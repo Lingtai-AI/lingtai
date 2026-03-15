@@ -419,7 +419,7 @@ def main():
     mail_a = TCPMailService(listen_port=8301)
     agent_a = BaseAgent(
         agent_id="researcher", service=llm, mail_service=mail_a,
-        config=AgentConfig(max_turns=10),
+        config=AgentConfig(max_turns=10), working_dir=".",
         logging_service=loggers["a"],
     )
     AGENT_PROMPT = (
@@ -448,7 +448,7 @@ def main():
     mail_b = TCPMailService(listen_port=8302)
     agent_b = BaseAgent(
         agent_id="assistant", service=llm, mail_service=mail_b,
-        config=AgentConfig(max_turns=10),
+        config=AgentConfig(max_turns=10), working_dir=".",
         logging_service=loggers["b"],
     )
     agent_b.update_system_prompt("role", (

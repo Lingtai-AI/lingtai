@@ -178,7 +178,7 @@ class BaseAgent:
         search: Any | None = None,
         config: AgentConfig | None = None,
         mcp_tools: list[MCPTool] | None = None,
-        working_dir: str | Path | None = None,
+        working_dir: str | Path,
         context: Any = None,
         enabled_intrinsics: set[str] | None = None,
         disabled_intrinsics: set[str] | None = None,
@@ -200,7 +200,7 @@ class BaseAgent:
         self._log_service = logging_service
 
         # Working directory for file intrinsics
-        self._working_dir = Path(working_dir) if working_dir else Path.cwd()
+        self._working_dir = Path(working_dir)
 
         # --- Wire services ---
         # FileIOService: auto-create LocalFileIOService for backward compat

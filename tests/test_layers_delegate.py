@@ -62,7 +62,7 @@ class TestAddCapability:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc)
+        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
         mgr = agent.add_capability("delegate")
         assert isinstance(mgr, DelegateManager)
         assert "delegate" in agent._mcp_handlers
@@ -73,7 +73,7 @@ class TestAddCapability:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc)
+        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
         with pytest.raises(ValueError, match="Unknown capability"):
             agent.add_capability("nonexistent")
 
@@ -83,7 +83,7 @@ class TestAddCapability:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc)
+        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
         results = agent.add_capability("bash", "delegate")
         assert isinstance(results["bash"], BashManager)
         assert isinstance(results["delegate"], DelegateManager)

@@ -76,7 +76,7 @@ class TestAddCapability:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc)
+        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
         mgr = agent.add_capability("bash")
         assert isinstance(mgr, BashManager)
         assert "bash" in agent._mcp_handlers

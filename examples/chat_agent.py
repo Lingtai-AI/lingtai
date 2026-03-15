@@ -56,6 +56,7 @@ def main():
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
+        working_dir=".",
         streaming=True,
     )
     agent.update_system_prompt("role", "You are a helpful AI assistant.", protected=True)

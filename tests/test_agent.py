@@ -23,14 +23,14 @@ def make_mock_service():
 # ---------------------------------------------------------------------------
 
 def test_agent_starts_and_stops():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.start()
     assert agent.state == AgentState.SLEEPING
     agent.stop(timeout=2.0)
 
 
 def test_agent_double_start():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.start()
     agent.start()  # should be no-op
     assert agent.state == AgentState.SLEEPING
@@ -42,7 +42,7 @@ def test_agent_double_start():
 # ---------------------------------------------------------------------------
 
 def test_intrinsics_enabled_by_default():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     assert "read" in agent._intrinsics
     assert "write" in agent._intrinsics
     assert "mail" in agent._intrinsics
@@ -59,6 +59,7 @@ def test_disabled_intrinsics():
         agent_id="test",
         service=make_mock_service(),
         disabled_intrinsics={"mail", "vision"},
+        working_dir="/tmp",
     )
     assert "mail" not in agent._intrinsics
     assert "vision" not in agent._intrinsics
@@ -70,6 +71,7 @@ def test_enabled_intrinsics():
         agent_id="test",
         service=make_mock_service(),
         enabled_intrinsics={"read", "write"},
+        working_dir="/tmp",
     )
     assert "read" in agent._intrinsics
     assert "write" in agent._intrinsics
@@ -84,6 +86,7 @@ def test_enabled_and_disabled_raises():
             service=make_mock_service(),
             enabled_intrinsics={"read"},
             disabled_intrinsics={"mail"},
+            working_dir="/tmp",
         )
 
 
@@ -92,7 +95,7 @@ def test_enabled_and_disabled_raises():
 # ---------------------------------------------------------------------------
 
 def test_add_remove_tool():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.add_tool("custom", schema={"type": "object"}, handler=lambda args: {"ok": True})
     assert "custom" in agent._mcp_handlers
     agent.remove_tool("custom")
@@ -101,19 +104,19 @@ def test_add_remove_tool():
 
 def test_mcp_tools_registered():
     tool = MCPTool(name="domain_tool", schema={}, description="test", handler=lambda a: {"r": 1})
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), mcp_tools=[tool])
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), mcp_tools=[tool], working_dir="/tmp")
     assert "domain_tool" in agent._mcp_handlers
 
 
 def test_add_tool_replaces_existing():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.add_tool("custom", schema={}, handler=lambda args: {"v": 1})
     agent.add_tool("custom", schema={}, handler=lambda args: {"v": 2})
     assert agent._mcp_handlers["custom"]({})=={"v": 2}
 
 
 def test_remove_nonexistent_tool_is_noop():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.remove_tool("nonexistent")  # should not raise
 
 
@@ -122,13 +125,13 @@ def test_remove_nonexistent_tool_is_noop():
 # ---------------------------------------------------------------------------
 
 def test_system_prompt_sections():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.update_system_prompt("role", "You are a test agent", protected=True)
     assert agent._prompt_manager.read_section("role") == "You are a test agent"
 
 
 def test_system_prompt_update_marks_dirty():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent._token_decomp_dirty = False
     agent.update_system_prompt("info", "some info")
     assert agent._token_decomp_dirty is True
@@ -139,7 +142,7 @@ def test_system_prompt_update_marks_dirty():
 # ---------------------------------------------------------------------------
 
 def test_mail_without_service():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     result = agent.mail("localhost:8301", "hello")
     assert result.get("error") == "mail service not configured"
 
@@ -165,6 +168,7 @@ def test_mail_with_service():
             agent_id="sender",
             service=make_mock_service(),
             mail_service=sender_svc,
+            working_dir="/tmp",
         )
         result = agent.mail(f"127.0.0.1:{port}", "hello from agent")
         assert result["status"] == "delivered"
@@ -181,6 +185,7 @@ def test_mail_to_bad_address():
         agent_id="test",
         service=make_mock_service(),
         mail_service=sender_svc,
+        working_dir="/tmp",
     )
     result = agent.mail("127.0.0.1:1", "hello")
     assert result["status"] == "refused"
@@ -192,7 +197,7 @@ def test_mail_to_bad_address():
 
 def test_mail_inbox_wiring():
     """_on_mail_received should enqueue in FIFO and notify agent inbox."""
-    agent = BaseAgent(agent_id="receiver", service=make_mock_service())
+    agent = BaseAgent(agent_id="receiver", service=make_mock_service(), working_dir="/tmp")
     agent._on_mail_received({
         "from": "127.0.0.1:9999",
         "to": "127.0.0.1:8301",
@@ -222,6 +227,7 @@ def test_mail_start_wires_listener():
         agent_id="receiver",
         service=make_mock_service(),
         mail_service=agent_svc,
+        working_dir="/tmp",
     )
     agent.start()
     try:
@@ -239,7 +245,7 @@ def test_mail_start_wires_listener():
 
 def test_mail_check_returns_count():
     """mail check should return the count of queued messages."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     for i in range(3):
         agent._on_mail_received({"from": "s", "message": f"m{i}"})
     result = agent._handle_mail({"action": "check"})
@@ -248,7 +254,7 @@ def test_mail_check_returns_count():
 
 def test_mail_read_pops_fifo():
     """mail read should pop messages in FIFO order."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent._on_mail_received({"from": "a", "message": "first"})
     agent._on_mail_received({"from": "b", "message": "second"})
 
@@ -263,7 +269,7 @@ def test_mail_read_pops_fifo():
 
 def test_mail_read_empty_queue():
     """mail read on empty queue should return message=None."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     result = agent._handle_mail({"action": "read"})
     assert result["message"] is None
     assert result["remaining"] == 0
@@ -271,7 +277,7 @@ def test_mail_read_empty_queue():
 
 def test_mail_received_full_content_in_notification():
     """_on_mail_received should put full message content in inbox notification."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent._on_mail_received({
         "from": "sender",
         "subject": "test subject",
@@ -316,7 +322,7 @@ def test_file_intrinsics_use_service(tmp_path):
 
 def test_file_intrinsics_auto_create_service():
     """Without explicit file_io, LocalFileIOService should be auto-created."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     # Should still have file intrinsics
     assert "read" in agent._intrinsics
     assert "write" in agent._intrinsics
@@ -333,6 +339,7 @@ def test_no_file_io_disables_file_intrinsics():
         agent_id="test",
         service=make_mock_service(),
         disabled_intrinsics={"read", "edit", "write", "glob", "grep"},
+        working_dir="/tmp",
     )
     assert "read" not in agent._intrinsics
     assert "write" not in agent._intrinsics
@@ -343,7 +350,7 @@ def test_no_file_io_disables_file_intrinsics():
 # ---------------------------------------------------------------------------
 
 def test_token_usage():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     usage = agent.get_token_usage()
     assert isinstance(usage, dict)
     assert "input_tokens" in usage
@@ -387,7 +394,7 @@ def test_message_reply_event():
 def test_execute_single_tool_intrinsic():
     """Intrinsic tools should be callable via _execute_single_tool."""
     from stoai.llm.base import ToolCall
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
 
     # Replace the read intrinsic with a mock
     agent._intrinsics["read"] = lambda args: {"status": "ok", "content": "test"}
@@ -400,7 +407,7 @@ def test_execute_single_tool_intrinsic():
 def test_execute_single_tool_mcp():
     """MCP tools should be callable via _dispatch_tool."""
     from stoai.llm.base import ToolCall
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.add_tool("my_tool", schema={}, handler=lambda args: {"status": "ok", "value": args.get("x")})
 
     tc = ToolCall(name="my_tool", args={"x": 42})
@@ -412,7 +419,7 @@ def test_execute_single_tool_mcp():
 def test_execute_single_tool_unknown():
     """Unknown tools should raise UnknownToolError."""
     from stoai.llm.base import ToolCall
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
 
     tc = ToolCall(name="nonexistent_tool", args={})
     with pytest.raises(UnknownToolError):
@@ -425,7 +432,7 @@ def test_execute_single_tool_unknown():
 
 def test_context_stored_opaque():
     ctx = {"custom": "data", "nested": [1, 2, 3]}
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), context=ctx)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), context=ctx, working_dir="/tmp")
     assert agent._context is ctx
 
 
@@ -438,10 +445,10 @@ def test_working_dir_resolved():
     assert str(agent._working_dir) == "/tmp/test"
 
 
-def test_working_dir_default():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
-    # Default working dir should be current directory
-    assert agent._working_dir is not None
+def test_working_dir_required():
+    """working_dir must be explicitly provided."""
+    with pytest.raises(TypeError):
+        BaseAgent(agent_id="test", service=make_mock_service())
 
 
 # ---------------------------------------------------------------------------
@@ -449,13 +456,13 @@ def test_working_dir_default():
 # ---------------------------------------------------------------------------
 
 def test_config_defaults():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     assert agent._config.max_turns == 50
 
 
 def test_config_override():
     config = AgentConfig(max_turns=10, provider="anthropic")
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), config=config)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), config=config, working_dir="/tmp")
     assert agent._config.max_turns == 10
     assert agent._config.provider == "anthropic"
 
@@ -465,7 +472,7 @@ def test_config_override():
 # ---------------------------------------------------------------------------
 
 def test_status():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     s = agent.status()
     assert s["agent_id"] == "test"
     assert s["state"] == "sleeping"
@@ -483,7 +490,7 @@ def test_status():
 
 def test_send_fires_message():
     """send(wait=False) should put a message in the inbox."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.send("hello", wait=False)
     assert not agent.inbox.empty()
     msg = agent.inbox.get_nowait()

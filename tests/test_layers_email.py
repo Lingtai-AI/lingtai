@@ -28,14 +28,14 @@ def _get_free_port():
 # ---------------------------------------------------------------------------
 
 def test_email_capability_registers_tool():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     assert "email" in agent._mcp_handlers
     assert mgr is not None
 
 
 def test_email_capability_adds_system_prompt():
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     agent.add_capability("email")
     section = agent._prompt_manager.read_section("email_instructions")
     assert section is not None
@@ -47,7 +47,7 @@ def test_email_capability_adds_system_prompt():
 
 def test_email_receive_intercept():
     """Email capability should intercept mail receive and store in mailbox."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     mgr.on_mail_received({"from": "sender", "to": ["test"], "subject": "hi", "message": "body"})
     assert len(mgr._mailbox) == 1
@@ -59,7 +59,7 @@ def test_email_receive_intercept():
 
 def test_email_receive_intercept_via_agent():
     """After add_capability('email'), agent._on_mail_received should route to mailbox."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     # Call via agent's method — should be intercepted
     agent._on_mail_received({"from": "sender", "to": ["test"], "subject": "hi", "message": "body"})
@@ -72,7 +72,7 @@ def test_email_receive_intercept_via_agent():
 
 def test_email_check_mailbox():
     """email check should return stored emails with IDs."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     mgr.on_mail_received({"from": "a", "to": ["test"], "subject": "s1", "message": "m1"})
     mgr.on_mail_received({"from": "b", "to": ["test"], "subject": "s2", "message": "m2"})
@@ -84,7 +84,7 @@ def test_email_check_mailbox():
 
 def test_email_read_by_id():
     """email read should return full content by ID."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     mgr.on_mail_received({"from": "sender", "to": ["test"], "subject": "topic", "message": "full body"})
     eid = mgr._mailbox[0]["id"]
@@ -96,7 +96,7 @@ def test_email_read_by_id():
 
 def test_email_read_marks_as_read():
     """email read should mark the message as read."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     mgr.on_mail_received({"from": "sender", "message": "m"})
     eid = mgr._mailbox[0]["id"]
@@ -124,7 +124,7 @@ def test_email_send_multi_to():
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir="/tmp")
         mgr = agent.add_capability("email")
         addrs = [f"127.0.0.1:{p}" for p in ports]
         result = mgr.handle({"action": "send", "address": addrs, "message": "multi-to"})
@@ -153,7 +153,7 @@ def test_email_send_cc_visible():
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir="/tmp")
         mgr = agent.add_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
         cc_addr = f"127.0.0.1:{ports[1]}"
@@ -183,7 +183,7 @@ def test_email_send_bcc_hidden():
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir="/tmp")
         mgr = agent.add_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
         bcc_addr = f"127.0.0.1:{ports[1]}"
@@ -206,7 +206,7 @@ def test_email_send_bcc_hidden():
 
 def test_email_reply():
     """reply should auto-fill address from original sender and prefix subject."""
-    agent = BaseAgent(agent_id="replier", service=make_mock_service())
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir="/tmp")
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
@@ -229,7 +229,7 @@ def test_email_reply():
 
 def test_email_reply_no_double_re():
     """reply should not stack Re: prefix."""
-    agent = BaseAgent(agent_id="replier", service=make_mock_service())
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir="/tmp")
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
@@ -255,7 +255,7 @@ def test_email_reply_no_double_re():
 
 def test_email_reply_all():
     """reply_all should send to sender + CC all other recipients minus self."""
-    agent = BaseAgent(agent_id="replier", service=make_mock_service())
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir="/tmp")
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
@@ -282,7 +282,7 @@ def test_email_reply_all():
 
 def test_email_reply_all_excludes_self():
     """reply_all should not duplicate the sender address."""
-    agent = BaseAgent(agent_id="replier", service=make_mock_service())
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir="/tmp")
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
@@ -309,7 +309,7 @@ def test_email_reply_all_excludes_self():
 
 def test_email_without_mail_service():
     """email send should return error if mail service not configured."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
     mgr = agent.add_capability("email")
     result = mgr.handle({"action": "send", "address": "someone", "message": "hello"})
     assert "error" in result
