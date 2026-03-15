@@ -1,4 +1,4 @@
-from stoai.types import MCPTool, UnknownToolError, AgentNotConnectedError
+from stoai.types import MCPTool, UnknownToolError
 
 
 def test_mcp_tool_creation():
@@ -15,9 +15,3 @@ def test_mcp_tool_creation():
 def test_unknown_tool_error():
     err = UnknownToolError("bad_tool")
     assert "bad_tool" in str(err)
-
-
-def test_agent_not_connected_error():
-    """AgentNotConnectedError kept for backward compat."""
-    err = AgentNotConnectedError("agent_42")
-    assert "agent_42" in str(err)

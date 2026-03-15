@@ -58,8 +58,9 @@ def count_tokens(text: str) -> int:
         return len(text) // 4
 
 
-def count_tool_tokens(schemas: list[dict]) -> int:
-    """Estimate tokens consumed by tool schemas."""
+def count_tool_tokens(schemas: list) -> int:
+    """Estimate tokens consumed by tool schemas (dicts or FunctionSchema objects)."""
     import json
-    text = json.dumps(schemas)
+    dicts = [s.to_dict() if hasattr(s, "to_dict") else s for s in schemas]
+    text = json.dumps(dicts)
     return count_tokens(text)

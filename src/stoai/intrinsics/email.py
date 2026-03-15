@@ -1,21 +1,33 @@
-"""Email intrinsic — fire-and-forget inter-agent messaging.
+"""Email intrinsic — structured inter-agent messaging with inbox.
 
-The actual send logic lives in BaseAgent (it needs access to the EmailService).
+Actions:
+    send    — fire-and-forget message to an address
+    check   — list emails in inbox (from, time, subject, preview)
+    read    — read a specific email by ID
+
+The actual handlers live in BaseAgent (needs access to EmailService and mailbox).
 This module provides the schema and description.
-
-Replaces the old `talk` intrinsic. Key differences:
-- Uses address (e.g. "localhost:8301") instead of target_id
-- Fire-and-forget only — no send_and_wait (that's an upper layer concern)
-- Backed by EmailService, not in-process _connections dict
 """
 from __future__ import annotations
 
 SCHEMA = {
     "type": "object",
     "properties": {
-        "address": {"type": "string", "description": "Target address (e.g. localhost:8301)"},
-        "message": {"type": "string", "description": "Message to send"},
+        "action": {
+            "type": "string",
+            "enum": ["send", "check", "read"],
+            "description": "Action: send an email, check inbox, or read a specific email",
+        },
+        "address": {"type": "string", "description": "Target address for send (e.g. 127.0.0.1:8301)"},
+        "subject": {"type": "string", "description": "Email subject line (for send)"},
+        "message": {"type": "string", "description": "Email body (for send)"},
+        "email_id": {"type": "string", "description": "Email ID to read (for read)"},
+        "n": {"type": "integer", "description": "Number of recent emails to list (for check)", "default": 10},
     },
-    "required": ["address", "message"],
+    "required": ["action"],
 }
-DESCRIPTION = "Send an email (fire-and-forget message) to another agent at the given address."
+DESCRIPTION = (
+    "Email tool for inter-agent communication. "
+    "Use 'send' to email another agent, 'check' to list your inbox, "
+    "'read' to read a specific email by ID."
+)

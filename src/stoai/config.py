@@ -12,7 +12,7 @@ class AgentConfig:
     No file-based config reading inside stoai.
     """
     max_turns: int = 50
-    provider: str = "gemini"
+    provider: str | None = None  # None = use LLMService's provider
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = None

@@ -48,7 +48,6 @@ from .tool_timing import ToolTimer, stamp_tool_result
 from .types import (
     MCPTool,
     UnknownToolError,
-    AgentNotConnectedError,
 )
 
 logger = get_logger()
@@ -228,8 +227,9 @@ class BaseAgent:
         # System prompt manager
         self._prompt_manager = SystemPromptManager()
 
-        # Agent connections (legacy — kept for backward compat, used alongside email)
-        self._connections: dict[str, BaseAgent] = {}
+        # Email mailbox — structured storage for received emails
+        self._mailbox: list[dict] = []
+        self._mailbox_lock = threading.Lock()
 
         # MCP tool handlers
         self._mcp_handlers: dict[str, Callable[[dict], dict]] = {}
@@ -441,49 +441,76 @@ class BaseAgent:
     # ------------------------------------------------------------------
 
     def _handle_email(self, args: dict) -> dict:
-        """Send an email to another agent via EmailService or legacy connections."""
+        """Handle email tool — send, check inbox, or read a specific email."""
+        action = args.get("action", "send")
+
+        if action == "send":
+            return self._email_send(args)
+        elif action == "check":
+            return self._email_check(args)
+        elif action == "read":
+            return self._email_read(args)
+        else:
+            return {"error": f"Unknown email action: {action}"}
+
+    def _email_send(self, args: dict) -> dict:
+        """Send an email to another agent."""
         address = args.get("address", "")
+        subject = args.get("subject", "")
         message_text = args.get("message", "")
 
-        # Legacy talk compatibility: support target_id for in-process connections
-        target_id = args.get("target_id", "")
-        if target_id and target_id in self._connections:
-            action = args.get("action", "send")
-            target = self._connections[target_id]
-            msg = _make_message(MSG_REQUEST, self.agent_id, message_text)
-            if action == "send_and_wait":
-                timeout = args.get("timeout", 120)
-                reply_event = threading.Event()
-                msg._reply_event = reply_event
-                target.inbox.put(msg)
-                if not reply_event.wait(timeout=timeout):
-                    return {"status": "timeout", "message": f"No reply from {target_id} within {timeout}s"}
-                return {"status": "ok", "reply": msg._reply_value}
-            else:
-                target.inbox.put(msg)
-                return {"status": "ok", "message": f"Sent to {target_id}"}
-
         if not address:
-            if target_id:
-                raise AgentNotConnectedError(target_id)
             return {"error": "address is required"}
-
         if self._email_service is None:
             return {"error": "email service not configured"}
 
         payload = {
             "from": self._email_service.address or self.agent_id,
             "to": address,
+            "subject": subject,
             "message": message_text,
         }
         success = self._email_service.send(address, payload)
-        preview = message_text[:200] if message_text else ""
-        status = "delivered" if success else "refused"
-        self._log("email_sent", address=address, status=status, message_preview=preview)
         if success:
-            return {"status": "delivered"}
+            return {"status": "delivered", "to": address}
         else:
             return {"status": "refused", "error": f"Could not deliver to {address}"}
+
+    def _email_check(self, args: dict) -> dict:
+        """List recent emails in the mailbox."""
+        n = args.get("n", 10)
+        with self._mailbox_lock:
+            recent = self._mailbox[-n:] if n > 0 else self._mailbox[:]
+        emails = []
+        for e in reversed(recent):  # newest first
+            emails.append({
+                "id": e["id"],
+                "from": e["from"],
+                "subject": e.get("subject", "(no subject)"),
+                "preview": e["message"][:100],
+                "time": e["time"],
+                "unread": e.get("unread", False),
+            })
+        return {"status": "ok", "count": len(emails), "emails": emails}
+
+    def _email_read(self, args: dict) -> dict:
+        """Read a specific email by ID."""
+        email_id = args.get("email_id", "")
+        if not email_id:
+            return {"error": "email_id is required"}
+        with self._mailbox_lock:
+            for e in self._mailbox:
+                if e["id"] == email_id:
+                    e["unread"] = False
+                    return {
+                        "status": "ok",
+                        "id": e["id"],
+                        "from": e["from"],
+                        "subject": e.get("subject", "(no subject)"),
+                        "message": e["message"],
+                        "time": e["time"],
+                    }
+        return {"error": f"Email not found: {email_id}"}
 
     def _handle_vision(self, args: dict) -> dict:
         """Analyze an image file using VisionService or direct LLM multimodal call."""
@@ -605,13 +632,40 @@ class BaseAgent:
                 pass
 
     def _on_email_received(self, payload: dict) -> None:
-        """Callback for EmailService — puts received email into inbox."""
+        """Callback for EmailService — stores email in mailbox, notifies agent."""
+        from datetime import datetime, timezone
+
         sender = payload.get("from", "unknown")
-        content = payload.get("message", "")
-        msg = _make_message(MSG_REQUEST, sender, content)
+        subject = payload.get("subject", "(no subject)")
+        message = payload.get("message", "")
+        email_id = f"mail_{uuid4().hex[:8]}"
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Store in mailbox
+        email_entry = {
+            "id": email_id,
+            "from": sender,
+            "subject": subject,
+            "message": message,
+            "time": timestamp,
+            "unread": True,
+        }
+        with self._mailbox_lock:
+            self._mailbox.append(email_entry)
+
+        # Notify agent with a short summary — agent can use email(action="read") for full content
+        preview = message[:80].replace("\n", " ")
+        notification = (
+            f'[New email received]\n'
+            f'  From: {sender}\n'
+            f'  Subject: {subject}\n'
+            f'  Preview: {preview}...\n'
+            f'  ID: {email_id}\n'
+            f'Use email(action="read", email_id="{email_id}") to read the full message. '
+            f'Use email(action="send", address="{sender}", ...) to reply.'
+        )
+        msg = _make_message(MSG_REQUEST, sender, notification)
         self.inbox.put(msg)
-        preview = str(content)[:200] if content else ""
-        self._log("email_received", sender=sender, message_preview=preview)
 
     def _set_state(self, new_state: AgentState, reason: str = "") -> None:
         """Transition to a new state, keeping _idle in sync."""
@@ -1345,33 +1399,12 @@ class BaseAgent:
     # Public API
     # ------------------------------------------------------------------
 
-    def connect(self, agent_id: str, agent: BaseAgent) -> None:
-        """Register a connected agent for in-process messaging (legacy talk)."""
-        self._connections[agent_id] = agent
-
-    def disconnect(self, agent_id: str) -> None:
-        """Remove a connected agent."""
-        self._connections.pop(agent_id, None)
-
-    def talk(self, target_id: str, message: str, *, wait: bool = False, timeout: float = 120) -> dict:
-        """Send a message to a connected agent (legacy public API).
-
-        For new code, use email() with EmailService instead.
-        Raises AgentNotConnectedError if the target is not connected.
-        """
-        return self._handle_email({
-            "action": "send_and_wait" if wait else "send",
-            "target_id": target_id,
-            "message": message,
-            "timeout": timeout,
-        })
-
-    def email(self, address: str, message: str) -> dict:
+    def email(self, address: str, message: str, subject: str = "") -> dict:
         """Send an email to another agent at the given address (public API).
 
         Requires EmailService to be configured.
         """
-        return self._handle_email({"address": address, "message": message})
+        return self._handle_email({"action": "send", "address": address, "message": message, "subject": subject})
 
     def add_tool(
         self,

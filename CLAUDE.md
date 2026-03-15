@@ -89,4 +89,4 @@ Base prompt (hardcoded with intrinsic list) → Sections (injected by host/capab
 - All services optional — missing service auto-disables backed intrinsics.
 - Provider SDKs lazy-imported — only active provider needs installation.
 - Tests use `unittest.mock.MagicMock` for LLM service mocking. Test functions follow `test_<what_is_tested>` naming.
-- Legacy `talk` intrinsic renamed to `email`. Legacy `connect()`/`talk()` API kept for backward compat but new code should use `EmailService`.
+- Migrations should be complete and clean — remove old code entirely. No backward-compatibility shims, no deprecated wrappers, no legacy aliases unless the user explicitly asks for them.

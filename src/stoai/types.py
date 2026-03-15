@@ -20,10 +20,3 @@ class UnknownToolError(Exception):
         self.tool_name = tool_name
         super().__init__(f"Unknown tool: {tool_name}")
 
-
-# Kept for backward compatibility — deprecated, use email return values instead.
-class AgentNotConnectedError(Exception):
-    """Deprecated. Email is fire-and-forget; delivery errors are return values."""
-    def __init__(self, target_id: str):
-        self.target_id = target_id
-        super().__init__(f"Agent not connected: {target_id}")

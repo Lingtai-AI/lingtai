@@ -2,7 +2,6 @@
 from .types import (
     MCPTool,
     UnknownToolError,
-    AgentNotConnectedError,
 )
 from .config import AgentConfig
 from .agent import BaseAgent, Message, AgentState
@@ -27,7 +26,6 @@ __all__ = [
     "MCPTool",
     "AgentConfig",
     "UnknownToolError",
-    "AgentNotConnectedError",
     # Capabilities
     "setup_capability",
     "BashManager",

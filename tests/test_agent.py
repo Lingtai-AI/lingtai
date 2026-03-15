@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from stoai.agent import BaseAgent, Message, AgentState, _make_message, MSG_REQUEST
-from stoai.types import MCPTool, AgentNotConnectedError, UnknownToolError
+from stoai.types import MCPTool, UnknownToolError
 from stoai.config import AgentConfig
 
 
@@ -136,34 +136,6 @@ def test_system_prompt_update_marks_dirty():
 
 
 # ---------------------------------------------------------------------------
-# Agent connections (legacy talk)
-# ---------------------------------------------------------------------------
-
-def test_connect_agents():
-    a = BaseAgent(agent_id="a", service=make_mock_service())
-    b = BaseAgent(agent_id="b", service=make_mock_service())
-    a.connect("b", b)
-    assert "b" in a._connections
-
-
-def test_talk_unconnected_raises():
-    a = BaseAgent(agent_id="a", service=make_mock_service())
-    with pytest.raises(AgentNotConnectedError):
-        a.talk("nonexistent", "hello")
-
-
-def test_talk_sends_to_connected():
-    a = BaseAgent(agent_id="a", service=make_mock_service())
-    b = BaseAgent(agent_id="b", service=make_mock_service())
-    a.connect("b", b)
-    a.talk("b", "hello")
-    assert not b.inbox.empty()
-    msg = b.inbox.get_nowait()
-    assert msg.content == "hello"
-    assert msg.sender == "a"
-
-
-# ---------------------------------------------------------------------------
 # Email via EmailService
 # ---------------------------------------------------------------------------
 
@@ -234,8 +206,12 @@ def test_email_inbox_wiring():
     })
     assert not agent.inbox.empty()
     msg = agent.inbox.get_nowait()
-    assert msg.content == "inbox test"
+    assert "inbox test" in msg.content  # notification includes the message preview
     assert msg.sender == "127.0.0.1:9999"
+    # Email should be stored in mailbox
+    assert len(agent._mailbox) == 1
+    assert agent._mailbox[0]["message"] == "inbox test"
+    assert agent._mailbox[0]["from"] == "127.0.0.1:9999"
 
 
 def test_email_start_wires_listener():
