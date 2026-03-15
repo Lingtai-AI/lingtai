@@ -470,7 +470,7 @@ class BaseAgent:
             "subject": subject,
             "message": message_text,
         }
-        # Handle attachments — resolve relative paths and include in payload
+        # Handle attachments — resolve relative paths, verify existence
         attachments = args.get("attachments", [])
         if attachments:
             resolved = []
@@ -478,6 +478,8 @@ class BaseAgent:
                 path = Path(p)
                 if not path.is_absolute():
                     path = self._working_dir / path
+                if not path.is_file():
+                    return {"error": f"Attachment not found: {path}"}
                 resolved.append(str(path))
             payload["attachments"] = resolved
         success = self._mail_service.send(address, payload)
@@ -501,7 +503,7 @@ class BaseAgent:
                 return {"status": "ok", "message": None, "remaining": 0}
             entry = self._mail_queue.popleft()
             remaining = len(self._mail_queue)
-        return {
+        result = {
             "status": "ok",
             "from": entry["from"],
             "to": entry.get("to", ""),
@@ -510,6 +512,9 @@ class BaseAgent:
             "time": entry["time"],
             "remaining": remaining,
         }
+        if entry.get("attachments"):
+            result["attachments"] = entry["attachments"]
+        return result
 
     def _handle_vision(self, args: dict) -> dict:
         """Analyze an image file using VisionService or direct LLM multimodal call."""

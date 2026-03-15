@@ -54,16 +54,20 @@ def test_mail_send_passes_attachments(tmp_path):
 
     agent = BaseAgent(agent_id="test", service=svc, mail_service=mail_svc, working_dir=tmp_path)
 
+    # Create a real file to attach
+    attachment = tmp_path / "file.png"
+    attachment.write_bytes(b"PNG_DATA")
+
     # Call the mail handler directly
     result = agent._intrinsics["mail"]({
         "action": "send",
         "address": "127.0.0.1:8888",
         "message": "here is a file",
-        "attachments": ["/path/to/file.png"],
+        "attachments": [str(attachment)],
     })
     assert result["status"] == "delivered"
     # Verify attachments were passed through
     call_args = mail_svc.send.call_args
     sent_message = call_args[0][1]  # second positional arg is the message dict
     assert "attachments" in sent_message
-    assert sent_message["attachments"] == ["/path/to/file.png"]
+    assert sent_message["attachments"] == [str(attachment)]

@@ -484,10 +484,6 @@ def test_status():
 # Public send API
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Public send API
-# ---------------------------------------------------------------------------
-
 def test_send_fires_message():
     """send(wait=False) should put a message in the inbox."""
     agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir="/tmp")
