@@ -574,6 +574,11 @@ class BaseAgent:
     def state(self) -> AgentState:
         return self._state
 
+    @property
+    def working_dir(self) -> Path:
+        """The agent's working directory."""
+        return self._working_dir
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
