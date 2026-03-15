@@ -7,8 +7,8 @@ Key concepts:
     - **2-layer tool dispatch**: intrinsics (built-in) + MCP handlers (domain tools).
     - **Opaque context**: the host app can pass any context object — the agent
       stores it but never introspects it.
-    - **5 optional services**: LLM, FileIO, Email, Vision, Search — missing
-      service auto-disables the intrinsics it backs.
+    - **6 optional services**: LLM, FileIO, Mail, Vision, Search, Logging —
+      missing service auto-disables the intrinsics it backs.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from __future__ import annotations
 import enum
 import json
 import queue
+from collections import deque
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -228,7 +229,7 @@ class BaseAgent:
         self._prompt_manager = SystemPromptManager()
 
         # Mail FIFO queue — incoming messages consumed by read
-        self._mail_queue: list[dict] = []
+        self._mail_queue: deque[dict] = deque()
         self._mail_queue_lock = threading.Lock()
 
         # MCP tool handlers
@@ -488,7 +489,7 @@ class BaseAgent:
         with self._mail_queue_lock:
             if not self._mail_queue:
                 return {"status": "ok", "message": None, "remaining": 0}
-            entry = self._mail_queue.pop(0)
+            entry = self._mail_queue.popleft()
             remaining = len(self._mail_queue)
         return {
             "status": "ok",

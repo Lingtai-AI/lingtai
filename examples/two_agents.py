@@ -48,7 +48,7 @@ user_mailbox: list[dict] = []
 user_mailbox_lock = threading.Lock()
 
 
-def on_user_email(payload: dict) -> None:
+def on_user_mail(payload: dict) -> None:
     """Callback when user's TCPMailService receives an email."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     entry = {
@@ -411,14 +411,14 @@ def main():
     )
 
     # User mailbox — receives emails from agents
-    user_email = TCPMailService(listen_port=USER_PORT)
-    user_email.listen(on_message=on_user_email)
+    user_mail = TCPMailService(listen_port=USER_PORT)
+    user_mail.listen(on_message=on_user_mail)
 
     # Agent A
     loggers["a"] = MemoryLoggingService()
-    email_a = TCPMailService(listen_port=8301)
+    mail_a = TCPMailService(listen_port=8301)
     agent_a = BaseAgent(
-        agent_id="researcher", service=llm, mail_service=email_a,
+        agent_id="researcher", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10),
         logging_service=loggers["a"],
     )
@@ -445,9 +445,9 @@ def main():
 
     # Agent B
     loggers["b"] = MemoryLoggingService()
-    email_b = TCPMailService(listen_port=8302)
+    mail_b = TCPMailService(listen_port=8302)
     agent_b = BaseAgent(
-        agent_id="assistant", service=llm, mail_service=email_b,
+        agent_id="assistant", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10),
         logging_service=loggers["b"],
     )
@@ -481,7 +481,7 @@ def main():
         print("\nShutting down...")
     finally:
         server.shutdown()
-        user_email.stop()
+        user_mail.stop()
         agent_a.stop(timeout=5.0)
         agent_b.stop(timeout=5.0)
         print("Done.")

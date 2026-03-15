@@ -49,12 +49,12 @@ def main():
         },
     )
 
-    email_svc = TCPMailService(listen_port=PORT)
+    mail_svc = TCPMailService(listen_port=PORT)
 
     agent = BaseAgent(
         agent_id="assistant",
         service=llm,
-        mail_service=email_svc,
+        mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
         streaming=True,
     )

@@ -183,12 +183,12 @@ def main():
         },
     )
 
-    email_svc = TCPMailService(listen_port=AGENT_PORT)
+    mail_svc = TCPMailService(listen_port=AGENT_PORT)
 
     agent = BaseAgent(
         agent_id="assistant",
         service=llm,
-        mail_service=email_svc,
+        mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
     )
     agent.update_system_prompt("role", "You are a helpful AI assistant.", protected=True)
