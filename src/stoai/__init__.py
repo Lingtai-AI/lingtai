@@ -17,6 +17,7 @@ from .services.file_io import FileIOService, LocalFileIOService, GrepMatch
 from .services.email import EmailService, TCPEmailService
 from .services.vision import VisionService, LLMVisionService
 from .services.search import SearchService, LLMSearchService, SearchResult
+from .services.logging import LoggingService, JSONLLoggingService
 
 __all__ = [
     # Core
@@ -42,4 +43,6 @@ __all__ = [
     "SearchService",
     "LLMSearchService",
     "SearchResult",
+    "LoggingService",
+    "JSONLLoggingService",
 ]
