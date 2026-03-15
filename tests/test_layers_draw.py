@@ -63,3 +63,16 @@ class TestSetupDraw:
         assert isinstance(mgr, DrawManager)
         agent.add_tool.assert_called_once()
         agent.update_system_prompt.assert_called_once()
+
+
+class TestAddCapabilityIntegration:
+    def test_add_capability_draw(self, tmp_path):
+        from stoai.agent import BaseAgent
+        from unittest.mock import MagicMock
+        svc = MagicMock()
+        svc.get_adapter.return_value = MagicMock()
+        svc.provider = "gemini"
+        svc.model = "gemini-test"
+        agent = BaseAgent(agent_id="test", service=svc, working_dir=str(tmp_path))
+        mgr = agent.add_capability("draw")
+        assert "draw" in agent._mcp_handlers
