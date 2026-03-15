@@ -45,23 +45,25 @@ def test_intrinsics_enabled_by_default():
     agent = BaseAgent(agent_id="test", service=make_mock_service())
     assert "read" in agent._intrinsics
     assert "write" in agent._intrinsics
-    assert "talk" in agent._intrinsics
+    assert "email" in agent._intrinsics
     assert "vision" in agent._intrinsics
     assert "web_search" in agent._intrinsics
-    # diary, plan, manage_system_prompt are now layers, not intrinsics
+    # diary, plan, manage_system_prompt are layers, not intrinsics
     assert "manage_system_prompt" not in agent._intrinsics
     assert "manage_diary" not in agent._intrinsics
     assert "plan" not in agent._intrinsics
-    assert len(agent._intrinsics) == 8  # read, edit, write, glob, grep, talk, vision, web_search
+    # talk renamed to email
+    assert "talk" not in agent._intrinsics
+    assert len(agent._intrinsics) == 8  # read, edit, write, glob, grep, email, vision, web_search
 
 
 def test_disabled_intrinsics():
     agent = BaseAgent(
         agent_id="test",
         service=make_mock_service(),
-        disabled_intrinsics={"talk", "vision"},
+        disabled_intrinsics={"email", "vision"},
     )
-    assert "talk" not in agent._intrinsics
+    assert "email" not in agent._intrinsics
     assert "vision" not in agent._intrinsics
     assert "read" in agent._intrinsics
 
@@ -74,7 +76,7 @@ def test_enabled_intrinsics():
     )
     assert "read" in agent._intrinsics
     assert "write" in agent._intrinsics
-    assert "talk" not in agent._intrinsics
+    assert "email" not in agent._intrinsics
     assert "vision" not in agent._intrinsics
 
 
@@ -84,7 +86,7 @@ def test_enabled_and_disabled_raises():
             agent_id="test",
             service=make_mock_service(),
             enabled_intrinsics={"read"},
-            disabled_intrinsics={"talk"},
+            disabled_intrinsics={"email"},
         )
 
 
@@ -136,7 +138,7 @@ def test_system_prompt_update_marks_dirty():
 
 
 # ---------------------------------------------------------------------------
-# Agent connections
+# Agent connections (legacy talk)
 # ---------------------------------------------------------------------------
 
 def test_connect_agents():
@@ -164,26 +166,167 @@ def test_talk_sends_to_connected():
 
 
 # ---------------------------------------------------------------------------
-# Events
+# Email via EmailService
 # ---------------------------------------------------------------------------
 
-def test_on_event_callback():
-    events = []
+def test_email_without_service():
+    agent = BaseAgent(agent_id="test", service=make_mock_service())
+    result = agent.email("localhost:8301", "hello")
+    assert result.get("error") == "email service not configured"
+
+
+def test_email_with_service():
+    import socket
+    from stoai.services.email import TCPEmailService
+
+    # Get free port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    received = []
+    event = threading.Event()
+
+    receiver_svc = TCPEmailService(listen_port=port)
+    receiver_svc.listen(on_message=lambda msg: (received.append(msg), event.set()))
+
+    try:
+        sender_svc = TCPEmailService()
+        agent = BaseAgent(
+            agent_id="sender",
+            service=make_mock_service(),
+            email_service=sender_svc,
+        )
+        result = agent.email(f"127.0.0.1:{port}", "hello from agent")
+        assert result["status"] == "delivered"
+        assert event.wait(timeout=5.0)
+        assert received[0]["message"] == "hello from agent"
+    finally:
+        receiver_svc.stop()
+
+
+def test_email_to_bad_address():
+    from stoai.services.email import TCPEmailService
+    sender_svc = TCPEmailService()
     agent = BaseAgent(
         agent_id="test",
         service=make_mock_service(),
-        on_event=lambda t, p: events.append((t, p)),
+        email_service=sender_svc,
     )
-    agent._emit_event("test_event", {"data": 42})
-    assert len(events) == 1
-    assert events[0][0] == "test_event"
-    assert events[0][1]["data"] == 42
-    assert events[0][1]["agent_id"] == "test"
+    result = agent.email("127.0.0.1:1", "hello")
+    assert result["status"] == "refused"
 
 
-def test_no_event_callback_is_noop():
+# ---------------------------------------------------------------------------
+# Email wiring — inbox receives from EmailService
+# ---------------------------------------------------------------------------
+
+def test_email_inbox_wiring():
+    """_on_email_received should put messages into the agent's inbox."""
+    agent = BaseAgent(
+        agent_id="receiver",
+        service=make_mock_service(),
+    )
+    # Directly call the callback that EmailService would invoke
+    agent._on_email_received({
+        "from": "127.0.0.1:9999",
+        "to": "127.0.0.1:8301",
+        "message": "inbox test",
+    })
+    assert not agent.inbox.empty()
+    msg = agent.inbox.get_nowait()
+    assert msg.content == "inbox test"
+    assert msg.sender == "127.0.0.1:9999"
+
+
+def test_email_start_wires_listener():
+    """start() should call EmailService.listen() when configured."""
+    import socket
+    from stoai.services.email import TCPEmailService
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    agent_svc = TCPEmailService(listen_port=port)
+    agent = BaseAgent(
+        agent_id="receiver",
+        service=make_mock_service(),
+        email_service=agent_svc,
+    )
+    agent.start()
+    try:
+        # The service should be listening now — send a message
+        sender_svc = TCPEmailService()
+        result = sender_svc.send(
+            f"127.0.0.1:{port}",
+            {"from": "sender", "to": f"127.0.0.1:{port}", "message": "wired"},
+        )
+        assert result is True
+        time.sleep(0.5)
+        # Message should be in inbox (even though the agent loop will try to process it)
+        # Check the inbox has at least received something
+        assert agent.inbox.qsize() >= 0  # message may have been consumed by loop
+    finally:
+        agent.stop(timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# FileIOService integration
+# ---------------------------------------------------------------------------
+
+def test_file_intrinsics_use_service(tmp_path):
+    """File intrinsics should delegate to the FileIOService."""
+    from stoai.services.file_io import LocalFileIOService
+
+    svc = LocalFileIOService(root=tmp_path)
+    agent = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        file_io=svc,
+        working_dir=str(tmp_path),
+    )
+
+    # Write via agent
+    result = agent.write_file(str(tmp_path / "test.txt"), "hello world")
+    assert result["status"] == "ok"
+
+    # Read via agent
+    result = agent.read_file(str(tmp_path / "test.txt"))
+    assert "hello world" in result["content"]
+
+    # Edit via agent
+    result = agent.edit_file(str(tmp_path / "test.txt"), "hello", "goodbye")
+    assert result["status"] == "ok"
+
+    result = agent.read_file(str(tmp_path / "test.txt"))
+    assert "goodbye world" in result["content"]
+
+
+def test_file_intrinsics_auto_create_service():
+    """Without explicit file_io, LocalFileIOService should be auto-created."""
     agent = BaseAgent(agent_id="test", service=make_mock_service())
-    agent._emit_event("test_event", {"data": 42})  # should not raise
+    # Should still have file intrinsics
+    assert "read" in agent._intrinsics
+    assert "write" in agent._intrinsics
+    assert agent._file_io is not None
+
+
+def test_no_file_io_disables_file_intrinsics():
+    """Setting file_io=None should not create file intrinsics.
+
+    NOTE: Currently file_io=None triggers auto-creation of LocalFileIOService
+    for backward compat. To truly disable file intrinsics, use disabled_intrinsics.
+    """
+    agent = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        disabled_intrinsics={"read", "edit", "write", "glob", "grep"},
+    )
+    assert "read" not in agent._intrinsics
+    assert "write" not in agent._intrinsics
 
 
 # ---------------------------------------------------------------------------

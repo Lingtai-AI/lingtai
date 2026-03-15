@@ -5,10 +5,6 @@ from stoai.llm_utils import (
     build_outcome_summary,
     track_llm_usage,
     execute_tools_batch,
-    EVENT_DEBUG,
-    EVENT_LLM_RESPONSE,
-    EVENT_TOKEN_USAGE,
-    EVENT_THINKING,
     MODEL_CONTEXT_LIMITS,
 )
 
@@ -73,42 +69,18 @@ class FakeLLMResponse:
 def test_track_llm_usage_accumulates():
     """track_llm_usage should update token_state in place."""
     state = {"input": 0, "output": 0, "thinking": 0, "cached": 0, "api_calls": 0}
-    events = []
-
-    def capture_event(event_type, payload):
-        events.append((event_type, payload))
 
     track_llm_usage(
         FakeLLMResponse(),
         state,
         "test_agent",
         "some_tool",
-        on_event=capture_event,
     )
 
     assert state["input"] == 100
     assert state["output"] == 50
     assert state["thinking"] == 10
     assert state["cached"] == 20
-    assert state["api_calls"] == 1
-
-    # Should have emitted llm_response, token_usage, and thinking events
-    event_types = [e[0] for e in events]
-    assert EVENT_LLM_RESPONSE in event_types
-    assert EVENT_TOKEN_USAGE in event_types
-    assert EVENT_THINKING in event_types
-
-
-def test_track_llm_usage_no_event_callback():
-    """track_llm_usage with on_event=None should not raise."""
-    state = {"input": 0, "output": 0, "thinking": 0, "cached": 0, "api_calls": 0}
-    track_llm_usage(
-        FakeLLMResponse(),
-        state,
-        "test_agent",
-        "some_tool",
-        on_event=None,
-    )
     assert state["api_calls"] == 1
 
 
@@ -129,7 +101,7 @@ def test_execute_tools_batch_sequential():
         return {"status": "ok", "tool": name}
 
     results = execute_tools_batch(
-        calls, executor, set(), False, 4, "test", None, on_event=None,
+        calls, executor, set(), False, 4, "test", None,
     )
     assert len(results) == 2
     assert results[0][1] == "tool_a"
@@ -140,18 +112,11 @@ def test_execute_tools_batch_sequential():
 def test_execute_tools_batch_parallel():
     """execute_tools_batch runs in parallel when all tools are safe."""
     calls = [FakeToolCall("safe_a", {}), FakeToolCall("safe_b", {})]
-    events = []
 
     def executor(name, args, tc_id):
         return {"status": "ok"}
 
-    def capture(et, payload):
-        events.append((et, payload))
-
     results = execute_tools_batch(
         calls, executor, {"safe_a", "safe_b"}, True, 4, "test", None,
-        on_event=capture,
     )
     assert len(results) == 2
-    # Should have emitted a debug event about parallel execution
-    assert any(et == EVENT_DEBUG for et, _ in events)

@@ -1,15 +1,13 @@
 """
 Shared LLM utilities used by BaseAgent and its subclasses.
 
-All functions are stateless (operate on passed-in state dicts,
-on_event callbacks, etc.).
+All functions are stateless (operate on passed-in state dicts).
 """
 
 import contextvars
 import json
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
@@ -17,16 +15,6 @@ from .llm import LLMResponse
 from .logging import get_logger
 
 _logger = get_logger()
-
-# Event type strings used with on_event callback
-EVENT_DEBUG = "debug"
-EVENT_LLM_CALL = "llm_call"
-EVENT_LLM_RESPONSE = "llm_response"
-EVENT_TOKEN_USAGE = "token_usage"
-EVENT_THINKING = "thinking"
-
-# Type alias for on_event callback
-OnEventCallback = Callable[[str, dict], None] | None
 
 # Directory to save chat history snapshots on reset
 _RESET_SNAPSHOT_DIR = Path.home() / ".stoai" / "reset_snapshots"
@@ -353,7 +341,6 @@ def _send_with_retry(
     on_reset=None,
     max_retries: int | None = None,
     reset_threshold: int | None = None,
-    on_event: OnEventCallback = None,
 ) -> LLMResponse:
     """Core retry loop for LLM API calls — used by both send and stream paths.
 
@@ -369,8 +356,6 @@ def _send_with_retry(
             result by calling ``timeout_pool.submit(...)`` internally. Must also
             accept updated (chat, message) after a reset. Returns a callable
             ``() -> Future``, plus mutable ``chat`` and ``message`` via closure.
-        on_event: Optional callback ``(event_type, payload_dict)`` for emitting
-            events. If None, events are silently dropped.
 
     ``on_reset(chat, message)`` must return ``(new_chat, new_message)``.
     """
@@ -378,10 +363,6 @@ def _send_with_retry(
         max_retries = _LLM_MAX_RETRIES
     if reset_threshold is None:
         reset_threshold = _SESSION_RESET_THRESHOLD
-
-    def _emit(event_type: str, **payload):
-        if on_event:
-            on_event(event_type, payload)
 
     # submit_fn is a mutable-state closure: submit_fn() -> Future
     # It also exposes .chat and .message for reset, and .update(chat, msg).
@@ -396,12 +377,6 @@ def _send_with_retry(
             while True:
                 if cancel_event and cancel_event.is_set():
                     future.cancel()
-                    _emit(
-                        EVENT_DEBUG,
-                        agent=agent_name,
-                        level="info",
-                        msg=f"[{agent_name}] LLM call cancelled by user",
-                    )
                     raise _CancelledDuringLLM()
 
                 elapsed = time.monotonic() - t0
@@ -417,11 +392,9 @@ def _send_with_retry(
                     elapsed = time.monotonic() - t0
                     if elapsed >= retry_timeout:
                         break
-                    _emit(
-                        EVENT_LLM_CALL,
-                        agent=agent_name,
-                        level="warning",
-                        msg=f"[{agent_name}] LLM API not responding after {elapsed:.0f}s (attempt {attempt + 1})...",
+                    _logger.warning(
+                        "[%s] LLM API not responding after %.0fs (attempt %d)...",
+                        agent_name, elapsed, attempt + 1,
                     )
 
             elapsed = time.monotonic() - t0
@@ -436,29 +409,23 @@ def _send_with_retry(
                     except Exception as reset_err:
                         _logger.warning("[%s] Session reset failed after timeout: %s", agent_name, reset_err)
                     consecutive_errors = 0
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="warning",
-                    msg=f"[{agent_name}] LLM API timed out after {elapsed:.0f}s, retrying ({attempt + 1}/{max_retries})...",
+                _logger.warning(
+                    "[%s] LLM API timed out after %.0fs, retrying (%d/%d)...",
+                    agent_name, elapsed, attempt + 1, max_retries,
                 )
             else:
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="error",
-                    msg=f"[{agent_name}] LLM API timed out after {elapsed:.0f}s, no retries left",
+                _logger.error(
+                    "[%s] LLM API timed out after %.0fs, no retries left",
+                    agent_name, elapsed,
                 )
         except _CancelledDuringLLM:
             raise
         except Exception as exc:
             if _is_history_desync_error(exc) and on_reset and not _desync_reset_done:
                 _desync_reset_done = True
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="warning",
-                    msg=f"[{agent_name}] History desync detected (tool results don't match tool calls), resetting session: {exc}",
+                _logger.warning(
+                    "[%s] History desync detected, resetting session: %s",
+                    agent_name, exc,
                 )
                 _save_reset_snapshot(submit_fn.chat, agent_name, "desync")
                 try:
@@ -471,11 +438,9 @@ def _send_with_retry(
                 last_exc = exc
                 continue
             if _is_precondition_error(exc) and on_reset:
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="warning",
-                    msg=f"[{agent_name}] Precondition check failed (corrupted session state), resetting: {exc}",
+                _logger.warning(
+                    "[%s] Precondition check failed, resetting session: %s",
+                    agent_name, exc,
                 )
                 try:
                     new_chat, new_msg = on_reset(submit_fn.chat, submit_fn.message)
@@ -488,11 +453,9 @@ def _send_with_retry(
                 continue
             if _is_bad_request_error(exc) and on_reset and not _bad_request_reset_done:
                 _bad_request_reset_done = True
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="warning",
-                    msg=f"[{agent_name}] Bad request (likely corrupted history), resetting session: {exc}",
+                _logger.warning(
+                    "[%s] Bad request (likely corrupted history), resetting session: %s",
+                    agent_name, exc,
                 )
                 _save_reset_snapshot(submit_fn.chat, agent_name, "bad_request")
                 try:
@@ -514,11 +477,9 @@ def _send_with_retry(
                     except Exception as reset_err:
                         _logger.warning("[%s] Session reset failed after API error: %s", agent_name, reset_err)
                     consecutive_errors = 0
-                _emit(
-                    EVENT_LLM_CALL,
-                    agent=agent_name,
-                    level="warning",
-                    msg=f"[{agent_name}] API server error, retrying in {delay}s ({attempt + 1}/{max_retries})...",
+                _logger.warning(
+                    "[%s] API server error, retrying in %.0fs (%d/%d)...",
+                    agent_name, delay, attempt + 1, max_retries,
                 )
                 last_exc = exc
                 time.sleep(delay)
@@ -560,14 +521,12 @@ def send_with_timeout(
     on_reset=None,
     max_retries: int | None = None,
     reset_threshold: int | None = None,
-    on_event: OnEventCallback = None,
 ) -> LLMResponse:
     """Send a message to the LLM with periodic warnings and retry on timeout."""
     submit_fn = _SubmitFn(timeout_pool, chat, message, "send")
     return _send_with_retry(
         submit_fn, timeout_pool, cancel_event, retry_timeout,
         agent_name, on_reset, max_retries, reset_threshold,
-        on_event=on_event,
     )
 
 
@@ -583,7 +542,6 @@ def send_with_timeout_stream(
     on_reset=None,
     max_retries: int | None = None,
     reset_threshold: int | None = None,
-    on_event: OnEventCallback = None,
 ) -> LLMResponse:
     """Like ``send_with_timeout`` but uses ``chat.send_stream()`` for incremental text.
 
@@ -594,7 +552,6 @@ def send_with_timeout_stream(
     return _send_with_retry(
         submit_fn, timeout_pool, cancel_event, retry_timeout,
         agent_name, on_reset, max_retries, reset_threshold,
-        on_event=on_event,
     )
 
 
@@ -606,9 +563,8 @@ def track_llm_usage(
     *,
     system_tokens: int = 0,
     tools_tokens: int = 0,
-    on_event: OnEventCallback = None,
 ):
-    """Accumulate token usage from an LLMResponse and emit via on_event callback.
+    """Accumulate token usage from an LLMResponse.
 
     Shared implementation used by BaseAgent and its subclasses.
 
@@ -620,91 +576,13 @@ def track_llm_usage(
         last_tool_context: Tool context string for the token log.
         system_tokens: Approximate token count of the system prompt (0 = unknown).
         tools_tokens: Approximate token count of tool declarations (0 = unknown).
-        on_event: Optional callback ``(event_type, payload_dict)`` for emitting events.
     """
     usage = response.usage
-    call_input = usage.input_tokens
-    call_output = usage.output_tokens
-    call_thinking = usage.thinking_tokens
-    call_cached = usage.cached_tokens
-    token_state["input"] += call_input
-    token_state["output"] += call_output
-    token_state["thinking"] += call_thinking
-    token_state["cached"] += call_cached
+    token_state["input"] += usage.input_tokens
+    token_state["output"] += usage.output_tokens
+    token_state["thinking"] += usage.thinking_tokens
+    token_state["cached"] += usage.cached_tokens
     token_state["api_calls"] += 1
-
-    # Compute history tokens when decomposition is available
-    has_decomp = system_tokens > 0 or tools_tokens > 0
-    history_tokens = (
-        max(0, call_input - system_tokens - tools_tokens) if has_decomp else 0
-    )
-
-    # Build log message
-    if has_decomp:
-        decomp_str = (
-            f" (sys:{system_tokens} tools:{tools_tokens} hist:{history_tokens})"
-        )
-    else:
-        decomp_str = ""
-
-    def _emit(event_type: str, **payload):
-        if on_event:
-            on_event(event_type, payload)
-
-    _emit(
-        EVENT_LLM_RESPONSE,
-        agent=agent_name,
-        level="debug",
-        msg=f"[LLM] {agent_name} responded — in:{call_input} out:{call_output} think:{call_thinking}",
-        data={
-            "agent_name": agent_name,
-            "input_tokens": call_input,
-            "output_tokens": call_output,
-            "thinking_tokens": call_thinking,
-        },
-    )
-
-    # Truncate tool context for logging (not data truncation)
-    _tool_ctx = last_tool_context
-    if _tool_ctx and len(_tool_ctx) > 500:
-        _tool_ctx = _tool_ctx[:500] + "..."
-
-    _emit(
-        EVENT_TOKEN_USAGE,
-        agent=agent_name,
-        level="debug",
-        msg=(
-            f"[Tokens] {agent_name} in:{call_input}{decomp_str} out:{call_output} "
-            f"think:{call_thinking} | cum_in:{token_state['input']} "
-            f"cum_out:{token_state['output']} calls:{token_state['api_calls']}"
-        ),
-        data={
-            "agent_name": agent_name,
-            "tool_context": _tool_ctx if _tool_ctx else "unknown",
-            "input_tokens": call_input,
-            "output_tokens": call_output,
-            "thinking_tokens": call_thinking,
-            "cached_tokens": call_cached,
-            "system_tokens": system_tokens,
-            "tools_tokens": tools_tokens,
-            "history_tokens": history_tokens,
-            "cumulative_input": token_state["input"],
-            "cumulative_output": token_state["output"],
-            "cumulative_thinking": token_state["thinking"],
-            "cumulative_cached": token_state["cached"],
-            "api_calls": token_state["api_calls"],
-        },
-    )
-    # Always emit thinking events so consumers can forward to frontend
-    if response.thoughts:
-        combined = "\n\n".join(response.thoughts)
-        _emit(
-            EVENT_THINKING,
-            agent=agent_name,
-            level="debug",
-            msg=f"[Thinking] {combined}",
-            data={"text": combined},
-        )
 
 
 def execute_tools_batch(
@@ -715,7 +593,6 @@ def execute_tools_batch(
     max_workers: int,
     agent_name: str,
     logger,
-    on_event: OnEventCallback = None,
 ) -> list[tuple[str | None, str, dict, dict]]:
     """Execute tool calls, parallelizing when all are in the safe set.
 
@@ -746,12 +623,6 @@ def execute_tools_batch(
             for tc_id, name, args in parsed
         ]
 
-    if on_event:
-        on_event(EVENT_DEBUG, {
-            "agent": agent_name,
-            "level": "debug",
-            "msg": f"[{agent_name}] Parallel: {len(parsed)} tools concurrently",
-        })
     workers = min(len(parsed), max_workers)
     results_by_idx: dict[int, dict] = {}
 

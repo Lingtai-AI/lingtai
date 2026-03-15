@@ -2,10 +2,9 @@
 
 See docs/plans/2026-03-06-llm-service-design.md for design rationale.
 
-This version is decoupled from xhelio's config system:
+This version is decoupled from any app-specific config system:
 - API key resolution via injected ``key_resolver`` callable (defaults to env vars)
 - Provider defaults via injected ``provider_defaults`` dict
-- Event emission via injected ``on_event`` callback
 """
 
 from __future__ import annotations
@@ -40,8 +39,8 @@ COMPACTION_PROMPT = (
 
 
 def _generate_session_id() -> str:
-    """Generate a unique xhelio session ID."""
-    return f"xh_{uuid.uuid4().hex[:12]}"
+    """Generate a unique stoai session ID."""
+    return f"st_{uuid.uuid4().hex[:12]}"
 
 
 class LLMService:
@@ -49,7 +48,7 @@ class LLMService:
 
     Responsibilities:
     - Adapter factory: constructs the right adapter from config
-    - Session registry: assigns xhelio session IDs, tracks active sessions
+    - Session registry: assigns stoai session IDs, tracks active sessions
     - One-shot gateway: routes generate() through the same tracking path
     - Token accounting: centralizes per-session usage tracking via interface
 
@@ -63,8 +62,6 @@ class LLMService:
       Defaults to reading ``{PROVIDER}_API_KEY`` from the environment.
     - ``provider_defaults``: dict mapping provider name to defaults dict
       (model, base_url, api_compat, etc.).  Defaults to empty dict.
-    - ``on_event``: optional callback(event_type: str, data: dict) for
-      token usage events emitted from generate().
     """
 
     def __init__(
@@ -76,7 +73,6 @@ class LLMService:
         provider_config: dict | None = None,
         key_resolver: Callable[[str], str | None] | None = None,
         provider_defaults: dict | None = None,
-        on_event: Callable[[str, dict], None] | None = None,
     ) -> None:
         self._provider = provider.lower()
         self._model = model
@@ -84,7 +80,6 @@ class LLMService:
         self._config = provider_config or {}
         self._key_resolver = key_resolver or (lambda p: os.environ.get(f"{p.upper()}_API_KEY"))
         self._provider_defaults = provider_defaults or {}
-        self._on_event = on_event
         self._adapters: dict[tuple[str, str | None], LLMAdapter] = {}
         self._adapter_lock = threading.Lock()
         self._adapters[(self._provider, base_url)] = self._create_adapter(self._provider, api_key, base_url)
@@ -323,14 +318,9 @@ class LLMService:
         temperature: float | None = None,
         json_schema: dict | None = None,
         max_output_tokens: int | None = None,
-        tracked: bool = True,
         provider: str | None = None,
     ) -> LLMResponse:
-        """Single-turn generation.
-
-        If tracked=True (default): invokes on_event callback with usage data.
-        If tracked=False: fire-and-forget, no logging.
-        """
+        """Single-turn generation."""
         adapter = self.get_adapter(provider) if provider else self.get_adapter(self._provider, self._base_url)
         gen_model = model or self._model
         response = adapter.generate(
@@ -341,15 +331,6 @@ class LLMService:
             json_schema=json_schema,
             max_output_tokens=max_output_tokens,
         )
-        if tracked and response.usage and self._on_event:
-            usage = response.usage
-            self._on_event("llm_call", {
-                "agent_name": "generate",
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "thinking_tokens": usage.thinking_tokens,
-                "cached_tokens": usage.cached_tokens,
-            })
         return response
 
     # --- Context compaction ---

@@ -7,6 +7,8 @@ Key concepts:
     - **2-layer tool dispatch**: intrinsics (built-in) + MCP handlers (domain tools).
     - **Opaque context**: the host app can pass any context object — the agent
       stores it but never introspects it.
+    - **5 optional services**: LLM, FileIO, Email, Vision, Search — missing
+      service auto-disables the intrinsics it backs.
 """
 
 from __future__ import annotations
@@ -47,12 +49,6 @@ from .types import (
     MCPTool,
     UnknownToolError,
     AgentNotConnectedError,
-    EVENT_TOOL_CALL,
-    EVENT_TOOL_RESULT,
-    EVENT_TEXT_DELTA,
-    EVENT_AGENT_STATE,
-    EVENT_COMPACTION,
-    EVENT_DEBUG,
 )
 
 logger = get_logger()
@@ -146,6 +142,15 @@ _MIME_BY_EXT: dict[str, str] = {
 class BaseAgent:
     """Generic research agent with intrinsic tools and MCP tool dispatch.
 
+    Services (all optional):
+        - ``service`` (LLMService): The brain — thinking, generating text.
+        - ``file_io`` (FileIOService): File access — backs read/edit/write/glob/grep.
+        - ``email`` (EmailService): Message transport — backs email intrinsic.
+        - ``vision`` (VisionService): Image understanding — backs vision intrinsic.
+        - ``search`` (SearchService): Web search — backs web_search intrinsic.
+
+    Missing service = intrinsics backed by it are auto-disabled.
+
     Subclasses customize behavior via:
         - ``_pre_request(msg)`` — transform message before LLM send
         - ``_post_request(msg, result)`` — side effects after LLM responds
@@ -167,10 +172,13 @@ class BaseAgent:
         agent_id: str,
         service: LLMService,
         *,
+        file_io: Any | None = None,
+        email_service: Any | None = None,
+        vision: Any | None = None,
+        search: Any | None = None,
         config: AgentConfig | None = None,
         mcp_tools: list[MCPTool] | None = None,
         working_dir: str | Path | None = None,
-        on_event: Callable[[str, dict], None] | None = None,
         context: Any = None,
         enabled_intrinsics: set[str] | None = None,
         disabled_intrinsics: set[str] | None = None,
@@ -188,15 +196,37 @@ class BaseAgent:
         self._context = context
         self._cancel_event = cancel_event
         self._streaming = streaming
-        self.on_event = on_event
 
         # Working directory for file intrinsics
         self._working_dir = Path(working_dir) if working_dir else Path.cwd()
 
+        # --- Wire services ---
+        # FileIOService: auto-create LocalFileIOService for backward compat
+        if file_io is not None:
+            self._file_io = file_io
+        else:
+            from .services.file_io import LocalFileIOService
+            self._file_io = LocalFileIOService(root=self._working_dir)
+
+        # EmailService: None means email intrinsic disabled
+        self._email_service = email_service
+
+        # VisionService: auto-create from LLM if not provided
+        if vision is not None:
+            self._vision_service = vision
+        else:
+            self._vision_service = None  # will fall back to direct LLM call
+
+        # SearchService: auto-create from LLM if not provided
+        if search is not None:
+            self._search_service = search
+        else:
+            self._search_service = None  # will fall back to direct LLM call
+
         # System prompt manager
         self._prompt_manager = SystemPromptManager()
 
-        # Agent connections (for talk intrinsic)
+        # Agent connections (legacy — kept for backward compat, used alongside email)
         self._connections: dict[str, BaseAgent] = {}
 
         # MCP tool handlers
@@ -261,30 +291,21 @@ class BaseAgent:
         enabled: set[str] | None,
         disabled: set[str] | None,
     ) -> None:
-        """Wire intrinsic tool handlers based on enabled/disabled sets."""
-        # File intrinsics — thin wrappers that resolve working_dir
-        from .intrinsics.read import handle_read
-        from .intrinsics.edit import handle_edit
-        from .intrinsics.write import handle_write
-        from .intrinsics.glob import handle_glob
-        from .intrinsics.grep import handle_grep
+        """Wire intrinsic tool handlers based on enabled/disabled sets and available services."""
+        # File intrinsics — delegate to FileIOService
+        file_intrinsic_names = {"read", "edit", "write", "glob", "grep"}
 
-        file_intrinsics = {
-            "read": ("file_path", handle_read),
-            "edit": ("file_path", handle_edit),
-            "write": ("file_path", handle_write),
-            "glob": ("path", handle_glob),
-            "grep": ("path", handle_grep),
-        }
+        # Agent-state intrinsics (bound methods) — depend on services
+        state_intrinsics: dict[str, Callable[[dict], dict]] = {}
 
-        # Agent-state intrinsics (bound methods)
-        state_intrinsics = {
-            "talk": self._handle_talk,
-            "vision": self._handle_vision,
-            "web_search": self._handle_web_search,
-        }
+        # Email requires EmailService OR legacy connections
+        state_intrinsics["email"] = self._handle_email
 
-        all_names = set(file_intrinsics.keys()) | set(state_intrinsics.keys())
+        # Vision and web_search always available (fall back to direct LLM calls)
+        state_intrinsics["vision"] = self._handle_vision
+        state_intrinsics["web_search"] = self._handle_web_search
+
+        all_names = file_intrinsic_names | set(state_intrinsics.keys())
 
         # Determine which intrinsics to enable
         if enabled is not None:
@@ -294,61 +315,173 @@ class BaseAgent:
         else:
             active_names = all_names
 
-        # Wire file intrinsics
-        for name, (path_key, handler) in file_intrinsics.items():
-            if name in active_names:
-                # Create closure with captured variables
-                self._intrinsics[name] = self._make_file_handler(path_key, handler)
+        # Wire file intrinsics via FileIOService
+        if self._file_io is not None:
+            for name in file_intrinsic_names:
+                if name in active_names:
+                    self._intrinsics[name] = self._make_file_service_handler(name)
+        # else: no FileIOService → no file intrinsics
 
         # Wire state intrinsics
         for name, handler in state_intrinsics.items():
             if name in active_names:
                 self._intrinsics[name] = handler
 
-    def _make_file_handler(
-        self, path_key: str, handler: Callable[[dict], dict]
-    ) -> Callable[[dict], dict]:
-        """Create a file intrinsic handler that resolves paths relative to working_dir."""
+    def _make_file_service_handler(self, intrinsic_name: str) -> Callable[[dict], dict]:
+        """Create a file intrinsic handler that delegates to FileIOService."""
 
-        def _handler(args: dict) -> dict:
-            args = dict(args)  # don't mutate caller's dict
-            path_val = args.get(path_key)
-            if path_val and not Path(path_val).is_absolute():
-                args[path_key] = str(self._working_dir / path_val)
-            return handler(args)
+        if intrinsic_name == "read":
+            def _handle_read(args: dict) -> dict:
+                path = args.get("file_path", "")
+                if not path:
+                    return {"error": "file_path is required"}
+                if not Path(path).is_absolute():
+                    path = str(self._working_dir / path)
+                offset = args.get("offset", 1)
+                limit = args.get("limit", 2000)
+                try:
+                    content = self._file_io.read(path)
+                except FileNotFoundError:
+                    return {"error": f"File not found: {path}"}
+                except Exception as e:
+                    return {"error": f"Cannot read {path}: {e}"}
+                lines = content.splitlines(keepends=True)
+                start = max(0, offset - 1)
+                selected = lines[start:start + limit]
+                numbered = "".join(f"{start + i + 1}\t{line}" for i, line in enumerate(selected))
+                return {"content": numbered, "total_lines": len(lines), "lines_shown": len(selected)}
+            return _handle_read
 
-        return _handler
+        elif intrinsic_name == "edit":
+            def _handle_edit(args: dict) -> dict:
+                path = args.get("file_path", "")
+                if not path:
+                    return {"error": "file_path is required"}
+                if not Path(path).is_absolute():
+                    path = str(self._working_dir / path)
+                old = args.get("old_string", "")
+                new = args.get("new_string", "")
+                replace_all = args.get("replace_all", False)
+                try:
+                    content = self._file_io.read(path)
+                except FileNotFoundError:
+                    return {"error": f"File not found: {path}"}
+                except Exception as e:
+                    return {"error": f"Cannot read {path}: {e}"}
+                count = content.count(old)
+                if count == 0:
+                    return {"error": f"old_string not found in {path}"}
+                if count > 1 and not replace_all:
+                    return {"error": f"old_string found {count} times — use replace_all=true or provide more context"}
+                if replace_all:
+                    updated = content.replace(old, new)
+                else:
+                    updated = content.replace(old, new, 1)
+                try:
+                    self._file_io.write(path, updated)
+                except Exception as e:
+                    return {"error": f"Cannot write {path}: {e}"}
+                return {"status": "ok", "replacements": count if replace_all else 1}
+            return _handle_edit
+
+        elif intrinsic_name == "write":
+            def _handle_write(args: dict) -> dict:
+                path = args.get("file_path", "")
+                content = args.get("content", "")
+                if not path:
+                    return {"error": "file_path is required"}
+                if not Path(path).is_absolute():
+                    path = str(self._working_dir / path)
+                try:
+                    self._file_io.write(path, content)
+                    return {"status": "ok", "path": path, "bytes": len(content)}
+                except Exception as e:
+                    return {"error": f"Cannot write {path}: {e}"}
+            return _handle_write
+
+        elif intrinsic_name == "glob":
+            def _handle_glob(args: dict) -> dict:
+                pattern = args.get("pattern", "")
+                if not pattern:
+                    return {"error": "pattern is required"}
+                search_dir = args.get("path", str(self._working_dir))
+                if not Path(search_dir).is_absolute():
+                    search_dir = str(self._working_dir / search_dir)
+                try:
+                    matches = self._file_io.glob(pattern, root=search_dir)
+                    return {"matches": matches, "count": len(matches)}
+                except Exception as e:
+                    return {"error": f"Glob failed: {e}"}
+            return _handle_glob
+
+        elif intrinsic_name == "grep":
+            def _handle_grep(args: dict) -> dict:
+                pattern = args.get("pattern", "")
+                if not pattern:
+                    return {"error": "pattern is required"}
+                search_path = args.get("path", str(self._working_dir))
+                if not Path(search_path).is_absolute():
+                    search_path = str(self._working_dir / search_path)
+                max_matches = args.get("max_matches", 200)
+                try:
+                    results = self._file_io.grep(pattern, path=search_path, max_results=max_matches)
+                    matches = [{"file": r.path, "line": r.line_number, "text": r.line} for r in results]
+                    return {"matches": matches, "count": len(matches), "truncated": len(matches) >= max_matches}
+                except Exception as e:
+                    return {"error": f"Grep failed: {e}"}
+            return _handle_grep
+
+        else:
+            raise ValueError(f"Unknown file intrinsic: {intrinsic_name}")
 
     # ------------------------------------------------------------------
     # Intrinsic handlers (agent-state intrinsics)
     # ------------------------------------------------------------------
 
-    def _handle_talk(self, args: dict) -> dict:
-        """Send a message to a connected agent."""
-        action = args.get("action", "send")
+    def _handle_email(self, args: dict) -> dict:
+        """Send an email to another agent via EmailService or legacy connections."""
+        address = args.get("address", "")
+        message_text = args.get("message", "")
+
+        # Legacy talk compatibility: support target_id for in-process connections
         target_id = args.get("target_id", "")
-        message = args.get("message", "")
-        timeout = args.get("timeout", 120)
+        if target_id and target_id in self._connections:
+            action = args.get("action", "send")
+            target = self._connections[target_id]
+            msg = _make_message(MSG_REQUEST, self.agent_id, message_text)
+            if action == "send_and_wait":
+                timeout = args.get("timeout", 120)
+                reply_event = threading.Event()
+                msg._reply_event = reply_event
+                target.inbox.put(msg)
+                if not reply_event.wait(timeout=timeout):
+                    return {"status": "timeout", "message": f"No reply from {target_id} within {timeout}s"}
+                return {"status": "ok", "reply": msg._reply_value}
+            else:
+                target.inbox.put(msg)
+                return {"status": "ok", "message": f"Sent to {target_id}"}
 
-        if target_id not in self._connections:
-            raise AgentNotConnectedError(target_id)
+        if not address:
+            if target_id:
+                raise AgentNotConnectedError(target_id)
+            return {"error": "address is required"}
 
-        target = self._connections[target_id]
-        msg = _make_message(MSG_REQUEST, self.agent_id, message)
+        if self._email_service is None:
+            return {"error": "email service not configured"}
 
-        if action == "send_and_wait":
-            reply_event = threading.Event()
-            msg._reply_event = reply_event
-            target.inbox.put(msg)
-            if not reply_event.wait(timeout=timeout):
-                return {"status": "timeout", "message": f"No reply from {target_id} within {timeout}s"}
-            return {"status": "ok", "reply": msg._reply_value}
+        payload = {
+            "from": self._email_service.address or self.agent_id,
+            "to": address,
+            "message": message_text,
+        }
+        success = self._email_service.send(address, payload)
+        if success:
+            return {"status": "delivered"}
         else:
-            target.inbox.put(msg)
-            return {"status": "ok", "message": f"Sent to {target_id}"}
+            return {"status": "refused", "error": f"Could not deliver to {address}"}
 
     def _handle_vision(self, args: dict) -> dict:
-        """Analyze an image file using the model's vision capability."""
+        """Analyze an image file using VisionService or direct LLM multimodal call."""
         image_path = args.get("image_path", "")
         question = args.get("question", "Describe what you see in this image.")
 
@@ -362,6 +495,15 @@ class BaseAgent:
         if not path.is_file():
             return {"status": "error", "message": f"Image file not found: {path}"}
 
+        # Try VisionService first
+        if self._vision_service is not None:
+            try:
+                analysis = self._vision_service.analyze_image(str(path), prompt=question)
+                return {"status": "ok", "analysis": analysis}
+            except NotImplementedError:
+                pass  # Fall through to direct LLM call
+
+        # Fall back to direct LLM multimodal call
         image_bytes = path.read_bytes()
         mime = _MIME_BY_EXT.get(path.suffix.lower(), "image/png")
 
@@ -374,10 +516,23 @@ class BaseAgent:
         return {"status": "ok", "analysis": response.text}
 
     def _handle_web_search(self, args: dict) -> dict:
-        """Search the web for information."""
+        """Search the web using SearchService or direct LLM grounding."""
         query = args.get("query")
         if not query:
             return {"status": "error", "message": "Missing required parameter: query"}
+
+        # Try SearchService first
+        if self._search_service is not None:
+            try:
+                results = self._search_service.search(query)
+                formatted = "\n\n".join(
+                    f"**{r.title}**\n{r.url}\n{r.snippet}" for r in results
+                )
+                return {"status": "ok", "results": formatted or "No results found."}
+            except NotImplementedError:
+                pass  # Fall through to direct LLM call
+
+        # Fall back to direct LLM grounding call
         resp = self.service.web_search(query)
         if not resp.text:
             return {
@@ -407,6 +562,14 @@ class BaseAgent:
         if self._thread and self._thread.is_alive():
             return
         self._shutdown.clear()
+
+        # Start EmailService listener if configured
+        if self._email_service is not None:
+            try:
+                self._email_service.listen(on_message=self._on_email_received)
+            except RuntimeError:
+                pass  # Already listening or no listen_port — that's fine
+
         self._thread = threading.Thread(
             target=self._run_loop,
             daemon=True,
@@ -421,6 +584,20 @@ class BaseAgent:
             self._thread.join(timeout=timeout)
         self._timeout_pool.shutdown(wait=False)
 
+        # Stop EmailService if configured
+        if self._email_service is not None:
+            try:
+                self._email_service.stop()
+            except Exception:
+                pass
+
+    def _on_email_received(self, payload: dict) -> None:
+        """Callback for EmailService — puts received email into inbox."""
+        sender = payload.get("from", "unknown")
+        content = payload.get("message", "")
+        msg = _make_message(MSG_REQUEST, sender, content)
+        self.inbox.put(msg)
+
     def _set_state(self, new_state: AgentState, reason: str = "") -> None:
         """Transition to a new state, keeping _idle in sync."""
         old = self._state
@@ -431,16 +608,6 @@ class BaseAgent:
             self._idle.set()
         else:
             self._idle.clear()
-        suffix = f" ({reason})" if reason else ""
-        self._emit_event(
-            EVENT_AGENT_STATE,
-            {
-                "old": old.value,
-                "new": new_state.value,
-                "reason": reason,
-                "msg": f"[{self.agent_id}] {old.value} -> {new_state.value}{suffix}",
-            },
-        )
 
     # ------------------------------------------------------------------
     # Main loop (final — do not override)
@@ -461,10 +628,6 @@ class BaseAgent:
                 logger.error(
                     f"[{self.agent_id}] Unhandled error in message handler: {err_desc}",
                     exc_info=True,
-                )
-                self._emit_event(
-                    EVENT_DEBUG,
-                    {"level": "error", "msg": f"[{self.agent_id}] Unhandled error: {err_desc}"},
                 )
                 if msg._reply_event:
                     msg._reply_value = {
@@ -537,11 +700,6 @@ class BaseAgent:
             if response.text:
                 collected_text_parts.append(response.text)
                 if response.tool_calls:
-                    if not (self._streaming and self._intermediate_text_streamed):
-                        self._emit_event(
-                            EVENT_TEXT_DELTA,
-                            {"text": response.text + "\n\n", "commentary": True},
-                        )
                     self._intermediate_text_streamed = False
 
             if not response.tool_calls:
@@ -556,19 +714,11 @@ class BaseAgent:
 
             stop_reason = guard.check_limit(len(response.tool_calls))
             if stop_reason:
-                self._emit_event(
-                    EVENT_DEBUG,
-                    {"level": "debug", "msg": f"[{self.agent_id}] Stopping: {stop_reason}"},
-                )
                 break
 
             # Check for invalid tool names
             invalid_reason = guard.check_invalid_tool_limit()
             if invalid_reason:
-                self._emit_event(
-                    EVENT_DEBUG,
-                    {"level": "warning", "msg": f"[{self.agent_id}] Stopping: {invalid_reason}"},
-                )
                 break
 
             all_parallel_safe = (
@@ -658,12 +808,7 @@ class BaseAgent:
         """
         tc_id = getattr(tc, "id", None)
         args = dict(tc.args) if tc.args else {}
-        commentary = args.pop("commentary", None)
-        if commentary:
-            self._emit_event(
-                EVENT_TEXT_DELTA,
-                {"text": commentary + "\n\n", "commentary": True},
-            )
+        args.pop("commentary", None)
         args.pop("_sync", None)
 
         verdict = guard.record_tool_call(tc.name, args)
@@ -679,12 +824,6 @@ class BaseAgent:
             )
             return msg, False, ""
 
-        # Emit tool_call event
-        self._emit_event(
-            EVENT_TOOL_CALL,
-            {"tool_name": tc.name, "tool_args": args},
-        )
-
         timer = ToolTimer()
         try:
             # Check for unknown tool first
@@ -699,17 +838,6 @@ class BaseAgent:
 
             if isinstance(result, dict):
                 stamp_tool_result(result, timer.elapsed_ms)
-
-            # Emit tool_result event
-            status = result.get("status", "success") if isinstance(result, dict) else "success"
-            self._emit_event(
-                EVENT_TOOL_RESULT,
-                {
-                    "tool_name": tc.name,
-                    "tool_result": result,
-                    "status": status,
-                },
-            )
 
             if verdict.warning and isinstance(result, dict):
                 result["_duplicate_warning"] = verdict.warning
@@ -747,15 +875,6 @@ class BaseAgent:
                 provider=self._config.provider,
             )
             collected_errors.append(f"{tc.name}: {e}")
-            self._emit_event(
-                EVENT_DEBUG,
-                {
-                    "level": "error",
-                    "msg": f"[{self.agent_id}] {tc.name} FAILED: {e}",
-                    "tool_name": tc.name,
-                    "error": str(e),
-                },
-            )
             return result_msg, False, ""
 
     def _execute_tools_sequential(
@@ -796,14 +915,8 @@ class BaseAgent:
         for i, tc in enumerate(tool_calls):
             tc_id = getattr(tc, "id", None)
             args = dict(tc.args) if tc.args else {}
-            commentary = args.pop("commentary", None)
+            args.pop("commentary", None)
             args.pop("_sync", None)
-
-            if commentary:
-                self._emit_event(
-                    EVENT_TEXT_DELTA,
-                    {"text": commentary + "\n\n", "commentary": True},
-                )
 
             verdict = guard.record_tool_call(tc.name, args)
             if verdict.blocked:
@@ -824,11 +937,6 @@ class BaseAgent:
             return [r for _, r in tool_results], False, ""
 
         # Phase 2: Execute in parallel
-        self._emit_event(
-            EVENT_DEBUG,
-            {"level": "debug", "msg": f"[{self.agent_id}] Parallel: {len(to_execute)} tools concurrently"},
-        )
-
         results_map: dict[int, Any] = {}
         errors_map: dict[int, str] = {}
 
@@ -978,15 +1086,10 @@ class BaseAgent:
                     agent_name=self.agent_id,
                     logger=logger,
                     on_reset=self._on_reset,
-                    on_event=self._emit_event_kw,
                 )
         except Exception as exc:
             # Handle stale Interactions API session
             if self._interaction_id and _is_stale_interaction_error(exc):
-                self._emit_event(
-                    EVENT_DEBUG,
-                    {"level": "warning", "msg": f"[{self.agent_id}] Stale interaction — starting fresh session"},
-                )
                 self._interaction_id = None
                 self._chat = self.service.create_session(
                     system_prompt=self._build_system_prompt(),
@@ -1008,7 +1111,6 @@ class BaseAgent:
                         retry_timeout=retry_timeout,
                         agent_name=self.agent_id,
                         logger=logger,
-                        on_event=self._emit_event_kw,
                     )
             else:
                 raise
@@ -1022,18 +1124,8 @@ class BaseAgent:
     def _llm_send_streaming(
         self, message: Any, retry_timeout: float
     ) -> LLMResponse:
-        """Streaming LLM send — emits TEXT_DELTA events as tokens arrive."""
+        """Streaming LLM send via send_stream."""
         self._message_seq += 1
-        seq = self._message_seq
-        first_chunk = True
-
-        def _on_chunk(text_delta: str) -> None:
-            nonlocal first_chunk
-            data: dict = {"text": text_delta, "streaming": True}
-            if first_chunk:
-                data["message_seq"] = seq
-                first_chunk = False
-            self._emit_event(EVENT_TEXT_DELTA, data)
 
         response = send_with_timeout_stream(
             chat=self._chat,
@@ -1043,9 +1135,7 @@ class BaseAgent:
             retry_timeout=retry_timeout,
             agent_name=self.agent_id,
             logger=logger,
-            on_chunk=_on_chunk,
             on_reset=self._on_reset,
-            on_event=self._emit_event_kw,
         )
 
         if response.text:
@@ -1079,11 +1169,6 @@ class BaseAgent:
         iface.drop_trailing(
             lambda e: e.role == "user"
             and all(isinstance(b, ToolResultBlock) for b in e.content)
-        )
-
-        self._emit_event(
-            EVENT_DEBUG,
-            {"level": "warning", "msg": f"[{self.agent_id}] Session rollback — new chat ({len(iface.entries)} entries kept)"},
         )
 
         self._chat = self.service.create_session(
@@ -1136,7 +1221,6 @@ class BaseAgent:
                 "".join(prompt_parts),
                 temperature=0.1,
                 max_output_tokens=target_tokens,
-                tracked=False,
             )
             return response.text.strip() if response and response.text else ""
 
@@ -1147,18 +1231,8 @@ class BaseAgent:
             provider=self._config.provider,
         )
         if new_chat is not None:
-            old_tokens = self._chat.interface.estimate_context_tokens()
-            new_tokens = new_chat.interface.estimate_context_tokens()
             self._chat = new_chat
             self._interaction_id = None
-            self._emit_event(
-                EVENT_COMPACTION,
-                {
-                    "before_tokens": old_tokens,
-                    "after_tokens": new_tokens,
-                    "context_window": self._chat.context_window(),
-                },
-            )
 
     # ------------------------------------------------------------------
     # Token tracking
@@ -1188,7 +1262,6 @@ class BaseAgent:
             last_tool_context=self._last_tool_context,
             system_tokens=self._system_prompt_tokens,
             tools_tokens=self._tools_tokens,
-            on_event=self._emit_event_kw,
         )
         self._total_input_tokens = token_state["input"]
         self._total_output_tokens = token_state["output"]
@@ -1223,27 +1296,11 @@ class BaseAgent:
         }
 
     # ------------------------------------------------------------------
-    # Event emission
-    # ------------------------------------------------------------------
-
-    def _emit_event(self, event_type: str, payload: dict) -> None:
-        """Emit an event via the on_event callback, injecting agent_id."""
-        if self.on_event:
-            self.on_event(event_type, {**payload, "agent_id": self.agent_id})
-
-    def _emit_event_kw(self, event_type: str, payload: dict) -> None:
-        """Emit event — same signature as on_event callback.
-
-        Used as the on_event parameter for llm_utils functions.
-        """
-        self._emit_event(event_type, payload)
-
-    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def connect(self, agent_id: str, agent: BaseAgent) -> None:
-        """Register a connected agent for the talk intrinsic."""
+        """Register a connected agent for in-process messaging (legacy talk)."""
         self._connections[agent_id] = agent
 
     def disconnect(self, agent_id: str) -> None:
@@ -1251,16 +1308,24 @@ class BaseAgent:
         self._connections.pop(agent_id, None)
 
     def talk(self, target_id: str, message: str, *, wait: bool = False, timeout: float = 120) -> dict:
-        """Send a message to a connected agent (public API).
+        """Send a message to a connected agent (legacy public API).
 
+        For new code, use email() with EmailService instead.
         Raises AgentNotConnectedError if the target is not connected.
         """
-        return self._handle_talk({
+        return self._handle_email({
             "action": "send_and_wait" if wait else "send",
             "target_id": target_id,
             "message": message,
             "timeout": timeout,
         })
+
+    def email(self, address: str, message: str) -> dict:
+        """Send an email to another agent at the given address (public API).
+
+        Requires EmailService to be configured.
+        """
+        return self._handle_email({"address": address, "message": message})
 
     def add_tool(
         self,

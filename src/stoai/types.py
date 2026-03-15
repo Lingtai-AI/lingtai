@@ -21,21 +21,9 @@ class UnknownToolError(Exception):
         super().__init__(f"Unknown tool: {tool_name}")
 
 
+# Kept for backward compatibility — deprecated, use email return values instead.
 class AgentNotConnectedError(Exception):
-    """Raised when talk targets an agent that is not connected."""
+    """Deprecated. Email is fire-and-forget; delivery errors are return values."""
     def __init__(self, target_id: str):
         self.target_id = target_id
         super().__init__(f"Agent not connected: {target_id}")
-
-
-# Event type constants (used with on_event callback)
-EVENT_TOOL_CALL = "tool_call"
-EVENT_TOOL_RESULT = "tool_result"
-EVENT_TEXT_DELTA = "text_delta"
-EVENT_AGENT_STATE = "agent_state"
-EVENT_COMPACTION = "compaction"
-EVENT_LLM_CALL = "llm_call"
-EVENT_LLM_RESPONSE = "llm_response"
-EVENT_TOKEN_USAGE = "token_usage"
-EVENT_THINKING = "thinking"
-EVENT_DEBUG = "debug"
