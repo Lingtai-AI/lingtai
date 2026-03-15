@@ -59,7 +59,21 @@ Three identical agents, each with:
 - `cc`: optional, array of agent keys — mapped to addresses, included in email payload
 - `bcc`: optional, array of agent keys — mapped to addresses, included in email payload
 
-The handler creates a `TCPMailService` sender and calls `email.handle()` with the appropriate `address`, `cc`, and `bcc` fields (converted from agent keys to `127.0.0.1:port` addresses).
+The handler uses a standalone `TCPMailService()` (send-only, no listen_port) and calls `sender.send()` directly — the user is not an agent and has no EmailManager. The handler must replicate the fan-out and BCC-stripping logic from `EmailManager._send()`:
+
+1. Build a base payload: `{from, to, cc, subject, message}` — **no `bcc` field** in the wire payload
+2. Send the base payload to the primary `to` address
+3. Send the base payload to each CC address
+4. Send the base payload to each BCC address (they receive it but are not listed anywhere)
+
+```python
+# Pseudocode
+base = {"from": user_addr, "to": [to_addr], "subject": "", "message": msg}
+if cc_addrs:
+    base["cc"] = cc_addrs
+for addr in [to_addr] + cc_addrs + bcc_addrs:
+    sender.send(addr, base)
+```
 
 ## Frontend
 
@@ -75,7 +89,7 @@ Tabs at the top: **All | Alice | Bob | Charlie**
 
 - "All" shows interleaved entries from all agents, sorted by time (default)
 - Agent tabs filter to that agent's entries only
-- Color tags: Alice = red (`#e94560`), Bob = teal (`#4ecdc4`), Charlie = amber (`#f0a500`)
+- Color tags: Alice = red (`#e94560`, class `alice`), Bob = teal (`#4ecdc4`, class `bob`), Charlie = amber (`#f0a500`, class `charlie`)
 
 ### Compose Bar
 
@@ -86,18 +100,34 @@ Bottom of inbox panel, left to right:
 4. **Message input** — text field
 5. **Send button**
 
-CC/BCC rows appear below the main compose line when toggled. Checkboxes update dynamically when the To selection changes (exclude the To target from CC/BCC options).
+CC/BCC rows appear below the main compose line when toggled. Checkboxes update dynamically when the To selection changes (exclude the To target from CC/BCC options). If a checked agent becomes the To target, uncheck and hide them. An agent cannot appear in both CC and BCC — BCC takes precedence if both are somehow checked (unlikely with the UI, but handle it).
 
 ### Inbox Display
 
 Emails show:
-- Sent: "To: Alice" (+ "CC: Bob, Charlie" if CC was used)
-- Received: "From: Alice" with subject, CC field if present
+- Sent: "To: Alice" (+ "CC: Bob, Charlie" if CC was used). The `sentMessages` array stores `{to, cc, text, time}`.
+- Received: "From: Alice" with subject, CC field if present. The `on_user_mail` callback captures `from`, `to`, `cc`, `subject`, `message` from the payload.
 - BCC is never displayed (blind by design)
+
+#### GET /inbox response
+
+```json
+{
+  "emails": [
+    {"id": "...", "from": "127.0.0.1:8301", "to": ["127.0.0.1:8300"], "cc": ["127.0.0.1:8302"], "subject": "...", "message": "...", "time": "..."}
+  ]
+}
+```
 
 ## File Structure
 
 Single file: `examples/three_agents.py`. No external dependencies beyond stoai and its optional `minimax` extra.
+
+## Notes
+
+- Uses same ports as `two_agents.py` (8300-8302 + 8080). Only run one at a time.
+- Shutdown sequence: `server.shutdown()`, `user_mail.stop()`, then `agent.stop(timeout=5.0)` for all three agents.
+- Each agent's contacts list has 3 entries: two other agents + user.
 
 ## Non-Goals
 
