@@ -18,5 +18,6 @@ def test_unknown_tool_error():
 
 
 def test_agent_not_connected_error():
+    """AgentNotConnectedError kept for backward compat."""
     err = AgentNotConnectedError("agent_42")
     assert "agent_42" in str(err)

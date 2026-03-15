@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 StoAI (Stoa + AI) is a generic agent framework — an "agent operating system" providing the minimal kernel for AI agents: thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Domain tools, coordination, and orchestration are plugged in from outside via MCP-compatible interfaces.
 
-The primary consumer is **xhelio** (space data platform), which provides MCP tools, memory, and session management on top of StoAI.
-
 ## Build & Test
 
 ```bash
@@ -31,23 +29,36 @@ No hard dependencies — only the active LLM provider's SDK needs to be installe
 
 ## Architecture
 
+### Five Services (all optional)
+
+| Service | What it backs | First implementation |
+|---------|--------------|---------------------|
+| `LLMService` | Core agent loop (thinking) | Gemini adapter |
+| `FileIOService` | read, edit, write, glob, grep | `LocalFileIOService` |
+| `EmailService` | email (inter-agent messaging) | `TCPEmailService` |
+| `VisionService` | vision | `LLMVisionService` |
+| `SearchService` | web_search | `LLMSearchService` |
+
+Missing service = intrinsics backed by it auto-disabled. `FileIOService` auto-creates `LocalFileIOService` for backward compat if not passed.
+
 ### Three-Tier Tool Model
 
 | Tier | What | How added |
 |------|------|-----------|
-| **Intrinsics** | Core capabilities the agent *is* (read, edit, write, glob, grep, talk, vision, web_search) | Built-in, can be disabled at construction |
-| **Layers** | Composable capabilities (diary, plan) added via `add_tool()` + `update_system_prompt()` | `add_diary_layer(agent)`, `add_plan_layer(agent)` |
+| **Intrinsics** | Core capabilities (read, edit, write, glob, grep, email, vision, web_search) | Built-in, backed by services, can be disabled |
+| **Layers** | Composable capabilities (diary, plan, bash, delegate) via `add_tool()` + `update_system_prompt()` | `add_diary_layer(agent)`, `add_plan_layer(agent)`, etc. |
 | **MCP tools** | Domain context from the host app | Passed as `mcp_tools=[MCPTool(...)]` at construction |
 
 ### Key Modules
 
-- **`agent.py`** — `BaseAgent` class. 2-state lifecycle (SLEEPING/ACTIVE), persistent LLM session, 2-layer tool dispatch (intrinsics + MCP handlers), inbox-based inter-agent messaging, context compaction, loop guard, parallel tool execution.
+- **`agent.py`** — `BaseAgent` class. 2-state lifecycle (SLEEPING/ACTIVE), 5 optional services, persistent LLM session, 2-layer tool dispatch (intrinsics + MCP), inbox-based inter-agent messaging via EmailService, context compaction, loop guard, parallel tool execution.
+- **`services/`** — Service ABCs + first implementations: `file_io.py`, `email.py`, `vision.py`, `search.py`.
 - **`llm/interface.py`** — `ChatInterface`, the canonical provider-agnostic conversation history. Single source of truth — adapters rebuild provider formats from this. Content blocks: `TextBlock`, `ToolCallBlock`, `ToolResultBlock`, `ThinkingBlock`, `ImageBlock`.
 - **`llm/base.py`** — `LLMAdapter` (ABC), `ChatSession` (ABC), `LLMResponse`, `ToolCall`, `FunctionSchema`. All agent code depends on these, never on provider SDKs directly.
 - **`llm/service.py`** — `LLMService`. Adapter factory, session registry, one-shot generation gateway, context compaction orchestration. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
 - **`llm/interface_converters.py`** — Bidirectional converters between `ChatInterface` and provider-specific formats (Anthropic, OpenAI, Gemini).
-- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, `handle_*`. Some (talk, vision, web_search) have `handler=None` because they need agent state and are handled in `BaseAgent`.
-- **`layers/`** — Each layer is a function that takes an agent and wires in a tool + system prompt section. Layers compose independently.
+- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, `handle_*`. Some (email, vision, web_search) have `handler=None` because they need agent state and are handled in `BaseAgent`.
+- **`layers/`** — Each layer is a function that takes an agent and wires in a tool + system prompt section. 4 layers: diary, plan, bash, delegate.
 - **`config.py`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
 - **`prompt.py`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.
 
@@ -75,4 +86,4 @@ Base prompt (hardcoded with intrinsic list) → Sections (injected by host/layer
 - All services optional — missing service auto-disables backed intrinsics.
 - Provider SDKs lazy-imported — only active provider needs installation.
 - Tests use `unittest.mock.MagicMock` for LLM service mocking. Test functions follow `test_<what_is_tested>` naming.
-- Event system uses string constants (`EVENT_TOOL_CALL`, `EVENT_TEXT_DELTA`, etc.) with `on_event(type, payload)` callback.
+- Legacy `talk` intrinsic renamed to `email`. Legacy `connect()`/`talk()` API kept for backward compat but new code should use `EmailService`.
