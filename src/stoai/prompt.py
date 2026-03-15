@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from .intrinsics.manage_system_prompt import SystemPromptManager
 
-BASE_PROMPT = """You are an AI agent. Check your tool schemas for available capabilities."""
+BASE_PROMPT = """\
+You are an AI agent. Check your tool schemas for available capabilities.
+
+Your tools are diverse — be creative in combining them. \
+When you encounter files you cannot directly read (e.g. audio, video, binary), \
+use your tools creatively to analyze them programmatically — \
+you can write and run scripts, and install any packages you need."""
 
 
 def build_system_prompt(
