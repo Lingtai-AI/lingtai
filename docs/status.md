@@ -46,7 +46,7 @@
 - [x] `llm_utils.py` — LLM utilities (send_with_timeout, etc.)
 - [x] `logging.py` — package logging
 
-## Tests (125 passing)
+## Tests (121 passing)
 - [x] `test_agent.py` — lifecycle, intrinsics, services, email, file I/O
 - [x] `test_types.py`
 - [x] `test_prompt.py`
