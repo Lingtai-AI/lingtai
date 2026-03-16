@@ -65,16 +65,32 @@ Missing service = intrinsics backed by it auto-disabled. `FileIOService` auto-cr
 
 10 adapters under `llm/`, each lazy-imported. Most use OpenAI-compatible SDK: Gemini (`google-genai`), OpenAI, Anthropic, MiniMax, DeepSeek, Grok, Qwen, GLM, Kimi, Custom. Each adapter subdirectory has `adapter.py` (implementation) and `defaults.py` (model defaults).
 
+### Built-in Capabilities (9)
+
+| Capability | Usage | What it adds |
+|-----------|-------|-------------|
+| `bash` | `add_capability("bash", policy_file="p.json")` or `yolo=True` | Shell command execution with policy |
+| `delegate` | `add_capability("delegate")` | Spawn and manage sub-agents |
+| `email` | `add_capability("email")` | Persistent mailbox — upgrades mail FIFO with reply, CC/BCC, search, check |
+| `vision` | `add_capability("vision")` or `vision_service=svc` | Image understanding (LLM multimodal or dedicated VisionService) |
+| `web_search` | `add_capability("web_search")` or `search_service=svc` | Web search (LLM grounding or dedicated SearchService) |
+| `talk` | `add_capability("talk")` | Text-to-speech via MiniMax MCP |
+| `compose` | `add_capability("compose")` | Music generation via MiniMax MCP |
+| `draw` | `add_capability("draw")` | Text-to-image via MiniMax MCP |
+| `listen` | `add_capability("listen")` | Speech transcription + music analysis |
+
 ### Extension Pattern
 
 ```python
-agent.add_capability("bash", policy_file="p.json")  # bash with policy file
-agent.add_capability("bash", yolo=True)              # bash unrestricted
-agent.add_capability("email")                        # email capability
-agent.add_tool(name, schema, handler)          # add a custom/MCP tool (low-level)
-agent.remove_tool(name)                        # remove from LLM schema
-agent.update_system_prompt(section, content)   # inject system prompt section (Python API, NOT an LLM tool)
+agent.add_capability("vision", "web_search")          # multiple at once (no kwargs)
+agent.add_capability("bash", policy_file="p.json")     # single with kwargs
+agent.add_capability("bash", yolo=True)                # single with kwargs
+agent.add_tool(name, schema, handler)                  # add a custom/MCP tool (low-level)
+agent.remove_tool(name)                                # remove from LLM schema
+agent.update_system_prompt(section, content)           # inject system prompt section (Python API, NOT an LLM tool)
 ```
+
+Note: `add_capability(*names, **kwargs)` accepts multiple names, but kwargs apply to all — use separate calls when capabilities need different kwargs.
 
 ### System Prompt Structure
 
