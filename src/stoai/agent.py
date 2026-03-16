@@ -377,6 +377,9 @@ class BaseAgent:
         # Status — always available (no service dependency)
         state_intrinsics["status"] = self._handle_status
 
+        # Memory — always available (no service dependency)
+        state_intrinsics["memory"] = self._handle_memory
+
         all_names = file_intrinsic_names | set(state_intrinsics.keys())
 
         # Determine which intrinsics to enable
@@ -800,6 +803,134 @@ class BaseAgent:
                 },
             },
         }
+
+    # ------------------------------------------------------------------
+    # Memory intrinsic
+    # ------------------------------------------------------------------
+
+    def _handle_memory(self, args: dict) -> dict:
+        """Handle memory tool — long-term memory management."""
+        action = args.get("action", "load")
+        if action == "load":
+            return self._memory_load()
+        else:
+            return {"error": f"Unknown memory action: {action}"}
+
+    def _memory_load(self) -> dict:
+        """Read ltm/ltm.md, inject into system prompt, git commit."""
+        ltm_dir = self._working_dir / "ltm"
+        ltm_file = ltm_dir / "ltm.md"
+
+        # Create if missing
+        ltm_dir.mkdir(exist_ok=True)
+        if not ltm_file.is_file():
+            ltm_file.write_text("")
+
+        # Read file
+        content = ltm_file.read_text()
+        size_bytes = ltm_file.stat().st_size
+
+        # Inject into system prompt (or remove if empty)
+        if content.strip():
+            self._prompt_manager.write_section("ltm", content)
+        else:
+            self._prompt_manager.delete_section("ltm")
+        self._token_decomp_dirty = True
+
+        # Update live session's system prompt if one exists
+        if self._chat is not None:
+            self._chat.update_system_prompt(self._build_system_prompt())
+
+        # Git diff + commit
+        git_diff, commit_hash = self._git_diff_and_commit_ltm()
+
+        self._log("memory_load", size_bytes=size_bytes, changed=commit_hash is not None)
+
+        return {
+            "status": "ok",
+            "path": str(ltm_file),
+            "size_bytes": size_bytes,
+            "content_preview": content[:200],
+            "diff": {
+                "changed": commit_hash is not None,
+                "git_diff": git_diff or "",
+                "commit": commit_hash,
+            },
+        }
+
+    def _git_diff_and_commit_ltm(self) -> tuple[str | None, str | None]:
+        """Run git diff on ltm/ltm.md, stage, and commit if changed.
+
+        Returns (diff_text, short_commit_hash) or (None, None) if no changes
+        or git is not available.
+        """
+        try:
+            # Check for changes
+            diff_result = subprocess.run(
+                ["git", "diff", "ltm/ltm.md"],
+                cwd=self._working_dir,
+                capture_output=True, text=True,
+            )
+            # Also check for untracked new content
+            diff_cached = subprocess.run(
+                ["git", "diff", "--cached", "ltm/ltm.md"],
+                cwd=self._working_dir,
+                capture_output=True, text=True,
+            )
+            # Check status for untracked/new files
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain", "ltm/ltm.md"],
+                cwd=self._working_dir,
+                capture_output=True, text=True,
+            )
+
+            has_changes = bool(
+                diff_result.stdout.strip()
+                or diff_cached.stdout.strip()
+                or status_result.stdout.strip()
+            )
+
+            if not has_changes:
+                return None, None
+
+            # Capture the diff before staging
+            diff_text = diff_result.stdout or status_result.stdout
+
+            # Stage and commit
+            subprocess.run(
+                ["git", "add", "ltm/ltm.md"],
+                cwd=self._working_dir,
+                capture_output=True, check=True,
+            )
+
+            # Get diff of staged changes (for new files, diff_result is empty)
+            if not diff_text.strip():
+                staged = subprocess.run(
+                    ["git", "diff", "--cached", "ltm/ltm.md"],
+                    cwd=self._working_dir,
+                    capture_output=True, text=True,
+                )
+                diff_text = staged.stdout
+
+            subprocess.run(
+                ["git", "commit", "-m", "ltm: update long-term memory"],
+                cwd=self._working_dir,
+                capture_output=True, check=True,
+            )
+
+            # Get short commit hash
+            hash_result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=self._working_dir,
+                capture_output=True, text=True,
+            )
+            commit_hash = hash_result.stdout.strip()
+
+            return diff_text, commit_hash
+
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            # Git not available or error — load still works, just no diff/commit
+            return None, None
 
     # ------------------------------------------------------------------
     # Properties
