@@ -52,7 +52,8 @@ def test_intrinsics_enabled_by_default(tmp_path):
     assert "manage_system_prompt" not in agent._intrinsics
     assert "email" not in agent._intrinsics  # email is now a capability, not intrinsic
     assert "clock" in agent._intrinsics
-    assert len(agent._intrinsics) == 9  # read, edit, write, glob, grep, mail, vision, web_search, clock
+    assert "status" in agent._intrinsics
+    assert len(agent._intrinsics) == 10  # read, edit, write, glob, grep, mail, vision, web_search, clock, status
 
 
 def test_disabled_intrinsics(tmp_path):
