@@ -1,7 +1,8 @@
-"""Status intrinsic — agent self-inspection.
+"""Status intrinsic — agent self-inspection and lifecycle.
 
 Actions:
-    show — display agent identity, runtime, and resource usage
+    show     — display agent identity, runtime, and resource usage
+    shutdown — initiate graceful self-termination (use when capabilities are lacking)
 
 The handler lives in BaseAgent (needs access to agent state).
 This module provides the schema and description.

@@ -1451,6 +1451,7 @@ class BaseAgent:
 
             if reasoning:
                 self._log("tool_reasoning", tool=tc.name, reasoning=reasoning)
+                args["_reasoning"] = reasoning  # preserve for handlers that need it (e.g. delegate)
 
             verdict = guard.record_tool_call(tc.name, args)
             if verdict.blocked:

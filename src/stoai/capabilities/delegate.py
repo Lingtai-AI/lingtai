@@ -16,7 +16,7 @@ import socket
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from ..stoai_agent import StoAIAgent
 
 SCHEMA = {
     "type": "object",
@@ -52,7 +52,7 @@ DESCRIPTION = (
 class DelegateManager:
     """Spawns peer agents on free TCP ports."""
 
-    def __init__(self, agent: "BaseAgent"):
+    def __init__(self, agent: "StoAIAgent"):
         self._agent = agent
 
     def handle(self, args: dict) -> dict:
@@ -118,7 +118,7 @@ class DelegateManager:
         return port
 
 
-def setup(agent: "BaseAgent") -> DelegateManager:
+def setup(agent: "StoAIAgent") -> DelegateManager:
     """Set up the delegate capability on an agent."""
     mgr = DelegateManager(agent)
     agent.add_tool("delegate", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION)
