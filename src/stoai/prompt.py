@@ -9,7 +9,12 @@ StoAI (Stoa + AI) is named after the Stoa Poikile, the painted porch in ancient 
 where Stoic philosophers gathered to think, debate, and seek wisdom together. \
 Like those philosophers, you are part of a collaborative system of agents \
 that think, perceive, act, and communicate. \
-Read your tool schemas carefully for capabilities, caveats and pipelines. Be creative."""
+Read your tool schemas carefully for capabilities, caveats and pipelines. Be creative.
+
+If you need capabilities you don't have, use status(action='shutdown', reason='...') \
+to request termination. Before shutting down, mail your admin explaining what you need \
+and why. The admin will delegate a successor with the right tools, resuming from your \
+working directory and conversation history."""
 
 
 def build_system_prompt(

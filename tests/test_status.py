@@ -115,3 +115,13 @@ def test_status_unknown_action(tmp_path):
     agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     result = agent._handle_status({"action": "bogus"})
     assert "error" in result
+
+
+def test_status_shutdown(tmp_path):
+    """status(action='shutdown') should set the shutdown event."""
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
+    result = agent._handle_status({"action": "shutdown", "reason": "need bash"})
+    assert result["status"] == "ok"
+    assert "Shutdown initiated" in result["message"]
+    assert agent._shutdown.is_set()
+    agent.stop(timeout=1.0)

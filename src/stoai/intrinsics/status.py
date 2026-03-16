@@ -13,7 +13,7 @@ SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["show"],
+            "enum": ["show", "shutdown"],
             "description": (
                 "show: display full agent self-inspection. Returns:\n"
                 "- identity: agent_id, working_dir, mail_address (or null if no mail service)\n"
@@ -25,16 +25,23 @@ SCHEMA = {
                 "- tokens.context.window_size: total context window capacity\n"
                 "- tokens.context.usage_pct: percentage of context window currently occupied\n"
                 "Use this to monitor resource consumption, decide when to save "
-                "important information to long-term memory, and identify yourself."
+                "important information to long-term memory, and identify yourself.\n\n"
+                "shutdown: initiate graceful self-termination. Use when you need "
+                "capabilities you don't have. Before shutting down, mail your admin "
+                "explaining what you need and why. A successor agent may resume from "
+                "your working directory and conversation history."
             ),
+        },
+        "reason": {
+            "type": "string",
+            "description": "Reason for shutdown (only used with action='shutdown'). Logged to event log and visible in conversation history for successor agents.",
         },
     },
     "required": ["action"],
 }
 DESCRIPTION = (
-    "Agent self-inspection. 'show' returns identity (agent_id, working_dir, "
-    "mail address), runtime (uptime), and resource usage (cumulative tokens, "
-    "context window breakdown with usage percentage). "
-    "Check this to monitor your own resource consumption and decide when to "
-    "save important information to long-term memory before context compaction."
+    "Agent self-inspection and lifecycle. "
+    "'show' returns identity, runtime, and resource usage. "
+    "'shutdown' initiates graceful self-termination — use when you need "
+    "capabilities you don't have. Mail your admin before shutting down."
 )

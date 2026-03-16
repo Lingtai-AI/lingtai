@@ -583,12 +583,24 @@ class BaseAgent:
     # ------------------------------------------------------------------
 
     def _handle_status(self, args: dict) -> dict:
-        """Handle status tool — agent self-inspection."""
+        """Handle status tool — agent self-inspection and lifecycle."""
         action = args.get("action", "show")
         if action == "show":
             return self._status_show()
+        elif action == "shutdown":
+            return self._status_shutdown(args)
         else:
             return {"error": f"Unknown status action: {action}"}
+
+    def _status_shutdown(self, args: dict) -> dict:
+        """Initiate graceful self-termination."""
+        reason = args.get("reason", "")
+        self._log("shutdown_requested", reason=reason)
+        self._shutdown.set()
+        return {
+            "status": "ok",
+            "message": "Shutdown initiated. A successor agent may resume from your working directory and conversation history.",
+        }
 
     def _status_show(self) -> dict:
         """Return full agent self-inspection payload."""
