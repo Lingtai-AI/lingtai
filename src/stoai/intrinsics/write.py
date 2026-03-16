@@ -10,7 +10,12 @@ SCHEMA = {
     },
     "required": ["file_path", "content"],
 }
-DESCRIPTION = "Create or overwrite a file with the given content."
+DESCRIPTION = (
+    "Create or overwrite a file with the given content. "
+    "Parent directories are created automatically. "
+    "Use this for creating new files or complete rewrites. "
+    "For small changes to existing files, prefer edit."
+)
 
 def handle_write(args: dict) -> dict:
     path = Path(args["file_path"])

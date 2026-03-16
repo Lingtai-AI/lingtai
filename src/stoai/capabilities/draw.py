@@ -31,10 +31,11 @@ SCHEMA: dict[str, Any] = {
 }
 
 DESCRIPTION = (
-    "Generate an image from a text description. "
-    "Provide a text prompt describing the image you want. "
-    "Optionally specify aspect_ratio (e.g. '16:9'). "
-    "Generated images are saved to media/images/ in your working directory."
+    "Generate an image from a text description using MiniMax image-01. "
+    "Provide a detailed prompt — the more specific, the better the result. "
+    "Supports various aspect ratios (1:1, 16:9, 9:16, 4:3, etc.). "
+    "Output: JPEG image saved to media/images/ in your working directory. "
+    "Combine with vision to generate an image and then analyze or critique it."
 )
 
 

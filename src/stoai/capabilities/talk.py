@@ -35,10 +35,12 @@ SCHEMA: dict[str, Any] = {
 }
 
 DESCRIPTION = (
-    "Convert text to speech audio. "
-    "Provide the text you want spoken. "
-    "Optionally specify voice_id, emotion, and speed. "
-    "Generated audio is saved to media/audio/ in your working directory."
+    "Convert text to speech audio using MiniMax speech-2.6. "
+    "Produces natural-sounding speech in multiple voices and emotions. "
+    "Output: MP3 file saved to media/audio/ in your working directory. "
+    "Supports voice selection, emotion control (happy, sad, neutral), "
+    "and speed adjustment. Use for narration, announcements, or "
+    "giving your output a voice."
 )
 
 

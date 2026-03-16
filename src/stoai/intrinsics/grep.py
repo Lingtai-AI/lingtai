@@ -13,7 +13,12 @@ SCHEMA = {
     },
     "required": ["pattern"],
 }
-DESCRIPTION = "Search file contents for lines matching a regex pattern."
+DESCRIPTION = (
+    "Search file contents for lines matching a regex pattern. "
+    "Returns matching lines with file path and line number. "
+    "Searches recursively when given a directory. "
+    "Use the glob filter to narrow to specific file types."
+)
 
 def handle_grep(args: dict) -> dict:
     pattern = args["pattern"]

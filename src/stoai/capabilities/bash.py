@@ -40,9 +40,11 @@ SCHEMA = {
 }
 
 DESCRIPTION = (
-    "Execute a shell command and return its output. "
-    "Use it for system operations, running scripts, git commands, "
-    "and other tasks that require shell access."
+    "Execute a shell command and return stdout/stderr. "
+    "You can run any program available on the system — Python scripts, "
+    "git, curl, package managers (pip install), data processing pipelines, "
+    "and more. Use this creatively to extend your capabilities beyond "
+    "your built-in tools. Returns exit code, stdout, and stderr."
 )
 
 

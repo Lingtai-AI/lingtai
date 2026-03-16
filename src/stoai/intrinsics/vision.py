@@ -9,4 +9,9 @@ SCHEMA = {
     },
     "required": ["image_path"],
 }
-DESCRIPTION = "Analyze an image using the LLM's vision capabilities."
+DESCRIPTION = (
+    "Analyze an image using the LLM's vision capabilities. "
+    "Supports JPEG, PNG, and WebP. Ask any question about the image — "
+    "describe contents, read text, interpret charts, identify objects, "
+    "assess style or mood. Combine with draw to generate then analyze images."
+)

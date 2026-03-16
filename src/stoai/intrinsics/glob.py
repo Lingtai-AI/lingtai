@@ -10,7 +10,11 @@ SCHEMA = {
     },
     "required": ["pattern"],
 }
-DESCRIPTION = "Find files matching a glob pattern."
+DESCRIPTION = (
+    "Find files matching a glob pattern. "
+    "Use '**/' for recursive search (e.g. '**/*.py' finds all Python files). "
+    "Returns sorted list of matching file paths."
+)
 
 def handle_glob(args: dict) -> dict:
     pattern = args["pattern"]

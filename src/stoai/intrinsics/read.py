@@ -11,7 +11,11 @@ SCHEMA = {
     },
     "required": ["file_path"],
 }
-DESCRIPTION = "Read the contents of a text file."
+DESCRIPTION = (
+    "Read the contents of a text file. Returns numbered lines. "
+    "Text files only — cannot read binary, images, or audio. "
+    "Use offset/limit to read specific sections of large files."
+)
 
 def handle_read(args: dict) -> dict:
     path = Path(args["file_path"])

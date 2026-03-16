@@ -37,6 +37,7 @@ SCHEMA = {
     "required": ["action"],
 }
 DESCRIPTION = (
-    "Point-to-point messaging. Use 'send' to message another agent, "
-    "'check' to see how many messages are queued, 'read' to pop the next message."
+    "Point-to-point FIFO messaging between agents. "
+    "Messages are queued — 'read' pops the next one (first-in, first-out). "
+    "For persistent mailbox with reply/CC/BCC, use the email capability instead."
 )
