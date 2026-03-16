@@ -53,7 +53,7 @@ def test_intrinsics_enabled_by_default(tmp_path):
     assert "email" not in agent._intrinsics  # email is now a capability, not intrinsic
     assert "clock" in agent._intrinsics
     assert "status" in agent._intrinsics
-    assert len(agent._intrinsics) == 10  # read, edit, write, glob, grep, mail, vision, web_search, clock, status
+    assert len(agent._intrinsics) == 11  # read, edit, write, glob, grep, mail, vision, web_search, clock, status, memory
 
 
 def test_disabled_intrinsics(tmp_path):
@@ -567,14 +567,14 @@ def test_agent_resume_explicit_overrides_manifest(tmp_path):
 
 
 def test_agent_stop_persists_ltm(tmp_path):
-    import json
     agent = BaseAgent(
         agent_id="alice", service=make_mock_service(), base_dir=tmp_path, ltm="initial",
     )
     agent._prompt_manager.write_section("ltm", "updated knowledge")
     agent.stop()
-    data = json.loads((tmp_path / "alice" / ".agent.json").read_text())
-    assert data["ltm"] == "updated knowledge"
+    ltm_file = tmp_path / "alice" / "ltm" / "ltm.md"
+    assert ltm_file.is_file()
+    assert ltm_file.read_text() == "updated knowledge"
 
 
 def test_agent_corrupt_manifest(tmp_path):
