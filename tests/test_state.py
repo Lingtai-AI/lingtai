@@ -1,0 +1,6 @@
+from stoai.state import AgentState
+
+
+def test_agent_state_values():
+    assert AgentState.ACTIVE.value == "active"
+    assert AgentState.SLEEPING.value == "sleeping"
