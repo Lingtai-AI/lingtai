@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import queue
+import re
 from collections import deque
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,6 +55,26 @@ from .types import (
 )
 
 logger = get_logger()
+
+# Cross-platform file locking
+if sys.platform == "win32":
+    import msvcrt as _msvcrt
+
+    def _lock_fd(fd):
+        _msvcrt.locking(fd.fileno(), _msvcrt.LK_NBLCK, 1)
+
+    def _unlock_fd(fd):
+        _msvcrt.locking(fd.fileno(), _msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl as _fcntl
+
+    def _lock_fd(fd):
+        _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+
+    def _unlock_fd(fd):
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+
+_AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +201,7 @@ class BaseAgent:
         search: Any | None = None,
         config: AgentConfig | None = None,
         mcp_tools: list[MCPTool] | None = None,
-        working_dir: str | Path,
+        base_dir: str | Path,
         context: Any = None,
         enabled_intrinsics: set[str] | None = None,
         disabled_intrinsics: set[str] | None = None,
@@ -193,6 +216,12 @@ class BaseAgent:
                 "Cannot specify both enabled_intrinsics and disabled_intrinsics"
             )
 
+        # Validate agent_id
+        if not _AGENT_ID_RE.match(agent_id):
+            raise ValueError(
+                f"agent_id must match [a-zA-Z0-9_-]+, got: {agent_id!r}"
+            )
+
         self.agent_id = agent_id
         self.service = service
         self._config = config or AgentConfig()
@@ -201,8 +230,16 @@ class BaseAgent:
         self._streaming = streaming
         self._log_service = logging_service
 
-        # Working directory for file intrinsics
-        self._working_dir = Path(working_dir)
+        # Base directory (shared root) and working directory (per-agent)
+        self._base_dir = Path(base_dir)
+        if not self._base_dir.is_dir():
+            raise FileNotFoundError(f"base_dir does not exist: {self._base_dir}")
+        self._working_dir = self._base_dir / self.agent_id
+        self._working_dir.mkdir(exist_ok=True)
+
+        # Acquire working directory lock
+        self._lock_file: Any = None
+        self._acquire_lock()
 
         # --- Wire services ---
         # FileIOService: auto-create LocalFileIOService for backward compat
@@ -227,12 +264,22 @@ class BaseAgent:
         else:
             self._search_service = None  # will fall back to direct LLM call
 
+        # Read manifest for resume (before prompt manager, so role/ltm can be restored)
+        manifest_role, manifest_ltm = self._read_manifest()
+        if not role and manifest_role:
+            role = manifest_role
+        if not ltm and manifest_ltm:
+            ltm = manifest_ltm
+
         # System prompt manager
         self._prompt_manager = SystemPromptManager()
         if role:
             self._prompt_manager.write_section("role", role, protected=True)
         if ltm:
             self._prompt_manager.write_section("ltm", ltm)
+
+        # Write manifest (new start or resume)
+        self._write_manifest()
 
         # Mail FIFO queue — incoming messages consumed by read
         self._mail_queue: deque[dict] = deque()
@@ -651,6 +698,74 @@ class BaseAgent:
                 self._log_service.close()
             except Exception:
                 pass
+
+        # Persist final state and release lock
+        self._write_manifest()
+        self._release_lock()
+
+    # ------------------------------------------------------------------
+    # Working directory lock + manifest
+    # ------------------------------------------------------------------
+
+    _LOCK_FILE = ".agent.lock"
+    _MANIFEST_FILE = ".agent.json"
+
+    def _acquire_lock(self) -> None:
+        """Acquire exclusive lock on working directory."""
+        lock_path = self._working_dir / self._LOCK_FILE
+        self._lock_file = open(lock_path, "w")
+        try:
+            _lock_fd(self._lock_file)
+        except OSError:
+            self._lock_file.close()
+            self._lock_file = None
+            raise RuntimeError(
+                f"Working directory '{self._working_dir}' is already in use "
+                f"by another agent. Each agent needs its own directory."
+            )
+
+    def _release_lock(self) -> None:
+        """Release working directory lock."""
+        if self._lock_file is not None:
+            try:
+                _unlock_fd(self._lock_file)
+                self._lock_file.close()
+            except OSError:
+                pass
+            self._lock_file = None
+
+    def _read_manifest(self) -> tuple[str, str]:
+        """Read role and ltm from .agent.json. Returns ("", "") if not found."""
+        path = self._working_dir / self._MANIFEST_FILE
+        if not path.is_file():
+            return "", ""
+        try:
+            data = json.loads(path.read_text())
+            return data.get("role", ""), data.get("ltm", "")
+        except (json.JSONDecodeError, OSError):
+            corrupt = self._working_dir / ".agent.json.corrupt"
+            try:
+                path.rename(corrupt)
+            except OSError:
+                pass
+            logger.warning("Corrupt .agent.json renamed to .agent.json.corrupt")
+            return "", ""
+
+    def _write_manifest(self) -> None:
+        """Write .agent.json atomically."""
+        from datetime import datetime, timezone
+        data = {
+            "agent_id": self.agent_id,
+            "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "role": self._prompt_manager.read_section("role") or "",
+            "ltm": self._prompt_manager.read_section("ltm") or "",
+        }
+        if self._mail_service is not None and self._mail_service.address:
+            data["address"] = self._mail_service.address
+        target = self._working_dir / self._MANIFEST_FILE
+        tmp = self._working_dir / ".agent.json.tmp"
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(str(tmp), str(target))
 
     def _on_mail_received(self, payload: dict) -> None:
         """Callback for MailService — enqueues message in FIFO, notifies agent."""
