@@ -496,9 +496,30 @@ class EmailManager:
     def on_mail_received(self, payload: dict) -> None:
         """Intercept incoming mail — send notification to agent inbox.
 
-        The mail service already wrote message.json to disk.
-        We just need to extract the ID and notify.
+        Cancel-type emails are delegated to the base agent's cancel handler.
+        Normal emails are saved to the mailbox and a notification is sent.
         """
+        mail_type = payload.get("type", "normal")
+        if mail_type == "cancel":
+            # Delegate cancel handling to base agent
+            if self._agent._cancelling:
+                return
+            self._agent._cancel_mail = payload
+            self._agent._cancel_event.set()
+            self._agent._log(
+                "cancel_received",
+                sender=payload.get("from", "unknown"),
+                subject=payload.get("subject", ""),
+            )
+            return
+
+        if mail_type != "normal":
+            import logging
+            logging.getLogger(__name__).warning(
+                "[%s] Unrecognized mail type %r, treating as normal",
+                self._agent.agent_id, mail_type,
+            )
+
         # Use _mailbox_id from mail service, or fall back to generating one
         email_id = payload.get("_mailbox_id") or str(uuid4())
 
