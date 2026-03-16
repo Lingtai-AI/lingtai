@@ -13,7 +13,6 @@ Key concepts:
 
 from __future__ import annotations
 
-import enum
 import json
 import os
 import queue
@@ -24,12 +23,12 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
 
 from .config import AgentConfig
+from .state import AgentState
+from .message import Message, _make_message, MSG_REQUEST, MSG_USER_INPUT
 from .intrinsics import ALL_INTRINSICS
 from .intrinsics.manage_system_prompt import SystemPromptManager
 from .llm import (
@@ -76,73 +75,6 @@ else:
         _fcntl.flock(fd, _fcntl.LOCK_UN)
 
 _AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-
-# ---------------------------------------------------------------------------
-# AgentState
-# ---------------------------------------------------------------------------
-
-
-class AgentState(enum.Enum):
-    """Lifecycle state of an agent.
-
-    SLEEPING --(inbox message)---> ACTIVE
-    ACTIVE   --(all done)--------> SLEEPING
-    """
-
-    ACTIVE = "active"
-    SLEEPING = "sleeping"
-
-
-# ---------------------------------------------------------------------------
-# Message types and Message dataclass
-# ---------------------------------------------------------------------------
-
-MSG_REQUEST = "request"
-MSG_USER_INPUT = "user_input"
-
-
-@dataclass
-class Message:
-    """A message delivered to an agent's inbox.
-
-    Attributes:
-        id:        Unique message ID (auto-generated if not provided).
-        type:      One of MSG_REQUEST, MSG_USER_INPUT.
-        sender:    Agent ID, "user", etc.
-        content:   Payload — str for requests, dict for structured data.
-        reply_to:  Links back to original message.
-        timestamp: ``time.monotonic()`` when created.
-        _reply_event: Internal Event for callers waiting on a result.
-        _reply_value: Internal slot for the agent's response.
-    """
-
-    type: str
-    sender: str
-    content: Any
-    id: str = field(default_factory=lambda: f"msg_{uuid4().hex[:12]}")
-    reply_to: str | None = None
-    timestamp: float = field(default_factory=time.monotonic)
-    _reply_event: threading.Event | None = field(default=None, repr=False)
-    _reply_value: Any = field(default=None, repr=False)
-
-
-def _make_message(
-    type: str,
-    sender: str,
-    content: Any,
-    *,
-    reply_to: str | None = None,
-    reply_event: threading.Event | None = None,
-) -> Message:
-    return Message(
-        id=f"msg_{uuid4().hex[:12]}",
-        type=type,
-        sender=sender,
-        content=content,
-        reply_to=reply_to,
-        _reply_event=reply_event,
-    )
 
 
 # ---------------------------------------------------------------------------
