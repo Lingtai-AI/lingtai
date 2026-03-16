@@ -176,13 +176,13 @@ class TestSetupBash:
 # ---------------------------------------------------------------------------
 
 class TestAddCapability:
-    def test_add_capability_bash_yolo(self):
+    def test_add_capability_bash_yolo(self, tmp_path):
         from stoai.agent import BaseAgent
         svc = MagicMock()
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
+        agent = BaseAgent(agent_id="test", service=svc, base_dir=tmp_path)
         mgr = agent.add_capability("bash", yolo=True)
         assert isinstance(mgr, BashManager)
         assert "bash" in agent._mcp_handlers
@@ -195,6 +195,6 @@ class TestAddCapability:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc, working_dir="/tmp")
+        agent = BaseAgent(agent_id="test", service=svc, base_dir=tmp_path)
         mgr = agent.add_capability("bash", policy_file=str(policy_file))
         assert isinstance(mgr, BashManager)

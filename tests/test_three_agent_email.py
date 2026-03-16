@@ -12,7 +12,9 @@ Scenarios:
 from __future__ import annotations
 
 import json
+import shutil
 import socket
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -39,14 +41,14 @@ def _get_free_port():
     return port
 
 
-def _make_agent(agent_id: str, port: int, working_dir: Path):
+def _make_agent(agent_id: str, port: int, base_dir: Path):
     """Create an agent with a real TCPMailService and email capability."""
-    mail_svc = TCPMailService(listen_port=port, working_dir=working_dir)
+    mail_svc = TCPMailService(listen_port=port, working_dir=base_dir / agent_id)
     agent = BaseAgent(
         agent_id=agent_id,
         service=_make_mock_service(),
         mail_service=mail_svc,
-        working_dir=working_dir,
+        base_dir=base_dir,
     )
     mgr = agent.add_capability("email")
     return agent, mgr
@@ -79,18 +81,14 @@ def _inbox_emails(working_dir: Path) -> list[dict]:
 class TestThreeAgentEmail:
     """Integration tests for email flows between three agents."""
 
-    def setup_method(self, tmp_path_factory=None):
+    def setup_method(self):
         """Set up three agents with real TCP mail services."""
-        # Use unique temp dirs per agent
-        import tempfile
-        self.tmp_dirs = {}
+        self.base_dir = Path(tempfile.mkdtemp())
         self.ports = {name: _get_free_port() for name in ("alice", "bob", "charlie")}
         self.agents = {}
         self.managers = {}
         for name, port in self.ports.items():
-            d = Path(tempfile.mkdtemp())
-            self.tmp_dirs[name] = d
-            agent, mgr = _make_agent(name, port, d)
+            agent, mgr = _make_agent(name, port, self.base_dir)
             self.agents[name] = agent
             self.managers[name] = mgr
 
@@ -104,15 +102,13 @@ class TestThreeAgentEmail:
         """Stop all mail services and clean up temp dirs."""
         for agent in self.agents.values():
             agent._mail_service.stop()
-        import shutil
-        for d in self.tmp_dirs.values():
-            shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(self.base_dir, ignore_errors=True)
 
     def _addr(self, name: str) -> str:
         return f"127.0.0.1:{self.ports[name]}"
 
     def _dir(self, name: str) -> Path:
-        return self.tmp_dirs[name]
+        return self.base_dir / name
 
     def _wait_for_inbox(self, name: str, count: int, timeout: float = 5.0):
         """Wait until the agent's inbox has at least `count` messages."""
@@ -154,7 +150,7 @@ class TestThreeAgentEmail:
 
     def test_bob_replies_to_alice(self):
         """Alice emails Bob, then Bob replies back to Alice."""
-        # Alice → Bob
+        # Alice -> Bob
         self.managers["alice"].handle({
             "action": "send",
             "address": self._addr("bob"),
@@ -185,7 +181,7 @@ class TestThreeAgentEmail:
 
     def test_charlie_reply_all(self):
         """Alice sends to Bob and Charlie, Charlie reply-alls to both."""
-        # Alice → Bob + Charlie
+        # Alice -> Bob + Charlie
         self.managers["alice"].handle({
             "action": "send",
             "address": [self._addr("bob"), self._addr("charlie")],
@@ -224,7 +220,7 @@ class TestThreeAgentEmail:
     # -------------------------------------------------------------------
 
     def test_alice_sends_to_bob_with_charlie_cc(self):
-        """Alice sends to Bob with Charlie on CC — both receive, CC field visible."""
+        """Alice sends to Bob with Charlie on CC -- both receive, CC field visible."""
         result = self.managers["alice"].handle({
             "action": "send",
             "address": self._addr("bob"),
@@ -251,7 +247,7 @@ class TestThreeAgentEmail:
 
     def test_full_conversation_flow(self):
         """End-to-end: Alice starts thread, Bob replies, Charlie reply-alls."""
-        # Step 1: Alice → Bob + Charlie
+        # Step 1: Alice -> Bob + Charlie
         self.managers["alice"].handle({
             "action": "send",
             "address": [self._addr("bob"), self._addr("charlie")],

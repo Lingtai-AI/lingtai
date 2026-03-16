@@ -114,7 +114,7 @@ class TestAddCapabilityIntegration:
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc, working_dir=str(tmp_path))
+        agent = BaseAgent(agent_id="test", service=svc, base_dir=tmp_path)
         mcp = make_mock_mcp()
         mgr = agent.add_capability("draw", mcp_client=mcp)
         assert "draw" in agent._mcp_handlers

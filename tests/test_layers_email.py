@@ -26,12 +26,12 @@ def _get_free_port():
     return port
 
 
-def _make_inbox_email(tmp_path, *, sender="sender", to=None, subject="test",
+def _make_inbox_email(working_dir, *, sender="sender", to=None, subject="test",
                        message="body", cc=None, attachments=None):
     """Create an email on disk in mailbox/inbox/{uuid}/message.json.
     Returns the email_id (directory name)."""
     email_id = str(uuid4())
-    msg_dir = tmp_path / "mailbox" / "inbox" / email_id
+    msg_dir = working_dir / "mailbox" / "inbox" / email_id
     msg_dir.mkdir(parents=True, exist_ok=True)
     data = {
         "_mailbox_id": email_id,
@@ -54,7 +54,7 @@ def _make_inbox_email(tmp_path, *, sender="sender", to=None, subject="test",
 # ---------------------------------------------------------------------------
 
 def test_email_capability_registers_tool(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     assert "email" in agent._mcp_handlers
     assert "email" in [s.name for s in agent._mcp_schemas]
@@ -67,7 +67,7 @@ def test_email_capability_registers_tool(tmp_path):
 
 def test_email_receive_notification(tmp_path):
     """on_mail_received should send notification to agent inbox."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     mgr.on_mail_received({
         "_mailbox_id": "abc123",
@@ -84,7 +84,7 @@ def test_email_receive_notification(tmp_path):
 
 def test_email_receive_fallback_id(tmp_path):
     """on_mail_received should generate ID if _mailbox_id is absent."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     mgr.on_mail_received({"from": "sender", "message": "body"})
     assert not agent.inbox.empty()
@@ -92,7 +92,7 @@ def test_email_receive_fallback_id(tmp_path):
 
 def test_email_receive_via_agent(tmp_path):
     """After add_capability('email'), agent._on_mail_received should route to mailbox."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     agent.add_capability("email")
     agent._on_mail_received({
         "_mailbox_id": "xyz",
@@ -109,10 +109,10 @@ def test_email_receive_via_agent(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_check_inbox(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    _make_inbox_email(tmp_path, sender="a", subject="s1", message="m1")
-    _make_inbox_email(tmp_path, sender="b", subject="s2", message="m2")
+    _make_inbox_email(agent.working_dir, sender="a", subject="s1", message="m1")
+    _make_inbox_email(agent.working_dir, sender="b", subject="s2", message="m2")
     result = mgr.handle({"action": "check"})
     assert result["status"] == "ok"
     assert result["total"] == 2
@@ -121,7 +121,7 @@ def test_email_check_inbox(tmp_path):
 
 def test_email_check_sent(tmp_path):
     """check with folder=sent should show sent emails."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "me"
     mail_svc.send.return_value = True
@@ -134,7 +134,7 @@ def test_email_check_sent(tmp_path):
 
 
 def test_email_check_empty_mailbox(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     result = mgr.handle({"action": "check"})
     assert result["status"] == "ok"
@@ -142,9 +142,9 @@ def test_email_check_empty_mailbox(tmp_path):
 
 
 def test_email_read_by_id(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, sender="sender", subject="topic", message="full body")
+    eid = _make_inbox_email(agent.working_dir, sender="sender", subject="topic", message="full body")
     result = mgr.handle({"action": "read", "email_id": eid})
     assert result["status"] == "ok"
     assert result["message"] == "full body"
@@ -152,9 +152,9 @@ def test_email_read_by_id(tmp_path):
 
 
 def test_email_read_marks_as_read(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, message="m")
+    eid = _make_inbox_email(agent.working_dir, message="m")
     # First check — should be unread
     result = mgr.handle({"action": "check"})
     assert result["emails"][0]["unread"] is True
@@ -166,9 +166,9 @@ def test_email_read_marks_as_read(tmp_path):
 
 
 def test_email_read_shows_attachments(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, subject="photo", message="look",
+    eid = _make_inbox_email(agent.working_dir, subject="photo", message="look",
                             attachments=["/path/to/photo.png"])
     result = mgr.handle({"action": "read", "email_id": eid})
     assert result["status"] == "ok"
@@ -181,7 +181,7 @@ def test_email_read_shows_attachments(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_send_saves_to_sent(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "me"
     mail_svc.send.return_value = True
@@ -192,7 +192,7 @@ def test_email_send_saves_to_sent(tmp_path):
         "message": "hello", "subject": "test",
     })
     assert result["status"] == "delivered"
-    sent_dir = tmp_path / "mailbox" / "sent"
+    sent_dir = agent.working_dir / "mailbox" / "sent"
     assert sent_dir.is_dir()
     sent_emails = list(sent_dir.iterdir())
     assert len(sent_emails) == 1
@@ -202,7 +202,7 @@ def test_email_send_saves_to_sent(tmp_path):
 
 
 def test_email_send_saves_bcc_in_sent(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "me"
     mail_svc.send.return_value = True
@@ -212,14 +212,14 @@ def test_email_send_saves_bcc_in_sent(tmp_path):
         "action": "send", "address": "someone",
         "message": "secret", "bcc": ["hidden"],
     })
-    sent_dir = tmp_path / "mailbox" / "sent"
+    sent_dir = agent.working_dir / "mailbox" / "sent"
     msg = json.loads(list(sent_dir.iterdir())[0].joinpath("message.json").read_text())
     assert msg["bcc"] == ["hidden"]
 
 
 def test_email_blocks_identical_consecutive_send(tmp_path):
     """Sending the exact same message twice to the same recipient is blocked."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
     mail_svc.send.return_value = True
@@ -229,14 +229,14 @@ def test_email_blocks_identical_consecutive_send(tmp_path):
     # First send — should work
     result = mgr.handle({
         "action": "send", "address": "127.0.0.1:8888",
-        "subject": "hi", "message": "👍",
+        "subject": "hi", "message": "\ud83d\udc4d",
     })
     assert result["status"] == "delivered"
 
     # Identical send — should be blocked
     result = mgr.handle({
         "action": "send", "address": "127.0.0.1:8888",
-        "subject": "hi", "message": "👍",
+        "subject": "hi", "message": "\ud83d\udc4d",
     })
     assert result["status"] == "blocked"
     assert "warning" in result
@@ -251,7 +251,7 @@ def test_email_blocks_identical_consecutive_send(tmp_path):
 
 def test_email_blocks_identical_reply(tmp_path):
     """Replying with the same message twice is blocked."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
     mail_svc.send.return_value = True
@@ -259,21 +259,21 @@ def test_email_blocks_identical_reply(tmp_path):
     mgr = agent.add_capability("email")
 
     # Create an inbox email to reply to
-    _make_inbox_email(tmp_path, sender="127.0.0.1:8888", subject="hello", message="hi there")
+    _make_inbox_email(agent.working_dir, sender="127.0.0.1:8888", subject="hello", message="hi there")
     check = mgr.handle({"action": "check"})
     email_id = check["emails"][0]["id"]
 
     # First reply
-    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "👍"})
+    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "\ud83d\udc4d"})
     assert result["status"] == "delivered"
 
     # Identical reply — blocked
-    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "👍"})
+    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "\ud83d\udc4d"})
     assert result["status"] == "blocked"
 
 
 def test_email_send_with_attachments(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
     mail_svc.send.return_value = True
@@ -310,7 +310,7 @@ def test_email_send_multi_to(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir=tmp_path)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, base_dir=tmp_path)
         mgr = agent.add_capability("email")
         addrs = [f"127.0.0.1:{p}" for p in ports]
         result = mgr.handle({"action": "send", "address": addrs, "message": "multi-to"})
@@ -339,7 +339,7 @@ def test_email_send_cc_visible(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir=tmp_path)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, base_dir=tmp_path)
         mgr = agent.add_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
         cc_addr = f"127.0.0.1:{ports[1]}"
@@ -369,7 +369,7 @@ def test_email_send_bcc_hidden(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, working_dir=tmp_path)
+        agent = BaseAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc, base_dir=tmp_path)
         mgr = agent.add_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
         bcc_addr = f"127.0.0.1:{ports[1]}"
@@ -391,13 +391,13 @@ def test_email_send_bcc_hidden(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_reply(tmp_path):
-    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path)
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
     agent._mail_service = mock_svc
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, sender="alice", subject="Original topic", message="Please respond")
+    eid = _make_inbox_email(agent.working_dir, sender="alice", subject="Original topic", message="Please respond")
     result = mgr.handle({"action": "reply", "email_id": eid, "message": "Here is my reply"})
     assert result["status"] == "delivered"
     sent_payload = mock_svc.send.call_args[0][1]
@@ -406,13 +406,13 @@ def test_email_reply(tmp_path):
 
 
 def test_email_reply_no_double_re(tmp_path):
-    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path)
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
     agent._mail_service = mock_svc
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, sender="other", subject="Re: Already replied", message="text")
+    eid = _make_inbox_email(agent.working_dir, sender="other", subject="Re: Already replied", message="text")
     result = mgr.handle({"action": "reply", "email_id": eid, "message": "follow up"})
     sent_payload = mock_svc.send.call_args[0][1]
     assert sent_payload["subject"] == "Re: Already replied"
@@ -423,13 +423,13 @@ def test_email_reply_no_double_re(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_reply_all(tmp_path):
-    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path)
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
     agent._mail_service = mock_svc
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, sender="alice", to=["me", "bob"],
+    eid = _make_inbox_email(agent.working_dir, sender="alice", to=["me", "bob"],
                             cc=["charlie"], subject="Group thread", message="discussion")
     result = mgr.handle({"action": "reply_all", "email_id": eid, "message": "my thoughts"})
     assert result["status"] == "delivered"
@@ -441,13 +441,13 @@ def test_email_reply_all(tmp_path):
 
 
 def test_email_reply_all_excludes_self(tmp_path):
-    agent = BaseAgent(agent_id="replier", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path)
     mock_svc = MagicMock()
     mock_svc.address = "me"
     mock_svc.send.return_value = True
     agent._mail_service = mock_svc
     mgr = agent.add_capability("email")
-    eid = _make_inbox_email(tmp_path, sender="alice", to=["me", "alice"],
+    eid = _make_inbox_email(agent.working_dir, sender="alice", to=["me", "alice"],
                             subject="Self-cc", message="text")
     result = mgr.handle({"action": "reply_all", "email_id": eid, "message": "reply"})
     assert result["status"] == "delivered"
@@ -461,42 +461,42 @@ def test_email_reply_all_excludes_self(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_search_by_subject(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    _make_inbox_email(tmp_path, subject="important meeting", message="body1")
-    _make_inbox_email(tmp_path, subject="casual chat", message="body2")
+    _make_inbox_email(agent.working_dir, subject="important meeting", message="body1")
+    _make_inbox_email(agent.working_dir, subject="casual chat", message="body2")
     result = mgr.handle({"action": "search", "query": "important"})
     assert result["total"] == 1
     assert "important" in result["emails"][0]["subject"]
 
 
 def test_email_search_by_sender(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    _make_inbox_email(tmp_path, sender="alice@test", message="hello")
-    _make_inbox_email(tmp_path, sender="bob@test", message="world")
+    _make_inbox_email(agent.working_dir, sender="alice@test", message="hello")
+    _make_inbox_email(agent.working_dir, sender="bob@test", message="world")
     result = mgr.handle({"action": "search", "query": "alice"})
     assert result["total"] == 1
 
 
 def test_email_search_by_message_body(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
-    _make_inbox_email(tmp_path, message="the secret code is 42")
-    _make_inbox_email(tmp_path, message="nothing interesting")
+    _make_inbox_email(agent.working_dir, message="the secret code is 42")
+    _make_inbox_email(agent.working_dir, message="nothing interesting")
     result = mgr.handle({"action": "search", "query": "secret.*42"})
     assert result["total"] == 1
 
 
 def test_email_search_folder_filter(tmp_path):
     """Search with folder param should only search that folder."""
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mail_svc = MagicMock()
     mail_svc.address = "me"
     mail_svc.send.return_value = True
     agent._mail_service = mail_svc
     mgr = agent.add_capability("email")
-    _make_inbox_email(tmp_path, message="keyword in inbox")
+    _make_inbox_email(agent.working_dir, message="keyword in inbox")
     mgr.handle({"action": "send", "address": "someone", "message": "keyword in sent"})
     # Search both — should find 2
     result = mgr.handle({"action": "search", "query": "keyword"})
@@ -507,7 +507,7 @@ def test_email_search_folder_filter(tmp_path):
 
 
 def test_email_search_invalid_regex(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     result = mgr.handle({"action": "search", "query": "[invalid"})
     assert "error" in result
@@ -518,14 +518,14 @@ def test_email_search_invalid_regex(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_without_mail_service(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     result = mgr.handle({"action": "send", "address": "someone", "message": "hello"})
     assert "error" in result
 
 
 def test_email_read_not_found(tmp_path):
-    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     mgr = agent.add_capability("email")
     result = mgr.handle({"action": "read", "email_id": "nonexistent"})
     assert "error" in result

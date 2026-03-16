@@ -414,17 +414,14 @@ def main():
     user_mail = TCPMailService(listen_port=USER_PORT)
     user_mail.listen(on_message=on_user_mail)
 
-    # Create per-agent working directories
     base_dir = Path(".")
-    for name in ("alice", "bob"):
-        (base_dir / name).mkdir(exist_ok=True)
 
     # Agent A
     loggers["a"] = MemoryLoggingService()
-    mail_a = TCPMailService(listen_port=8301, working_dir=base_dir / "alice")
+    mail_a = TCPMailService(listen_port=8301, working_dir=base_dir / "researcher")
     agent_a = BaseAgent(
         agent_id="researcher", service=llm, mail_service=mail_a,
-        config=AgentConfig(max_turns=10), working_dir=base_dir / "alice",
+        config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["a"],
     )
     AGENT_PROMPT = (
@@ -450,10 +447,10 @@ def main():
 
     # Agent B
     loggers["b"] = MemoryLoggingService()
-    mail_b = TCPMailService(listen_port=8302, working_dir=base_dir / "bob")
+    mail_b = TCPMailService(listen_port=8302, working_dir=base_dir / "assistant")
     agent_b = BaseAgent(
         agent_id="assistant", service=llm, mail_service=mail_b,
-        config=AgentConfig(max_turns=10), working_dir=base_dir / "bob",
+        config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["b"],
     )
     agent_b.update_system_prompt("role", (

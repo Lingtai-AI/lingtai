@@ -127,7 +127,7 @@ class TestBaseAgentLoggingIntegration:
             agent_id="test",
             service=make_mock_service(),
             logging_service=log_svc,
-            working_dir="/tmp",
+            base_dir=tmp_path,
         )
         agent.add_tool("greet", schema={"type": "object", "properties": {}}, handler=lambda args: {"status": "ok"})
 
@@ -152,7 +152,7 @@ class TestBaseAgentLoggingIntegration:
         agent = BaseAgent(
             agent_id="test",
             service=make_mock_service(),
-            working_dir="/tmp",
+            base_dir=tmp_path,
         )
         agent.add_tool("greet", schema={"type": "object", "properties": {}}, handler=lambda args: {"status": "ok"})
 
@@ -170,7 +170,7 @@ class TestBaseAgentLoggingIntegration:
             agent_id="test",
             service=make_mock_service(),
             logging_service=log_svc,
-            working_dir="/tmp",
+            base_dir=tmp_path,
         )
         agent._set_state(AgentState.ACTIVE, reason="test")
         log_svc.close()

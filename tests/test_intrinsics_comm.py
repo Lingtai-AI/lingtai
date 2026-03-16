@@ -52,7 +52,7 @@ def test_mail_send_passes_attachments(tmp_path):
     mail_svc.address = "127.0.0.1:9999"
     mail_svc.send.return_value = True
 
-    agent = BaseAgent(agent_id="test", service=svc, mail_service=mail_svc, working_dir=tmp_path)
+    agent = BaseAgent(agent_id="test", service=svc, mail_service=mail_svc, base_dir=tmp_path)
 
     # Create a real file to attach
     attachment = tmp_path / "file.png"
