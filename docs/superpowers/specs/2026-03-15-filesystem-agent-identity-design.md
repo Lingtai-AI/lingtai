@@ -17,7 +17,10 @@ An agent's identity is its working directory. Folder = agent, agent = folder.
 - `working_dir` parameter
 
 ### Add
-- `base_dir` (required, `str | Path`) — shared root for all agents
+- `base_dir` (required, `str | Path`) — shared root for all agents. Must already exist — raises `FileNotFoundError` if not. Only the agent's subdirectory is auto-created.
+
+### Validation
+- `agent_id` must match `^[a-zA-Z0-9_-]+$`. Raises `ValueError` otherwise. Prevents path traversal and filesystem-unsafe characters.
 
 ### Computed
 - `working_dir` = property returning `base_dir / agent_id`
@@ -77,6 +80,8 @@ No PID — liveness is handled by `.agent.lock`.
 ### Lifecycle
 - **Construction**: read role/ltm if present, overwrite with new `started_at` and `address`.
 - **Stop**: update `ltm` with latest value from prompt manager, keep file for future resume.
+- **Writes are atomic**: write to `.agent.json.tmp`, then `os.replace` to `.agent.json`.
+- **Corrupt file handling**: if `.agent.json` exists but cannot be parsed, rename to `.agent.json.corrupt`, log a warning, treat as fresh start.
 
 ## `.agent.lock` — Liveness
 
@@ -86,8 +91,10 @@ OS-managed file lock. The lock IS the heartbeat — if you can acquire it, the p
 - **Construction**: open `working_dir/.agent.lock`, acquire exclusive non-blocking lock. If acquisition fails → `RuntimeError("Working directory already in use by another agent")`.
 - **Stop**: close the file descriptor → OS releases the lock.
 - **Crash**: OS releases the lock automatically when the process dies.
+- **Stale `.agent.lock` files**: the file persists on disk after process death (zero bytes, unlocked). This is harmless — only the lock state matters, not the file's existence.
 
 ### Cross-platform
+
 ```python
 import sys
 
@@ -101,17 +108,21 @@ else:
     def _unlock(fd): fcntl.flock(fd, fcntl.LOCK_UN)
 ```
 
+**Note on Windows**: `msvcrt.locking` uses byte-range locks which are semantically different from `fcntl.flock`. On Unix, `flock` is guaranteed to release on process death. On Windows, `msvcrt` locks release when the file handle is closed by the OS during process cleanup, which is reliable for normal termination and `taskkill` but best-effort for hard crashes. This asymmetry is acceptable — the primary deployment target is Unix.
+
 Two files, clean separation: `.agent.json` = who am I, `.agent.lock` = am I alive.
 
 ## Resume Flow
 
 1. `BaseAgent(agent_id="alice", service=llm, base_dir="./workspace")`
-2. Compute `working_dir = base_dir / "alice"`, create directory if needed
-3. Try to acquire `.agent.lock` → succeeds (previous agent dead or first run) or raises
-4. If `.agent.json` exists → read `role` and `ltm`
-5. Caller-passed `role`/`ltm` override manifest values (if provided)
-6. Write `.agent.json` with new `started_at`, `address`, current `role`/`ltm`
-7. Existing `mailbox/` is intact — agent resumes with full email history
+2. Validate `agent_id` matches `^[a-zA-Z0-9_-]+$`
+3. Validate `base_dir` exists, raise `FileNotFoundError` if not
+4. Compute `working_dir = base_dir / "alice"`, create directory if needed
+5. Try to acquire `.agent.lock` → succeeds (previous agent dead or first run) or raises
+6. If `.agent.json` exists → read `role` and `ltm` (rename to `.corrupt` if unparseable)
+7. Caller-passed `role`/`ltm` override manifest values (if provided)
+8. Write `.agent.json` atomically with new `started_at`, `address`, current `role`/`ltm`
+9. Existing `mailbox/` is intact — agent resumes with full email history
 
 ## Delegate Changes
 
@@ -136,6 +147,7 @@ Role and ltm inherited from parent by default, overridable via delegate tool arg
 
 ### `src/stoai/agent.py`
 - Replace `working_dir` param with `base_dir`
+- Add `agent_id` validation
 - Add `working_dir` as computed property (`self._base_dir / self.agent_id`)
 - Add `_acquire_lock()` / `_release_lock()` methods using file lock
 - Add `.agent.json` read/write in constructor and `stop()`
@@ -148,17 +160,24 @@ Role and ltm inherited from parent by default, overridable via delegate tool arg
 ### `src/stoai/services/mail.py`
 - `TCPMailService(working_dir=...)` — no change needed, receives the computed `working_dir`
 
+### Capabilities (no code changes needed — audited)
+All capabilities access `agent.working_dir` or `agent._working_dir`, which becomes a computed property returning the same type (`Path`). Verified:
+- `bash.py` — uses `str(agent._working_dir)` as subprocess cwd
+- `email.py` — uses `agent._working_dir / "mailbox"`
+- `draw.py`, `talk.py`, `compose.py`, `listen.py` — use `agent.working_dir` for media output dirs
+- `FileIOService` — receives `root=self._working_dir` in constructor, unchanged
+
 ### Examples
 - `examples/two_agents.py`, `examples/three_agents.py`, `examples/chat_agent.py`, `examples/chat_web.py`
 - Replace `working_dir="."` with `base_dir="."` (each agent already has a unique `agent_id`)
-- Remove the manual per-agent directory creation we added earlier
+- Remove the manual per-agent directory creation added in previous commit
 
 ### Tests
 - All `working_dir="/tmp"` → `base_dir=tmp_path`
-- ~50 tests across `test_agent.py`, `test_layers_*.py`, `test_three_agent_email.py`
+- ~80 occurrences across `test_agent.py`, `test_layers_*.py`, `test_three_agent_email.py`, `test_services_mail.py`
 - Mechanical changes, no logic changes
-- Add new tests for: lock acquisition, lock conflict, resume from manifest, delegate peer folders
+- Add new tests for: lock acquisition, lock conflict, resume from manifest, corrupt manifest, agent_id validation, delegate peer folders
 
-## Backward Compatibility
+## Migration Note
 
-This is a breaking API change: `working_dir` is removed, `base_dir` is required. All callers must update. No backward-compatibility shim — clean migration per project conventions.
+This is a breaking API change: `working_dir` is removed, `base_dir` is required. All callers must update. No backward-compatibility shim — clean migration per project conventions. Existing deployments must move agent data into `base_dir/<agent_id>/` subdirectories, or accept that old data will not be found.
