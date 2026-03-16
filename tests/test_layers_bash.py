@@ -177,24 +177,26 @@ class TestSetupBash:
 
 class TestAddCapability:
     def test_add_capability_bash_yolo(self, tmp_path):
-        from stoai.base_agent import BaseAgent
+        from stoai.stoai_agent import StoAIAgent
         svc = MagicMock()
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc, base_dir=tmp_path)
-        mgr = agent.add_capability("bash", yolo=True)
+        agent = StoAIAgent(agent_id="test", service=svc, base_dir=tmp_path,
+                           capabilities={"bash": {"yolo": True}})
+        mgr = agent.get_capability("bash")
         assert isinstance(mgr, BashManager)
         assert "bash" in agent._mcp_handlers
 
     def test_add_capability_bash_with_policy(self, tmp_path):
-        from stoai.base_agent import BaseAgent
+        from stoai.stoai_agent import StoAIAgent
         policy_file = tmp_path / "policy.json"
         policy_file.write_text(json.dumps({"allow": ["echo"]}))
         svc = MagicMock()
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
-        agent = BaseAgent(agent_id="test", service=svc, base_dir=tmp_path)
-        mgr = agent.add_capability("bash", policy_file=str(policy_file))
+        agent = StoAIAgent(agent_id="test", service=svc, base_dir=tmp_path,
+                           capabilities={"bash": {"policy_file": str(policy_file)}})
+        mgr = agent.get_capability("bash")
         assert isinstance(mgr, BashManager)

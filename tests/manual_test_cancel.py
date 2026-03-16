@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from stoai.base_agent import BaseAgent
+from stoai.stoai_agent import StoAIAgent
 from stoai.config import AgentConfig
 from stoai.services.mail import TCPMailService
 from stoai.llm import LLMResponse, ToolCall
@@ -58,14 +59,15 @@ def main():
         mail_svc = TCPMailService(listen_port=port, working_dir=base_dir / name)
         mail_services[name] = mail_svc
         is_admin = (name == "alice")
-        agent = BaseAgent(
+        agent = StoAIAgent(
             agent_id=name,
             service=_make_mock_service(),
             mail_service=mail_svc,
             base_dir=base_dir,
             admin=is_admin,
+            capabilities=["email"],
         )
-        mgr = agent.add_capability("email")
+        mgr = agent.get_capability("email")
         agents[name] = agent
         managers[name] = mgr
 

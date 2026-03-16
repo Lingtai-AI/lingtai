@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from stoai.base_agent import BaseAgent
+from stoai.stoai_agent import StoAIAgent
 from stoai.config import AgentConfig
 from stoai.services.mail import TCPMailService
 
@@ -44,13 +44,14 @@ def _get_free_port():
 def _make_agent(agent_id: str, port: int, base_dir: Path):
     """Create an agent with a real TCPMailService and email capability."""
     mail_svc = TCPMailService(listen_port=port, working_dir=base_dir / agent_id)
-    agent = BaseAgent(
+    agent = StoAIAgent(
         agent_id=agent_id,
         service=_make_mock_service(),
         mail_service=mail_svc,
         base_dir=base_dir,
+        capabilities=["email"],
     )
-    mgr = agent.add_capability("email")
+    mgr = agent.get_capability("email")
     return agent, mgr
 
 
