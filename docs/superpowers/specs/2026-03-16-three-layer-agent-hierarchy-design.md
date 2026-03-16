@@ -287,7 +287,7 @@ Updated delegate schema description:
 
 ```python
 DESCRIPTION = (
-    "Spawn a new agent cloned from this agent. "
+    "Spawn a new agent. "
     "Returns the new agent's mail address. "
     "IMPORTANT: The reasoning field for this tool is sent as the first message "
     "to the spawned agent — write a thorough mission briefing: what to do, why, "
