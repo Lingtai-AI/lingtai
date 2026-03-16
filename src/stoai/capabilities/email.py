@@ -91,7 +91,9 @@ DESCRIPTION = (
     "'read' to read by ID. "
     "'reply'/'reply_all' to respond. "
     "'search' to find emails by regex (searches from, subject, message). "
-    "Attachments are stored alongside emails in the mailbox."
+    "Attachments are stored alongside emails in the mailbox. "
+    "Etiquette: a short acknowledgement is fine, but do not reply to "
+    "an acknowledgement — that creates pointless ping-pong."
 )
 
 
@@ -100,6 +102,8 @@ class EmailManager:
 
     def __init__(self, agent: "BaseAgent"):
         self._agent = agent
+        # Track last sent message per recipient to block identical consecutive sends.
+        self._last_sent: dict[str, str] = {}  # address → message text
 
     @property
     def _mailbox_dir(self) -> Path:
@@ -235,6 +239,23 @@ class EmailManager:
         if self._agent._mail_service is None:
             return {"error": "mail service not configured"}
 
+        # Block identical consecutive messages to the same recipient.
+        all_targets = to_list + cc + bcc
+        duplicates = [
+            addr for addr in all_targets
+            if self._last_sent.get(addr) == message_text
+        ]
+        if duplicates:
+            return {
+                "status": "blocked",
+                "warning": (
+                    "Identical message already sent to: "
+                    f"{', '.join(duplicates)}. "
+                    "This looks like a repetitive loop — "
+                    "think twice before sending."
+                ),
+            }
+
         sender = self._agent._mail_service.address or self._agent.agent_id
 
         # Build visible payload (no bcc field)
@@ -275,6 +296,10 @@ class EmailManager:
         (sent_dir / "message.json").write_text(
             json.dumps(sent_record, indent=2, default=str)
         )
+
+        # Track last sent message per recipient for duplicate detection.
+        for addr in all_recipients:
+            self._last_sent[addr] = message_text
 
         self._agent._log(
             "email_sent", to=to_list, cc=cc, bcc=bcc,

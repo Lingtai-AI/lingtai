@@ -39,5 +39,7 @@ SCHEMA = {
 DESCRIPTION = (
     "Point-to-point FIFO messaging between agents. "
     "Messages are queued — 'read' pops the next one (first-in, first-out). "
-    "For persistent mailbox with reply/CC/BCC, use the email capability instead."
+    "For persistent mailbox with reply/CC/BCC, use the email capability instead. "
+    "Etiquette: a short acknowledgement is fine, but do not reply to "
+    "an acknowledgement — that creates pointless ping-pong."
 )

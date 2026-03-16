@@ -217,6 +217,61 @@ def test_email_send_saves_bcc_in_sent(tmp_path):
     assert msg["bcc"] == ["hidden"]
 
 
+def test_email_blocks_identical_consecutive_send(tmp_path):
+    """Sending the exact same message twice to the same recipient is blocked."""
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    mail_svc = MagicMock()
+    mail_svc.address = "127.0.0.1:9999"
+    mail_svc.send.return_value = True
+    agent._mail_service = mail_svc
+    mgr = agent.add_capability("email")
+
+    # First send — should work
+    result = mgr.handle({
+        "action": "send", "address": "127.0.0.1:8888",
+        "subject": "hi", "message": "👍",
+    })
+    assert result["status"] == "delivered"
+
+    # Identical send — should be blocked
+    result = mgr.handle({
+        "action": "send", "address": "127.0.0.1:8888",
+        "subject": "hi", "message": "👍",
+    })
+    assert result["status"] == "blocked"
+    assert "warning" in result
+
+    # Different message — should work
+    result = mgr.handle({
+        "action": "send", "address": "127.0.0.1:8888",
+        "subject": "hi", "message": "Got it, thanks!",
+    })
+    assert result["status"] == "delivered"
+
+
+def test_email_blocks_identical_reply(tmp_path):
+    """Replying with the same message twice is blocked."""
+    agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
+    mail_svc = MagicMock()
+    mail_svc.address = "127.0.0.1:9999"
+    mail_svc.send.return_value = True
+    agent._mail_service = mail_svc
+    mgr = agent.add_capability("email")
+
+    # Create an inbox email to reply to
+    _make_inbox_email(tmp_path, sender="127.0.0.1:8888", subject="hello", message="hi there")
+    check = mgr.handle({"action": "check"})
+    email_id = check["emails"][0]["id"]
+
+    # First reply
+    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "👍"})
+    assert result["status"] == "delivered"
+
+    # Identical reply — blocked
+    result = mgr.handle({"action": "reply", "email_id": email_id, "message": "👍"})
+    assert result["status"] == "blocked"
+
+
 def test_email_send_with_attachments(tmp_path):
     agent = BaseAgent(agent_id="test", service=make_mock_service(), working_dir=tmp_path)
     mail_svc = MagicMock()
