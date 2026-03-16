@@ -285,6 +285,7 @@ class BaseAgent:
         # Mail FIFO queue — incoming messages consumed by read
         self._mail_queue: deque[dict] = deque()
         self._mail_queue_lock = threading.Lock()
+        self._mail_arrived = threading.Event()  # set when normal mail arrives; clock wait uses this
 
         # MCP tool handlers
         self._mcp_handlers: dict[str, Callable[[dict], dict]] = {}
@@ -366,6 +367,9 @@ class BaseAgent:
         # Vision and web_search always available (fall back to direct LLM calls)
         state_intrinsics["vision"] = self._handle_vision
         state_intrinsics["web_search"] = self._handle_web_search
+
+        # Clock — always available (no service dependency)
+        state_intrinsics["clock"] = self._handle_clock
 
         all_names = file_intrinsic_names | set(state_intrinsics.keys())
 
@@ -642,6 +646,16 @@ class BaseAgent:
             }
         return {"status": "ok", "results": resp.text}
 
+    def _handle_clock(self, args: dict) -> dict:
+        """Handle clock tool — time check and wait/sync."""
+        action = args.get("action", "check")
+        if action == "check":
+            return self._clock_check()
+        elif action == "wait":
+            return self._clock_wait(args)
+        else:
+            return {"error": f"Unknown clock action: {action}"}
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -819,6 +833,7 @@ class BaseAgent:
         }
         with self._mail_queue_lock:
             self._mail_queue.append(entry)
+        self._mail_arrived.set()
 
         # Notify agent with full content inline
         notification = (
