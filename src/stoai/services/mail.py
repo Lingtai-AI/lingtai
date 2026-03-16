@@ -167,10 +167,11 @@ class TCPMailService(MailService):
                 return
             payload = json.loads(payload_data.decode("utf-8"))
 
-            # Persist to mailbox and decode attachments
+            # Persist to mailbox/inbox/ and decode attachments
             if self._working_dir is not None:
+                from datetime import datetime, timezone
                 msg_id = str(uuid.uuid4())
-                msg_dir = self._working_dir / "mailbox" / msg_id
+                msg_dir = self._working_dir / "mailbox" / "inbox" / msg_id
 
                 if "_encoded_attachments" in payload:
                     att_dir = msg_dir / "attachments"
@@ -184,6 +185,10 @@ class TCPMailService(MailService):
                     payload["attachments"] = local_paths
                 else:
                     msg_dir.mkdir(parents=True, exist_ok=True)
+
+                # Inject metadata for email capability
+                payload["_mailbox_id"] = msg_id
+                payload["received_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 # Save message.json (without binary data)
                 (msg_dir / "message.json").write_text(

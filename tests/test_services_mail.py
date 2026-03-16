@@ -233,7 +233,7 @@ class TestMailAttachments:
             assert event.wait(timeout=5.0)
 
             # Check mailbox structure
-            mailbox = receiver_dir / "mailbox"
+            mailbox = receiver_dir / "mailbox" / "inbox"
             assert mailbox.is_dir()
             msg_dirs = list(mailbox.iterdir())
             assert len(msg_dirs) == 1
@@ -269,7 +269,7 @@ class TestMailAttachments:
             sender.send(f"127.0.0.1:{port}", {"from": "s", "to": "r", "message": "plain"})
             assert event.wait(timeout=5.0)
 
-            mailbox = tmp_path / "mailbox"
+            mailbox = tmp_path / "mailbox" / "inbox"
             assert mailbox.is_dir()
             msg_dirs = list(mailbox.iterdir())
             assert len(msg_dirs) == 1
