@@ -127,7 +127,9 @@ Note: `capabilities=` accepts `list[str]` (no kwargs) or `dict[str, dict]` (with
 
 ### System Prompt Structure
 
-Base prompt (hardcoded with intrinsic list + shutdown guidance) → Sections (injected by host/capabilities via `update_system_prompt`) → MCP tool descriptions (auto-generated). Protected sections cannot be modified by the LLM's `manage_system_prompt` intrinsic.
+Base prompt (minimal — identity and general guidance only) → Sections (injected by host/capabilities via `update_system_prompt`) → MCP tool descriptions (auto-generated). Protected sections cannot be modified by the LLM's `manage_system_prompt` intrinsic.
+
+**Do not put tool pipelines or tool-specific instructions in the system prompt.** Pipelines (e.g., "mail admin first, then shutdown") belong in tool schema descriptions where the LLM sees them in context. The system prompt should stay minimal.
 
 ## Conventions
 
