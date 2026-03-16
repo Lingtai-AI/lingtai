@@ -139,6 +139,90 @@ def test_memory_unknown_action(tmp_path):
     assert "error" in result
 
 
+# ---------------------------------------------------------------------------
+# LTM migration
+# ---------------------------------------------------------------------------
+
+
+def test_ltm_migration_from_manifest(tmp_path):
+    """Agent with ltm in manifest should migrate to ltm/ltm.md on init."""
+    agent = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        base_dir=tmp_path,
+        ltm="old manifest ltm content",
+    )
+    agent.start()
+    try:
+        ltm_file = agent.working_dir / "ltm" / "ltm.md"
+        assert ltm_file.is_file()
+        assert ltm_file.read_text() == "old manifest ltm content"
+
+        section = agent._prompt_manager.read_section("ltm")
+        assert "old manifest ltm content" in section
+    finally:
+        agent.stop()
+
+
+def test_ltm_migration_does_not_overwrite_existing_file(tmp_path):
+    """If ltm/ltm.md already exists, migration should not overwrite it."""
+    working_dir = tmp_path / "test"
+    working_dir.mkdir()
+    ltm_dir = working_dir / "ltm"
+    ltm_dir.mkdir()
+    (ltm_dir / "ltm.md").write_text("existing file content")
+
+    agent = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        base_dir=tmp_path,
+        ltm="manifest ltm",
+    )
+    agent.start()
+    try:
+        ltm_file = agent.working_dir / "ltm" / "ltm.md"
+        assert ltm_file.read_text() == "existing file content"
+    finally:
+        agent.stop()
+
+
+def test_manifest_no_longer_stores_ltm(tmp_path):
+    """After migration, manifest should not contain ltm field."""
+    import json
+    agent = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        base_dir=tmp_path,
+        ltm="some ltm",
+    )
+    agent.start()
+    agent.stop()
+
+    manifest = json.loads((agent.working_dir / ".agent.json").read_text())
+    assert "ltm" not in manifest
+
+
+def test_auto_load_ltm_on_resume(tmp_path):
+    """On resume, ltm/ltm.md should be auto-loaded into system prompt."""
+    agent1 = BaseAgent(
+        agent_id="test",
+        service=make_mock_service(),
+        base_dir=tmp_path,
+        ltm="initial memory",
+    )
+    agent1.start()
+    # Simulate agent updating LTM (file + prompt manager, as memory intrinsic does)
+    ltm_file = agent1.working_dir / "ltm" / "ltm.md"
+    ltm_file.write_text("updated memory from file")
+    agent1._prompt_manager.write_section("ltm", "updated memory from file")
+    agent1.stop()
+
+    agent2 = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
+    section = agent2._prompt_manager.read_section("ltm")
+    assert section is not None
+    assert "updated memory from file" in section
+
+
 def test_memory_creates_ltm_if_missing(tmp_path):
     agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     agent.start()

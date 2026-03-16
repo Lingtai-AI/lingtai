@@ -268,21 +268,37 @@ class BaseAgent:
         else:
             self._search_service = None  # will fall back to direct LLM call
 
-        # Read manifest for resume (before prompt manager, so role/ltm can be restored)
+        # Read manifest for resume (before prompt manager, so role can be restored)
         manifest_role, manifest_ltm = self._read_manifest()
         if not role and manifest_role:
             role = manifest_role
-        if not ltm and manifest_ltm:
-            ltm = manifest_ltm
+
+        # LTM migration: manifest → ltm/ltm.md
+        ltm_dir = self._working_dir / "ltm"
+        ltm_file = ltm_dir / "ltm.md"
+
+        # If constructor ltm is provided and ltm file doesn't exist, write it
+        if ltm and not ltm_file.is_file():
+            ltm_dir.mkdir(exist_ok=True)
+            ltm_file.write_text(ltm)
+        # If manifest has ltm and file doesn't exist, migrate
+        elif manifest_ltm and not ltm_file.is_file():
+            ltm_dir.mkdir(exist_ok=True)
+            ltm_file.write_text(manifest_ltm)
+
+        # Auto-load LTM from file into prompt manager
+        loaded_ltm = ""
+        if ltm_file.is_file():
+            loaded_ltm = ltm_file.read_text()
 
         # System prompt manager
         self._prompt_manager = SystemPromptManager()
         if role:
             self._prompt_manager.write_section("role", role, protected=True)
-        if ltm:
-            self._prompt_manager.write_section("ltm", ltm)
+        if loaded_ltm.strip():
+            self._prompt_manager.write_section("ltm", loaded_ltm)
 
-        # Write manifest (new start or resume)
+        # Write manifest (without ltm — it now lives in ltm/ltm.md)
         self._write_manifest()
 
         # Mail FIFO queue — incoming messages consumed by read
@@ -1003,6 +1019,13 @@ class BaseAgent:
             except Exception:
                 pass
 
+        # Persist LTM from prompt manager to file
+        ltm_content = self._prompt_manager.read_section("ltm") or ""
+        ltm_file = self._working_dir / "ltm" / "ltm.md"
+        if ltm_file.is_file() or ltm_content:
+            ltm_file.parent.mkdir(exist_ok=True)
+            ltm_file.write_text(ltm_content)
+
         # Persist final state and release lock
         self._write_manifest()
         self._release_lock()
@@ -1108,7 +1131,11 @@ class BaseAgent:
                 ltm_file.write_text("")
 
     def _read_manifest(self) -> tuple[str, str]:
-        """Read role and ltm from .agent.json. Returns ("", "") if not found."""
+        """Read role and ltm from .agent.json. Returns ("", "") if not found.
+
+        Note: ltm is read for migration purposes only. New agents store ltm
+        in ltm/ltm.md, not in the manifest.
+        """
         path = self._working_dir / self._MANIFEST_FILE
         if not path.is_file():
             return "", ""
@@ -1131,7 +1158,6 @@ class BaseAgent:
             "agent_id": self.agent_id,
             "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "role": self._prompt_manager.read_section("role") or "",
-            "ltm": self._prompt_manager.read_section("ltm") or "",
         }
         if self._mail_service is not None and self._mail_service.address:
             data["address"] = self._mail_service.address
