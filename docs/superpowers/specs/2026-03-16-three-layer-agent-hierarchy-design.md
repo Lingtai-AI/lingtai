@@ -26,7 +26,7 @@ CustomAgent(StoAIAgent) — host's wrapper (subclass with domain logic)
 | `update_system_prompt()` | Open at any time (not sealed) | Prompt sections are context, not tools — memory reload, host-injected context |
 | `capabilities=` format | `list[str]` or `dict[str, dict]` — list is sugar for dict with empty kwargs | Clean one-liner for simple cases, dict when kwargs needed |
 | Delegate spawning | Mirrors parent capabilities by default | Future delegate policy is delegate tool's concern, not StoAIAgent's |
-| `[MCP]` tool labeling | Removed | With `mcp_tools=` gone, no distinction between capability tools and domain tools |
+| `[MCP]` tool labeling | Kept — StoAIAgent populates `_mcp_tool_names` from `tools=` param | Capabilities are capabilities, MCP tools are MCP tools — the LLM should know the difference |
 | `shutdown_reason` | Public property on BaseAgent | Host reads it after agent stops to decide rebirth |
 | Shutdown | `status(action="shutdown", reason="...")` intrinsic | Agent requests termination; host handles rebirth |
 | File convenience methods | Stay on BaseAgent | Ergonomic wrappers backed by intrinsics, kernel-level |
@@ -132,9 +132,20 @@ The `status` intrinsic schema in `intrinsics/status.py` is updated:
 - New optional property: `reason` (string) — only used with `shutdown` action
 - The shutdown guidance text is added to the base system prompt template in `prompt.py`
 
-### Removed: `_mcp_tool_names` and `[MCP]` Labeling
+### `[MCP]` Labeling — Kept
 
-With `mcp_tools=` removed from BaseAgent, the `_mcp_tool_names` set and the `[MCP]` prefix logic in `_build_tool_schemas()` are deleted. All non-intrinsic tools are simply "tools" — there's no need to distinguish capability tools from domain tools at the LLM level.
+The `_mcp_tool_names` set and `[MCP]` prefix logic in `_build_tool_schemas()` stay on BaseAgent. The set is just no longer populated in BaseAgent's constructor (since `mcp_tools=` is removed). Instead, StoAIAgent populates it when registering tools from the `tools=` param:
+
+```python
+# In StoAIAgent.__init__, when registering domain tools:
+if tools:
+    for tool in tools:
+        self.add_tool(tool.name, schema=tool.schema,
+                      handler=tool.handler, description=tool.description)
+        self._mcp_tool_names.add(tool.name)
+```
+
+Capabilities are capabilities. MCP tools are MCP tools. The LLM should know which is which.
 
 ### `shutdown_reason` Property
 
