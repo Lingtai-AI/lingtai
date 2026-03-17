@@ -12,9 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,11 +27,12 @@ SCHEMA = {
     "properties": {
         "object": {
             "type": "string",
-            "enum": ["role", "memory", "context"],
+            "enum": ["role", "library", "memory", "context"],
             "description": (
                 "role: the agent's identity (system/covenant.md + system/character.md).\n"
-                "memory: the agent's long-term memory "
-                "(system/memory.md, backed by system/memory.json).\n"
+                "library: the agent's knowledge archive (system/library.json).\n"
+                "memory: the agent's active working memory "
+                "(system/memory.md, loaded from library).\n"
                 "context: the agent's conversation context window."
             ),
         },
@@ -39,26 +40,74 @@ SCHEMA = {
             "type": "string",
             "enum": [
                 "update", "diff", "load",
-                "submit", "consolidate",
+                "submit", "filter", "view", "consolidate", "delete",
                 "compact",
             ],
             "description": (
                 "role: update | diff | load.\n"
-                "memory: submit | diff | consolidate | load.\n"
+                "library: submit | filter | view | consolidate | delete.\n"
+                "memory: load | diff.\n"
                 "context: compact."
+            ),
+        },
+        "title": {
+            "type": "string",
+            "description": (
+                "Entry title — one line. "
+                "Required for library submit and consolidate."
+            ),
+        },
+        "summary": {
+            "type": "string",
+            "description": (
+                "Entry summary — 1-3 sentences. Used for filtering. "
+                "Required for library submit and consolidate."
             ),
         },
         "content": {
             "type": "string",
             "description": (
                 "Text content — for role update (character), "
-                "memory submit (new entry), or memory consolidate (merged text)."
+                "library submit/consolidate (main body, up to 500 words), "
+                "or other actions that accept text."
+            ),
+        },
+        "supplementary": {
+            "type": "string",
+            "description": (
+                "Extended material for a library entry — unbounded. "
+                "Optional for library submit and consolidate. "
+                "Use when the content alone doesn't capture full detail."
             ),
         },
         "ids": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Memory entry IDs — for memory consolidate.",
+            "description": (
+                "Entry IDs — for library view, consolidate, delete, "
+                "and memory load."
+            ),
+        },
+        "pattern": {
+            "type": "string",
+            "description": (
+                "Regex pattern for library filter. "
+                "Searches across titles, summaries, and content. "
+                "Omit to list all entries."
+            ),
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Maximum entries to return for library filter.",
+        },
+        "depth": {
+            "type": "string",
+            "enum": ["content", "supplementary"],
+            "description": (
+                "Depth for library view. "
+                "'content' (default): id + title + summary + content. "
+                "'supplementary': id + title + summary + content + supplementary."
+            ),
         },
         "prompt": {
             "type": "string",
@@ -72,16 +121,21 @@ SCHEMA = {
 }
 
 DESCRIPTION = (
-    "Self-knowledge management — evolving identity, structured memory, "
-    "and context control. "
-    "role: update your character (your identity, knowledge, experience), "
-    "diff to review pending changes, load to apply into live system prompt. "
-    "memory: submit new entries, diff to review, consolidate entries by ID "
-    "into a single merged entry, load to apply. "
-    "Memory IDs are visible in your system prompt. "
+    "Self-knowledge management — identity, knowledge library, active memory, "
+    "and context control.\n"
+    "role: update your character, diff to review, load to apply.\n"
+    "library: your knowledge archive. submit entries (title + summary + content, "
+    "optional supplementary). filter to browse (returns id + title + summary, "
+    "optional regex pattern and limit). view to read entries at depth "
+    "(content or supplementary, default content). consolidate to merge entries. "
+    "delete to remove entries. Be a thoughtful librarian — write clear titles, "
+    "concise summaries (1-3 sentences), and structured content (up to 500 words).\n"
+    "memory: load selected library entries into active memory by IDs "
+    "(injects id + title + content into system prompt). "
+    "diff to see uncommitted changes (inherited, rarely needed).\n"
     "context: compact to proactively free context space — check usage via "
-    "status show first, provide guidance on what to preserve. "
-    "After any write (update/submit/consolidate), use diff then load to apply."
+    "status show first.\n"
+    "Workflow: filter to browse → view if you need detail → load to remember."
 )
 
 
@@ -98,12 +152,7 @@ class AnimaManager:
         self._covenant_path = system_dir / "covenant.md"
         self._character_path = system_dir / "character.md"
         self._memory_md = system_dir / "memory.md"
-        self._memory_json = system_dir / "memory.json"
-
-        # Ensure character.md exists
-        system_dir.mkdir(exist_ok=True)
-        if not self._character_path.is_file():
-            self._character_path.write_text("")
+        self._library_json = system_dir / "library.json"
 
         # In-memory cache of entries
         self._entries: list[dict] = self._load_entries()
@@ -113,26 +162,33 @@ class AnimaManager:
     # ------------------------------------------------------------------
 
     def _load_entries(self) -> list[dict]:
-        """Load entries from memory.json, or return empty list if missing."""
-        if not self._memory_json.is_file():
+        """Load entries from library.json, or return empty list if missing."""
+        if not self._library_json.is_file():
             return []
         try:
-            data = json.loads(self._memory_json.read_text())
-            return data.get("entries", [])
+            data = json.loads(self._library_json.read_text())
+            entries = data.get("entries", [])
+            # Migrate legacy flat entries (pre-library format)
+            for e in entries:
+                if "title" not in e:
+                    e["title"] = e.get("content", "")[:50] or "Untitled"
+                    e["summary"] = e.get("content", "")[:200]
+                    e["supplementary"] = ""
+            return entries
         except (json.JSONDecodeError, OSError):
             return []
 
     def _save_entries(self) -> None:
-        """Write entries to memory.json with atomic write."""
+        """Write entries to library.json with atomic write."""
         data = {"version": 1, "entries": self._entries}
-        self._memory_json.parent.mkdir(exist_ok=True)
+        self._library_json.parent.mkdir(exist_ok=True)
         fd, tmp = tempfile.mkstemp(
-            dir=str(self._memory_json.parent), suffix=".tmp",
+            dir=str(self._library_json.parent), suffix=".tmp",
         )
         try:
             os.write(fd, json.dumps(data, indent=2, ensure_ascii=False).encode())
             os.close(fd)
-            os.replace(tmp, str(self._memory_json))
+            os.replace(tmp, str(self._library_json))
         except Exception:
             try:
                 os.close(fd)
@@ -141,14 +197,6 @@ class AnimaManager:
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
-
-    def _render_memory_md(self) -> None:
-        """Render memory.json entries to memory.md."""
-        lines = []
-        for entry in self._entries:
-            lines.append(f"- [{entry['id']}] {entry['content']}")
-        self._memory_md.parent.mkdir(exist_ok=True)
-        self._memory_md.write_text("\n".join(lines) + ("\n" if lines else ""))
 
     @staticmethod
     def _make_id(content: str, created_at: str) -> str:
@@ -163,7 +211,8 @@ class AnimaManager:
 
     _VALID_ACTIONS: dict[str, set[str]] = {
         "role": {"update", "diff", "load"},
-        "memory": {"submit", "diff", "consolidate", "load"},
+        "library": {"submit", "filter", "view", "consolidate", "delete"},
+        "memory": {"load", "diff"},
         "context": {"compact"},
     }
 
@@ -252,20 +301,135 @@ class AnimaManager:
     # Memory actions
     # ------------------------------------------------------------------
 
-    def _memory_submit(self, args: dict) -> dict:
-        content = args.get("content", "")
-        if not content.strip():
-            return {"error": "content is required for memory submit."}
+    def _library_submit(self, args: dict) -> dict:
+        title = args.get("title", "").strip()
+        summary = args.get("summary", "").strip()
+        content = args.get("content", "").strip()
+        supplementary = args.get("supplementary", "").strip()
+        if not title:
+            return {"error": "title is required for library submit."}
+        if not summary:
+            return {"error": "summary is required for library submit."}
+        if not content:
+            return {"error": "content is required for library submit."}
         now = datetime.now(timezone.utc).isoformat()
-        entry_id = self._make_id(content, now)
+        entry_id = self._make_id(title + content, now)
         self._entries.append({
             "id": entry_id,
+            "title": title,
+            "summary": summary,
             "content": content,
+            "supplementary": supplementary,
             "created_at": now,
         })
         self._save_entries()
-        self._render_memory_md()
         return {"status": "ok", "id": entry_id}
+
+    def _library_filter(self, args: dict) -> dict:
+        pattern = args.get("pattern")
+        limit = args.get("limit")
+        entries = self._entries
+        if pattern:
+            try:
+                rx = re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                return {"error": f"Invalid regex pattern: {exc}"}
+            entries = [
+                e for e in entries
+                if rx.search(e["title"])
+                or rx.search(e["summary"])
+                or rx.search(e["content"])
+            ]
+        if limit is not None and limit > 0:
+            entries = entries[:limit]
+        return {
+            "status": "ok",
+            "entries": [
+                {"id": e["id"], "title": e["title"], "summary": e["summary"]}
+                for e in entries
+            ],
+        }
+
+    def _library_view(self, args: dict) -> dict:
+        ids = args.get("ids")
+        if not ids:
+            return {"error": "ids is required for library view."}
+        depth = args.get("depth", "content")
+
+        entries_by_id = {e["id"]: e for e in self._entries}
+        invalid = [i for i in ids if i not in entries_by_id]
+        if invalid:
+            return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+
+        result_entries = []
+        for entry_id in ids:
+            e = entries_by_id[entry_id]
+            item = {
+                "id": e["id"],
+                "title": e["title"],
+                "summary": e["summary"],
+                "content": e["content"],
+            }
+            if depth == "supplementary":
+                item["supplementary"] = e.get("supplementary", "")
+            result_entries.append(item)
+
+        return {"status": "ok", "entries": result_entries}
+
+    def _library_consolidate(self, args: dict) -> dict:
+        ids = args.get("ids")
+        title = args.get("title", "").strip()
+        summary = args.get("summary", "").strip()
+        content = args.get("content", "").strip()
+        supplementary = args.get("supplementary", "").strip()
+        if not ids:
+            return {"error": "ids is required for library consolidate."}
+        if not title:
+            return {"error": "title is required for library consolidate."}
+        if not summary:
+            return {"error": "summary is required for library consolidate."}
+        if not content:
+            return {"error": "content is required for library consolidate."}
+
+        existing_ids = {e["id"] for e in self._entries}
+        invalid = [i for i in ids if i not in existing_ids]
+        if invalid:
+            return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+
+        ids_set = set(ids)
+        self._entries = [e for e in self._entries if e["id"] not in ids_set]
+
+        now = datetime.now(timezone.utc).isoformat()
+        new_id = self._make_id(title + content, now)
+        self._entries.append({
+            "id": new_id,
+            "title": title,
+            "summary": summary,
+            "content": content,
+            "supplementary": supplementary,
+            "created_at": now,
+        })
+
+        self._save_entries()
+        return {"status": "ok", "id": new_id, "removed": len(ids)}
+
+    def _library_delete(self, args: dict) -> dict:
+        ids = args.get("ids")
+        if not ids:
+            return {"error": "ids is required for library delete."}
+
+        existing_ids = {e["id"] for e in self._entries}
+        invalid = [i for i in ids if i not in existing_ids]
+        if invalid:
+            return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+
+        ids_set = set(ids)
+        before = len(self._entries)
+        self._entries = [e for e in self._entries if e["id"] not in ids_set]
+        removed = before - len(self._entries)
+
+        self._save_entries()
+        return {"status": "ok", "removed": removed}
 
     def _memory_diff(self, args: dict) -> dict:
         # Delegate to original system handler
@@ -273,42 +437,62 @@ class AnimaManager:
             return {"error": "anima not properly initialized (missing system handler)"}
         return self._original_system({"action": "diff", "object": "memory"})
 
-    def _memory_consolidate(self, args: dict) -> dict:
-        ids = args.get("ids")
-        content = args.get("content", "")
-        if not ids:
-            return {"error": "ids is required for memory consolidate."}
-        if not content.strip():
-            return {"error": "content is required for memory consolidate."}
-
-        # Validate IDs
-        existing_ids = {e["id"] for e in self._entries}
-        invalid = [i for i in ids if i not in existing_ids]
-        if invalid:
-            return {"error": f"Unknown memory IDs: {', '.join(invalid)}"}
-
-        # Remove old entries
-        ids_set = set(ids)
-        self._entries = [e for e in self._entries if e["id"] not in ids_set]
-
-        # Add consolidated entry
-        now = datetime.now(timezone.utc).isoformat()
-        new_id = self._make_id(content, now)
-        self._entries.append({
-            "id": new_id,
-            "content": content,
-            "created_at": now,
-        })
-
-        self._save_entries()
-        self._render_memory_md()
-        return {"status": "ok", "id": new_id, "removed": len(ids)}
-
     def _memory_load(self, args: dict) -> dict:
-        # Delegate to original system handler
-        if self._original_system is None:
-            return {"error": "anima not properly initialized (missing system handler)"}
-        return self._original_system({"action": "load", "object": "memory"})
+        ids = args.get("ids")
+        if not ids:
+            return {"error": "ids is required for memory load."}
+
+        entries_by_id = {e["id"]: e for e in self._entries}
+        invalid = [i for i in ids if i not in entries_by_id]
+        if invalid:
+            return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+
+        # Render memory.md with id + title + content
+        lines = []
+        for entry_id in ids:
+            e = entries_by_id[entry_id]
+            lines.append(f"### [{e['id']}] {e['title']}\n{e['content']}")
+        content = "\n\n".join(lines) + ("\n" if lines else "")
+
+        # Write to disk
+        self._memory_md.parent.mkdir(exist_ok=True)
+        self._memory_md.write_text(content)
+
+        # Inject into system prompt
+        if content.strip():
+            self._agent._prompt_manager.write_section("memory", content)
+        else:
+            self._agent._prompt_manager.delete_section("memory")
+        self._agent._token_decomp_dirty = True
+
+        if self._agent._chat is not None:
+            self._agent._chat.update_system_prompt(
+                self._agent._build_system_prompt()
+            )
+
+        # Git commit
+        rel_path = "system/memory.md"
+        git_diff, commit_hash = self._agent._workdir.diff_and_commit(
+            rel_path, "memory",
+        )
+
+        self._agent._log(
+            "anima_memory_load",
+            entry_count=len(ids),
+            changed=commit_hash is not None,
+        )
+
+        return {
+            "status": "ok",
+            "loaded": len(ids),
+            "size_bytes": len(content.encode("utf-8")),
+            "content_preview": content[:200],
+            "diff": {
+                "changed": commit_hash is not None,
+                "git_diff": git_diff or "",
+                "commit": commit_hash,
+            },
+        }
 
     # ------------------------------------------------------------------
     # Context actions
@@ -378,6 +562,20 @@ def setup(agent: "BaseAgent") -> AnimaManager:
     """Set up anima capability — self-knowledge management."""
     mgr = AnimaManager(agent)
     mgr._original_system = agent.override_intrinsic("system")
+    agent._anima_owns_memory = True
+
+    # Migrate existing memory.md content to library as a seed entry
+    memory_file = agent._working_dir / "system" / "memory.md"
+    if memory_file.is_file():
+        existing = memory_file.read_text().strip()
+        if existing and not mgr._entries:
+            mgr.handle({
+                "object": "library", "action": "submit",
+                "title": "Initial memory (migrated)",
+                "summary": existing[:200],
+                "content": existing,
+            })
+
     agent.add_tool(
         "anima", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
     )

@@ -129,6 +129,9 @@ class BaseAgent:
         # MailService: None means mail intrinsic disabled
         self._mail_service = mail_service
 
+        # Set by anima capability to prevent stop() from overwriting anima-managed memory.md
+        self._anima_owns_memory = False
+
         # Read manifest for resume (before prompt manager, so role can be restored)
         manifest_role, manifest_ltm = self._workdir.read_manifest()
         if not role and manifest_role:
@@ -340,11 +343,12 @@ class BaseAgent:
                 pass
 
         # Persist memory from prompt manager to file
-        memory_content = self._prompt_manager.read_section("memory") or ""
-        memory_file = self._working_dir / "system" / "memory.md"
-        if memory_file.is_file() or memory_content:
-            memory_file.parent.mkdir(exist_ok=True)
-            memory_file.write_text(memory_content)
+        if not self._anima_owns_memory:
+            memory_content = self._prompt_manager.read_section("memory") or ""
+            memory_file = self._working_dir / "system" / "memory.md"
+            if memory_file.is_file() or memory_content:
+                memory_file.parent.mkdir(exist_ok=True)
+                memory_file.write_text(memory_content)
 
         # Persist final state and release lock
         from datetime import datetime, timezone
