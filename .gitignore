@@ -25,3 +25,4 @@ mailbox/
 # Scratch scripts and artifacts
 plot_example.py
 scatter_plot.*
+test/

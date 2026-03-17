@@ -1,4 +1,4 @@
-from stoai.intrinsics.manage_system_prompt import SystemPromptManager
+from stoai.prompt import SystemPromptManager
 
 
 def test_system_prompt_manager():

@@ -1,7 +1,52 @@
-"""System prompt builder — assembles base + sections."""
+"""System prompt — section manager + builder.
+
+SystemPromptManager manages named sections (role, ltm, etc.) of an agent's
+system prompt. build_system_prompt() assembles the base prompt + rendered
+sections into the final string sent to the LLM.
+"""
 from __future__ import annotations
 
-from .intrinsics.manage_system_prompt import SystemPromptManager
+from typing import Optional
+
+
+class SystemPromptManager:
+    """Manages named sections of an agent's system prompt.
+
+    Sections can be marked as protected (host-written, not overwritable by the LLM)
+    or unprotected (LLM-writable at runtime).
+    """
+
+    def __init__(self) -> None:
+        # {name: {"content": str, "protected": bool}}
+        self._sections: dict[str, dict] = {}
+
+    def write_section(self, name: str, content: str, protected: bool = False) -> None:
+        """Write a section (host API — bypasses protection checks)."""
+        self._sections[name] = {"content": content, "protected": protected}
+
+    def read_section(self, name: str) -> Optional[str]:
+        """Read a section's content, or None if not found."""
+        entry = self._sections.get(name)
+        return entry["content"] if entry else None
+
+    def delete_section(self, name: str) -> bool:
+        """Delete a section. Returns True if it existed."""
+        return self._sections.pop(name, None) is not None
+
+    def list_sections(self) -> list[dict]:
+        """Return a list of section metadata dicts."""
+        return [
+            {"name": name, "protected": entry["protected"], "length": len(entry["content"])}
+            for name, entry in self._sections.items()
+        ]
+
+    def render(self) -> str:
+        """Render all sections into a single system prompt string."""
+        parts = []
+        for name, entry in self._sections.items():
+            parts.append(f"## {name}\n{entry['content']}")
+        return "\n\n".join(parts)
+
 
 BASE_PROMPT = """\
 # System Prompt
@@ -19,7 +64,6 @@ def build_system_prompt(
     """Build the full system prompt from components."""
     parts = [BASE_PROMPT]
 
-    # Sections from manage_system_prompt
     sections_text = prompt_manager.render()
     if sections_text:
         parts.append(sections_text)

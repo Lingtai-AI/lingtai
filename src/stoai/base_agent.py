@@ -30,7 +30,7 @@ from .config import AgentConfig
 from .state import AgentState
 from .message import Message, _make_message, MSG_REQUEST, MSG_USER_INPUT
 from .intrinsics import ALL_INTRINSICS
-from .intrinsics.manage_system_prompt import SystemPromptManager
+from .prompt import SystemPromptManager
 from .llm import (
     ChatSession,
     FunctionSchema,
