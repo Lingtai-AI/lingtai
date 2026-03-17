@@ -102,6 +102,22 @@ class SessionManager:
     def streaming(self) -> bool:
         return self._streaming
 
+    @property
+    def interaction_id(self) -> str | None:
+        return self._interaction_id
+
+    @interaction_id.setter
+    def interaction_id(self, value: str | None) -> None:
+        self._interaction_id = value
+
+    @property
+    def intermediate_text_streamed(self) -> bool:
+        return self._intermediate_text_streamed
+
+    @intermediate_text_streamed.setter
+    def intermediate_text_streamed(self, value: bool) -> None:
+        self._intermediate_text_streamed = value
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

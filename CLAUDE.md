@@ -39,7 +39,7 @@ Agent(BaseAgent)   — kernel + capabilities + domain tools
 CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 ```
 
-- **BaseAgent** (`base_agent.py`) — pure kernel. 4 intrinsics (mail, clock, status, system), `add_tool()`/`remove_tool()` sealed after `start()`. No capabilities. `update_system_prompt()` stays open.
+- **BaseAgent** (`base_agent.py`) — kernel coordinator (~900 lines). 2-state lifecycle, message loop, tool dispatch routing, public API, subclass hooks. Delegates to `WorkingDir` (git/filesystem), `SessionManager` (LLM session/tokens), `ToolExecutor` (tool execution). 4 intrinsics wired from `intrinsics/*.py`. `add_tool()`/`remove_tool()` sealed after `start()`. `update_system_prompt()` stays open.
 - **Agent** (`agent.py`) — accepts `capabilities=` (list or dict) at construction. `get_capability(name)` for manager access.
 - **Custom agents** — subclass Agent, add domain tools via `add_tool()` or `_setup_capability()` in `__init__`.
 
@@ -64,7 +64,10 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 
 ### Key Modules
 
-- **`base_agent.py`** — `BaseAgent` class (kernel). 2-state lifecycle (SLEEPING/ACTIVE), 4 optional services, persistent LLM session, 2-layer tool dispatch (intrinsics + tools), FIFO mail queue via MailService, structured JSONL logging, git-controlled working dir, context compaction, loop guard, parallel tool execution. Tool surface sealed after `start()`.
+- **`base_agent.py`** — `BaseAgent` class (kernel coordinator, ~900 lines). 2-state lifecycle (SLEEPING/ACTIVE), message loop, 2-layer tool dispatch routing (intrinsics + tools), FIFO mail queue via MailService, public API (`add_tool`, `remove_tool`, `override_intrinsic`, `send`, `mail`), subclass hooks (`_pre_request`, `_post_request`, `_on_tool_result_hook`). Delegates to `WorkingDir`, `SessionManager`, `ToolExecutor`. Tool surface sealed after `start()`.
+- **`workdir.py`** — `WorkingDir` class. Agent working directory management: exclusive file locking, git init with opt-in tracking, manifest read/write, `diff()` (read-only) and `diff_and_commit()`. No reference to BaseAgent — pure filesystem/subprocess operations.
+- **`session.py`** — `SessionManager` class. LLM session lifecycle: `ensure_session()`, `send()` (with timeout/retry/stale-interaction recovery), `_on_reset()` (rollback on server error), context compaction, token tracking, session persistence. No reference to BaseAgent — receives callbacks (`build_system_prompt_fn`, `build_tool_schemas_fn`) at construction.
+- **`tool_executor.py`** — `ToolExecutor` class. Sequential and parallel tool call execution with timing, error handling, guard checks, and intercept hooks. No reference to BaseAgent — receives `dispatch_fn` and `make_tool_result_fn` callbacks.
 - **`agent.py`** — `Agent(BaseAgent)`. Accepts `capabilities=` at construction. Tracks `_capabilities` for delegate replay. `get_capability(name)` returns manager instances.
 - **`state.py`** — `AgentState` enum (ACTIVE, SLEEPING).
 - **`message.py`** — `Message` dataclass, `_make_message`, `MSG_REQUEST`, `MSG_USER_INPUT`.
@@ -73,7 +76,7 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 - **`llm/base.py`** — `LLMAdapter` (ABC), `ChatSession` (ABC), `LLMResponse`, `ToolCall`, `FunctionSchema`. All agent code depends on these, never on provider SDKs directly.
 - **`llm/service.py`** — `LLMService`. Adapter factory, session registry, one-shot generation gateway, context compaction orchestration. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
 - **`llm/interface_converters.py`** — Bidirectional converters between `ChatInterface` and provider-specific formats (Anthropic, OpenAI, Gemini).
-- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`. All 4 kernel intrinsics (mail, clock, status, system) have `handler=None` because they need agent state and are handled in `BaseAgent`. Status intrinsic supports `show` and `shutdown` actions. System intrinsic supports `diff`/`load` actions on `memory` object. Covenant is injected at construction as a protected prompt section (no tool access).
+- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, and `handle(agent, args)`. All 4 kernel intrinsics (mail, clock, status, system) have self-contained handler logic — they receive the agent as an explicit parameter. Status intrinsic supports `show` and `shutdown` actions. System intrinsic supports `diff`/`load` actions on `memory` object (delegates to `agent._workdir` for git operations). Covenant is injected at construction as a protected prompt section (no tool access).
 - **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 16 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), anima, bash, conscience, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail intrinsic with a persistent mailbox, reply/reply_all, CC/BCC, and multi-to. The anima capability upgrades the system intrinsic with evolving role, structured memory, and on-demand compaction. Delegate spawns `Agent` with reasoning as first prompt. Conscience adds hormê — a periodic inner voice that nudges idle agents.
 - **`config.py`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
 - **`prompt.py`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.

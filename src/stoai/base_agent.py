@@ -269,20 +269,20 @@ class BaseAgent:
     @property
     def _interaction_id(self) -> str | None:
         """Proxy to SessionManager's interaction ID."""
-        return self._session._interaction_id
+        return self._session.interaction_id
 
     @_interaction_id.setter
     def _interaction_id(self, value: str | None) -> None:
-        self._session._interaction_id = value
+        self._session.interaction_id = value
 
     @property
     def _intermediate_text_streamed(self) -> bool:
         """Proxy to SessionManager's intermediate text streamed flag."""
-        return self._session._intermediate_text_streamed
+        return self._session.intermediate_text_streamed
 
     @_intermediate_text_streamed.setter
     def _intermediate_text_streamed(self, value: bool) -> None:
-        self._session._intermediate_text_streamed = value
+        self._session.intermediate_text_streamed = value
 
     # ------------------------------------------------------------------
     # Lifecycle
