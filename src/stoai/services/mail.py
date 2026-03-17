@@ -87,6 +87,7 @@ class TCPMailService(MailService):
         self._listener_thread: threading.Thread | None = None
         self._running = False
         self._info_handler: Callable[[], dict] | None = None
+        self._banner_id: str = ""  # set by agent to enable TCP banner
 
     def send(self, address: str, message: dict) -> str | None:
         """Send a message to host:port. Returns None on success, error string on failure."""
@@ -155,6 +156,14 @@ class TCPMailService(MailService):
         """Read a single length-prefixed JSON message from a connection."""
         try:
             conn.settimeout(10.0)
+            # Send banner for TCP discovery — scanners read this and disconnect.
+            # Normal email senders ignore it (they never read from the socket).
+            banner = f"STOAI {self._banner_id}\n".encode("utf-8") if self._banner_id else b""
+            if banner:
+                try:
+                    conn.sendall(banner)
+                except OSError:
+                    return
             # Read 4-byte length prefix
             length_data = self._recv_exact(conn, 4)
             if length_data is None:

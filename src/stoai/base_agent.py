@@ -161,9 +161,12 @@ class BaseAgent:
 
         # Write manifest — stable identity only (no covenant, no runtime state)
         from datetime import datetime, timezone
+        import uuid as _uuid
         self._started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self._instance_id = _uuid.uuid4().hex[:12]
         manifest_data = {
             "agent_id": self.agent_id,
+            "instance_id": self._instance_id,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
@@ -172,9 +175,25 @@ class BaseAgent:
             manifest_data["address"] = self._mail_service.address
         self._workdir.write_manifest(manifest_data)
 
-        # Wire TCP discovery handler — returns live agent info on {"_stoai": "info"}
-        if self._mail_service is not None and hasattr(self._mail_service, '_info_handler'):
-            self._mail_service._info_handler = self._get_discovery_info
+        # Post to billboard — ephemeral discovery index at ~/.stoai/billboard/
+        self._billboard_path: Path | None = None
+        try:
+            billboard_dir = Path.home() / ".stoai" / "billboard"
+            billboard_dir.mkdir(parents=True, exist_ok=True)
+            self._billboard_path = billboard_dir / f"{self._instance_id}.json"
+            import json as _json, os as _os
+            tmp = self._billboard_path.with_suffix(".tmp")
+            tmp.write_text(_json.dumps(manifest_data, indent=2))
+            _os.replace(str(tmp), str(self._billboard_path))
+        except OSError:
+            self._billboard_path = None
+
+        # Wire TCP discovery — banner on connect + info query handler
+        if self._mail_service is not None:
+            if hasattr(self._mail_service, '_banner_id'):
+                self._mail_service._banner_id = self.agent_id
+            if hasattr(self._mail_service, '_info_handler'):
+                self._mail_service._info_handler = self._get_discovery_info
 
         # Mail FIFO queue — incoming messages consumed by read
         self._mail_queue: deque[dict] = deque()
@@ -231,6 +250,7 @@ class BaseAgent:
         info = {
             "_stoai": "agent",
             "agent_id": self.agent_id,
+            "instance_id": self._instance_id,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
@@ -386,9 +406,17 @@ class BaseAgent:
                 memory_file.parent.mkdir(exist_ok=True)
                 memory_file.write_text(memory_content)
 
+        # Remove billboard entry
+        if self._billboard_path and self._billboard_path.is_file():
+            try:
+                self._billboard_path.unlink()
+            except OSError:
+                pass
+
         # Persist final state and release lock
         manifest_data = {
             "agent_id": self.agent_id,
+            "instance_id": self._instance_id,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
