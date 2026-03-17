@@ -208,7 +208,7 @@ class BaseAgent:
         if loaded_ltm.strip():
             self._prompt_manager.write_section("ltm", loaded_ltm)
 
-        # Write manifest (without ltm — it now lives in ltm/ltm.md)
+        # Write manifest (without ltm — it now lives in system/ltm.md)
         self._write_manifest()
 
         # Mail FIFO queue — incoming messages consumed by read
@@ -871,7 +871,7 @@ class BaseAgent:
         """Read role and ltm from .agent.json. Returns ("", "") if not found.
 
         Note: ltm is read for migration purposes only. New agents store ltm
-        in ltm/ltm.md, not in the manifest.
+        in system/ltm.md, not in the manifest.
         """
         path = self._working_dir / self._MANIFEST_FILE
         if not path.is_file():

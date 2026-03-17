@@ -27,6 +27,17 @@ def test_file_sugar_expands_to_five(tmp_path):
     agent.stop(timeout=1.0)
 
 
+def test_file_sugar_dict_form(tmp_path):
+    """capabilities={"file": {}} (dict form) should also expand."""
+    agent = StoAIAgent(
+        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        capabilities={"file": {}},
+    )
+    for name in ("read", "write", "edit", "glob", "grep"):
+        assert name in agent._mcp_handlers, f"{name} not registered (dict form)"
+    agent.stop(timeout=1.0)
+
+
 def test_individual_file_capability(tmp_path):
     """Each file capability can be loaded individually."""
     agent = StoAIAgent(
