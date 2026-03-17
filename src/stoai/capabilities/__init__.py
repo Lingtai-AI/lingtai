@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 # Registry of built-in capability names → module paths (relative to this package).
 _BUILTIN: dict[str, str] = {
     "bash": ".bash",
+    "conscience": ".conscience",
     "delegate": ".delegate",
     "email": ".email",
     "draw": ".draw",
