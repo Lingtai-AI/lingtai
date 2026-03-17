@@ -5,10 +5,10 @@ Each intrinsic has:
 - DESCRIPTION: human-readable description
 - handle_* or a Manager class: the implementation
 
-Some intrinsics (mail) are implemented in BaseAgent because they need
-access to agent state (services, etc.).
+Some intrinsics (mail, clock, status, system) are implemented in BaseAgent
+because they need access to agent state (services, etc.).
 """
-from . import read, edit, write, glob, grep, mail, clock, status, memory
+from . import read, edit, write, glob, grep, mail, clock, status, system
 
 ALL_INTRINSICS = {
     "read": {"schema": read.SCHEMA, "description": read.DESCRIPTION, "handler": read.handle_read},
@@ -19,5 +19,5 @@ ALL_INTRINSICS = {
     "mail": {"schema": mail.SCHEMA, "description": mail.DESCRIPTION, "handler": None},
     "clock": {"schema": clock.SCHEMA, "description": clock.DESCRIPTION, "handler": None},
     "status": {"schema": status.SCHEMA, "description": status.DESCRIPTION, "handler": None},
-    "memory": {"schema": memory.SCHEMA, "description": memory.DESCRIPTION, "handler": None},
+    "system": {"schema": system.SCHEMA, "description": system.DESCRIPTION, "handler": None},
 }
