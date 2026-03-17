@@ -7,7 +7,8 @@ BASE_PROMPT = """\
 # System Prompt
 
 Your text responses are your private diary — not visible to anyone. All external communication and actions are done through tools.
-Read your tool schemas carefully for capabilities, caveats and pipelines."""
+Read your tool schemas carefully for capabilities, caveats and pipelines.
+Automatic context compaction triggers at 80% of your context window — earlier conversation will be summarized to free space."""
 
 
 def build_system_prompt(
