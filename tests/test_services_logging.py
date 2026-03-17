@@ -120,6 +120,8 @@ class TestBaseAgentLoggingIntegration:
 
     def test_tool_call_logged(self, tmp_path):
         """Executing a tool logs tool_call and tool_result events."""
+        from stoai.tool_executor import ToolExecutor
+
         log_file = tmp_path / "agent.jsonl"
         log_svc = JSONLLoggingService(log_file)
 
@@ -134,7 +136,16 @@ class TestBaseAgentLoggingIntegration:
         guard = LoopGuard()
         errors = []
         tc = ToolCall(name="greet", args={})
-        agent._execute_single_tool(tc, guard, errors)
+        executor = ToolExecutor(
+            dispatch_fn=agent._dispatch_tool,
+            make_tool_result_fn=lambda name, result, **kw: agent.service.make_tool_result(
+                name, result, provider=agent._config.provider, **kw
+            ),
+            guard=guard,
+            known_tools=set(agent._intrinsics) | set(agent._mcp_handlers),
+            logger_fn=agent._log,
+        )
+        executor.execute([tc], collected_errors=errors)
         log_svc.close()
 
         lines = log_file.read_text().strip().split("\n")
@@ -149,6 +160,8 @@ class TestBaseAgentLoggingIntegration:
 
     def test_auto_logging_to_working_dir(self, tmp_path):
         """Agent without explicit logging_service auto-creates one in working dir."""
+        from stoai.tool_executor import ToolExecutor
+
         agent = BaseAgent(
             agent_id="test",
             service=make_mock_service(),
@@ -159,7 +172,16 @@ class TestBaseAgentLoggingIntegration:
         guard = LoopGuard()
         errors = []
         tc = ToolCall(name="greet", args={})
-        agent._execute_single_tool(tc, guard, errors)
+        executor = ToolExecutor(
+            dispatch_fn=agent._dispatch_tool,
+            make_tool_result_fn=lambda name, result, **kw: agent.service.make_tool_result(
+                name, result, provider=agent._config.provider, **kw
+            ),
+            guard=guard,
+            known_tools=set(agent._intrinsics) | set(agent._mcp_handlers),
+            logger_fn=agent._log,
+        )
+        executor.execute([tc], collected_errors=errors)
 
         # Log file should exist in working dir
         log_file = tmp_path / "test" / "logs" / "events.jsonl"

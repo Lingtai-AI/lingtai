@@ -218,6 +218,7 @@ def test_handle_cancel_diary_without_chat(tmp_path):
 def test_sequential_execution_stops_on_cancel(tmp_path):
     """Sequential tool execution should return empty when cancel event is set."""
     from stoai.loop_guard import LoopGuard
+    from stoai.tool_executor import ToolExecutor
 
     agent = BaseAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     agent._cancel_event.set()
@@ -226,7 +227,18 @@ def test_sequential_execution_stops_on_cancel(tmp_path):
     guard = LoopGuard(max_total_calls=10)
     errors: list[str] = []
 
-    results, intercepted, text = agent._execute_tools_sequential([tc], guard, errors)
+    executor = ToolExecutor(
+        dispatch_fn=agent._dispatch_tool,
+        make_tool_result_fn=lambda name, result, **kw: agent.service.make_tool_result(
+            name, result, provider=agent._config.provider, **kw
+        ),
+        guard=guard,
+        known_tools=set(agent._intrinsics) | set(agent._mcp_handlers),
+        logger_fn=agent._log,
+    )
+    results, intercepted, text = executor.execute(
+        [tc], cancel_event=agent._cancel_event, collected_errors=errors,
+    )
 
     assert results == []
     assert intercepted is False
