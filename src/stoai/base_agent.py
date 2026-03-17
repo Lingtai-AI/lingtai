@@ -1786,6 +1786,20 @@ class BaseAgent:
             self._chat.update_tools(self._build_tool_schemas())
         self._token_decomp_dirty = True
 
+    def override_intrinsic(self, name: str) -> Callable[[dict], dict]:
+        """Remove an intrinsic and return its handler for delegation.
+
+        Called by capabilities that upgrade an intrinsic (email → mail,
+        anima → system). Must be called before start() (tool surface sealed).
+
+        Returns the original handler so the capability can delegate to it.
+        """
+        if self._sealed:
+            raise RuntimeError("Cannot modify tools after start()")
+        handler = self._intrinsics.pop(name)  # raises KeyError if missing
+        self._token_decomp_dirty = True
+        return handler
+
     def update_system_prompt(
         self, section: str, content: str, *, protected: bool = False
     ) -> None:
