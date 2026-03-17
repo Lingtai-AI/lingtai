@@ -1,4 +1,4 @@
-"""Composable agent capabilities — add via agent.add_capability("name")."""
+"""Composable agent capabilities — add via StoAIAgent(capabilities=[...])."""
 from __future__ import annotations
 
 import importlib
@@ -18,7 +18,28 @@ _BUILTIN: dict[str, str] = {
     "listen": ".listen",
     "vision": ".vision",
     "web_search": ".web_search",
+    "read": ".read",
+    "write": ".write",
+    "edit": ".edit",
+    "glob": ".glob",
+    "grep": ".grep",
 }
+
+# Group names that expand to multiple capabilities.
+_GROUPS: dict[str, list[str]] = {
+    "file": ["read", "write", "edit", "glob", "grep"],
+}
+
+
+def expand_groups(names: list[str]) -> list[str]:
+    """Expand group names (e.g. 'file') into individual capability names."""
+    result = []
+    for name in names:
+        if name in _GROUPS:
+            result.extend(_GROUPS[name])
+        else:
+            result.append(name)
+    return result
 
 
 def setup_capability(agent: "BaseAgent", name: str, **kwargs: Any) -> Any:
@@ -33,7 +54,8 @@ def setup_capability(agent: "BaseAgent", name: str, **kwargs: Any) -> Any:
     if module_path is None:
         raise ValueError(
             f"Unknown capability: {name!r}. "
-            f"Available: {', '.join(sorted(_BUILTIN))}"
+            f"Available: {', '.join(sorted(_BUILTIN))}. "
+            f"Groups: {', '.join(sorted(_GROUPS))}"
         )
     mod = importlib.import_module(module_path, package=__package__)
     setup_fn = getattr(mod, "setup", None)

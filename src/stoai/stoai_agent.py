@@ -19,7 +19,8 @@ class StoAIAgent(BaseAgent):
     Args:
         capabilities: Capability names to enable. Either a list of strings
             (no kwargs) or a dict mapping names to kwargs dicts.
-            Example: ``["vision", "bash"]`` or ``{"bash": {"policy_file": "p.json"}}``.
+            Example: ``["file", "bash"]`` or ``{"bash": {"policy_file": "p.json"}}``.
+            Group names (e.g. ``"file"``) expand to individual capabilities.
         tools: Domain tools (MCP tools) to register. Each tool gets an ``[MCP]``
             prefix in its LLM-visible description.
         *args, **kwargs: Passed through to BaseAgent.
@@ -34,9 +35,21 @@ class StoAIAgent(BaseAgent):
     ):
         super().__init__(*args, **kwargs)
 
-        # Normalize list to dict
+        # Expand groups and normalize to dict
         if isinstance(capabilities, list):
-            capabilities = {name: {} for name in capabilities}
+            from .capabilities import expand_groups
+            expanded = expand_groups(capabilities)
+            capabilities = {name: {} for name in expanded}
+        elif isinstance(capabilities, dict):
+            from .capabilities import _GROUPS
+            expanded_dict: dict[str, dict] = {}
+            for name, cap_kwargs in capabilities.items():
+                if name in _GROUPS:
+                    for sub in _GROUPS[name]:
+                        expanded_dict[sub] = {}
+                else:
+                    expanded_dict[name] = cap_kwargs
+            capabilities = expanded_dict
 
         # Track for delegate replay
         self._capabilities: list[tuple[str, dict]] = []
