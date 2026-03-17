@@ -79,8 +79,32 @@ class MiniMaxAdapter(AnthropicAdapter):
                 return LLMResponse(text="")
         return self._gated_call(_do_search)
 
+    def generate_vision(
+        self, question: str, image_bytes: bytes, *, model: str = "",
+        mime_type: str = "image/png",
+    ) -> LLMResponse:
+        """Vision via MiniMax MCP understand_image tool."""
+        import base64
+        def _do_vision():
+            try:
+                from .mcp_client import get_minimax_mcp_client
+                client = get_minimax_mcp_client()
+                b64 = base64.b64encode(image_bytes).decode("ascii")
+                result = client.call_tool("understand_image", {
+                    "image_source": f"data:{mime_type};base64,{b64}",
+                    "prompt": question,
+                })
+                if result.get("status") == "error":
+                    logger.warning("MiniMax MCP vision error: %s", result.get("message"))
+                    return LLMResponse(text="")
+                return LLMResponse(text=result.get("text", ""))
+            except Exception as e:
+                logger.warning("MiniMax MCP vision failed: %s", e)
+                return LLMResponse(text="")
+        return self._gated_call(_do_vision)
+
     def make_multimodal_message(
         self, text: str, image_bytes: bytes, mime_type: str = "image/png"
     ) -> dict:
-        logger.warning("MiniMax Anthropic-compatible API does not support image input")
+        logger.warning("MiniMax Anthropic-compatible API does not support inline image input — use generate_vision instead")
         return {"role": "user", "content": [{"type": "text", "text": text}]}
