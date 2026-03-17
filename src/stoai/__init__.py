@@ -1,5 +1,8 @@
 """stoai — generic AI agent framework with intrinsic tools, composable capabilities, and pluggable services."""
-from .types import UnknownToolError
+from .types import (
+    MCPTool,
+    UnknownToolError,
+)
 from .config import AgentConfig
 from .base_agent import BaseAgent
 from .agent import Agent
@@ -27,6 +30,7 @@ __all__ = [
     "AgentState",
     "MSG_REQUEST",
     "MSG_USER_INPUT",
+    "MCPTool",
     "AgentConfig",
     "UnknownToolError",
     # Capabilities
