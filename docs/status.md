@@ -2,7 +2,7 @@
 
 ## Core
 - [x] `agent.py` — BaseAgent (full lifecycle, tool dispatch, compaction, loop guard, streaming, session save/restore, 6-service architecture)
-- [x] `types.py` — MCPTool, UnknownToolError
+- [x] `types.py` — UnknownToolError
 - [x] `config.py` — AgentConfig dataclass
 - [x] `prompt.py` — system prompt builder
 - [x] `__init__.py` — public API exports

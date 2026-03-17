@@ -353,18 +353,6 @@ Actions:
 
 ## Core Types
 
-### MCPTool
-
-```python
-@dataclass
-class MCPTool:
-    """A domain tool provided via MCP-compatible interface."""
-    name: str
-    schema: dict
-    description: str
-    handler: Callable[[dict], dict]
-```
-
 ### AgentConfig
 
 ```python
@@ -427,7 +415,7 @@ stoai/
 
     agent.py                  ← BaseAgent class
     config.py                 ← AgentConfig dataclass
-    types.py                  ← MCPTool, errors, event constants
+    types.py                  ← UnknownToolError
 
     services/
       __init__.py

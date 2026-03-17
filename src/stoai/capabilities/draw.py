@@ -12,6 +12,7 @@ from ..logging import get_logger
 
 if TYPE_CHECKING:
     from ..base_agent import BaseAgent
+    from ..services.mcp import MCPClient
 
 logger = get_logger()
 
@@ -42,7 +43,7 @@ DESCRIPTION = (
 class DrawManager:
     """Manages text-to-image generation via MiniMax MCP."""
 
-    def __init__(self, *, working_dir: Path, mcp_client: Any) -> None:
+    def __init__(self, *, working_dir: Path, mcp_client: "MCPClient") -> None:
         self._working_dir = working_dir
         self._mcp = mcp_client
 
