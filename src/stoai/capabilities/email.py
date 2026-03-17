@@ -110,8 +110,10 @@ class EmailManager:
 
     def __init__(self, agent: "BaseAgent"):
         self._agent = agent
-        # Track last sent message per recipient to block identical consecutive sends.
-        self._last_sent: dict[str, str] = {}  # address → message text
+        # Track consecutive identical sends per recipient to block loops.
+        # Maps address → (message_text, count).
+        self._last_sent: dict[str, tuple[str, int]] = {}
+        self._dup_free_passes = 2  # allow this many identical sends
 
     @property
     def _mailbox_dir(self) -> Path:
@@ -259,7 +261,9 @@ class EmailManager:
         all_targets = to_list + cc + bcc
         duplicates = [
             addr for addr in all_targets
-            if self._last_sent.get(addr) == message_text
+            if (prev := self._last_sent.get(addr)) is not None
+            and prev[0] == message_text
+            and prev[1] >= self._dup_free_passes
         ]
         if duplicates:
             return {
@@ -316,7 +320,11 @@ class EmailManager:
 
         # Track last sent message per recipient for duplicate detection.
         for addr in all_recipients:
-            self._last_sent[addr] = message_text
+            prev = self._last_sent.get(addr)
+            if prev is not None and prev[0] == message_text:
+                self._last_sent[addr] = (message_text, prev[1] + 1)
+            else:
+                self._last_sent[addr] = (message_text, 1)
 
         self._agent._log(
             "email_sent", to=to_list, cc=cc, bcc=bcc,
