@@ -184,18 +184,24 @@ class BaseAgent:
         if not role and manifest_role:
             role = manifest_role
 
-        # LTM migration: manifest → ltm/ltm.md
-        ltm_dir = self._working_dir / "ltm"
-        ltm_file = ltm_dir / "ltm.md"
+        # LTM and role file paths
+        system_dir = self._working_dir / "system"
+        ltm_file = system_dir / "ltm.md"
+        role_file = system_dir / "role.md"
 
         # If constructor ltm is provided and ltm file doesn't exist, write it
         if ltm and not ltm_file.is_file():
-            ltm_dir.mkdir(exist_ok=True)
+            system_dir.mkdir(exist_ok=True)
             ltm_file.write_text(ltm)
         # If manifest has ltm and file doesn't exist, migrate
         elif manifest_ltm and not ltm_file.is_file():
-            ltm_dir.mkdir(exist_ok=True)
+            system_dir.mkdir(exist_ok=True)
             ltm_file.write_text(manifest_ltm)
+
+        # If constructor role is provided and role file doesn't exist, write it
+        if role and not role_file.is_file():
+            system_dir.mkdir(exist_ok=True)
+            role_file.write_text(role)
 
         # Auto-load LTM from file into prompt manager
         loaded_ltm = ""
@@ -287,8 +293,8 @@ class BaseAgent:
         # Status — always available (no service dependency)
         state_intrinsics["status"] = self._handle_status
 
-        # Memory — always available (no service dependency)
-        state_intrinsics["memory"] = self._handle_memory
+        # System — always available (no service dependency)
+        state_intrinsics["system"] = self._handle_system
 
         all_names = file_intrinsic_names | set(state_intrinsics.keys())
 
@@ -658,36 +664,81 @@ class BaseAgent:
         }
 
     # ------------------------------------------------------------------
-    # Memory intrinsic
+    # System intrinsic
     # ------------------------------------------------------------------
 
-    def _handle_memory(self, args: dict) -> dict:
-        """Handle memory tool — long-term memory management."""
-        action = args.get("action", "load")
-        if action == "load":
-            return self._memory_load()
+    def _handle_system(self, args: dict) -> dict:
+        """Handle system tool — agent identity management (role + ltm)."""
+        action = args.get("action", "view")
+        obj = args.get("object", "")
+        if obj not in ("role", "ltm"):
+            return {"error": f"Unknown object: {obj!r}. Must be 'role' or 'ltm'."}
+
+        system_dir = self._working_dir / "system"
+        system_dir.mkdir(exist_ok=True)
+        file_path = system_dir / f"{obj}.md"
+        if not file_path.is_file():
+            file_path.write_text("")
+
+        if action == "view":
+            return self._system_view(file_path)
+        elif action == "diff":
+            return self._system_diff(file_path, obj)
+        elif action == "load":
+            return self._system_load(file_path, obj)
         else:
-            return {"error": f"Unknown memory action: {action}"}
+            return {"error": f"Unknown action: {action!r}. Must be 'view', 'diff', or 'load'."}
 
-    def _memory_load(self) -> dict:
-        """Read ltm/ltm.md, inject into system prompt, git commit."""
-        ltm_dir = self._working_dir / "ltm"
-        ltm_file = ltm_dir / "ltm.md"
+    def _system_view(self, file_path: Path) -> dict:
+        """Read the current contents of a system file."""
+        content = file_path.read_text()
+        return {
+            "status": "ok",
+            "path": str(file_path),
+            "content": content,
+            "size_bytes": len(content.encode("utf-8")),
+        }
 
-        # Create if missing
-        ltm_dir.mkdir(exist_ok=True)
-        if not ltm_file.is_file():
-            ltm_file.write_text("")
+    def _system_diff(self, file_path: Path, obj: str) -> dict:
+        """Show uncommitted git diff for a system file."""
+        rel_path = f"system/{obj}.md"
+        try:
+            result = subprocess.run(
+                ["git", "diff", rel_path],
+                cwd=self._working_dir,
+                capture_output=True, text=True,
+            )
+            diff_text = result.stdout.strip()
+            # Also check for untracked/new file changes
+            if not diff_text:
+                status_result = subprocess.run(
+                    ["git", "status", "--porcelain", rel_path],
+                    cwd=self._working_dir,
+                    capture_output=True, text=True,
+                )
+                if status_result.stdout.strip():
+                    # Untracked or new — show the file content as the "diff"
+                    diff_text = f"(new/untracked file)\n{file_path.read_text()}"
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            diff_text = ""
 
-        # Read file
-        content = ltm_file.read_text()
-        size_bytes = ltm_file.stat().st_size
+        return {
+            "status": "ok",
+            "path": str(file_path),
+            "git_diff": diff_text,
+        }
+
+    def _system_load(self, file_path: Path, obj: str) -> dict:
+        """Read a system file, inject into system prompt, git commit."""
+        content = file_path.read_text()
+        size_bytes = len(content.encode("utf-8"))
 
         # Inject into system prompt (or remove if empty)
+        protected = (obj == "role")
         if content.strip():
-            self._prompt_manager.write_section("ltm", content)
+            self._prompt_manager.write_section(obj, content, protected=protected)
         else:
-            self._prompt_manager.delete_section("ltm")
+            self._prompt_manager.delete_section(obj)
         self._token_decomp_dirty = True
 
         # Update live session's system prompt if one exists
@@ -695,13 +746,14 @@ class BaseAgent:
             self._chat.update_system_prompt(self._build_system_prompt())
 
         # Git diff + commit
-        git_diff, commit_hash = self._git_diff_and_commit_ltm()
+        rel_path = f"system/{obj}.md"
+        git_diff, commit_hash = self._git_diff_and_commit(rel_path, obj)
 
-        self._log("memory_load", size_bytes=size_bytes, changed=commit_hash is not None)
+        self._log(f"system_load_{obj}", size_bytes=size_bytes, changed=commit_hash is not None)
 
         return {
             "status": "ok",
-            "path": str(ltm_file),
+            "path": str(file_path),
             "size_bytes": size_bytes,
             "content_preview": content[:200],
             "diff": {
@@ -711,28 +763,24 @@ class BaseAgent:
             },
         }
 
-    def _git_diff_and_commit_ltm(self) -> tuple[str | None, str | None]:
-        """Run git diff on ltm/ltm.md, stage, and commit if changed.
+    def _git_diff_and_commit(self, rel_path: str, label: str) -> tuple[str | None, str | None]:
+        """Run git diff on a file, stage, and commit if changed.
 
-        Returns (diff_text, short_commit_hash) or (None, None) if no changes
-        or git is not available.
+        Returns (diff_text, short_commit_hash) or (None, None) if no changes.
         """
         try:
-            # Check for changes
             diff_result = subprocess.run(
-                ["git", "diff", "ltm/ltm.md"],
+                ["git", "diff", rel_path],
                 cwd=self._working_dir,
                 capture_output=True, text=True,
             )
-            # Also check for untracked new content
             diff_cached = subprocess.run(
-                ["git", "diff", "--cached", "ltm/ltm.md"],
+                ["git", "diff", "--cached", rel_path],
                 cwd=self._working_dir,
                 capture_output=True, text=True,
             )
-            # Check status for untracked/new files
             status_result = subprocess.run(
-                ["git", "status", "--porcelain", "ltm/ltm.md"],
+                ["git", "status", "--porcelain", rel_path],
                 cwd=self._working_dir,
                 capture_output=True, text=True,
             )
@@ -746,32 +794,28 @@ class BaseAgent:
             if not has_changes:
                 return None, None
 
-            # Capture the diff before staging
             diff_text = diff_result.stdout or status_result.stdout
 
-            # Stage and commit
             subprocess.run(
-                ["git", "add", "ltm/ltm.md"],
+                ["git", "add", rel_path],
                 cwd=self._working_dir,
                 capture_output=True, check=True,
             )
 
-            # Get diff of staged changes (for new files, diff_result is empty)
             if not diff_text.strip():
                 staged = subprocess.run(
-                    ["git", "diff", "--cached", "ltm/ltm.md"],
+                    ["git", "diff", "--cached", rel_path],
                     cwd=self._working_dir,
                     capture_output=True, text=True,
                 )
                 diff_text = staged.stdout
 
             subprocess.run(
-                ["git", "commit", "-m", "ltm: update long-term memory"],
+                ["git", "commit", "-m", f"system: update {label}"],
                 cwd=self._working_dir,
                 capture_output=True, check=True,
             )
 
-            # Get short commit hash
             hash_result = subprocess.run(
                 ["git", "rev-parse", "--short", "HEAD"],
                 cwd=self._working_dir,
@@ -782,7 +826,6 @@ class BaseAgent:
             return diff_text, commit_hash
 
         except (FileNotFoundError, subprocess.CalledProcessError):
-            # Git not available or error — load still works, just no diff/commit
             return None, None
 
     # ------------------------------------------------------------------
@@ -859,7 +902,7 @@ class BaseAgent:
 
         # Persist LTM from prompt manager to file
         ltm_content = self._prompt_manager.read_section("ltm") or ""
-        ltm_file = self._working_dir / "ltm" / "ltm.md"
+        ltm_file = self._working_dir / "system" / "ltm.md"
         if ltm_file.is_file() or ltm_content:
             ltm_file.parent.mkdir(exist_ok=True)
             ltm_file.write_text(ltm_content)
@@ -902,8 +945,9 @@ class BaseAgent:
     def _git_init_working_dir(self) -> None:
         """Initialize working directory as a git repo with opt-in tracking.
 
-        Creates .gitignore (track nothing by default, whitelist ltm/),
-        ltm/ directory, and makes an initial commit. Skips if .git exists.
+        Creates .gitignore (track nothing by default, whitelist system/),
+        system/ directory with role.md and ltm.md, and makes an initial commit.
+        Skips if .git exists.
         """
         git_dir = self._working_dir / ".git"
         if git_dir.is_dir():
@@ -936,22 +980,25 @@ class BaseAgent:
                 "*\n"
                 "# Except these\n"
                 "!.gitignore\n"
-                "!ltm/\n"
-                "!ltm/**\n"
+                "!system/\n"
+                "!system/**\n"
                 "!logs/\n"
                 "!logs/**\n"
             )
 
-            # Create ltm/ directory and ltm.md
-            ltm_dir = self._working_dir / "ltm"
-            ltm_dir.mkdir(exist_ok=True)
-            ltm_file = ltm_dir / "ltm.md"
+            # Create system/ directory with role.md and ltm.md
+            system_dir = self._working_dir / "system"
+            system_dir.mkdir(exist_ok=True)
+            role_file = system_dir / "role.md"
+            if not role_file.is_file():
+                role_file.write_text("")
+            ltm_file = system_dir / "ltm.md"
             if not ltm_file.is_file():
                 ltm_file.write_text("")
 
             # Initial commit
             subprocess.run(
-                ["git", "add", ".gitignore", "ltm/"],
+                ["git", "add", ".gitignore", "system/"],
                 cwd=self._working_dir,
                 capture_output=True, check=True,
             )
@@ -962,11 +1009,14 @@ class BaseAgent:
             )
         except (FileNotFoundError, subprocess.CalledProcessError):
             # Git not available — degrade gracefully. Agent still works,
-            # just without git tracking for ltm.
-            # Still create ltm/ directory and file
-            ltm_dir = self._working_dir / "ltm"
-            ltm_dir.mkdir(exist_ok=True)
-            ltm_file = ltm_dir / "ltm.md"
+            # just without git tracking.
+            # Still create system/ directory and files
+            system_dir = self._working_dir / "system"
+            system_dir.mkdir(exist_ok=True)
+            role_file = system_dir / "role.md"
+            if not role_file.is_file():
+                role_file.write_text("")
+            ltm_file = system_dir / "ltm.md"
             if not ltm_file.is_file():
                 ltm_file.write_text("")
 
