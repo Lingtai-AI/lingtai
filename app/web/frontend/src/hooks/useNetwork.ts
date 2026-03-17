@@ -9,6 +9,8 @@ import type {
 } from "../types";
 import { AGENT_COLORS } from "../types";
 
+const PARTICLE_DURATION = 2000; // 2 seconds, regardless of line length
+
 export function useNetwork(
   agents: AgentInfo[],
   entries: DiaryEvent[],
@@ -17,7 +19,6 @@ export function useNetwork(
 ) {
   const [particles, setParticles] = useState<Particle[]>([]);
   const lastSeenTsRef = useRef(0);
-  const animFrameRef = useRef<number>(0);
 
   // Build node list: agents + user
   const nodes: NetworkNode[] = agents.map((a, i) => ({
@@ -52,7 +53,6 @@ export function useNetwork(
   for (const e of entries) {
     if (e.type === "email_out" && e.to) {
       const fromId = e.agent_key;
-      // e.to might be an address or comma-separated addresses
       for (const addr of e.to.split(", ")) {
         const toId = addrToNodeId[addr.trim()];
         if (toId && toId !== fromId) addEdge(fromId, toId);
@@ -103,34 +103,43 @@ export function useNetwork(
                 target: toId,
                 color,
                 startTime: performance.now(),
-                duration: 1500,
+                duration: PARTICLE_DURATION,
               });
             }
+          }
+        }
+        if (e.type === "email_in" && e.from) {
+          const toId = e.agent_key;
+          const fromId = addrToNodeId[e.from];
+          if (fromId && fromId !== toId) {
+            const agentIdx = agents.findIndex((a) => a.key === fromId);
+            const color =
+              AGENT_COLORS[agentIdx % AGENT_COLORS.length] || "#e94560";
+            newParticles.push({
+              id: `${e.time}-${fromId}-${toId}-${Math.random()}`,
+              source: fromId,
+              target: toId,
+              color,
+              startTime: performance.now(),
+              duration: PARTICLE_DURATION,
+            });
           }
         }
       }
 
       if (newParticles.length > 0) {
         setParticles((prev) => [...prev, ...newParticles]);
+
+        // Schedule cleanup after particles expire
+        setTimeout(() => {
+          const cutoff = performance.now();
+          setParticles((prev) =>
+            prev.filter((p) => cutoff - p.startTime < p.duration)
+          );
+        }, PARTICLE_DURATION + 100);
       }
     }
-  }, [entries, agents, addrToNodeId]);
-
-  // Animation loop — remove expired particles
-  useEffect(() => {
-    const tick = () => {
-      const now = performance.now();
-      setParticles((prev) => {
-        const alive = prev.filter(
-          (p) => now - p.startTime < p.duration
-        );
-        return alive.length !== prev.length ? alive : prev;
-      });
-      animFrameRef.current = requestAnimationFrame(tick);
-    };
-    animFrameRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animFrameRef.current);
-  }, []);
+  }, [entries, agents]);
 
   return { nodes, edges, particles };
 }

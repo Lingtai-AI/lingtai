@@ -5,6 +5,8 @@ interface HeaderProps {
   userPort: number;
   activePage: "inbox" | "network";
   onPageChange: (page: "inbox" | "network") => void;
+  lightMode: boolean;
+  onToggleTheme: () => void;
 }
 
 export function Header({
@@ -12,6 +14,8 @@ export function Header({
   userPort,
   activePage,
   onPageChange,
+  lightMode,
+  onToggleTheme,
 }: HeaderProps) {
   const activeCount = agents.filter((a) => a.status === "active").length;
   return (
@@ -43,11 +47,20 @@ export function Header({
           Network
         </button>
       </div>
-      {activeCount > 0 && (
-        <span className="text-xs text-emerald-400 ml-auto">
-          ● {activeCount} active
-        </span>
-      )}
+      <div className="ml-auto flex items-center gap-3">
+        {activeCount > 0 && (
+          <span className="text-xs text-emerald-400">
+            ● {activeCount} active
+          </span>
+        )}
+        <button
+          onClick={onToggleTheme}
+          className="px-2 py-1 text-xs border border-border rounded cursor-pointer bg-transparent text-text-dim hover:text-text"
+          title={lightMode ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          {lightMode ? "Dark" : "Light"}
+        </button>
+      </div>
     </div>
   );
 }

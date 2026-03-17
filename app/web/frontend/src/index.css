@@ -12,3 +12,17 @@
   --color-text-dim: #666;
   --color-text-faint: #555;
 }
+
+/* Light mode — warm, eye-friendly */
+:root.light {
+  --color-bg: #faf6f0;
+  --color-panel: #f5efe6;
+  --color-panel-dark: #ede6da;
+  --color-border: #d4c9b8;
+  --color-accent: #c0392b;
+  --color-accent-hover: #a33025;
+  --color-text: #3d3229;
+  --color-text-muted: #7a6e62;
+  --color-text-dim: #9a8e82;
+  --color-text-faint: #b8ad9f;
+}

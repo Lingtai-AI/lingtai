@@ -89,7 +89,11 @@ def main():
             name=a["name"],
             port=a["port"],
             llm=llm,
-            capabilities={"email": {}, "web_search": {}, "file": {}, "bash": {}},
+            capabilities={
+                "email": {}, "web_search": {}, "file": {},
+                "vision": {}, "anima": {}, "conscience": {"interval": 10},
+                "bash": {},
+            },
             covenant=make_covenant(a["name"], f"127.0.0.1:{a['port']}", contacts),
         )
 
