@@ -31,7 +31,7 @@ Owns the agent's working directory — filesystem locking, git initialization, m
 
 ```python
 class WorkingDir:
-    def __init__(self, base_dir: Path, agent_id: str, git_enabled: bool = True): ...
+    def __init__(self, base_dir: Path, agent_id: str): ...
 
     @property
     def path(self) -> Path: ...
@@ -42,11 +42,12 @@ class WorkingDir:
 
     # Git operations
     def init_git(self) -> None: ...
+    def diff(self, filepath: str) -> str: ...              # read-only git diff
     def diff_and_commit(self, filepath: str, message: str) -> tuple[str, str | None]: ...
 
     # Manifest
     def read_manifest(self) -> tuple[str, str]: ...      # (covenant, memory)
-    def write_manifest(self, agent_id: str, covenant: str) -> None: ...
+    def write_manifest(self, manifest: dict) -> None: ...
 ```
 
 ### What moves here
@@ -82,9 +83,9 @@ class SessionManager:
 
     # Core operations
     def ensure_session(self) -> ChatSession: ...
-    def send(self, content: str, tools: list[FunctionSchema]) -> LLMResponse: ...
-    def send_streaming(self, content: str, tools: list[FunctionSchema], callbacks) -> LLMResponse: ...
-    def reset(self, failed_tool_calls: list, interface) -> None: ...
+    def send(self, message: str) -> LLMResponse: ...
+    def send_streaming(self, message: str, callbacks) -> LLMResponse: ...
+    def reset(self, chat: ChatSession, failed_message) -> tuple[ChatSession, str]: ...
 
     # Token tracking
     def track_usage(self, response: LLMResponse) -> None: ...
@@ -116,8 +117,8 @@ Receives `LLMService`, `AgentConfig`, `SystemPromptManager` at construction. Use
 
 ### Design notes
 
-- `send()` encapsulates the timeout/retry/stale-interaction-recovery logic currently in `_llm_send()`
-- `reset()` encapsulates the rollback-on-server-error logic currently in `_on_reset()`
+- `send()` encapsulates the timeout/retry/stale-interaction-recovery logic currently in `_llm_send()`. Tools are obtained internally via `build_tool_schemas_fn`, not passed per-call (matching current `_llm_send` which takes only `message`).
+- `reset(chat, failed_message)` encapsulates the rollback-on-server-error logic currently in `_on_reset()`. Returns `(new_chat, rollback_msg)` tuple — the caller uses both.
 - Token state (`_cumulative_input`, `_cumulative_output`, etc.) lives on SessionManager
 - Compaction logic calls `llm_service.compact()` and updates the session's interface
 
@@ -132,6 +133,7 @@ class ToolExecutor:
     def __init__(
         self,
         dispatch_fn: Callable[[ToolCall], str],
+        make_tool_result_fn: Callable,
         guard: LoopGuard,
         parallel_safe_tools: set[str],
         logger_fn: Callable | None = None,
@@ -158,12 +160,14 @@ class ToolExecutor:
 
 ### Dependencies
 
-Receives `dispatch_fn` (a closure over BaseAgent's tool tables), `LoopGuard`, and `parallel_safe_tools` at construction. No reference to BaseAgent.
+Receives `dispatch_fn` (a closure over BaseAgent's tool tables), `make_tool_result_fn` (wraps `service.make_tool_result` — formats results for the LLM provider), `LoopGuard`, and `parallel_safe_tools` at construction. No reference to BaseAgent.
 
 ### Design notes
 
 - Single public method `execute()`. Internally decides sequential vs parallel based on tool call count and `parallel_safe_tools` membership.
-- `on_result_hook` replaces the current `_on_tool_result_hook` call — ToolExecutor calls it after each tool execution, and if it returns a non-None string, that string replaces the tool result (intercept pattern).
+- `make_tool_result_fn` wraps `service.make_tool_result(name, result, tool_call_id, provider)` — every execution path needs to format results for the LLM provider. BaseAgent passes a closure: `lambda name, result, tc_id: self.service.make_tool_result(name, result, tool_call_id=tc_id, provider=self._config.provider)`.
+- `on_result_hook` replaces the current `_on_tool_result_hook` call — ToolExecutor calls it after each tool execution, and if it returns a non-None string, that string replaces the tool result (intercept pattern). This is a callback, so subclass overrides work via late binding.
+- Owns `ThreadPoolExecutor` lifecycle — creates per-batch (matching current behavior).
 - Error handling (UnknownToolError, guard blocks, exceptions) is encapsulated — results always come back as dicts with `result` or `error` fields.
 
 ## Component 4: Intrinsic Handlers in `intrinsics/*.py`
@@ -216,10 +220,10 @@ def _wire_intrinsics(self):
 
 Each handler accesses agent state via the `agent` parameter. The specific attributes each handler needs:
 
-- **mail**: `agent._mail_service`, `agent._mail_queue`, `agent.agent_id`, `agent._log()`
-- **clock**: `agent._cancel_event`, `agent._mail_event`, `agent._state`
-- **status**: `agent.agent_id`, `agent._state`, `agent._session` (via SessionManager), `agent.get_token_usage()`, `agent._shutdown_requested`, `agent._workdir`
-- **system**: `agent._workdir` (for `diff_and_commit`), `agent.update_system_prompt()`, `agent._prompt_manager`
+- **mail**: `agent._mail_service`, `agent._mail_queue`, `agent._mail_queue_lock`, `agent.agent_id`, `agent._admin`, `agent._working_dir`, `agent._log()`
+- **clock**: `agent._cancel_event`, `agent._mail_arrived`, `agent._log()`
+- **status**: `agent.agent_id`, `agent._state`, `agent._chat` (→ `agent._session.chat` after SessionManager extraction), `agent._mail_service`, `agent._uptime_anchor`, `agent._started_at`, `agent._shutdown` (threading.Event), `agent._working_dir`, `agent.get_token_usage()`, `agent._log()`
+- **system**: `agent._working_dir` (for `diff()` and `diff_and_commit()`), `agent.update_system_prompt()`, `agent._prompt_manager`, `agent._chat` (→ `agent._session.chat`), `agent._token_decomp_dirty`, `agent._build_system_prompt()`, `agent._log()`
 
 This is an explicit dependency — each handler documents exactly what agent surface it touches.
 
@@ -236,6 +240,7 @@ This is an explicit dependency — each handler documents exactly what agent sur
 - `_handle_message()` — route by message type
 - `_handle_request()` — send to LLM, process response
 - `_process_response()` — tool call loop, delegates execution to ToolExecutor, feeds results back via SessionManager
+- `_handle_cancel_diary()` — sends LLM call to write diary on cancellation (called from `_process_response`)
 
 ### Mail routing (MailService callbacks)
 - `_on_mail_received()`, `_on_normal_mail()`
@@ -245,7 +250,7 @@ This is an explicit dependency — each handler documents exactly what agent sur
 
 ### Public API
 - `add_tool()`, `remove_tool()`, `override_intrinsic()`, `update_system_prompt()`
-- `send()`, `mail()`
+- `send()`, `mail()`, `status()`
 
 ### Schema building
 - `_build_tool_schemas()`, `_build_system_prompt()` — these know about the agent's tool registry and prompt sections, so they stay here and are passed as callbacks to SessionManager
@@ -293,6 +298,26 @@ Each step: extract code → update BaseAgent to delegate → run full test suite
   - `ToolExecutor`: give it a mock dispatch function, verify sequential/parallel execution
   - `SessionManager`: give it a mock LLMService, verify send/retry/reset/compaction
   - Intrinsic handlers: give them a mock agent, verify each action
+
+## Migration Warnings
+
+### Anima capability accesses `agent._chat` directly
+
+The anima capability (`capabilities/anima.py`) reads `self._agent._chat`, `self._agent._interaction_id`, and `self._agent._token_decomp_dirty` in multiple places. It also calls `self._agent._build_system_prompt()` and `self._agent.service.check_and_compact()` — its compaction logic partially duplicates BaseAgent's own `_check_and_compact()`. When SessionManager is extracted (step 4), these references must be updated to `self._agent._session.chat` etc., and the duplicated compaction logic should be reconciled. This is the highest-risk migration step.
+
+### Tests call intrinsic handlers by method name
+
+Tests call `agent._handle_mail()`, `agent._handle_clock()`, `agent._handle_status()`, and `agent._handle_system()` directly across `test_agent.py`, `test_clock.py`, `test_status.py`, `test_system.py`, and `test_conscience.py`. After extraction, these methods no longer exist on BaseAgent. Additionally, `test_conscience.py` asserts `agent._intrinsics["clock"] == agent._handle_clock` (identity check against bound method). Either:
+- Update all tests to call via `intrinsics/module.handle(agent, args)` directly, or
+- Keep thin forwarding methods on BaseAgent (less clean but less churn)
+
+### Email capability monkey-patches `_on_normal_mail()`
+
+The email capability replaces `agent._on_normal_mail` at runtime. This method stays on BaseAgent, so no issue — but worth documenting since it's a runtime mutation of agent behavior.
+
+### `_system_diff()` does raw subprocess, not `_git_diff_and_commit()`
+
+The system intrinsic's `diff` action runs its own `git diff` and `git status --porcelain` via subprocess. This is read-only (no commit). WorkingDir needs a separate `diff(filepath)` method for this, distinct from `diff_and_commit()`.
 
 ## Non-goals
 
