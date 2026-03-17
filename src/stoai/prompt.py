@@ -1,6 +1,6 @@
 """System prompt — section manager + builder.
 
-SystemPromptManager manages named sections (role, ltm, etc.) of an agent's
+SystemPromptManager manages named sections (covenant, memory, etc.) of an agent's
 system prompt. build_system_prompt() assembles the base prompt + rendered
 sections into the final string sent to the LLM.
 """
