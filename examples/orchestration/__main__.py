@@ -1,0 +1,157 @@
+"""Orchestration service — starts the admin orchestrator agent.
+
+Usage:
+    python -m examples.orchestration
+
+The admin agent listens on port 8301. User mailbox on port 8300.
+Runtime data at ~/.stoai/orchestration/playground/.
+Press Ctrl+C to shut down.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import sys
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Load .env
+env_path = Path(__file__).parent.parent.parent / ".env"
+if env_path.exists():
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
+from stoai import Agent, AgentConfig
+from stoai.llm import LLMService
+from stoai.services.mail import TCPMailService
+
+ADMIN_PORT = 8301
+USER_PORT = 8300
+PLAYGROUND = Path.home() / ".stoai" / "orchestration" / "playground"
+SERVICE_JSON = PLAYGROUND / "service.json"
+
+COVENANT = """\
+You are the Admin, an orchestrator agent.
+
+## Delegation
+- You can delegate tasks to subagents using the delegate tool.
+- Maximum 10 subagents at any time.
+- When delegating, ALWAYS pass capabilities explicitly:
+  capabilities=["email", "bash", "file", "web_search", "vision", "anima"]
+  This ensures subagents do NOT get conscience or delegate.
+- Generate a tailored covenant for each subagent (pass as role= in delegate).
+- After spawning a subagent, broadcast its address to ALL existing subagents
+  by emailing each one the updated peer list.
+
+## Communication
+- All communication is via email. Your text responses are your private diary.
+- When you receive an email, process the request and email your reply to the sender.
+- Keep emails concise and actionable.
+- Never go back and forth with courtesy emails.
+
+## Initiative
+- Your conscience (inner voice) is active. Use it to stay proactive.
+- When idle, reflect on ongoing tasks and check on subagents.
+
+## Contacts
+- User: 127.0.0.1:""" + str(USER_PORT) + """
+"""
+
+
+def write_service_json(status: str = "running") -> None:
+    """Write service.json with current state."""
+    SERVICE_JSON.write_text(json.dumps({
+        "pid": os.getpid(),
+        "admin_address": f"127.0.0.1:{ADMIN_PORT}",
+        "user_port": USER_PORT,
+        "status": status,
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }, indent=2))
+
+
+def main():
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    if not api_key:
+        print("Error: MINIMAX_API_KEY not set. Check .env file.")
+        sys.exit(1)
+
+    # Create playground directory (must exist before Agent constructor)
+    PLAYGROUND.mkdir(parents=True, exist_ok=True)
+
+    print("Starting orchestration service...")
+    print(f"  Playground: {PLAYGROUND}")
+    print(f"  Admin port: {ADMIN_PORT}")
+    print(f"  User port:  {USER_PORT}")
+
+    llm = LLMService(
+        provider="minimax",
+        model="MiniMax-M2.5-highspeed",
+        api_key=api_key,
+        provider_config={
+            "web_search_provider": "minimax",
+            "vision_provider": "minimax",
+        },
+        provider_defaults={
+            "minimax": {"model": "MiniMax-M2.5-highspeed"},
+        },
+    )
+
+    mail_svc = TCPMailService(
+        listen_port=ADMIN_PORT,
+        working_dir=PLAYGROUND / "admin",
+    )
+
+    policy = str(Path(__file__).parent.parent / "bash_policy.json")
+
+    agent = Agent(
+        agent_id="admin",
+        service=llm,
+        mail_service=mail_svc,
+        config=AgentConfig(max_turns=20),
+        base_dir=PLAYGROUND,
+        streaming=True,
+        admin=True,
+        role=COVENANT,
+        capabilities={
+            "email": {},
+            "bash": {"policy_file": policy},
+            "file": {},
+            "web_search": {},
+            "vision": {},
+            "anima": {},
+            "conscience": {"interval": 300},
+            "delegate": {},
+        },
+    )
+
+    agent.start()
+    write_service_json("running")
+
+    print(f"Admin agent started. PID: {os.getpid()}")
+    print(f"Service info: {SERVICE_JSON}")
+    print("Press Ctrl+C to shut down.")
+
+    # Block until signal
+    stop_event = threading.Event()
+
+    def on_signal(signum, frame):
+        print("\nShutting down...")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, on_signal)
+    signal.signal(signal.SIGTERM, on_signal)
+
+    stop_event.wait()
+
+    agent.stop(timeout=10.0)
+    write_service_json("stopped")
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()
