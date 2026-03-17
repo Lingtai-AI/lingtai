@@ -688,19 +688,18 @@ class BaseAgent:
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt from base + sections + tool inventory."""
-        # Build tool inventory from SYSTEM_PROMPT constants
+        # Build tool inventory from full tool descriptions
         lines = []
         for name in self._intrinsics:
             info = ALL_INTRINSICS.get(name)
-            if info and info.get("system_prompt"):
-                lines.append(f"- {name}: {info['system_prompt']}")
+            if info:
+                lines.append(f"### {name}\n{info['description']}")
         for s in self._mcp_schemas:
-            sp = getattr(s, "system_prompt", None)
-            if sp:
-                lines.append(f"- {s.name}: {sp}")
+            if s.description:
+                lines.append(f"### {s.name}\n{s.description}")
         if lines:
             self._prompt_manager.write_section(
-                "tools", "\n".join(lines), protected=True
+                "tools", "\n\n".join(lines), protected=True
             )
         return build_system_prompt(prompt_manager=self._prompt_manager)
 

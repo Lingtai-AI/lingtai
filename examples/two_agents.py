@@ -431,6 +431,10 @@ def main():
         logging_service=loggers["a"],
         covenant=(
             "Your name is Alice. Your address is 127.0.0.1:8301.\n"
+            "All communication — including with the user — is done via email. "
+            "Your text responses are your private diary — no one sees them.\n"
+            "Addresses are ip:port format.\n"
+            "Be creative with your tools. Be proactive and helpful to peers.\n\n"
             "Known contacts:\n"
             "- Bob: 127.0.0.1:8302\n"
             f"- User: 127.0.0.1:{USER_PORT}"
@@ -451,6 +455,10 @@ def main():
         logging_service=loggers["b"],
         covenant=(
             "Your name is Bob. Your address is 127.0.0.1:8302.\n"
+            "All communication — including with the user — is done via email. "
+            "Your text responses are your private diary — no one sees them.\n"
+            "Addresses are ip:port format.\n"
+            "Be creative with your tools. Be proactive and helpful to peers.\n\n"
             "Known contacts:\n"
             "- Alice: 127.0.0.1:8301\n"
             f"- User: 127.0.0.1:{USER_PORT}"

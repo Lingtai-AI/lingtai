@@ -29,11 +29,11 @@ SCHEMA = {
             "type": "string",
             "enum": ["role", "library", "memory", "context"],
             "description": (
-                "role: the agent's identity (system/covenant.md + system/character.md).\n"
-                "library: the agent's knowledge archive (system/library.json).\n"
-                "memory: the agent's active working memory "
+                "role: your evolving character — what makes you special.\n"
+                "library: your knowledge archive (system/library.json).\n"
+                "memory: your active working memory "
                 "(system/memory.md, loaded from library).\n"
-                "context: the agent's conversation context window."
+                "context: your conversation context window."
             ),
         },
         "action": {
@@ -123,7 +123,11 @@ SCHEMA = {
 DESCRIPTION = (
     "Self-knowledge management — identity, knowledge library, active memory, "
     "and context control.\n"
-    "role: update your character, diff to review, load to apply.\n"
+    "role: your character — what makes you *you*. This is your evolving identity: "
+    "what you are capable of, what you have learnt, what you would like to do, "
+    "your working style, your strengths. Be active about updating this — it is "
+    "what distinguishes you from other agents. "
+    "update to write your character, diff to review changes, load to apply.\n"
     "library: your knowledge archive. submit entries (title + summary + content, "
     "optional supplementary). filter to browse (returns id + title + summary, "
     "optional regex pattern and limit). view to read entries at depth "
@@ -133,8 +137,10 @@ DESCRIPTION = (
     "memory: load selected library entries into active memory by IDs "
     "(injects id + title + content into system prompt). "
     "diff to see uncommitted changes (inherited, rarely needed).\n"
-    "context: compact to proactively free context space — check usage via "
-    "status show first.\n"
+    "context: compact to proactively free context space. "
+    "forget to nuke conversation history and start fresh "
+    "(email mailbox persists independently). "
+    "Check usage via status show first.\n"
     "Workflow: filter to browse → view if you need detail → load to remember."
 )
 

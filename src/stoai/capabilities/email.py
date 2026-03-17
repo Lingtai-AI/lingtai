@@ -545,6 +545,6 @@ def setup(agent: "BaseAgent") -> EmailManager:
     agent._on_normal_mail = mgr.on_normal_mail
     agent.add_tool(
         "email", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
-        system_prompt="Your only communication channel — with other agents and the user. Text responses are your private diary.",
+        system_prompt="Send, receive, reply, and search email.",
     )
     return mgr
