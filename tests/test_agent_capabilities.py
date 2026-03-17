@@ -1,9 +1,9 @@
-"""Tests for StoAIAgent — capabilities and tools layer."""
+"""Tests for Agent — capabilities and tools layer."""
 from __future__ import annotations
 
 import pytest
 from unittest.mock import MagicMock
-from stoai.stoai_agent import StoAIAgent
+from stoai.agent import Agent
 from stoai.types import MCPTool
 
 
@@ -15,17 +15,17 @@ def make_mock_service():
     return svc
 
 
-def test_stoai_agent_no_capabilities(tmp_path):
-    """StoAIAgent with no capabilities works like BaseAgent."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
+def test_agent_no_capabilities(tmp_path):
+    """Agent with no capabilities works like BaseAgent."""
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path)
     assert agent._capabilities == []
     assert agent._capability_managers == {}
     agent.stop(timeout=1.0)
 
 
-def test_stoai_agent_capabilities_list(tmp_path):
+def test_agent_capabilities_list(tmp_path):
     """capabilities= as list of strings registers capabilities."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["vision", "web_search"],
     )
@@ -37,9 +37,9 @@ def test_stoai_agent_capabilities_list(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_stoai_agent_capabilities_dict(tmp_path):
+def test_agent_capabilities_dict(tmp_path):
     """capabilities= as dict registers capabilities with kwargs."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"vision": {}, "web_search": {}},
     )
@@ -48,11 +48,11 @@ def test_stoai_agent_capabilities_dict(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_stoai_agent_tools_param(tmp_path):
+def test_agent_tools_param(tmp_path):
     """tools= registers MCP tools and populates _mcp_tool_names."""
     handler = MagicMock(return_value={"ok": True})
     tool = MCPTool(name="my_tool", schema={"type": "object", "properties": {}}, description="test", handler=handler)
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         tools=[tool],
     )
@@ -61,9 +61,9 @@ def test_stoai_agent_tools_param(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_stoai_agent_get_capability(tmp_path):
+def test_agent_get_capability(tmp_path):
     """get_capability() returns the manager instance."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["vision"],
     )
@@ -73,9 +73,9 @@ def test_stoai_agent_get_capability(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_stoai_agent_seal_after_start(tmp_path):
-    """add_tool() raises after start() on StoAIAgent too."""
-    agent = StoAIAgent(
+def test_agent_seal_after_start(tmp_path):
+    """add_tool() raises after start() on Agent too."""
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["vision"],
     )
@@ -87,11 +87,11 @@ def test_stoai_agent_seal_after_start(tmp_path):
         agent.stop(timeout=2.0)
 
 
-def test_stoai_agent_capabilities_and_tools(tmp_path):
+def test_agent_capabilities_and_tools(tmp_path):
     """Both capabilities and tools can be used together."""
     handler = MagicMock(return_value={"ok": True})
     tool = MCPTool(name="my_tool", schema={"type": "object", "properties": {}}, description="test", handler=handler)
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["vision"],
         tools=[tool],

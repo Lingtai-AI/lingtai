@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stoai.stoai_agent import StoAIAgent
+from stoai.agent import Agent
 
 
 def make_mock_service():
@@ -18,7 +18,7 @@ def make_mock_service():
 
 def test_file_sugar_expands_to_five(tmp_path):
     """capabilities=["file"] should register all 5 file tools."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["file"],
     )
@@ -29,7 +29,7 @@ def test_file_sugar_expands_to_five(tmp_path):
 
 def test_file_sugar_dict_form(tmp_path):
     """capabilities={"file": {}} (dict form) should also expand."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"file": {}},
     )
@@ -40,7 +40,7 @@ def test_file_sugar_dict_form(tmp_path):
 
 def test_individual_file_capability(tmp_path):
     """Each file capability can be loaded individually."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["read", "write"],
     )
@@ -54,7 +54,7 @@ def test_individual_file_capability(tmp_path):
 
 def test_write_and_read_via_capability(tmp_path):
     """Write and read files through capability handlers."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["file"],
     )
@@ -74,7 +74,7 @@ def test_write_and_read_via_capability(tmp_path):
 
 def test_edit_via_capability(tmp_path):
     """Edit files through capability handler."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["file"],
     )
@@ -89,7 +89,7 @@ def test_edit_via_capability(tmp_path):
 
 def test_glob_via_capability(tmp_path):
     """Glob files through capability handler."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["file"],
     )
@@ -105,7 +105,7 @@ def test_glob_via_capability(tmp_path):
 
 def test_grep_via_capability(tmp_path):
     """Grep files through capability handler."""
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["file"],
     )
@@ -138,7 +138,7 @@ def test_file_capability_uses_file_io_service(tmp_path):
     """File capabilities should use the agent's FileIOService."""
     from stoai.services.file_io import LocalFileIOService
     svc = LocalFileIOService(root=tmp_path)
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="test", service=make_mock_service(), base_dir=tmp_path,
         file_io=svc,
         capabilities=["file"],

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from stoai.stoai_agent import StoAIAgent
+from stoai.agent import Agent
 
 
 def make_mock_service():
@@ -54,7 +54,7 @@ def _make_inbox_email(working_dir, *, sender="sender", to=None, subject="test",
 # ---------------------------------------------------------------------------
 
 def test_email_capability_registers_tool(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     assert "email" in agent._mcp_handlers
@@ -68,7 +68,7 @@ def test_email_capability_registers_tool(tmp_path):
 
 def test_email_receive_notification(tmp_path):
     """on_normal_mail should send notification to agent inbox."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     mgr.on_normal_mail({
@@ -86,7 +86,7 @@ def test_email_receive_notification(tmp_path):
 
 def test_email_receive_fallback_id(tmp_path):
     """on_normal_mail should generate ID if _mailbox_id is absent."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     mgr.on_normal_mail({"from": "sender", "message": "body"})
@@ -95,7 +95,7 @@ def test_email_receive_fallback_id(tmp_path):
 
 def test_email_receive_via_agent(tmp_path):
     """After add_capability('email'), agent._on_mail_received should route to mailbox."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     agent._on_mail_received({
         "_mailbox_id": "xyz",
@@ -112,7 +112,7 @@ def test_email_receive_via_agent(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_check_inbox(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     _make_inbox_email(agent.working_dir, sender="a", subject="s1", message="m1")
@@ -125,7 +125,7 @@ def test_email_check_inbox(tmp_path):
 
 def test_email_check_sent(tmp_path):
     """check with folder=sent should show sent emails."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "me"
@@ -139,7 +139,7 @@ def test_email_check_sent(tmp_path):
 
 
 def test_email_check_empty_mailbox(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "check"})
@@ -148,7 +148,7 @@ def test_email_check_empty_mailbox(tmp_path):
 
 
 def test_email_read_by_id(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     eid = _make_inbox_email(agent.working_dir, sender="sender", subject="topic", message="full body")
@@ -159,7 +159,7 @@ def test_email_read_by_id(tmp_path):
 
 
 def test_email_read_marks_as_read(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     eid = _make_inbox_email(agent.working_dir, message="m")
@@ -174,7 +174,7 @@ def test_email_read_marks_as_read(tmp_path):
 
 
 def test_email_read_shows_attachments(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     eid = _make_inbox_email(agent.working_dir, subject="photo", message="look",
@@ -190,7 +190,7 @@ def test_email_read_shows_attachments(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_send_saves_to_sent(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "me"
@@ -212,7 +212,7 @@ def test_email_send_saves_to_sent(tmp_path):
 
 
 def test_email_send_saves_bcc_in_sent(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "me"
@@ -230,7 +230,7 @@ def test_email_send_saves_bcc_in_sent(tmp_path):
 
 def test_email_blocks_identical_consecutive_send(tmp_path):
     """Sending the exact same message twice to the same recipient is blocked."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
@@ -263,7 +263,7 @@ def test_email_blocks_identical_consecutive_send(tmp_path):
 
 def test_email_blocks_identical_reply(tmp_path):
     """Replying with the same message twice is blocked."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
@@ -286,7 +286,7 @@ def test_email_blocks_identical_reply(tmp_path):
 
 
 def test_email_send_with_attachments(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "127.0.0.1:9999"
@@ -324,7 +324,7 @@ def test_email_send_multi_to(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = StoAIAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
+        agent = Agent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
                            base_dir=tmp_path, capabilities=["email"])
         mgr = agent.get_capability("email")
         addrs = [f"127.0.0.1:{p}" for p in ports]
@@ -354,7 +354,7 @@ def test_email_send_cc_visible(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = StoAIAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
+        agent = Agent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
                            base_dir=tmp_path, capabilities=["email"])
         mgr = agent.get_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
@@ -385,7 +385,7 @@ def test_email_send_bcc_hidden(tmp_path):
 
     try:
         sender_svc = TCPMailService()
-        agent = StoAIAgent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
+        agent = Agent(agent_id="sender", service=make_mock_service(), mail_service=sender_svc,
                            base_dir=tmp_path, capabilities=["email"])
         mgr = agent.get_capability("email")
         to_addr = f"127.0.0.1:{ports[0]}"
@@ -408,7 +408,7 @@ def test_email_send_bcc_hidden(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_reply(tmp_path):
-    agent = StoAIAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mock_svc = MagicMock()
     mock_svc.address = "me"
@@ -424,7 +424,7 @@ def test_email_reply(tmp_path):
 
 
 def test_email_reply_no_double_re(tmp_path):
-    agent = StoAIAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mock_svc = MagicMock()
     mock_svc.address = "me"
@@ -442,7 +442,7 @@ def test_email_reply_no_double_re(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_reply_all(tmp_path):
-    agent = StoAIAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mock_svc = MagicMock()
     mock_svc.address = "me"
@@ -461,7 +461,7 @@ def test_email_reply_all(tmp_path):
 
 
 def test_email_reply_all_excludes_self(tmp_path):
-    agent = StoAIAgent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="replier", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mock_svc = MagicMock()
     mock_svc.address = "me"
@@ -482,7 +482,7 @@ def test_email_reply_all_excludes_self(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_search_by_subject(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     _make_inbox_email(agent.working_dir, subject="important meeting", message="body1")
@@ -493,7 +493,7 @@ def test_email_search_by_subject(tmp_path):
 
 
 def test_email_search_by_sender(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     _make_inbox_email(agent.working_dir, sender="alice@test", message="hello")
@@ -503,7 +503,7 @@ def test_email_search_by_sender(tmp_path):
 
 
 def test_email_search_by_message_body(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     _make_inbox_email(agent.working_dir, message="the secret code is 42")
@@ -514,7 +514,7 @@ def test_email_search_by_message_body(tmp_path):
 
 def test_email_search_folder_filter(tmp_path):
     """Search with folder param should only search that folder."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mail_svc = MagicMock()
     mail_svc.address = "me"
@@ -532,7 +532,7 @@ def test_email_search_folder_filter(tmp_path):
 
 
 def test_email_search_invalid_regex(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "search", "query": "[invalid"})
@@ -544,7 +544,7 @@ def test_email_search_invalid_regex(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_without_mail_service(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "send", "address": "someone", "message": "hello"})
@@ -552,7 +552,7 @@ def test_email_without_mail_service(tmp_path):
 
 
 def test_email_read_not_found(tmp_path):
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "read", "email_id": "nonexistent"})

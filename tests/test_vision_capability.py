@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stoai.stoai_agent import StoAIAgent
+from stoai.agent import Agent
 
 
 def make_mock_service():
@@ -18,14 +18,14 @@ def make_mock_service():
 
 def test_vision_added_by_capability(tmp_path):
     """capabilities=['vision'] should register the vision tool."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["vision"])
     assert "vision" in agent._mcp_handlers
 
 
 def test_vision_analyzes_image(tmp_path):
     """Vision capability should analyze an image file."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["vision"])
     mock_response = MagicMock()
     mock_response.text = "A cat sitting on a table"
@@ -41,7 +41,7 @@ def test_vision_with_dedicated_service(tmp_path):
     """Vision capability should use VisionService if provided."""
     mock_vision_svc = MagicMock()
     mock_vision_svc.analyze_image.return_value = "A dog in the park"
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities={"vision": {"vision_service": mock_vision_svc}})
     img_path = agent.working_dir / "test.jpg"
     img_path.write_bytes(b"\xff\xd8\xff fake jpeg")
@@ -53,7 +53,7 @@ def test_vision_with_dedicated_service(tmp_path):
 
 def test_vision_missing_image(tmp_path):
     """Vision should return error for missing image file."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["vision"])
     result = agent._mcp_handlers["vision"]({"image_path": "/nonexistent/image.png"})
     assert result.get("status") == "error"
@@ -61,7 +61,7 @@ def test_vision_missing_image(tmp_path):
 
 def test_vision_relative_path(tmp_path):
     """Vision should resolve relative paths against working directory."""
-    agent = StoAIAgent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+    agent = Agent(agent_id="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["vision"])
     mock_response = MagicMock()
     mock_response.text = "An image"

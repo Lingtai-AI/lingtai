@@ -35,7 +35,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from stoai import StoAIAgent, AgentConfig
+from stoai import Agent, AgentConfig
 from stoai.llm import LLMService
 from stoai.services.mail import TCPMailService
 from stoai.services.logging import LoggingService
@@ -419,7 +419,7 @@ setInterval(poll, 1500);
 # ---------------------------------------------------------------------------
 
 class ChatHandler(http.server.BaseHTTPRequestHandler):
-    agents: dict[str, StoAIAgent] = {}
+    agents: dict[str, Agent] = {}
     agent_ports: dict[str, int] = {}
 
     def do_GET(self):
@@ -566,7 +566,7 @@ def main():
     # Agent A (Alice)
     loggers["a"] = MemoryLoggingService()
     mail_a = TCPMailService(listen_port=8301, working_dir=base_dir / "alice")
-    agent_a = StoAIAgent(
+    agent_a = Agent(
         agent_id="alice", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["a"], admin=True,
@@ -584,7 +584,7 @@ def main():
     # Agent B (Bob)
     loggers["b"] = MemoryLoggingService()
     mail_b = TCPMailService(listen_port=8302, working_dir=base_dir / "bob")
-    agent_b = StoAIAgent(
+    agent_b = Agent(
         agent_id="bob", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["b"],
@@ -602,7 +602,7 @@ def main():
     # Agent C (Charlie)
     loggers["c"] = MemoryLoggingService()
     mail_c = TCPMailService(listen_port=8303, working_dir=base_dir / "charlie")
-    agent_c = StoAIAgent(
+    agent_c = Agent(
         agent_id="charlie", service=llm, mail_service=mail_c,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["c"],

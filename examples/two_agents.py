@@ -34,7 +34,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from stoai import StoAIAgent, AgentConfig
+from stoai import Agent, AgentConfig
 from stoai.llm import LLMService
 from stoai.services.mail import TCPMailService
 from stoai.services.logging import LoggingService
@@ -305,7 +305,7 @@ setInterval(poll, 1500);
 # ---------------------------------------------------------------------------
 
 class ChatHandler(http.server.BaseHTTPRequestHandler):
-    agents: dict[str, StoAIAgent] = {}
+    agents: dict[str, Agent] = {}
     agent_ports: dict[str, int] = {}
 
     def do_GET(self):
@@ -432,7 +432,7 @@ def main():
     # Agent A
     loggers["a"] = MemoryLoggingService()
     mail_a = TCPMailService(listen_port=8301, working_dir=base_dir / "researcher")
-    agent_a = StoAIAgent(
+    agent_a = Agent(
         agent_id="researcher", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["a"],
@@ -449,7 +449,7 @@ def main():
     # Agent B
     loggers["b"] = MemoryLoggingService()
     mail_b = TCPMailService(listen_port=8302, working_dir=base_dir / "assistant")
-    agent_b = StoAIAgent(
+    agent_b = Agent(
         agent_id="assistant", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         logging_service=loggers["b"],

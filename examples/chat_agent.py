@@ -1,4 +1,4 @@
-"""Launch a StoAIAgent on a TCP port and chat with it.
+"""Launch an Agent on a TCP port and chat with it.
 
 Usage:
     python examples/chat_agent.py
@@ -22,7 +22,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from stoai import StoAIAgent, AgentConfig
+from stoai import Agent, AgentConfig
 from stoai.llm import LLMService
 from stoai.services.mail import TCPMailService
 
@@ -52,7 +52,7 @@ def main():
     mail_svc = TCPMailService(listen_port=PORT)
 
     policy = str(Path(__file__).parent / "bash_policy.json")
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="assistant",
         service=llm,
         mail_service=mail_svc,

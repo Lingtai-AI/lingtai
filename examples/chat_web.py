@@ -1,4 +1,4 @@
-"""Web chat UI for a StoAIAgent.
+"""Web chat UI for an Agent.
 
 Usage:
     python examples/chat_web.py
@@ -27,7 +27,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from stoai import StoAIAgent, AgentConfig
+from stoai import Agent, AgentConfig
 from stoai.llm import LLMService
 from stoai.services.mail import TCPMailService
 
@@ -118,7 +118,7 @@ async function sendMsg() {
 class ChatHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler: serves chat page and proxies messages to agent."""
 
-    agent: StoAIAgent = None  # set by main()
+    agent: Agent = None  # set by main()
 
     def do_GET(self):
         self.send_response(200)
@@ -186,7 +186,7 @@ def main():
     mail_svc = TCPMailService(listen_port=AGENT_PORT)
 
     policy = str(Path(__file__).parent / "bash_policy.json")
-    agent = StoAIAgent(
+    agent = Agent(
         agent_id="assistant",
         service=llm,
         mail_service=mail_svc,

@@ -1,6 +1,6 @@
 """Grep capability — search file contents by regex.
 
-Usage: StoAIAgent(capabilities=["grep"]) or capabilities=["file"]
+Usage: Agent(capabilities=["grep"]) or capabilities=["file"]
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
-"""StoAIAgent — BaseAgent + composable capabilities + domain tools.
+"""Agent — BaseAgent + composable capabilities + domain tools.
 
 Layer 2 of the three-layer hierarchy:
-    BaseAgent (kernel) → StoAIAgent (capabilities) → CustomAgent (domain)
+    BaseAgent (kernel) → Agent (capabilities) → CustomAgent (domain)
 
 Capabilities and tools are declared at construction and sealed before start().
 """
@@ -13,7 +13,7 @@ from .base_agent import BaseAgent
 from .types import MCPTool
 
 
-class StoAIAgent(BaseAgent):
+class Agent(BaseAgent):
     """BaseAgent with composable capabilities and domain tools.
 
     Args:

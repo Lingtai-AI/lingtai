@@ -109,12 +109,12 @@ class TestSetupDraw:
 class TestAddCapabilityIntegration:
     def test_add_capability_draw(self, tmp_path):
         from unittest.mock import MagicMock
-        from stoai.stoai_agent import StoAIAgent
+        from stoai.agent import Agent
         svc = MagicMock()
         svc.get_adapter.return_value = MagicMock()
         svc.provider = "gemini"
         svc.model = "gemini-test"
         mcp = make_mock_mcp()
-        agent = StoAIAgent(agent_id="test", service=svc, base_dir=tmp_path,
+        agent = Agent(agent_id="test", service=svc, base_dir=tmp_path,
                            capabilities={"draw": {"mcp_client": mcp}})
         assert "draw" in agent._mcp_handlers

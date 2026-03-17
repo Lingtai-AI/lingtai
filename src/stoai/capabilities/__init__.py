@@ -1,4 +1,4 @@
-"""Composable agent capabilities — add via StoAIAgent(capabilities=[...])."""
+"""Composable agent capabilities — add via Agent(capabilities=[...])."""
 from __future__ import annotations
 
 import importlib

@@ -1,6 +1,6 @@
 """Write capability — create or overwrite a file.
 
-Usage: StoAIAgent(capabilities=["write"]) or capabilities=["file"]
+Usage: Agent(capabilities=["write"]) or capabilities=["file"]
 """
 from __future__ import annotations
 

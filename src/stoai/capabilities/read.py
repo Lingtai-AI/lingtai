@@ -1,6 +1,6 @@
 """Read capability — read text file contents.
 
-Usage: StoAIAgent(capabilities=["read"]) or capabilities=["file"]
+Usage: Agent(capabilities=["read"]) or capabilities=["file"]
 """
 from __future__ import annotations
 

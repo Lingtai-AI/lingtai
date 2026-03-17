@@ -1,6 +1,6 @@
 """Glob capability — find files by pattern.
 
-Usage: StoAIAgent(capabilities=["glob"]) or capabilities=["file"]
+Usage: Agent(capabilities=["glob"]) or capabilities=["file"]
 """
 from __future__ import annotations
 

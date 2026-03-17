@@ -1,13 +1,13 @@
 """Delegate capability — spawn a new agent on a free TCP port.
 
-Creates a new StoAIAgent with capabilities from the parent agent.
+Creates a new Agent with capabilities from the parent agent.
 Optionally overrides the role and/or long-term memory (system prompt sections).
 Returns the new agent's mail address so the parent can communicate with it.
 The reasoning field is sent as the first message (mission briefing) to the
 spawned agent.
 
 Usage:
-    StoAIAgent(capabilities=["delegate"])
+    Agent(capabilities=["delegate"])
     # Then the LLM can call: delegate(role="researcher", ltm="focus on X")
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ import socket
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..stoai_agent import StoAIAgent
+    from ..agent import Agent
 
 SCHEMA = {
     "type": "object",
@@ -52,14 +52,14 @@ DESCRIPTION = (
 class DelegateManager:
     """Spawns peer agents on free TCP ports."""
 
-    def __init__(self, agent: "StoAIAgent"):
+    def __init__(self, agent: "Agent"):
         self._agent = agent
 
     def handle(self, args: dict) -> dict:
         return self._spawn(args)
 
     def _spawn(self, args: dict) -> dict:
-        from ..stoai_agent import StoAIAgent
+        from ..agent import Agent
         from ..services.mail import TCPMailService
 
         parent = self._agent
@@ -88,7 +88,7 @@ class DelegateManager:
         mail_svc = TCPMailService(listen_port=port, working_dir=delegate_working_dir)
 
         # Create delegate agent
-        delegate = StoAIAgent(
+        delegate = Agent(
             agent_id=child_id,
             service=parent.service,
             mail_service=mail_svc,
@@ -118,7 +118,7 @@ class DelegateManager:
         return port
 
 
-def setup(agent: "StoAIAgent") -> DelegateManager:
+def setup(agent: "Agent") -> DelegateManager:
     """Set up the delegate capability on an agent."""
     mgr = DelegateManager(agent)
     agent.add_tool("delegate", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION)

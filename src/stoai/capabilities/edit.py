@@ -1,6 +1,6 @@
 """Edit capability — exact string replacement in a file.
 
-Usage: StoAIAgent(capabilities=["edit"]) or capabilities=["file"]
+Usage: Agent(capabilities=["edit"]) or capabilities=["file"]
 """
 from __future__ import annotations
 

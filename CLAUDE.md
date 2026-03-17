@@ -34,14 +34,14 @@ No hard dependencies — only the active LLM provider's SDK needs to be installe
 ```
 BaseAgent              — kernel (intrinsics, sealed tool surface)
     |
-StoAIAgent(BaseAgent)  — kernel + capabilities + domain tools
+Agent(BaseAgent)   — kernel + capabilities + domain tools
     |
-CustomAgent(StoAIAgent) — host's wrapper (subclass with domain logic)
+CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 ```
 
 - **BaseAgent** (`base_agent.py`) — pure kernel. 4 intrinsics (mail, clock, status, system), `add_tool()`/`remove_tool()` sealed after `start()`. No capabilities. `update_system_prompt()` stays open.
-- **StoAIAgent** (`stoai_agent.py`) — accepts `capabilities=` (list or dict) and `tools=` (MCPTool list) at construction. `get_capability(name)` for manager access.
-- **Custom agents** — subclass StoAIAgent, add domain tools via `add_tool()` or `_setup_capability()` in `__init__`.
+- **Agent** (`agent.py`) — accepts `capabilities=` (list or dict) and `tools=` (MCPTool list) at construction. `get_capability(name)` for manager access.
+- **Custom agents** — subclass Agent, add domain tools via `add_tool()` or `_setup_capability()` in `__init__`.
 
 ### Four Services (all optional)
 
@@ -59,13 +59,13 @@ CustomAgent(StoAIAgent) — host's wrapper (subclass with domain logic)
 | Tier | What | How added |
 |------|------|-----------|
 | **Intrinsics** | Kernel services (mail, clock, status+shutdown, system) | Built-in, always present |
-| **Capabilities** | Composable capabilities (file [read/write/edit/glob/grep], bash, delegate, email, vision, web_search, talk, compose, draw, listen) | Declared at construction via `capabilities=` on StoAIAgent |
-| **MCP tools** | Domain context from the host app | Passed as `tools=[MCPTool(...)]` on StoAIAgent, or `add_tool()` in subclass constructors |
+| **Capabilities** | Composable capabilities (file [read/write/edit/glob/grep], bash, delegate, email, vision, web_search, talk, compose, draw, listen) | Declared at construction via `capabilities=` on Agent |
+| **MCP tools** | Domain context from the host app | Passed as `tools=[MCPTool(...)]` on Agent, or `add_tool()` in subclass constructors |
 
 ### Key Modules
 
 - **`base_agent.py`** — `BaseAgent` class (kernel). 2-state lifecycle (SLEEPING/ACTIVE), 4 optional services, persistent LLM session, 2-layer tool dispatch (intrinsics + tools), FIFO mail queue via MailService, structured JSONL logging, git-controlled working dir, context compaction, loop guard, parallel tool execution. Tool surface sealed after `start()`.
-- **`stoai_agent.py`** — `StoAIAgent(BaseAgent)`. Accepts `capabilities=` and `tools=` at construction. Tracks `_capabilities` for delegate replay. `get_capability(name)` returns manager instances.
+- **`agent.py`** — `Agent(BaseAgent)`. Accepts `capabilities=` and `tools=` at construction. Tracks `_capabilities` for delegate replay. `get_capability(name)` returns manager instances.
 - **`state.py`** — `AgentState` enum (ACTIVE, SLEEPING).
 - **`message.py`** — `Message` dataclass, `_make_message`, `MSG_REQUEST`, `MSG_USER_INPUT`.
 - **`services/`** — Service ABCs + first implementations: `file_io.py`, `mail.py`, `vision.py`, `search.py`, `logging.py`.
@@ -74,7 +74,7 @@ CustomAgent(StoAIAgent) — host's wrapper (subclass with domain logic)
 - **`llm/service.py`** — `LLMService`. Adapter factory, session registry, one-shot generation gateway, context compaction orchestration. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
 - **`llm/interface_converters.py`** — Bidirectional converters between `ChatInterface` and provider-specific formats (Anthropic, OpenAI, Gemini).
 - **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`. All 4 kernel intrinsics (mail, clock, status, system) have `handler=None` because they need agent state and are handled in `BaseAgent`. Status intrinsic supports `show` and `shutdown` actions. System intrinsic supports `view`/`diff`/`load` actions on `role`/`ltm` objects.
-- **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 14 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), bash, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail FIFO with a persistent mailbox, reply/reply_all, CC/BCC, and multi-to. Delegate spawns `StoAIAgent` with reasoning as first prompt.
+- **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 14 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), bash, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail FIFO with a persistent mailbox, reply/reply_all, CC/BCC, and multi-to. Delegate spawns `Agent` with reasoning as first prompt.
 - **`config.py`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
 - **`prompt.py`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.
 
@@ -105,19 +105,19 @@ CustomAgent(StoAIAgent) — host's wrapper (subclass with domain logic)
 ### Extension Pattern
 
 ```python
-# Layer 2: StoAIAgent with capabilities
-agent = StoAIAgent(
+# Layer 2: Agent with capabilities
+agent = Agent(
     agent_id="alice", service=svc, base_dir="/agents",
     capabilities=["file", "vision", "web_search", "bash"],  # "file" expands to read/write/edit/glob/grep
 )
-agent = StoAIAgent(
+agent = Agent(
     agent_id="bob", service=svc, base_dir="/agents",
     capabilities={"bash": {"policy_file": "p.json"}},   # dict form (with kwargs)
     tools=[MCPTool(name="query_db", ...)],               # domain tools
 )
 
 # Layer 3: Custom agent subclass
-class ResearchAgent(StoAIAgent):
+class ResearchAgent(Agent):
     def __init__(self, **kwargs):
         super().__init__(capabilities=["file", "vision", "web_search"], **kwargs)
         self._setup_capability("bash", policy_file="research.json")
