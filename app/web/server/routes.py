@@ -62,6 +62,17 @@ def get_diary(request: Request, agent_key: str, since: float = 0.0):
     return {"entries": entries, "agent_key": agent_key}
 
 
+@router.get("/diary")
+def get_all_diaries(request: Request, since: float = 0.0):
+    """Batch diary endpoint — returns all agents' entries in one request."""
+    state = _get_state(request)
+    result = {}
+    for key, entry in state.agents.items():
+        log_file = entry.working_dir / "logs" / "events.jsonl"
+        result[key] = parse_diary(log_file, since=since)
+    return result
+
+
 @router.post("/send")
 def send_email(request: Request, body: SendRequest):
     state = _get_state(request)

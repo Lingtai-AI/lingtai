@@ -43,10 +43,10 @@ export function InputBar({ agents, onSent }: InputBarProps) {
   return (
     <div>
       {ccVisible && (
-        <div className="px-4 py-1.5 bg-panel text-xs text-text-muted border-t border-border">
-          CC:{" "}
+        <div className="px-4 py-1.5 bg-panel text-xs text-text-muted border-t border-border flex flex-wrap gap-x-3 gap-y-1">
+          <span className="text-text-dim">CC:</span>
           {otherAgents.map((a) => (
-            <label key={a.key} className="mr-3 cursor-pointer">
+            <label key={a.key} className="cursor-pointer whitespace-nowrap">
               <input
                 type="checkbox"
                 className="mr-1"
@@ -61,10 +61,10 @@ export function InputBar({ agents, onSent }: InputBarProps) {
         </div>
       )}
       {bccVisible && (
-        <div className="px-4 py-1.5 bg-panel text-xs text-text-muted border-t border-border">
-          BCC:{" "}
+        <div className="px-4 py-1.5 bg-panel text-xs text-text-muted border-t border-border flex flex-wrap gap-x-3 gap-y-1">
+          <span className="text-text-dim">BCC:</span>
           {otherAgents.map((a) => (
-            <label key={a.key} className="mr-3 cursor-pointer">
+            <label key={a.key} className="cursor-pointer whitespace-nowrap">
               <input
                 type="checkbox"
                 className="mr-1"

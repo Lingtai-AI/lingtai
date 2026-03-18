@@ -5,37 +5,33 @@ const POLL_MS = 1500;
 
 export function useDiary(agents: AgentInfo[]) {
   const [entries, setEntries] = useState<DiaryEvent[]>([]);
-  const sinceRef = useRef<Record<string, number>>({});
+  const sinceRef = useRef(0);
 
   useEffect(() => {
     if (agents.length === 0) return;
 
     const poll = async () => {
       try {
-        const fetches = agents.map(async (a) => {
-          const since = sinceRef.current[a.key] ?? 0;
-          const resp = await fetch(
-            `/api/diary/${a.key}?since=${since}`
-          );
-          const data = await resp.json();
-          const newEntries: DiaryEvent[] = (data.entries || []).map(
-            (e: DiaryEvent) => ({
-              ...e,
-              agent_key: a.key,
-              agent_name: a.name,
-            })
-          );
-          // Update since to the latest timestamp
-          if (newEntries.length > 0) {
-            const maxTs = Math.max(...newEntries.map((e) => e.time));
-            sinceRef.current[a.key] = maxTs;
-          }
-          return newEntries;
-        });
+        const since = sinceRef.current;
+        const resp = await fetch(`/api/diary?since=${since}`);
+        const data = await resp.json();
 
-        const results = await Promise.all(fetches);
-        const allNew = results.flat();
+        const allNew: DiaryEvent[] = [];
+        for (const [key, agentEntries] of Object.entries(data)) {
+          const agent = agents.find((a) => a.key === key);
+          if (!agent) continue;
+          for (const e of agentEntries as DiaryEvent[]) {
+            allNew.push({
+              ...e,
+              agent_key: key,
+              agent_name: agent.name,
+            });
+          }
+        }
+
         if (allNew.length > 0) {
+          const maxTs = Math.max(...allNew.map((e) => e.time));
+          sinceRef.current = maxTs;
           setEntries((prev) => {
             const combined = [...prev, ...allNew];
             combined.sort((a, b) => a.time - b.time);

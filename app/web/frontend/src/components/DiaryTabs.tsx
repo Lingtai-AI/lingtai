@@ -8,37 +8,39 @@ interface DiaryTabsProps {
 }
 
 export function DiaryTabs({ agents, activeTab, onTabChange }: DiaryTabsProps) {
+  const activeAgent = agents.find((a) => a.key === activeTab);
+  const activeIdx = agents.findIndex((a) => a.key === activeTab);
+  const activeColor =
+    activeTab === "all"
+      ? undefined
+      : AGENT_COLORS[activeIdx % AGENT_COLORS.length];
+
   return (
-    <div className="flex gap-0 border-b border-border overflow-x-auto">
-      <button
-        className={`px-3 py-2 text-xs uppercase tracking-widest border-b-2 cursor-pointer bg-transparent ${
-          activeTab === "all"
-            ? "text-accent border-accent"
-            : "text-text-dim border-transparent hover:text-text"
-        }`}
-        onClick={() => onTabChange("all")}
+    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border">
+      <span className="text-[10px] text-text-dim uppercase tracking-wider">
+        Diary
+      </span>
+      <select
+        value={activeTab}
+        onChange={(e) => onTabChange(e.target.value)}
+        className="px-2 py-1 text-xs border border-border rounded bg-bg text-text cursor-pointer"
+        style={activeColor ? { color: activeColor } : undefined}
       >
-        All
-      </button>
-      {agents.map((a, i) => (
-        <button
-          key={a.key}
-          className={`px-3 py-2 text-xs uppercase tracking-widest border-b-2 cursor-pointer bg-transparent ${
-            activeTab === a.key
-              ? "border-accent"
-              : "border-transparent hover:text-text"
-          }`}
-          style={{
-            color:
-              activeTab === a.key
-                ? AGENT_COLORS[i % AGENT_COLORS.length]
-                : undefined,
-          }}
-          onClick={() => onTabChange(a.key)}
+        <option value="all">All agents</option>
+        {agents.map((a) => (
+          <option key={a.key} value={a.key}>
+            {a.name}
+          </option>
+        ))}
+      </select>
+      {activeAgent && (
+        <span
+          className="text-[10px]"
+          style={{ color: activeColor }}
         >
-          {a.name}
-        </button>
-      ))}
+          :{activeAgent.port}
+        </span>
+      )}
     </div>
   );
 }
