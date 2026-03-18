@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 SCHEMA = {
     "type": "object",
     "properties": {
+        "name": {
+            "type": "string",
+            "description": "Name for the new agent (required, e.g. 'researcher', 'analyst')",
+        },
         "covenant": {
             "type": "string",
             "description": "Covenant override for the new agent (optional, default = copy parent)",
@@ -35,6 +39,7 @@ SCHEMA = {
             "description": "Capability names for the new agent (optional, default = same as parent minus delegate)",
         },
     },
+    "required": ["name"],
 }
 
 DESCRIPTION = (
@@ -64,10 +69,10 @@ class DelegateManager:
 
         parent = self._agent
         reasoning = args.get("_reasoning")
+        child_name = args.get("name", "delegate")
 
         # Get a free TCP port
         port = self._get_free_port()
-        child_name = f"{parent.agent_name}_delegate_{port}"
 
         # Resolve covenant — override or copy parent
         covenant = args.get("covenant") or parent._prompt_manager.read_section("covenant") or ""

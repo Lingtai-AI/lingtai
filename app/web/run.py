@@ -30,14 +30,10 @@ from .server.main import create_app
 from .server.state import AppState
 
 
-def make_covenant(name: str, address: str, contacts: dict[str, str]) -> str:
+def make_covenant(contacts: dict[str, str]) -> str:
     """Build a structured covenant for an agent."""
     contact_lines = "\n".join(f"- {n}: {a}" for n, a in contacts.items())
     return (
-        f"### Identity\n"
-        f"Name: {name}\n"
-        f"Address: {address}\n"
-        f"\n"
         f"### Communication\n"
         f"- All communication — including with the user — is done via email.\n"
         f"- Addresses are ip:port format.\n"
@@ -94,7 +90,7 @@ def main():
                 "vision": {}, "anima": {}, "conscience": {"interval": 10},
                 "bash": {},
             },
-            covenant=make_covenant(a["name"], f"127.0.0.1:{a['port']}", contacts),
+            covenant=make_covenant(contacts),
         )
 
     app = create_app(state)

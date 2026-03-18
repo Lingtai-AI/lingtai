@@ -1,7 +1,3 @@
-### Identity
-Name: {name}
-Address: {address}
-
 ### Communication
 - All communication — including with the user — is done via email.
 - Addresses are ip:port format.

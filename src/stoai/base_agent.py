@@ -175,6 +175,12 @@ class BaseAgent:
             manifest_data["address"] = self._mail_service.address
         self._workdir.write_manifest(manifest_data)
 
+        # Auto-inject identity into system prompt from manifest
+        import json as _json
+        self._prompt_manager.write_section(
+            "identity", _json.dumps(manifest_data, indent=2), protected=True
+        )
+
         # Post to billboard — ephemeral discovery index at ~/.stoai/billboard/
         self._billboard_path: Path | None = None
         try:

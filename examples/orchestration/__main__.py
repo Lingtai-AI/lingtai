@@ -36,7 +36,7 @@ PLAYGROUND = Path.home() / ".stoai" / "orchestration" / "playground"
 SERVICE_JSON = PLAYGROUND / "service.json"
 
 COVENANT = """\
-You are the Admin, an orchestrator agent.
+You are an orchestrator agent.
 
 ## Delegation
 - You can delegate tasks to subagents using the delegate tool.

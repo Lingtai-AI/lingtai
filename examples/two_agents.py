@@ -382,17 +382,15 @@ class ChatHandler(http.server.BaseHTTPRequestHandler):
 # Main
 # ---------------------------------------------------------------------------
 
-def make_covenant(name: str, address: str, contacts: dict[str, str]) -> str:
+def make_covenant(contacts: dict[str, str]) -> str:
     """Build a structured covenant for an agent from a template file."""
     template_path = Path(__file__).parent.parent / "prompt" / "covenant" / "covenant.example.md"
+    contact_lines = "\n".join(f"- {n}: {a}" for n, a in contacts.items())
     if not template_path.exists():
-        # Fallback to a minimal version if template is missing
-        contact_lines = "\n".join(f"- {n}: {a}" for n, a in contacts.items())
-        return f"### Identity\nName: {name}\nAddress: {address}\n\n### Contacts\n{contact_lines}"
+        return f"### Contacts\n{contact_lines}"
 
     template = template_path.read_text()
-    contact_lines = "\n".join(f"- {n}: {a}" for n, a in contacts.items())
-    return template.format(name=name, address=address, contact_lines=contact_lines)
+    return template.format(contact_lines=contact_lines)
 
 
 def main():
@@ -426,7 +424,7 @@ def main():
     agent_a = Agent(
         agent_name="alice", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
-        covenant=make_covenant("Alice", "127.0.0.1:8301", {
+        covenant=make_covenant({
             "Bob": "127.0.0.1:8302",
             "User": f"127.0.0.1:{USER_PORT}",
         }),
@@ -442,7 +440,7 @@ def main():
     agent_b = Agent(
         agent_name="bob", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
-        covenant=make_covenant("Bob", "127.0.0.1:8302", {
+        covenant=make_covenant({
             "Alice": "127.0.0.1:8301",
             "User": f"127.0.0.1:{USER_PORT}",
         }),

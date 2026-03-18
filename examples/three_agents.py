@@ -554,7 +554,6 @@ def main():
         agent_name="alice", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         role=(
-            "Your name is Alice. Your address is 127.0.0.1:8301.\n\n"
             f"{AGENT_PROMPT}\n\n"
             "Known contacts:\n"
             "- Bob: 127.0.0.1:8302\n"
@@ -571,7 +570,6 @@ def main():
         agent_name="bob", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         role=(
-            "Your name is Bob. Your address is 127.0.0.1:8302.\n\n"
             f"{AGENT_PROMPT}\n\n"
             "Known contacts:\n"
             "- Alice: 127.0.0.1:8301\n"
@@ -587,7 +585,6 @@ def main():
         agent_name="charlie", service=llm, mail_service=mail_c,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         role=(
-            "Your name is Charlie. Your address is 127.0.0.1:8303.\n\n"
             f"{AGENT_PROMPT}\n\n"
             "Known contacts:\n"
             "- Alice: 127.0.0.1:8301\n"
