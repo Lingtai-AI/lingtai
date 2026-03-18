@@ -9,6 +9,7 @@ Available examples are in app/web/examples/.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,15 @@ from stoai.llm import LLMService
 
 from .server.main import create_app
 
+# Maps addon name → LLMService provider_config key
+_ADDON_TO_PROVIDER_KEY = {
+    "web_search": "web_search_provider",
+    "vision": "vision_provider",
+    "draw": "image_provider",
+    "compose": "music_provider",
+    "talk": "tts_provider",
+}
+
 
 def _list_examples() -> list[str]:
     """List available example names."""
@@ -36,6 +46,30 @@ def _list_examples() -> list[str]:
         p.stem for p in examples_dir.glob("*.py")
         if p.stem != "__init__"
     )
+
+
+def _build_key_resolver(cfg: dict) -> callable:
+    """Build a key resolver that checks addon-specific env vars first,
+    then falls back to {PROVIDER}_API_KEY."""
+    # Collect provider → env var mappings from addons
+    provider_env: dict[str, str] = {}
+    for addon_cfg in cfg.get("addons", {}).values():
+        if isinstance(addon_cfg, dict) and addon_cfg.get("provider"):
+            env_var = addon_cfg.get("api_key_env")
+            if env_var:
+                provider_env[addon_cfg["provider"].lower()] = env_var
+
+    # Also include the main provider
+    main_env = cfg.get("api_key_env")
+    if main_env and cfg.get("provider"):
+        provider_env[cfg["provider"].lower()] = main_env
+
+    def resolver(provider: str) -> str | None:
+        p = provider.lower()
+        env_var = provider_env.get(p, f"{p.upper()}_API_KEY")
+        return os.environ.get(env_var)
+
+    return resolver
 
 
 def main(example_name: str | None = None):
@@ -61,18 +95,76 @@ def main(example_name: str | None = None):
         print(f"Available: {', '.join(_list_examples())}")
         sys.exit(1)
 
-    # Get API key
-    api_key = os.environ.get("MINIMAX_API_KEY")
+    # Load config
+    config_path = Path(__file__).parent / "config.json"
+    if config_path.exists():
+        cfg = json.loads(config_path.read_text())
+    else:
+        cfg = {}
+
+    provider = cfg.get("provider", "minimax")
+    model = cfg.get("model", "MiniMax-M2.5-highspeed")
+    base_url = cfg.get("base_url")
+    max_rpm = cfg.get("max_rpm", 0)
+    dashboard_port = cfg.get("dashboard_port", 8080)
+
+    # Build key resolver from config
+    key_resolver = _build_key_resolver(cfg)
+
+    # Get main API key
+    api_key = key_resolver(provider)
     if not api_key:
-        print("Error: MINIMAX_API_KEY not set.")
+        env_var = cfg.get("api_key_env", f"{provider.upper()}_API_KEY")
+        print(f"Error: {env_var} not set.")
         sys.exit(1)
 
+    # Build provider_defaults — merge main + addon base_urls
+    provider_defaults: dict = {provider: {"model": model}}
+    if max_rpm > 0:
+        provider_defaults[provider]["max_rpm"] = max_rpm
+    if base_url:
+        provider_defaults[provider]["base_url"] = base_url
+
+    # Build provider_config from addons, merge addon base_urls into provider_defaults
+    provider_config: dict = {}
+    addons = cfg.get("addons", {})
+    for addon_name, addon_cfg in addons.items():
+        if not isinstance(addon_cfg, dict):
+            continue
+        addon_provider = addon_cfg.get("provider")
+        if not addon_provider:
+            continue  # local-only (e.g. listen)
+        config_key = _ADDON_TO_PROVIDER_KEY.get(addon_name)
+        if config_key:
+            provider_config[config_key] = addon_provider
+        # Merge addon base_url into provider_defaults
+        addon_url = addon_cfg.get("base_url")
+        if addon_url:
+            provider_defaults.setdefault(addon_provider, {})["base_url"] = addon_url
+
+    # Pass all addon API keys to MiniMax MCP subprocess
+    if provider == "minimax":
+        mcp_env: dict[str, str] = {}
+        for addon_cfg in addons.values():
+            if not isinstance(addon_cfg, dict):
+                continue
+            key_env = addon_cfg.get("api_key_env")
+            if key_env:
+                key_val = os.environ.get(key_env)
+                if key_val:
+                    mcp_env[key_env] = key_val
+        if mcp_env:
+            from stoai.llm.minimax.mcp_client import set_extra_env
+            set_extra_env(mcp_env)
+
     llm = LLMService(
-        provider="minimax",
-        model="MiniMax-M2.5-highspeed",
+        provider=provider,
+        model=model,
         api_key=api_key,
-        provider_config={"web_search_provider": "minimax"},
-        provider_defaults={"minimax": {"model": "MiniMax-M2.5-highspeed"}},
+        base_url=base_url,
+        provider_config=provider_config,
+        provider_defaults=provider_defaults,
+        key_resolver=key_resolver,
     )
 
     base_dir = Path.home() / ".stoai" / "web" / example_name
@@ -89,11 +181,11 @@ def main(example_name: str | None = None):
     for entry in state.agents.values():
         admin_tag = " [admin]" if entry.agent._admin else ""
         print(f"Agent {entry.name:8s}  {entry.address}{admin_tag}")
-    print("Dashboard:     http://localhost:8080")
+    print(f"Dashboard:     http://localhost:{dashboard_port}")
     print("Press Ctrl+C to shut down.")
 
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8080)
+        uvicorn.run(app, host="0.0.0.0", port=dashboard_port)
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:

@@ -6,11 +6,4 @@ DEFAULTS = {
     "base_url_anthropic": "https://api.moonshot.ai/v1",
     "api_key_env": "KIMI_API_KEY",
     "model": "kimi-k2.5",
-    "sub_agent_model": "kimi-k2.5",
-    "inline_model": "kimi-k2.5",
-    "web_search_provider": "kimi",
-    "vision_provider": "kimi",
-    "thinking_model": "default",
-    "thinking_sub_agent": "default",
-    "rate_limit_interval": 0,
 }

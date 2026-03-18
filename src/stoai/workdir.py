@@ -107,6 +107,10 @@ class WorkingDir:
                 "!history/**\n"
                 "!logs/\n"
                 "!logs/**\n"
+                "!conscience/\n"
+                "!conscience/**\n"
+                "!mailbox/\n"
+                "!mailbox/**\n"
             )
 
             system_dir = self._path / "system"

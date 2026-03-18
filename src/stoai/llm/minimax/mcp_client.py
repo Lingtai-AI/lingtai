@@ -1,7 +1,14 @@
 """MiniMax MCP factory — builds an MCPClient for the MiniMax MCP server.
 
 Manages a singleton MCPClient instance and MiniMax-specific config
-(API key, API host, enable/disable).
+(API keys, API host, enable/disable).
+
+The MCP server uses multiple API keys for different tools:
+  MINIMAX_API_KEY     — web_search, vision (code plan key)
+  MINIMAX_MCP_API_KEY — talk, compose, draw
+
+All keys from the host environment are passed through to the subprocess.
+Use set_extra_env() to inject additional keys not in os.environ.
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ logger = get_logger()
 
 _enabled: bool = True
 _api_host: str | None = None
+_extra_env: dict[str, str] = {}
 
 
 def set_enabled(enabled: bool) -> None:
@@ -41,6 +49,17 @@ def set_api_host(host: str) -> None:
     global _api_host
     _api_host = host
     logger.debug("MiniMaxMCP: API host set to: %s", host)
+
+
+def set_extra_env(env: dict[str, str]) -> None:
+    """Set extra environment variables for the MCP subprocess.
+
+    Use this to pass API keys that aren't in os.environ,
+    e.g. when keys are resolved from config at startup.
+    """
+    global _extra_env
+    _extra_env = env
+    logger.debug("MiniMaxMCP: extra env vars set: %s", list(env.keys()))
 
 
 def get_api_host() -> str | None:
@@ -94,17 +113,16 @@ def get_minimax_mcp_client() -> MCPClient:
                 "https://docs.astral.sh/uv/getting-started/installation/"
             )
 
-        # Resolve API key
-        api_key = os.getenv("MINIMAX_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "MINIMAX_API_KEY environment variable not set. "
-                "Please set it in your .env file."
-            )
-
-        # Resolve API host
+        # Build subprocess environment — inherit everything, add extras
         host = _api_host or "https://api.minimaxi.com"
-        env = {**os.environ, "MINIMAX_API_KEY": api_key, "MINIMAX_API_HOST": host}
+        env = {**os.environ, "MINIMAX_API_HOST": host, **_extra_env}
+
+        # Verify at least one API key is present
+        if not env.get("MINIMAX_API_KEY") and not env.get("MINIMAX_MCP_API_KEY"):
+            raise RuntimeError(
+                "Neither MINIMAX_API_KEY nor MINIMAX_MCP_API_KEY is set. "
+                "Please set at least one in your .env file."
+            )
 
         logger.debug("MiniMaxMCP: starting MCP client subprocess...")
         _client = MCPClient(
