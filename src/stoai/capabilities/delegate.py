@@ -101,6 +101,7 @@ class DelegateManager:
         memory = args.get("memory", "")
 
         # Build capabilities dict from parent (excluding delegate to prevent recursion)
+        # Re-inject per-capability provider settings so child inherits routing
         requested = args.get("capabilities")
         caps: dict[str, dict] = {}
         for cap_name, cap_kwargs in parent._capabilities:
@@ -108,7 +109,11 @@ class DelegateManager:
                 continue  # no recursive spawning
             if requested is not None and cap_name not in requested:
                 continue
-            caps[cap_name] = cap_kwargs
+            child_cap = dict(cap_kwargs)
+            cap_provider = parent._capability_providers.get(cap_name)
+            if cap_provider:
+                child_cap["provider"] = cap_provider
+            caps[cap_name] = child_cap
 
         # Delegate is a peer in the same base_dir
         delegate_working_dir = parent._base_dir / child_name

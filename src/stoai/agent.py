@@ -58,11 +58,14 @@ class Agent(BaseAgent):
                     expanded_dict[name] = cap_kwargs
             capabilities = expanded_dict
 
-        # Apply per-capability provider overrides to LLMService config
+        # Extract per-capability provider overrides, apply to LLMService config
+        # Store providers separately so they survive pop() and replay in delegates
+        self._capability_providers: dict[str, str] = {}
         if capabilities:
             for name, cap_kwargs in capabilities.items():
                 cap_provider = cap_kwargs.pop("provider", None)
                 if cap_provider:
+                    self._capability_providers[name] = cap_provider
                     config_key = self._CAPABILITY_PROVIDER_KEYS.get(name)
                     if config_key:
                         self.service._config[config_key] = cap_provider
