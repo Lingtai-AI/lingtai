@@ -38,6 +38,7 @@ class Agent(BaseAgent):
         self,
         *args: Any,
         capabilities: list[str] | dict[str, dict] | None = None,
+        addons: dict[str, dict] | None = None,
         **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
@@ -81,6 +82,14 @@ class Agent(BaseAgent):
         if capabilities:
             for name, cap_kwargs in capabilities.items():
                 self._setup_capability(name, **cap_kwargs)
+
+        # Register addons (after capabilities, may depend on them)
+        self._addon_managers: dict[str, Any] = {}
+        if addons:
+            from .addons import setup_addon
+            for addon_name, addon_kwargs in addons.items():
+                mgr = setup_addon(self, addon_name, **(addon_kwargs or {}))
+                self._addon_managers[addon_name] = mgr
 
     def _setup_capability(self, name: str, **kwargs: Any) -> Any:
         """Load a named capability.
@@ -141,6 +150,21 @@ class Agent(BaseAgent):
             except Exception as e:
                 logger.warning("[%s] MCP %s: failed to load: %s",
                                self.agent_name, name, e)
+
+    def start(self) -> None:
+        super().start()
+        for name, mgr in self._addon_managers.items():
+            if hasattr(mgr, "start"):
+                mgr.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        for name, mgr in self._addon_managers.items():
+            if hasattr(mgr, "stop"):
+                try:
+                    mgr.stop()
+                except Exception:
+                    pass
+        super().stop(timeout=timeout)
 
     def get_capability(self, name: str) -> Any:
         """Return the manager instance for a registered capability, or None."""
