@@ -292,10 +292,10 @@ class ChatHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/diary":
             result = {}
             # Read from JSONL files in the working directories
-            # base_dir / agent_id / logs / events.jsonl
-            agent_ids = {"a": "alice", "b": "bob"}
-            for key, agent_id in agent_ids.items():
-                log_file = ChatHandler.base_dir / agent_id / "logs" / "events.jsonl"
+            # base_dir / agent_name / logs / events.jsonl
+            agent_names = {"a": "alice", "b": "bob"}
+            for key, agent_name in agent_names.items():
+                log_file = ChatHandler.base_dir / agent_name / "logs" / "events.jsonl"
                 entries = []
                 if log_file.exists():
                     with open(log_file, "r") as f:
@@ -424,7 +424,7 @@ def main():
     # Agent A
     mail_a = TCPMailService(listen_port=8301, working_dir=base_dir / "alice")
     agent_a = Agent(
-        agent_id="alice", service=llm, mail_service=mail_a,
+        agent_name="alice", service=llm, mail_service=mail_a,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         covenant=make_covenant("Alice", "127.0.0.1:8301", {
             "Bob": "127.0.0.1:8302",
@@ -440,7 +440,7 @@ def main():
     # Agent B
     mail_b = TCPMailService(listen_port=8302, working_dir=base_dir / "bob")
     agent_b = Agent(
-        agent_id="bob", service=llm, mail_service=mail_b,
+        agent_name="bob", service=llm, mail_service=mail_b,
         config=AgentConfig(max_turns=10), base_dir=base_dir,
         covenant=make_covenant("Bob", "127.0.0.1:8302", {
             "Alice": "127.0.0.1:8301",

@@ -15,7 +15,7 @@ from stoai.services.mail import TCPMailService
 @dataclass
 class AgentEntry:
     """One registered agent."""
-    agent_id: str
+    agent_name: str
     name: str
     key: str
     address: str
@@ -60,7 +60,7 @@ class AppState:
     def register_agent(
         self,
         key: str,
-        agent_id: str,
+        agent_name: str,
         name: str,
         port: int,
         llm: LLMService,
@@ -69,10 +69,10 @@ class AppState:
         config: AgentConfig | None = None,
     ) -> AgentEntry:
         """Create Agent + TCPMailService, wire together, store in registry."""
-        working_dir = self.base_dir / agent_id
+        working_dir = self.base_dir / agent_name
         mail_svc = TCPMailService(listen_port=port, working_dir=working_dir)
         agent = Agent(
-            agent_id=agent_id,
+            agent_name=agent_name,
             service=llm,
             mail_service=mail_svc,
             config=config or AgentConfig(max_turns=10),
@@ -81,7 +81,7 @@ class AppState:
             capabilities=capabilities or ["email", "web_search"],
         )
         entry = AgentEntry(
-            agent_id=agent_id,
+            agent_name=agent_name,
             name=name,
             key=key,
             address=f"127.0.0.1:{port}",

@@ -41,11 +41,11 @@ def _get_free_port():
     return port
 
 
-def _make_agent(agent_id: str, port: int, base_dir: Path):
+def _make_agent(name: str, port: int, base_dir: Path):
     """Create an agent with a real TCPMailService and email capability."""
-    mail_svc = TCPMailService(listen_port=port, working_dir=base_dir / agent_id)
+    mail_svc = TCPMailService(listen_port=port, working_dir=base_dir / name)
     agent = Agent(
-        agent_id=agent_id,
+        agent_name=name,
         service=_make_mock_service(),
         mail_service=mail_svc,
         base_dir=base_dir,

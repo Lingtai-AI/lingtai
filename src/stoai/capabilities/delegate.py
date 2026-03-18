@@ -67,7 +67,7 @@ class DelegateManager:
 
         # Get a free TCP port
         port = self._get_free_port()
-        child_id = f"{parent.agent_id}_delegate_{port}"
+        child_name = f"{parent.agent_name}_delegate_{port}"
 
         # Resolve covenant — override or copy parent
         covenant = args.get("covenant") or parent._prompt_manager.read_section("covenant") or ""
@@ -84,12 +84,12 @@ class DelegateManager:
             caps[cap_name] = cap_kwargs
 
         # Delegate is a peer in the same base_dir
-        delegate_working_dir = parent._base_dir / child_id
+        delegate_working_dir = parent._base_dir / child_name
         mail_svc = TCPMailService(listen_port=port, working_dir=delegate_working_dir)
 
         # Create delegate agent
         delegate = Agent(
-            agent_id=child_id,
+            agent_name=child_name,
             service=parent.service,
             mail_service=mail_svc,
             config=parent._config,
@@ -106,7 +106,7 @@ class DelegateManager:
             delegate.send(reasoning, sender=parent.agent_id, wait=False)
 
         address = mail_svc.address
-        return {"status": "ok", "address": address, "agent_id": delegate.agent_id}
+        return {"status": "ok", "address": address, "agent_id": delegate.agent_id, "agent_name": delegate.agent_name}
 
     @staticmethod
     def _get_free_port() -> int:

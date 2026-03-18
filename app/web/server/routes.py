@@ -34,7 +34,7 @@ def list_agents(request: Request):
     agents = []
     for entry in state.agents.values():
         agents.append({
-            "id": entry.agent_id,
+            "id": entry.agent.agent_id,
             "name": entry.name,
             "key": entry.key,
             "address": entry.address,

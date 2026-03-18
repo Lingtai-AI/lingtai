@@ -27,7 +27,8 @@ def make_session_manager(**kw):
     return SessionManager(
         llm_service=svc,
         config=config,
-        agent_id="test",
+        agent_id="abc123def456",
+        agent_name="test",
         streaming=kw.get("streaming", False),
         build_system_prompt_fn=lambda: "test prompt",
         build_tool_schemas_fn=lambda: [],

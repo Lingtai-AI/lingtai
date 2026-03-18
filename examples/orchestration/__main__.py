@@ -109,7 +109,7 @@ def main():
     policy = str(Path(__file__).parent.parent.parent / "src" / "stoai" / "capabilities" / "bash_policy.json")
 
     agent = Agent(
-        agent_id="admin",
+        agent_name="admin",
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),

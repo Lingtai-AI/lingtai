@@ -39,7 +39,7 @@ Agent(BaseAgent)   — kernel + capabilities + domain tools
 CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 ```
 
-- **BaseAgent** (`base_agent.py`) — kernel coordinator (~900 lines). 2-state lifecycle, message loop, tool dispatch routing, public API, subclass hooks. Delegates to `WorkingDir` (git/filesystem), `SessionManager` (LLM session/tokens), `ToolExecutor` (tool execution). 4 intrinsics wired from `intrinsics/*.py`. `add_tool()`/`remove_tool()` sealed after `start()`. `update_system_prompt()` stays open.
+- **BaseAgent** (`base_agent.py`) — kernel coordinator (~900 lines). Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle, message loop, tool dispatch routing, public API, subclass hooks. Delegates to `WorkingDir` (git/filesystem), `SessionManager` (LLM session/tokens), `ToolExecutor` (tool execution). 4 intrinsics wired from `intrinsics/*.py`. `add_tool()`/`remove_tool()` sealed after `start()`. `update_system_prompt()` stays open.
 - **Agent** (`agent.py`) — accepts `capabilities=` (list or dict) at construction. `get_capability(name)` for manager access.
 - **Custom agents** — subclass Agent, add domain tools via `add_tool()` or `_setup_capability()` in `__init__`.
 
@@ -64,8 +64,8 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 
 ### Key Modules
 
-- **`base_agent.py`** — `BaseAgent` class (kernel coordinator, ~900 lines). 2-state lifecycle (SLEEPING/ACTIVE), message loop, 2-layer tool dispatch routing (intrinsics + tools), FIFO mail queue via MailService, public API (`add_tool`, `remove_tool`, `override_intrinsic`, `send`, `mail`), subclass hooks (`_pre_request`, `_post_request`, `_on_tool_result_hook`). Delegates to `WorkingDir`, `SessionManager`, `ToolExecutor`. Tool surface sealed after `start()`.
-- **`workdir.py`** — `WorkingDir` class. Agent working directory management: exclusive file locking, git init with opt-in tracking, manifest read/write, `diff()` (read-only) and `diff_and_commit()`. No reference to BaseAgent — pure filesystem/subprocess operations.
+- **`base_agent.py`** — `BaseAgent` class (kernel coordinator, ~900 lines). Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle (SLEEPING/ACTIVE), message loop, 2-layer tool dispatch routing (intrinsics + tools), FIFO mail queue via MailService, public API (`add_tool`, `remove_tool`, `override_intrinsic`, `send`, `mail`), subclass hooks (`_pre_request`, `_post_request`, `_on_tool_result_hook`). Delegates to `WorkingDir`, `SessionManager`, `ToolExecutor`. Tool surface sealed after `start()`.
+- **`workdir.py`** — `WorkingDir` class. Agent working directory management: directory path is `{base_dir}/{agent_name}/`. Exclusive file locking, git init with opt-in tracking, manifest read/write, `diff()` (read-only) and `diff_and_commit()`. No reference to BaseAgent — pure filesystem/subprocess operations.
 - **`session.py`** — `SessionManager` class. LLM session lifecycle: `ensure_session()`, `send()` (with timeout/retry/stale-interaction recovery), `_on_reset()` (rollback on server error), context compaction, token tracking, session persistence. No reference to BaseAgent — receives callbacks (`build_system_prompt_fn`, `build_tool_schemas_fn`) at construction.
 - **`tool_executor.py`** — `ToolExecutor` class. Sequential and parallel tool call execution with timing, error handling, guard checks, and intercept hooks. No reference to BaseAgent — receives `dispatch_fn` and `make_tool_result_fn` callbacks.
 - **`agent.py`** — `Agent(BaseAgent)`. Accepts `capabilities=` at construction. Tracks `_capabilities` for delegate replay. `get_capability(name)` returns manager instances.
@@ -112,11 +112,11 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 ```python
 # Layer 2: Agent with capabilities
 agent = Agent(
-    agent_id="alice", service=svc, base_dir="/agents",
+    agent_name="alice", service=svc, base_dir="/agents",
     capabilities=["file", "vision", "web_search", "bash"],  # "file" expands to read/write/edit/glob/grep
 )
 agent = Agent(
-    agent_id="bob", service=svc, base_dir="/agents",
+    agent_name="bob", service=svc, base_dir="/agents",
     capabilities={"bash": {"policy_file": "p.json"}},   # dict form (with kwargs)
 )
 

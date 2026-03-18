@@ -40,7 +40,7 @@ def git_init(agent):
 def test_conscience_registered_as_capability(tmp_path):
     """conscience registers the 'conscience' tool."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     assert "conscience" in agent._mcp_handlers
@@ -51,7 +51,7 @@ def test_conscience_registered_as_capability(tmp_path):
 def test_conscience_get_capability(tmp_path):
     """get_capability returns ConscienceManager."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     assert isinstance(agent.get_capability("conscience"), ConscienceManager)
@@ -61,7 +61,7 @@ def test_conscience_get_capability(tmp_path):
 def test_conscience_custom_interval(tmp_path):
     """Custom interval is passed through."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 60}},
     )
     assert agent.get_capability("conscience")._interval == 60
@@ -71,7 +71,7 @@ def test_conscience_custom_interval(tmp_path):
 def test_clock_intrinsic_unchanged(tmp_path):
     """conscience does NOT replace the clock intrinsic."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     assert callable(agent._intrinsics["clock"])
@@ -85,7 +85,7 @@ def test_clock_intrinsic_unchanged(tmp_path):
 def test_horme_on(tmp_path):
     """horme enabled=true activates the timer."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 9999}},
     )
     mgr = agent.get_capability("conscience")
@@ -100,7 +100,7 @@ def test_horme_on(tmp_path):
 def test_horme_on_already_active(tmp_path):
     """horme on when already active returns already_active."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 9999}},
     )
     mgr = agent.get_capability("conscience")
@@ -114,7 +114,7 @@ def test_horme_on_already_active(tmp_path):
 def test_horme_off(tmp_path):
     """horme enabled=false deactivates."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 9999}},
     )
     mgr = agent.get_capability("conscience")
@@ -129,7 +129,7 @@ def test_horme_off(tmp_path):
 def test_horme_off_already_inactive(tmp_path):
     """horme off when inactive returns already_inactive."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     mgr = agent.get_capability("conscience")
@@ -141,7 +141,7 @@ def test_horme_off_already_inactive(tmp_path):
 def test_horme_missing_enabled(tmp_path):
     """horme without enabled returns error."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     mgr = agent.get_capability("conscience")
@@ -157,7 +157,7 @@ def test_horme_missing_enabled(tmp_path):
 def test_inner_voice_update(tmp_path):
     """inner_voice updates the prompt."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     mgr = agent.get_capability("conscience")
@@ -175,7 +175,7 @@ def test_inner_voice_update(tmp_path):
 def test_inner_voice_missing_prompt(tmp_path):
     """inner_voice without prompt returns error."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     mgr = agent.get_capability("conscience")
@@ -187,7 +187,7 @@ def test_inner_voice_missing_prompt(tmp_path):
 def test_unknown_action(tmp_path):
     """Unknown action returns error."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
     mgr = agent.get_capability("conscience")
@@ -203,7 +203,7 @@ def test_unknown_action(tmp_path):
 def test_nudge_fires_when_idle(tmp_path):
     """Nudge is sent via agent.send() after interval when idle."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 0.1}},
     )
     git_init(agent)
@@ -226,7 +226,7 @@ def test_nudge_fires_when_idle(tmp_path):
 def test_nudge_skips_when_active(tmp_path):
     """When agent is ACTIVE, nudge reschedules instead of sending."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 0.1}},
     )
     git_init(agent)
@@ -248,7 +248,7 @@ def test_nudge_skips_when_active(tmp_path):
 def test_nudge_uses_updated_prompt(tmp_path):
     """Nudge uses the most recent inner_voice prompt."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 0.1}},
     )
     git_init(agent)
@@ -269,7 +269,7 @@ def test_nudge_uses_updated_prompt(tmp_path):
 def test_nudge_writes_horme_md(tmp_path):
     """Each nudge writes conscience/horme.md."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 0.1}},
     )
     git_init(agent)
@@ -292,7 +292,7 @@ def test_nudge_writes_horme_md(tmp_path):
 def test_nudge_git_commits(tmp_path):
     """Each nudge creates a git commit."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 0.1}},
     )
     git_init(agent)
@@ -321,7 +321,7 @@ def test_nudge_git_commits(tmp_path):
 def test_stop_cancels_timer(tmp_path):
     """stop() cancels the timer and deactivates."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities={"conscience": {"interval": 9999}},
     )
     mgr = agent.get_capability("conscience")

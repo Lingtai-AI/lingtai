@@ -75,7 +75,7 @@ class BaseAgent:
 
     def __init__(
         self,
-        agent_id: str,
+        agent_name: str,
         service: LLMService,
         *,
         file_io: Any | None = None,
@@ -88,7 +88,9 @@ class BaseAgent:
         covenant: str = "",
         memory: str = "",
     ):
-        self.agent_id = agent_id
+        import uuid as _uuid
+        self.agent_name = agent_name
+        self.agent_id = _uuid.uuid4().hex[:12]
         self.service = service
         self._config = config or AgentConfig()
         self._context = context
@@ -102,7 +104,7 @@ class BaseAgent:
         self._base_dir = Path(base_dir)
         if not self._base_dir.is_dir():
             raise FileNotFoundError(f"base_dir does not exist: {self._base_dir}")
-        self._workdir = WorkingDir(base_dir=base_dir, agent_id=agent_id)
+        self._workdir = WorkingDir(base_dir=base_dir, agent_name=agent_name)
         self._working_dir = self._workdir.path
 
         # LoggingService: always JSONL in working dir
@@ -161,12 +163,10 @@ class BaseAgent:
 
         # Write manifest — stable identity only (no covenant, no runtime state)
         from datetime import datetime, timezone
-        import uuid as _uuid
         self._started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        self._instance_id = _uuid.uuid4().hex[:12]
         manifest_data = {
             "agent_id": self.agent_id,
-            "instance_id": self._instance_id,
+            "agent_name": self.agent_name,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
@@ -180,7 +180,7 @@ class BaseAgent:
         try:
             billboard_dir = Path.home() / ".stoai" / "billboard"
             billboard_dir.mkdir(parents=True, exist_ok=True)
-            self._billboard_path = billboard_dir / f"{self._instance_id}.json"
+            self._billboard_path = billboard_dir / f"{self.agent_id}.json"
             import json as _json, os as _os
             tmp = self._billboard_path.with_suffix(".tmp")
             tmp.write_text(_json.dumps(manifest_data, indent=2))
@@ -224,7 +224,8 @@ class BaseAgent:
         self._session = SessionManager(
             llm_service=service,
             config=self._config,
-            agent_id=agent_id,
+            agent_id=self.agent_id,
+            agent_name=agent_name,
             streaming=streaming,
             build_system_prompt_fn=self._build_system_prompt,
             build_tool_schemas_fn=self._build_tool_schemas,
@@ -250,7 +251,7 @@ class BaseAgent:
         info = {
             "_stoai": "agent",
             "agent_id": self.agent_id,
-            "instance_id": self._instance_id,
+            "agent_name": self.agent_name,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
@@ -353,14 +354,14 @@ class BaseAgent:
                 self.restore_chat(state)
                 self._log("session_restored")
             except Exception as e:
-                logger.warning(f"[{self.agent_id}] Failed to restore chat history: {e}")
+                logger.warning(f"[{self.agent_name}] Failed to restore chat history: {e}")
         status_file = self._working_dir / "history" / "status.json"
         if status_file.is_file():
             try:
                 status_state = json.loads(status_file.read_text())
                 self.restore_token_state(status_state.get("tokens", {}))
             except Exception as e:
-                logger.warning(f"[{self.agent_id}] Failed to restore token state: {e}")
+                logger.warning(f"[{self.agent_name}] Failed to restore token state: {e}")
 
         # Start MailService listener if configured
         if self._mail_service is not None:
@@ -372,7 +373,7 @@ class BaseAgent:
         self._thread = threading.Thread(
             target=self._run_loop,
             daemon=True,
-            name=f"agent-{self.agent_id}",
+            name=f"agent-{self.agent_name}",
         )
         self._thread.start()
 
@@ -416,7 +417,7 @@ class BaseAgent:
         # Persist final state and release lock
         manifest_data = {
             "agent_id": self.agent_id,
-            "instance_id": self._instance_id,
+            "agent_name": self.agent_name,
             "started_at": self._started_at,
             "working_dir": str(self._working_dir),
             "admin": self._admin,
@@ -502,6 +503,7 @@ class BaseAgent:
             self._log_service.log({
                 "type": event_type,
                 "agent_id": self.agent_id,
+                "agent_name": self.agent_name,
                 "ts": time.time(),
                 **fields,
             })
@@ -524,7 +526,7 @@ class BaseAgent:
             except Exception as e:
                 err_desc = str(e) or repr(e)
                 logger.error(
-                    f"[{self.agent_id}] Unhandled error in message handler: {err_desc}",
+                    f"[{self.agent_name}] Unhandled error in message handler: {err_desc}",
                     exc_info=True,
                 )
                 self._log("error", source="message_handler", message=err_desc)
@@ -598,7 +600,7 @@ class BaseAgent:
         if msg.type in (MSG_REQUEST, MSG_USER_INPUT):
             self._handle_request(msg)
         else:
-            logger.warning(f"[{self.agent_id}] Unknown message type: {msg.type}")
+            logger.warning(f"[{self.agent_name}] Unknown message type: {msg.type}")
 
     def _handle_request(self, msg: Message) -> None:
         """Send request to LLM, process response with tool calls."""
@@ -700,7 +702,7 @@ class BaseAgent:
             ):
                 logger.warning(
                     "[%s] Same error repeated, breaking early: %s",
-                    self.agent_id,
+                    self.agent_name,
                     collected_errors[-1],
                 )
                 break
@@ -746,7 +748,7 @@ class BaseAgent:
             except Exception as exc:
                 logger.warning(
                     "[%s] Diary LLM call failed during cancel: %s",
-                    self.agent_id, exc,
+                    self.agent_name, exc,
                 )
                 diary_text = (
                     f"[Cancelled by {sender}] "
@@ -1004,7 +1006,7 @@ class BaseAgent:
             self._workdir.diff_and_commit("history/chat_history.json", "chat_history")
             self._workdir.diff_and_commit("history/status.json", "status")
         except Exception as e:
-            logger.warning(f"[{self.agent_id}] Failed to persist session state: {e}")
+            logger.warning(f"[{self.agent_name}] Failed to persist session state: {e}")
 
     # ------------------------------------------------------------------
     # Status / introspection
@@ -1014,6 +1016,7 @@ class BaseAgent:
         """Return agent status for monitoring."""
         return {
             "agent_id": self.agent_id,
+            "agent_name": self.agent_name,
             "agent_type": self.agent_type,
             "state": self._state.value,
             "idle": self.is_idle,

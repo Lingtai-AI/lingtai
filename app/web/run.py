@@ -85,7 +85,7 @@ def main():
         contacts = {k: v for k, v in all_contacts.items() if k != a["name"]}
         state.register_agent(
             key=a["key"],
-            agent_id=a["id"],
+            agent_name=a["id"],
             name=a["name"],
             port=a["port"],
             llm=llm,

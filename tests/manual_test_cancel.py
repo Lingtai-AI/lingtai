@@ -60,7 +60,7 @@ def main():
         mail_services[name] = mail_svc
         is_admin = (name == "alice")
         agent = Agent(
-            agent_id=name,
+            agent_name=name,
             service=_make_mock_service(),
             mail_service=mail_svc,
             base_dir=base_dir,

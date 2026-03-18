@@ -123,7 +123,7 @@ class TestBaseAgentLoggingIntegration:
         from stoai.tool_executor import ToolExecutor
 
         agent = BaseAgent(
-            agent_id="test",
+            agent_name="test",
             service=make_mock_service(),
             base_dir=tmp_path,
         )
@@ -150,8 +150,8 @@ class TestBaseAgentLoggingIntegration:
         types = [e["type"] for e in events]
         assert "tool_call" in types
         assert "tool_result" in types
-        # Verify agent_id is injected
-        assert all(e["agent_id"] == "test" for e in events)
+        # Verify agent_name is injected
+        assert all(e["agent_name"] == "test" for e in events)
         # Verify ts is present
         assert all("ts" in e for e in events)
 
@@ -160,7 +160,7 @@ class TestBaseAgentLoggingIntegration:
         from stoai.tool_executor import ToolExecutor
 
         agent = BaseAgent(
-            agent_id="test",
+            agent_name="test",
             service=make_mock_service(),
             base_dir=tmp_path,
         )
@@ -190,7 +190,7 @@ class TestBaseAgentLoggingIntegration:
     def test_state_change_logged(self, tmp_path):
         """State transitions are logged."""
         agent = BaseAgent(
-            agent_id="test",
+            agent_name="test",
             service=make_mock_service(),
             base_dir=tmp_path,
         )

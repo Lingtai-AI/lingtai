@@ -94,6 +94,7 @@ def _show(agent) -> dict:
         "status": "ok",
         "identity": {
             "agent_id": agent.agent_id,
+            "agent_name": agent.agent_name,
             "working_dir": str(agent._working_dir),
             "mail_address": mail_addr,
         },

@@ -27,7 +27,7 @@ else:
         _fcntl.flock(fd, _fcntl.LOCK_UN)
 
 
-_AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _LOCK_FILE = ".agent.lock"
 _MANIFEST_FILE = ".agent.json"
 
@@ -35,14 +35,14 @@ _MANIFEST_FILE = ".agent.json"
 class WorkingDir:
     """Manages an agent's working directory — locking, git, manifest."""
 
-    def __init__(self, base_dir: Path | str, agent_id: str) -> None:
-        if not _AGENT_ID_RE.match(agent_id):
+    def __init__(self, base_dir: Path | str, agent_name: str) -> None:
+        if not _AGENT_NAME_RE.match(agent_name):
             raise ValueError(
-                f"agent_id must match [a-zA-Z0-9_-]+, got: {agent_id!r}"
+                f"agent_name must match [a-zA-Z0-9_-]+, got: {agent_name!r}"
             )
         self._base_dir = Path(base_dir)
-        self._agent_id = agent_id
-        self._path = self._base_dir / agent_id
+        self._agent_name = agent_name
+        self._path = self._base_dir / agent_name
         self._path.mkdir(exist_ok=True)
         self._lock_file: Any = None
 

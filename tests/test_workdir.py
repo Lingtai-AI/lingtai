@@ -11,16 +11,16 @@ from stoai.workdir import WorkingDir
 
 
 def test_init_creates_agent_dir(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     assert wd.path == tmp_path / "alice"
     assert wd.path.is_dir()
 
 
 def test_lock_prevents_second_instance(tmp_path):
-    wd1 = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd1 = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd1.acquire_lock()
     try:
-        wd2 = WorkingDir(base_dir=tmp_path, agent_id="alice")
+        wd2 = WorkingDir(base_dir=tmp_path, agent_name="alice")
         with pytest.raises(RuntimeError, match="already in use"):
             wd2.acquire_lock()
     finally:
@@ -28,16 +28,16 @@ def test_lock_prevents_second_instance(tmp_path):
 
 
 def test_lock_release_allows_reuse(tmp_path):
-    wd1 = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd1 = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd1.acquire_lock()
     wd1.release_lock()
-    wd2 = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd2 = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd2.acquire_lock()  # should not raise
     wd2.release_lock()
 
 
 def test_git_init_creates_repo(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd.init_git()
     assert (wd.path / ".git").is_dir()
     assert (wd.path / ".gitignore").is_file()
@@ -46,7 +46,7 @@ def test_git_init_creates_repo(tmp_path):
 
 
 def test_git_init_skips_if_already_initialized(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd.init_git()
     result1 = subprocess.run(
         ["git", "rev-list", "--count", "HEAD"],
@@ -61,20 +61,20 @@ def test_git_init_skips_if_already_initialized(tmp_path):
 
 
 def test_read_manifest_returns_empty_when_missing(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     assert wd.read_manifest() == ""
 
 
 def test_write_and_read_manifest(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
-    manifest = {"agent_id": "alice", "covenant": "researcher", "started_at": "2026-01-01T00:00:00Z"}
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
+    manifest = {"agent_name": "alice", "covenant": "researcher", "started_at": "2026-01-01T00:00:00Z"}
     wd.write_manifest(manifest)
     covenant = wd.read_manifest()
     assert covenant == "researcher"
 
 
 def test_diff_and_commit(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd.init_git()
     # Write to tracked file
     memory_file = wd.path / "system" / "memory.md"
@@ -85,7 +85,7 @@ def test_diff_and_commit(tmp_path):
 
 
 def test_diff_and_commit_no_changes(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd.init_git()
     diff_text, commit_hash = wd.diff_and_commit("system/memory.md", "memory")
     assert diff_text is None
@@ -93,7 +93,7 @@ def test_diff_and_commit_no_changes(tmp_path):
 
 
 def test_diff_read_only(tmp_path):
-    wd = WorkingDir(base_dir=tmp_path, agent_id="alice")
+    wd = WorkingDir(base_dir=tmp_path, agent_name="alice")
     wd.init_git()
     memory_file = wd.path / "system" / "memory.md"
     memory_file.write_text("new content")
@@ -107,6 +107,6 @@ def test_diff_read_only(tmp_path):
     assert status.stdout.strip()  # still dirty
 
 
-def test_invalid_agent_id_raises(tmp_path):
-    with pytest.raises(ValueError, match="agent_id must match"):
-        WorkingDir(base_dir=tmp_path, agent_id="bad agent!")
+def test_invalid_agent_name_raises(tmp_path):
+    with pytest.raises(ValueError, match="agent_name must match"):
+        WorkingDir(base_dir=tmp_path, agent_name="bad agent!")

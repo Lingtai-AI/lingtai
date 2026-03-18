@@ -187,7 +187,7 @@ def main():
 
     policy = str(Path(__file__).parent / "bash_policy.json")
     agent = Agent(
-        agent_id="assistant",
+        agent_name="assistant",
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),

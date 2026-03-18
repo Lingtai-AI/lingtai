@@ -25,7 +25,7 @@ def make_mock_service():
 
 def test_anima_setup_removes_system_intrinsic(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     assert "system" not in agent._intrinsics
@@ -35,7 +35,7 @@ def test_anima_setup_removes_system_intrinsic(tmp_path):
 
 def test_anima_manager_accessible(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -50,7 +50,7 @@ def test_anima_manager_accessible(tmp_path):
 
 def test_role_update_writes_character(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         covenant="You are helpful",
         capabilities=["anima"],
     )
@@ -64,7 +64,7 @@ def test_role_update_writes_character(tmp_path):
 
 def test_role_update_empty_clears_character(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -77,7 +77,7 @@ def test_role_update_empty_clears_character(tmp_path):
 
 def test_role_diff(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -93,7 +93,7 @@ def test_role_diff(tmp_path):
 
 def test_role_load_combines_covenant_and_character(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         covenant="You are helpful",
         capabilities=["anima"],
     )
@@ -116,7 +116,7 @@ def test_role_load_combines_covenant_and_character(tmp_path):
 
 def test_memory_diff_delegates_to_system(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -134,7 +134,7 @@ def test_memory_diff_delegates_to_system(tmp_path):
 def test_library_to_memory_workflow(tmp_path):
     """Full workflow: submit → filter → view → load → verify prompt."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -186,7 +186,7 @@ def test_library_to_memory_workflow(tmp_path):
 def test_memory_load_selective(tmp_path):
     """Memory load should inject only selected entries (id + title + content) into prompt."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -216,7 +216,7 @@ def test_memory_load_selective(tmp_path):
 
 def test_memory_load_requires_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -228,7 +228,7 @@ def test_memory_load_requires_ids(tmp_path):
 def test_memory_load_replaces_previous(tmp_path):
     """Each load replaces the entire memory section."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -253,7 +253,7 @@ def test_memory_load_replaces_previous(tmp_path):
 
 def test_memory_load_invalid_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -265,7 +265,7 @@ def test_memory_load_invalid_ids(tmp_path):
 def test_memory_load_writes_memory_md(tmp_path):
     """Load should also write memory.md to disk."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     agent.start()
@@ -288,7 +288,7 @@ def test_memory_load_writes_memory_md(tmp_path):
 
 def test_context_compact_requires_prompt(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -301,7 +301,7 @@ def test_context_compact_requires_prompt(tmp_path):
 def test_context_compact_no_session(tmp_path):
     """Compact without active chat should return error."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -317,7 +317,7 @@ def test_context_compact_no_session(tmp_path):
 
 def test_invalid_object(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -328,7 +328,7 @@ def test_invalid_object(tmp_path):
 
 def test_invalid_action_for_object(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -377,7 +377,7 @@ def test_anima_schema_has_library_fields():
 def test_library_submit_creates_structured_entry(tmp_path):
     """Submit should require title, summary, content and store structured entry."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -403,7 +403,7 @@ def test_library_submit_creates_structured_entry(tmp_path):
 
 def test_library_submit_with_supplementary(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -422,7 +422,7 @@ def test_library_submit_with_supplementary(tmp_path):
 
 def test_library_submit_requires_title_summary_content(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -444,7 +444,7 @@ def test_library_submit_requires_title_summary_content(tmp_path):
 def test_anima_migrates_ltm_to_library(tmp_path):
     """If ltm is provided, anima should migrate it to a library entry."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         memory="I know about CDF format",
         capabilities=["anima"],
     )
@@ -458,7 +458,7 @@ def test_anima_migrates_ltm_to_library(tmp_path):
 def test_anima_stop_does_not_overwrite_memory_md(tmp_path):
     """When anima is active, stop() should not write memory.md."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     # Write something to memory.md manually to simulate previous session state
@@ -472,7 +472,7 @@ def test_anima_stop_does_not_overwrite_memory_md(tmp_path):
 def test_library_filter_all(tmp_path):
     """Filter with no pattern returns all entries."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -495,7 +495,7 @@ def test_library_filter_all(tmp_path):
 def test_library_filter_with_pattern(tmp_path):
     """Filter with regex pattern matches against title, summary, and content."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -512,7 +512,7 @@ def test_library_filter_with_pattern(tmp_path):
 def test_library_filter_matches_content(tmp_path):
     """Filter should match against content field, not just title."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -528,7 +528,7 @@ def test_library_filter_matches_content(tmp_path):
 
 def test_library_filter_with_limit(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -542,7 +542,7 @@ def test_library_filter_with_limit(tmp_path):
 
 def test_library_filter_invalid_regex(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -554,7 +554,7 @@ def test_library_filter_invalid_regex(tmp_path):
 def test_library_view_content_depth(tmp_path):
     """View with depth=content returns id, title, summary, content."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -576,7 +576,7 @@ def test_library_view_content_depth(tmp_path):
 def test_library_view_supplementary_depth(tmp_path):
     """View with depth=supplementary returns everything."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -594,7 +594,7 @@ def test_library_view_supplementary_depth(tmp_path):
 def test_library_view_default_depth_is_content(tmp_path):
     """View without explicit depth defaults to content."""
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -611,7 +611,7 @@ def test_library_view_default_depth_is_content(tmp_path):
 
 def test_library_view_requires_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -622,7 +622,7 @@ def test_library_view_requires_ids(tmp_path):
 
 def test_library_view_unknown_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -633,7 +633,7 @@ def test_library_view_unknown_ids(tmp_path):
 
 def test_library_consolidate(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -659,7 +659,7 @@ def test_library_consolidate(tmp_path):
 
 def test_library_consolidate_requires_title_summary_content(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -674,7 +674,7 @@ def test_library_consolidate_requires_title_summary_content(tmp_path):
 
 def test_library_consolidate_invalid_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -688,7 +688,7 @@ def test_library_consolidate_invalid_ids(tmp_path):
 
 def test_library_delete(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -708,7 +708,7 @@ def test_library_delete(tmp_path):
 
 def test_library_delete_invalid_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
@@ -719,7 +719,7 @@ def test_library_delete_invalid_ids(tmp_path):
 
 def test_library_delete_requires_ids(tmp_path):
     agent = Agent(
-        agent_id="test", service=make_mock_service(), base_dir=tmp_path,
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
     mgr = agent.get_capability("anima")
