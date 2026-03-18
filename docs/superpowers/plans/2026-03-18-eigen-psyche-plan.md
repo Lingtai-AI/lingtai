@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Split the current `anima` capability into a two-layer architecture: `eigen` (intrinsic — bare essentials) and `psyche` (capability — full inner architecture). Rename `anima` → `psyche`, extract `compact` + `memory` into a new `eigen` intrinsic that replaces the current `memory` intrinsic. Remove `forget` from agent-facing API (keep as internal method for auto-wipe).
+**Goal:** Split the current `anima` capability into a two-layer architecture: `eigen` (intrinsic — bare essentials) and `psyche` (capability — full inner architecture). Rename `anima` → `psyche`, extract `molt` + `memory` into a new `eigen` intrinsic that replaces the current `memory` intrinsic. Remove `forget` from agent-facing API (keep as internal method for auto-wipe).
 
 **Architecture:**
-- `eigen` replaces the current `memory` intrinsic. It provides: `memory` (edit/load `system/memory.md`) and `compact` (self-compaction with briefing). `forget` is an internal method only.
-- `psyche` replaces `anima` as a capability. It provides: `character` (identity), `library` (external brain), and upgrades eigen's `memory.edit` → `construct(ids, notes)` which builds memory from library entries + free text. `compact` is inherited from eigen.
+- `eigen` replaces the current `memory` intrinsic. It provides: `memory` (edit/load `system/memory.md`) and `molt` (molt with briefing). `forget` is an internal method only.
+- `psyche` replaces `anima` as a capability. It provides: `character` (identity), `library` (external brain), and upgrades eigen's `memory.edit` → `construct(ids, notes)` which builds memory from library entries + free text. `molt` is inherited from eigen.
 - Psyche upgrades eigen the same way email upgrades the mail intrinsic — via `override_intrinsic`.
 
 **Tech Stack:** Python, existing stoai intrinsic/capability patterns
@@ -17,11 +17,11 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `src/stoai/intrinsics/eigen.py` | **Create** | New intrinsic: memory edit/load + compact. Replaces `memory` intrinsic. |
-| `src/stoai/capabilities/psyche.py` | **Create** | New capability: character + library + memory construct/load + compact (inherited). Replaces `anima`. |
+| `src/stoai/intrinsics/eigen.py` | **Create** | New intrinsic: memory edit/load + molt. Replaces `memory` intrinsic. |
+| `src/stoai/capabilities/psyche.py` | **Create** | New capability: character + library + memory construct/load + molt (inherited). Replaces `anima`. |
 | `src/stoai/intrinsics/memory.py` | **Delete** | Replaced by eigen |
 | `src/stoai/capabilities/anima.py` | **Delete** | Replaced by psyche |
-| `src/stoai/base_agent.py` | **Modify** | Wire eigen as intrinsic (replacing memory), update compaction pressure to reference eigen/psyche |
+| `src/stoai/base_agent.py` | **Modify** | Wire eigen as intrinsic (replacing memory), update molt pressure to reference eigen/psyche |
 | `src/stoai/agent.py` | **Modify** | Map `"psyche"` capability name (replace `"anima"`), keep `"anima"` as alias for backward compat during migration |
 | `tests/test_eigen.py` | **Create** | Tests for eigen intrinsic |
 | `tests/test_psyche.py` | **Create** | Tests for psyche capability |
@@ -45,7 +45,7 @@
 
 Objects:
     memory — edit/load system/memory.md (agent's working notes)
-    context — compact (self-compaction with briefing)
+    context — molt (molt with briefing)
 
 Internal (not exposed to agent):
     _context_forget — nuclear wipe, used by auto-forget only
@@ -65,10 +65,10 @@ SCHEMA = {
         },
         "action": {
             "type": "string",
-            "enum": ["edit", "load", "compact"],
+            "enum": ["edit", "load", "molt"],
             "description": (
                 "memory: edit | load.\n"
-                "context: compact."
+                "context: molt."
             ),
         },
         "content": {
@@ -78,8 +78,8 @@ SCHEMA = {
         "summary": {
             "type": "string",
             "description": (
-                "For context compact: a briefing to your future self — "
-                "the ONLY thing you will see after compaction. "
+                "For context molt: a briefing to your future self — "
+                "the ONLY thing you will see after molt. "
                 "Write what you are doing, what you have found, "
                 "what remains to be done, and who you are working with. "
                 "~10000 tokens max."
@@ -93,9 +93,9 @@ DESCRIPTION = (
     "Core self-management — working notes and context control.\n"
     "memory: edit to write your working notes (system/memory.md), "
     "load to inject them into your active prompt.\n"
-    "context: compact to self-compact — write a briefing to your future self, "
+    "context: molt to molt — write a briefing to your future self, "
     "your conversation history is wiped and your summary becomes the new starting context. "
-    "Before compacting, save important data elsewhere first."
+    "Before molting, save important data elsewhere first."
 )
 
 
@@ -112,10 +112,10 @@ def handle(agent, args: dict) -> dict:
         else:
             return {"error": f"Unknown memory action: {action}. Use edit or load."}
     elif obj == "context":
-        if action == "compact":
-            return _context_compact(agent, args)
+        if action == "molt":
+            return _context_molt(agent, args)
         else:
-            return {"error": f"Unknown context action: {action}. Use compact."}
+            return {"error": f"Unknown context action: {action}. Use molt."}
     else:
         return {"error": f"Unknown object: {obj}. Use memory or context."}
 
@@ -155,8 +155,8 @@ def _memory_load(agent, args: dict) -> dict:
     return {"status": "ok", "loaded": True, "length": len(content)}
 
 
-def _context_compact(agent, args: dict) -> dict:
-    """Agent self-compaction: summary IS the briefing, wipe + re-inject."""
+def _context_molt(agent, args: dict) -> dict:
+    """Agent molt: summary IS the briefing, wipe + re-inject."""
     summary = args.get("summary")
     if summary is None:
         return {"error": "summary is required — write a briefing to your future self."}
@@ -164,7 +164,7 @@ def _context_compact(agent, args: dict) -> dict:
         return {"error": "summary cannot be empty — write what you need to remember."}
 
     if agent._chat is None:
-        return {"error": "No active chat session to compact."}
+        return {"error": "No active chat session to molt."}
 
     before_tokens = agent._chat.interface.estimate_context_tokens()
 
@@ -183,12 +183,12 @@ def _context_compact(agent, args: dict) -> dict:
 
     after_tokens = iface.estimate_context_tokens()
 
-    # Reset compaction warnings
-    if hasattr(agent._session, "_compaction_warnings"):
-        agent._session._compaction_warnings = 0
+    # Reset molt warnings
+    if hasattr(agent._session, "_molt_warnings"):
+        agent._session._molt_warnings = 0
 
     agent._log(
-        "eigen_compact",
+        "eigen_molt",
         before_tokens=before_tokens,
         after_tokens=after_tokens,
     )
@@ -203,7 +203,7 @@ def _context_compact(agent, args: dict) -> dict:
 def context_forget(agent) -> dict:
     """Nuclear context wipe. Internal only — not exposed in SCHEMA.
 
-    Called by base_agent auto-forget after ignored compaction warnings.
+    Called by base_agent auto-forget after ignored molt warnings.
     """
     if agent._chat is None:
         return {"error": "No active chat session."}
@@ -232,11 +232,11 @@ from .intrinsics import eigen
 self._register_intrinsic("eigen", eigen.SCHEMA, eigen.DESCRIPTION, eigen.handle)
 ```
 
-Also update the compaction auto-forget in `_handle_request` to use `eigen.context_forget(self)` instead of `anima._context_forget({})`.
+Also update the molt auto-forget in `_handle_request` to use `eigen.context_forget(self)` instead of `anima._context_forget({})`.
 
 - [ ] **Step 3: Write tests**
 
-`tests/test_eigen.py` — test memory edit/load, compact, and forget:
+`tests/test_eigen.py` — test memory edit/load, molt, and forget:
 
 ```python
 def test_eigen_memory_edit(tmp_path):
@@ -245,11 +245,11 @@ def test_eigen_memory_edit(tmp_path):
 def test_eigen_memory_load(tmp_path):
     """eigen memory load injects into system prompt."""
 
-def test_eigen_compact_uses_summary(tmp_path):
-    """compact wipes context and re-injects agent's summary."""
+def test_eigen_molt_uses_summary(tmp_path):
+    """molt wipes context and re-injects agent's summary."""
 
-def test_eigen_compact_rejects_empty(tmp_path):
-    """compact with empty summary returns error."""
+def test_eigen_molt_rejects_empty(tmp_path):
+    """molt with empty summary returns error."""
 
 def test_eigen_forget_wipes_context(tmp_path):
     """context_forget nuclear wipes the session."""
@@ -267,7 +267,7 @@ Run: `python -c "import stoai"`
 
 ```bash
 git add src/stoai/intrinsics/eigen.py src/stoai/base_agent.py tests/test_eigen.py
-git commit -m "feat: eigen intrinsic — memory edit/load + self-compaction"
+git commit -m "feat: eigen intrinsic — memory edit/load + molt"
 ```
 
 ---
@@ -326,33 +326,33 @@ SCHEMA adds `ids` field:
 
 Memory actions when psyche is active: `construct` (replaces edit), `load` (inherited from eigen).
 
-Psyche upgrades eigen via `override_intrinsic("eigen")` — takes over the tool, adds character + library + upgraded memory, but delegates compact to eigen's handler.
+Psyche upgrades eigen via `override_intrinsic("eigen")` — takes over the tool, adds character + library + upgraded memory, but delegates molt to eigen's handler.
 
 - [ ] **Step 2: Migrate character + library code from anima.py**
 
 Copy the character and library logic from `anima.py` into `psyche.py`. The AnimaManager class becomes PsycheManager. Key changes:
 - `object=memory, action=edit` → `object=memory, action=construct` (with ids + notes)
 - `object=memory, action=load` → delegates to eigen's `_memory_load`
-- `object=context, action=compact` → delegates to eigen's `_context_compact`
+- `object=context, action=molt` → delegates to eigen's `_context_molt`
 - `object=context, action=forget` → **removed from schema** (internal only)
 
 - [ ] **Step 3: Update SCHEMA and DESCRIPTION**
 
 SCHEMA enum for objects: `["character", "library", "memory", "context"]`
 
-SCHEMA enum for actions: `["update", "diff", "load", "submit", "filter", "view", "consolidate", "delete", "construct", "compact"]`
+SCHEMA enum for actions: `["update", "diff", "load", "submit", "filter", "view", "consolidate", "delete", "construct", "molt"]`
 
 DESCRIPTION:
 ```
 "Self-knowledge management — identity, knowledge, memory, and context.\n"
 "character: your evolving identity. update | diff | load.\n"
-"library: your external brain — persists across compactions, reboots, kills. "
+"library: your external brain — persists across molts, reboots, kills. "
 "submit | filter | view | consolidate | delete. "
 "Use filter/view to retrieve anytime.\n"
 "memory: construct your active memory from library entries + notes. "
 "construct(ids=[...], notes='...') builds system/memory.md from selected library entries "
 "and your free text. load injects it into your prompt.\n"
-"context: compact to self-compact — write a briefing to your future self.\n"
+"context: molt to molt — write a briefing to your future self.\n"
 ```
 
 - [ ] **Step 4: Write tests**
@@ -374,8 +374,8 @@ def test_character_update_and_load(tmp_path):
 def test_library_submit_and_filter(tmp_path):
     """library submit + filter retrieves entries."""
 
-def test_compact_delegates_to_eigen(tmp_path):
-    """psyche compact calls through to eigen's handler."""
+def test_molt_delegates_to_eigen(tmp_path):
+    """psyche molt calls through to eigen's handler."""
 
 def test_forget_not_in_schema():
     """forget is not exposed in psyche's SCHEMA actions."""
@@ -427,15 +427,15 @@ In `app/web/examples/orchestrator.py`, change capabilities:
 
 Also update CHARACTER prompt and COVENANT to reference `psyche` and `eigen` instead of `anima`.
 
-- [ ] **Step 4: Update compaction warnings in base_agent.py**
+- [ ] **Step 4: Update molt warnings in base_agent.py**
 
-Change all `anima(object=context, action=compact, summary=...)` references in warning messages to `eigen(object=context, action=compact, summary=...)` (since compact lives in eigen, though psyche inherits it — the tool name the agent sees depends on whether psyche is active).
+Change all `anima(object=context, action=molt, summary=...)` references in warning messages to `eigen(object=context, action=molt, summary=...)` (since molt lives in eigen, though psyche inherits it — the tool name the agent sees depends on whether psyche is active).
 
 Actually: when psyche upgrades eigen, the tool name becomes `psyche`. When only eigen is present, the tool name is `eigen`. The warning messages should detect which is available:
 
 ```python
 tool_name = "psyche" if "psyche" in cap_managers else "eigen"
-f"{tool_name}(object=context, action=compact, summary=<briefing>)"
+f"{tool_name}(object=context, action=molt, summary=<briefing>)"
 ```
 
 - [ ] **Step 5: Update all imports/references**
