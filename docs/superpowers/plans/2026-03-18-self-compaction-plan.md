@@ -265,7 +265,8 @@ if pressure >= 0.8 and has_anima:
         self._session._compaction_warnings = 0
         content = (
             f"[system] Your conversation history was wiped because you ignored "
-            f"2 compaction warnings. Start fresh.\n\n{content}"
+            f"2 compaction warnings. Check your email inbox and library for context. "
+            f"Start fresh.\n\n{content}"
         )
     elif warnings == 2:
         content = (
