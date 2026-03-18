@@ -208,27 +208,32 @@ def test_mail_start_wires_listener(tmp_path):
         agent.stop(timeout=2.0)
 
 
-def test_mail_read_pops_fifo(tmp_path):
-    """mail read should pop messages in FIFO order."""
+def test_mail_read_by_id(tmp_path):
+    """mail read should load messages by ID from disk."""
+    import json
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    agent._on_mail_received({"from": "a", "message": "first"})
-    agent._on_mail_received({"from": "b", "message": "second"})
+    # Persist a message to the inbox directory
+    import uuid
+    msg_id = str(uuid.uuid4())
+    msg_dir = agent._working_dir / "mailbox" / "inbox" / msg_id
+    msg_dir.mkdir(parents=True)
+    (msg_dir / "message.json").write_text(json.dumps({
+        "_mailbox_id": msg_id,
+        "from": "a",
+        "subject": "test",
+        "message": "first",
+        "received_at": "2026-03-18T10:00:00Z",
+    }))
+    result = agent._intrinsics["mail"]({"action": "read", "id": [msg_id]})
+    assert len(result["messages"]) == 1
+    assert result["messages"][0]["message"] == "first"
 
-    r1 = agent._intrinsics["mail"]({"action": "read"})
-    assert r1["message"] == "first"
-    assert r1["remaining"] == 1
 
-    r2 = agent._intrinsics["mail"]({"action": "read"})
-    assert r2["message"] == "second"
-    assert r2["remaining"] == 0
-
-
-def test_mail_read_empty_queue(tmp_path):
-    """mail read on empty queue should return message=None."""
+def test_mail_read_no_ids_returns_error(tmp_path):
+    """mail read without id should return an error."""
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     result = agent._intrinsics["mail"]({"action": "read"})
-    assert result["message"] is None
-    assert result["remaining"] == 0
+    assert "error" in result
 
 
 def test_mail_received_full_content_in_notification(tmp_path):
