@@ -9,7 +9,8 @@ if TYPE_CHECKING:
 
 # Registry of built-in capability names → module paths (relative to this package).
 _BUILTIN: dict[str, str] = {
-    "anima": ".anima",
+    "psyche": ".psyche",
+    "anima": ".psyche",  # backward compat alias
     "bash": ".bash",
     "conscience": ".conscience",
     "delegate": ".delegate",

@@ -5,7 +5,7 @@ Each intrinsic has:
 - DESCRIPTION: human-readable description
 - handle: handler function(agent, args) -> dict
 """
-from . import mail, clock, status, memory
+from . import mail, clock, status, eigen
 
 ALL_INTRINSICS = {
     "mail": {
@@ -20,8 +20,8 @@ ALL_INTRINSICS = {
         "schema": status.SCHEMA, "description": status.DESCRIPTION, "handle": status.handle,
         "system_prompt": "Inspect your own state, token usage, and shut yourself down.",
     },
-    "memory": {
-        "schema": memory.SCHEMA, "description": memory.DESCRIPTION, "handle": memory.handle,
-        "system_prompt": "Edit and load your long-term memory.",
+    "eigen": {
+        "schema": eigen.SCHEMA, "description": eigen.DESCRIPTION, "handle": eigen.handle,
+        "system_prompt": "Core self-management — working notes and context control.",
     },
 }

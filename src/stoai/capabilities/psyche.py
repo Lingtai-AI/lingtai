@@ -1,11 +1,11 @@
-"""Anima capability — self-knowledge management.
+"""Psyche capability — self-knowledge management.
 
-Upgrades the memory intrinsic (like email upgrades mail).
-Adds evolving identity (covenant + character), structured memory,
-and on-demand context compaction.
+Upgrades the eigen intrinsic (like email upgrades mail).
+Adds evolving identity (covenant + character), structured library,
+and memory construct (build memory from library entries + notes).
 
 Usage:
-    agent = Agent(capabilities=["anima"])
+    agent = Agent(capabilities=["psyche"])
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ SCHEMA = {
                 "character: your evolving identity — what makes you special.\n"
                 "library: your knowledge archive (system/library.json).\n"
                 "memory: your active working memory "
-                "(system/memory.md, loaded from library).\n"
+                "(system/memory.md, constructed from library + notes).\n"
                 "context: your conversation context window."
             ),
         },
@@ -39,13 +39,13 @@ SCHEMA = {
             "enum": [
                 "update", "diff", "load",
                 "submit", "filter", "view", "consolidate", "delete",
-                "compact", "forget",
+                "construct", "molt",
             ],
             "description": (
                 "character: update | diff | load.\n"
                 "library: submit | filter | view | consolidate | delete.\n"
-                "memory: load.\n"
-                "context: compact | forget."
+                "memory: construct | load.\n"
+                "context: molt."
             ),
         },
         "title": {
@@ -59,8 +59,8 @@ SCHEMA = {
             "type": "string",
             "description": (
                 "For library submit/consolidate: entry summary — 1-3 sentences, used for filtering. "
-                "For context compact: a briefing to your future self — the ONLY thing you will see "
-                "after compaction. Write what you are doing, what you have found, "
+                "For context molt: a briefing to your future self — the ONLY thing you will see "
+                "after molt. Write what you are doing, what you have found, "
                 "what remains to be done, which library entries to retrieve, "
                 "and who you are working with (addresses). ~10000 tokens max."
             ),
@@ -86,7 +86,13 @@ SCHEMA = {
             "items": {"type": "string"},
             "description": (
                 "Entry IDs — for library view, consolidate, delete, "
-                "and memory load."
+                "memory load, and memory construct."
+            ),
+        },
+        "notes": {
+            "type": "string",
+            "description": (
+                "Free text notes to include in memory (for memory construct)."
             ),
         },
         "pattern": {
@@ -115,8 +121,7 @@ SCHEMA = {
 }
 
 DESCRIPTION = (
-    "Self-knowledge management — identity, knowledge library, active memory, "
-    "and context control.\n"
+    "Self-knowledge management — identity, knowledge, memory, and context.\n"
     "character: your evolving identity — what makes you *you*. "
     "Your personality, expertise, working style, and goals. Be active about "
     "updating this — your character is what distinguishes you from other agents. "
@@ -127,7 +132,7 @@ DESCRIPTION = (
     "Pipelines (workflows you've mastered). "
     "update to write your character (write your full profile, it replaces previous), "
     "diff to review changes, load to apply.\n"
-    "library: your external brain — persists across compactions, reboots, and kills. "
+    "library: your external brain — persists across molts, reboots, and kills. "
     "Proactively deposit important findings, data, decisions, and discoveries here "
     "throughout your work. Use filter/view to retrieve information anytime — "
     "you don't need to load everything into system prompt. "
@@ -135,25 +140,26 @@ DESCRIPTION = (
     "optional regex pattern and limit). view to read at depth "
     "(content or supplementary). consolidate to merge entries. "
     "delete to remove. Write clear titles and concise summaries (1-3 sentences).\n"
-    "memory: load selected library entries into active memory by IDs "
-    "(injects id + title + content into system prompt and git commits).\n"
-    "context: compact to self-compact — write a briefing to your future self. "
-    "Your conversation history is wiped and your prompt becomes the ONLY context you see. "
-    "Before compacting: deposit important data to library (your external brain — it persists). "
+    "memory: construct your active memory from library entries + notes. "
+    "construct(ids=[...], notes='...') builds system/memory.md from selected library entries "
+    "and your free text. load injects it into your prompt.\n"
+    "context: molt to molt — write a briefing to your future self. "
+    "Your conversation history is wiped and your summary becomes the ONLY context you see. "
+    "Before molting: deposit important data to library (your external brain — it persists). "
     "Then write what you're doing, what's done, what's pending, "
     "and which library entries to retrieve for context. "
-    "forget to nuke conversation history completely (you lose everything). "
     "Check usage via status show first.\n"
-    "Workflow: filter to browse → view if you need detail → load to remember."
+    "Workflow: filter to browse → view if you need detail → construct to build memory → load to remember."
 )
 
 
-class AnimaManager:
-    """Self-knowledge manager — character, memory, context."""
+class PsycheManager:
+    """Self-knowledge manager — character, library, memory, context."""
 
-    def __init__(self, agent: "BaseAgent"):
+    def __init__(self, agent: "BaseAgent", eigen_handler):
         self._agent = agent
         self._working_dir = agent._working_dir
+        self._eigen_handler = eigen_handler
 
         # Paths
         system_dir = self._working_dir / "system"
@@ -213,6 +219,13 @@ class AnimaManager:
             (content + created_at).encode()
         ).hexdigest()[:8]
 
+    def _load_library_entry(self, entry_id: str) -> dict | None:
+        """Look up a library entry by ID."""
+        for e in self._entries:
+            if e["id"] == entry_id:
+                return e
+        return None
+
     # ------------------------------------------------------------------
     # Dispatch
     # ------------------------------------------------------------------
@@ -220,8 +233,8 @@ class AnimaManager:
     _VALID_ACTIONS: dict[str, set[str]] = {
         "character": {"update", "diff", "load"},
         "library": {"submit", "filter", "view", "consolidate", "delete"},
-        "memory": {"load"},
-        "context": {"compact", "forget"},
+        "memory": {"construct", "load"},
+        "context": {"molt"},
     }
 
     def handle(self, args: dict) -> dict:
@@ -290,7 +303,7 @@ class AnimaManager:
         )
 
         self._agent._log(
-            "anima_character_load",
+            "psyche_character_load",
             changed=commit_hash is not None,
         )
 
@@ -306,7 +319,7 @@ class AnimaManager:
         }
 
     # ------------------------------------------------------------------
-    # Memory actions
+    # Library actions
     # ------------------------------------------------------------------
 
     def _library_submit(self, args: dict) -> dict:
@@ -439,130 +452,67 @@ class AnimaManager:
         self._save_entries()
         return {"status": "ok", "removed": removed}
 
-    def _memory_load(self, args: dict) -> dict:
-        ids = args.get("ids")
-        if not ids:
-            return {"error": "ids is required for memory load."}
+    # ------------------------------------------------------------------
+    # Memory actions
+    # ------------------------------------------------------------------
 
-        entries_by_id = {e["id"]: e for e in self._entries}
-        invalid = [i for i in ids if i not in entries_by_id]
-        if invalid:
-            return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+    def _memory_construct(self, args: dict) -> dict:
+        """Build memory from library entries + free text notes."""
+        ids = args.get("ids", [])
+        notes = args.get("notes", "")
 
-        # Render memory.md with id + title + content
-        lines = []
-        for entry_id in ids:
-            e = entries_by_id[entry_id]
-            lines.append(f"### [{e['id']}] {e['title']}\n{e['content']}")
-        content = "\n\n".join(lines) + ("\n" if lines else "")
+        parts = []
+        if notes:
+            parts.append(notes)
 
-        # Write to disk
+        # Load library entries by ID
+        if ids:
+            entries_by_id = {e["id"]: e for e in self._entries}
+            invalid = [i for i in ids if i not in entries_by_id]
+            if invalid:
+                return {"error": f"Unknown library IDs: {', '.join(invalid)}"}
+
+            for entry_id in ids:
+                e = entries_by_id[entry_id]
+                parts.append(f"### [{e['id']}] {e['title']}\n{e['content']}")
+
+        if not parts:
+            return {"error": "Provide ids, notes, or both for memory construct."}
+
+        content = "\n\n".join(parts)
         self._memory_md.parent.mkdir(exist_ok=True)
-        self._memory_md.write_text(content)
-
-        # Inject into system prompt
-        if content.strip():
-            self._agent._prompt_manager.write_section("memory", content)
-        else:
-            self._agent._prompt_manager.delete_section("memory")
-        self._agent._token_decomp_dirty = True
-
-        if self._agent._chat is not None:
-            self._agent._chat.update_system_prompt(
-                self._agent._build_system_prompt()
-            )
+        self._memory_md.write_text(content + "\n")
 
         # Git commit
-        rel_path = "system/memory.md"
-        git_diff, commit_hash = self._agent._workdir.diff_and_commit(
-            rel_path, "memory",
-        )
+        self._agent._workdir.diff_and_commit("system/memory.md", "memory construct")
 
         self._agent._log(
-            "anima_memory_load",
+            "psyche_memory_construct",
             entry_count=len(ids),
-            changed=commit_hash is not None,
+            length=len(content),
         )
 
-        return {
-            "status": "ok",
-            "loaded": len(ids),
-            "size_bytes": len(content.encode("utf-8")),
-            "content_preview": content[:200],
-            "diff": {
-                "changed": commit_hash is not None,
-                "git_diff": git_diff or "",
-                "commit": commit_hash,
-            },
-        }
+        return {"status": "ok", "entries": len(ids), "length": len(content)}
+
+    def _memory_load(self, args: dict) -> dict:
+        """Load system/memory.md into the system prompt — delegates to eigen."""
+        return self._eigen_handler({"object": "memory", "action": "load"})
 
     # ------------------------------------------------------------------
-    # Context actions
+    # Context actions — delegate to eigen
     # ------------------------------------------------------------------
 
-    def _context_compact(self, args: dict) -> dict:
-        """Agent self-compaction: summary IS the briefing, wipe + re-inject."""
-        summary = args.get("summary")
-        if summary is None:
-            return {"error": "summary is required — write a briefing to your future self."}
-        if not summary.strip():
-            return {"error": "summary cannot be empty — write what you need to remember."}
-
-        if self._agent._chat is None:
-            return {"error": "No active chat session to compact."}
-
-        before_tokens = self._agent._chat.interface.estimate_context_tokens()
-
-        # Wipe context and start fresh session
-        self._agent._session._chat = None
-        self._agent._session._interaction_id = None
-        self._agent._session.ensure_session()
-
-        # Inject the agent's summary as the opening context
-        from ..llm.interface import TextBlock
-        iface = self._agent._session._chat.interface
-        iface.add_user_message(f"[Previous conversation summary]\n{summary}")
-        iface.add_assistant_message(
-            [TextBlock(text="Understood. I have my previous context restored.")],
-        )
-
-        after_tokens = iface.estimate_context_tokens()
-
-        # Reset compaction warnings since agent just compacted
-        if hasattr(self._agent._session, "_compaction_warnings"):
-            self._agent._session._compaction_warnings = 0
-
-        self._agent._log(
-            "anima_compact",
-            before_tokens=before_tokens,
-            after_tokens=after_tokens,
-        )
-
-        return {
-            "status": "ok",
-            "before_tokens": before_tokens,
-            "after_tokens": after_tokens,
-        }
-
-    def _context_forget(self, args: dict) -> dict:
-        """Nuke the entire conversation context and start a fresh session."""
-        if self._agent._chat is None:
-            return {"error": "No active chat session."}
-
-        before_tokens = self._agent._chat.interface.estimate_context_tokens()
-        self._agent._session._chat = None
-        self._agent._session._interaction_id = None
-        self._agent._session.ensure_session()
-        self._agent._log("anima_forget", before_tokens=before_tokens)
-
-        return {"status": "ok", "freed_tokens": before_tokens}
+    def _context_molt(self, args: dict) -> dict:
+        """Delegate molt to eigen's handler."""
+        return self._eigen_handler({"object": "context", "action": "molt", "summary": args.get("summary")})
 
 
-def setup(agent: "BaseAgent") -> AnimaManager:
-    """Set up anima capability — self-knowledge management."""
-    mgr = AnimaManager(agent)
-    agent.override_intrinsic("memory")
-    agent._anima_owns_memory = True
+def setup(agent: "BaseAgent") -> PsycheManager:
+    """Set up psyche capability — self-knowledge management."""
+    eigen_handler = agent.override_intrinsic("eigen")
+    agent._eigen_owns_memory = True
+
+    mgr = PsycheManager(agent, eigen_handler)
 
     # Migrate existing memory.md content to library as a seed entry
     memory_file = agent._working_dir / "system" / "memory.md"
@@ -577,7 +527,7 @@ def setup(agent: "BaseAgent") -> AnimaManager:
             })
 
     agent.add_tool(
-        "anima", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
+        "psyche", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
         system_prompt="Manage your identity, knowledge library, and memory.",
     )
     return mgr

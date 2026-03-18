@@ -1,4 +1,7 @@
-"""Tests for memory intrinsic — agent long-term memory management."""
+"""Tests for eigen intrinsic — agent memory management (edit/load).
+
+Migrated from memory intrinsic tests. Tests the memory object within eigen.
+"""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -22,18 +25,20 @@ def make_mock_service():
 # ---------------------------------------------------------------------------
 
 
-def test_memory_in_all_intrinsics():
-    assert "memory" in ALL_INTRINSICS
-    assert "system" not in ALL_INTRINSICS
-    info = ALL_INTRINSICS["memory"]
+def test_eigen_in_all_intrinsics():
+    assert "eigen" in ALL_INTRINSICS
+    assert "memory" not in ALL_INTRINSICS
+    info = ALL_INTRINSICS["eigen"]
     schema = info["schema"]
-    assert schema["properties"]["action"]["enum"] == ["edit", "load"]
+    assert "edit" in schema["properties"]["action"]["enum"]
+    assert "load" in schema["properties"]["action"]["enum"]
+    assert "molt" in schema["properties"]["action"]["enum"]
 
 
-def test_memory_wired_in_agent(tmp_path):
+def test_eigen_wired_in_agent(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    assert "memory" in agent._intrinsics
-    assert "system" not in agent._intrinsics
+    assert "eigen" in agent._intrinsics
+    assert "memory" not in agent._intrinsics
     agent.stop(timeout=1.0)
 
 
@@ -96,14 +101,14 @@ def test_existing_system_files_not_overwritten(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Handler tests (edit / load)
+# Handler tests (edit / load via eigen)
 # ---------------------------------------------------------------------------
 
 
 def test_memory_edit(tmp_path):
     """Edit should write content to disk without injecting into prompt."""
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    result = agent._intrinsics["memory"]({"action": "edit", "content": "hello world"})
+    result = agent._intrinsics["eigen"]({"object": "memory", "action": "edit", "content": "hello world"})
     assert result["status"] == "ok"
     assert result["size_bytes"] == len("hello world".encode())
     memory_file = agent.working_dir / "system" / "memory.md"
@@ -116,8 +121,8 @@ def test_memory_edit_then_load(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     agent.start()
     try:
-        agent._intrinsics["memory"]({"action": "edit", "content": "important fact"})
-        result = agent._intrinsics["memory"]({"action": "load"})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "edit", "content": "important fact"})
+        result = agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
         assert result["status"] == "ok"
         assert result["diff"]["changed"] is True
         section = agent._prompt_manager.read_section("memory")
@@ -132,7 +137,7 @@ def test_memory_load(tmp_path):
     try:
         memory_file = agent.working_dir / "system" / "memory.md"
         memory_file.write_text("# Memory\n\nimportant fact\n")
-        result = agent._intrinsics["memory"]({"action": "load"})
+        result = agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
         assert result["status"] == "ok"
         assert result["diff"]["changed"] is True
         section = agent._prompt_manager.read_section("memory")
@@ -145,11 +150,11 @@ def test_memory_load_empty_removes_section(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     agent.start()
     try:
-        agent._intrinsics["memory"]({"action": "edit", "content": "some content"})
-        agent._intrinsics["memory"]({"action": "load"})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "edit", "content": "some content"})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
         assert agent._prompt_manager.read_section("memory") is not None
-        agent._intrinsics["memory"]({"action": "edit", "content": ""})
-        agent._intrinsics["memory"]({"action": "load"})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "edit", "content": ""})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
         section = agent._prompt_manager.read_section("memory")
         assert section is None or section.strip() == ""
     finally:
@@ -160,8 +165,8 @@ def test_memory_load_no_change_no_commit(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     agent.start()
     try:
-        agent._intrinsics["memory"]({"action": "load"})
-        result = agent._intrinsics["memory"]({"action": "load"})
+        agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
+        result = agent._intrinsics["eigen"]({"object": "memory", "action": "load"})
         assert result["diff"]["changed"] is False
     finally:
         agent.stop()
@@ -169,8 +174,8 @@ def test_memory_load_no_change_no_commit(tmp_path):
 
 def test_memory_unknown_action(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    result = agent._intrinsics["memory"]({"action": "diff"})
-    assert result["status"] == "error"
+    result = agent._intrinsics["eigen"]({"object": "memory", "action": "diff"})
+    assert "error" in result
     agent.stop(timeout=1.0)
 
 
@@ -182,7 +187,7 @@ def test_memory_creates_files_if_missing(tmp_path):
         system_dir = agent.working_dir / "system"
         if system_dir.exists():
             shutil.rmtree(system_dir)
-        result = agent._intrinsics["memory"]({"action": "edit", "content": "test"})
+        result = agent._intrinsics["eigen"]({"object": "memory", "action": "edit", "content": "test"})
         assert result["status"] == "ok"
         assert (agent.working_dir / "system" / "memory.md").is_file()
     finally:

@@ -18,16 +18,16 @@ def make_mock_service():
 
 def test_override_intrinsic_removes_from_dict(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    assert "memory" in agent._intrinsics
-    agent.override_intrinsic("memory")
-    assert "memory" not in agent._intrinsics
+    assert "eigen" in agent._intrinsics
+    agent.override_intrinsic("eigen")
+    assert "eigen" not in agent._intrinsics
     agent.stop(timeout=1.0)
 
 
 def test_override_intrinsic_returns_original_handler(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    original = agent._intrinsics["memory"]
-    returned = agent.override_intrinsic("memory")
+    original = agent._intrinsics["eigen"]
+    returned = agent.override_intrinsic("eigen")
     assert returned is original
     agent.stop(timeout=1.0)
 
@@ -37,7 +37,7 @@ def test_override_intrinsic_raises_after_start(tmp_path):
     agent.start()
     try:
         with pytest.raises(RuntimeError, match="Cannot modify tools after start"):
-            agent.override_intrinsic("memory")
+            agent.override_intrinsic("eigen")
     finally:
         agent.stop(timeout=2.0)
 
@@ -52,8 +52,8 @@ def test_override_intrinsic_raises_unknown(tmp_path):
 def test_override_intrinsic_tool_no_longer_visible(tmp_path):
     """After override, the intrinsic should not appear in tool schemas."""
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
-    agent.override_intrinsic("memory")
+    agent.override_intrinsic("eigen")
     schemas = agent._build_tool_schemas()
     schema_names = [s.name for s in schemas]
-    assert "memory" not in schema_names
+    assert "eigen" not in schema_names
     agent.stop(timeout=1.0)

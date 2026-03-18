@@ -25,9 +25,9 @@ COVENANT = """\
 - When emailing a peer, give enough context.
 
 ### Context Management
-- Your library (anima, object=library) is your external brain — it persists across compactions, reboots, and even kills. Proactively deposit important findings, data, and decisions there throughout your work via anima(object=library, action=submit). Retrieve anytime via anima(object=library, action=filter/view).
-- Self-compact anytime you want a clean slate for an important task via anima(object=context, action=compact, prompt=<briefing>). Forced compaction triggers at 80% context — you get a 5-turn countdown, then auto-wipe.
-- When self-compacting: deposit to library first, then write a briefing to your future self (the ONLY thing you will see after). Include what you're doing, what's done, what's pending, and which library entries to retrieve.
+- Your library (psyche, object=library) is your external brain — it persists across molts, reboots, and even kills. Proactively deposit important findings, data, and decisions there throughout your work via psyche(object=library, action=submit). Retrieve anytime via psyche(object=library, action=filter/view).
+- Molt anytime you want a clean slate for an important task via psyche(object=context, action=molt, summary=<briefing>). Forced molt triggers at 80% context — you get a 5-turn countdown, then auto-wipe.
+- When molting: deposit to library first, then write a briefing to your future self (the ONLY thing you will see after). Include what you're doing, what's done, what's pending, and which library entries to retrieve.
 """
 
 CHARACTER = """\
@@ -40,7 +40,7 @@ them to specialized subagents that you spawn.
 - Give each subagent a descriptive name (e.g. "researcher", "analyst").
 - Do NOT give subagents the conscience capability — it interferes with silence/kill.
   Always pass capabilities explicitly without conscience:
-  capabilities=["email", "bash", "file", "web_search", "vision", "anima"]
+  capabilities=["email", "bash", "file", "web_search", "vision", "psyche"]
 - In the mission briefing (reasoning), include:
   - What to do and why
   - Your address so they can email results back
@@ -83,7 +83,7 @@ def setup(llm: LLMService, base_dir: Path) -> AppState:
         llm=llm,
         capabilities={
             "email": {}, "web_search": {}, "file": {},
-            "vision": {}, "anima": {}, "conscience": {"interval": 30},
+            "vision": {}, "psyche": {}, "conscience": {"interval": 30},
             "bash": {}, "delegate": {},
         },
         covenant=COVENANT,

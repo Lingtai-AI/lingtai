@@ -48,11 +48,11 @@ def test_intrinsics_enabled_by_default(tmp_path):
     assert "mail" in agent._intrinsics
     assert "clock" in agent._intrinsics
     assert "status" in agent._intrinsics
-    assert "memory" in agent._intrinsics
+    assert "eigen" in agent._intrinsics
     # File I/O is now a capability, not intrinsic
     assert "read" not in agent._intrinsics
     assert "write" not in agent._intrinsics
-    assert len(agent._intrinsics) == 4  # mail, clock, status, memory
+    assert len(agent._intrinsics) == 4  # mail, clock, status, eigen
 
 
 # ---------------------------------------------------------------------------

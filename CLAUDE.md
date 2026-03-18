@@ -58,8 +58,8 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 
 | Tier | What | How added |
 |------|------|-----------|
-| **Intrinsics** | Kernel services (mail, clock, status+shutdown, memory). Memory operates on `system/memory.md` with `edit`/`load` actions. Covenant is a protected prompt section (no tool access). Capabilities can upgrade intrinsics via `override_intrinsic()`. | Built-in, always present |
-| **Capabilities** | Composable capabilities (file [read/write/edit/glob/grep], anima, bash, conscience, delegate, email, vision, web_search, talk, compose, draw, listen) | Declared at construction via `capabilities=` on Agent |
+| **Intrinsics** | Kernel services (mail, clock, status+shutdown, eigen). Eigen provides memory (`edit`/`load` on `system/memory.md`) and context management (`molt` for self-compaction with briefing). `context_forget` is internal only (auto-wipe). Covenant is a protected prompt section (no tool access). Capabilities can upgrade intrinsics via `override_intrinsic()`. | Built-in, always present |
+| **Capabilities** | Composable capabilities (file [read/write/edit/glob/grep], psyche, bash, conscience, delegate, email, vision, web_search, talk, compose, draw, listen) | Declared at construction via `capabilities=` on Agent |
 | **MCP tools** | Domain tools from external MCP servers | Connected via `MCPClient` from `services/mcp.py`, or `add_tool()` in subclass constructors |
 
 ### Key Modules
@@ -76,8 +76,8 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 - **`llm/base.py`** — `LLMAdapter` (ABC), `ChatSession` (ABC), `LLMResponse`, `ToolCall`, `FunctionSchema`. All agent code depends on these, never on provider SDKs directly.
 - **`llm/service.py`** — `LLMService`. Adapter factory, session registry, one-shot generation gateway, context compaction orchestration. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
 - **`llm/interface_converters.py`** — Bidirectional converters between `ChatInterface` and provider-specific formats (Anthropic, OpenAI, Gemini).
-- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, and `handle(agent, args)`. All 4 kernel intrinsics (mail, clock, status, memory) have self-contained handler logic — they receive the agent as an explicit parameter. Status intrinsic supports `show` and `shutdown` actions. Memory intrinsic supports `edit`/`load` actions on `system/memory.md` (`edit` writes to disk, `load` injects into prompt + git commits). Covenant is injected at construction as a protected prompt section (no tool access).
-- **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 16 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), anima, bash, conscience, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail intrinsic with a persistent mailbox, reply/reply_all, CC/BCC, and multi-to. The anima capability upgrades the memory intrinsic with evolving role, structured memory, and on-demand compaction. Delegate spawns `Agent` with reasoning as first prompt. Conscience adds hormê — a periodic inner voice that nudges idle agents.
+- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, and `handle(agent, args)`. All 4 kernel intrinsics (mail, clock, status, eigen) have self-contained handler logic — they receive the agent as an explicit parameter. Status intrinsic supports `show` and `shutdown` actions. Eigen intrinsic provides memory (`edit`/`load` on `system/memory.md`) and context management (`molt` for self-compaction with briefing). `context_forget` is internal only (called by auto-wipe). Covenant is injected at construction as a protected prompt section (no tool access).
+- **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 16 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), psyche, bash, conscience, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail intrinsic with a persistent mailbox, reply/reply_all, CC/BCC, and multi-to. The psyche capability upgrades the eigen intrinsic with evolving identity (character), knowledge library, and `memory.construct(ids, notes)` for building memory from library entries + free text. `molt` is inherited from eigen. `"anima"` is a backward-compat alias for `"psyche"`. Delegate spawns `Agent` with reasoning as first prompt. Conscience adds hormê — a periodic inner voice that nudges idle agents.
 - **`config.py`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
 - **`prompt.py`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.
 
@@ -95,7 +95,7 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 | `edit` | `capabilities=["edit"]` | Exact string replacement in files via FileIOService |
 | `glob` | `capabilities=["glob"]` | Find files by glob pattern via FileIOService |
 | `grep` | `capabilities=["grep"]` | Search file contents by regex via FileIOService |
-| `anima` | `capabilities=["anima"]` | Upgrades memory intrinsic — evolving role (covenant + character), structured memory (submit/consolidate), on-demand context compaction |
+| `psyche` | `capabilities=["psyche"]` | Upgrades eigen intrinsic — evolving identity (character), knowledge library, `memory.construct(ids, notes)` builds memory from library entries + free text. Molt inherited from eigen. `"anima"` is a backward-compat alias. |
 | `bash` | `capabilities={"bash": {"policy_file": "p.json"}}` or `{"bash": {"yolo": True}}` | Shell command execution with policy |
 | `conscience` | `capabilities=["conscience"]` or `{"conscience": {"interval": 300}}` | Inner voice (hormê) — periodic self-nudge that wakes idle agents. Agent writes its own prompt via `inner_voice` action, toggles via `horme` action. Each nudge git-committed to `conscience/horme.md` |
 | `delegate` | `capabilities=["delegate"]` | Spawn peer agents (reasoning = first prompt) |
@@ -138,7 +138,7 @@ Note: `capabilities=` accepts `list[str]` (no kwargs) or `dict[str, dict]` (with
 
 ### System Prompt Structure
 
-Base prompt (minimal — identity and general guidance only) → Sections (injected by host/capabilities via `update_system_prompt`) → MCP tool descriptions (auto-generated). Protected sections cannot be modified by the LLM's `memory` intrinsic.
+Base prompt (minimal — identity and general guidance only) → Sections (injected by host/capabilities via `update_system_prompt`) → MCP tool descriptions (auto-generated). Protected sections cannot be modified by the LLM's `eigen` intrinsic.
 
 **Do not put tool pipelines or tool-specific instructions in the system prompt.** Pipelines (e.g., "mail admin first, then shutdown") belong in tool schema descriptions where the LLM sees them in context. The system prompt should stay minimal.
 

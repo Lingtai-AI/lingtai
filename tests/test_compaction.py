@@ -409,8 +409,8 @@ class TestGetContextLimit:
 # ---------------------------------------------------------------------------
 
 
-def _make_agent_with_anima(tmp_path):
-    """Create an Agent with anima capability and mocked LLM service."""
+def _make_agent_with_psyche(tmp_path):
+    """Create an Agent with psyche capability and mocked LLM service."""
     from stoai.agent import Agent
 
     svc = MagicMock()
@@ -421,13 +421,13 @@ def _make_agent_with_anima(tmp_path):
         agent_name="test",
         service=svc,
         base_dir=tmp_path,
-        capabilities=["anima"],
+        capabilities=["psyche"],
     )
 
 
 def test_compaction_warning_injected_at_80_percent(tmp_path):
     """At 80%+ context, a [system] warning should be prepended to content."""
-    agent = _make_agent_with_anima(tmp_path)
+    agent = _make_agent_with_psyche(tmp_path)
     agent.start()
     try:
         # Mock session to report 85% context pressure
@@ -455,7 +455,7 @@ def test_compaction_warning_injected_at_80_percent(tmp_path):
 
         assert len(sent_content) > 0
         assert any("[system]" in c for c in sent_content)
-        assert any("compact" in c.lower() for c in sent_content)
+        assert any("molt" in c.lower() for c in sent_content)
         assert agent._session._compaction_warnings == 1
     finally:
         agent.stop()
@@ -483,7 +483,7 @@ def test_compaction_resets_warning_counter(tmp_path):
 
     agent = Agent(
         agent_name="test", service=svc, base_dir=tmp_path,
-        capabilities=["anima"],
+        capabilities=["psyche"],
     )
     agent.start()
     try:
@@ -491,10 +491,10 @@ def test_compaction_resets_warning_counter(tmp_path):
         agent._session.ensure_session()
         agent._session._compaction_warnings = 2  # simulate 2 warnings
 
-        mgr = agent.get_capability("anima")
+        mgr = agent.get_capability("psyche")
         result = mgr.handle({
             "object": "context",
-            "action": "compact",
+            "action": "molt",
             "summary": "My important context summary.",
         })
 

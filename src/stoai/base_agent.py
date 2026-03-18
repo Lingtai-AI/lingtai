@@ -126,8 +126,8 @@ class BaseAgent:
         # MailService: None means mail intrinsic disabled
         self._mail_service = mail_service
 
-        # Set by anima capability to prevent stop() from overwriting memory.md
-        self._anima_owns_memory = False
+        # Set by psyche capability to prevent stop() from overwriting memory.md
+        self._eigen_owns_memory = False
 
         # Covenant and memory file paths
         system_dir = self._working_dir / "system"
@@ -286,7 +286,7 @@ class BaseAgent:
     def _chat(self) -> Any:
         """Proxy to SessionManager's chat session.
 
-        Many parts of the codebase (intrinsics, capabilities, anima)
+        Many parts of the codebase (intrinsics, capabilities, psyche)
         read ``self._chat`` directly — this property keeps them working.
         """
         return self._session.chat
@@ -412,7 +412,7 @@ class BaseAgent:
                 pass
 
         # Persist memory from prompt manager to file
-        if not self._anima_owns_memory:
+        if not self._eigen_owns_memory:
             memory_content = self._prompt_manager.read_section("memory") or ""
             memory_file = self._working_dir / "system" / "memory.md"
             if memory_file.is_file() or memory_content:
@@ -701,45 +701,42 @@ class BaseAgent:
         content = self._pre_request(msg)
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Compaction pressure — warn agent when context is getting full
-        # Only if anima capability is registered (agent needs it to self-compact)
+        # Molt pressure — warn agent when context is getting full
+        # Needs eigen intrinsic (always present) or psyche capability to self-molt
         cap_managers = getattr(self, "_capability_managers", {})
-        has_anima = "anima" in cap_managers
+        has_molt = "eigen" in self._intrinsics or "psyche" in cap_managers
         pressure = self._session.get_context_pressure()
-        if pressure >= 0.8 and has_anima:
+        if pressure >= 0.8 and has_molt:
+            # Detect tool name: psyche if capability registered, else eigen
+            tool_name = "psyche" if "psyche" in cap_managers else "eigen"
             self._session._compaction_warnings += 1
             warnings = self._session._compaction_warnings
             if warnings > 5:
                 # Auto-forget — agent ignored 5 warnings
-                self._log("auto_forget", reason="ignored 5 compaction warnings", pressure=pressure)
-                anima = cap_managers.get("anima")
-                if anima is not None:
-                    anima._context_forget({})
-                else:
-                    self._session._chat = None
-                    self._session._interaction_id = None
-                    self._session.ensure_session()
+                self._log("auto_forget", reason="ignored 5 molt warnings", pressure=pressure)
+                from .intrinsics import eigen as _eigen
+                _eigen.context_forget(self)
                 self._session._compaction_warnings = 0
                 content = (
                     f"[system] Your conversation history was wiped because you ignored "
-                    f"5 compaction warnings. Check your email inbox and library for context. "
+                    f"5 molt warnings. Check your email inbox and library for context. "
                     f"Start fresh.\n\n{content}"
                 )
             elif warnings == 5:
                 content = (
                     f"[system] FINAL — countdown 0. Context {pressure:.0%} full. "
-                    f"Compact NOW or lose everything next turn. "
+                    f"Molt NOW or lose everything next turn. "
                     f"Write your briefing: what you're doing, what's done, what's pending, "
                     f"which library entries to load. "
-                    f"anima(object=context, action=compact, summary=<briefing>).\n\n{content}"
+                    f"{tool_name}(object=context, action=molt, summary=<briefing>).\n\n{content}"
                 )
             elif warnings >= 3:
                 remaining = 5 - warnings
                 content = (
                     f"[system] Context pressure: {pressure:.0%} full — "
                     f"countdown {remaining} {'turn' if remaining == 1 else 'turns'} until auto-wipe. "
-                    f"Deposit important data to library NOW (anima submit), then self-compact. "
-                    f"Your compact summary is a briefing to your future self — "
+                    f"Deposit important data to library NOW ({tool_name} submit), then molt. "
+                    f"Your molt summary is a briefing to your future self — "
                     f"the ONLY context you will have.\n\n{content}"
                 )
             else:
@@ -747,10 +744,10 @@ class BaseAgent:
                 content = (
                     f"[system] Context pressure: {pressure:.0%} full — "
                     f"countdown {remaining} turns until auto-wipe. "
-                    f"Start tidying up: save important findings to library (anima submit). "
-                    f"When ready, self-compact with a briefing to your future self: "
-                    f"anima(object=context, action=compact, summary=<briefing>). "
-                    f"Your summary is the ONLY thing you will see after compaction — "
+                    f"Start tidying up: save important findings to library ({tool_name} submit). "
+                    f"When ready, molt with a briefing to your future self: "
+                    f"{tool_name}(object=context, action=molt, summary=<briefing>). "
+                    f"Your summary is the ONLY thing you will see after molt — "
                     f"include what you're doing, what's done, what's pending, "
                     f"and which library entries to load.\n\n{content}"
                 )
@@ -1048,7 +1045,7 @@ class BaseAgent:
         """Remove an intrinsic and return its handler for delegation.
 
         Called by capabilities that upgrade an intrinsic (email → mail,
-        anima → system). Must be called before start() (tool surface sealed).
+        psyche → eigen). Must be called before start() (tool surface sealed).
 
         Returns the original handler so the capability can delegate to it.
         """
