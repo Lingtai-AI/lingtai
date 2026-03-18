@@ -4,8 +4,8 @@ DEFAULTS = {
     "capability_models": {
         "web_search": "gemini-3-flash-preview",
         "vision": "gemini-3-flash-preview",
-        "image_gen": "gemini-2.5-flash-image",
-        "tts": "gemini-2.5-flash-preview-tts",
+        "image_gen": "gemini-3.1-flash-image-preview",
+        "tts": "gemini-2.5-pro-preview-tts",
         "transcribe": "gemini-3-flash-preview",
     },
 }

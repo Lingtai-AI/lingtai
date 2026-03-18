@@ -7,6 +7,25 @@
   "max_turns": 20,
   "dashboard_port": 8080,
 
+  "providers": {
+    "minimax": {
+      "api_key_env": "MINIMAX_API_KEY",
+      "base_url": "https://api.minimaxi.com/anthropic",
+      "model": "MiniMax-M2.5-highspeed",
+      "max_rpm": 120
+    },
+    "gemini": {
+      "api_key_env": "GEMINI_API_KEY",
+      "model": "gemini-3-flash-preview"
+    },
+    "openrouter": {
+      "api_compat": "openai",
+      "api_key_env": "OPEN_ROUTER_API_KEY",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-sonnet-4.6"
+    }
+  },
+
   "addons": {
     "web_search": {
       "provider": "minimax",

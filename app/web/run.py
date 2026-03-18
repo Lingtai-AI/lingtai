@@ -49,17 +49,22 @@ def _list_examples() -> list[str]:
 
 
 def _build_key_resolver(cfg: dict) -> callable:
-    """Build a key resolver that checks addon-specific env vars first,
-    then falls back to {PROVIDER}_API_KEY."""
-    # Collect provider → env var mappings from addons
+    """Build a key resolver from providers, addons, and main config."""
     provider_env: dict[str, str] = {}
+
+    # From providers section
+    for name, pcfg in cfg.get("providers", {}).items():
+        if isinstance(pcfg, dict) and pcfg.get("api_key_env"):
+            provider_env[name.lower()] = pcfg["api_key_env"]
+
+    # From addons (may override)
     for addon_cfg in cfg.get("addons", {}).values():
         if isinstance(addon_cfg, dict) and addon_cfg.get("provider"):
             env_var = addon_cfg.get("api_key_env")
             if env_var:
                 provider_env[addon_cfg["provider"].lower()] = env_var
 
-    # Also include the main provider
+    # Main provider
     main_env = cfg.get("api_key_env")
     if main_env and cfg.get("provider"):
         provider_env[cfg["provider"].lower()] = main_env
@@ -118,8 +123,14 @@ def main(example_name: str | None = None):
         print(f"Error: {env_var} not set.")
         sys.exit(1)
 
-    # Build provider_defaults — merge main + addon base_urls
-    provider_defaults: dict = {provider: {"model": model}}
+    # Build provider_defaults from providers section + main config
+    provider_defaults: dict = {}
+    for pname, pcfg in cfg.get("providers", {}).items():
+        if isinstance(pcfg, dict):
+            provider_defaults[pname] = {k: v for k, v in pcfg.items()
+                                        if k != "api_key_env"}
+    # Main provider overrides
+    provider_defaults.setdefault(provider, {})["model"] = model
     if max_rpm > 0:
         provider_defaults[provider]["max_rpm"] = max_rpm
     if base_url:

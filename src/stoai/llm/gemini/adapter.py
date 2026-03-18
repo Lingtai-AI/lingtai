@@ -979,21 +979,49 @@ class GeminiAdapter(LLMAdapter):
 
     # -- Text-to-speech --------------------------------------------------------
 
-    def text_to_speech(self, text: str, model: str = "") -> bytes:
-        """TTS via Gemini's speech generation models."""
+    def text_to_speech(self, text: str, model: str = "",
+                       voice: str = "Charon") -> bytes:
+        """TTS via Gemini's speech generation models. Returns WAV bytes.
+
+        Available voices: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr.
+        """
+        import io
+        import wave
+
         effective_model = model or self._model_tts
+        speech_config = types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=voice,
+                ),
+            ),
+        )
         raw = self._client.models.generate_content(
             model=effective_model,
             contents=text,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
+                speech_config=speech_config,
             ),
         )
-        # Extract audio bytes from response
+        # Extract raw PCM and wrap in WAV header
         if raw.candidates:
             for part in raw.candidates[0].content.parts:
                 if part.inline_data and part.inline_data.data:
-                    return part.inline_data.data
+                    pcm = part.inline_data.data
+                    # Parse sample rate from mime_type (audio/L16;codec=pcm;rate=24000)
+                    mime = part.inline_data.mime_type or ""
+                    rate = 24000
+                    for token in mime.split(";"):
+                        if token.strip().startswith("rate="):
+                            rate = int(token.strip().split("=")[1])
+                    buf = io.BytesIO()
+                    with wave.open(buf, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)  # 16-bit
+                        wf.setframerate(rate)
+                        wf.writeframes(pcm)
+                    return buf.getvalue()
         raise RuntimeError("Gemini TTS returned no audio data")
 
     # -- Transcription ---------------------------------------------------------

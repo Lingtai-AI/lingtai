@@ -46,6 +46,20 @@ SCHEMA = {
                 "Only grant privileges the child needs to manage its own children."
             ),
         },
+        "provider": {
+            "type": "string",
+            "description": (
+                "LLM provider for the new agent (optional, default = same as parent). "
+                "Use a provider name defined in config, e.g. 'minimax', 'gemini', 'openrouter'."
+            ),
+        },
+        "model": {
+            "type": "string",
+            "description": (
+                "LLM model for the new agent (optional, default = same as parent). "
+                "e.g. 'gemini-3-flash-preview', 'anthropic/claude-sonnet-4.6'."
+            ),
+        },
     },
     "required": ["name"],
 }
@@ -100,13 +114,25 @@ class DelegateManager:
         delegate_working_dir = parent._base_dir / child_name
         mail_svc = TCPMailService(listen_port=port, working_dir=delegate_working_dir)
 
+        # Build config — optionally override provider/model
+        from ..config import AgentConfig
+        child_provider = args.get("provider") or parent._config.provider
+        child_model = args.get("model") or parent._config.model
+        child_config = AgentConfig(
+            max_turns=parent._config.max_turns,
+            provider=child_provider,
+            model=child_model,
+            retry_timeout=parent._config.retry_timeout,
+            thinking_budget=parent._config.thinking_budget,
+        )
+
         # Create delegate agent
         admin = args.get("admin") or {}
         delegate = Agent(
             agent_name=child_name,
             service=parent.service,
             mail_service=mail_svc,
-            config=parent._config,
+            config=child_config,
             base_dir=parent._base_dir,
             streaming=parent._streaming,
             covenant=covenant,
