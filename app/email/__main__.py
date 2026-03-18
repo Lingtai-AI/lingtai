@@ -30,6 +30,7 @@ if env_path.exists():
 
 from stoai import Agent, AgentConfig
 from stoai.llm import LLMService
+from stoai.services.logging import JSONLLoggingService
 from stoai.services.mail import TCPMailService
 
 logging.basicConfig(
@@ -41,6 +42,45 @@ log = logging.getLogger("app.email")
 
 CONFIG_DIR = Path(__file__).parent
 DEFAULT_PLAYGROUND = Path.home() / ".stoai" / "email"
+
+
+class TerminalLoggingService(JSONLLoggingService):
+    """JSONL logger that also prints diary/thinking/email events to terminal."""
+
+    # Event types to display and their prefixes
+    _DISPLAY_EVENTS = {
+        "diary": "\033[36m[diary]\033[0m",         # cyan
+        "thinking": "\033[35m[thinking]\033[0m",    # magenta
+        "gmail_received": "\033[32m[gmail ←]\033[0m",  # green
+        "gmail_sent": "\033[33m[gmail →]\033[0m",      # yellow
+        "email_received": "\033[32m[email ←]\033[0m",
+        "email_sent": "\033[33m[email →]\033[0m",
+        "tool_call": "\033[34m[tool]\033[0m",       # blue
+    }
+
+    def log(self, event: dict) -> None:
+        super().log(event)
+        event_type = event.get("type", "")
+        prefix = self._DISPLAY_EVENTS.get(event_type)
+        if prefix is None:
+            return
+
+        if event_type in ("diary", "thinking"):
+            text = event.get("text", "")
+            if text:
+                for line in text.splitlines():
+                    print(f"  {prefix} {line}", flush=True)
+        elif event_type in ("gmail_received", "email_received"):
+            sender = event.get("sender", "?")
+            subject = event.get("subject", "")
+            print(f"  {prefix} from {sender}: {subject}", flush=True)
+        elif event_type in ("gmail_sent", "email_sent"):
+            to = event.get("to", [])
+            subject = event.get("subject", "")
+            print(f"  {prefix} to {to}: {subject}", flush=True)
+        elif event_type == "tool_call":
+            name = event.get("tool_name", event.get("name", "?"))
+            print(f"  {prefix} {name}", flush=True)
 
 
 def load_config() -> dict:
@@ -75,7 +115,7 @@ def main():
 
     # LLM settings
     provider = cfg.get("provider", "minimax")
-    model = cfg.get("model", "MiniMax-M2.5-highspeed")
+    model = cfg.get("model", "MiniMax-M2.7-highspeed")
     api_key_env = cfg.get("api_key_env", f"{provider.upper()}_API_KEY")
     api_key = os.environ.get(api_key_env)
     if not api_key:
@@ -103,6 +143,11 @@ def main():
         working_dir=playground / agent_name,
     )
 
+    # Terminal logging service — shows diary/thinking in terminal
+    log_svc = TerminalLoggingService(
+        path=playground / agent_name / "logs" / "events.jsonl"
+    )
+
     # Character
     character = cfg.get("character", (
         "## Role\n"
@@ -115,13 +160,17 @@ def main():
     if not char_file.is_file():
         char_file.write_text(character)
 
-    # Capabilities (inter-agent email + others)
+    # Capabilities (inter-agent email + conscience + others)
     capabilities = cfg.get("capabilities", {
         "email": {},
         "file": {},
         "web_search": {},
         "anima": {},
+        "conscience": {"interval": 30},
     })
+    # Ensure conscience is enabled with 30s interval
+    if "conscience" not in capabilities:
+        capabilities["conscience"] = {"interval": 30}
 
     # Gmail addon
     addons = {
@@ -142,7 +191,14 @@ def main():
         "- When you receive an inter-agent email, reply via email.\n"
         "- Your text responses are your private diary.\n"
         "- Keep emails concise and helpful.\n"
-        "- Never go back and forth with courtesy emails."
+        "- Never go back and forth with courtesy emails.\n"
+        "\n"
+        "## Initiative\n"
+        "- FIRST THING: Turn on your conscience (inner voice) using conscience(action=\"horme\", enabled=true).\n"
+        "- Your conscience will nudge you periodically. Use it to stay proactive.\n"
+        "- Regularly check your gmail inbox for new or unreplied emails.\n"
+        "- When idle, use gmail(action=\"check\") to see if anything needs attention.\n"
+        "- If you find unreplied emails, read and respond to them.\n"
     ))
 
     # Create agent
@@ -157,6 +213,11 @@ def main():
         capabilities=capabilities,
         addons=addons,
     )
+
+    # Replace default logging service with terminal-printing one
+    if agent._log_service is not None:
+        agent._log_service.close()
+    agent._log_service = log_svc
 
     agent.start()
 

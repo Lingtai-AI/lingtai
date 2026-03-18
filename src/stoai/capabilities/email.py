@@ -35,7 +35,8 @@ SCHEMA = {
             "description": (
                 "send: send with optional cc/bcc (requires address, message). "
                 "check: list mailbox (optional folder, n). "
-                "read: read email by ID (requires email_id). "
+                "read: read emails by ID list (email_id=[id1, id2, ...]). "
+                "You are encouraged to read multiple relevant or even all unread emails and think before acting. "
                 "reply: reply to email (requires email_id, message). "
                 "reply_all: reply to all recipients (requires email_id, message). "
                 "search: regex search mailbox (requires query, optional folder). "
@@ -70,8 +71,9 @@ SCHEMA = {
         "subject": {"type": "string", "description": "Email subject line"},
         "message": {"type": "string", "description": "Email body"},
         "email_id": {
-            "type": "string",
-            "description": "Email ID for read/reply/reply_all (get from check)",
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List of email IDs for read. For reply/reply_all, pass a single-element list.",
         },
         "n": {
             "type": "integer",
@@ -408,32 +410,39 @@ class EmailManager:
     # ------------------------------------------------------------------
 
     def _read(self, args: dict) -> dict:
-        email_id = args.get("email_id", "")
-        if not email_id:
+        ids = args.get("email_id", [])
+        if isinstance(ids, str):
+            ids = [ids]
+        if not ids:
             return {"error": "email_id is required"}
 
-        data = self._load_email(email_id)
-        if data is None:
-            return {"error": f"Email not found: {email_id}"}
+        results = []
+        errors = []
+        for eid in ids:
+            data = self._load_email(eid)
+            if data is None:
+                errors.append(eid)
+                continue
+            if data.get("_folder") == "inbox":
+                self._mark_read(eid)
+            entry = {
+                "id": eid,
+                "from": data.get("from", ""),
+                "to": data.get("to", []),
+                "subject": data.get("subject", "(no subject)"),
+                "message": data.get("message", ""),
+                "time": data.get("received_at") or data.get("sent_at") or data.get("time") or "",
+                "folder": data.get("_folder", ""),
+            }
+            if data.get("cc"):
+                entry["cc"] = data["cc"]
+            if data.get("attachments"):
+                entry["attachments"] = data["attachments"]
+            results.append(entry)
 
-        # Mark as read (inbox only)
-        if data.get("_folder") == "inbox":
-            self._mark_read(email_id)
-
-        result = {
-            "status": "ok",
-            "id": email_id,
-            "from": data.get("from", ""),
-            "to": data.get("to", []),
-            "subject": data.get("subject", "(no subject)"),
-            "message": data.get("message", ""),
-            "time": data.get("received_at") or data.get("sent_at") or data.get("time") or "",
-            "folder": data.get("_folder", ""),
-        }
-        if data.get("cc"):
-            result["cc"] = data["cc"]
-        if data.get("attachments"):
-            result["attachments"] = data["attachments"]
+        result = {"status": "ok", "emails": results}
+        if errors:
+            result["not_found"] = errors
         return result
 
     # ------------------------------------------------------------------
@@ -449,6 +458,8 @@ class EmailManager:
 
     def _reply(self, args: dict) -> dict:
         email_id = args.get("email_id", "")
+        if isinstance(email_id, list):
+            email_id = email_id[0] if email_id else ""
         if not email_id:
             return {"error": "email_id is required for reply"}
         message_text = args.get("message", "")
@@ -474,6 +485,8 @@ class EmailManager:
 
     def _reply_all(self, args: dict) -> dict:
         email_id = args.get("email_id", "")
+        if isinstance(email_id, list):
+            email_id = email_id[0] if email_id else ""
         if not email_id:
             return {"error": "email_id is required for reply_all"}
         message_text = args.get("message", "")

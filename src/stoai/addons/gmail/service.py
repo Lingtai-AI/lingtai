@@ -223,24 +223,23 @@ class GoogleMailService(MailService):
                 imap = imaplib.IMAP4_SSL(self._imap_host, self._imap_port)
                 imap.login(self._gmail_address, self._gmail_password)
                 imap.select("INBOX")
-                logger.info("IMAP connected to %s", self._imap_host)
+                logger.info("IMAP connected to %s", self._gmail_address)
 
                 while self._running:
-                    self._check_new_emails(imap, on_message)
+                    try:
+                        self._check_new_emails(imap, on_message)
+                    except (imaplib.IMAP4.error, OSError) as e:
+                        logger.info("IMAP connection stale, reconnecting: %s", e)
+                        break  # break inner loop → reconnect immediately
                     # Sleep in small increments for responsive shutdown
                     for _ in range(self._poll_interval):
                         if not self._running:
                             break
                         time.sleep(1)
             except Exception as e:
-                logger.warning("IMAP error, reconnecting in 30s: %s", e)
-                if imap is not None:
-                    try:
-                        imap.logout()
-                    except Exception:
-                        pass
-                # Backoff before reconnect
-                for _ in range(30):
+                logger.warning("IMAP error, reconnecting in 10s: %s", e)
+                # Brief backoff before reconnect
+                for _ in range(10):
                     if not self._running:
                         return
                     time.sleep(1)
@@ -257,11 +256,15 @@ class GoogleMailService(MailService):
         on_message: Callable[[dict], None],
     ) -> None:
         """Search for UNSEEN messages and deliver any new ones."""
+        imap.noop()  # refresh mailbox state
         status, data = imap.uid("SEARCH", None, "UNSEEN")  # type: ignore[arg-type]
         if status != "OK" or not data or not data[0]:
+            logger.debug("No unseen emails (status=%s, data=%s)", status, data)
             return
 
         uid_list = data[0].split()
+        logger.info("Found %d unseen email(s): %s", len(uid_list),
+                     " ".join(u.decode() for u in uid_list))
         for uid_bytes in uid_list:
             uid = uid_bytes.decode("ascii") if isinstance(uid_bytes, bytes) else str(uid_bytes)
             if uid in self._processed_uids:
