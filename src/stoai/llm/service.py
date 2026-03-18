@@ -215,8 +215,9 @@ class LLMService:
     def _create_adapter(self, provider: str, api_key: str | None, base_url: str | None) -> LLMAdapter:
         # Build kwargs, omitting None values so adapters fall back to env vars
         key_kw: dict = {"api_key": api_key} if api_key is not None else {}
-        url_kw: dict = {"base_url": base_url} if base_url is not None else {}
         defaults = self._get_provider_defaults(provider)
+        effective_url = base_url or (defaults.get("base_url") if defaults else None)
+        url_kw: dict = {"base_url": effective_url} if effective_url is not None else {}
         max_rpm = defaults.get("max_rpm", 0) if defaults else 0
         rpm_kw: dict = {"max_rpm": max_rpm} if max_rpm > 0 else {}
 
@@ -233,35 +234,14 @@ class LLMService:
         elif p == "minimax":
             from .minimax.adapter import MiniMaxAdapter
             return MiniMaxAdapter(**key_kw, **url_kw, **rpm_kw)
-        elif p == "grok":
-            from .grok.adapter import GrokAdapter
-            return GrokAdapter(**key_kw, **rpm_kw)
-        elif p == "deepseek":
-            from .deepseek.adapter import DeepSeekAdapter
-            return DeepSeekAdapter(**key_kw, **rpm_kw)
-        elif p == "qwen":
-            from .qwen.adapter import QwenAdapter
-            return QwenAdapter(**key_kw, **rpm_kw)
-        elif p == "kimi":
-            from .kimi.adapter import create_kimi_adapter
-            defaults = self._get_provider_defaults(p)
-            compat = defaults.get("api_compat", "openai") if defaults else "openai"
-            return create_kimi_adapter(**key_kw, api_compat=compat, **url_kw, **rpm_kw)
-        elif p == "glm":
-            from .glm.adapter import GLMAdapter
-            return GLMAdapter(**key_kw, **rpm_kw)
-        elif p == "custom":
-            from .custom.adapter import create_custom_adapter
-            defaults = self._get_provider_defaults(p)
-            compat = defaults.get("api_compat", "openai") if defaults else "openai"
-            ws = defaults.get("supports_web_search", False) if defaults else False
-            vis = defaults.get("supports_vision", False) if defaults else False
-            return create_custom_adapter(
-                **key_kw, api_compat=compat, supports_web_search=ws,
-                supports_vision=vis, **url_kw, **rpm_kw,
-            )
         else:
-            raise ValueError(f"Unknown provider: {provider!r}")
+            # All other providers go through the custom adapter
+            # (openai or anthropic compat, configured via provider_defaults)
+            from .custom.adapter import create_custom_adapter
+            compat = defaults.get("api_compat", "openai") if defaults else "openai"
+            return create_custom_adapter(
+                **key_kw, api_compat=compat, **url_kw, **rpm_kw,
+            )
 
     # --- Adapter cache ---
 

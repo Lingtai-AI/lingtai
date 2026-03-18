@@ -700,7 +700,8 @@ class OpenAIAdapter(LLMAdapter):
 
         # Fallback: Chat Completions for compatible providers
         return self._create_completions_session(
-            model, system_prompt, tools, json_schema, force_tool_call, interface, thinking
+            model, system_prompt, tools, json_schema, force_tool_call, interface, thinking,
+            context_window=context_window,
         )
 
     def _create_responses_session(
@@ -768,6 +769,7 @@ class OpenAIAdapter(LLMAdapter):
         force_tool_call: bool = False,
         interface: ChatInterface | None = None,
         thinking: str = "default",
+        context_window: int = 0,
     ) -> OpenAIChatSession:
         # Create interface if not provided
         if interface is None:
