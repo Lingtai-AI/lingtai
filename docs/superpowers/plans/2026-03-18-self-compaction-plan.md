@@ -115,7 +115,7 @@ In SCHEMA, rename the `"prompt"` field to `"summary"` (line ~110-116), change to
         "after compaction. Write what you are doing, what you have found, "
         "what remains to be done, which library entries to retrieve for context, "
         "and who you are working with (addresses). "
-        "Budget: up to ~20% of your context window. Be thorough but concise. "
+        "Budget: ~10000 tokens max. Be concise — data belongs in library, this is just pointers and status. "
         "Required for context compact."
     ),
 },
