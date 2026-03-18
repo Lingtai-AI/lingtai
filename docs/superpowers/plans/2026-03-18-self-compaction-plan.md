@@ -16,6 +16,7 @@
 - Modify: `src/stoai/capabilities/anima.py:504-561` (rewrite `_context_compact`)
 - Modify: `src/stoai/capabilities/anima.py:110-116` (update `prompt` field description in SCHEMA)
 - Modify: `src/stoai/capabilities/anima.py:144-147` (update DESCRIPTION for context section)
+- Modify: `src/stoai/capabilities/anima.py:134-141` (update DESCRIPTION for library section — external brain framing)
 - Test: `tests/test_anima.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -110,10 +111,10 @@ In SCHEMA `"prompt"` field (line ~110-116), change to:
 "prompt": {
     "type": "string",
     "description": (
-        "Your context summary — what you need to remember. "
-        "Write everything important: current task, key findings, "
-        "decisions made, data gathered, pending work. "
-        "This replaces your entire conversation history. "
+        "A briefing to your future self — this is the ONLY thing you will see "
+        "after compaction. Write what you are doing, what you have found, "
+        "what remains to be done, which library entries to load for context, "
+        "and who you are working with (addresses). "
         "Required for context compact."
     ),
 },
@@ -124,10 +125,28 @@ In SCHEMA `"prompt"` field (line ~110-116), change to:
 In DESCRIPTION (line ~144-147), change to:
 
 ```python
-"context: compact to self-compact — write your own summary of what matters, "
-"your conversation history is wiped and your summary becomes the new starting context. "
+"context: compact to self-compact — write a briefing to your future self. "
+"Your conversation history is wiped and your prompt becomes the ONLY context you see. "
+"Before compacting: deposit important data to library (your external brain — it persists). "
+"Then write what you're doing, what's done, what's pending, "
+"and which library entries to retrieve for context. "
 "forget to nuke conversation history completely (you lose everything). "
 "Check usage via status show first.\n"
+```
+
+- [ ] **Step 5b: Update DESCRIPTION for library section — external brain framing**
+
+In DESCRIPTION (line ~134-141), change the library section to:
+
+```python
+"library: your external brain — persists across compactions, reboots, and kills. "
+"Proactively deposit important findings, data, decisions, and discoveries here "
+"throughout your work. Use filter/view to retrieve information anytime — "
+"you don't need to load everything into system prompt. "
+"submit to add entries. filter to browse (returns id + title + summary, "
+"optional regex pattern and limit). view to read at depth "
+"(content or supplementary). consolidate to merge entries. "
+"delete to remove. Write clear titles and concise summaries (1-3 sentences).\n"
 ```
 
 - [ ] **Step 6: Run test to verify it passes**
@@ -269,28 +288,32 @@ if pressure >= 0.8 and has_anima:
         )
     elif warnings == 5:
         content = (
-            f"[system] ⏳ FINAL WARNING — countdown 0. Your context is {pressure:.0%} full. "
-            f"You MUST compact NOW or your entire conversation history will be wiped. "
-            f"Save critical findings to library (anima submit), then "
-            f"call anima(object=context, action=compact, prompt=<your summary>).\n\n{content}"
+            f"[system] ⏳ FINAL — countdown 0. Context {pressure:.0%} full. "
+            f"Compact NOW or lose everything next turn. "
+            f"Write your briefing: what you're doing, what's done, what's pending, "
+            f"which library entries to load. "
+            f"anima(object=context, action=compact, prompt=<briefing>).\n\n{content}"
         )
     elif warnings >= 3:
         remaining = 5 - warnings
         content = (
             f"[system] ⏳ Context pressure: {pressure:.0%} full — "
             f"countdown {remaining} {'turn' if remaining == 1 else 'turns'} until auto-wipe. "
-            f"Save important findings to your library NOW (anima submit), then compact. "
-            f"Call anima(object=context, action=compact, prompt=<your summary>).\n\n{content}"
+            f"Deposit important data to library NOW (anima submit), then self-compact. "
+            f"Your compact prompt is a briefing to your future self — "
+            f"the ONLY context you will have.\n\n{content}"
         )
     else:
         remaining = 5 - warnings
         content = (
             f"[system] ⏳ Context pressure: {pressure:.0%} full — "
             f"countdown {remaining} turns until auto-wipe. "
-            f"Consider saving important data to your library (anima submit) "
-            f"and compacting soon. "
-            f"Call anima(object=context, action=compact, prompt=<your summary>) — "
-            f"write a summary of everything important.\n\n{content}"
+            f"Start tidying up: save important findings to library (anima submit). "
+            f"When ready, self-compact with a briefing to your future self: "
+            f"anima(object=context, action=compact, prompt=<briefing>). "
+            f"Your prompt is the ONLY thing you will see after compaction — "
+            f"include what you're doing, what's done, what's pending, "
+            f"and which library entries to load.\n\n{content}"
         )
 
 content = f"[Current time: {current_time}]\n\n{content}"
@@ -371,10 +394,11 @@ COVENANT = """\
 - When emailing a peer, give enough context.
 
 ### Context Management
+- Your library is your external brain — it persists across compactions, reboots, and even kills. Proactively deposit important findings, data, and decisions there throughout your work, not just before compacting.
 - Check your context usage periodically (status show).
-- When context exceeds 60%, proactively compact: save important findings to your library first (anima submit), then write a thorough summary and call anima(object=context, action=compact, prompt=<summary>).
-- Your library persists across compactions — anything saved there is safe. Use it to deposit important data, findings, and decisions before compacting.
-- If you receive a [system] compaction warning, you have a 5-turn countdown before your history is wiped. Don't panic — use the turns to save to library, then compact.
+- When context exceeds 60%, proactively compact: deposit anything important to library (anima submit), then self-compact with a briefing to your future self (anima compact). Your compact prompt is the ONLY thing you will see — include what you're doing, what's done, what's pending, and which library entries to retrieve.
+- If you receive a [system] compaction warning, you have a 5-turn countdown. Don't panic — use the turns to deposit to library, then compact.
+- The library is for retrieval, not just system prompt injection. Use filter/view to look things up anytime — you don't need to load everything into memory.
 """
 ```
 
