@@ -2,7 +2,8 @@
 
 Actions:
     show     — display agent identity, runtime, and resource usage
-    shutdown — initiate graceful self-termination (use when you want to add more capabilities or tools, contact admin first and then shutdown)
+    shutdown — initiate graceful self-termination
+    nirvana  — rebirth: stop, reload MCP servers and config from working dir, restart
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["show", "shutdown"],
+            "enum": ["show", "shutdown", "nirvana"],
             "description": (
                 "show: display full agent self-inspection. Returns:\n"
                 "- identity: agent_id, working_dir, mail_address (or null if no mail service)\n"
@@ -28,12 +29,16 @@ SCHEMA = {
                 "to add more capabilities or tools. Protocol: (1) contact your admin "
                 "explaining what capabilities/tools you need and why, (2) then call "
                 "shutdown. A successor agent may resume from your working directory "
-                "and conversation history."
+                "and conversation history.\n\n"
+                "nirvana: rebirth — the agent stops, reloads MCP servers and config "
+                "from its working directory (mcp/servers.json), and restarts with "
+                "a fresh session but the same identity. Use after installing new "
+                "MCP tools to pick them up without requiring external re-delegation."
             ),
         },
         "reason": {
             "type": "string",
-            "description": "Reason for shutdown (only used with action='shutdown'). Logged to event log and visible in conversation history for successor agents.",
+            "description": "Reason for shutdown or nirvana (logged to event log).",
         },
     },
     "required": ["action"],
@@ -41,8 +46,8 @@ SCHEMA = {
 DESCRIPTION = (
     "Agent self-inspection and lifecycle. "
     "'show' returns identity, runtime, and resource usage. "
-    "'shutdown' initiates graceful self-termination — use when you want "
-    "more capabilities or tools. Contact your admin first, then shutdown."
+    "'shutdown' initiates graceful self-termination. "
+    "'nirvana' triggers rebirth — reloads MCP servers from working dir and restarts."
 )
 
 import time
@@ -55,6 +60,8 @@ def handle(agent, args: dict) -> dict:
         return _show(agent)
     elif action == "shutdown":
         return _shutdown(agent, args)
+    elif action == "nirvana":
+        return _nirvana(agent, args)
     else:
         return {"status": "error", "message": f"Unknown status action: {action}"}
 
@@ -66,6 +73,19 @@ def _shutdown(agent, args: dict) -> dict:
     return {
         "status": "ok",
         "message": "Shutdown initiated. A successor agent may resume from your working directory and conversation history.",
+    }
+
+
+def _nirvana(agent, args: dict) -> dict:
+    reason = args.get("reason", "")
+    agent._log("nirvana_requested", reason=reason)
+    agent._nirvana_requested = True
+    agent._shutdown.set()
+    return {
+        "status": "ok",
+        "message": "Nirvana initiated — rebirth in progress. "
+                   "You will be reborn with the same identity but fresh tools. "
+                   "Any new MCP servers in mcp/servers.json will be loaded.",
     }
 
 

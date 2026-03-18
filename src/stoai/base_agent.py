@@ -546,32 +546,70 @@ class BaseAgent:
 
     def _run_loop(self) -> None:
         """Wait for messages, process them. Agent persists between messages."""
-        while not self._shutdown.is_set():
+        while True:
+            while not self._shutdown.is_set():
+                try:
+                    msg = self.inbox.get(timeout=self._inbox_timeout)
+                except queue.Empty:
+                    continue
+                msg = self._collapse_email_notifications(msg)
+                self._set_state(AgentState.ACTIVE, reason=f"received {msg.type}")
+                try:
+                    self._handle_message(msg)
+                except Exception as e:
+                    err_desc = str(e) or repr(e)
+                    logger.error(
+                        f"[{self.agent_name}] Unhandled error in message handler: {err_desc}",
+                        exc_info=True,
+                    )
+                    self._log("error", source="message_handler", message=err_desc)
+                    if msg._reply_event:
+                        msg._reply_value = {
+                            "text": f"Internal error: {err_desc}",
+                            "failed": True,
+                            "errors": [err_desc],
+                        }
+                        msg._reply_event.set()
+                finally:
+                    self._persist_chat_history()
+                    self._set_state(AgentState.SLEEPING, reason="all done")
+
+            # Check for nirvana (rebirth) before exiting
+            if getattr(self, "_nirvana_requested", False):
+                self._nirvana_requested = False
+                self._perform_nirvana()
+                self._shutdown.clear()
+                continue  # re-enter the message loop
+            break  # normal shutdown — exit
+
+    def _perform_nirvana(self) -> None:
+        """Rebirth: close old MCP clients, reload from working dir, reset session."""
+        self._log("nirvana_start")
+
+        # Close existing MCP clients
+        for client in getattr(self, "_mcp_clients", []):
             try:
-                msg = self.inbox.get(timeout=self._inbox_timeout)
-            except queue.Empty:
-                continue
-            msg = self._collapse_email_notifications(msg)
-            self._set_state(AgentState.ACTIVE, reason=f"received {msg.type}")
-            try:
-                self._handle_message(msg)
-            except Exception as e:
-                err_desc = str(e) or repr(e)
-                logger.error(
-                    f"[{self.agent_name}] Unhandled error in message handler: {err_desc}",
-                    exc_info=True,
-                )
-                self._log("error", source="message_handler", message=err_desc)
-                if msg._reply_event:
-                    msg._reply_value = {
-                        "text": f"Internal error: {err_desc}",
-                        "failed": True,
-                        "errors": [err_desc],
-                    }
-                    msg._reply_event.set()
-            finally:
-                self._persist_chat_history()
-                self._set_state(AgentState.SLEEPING, reason="all done")
+                client.close()
+            except Exception:
+                pass
+        self._mcp_clients = []
+
+        # Remove old MCP tool registrations
+        mcp_names = list(self._mcp_handlers.keys())
+        for name in mcp_names:
+            # Only remove tools that came from MCP (not intrinsics/capabilities)
+            if name not in self._intrinsic_handlers:
+                self._mcp_handlers.pop(name, None)
+                self._mcp_schemas = [s for s in self._mcp_schemas if s.name != name]
+
+        # Reload MCP servers from working dir
+        if hasattr(self, "_load_mcp_from_workdir"):
+            self._load_mcp_from_workdir()
+
+        # Reset session for fresh start with new tools
+        self._session.reset()
+
+        self._log("nirvana_complete", tools=list(self._mcp_handlers.keys()))
 
     def _collapse_email_notifications(self, msg: Message) -> Message:
         """Collapse consecutive email notification messages into one.
