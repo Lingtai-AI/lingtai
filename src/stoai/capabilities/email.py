@@ -1,9 +1,10 @@
-"""Email capability — filesystem-based mailbox with search.
+"""Email capability — filesystem-based mailbox with search and contacts.
 
 Storage layout:
     working_dir/mailbox/inbox/{uuid}/message.json   — received
     working_dir/mailbox/sent/{uuid}/message.json     — sent
     working_dir/mailbox/read.json                    — read tracking
+    working_dir/mailbox/contacts.json                — contact book
 
 Usage:
     agent.add_capability("email")
@@ -27,14 +28,21 @@ SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["send", "check", "read", "reply", "reply_all", "search"],
+            "enum": [
+                "send", "check", "read", "reply", "reply_all", "search",
+                "contacts", "add_contact", "remove_contact", "edit_contact",
+            ],
             "description": (
                 "send: send with optional cc/bcc (requires address, message). "
                 "check: list mailbox (optional folder, n). "
                 "read: read email by ID (requires email_id). "
                 "reply: reply to email (requires email_id, message). "
                 "reply_all: reply to all recipients (requires email_id, message). "
-                "search: regex search mailbox (requires query, optional folder)."
+                "search: regex search mailbox (requires query, optional folder). "
+                "contacts: list all contacts. "
+                "add_contact: add/update contact (requires agent_id, agent_name, address; optional note). "
+                "remove_contact: remove contact (requires agent_id). "
+                "edit_contact: update contact fields (requires agent_id; optional agent_name, address, note)."
             ),
         },
         "address": {
@@ -87,18 +95,34 @@ SCHEMA = {
                 "'cancel' stops the target agent immediately (requires admin privilege)."
             ),
         },
+        "agent_id": {
+            "type": "string",
+            "description": "Contact's agent ID (for add_contact, remove_contact, edit_contact)",
+        },
+        "agent_name": {
+            "type": "string",
+            "description": "Contact's human-readable name (for add_contact, edit_contact)",
+        },
+        "note": {
+            "type": "string",
+            "description": "Free-text note about the contact (for add_contact, edit_contact)",
+        },
     },
     "required": ["action"],
 }
 
 DESCRIPTION = (
     "Full email client — filesystem-based mailbox with inbox/sent folders, "
-    "reply, reply-all, CC/BCC, attachments, and regex search. "
+    "reply, reply-all, CC/BCC, attachments, regex search, and contacts. "
     "Use 'send' for outgoing email (saved to sent/). "
     "'check' to list inbox or sent (optional folder param). "
     "'read' to read by ID. "
     "'reply'/'reply_all' to respond. "
     "'search' to find emails by regex (searches from, subject, message). "
+    "'contacts' to list saved contacts. "
+    "'add_contact' to register a peer (agent_id, agent_name, address, optional note). "
+    "'remove_contact' to delete a contact by agent_id. "
+    "'edit_contact' to update fields on an existing contact. "
     "Attachments are stored alongside emails in the mailbox. "
     "Etiquette: a short acknowledgement is fine, but do not reply to "
     "an acknowledgement — that creates pointless ping-pong."
@@ -228,6 +252,14 @@ class EmailManager:
             return self._reply_all(args)
         elif action == "search":
             return self._search(args)
+        elif action == "contacts":
+            return self._contacts()
+        elif action == "add_contact":
+            return self._add_contact(args)
+        elif action == "remove_contact":
+            return self._remove_contact(args)
+        elif action == "edit_contact":
+            return self._edit_contact(args)
         else:
             return {"error": f"Unknown email action: {action}"}
 
@@ -498,6 +530,98 @@ class EmailManager:
                     matches.append(self._email_summary(email, read_ids))
 
         return {"status": "ok", "total": len(matches), "emails": matches}
+
+    # ------------------------------------------------------------------
+    # Contacts
+    # ------------------------------------------------------------------
+
+    @property
+    def _contacts_path(self) -> Path:
+        return self._mailbox_dir / "contacts.json"
+
+    def _load_contacts(self) -> list[dict]:
+        """Load contacts list from disk."""
+        if self._contacts_path.is_file():
+            try:
+                return json.loads(self._contacts_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return []
+        return []
+
+    def _save_contacts(self, contacts: list[dict]) -> None:
+        """Atomically write contacts list to disk."""
+        self._mailbox_dir.mkdir(parents=True, exist_ok=True)
+        target = self._contacts_path
+        fd, tmp = tempfile.mkstemp(dir=str(self._mailbox_dir), suffix=".tmp")
+        try:
+            os.write(fd, json.dumps(contacts, indent=2).encode())
+            os.close(fd)
+            os.replace(tmp, str(target))
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    def _contacts(self) -> dict:
+        return {"status": "ok", "contacts": self._load_contacts()}
+
+    def _add_contact(self, args: dict) -> dict:
+        agent_id = args.get("agent_id", "")
+        agent_name = args.get("agent_name", "")
+        address = args.get("address", "")
+        if not agent_id:
+            return {"error": "agent_id is required"}
+        if not agent_name:
+            return {"error": "agent_name is required"}
+        if not address:
+            return {"error": "address is required"}
+        note = args.get("note", "")
+
+        contacts = self._load_contacts()
+        # Upsert by agent_id
+        for c in contacts:
+            if c["agent_id"] == agent_id:
+                c["agent_name"] = agent_name
+                c["address"] = address
+                c["note"] = note
+                self._save_contacts(contacts)
+                return {"status": "updated", "contact": c}
+        entry = {"agent_id": agent_id, "agent_name": agent_name, "address": address, "note": note}
+        contacts.append(entry)
+        self._save_contacts(contacts)
+        return {"status": "added", "contact": entry}
+
+    def _remove_contact(self, args: dict) -> dict:
+        agent_id = args.get("agent_id", "")
+        if not agent_id:
+            return {"error": "agent_id is required"}
+        contacts = self._load_contacts()
+        new_contacts = [c for c in contacts if c["agent_id"] != agent_id]
+        if len(new_contacts) == len(contacts):
+            return {"error": f"Contact not found: {agent_id}"}
+        self._save_contacts(new_contacts)
+        return {"status": "removed", "agent_id": agent_id}
+
+    def _edit_contact(self, args: dict) -> dict:
+        agent_id = args.get("agent_id", "")
+        if not agent_id:
+            return {"error": "agent_id is required"}
+        contacts = self._load_contacts()
+        for c in contacts:
+            if c["agent_id"] == agent_id:
+                if "agent_name" in args:
+                    c["agent_name"] = args["agent_name"]
+                if "address" in args:
+                    c["address"] = args["address"]
+                if "note" in args:
+                    c["note"] = args["note"]
+                self._save_contacts(contacts)
+                return {"status": "updated", "contact": c}
+        return {"error": f"Contact not found: {agent_id}"}
 
     # ------------------------------------------------------------------
     # Receive interception
