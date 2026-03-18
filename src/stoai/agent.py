@@ -18,10 +18,21 @@ class Agent(BaseAgent):
     Args:
         capabilities: Capability names to enable. Either a list of strings
             (no kwargs) or a dict mapping names to kwargs dicts.
-            Example: ``["file", "bash"]`` or ``{"bash": {"policy_file": "p.json"}}``.
+            Each capability dict may include ``"provider"`` to route that
+            capability to a specific LLM provider (e.g. ``"gemini"``, ``"minimax"``).
             Group names (e.g. ``"file"``) expand to individual capabilities.
         *args, **kwargs: Passed through to BaseAgent.
     """
+
+    # Maps capability name → LLMService provider_config key
+    _CAPABILITY_PROVIDER_KEYS: dict[str, str] = {
+        "web_search": "web_search_provider",
+        "vision": "vision_provider",
+        "draw": "image_provider",
+        "compose": "music_provider",
+        "talk": "tts_provider",
+        "listen": "audio_provider",
+    }
 
     def __init__(
         self,
@@ -46,6 +57,15 @@ class Agent(BaseAgent):
                 else:
                     expanded_dict[name] = cap_kwargs
             capabilities = expanded_dict
+
+        # Apply per-capability provider overrides to LLMService config
+        if capabilities:
+            for name, cap_kwargs in capabilities.items():
+                cap_provider = cap_kwargs.pop("provider", None)
+                if cap_provider:
+                    config_key = self._CAPABILITY_PROVIDER_KEYS.get(name)
+                    if config_key:
+                        self.service._config[config_key] = cap_provider
 
         # Track for delegate replay
         self._capabilities: list[tuple[str, dict]] = []
