@@ -383,7 +383,8 @@ class LLMAdapter(ABC):
         """
         raise NotImplementedError
 
-    def transcribe(self, audio_bytes: bytes, model: str) -> str:
+    def transcribe(self, audio_bytes: bytes, model: str,
+                    mime_type: str = "audio/wav") -> str:
         """Speech-to-text transcription. Returns transcription text.
 
         Override in adapters that support transcription.

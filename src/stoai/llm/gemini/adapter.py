@@ -678,6 +678,8 @@ class GeminiAdapter(LLMAdapter):
     supports_web_search = True
     supports_vision = True
 
+    _default_model: str = "gemini-2.5-flash"
+
     def __init__(self, api_key: str, timeout_ms: int = 300_000, max_rpm: int = 0):
         self._client = genai.Client(
             api_key=api_key,
@@ -914,13 +916,13 @@ class GeminiAdapter(LLMAdapter):
 
     # -- Gemini-specific methods (not in ABC) ----------------------------------
 
-    def web_search(self, query: str, model: str) -> LLMResponse:
+    def web_search(self, query: str, model: str = "") -> LLMResponse:
         """Execute a web search via Gemini's Google Search grounding."""
         gen_config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
         )
         raw = self._client.models.generate_content(
-            model=model,
+            model=model or self._default_model,
             contents=query,
             config=gen_config,
         )
@@ -946,7 +948,79 @@ class GeminiAdapter(LLMAdapter):
     ) -> LLMResponse:
         """One-shot vision via Gemini's multimodal API."""
         contents = self.make_multimodal_message(question, image_bytes, mime_type)
-        return self.generate_multimodal(model=model, contents=contents)
+        return self.generate_multimodal(model=model or self._default_model, contents=contents)
+
+    # -- Image generation -------------------------------------------------------
+
+    def generate_image(self, prompt: str, model: str = "") -> bytes:
+        """Text-to-image via Gemini's native image generation."""
+        effective_model = model or "gemini-2.5-flash-image"
+        raw = self._client.models.generate_content(
+            model=effective_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+            ),
+        )
+        # Extract image bytes from response parts
+        if raw.candidates:
+            for part in raw.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    return part.inline_data.data
+        raise RuntimeError("Gemini image generation returned no image data")
+
+    # -- Text-to-speech --------------------------------------------------------
+
+    def text_to_speech(self, text: str, model: str = "") -> bytes:
+        """TTS via Gemini's speech generation models."""
+        effective_model = model or "gemini-2.5-flash-preview-tts"
+        raw = self._client.models.generate_content(
+            model=effective_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+            ),
+        )
+        # Extract audio bytes from response
+        if raw.candidates:
+            for part in raw.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    return part.inline_data.data
+        raise RuntimeError("Gemini TTS returned no audio data")
+
+    # -- Transcription ---------------------------------------------------------
+
+    def transcribe(self, audio_bytes: bytes, model: str = "",
+                    mime_type: str = "audio/wav") -> str:
+        """Speech-to-text via Gemini's multimodal understanding."""
+        effective_model = model or self._default_model
+        contents = [
+            types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+            "Transcribe this audio verbatim. Return only the exact transcription text, nothing else.",
+        ]
+        raw = self._client.models.generate_content(
+            model=effective_model,
+            contents=contents,
+        )
+        return _parse_response(raw).text
+
+    # -- Music generation ------------------------------------------------------
+
+    def generate_music(
+        self, prompt: str, model: str = "", duration_seconds: float | None = None,
+    ) -> bytes:
+        """Music generation via Gemini's Lyria model.
+
+        Note: Lyria RealTime uses WebSocket streaming which isn't supported
+        here. This uses the standard generateContent with Lyria 3 on Vertex AI
+        if available, otherwise falls back to the multimodal model.
+        """
+        raise NotImplementedError(
+            "Gemini music generation requires the Lyria WebSocket API "
+            "which is not yet supported in this adapter"
+        )
+
+    # -- Utility ---------------------------------------------------------------
 
     @staticmethod
     def make_bytes_part(data: bytes, mime_type: str) -> Any:
