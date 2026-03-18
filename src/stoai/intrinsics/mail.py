@@ -34,9 +34,9 @@ SCHEMA = {
             "description": (
                 "Mail type (for send). 'normal' (default) is regular mail. "
                 "'silence' interrupts the target agent and puts it to idle "
-                "(revives on next email; requires admin privilege). "
-                "'kill' hard-stops the target agent permanently "
-                "(requires admin privilege)."
+                "(revives on next email; requires admin.silence privilege). "
+                "'kill' hard-stops the target agent (requires admin.kill privilege). "
+                "To revive: re-delegate with the SAME name."
             ),
         },
     },
