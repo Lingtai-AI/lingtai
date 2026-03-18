@@ -160,6 +160,36 @@ class MCPClient:
 
         return result
 
+    def list_tools(self, timeout: float = 10) -> list[dict]:
+        """List available tools from the MCP server.
+
+        Returns a list of dicts with 'name', 'description', and 'schema' keys.
+        """
+        import asyncio
+
+        if not self.is_connected():
+            self.start()
+
+        if self._session is None or self._loop is None:
+            raise RuntimeError("MCP client not connected")
+
+        async def _list():
+            result = await self._session.list_tools()
+            tools = []
+            for tool in result.tools:
+                schema = {}
+                if tool.inputSchema:
+                    schema = tool.inputSchema if isinstance(tool.inputSchema, dict) else {}
+                tools.append({
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "schema": schema,
+                })
+            return tools
+
+        future = asyncio.run_coroutine_threadsafe(_list(), self._loop)
+        return future.result(timeout=timeout)
+
     def get_activity_log(self) -> list[dict[str, Any]]:
         """Get recent MCP tool calls for debugging."""
         with self._activity_lock:

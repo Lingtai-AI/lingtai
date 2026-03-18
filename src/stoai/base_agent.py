@@ -404,6 +404,13 @@ class BaseAgent:
             except Exception:
                 pass
 
+        # Close MCP clients
+        for client in getattr(self, "_mcp_clients", []):
+            try:
+                client.close()
+            except Exception:
+                pass
+
         # Persist memory from prompt manager to file
         if not self._anima_owns_memory:
             memory_content = self._prompt_manager.read_section("memory") or ""
@@ -875,6 +882,58 @@ class BaseAgent:
         if self._chat is not None:
             self._chat.update_tools(self._build_tool_schemas())
         self._token_decomp_dirty = True
+
+    def connect_mcp(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> list[str]:
+        """Connect to an MCP server and auto-register all its tools.
+
+        Args:
+            command: Executable to run (e.g., "uvx", "xhelio-spice-mcp").
+            args: Arguments to the command.
+            env: Environment variables for the subprocess.
+
+        Returns:
+            List of registered tool names.
+        """
+        from .services.mcp import MCPClient
+
+        client = MCPClient(command=command, args=args, env=env)
+        client.start()
+
+        # Track for cleanup
+        if not hasattr(self, "_mcp_clients"):
+            self._mcp_clients: list = []
+        self._mcp_clients.append(client)
+
+        # List tools and register each one
+        tools = client.list_tools()
+        registered = []
+        for tool in tools:
+            name = tool["name"]
+
+            def _make_handler(c: MCPClient, tool_name: str):
+                def handler(tool_args: dict) -> dict:
+                    return c.call_tool(tool_name, tool_args)
+                return handler
+
+            # Extract schema properties (MCP uses inputSchema with JSON Schema)
+            schema = tool.get("schema", {})
+            # Remove top-level keys that aren't valid for our FunctionSchema
+            schema.pop("additionalProperties", None)
+
+            self.add_tool(
+                name,
+                schema=schema,
+                handler=_make_handler(client, name),
+                description=tool.get("description", ""),
+            )
+            registered.append(name)
+
+        return registered
 
     def remove_tool(self, name: str) -> None:
         """Unregister a dynamic tool."""
