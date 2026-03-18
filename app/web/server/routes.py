@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import socket
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -13,17 +12,6 @@ from stoai.services.mail import TCPMailService
 from .diary import parse_diary
 
 
-def _check_agent_alive(host: str, port: int, timeout: float = 0.3) -> bool:
-    """Check if a stoai agent is alive by reading its TCP banner."""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        data = sock.recv(64)
-        sock.close()
-        return data.startswith(b"STOAI ")
-    except (OSError, socket.timeout):
-        return False
 
 router = APIRouter()
 
@@ -65,37 +53,25 @@ def list_agents(request: Request):
             "type": "admin" if entry.agent._admin else "agent",
         })
 
-    # Discover unregistered agents from billboard + verify alive via TCP banner
-    billboard_dir = Path.home() / ".stoai" / "billboard"
-    if billboard_dir.is_dir():
-        for f in billboard_dir.glob("*.json"):
+    # Discover unregistered agents by scanning base_dir for .agent.json
+    registered_names = {e.agent_name for e in state.agents.values()}
+    if state.base_dir.is_dir():
+        for manifest_file in state.base_dir.glob("*/.agent.json"):
             try:
-                data = json.loads(f.read_text())
+                data = json.loads(manifest_file.read_text())
+                agent_name = data.get("agent_name", "")
+                if agent_name in registered_names:
+                    continue
                 agent_id = data.get("agent_id", "")
-                if agent_id in known_ids:
-                    continue
                 address = data.get("address", "")
-                if ":" not in address:
-                    continue
-                host, port_str = address.rsplit(":", 1)
-                port = int(port_str)
-
-                # Verify agent is alive via TCP banner
-                if not _check_agent_alive(host, port):
-                    # Stale billboard entry — agent is dead, clean up
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass
-                    continue
-
+                port = int(address.split(":")[-1]) if ":" in address else 0
                 agents.append({
                     "id": agent_id,
-                    "name": data.get("agent_name", agent_id),
+                    "name": agent_name,
                     "key": agent_id[:8],
                     "address": address,
                     "port": port,
-                    "status": "active",
+                    "status": "unknown",
                     "type": "admin" if data.get("admin") else "agent",
                 })
             except (json.JSONDecodeError, OSError, ValueError):
@@ -111,19 +87,18 @@ def get_inbox(request: Request):
 
 
 def _resolve_working_dir(state, agent_key: str) -> Path | None:
-    """Resolve agent key to working dir — checks registered agents then billboard."""
+    """Resolve agent key to working dir — checks registered agents then base_dir scan."""
     entry = state.agents.get(agent_key)
     if entry:
         return entry.working_dir
-    # Check billboard for unregistered agents (key is first 8 chars of agent_id)
-    billboard_dir = Path.home() / ".stoai" / "billboard"
-    if billboard_dir.is_dir():
-        for f in billboard_dir.glob("*.json"):
+    # Check base_dir for unregistered agents (key is first 8 chars of agent_id)
+    if state.base_dir.is_dir():
+        for manifest_file in state.base_dir.glob("*/.agent.json"):
             try:
-                data = json.loads(f.read_text())
+                data = json.loads(manifest_file.read_text())
                 if data.get("agent_id", "")[:8] == agent_key:
-                    return Path(data["working_dir"])
-            except (json.JSONDecodeError, OSError, KeyError):
+                    return manifest_file.parent
+            except (json.JSONDecodeError, OSError):
                 continue
     return None
 
@@ -148,21 +123,19 @@ def get_all_diaries(request: Request, since: float = 0.0):
     for key, entry in state.agents.items():
         log_file = entry.working_dir / "logs" / "events.jsonl"
         result[key] = parse_diary(log_file, since=since)
-    # Billboard agents (unregistered)
-    billboard_dir = Path.home() / ".stoai" / "billboard"
-    if billboard_dir.is_dir():
-        registered_ids = {e.agent.agent_id for e in state.agents.values()}
-        for f in billboard_dir.glob("*.json"):
+    # Discovered agents (unregistered, from base_dir scan)
+    registered_names = {e.agent_name for e in state.agents.values()}
+    if state.base_dir.is_dir():
+        for manifest_file in state.base_dir.glob("*/.agent.json"):
             try:
-                data = json.loads(f.read_text())
-                agent_id = data.get("agent_id", "")
-                if agent_id in registered_ids:
+                data = json.loads(manifest_file.read_text())
+                agent_name = data.get("agent_name", "")
+                if agent_name in registered_names:
                     continue
-                key = agent_id[:8]
-                working_dir = Path(data["working_dir"])
-                log_file = working_dir / "logs" / "events.jsonl"
+                key = data.get("agent_id", "")[:8]
+                log_file = manifest_file.parent / "logs" / "events.jsonl"
                 result[key] = parse_diary(log_file, since=since)
-            except (json.JSONDecodeError, OSError, KeyError):
+            except (json.JSONDecodeError, OSError):
                 continue
     return result
 
