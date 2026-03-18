@@ -594,11 +594,14 @@ class BaseAgent:
                 pass
         self._mcp_clients = []
 
-        # Remove old MCP tool registrations
+        # Temporarily unseal to allow tool modifications
+        self._sealed = False
+
+        # Remove old MCP tool registrations (keep intrinsics and capability tools)
+        cap_tool_names = {name for name, _ in getattr(self, "_capabilities", [])}
         mcp_names = list(self._mcp_handlers.keys())
         for name in mcp_names:
-            # Only remove tools that came from MCP (not intrinsics/capabilities)
-            if name not in self._intrinsic_handlers:
+            if name not in self._intrinsics and name not in cap_tool_names:
                 self._mcp_handlers.pop(name, None)
                 self._mcp_schemas = [s for s in self._mcp_schemas if s.name != name]
 
@@ -606,8 +609,11 @@ class BaseAgent:
         if hasattr(self, "_load_mcp_from_workdir"):
             self._load_mcp_from_workdir()
 
-        # Reset session for fresh start with new tools
-        self._session.reset()
+        # Re-seal
+        self._sealed = True
+
+        # Reset session so next message creates fresh one with new tools
+        self._session.chat = None
 
         self._log("nirvana_complete", tools=list(self._mcp_handlers.keys()))
 
