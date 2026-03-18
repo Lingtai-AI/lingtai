@@ -23,12 +23,12 @@ def make_mock_service():
 # ---------------------------------------------------------------------------
 
 
-def test_anima_setup_removes_system_intrinsic(tmp_path):
+def test_anima_setup_removes_memory_intrinsic(tmp_path):
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
-    assert "system" not in agent._intrinsics
+    assert "memory" not in agent._intrinsics
     assert "anima" in agent._mcp_handlers
     agent.stop(timeout=1.0)
 
@@ -114,21 +114,16 @@ def test_character_load_combines_covenant_and_character(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_memory_diff_delegates_to_system(tmp_path):
+def test_memory_edit_rejected_by_anima(tmp_path):
+    """Anima should not expose raw edit — memory is structural (library-based)."""
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["anima"],
     )
-    agent.start()
-    try:
-        mgr = agent.get_capability("anima")
-        r = mgr.handle({"object": "library", "action": "submit",
-                         "title": "T", "summary": "s.", "content": "test entry"})
-        mgr.handle({"object": "memory", "action": "load", "ids": [r["id"]]})
-        result = mgr.handle({"object": "memory", "action": "diff"})
-        assert result["status"] == "ok"
-    finally:
-        agent.stop()
+    mgr = agent.get_capability("anima")
+    result = mgr.handle({"object": "memory", "action": "edit", "content": "direct write"})
+    assert "error" in result
+    agent.stop(timeout=1.0)
 
 
 def test_library_to_memory_workflow(tmp_path):

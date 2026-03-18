@@ -1,6 +1,6 @@
 """Anima capability — self-knowledge management.
 
-Upgrades the system intrinsic (like email upgrades mail).
+Upgrades the memory intrinsic (like email upgrades mail).
 Adds evolving identity (covenant + character), structured memory,
 and on-demand context compaction.
 
@@ -18,8 +18,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..base_agent import BaseAgent
 
 SCHEMA = {
@@ -46,7 +44,7 @@ SCHEMA = {
             "description": (
                 "character: update | diff | load.\n"
                 "library: submit | filter | view | consolidate | delete.\n"
-                "memory: load | diff.\n"
+                "memory: load.\n"
                 "context: compact | forget."
             ),
         },
@@ -142,8 +140,7 @@ DESCRIPTION = (
     "delete to remove. Be a thoughtful librarian — write clear titles, "
     "concise summaries (1-3 sentences), and structured content (up to 500 words).\n"
     "memory: load selected library entries into active memory by IDs "
-    "(injects id + title + content into system prompt). "
-    "diff to see uncommitted changes (inherited, rarely needed).\n"
+    "(injects id + title + content into system prompt and git commits).\n"
     "context: compact to proactively free context space. "
     "forget to nuke conversation history and start fresh "
     "(email mailbox persists independently). "
@@ -158,7 +155,6 @@ class AnimaManager:
     def __init__(self, agent: "BaseAgent"):
         self._agent = agent
         self._working_dir = agent._working_dir
-        self._original_system: Callable[[dict], dict] | None = None
 
         # Paths
         system_dir = self._working_dir / "system"
@@ -225,7 +221,7 @@ class AnimaManager:
     _VALID_ACTIONS: dict[str, set[str]] = {
         "character": {"update", "diff", "load"},
         "library": {"submit", "filter", "view", "consolidate", "delete"},
-        "memory": {"load", "diff"},
+        "memory": {"load"},
         "context": {"compact", "forget"},
     }
 
@@ -444,12 +440,6 @@ class AnimaManager:
         self._save_entries()
         return {"status": "ok", "removed": removed}
 
-    def _memory_diff(self, args: dict) -> dict:
-        # Delegate to original system handler
-        if self._original_system is None:
-            return {"error": "anima not properly initialized (missing system handler)"}
-        return self._original_system({"action": "diff", "object": "memory"})
-
     def _memory_load(self, args: dict) -> dict:
         ids = args.get("ids")
         if not ids:
@@ -587,7 +577,7 @@ class AnimaManager:
 def setup(agent: "BaseAgent") -> AnimaManager:
     """Set up anima capability — self-knowledge management."""
     mgr = AnimaManager(agent)
-    mgr._original_system = agent.override_intrinsic("system")
+    agent.override_intrinsic("memory")
     agent._anima_owns_memory = True
 
     # Migrate existing memory.md content to library as a seed entry

@@ -126,7 +126,7 @@ class BaseAgent:
         # MailService: None means mail intrinsic disabled
         self._mail_service = mail_service
 
-        # Set by anima capability to prevent stop() from overwriting anima-managed memory.md
+        # Set by anima capability to prevent stop() from overwriting memory.md
         self._anima_owns_memory = False
 
         # Covenant and memory file paths
