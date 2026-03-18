@@ -45,10 +45,10 @@ export function useNetwork(
   }
   addrToNodeId[`127.0.0.1:${userPort}`] = "user";
 
-  // Build directed edges from diary entries
+  // Build undirected edges from diary entries (one line per pair)
   const edgeMap = new Map<string, number>();
   const addEdge = (from: string, to: string) => {
-    const key = `${from}->${to}`;
+    const key = [from, to].sort().join("--");
     edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
   };
 
@@ -73,7 +73,7 @@ export function useNetwork(
 
   const links: GraphLink[] = [];
   for (const [key, count] of edgeMap) {
-    const [source, target] = key.split("->");
+    const [source, target] = key.split("--");
     links.push({ source, target, count });
   }
 

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ForceGraph3D from "react-force-graph-3d";
-import * as THREE from "three";
-import SpriteText from "three-spritetext";
+import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { forceRadial } from "d3-force-3d";
 import type { GraphNode, GraphLink, NodeActivity } from "../types";
 
@@ -11,9 +9,6 @@ const GLOW_COLORS: Record<NodeActivity["type"], string> = {
   diary: "#6bcb77",
 };
 
-const BASE_EMISSIVE_ACTIVE = 0.6;
-const BASE_EMISSIVE_SLEEPING = 0.15;
-const GLOW_INTENSITY = 1.8;
 const GLOW_DECAY_MS = 4000;
 
 type LayoutMode = "default" | "volume" | "cluster";
@@ -27,17 +22,10 @@ interface NetworkPageProps {
 
 export function NetworkPage({ graphData, nodeActivity, lightMode }: NetworkPageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const materialsRef = useRef<Map<string, THREE.MeshStandardMaterial>>(new Map());
-  const animRef = useRef<number>(0);
+  const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
   const [viewMode, setViewMode] = useState<ViewMode>("comm");
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("default");
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-
-  // Refs for animation loop access (avoid stale closures)
-  const nodeActivityRef = useRef(nodeActivity);
-  nodeActivityRef.current = nodeActivity;
-  const viewModeRef = useRef(viewMode);
-  viewModeRef.current = viewMode;
 
   // Container sizing
   useEffect(() => {
@@ -65,81 +53,136 @@ export function NetworkPage({ graphData, nodeActivity, lightMode }: NetworkPageP
     [graphData.links]
   );
 
-  // Activity glow animation loop
+  // Apply layout forces
   useEffect(() => {
-    const tick = () => {
-      const now = Date.now();
-      const materials = materialsRef.current;
-      const activity = nodeActivityRef.current;
-      const mode = viewModeRef.current;
+    const fg = fgRef.current;
+    if (!fg) return;
 
-      for (const [, mat] of materials) {
-        const nodeId = (mat.userData as { nodeId?: string })?.nodeId;
-        const events = nodeId ? activity.get(nodeId) : undefined;
-        const isActive = (mat.userData as { status?: string })?.status === "active";
-        const baseIntensity = isActive ? BASE_EMISSIVE_ACTIVE : BASE_EMISSIVE_SLEEPING;
-        const baseColor = (mat.userData as { baseColor?: string })?.baseColor || "#ffffff";
-
-        if (events && events.length > 0) {
-          const latest = events[events.length - 1];
-          const age = now - latest.time;
-          if (age < GLOW_DECAY_MS) {
-            const progress = age / GLOW_DECAY_MS;
-            const intensity = baseIntensity + (GLOW_INTENSITY - baseIntensity) * (1 - progress);
-            const glowColor = GLOW_COLORS[latest.type];
-            const glowFactor = mode === "activity" ? (1 - progress) : (1 - progress) * 0.7;
-            const base = new THREE.Color(baseColor);
-            base.lerp(new THREE.Color(glowColor), glowFactor);
-            mat.emissive.copy(base);
-            mat.emissiveIntensity = mode === "activity" ? intensity * 1.3 : intensity;
-            continue;
-          }
-        }
-        mat.emissive.set(baseColor);
-        mat.emissiveIntensity = baseIntensity;
+    if (layoutMode === "volume") {
+      fg.d3Force(
+        "radial",
+        forceRadial((node: GraphNode) => {
+          const normalized = (node._volume || 0) / maxVolume;
+          return 200 * (1 - normalized);
+        }).strength(0.4)
+      );
+      const charge = fg.d3Force("charge");
+      if (charge && typeof charge.strength === "function") charge.strength(-30);
+      const link = fg.d3Force("link");
+      if (link && typeof link.strength === "function") link.strength(null);
+    } else if (layoutMode === "cluster") {
+      fg.d3Force("radial", null);
+      const link = fg.d3Force("link");
+      if (link && typeof link.strength === "function") {
+        link.strength((l: GraphLink) => 0.3 + 0.7 * (l.count / maxLinkCount));
       }
-      animRef.current = requestAnimationFrame(tick);
-    };
-    animRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animRef.current);
-  }, []);
-
-  // Custom node rendering
-  const nodeThreeObject = useCallback((node: GraphNode) => {
-    const group = new THREE.Group();
-    const isActive = node.status === "active";
-
-    const geometry = node.type === "user"
-      ? new THREE.OctahedronGeometry(6)
-      : new THREE.SphereGeometry(5, 32, 32);
-
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x111111,
-      emissive: new THREE.Color(node.color),
-      emissiveIntensity: isActive ? BASE_EMISSIVE_ACTIVE : BASE_EMISSIVE_SLEEPING,
-      metalness: 0.3,
-      roughness: 0.4,
-      transparent: true,
-      opacity: isActive ? 1.0 : 0.6,
-    });
-    material.userData = { status: node.status, baseColor: node.color, nodeId: node.id };
-    materialsRef.current.set(node.id, material);
-    group.add(new THREE.Mesh(geometry, material));
-
-    if (node.type === "admin") {
-      const shellMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(node.color), wireframe: true, transparent: true, opacity: 0.15,
-      });
-      group.add(new THREE.Mesh(new THREE.IcosahedronGeometry(8, 1), shellMat));
+      const charge = fg.d3Force("charge");
+      if (charge && typeof charge.strength === "function") charge.strength(-80);
+    } else {
+      fg.d3Force("radial", null);
+      const charge = fg.d3Force("charge");
+      if (charge && typeof charge.strength === "function") charge.strength(-30);
+      const link = fg.d3Force("link");
+      if (link && typeof link.strength === "function") link.strength(null);
     }
 
-    const label = new SpriteText(node.name, 3.5, node.color);
-    label.position.set(0, 10, 0);
-    label.material.depthWrite = false;
-    group.add(label);
+    fg.d3ReheatSimulation();
+  }, [layoutMode, maxVolume, maxLinkCount]);
 
-    return group;
-  }, []);
+  // Custom node rendering on Canvas
+  const nodeCanvasObject = useCallback(
+    (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      const isActive = node.status === "active";
+      const baseRadius = node.type === "user" ? 7 : 5;
+
+      // Check for activity glow
+      const events = nodeActivity.get(node.id);
+      let glowColor: string | null = null;
+      let glowIntensity = 0;
+      if (events && events.length > 0) {
+        const latest = events[events.length - 1];
+        const age = Date.now() - latest.time;
+        if (age < GLOW_DECAY_MS) {
+          const progress = age / GLOW_DECAY_MS;
+          glowIntensity = 1 - progress;
+          glowColor = GLOW_COLORS[latest.type];
+        }
+      }
+
+      // Glow halo
+      if (glowColor && glowIntensity > 0) {
+        const glowRadius = baseRadius + 8 * glowIntensity;
+        const gradient = ctx.createRadialGradient(x, y, baseRadius, x, y, glowRadius);
+        gradient.addColorStop(0, glowColor + Math.round(glowIntensity * 100).toString(16).padStart(2, "0"));
+        gradient.addColorStop(1, glowColor + "00");
+        ctx.beginPath();
+        ctx.arc(x, y, glowRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Admin: outer dashed ring
+      if (node.type === "admin") {
+        ctx.beginPath();
+        ctx.arc(x, y, baseRadius + 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = node.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 2]);
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+
+      // User: diamond shape
+      if (node.type === "user") {
+        const s = baseRadius;
+        ctx.beginPath();
+        ctx.moveTo(x, y - s);
+        ctx.lineTo(x + s, y);
+        ctx.lineTo(x, y + s);
+        ctx.lineTo(x - s, y);
+        ctx.closePath();
+        ctx.fillStyle = isActive ? node.color : node.color + "66";
+        ctx.fill();
+        ctx.strokeStyle = node.color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        // Regular node: filled circle
+        ctx.beginPath();
+        ctx.arc(x, y, baseRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = lightMode ? "#f5efe6" : "#16213e";
+        ctx.fill();
+        ctx.strokeStyle = node.color;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = isActive ? 1 : 0.4;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // Status dot (top-right)
+      if (node.type !== "user") {
+        ctx.beginPath();
+        ctx.arc(x + baseRadius - 1, y - baseRadius + 1, 2, 0, 2 * Math.PI);
+        ctx.fillStyle = isActive ? "#4ecdc4" : "#666";
+        ctx.fill();
+      }
+
+      // Label
+      const fontSize = Math.max(10 / globalScale, 3);
+      ctx.font = `bold ${fontSize}px 'Courier New', monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = node.color;
+      ctx.globalAlpha = isActive ? 1 : 0.5;
+      ctx.fillText(node.name, x, y + baseRadius + 2);
+      ctx.globalAlpha = 1;
+    },
+    [nodeActivity, lightMode]
+  );
 
   const bgColor = lightMode ? "#faf6f0" : "#0a0a1a";
   const linkBaseColor = lightMode ? "#d4c9b8" : "#1a3a5c";
@@ -151,31 +194,35 @@ export function NetworkPage({ graphData, nodeActivity, lightMode }: NetworkPageP
       style={{ position: "relative" }}
     >
       {dimensions.width > 0 && dimensions.height > 0 && (
-        <ForceGraph3D
+        <ForceGraph2D
+          ref={fgRef}
           graphData={graphData}
           width={dimensions.width}
           height={dimensions.height}
           backgroundColor={bgColor}
           nodeId="id"
-          nodeLabel={(node: GraphNode) => `${node.name} (${node.status}) [${node.type}]`}
-          nodeThreeObject={nodeThreeObject}
-          nodeThreeObjectExtend={false}
-          linkSource="source"
-          linkTarget="target"
+          nodeLabel={(node: GraphNode) => `${node.name} (${node.status}) [${node.type}] — ${node._volume || 0} emails`}
+          nodeCanvasObject={nodeCanvasObject}
+          nodePointerAreaPaint={(node: GraphNode, color, ctx) => {
+            const r = node.type === "user" ? 7 : 5;
+            ctx.beginPath();
+            ctx.arc(node.x ?? 0, node.y ?? 0, r + 4, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+          }}
           linkColor={() => linkBaseColor}
-          linkWidth={(link: GraphLink) => Math.min(1 + link.count * 0.3, 4)}
+          linkWidth={(link: GraphLink) => Math.min(0.5 + link.count * 0.3, 3)}
           linkOpacity={viewMode === "activity" ? 0.05 : 0.6}
-          linkCurvature={0.15}
           linkDirectionalParticles={viewMode === "activity"
             ? 0
             : (link: GraphLink) => (link.count > 0 ? 2 : 0)
           }
           linkDirectionalParticleWidth={3}
-          linkDirectionalParticleSpeed={0.015}
-          linkDirectionalArrowLength={3.5}
-          linkDirectionalArrowRelPos={1}
+          linkDirectionalParticleSpeed={0.012}
           d3AlphaDecay={0.02}
           d3VelocityDecay={0.3}
+          enableNodeDrag={true}
+          enableZoomPanInteraction={true}
         />
       )}
 
