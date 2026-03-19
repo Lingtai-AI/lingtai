@@ -68,13 +68,13 @@ def test_conscience_custom_interval(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_clock_intrinsic_unchanged(tmp_path):
-    """conscience does NOT replace the clock intrinsic."""
+def test_system_intrinsic_unchanged(tmp_path):
+    """conscience does NOT replace the system intrinsic."""
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["conscience"],
     )
-    assert callable(agent._intrinsics["clock"])
+    assert callable(agent._intrinsics["system"])
     agent.stop(timeout=1.0)
 
 

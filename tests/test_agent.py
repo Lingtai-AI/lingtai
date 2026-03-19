@@ -46,13 +46,12 @@ def test_agent_double_start(tmp_path):
 def test_intrinsics_enabled_by_default(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     assert "mail" in agent._intrinsics
-    assert "clock" in agent._intrinsics
-    assert "status" in agent._intrinsics
+    assert "system" in agent._intrinsics
     assert "eigen" in agent._intrinsics
     # File I/O is now a capability, not intrinsic
     assert "read" not in agent._intrinsics
     assert "write" not in agent._intrinsics
-    assert len(agent._intrinsics) == 4  # mail, clock, status, eigen
+    assert len(agent._intrinsics) == 3  # mail, system, eigen
 
 
 # ---------------------------------------------------------------------------
@@ -292,10 +291,10 @@ def test_execute_single_tool_intrinsic(tmp_path):
     from stoai.llm.base import ToolCall
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
 
-    # Replace the clock intrinsic with a mock
-    agent._intrinsics["clock"] = lambda args: {"status": "ok", "time": "12:00"}
+    # Replace the system intrinsic with a mock
+    agent._intrinsics["system"] = lambda args: {"status": "ok", "time": "12:00"}
 
-    tc = ToolCall(name="clock", args={"action": "check"})
+    tc = ToolCall(name="system", args={"action": "show"})
     result = agent._dispatch_tool(tc)
     assert result["status"] == "ok"
 
