@@ -10,24 +10,32 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from stoai_kernel.base_agent import BaseAgent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "pattern": {"type": "string", "description": "Glob pattern (e.g., '**/*.py')"},
-        "path": {"type": "string", "description": "Directory to search in"},
-    },
-    "required": ["pattern"],
-}
 
-DESCRIPTION = (
-    "Find files matching a glob pattern. "
-    "Use '**/' for recursive search (e.g. '**/*.py' finds all Python files). "
-    "Returns sorted list of matching file paths."
-)
+def get_description(lang: str = "en") -> str:
+    from ..i18n import t
+    return t(lang, "glob.description")
+
+
+def get_schema(lang: str = "en") -> dict:
+    from ..i18n import t
+    return {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": t(lang, "glob.pattern")},
+            "path": {"type": "string", "description": t(lang, "glob.path")},
+        },
+        "required": ["pattern"],
+    }
+
+
+# Backward compat
+SCHEMA = get_schema("en")
+DESCRIPTION = get_description("en")
 
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the glob capability on an agent."""
+    lang = agent._config.language
 
     def handle_glob(args: dict) -> dict:
         pattern = args.get("pattern", "")
@@ -42,5 +50,4 @@ def setup(agent: "BaseAgent") -> None:
         except Exception as e:
             return {"error": f"Glob failed: {e}"}
 
-    agent.add_tool("glob", schema=SCHEMA, handler=handle_glob, description=DESCRIPTION,
-                    system_prompt="Find files by name pattern.")
+    agent.add_tool("glob", schema=get_schema(lang), handler=handle_glob, description=get_description(lang))

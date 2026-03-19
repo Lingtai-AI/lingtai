@@ -10,22 +10,34 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from stoai_kernel.base_agent import BaseAgent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "file_path": {"type": "string", "description": "Absolute path to the file to edit"},
-        "old_string": {"type": "string", "description": "The exact text to find and replace"},
-        "new_string": {"type": "string", "description": "The replacement text"},
-        "replace_all": {"type": "boolean", "description": "Replace all occurrences", "default": False},
-    },
-    "required": ["file_path", "old_string", "new_string"],
-}
 
-DESCRIPTION = "Replace an exact string in a file. Fails if old_string is not found or is ambiguous."
+def get_description(lang: str = "en") -> str:
+    from ..i18n import t
+    return t(lang, "edit.description")
+
+
+def get_schema(lang: str = "en") -> dict:
+    from ..i18n import t
+    return {
+        "type": "object",
+        "properties": {
+            "file_path": {"type": "string", "description": t(lang, "edit.file_path")},
+            "old_string": {"type": "string", "description": t(lang, "edit.old_string")},
+            "new_string": {"type": "string", "description": t(lang, "edit.new_string")},
+            "replace_all": {"type": "boolean", "description": t(lang, "edit.replace_all"), "default": False},
+        },
+        "required": ["file_path", "old_string", "new_string"],
+    }
+
+
+# Backward compat
+SCHEMA = get_schema("en")
+DESCRIPTION = get_description("en")
 
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the edit capability on an agent."""
+    lang = agent._config.language
 
     def handle_edit(args: dict) -> dict:
         path = args.get("file_path", "")
@@ -57,5 +69,4 @@ def setup(agent: "BaseAgent") -> None:
             return {"error": f"Cannot write {path}: {e}"}
         return {"status": "ok", "replacements": count if replace_all else 1}
 
-    agent.add_tool("edit", schema=SCHEMA, handler=handle_edit, description=DESCRIPTION,
-                    system_prompt="Find-and-replace text in files.")
+    agent.add_tool("edit", schema=get_schema(lang), handler=handle_edit, description=get_description(lang))

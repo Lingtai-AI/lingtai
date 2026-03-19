@@ -10,25 +10,32 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from stoai_kernel.base_agent import BaseAgent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "file_path": {"type": "string", "description": "Absolute path to the file to write"},
-        "content": {"type": "string", "description": "Content to write"},
-    },
-    "required": ["file_path", "content"],
-}
 
-DESCRIPTION = (
-    "Create or overwrite a file with the given content. "
-    "Parent directories are created automatically. "
-    "Use this for creating new files or complete rewrites. "
-    "For small changes to existing files, prefer edit."
-)
+def get_description(lang: str = "en") -> str:
+    from ..i18n import t
+    return t(lang, "write.description")
+
+
+def get_schema(lang: str = "en") -> dict:
+    from ..i18n import t
+    return {
+        "type": "object",
+        "properties": {
+            "file_path": {"type": "string", "description": t(lang, "write.file_path")},
+            "content": {"type": "string", "description": t(lang, "write.content")},
+        },
+        "required": ["file_path", "content"],
+    }
+
+
+# Backward compat
+SCHEMA = get_schema("en")
+DESCRIPTION = get_description("en")
 
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the write capability on an agent."""
+    lang = agent._config.language
 
     def handle_write(args: dict) -> dict:
         path = args.get("file_path", "")
@@ -43,5 +50,4 @@ def setup(agent: "BaseAgent") -> None:
         except Exception as e:
             return {"error": f"Cannot write {path}: {e}"}
 
-    agent.add_tool("write", schema=SCHEMA, handler=handle_write, description=DESCRIPTION,
-                    system_prompt="Create or overwrite files.")
+    agent.add_tool("write", schema=get_schema(lang), handler=handle_write, description=get_description(lang))

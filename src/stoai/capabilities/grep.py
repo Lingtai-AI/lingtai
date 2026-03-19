@@ -10,27 +10,34 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from stoai_kernel.base_agent import BaseAgent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "pattern": {"type": "string", "description": "Regex pattern to search for"},
-        "path": {"type": "string", "description": "File or directory to search in"},
-        "glob": {"type": "string", "description": "File glob filter (e.g., '*.py')", "default": "*"},
-        "max_matches": {"type": "integer", "description": "Maximum matches to return", "default": 200},
-    },
-    "required": ["pattern"],
-}
 
-DESCRIPTION = (
-    "Search file contents for lines matching a regex pattern. "
-    "Returns matching lines with file path and line number. "
-    "Searches recursively when given a directory. "
-    "Use the glob filter to narrow to specific file types."
-)
+def get_description(lang: str = "en") -> str:
+    from ..i18n import t
+    return t(lang, "grep.description")
+
+
+def get_schema(lang: str = "en") -> dict:
+    from ..i18n import t
+    return {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": t(lang, "grep.pattern")},
+            "path": {"type": "string", "description": t(lang, "grep.path")},
+            "glob": {"type": "string", "description": t(lang, "grep.glob"), "default": "*"},
+            "max_matches": {"type": "integer", "description": t(lang, "grep.max_matches"), "default": 200},
+        },
+        "required": ["pattern"],
+    }
+
+
+# Backward compat
+SCHEMA = get_schema("en")
+DESCRIPTION = get_description("en")
 
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the grep capability on an agent."""
+    lang = agent._config.language
 
     def handle_grep(args: dict) -> dict:
         pattern = args.get("pattern", "")
@@ -47,5 +54,4 @@ def setup(agent: "BaseAgent") -> None:
         except Exception as e:
             return {"error": f"Grep failed: {e}"}
 
-    agent.add_tool("grep", schema=SCHEMA, handler=handle_grep, description=DESCRIPTION,
-                    system_prompt="Search file contents by regex.")
+    agent.add_tool("grep", schema=get_schema(lang), handler=handle_grep, description=get_description(lang))

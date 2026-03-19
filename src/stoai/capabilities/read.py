@@ -10,25 +10,33 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from stoai_kernel.base_agent import BaseAgent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "file_path": {"type": "string", "description": "Absolute path to the file to read"},
-        "offset": {"type": "integer", "description": "Line number to start from (1-based)", "default": 1},
-        "limit": {"type": "integer", "description": "Max lines to read", "default": 2000},
-    },
-    "required": ["file_path"],
-}
 
-DESCRIPTION = (
-    "Read the contents of a text file. Returns numbered lines. "
-    "Text files only — cannot read binary, images, or audio. "
-    "Use offset/limit to read specific sections of large files."
-)
+def get_description(lang: str = "en") -> str:
+    from ..i18n import t
+    return t(lang, "read.description")
+
+
+def get_schema(lang: str = "en") -> dict:
+    from ..i18n import t
+    return {
+        "type": "object",
+        "properties": {
+            "file_path": {"type": "string", "description": t(lang, "read.file_path")},
+            "offset": {"type": "integer", "description": t(lang, "read.offset"), "default": 1},
+            "limit": {"type": "integer", "description": t(lang, "read.limit"), "default": 2000},
+        },
+        "required": ["file_path"],
+    }
+
+
+# Backward compat
+SCHEMA = get_schema("en")
+DESCRIPTION = get_description("en")
 
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the read capability on an agent."""
+    lang = agent._config.language
 
     def handle_read(args: dict) -> dict:
         path = args.get("file_path", "")
@@ -50,5 +58,4 @@ def setup(agent: "BaseAgent") -> None:
         numbered = "".join(f"{start + i + 1}\t{line}" for i, line in enumerate(selected))
         return {"content": numbered, "total_lines": len(lines), "lines_shown": len(selected)}
 
-    agent.add_tool("read", schema=SCHEMA, handler=handle_read, description=DESCRIPTION,
-                    system_prompt="Read file contents.")
+    agent.add_tool("read", schema=get_schema(lang), handler=handle_read, description=get_description(lang))
