@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 def register_all_adapters() -> None:
-    from .service import LLMService
+    from stoai_kernel.llm.service import LLMService
 
     def _gemini(*, model=None, defaults=None, api_key=None, max_rpm=0, **_kw):
         from .gemini.adapter import GeminiAdapter

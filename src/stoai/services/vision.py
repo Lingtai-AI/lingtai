@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..llm.service import LLMService
+    from stoai_kernel.llm.service import LLMService
 
 
 class VisionService(ABC):

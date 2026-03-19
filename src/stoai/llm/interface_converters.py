@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .interface import (
+from stoai_kernel.llm.interface import (
     ContentBlock,
     ImageBlock,
     ChatInterface,

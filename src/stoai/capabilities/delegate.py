@@ -87,7 +87,7 @@ class DelegateManager:
 
     def _spawn(self, args: dict) -> dict:
         from ..agent import Agent
-        from ..services.mail import TCPMailService
+        from stoai_kernel.services.mail import TCPMailService
 
         parent = self._agent
         reasoning = args.get("_reasoning")
@@ -116,7 +116,7 @@ class DelegateManager:
         mail_svc = TCPMailService(listen_port=port, working_dir=delegate_working_dir)
 
         # Build config — optionally override provider/model
-        from ..config import AgentConfig
+        from stoai_kernel.config import AgentConfig
         child_provider = args.get("provider") or parent._config.provider
         child_model = args.get("model") or parent._config.model
         child_config = AgentConfig(

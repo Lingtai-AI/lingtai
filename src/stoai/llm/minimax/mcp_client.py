@@ -18,7 +18,7 @@ import shutil
 import threading
 from typing import Any
 
-from ...logging import get_logger
+from stoai_kernel.logging import get_logger
 from ...services.mcp import MCPClient
 
 logger = get_logger()

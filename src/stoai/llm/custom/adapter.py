@@ -12,7 +12,7 @@ Usage in config.json providers section:
   "bedrock":     {"api_compat": "anthropic",  "base_url": "https://...", ...}
   "vertex":      {"api_compat": "gemini",     ...}
 """
-from ..base import LLMAdapter
+from stoai_kernel.llm.base import LLMAdapter
 
 from .defaults import DEFAULTS  # noqa: F401 — re-exported for consumers
 

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from ...services.mail import MailService
+from stoai_kernel.services.mail import MailService
 
 logger = logging.getLogger(__name__)
 

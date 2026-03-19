@@ -4,10 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..logging import get_logger
+from stoai_kernel.logging import get_logger
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
     from ..services.mcp import MCPClient
 
 logger = get_logger()

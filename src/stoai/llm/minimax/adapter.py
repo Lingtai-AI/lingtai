@@ -1,6 +1,6 @@
-from ...logging import get_logger
+from stoai_kernel.logging import get_logger
 from ..anthropic.adapter import AnthropicAdapter
-from ..base import ChatSession, LLMResponse
+from stoai_kernel.llm.base import ChatSession, LLMResponse
 
 logger = get_logger()
 

@@ -16,9 +16,9 @@ from typing import Any
 
 import openai
 
-from ...logging import get_logger
+from stoai_kernel.logging import get_logger
 
-from ..base import (
+from stoai_kernel.llm.base import (
     ChatSession,
     FunctionSchema,
     LLMAdapter,
@@ -27,9 +27,9 @@ from ..base import (
     ToolResultBlock,
     UsageMetadata,
 )
-from ..interface import ChatInterface, TextBlock, ToolCallBlock
+from stoai_kernel.llm.interface import ChatInterface, TextBlock, ToolCallBlock
 from ..interface_converters import to_openai
-from ..streaming import StreamingAccumulator
+from stoai_kernel.llm.streaming import StreamingAccumulator
 
 logger = get_logger()
 

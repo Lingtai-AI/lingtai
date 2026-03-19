@@ -19,12 +19,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...services.mail import TCPMailService
+from stoai_kernel.services.mail import TCPMailService
 from .manager import GmailManager, SCHEMA, DESCRIPTION
 from .service import GoogleMailService
 
 if TYPE_CHECKING:
-    from ...base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
 
 log = logging.getLogger(__name__)
 

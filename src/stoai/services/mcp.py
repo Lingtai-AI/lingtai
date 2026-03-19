@@ -13,7 +13,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ..logging import get_logger
+from stoai_kernel.logging import get_logger
 
 logger = get_logger()
 

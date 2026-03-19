@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
 
 SCHEMA = {
     "type": "object",

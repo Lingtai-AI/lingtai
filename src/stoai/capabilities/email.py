@@ -22,14 +22,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from ..intrinsics.mail import (
+from stoai_kernel.intrinsics.mail import (
     _list_inbox, _load_message, _read_ids, _mark_read, _save_read_ids,
     _message_summary, _mailbox_dir,
     _persist_to_outbox, _mailman,
 )
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
 
 SCHEMA = {
     "type": "object",

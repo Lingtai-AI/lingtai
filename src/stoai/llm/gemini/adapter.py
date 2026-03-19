@@ -13,9 +13,9 @@ from typing import Any
 from google import genai
 from google.genai import errors as genai_errors, types
 
-from ...logging import get_logger
+from stoai_kernel.logging import get_logger
 
-from ..base import (
+from stoai_kernel.llm.base import (
     ChatSession,
     FunctionSchema,
     LLMAdapter,
@@ -24,8 +24,8 @@ from ..base import (
     ToolResultBlock,
     UsageMetadata,
 )
-from ..interface import ChatInterface
-from ..streaming import StreamingAccumulator
+from stoai_kernel.llm.interface import ChatInterface
+from stoai_kernel.llm.streaming import StreamingAccumulator
 
 logger = get_logger()
 

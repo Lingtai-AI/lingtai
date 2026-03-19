@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..llm.service import LLMService
+    from stoai_kernel.llm.service import LLMService
 
 
 @dataclass

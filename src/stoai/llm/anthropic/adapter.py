@@ -21,11 +21,11 @@ from typing import Any
 
 import anthropic
 
-from ...logging import get_logger
+from stoai_kernel.logging import get_logger
 
 logger = get_logger()
 
-from ..base import (
+from stoai_kernel.llm.base import (
     ChatSession,
     FunctionSchema,
     LLMAdapter,
@@ -34,9 +34,9 @@ from ..base import (
     ToolResultBlock,
     UsageMetadata,
 )
-from ..interface import ChatInterface
+from stoai_kernel.llm.interface import ChatInterface
 from ..interface_converters import to_anthropic
-from ..streaming import StreamingAccumulator
+from stoai_kernel.llm.streaming import StreamingAccumulator
 
 from .defaults import DEFAULTS  # noqa: F401 — re-exported for consumers
 
@@ -328,7 +328,7 @@ class AnthropicChatSession(ChatSession):
         # Parse response and add to interface
         response = _parse_response(raw)
         # Record assistant response from raw API object (preserves thinking signatures)
-        from ..interface import TextBlock, ThinkingBlock, ToolCallBlock
+        from stoai_kernel.llm.interface import TextBlock, ThinkingBlock, ToolCallBlock
         assistant_blocks = []
         for block in raw.content:
             if block.type == "thinking":
@@ -366,7 +366,7 @@ class AnthropicChatSession(ChatSession):
         on_chunk: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         """Streaming send. User message committed to history only after success."""
-        from ..interface import TextBlock, ThinkingBlock, ToolCallBlock
+        from stoai_kernel.llm.interface import TextBlock, ThinkingBlock, ToolCallBlock
 
         # Record user input into interface first
         if isinstance(message, str):

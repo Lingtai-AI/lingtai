@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from ...base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
     from .service import GoogleMailService
 
 SCHEMA = {
@@ -210,7 +210,7 @@ class GmailManager:
             f'Use gmail(action="check") to see your inbox.'
         )
 
-        from ...message import _make_message, MSG_REQUEST
+        from stoai_kernel.message import _make_message, MSG_REQUEST
         self._agent._log(
             "gmail_received", sender=sender, subject=subject, message=message,
         )

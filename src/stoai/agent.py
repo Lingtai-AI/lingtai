@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base_agent import BaseAgent
+from stoai_kernel.base_agent import BaseAgent
 
 
 class Agent(BaseAgent):

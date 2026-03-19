@@ -5,7 +5,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
 
 # Registry of built-in capability names → module paths (relative to this package).
 _BUILTIN: dict[str, str] = {
