@@ -12,7 +12,6 @@ _BUILTIN: dict[str, str] = {
     "psyche": ".psyche",
     "anima": ".psyche",  # backward compat alias
     "bash": ".bash",
-    "vibing": ".vibing",
     "delegate": ".delegate",
     "email": ".email",
     "draw": ".draw",
