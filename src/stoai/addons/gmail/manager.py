@@ -34,7 +34,7 @@ SCHEMA = {
                 "contacts", "add_contact", "remove_contact", "edit_contact",
             ],
             "description": (
-                "send: send email via Gmail (requires address, message). "
+                "send: send email via Gmail (requires address, message; optional attachments as file paths). "
                 "check: list mailbox (optional folder, n). "
                 "read: read emails by ID list (email_id=[id1, id2, ...]). "
                 "You are encouraged to read multiple relevant or even all unread emails and think before acting. "
@@ -82,6 +82,11 @@ SCHEMA = {
             "type": "string",
             "description": "Free-text note about the contact (for add_contact, edit_contact)",
         },
+        "attachments": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List of file paths to attach (absolute or relative to working dir). For images and documents.",
+        },
     },
     "required": ["action"],
 }
@@ -89,7 +94,7 @@ SCHEMA = {
 DESCRIPTION = (
     "Gmail client — real email via Gmail IMAP/SMTP with its own mailbox "
     "(working_dir/gmail/). Every response includes account and tcp_alias fields. "
-    "Use 'send' for outgoing email (saved to gmail/sent/). "
+    "Use 'send' for outgoing email (saved to gmail/sent/). Supports file attachments. "
     "'check' to list inbox or sent (optional folder param). "
     "'read' to read by ID. "
     "'reply' to respond to a received email. "
@@ -314,6 +319,15 @@ class GmailManager:
         raw_address = args.get("address", "")
         subject = args.get("subject", "")
         message_text = args.get("message", "")
+        raw_attachments = args.get("attachments", [])
+
+        # Resolve attachment paths (relative → absolute from working dir)
+        attachments = []
+        for p in raw_attachments:
+            path = Path(p)
+            if not path.is_absolute():
+                path = Path(self._agent._working_dir) / p
+            attachments.append(str(path))
 
         if isinstance(raw_address, str):
             to_list = [raw_address] if raw_address else []
@@ -348,6 +362,7 @@ class GmailManager:
             "to": to_list,
             "subject": subject,
             "message": message_text,
+            "attachments": attachments,
         }
 
         delivered = []
@@ -436,6 +451,7 @@ class GmailManager:
                 "message": data.get("message", ""),
                 "time": data.get("received_at") or data.get("sent_at") or data.get("time") or "",
                 "folder": data.get("_folder", ""),
+                "attachments": data.get("attachments", []),
             })
 
         result = {"status": "ok", "emails": results}

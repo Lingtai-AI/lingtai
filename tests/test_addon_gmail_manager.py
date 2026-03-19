@@ -120,6 +120,87 @@ def test_duplicate_send_blocked(tmp_path):
     assert r3["status"] == "blocked"
 
 
+def test_send_with_attachments(tmp_path):
+    """Manager should pass attachments to the gmail service."""
+    agent = MagicMock()
+    agent._working_dir = tmp_path
+    svc = MagicMock()
+    svc.address = "agent@gmail.com"
+    svc.send.return_value = None
+    mgr = GmailManager(agent, gmail_service=svc, tcp_alias="127.0.0.1:8399")
+
+    # Create a test file
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG")
+
+    result = mgr.handle({
+        "action": "send",
+        "address": "user@gmail.com",
+        "subject": "photo",
+        "message": "see attached",
+        "attachments": [str(img)],
+    })
+
+    assert result["status"] == "delivered"
+    call_payload = svc.send.call_args[0][1]
+    assert call_payload["attachments"] == [str(img)]
+
+
+def test_send_with_relative_attachment(tmp_path):
+    """Attachments with relative paths should resolve from working dir."""
+    agent = MagicMock()
+    agent._working_dir = tmp_path
+    svc = MagicMock()
+    svc.address = "agent@gmail.com"
+    svc.send.return_value = None
+    mgr = GmailManager(agent, gmail_service=svc, tcp_alias="127.0.0.1:8399")
+
+    # Create a test file inside working dir
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG")
+
+    result = mgr.handle({
+        "action": "send",
+        "address": "user@gmail.com",
+        "subject": "photo",
+        "message": "see attached",
+        "attachments": ["photo.png"],
+    })
+
+    assert result["status"] == "delivered"
+    call_payload = svc.send.call_args[0][1]
+    # Should be resolved to absolute path
+    assert call_payload["attachments"] == [str(img)]
+
+
+def test_read_includes_attachment_metadata(tmp_path):
+    """Reading an email with attachments should include attachment info."""
+    agent = MagicMock()
+    agent._working_dir = tmp_path
+    svc = MagicMock()
+    svc.address = "agent@gmail.com"
+    mgr = GmailManager(agent, gmail_service=svc, tcp_alias="127.0.0.1:8399")
+
+    eid = "email-with-attachment"
+    msg_dir = tmp_path / "gmail" / "inbox" / eid
+    msg_dir.mkdir(parents=True)
+    att_dir = msg_dir / "attachments"
+    att_dir.mkdir()
+    (att_dir / "photo.png").write_bytes(b"\x89PNG")
+    (msg_dir / "message.json").write_text(json.dumps({
+        "from": "user@gmail.com", "to": ["agent@gmail.com"],
+        "subject": "photo", "message": "see attached",
+        "_mailbox_id": eid, "received_at": "2026-03-19T12:00:00Z",
+        "attachments": [{"filename": "photo.png", "path": str(att_dir / "photo.png"), "size": 4, "content_type": "image/png"}],
+    }))
+
+    result = mgr.handle({"action": "read", "email_id": [eid]})
+    assert result["status"] == "ok"
+    email = result["emails"][0]
+    assert len(email["attachments"]) == 1
+    assert email["attachments"][0]["filename"] == "photo.png"
+
+
 def test_start_stop_lifecycle(tmp_path):
     agent = MagicMock()
     agent._working_dir = tmp_path
