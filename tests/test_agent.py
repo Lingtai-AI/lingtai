@@ -597,3 +597,34 @@ def test_connect_mcp_is_on_agent_not_base(tmp_path):
     assert hasattr(Agent, 'connect_mcp')
     # Verify it's not inherited from BaseAgent
     assert 'connect_mcp' not in BaseAgent.__dict__
+
+
+# ---------------------------------------------------------------------------
+# AgentConfig kernel cleanliness
+# ---------------------------------------------------------------------------
+
+def test_agent_config_has_no_bash_policy_file():
+    """AgentConfig should not have capability-specific fields."""
+    from stoai.config import AgentConfig
+    assert 'bash_policy_file' not in AgentConfig.__dataclass_fields__
+
+
+# ---------------------------------------------------------------------------
+# BaseAgent kernel import cleanliness
+# ---------------------------------------------------------------------------
+
+def test_base_agent_has_no_non_kernel_imports():
+    """BaseAgent module should not import from non-kernel modules."""
+    import ast
+    from pathlib import Path
+    source = Path("src/stoai/base_agent.py").read_text()
+    tree = ast.parse(source)
+
+    non_kernel = {"services.file_io", "services.mcp", "services.vision", "services.search",
+                  "capabilities", "addons", "agent"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                for nk in non_kernel:
+                    assert nk not in node.module, f"base_agent.py imports from non-kernel: {node.module}"

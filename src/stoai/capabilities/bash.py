@@ -211,8 +211,8 @@ def setup(
     Returns:
         The BashManager instance for programmatic access.
     """
-    # Resolve policy: explicit arg > config > error
-    resolved_policy_file = policy_file or getattr(agent._config, "bash_policy_file", None)
+    # Resolve policy: explicit arg or default
+    resolved_policy_file = policy_file
 
     if yolo:
         policy = BashPolicy.yolo()

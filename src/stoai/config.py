@@ -19,4 +19,3 @@ class AgentConfig:
     retry_timeout: float = 30.0
     thinking_budget: int | None = None
     data_dir: str | None = None  # for cache files (e.g., model context windows)
-    bash_policy_file: str | None = None  # path to bash policy JSON
