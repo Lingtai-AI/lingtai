@@ -5,7 +5,7 @@ import threading
 from unittest.mock import MagicMock
 
 from stoai.agent import Agent
-from stoai.base_agent import BaseAgent
+from stoai_kernel.base_agent import BaseAgent
 
 
 def make_mock_service():
@@ -324,8 +324,8 @@ def test_admin_dict_stored(tmp_path):
 
 def test_sequential_execution_stops_on_cancel(tmp_path):
     """Sequential tool execution should return empty when cancel event is set."""
-    from stoai.loop_guard import LoopGuard
-    from stoai.tool_executor import ToolExecutor
+    from stoai_kernel.loop_guard import LoopGuard
+    from stoai_kernel.tool_executor import ToolExecutor
     from stoai.llm import ToolCall
 
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)

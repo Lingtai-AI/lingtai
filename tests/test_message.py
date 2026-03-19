@@ -1,4 +1,4 @@
-from stoai.message import Message, _make_message, MSG_REQUEST, MSG_USER_INPUT
+from stoai_kernel.message import Message, _make_message, MSG_REQUEST, MSG_USER_INPUT
 
 
 def test_msg_constants():

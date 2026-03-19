@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stoai.llm.base import ToolCall
-from stoai.loop_guard import LoopGuard
-from stoai.tool_executor import ToolExecutor
-from stoai.types import UnknownToolError
+from stoai_kernel.llm.base import ToolCall
+from stoai_kernel.loop_guard import LoopGuard
+from stoai_kernel.tool_executor import ToolExecutor
+from stoai_kernel.types import UnknownToolError
 
 
 def make_executor(dispatch_fn=None, parallel_safe=None, known_tools=None):

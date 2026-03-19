@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from stoai.agent import Agent
-from stoai.base_agent import BaseAgent
+from stoai_kernel.base_agent import BaseAgent
 
 
 def make_mock_service():
@@ -261,7 +261,7 @@ def test_memory_load_delegates_to_eigen(tmp_path):
 
 def test_molt_delegates_to_eigen(tmp_path):
     """psyche molt calls through to eigen's handler."""
-    from stoai.llm.interface import ChatInterface, TextBlock
+    from stoai_kernel.llm.interface import ChatInterface, TextBlock
 
     svc = make_mock_service()
 

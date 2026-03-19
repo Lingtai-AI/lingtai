@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stoai.intrinsics import ALL_INTRINSICS
-from stoai.base_agent import BaseAgent
+from stoai_kernel.intrinsics import ALL_INTRINSICS
+from stoai_kernel.base_agent import BaseAgent
 
 
 def make_mock_service():

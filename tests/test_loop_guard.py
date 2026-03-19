@@ -1,4 +1,4 @@
-from stoai.loop_guard import LoopGuard
+from stoai_kernel.loop_guard import LoopGuard
 
 
 def test_loop_guard_no_loop():

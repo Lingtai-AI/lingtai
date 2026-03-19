@@ -1,6 +1,6 @@
 """Tests for stoai.llm_utils."""
 
-from stoai.llm_utils import (
+from stoai_kernel.llm_utils import (
     track_llm_usage,
     execute_tools_batch,
 )

@@ -387,7 +387,7 @@ def test_email_send_with_attachments(tmp_path):
 
 def test_email_send_multi_to(tmp_path):
     """email send should deliver to multiple addresses."""
-    from stoai.services.mail import TCPMailService
+    from stoai_kernel.services.mail import TCPMailService
 
     received = {0: [], 1: []}
     events = [threading.Event(), threading.Event()]
@@ -417,7 +417,7 @@ def test_email_send_multi_to(tmp_path):
 
 def test_email_send_cc_visible(tmp_path):
     """CC addresses should receive the email with cc field visible."""
-    from stoai.services.mail import TCPMailService
+    from stoai_kernel.services.mail import TCPMailService
 
     received = {0: [], 1: []}
     events = [threading.Event(), threading.Event()]
@@ -448,7 +448,7 @@ def test_email_send_cc_visible(tmp_path):
 
 def test_email_send_bcc_hidden(tmp_path):
     """BCC addresses should receive the email but bcc field should NOT be in payload."""
-    from stoai.services.mail import TCPMailService
+    from stoai_kernel.services.mail import TCPMailService
 
     received = {0: [], 1: []}
     events = [threading.Event(), threading.Event()]

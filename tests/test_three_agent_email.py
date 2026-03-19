@@ -21,8 +21,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from stoai.agent import Agent
-from stoai.config import AgentConfig
-from stoai.services.mail import TCPMailService
+from stoai_kernel.config import AgentConfig
+from stoai_kernel.services.mail import TCPMailService
 
 
 def _make_mock_service():

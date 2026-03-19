@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from stoai.services.mail import TCPMailService
+from stoai_kernel.services.mail import TCPMailService
 
 
 class TestTCPMailService:

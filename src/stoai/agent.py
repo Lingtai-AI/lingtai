@@ -116,7 +116,7 @@ class Agent(BaseAgent):
         if not isinstance(servers, dict):
             return
 
-        from .logging import get_logger
+        from stoai_kernel.logging import get_logger
         logger = get_logger()
 
         for name, cfg in servers.items():

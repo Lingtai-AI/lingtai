@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from stoai.llm.interface import (
+from stoai_kernel.llm.interface import (
     ChatInterface,
     TextBlock,
     ToolCallBlock,
     ToolResultBlock,
 )
-from stoai.llm.base import ChatSession, FunctionSchema
-from stoai.llm.service import LLMService, get_context_limit
+from stoai_kernel.llm.base import ChatSession, FunctionSchema
+from stoai_kernel.llm.service import LLMService, get_context_limit
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +449,7 @@ def test_compaction_warning_injected_at_80_percent(tmp_path):
         agent._session.send = capture_send
 
         # Use _handle_request directly with a mock message
-        from stoai.message import _make_message, MSG_REQUEST
+        from stoai_kernel.message import _make_message, MSG_REQUEST
         msg = _make_message(MSG_REQUEST, sender="test", content="do something")
         agent._handle_request(msg)
 
@@ -464,7 +464,7 @@ def test_compaction_warning_injected_at_80_percent(tmp_path):
 def test_compaction_resets_warning_counter(tmp_path):
     """After successful compact, warning counter should reset to 0."""
     from stoai.agent import Agent
-    from stoai.llm.interface import ChatInterface
+    from stoai_kernel.llm.interface import ChatInterface
 
     svc = MagicMock()
     svc.get_adapter.return_value = MagicMock()

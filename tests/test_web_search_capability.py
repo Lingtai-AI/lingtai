@@ -26,7 +26,7 @@ def test_web_search_added_by_capability(tmp_path):
 
 def test_web_search_calls_adapter_directly():
     """WebSearchManager should call adapter.web_search() directly."""
-    from stoai.llm.base import LLMResponse
+    from stoai_kernel.llm.base import LLMResponse
 
     svc = MagicMock()
     adapter = MagicMock()

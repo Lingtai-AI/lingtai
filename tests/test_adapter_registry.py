@@ -1,8 +1,8 @@
 """Tests for LLMService adapter registry."""
 from __future__ import annotations
 from unittest.mock import MagicMock
-from stoai.llm.service import LLMService
-from stoai.llm.base import LLMAdapter
+from stoai_kernel.llm.service import LLMService
+from stoai_kernel.llm.base import LLMAdapter
 
 
 def _make_stub_adapter(**kwargs):

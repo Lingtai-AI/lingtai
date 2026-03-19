@@ -1,4 +1,4 @@
-from stoai.state import AgentState
+from stoai_kernel.state import AgentState
 
 
 def test_agent_state_values():

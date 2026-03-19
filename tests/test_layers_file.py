@@ -119,7 +119,7 @@ def test_grep_via_capability(tmp_path):
 
 def test_base_agent_has_no_file_intrinsics(tmp_path):
     """BaseAgent should NOT have file intrinsics after phase 2."""
-    from stoai.base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     for name in ("read", "write", "edit", "glob", "grep"):
         assert name not in agent._intrinsics, f"{name} should not be in BaseAgent intrinsics"
@@ -128,7 +128,7 @@ def test_base_agent_has_no_file_intrinsics(tmp_path):
 
 def test_base_agent_kernel_only(tmp_path):
     """BaseAgent should have exactly 3 intrinsics: mail, system, eigen."""
-    from stoai.base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     assert set(agent._intrinsics.keys()) == {"mail", "system", "eigen"}
     agent.stop(timeout=1.0)

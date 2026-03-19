@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from stoai.workdir import WorkingDir
+from stoai_kernel.workdir import WorkingDir
 
 
 def test_init_creates_agent_dir(tmp_path):

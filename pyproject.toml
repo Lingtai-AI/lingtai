@@ -7,7 +7,7 @@ name = "stoai"
 version = "0.1.0"
 description = "Generic research agent with intrinsic tools and MCP-compatible extension interface"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["stoai-kernel"]
 
 [project.optional-dependencies]
 gemini = ["google-genai>=1.0"]
