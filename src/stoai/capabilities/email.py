@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..intrinsics.mail import (
-    _list_inbox, _load_message, _read_ids, _mark_read,
+    _list_inbox, _load_message, _read_ids, _mark_read, _save_read_ids,
     _message_summary, _mailbox_dir,
 )
 
@@ -35,6 +36,7 @@ SCHEMA = {
             "type": "string",
             "enum": [
                 "send", "check", "read", "reply", "reply_all", "search",
+                "archive", "delete",
                 "contacts", "add_contact", "remove_contact", "edit_contact",
             ],
             "description": (
@@ -45,6 +47,8 @@ SCHEMA = {
                 "reply: reply to email (requires email_id, message). "
                 "reply_all: reply to all recipients (requires email_id, message). "
                 "search: regex search mailbox (requires query, optional folder). "
+                "archive: move email(s) from inbox to archive (requires email_id). "
+                "delete: remove email(s) from inbox or archive (requires email_id, optional folder). "
                 "contacts: list all contacts. "
                 "add_contact: add/update contact (requires address, name; optional note). "
                 "remove_contact: remove contact (requires address). "
@@ -91,8 +95,8 @@ SCHEMA = {
         },
         "folder": {
             "type": "string",
-            "enum": ["inbox", "sent"],
-            "description": "Folder for check/search. Default: inbox for check, both for search.",
+            "enum": ["inbox", "sent", "archive"],
+            "description": "Folder for check/search/read/delete. Default: inbox for check, both for search.",
         },
         "type": {
             "type": "string",
@@ -121,13 +125,15 @@ SCHEMA = {
 }
 
 DESCRIPTION = (
-    "Full email client — filesystem-based mailbox with inbox/sent folders, "
+    "Full email client — filesystem-based mailbox with inbox/sent/archive folders, "
     "reply, reply-all, CC/BCC, attachments, regex search, and contacts. "
-    "Use 'send' for outgoing email (saved to sent/). "
-    "'check' to list inbox or sent (optional folder param). "
+    "Use 'send' for outgoing email (optional delay for scheduled delivery). "
+    "'check' to list inbox, sent, or archive (optional folder param). "
     "'read' to read by ID. "
     "'reply'/'reply_all' to respond. "
     "'search' to find emails by regex (searches from, subject, message). "
+    "'archive' to move emails from inbox to archive. "
+    "'delete' to remove emails from inbox or archive. "
     "'contacts' to list saved contacts. "
     "'add_contact' to register a peer (address, name, optional note). "
     "'remove_contact' to delete a contact by address. "
@@ -175,6 +181,16 @@ class EmailManager:
             data["_folder"] = "sent"
             data.setdefault("_mailbox_id", email_id)
             return data
+        # Archive
+        path = self._mailbox_path / "archive" / email_id / "message.json"
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+            data["_folder"] = "archive"
+            data.setdefault("_mailbox_id", email_id)
+            return data
         return None
 
     def _list_emails(self, folder: str) -> list[dict]:
@@ -218,6 +234,12 @@ class EmailManager:
             if e.get("cc"):
                 summary["cc"] = e["cc"]
             return summary
+        if e.get("_folder") == "archive":
+            summary = _message_summary(e, read_set)
+            summary["folder"] = "archive"
+            if e.get("cc"):
+                summary["cc"] = e["cc"]
+            return summary
         # Sent — own summary logic
         eid = e.get("_mailbox_id", "")
         entry = {
@@ -251,6 +273,10 @@ class EmailManager:
             return self._reply_all(args)
         elif action == "search":
             return self._search(args)
+        elif action == "archive":
+            return self._archive(args)
+        elif action == "delete":
+            return self._delete(args)
         elif action == "contacts":
             return self._contacts()
         elif action == "add_contact":
@@ -410,13 +436,29 @@ class EmailManager:
         if not ids:
             return {"error": "email_id is required"}
 
+        folder = args.get("folder")
+
         results = []
         errors = []
         for eid in ids:
-            data = self._load_email(eid)
-            if data is None:
-                errors.append(eid)
-                continue
+            if folder:
+                path = self._mailbox_path / folder / eid / "message.json"
+                if path.is_file():
+                    try:
+                        data = json.loads(path.read_text())
+                        data["_folder"] = folder
+                        data.setdefault("_mailbox_id", eid)
+                    except (json.JSONDecodeError, OSError):
+                        errors.append(eid)
+                        continue
+                else:
+                    errors.append(eid)
+                    continue
+            else:
+                data = self._load_email(eid)
+                if data is None:
+                    errors.append(eid)
+                    continue
             if data.get("_folder") == "inbox":
                 _mark_read(self._agent, eid)
             entry = {
@@ -553,6 +595,81 @@ class EmailManager:
                     matches.append(self._email_summary(email, read_set))
 
         return {"status": "ok", "total": len(matches), "emails": matches}
+
+    # ------------------------------------------------------------------
+    # Archive
+    # ------------------------------------------------------------------
+
+    def _archive(self, args: dict) -> dict:
+        """Move email(s) from inbox to archive."""
+        ids = args.get("email_id", [])
+        if isinstance(ids, str):
+            ids = [ids]
+        if not ids:
+            return {"error": "email_id is required"}
+
+        archived = []
+        not_found = []
+        archive_dir = self._mailbox_path / "archive"
+        inbox_dir = self._mailbox_path / "inbox"
+
+        for eid in ids:
+            src = inbox_dir / eid
+            if not src.is_dir():
+                not_found.append(eid)
+                continue
+            dst = archive_dir / eid
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            archived.append(eid)
+
+        if archived:
+            read_set = _read_ids(self._agent)
+            read_set -= set(archived)
+            _save_read_ids(self._agent, read_set)
+
+        result: dict = {"status": "ok", "archived": archived}
+        if not_found:
+            result["not_found"] = not_found
+        return result
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    def _delete(self, args: dict) -> dict:
+        """Remove email(s) from inbox or archive."""
+        ids = args.get("email_id", [])
+        if isinstance(ids, str):
+            ids = [ids]
+        if not ids:
+            return {"error": "email_id is required"}
+
+        folder = args.get("folder", "inbox")
+        if folder not in ("inbox", "archive"):
+            return {"error": f"Cannot delete from folder: {folder}"}
+
+        folder_dir = self._mailbox_path / folder
+        deleted = []
+        not_found = []
+
+        for eid in ids:
+            target = folder_dir / eid
+            if target.is_dir():
+                shutil.rmtree(target)
+                deleted.append(eid)
+            else:
+                not_found.append(eid)
+
+        if deleted:
+            read_set = _read_ids(self._agent)
+            read_set -= set(deleted)
+            _save_read_ids(self._agent, read_set)
+
+        result: dict = {"status": "ok", "deleted": deleted}
+        if not_found:
+            result["not_found"] = not_found
+        return result
 
     # ------------------------------------------------------------------
     # Contacts

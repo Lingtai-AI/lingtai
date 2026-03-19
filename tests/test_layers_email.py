@@ -654,6 +654,113 @@ def test_email_private_mode_off_allows_anyone(tmp_path):
     assert result["status"] == "delivered"
 
 
+# ---------------------------------------------------------------------------
+# Archive
+# ---------------------------------------------------------------------------
+
+def test_email_archive_moves_to_archive(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="keep this")
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"action": "archive", "email_id": [email_id]})
+    assert result["status"] == "ok"
+    assert email_id in result["archived"]
+    inbox = agent.working_dir / "mailbox" / "inbox" / email_id
+    assert not inbox.exists()
+    archive = agent.working_dir / "mailbox" / "archive" / email_id
+    assert archive.is_dir()
+    msg = json.loads((archive / "message.json").read_text())
+    assert msg["subject"] == "keep this"
+
+
+def test_email_archive_not_found(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"action": "archive", "email_id": ["nonexistent"]})
+    assert result["not_found"] == ["nonexistent"]
+
+
+def test_email_check_archive_folder(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="archived msg")
+    mgr = agent.get_capability("email")
+    mgr.handle({"action": "archive", "email_id": [email_id]})
+    result = mgr.handle({"action": "check", "folder": "archive"})
+    assert result["total"] == 1
+    assert result["emails"][0]["id"] == email_id
+
+
+def test_email_read_archive_folder(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="archived")
+    mgr = agent.get_capability("email")
+    mgr.handle({"action": "archive", "email_id": [email_id]})
+    result = mgr.handle({"action": "read", "email_id": [email_id], "folder": "archive"})
+    assert len(result["emails"]) == 1
+    assert result["emails"][0]["subject"] == "archived"
+
+
+def test_email_search_archive_folder(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="unique archived topic")
+    mgr = agent.get_capability("email")
+    mgr.handle({"action": "archive", "email_id": [email_id]})
+    result = mgr.handle({"action": "search", "query": "unique archived", "folder": "archive"})
+    assert result["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+def test_email_delete_from_inbox(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="delete me")
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"action": "delete", "email_id": [email_id]})
+    assert email_id in result["deleted"]
+    inbox = agent.working_dir / "mailbox" / "inbox" / email_id
+    assert not inbox.exists()
+
+
+def test_email_delete_from_archive(tmp_path):
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="archive then delete")
+    mgr = agent.get_capability("email")
+    mgr.handle({"action": "archive", "email_id": [email_id]})
+    result = mgr.handle({"action": "delete", "email_id": [email_id], "folder": "archive"})
+    assert email_id in result["deleted"]
+    archive = agent.working_dir / "mailbox" / "archive" / email_id
+    assert not archive.exists()
+
+
+def test_email_delete_from_sent_rejected(tmp_path):
+    """Cannot delete from sent folder."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"action": "delete", "email_id": ["x"], "folder": "sent"})
+    assert "error" in result
+
+
+def test_email_archive_already_archived(tmp_path):
+    """Archiving a message that's already in archive returns not_found."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    email_id = _make_inbox_email(agent.working_dir, subject="move me")
+    mgr = agent.get_capability("email")
+    mgr.handle({"action": "archive", "email_id": [email_id]})
+    result = mgr.handle({"action": "archive", "email_id": [email_id]})
+    assert result["not_found"] == [email_id]
+
+
 def test_email_private_mode_receive_unrestricted(tmp_path):
     """Private mode should not block receiving emails."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
