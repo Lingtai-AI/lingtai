@@ -201,6 +201,12 @@ class BaseAgent:
 
         self._mail_arrived = threading.Event()  # set when normal mail arrives; clock wait uses this
 
+        # Mailbox identity — capabilities override these to change notification text.
+        # _mailbox_name: human label ("mail box", "email box", "gmail box")
+        # _mailbox_tool: tool name for check/read instructions ("mail", "email", "gmail")
+        self._mailbox_name = "mail box"
+        self._mailbox_tool = "mail"
+
         # MCP tool handlers
         self._mcp_handlers: dict[str, Callable[[dict], dict]] = {}
         self._mcp_schemas: list[FunctionSchema] = []
@@ -483,29 +489,29 @@ class BaseAgent:
         """Handle a normal mail — notify agent via inbox.
 
         The message is already persisted to mailbox/inbox/ by MailService.
-        This method only signals arrival and sends a notification.
-        Capabilities (e.g. email) may replace this method.
+        This method signals arrival and sends a uniform push notification.
+        Capabilities configure ``_mailbox_name`` and ``_mailbox_tool``
+        to change the notification text (e.g. "email box" / "email").
         """
         from uuid import uuid4
 
         email_id = payload.get("_mailbox_id") or str(uuid4())
         sender = payload.get("from", "unknown")
-        subject = payload.get("subject", "")
+        subject = payload.get("subject", "(no subject)")
         message = payload.get("message", "")
 
         self._mail_arrived.set()
 
-        preview = message[:200].replace("\n", " ")
+        preview = message[:100].replace("\n", " ")
         notification = (
-            f'[Mail from {sender}]\n'
-            f'  Subject: {subject}\n'
-            f'  Preview: {preview}...\n'
-            f'  ID: {email_id}\n'
-            f'Use mail(action="read", id=["{email_id}"]) to read full message.'
+            f'[system] 1 new message in {self._mailbox_name}.\n'
+            f'  From: {sender} — {subject}\n'
+            f'  {preview}...\n'
+            f'Use {self._mailbox_tool}(action="check") to see your inbox.'
         )
 
         self._log("mail_received", sender=sender, subject=subject, message=message)
-        msg = _make_message(MSG_REQUEST, sender, notification)
+        msg = _make_message(MSG_REQUEST, "system", notification)
         msg._mail_notification = {
             "email_id": email_id,
             "sender": sender,

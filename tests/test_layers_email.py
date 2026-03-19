@@ -67,11 +67,10 @@ def test_email_capability_registers_tool(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_receive_notification(tmp_path):
-    """on_normal_mail should send notification to agent inbox."""
+    """Incoming mail should send notification to agent inbox."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
-    mgr = agent.get_capability("email")
-    mgr.on_normal_mail({
+    agent._on_mail_received({
         "_mailbox_id": "abc123",
         "from": "sender",
         "to": ["test"],
@@ -80,16 +79,16 @@ def test_email_receive_notification(tmp_path):
     })
     assert not agent.inbox.empty()
     notification = agent.inbox.get_nowait()
-    assert "hi" in notification.content
-    assert "abc123" in notification.content
+    assert notification.sender == "system"
+    assert "email box" in notification.content
+    assert 'email(action=' in notification.content
 
 
 def test_email_receive_fallback_id(tmp_path):
-    """on_normal_mail should generate ID if _mailbox_id is absent."""
+    """Notification should work even without _mailbox_id."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
-    mgr = agent.get_capability("email")
-    mgr.on_normal_mail({"from": "sender", "message": "body"})
+    agent._on_mail_received({"from": "sender", "message": "body"})
     assert not agent.inbox.empty()
 
 
@@ -659,8 +658,7 @@ def test_email_private_mode_receive_unrestricted(tmp_path):
     """Private mode should not block receiving emails."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities={"email": {"private_mode": True}})
-    mgr = agent.get_capability("email")
-    mgr.on_normal_mail({
+    agent._on_mail_received({
         "_mailbox_id": "abc",
         "from": "stranger",
         "to": ["me"],

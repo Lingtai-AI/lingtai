@@ -640,56 +640,12 @@ class EmailManager:
                 return {"status": "updated", "contact": c}
         return {"error": f"Contact not found: {address}"}
 
-    # ------------------------------------------------------------------
-    # Receive interception
-    # ------------------------------------------------------------------
-
-    def on_normal_mail(self, payload: dict) -> None:
-        """Handle normal mail — save to mailbox and notify agent.
-
-        Replaces BaseAgent._on_normal_mail when the email capability is active.
-        Silence-type and kill-type emails never reach this method — they are
-        handled by BaseAgent._on_mail_received before delegation.
-        """
-        # Use _mailbox_id from mail service, or fall back to generating one
-        email_id = payload.get("_mailbox_id") or str(uuid4())
-
-        sender = payload.get("from", "unknown")
-        to = payload.get("to") or []
-        if isinstance(to, str):
-            to = [to]
-        cc = payload.get("cc") or []
-        subject = payload.get("subject", "(no subject)")
-        message = payload.get("message", "")
-
-        # Send notification to agent inbox (not the full content)
-        preview = message[:200].replace("\n", " ")
-        notification = (
-            f'[New email from {sender}]\n'
-            f'  Subject: {subject}\n'
-            f'  Preview: {preview}...\n'
-            f'  ID: {email_id}\n'
-            f'Use email(action="read", email_id="{email_id}") to read full message. '
-            f'Use email(action="reply", email_id="{email_id}", message="...") to reply.'
-        )
-
-        from ..message import _make_message, MSG_REQUEST
-        self._agent._log("email_received", sender=sender, to=to, cc=cc, subject=subject, message=message)
-        msg = _make_message(MSG_REQUEST, sender, notification)
-        msg._mail_notification = {
-            "email_id": email_id,
-            "sender": sender,
-            "subject": subject,
-            "preview": preview,
-        }
-        self._agent.inbox.put(msg)
-
-
 def setup(agent: "BaseAgent", *, private_mode: bool = False) -> EmailManager:
     """Set up email capability — filesystem-based mailbox."""
     mgr = EmailManager(agent, private_mode=private_mode)
     agent.override_intrinsic("mail")  # remove mail tool; email reimplements fully
-    agent._on_normal_mail = mgr.on_normal_mail
+    agent._mailbox_name = "email box"
+    agent._mailbox_tool = "email"
     agent.add_tool(
         "email", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
         system_prompt="Send, receive, reply, and search email.",

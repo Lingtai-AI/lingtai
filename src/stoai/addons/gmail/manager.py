@@ -197,21 +197,21 @@ class GmailManager:
         subject = payload.get("subject", "(no subject)")
         message = payload.get("message", "")
 
-        preview = message[:200].replace("\n", " ")
+        self._agent._mail_arrived.set()
+
+        preview = message[:100].replace("\n", " ")
         notification = (
-            f'[New Gmail from {sender}]\n'
-            f'  Subject: {subject}\n'
-            f'  Preview: {preview}...\n'
-            f'  ID: {email_id}\n'
-            f'Use gmail(action="read", email_id="{email_id}") to read full message. '
-            f'Use gmail(action="reply", email_id="{email_id}", message="...") to reply.'
+            f'[system] 1 new message in gmail box.\n'
+            f'  From: {sender} — {subject}\n'
+            f'  {preview}...\n'
+            f'Use gmail(action="check") to see your inbox.'
         )
 
         from ...message import _make_message, MSG_REQUEST
         self._agent._log(
             "gmail_received", sender=sender, subject=subject, message=message,
         )
-        msg = _make_message(MSG_REQUEST, sender, notification)
+        msg = _make_message(MSG_REQUEST, "system", notification)
         msg._mail_notification = {
             "email_id": email_id,
             "sender": sender,

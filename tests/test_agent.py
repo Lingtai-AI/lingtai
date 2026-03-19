@@ -171,10 +171,9 @@ def test_mail_inbox_wiring(tmp_path):
     })
     assert not agent.inbox.empty()
     msg = agent.inbox.get_nowait()
-    assert "inbox test" in msg.content
-    assert msg.sender == "127.0.0.1:9999"
-    assert msg._mail_notification is not None
-    assert msg._mail_notification["email_id"] == "test-id-123"
+    assert msg.sender == "system"
+    assert "mail box" in msg.content
+    assert 'mail(action=' in msg.content
 
 
 def test_mail_start_wires_listener(tmp_path):
@@ -237,7 +236,7 @@ def test_mail_read_no_ids_returns_error(tmp_path):
 
 
 def test_mail_received_full_content_in_notification(tmp_path):
-    """_on_mail_received should put full message content in inbox notification."""
+    """_on_mail_received should include preview and subject in notification."""
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     agent._on_mail_received({
         "from": "sender",
@@ -247,6 +246,8 @@ def test_mail_received_full_content_in_notification(tmp_path):
     msg = agent.inbox.get_nowait()
     assert "full body content here" in msg.content
     assert "test subject" in msg.content
+    assert msg.sender == "system"
+    assert "mail box" in msg.content
 
 
 # ---------------------------------------------------------------------------
