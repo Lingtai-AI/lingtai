@@ -154,8 +154,9 @@ def test_email_read_by_id(tmp_path):
     eid = _make_inbox_email(agent.working_dir, sender="sender", subject="topic", message="full body")
     result = mgr.handle({"action": "read", "email_id": eid})
     assert result["status"] == "ok"
-    assert result["message"] == "full body"
-    assert result["subject"] == "topic"
+    assert len(result["emails"]) == 1
+    assert result["emails"][0]["message"] == "full body"
+    assert result["emails"][0]["subject"] == "topic"
 
 
 def test_email_read_marks_as_read(tmp_path):
@@ -181,8 +182,8 @@ def test_email_read_shows_attachments(tmp_path):
                             attachments=["/path/to/photo.png"])
     result = mgr.handle({"action": "read", "email_id": eid})
     assert result["status"] == "ok"
-    assert "attachments" in result
-    assert any("photo.png" in p for p in result["attachments"])
+    assert "attachments" in result["emails"][0]
+    assert any("photo.png" in p for p in result["emails"][0]["attachments"])
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +559,8 @@ def test_email_read_not_found(tmp_path):
                        capabilities=["email"])
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "read", "email_id": "nonexistent"})
-    assert "error" in result
+    assert result["status"] == "ok"
+    assert result["not_found"] == ["nonexistent"]
 
 
 def test_email_removes_mail_intrinsic(tmp_path):

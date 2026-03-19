@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ..intrinsics.mail import (
+    _list_inbox, _load_message, _read_ids, _mark_read,
+    _message_summary, _mailbox_dir,
+)
+
 if TYPE_CHECKING:
     from ..base_agent import BaseAgent
 
@@ -145,30 +150,44 @@ class EmailManager:
         self._dup_free_passes = 2  # allow this many identical sends
 
     @property
-    def _mailbox_dir(self) -> Path:
-        return self._agent._working_dir / "mailbox"
+    def _mailbox_path(self) -> Path:
+        return _mailbox_dir(self._agent)
 
     # ------------------------------------------------------------------
     # Filesystem helpers
     # ------------------------------------------------------------------
 
     def _load_email(self, email_id: str) -> dict | None:
-        """Load a single email by ID. Checks inbox/ then sent/."""
-        for folder in ("inbox", "sent"):
-            path = self._mailbox_dir / folder / email_id / "message.json"
-            if path.is_file():
-                try:
-                    data = json.loads(path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    continue
-                data["_folder"] = folder
-                data.setdefault("_mailbox_id", email_id)
-                return data
+        """Load a single email by ID. Checks inbox (via mail intrinsic) then sent/."""
+        # Inbox — delegate to mail intrinsic helper
+        msg = _load_message(self._agent, email_id)
+        if msg is not None:
+            msg["_folder"] = "inbox"
+            msg.setdefault("_mailbox_id", email_id)
+            return msg
+        # Sent — own logic (mail intrinsic only knows inbox)
+        path = self._mailbox_path / "sent" / email_id / "message.json"
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+            data["_folder"] = "sent"
+            data.setdefault("_mailbox_id", email_id)
+            return data
         return None
 
     def _list_emails(self, folder: str) -> list[dict]:
         """Load all emails from a folder, sorted by time (newest first)."""
-        folder_dir = self._mailbox_dir / folder
+        if folder == "inbox":
+            # Delegate to mail intrinsic helper
+            messages = _list_inbox(self._agent)
+            for m in messages:
+                m["_folder"] = "inbox"
+                m.setdefault("_mailbox_id", m.get("_mailbox_id", ""))
+            return messages
+        # Sent — own logic
+        folder_dir = self._mailbox_path / folder
         if not folder_dir.is_dir():
             return []
         emails = []
@@ -182,47 +201,25 @@ class EmailManager:
                     emails.append(data)
                 except (json.JSONDecodeError, OSError):
                     continue
-        # Sort by timestamp — received_at for inbox, sent_at for sent
         def sort_key(e):
             return e.get("received_at") or e.get("sent_at") or e.get("time") or ""
         emails.sort(key=sort_key, reverse=True)
         return emails
 
-    def _read_ids(self) -> set[str]:
-        """Load the set of read email IDs from read.json."""
-        path = self._mailbox_dir / "read.json"
-        if path.is_file():
-            try:
-                return set(json.loads(path.read_text()))
-            except (json.JSONDecodeError, OSError):
-                return set()
-        return set()
-
-    def _mark_read(self, email_id: str) -> None:
-        """Add email_id to read.json with atomic write."""
-        ids = self._read_ids()
-        ids.add(email_id)
-        self._mailbox_dir.mkdir(parents=True, exist_ok=True)
-        target = self._mailbox_dir / "read.json"
-        fd, tmp = tempfile.mkstemp(dir=str(self._mailbox_dir), suffix=".tmp")
-        try:
-            os.write(fd, json.dumps(sorted(ids)).encode())
-            os.close(fd)
-            os.replace(tmp, str(target))
-        except Exception:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
-
-    def _email_summary(self, e: dict, read_ids: set[str] | None = None) -> dict:
+    def _email_summary(self, e: dict, read_set: set[str] | None = None) -> dict:
         """Build a summary dict from a raw email dict."""
+        if read_set is None:
+            read_set = _read_ids(self._agent)
+        if e.get("_folder") == "inbox":
+            # Delegate to mail intrinsic helper for base fields
+            summary = _message_summary(e, read_set)
+            # Add email-capability extras
+            summary["folder"] = "inbox"
+            if e.get("cc"):
+                summary["cc"] = e["cc"]
+            return summary
+        # Sent — own summary logic
         eid = e.get("_mailbox_id", "")
-        if read_ids is None:
-            read_ids = self._read_ids()
         entry = {
             "id": eid,
             "from": e.get("from", ""),
@@ -232,9 +229,6 @@ class EmailManager:
             "time": e.get("received_at") or e.get("sent_at") or e.get("time") or "",
             "folder": e.get("_folder", ""),
         }
-        # Only track unread for inbox
-        if e.get("_folder") == "inbox":
-            entry["unread"] = eid not in read_ids
         if e.get("cc"):
             entry["cc"] = e["cc"]
         return entry
@@ -357,7 +351,7 @@ class EmailManager:
 
         # Save to sent/ (includes bcc for sender's records)
         sent_id = str(uuid4())
-        sent_dir = self._mailbox_dir / "sent" / sent_id
+        sent_dir = self._mailbox_path / "sent" / sent_id
         sent_dir.mkdir(parents=True, exist_ok=True)
         sent_record = {
             **base_payload,
@@ -401,8 +395,8 @@ class EmailManager:
         emails = self._list_emails(folder)
         total = len(emails)
         recent = emails[:n] if n > 0 else emails
-        read_ids = self._read_ids()
-        summaries = [self._email_summary(e, read_ids) for e in recent]
+        read_set = _read_ids(self._agent)
+        summaries = [self._email_summary(e, read_set) for e in recent]
         return {"status": "ok", "total": total, "showing": len(summaries), "emails": summaries}
 
     # ------------------------------------------------------------------
@@ -424,7 +418,7 @@ class EmailManager:
                 errors.append(eid)
                 continue
             if data.get("_folder") == "inbox":
-                self._mark_read(eid)
+                _mark_read(self._agent, eid)
             entry = {
                 "id": eid,
                 "from": data.get("from", ""),
@@ -547,7 +541,7 @@ class EmailManager:
             return {"error": f"Invalid regex: {e}"}
 
         matches = []
-        read_ids = self._read_ids()
+        read_set = _read_ids(self._agent)
         for f in folders:
             for email in self._list_emails(f):
                 searchable = " ".join([
@@ -556,7 +550,7 @@ class EmailManager:
                     email.get("message", ""),
                 ])
                 if pattern.search(searchable):
-                    matches.append(self._email_summary(email, read_ids))
+                    matches.append(self._email_summary(email, read_set))
 
         return {"status": "ok", "total": len(matches), "emails": matches}
 
@@ -566,7 +560,7 @@ class EmailManager:
 
     @property
     def _contacts_path(self) -> Path:
-        return self._mailbox_dir / "contacts.json"
+        return self._mailbox_path / "contacts.json"
 
     def _load_contacts(self) -> list[dict]:
         """Load contacts list from disk."""
@@ -579,9 +573,9 @@ class EmailManager:
 
     def _save_contacts(self, contacts: list[dict]) -> None:
         """Atomically write contacts list to disk."""
-        self._mailbox_dir.mkdir(parents=True, exist_ok=True)
+        self._mailbox_path.mkdir(parents=True, exist_ok=True)
         target = self._contacts_path
-        fd, tmp = tempfile.mkstemp(dir=str(self._mailbox_dir), suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=str(self._mailbox_path), suffix=".tmp")
         try:
             os.write(fd, json.dumps(contacts, indent=2).encode())
             os.close(fd)
