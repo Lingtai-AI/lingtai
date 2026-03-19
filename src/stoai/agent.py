@@ -9,7 +9,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from pathlib import Path
+
 from stoai_kernel.base_agent import BaseAgent
+from stoai_kernel.prompt import build_system_prompt
+
+_BASE_PROMPTS: dict[str, str] = {}
+
+
+def _load_base_prompt(lang: str = "en") -> str:
+    """Load base_prompt[_lang].md shipped with the package."""
+    if lang not in _BASE_PROMPTS:
+        base = Path(__file__).parent
+        if lang != "en":
+            path = base / f"base_prompt_{lang}.md"
+            if path.is_file():
+                _BASE_PROMPTS[lang] = path.read_text().strip()
+                return _BASE_PROMPTS[lang]
+        _BASE_PROMPTS[lang] = (base / "base_prompt.md").read_text().strip()
+    return _BASE_PROMPTS[lang]
 
 
 class Agent(BaseAgent):
@@ -86,6 +104,28 @@ class Agent(BaseAgent):
         mgr = setup_capability(self, name, **kwargs)
         self._capability_managers[name] = mgr
         return mgr
+
+    def _build_system_prompt(self) -> str:
+        """Override kernel's prompt builder to inject stoai's base prompt."""
+        lang = self._config.language
+        lines = []
+        from stoai_kernel.intrinsics import ALL_INTRINSICS
+        for name in self._intrinsics:
+            info = ALL_INTRINSICS.get(name)
+            if info:
+                lines.append(f"### {name}\n{info['module'].get_description(lang)}")
+        for s in self._mcp_schemas:
+            if s.description:
+                lines.append(f"### {s.name}\n{s.description}")
+        if lines:
+            self._prompt_manager.write_section(
+                "tools", "\n\n".join(lines), protected=True
+            )
+        return build_system_prompt(
+            prompt_manager=self._prompt_manager,
+            base_prompt=_load_base_prompt(lang),
+            language=lang,
+        )
 
     def _load_mcp_from_workdir(self) -> None:
         """Auto-load MCP servers declared in working_dir/mcp/servers.json.
