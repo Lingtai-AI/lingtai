@@ -1,4 +1,4 @@
-"""Mail intrinsic — disk-backed mailbox with 6 actions.
+"""Mail intrinsic — disk-backed mailbox with 5 actions.
 
 Actions:
     send   — fire-and-forget message to an address (self-send short-circuits TCP)
@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA = {
@@ -51,6 +52,10 @@ SCHEMA = {
                 "'kill' hard-stops the target agent (requires admin.kill privilege). "
                 "To revive: re-delegate with the SAME name."
             ),
+        },
+        "delay": {
+            "type": "integer",
+            "description": "Delay in seconds before delivery (default: 0)",
         },
         "id": {
             "type": "array",
@@ -230,18 +235,105 @@ def _persist_to_inbox(agent, payload: dict) -> str:
     return msg_id
 
 
+def _outbox_dir(agent) -> Path:
+    """Return the outbox directory."""
+    return _mailbox_dir(agent) / "outbox"
+
+
+def _sent_dir(agent) -> Path:
+    """Return the sent directory."""
+    return _mailbox_dir(agent) / "sent"
+
+
+def _persist_to_outbox(agent, payload: dict, deliver_at: datetime) -> str:
+    """Write a message to outbox/{uuid}/message.json. Returns the message ID."""
+    msg_id = str(uuid.uuid4())
+    msg_dir = _outbox_dir(agent) / msg_id
+    msg_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = dict(payload)  # shallow copy
+    payload["_mailbox_id"] = msg_id
+    payload["deliver_at"] = deliver_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    (msg_dir / "message.json").write_text(
+        json.dumps(payload, indent=2, default=str)
+    )
+    return msg_id
+
+
+def _move_to_sent(agent, msg_id: str, sent_at: str, status: str) -> None:
+    """Move outbox/{uuid}/ → sent/{uuid}/, enriching with sent_at and status."""
+    src = _outbox_dir(agent) / msg_id
+    dst = _sent_dir(agent) / msg_id
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.is_dir():
+        return
+
+    msg_file = src / "message.json"
+    if msg_file.is_file():
+        try:
+            data = json.loads(msg_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+        data["sent_at"] = sent_at
+        data["status"] = status
+        msg_file.write_text(json.dumps(data, indent=2, default=str))
+
+    shutil.move(str(src), str(dst))
+
+
+def _mailman(agent, msg_id: str, payload: dict, deliver_at: datetime,
+             *, skip_sent: bool = False) -> None:
+    """Daemon thread — one per message. Waits, dispatches, archives to sent."""
+    import time as _time
+
+    wait = (deliver_at - datetime.now(timezone.utc)).total_seconds()
+    if wait > 0:
+        _time.sleep(wait)
+
+    address = payload.get("to", "")
+    if isinstance(address, list):
+        address = address[0] if address else ""
+
+    try:
+        if _is_self_send(agent, address):
+            _persist_to_inbox(agent, payload)
+            agent._mail_arrived.set()
+            status = "delivered"
+        elif agent._mail_service is not None:
+            err = agent._mail_service.send(address, payload)
+            status = "delivered" if err is None else "refused"
+        else:
+            status = "refused"
+    except Exception:
+        status = "refused"
+
+    sent_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if not skip_sent:
+        _move_to_sent(agent, msg_id, sent_at, status)
+    else:
+        outbox_entry = _outbox_dir(agent) / msg_id
+        if outbox_entry.is_dir():
+            shutil.rmtree(outbox_entry)
+
+    agent._log("mail_sent", address=address, subject=payload.get("subject", ""),
+               status=status, message=payload.get("message", ""))
+
+
 # ---------------------------------------------------------------------------
 # Action handlers
 # ---------------------------------------------------------------------------
 
 def _send(agent, args: dict) -> dict:
-    """Send a message — privilege gate, resolve attachments, self-send check."""
+    """Send a message — validate, write to outbox, spawn mailman."""
     address = args.get("address", "")
     subject = args.get("subject", "")
     message_text = args.get("message", "")
     mail_type = args.get("type", "normal")
+    delay = args.get("delay", 0)
 
-    # Privilege gate for non-normal types
     if mail_type != "normal" and not agent._admin.get(mail_type):
         return {"error": f"Not authorized to send type={mail_type!r} mail (requires admin.{mail_type}=True)"}
 
@@ -256,7 +348,6 @@ def _send(agent, args: dict) -> dict:
         "type": mail_type,
     }
 
-    # Resolve attachments
     attachments = args.get("attachments", [])
     if attachments:
         resolved = []
@@ -269,24 +360,18 @@ def _send(agent, args: dict) -> dict:
             resolved.append(str(path))
         payload["attachments"] = resolved
 
-    # Self-send: bypass TCP, persist directly to inbox
-    if _is_self_send(agent, address):
-        msg_id = _persist_to_inbox(agent, payload)
-        agent._mail_arrived.set()
-        agent._log("mail_sent", address=address, subject=subject, status="delivered", message=message_text)
-        return {"status": "delivered", "to": address, "self_send": True}
+    deliver_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    msg_id = _persist_to_outbox(agent, payload, deliver_at)
 
-    # External send via mail service
-    if agent._mail_service is None:
-        return {"error": "mail service not configured"}
+    t = threading.Thread(
+        target=_mailman,
+        args=(agent, msg_id, payload, deliver_at),
+        name=f"mailman-{msg_id[:8]}",
+        daemon=True,
+    )
+    t.start()
 
-    err = agent._mail_service.send(address, payload)
-    status = "delivered" if err is None else "refused"
-    agent._log("mail_sent", address=address, subject=subject, status=status, message=message_text)
-    if err is None:
-        return {"status": "delivered", "to": address}
-    else:
-        return {"status": "refused", "error": err}
+    return {"status": "sent", "to": address, "delay": delay}
 
 
 def _check(agent, args: dict) -> dict:

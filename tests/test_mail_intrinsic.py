@@ -1,7 +1,8 @@
-"""Tests for the mail intrinsic — disk-backed mailbox with 6 actions."""
+"""Tests for the mail intrinsic — disk-backed mailbox with 5 actions."""
 from __future__ import annotations
 
 import json
+import time
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -78,37 +79,15 @@ class TestSend:
             "subject": "hello",
             "message": "world",
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
         assert result["to"] == "127.0.0.1:8888"
-        agent._mail_service.send.assert_called_once()
+        assert result["delay"] == 0
 
     def test_send_no_address(self, tmp_path):
         agent = _make_mock_agent(tmp_path)
         result = handle(agent, {"action": "send", "message": "hello"})
         assert "error" in result
         assert "address" in result["error"]
-
-    def test_send_no_mail_service(self, tmp_path):
-        agent = _make_mock_agent(tmp_path)
-        agent._mail_service = None
-        result = handle(agent, {
-            "action": "send",
-            "address": "127.0.0.1:8888",
-            "message": "hello",
-        })
-        assert "error" in result
-        assert "mail service" in result["error"]
-
-    def test_send_refused(self, tmp_path):
-        agent = _make_mock_agent(tmp_path)
-        agent._mail_service.send.return_value = "connection refused"
-        result = handle(agent, {
-            "action": "send",
-            "address": "127.0.0.1:8888",
-            "message": "hello",
-        })
-        assert result["status"] == "refused"
-        assert "connection refused" in result["error"]
 
     def test_send_privilege_gate(self, tmp_path):
         agent = _make_mock_agent(tmp_path)
@@ -130,7 +109,7 @@ class TestSend:
             "message": "shh",
             "type": "silence",
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
 
     def test_send_with_attachments(self, tmp_path):
         agent = _make_mock_agent(tmp_path)
@@ -144,9 +123,13 @@ class TestSend:
             "message": "see attached",
             "attachments": [str(att)],
         })
-        assert result["status"] == "delivered"
-        sent_payload = agent._mail_service.send.call_args[0][1]
-        assert sent_payload["attachments"] == [str(att)]
+        assert result["status"] == "sent"
+        time.sleep(0.2)
+        sent = agent._working_dir / "mailbox" / "sent"
+        sent_items = list(sent.iterdir())
+        assert len(sent_items) == 1
+        msg = json.loads((sent_items[0] / "message.json").read_text())
+        assert msg["attachments"] == [str(att)]
 
     def test_send_attachment_not_found(self, tmp_path):
         agent = _make_mock_agent(tmp_path)
@@ -173,10 +156,10 @@ class TestSelfSend:
             "subject": "note to self",
             "message": "remember this",
         })
-        assert result["status"] == "delivered"
-        assert result.get("self_send") is True
+        assert result["status"] == "sent"
         # Should NOT have called mail_service.send
         agent._mail_service.send.assert_not_called()
+        time.sleep(0.2)
         # Should have persisted to disk
         inbox = agent._working_dir / "mailbox" / "inbox"
         msg_dirs = list(inbox.iterdir())
@@ -194,6 +177,7 @@ class TestSelfSend:
             "subject": "ping",
             "message": "self",
         })
+        time.sleep(0.2)
         assert agent._mail_arrived.is_set()
 
     def test_self_send_no_mail_service_still_works(self, tmp_path):
@@ -206,8 +190,8 @@ class TestSelfSend:
             "subject": "self note",
             "message": "via agent_id",
         })
-        assert result["status"] == "delivered"
-        assert result.get("self_send") is True
+        assert result["status"] == "sent"
+        time.sleep(0.2)
         inbox = agent._working_dir / "mailbox" / "inbox"
         assert len(list(inbox.iterdir())) == 1
 
@@ -415,3 +399,136 @@ class TestDelete:
         agent = _make_mock_agent(tmp_path)
         result = handle(agent, {"action": "delete"})
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# outbox / mailman tests
+# ---------------------------------------------------------------------------
+
+class TestOutboxAndMailman:
+    def test_send_writes_to_outbox_then_sent(self, tmp_path):
+        """Every send writes to outbox, mailman moves to sent."""
+        agent = _make_mock_agent(tmp_path)
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "subject": "hello",
+            "message": "world",
+        })
+        assert result["status"] == "sent"
+        assert result["delay"] == 0
+        time.sleep(0.2)
+        outbox = agent._working_dir / "mailbox" / "outbox"
+        if outbox.exists():
+            assert len(list(outbox.iterdir())) == 0
+        sent = agent._working_dir / "mailbox" / "sent"
+        assert sent.is_dir()
+        sent_items = list(sent.iterdir())
+        assert len(sent_items) == 1
+        msg = json.loads((sent_items[0] / "message.json").read_text())
+        assert msg["message"] == "world"
+        assert msg["sent_at"]
+        assert msg["status"] == "delivered"
+
+    def test_send_with_delay(self, tmp_path):
+        """Delayed send writes to outbox, mailman waits before dispatch."""
+        agent = _make_mock_agent(tmp_path)
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "subject": "delayed",
+            "message": "later",
+            "delay": 1,
+        })
+        assert result["status"] == "sent"
+        assert result["delay"] == 1
+        agent._mail_service.send.assert_not_called()
+        outbox = agent._working_dir / "mailbox" / "outbox"
+        assert len(list(outbox.iterdir())) == 1
+        time.sleep(1.5)
+        agent._mail_service.send.assert_called_once()
+        assert len(list(outbox.iterdir())) == 0
+        sent = agent._working_dir / "mailbox" / "sent"
+        assert len(list(sent.iterdir())) == 1
+
+    def test_send_returns_delay_zero(self, tmp_path):
+        """Default delay=0 always appears in return."""
+        agent = _make_mock_agent(tmp_path)
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "message": "hi",
+        })
+        assert result["delay"] == 0
+
+    def test_self_send_through_mailman(self, tmp_path):
+        """Self-send goes through outbox → mailman → inbox + sent."""
+        agent = _make_mock_agent(tmp_path)
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:9999",
+            "subject": "note",
+            "message": "remember",
+        })
+        assert result["status"] == "sent"
+        time.sleep(0.2)
+        inbox = agent._working_dir / "mailbox" / "inbox"
+        assert len(list(inbox.iterdir())) == 1
+        assert agent._mail_arrived.is_set()
+        agent._mail_service.send.assert_not_called()
+        sent = agent._working_dir / "mailbox" / "sent"
+        assert len(list(sent.iterdir())) == 1
+
+    def test_send_no_mail_service_external(self, tmp_path):
+        """External send with no mail service — mailman writes refused to sent."""
+        agent = _make_mock_agent(tmp_path)
+        agent._mail_service = None
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "message": "hello",
+        })
+        assert result["status"] == "sent"
+        time.sleep(0.2)
+        sent = agent._working_dir / "mailbox" / "sent"
+        assert sent.is_dir()
+        sent_items = list(sent.iterdir())
+        assert len(sent_items) == 1
+        msg = json.loads((sent_items[0] / "message.json").read_text())
+        assert msg["status"] == "refused"
+
+    def test_send_refused_external(self, tmp_path):
+        """External send refused by mail service — mailman writes refused to sent."""
+        agent = _make_mock_agent(tmp_path)
+        agent._mail_service.send.return_value = "connection refused"
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "message": "hello",
+        })
+        assert result["status"] == "sent"
+        time.sleep(0.2)
+        sent = agent._working_dir / "mailbox" / "sent"
+        sent_items = list(sent.iterdir())
+        msg = json.loads((sent_items[0] / "message.json").read_text())
+        assert msg["status"] == "refused"
+
+    def test_mailman_exception_still_moves_to_sent(self, tmp_path):
+        """If mail_service.send() raises, mailman writes refused to sent."""
+        agent = _make_mock_agent(tmp_path)
+        agent._mail_service.send.side_effect = ConnectionError("boom")
+        result = handle(agent, {
+            "action": "send",
+            "address": "127.0.0.1:8888",
+            "message": "hello",
+        })
+        assert result["status"] == "sent"
+        time.sleep(0.2)
+        outbox = agent._working_dir / "mailbox" / "outbox"
+        if outbox.exists():
+            assert len(list(outbox.iterdir())) == 0
+        sent = agent._working_dir / "mailbox" / "sent"
+        sent_items = list(sent.iterdir())
+        assert len(sent_items) == 1
+        msg = json.loads((sent_items[0] / "message.json").read_text())
+        assert msg["status"] == "refused"
