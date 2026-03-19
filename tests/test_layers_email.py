@@ -846,6 +846,442 @@ def test_email_archive_already_archived(tmp_path):
     assert result["not_found"] == [email_id]
 
 
+# ---------------------------------------------------------------------------
+# Schedule — schema and routing
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_in_schema(tmp_path):
+    """Email schema should include schedule property."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    schemas = {s.name: s for s in agent._mcp_schemas}
+    props = schemas["email"].parameters["properties"]
+    assert "schedule" in props
+    assert "create" in props["schedule"]["properties"]["action"]["enum"]
+
+
+def test_email_handle_without_action_or_schedule(tmp_path):
+    """Missing both action and schedule should return error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({})
+    assert "action is required" in result["error"]
+
+
+def test_email_schedule_unknown_action(tmp_path):
+    """Unknown schedule action should return error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"schedule": {"action": "bogus"}})
+    assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Schedule — create
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_create_basic(tmp_path):
+    """schedule.create should persist schedule.json and return schedule_id."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "subject": "Heartbeat",
+        "message": "alive",
+        "schedule": {"action": "create", "interval": 1, "count": 3},
+    })
+    assert result["status"] == "scheduled"
+    assert "schedule_id" in result
+    assert result["interval"] == 1
+    assert result["count"] == 3
+    # schedule.json should exist on disk
+    sched_dir = agent.working_dir / "mailbox" / "schedules" / result["schedule_id"]
+    assert (sched_dir / "schedule.json").is_file()
+    sched = json.loads((sched_dir / "schedule.json").read_text())
+    assert sched["count"] == 3
+    assert sched["sent"] == 0
+    assert sched["cancelled"] is False
+
+
+def test_email_schedule_create_sends_messages(tmp_path):
+    """schedule.create should send count messages with interval between them."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "subject": "Beat",
+        "message": "ping",
+        "schedule": {"action": "create", "interval": 1, "count": 3},
+    })
+    sid = result["schedule_id"]
+    # Wait for all 3 sends (3 sends * 1s interval + buffer)
+    time.sleep(4.0)
+    # Should have sent 3 times
+    sched = json.loads((agent.working_dir / "mailbox" / "schedules" / sid / "schedule.json").read_text())
+    assert sched["sent"] == 3
+    # Sent folder should have 3 records
+    sent_dir = agent.working_dir / "mailbox" / "sent"
+    assert len(list(sent_dir.iterdir())) == 3
+
+
+def test_email_schedule_create_includes_metadata(tmp_path):
+    """Each scheduled send should include _schedule metadata."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "message": "beat",
+        "schedule": {"action": "create", "interval": 1, "count": 2},
+    })
+    time.sleep(3.0)
+    # Check sent records for _schedule metadata
+    sent_dir = agent.working_dir / "mailbox" / "sent"
+    sent_msgs = []
+    for d in sent_dir.iterdir():
+        msg = json.loads((d / "message.json").read_text())
+        sent_msgs.append(msg)
+    # Sort by seq
+    sent_msgs.sort(key=lambda m: m.get("_schedule", {}).get("seq", 0))
+    assert len(sent_msgs) == 2
+    assert sent_msgs[0]["_schedule"]["seq"] == 1
+    assert sent_msgs[0]["_schedule"]["total"] == 2
+    assert sent_msgs[1]["_schedule"]["seq"] == 2
+    assert "estimated_finish" in sent_msgs[1]["_schedule"]
+    assert "schedule_id" in sent_msgs[0]["_schedule"]
+
+
+def test_email_schedule_create_missing_params(tmp_path):
+    """schedule.create without interval or count should error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone", "message": "hi",
+        "schedule": {"action": "create", "count": 3},
+    })
+    assert "error" in result
+    result = mgr.handle({
+        "address": "someone", "message": "hi",
+        "schedule": {"action": "create", "interval": 10},
+    })
+    assert "error" in result
+
+
+def test_email_schedule_create_invalid_params(tmp_path):
+    """schedule.create with non-positive interval or count should error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone", "message": "hi",
+        "schedule": {"action": "create", "interval": 0, "count": 3},
+    })
+    assert "error" in result
+    result = mgr.handle({
+        "address": "someone", "message": "hi",
+        "schedule": {"action": "create", "interval": 10, "count": -1},
+    })
+    assert "error" in result
+
+
+def test_email_schedule_create_missing_address(tmp_path):
+    """schedule.create without address should error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "message": "hi",
+        "schedule": {"action": "create", "interval": 10, "count": 3},
+    })
+    assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Schedule — cancel
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_cancel(tmp_path):
+    """cancel should stop a running schedule."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "message": "beat",
+        "schedule": {"action": "create", "interval": 60, "count": 100},
+    })
+    sid = result["schedule_id"]
+    time.sleep(0.5)  # let first send go through
+
+    cancel_result = mgr.handle({"schedule": {"action": "cancel", "schedule_id": sid}})
+    assert cancel_result["status"] == "cancelled"
+
+    # Verify on disk
+    sched = json.loads(
+        (agent.working_dir / "mailbox" / "schedules" / sid / "schedule.json").read_text()
+    )
+    assert sched["cancelled"] is True
+    # Should NOT have sent all 100
+    assert sched["sent"] < 100
+
+
+def test_email_schedule_cancel_not_found(tmp_path):
+    """cancel on non-existent schedule should error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"schedule": {"action": "cancel", "schedule_id": "nonexistent"}})
+    assert "error" in result
+
+
+def test_email_schedule_cancel_missing_id(tmp_path):
+    """cancel without schedule_id should error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"schedule": {"action": "cancel"}})
+    assert "error" in result
+
+
+def test_email_schedule_cancel_already_stopped(tmp_path):
+    """cancel on completed or already-cancelled schedule should return already_stopped."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    # Create a short schedule and let it complete
+    result = mgr.handle({
+        "address": "someone",
+        "message": "beat",
+        "schedule": {"action": "create", "interval": 1, "count": 1},
+    })
+    sid = result["schedule_id"]
+    time.sleep(2.0)
+    # Cancel after completion
+    cancel_result = mgr.handle({"schedule": {"action": "cancel", "schedule_id": sid}})
+    assert cancel_result["status"] == "already_stopped"
+
+
+# ---------------------------------------------------------------------------
+# Schedule — list
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_list_empty(tmp_path):
+    """list with no schedules should return empty list."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"schedule": {"action": "list"}})
+    assert result["status"] == "ok"
+    assert result["schedules"] == []
+
+
+def test_email_schedule_list_shows_active(tmp_path):
+    """list should show active schedules with progress."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "subject": "Status",
+        "message": "ok",
+        "schedule": {"action": "create", "interval": 60, "count": 10},
+    })
+    sid = result["schedule_id"]
+    time.sleep(0.5)  # let first send happen
+    listing = mgr.handle({"schedule": {"action": "list"}})
+    assert listing["status"] == "ok"
+    assert len(listing["schedules"]) == 1
+    entry = listing["schedules"][0]
+    assert entry["schedule_id"] == sid
+    assert entry["interval"] == 60
+    assert entry["count"] == 10
+    assert entry["to"] == "someone"
+    assert entry["subject"] == "Status"
+    assert entry["active"] is True
+    # Cleanup
+    mgr.handle({"schedule": {"action": "cancel", "schedule_id": sid}})
+
+
+def test_email_schedule_list_shows_completed(tmp_path):
+    """list should show completed schedules with active=False."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "address": "someone",
+        "message": "done",
+        "schedule": {"action": "create", "interval": 1, "count": 1},
+    })
+    time.sleep(2.0)
+    listing = mgr.handle({"schedule": {"action": "list"}})
+    entry = listing["schedules"][0]
+    assert entry["active"] is False
+    assert entry["sent"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Schedule — recovery
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_recovery_on_setup(tmp_path):
+    """Incomplete schedules should resume when a new EmailManager is created."""
+    agent1 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                        capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent1._mail_service = mail_svc
+
+    # Manually write a schedule.json that looks like it was interrupted at sent=1 of count=3
+    sched_id = "recover12345"
+    sched_dir = agent1.working_dir / "mailbox" / "schedules" / sched_id
+    sched_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schedule_id": sched_id,
+        "send_payload": {
+            "address": "someone",
+            "subject": "Resume",
+            "message": "continued",
+            "cc": [],
+            "bcc": [],
+            "type": "normal",
+        },
+        "interval": 1,
+        "count": 3,
+        "sent": 1,
+        "cancelled": False,
+        "created_at": "2026-03-18T10:00:00Z",
+        "last_sent_at": "2026-03-18T10:00:00Z",
+    }
+    (sched_dir / "schedule.json").write_text(json.dumps(record, indent=2))
+
+    # Release the first agent's lock so the second agent can use the same directory
+    agent1.stop(timeout=1.0)
+
+    # Create a NEW agent at the same base_dir — setup() should auto-recover
+    agent2 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                        mail_service=mail_svc, capabilities=["email"])
+    # Recovery happens automatically in setup() — no manual call needed
+
+    # Wait for remaining 2 sends
+    time.sleep(3.0)
+    final = json.loads((sched_dir / "schedule.json").read_text())
+    assert final["sent"] == 3
+
+
+def test_email_schedule_recovery_skips_cancelled(tmp_path):
+    """Cancelled schedules should not be resumed."""
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+
+    # First agent creates the schedule dir, then releases lock
+    agent1 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+
+    sched_id = "cancelled1234"
+    sched_dir = agent1.working_dir / "mailbox" / "schedules" / sched_id
+    sched_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schedule_id": sched_id,
+        "send_payload": {"address": "someone", "message": "x", "subject": "", "cc": [], "bcc": [], "type": "normal"},
+        "interval": 1, "count": 5, "sent": 2,
+        "cancelled": True,
+        "created_at": "2026-03-18T10:00:00Z",
+        "last_sent_at": "2026-03-18T10:00:00Z",
+    }
+    (sched_dir / "schedule.json").write_text(json.dumps(record, indent=2))
+    agent1.stop(timeout=1.0)
+
+    # Second agent picks up the same working dir — recovery should skip cancelled
+    agent2 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       mail_service=mail_svc, capabilities=["email"])
+
+    time.sleep(2.0)
+
+    # Should NOT have resumed — sent should still be 2
+    final = json.loads((sched_dir / "schedule.json").read_text())
+    assert final["sent"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Schedule — end-to-end
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_end_to_end(tmp_path):
+    """Full lifecycle: create → sends happen → list shows progress → cancel → list shows cancelled."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+
+    # Create
+    result = mgr.handle({
+        "address": "peer",
+        "subject": "Status",
+        "message": "System OK",
+        "schedule": {"action": "create", "interval": 1, "count": 5},
+    })
+    assert result["status"] == "scheduled"
+    sid = result["schedule_id"]
+
+    # Let 2 sends happen
+    time.sleep(2.5)
+
+    # List — should be active with some progress
+    listing = mgr.handle({"schedule": {"action": "list"}})
+    entry = [s for s in listing["schedules"] if s["schedule_id"] == sid][0]
+    assert entry["active"] is True
+    assert entry["sent"] >= 2
+
+    # Cancel
+    cancel = mgr.handle({"schedule": {"action": "cancel", "schedule_id": sid}})
+    assert cancel["status"] == "cancelled"
+
+    # List — should show cancelled
+    listing = mgr.handle({"schedule": {"action": "list"}})
+    entry = [s for s in listing["schedules"] if s["schedule_id"] == sid][0]
+    assert entry["active"] is False
+    assert entry["cancelled"] is True
+    assert entry["sent"] < 5
+
+
 def test_email_private_mode_receive_unrestricted(tmp_path):
     """Private mode should not block receiving emails."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
