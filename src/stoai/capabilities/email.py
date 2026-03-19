@@ -16,7 +16,8 @@ import os
 import re
 import shutil
 import tempfile
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -24,6 +25,7 @@ from uuid import uuid4
 from ..intrinsics.mail import (
     _list_inbox, _load_message, _read_ids, _mark_read, _save_read_ids,
     _message_summary, _mailbox_dir,
+    _persist_to_outbox, _mailman,
 )
 
 if TYPE_CHECKING:
@@ -299,8 +301,9 @@ class EmailManager:
         mail_type = args.get("type", "normal")
         cc = args.get("cc") or []
         bcc = args.get("bcc") or []
+        delay = args.get("delay", 0)
 
-        # Privilege gate: only admin agents can send non-normal mail
+        # Privilege gate
         if mail_type != "normal" and not self._agent._admin.get(mail_type):
             return {"error": f"Not authorized to send type={mail_type!r} mail (requires admin.{mail_type}=True)"}
 
@@ -311,10 +314,8 @@ class EmailManager:
 
         if not to_list:
             return {"error": "address is required"}
-        if self._agent._mail_service is None:
-            return {"error": "mail service not configured"}
 
-        # Block identical consecutive messages to the same recipient.
+        # Block identical consecutive messages
         all_targets = to_list + cc + bcc
         duplicates = [
             addr for addr in all_targets
@@ -333,7 +334,7 @@ class EmailManager:
                 ),
             }
 
-        # Private mode: block sends to addresses not in contacts.
+        # Private mode
         if self._private_mode:
             contact_addresses = {c["address"] for c in self._load_contacts()}
             not_in_contacts = [a for a in all_targets if a not in contact_addresses]
@@ -346,9 +347,11 @@ class EmailManager:
                     ),
                 }
 
-        sender = self._agent._mail_service.address or self._agent.agent_id
+        sender = (self._agent._mail_service.address
+                  if self._agent._mail_service is not None and self._agent._mail_service.address
+                  else self._agent.agent_id)
 
-        # Build visible payload (no bcc field)
+        # Build visible payload (no bcc)
         base_payload = {
             "from": sender,
             "to": to_list,
@@ -362,20 +365,24 @@ class EmailManager:
         if attachments:
             base_payload["attachments"] = attachments
 
-        # Deliver to all recipients: to + cc + bcc
+        # Dispatch each recipient through outbox → mailman (skip_sent=True)
+        deliver_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
         all_recipients = to_list + cc + bcc
-        delivered = []
-        refused = []
-        errors = []
-        for addr in all_recipients:
-            err = self._agent._mail_service.send(addr, base_payload)
-            if err is None:
-                delivered.append(addr)
-            else:
-                refused.append(addr)
-                errors.append(err)
 
-        # Save to sent/ (includes bcc for sender's records)
+        for addr in all_recipients:
+            dispatch_payload = dict(base_payload)
+            dispatch_payload["to"] = addr
+            msg_id = _persist_to_outbox(self._agent, dispatch_payload, deliver_at)
+            t = threading.Thread(
+                target=_mailman,
+                args=(self._agent, msg_id, dispatch_payload, deliver_at),
+                kwargs={"skip_sent": True},
+                name=f"mailman-{msg_id[:8]}",
+                daemon=True,
+            )
+            t.start()
+
+        # Write ONE sent record (email-level, preserving the "one email" view)
         sent_id = str(uuid4())
         sent_dir = self._mailbox_path / "sent" / sent_id
         sent_dir.mkdir(parents=True, exist_ok=True)
@@ -383,6 +390,7 @@ class EmailManager:
             **base_payload,
             "_mailbox_id": sent_id,
             "sent_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "delay": delay,
         }
         if bcc:
             sent_record["bcc"] = bcc
@@ -390,7 +398,7 @@ class EmailManager:
             json.dumps(sent_record, indent=2, default=str)
         )
 
-        # Track last sent message per recipient for duplicate detection.
+        # Track duplicates
         for addr in all_recipients:
             prev = self._last_sent.get(addr)
             if prev is not None and prev[0] == message_text:
@@ -400,16 +408,10 @@ class EmailManager:
 
         self._agent._log(
             "email_sent", to=to_list, cc=cc, bcc=bcc,
-            subject=subject, message=message_text,
-            delivered=delivered, refused=refused,
+            subject=subject, message=message_text, delay=delay,
         )
 
-        if not refused:
-            return {"status": "delivered", "to": to_list, "cc": cc, "bcc": bcc}
-        elif not delivered:
-            return {"status": "refused", "error": errors[0], "refused": refused}
-        else:
-            return {"status": "partial", "delivered": delivered, "refused": refused}
+        return {"status": "sent", "to": to_list, "cc": cc, "bcc": bcc, "delay": delay}
 
     # ------------------------------------------------------------------
     # Check — list emails from a folder

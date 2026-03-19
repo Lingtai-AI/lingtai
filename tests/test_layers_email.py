@@ -2,6 +2,7 @@
 import json
 import socket
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -186,6 +187,78 @@ def test_email_read_shows_attachments(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Send — outbox → mailman pipeline
+# ---------------------------------------------------------------------------
+
+def test_email_send_through_mailman(tmp_path):
+    """Email send goes through outbox → mailman → sent."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "action": "send", "address": "someone",
+        "message": "hello", "subject": "test",
+    })
+    assert result["status"] == "sent"
+    assert result["delay"] == 0
+    time.sleep(0.5)
+    sent_dir = agent.working_dir / "mailbox" / "sent"
+    assert sent_dir.is_dir()
+    sent_items = list(sent_dir.iterdir())
+    assert len(sent_items) == 1
+    msg = json.loads((sent_items[0] / "message.json").read_text())
+    assert msg["message"] == "hello"
+    assert msg["sent_at"]
+
+
+def test_email_send_with_delay(tmp_path):
+    """Email send with delay dispatches after waiting."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "action": "send", "address": "someone",
+        "message": "delayed", "delay": 1,
+    })
+    assert result["status"] == "sent"
+    assert result["delay"] == 1
+    mail_svc.send.assert_not_called()
+    time.sleep(1.5)
+    mail_svc.send.assert_called_once()
+
+
+def test_email_send_cc_one_sent_record(tmp_path):
+    """CC/BCC email produces one sent record, not one per recipient."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent._mail_service = mail_svc
+    mgr = agent.get_capability("email")
+    result = mgr.handle({
+        "action": "send", "address": ["a", "b"],
+        "cc": ["c"], "bcc": ["d"],
+        "message": "broadcast", "subject": "multi",
+    })
+    assert result["status"] == "sent"
+    time.sleep(0.5)
+    sent_dir = agent.working_dir / "mailbox" / "sent"
+    sent_items = list(sent_dir.iterdir())
+    assert len(sent_items) == 1  # ONE sent record
+    msg = json.loads((sent_items[0] / "message.json").read_text())
+    assert msg["bcc"] == ["d"]
+
+
+# ---------------------------------------------------------------------------
 # Send — saves to sent/
 # ---------------------------------------------------------------------------
 
@@ -201,7 +274,7 @@ def test_email_send_saves_to_sent(tmp_path):
         "action": "send", "address": "someone",
         "message": "hello", "subject": "test",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
     sent_dir = agent.working_dir / "mailbox" / "sent"
     assert sent_dir.is_dir()
     sent_emails = list(sent_dir.iterdir())
@@ -244,7 +317,7 @@ def test_email_blocks_identical_consecutive_send(tmp_path):
         "action": "send", "address": "127.0.0.1:8888",
         "subject": "hi", "message": "\ud83d\udc4d",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
     # Identical send — should be blocked
     result = mgr.handle({
@@ -259,7 +332,7 @@ def test_email_blocks_identical_consecutive_send(tmp_path):
         "action": "send", "address": "127.0.0.1:8888",
         "subject": "hi", "message": "Got it, thanks!",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
 
 def test_email_blocks_identical_reply(tmp_path):
@@ -280,7 +353,7 @@ def test_email_blocks_identical_reply(tmp_path):
 
     # First reply
     result = mgr.handle({"action": "reply", "email_id": email_id, "message": "\ud83d\udc4d"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
     # Identical reply — blocked
     result = mgr.handle({"action": "reply", "email_id": email_id, "message": "\ud83d\udc4d"})
@@ -302,7 +375,8 @@ def test_email_send_with_attachments(tmp_path):
         "message": "see attached",
         "attachments": ["/path/to/file.png"],
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    time.sleep(0.5)
     sent = mail_svc.send.call_args[0][1]
     assert sent.get("attachments") == ["/path/to/file.png"]
 
@@ -331,7 +405,7 @@ def test_email_send_multi_to(tmp_path):
         mgr = agent.get_capability("email")
         addrs = [f"127.0.0.1:{p}" for p in ports]
         result = mgr.handle({"action": "send", "address": addrs, "message": "multi-to"})
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
         for ev in events:
             assert ev.wait(timeout=5.0)
         for i in range(2):
@@ -362,7 +436,7 @@ def test_email_send_cc_visible(tmp_path):
         to_addr = f"127.0.0.1:{ports[0]}"
         cc_addr = f"127.0.0.1:{ports[1]}"
         result = mgr.handle({"action": "send", "address": to_addr, "message": "cc test", "cc": [cc_addr]})
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
         for ev in events:
             assert ev.wait(timeout=5.0)
         assert received[0][0]["cc"] == [cc_addr]
@@ -393,7 +467,7 @@ def test_email_send_bcc_hidden(tmp_path):
         to_addr = f"127.0.0.1:{ports[0]}"
         bcc_addr = f"127.0.0.1:{ports[1]}"
         result = mgr.handle({"action": "send", "address": to_addr, "message": "bcc test", "bcc": [bcc_addr]})
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
         for ev in events:
             assert ev.wait(timeout=5.0)
         assert received[0][0]["message"] == "bcc test"
@@ -419,7 +493,8 @@ def test_email_reply(tmp_path):
     mgr = agent.get_capability("email")
     eid = _make_inbox_email(agent.working_dir, sender="alice", subject="Original topic", message="Please respond")
     result = mgr.handle({"action": "reply", "email_id": eid, "message": "Here is my reply"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    time.sleep(0.5)
     sent_payload = mock_svc.send.call_args[0][1]
     assert sent_payload["subject"] == "Re: Original topic"
     assert sent_payload["message"] == "Here is my reply"
@@ -435,6 +510,7 @@ def test_email_reply_no_double_re(tmp_path):
     mgr = agent.get_capability("email")
     eid = _make_inbox_email(agent.working_dir, sender="other", subject="Re: Already replied", message="text")
     result = mgr.handle({"action": "reply", "email_id": eid, "message": "follow up"})
+    time.sleep(0.5)
     sent_payload = mock_svc.send.call_args[0][1]
     assert sent_payload["subject"] == "Re: Already replied"
 
@@ -454,7 +530,8 @@ def test_email_reply_all(tmp_path):
     eid = _make_inbox_email(agent.working_dir, sender="alice", to=["me", "bob"],
                             cc=["charlie"], subject="Group thread", message="discussion")
     result = mgr.handle({"action": "reply_all", "email_id": eid, "message": "my thoughts"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    time.sleep(0.5)
     sent_addresses = [call[0][0] for call in mock_svc.send.call_args_list]
     assert "alice" in sent_addresses
     assert "bob" in sent_addresses
@@ -473,7 +550,8 @@ def test_email_reply_all_excludes_self(tmp_path):
     eid = _make_inbox_email(agent.working_dir, sender="alice", to=["me", "alice"],
                             subject="Self-cc", message="text")
     result = mgr.handle({"action": "reply_all", "email_id": eid, "message": "reply"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    time.sleep(0.5)
     sent_addresses = [call[0][0] for call in mock_svc.send.call_args_list]
     assert sent_addresses.count("alice") == 1
     assert "me" not in sent_addresses
@@ -546,11 +624,18 @@ def test_email_search_invalid_regex(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_email_without_mail_service(tmp_path):
+    """Send without mail service succeeds at send-time."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
                        capabilities=["email"])
+    agent._mail_service = None
     mgr = agent.get_capability("email")
-    result = mgr.handle({"action": "send", "address": "someone", "message": "hello"})
-    assert "error" in result
+    result = mgr.handle({
+        "action": "send", "address": "someone",
+        "message": "hello",
+    })
+    assert result["status"] == "sent"
+    sent_dir = agent.working_dir / "mailbox" / "sent"
+    assert sent_dir.is_dir()
 
 
 def test_email_read_not_found(tmp_path):
@@ -605,7 +690,7 @@ def test_email_private_mode_allows_send_to_contact(tmp_path):
     # Register contact first
     mgr.handle({"action": "add_contact", "name": "Alice", "address": "alice:8000"})
     result = mgr.handle({"action": "send", "address": "alice:8000", "message": "hi"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
 
 def test_email_private_mode_blocks_reply_to_non_contact(tmp_path):
@@ -651,7 +736,7 @@ def test_email_private_mode_off_allows_anyone(tmp_path):
     agent._mail_service = mail_svc
     mgr = agent.get_capability("email")
     result = mgr.handle({"action": "send", "address": "anyone", "message": "hi"})
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
 
 # ---------------------------------------------------------------------------
