@@ -553,6 +553,32 @@ class EmailManager:
         self._schedule_events.pop(schedule_id, None)
 
     # ------------------------------------------------------------------
+    # Schedule recovery
+    # ------------------------------------------------------------------
+
+    def resume_schedules(self) -> None:
+        """Resume any incomplete, non-cancelled schedules from disk."""
+        schedules_dir = self._schedules_dir
+        if not schedules_dir.is_dir():
+            return
+        for sched_dir in schedules_dir.iterdir():
+            if not sched_dir.is_dir():
+                continue
+            sched_file = sched_dir / "schedule.json"
+            if not sched_file.is_file():
+                continue
+            try:
+                record = json.loads(sched_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            if record.get("cancelled"):
+                continue
+            if record.get("sent", 0) >= record.get("count", 0):
+                continue
+            # Resume
+            self._spawn_schedule_thread(record["schedule_id"], record)
+
+    # ------------------------------------------------------------------
     # Send — deliver + save to sent/
     # ------------------------------------------------------------------
 
@@ -1036,4 +1062,5 @@ def setup(agent: "BaseAgent", *, private_mode: bool = False) -> EmailManager:
         "email", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
         system_prompt="Send, receive, reply, and search email.",
     )
+    mgr.resume_schedules()
     return mgr

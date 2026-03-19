@@ -1152,6 +1152,91 @@ def test_email_schedule_list_shows_completed(tmp_path):
     assert entry["sent"] == 1
 
 
+# ---------------------------------------------------------------------------
+# Schedule — recovery
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_recovery_on_setup(tmp_path):
+    """Incomplete schedules should resume when a new EmailManager is created."""
+    agent1 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                        capabilities=["email"])
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+    agent1._mail_service = mail_svc
+
+    # Manually write a schedule.json that looks like it was interrupted at sent=1 of count=3
+    sched_id = "recover12345"
+    sched_dir = agent1.working_dir / "mailbox" / "schedules" / sched_id
+    sched_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schedule_id": sched_id,
+        "send_payload": {
+            "address": "someone",
+            "subject": "Resume",
+            "message": "continued",
+            "cc": [],
+            "bcc": [],
+            "type": "normal",
+        },
+        "interval": 1,
+        "count": 3,
+        "sent": 1,
+        "cancelled": False,
+        "created_at": "2026-03-18T10:00:00Z",
+        "last_sent_at": "2026-03-18T10:00:00Z",
+    }
+    (sched_dir / "schedule.json").write_text(json.dumps(record, indent=2))
+
+    # Release the first agent's lock so the second agent can use the same directory
+    agent1.stop(timeout=1.0)
+
+    # Create a NEW agent at the same base_dir — setup() should auto-recover
+    agent2 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                        mail_service=mail_svc, capabilities=["email"])
+    # Recovery happens automatically in setup() — no manual call needed
+
+    # Wait for remaining 2 sends
+    time.sleep(3.0)
+    final = json.loads((sched_dir / "schedule.json").read_text())
+    assert final["sent"] == 3
+
+
+def test_email_schedule_recovery_skips_cancelled(tmp_path):
+    """Cancelled schedules should not be resumed."""
+    mail_svc = MagicMock()
+    mail_svc.address = "me"
+    mail_svc.send.return_value = None
+
+    # First agent creates the schedule dir, then releases lock
+    agent1 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+
+    sched_id = "cancelled1234"
+    sched_dir = agent1.working_dir / "mailbox" / "schedules" / sched_id
+    sched_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schedule_id": sched_id,
+        "send_payload": {"address": "someone", "message": "x", "subject": "", "cc": [], "bcc": [], "type": "normal"},
+        "interval": 1, "count": 5, "sent": 2,
+        "cancelled": True,
+        "created_at": "2026-03-18T10:00:00Z",
+        "last_sent_at": "2026-03-18T10:00:00Z",
+    }
+    (sched_dir / "schedule.json").write_text(json.dumps(record, indent=2))
+    agent1.stop(timeout=1.0)
+
+    # Second agent picks up the same working dir — recovery should skip cancelled
+    agent2 = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       mail_service=mail_svc, capabilities=["email"])
+
+    time.sleep(2.0)
+
+    # Should NOT have resumed — sent should still be 2
+    final = json.loads((sched_dir / "schedule.json").read_text())
+    assert final["sent"] == 2
+
+
 def test_email_private_mode_receive_unrestricted(tmp_path):
     """Private mode should not block receiving emails."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
