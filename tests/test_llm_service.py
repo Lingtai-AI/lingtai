@@ -14,29 +14,13 @@ def test_get_context_limit_empty():
     assert get_context_limit("") == DEFAULT_CONTEXT_WINDOW
 
 
-def test_adapter_generate_image_raises_not_implemented():
-    """Base LLMAdapter media methods raise NotImplementedError."""
-    from stoai.llm.base import LLMAdapter, LLMResponse
-    from unittest.mock import MagicMock
-    import pytest
-    # Create a minimal concrete subclass (all abstract methods must be overridden)
-    class StubAdapter(LLMAdapter):
-        def create_chat(self, *a, **kw): pass
-        def generate(self, *a, **kw): return LLMResponse()
-        def make_tool_result_message(self, *a, **kw): pass
-        def make_multimodal_message(self, *a, **kw): pass
-        def is_quota_error(self, *a, **kw): return False
-    adapter = StubAdapter()
-    with pytest.raises(NotImplementedError):
-        adapter.generate_image("a cat", model="test")
-    with pytest.raises(NotImplementedError):
-        adapter.generate_music("jazz", model="test")
-    with pytest.raises(NotImplementedError):
-        adapter.text_to_speech("hello", model="test")
-    with pytest.raises(NotImplementedError):
-        adapter.transcribe(b"audio", model="test")
-    with pytest.raises(NotImplementedError):
-        adapter.analyze_audio(b"audio", "what is this?", model="test")
+def test_adapter_base_class_has_no_multimodal_methods():
+    """LLMAdapter ABC should not define multimodal convenience methods."""
+    from stoai.llm.base import LLMAdapter
+    # These methods were removed — they live on individual adapters only
+    for method in ("generate_image", "generate_music", "text_to_speech",
+                   "transcribe", "analyze_audio"):
+        assert not hasattr(LLMAdapter, method), f"LLMAdapter still has {method}"
 
 
 def test_generate_image_no_provider():
