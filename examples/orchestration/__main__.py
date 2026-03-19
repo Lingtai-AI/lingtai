@@ -43,7 +43,6 @@ COVENANT = """\
 - Never go back and forth with courtesy emails.
 
 ## Initiative
-- Your vibing (inner voice) is active. Use it to stay proactive.
 - When idle, reflect on ongoing tasks and check on subagents.
 """
 
@@ -56,7 +55,7 @@ You are an orchestrator agent.
 - Maximum 10 subagents at any time.
 - When delegating, ALWAYS pass capabilities explicitly:
   capabilities=["email", "bash", "file", "web_search", "vision", "anima"]
-  This ensures subagents do NOT get vibing or delegate.
+  This ensures subagents do NOT get delegate.
 - Generate a tailored covenant for each subagent (pass as covenant= in delegate).
 - In the mission briefing (reasoning), include the peer contact list so the
   subagent knows who its friends are.
@@ -136,7 +135,6 @@ def main():
             "web_search": {},
             "vision": {},
             "anima": {},
-            "vibing": {"interval": 300},
             "delegate": {},
         },
     )
