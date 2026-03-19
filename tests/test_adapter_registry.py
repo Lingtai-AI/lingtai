@@ -53,3 +53,16 @@ class TestAdapterRegistry:
         LLMService("prov", "model", api_key="key")
         factory_b.assert_called_once()
         factory_a.assert_not_called()
+
+
+def test_default_adapters_registered():
+    """All default adapters should be registered after importing stoai.llm."""
+    from stoai.llm._register import register_all_adapters
+    # Clear and re-register
+    saved = dict(LLMService._adapter_registry)
+    LLMService._adapter_registry.clear()
+    register_all_adapters()
+    expected = {"gemini", "anthropic", "openai", "minimax", "deepseek", "grok", "qwen", "glm", "kimi", "custom"}
+    assert expected.issubset(set(LLMService._adapter_registry.keys()))
+    LLMService._adapter_registry.clear()
+    LLMService._adapter_registry.update(saved)
