@@ -121,3 +121,55 @@ def test_backward_compat_constants():
     for desc in (R_D, W_D, E_D, G_D, GR_D):
         assert isinstance(desc, str)
         assert len(desc) > 10
+
+
+# --- All capabilities: no key typos ---
+
+import importlib
+import pytest
+
+_ALL_CAPABILITIES = [
+    "read", "write", "edit", "glob", "grep",
+    "bash", "psyche", "delegate", "email",
+    "vision", "web_search", "talk", "compose", "draw", "listen",
+]
+
+
+def _get_all_descriptions(schema: dict) -> list[str]:
+    """Recursively extract all 'description' values from a schema dict."""
+    descs = []
+    if isinstance(schema, dict):
+        if "description" in schema:
+            descs.append(schema["description"])
+        for v in schema.values():
+            descs.extend(_get_all_descriptions(v))
+    elif isinstance(schema, list):
+        for item in schema:
+            descs.extend(_get_all_descriptions(item))
+    return descs
+
+
+def _looks_like_i18n_key(s: str) -> bool:
+    """Check if a string looks like a raw i18n key (e.g. 'read.file_path')."""
+    import re
+    return bool(re.fullmatch(r"[a-z_]+\.[a-z_]+", s))
+
+
+@pytest.mark.parametrize("cap_name", _ALL_CAPABILITIES)
+def test_all_capabilities_en_no_key_fallback(cap_name):
+    """English schema descriptions should never be a raw i18n key."""
+    mod = importlib.import_module(f"stoai.capabilities.{cap_name}")
+    desc = mod.get_description("en")
+    assert not _looks_like_i18n_key(desc), f"{cap_name} description is a fallback key: {desc}"
+    for d in _get_all_descriptions(mod.get_schema("en").get("properties", {})):
+        assert not _looks_like_i18n_key(d), f"{cap_name} schema has key-like description: {d}"
+
+
+@pytest.mark.parametrize("cap_name", _ALL_CAPABILITIES)
+def test_all_capabilities_zh_no_key_fallback(cap_name):
+    """Chinese schema descriptions should not fall back to raw i18n keys."""
+    mod = importlib.import_module(f"stoai.capabilities.{cap_name}")
+    desc = mod.get_description("zh")
+    assert not _looks_like_i18n_key(desc), f"{cap_name} zh description is a fallback key: {desc}"
+    for d in _get_all_descriptions(mod.get_schema("zh").get("properties", {})):
+        assert not _looks_like_i18n_key(d), f"{cap_name} zh schema has key-like description: {d}"
