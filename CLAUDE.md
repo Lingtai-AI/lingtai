@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 StoAI (Stoa + AI) is a generic agent framework — an "agent operating system" providing the minimal kernel for AI agents: thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Domain tools, coordination, and orchestration are plugged in from outside via MCP-compatible interfaces.
 
+### Two-Package Architecture
+
+The framework is split into two packages:
+
+- **`stoai-kernel`** (`import stoai_kernel`) — minimal agent runtime at `../stoai-kernel/`. Contains BaseAgent, intrinsics, LLM protocol (ABCs + service), mail/logging services, and core utilities. Zero hard dependencies. Can be used standalone.
+- **`stoai`** (`import stoai`) — batteries-included wrapper (this repo). Depends on `stoai-kernel`. Provides Agent (capabilities layer), 15 capabilities, LLM adapter implementations, FileIO/Vision/Search services, MCP, and addons. Re-exports kernel's public API so `from stoai import BaseAgent` works.
+
+Kernel modules live in `stoai_kernel.*`. All imports in this repo use `from stoai_kernel.xxx import ...` for kernel types. The kernel must never import from stoai — the dependency is strictly one-directional.
+
 ## Build & Test
 
 ```bash
@@ -39,20 +48,20 @@ Agent(BaseAgent)   — kernel + capabilities + domain tools
 CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 ```
 
-- **BaseAgent** (`base_agent.py`) — kernel coordinator (~900 lines). Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle, message loop, tool dispatch routing, public API, subclass hooks. Delegates to `WorkingDir` (git/filesystem), `SessionManager` (LLM session/tokens), `ToolExecutor` (tool execution). 3 intrinsics wired from `intrinsics/*.py`. `add_tool()`/`remove_tool()` sealed after `start()`. `update_system_prompt()` stays open.
-- **Agent** (`agent.py`) — accepts `capabilities=` (list or dict) at construction. `get_capability(name)` for manager access.
+- **BaseAgent** (`stoai_kernel.base_agent`) — kernel coordinator (~900 lines). Lives in `stoai-kernel`. Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle, message loop, tool dispatch routing, public API, subclass hooks. Delegates to `WorkingDir` (git/filesystem), `SessionManager` (LLM session/tokens), `ToolExecutor` (tool execution). 3 intrinsics wired from `intrinsics/*.py`. `add_tool()`/`remove_tool()` sealed after `start()`. `update_system_prompt()` stays open.
+- **Agent** (`agent.py`) — accepts `capabilities=` (list or dict) at construction. `get_capability(name)` for manager access. Also provides `connect_mcp()` for MCP server integration and auto-creates `LocalFileIOService` if none provided.
 - **Custom agents** — subclass Agent, add domain tools via `add_tool()` or `_setup_capability()` in `__init__`.
 
 ### Four Services (all optional)
 
 | Service | What it backs | First implementation |
 |---------|--------------|---------------------|
-| `LLMService` | Core agent loop (thinking) | Gemini adapter |
-| `FileIOService` | file capabilities (read, edit, write, glob, grep) | `LocalFileIOService` |
-| `MailService` | mail (disk-backed mailbox with inbox, send, check, read, search, delete, self-send) | `TCPMailService` |
-| `LoggingService` | structured JSONL event logging (auto-created in working dir) | `JSONLLoggingService` |
+| `LLMService` | Core agent loop (thinking) | Adapter registry (kernel) + adapters (stoai) |
+| `FileIOService` | file capabilities (read, edit, write, glob, grep) | `LocalFileIOService` (stoai) |
+| `MailService` | mail (disk-backed mailbox with inbox, send, check, read, search, delete, self-send) | `TCPMailService` (kernel) |
+| `LoggingService` | structured JSONL event logging (auto-created in working dir) | `JSONLLoggingService` (kernel) |
 
-`FileIOService` auto-creates `LocalFileIOService` if not passed (file capabilities need it via `agent._file_io`). `LoggingService` auto-creates `JSONLLoggingService` at `{working_dir}/logs/events.jsonl` if not passed. `VisionService` and `SearchService` are capability-level — passed via `capabilities={"vision": {"vision_service": svc}}`.
+`LLMService` lives in the kernel with an adapter registry; adapter implementations live in stoai and register on import. `FileIOService` auto-creates `LocalFileIOService` in Agent (not BaseAgent). `LoggingService` auto-creates `JSONLLoggingService` at `{working_dir}/logs/events.jsonl` if not passed. `VisionService` and `SearchService` are capability-level — passed via `capabilities={"vision": {"vision_service": svc}}`.
 
 ### Three-Tier Tool Model
 
@@ -60,30 +69,30 @@ CustomAgent(Agent) — host's wrapper (subclass with domain logic)
 |------|------|-----------|
 | **Intrinsics** | Kernel services (mail, system, eigen). Mail provides a disk-backed mailbox: send, check, read, search, delete. Self-send (to own address) creates persistent notes that survive context compaction. System provides runtime inspection (`show`), synchronization (`sleep`), and lifecycle (`shutdown`, `restart`). Eigen provides memory (`edit`/`load` on `system/memory.md`) and context management (`molt` for self-compaction with briefing). `context_forget` is internal only (auto-wipe). Covenant is a protected prompt section (no tool access). Capabilities can upgrade intrinsics via `override_intrinsic()`. | Built-in, always present |
 | **Capabilities** | Composable capabilities (file [read/write/edit/glob/grep], psyche, bash, delegate, email, vision, web_search, talk, compose, draw, listen) | Declared at construction via `capabilities=` on Agent |
-| **MCP tools** | Domain tools from external MCP servers | Connected via `MCPClient` from `services/mcp.py`, or `add_tool()` in subclass constructors |
+| **MCP tools** | Domain tools from external MCP servers | Connected via `Agent.connect_mcp()` using `MCPClient` from `services/mcp.py`, or `add_tool()` in subclass constructors |
 
 ### Key Modules
 
-- **`base_agent.py`** — `BaseAgent` class (kernel coordinator, ~900 lines). Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle (SLEEPING/ACTIVE), message loop, 2-layer tool dispatch routing (intrinsics + tools), mail notification pipeline via MailService (messages persisted to disk by MailService, agent notified via `[system]` notification with configurable `_mailbox_name`/`_mailbox_tool`). Messages queued during active work are concatenated into one LLM turn via `_concat_queued_messages`. Public API (`add_tool`, `remove_tool`, `override_intrinsic`, `send`, `mail`). `send()` is fire-and-forget only — all agents are async peers. Subclass hooks (`_pre_request`, `_post_request`, `_on_tool_result_hook`). Delegates to `WorkingDir`, `SessionManager`, `ToolExecutor`. Tool surface sealed after `start()`.
-- **`workdir.py`** — `WorkingDir` class. Agent working directory management: directory path is `{base_dir}/{agent_name}/`. Exclusive file locking, git init with opt-in tracking, manifest read/write, `diff()` (read-only) and `diff_and_commit()`. No reference to BaseAgent — pure filesystem/subprocess operations.
-- **`session.py`** — `SessionManager` class. LLM session lifecycle: `ensure_session()`, `send()` (with timeout/retry/stale-interaction recovery), `_on_reset()` (rollback on server error), context compaction, token tracking, session persistence. No reference to BaseAgent — receives callbacks (`build_system_prompt_fn`, `build_tool_schemas_fn`) at construction.
-- **`tool_executor.py`** — `ToolExecutor` class. Sequential and parallel tool call execution with timing, error handling, guard checks, and intercept hooks. No reference to BaseAgent — receives `dispatch_fn` and `make_tool_result_fn` callbacks.
+- **`stoai_kernel.base_agent`** — `BaseAgent` class (kernel coordinator, ~900 lines, lives in stoai-kernel). Constructor takes `agent_name: str` (human-readable label); `agent_id` is auto-generated as a 12-char hex UUID (`uuid4().hex[:12]`). 2-state lifecycle (SLEEPING/ACTIVE), message loop, 2-layer tool dispatch routing (intrinsics + tools), mail notification pipeline via MailService (messages persisted to disk by MailService, agent notified via `[system]` notification with configurable `_mailbox_name`/`_mailbox_tool`). Messages queued during active work are concatenated into one LLM turn via `_concat_queued_messages`. Public API (`add_tool`, `remove_tool`, `override_intrinsic`, `send`, `mail`). `send()` is fire-and-forget only — all agents are async peers. Subclass hooks (`_pre_request`, `_post_request`, `_on_tool_result_hook`). Delegates to `WorkingDir`, `SessionManager`, `ToolExecutor`. Tool surface sealed after `start()`.
+- **`stoai_kernel.workdir`** — `WorkingDir` class. Agent working directory management: directory path is `{base_dir}/{agent_name}/`. Exclusive file locking, git init with opt-in tracking, manifest read/write, `diff()` (read-only) and `diff_and_commit()`. No reference to BaseAgent — pure filesystem/subprocess operations.
+- **`stoai_kernel.session`** — `SessionManager` class. LLM session lifecycle: `ensure_session()`, `send()` (with timeout/retry/stale-interaction recovery), `_on_reset()` (rollback on server error), context compaction, token tracking, session persistence. No reference to BaseAgent — receives callbacks (`build_system_prompt_fn`, `build_tool_schemas_fn`) at construction.
+- **`stoai_kernel.tool_executor`** — `ToolExecutor` class. Sequential and parallel tool call execution with timing, error handling, guard checks, and intercept hooks. No reference to BaseAgent — receives `dispatch_fn` and `make_tool_result_fn` callbacks.
 - **`agent.py`** — `Agent(BaseAgent)`. Accepts `capabilities=` at construction. Tracks `_capabilities` for delegate replay. `get_capability(name)` returns manager instances.
 - **`state.py`** — `AgentState` enum (ACTIVE, SLEEPING).
 - **`message.py`** — `Message` dataclass (type, sender, content, id, reply_to, timestamp), `_make_message` (auto-prepends UTC timestamp to string content), `MSG_REQUEST`, `MSG_USER_INPUT`. No synchronous reply mechanism — all communication is async.
-- **`services/`** — Service ABCs + first implementations: `file_io.py`, `mail.py`, `vision.py`, `search.py`, `logging.py`.
-- **`llm/interface.py`** — `ChatInterface`, the canonical provider-agnostic conversation history. Single source of truth — adapters rebuild provider formats from this. Content blocks: `TextBlock`, `ToolCallBlock`, `ToolResultBlock`, `ThinkingBlock`, `ImageBlock`.
-- **`llm/base.py`** — `LLMAdapter` (ABC), `ChatSession` (ABC), `LLMResponse`, `ToolCall`, `FunctionSchema`. All agent code depends on these, never on provider SDKs directly.
-- **`llm/service.py`** — `LLMService`. Adapter factory, session registry, one-shot generation gateway, context compaction orchestration. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
+- **`services/`** — stoai services: `file_io.py` (ABC + LocalFileIOService), `vision.py`, `search.py`, `mcp.py`. Kernel services (`mail.py`, `logging.py`) live in `stoai_kernel.services`.
+- **`stoai_kernel.llm.interface`** — `ChatInterface`, the canonical provider-agnostic conversation history. Single source of truth — adapters rebuild provider formats from this. Content blocks: `TextBlock`, `ToolCallBlock`, `ToolResultBlock`, `ThinkingBlock`, `ImageBlock`.
+- **`stoai_kernel.llm.base`** — `LLMAdapter` (ABC), `ChatSession` (ABC), `LLMResponse`, `ToolCall`, `FunctionSchema`. All agent code depends on these, never on provider SDKs directly.
+- **`stoai_kernel.llm.service`** — `LLMService`. Adapter registry + factory, session registry, one-shot generation gateway, context compaction orchestration. Adapters register via `LLMService.register_adapter()`. Decoupled from config files — uses injected `key_resolver` and `provider_defaults`.
 - **`llm/interface_converters.py`** — Bidirectional converters between `ChatInterface` and provider-specific formats (Anthropic, OpenAI, Gemini).
-- **`intrinsics/`** — Each file exports `SCHEMA`, `DESCRIPTION`, and `handle(agent, args)`. All 3 kernel intrinsics (mail, system, eigen) have self-contained handler logic — they receive the agent as an explicit parameter. Mail intrinsic provides a disk-backed mailbox with 5 actions: `send` (fire-and-forget with optional `delay` in seconds — all sends go through outbox → mailman thread → sent pipeline), `check` (list inbox with unread flags), `read` (by ID, non-destructive), `search` (regex), `delete`. Every send writes to `mailbox/outbox/`, spawns a daemon `_mailman` thread that sleeps for the delay, dispatches (TCP or self-send), then moves to `mailbox/sent/` with `sent_at` and `status`. Returns `{"status": "sent", "to": addr, "delay": N}` — the agent doesn't know dispatch outcome. `outbox/` (transient) and `sent/` (audit trail) are not exposed to the agent. Messages persist in `mailbox/inbox/{uuid}/message.json` — the same directory TCPMailService writes to on receive. System intrinsic provides runtime inspection (`show`), synchronization (`sleep` — timed wait, wakes on mail), and lifecycle (`shutdown`, `restart` — rebirth with reloaded MCP servers). Eigen intrinsic provides memory (`edit`/`load` on `system/memory.md`) and context management (`molt` for self-compaction with briefing). `context_forget` is internal only (called by auto-wipe). Covenant is injected at construction as a protected prompt section (no tool access).
+- **`stoai_kernel.intrinsics`** — Each file exports `SCHEMA`, `DESCRIPTION`, and `handle(agent, args)`. All 3 kernel intrinsics (mail, system, eigen) have self-contained handler logic — they receive the agent as an explicit parameter. Mail intrinsic provides a disk-backed mailbox with 5 actions: `send` (fire-and-forget with optional `delay` in seconds — all sends go through outbox → mailman thread → sent pipeline), `check` (list inbox with unread flags), `read` (by ID, non-destructive), `search` (regex), `delete`. Every send writes to `mailbox/outbox/`, spawns a daemon `_mailman` thread that sleeps for the delay, dispatches (TCP or self-send), then moves to `mailbox/sent/` with `sent_at` and `status`. Returns `{"status": "sent", "to": addr, "delay": N}` — the agent doesn't know dispatch outcome. `outbox/` (transient) and `sent/` (audit trail) are not exposed to the agent. Messages persist in `mailbox/inbox/{uuid}/message.json` — the same directory TCPMailService writes to on receive. System intrinsic provides runtime inspection (`show`), synchronization (`sleep` — timed wait, wakes on mail), and lifecycle (`shutdown`, `restart` — rebirth with reloaded MCP servers). Eigen intrinsic provides memory (`edit`/`load` on `system/memory.md`) and context management (`molt` for self-compaction with briefing). `context_forget` is internal only (called by auto-wipe). Covenant is injected at construction as a protected prompt section (no tool access).
 - **`capabilities/`** — Each capability module exports `setup(agent, **kwargs)`. 15 built-in: read, write, edit, glob, grep (file I/O — also available as `"file"` group), psyche, bash, delegate, email, vision, web_search, talk, compose, draw, listen. The email capability upgrades the mail intrinsic with reply/reply_all, CC/BCC, contacts, sent/archive folders, archive action (one-way inbox→archive), delete action (inbox or archive), delayed send (`delay` param), and private mode. Routes per-recipient dispatch through the mail intrinsic's outbox → `_mailman(skip_sent=True)` pipeline, writes one sent record per logical email. Delegates inbox ops to mail intrinsic helpers. The psyche capability upgrades the eigen intrinsic with evolving identity (character), knowledge library, and `memory.construct(ids, notes)` for building memory from library entries + free text. `molt` is inherited from eigen. `"anima"` is a backward-compat alias for `"psyche"`. Delegate spawns `Agent` with reasoning as first prompt.
-- **`config.py`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
-- **`prompt.py`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.
+- **`stoai_kernel.config`** — `AgentConfig` dataclass. Host app injects resolved values; no file-based config inside stoai.
+- **`stoai_kernel.prompt`** — Builds system prompt from base template + `SystemPromptManager` sections + MCP tool descriptions.
 
 ### LLM Provider Adapters
 
-10 adapters under `llm/`, each lazy-imported. Most use OpenAI-compatible SDK: Gemini (`google-genai`), OpenAI, Anthropic, MiniMax, DeepSeek, Grok, Qwen, GLM, Kimi, Custom. Each adapter subdirectory has `adapter.py` (implementation) and `defaults.py` (model defaults).
+5 adapter directories under `llm/`, each lazy-imported and registered with `LLMService.register_adapter()` on `import stoai.llm`: Gemini (`google-genai`), OpenAI, Anthropic, MiniMax, Custom. The Custom adapter handles additional providers (DeepSeek, Grok, Qwen, GLM, Kimi) via `api_compat` routing. Each adapter subdirectory has `adapter.py` (implementation) and `defaults.py` (model defaults). LLM protocol ABCs live in `stoai_kernel.llm`; adapter implementations live here in `stoai.llm`.
 
 ### Built-in Capabilities (15)
 
