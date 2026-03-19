@@ -846,6 +846,38 @@ def test_email_archive_already_archived(tmp_path):
     assert result["not_found"] == [email_id]
 
 
+# ---------------------------------------------------------------------------
+# Schedule — schema and routing
+# ---------------------------------------------------------------------------
+
+def test_email_schedule_in_schema(tmp_path):
+    """Email schema should include schedule property."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    schemas = {s.name: s for s in agent._mcp_schemas}
+    props = schemas["email"].parameters["properties"]
+    assert "schedule" in props
+    assert "create" in props["schedule"]["properties"]["action"]["enum"]
+
+
+def test_email_handle_without_action_or_schedule(tmp_path):
+    """Missing both action and schedule should return error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({})
+    assert "action is required" in result["error"]
+
+
+def test_email_schedule_unknown_action(tmp_path):
+    """Unknown schedule action should return error."""
+    agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+                       capabilities=["email"])
+    mgr = agent.get_capability("email")
+    result = mgr.handle({"schedule": {"action": "bogus"}})
+    assert "error" in result
+
+
 def test_email_private_mode_receive_unrestricted(tmp_path):
     """Private mode should not block receiving emails."""
     agent = Agent(agent_name="test", service=make_mock_service(), base_dir=tmp_path,

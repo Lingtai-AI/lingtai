@@ -122,8 +122,34 @@ SCHEMA = {
             "type": "string",
             "description": "Free-text note about the contact (for add_contact, edit_contact)",
         },
+        "schedule": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create", "cancel", "list"],
+                    "description": (
+                        "create: start a recurring send (requires address, message + schedule.interval, schedule.count). "
+                        "cancel: stop a running schedule (requires schedule.schedule_id). "
+                        "list: show all schedules with progress."
+                    ),
+                },
+                "interval": {
+                    "type": "integer",
+                    "description": "Seconds between each send (for create)",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Total number of sends (for create)",
+                },
+                "schedule_id": {
+                    "type": "string",
+                    "description": "Schedule ID (for cancel)",
+                },
+            },
+        },
     },
-    "required": ["action"],
+    "required": [],
 }
 
 DESCRIPTION = (
@@ -142,7 +168,11 @@ DESCRIPTION = (
     "'edit_contact' to update fields on an existing contact. "
     "Attachments are stored alongside emails in the mailbox. "
     "Etiquette: a short acknowledgement is fine, but do not reply to "
-    "an acknowledgement — that creates pointless ping-pong."
+    "an acknowledgement — that creates pointless ping-pong. "
+    "Pass a 'schedule' object instead of 'action' for recurring sends. "
+    "schedule.action='create': start recurring send (requires address, message, schedule.interval, schedule.count). "
+    "schedule.action='cancel': stop a schedule (requires schedule.schedule_id). "
+    "schedule.action='list': show all schedules with progress."
 )
 
 
@@ -262,7 +292,13 @@ class EmailManager:
     # ------------------------------------------------------------------
 
     def handle(self, args: dict) -> dict:
+        # Schedule sub-object takes priority over action
+        schedule = args.get("schedule")
+        if schedule is not None:
+            return self._handle_schedule(args, schedule)
         action = args.get("action")
+        if not action:
+            return {"error": "action is required (or pass a schedule object)"}
         if action == "send":
             return self._send(args)
         elif action == "check":
@@ -289,6 +325,30 @@ class EmailManager:
             return self._edit_contact(args)
         else:
             return {"error": f"Unknown email action: {action}"}
+
+    # ------------------------------------------------------------------
+    # Schedule dispatch
+    # ------------------------------------------------------------------
+
+    def _handle_schedule(self, args: dict, schedule: dict) -> dict:
+        action = schedule.get("action")
+        if action == "create":
+            return self._schedule_create(args, schedule)
+        elif action == "cancel":
+            return self._schedule_cancel(schedule)
+        elif action == "list":
+            return self._schedule_list()
+        else:
+            return {"error": f"Unknown schedule action: {action}"}
+
+    def _schedule_create(self, args: dict, schedule: dict) -> dict:
+        return {"error": "not implemented"}
+
+    def _schedule_cancel(self, schedule: dict) -> dict:
+        return {"error": "not implemented"}
+
+    def _schedule_list(self) -> dict:
+        return {"error": "not implemented"}
 
     # ------------------------------------------------------------------
     # Send — deliver + save to sent/
