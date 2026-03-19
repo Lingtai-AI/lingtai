@@ -65,7 +65,10 @@ def test_mail_send_passes_attachments(tmp_path):
         "message": "here is a file",
         "attachments": [str(attachment)],
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    # Delivery is async via mailman thread — wait for it
+    import time
+    time.sleep(0.5)
     # Verify attachments were passed through
     call_args = mail_svc.send.call_args
     sent_message = call_args[0][1]  # second positional arg is the message dict

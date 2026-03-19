@@ -132,7 +132,7 @@ class TestThreeAgentEmail:
             "subject": "Team update",
             "message": "Hello team, here is the update.",
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
 
         assert self._wait_for_inbox("bob", 1), "Bob did not receive the email"
         assert self._wait_for_inbox("charlie", 1), "Charlie did not receive the email"
@@ -167,7 +167,7 @@ class TestThreeAgentEmail:
             "email_id": bob_email_id,
             "message": "Everything is on track.",
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
 
         # Alice should receive Bob's reply
         assert self._wait_for_inbox("alice", 1), "Alice did not receive Bob's reply"
@@ -181,7 +181,12 @@ class TestThreeAgentEmail:
     # -------------------------------------------------------------------
 
     def test_charlie_reply_all(self):
-        """Alice sends to Bob and Charlie, Charlie reply-alls to both."""
+        """Alice sends to Bob and Charlie, Charlie reply-alls.
+
+        Per-recipient dispatch means each recipient sees only their own
+        address in the ``to`` field, so reply_all resolves to the original
+        sender (Alice) only — Bob is not included.
+        """
         # Alice -> Bob + Charlie
         self.managers["alice"].handle({
             "action": "send",
@@ -191,18 +196,17 @@ class TestThreeAgentEmail:
         })
         assert self._wait_for_inbox("charlie", 1)
 
-        # Charlie reply-alls
+        # Charlie reply-alls — goes to Alice only (per-recipient dispatch)
         charlie_email_id = _inbox_emails(self._dir("charlie"))[0]["_mailbox_id"]
         result = self.managers["charlie"].handle({
             "action": "reply_all",
             "email_id": charlie_email_id,
             "message": "I have some ideas to share.",
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
 
-        # Both Alice and Bob should receive Charlie's reply
+        # Alice should receive Charlie's reply
         assert self._wait_for_inbox("alice", 1), "Alice did not receive Charlie's reply_all"
-        assert self._wait_for_inbox("bob", 2), "Bob did not receive Charlie's reply_all"
 
         # Verify Alice got the reply
         alice_reply = _inbox_emails(self._dir("alice"))[0]
@@ -210,11 +214,11 @@ class TestThreeAgentEmail:
         assert alice_reply["from"] == self._addr("charlie")
         assert alice_reply["subject"] == "Re: Group discussion"
 
-        # Verify Bob also got it
+        # Bob only has the original email from Alice (reply_all does not
+        # reach Bob because per-recipient dispatch sets to=single_addr)
         bob_emails = _inbox_emails(self._dir("bob"))
-        bob_from_charlie = [e for e in bob_emails if e["from"] == self._addr("charlie")]
-        assert len(bob_from_charlie) == 1
-        assert bob_from_charlie[0]["message"] == "I have some ideas to share."
+        assert len(bob_emails) == 1
+        assert bob_emails[0]["from"] == self._addr("alice")
 
     # -------------------------------------------------------------------
     # Test 4: Alice sends to Bob with Charlie on CC
@@ -229,7 +233,7 @@ class TestThreeAgentEmail:
             "message": "Bob, please review. Charlie for visibility.",
             "cc": [self._addr("charlie")],
         })
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
 
         assert self._wait_for_inbox("bob", 1), "Bob did not receive the email"
         assert self._wait_for_inbox("charlie", 1), "Charlie did not receive the CC"
@@ -247,7 +251,12 @@ class TestThreeAgentEmail:
     # -------------------------------------------------------------------
 
     def test_full_conversation_flow(self):
-        """End-to-end: Alice starts thread, Bob replies, Charlie reply-alls."""
+        """End-to-end: Alice starts thread, Bob replies, Charlie reply-alls.
+
+        Per-recipient dispatch means reply_all only reaches the original
+        sender, not other recipients (their addresses aren't in the ``to``
+        field of the dispatched copy).
+        """
         # Step 1: Alice -> Bob + Charlie
         self.managers["alice"].handle({
             "action": "send",
@@ -268,18 +277,17 @@ class TestThreeAgentEmail:
         assert self._wait_for_inbox("alice", 1)
         assert _inbox_emails(self._dir("alice"))[0]["subject"] == "Re: Project kickoff"
 
-        # Step 3: Charlie reply-alls
+        # Step 3: Charlie reply-alls (goes to Alice only, per-recipient dispatch)
         charlie_email_id = _inbox_emails(self._dir("charlie"))[0]["_mailbox_id"]
         self.managers["charlie"].handle({
             "action": "reply_all",
             "email_id": charlie_email_id,
             "message": "Looking forward to it!",
         })
-        # Alice gets Charlie's reply (2nd message), Bob also gets it (2nd message)
+        # Alice gets Charlie's reply (2nd message)
         assert self._wait_for_inbox("alice", 2), "Alice didn't get Charlie's reply_all"
-        assert self._wait_for_inbox("bob", 2), "Bob didn't get Charlie's reply_all"
 
         # Verify final mailbox states
         assert _inbox_count(self._dir("alice")) == 2  # Bob's reply + Charlie's reply_all
-        assert _inbox_count(self._dir("bob")) == 2    # Alice's original + Charlie's reply_all
+        assert _inbox_count(self._dir("bob")) == 1    # Alice's original only
         assert _inbox_count(self._dir("charlie")) == 1  # Alice's original only

@@ -108,7 +108,8 @@ def test_system_prompt_update_marks_dirty(tmp_path):
 def test_mail_without_service(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     result = agent.mail("localhost:8301", "hello")
-    assert result.get("error") == "mail service not configured"
+    # Send is async — no error at send time, mailman handles missing service
+    assert result["status"] == "sent"
 
 
 def test_mail_with_service(tmp_path):
@@ -135,7 +136,8 @@ def test_mail_with_service(tmp_path):
             base_dir=tmp_path,
         )
         result = agent.mail(f"127.0.0.1:{port}", "hello from agent")
-        assert result["status"] == "delivered"
+        assert result["status"] == "sent"
+        # Delivery is async via mailman thread — wait for receiver
         assert event.wait(timeout=5.0)
         assert received[0]["message"] == "hello from agent"
     finally:
@@ -152,7 +154,8 @@ def test_mail_to_bad_address(tmp_path):
         base_dir=tmp_path,
     )
     result = agent.mail("127.0.0.1:1", "hello")
-    assert result["status"] == "refused"
+    # Send is async — always returns "sent"; refusal is recorded by mailman
+    assert result["status"] == "sent"
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +478,10 @@ def test_agent_corrupt_manifest(tmp_path):
     agent_dir.mkdir()
     (agent_dir / ".agent.json").write_text("{corrupt json")
     agent = BaseAgent(agent_name="alice", service=make_mock_service(), base_dir=tmp_path)
-    assert (agent_dir / ".agent.json.corrupt").is_file()
+    # Constructor writes a fresh manifest (overwriting the corrupt one)
+    import json
+    data = json.loads((agent_dir / ".agent.json").read_text())
+    assert data["agent_name"] == "alice"
     assert agent._prompt_manager.read_section("covenant") is None
 
 

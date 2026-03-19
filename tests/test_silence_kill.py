@@ -150,6 +150,7 @@ def test_non_admin_cannot_send_kill_via_mail(tmp_path):
 
 def test_admin_can_send_silence_via_mail(tmp_path):
     """Admin should be able to send silence mail."""
+    import time
     agent = BaseAgent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path, admin={"silence": True, "kill": True},
     )
@@ -162,13 +163,16 @@ def test_admin_can_send_silence_via_mail(tmp_path):
         "action": "send", "address": "127.0.0.1:8001",
         "message": "shh", "type": "silence",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    # Delivery is async via mailman thread — wait for it
+    time.sleep(0.5)
     payload = mock_mail.send.call_args[0][1]
     assert payload["type"] == "silence"
 
 
 def test_admin_can_send_kill_via_mail(tmp_path):
     """Admin should be able to send kill mail."""
+    import time
     agent = BaseAgent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path, admin={"silence": True, "kill": True},
     )
@@ -181,7 +185,9 @@ def test_admin_can_send_kill_via_mail(tmp_path):
         "action": "send", "address": "127.0.0.1:8001",
         "message": "die", "type": "kill",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
+    # Delivery is async via mailman thread — wait for it
+    time.sleep(0.5)
     payload = mock_mail.send.call_args[0][1]
     assert payload["type"] == "kill"
 
@@ -281,7 +287,7 @@ def test_non_admin_can_send_normal_mail(tmp_path):
         "action": "send", "address": "127.0.0.1:8001",
         "subject": "hello", "message": "hi there",
     })
-    assert result["status"] == "delivered"
+    assert result["status"] == "sent"
 
 
 # ---------------------------------------------------------------------------
