@@ -140,7 +140,66 @@ class Agent(BaseAgent):
             if hasattr(mgr, "start"):
                 mgr.start()
 
+    def connect_mcp(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> list[str]:
+        """Connect to an MCP server and auto-register all its tools.
+
+        Args:
+            command: Executable to run (e.g., "uvx", "xhelio-spice-mcp").
+            args: Arguments to the command.
+            env: Environment variables for the subprocess.
+
+        Returns:
+            List of registered tool names.
+        """
+        from .services.mcp import MCPClient
+
+        client = MCPClient(command=command, args=args, env=env)
+        client.start()
+
+        # Track for cleanup
+        if not hasattr(self, "_mcp_clients"):
+            self._mcp_clients: list = []
+        self._mcp_clients.append(client)
+
+        # List tools and register each one
+        tools = client.list_tools()
+        registered = []
+        for tool in tools:
+            name = tool["name"]
+
+            def _make_handler(c: MCPClient, tool_name: str):
+                def handler(tool_args: dict) -> dict:
+                    return c.call_tool(tool_name, tool_args)
+                return handler
+
+            # Extract schema properties (MCP uses inputSchema with JSON Schema)
+            schema = tool.get("schema", {})
+            # Remove top-level keys that aren't valid for our FunctionSchema
+            schema.pop("additionalProperties", None)
+
+            self.add_tool(
+                name,
+                schema=schema,
+                handler=_make_handler(client, name),
+                description=tool.get("description", ""),
+            )
+            registered.append(name)
+
+        return registered
+
     def stop(self, timeout: float = 5.0) -> None:
+        # Close MCP clients
+        for client in getattr(self, "_mcp_clients", []):
+            try:
+                client.close()
+            except Exception:
+                pass
+
         for name, mgr in self._addon_managers.items():
             if hasattr(mgr, "stop"):
                 try:

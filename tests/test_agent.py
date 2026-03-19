@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from stoai.base_agent import BaseAgent
+from stoai.agent import Agent
 from stoai.message import Message, _make_message, MSG_REQUEST
 from stoai.state import AgentState
 from stoai.types import UnknownToolError
@@ -585,3 +586,14 @@ def test_concat_preserves_first_sender(tmp_path):
     assert "task for you" in result.content
     assert "mail box" in result.content
     assert result.sender == "alice"
+
+
+# ---------------------------------------------------------------------------
+# connect_mcp placement
+# ---------------------------------------------------------------------------
+
+def test_connect_mcp_is_on_agent_not_base(tmp_path):
+    """connect_mcp should be defined on Agent, not BaseAgent."""
+    assert hasattr(Agent, 'connect_mcp')
+    # Verify it's not inherited from BaseAgent
+    assert 'connect_mcp' not in BaseAgent.__dict__
