@@ -217,7 +217,9 @@ def test_nudge_fires_when_idle(tmp_path):
 
     mock_send.assert_called()
     call_args = mock_send.call_args
-    assert call_args[0][0] == DEFAULT_VIBE
+    sent_text = call_args[0][0]
+    assert sent_text.startswith("[vibing]\ntime: ")
+    assert DEFAULT_VIBE.strip() in sent_text
     assert call_args[1]["sender"] == "vibing"
     agent.stop(timeout=2.0)
 
@@ -261,7 +263,8 @@ def test_nudge_uses_updated_prompt(tmp_path):
         mgr.stop()
 
     mock_send.assert_called()
-    assert mock_send.call_args[0][0] == "What now?"
+    sent_text = mock_send.call_args[0][0]
+    assert "What now?" in sent_text
     agent.stop(timeout=2.0)
 
 

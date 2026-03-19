@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..base_agent import BaseAgent
+    from stoai_kernel.base_agent import BaseAgent
 
 DEFAULT_VIBE = """\
 What haven't I explored yet?
@@ -185,18 +185,18 @@ class VibingManager:
             prompt = self._prompt
 
         # Write vibe.md and git-commit
-        self._commit_vibe(prompt)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self._commit_vibe(prompt, now)
 
-        # Send the nudge
-        self._agent.send(prompt, sender="vibing")
+        # Send the nudge — multiline so the agent sees when and what
+        self._agent.send(f"[vibing]\ntime: {now}\nvibe: {prompt}", sender="vibing")
 
         with self._lock:
             if self._active:
                 self._schedule()
 
-    def _commit_vibe(self, prompt: str) -> None:
+    def _commit_vibe(self, prompt: str, now: str) -> None:
         """Write vibing/vibe.md and git-commit."""
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         content = f"{prompt}\n\n---\nLast vibe: {now}\n"
         self._vibe_path.parent.mkdir(parents=True, exist_ok=True)
         self._vibe_path.write_text(content)
