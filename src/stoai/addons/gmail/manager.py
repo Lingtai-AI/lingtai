@@ -196,13 +196,16 @@ class GmailManager:
         sender = payload.get("from", "unknown")
         subject = payload.get("subject", "(no subject)")
         message = payload.get("message", "")
+        sent_at = payload.get("sent_at") or payload.get("time") or ""
 
         self._agent._mail_arrived.set()
 
         preview = message[:100].replace("\n", " ")
         notification = (
             f'[system] 1 new message in gmail box.\n'
-            f'  From: {sender} — {subject}\n'
+            f'  From: {sender}\n'
+            f'  Subject: {subject}\n'
+            f'  Sent at: {sent_at}\n'
             f'  {preview}...\n'
             f'Use gmail(action="check") to see your inbox.'
         )

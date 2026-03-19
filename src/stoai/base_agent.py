@@ -499,13 +499,16 @@ class BaseAgent:
         sender = payload.get("from", "unknown")
         subject = payload.get("subject", "(no subject)")
         message = payload.get("message", "")
+        sent_at = payload.get("sent_at") or payload.get("time") or ""
 
         self._mail_arrived.set()
 
         preview = message[:100].replace("\n", " ")
         notification = (
             f'[system] 1 new message in {self._mailbox_name}.\n'
-            f'  From: {sender} — {subject}\n'
+            f'  From: {sender}\n'
+            f'  Subject: {subject}\n'
+            f'  Sent at: {sent_at}\n'
             f'  {preview}...\n'
             f'Use {self._mailbox_tool}(action="check") to see your inbox.'
         )
