@@ -205,7 +205,7 @@ def _shutdown(agent, args: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# restart (formerly nirvana)
+# restart
 # ---------------------------------------------------------------------------
 
 def _restart(agent, args: dict) -> dict:
