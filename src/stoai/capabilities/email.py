@@ -371,7 +371,7 @@ class EmailManager:
 
         for addr in all_recipients:
             dispatch_payload = dict(base_payload)
-            dispatch_payload["to"] = addr
+            dispatch_payload["_dispatch_to"] = addr
             msg_id = _persist_to_outbox(self._agent, dispatch_payload, deliver_at)
             t = threading.Thread(
                 target=_mailman,

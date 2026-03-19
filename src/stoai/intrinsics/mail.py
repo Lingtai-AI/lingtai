@@ -292,7 +292,7 @@ def _mailman(agent, msg_id: str, payload: dict, deliver_at: datetime,
     if wait > 0:
         _time.sleep(wait)
 
-    address = payload.get("to", "")
+    address = payload.get("_dispatch_to") or payload.get("to", "")
     if isinstance(address, list):
         address = address[0] if address else ""
 
