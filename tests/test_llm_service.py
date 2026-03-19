@@ -18,7 +18,8 @@ def test_adapter_base_class_has_no_multimodal_methods():
     """LLMAdapter ABC should not define multimodal convenience methods."""
     from stoai.llm.base import LLMAdapter
     # These methods were removed — they live on individual adapters only
-    for method in ("generate_image", "generate_music", "text_to_speech",
+    for method in ("web_search", "generate_vision", "generate_image",
+                   "generate_music", "text_to_speech",
                    "transcribe", "analyze_audio"):
         assert not hasattr(LLMAdapter, method), f"LLMAdapter still has {method}"
 
