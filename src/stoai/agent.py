@@ -92,6 +92,10 @@ class Agent(BaseAgent):
                 mgr = setup_addon(self, addon_name, **(addon_kwargs or {}))
                 self._addon_managers[addon_name] = mgr
 
+        # Re-write manifest now that capabilities are registered
+        if self._capabilities:
+            self._workdir.write_manifest(self._build_manifest())
+
     def _setup_capability(self, name: str, **kwargs: Any) -> Any:
         """Load a named capability.
 
@@ -104,6 +108,14 @@ class Agent(BaseAgent):
         mgr = setup_capability(self, name, **kwargs)
         self._capability_managers[name] = mgr
         return mgr
+
+    def _build_manifest(self) -> dict:
+        """Extend kernel manifest with capabilities."""
+        data = super()._build_manifest()
+        caps = getattr(self, "_capabilities", None)
+        if caps:
+            data["capabilities"] = caps
+        return data
 
     def _build_system_prompt(self) -> str:
         """Override kernel's prompt builder to inject stoai's base prompt."""

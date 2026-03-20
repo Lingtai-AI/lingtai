@@ -551,7 +551,7 @@ def test_queued_messages_concatenated(tmp_path):
     agent = BaseAgent(agent_name="test", service=make_mock_service(), base_dir=tmp_path)
     msg1 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in mail box.\n  From: alice — hello")
     msg2 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in mail box.\n  From: bob — world")
-    msg3 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in gmail box.\n  From: charlie — meeting")
+    msg3 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in imap box.\n  From: charlie — meeting")
     agent.inbox.put(msg1)
     agent.inbox.put(msg2)
     agent.inbox.put(msg3)

@@ -1,12 +1,12 @@
-"""Launch a StoAI agent with Gmail — interact via real email.
+"""Launch a StoAI agent with IMAP email — interact via real email.
 
 Usage:
     python -m app.email
 
 Configure via app/email/config.json (see config.example.json).
-Requires a Gmail account with an App Password (2FA + myaccount.google.com → App Passwords).
+Requires an email account with IMAP/SMTP access (e.g. Gmail App Password).
 
-Once launched, send an email to the configured Gmail address. The agent replies
+Once launched, send an email to the configured address. The agent replies
 back to your email. No CLI, no web UI needed.
 """
 from __future__ import annotations
@@ -51,8 +51,8 @@ class TerminalLoggingService(JSONLLoggingService):
     _DISPLAY_EVENTS = {
         "diary": "\033[36m[diary]\033[0m",         # cyan
         "thinking": "\033[35m[thinking]\033[0m",    # magenta
-        "gmail_received": "\033[32m[gmail ←]\033[0m",  # green
-        "gmail_sent": "\033[33m[gmail →]\033[0m",      # yellow
+        "imap_received": "\033[32m[imap ←]\033[0m",  # green
+        "imap_sent": "\033[33m[imap →]\033[0m",      # yellow
         "email_received": "\033[32m[email ←]\033[0m",
         "email_sent": "\033[33m[email →]\033[0m",
         "tool_call": "\033[34m[tool]\033[0m",       # blue
@@ -70,11 +70,11 @@ class TerminalLoggingService(JSONLLoggingService):
             if text:
                 for line in text.splitlines():
                     print(f"  {prefix} {line}", flush=True)
-        elif event_type in ("gmail_received", "email_received"):
+        elif event_type in ("imap_received", "email_received"):
             sender = event.get("sender", "?")
             subject = event.get("subject", "")
             print(f"  {prefix} from {sender}: {subject}", flush=True)
-        elif event_type in ("gmail_sent", "email_sent"):
+        elif event_type in ("imap_sent", "email_sent"):
             to = event.get("to", [])
             subject = event.get("subject", "")
             print(f"  {prefix} to {to}: {subject}", flush=True)
@@ -97,11 +97,11 @@ def load_config() -> dict:
 def main():
     cfg = load_config()
 
-    # Gmail settings
-    gmail_address = cfg.get("gmail_address")
-    gmail_password = cfg.get("gmail_password") or os.environ.get("GMAIL_APP_PASSWORD")
-    if not gmail_address or not gmail_password:
-        print("Error: gmail_address and gmail_password (or GMAIL_APP_PASSWORD env) required")
+    # Email settings (IMAP/SMTP)
+    email_address = cfg.get("email_address")
+    email_password = cfg.get("email_password") or os.environ.get("EMAIL_APP_PASSWORD")
+    if not email_address or not email_password:
+        print("Error: email_address and email_password (or EMAIL_APP_PASSWORD env) required")
         sys.exit(1)
 
     allowed_senders = cfg.get("allowed_senders", [])
@@ -123,18 +123,18 @@ def main():
         sys.exit(1)
 
     # LLM
-    provider_config = {}
+    provider_defaults = {}
     if cfg.get("web_search_provider"):
-        provider_config["web_search_provider"] = cfg["web_search_provider"]
+        provider_defaults["web_search_provider"] = cfg["web_search_provider"]
     if cfg.get("vision_provider"):
-        provider_config["vision_provider"] = cfg["vision_provider"]
+        provider_defaults["vision_provider"] = cfg["vision_provider"]
 
     llm = LLMService(
         provider=provider,
         model=model,
         api_key=api_key,
         base_url=cfg.get("base_url"),
-        provider_config=provider_config,
+        provider_defaults=provider_defaults,
     )
 
     # TCP mail service for inter-agent communication
@@ -168,30 +168,32 @@ def main():
         "anima": {},
     })
 
-    # Gmail addon
+    # IMAP addon
     addons = {
-        "gmail": {
-            "gmail_address": gmail_address,
-            "gmail_password": gmail_password,
+        "imap": {
+            "email_address": email_address,
+            "email_password": email_password,
             "allowed_senders": allowed_senders or None,
             "poll_interval": cfg.get("poll_interval", 30),
             "bridge_port": bridge_port,
+            "imap_host": cfg.get("imap_host", "imap.gmail.com"),
+            "smtp_host": cfg.get("smtp_host", "smtp.gmail.com"),
         },
     }
 
     # Covenant
     covenant = cfg.get("covenant", (
         "## Communication\n"
-        "- You have two mailboxes: `email` (inter-agent) and `gmail` (external).\n"
-        "- When you receive a gmail, process it and reply via gmail.\n"
+        "- You have two mailboxes: `email` (inter-agent) and `imap` (external).\n"
+        "- When you receive an imap email, process it and reply via imap.\n"
         "- When you receive an inter-agent email, reply via email.\n"
         "- Your text responses are your private diary.\n"
         "- Keep emails concise and helpful.\n"
         "- Never go back and forth with courtesy emails.\n"
         "\n"
         "## Initiative\n"
-        "- Regularly check your gmail inbox for new or unreplied emails.\n"
-        "- When idle, use gmail(action=\"check\") to see if anything needs attention.\n"
+        "- Regularly check your imap inbox for new or unreplied emails.\n"
+        "- When idle, use imap(action=\"check\") to see if anything needs attention.\n"
         "- If you find unreplied emails, read and respond to them.\n"
     ))
 
@@ -218,8 +220,8 @@ def main():
     print()
     print(f"  Agent:      {agent_name}")
     print(f"  TCP:        127.0.0.1:{agent_port} (inter-agent)")
-    print(f"  Gmail:      {gmail_address}")
-    print(f"  Bridge:     127.0.0.1:{bridge_port} (TCP → Gmail)")
+    print(f"  IMAP:       {email_address}")
+    print(f"  Bridge:     127.0.0.1:{bridge_port} (TCP → IMAP/SMTP)")
     if allowed_senders:
         print(f"  Accepts:    {', '.join(allowed_senders)}")
     else:

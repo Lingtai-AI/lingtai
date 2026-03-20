@@ -1,11 +1,14 @@
 {
-  "_comment": "Gmail email app config. Copy to config.json and fill in.",
+  "_comment": "IMAP email app config. Copy to config.json and fill in.",
 
-  "gmail_address": "your-agent@gmail.com",
-  "gmail_password": "xxxx xxxx xxxx xxxx",
-  "_gmail_note": "Use a Gmail App Password (2FA required). myaccount.google.com → App Passwords",
+  "email_address": "your-agent@gmail.com",
+  "email_password": "xxxx xxxx xxxx xxxx",
+  "_email_note": "For Gmail, use an App Password (2FA required). myaccount.google.com → App Passwords",
 
   "allowed_senders": ["your-personal@gmail.com"],
+
+  "imap_host": "imap.gmail.com",
+  "smtp_host": "smtp.gmail.com",
 
   "agent_name": "agent",
   "agent_port": 8301,
