@@ -31,6 +31,8 @@ class IMAPMailService(MailService):
                 smtp_host=cfg.get("smtp_host", "smtp.gmail.com"),
                 smtp_port=cfg.get("smtp_port", 587),
                 working_dir=self._working_dir,
+                allowed_senders=cfg.get("allowed_senders"),
+                poll_interval=cfg.get("poll_interval", 30),
             )
             self._accounts.append(acct)
         self._account_map: dict[str, IMAPAccount] = {
@@ -60,8 +62,17 @@ class IMAPMailService(MailService):
         )
 
     def listen(self, on_message: Callable[[dict], None]) -> None:
+        """Start listening on all accounts.
+
+        Wraps the per-message callback so each header dict from the
+        account's batch callback is dispatched individually.
+        """
+        def _dispatch_each(headers: list[dict]) -> None:
+            for header in headers:
+                on_message(header)
+
         for acct in self._accounts:
-            acct.start_listening(on_message)
+            acct.start_listening(_dispatch_each)
 
     def stop(self) -> None:
         for acct in self._accounts:

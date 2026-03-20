@@ -178,6 +178,8 @@ class IMAPAccount:
         smtp_host: str = "smtp.gmail.com",
         smtp_port: int = 587,
         working_dir: Path | str | None = None,
+        allowed_senders: list[str] | None = None,
+        poll_interval: int = 30,
     ) -> None:
         self._email_address = email_address
         self._email_password = email_password
@@ -186,6 +188,8 @@ class IMAPAccount:
         self._smtp_host = smtp_host
         self._smtp_port = smtp_port
         self._working_dir = Path(working_dir) if working_dir else None
+        self._allowed_senders = allowed_senders
+        self._poll_interval = poll_interval
 
         # IMAP connection
         self._imap: imaplib.IMAP4_SSL | None = None
@@ -215,6 +219,10 @@ class IMAPAccount:
         # Reconnect backoff steps (seconds)
         self._backoff_steps = [1, 2, 5, 10, 60]
         self._backoff_index = 0
+
+        # Background listening thread
+        self._bg_thread: threading.Thread | None = None
+        self._stop_event: threading.Event | None = None
 
         # Load persisted state
         self._load_state()
@@ -820,6 +828,66 @@ class IMAPAccount:
             logger.error(error)
             return error
 
+    # -- Background listening -------------------------------------------------
+
+    def start_listening(
+        self,
+        on_message: Callable[[list[dict]], None],
+        *,
+        folder: str = "INBOX",
+        poll_interval: int | None = None,
+    ) -> None:
+        """Start listening for new messages in a background daemon thread."""
+        if self._bg_thread is not None:
+            return  # already listening
+        if poll_interval is None:
+            poll_interval = self._poll_interval
+        self._stop_event = threading.Event()
+        self._bg_thread = threading.Thread(
+            target=self._listen_wrapper,
+            args=(folder, on_message, poll_interval),
+            daemon=True,
+        )
+        self._bg_thread.start()
+
+    def stop_listening(self) -> None:
+        """Stop the background listening thread."""
+        if hasattr(self, "_stop_event") and self._stop_event is not None:
+            self._stop_event.set()
+        if self._bg_thread is not None:
+            self._bg_thread.join(timeout=10.0)
+            self._bg_thread = None
+
+    def _listen_wrapper(
+        self,
+        folder: str,
+        on_message: Callable[[list[dict]], None],
+        poll_interval: int,
+    ) -> None:
+        """Wrapper that handles connect + idle loop with reconnection."""
+        while not self._stop_event.is_set():
+            try:
+                if not self.connected:
+                    self.connect()
+                    self._backoff_index = 0
+                self.idle(
+                    folder, on_message,
+                    poll_interval=poll_interval,
+                    stop_event=self._stop_event,
+                )
+            except Exception as e:
+                logger.warning("Listen error on %s: %s", self._email_address, e)
+                try:
+                    self.disconnect()
+                except Exception:
+                    pass
+                delay = self._backoff_steps[
+                    min(self._backoff_index, len(self._backoff_steps) - 1)
+                ]
+                self._backoff_index += 1
+                if self._stop_event.wait(delay):
+                    return
+
     # -- IDLE with poll fallback (errata #3, #4) -----------------------------
 
     def idle(
@@ -1016,6 +1084,17 @@ class IMAPAccount:
             for uid in new_uids:
                 self._processed_uids[folder].add(int(uid))
             self._save_state()
+
+        # Filter by allowed_senders if configured
+        if new_headers and self._allowed_senders is not None:
+            allowed = {s.lower() for s in self._allowed_senders}
+            filtered: list[dict] = []
+            for hdr in new_headers:
+                from_raw = hdr.get("from", "")
+                _, from_addr = parseaddr(from_raw)
+                if from_addr.lower() in allowed:
+                    filtered.append(hdr)
+            new_headers = filtered
 
         # Deliver OUTSIDE the lock (erratum #5)
         if new_headers:
