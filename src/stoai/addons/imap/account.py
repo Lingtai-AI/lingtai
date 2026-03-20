@@ -209,8 +209,12 @@ class IMAPAccount:
         # IDLE tag counter (erratum #3)
         self._tag_counter = 0
 
-        # State persistence
-        self._processed_uids: set[str] = set()
+        # State persistence — per-folder dict of int UIDs
+        self._processed_uids: dict[str, list[int]] = {}
+
+        # Reconnect backoff steps (seconds)
+        self._backoff_steps = [1, 2, 5, 10, 60]
+        self._backoff_index = 0
 
         # Load persisted state
         self._load_state()
@@ -590,19 +594,24 @@ class IMAPAccount:
         """Build IMAP SEARCH criteria from a query string.
 
         Supported operators:
-            from:addr, subject:text, since:YYYY-MM-DD, before:YYYY-MM-DD,
-            flagged, unseen
+            from:addr, to:addr, subject:text, since:YYYY-MM-DD, before:YYYY-MM-DD,
+            flagged, unseen, seen, answered
 
-        Multiple terms are AND-ed. Unknown tokens become a SUBJECT search as fallback.
+        Quoted phrases: "exact phrase" → TEXT "exact phrase"
+        Multiple terms are AND-ed. Unknown tokens become a TEXT search as fallback.
         """
         parts: list[str] = []
 
         # Tokenize — respecting quoted values
-        # Matches: key:"quoted value" or key:value or standalone_keyword
-        tokens = re.findall(r'(\w+:"[^"]*"|\w+:\S+|\w+)', query)
+        # Matches: key:"quoted value", key:value, "quoted phrase", or standalone_keyword
+        tokens = re.findall(r'(\w+:"[^"]*"|\w+:\S+|"[^"]*"|\w+)', query)
 
         for token in tokens:
-            if ":" in token and not token.startswith('"'):
+            if token.startswith('"') and token.endswith('"'):
+                # Quoted phrase → TEXT search
+                phrase = token[1:-1]
+                parts.append(f'TEXT "{phrase}"')
+            elif ":" in token:
                 key, _, value = token.partition(":")
                 # Strip quotes from value
                 value = value.strip('"')
@@ -610,6 +619,8 @@ class IMAPAccount:
 
                 if key_lower == "from":
                     parts.append(f'FROM "{value}"')
+                elif key_lower == "to":
+                    parts.append(f'TO "{value}"')
                 elif key_lower == "subject":
                     parts.append(f'SUBJECT "{value}"')
                 elif key_lower == "since":
@@ -617,16 +628,16 @@ class IMAPAccount:
                         dt = datetime.strptime(value, "%Y-%m-%d")
                         parts.append(f'SINCE {_format_imap_date(dt)}')
                     except ValueError:
-                        parts.append(f'SUBJECT "{value}"')
+                        parts.append(f'TEXT "{value}"')
                 elif key_lower == "before":
                     try:
                         dt = datetime.strptime(value, "%Y-%m-%d")
                         parts.append(f'BEFORE {_format_imap_date(dt)}')
                     except ValueError:
-                        parts.append(f'SUBJECT "{value}"')
+                        parts.append(f'TEXT "{value}"')
                 else:
-                    # Unknown key — treat as subject search
-                    parts.append(f'SUBJECT "{token}"')
+                    # Unknown key — treat as TEXT search
+                    parts.append(f'TEXT "{token}"')
             else:
                 # Standalone keyword
                 keyword = token.lower()
@@ -634,9 +645,13 @@ class IMAPAccount:
                     parts.append("FLAGGED")
                 elif keyword == "unseen":
                     parts.append("UNSEEN")
+                elif keyword == "seen":
+                    parts.append("SEEN")
+                elif keyword == "answered":
+                    parts.append("ANSWERED")
                 else:
-                    # Fallback: treat as subject search
-                    parts.append(f'SUBJECT "{token}"')
+                    # Fallback: treat as TEXT search
+                    parts.append(f'TEXT "{token}"')
 
         if not parts:
             return "ALL"
@@ -696,7 +711,10 @@ class IMAPAccount:
                 if status != "OK":
                     return False
                 imap.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-                imap.expunge()
+                if self._has_uidplus:
+                    imap.uid("EXPUNGE", uid)
+                else:
+                    imap.expunge()
                 return True
 
     def delete_message(self, folder: str, uid: str) -> bool:
@@ -711,7 +729,10 @@ class IMAPAccount:
                 imap = self._ensure_connected()
                 imap.select(folder)
                 imap.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-                imap.expunge()
+                if self._has_uidplus:
+                    imap.uid("EXPUNGE", uid)
+                else:
+                    imap.expunge()
                 return True
 
     # -- SMTP send -----------------------------------------------------------
@@ -833,11 +854,14 @@ class IMAPAccount:
                     self.disconnect()
                 except Exception:
                     pass
-                # Back off before reconnect
-                if stop_event.wait(10.0):
+                # Progressive backoff before reconnect
+                delay = self._backoff_steps[min(self._backoff_index, len(self._backoff_steps) - 1)]
+                self._backoff_index += 1
+                if stop_event.wait(delay):
                     return
                 try:
                     self.connect()
+                    self._backoff_index = 0  # Reset on successful connect
                 except Exception as ce:
                     logger.warning("Reconnect failed: %s", ce)
 
@@ -875,8 +899,10 @@ class IMAPAccount:
         # - _idle_event (another method needs the connection)
         # - server notification (EXISTS etc.)
         try:
+            # Cap IDLE wait at 25 minutes (1500s) per RFC 2177 recommendation
+            effective_timeout = min(timeout, 1500)
             # Use _idle_event to detect interrupts, check periodically for server data
-            deadline = time.monotonic() + timeout
+            deadline = time.monotonic() + effective_timeout
             got_data = False
             while time.monotonic() < deadline:
                 if stop_event.is_set() or self._idle_event.is_set():
@@ -964,11 +990,12 @@ class IMAPAccount:
                 return
 
             uid_list = data[0].split()
+            processed_for_folder = set(self._processed_uids.get(folder, []))
             new_uids = []
             for uid_bytes in uid_list:
                 uid = uid_bytes.decode("ascii") if isinstance(uid_bytes, bytes) else str(uid_bytes)
-                compound_id = f"{self._email_address}:{folder}:{uid}"
-                if compound_id not in self._processed_uids:
+                uid_int = int(uid)
+                if uid_int not in processed_for_folder:
                     new_uids.append(uid)
 
             if not new_uids:
@@ -984,9 +1011,10 @@ class IMAPAccount:
                 new_headers = self._parse_fetch_response(fetch_data, folder)
 
             # Mark as processed
+            if folder not in self._processed_uids:
+                self._processed_uids[folder] = []
             for uid in new_uids:
-                compound_id = f"{self._email_address}:{folder}:{uid}"
-                self._processed_uids.add(compound_id)
+                self._processed_uids[folder].append(int(uid))
             self._save_state()
 
         # Deliver OUTSIDE the lock (erratum #5)
@@ -1007,37 +1035,83 @@ class IMAPAccount:
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            self._processed_uids = set(data.get("processed_uids", []))
-            # Restore cached folder mapping
+
+            # processed_uids: {folder: [uid_ints]}
+            raw_uids = data.get("processed_uids", {})
+            if isinstance(raw_uids, dict):
+                self._processed_uids = {
+                    folder: list(uid_list) for folder, uid_list in raw_uids.items()
+                }
+            else:
+                self._processed_uids = {}
+
+            # folders: {name: {"role": role}}
             if "folders" in data:
-                self._folders = data["folders"]
+                self._folders = {}
                 self._folder_by_role = {}
-                for name, role in self._folders.items():
+                for name, val in data["folders"].items():
+                    if isinstance(val, dict):
+                        role = val.get("role", "")
+                    else:
+                        # Backward compat: bare string
+                        role = val if isinstance(val, str) else ""
+                    self._folders[name] = role
                     if role and role not in self._folder_by_role:
                         self._folder_by_role[role] = name
+
+            # capabilities: {name: bool}
             if "capabilities" in data:
-                self._parse_capabilities(data["capabilities"])
+                caps = data["capabilities"]
+                if isinstance(caps, dict):
+                    self._has_idle = bool(caps.get("idle", False))
+                    self._has_move = bool(caps.get("move", False))
+                    self._has_uidplus = bool(caps.get("uidplus", False))
+                    # Rebuild _capabilities set from booleans
+                    self._capabilities = set()
+                    if self._has_idle:
+                        self._capabilities.add("IDLE")
+                    if self._has_move:
+                        self._capabilities.add("MOVE")
+                    if self._has_uidplus:
+                        self._capabilities.add("UIDPLUS")
+                elif isinstance(caps, str):
+                    # Backward compat: space-separated string
+                    self._parse_capabilities(caps)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load IMAP state for %s: %s", self._email_address, e)
 
     def _save_state(self) -> None:
-        """Persist state to disk. Trims processed_uids to last 2000."""
+        """Persist state to disk. Trims processed_uids to last 2000 per folder."""
         path = self._state_path()
         if path is None:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        uids = sorted(self._processed_uids)
-        if len(uids) > 2000:
-            uids = uids[-2000:]
-            self._processed_uids = set(uids)
+        # Trim each folder's UID list to last 2000
+        trimmed: dict[str, list[int]] = {}
+        for folder, uid_list in self._processed_uids.items():
+            sorted_uids = sorted(uid_list)
+            if len(sorted_uids) > 2000:
+                sorted_uids = sorted_uids[-2000:]
+            trimmed[folder] = sorted_uids
+        self._processed_uids = trimmed
 
-        caps_str = " ".join(sorted(self._capabilities))
+        # Folders as {name: {"role": role}} objects
+        folders_obj: dict[str, dict[str, str]] = {}
+        for name, role in self._folders.items():
+            folders_obj[name] = {"role": role}
+
+        # Capabilities as {name: true/false} boolean dict
+        caps_obj: dict[str, bool] = {
+            "idle": self._has_idle,
+            "move": self._has_move,
+            "uidplus": self._has_uidplus,
+        }
 
         state = {
-            "processed_uids": uids,
-            "folders": self._folders,
-            "capabilities": caps_str,
+            "processed_uids": trimmed,
+            "folders": folders_obj,
+            "capabilities": caps_obj,
         }
         path.write_text(
             json.dumps(state, indent=2), encoding="utf-8",
