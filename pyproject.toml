@@ -13,7 +13,7 @@ dependencies = ["stoai-kernel"]
 gemini = ["google-genai>=1.0"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.40"]
-minimax = ["minimax>=0.1"]
+minimax = ["anthropic>=0.40", "mcp>=1.0"]
 all = ["stoai[gemini,openai,anthropic,minimax]"]
 
 [tool.setuptools.packages.find]
