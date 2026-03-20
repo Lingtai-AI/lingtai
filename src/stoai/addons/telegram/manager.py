@@ -253,13 +253,27 @@ class TelegramManager:
                 "callback_query": None,
             }
             username = sender.get("username") or sender.get("first_name", "unknown")
+
+            # Update existing inbox entry in-place if found
+            existing_dir = self._find_inbox_by_compound_id(account_alias, compound_id)
+            if existing_dir is not None:
+                (existing_dir / "message.json").write_text(
+                    json.dumps(payload, indent=2, default=str), encoding="utf-8",
+                )
+                # Clean up the unused new dir
+                msg_dir.rmdir()
+            else:
+                (msg_dir / "message.json").write_text(
+                    json.dumps(payload, indent=2, default=str), encoding="utf-8",
+                )
         else:
             return  # unsupported update type
 
-        # Persist
-        (msg_dir / "message.json").write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8",
-        )
+        # Persist (for message and callback_query types)
+        if "edited_message" not in update:
+            (msg_dir / "message.json").write_text(
+                json.dumps(payload, indent=2, default=str), encoding="utf-8",
+            )
 
         # Notify agent
         self._agent._mail_arrived.set()
@@ -333,6 +347,22 @@ class TelegramManager:
                     continue
         messages.sort(key=lambda m: m.get("date", ""), reverse=True)
         return messages
+
+    def _find_inbox_by_compound_id(self, account: str, compound_id: str) -> Path | None:
+        """Find an existing inbox message dir by compound ID. Returns dir Path or None."""
+        inbox_dir = self._account_dir(account) / "inbox"
+        if not inbox_dir.is_dir():
+            return None
+        for msg_dir in inbox_dir.iterdir():
+            msg_file = msg_dir / "message.json"
+            if msg_dir.is_dir() and msg_file.is_file():
+                try:
+                    data = json.loads(msg_file.read_text(encoding="utf-8"))
+                    if data.get("id") == compound_id:
+                        return msg_dir
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return None
 
     def _read_ids(self, account: str) -> set[str]:
         path = self._account_dir(account) / "read.json"
@@ -597,9 +627,25 @@ class TelegramManager:
         account, chat_id, tg_msg_id = self._parse_compound_id(compound_id)
         reply_markup = args.get("reply_markup")
         acct = self._service.get_account(account)
+
+        # Detect if original message had media (caption edit vs text edit)
+        is_caption = False
+        sent_dir = self._account_dir(account) / "sent"
+        if sent_dir.is_dir():
+            for msg_dir in sent_dir.iterdir():
+                msg_file = msg_dir / "message.json"
+                if msg_dir.is_dir() and msg_file.is_file():
+                    try:
+                        data = json.loads(msg_file.read_text(encoding="utf-8"))
+                        if data.get("id") == compound_id and data.get("media"):
+                            is_caption = True
+                            break
+                    except (json.JSONDecodeError, OSError):
+                        continue
+
         acct.edit_message(
             chat_id=chat_id, message_id=tg_msg_id, text=text,
-            reply_markup=reply_markup,
+            reply_markup=reply_markup, is_caption=is_caption,
         )
         return {"status": "edited", "message_id": compound_id}
 

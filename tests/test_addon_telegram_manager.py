@@ -342,3 +342,103 @@ def test_start_stop_lifecycle(tmp_path):
     svc.start.assert_called_once()
     mgr.stop()
     svc.stop.assert_called_once()
+
+
+def test_edited_message_updates_existing(tmp_path):
+    """edited_message should update existing inbox entry, not create a duplicate."""
+    mgr, agent, svc = _make_manager(tmp_path)
+
+    # First: receive the original message
+    original_update = {
+        "update_id": 1,
+        "message": {
+            "message_id": 42,
+            "from": {"id": 111, "username": "alice", "first_name": "Alice"},
+            "chat": {"id": 111, "type": "private"},
+            "date": 1710928200,
+            "text": "Original text",
+        },
+    }
+    mgr.on_incoming("default", original_update)
+
+    inbox_dir = tmp_path / "telegram" / "default" / "inbox"
+    msg_dirs = list(inbox_dir.iterdir())
+    assert len(msg_dirs) == 1
+    original_dir = msg_dirs[0]
+
+    # Now: receive an edit for the same message
+    edit_update = {
+        "update_id": 2,
+        "edited_message": {
+            "message_id": 42,
+            "from": {"id": 111, "username": "alice", "first_name": "Alice"},
+            "chat": {"id": 111, "type": "private"},
+            "date": 1710928200,
+            "edit_date": 1710928300,
+            "text": "Edited text",
+        },
+    }
+    mgr.on_incoming("default", edit_update)
+
+    # Should still have only 1 inbox entry (not 2)
+    msg_dirs = [d for d in inbox_dir.iterdir() if d.is_dir()]
+    assert len(msg_dirs) == 1
+    # The original entry should be updated
+    msg = json.loads((original_dir / "message.json").read_text())
+    assert msg["text"] == "Edited text"
+    assert msg["id"] == "default:111:42"
+
+
+def test_edit_caption_detected(tmp_path):
+    """_edit should use editMessageCaption when original had media."""
+    mgr, agent, svc = _make_manager(tmp_path)
+    acct_mock = MagicMock()
+    acct_mock.alias = "default"
+    acct_mock.send_photo.return_value = {"message_id": 100}
+    acct_mock.edit_message.return_value = {}
+    svc.get_account.return_value = acct_mock
+    svc.default_account = acct_mock
+
+    # First: send a photo message so it's in sent/
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"\x89PNG")
+    mgr.handle({
+        "action": "send", "chat_id": 111, "text": "See photo",
+        "media": {"type": "photo", "path": str(photo)},
+    })
+
+    # Now edit it — should detect is_caption=True
+    result = mgr.handle({
+        "action": "edit", "message_id": "default:111:100",
+        "text": "Updated caption",
+    })
+    assert result["status"] == "edited"
+    acct_mock.edit_message.assert_called_once_with(
+        chat_id=111, message_id=100, text="Updated caption",
+        reply_markup=None, is_caption=True,
+    )
+
+
+def test_edit_text_no_media(tmp_path):
+    """_edit should use editMessageText when original had no media."""
+    mgr, agent, svc = _make_manager(tmp_path)
+    acct_mock = MagicMock()
+    acct_mock.alias = "default"
+    acct_mock.send_message.return_value = {"message_id": 200}
+    acct_mock.edit_message.return_value = {}
+    svc.get_account.return_value = acct_mock
+    svc.default_account = acct_mock
+
+    # Send a text-only message
+    mgr.handle({"action": "send", "chat_id": 111, "text": "Hello"})
+
+    # Edit it — should detect is_caption=False
+    result = mgr.handle({
+        "action": "edit", "message_id": "default:111:200",
+        "text": "Updated text",
+    })
+    assert result["status"] == "edited"
+    acct_mock.edit_message.assert_called_once_with(
+        chat_id=111, message_id=200, text="Updated text",
+        reply_markup=None, is_caption=False,
+    )
