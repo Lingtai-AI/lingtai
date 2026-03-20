@@ -1,0 +1,19 @@
+{
+  "_comment": "LLM provider config. Only api_key_env (env var names), never raw keys.",
+
+  "provider": "minimax",
+  "model": "MiniMax-M2.7-highspeed",
+  "api_key_env": "MINIMAX_API_KEY",
+
+  "vision": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+
+  "web_search": {
+    "provider": "gemini",
+    "model": "gemini-2.0-flash",
+    "api_key_env": "GEMINI_API_KEY"
+  }
+}

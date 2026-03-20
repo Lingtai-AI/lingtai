@@ -17,5 +17,11 @@ minimax = ["anthropic>=0.40", "mcp>=1.0"]
 telegram = ["httpx>=0.27"]
 all = ["stoai[gemini,openai,anthropic,minimax,telegram]"]
 
+[project.scripts]
+stoai = "app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-dir]
+app = "app"

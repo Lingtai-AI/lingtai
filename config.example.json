@@ -1,0 +1,26 @@
+{
+  "_comment": "StoAI orchestrator config. Copy to config.json and fill in.",
+
+  "model": "model.json",
+
+  "imap": {
+    "email_address": "your-agent@gmail.com",
+    "email_password_env": "GMAIL_APP_PASSWORD",
+    "allowed_senders": ["your-personal@gmail.com"],
+    "imap_host": "imap.gmail.com",
+    "smtp_host": "smtp.gmail.com"
+  },
+
+  "telegram": {
+    "bot_token_env": "TELEGRAM_BOT_TOKEN",
+    "allowed_users": []
+  },
+
+  "cli": true,
+
+  "agent_name": "orchestrator",
+  "base_dir": "~/.stoai",
+  "bash_policy": "policy.json",
+  "max_turns": 50,
+  "agent_port": 8501
+}
