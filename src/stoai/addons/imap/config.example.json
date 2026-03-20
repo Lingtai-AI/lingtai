@@ -1,22 +1,9 @@
 {
-  "_comment": "IMAP email config. Copy and fill in your credentials.",
-
   "email_address": "your-agent@gmail.com",
   "email_password": "xxxx xxxx xxxx xxxx",
-  "_email_note_1": "Regular passwords do NOT work — you need an App Password.",
-  "_email_note_2": "Gmail setup: 1) Enable 2FA at myaccount.google.com/security",
-  "_email_note_3": "             2) Go to myaccount.google.com/apppasswords",
-  "_email_note_4": "             3) Create a new app password (name it anything, e.g. 'stoai')",
-  "_email_note_5": "             4) Copy the 16-char password (format: xxxx xxxx xxxx xxxx)",
-  "_email_note_6": "Outlook setup: 1) Enable 2FA at account.microsoft.com/security",
-  "_email_note_7": "               2) Go to Security → App passwords → Create a new app password",
-  "_email_note_8": "               3) Use imap_host: imap.outlook.com, smtp_host: smtp.outlook.com",
-
   "allowed_senders": ["your-personal@gmail.com"],
-
   "imap_host": "imap.gmail.com",
   "smtp_host": "smtp.gmail.com",
-
   "poll_interval": 30,
   "bridge_port": 8399
 }
