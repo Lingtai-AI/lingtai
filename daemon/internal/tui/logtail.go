@@ -83,7 +83,6 @@ func (lt *LogTailer) tailFile() {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
 	// Seek to end
 	f.Seek(0, 2)
@@ -95,6 +94,7 @@ func (lt *LogTailer) tailFile() {
 	for {
 		select {
 		case <-lt.done:
+			f.Close()
 			return
 		default:
 		}
@@ -107,11 +107,10 @@ func (lt *LogTailer) tailFile() {
 			if scanner.Err() != nil {
 				// Scanner error (e.g., buffer overflow) — re-open the file and seek to end.
 				f.Close()
-				f2, err := os.Open(lt.path)
+				f, err = os.Open(lt.path)
 				if err != nil {
 					return
 				}
-				f = f2
 				f.Seek(0, 2)
 				scanner = bufio.NewScanner(f)
 				scanner.Buffer(make([]byte, 1024*1024), 1024*1024)

@@ -31,6 +31,7 @@ type Model struct {
 	mail     *agent.MailClient
 	listener *agent.MailListener
 	tailer   *LogTailer
+	mailCh   chan map[string]interface{}
 
 	viewport viewport.Model
 	input    textinput.Model
@@ -57,6 +58,7 @@ func New(cfg *config.Config, proc *agent.Process) Model {
 		config:   cfg,
 		proc:     proc,
 		mail:     mailClient,
+		mailCh:   make(chan map[string]interface{}, 32),
 		input:    ti,
 		messages: []string{},
 	}
@@ -113,8 +115,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Start mail listener for agent replies
 			if m.config.CLIPort > 0 {
+				mailCh := m.mailCh
 				listener, err := agent.NewMailListener(m.config.CLIPort, func(msg map[string]interface{}) {
-					// Will be picked up by pollMailEvents
+					mailCh <- msg
 				})
 				if err == nil {
 					m.listener = listener
@@ -223,10 +226,12 @@ func (m Model) pollLogEvents() tea.Cmd {
 
 func (m Model) pollMailEvents() tea.Cmd {
 	return func() tea.Msg {
-		// Poll is handled via the listener callback + log events
-		// For now, just tick
-		time.Sleep(1 * time.Second)
-		return tickMsg(time.Now())
+		select {
+		case msg := <-m.mailCh:
+			return mailReceivedMsg(msg)
+		case <-time.After(1 * time.Second):
+			return tickMsg(time.Now())
+		}
 	}
 }
 
@@ -254,13 +259,6 @@ func formatLogEvent(e LogEvent) string {
 		return DiaryMsg.Render(fmt.Sprintf("📝 %s", e.Text))
 	}
 	return ""
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // Run starts the TUI.
