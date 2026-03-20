@@ -4,7 +4,7 @@
 
 A Telegram Bot API addon for StoAI, enabling agents to interact with Telegram users for customer service. Follows the IMAP addon's three-class pattern (Account, Service, Manager). Supports multi-account (multiple bot tokens), text + images + documents, inline keyboards, and long polling for updates.
 
-**Standalone tool** — no bridge to the inter-agent mail system. The `telegram` tool is a separate channel, like how humans treat email and Telegram as naturally different.
+**Standalone tool** — no bridge to the inter-agent mail system. The `telegram` tool is a separate channel, like how humans treat email and Telegram as naturally different. `TelegramService` does not implement `MailService` — it is not a mail transport. There is no TCP bridge.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ src/stoai/addons/telegram/
 
 ### Dependency
 
-`httpx` for Bot API HTTP calls. No Telegram SDK — the Bot API is straightforward REST. Added as optional: `pip install stoai[telegram]`.
+`httpx` for Bot API HTTP calls. Chosen over stdlib `urllib.request` for multipart file upload ergonomics (photo/document sends) and connection pooling for long-poll requests. No Telegram SDK needed — the Bot API is straightforward REST. Added as optional: `pip install stoai[telegram]`.
 
 ## Tool Schema
 
@@ -44,17 +44,19 @@ Single `telegram` tool with these actions:
 
 | Action | Purpose | Key params |
 |--------|---------|------------|
-| `send` | Send message to a chat | `account`, `chat_id`, `text`, `media` (optional), `reply_markup` (optional) |
+| `send` | Send message to a chat | `account` (optional), `chat_id`, `text`, `media` (optional), `reply_markup` (optional) |
 | `check` | List recent conversations with unread counts | `account` (optional, all if omitted) |
-| `read` | Read messages from a chat | `account`, `chat_id`, `limit` (default 10) |
-| `reply` | Reply to a specific message | `account`, `message_id`, `text`, `media` (optional) |
-| `search` | Search messages by text/sender | `account`, `query`, `chat_id` (optional) |
-| `delete` | Delete a message the bot sent | `account`, `message_id` |
-| `edit` | Edit a message the bot sent | `account`, `message_id`, `text`, `reply_markup` (optional) |
+| `read` | Read messages from a chat. Returns messages with compound IDs that can be used for `reply`. | `account` (optional), `chat_id`, `limit` (default 10) |
+| `reply` | Reply to a specific message (use compound ID from `read` results) | `account` (optional), `message_id`, `text`, `media` (optional) |
+| `search` | Search messages by text/sender | `account` (optional), `query`, `chat_id` (optional) |
+| `delete` | Delete a message the bot sent. In groups, can delete user messages only if bot is admin. | `account` (optional), `message_id` |
+| `edit` | Edit a text message or caption the bot sent. Uses `editMessageText` for text messages, `editMessageCaption` for media with captions. | `account` (optional), `message_id`, `text`, `reply_markup` (optional) |
 | `contacts` | List known contacts/chats | `account` (optional) |
-| `add_contact` | Save a chat with alias | `account`, `chat_id`, `alias` |
-| `remove_contact` | Remove a saved contact | `account`, `alias` or `chat_id` |
+| `add_contact` | Save a chat with alias | `account` (optional), `chat_id`, `alias` |
+| `remove_contact` | Remove a saved contact | `account` (optional), `alias` or `chat_id` |
 | `accounts` | List configured bot accounts | (none) |
+
+`account` is optional on all actions — defaults to the first configured account. In single-account setups the agent never needs to specify it.
 
 ### Message ID Format
 
@@ -78,20 +80,21 @@ Callback query updates (button presses) are received as a special message type s
 
 ```
 working_dir/telegram/
-├── {account_alias}/
-│   ├── inbox/
-│   │   └── {uuid}/
-│   │       ├── message.json
-│   │       └── attachments/
-│   │           └── photo.jpg
-│   ├── sent/
-│   │   └── {uuid}/
-│   │       └── message.json
-│   ├── read.json              # set of read message compound IDs
-│   └── state.json             # last update_id for polling offset
-├── contacts.json              # shared across accounts
-└── callback_queries.json      # pending inline keyboard responses
+└── {account_alias}/
+    ├── inbox/
+    │   └── {uuid}/
+    │       ├── message.json
+    │       └── attachments/
+    │           └── photo.jpg
+    ├── sent/
+    │   └── {uuid}/
+    │       └── message.json
+    ├── contacts.json          # per-account contacts
+    ├── read.json              # set of read message compound IDs
+    └── state.json             # last update_id + bot info (getMe cache)
 ```
+
+Callback queries (inline keyboard button presses) are stored as regular inbox messages with a `callback_query` field — no separate file needed.
 
 ### Inbox message.json
 
@@ -123,12 +126,12 @@ working_dir/telegram/
 }
 ```
 
-### contacts.json
+### contacts.json (per account)
 
 ```json
 {
-  "alice": {"chat_id": 12345, "username": "customer1", "first_name": "Alice", "account": "bot1"},
-  "support_group": {"chat_id": -100999, "type": "group", "account": "bot1"}
+  "alice": {"chat_id": 12345, "username": "customer1", "first_name": "Alice"},
+  "support_group": {"chat_id": -100999, "type": "group"}
 }
 ```
 
@@ -139,7 +142,11 @@ class TelegramAccount:
     def __init__(self, alias: str, bot_token: str, allowed_users: list[int] | None,
                  poll_interval: float = 1.0, on_message: Callable):
         ...
+    def start(self) -> None: ...   # calls getMe (caches bot info), starts polling thread
+    def stop(self) -> None: ...    # signals polling thread to stop, joins
 ```
+
+Constructor stores config only — no threads, no API calls. `start()` calls `getMe` to cache the bot's username/id in `state.json`, then spawns the polling daemon thread. `stop()` sets a stop event and joins the thread.
 
 ### Polling
 
@@ -228,7 +235,11 @@ class TelegramManager:
 1. Service calls `manager.on_incoming(account_alias, update)`
 2. Manager persists to `telegram/{account}/inbox/{uuid}/message.json`
 3. Downloads any media attachments to `telegram/{account}/inbox/{uuid}/attachments/`
-4. Notifies agent: `"New telegram message from {username} via {account}"`
+4. Notifies agent using the same pattern as IMAP:
+   - Set `self._agent._mail_arrived.set()` to wake the agent from sleep
+   - Create system notification via `_make_message(MSG_REQUEST, "system", "New telegram message from {username} via {account}")`
+   - Put it on `self._agent.inbox`
+   - Log via `self._agent._log("telegram_received", ...)`
 
 ### Action Dispatch
 
@@ -248,7 +259,7 @@ class TelegramManager:
 
 ### Duplicate Send Protection
 
-Hash recent sends by `(account, chat_id, text)` with a short TTL to prevent double-sends from retries.
+Count-based blocking (same pattern as IMAP): track `_last_sent` dict keyed by `(account, chat_id, text)` with a count. Block repeated identical sends beyond a configurable free-pass threshold.
 
 ### Lifecycle
 
@@ -265,6 +276,8 @@ def setup(agent, *, accounts: list[dict] | None = None,
           poll_interval: float = 1.0, **kwargs) -> TelegramManager:
     ...
 ```
+
+`setup()` normalizes config (single-account shorthand → accounts list), creates `TelegramService` and `TelegramManager`, then calls `agent.add_tool("telegram", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION)` to register the tool. Returns the manager (which has `start()`/`stop()` lifecycle hooks called by `Agent`).
 
 ### Single Account Shorthand
 
