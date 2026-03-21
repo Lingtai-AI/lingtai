@@ -106,6 +106,10 @@ def get_schema(lang: str = "en") -> dict:
                 "type": "string",
                 "description": t(lang, "email.note"),
             },
+            "agent_id": {
+                "type": "string",
+                "description": t(lang, "email.agent_id"),
+            },
             "schedule": {
                 "type": "object",
                 "properties": {
@@ -974,6 +978,7 @@ class EmailManager:
         if not name:
             return {"error": "name is required"}
         note = args.get("note", "")
+        agent_id = args.get("agent_id", "")
 
         contacts = self._load_contacts()
         # Upsert by address
@@ -981,9 +986,11 @@ class EmailManager:
             if c["address"] == address:
                 c["name"] = name
                 c["note"] = note
+                if agent_id:
+                    c["agent_id"] = agent_id
                 self._save_contacts(contacts)
                 return {"status": "updated", "contact": c}
-        entry = {"address": address, "name": name, "note": note}
+        entry: dict = {"address": address, "name": name, "agent_id": agent_id, "note": note}
         contacts.append(entry)
         self._save_contacts(contacts)
         return {"status": "added", "contact": entry}
@@ -1010,6 +1017,8 @@ class EmailManager:
                     c["name"] = args["name"]
                 if "note" in args:
                     c["note"] = args["note"]
+                if "agent_id" in args:
+                    c["agent_id"] = args["agent_id"]
                 self._save_contacts(contacts)
                 return {"status": "updated", "contact": c}
         return {"error": f"Contact not found: {address}"}

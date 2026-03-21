@@ -1,4 +1,4 @@
-"""Re-export kernel mail services for backward compatibility."""
-from lingtai_kernel.services.mail import MailService, TCPMailService
+"""Re-export kernel mail services."""
+from lingtai_kernel.services.mail import MailService, FilesystemMailService
 
-__all__ = ["MailService", "TCPMailService"]
+__all__ = ["MailService", "FilesystemMailService"]

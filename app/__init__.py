@@ -10,7 +10,7 @@ from pathlib import Path
 from lingtai import Agent, AgentConfig
 from lingtai.llm import LLMService
 from lingtai.services.logging import JSONLLoggingService
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 from app.config import load_config, resolve_env_vars
 
@@ -118,12 +118,14 @@ def _build_addons(cfg: dict) -> dict:
 
 def _print_meta(cfg: dict) -> None:
     """Print agent metadata to terminal."""
-    name = cfg.get("agent_name", "orchestrator")
+    name = cfg.get("agent_name", "")
+    agent_id = cfg["agent_id"]
     base_dir = cfg.get("base_dir", "~/.lingtai")
     port = cfg.get("agent_port", 8501)
 
     print(f"  Agent:   {name}")
-    print(f"  Dir:     {base_dir}/{name}/")
+    print(f"  ID:      {agent_id}")
+    print(f"  Dir:     {base_dir}/{agent_id}/")
     print(f"  Port:    {port}")
 
     if cfg.get("imap"):
@@ -143,7 +145,7 @@ def _print_meta(cfg: dict) -> None:
 def send_message(config_path: str, message: str) -> None:
     """Send a one-shot TCP mail message to the agent."""
     cfg = load_config(config_path)
-    svc = TCPMailService()
+    svc = FilesystemMailService()
     svc.send(f"localhost:{cfg['agent_port']}", {
         "from": "cli@local",
         "to": [f"localhost:{cfg['agent_port']}"],
@@ -192,12 +194,14 @@ def main(config_path: str | None = None) -> None:
     )
 
     base_dir = Path(cfg["base_dir"]).expanduser()
-    agent_name = cfg.get("agent_name", "orchestrator")
+    agent_name = cfg.get("agent_name", "")
+    agent_id = cfg["agent_id"]
+    agent_dir = base_dir / agent_id
 
     # Build mail service — working_dir enables disk-backed mailbox
-    mail_service = TCPMailService(
+    mail_service = FilesystemMailService(
         listen_port=cfg["agent_port"],
-        working_dir=base_dir / agent_name,
+        working_dir=agent_dir,
     )
 
     # Build capabilities and addons
@@ -208,22 +212,22 @@ def main(config_path: str | None = None) -> None:
     _print_meta(cfg)
 
     # Resolve covenant — per-agent, in working dir
-    covenant_path = base_dir / agent_name / "covenant.md"
+    covenant_path = agent_dir / "covenant.md"
     if covenant_path.is_file():
         covenant = covenant_path.read_text(encoding="utf-8")
     else:
         covenant = _DEFAULT_COVENANT
 
-    # Create agent — use agent_name as agent_id so the working dir is
-    # stable across restarts (base_dir/orchestrator/ instead of base_dir/<random>/).
     agent = Agent(
         agent_name=agent_name,
-        agent_id=agent_name,
+        agent_id=agent_id,
         service=llm,
         mail_service=mail_service,
         config=AgentConfig(
             max_turns=cfg.get("max_turns", 50),
             language=cfg.get("language", "en"),
+            lifetime=cfg.get("lifetime", 86400.0),
+            flow_delay=cfg.get("flow_delay", 120.0),
         ),
         base_dir=base_dir,
         streaming=cfg.get("streaming", True),
@@ -233,7 +237,7 @@ def main(config_path: str | None = None) -> None:
     )
 
     # Copy combo.json to agent working dir for avatar spawning
-    combo_json_path = base_dir / agent_name / "combo.json"
+    combo_json_path = agent_dir / "combo.json"
     if not combo_json_path.exists():
         combo_record = {
             "name": cfg.get("combo_name", ""),
@@ -256,8 +260,7 @@ def main(config_path: str | None = None) -> None:
     cli = None
     if cfg.get("cli"):
         from app.cli import CLIChannel
-        cli_port = cfg.get("cli_port", cfg["agent_port"] + 1)
-        cli = CLIChannel(agent_port=cfg["agent_port"], cli_port=cli_port)
+        cli = CLIChannel(agent_port=cfg["agent_port"])
 
     # Signal handling
     stop_event = threading.Event()

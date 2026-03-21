@@ -119,6 +119,7 @@
   "email.type": "书信之类（用于 send）。'normal'（默认）为常书。'silence'中断目标使其入定（下书唤醒；须 admin.silence 之权）。'kill'强令目标归寂（须 admin.kill 之权）。恢复之法：以同名重新化出他我（保留工作目录、心印与邮匣）。恢复后他我得新址——请更新通讯录。",
   "email.name": "联络人之可读名称（用于 add_contact、edit_contact）",
   "email.note": "关于联络人之备注（用于 add_contact、edit_contact）",
+  "email.agent_id": "联络人之器灵号（十二位十六进制）。用于投递验证。可省。",
   "email.schedule_action": "create：设定期发信（须 address、message + schedule.interval、schedule.count）。cancel：撤运行中之定期（须 schedule.schedule_id）。list：查阅诸定期及进度。",
   "email.schedule_interval": "每次发信间隔之秒数（用于 create）",
   "email.schedule_count": "总发信次数（用于 create）",

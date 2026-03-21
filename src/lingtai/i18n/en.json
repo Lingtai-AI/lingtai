@@ -72,6 +72,7 @@
   "email.type": "Mail type (for send). 'normal' (default) is regular mail. 'silence' interrupts the target agent and puts it to idle (revives on next email; requires admin.silence privilege). 'kill' hard-stops the target agent (requires admin.kill privilege). To revive after kill: spawn a new 他我 with the SAME name (preserves working directory, character, and mailbox). The revived 他我 gets a NEW address — update your contacts after respawning.",
   "email.name": "Contact's human-readable name (for add_contact, edit_contact)",
   "email.note": "Free-text note about the contact (for add_contact, edit_contact)",
+  "email.agent_id": "The contact's agent_id (12-char hex). Used for delivery verification. Optional.",
   "email.schedule_action": "create: start a recurring send (requires address, message + schedule.interval, schedule.count). cancel: stop a running schedule (requires schedule.schedule_id). list: show all schedules with progress.",
   "email.schedule_interval": "Seconds between each send (for create)",
   "email.schedule_count": "Total number of sends (for create)",

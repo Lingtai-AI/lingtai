@@ -25,7 +25,7 @@ from .capabilities.email import EmailManager
 
 # Services
 from .services.file_io import FileIOService, LocalFileIOService, GrepMatch
-from lingtai_kernel.services.mail import MailService, TCPMailService
+from lingtai_kernel.services.mail import MailService, FilesystemMailService
 from .services.vision import VisionService, LLMVisionService
 from .services.search import SearchService, LLMSearchService, SearchResult
 from lingtai_kernel.services.logging import LoggingService, JSONLLoggingService
@@ -50,7 +50,7 @@ __all__ = [
     "LocalFileIOService",
     "GrepMatch",
     "MailService",
-    "TCPMailService",
+    "FilesystemMailService",
     "VisionService",
     "LLMVisionService",
     "SearchService",
