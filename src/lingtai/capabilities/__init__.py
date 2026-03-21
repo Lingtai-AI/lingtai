@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 _BUILTIN: dict[str, str] = {
     "psyche": ".psyche",
     "anima": ".psyche",  # backward compat alias
+    "library": ".library",
     "bash": ".bash",
     "avatar": ".avatar",
     "email": ".email",
@@ -20,6 +21,7 @@ _BUILTIN: dict[str, str] = {
     "listen": ".listen",
     "vision": ".vision",
     "web_search": ".web_search",
+    "web_read": ".web_read",
     "read": ".read",
     "write": ".write",
     "edit": ".edit",

@@ -1,5 +1,13 @@
 """lingtai — generic AI agent framework with intrinsic tools, composable capabilities, and pluggable services."""
 
+# Register 文言 manifesto with the kernel
+from pathlib import Path as _Path
+from lingtai_kernel.prompt import set_manifesto as _set_manifesto
+_lzh_path = _Path(__file__).parent / "manifesto_lzh.md"
+if _lzh_path.is_file():
+    _set_manifesto("lzh", _lzh_path.read_text().strip())
+del _Path, _set_manifesto, _lzh_path
+
 from lingtai_kernel.types import UnknownToolError
 from lingtai_kernel.config import AgentConfig
 from lingtai_kernel.base_agent import BaseAgent

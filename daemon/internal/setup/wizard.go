@@ -33,10 +33,13 @@ const (
 	StepLang step = iota
 	StepModel
 	StepMultimodal
-	StepIMAP
-	StepTelegram
+	StepMessaging
 	StepGeneral
 	StepReview
+
+	// Internal field storage keys (not real steps in the wizard flow)
+	StepIMAP     step = 100
+	StepTelegram step = 101
 )
 
 func (s step) String() string {
@@ -46,11 +49,9 @@ func (s step) String() string {
 	case StepModel:
 		return i18n.S("setup_model")
 	case StepMultimodal:
-		return i18n.S("setup_multimodal") + " (Esc)"
-	case StepIMAP:
-		return "IMAP (Esc)"
-	case StepTelegram:
-		return "Telegram (Esc)"
+		return i18n.S("setup_multimodal")
+	case StepMessaging:
+		return i18n.S("setup_messaging")
 	case StepGeneral:
 		return i18n.S("setup_general")
 	case StepReview:
@@ -74,7 +75,7 @@ var providers = []string{"minimax", "openai", "anthropic", "gemini", "custom"}
 
 // Default endpoints for known providers (empty = provider SDK default).
 var providerEndpoints = map[string]string{
-	"minimax":   "https://api.minimax.chat/v1",
+	"minimax":   "https://api.minimaxi.com/v1",
 	"openai":    "https://api.openai.com/v1",
 	"anthropic": "https://api.anthropic.com",
 	"gemini":    "https://generativelanguage.googleapis.com",
@@ -89,6 +90,13 @@ var providerModels = map[string]string{
 	"gemini":    "gemini-3.1-pro",
 	"custom":    "",
 }
+
+// MiniMax regional endpoints for quick setup.
+var mmQuickEndpoints = []string{
+	"https://api.minimaxi.com", // china (default)
+	"https://api.minimax.io",   // international
+}
+var mmQuickEndpointLabels = []string{"China", "International"}
 
 // mmCapability describes a multimodal capability row in the wizard grid.
 type mmCapability struct {
@@ -187,10 +195,22 @@ type wizardModel struct {
 	// provider selector state
 	providerIdx int
 
-	// multimodal grid state
-	mmRows []mmCapState
-	mmRow  int // active row (0-5)
-	mmCol  int // active column: 0=provider, 1=key, 2=endpoint
+	// multimodal state
+	mmMode          int // 0=chooser, 1=quick setup, 2=manual grid
+	mmChooserIdx    int // chooser selection: 0=quick, 1=manual, 2=skip
+	mmQuickKey1     textinput.Model // MINIMAX_API_KEY (vision, web_search)
+	mmQuickKey2     textinput.Model // MINIMAX_MCP_API_KEY (talk, compose, draw)
+	mmQuickFocus    int             // 0=endpoint, 1=key1, 2=key2
+	mmQuickEndpoint int             // 0=international, 1=china
+	mmRows          []mmCapState
+	mmRow         int // active row (0-5)
+	mmCol         int // active column: 0=provider, 1=key, 2=endpoint
+
+	// messaging state
+	msgMode       int // 0=chooser, 1=imap, 2=telegram
+	msgChooserIdx int // 0=imap, 1=telegram, 2=skip
+	msgImapDone   bool
+	msgTgDone     bool
 
 	// test results per step
 	testResults map[step]*TestResult
@@ -243,7 +263,17 @@ func newWizardModel(outputDir string) wizardModel {
 		{label: "Endpoint", input: newTextInput("https://...", providerEndpoints[defaultProvider])},
 	}
 
-	// Step: Multimodal grid
+	// Step: Multimodal
+	m.mmMode = 0 // start with chooser
+	m.mmQuickEndpoint = 0 // china default
+	qk1 := newTextInput("sk-...", "")
+	qk1.EchoMode = textinput.EchoPassword
+	qk1.EchoCharacter = '•'
+	qk2 := newTextInput("sk-...", "")
+	qk2.EchoMode = textinput.EchoPassword
+	qk2.EchoCharacter = '•'
+	m.mmQuickKey1 = qk1
+	m.mmQuickKey2 = qk2
 	m.mmRows = make([]mmCapState, len(mmCaps))
 	for i := range mmCaps {
 		m.mmRows[i] = newMMCapState(i)
@@ -499,9 +529,39 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			// Skip optional steps
-			if m.step == StepMultimodal || m.step == StepIMAP || m.step == StepTelegram {
-				m.advanceStep()
+			// Multimodal: Esc goes back within sub-modes
+			if m.step == StepMultimodal {
+				switch m.mmMode {
+				case 0: // chooser — do nothing
+				case 1: // quick setup — back to chooser
+					m.mmQuickKey1.Blur()
+					m.mmQuickKey2.Blur()
+					m.mmMode = 0
+				case 2: // manual grid — back to chooser
+					m.mmBlurCurrent()
+					m.mmMode = 0
+				}
+				return m, nil
+			}
+			// Messaging: Esc goes back within sub-modes
+			if m.step == StepMessaging {
+				switch m.msgMode {
+				case 0: // chooser — do nothing
+				case 1, 2: // imap or telegram — back to chooser
+					// blur current fields
+					activeStep := StepIMAP
+					if m.msgMode == 2 {
+						activeStep = StepTelegram
+					}
+					if fields, ok := m.fields[activeStep]; ok {
+						for i := range fields {
+							fields[i].input.Blur()
+						}
+						m.fields[activeStep] = fields
+					}
+					m.msgMode = 0
+					m.focus = 0
+				}
 				return m, nil
 			}
 
@@ -512,10 +572,47 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.step == StepMultimodal {
-				if msg.String() == "tab" {
-					m.mmTabNext()
-				} else {
-					m.mmMoveRow(+1)
+				switch m.mmMode {
+				case 0: // chooser
+					m.mmChooserIdx = (m.mmChooserIdx + 1) % 3
+				case 1: // quick setup
+					switch m.mmQuickFocus {
+					case 0:
+						m.mmQuickFocus = 1
+						m.mmQuickKey1.Focus()
+					case 1:
+						m.mmQuickKey1.Blur()
+						m.mmQuickFocus = 2
+						m.mmQuickKey2.Focus()
+					case 2:
+						m.mmQuickKey2.Blur()
+						m.mmQuickFocus = 0
+					}
+				case 2: // manual grid
+					if msg.String() == "tab" {
+						m.mmTabNext()
+					} else {
+						m.mmMoveRow(+1)
+					}
+				}
+				return m, nil
+			}
+			if m.step == StepMessaging {
+				switch m.msgMode {
+				case 0: // chooser
+					m.msgChooserIdx = (m.msgChooserIdx + 1) % 3
+				case 1, 2: // imap or telegram fields
+					activeStep := StepIMAP
+					if m.msgMode == 2 {
+						activeStep = StepTelegram
+					}
+					fields := m.fields[activeStep]
+					if m.focus < len(fields)-1 {
+						fields[m.focus].input.Blur()
+						m.focus++
+						fields[m.focus].input.Focus()
+						m.fields[activeStep] = fields
+					}
 				}
 				return m, nil
 			}
@@ -538,10 +635,47 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.step == StepMultimodal {
-				if msg.String() == "shift+tab" {
-					m.mmTabPrev()
-				} else {
-					m.mmMoveRow(-1)
+				switch m.mmMode {
+				case 0: // chooser
+					m.mmChooserIdx = (m.mmChooserIdx - 1 + 3) % 3
+				case 1: // quick setup
+					switch m.mmQuickFocus {
+					case 0:
+						m.mmQuickFocus = 2
+						m.mmQuickKey2.Focus()
+					case 1:
+						m.mmQuickKey1.Blur()
+						m.mmQuickFocus = 0
+					case 2:
+						m.mmQuickKey2.Blur()
+						m.mmQuickFocus = 1
+						m.mmQuickKey1.Focus()
+					}
+				case 2: // manual grid
+					if msg.String() == "shift+tab" {
+						m.mmTabPrev()
+					} else {
+						m.mmMoveRow(-1)
+					}
+				}
+				return m, nil
+			}
+			if m.step == StepMessaging {
+				switch m.msgMode {
+				case 0:
+					m.msgChooserIdx = (m.msgChooserIdx - 1 + 3) % 3
+				case 1, 2:
+					activeStep := StepIMAP
+					if m.msgMode == 2 {
+						activeStep = StepTelegram
+					}
+					fields := m.fields[activeStep]
+					if m.focus > 0 {
+						fields[m.focus].input.Blur()
+						m.focus--
+						fields[m.focus].input.Focus()
+						m.fields[activeStep] = fields
+					}
 				}
 				return m, nil
 			}
@@ -566,11 +700,20 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncProviderDefaults()
 				return m, nil
 			}
-			if m.step == StepMultimodal && m.mmCol == 0 {
-				cap := mmCaps[m.mmRow]
-				if len(cap.providers) > 1 {
-					m.mmRows[m.mmRow].providerIdx = (m.mmRows[m.mmRow].providerIdx - 1 + len(cap.providers)) % len(cap.providers)
-					m.syncMMDefaults(m.mmRow)
+			if m.step == StepMultimodal {
+				switch m.mmMode {
+				case 1: // quick setup — cycle endpoint
+					if m.mmQuickFocus == 0 {
+						m.mmQuickEndpoint = (m.mmQuickEndpoint - 1 + len(mmQuickEndpoints)) % len(mmQuickEndpoints)
+					}
+				case 2: // manual grid
+					if m.mmCol == 0 {
+						cap := mmCaps[m.mmRow]
+						if len(cap.providers) > 1 {
+							m.mmRows[m.mmRow].providerIdx = (m.mmRows[m.mmRow].providerIdx - 1 + len(cap.providers)) % len(cap.providers)
+							m.syncMMDefaults(m.mmRow)
+						}
+					}
 				}
 				return m, nil
 			}
@@ -584,11 +727,20 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncProviderDefaults()
 				return m, nil
 			}
-			if m.step == StepMultimodal && m.mmCol == 0 {
-				cap := mmCaps[m.mmRow]
-				if len(cap.providers) > 1 {
-					m.mmRows[m.mmRow].providerIdx = (m.mmRows[m.mmRow].providerIdx + 1) % len(cap.providers)
-					m.syncMMDefaults(m.mmRow)
+			if m.step == StepMultimodal {
+				switch m.mmMode {
+				case 1: // quick setup — cycle endpoint
+					if m.mmQuickFocus == 0 {
+						m.mmQuickEndpoint = (m.mmQuickEndpoint + 1) % len(mmQuickEndpoints)
+					}
+				case 2: // manual grid
+					if m.mmCol == 0 {
+						cap := mmCaps[m.mmRow]
+						if len(cap.providers) > 1 {
+							m.mmRows[m.mmRow].providerIdx = (m.mmRows[m.mmRow].providerIdx + 1) % len(cap.providers)
+							m.syncMMDefaults(m.mmRow)
+						}
+					}
 				}
 				return m, nil
 			}
@@ -602,6 +754,86 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.written, m.err = m.writeConfig()
 				m.done = true
 				return m, tea.Quit
+			}
+			if m.step == StepMultimodal {
+				switch m.mmMode {
+				case 0: // chooser
+					switch m.mmChooserIdx {
+					case 0: // MiniMax Quick Setup
+						m.mmMode = 1
+						m.mmQuickFocus = 0
+					case 1: // Manual Configuration
+						m.mmMode = 2
+					case 2: // Skip
+						m.advanceStep()
+					}
+					return m, nil
+				case 1: // quick setup — apply and advance
+					m.mmQuickKey1.Blur()
+					m.mmQuickKey2.Blur()
+					m.mmApplyQuickSetup()
+					m.advanceStep()
+					return m, nil
+				case 2: // manual grid — advance
+					m.advanceStep()
+					return m, nil
+				}
+			}
+			if m.step == StepMessaging {
+				switch m.msgMode {
+				case 0: // chooser
+					switch m.msgChooserIdx {
+					case 0: // IMAP
+						m.msgMode = 1
+						m.focus = 0
+						fields := m.fields[StepIMAP]
+						if len(fields) > 0 {
+							fields[0].input.Focus()
+							m.fields[StepIMAP] = fields
+						}
+					case 1: // Telegram
+						m.msgMode = 2
+						m.focus = 0
+						fields := m.fields[StepTelegram]
+						if len(fields) > 0 {
+							fields[0].input.Focus()
+							m.fields[StepTelegram] = fields
+						}
+					case 2: // Skip
+						m.advanceStep()
+					}
+					return m, nil
+				case 1: // IMAP — enter on last field goes back to chooser with done flag
+					fields := m.fields[StepIMAP]
+					if m.focus >= len(fields)-1 {
+						fields[m.focus].input.Blur()
+						m.fields[StepIMAP] = fields
+						m.msgImapDone = true
+						m.msgMode = 0
+						m.focus = 0
+						return m, nil
+					}
+					fields[m.focus].input.Blur()
+					m.focus++
+					fields[m.focus].input.Focus()
+					m.fields[StepIMAP] = fields
+					return m, nil
+				case 2: // Telegram — same pattern
+					fields := m.fields[StepTelegram]
+					if m.focus >= len(fields)-1 {
+						fields[m.focus].input.Blur()
+						m.fields[StepTelegram] = fields
+						m.msgTgDone = true
+						m.msgMode = 0
+						m.focus = 0
+						return m, nil
+					}
+					fields[m.focus].input.Blur()
+					m.focus++
+					fields[m.focus].input.Focus()
+					m.fields[StepTelegram] = fields
+					return m, nil
+				}
 			}
 			// On last field of current step, advance
 			fields := m.fields[m.step]
@@ -621,14 +853,36 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update the focused text input
 	if m.step == StepMultimodal {
 		var cmd tea.Cmd
-		if m.mmCol == 1 {
-			m.mmRows[m.mmRow].keyInput, cmd = m.mmRows[m.mmRow].keyInput.Update(msg)
-		} else if m.mmCol == 2 {
-			m.mmRows[m.mmRow].endpointInput, cmd = m.mmRows[m.mmRow].endpointInput.Update(msg)
+		switch m.mmMode {
+		case 1: // quick setup
+			if m.mmQuickFocus == 1 {
+				m.mmQuickKey1, cmd = m.mmQuickKey1.Update(msg)
+			} else if m.mmQuickFocus == 2 {
+				m.mmQuickKey2, cmd = m.mmQuickKey2.Update(msg)
+			}
+		case 2: // manual grid
+			if m.mmCol == 1 {
+				m.mmRows[m.mmRow].keyInput, cmd = m.mmRows[m.mmRow].keyInput.Update(msg)
+			} else if m.mmCol == 2 {
+				m.mmRows[m.mmRow].endpointInput, cmd = m.mmRows[m.mmRow].endpointInput.Update(msg)
+			}
 		}
 		return m, cmd
 	}
-	if m.step != StepReview && m.step != StepLang {
+	if m.step == StepMessaging && (m.msgMode == 1 || m.msgMode == 2) {
+		activeStep := StepIMAP
+		if m.msgMode == 2 {
+			activeStep = StepTelegram
+		}
+		fields := m.fields[activeStep]
+		if m.focus < len(fields) {
+			var cmd tea.Cmd
+			fields[m.focus].input, cmd = fields[m.focus].input.Update(msg)
+			m.fields[activeStep] = fields
+			return m, cmd
+		}
+	}
+	if m.step != StepReview && m.step != StepLang && m.step != StepMultimodal && m.step != StepMessaging {
 		fields := m.fields[m.step]
 		if m.focus < len(fields) {
 			var cmd tea.Cmd
@@ -716,6 +970,28 @@ func (m *wizardModel) syncMMDefaults(row int) {
 	}
 }
 
+// mmApplyQuickSetup fills all non-local mmRows from the quick setup keys and endpoint.
+func (m *wizardModel) mmApplyQuickSetup() {
+	ep := mmQuickEndpoints[m.mmQuickEndpoint]
+	apiKey := m.mmQuickKey1.Value()
+	mcpKey := m.mmQuickKey2.Value()
+
+	for i, cap := range mmCaps {
+		if cap.providers[0] == "local" {
+			continue
+		}
+		// Set provider to minimax
+		m.mmRows[i].providerIdx = 0
+		m.mmRows[i].endpointInput.SetValue(ep)
+		// vision + web_search use MINIMAX_API_KEY, others use MINIMAX_MCP_API_KEY
+		if cap.configKey == "vision" || cap.configKey == "web_search" {
+			m.mmRows[i].keyInput.SetValue(apiKey)
+		} else {
+			m.mmRows[i].keyInput.SetValue(mcpKey)
+		}
+	}
+}
+
 func (m *wizardModel) advanceStep() {
 	// Blur current fields
 	if m.step == StepMultimodal {
@@ -739,6 +1015,131 @@ func (m *wizardModel) advanceStep() {
 			m.fields[m.step] = fields
 		}
 	}
+}
+
+func (m wizardModel) renderMMChooser() string {
+	var b strings.Builder
+
+	choices := []string{
+		"MiniMax Quick Setup",
+		"Manual Configuration",
+		"Skip",
+	}
+	descs := []string{
+		"Enter two API keys — fills vision, web search, talk, compose, draw automatically",
+		"Configure each capability individually with any provider",
+		"Skip multimodal setup for now",
+	}
+
+	for i, choice := range choices {
+		if i == m.mmChooserIdx {
+			b.WriteString(fmt.Sprintf("  %s  %s\n", promptStyle.Render(">"), promptStyle.Render(choice)))
+			b.WriteString(fmt.Sprintf("       %s\n", dimStyle.Render(descs[i])))
+		} else {
+			b.WriteString(fmt.Sprintf("      %s\n", dimStyle.Render(choice)))
+		}
+	}
+
+	b.WriteString("\n" + dimStyle.Render("↑/↓ to select, Enter to confirm") + "\n")
+	return b.String()
+}
+
+func (m wizardModel) renderMMQuick() string {
+	var b strings.Builder
+
+	b.WriteString(promptStyle.Render("MiniMax Quick Setup") + "\n\n")
+
+	// Endpoint selector
+	ep := mmQuickEndpoints[m.mmQuickEndpoint]
+	epLabel := mmQuickEndpointLabels[m.mmQuickEndpoint]
+	if m.mmQuickFocus == 0 {
+		b.WriteString(fmt.Sprintf("  %s Endpoint: ◀ %s (%s) ▶\n", promptStyle.Render(">"), ep, epLabel))
+	} else {
+		b.WriteString(fmt.Sprintf("    Endpoint: %s (%s)\n", dimStyle.Render(ep), dimStyle.Render(epLabel)))
+	}
+	b.WriteString("\n")
+
+	// Key 1: MINIMAX_API_KEY
+	label1 := "MINIMAX_API_KEY (vision, web search)"
+	if m.mmQuickFocus == 1 {
+		b.WriteString(fmt.Sprintf("  %s %s\n", promptStyle.Render(">"), promptStyle.Render(label1)))
+		b.WriteString(fmt.Sprintf("    %s\n", m.mmQuickKey1.View()))
+	} else {
+		b.WriteString(fmt.Sprintf("    %s\n", label1))
+		if m.mmQuickKey1.Value() != "" {
+			b.WriteString(fmt.Sprintf("    %s\n", "••••••••"))
+		} else {
+			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render("(not set)")))
+		}
+	}
+	b.WriteString("\n")
+
+	// Key 2: MINIMAX_MCP_API_KEY
+	label2 := "MINIMAX_MCP_API_KEY (talk, compose, draw)"
+	if m.mmQuickFocus == 2 {
+		b.WriteString(fmt.Sprintf("  %s %s\n", promptStyle.Render(">"), promptStyle.Render(label2)))
+		b.WriteString(fmt.Sprintf("    %s\n", m.mmQuickKey2.View()))
+	} else {
+		b.WriteString(fmt.Sprintf("    %s\n", label2))
+		if m.mmQuickKey2.Value() != "" {
+			b.WriteString(fmt.Sprintf("    %s\n", "••••••••"))
+		} else {
+			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render("(not set)")))
+		}
+	}
+
+	b.WriteString("\n" + dimStyle.Render("Tab: next field | ←/→: cycle endpoint | Enter: apply & continue | Esc: back") + "\n")
+	return b.String()
+}
+
+func (m wizardModel) renderMsgChooser() string {
+	var b strings.Builder
+
+	choices := []struct{ name, desc string }{
+		{"IMAP Email", "Connect to an IMAP/SMTP email account"},
+		{"Telegram Bot", "Connect a Telegram bot"},
+		{"Skip", "Skip external messaging setup"},
+	}
+
+	// Show checkmarks for completed configs
+	for i, ch := range choices {
+		done := ""
+		if i == 0 && m.msgImapDone {
+			done = successStyle.Render(" ✓")
+		}
+		if i == 1 && m.msgTgDone {
+			done = successStyle.Render(" ✓")
+		}
+
+		if i == m.msgChooserIdx {
+			b.WriteString(fmt.Sprintf("  %s  %s%s\n", promptStyle.Render(">"), promptStyle.Render(ch.name), done))
+			b.WriteString(fmt.Sprintf("       %s\n", dimStyle.Render(ch.desc)))
+		} else {
+			b.WriteString(fmt.Sprintf("      %s%s\n", dimStyle.Render(ch.name), done))
+		}
+	}
+
+	b.WriteString("\n" + dimStyle.Render("↑/↓ to select, Enter to configure, Esc to go back") + "\n")
+	return b.String()
+}
+
+func (m wizardModel) renderMsgFields(fieldStep step, title string) string {
+	var b strings.Builder
+
+	b.WriteString(promptStyle.Render(title) + "\n\n")
+
+	fields := m.fields[fieldStep]
+	for i, f := range fields {
+		cursor := "  "
+		if i == m.focus {
+			cursor = promptStyle.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, promptStyle.Render(f.label)))
+		b.WriteString(fmt.Sprintf("  %s\n", f.input.View()))
+	}
+
+	b.WriteString("\n" + dimStyle.Render("Tab/↓: next field | Enter: save & back | Esc: back | Ctrl+T: test") + "\n")
+	return b.String()
 }
 
 func (m wizardModel) renderMultimodal() string {
@@ -804,7 +1205,7 @@ func (m wizardModel) renderMultimodal() string {
 	}
 
 	// Hints
-	b.WriteString("\n" + dimStyle.Render("\u2191/\u2193: move row | Tab: next field | \u2190/\u2192: cycle provider | Enter: next step | Esc: skip") + "\n")
+	b.WriteString("\n" + dimStyle.Render("\u2191/\u2193: move row | Tab: next field | \u2190/\u2192: cycle provider | Enter: next step | Esc: back") + "\n")
 
 	return b.String()
 }
@@ -826,18 +1227,18 @@ func (m wizardModel) View() string {
 	var b strings.Builder
 
 	// Banner
-	if m.langIdx == 0 { // English
+	if m.langIdx == 0 {
 		b.WriteString(headerStyle.Render("LingTai AI") + "\n")
-		b.WriteString(dimStyle.Render("Heard the Way beneath the Bodhi;") + "\n")
-		b.WriteString(dimStyle.Render("one body, ten thousand avatars.") + "\n\n")
+		b.WriteString(dimStyle.Render("Awakened beneath the Bodhi;") + "\n")
+		b.WriteString(dimStyle.Render("one mind, thousand avatars.") + "\n\n")
 	} else {
 		b.WriteString(headerStyle.Render("灵台AI") + "\n")
 		b.WriteString(dimStyle.Render("灵台方寸山  斜月三星洞") + "\n")
-		b.WriteString(dimStyle.Render("闻道菩提下  一身化万相") + "\n\n")
+		b.WriteString(dimStyle.Render("闻道菩提下  一心化万相") + "\n\n")
 	}
 
 	// Progress bar
-	allSteps := []step{StepLang, StepModel, StepMultimodal, StepIMAP, StepTelegram, StepGeneral, StepReview}
+	allSteps := []step{StepLang, StepModel, StepMultimodal, StepMessaging, StepGeneral, StepReview}
 	for i, s := range allSteps {
 		name := s.String()
 		if s == m.step {
@@ -871,7 +1272,26 @@ func (m wizardModel) View() string {
 	}
 
 	if m.step == StepMultimodal {
-		b.WriteString(m.renderMultimodal())
+		switch m.mmMode {
+		case 0:
+			b.WriteString(m.renderMMChooser())
+		case 1:
+			b.WriteString(m.renderMMQuick())
+		case 2:
+			b.WriteString(m.renderMultimodal())
+		}
+		return b.String()
+	}
+
+	if m.step == StepMessaging {
+		switch m.msgMode {
+		case 0:
+			b.WriteString(m.renderMsgChooser())
+		case 1:
+			b.WriteString(m.renderMsgFields(StepIMAP, "IMAP / SMTP"))
+		case 2:
+			b.WriteString(m.renderMsgFields(StepTelegram, "Telegram"))
+		}
 		return b.String()
 	}
 
@@ -919,12 +1339,6 @@ func (m wizardModel) View() string {
 	// Hints
 	b.WriteString("\n")
 	hints := []string{"Tab/Down: next field", "Shift+Tab/Up: prev field", "Enter: next step"}
-	if m.step == StepIMAP || m.step == StepTelegram {
-		hints = append(hints, "Esc: skip")
-	}
-	if m.step == StepIMAP || m.step == StepTelegram {
-		hints = append(hints, "Ctrl+T: test connection")
-	}
 	b.WriteString(dimStyle.Render(strings.Join(hints, " | ")) + "\n")
 
 	return b.String()
@@ -1035,8 +1449,11 @@ func (m wizardModel) fieldVal(s step, idx int) string {
 }
 
 func (m wizardModel) runTest() tea.Cmd {
-	switch m.step {
-	case StepIMAP:
+	if m.step != StepMessaging {
+		return nil
+	}
+	switch m.msgMode {
+	case 1: // IMAP
 		return func() tea.Msg {
 			email := m.fieldVal(StepIMAP, 0)
 			pass := m.fieldVal(StepIMAP, 1)
@@ -1056,7 +1473,7 @@ func (m wizardModel) runTest() tea.Cmd {
 			return testResultMsg{step: StepIMAP, result: r}
 		}
 
-	case StepTelegram:
+	case 2: // Telegram
 		return func() tea.Msg {
 			token := m.fieldVal(StepTelegram, 0)
 			if token == "" {

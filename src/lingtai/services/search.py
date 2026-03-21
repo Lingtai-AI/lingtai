@@ -1,7 +1,8 @@
 """SearchService — abstract web search backing the web_search capability.
 
-First implementation: LLMSearchService (wraps LLM grounding/search capabilities).
-Future: BraveSearchService, SerpAPIService, etc.
+Implementations:
+- DuckDuckGoSearchService — zero-API-key search via ddgs package.
+- LLMSearchService — wraps LLM grounding/search capabilities (stub).
 """
 from __future__ import annotations
 
@@ -40,6 +41,33 @@ class SearchService(ABC):
             List of search results.
         """
         ...
+
+
+class DuckDuckGoSearchService(SearchService):
+    """Zero-API-key web search via DuckDuckGo.
+
+    Uses the ``ddgs`` package to scrape DuckDuckGo results.
+    Install with ``pip install lingtai[duckduckgo]`` or
+    ``pip install ddgs``.
+    """
+
+    def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+        try:
+            from ddgs import DDGS  # type: ignore[import-untyped]
+        except ImportError:
+            raise ImportError(
+                "ddgs is required for DuckDuckGoSearchService. "
+                "Install it with: pip install lingtai[duckduckgo]"
+            )
+        raw = DDGS().text(query, max_results=max_results)
+        return [
+            SearchResult(
+                title=r.get("title", ""),
+                url=r.get("href", ""),
+                snippet=r.get("body", ""),
+            )
+            for r in raw
+        ]
 
 
 class LLMSearchService(SearchService):

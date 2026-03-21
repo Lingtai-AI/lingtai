@@ -1,11 +1,16 @@
 """Capability i18n — language-aware string tables for lingtai capabilities.
 
 Usage: t(lang, key, **kwargs)
-  lang: language code ("en", "zh")
+  lang: language code ("en", "zh", "wen")
   key: dotted string ID ("read.description")
   kwargs: template substitutions
 
-Mirrors lingtai_kernel.i18n for the capability layer.
+The kernel ships en.json + zh.json (kernel-level strings only).
+Lingtai ships en.json + zh.json + wen.json covering both capability
+strings and kernel strings for languages the kernel doesn't carry.
+On first load of a non-kernel language (e.g. "wen"), kernel-level
+keys are injected into the kernel's i18n cache via register_strings()
+so that kernel-level t() calls resolve correctly.
 """
 from __future__ import annotations
 
@@ -16,6 +21,13 @@ from pathlib import Path
 _DIR = Path(__file__).parent
 _CACHE: dict[str, dict[str, str]] = {}
 
+# Keys that belong to the kernel's i18n namespace.
+# When we load a language that the kernel doesn't ship (e.g. wen),
+# we extract these keys and inject them into the kernel's cache.
+_KERNEL_PREFIXES = (
+    "system.", "soul.", "mail.", "eigen.", "system_tool.", "tool.",
+)
+
 
 def _load(lang: str) -> dict[str, str]:
     if lang not in _CACHE:
@@ -24,7 +36,23 @@ def _load(lang: str) -> dict[str, str]:
             _CACHE[lang] = json.loads(path.read_text(encoding="utf-8"))
         else:
             _CACHE[lang] = {}
+        # Inject kernel-level keys into the kernel's i18n cache
+        # for languages the kernel doesn't carry natively.
+        _sync_to_kernel(lang)
     return _CACHE[lang]
+
+
+def _sync_to_kernel(lang: str) -> None:
+    """Push kernel-level keys from our table into kernel's i18n cache."""
+    from lingtai_kernel.i18n import register_strings
+
+    table = _CACHE.get(lang, {})
+    kernel_keys = {
+        k: v for k, v in table.items()
+        if k.startswith(_KERNEL_PREFIXES)
+    }
+    if kernel_keys:
+        register_strings(lang, kernel_keys)
 
 
 def t(lang: str, key: str, **kwargs) -> str:

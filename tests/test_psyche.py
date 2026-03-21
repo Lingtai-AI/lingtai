@@ -1,7 +1,6 @@
-"""Tests for psyche capability — self-knowledge management."""
+"""Tests for psyche capability — identity, memory, and context management."""
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -88,22 +87,6 @@ def test_character_update_empty_clears_character(tmp_path):
     agent.stop(timeout=1.0)
 
 
-def test_character_diff(tmp_path):
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    agent.start()
-    try:
-        mgr = agent.get_capability("psyche")
-        mgr.handle({"object": "character", "action": "update", "content": "new character"})
-        result = mgr.handle({"object": "character", "action": "diff"})
-        assert result["status"] == "ok"
-        assert "new character" in result["git_diff"]
-    finally:
-        agent.stop()
-
-
 def test_character_load_combines_covenant_and_character(tmp_path):
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
@@ -123,106 +106,90 @@ def test_character_load_combines_covenant_and_character(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Memory construct
+# Memory edit (upgraded with files support)
 # ---------------------------------------------------------------------------
 
 
-def test_memory_construct_with_ids_and_notes(tmp_path):
-    """construct builds memory from library entries + free text."""
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    agent.start()
-    try:
-        mgr = agent.get_capability("psyche")
-        r1 = mgr.handle({
-            "object": "library", "action": "submit",
-            "title": "Finding A", "summary": "About A.", "content": "Details about A.",
-        })
-        result = mgr.handle({
-            "object": "memory", "action": "construct",
-            "ids": [r1["id"]], "notes": "Working on task X.",
-        })
-        assert result["status"] == "ok"
-        assert result["entries"] == 1
-
-        md = (agent.working_dir / "system" / "memory.md").read_text()
-        assert "Working on task X." in md
-        assert "Finding A" in md
-        assert "Details about A." in md
-    finally:
-        agent.stop()
-
-
-def test_memory_construct_notes_only(tmp_path):
-    """construct with only notes (no ids) works."""
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    agent.start()
-    try:
-        mgr = agent.get_capability("psyche")
-        result = mgr.handle({
-            "object": "memory", "action": "construct",
-            "notes": "Just some free text notes.",
-        })
-        assert result["status"] == "ok"
-        assert result["entries"] == 0
-
-        md = (agent.working_dir / "system" / "memory.md").read_text()
-        assert "Just some free text notes." in md
-    finally:
-        agent.stop()
-
-
-def test_memory_construct_ids_only(tmp_path):
-    """construct with only ids (no notes) works."""
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    agent.start()
-    try:
-        mgr = agent.get_capability("psyche")
-        r1 = mgr.handle({
-            "object": "library", "action": "submit",
-            "title": "Entry X", "summary": "About X.", "content": "Content X.",
-        })
-        result = mgr.handle({
-            "object": "memory", "action": "construct",
-            "ids": [r1["id"]],
-        })
-        assert result["status"] == "ok"
-        assert result["entries"] == 1
-
-        md = (agent.working_dir / "system" / "memory.md").read_text()
-        assert "Entry X" in md
-        assert "Content X." in md
-    finally:
-        agent.stop()
-
-
-def test_memory_construct_empty_rejects(tmp_path):
-    """construct with no ids and no notes returns error."""
+def test_memory_edit_content_only(tmp_path):
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["psyche"],
     )
     mgr = agent.get_capability("psyche")
-    result = mgr.handle({"object": "memory", "action": "construct"})
-    assert "error" in result
+    result = mgr.handle({"object": "memory", "action": "edit", "content": "my notes"})
+    assert result["status"] == "ok"
+    md = (agent.working_dir / "system" / "memory.md").read_text()
+    assert "my notes" in md
     agent.stop(timeout=1.0)
 
 
-def test_memory_construct_invalid_ids(tmp_path):
+def test_memory_edit_with_files(tmp_path):
+    agent = Agent(
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+        capabilities=["psyche"],
+    )
+    # Create files to import
+    (agent.working_dir / "export1.txt").write_text("knowledge from export 1")
+    (agent.working_dir / "export2.txt").write_text("knowledge from export 2")
+
+    mgr = agent.get_capability("psyche")
+    result = mgr.handle({
+        "object": "memory", "action": "edit",
+        "content": "My working notes.",
+        "files": ["export1.txt", "export2.txt"],
+    })
+    assert result["status"] == "ok"
+    md = (agent.working_dir / "system" / "memory.md").read_text()
+    assert "My working notes." in md
+    assert "[file-1]" in md
+    assert "knowledge from export 1" in md
+    assert "[file-2]" in md
+    assert "knowledge from export 2" in md
+    agent.stop(timeout=1.0)
+
+
+def test_memory_edit_files_only(tmp_path):
+    agent = Agent(
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+        capabilities=["psyche"],
+    )
+    (agent.working_dir / "data.txt").write_text("file data")
+
+    mgr = agent.get_capability("psyche")
+    result = mgr.handle({
+        "object": "memory", "action": "edit",
+        "files": ["data.txt"],
+    })
+    assert result["status"] == "ok"
+    md = (agent.working_dir / "system" / "memory.md").read_text()
+    assert "[file-1]" in md
+    assert "file data" in md
+    agent.stop(timeout=1.0)
+
+
+def test_memory_edit_missing_file_errors(tmp_path):
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["psyche"],
     )
     mgr = agent.get_capability("psyche")
-    result = mgr.handle({"object": "memory", "action": "construct", "ids": ["nope"]})
+    result = mgr.handle({
+        "object": "memory", "action": "edit",
+        "content": "notes",
+        "files": ["nonexistent.txt"],
+    })
+    assert "error" in result
+    assert "nonexistent.txt" in result["error"]
+    agent.stop(timeout=1.0)
+
+
+def test_memory_edit_empty_errors(tmp_path):
+    agent = Agent(
+        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
+        capabilities=["psyche"],
+    )
+    mgr = agent.get_capability("psyche")
+    result = mgr.handle({"object": "memory", "action": "edit"})
     assert "error" in result
     agent.stop(timeout=1.0)
 
@@ -233,7 +200,6 @@ def test_memory_construct_invalid_ids(tmp_path):
 
 
 def test_memory_load_delegates_to_eigen(tmp_path):
-    """memory load should delegate to eigen's handler."""
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["psyche"],
@@ -241,7 +207,6 @@ def test_memory_load_delegates_to_eigen(tmp_path):
     agent.start()
     try:
         mgr = agent.get_capability("psyche")
-        # Write memory file
         system_dir = agent._working_dir / "system"
         system_dir.mkdir(exist_ok=True)
         (system_dir / "memory.md").write_text("loaded via eigen")
@@ -260,7 +225,6 @@ def test_memory_load_delegates_to_eigen(tmp_path):
 
 
 def test_molt_delegates_to_eigen(tmp_path):
-    """psyche molt calls through to eigen's handler."""
     from lingtai_kernel.llm.interface import ChatInterface, TextBlock
 
     svc = make_mock_service()
@@ -303,124 +267,25 @@ def test_molt_delegates_to_eigen(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Library actions (same as anima, migrated)
-# ---------------------------------------------------------------------------
-
-
-def test_library_submit_creates_structured_entry(tmp_path):
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    mgr = agent.get_capability("psyche")
-    result = mgr.handle({
-        "object": "library", "action": "submit",
-        "title": "TCP Retry Logic",
-        "summary": "Covers retry backoff and failure modes.",
-        "content": "The TCP mail service uses exponential backoff...",
-    })
-    assert result["status"] == "ok"
-    assert "id" in result
-    data = json.loads((agent.working_dir / "system" / "library.json").read_text())
-    assert len(data["entries"]) == 1
-    assert data["entries"][0]["title"] == "TCP Retry Logic"
-    agent.stop(timeout=1.0)
-
-
-def test_library_filter_with_pattern(tmp_path):
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    mgr = agent.get_capability("psyche")
-    mgr.handle({"object": "library", "action": "submit",
-                 "title": "TCP Retry", "summary": "About TCP.", "content": "Backoff logic."})
-    mgr.handle({"object": "library", "action": "submit",
-                 "title": "HTTP Caching", "summary": "About HTTP.", "content": "Cache rules."})
-    result = mgr.handle({"object": "library", "action": "filter", "pattern": "TCP"})
-    assert len(result["entries"]) == 1
-    assert result["entries"][0]["title"] == "TCP Retry"
-    agent.stop(timeout=1.0)
-
-
-def test_library_consolidate(tmp_path):
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    mgr = agent.get_capability("psyche")
-    r1 = mgr.handle({"object": "library", "action": "submit",
-                      "title": "A", "summary": "s1.", "content": "c1"})
-    r2 = mgr.handle({"object": "library", "action": "submit",
-                      "title": "B", "summary": "s2.", "content": "c2"})
-    result = mgr.handle({
-        "object": "library", "action": "consolidate",
-        "ids": [r1["id"], r2["id"]],
-        "title": "AB Combined",
-        "summary": "Merged A and B.",
-        "content": "Combined content.",
-    })
-    assert result["status"] == "ok"
-    assert result["removed"] == 2
-    data = json.loads((agent.working_dir / "system" / "library.json").read_text())
-    assert len(data["entries"]) == 1
-    assert data["entries"][0]["title"] == "AB Combined"
-    agent.stop(timeout=1.0)
-
-
-def test_library_delete(tmp_path):
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        capabilities=["psyche"],
-    )
-    mgr = agent.get_capability("psyche")
-    r1 = mgr.handle({"object": "library", "action": "submit",
-                      "title": "A", "summary": "s.", "content": "c"})
-    r2 = mgr.handle({"object": "library", "action": "submit",
-                      "title": "B", "summary": "s.", "content": "c"})
-    result = mgr.handle({"object": "library", "action": "delete",
-                          "ids": [r1["id"]]})
-    assert result["status"] == "ok"
-    assert result["removed"] == 1
-    data = json.loads((agent.working_dir / "system" / "library.json").read_text())
-    assert len(data["entries"]) == 1
-    assert data["entries"][0]["id"] == r2["id"]
-    agent.stop(timeout=1.0)
-
-
-# ---------------------------------------------------------------------------
 # Schema checks
 # ---------------------------------------------------------------------------
 
 
-def test_forget_not_in_schema():
-    """forget is not exposed in psyche's SCHEMA actions."""
+def test_psyche_schema_has_correct_objects():
+    from lingtai.capabilities.psyche import SCHEMA
+    objects = SCHEMA["properties"]["object"]["enum"]
+    assert set(objects) == {"character", "memory", "context"}
+
+
+def test_psyche_schema_has_correct_actions():
     from lingtai.capabilities.psyche import SCHEMA
     actions = SCHEMA["properties"]["action"]["enum"]
-    assert "forget" not in actions
+    assert set(actions) == {"update", "load", "edit", "molt"}
 
 
-def test_psyche_schema_has_construct():
-    """Schema should include construct action and notes/ids fields."""
+def test_psyche_schema_has_files_field():
     from lingtai.capabilities.psyche import SCHEMA
-    actions = SCHEMA["properties"]["action"]["enum"]
-    assert "construct" in actions
-    assert "molt" in actions
-    props = SCHEMA["properties"]
-    assert "ids" in props
-    assert "notes" in props
-
-
-def test_psyche_schema_has_library_fields():
-    """Schema should include title, summary, supplementary, pattern, limit, depth."""
-    from lingtai.capabilities.psyche import SCHEMA
-    props = SCHEMA["properties"]
-    assert "title" in props
-    assert "summary" in props
-    assert "supplementary" in props
-    assert "pattern" in props
-    assert "limit" in props
-    assert "depth" in props
+    assert "files" in SCHEMA["properties"]
 
 
 # ---------------------------------------------------------------------------
@@ -451,47 +316,7 @@ def test_invalid_action_for_object(tmp_path):
     agent.stop(timeout=1.0)
 
 
-# ---------------------------------------------------------------------------
-# Memory ID generation
-# ---------------------------------------------------------------------------
-
-
-def test_memory_id_deterministic(tmp_path):
-    from lingtai.capabilities.psyche import PsycheManager
-    id1 = PsycheManager._make_id("hello", "2026-03-16T00:00:00Z")
-    id2 = PsycheManager._make_id("hello", "2026-03-16T00:00:00Z")
-    assert id1 == id2
-    assert len(id1) == 8
-
-
-def test_memory_id_differs_by_content(tmp_path):
-    from lingtai.capabilities.psyche import PsycheManager
-    id1 = PsycheManager._make_id("hello", "2026-03-16T00:00:00Z")
-    id2 = PsycheManager._make_id("world", "2026-03-16T00:00:00Z")
-    assert id1 != id2
-
-
-# ---------------------------------------------------------------------------
-# Migration from existing memory
-# ---------------------------------------------------------------------------
-
-
-def test_psyche_migrates_memory_to_library(tmp_path):
-    """If memory.md exists, psyche should migrate it to a library entry."""
-    agent = Agent(
-        agent_name="test", service=make_mock_service(), base_dir=tmp_path,
-        memory="I know about CDF format",
-        capabilities=["psyche"],
-    )
-    mgr = agent.get_capability("psyche")
-    result = mgr.handle({"object": "library", "action": "filter"})
-    assert len(result["entries"]) == 1
-    assert "CDF" in result["entries"][0]["summary"]
-    agent.stop(timeout=1.0)
-
-
 def test_psyche_stop_does_not_overwrite_memory_md(tmp_path):
-    """When psyche is active, stop() should not write memory.md."""
     agent = Agent(
         agent_name="test", service=make_mock_service(), base_dir=tmp_path,
         capabilities=["psyche"],
