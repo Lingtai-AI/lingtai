@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 from .diary import parse_diary
 
@@ -167,8 +167,10 @@ def send_email(request: Request, body: SendRequest):
     if cc_addrs:
         payload["cc"] = cc_addrs
 
-    # Fan out to all recipients
-    sender = TCPMailService()
+    # Fan out to all recipients via filesystem mail
+    import tempfile
+    sender_dir = tempfile.mkdtemp(prefix="lingtai_web_send_")
+    sender = FilesystemMailService(working_dir=sender_dir)
     all_addrs = [to_addr] + cc_addrs + bcc_addrs
     results = [sender.send(addr, payload) for addr in all_addrs]
     ok = all(r is None for r in results)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import secrets
 import socket
 import struct
 import sys
@@ -29,7 +30,7 @@ if env_path.exists():
 
 from lingtai import Agent, AgentConfig
 from lingtai.llm import LLMService
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 AGENT_PORT = 8301
 WEB_PORT = 8080
@@ -179,15 +180,18 @@ def main():
         },
     )
 
-    mail_svc = TCPMailService(listen_port=AGENT_PORT)
+    base_dir = Path(".")
+    agent_id = secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
 
     policy = str(Path(__file__).parent / "bash_policy.json")
     agent = Agent(
         agent_name="assistant",
+        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
-        base_dir=".",
+        base_dir=base_dir,
         role="You are a helpful AI assistant.",
         capabilities={"email": {}, "bash": {"policy_file": policy}, "file": {}},
     )

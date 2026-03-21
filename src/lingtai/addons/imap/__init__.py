@@ -36,7 +36,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lingtai_kernel.services.mail import TCPMailService
+from lingtai_kernel.services.mail import FilesystemMailService
 from .manager import IMAPMailManager, SCHEMA, DESCRIPTION
 from .service import IMAPMailService
 
@@ -122,16 +122,17 @@ def setup(
         )
 
     working_dir = Path(agent._working_dir)
-    tcp_alias = f"127.0.0.1:{bridge_port}"
+    bridge_dir = working_dir / "imap_bridge"
+    bridge_dir.mkdir(parents=True, exist_ok=True)
 
     imap_svc = IMAPMailService(
         accounts=account_list,
         working_dir=working_dir,
     )
 
-    bridge = TCPMailService(listen_port=bridge_port)
+    bridge = FilesystemMailService(working_dir=bridge_dir)
 
-    mgr = IMAPMailManager(agent, service=imap_svc, tcp_alias=tcp_alias)
+    mgr = IMAPMailManager(agent, service=imap_svc, tcp_alias=str(bridge_dir))
     mgr._bridge = bridge
 
     # Build system prompt listing all configured accounts
@@ -141,7 +142,7 @@ def setup(
     )
     system_prompt = (
         f"IMAP email accounts:\n{addr_lines}\n"
-        f"Internal TCP alias: {tcp_alias} "
+        f"Internal bridge: {bridge_dir} "
         f"(other agents can send to this address to relay via IMAP/SMTP)\n"
         f"Use imap(action=...) for external email. "
         f"Use email(action=...) for inter-agent communication."
@@ -154,6 +155,6 @@ def setup(
 
     log.info(
         "IMAP addon configured: %d account(s) (bridge: %s)",
-        len(account_list), tcp_alias,
+        len(account_list), bridge_dir,
     )
     return mgr

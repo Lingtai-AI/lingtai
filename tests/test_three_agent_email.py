@@ -1,7 +1,7 @@
 """Three-agent email integration test.
 
 Tests end-to-end email flows between three agents (Alice, Bob, Charlie)
-using real TCPMailService instances and the email capability.
+using real FilesystemMailService instances and the email capability.
 
 Scenarios:
 1. Alice sends to Bob and Charlie (multi-to)
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import socket
 import tempfile
 import threading
 import time
@@ -22,7 +21,7 @@ from unittest.mock import MagicMock
 
 from lingtai.agent import Agent
 from lingtai_kernel.config import AgentConfig
-from lingtai_kernel.services.mail import TCPMailService
+from lingtai_kernel.services.mail import FilesystemMailService
 
 
 def _make_mock_service():
@@ -33,25 +32,27 @@ def _make_mock_service():
     return svc
 
 
-def _get_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-    return port
+def _setup_agent_dir(path: Path) -> None:
+    """Create a minimal agent directory with manifest and heartbeat."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".agent.json").write_text(json.dumps({
+        "agent_id": path.name,
+        "agent_name": path.name,
+    }))
+    (path / ".agent.heartbeat").write_text(str(time.time()))
 
 
-def _make_agent(name: str, port: int, base_dir: Path):
-    """Create an agent with a real TCPMailService and email capability."""
-    # Create agent first to get its agent_id-based working_dir
+def _make_agent(name: str, base_dir: Path):
+    """Create an agent with a real FilesystemMailService and email capability."""
     agent = Agent(
         service=_make_mock_service(),
         agent_name=name,
+        agent_id=name,
         base_dir=base_dir,
         capabilities=["email"],
     )
     # Wire up mail service after construction (needs working_dir from agent)
-    mail_svc = TCPMailService(listen_port=port, working_dir=agent.working_dir)
+    mail_svc = FilesystemMailService(working_dir=agent.working_dir)
     agent._mail_service = mail_svc
     mgr = agent.get_capability("email")
     return agent, mgr
@@ -85,15 +86,29 @@ class TestThreeAgentEmail:
     """Integration tests for email flows between three agents."""
 
     def setup_method(self):
-        """Set up three agents with real TCP mail services."""
+        """Set up three agents with real filesystem mail services."""
         self.base_dir = Path(tempfile.mkdtemp())
-        self.ports = {name: _get_free_port() for name in ("alice", "bob", "charlie")}
         self.agents = {}
         self.managers = {}
-        for name, port in self.ports.items():
-            agent, mgr = _make_agent(name, port, self.base_dir)
+        self._heartbeat_stop = threading.Event()
+
+        for name in ("alice", "bob", "charlie"):
+            agent, mgr = _make_agent(name, self.base_dir)
             self.agents[name] = agent
             self.managers[name] = mgr
+
+        # Keep heartbeats alive for all agents
+        def _heartbeat_loop():
+            while not self._heartbeat_stop.is_set():
+                for agent in self.agents.values():
+                    try:
+                        hb = agent.working_dir / ".agent.heartbeat"
+                        hb.write_text(str(time.time()))
+                    except OSError:
+                        pass
+                self._heartbeat_stop.wait(0.5)
+        self._hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+        self._hb_thread.start()
 
         # Start listening on all agents
         for name, agent in self.agents.items():
@@ -103,12 +118,13 @@ class TestThreeAgentEmail:
 
     def teardown_method(self):
         """Stop all mail services and clean up temp dirs."""
+        self._heartbeat_stop.set()
         for agent in self.agents.values():
             agent._mail_service.stop()
         shutil.rmtree(self.base_dir, ignore_errors=True)
 
     def _addr(self, name: str) -> str:
-        return f"127.0.0.1:{self.ports[name]}"
+        return str(self.agents[name].working_dir)
 
     def _dir(self, name: str) -> Path:
         return self.agents[name].working_dir
@@ -187,7 +203,7 @@ class TestThreeAgentEmail:
 
         Per-recipient dispatch means each recipient sees only their own
         address in the ``to`` field, so reply_all resolves to the original
-        sender (Alice) only — Bob is not included.
+        sender (Alice) only -- Bob is not included.
         """
         # Alice -> Bob + Charlie
         self.managers["alice"].handle({
@@ -198,7 +214,7 @@ class TestThreeAgentEmail:
         })
         assert self._wait_for_inbox("charlie", 1)
 
-        # Charlie reply-alls — goes to Alice (reply-to) and Bob (CC from original)
+        # Charlie reply-alls -- goes to Alice (reply-to) and Bob (CC from original)
         charlie_email_id = _inbox_emails(self._dir("charlie"))[0]["_mailbox_id"]
         result = self.managers["charlie"].handle({
             "action": "reply_all",
@@ -273,7 +289,7 @@ class TestThreeAgentEmail:
         assert self._wait_for_inbox("alice", 1)
         assert _inbox_emails(self._dir("alice"))[0]["subject"] == "Re: Project kickoff"
 
-        # Step 3: Charlie reply-alls — goes to Alice + Bob
+        # Step 3: Charlie reply-alls -- goes to Alice + Bob
         charlie_email_id = _inbox_emails(self._dir("charlie"))[0]["_mailbox_id"]
         self.managers["charlie"].handle({
             "action": "reply_all",

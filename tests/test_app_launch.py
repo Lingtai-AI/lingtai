@@ -51,6 +51,7 @@ def test_build_addons_empty():
 def test_print_meta(capsys):
     from app import _print_meta
     _print_meta({
+        "agent_id": "abc123",
         "agent_name": "test",
         "base_dir": "/tmp/lingtai",
         "imap": {"email_address": "a@b.com"},
@@ -67,12 +68,14 @@ def test_send_message(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "model": {"provider": "x", "model": "x", "api_key_env": "K"},
-        "agent_port": 9999,
+        "agent_id": "abc123",
+        "base_dir": str(tmp_path / "agents"),
     }))
+    (tmp_path / "agents").mkdir()
     with patch.dict(os.environ, {"K": "v"}), \
-         patch("app.TCPMailService") as MockTCP:
+         patch("app.FilesystemMailService") as MockFSMail:
         mock_svc = MagicMock()
-        MockTCP.return_value = mock_svc
+        MockFSMail.return_value = mock_svc
         send_message(str(cfg_file), "hello")
         mock_svc.send.assert_called_once()
-        assert "localhost:9999" in mock_svc.send.call_args[0][0]
+        assert "abc123" in mock_svc.send.call_args[0][0]

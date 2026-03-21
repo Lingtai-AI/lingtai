@@ -19,7 +19,7 @@ def test_setup_single_account():
     from lingtai.addons.imap import setup
     agent = MagicMock()
     agent._working_dir = "/tmp/test"
-    with patch("lingtai.addons.imap.TCPMailService"):
+    with patch("lingtai.addons.imap.FilesystemMailService"):
         mgr = setup(agent, email_address="a@gmail.com", email_password="x",
                     bridge_port=8399)
     assert mgr is not None
@@ -31,7 +31,7 @@ def test_setup_multi_account():
     from lingtai.addons.imap import setup
     agent = MagicMock()
     agent._working_dir = "/tmp/test"
-    with patch("lingtai.addons.imap.TCPMailService"):
+    with patch("lingtai.addons.imap.FilesystemMailService"):
         mgr = setup(agent, accounts=[
             {"email_address": "a@gmail.com", "email_password": "x"},
             {"email_address": "b@outlook.com", "email_password": "y"},

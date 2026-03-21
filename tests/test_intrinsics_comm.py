@@ -49,10 +49,10 @@ def test_mail_send_passes_attachments(tmp_path):
     svc.model = "gemini-test"
 
     mail_svc = MagicMock()
-    mail_svc.address = "127.0.0.1:9999"
+    mail_svc.address = str(tmp_path / "test")
     mail_svc.send.return_value = None
 
-    agent = BaseAgent(service=svc, agent_name="test", mail_service=mail_svc, base_dir=tmp_path)
+    agent = BaseAgent(service=svc, agent_name="test", agent_id="test", mail_service=mail_svc, base_dir=tmp_path)
 
     # Create a real file to attach
     attachment = tmp_path / "file.png"
@@ -61,7 +61,7 @@ def test_mail_send_passes_attachments(tmp_path):
     # Call the mail handler directly
     result = agent._intrinsics["mail"]({
         "action": "send",
-        "address": "127.0.0.1:8888",
+        "address": str(tmp_path / "other"),
         "message": "here is a file",
         "attachments": [str(attachment)],
     })

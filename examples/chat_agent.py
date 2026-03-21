@@ -9,6 +9,7 @@ Press Ctrl+C to quit.
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import time
 
@@ -22,7 +23,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from lingtai import Agent, AgentConfig, TCPMailService
+from lingtai import Agent, AgentConfig, FilesystemMailService
 from lingtai.llm import LLMService
 
 PORT = 8301
@@ -44,14 +45,17 @@ def main():
         },
     )
 
-    mail_svc = TCPMailService(listen_port=PORT)
+    base_dir = Path(".")
+    agent_id = secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
 
     agent = Agent(
         agent_name="assistant",
+        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
-        base_dir=".",
+        base_dir=base_dir,
         streaming=True,
         capabilities={
             "file": {},
@@ -65,10 +69,13 @@ def main():
     )
     agent.start()
 
-    print(f"Agent listening on 127.0.0.1:{PORT}")
+    agent_address = str(base_dir / agent_id)
+    print(f"Agent address: {agent_address}")
     print("Type messages below. Press Ctrl+C to quit.\n")
 
-    sender = TCPMailService()
+    import tempfile
+    sender_dir = Path(tempfile.mkdtemp(prefix="lingtai_chat_"))
+    sender = FilesystemMailService(working_dir=sender_dir)
 
     try:
         while True:
@@ -82,10 +89,10 @@ def main():
             # Send message to agent
             payload = {
                 "from": "user",
-                "to": f"127.0.0.1:{PORT}",
+                "to": agent_address,
                 "message": user_input,
             }
-            err = sender.send(f"127.0.0.1:{PORT}", payload)
+            err = sender.send(agent_address, payload)
             if err is not None:
                 print(f"  [Failed to send: {err}]")
                 continue

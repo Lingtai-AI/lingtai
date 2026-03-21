@@ -26,14 +26,14 @@ def make_mock_service():
 # ---------------------------------------------------------------------------
 
 def test_agent_starts_and_stops(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.start()
     assert agent.state == AgentState.IDLE
     agent.stop(timeout=2.0)
 
 
 def test_agent_double_start(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.start()
     agent.start()  # should be no-op
     assert agent.state == AgentState.IDLE
@@ -42,7 +42,7 @@ def test_agent_double_start(tmp_path):
 
 def test_base_agent_file_io_defaults_to_none(tmp_path):
     """BaseAgent should have _file_io=None when no file_io is passed."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     assert agent._file_io is None
 
 
@@ -51,7 +51,7 @@ def test_base_agent_file_io_defaults_to_none(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_intrinsics_enabled_by_default(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     assert "mail" in agent._intrinsics
     assert "system" in agent._intrinsics
     assert "eigen" in agent._intrinsics
@@ -66,7 +66,7 @@ def test_intrinsics_enabled_by_default(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_add_remove_tool(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("custom", schema={"type": "object"}, handler=lambda args: {"ok": True})
     assert "custom" in agent._mcp_handlers
     agent.remove_tool("custom")
@@ -74,20 +74,20 @@ def test_add_remove_tool(tmp_path):
 
 
 def test_mcp_tools_registered(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("domain_tool", schema={}, description="test", handler=lambda a: {"r": 1})
     assert "domain_tool" in agent._mcp_handlers
 
 
 def test_add_tool_replaces_existing(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("custom", schema={}, handler=lambda args: {"v": 1})
     agent.add_tool("custom", schema={}, handler=lambda args: {"v": 2})
     assert agent._mcp_handlers["custom"]({})=={"v": 2}
 
 
 def test_remove_nonexistent_tool_is_noop(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.remove_tool("nonexistent")  # should not raise
 
 
@@ -96,13 +96,13 @@ def test_remove_nonexistent_tool_is_noop(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_system_prompt_sections(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.update_system_prompt("role", "You are a test agent", protected=True)
     assert agent._prompt_manager.read_section("role") == "You are a test agent"
 
 
 def test_system_prompt_update_marks_dirty(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent._token_decomp_dirty = False
     agent.update_system_prompt("info", "some info")
     assert agent._token_decomp_dirty is True
@@ -113,52 +113,67 @@ def test_system_prompt_update_marks_dirty(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_mail_without_service(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     result = agent.mail("localhost:8301", "hello")
     # Send is async — no error at send time, mailman handles missing service
     assert result["status"] == "sent"
 
 
 def test_mail_with_service(tmp_path):
-    import socket
-    from lingtai_kernel.services.mail import TCPMailService
+    import json
+    from lingtai_kernel.services.mail import FilesystemMailService
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    # Set up receiver agent dir with manifest and heartbeat
+    receiver_dir = tmp_path / "receiver"
+    receiver_dir.mkdir()
+    (receiver_dir / ".agent.json").write_text(json.dumps({"agent_id": "receiver", "agent_name": "receiver"}))
 
     received = []
     event = threading.Event()
+    stop = threading.Event()
 
-    receiver_svc = TCPMailService(listen_port=port)
+    # Keep heartbeat alive
+    hb_path = receiver_dir / ".agent.heartbeat"
+    def _hb():
+        while not stop.is_set():
+            hb_path.write_text(str(time.time()))
+            stop.wait(0.5)
+    hb_thread = threading.Thread(target=_hb, daemon=True)
+    hb_thread.start()
+
+    receiver_svc = FilesystemMailService(working_dir=receiver_dir)
     receiver_svc.listen(on_message=lambda msg: (received.append(msg), event.set()))
 
     try:
-        sender_svc = TCPMailService()
+        sender_dir = tmp_path / "sender"
+        sender_dir.mkdir()
+        sender_svc = FilesystemMailService(working_dir=sender_dir)
         agent = BaseAgent(
-            service=make_mock_service(), agent_name="sender",
+            service=make_mock_service(), agent_name="sender", agent_id="test",
             mail_service=sender_svc,
             base_dir=tmp_path,
         )
-        result = agent.mail(f"127.0.0.1:{port}", "hello from agent")
+        result = agent.mail(str(receiver_dir), "hello from agent")
         assert result["status"] == "sent"
         # Delivery is async via mailman thread — wait for receiver
         assert event.wait(timeout=5.0)
         assert received[0]["message"] == "hello from agent"
     finally:
         receiver_svc.stop()
+        stop.set()
 
 
 def test_mail_to_bad_address(tmp_path):
-    from lingtai_kernel.services.mail import TCPMailService
-    sender_svc = TCPMailService()
+    from lingtai_kernel.services.mail import FilesystemMailService
+    sender_dir = tmp_path / "sender"
+    sender_dir.mkdir()
+    sender_svc = FilesystemMailService(working_dir=sender_dir)
     agent = BaseAgent(
-        service=make_mock_service(), agent_name="test",
+        service=make_mock_service(), agent_name="test", agent_id="test",
         mail_service=sender_svc,
         base_dir=tmp_path,
     )
-    result = agent.mail("127.0.0.1:1", "hello")
+    result = agent.mail(str(tmp_path / "nonexistent"), "hello")
     # Send is async — always returns "sent"; refusal is recorded by mailman
     assert result["status"] == "sent"
 
@@ -169,7 +184,7 @@ def test_mail_to_bad_address(tmp_path):
 
 def test_mail_inbox_wiring(tmp_path):
     """_on_mail_received should notify agent inbox."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="receiver", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="receiver", agent_id="test", base_dir=tmp_path)
     agent._on_mail_received({
         "_mailbox_id": "test-id-123",
         "from": "127.0.0.1:9999",
@@ -185,29 +200,29 @@ def test_mail_inbox_wiring(tmp_path):
 
 def test_mail_start_wires_listener(tmp_path):
     """start() should call MailService.listen() when configured."""
-    import socket
-    from lingtai_kernel.services.mail import TCPMailService
+    import json
+    from lingtai_kernel.services.mail import FilesystemMailService
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    agent_dir = tmp_path / "test"
+    agent_dir.mkdir()
 
-    agent_svc = TCPMailService(listen_port=port)
+    agent_svc = FilesystemMailService(working_dir=agent_dir)
     agent = BaseAgent(
-        service=make_mock_service(), agent_name="receiver",
+        service=make_mock_service(), agent_name="receiver", agent_id="test",
         mail_service=agent_svc,
         base_dir=tmp_path,
     )
     agent.start()
     try:
-        sender_svc = TCPMailService()
+        sender_dir = tmp_path / "sender"
+        sender_dir.mkdir()
+        sender_svc = FilesystemMailService(working_dir=sender_dir)
         result = sender_svc.send(
-            f"127.0.0.1:{port}",
-            {"from": "sender", "to": f"127.0.0.1:{port}", "message": "wired"},
+            str(agent_dir),
+            {"from": "sender", "to": str(agent_dir), "message": "wired"},
         )
         assert result is None
-        time.sleep(0.5)
+        time.sleep(1.0)
         assert agent.inbox.qsize() >= 0
     finally:
         agent.stop(timeout=2.0)
@@ -216,7 +231,7 @@ def test_mail_start_wires_listener(tmp_path):
 def test_mail_read_by_id(tmp_path):
     """mail read should load messages by ID from disk."""
     import json
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     # Persist a message to the inbox directory
     import uuid
     msg_id = str(uuid.uuid4())
@@ -236,14 +251,14 @@ def test_mail_read_by_id(tmp_path):
 
 def test_mail_read_no_ids_returns_error(tmp_path):
     """mail read without id should return an error."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     result = agent._intrinsics["mail"]({"action": "read"})
     assert "error" in result
 
 
 def test_mail_received_full_content_in_notification(tmp_path):
     """_on_mail_received should include preview and subject in notification."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent._on_mail_received({
         "from": "sender",
         "subject": "test subject",
@@ -261,7 +276,7 @@ def test_mail_received_full_content_in_notification(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_token_usage(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     usage = agent.get_token_usage()
     assert isinstance(usage, dict)
     assert "input_tokens" in usage
@@ -296,7 +311,7 @@ def test_make_message():
 def test_execute_single_tool_intrinsic(tmp_path):
     """Intrinsic tools should be callable via _dispatch_tool."""
     from lingtai_kernel.llm.base import ToolCall
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
     # Replace the system intrinsic with a mock
     agent._intrinsics["system"] = lambda args: {"status": "ok", "time": "12:00"}
@@ -309,7 +324,7 @@ def test_execute_single_tool_intrinsic(tmp_path):
 def test_execute_single_tool_mcp(tmp_path):
     """MCP tools should be callable via _dispatch_tool."""
     from lingtai_kernel.llm.base import ToolCall
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("my_tool", schema={}, handler=lambda args: {"status": "ok", "value": args.get("x")})
 
     tc = ToolCall(name="my_tool", args={"x": 42})
@@ -321,7 +336,7 @@ def test_execute_single_tool_mcp(tmp_path):
 def test_execute_single_tool_unknown(tmp_path):
     """Unknown tools should raise UnknownToolError."""
     from lingtai_kernel.llm.base import ToolCall
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
     tc = ToolCall(name="nonexistent_tool", args={})
     with pytest.raises(UnknownToolError):
@@ -334,7 +349,7 @@ def test_execute_single_tool_unknown(tmp_path):
 
 def test_context_stored_opaque(tmp_path):
     ctx = {"custom": "data", "nested": [1, 2, 3]}
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", context=ctx, base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", context=ctx, base_dir=tmp_path)
     assert agent._context is ctx
 
 
@@ -343,14 +358,14 @@ def test_context_stored_opaque(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_working_dir_resolved(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     assert agent.working_dir == tmp_path / agent.agent_id
 
 
 def test_base_dir_required():
     """base_dir must be explicitly provided."""
     with pytest.raises(TypeError):
-        BaseAgent(service=make_mock_service(), agent_name="test")
+        BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test")
 
 
 # ---------------------------------------------------------------------------
@@ -358,13 +373,13 @@ def test_base_dir_required():
 # ---------------------------------------------------------------------------
 
 def test_config_defaults(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     assert agent._config.max_turns == 50
 
 
 def test_config_override(tmp_path):
     config = AgentConfig(max_turns=10, provider="anthropic")
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", config=config, base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", config=config, base_dir=tmp_path)
     assert agent._config.max_turns == 10
     assert agent._config.provider == "anthropic"
 
@@ -374,7 +389,7 @@ def test_config_override(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_status(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     s = agent.status()
     assert s["agent_name"] == "test"
     assert s["state"] == "idle"
@@ -388,7 +403,7 @@ def test_status(tmp_path):
 
 def test_send_fires_message(tmp_path):
     """send() should put a message in the inbox."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.send("hello")
     assert not agent.inbox.empty()
     msg = agent.inbox.get_nowait()
@@ -401,13 +416,13 @@ def test_send_fires_message(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_working_dir_property(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     assert agent.working_dir == tmp_path / agent.agent_id
 
 def test_base_dir_property_required():
     """base_dir is a required argument — omitting it raises TypeError."""
     with pytest.raises(TypeError, match="base_dir"):
-        BaseAgent(service=make_mock_service(), agent_name="test")
+        BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test")
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +431,7 @@ def test_base_dir_property_required():
 
 def test_agent_creates_manifest(tmp_path):
     import json
-    agent = BaseAgent(service=make_mock_service(), agent_name="alice", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="alice", agent_id="test", base_dir=tmp_path)
     manifest = agent.working_dir / ".agent.json"
     assert manifest.is_file()
     data = json.loads(manifest.read_text())
@@ -425,13 +440,13 @@ def test_agent_creates_manifest(tmp_path):
 
 
 def test_agent_creates_lock_file(tmp_path):
-    agent = BaseAgent(service=make_mock_service(), agent_name="alice", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="alice", agent_id="test", base_dir=tmp_path)
     assert (agent.working_dir / ".agent.lock").is_file()
 
 
 def test_agent_stop_persists_memory(tmp_path):
     agent = BaseAgent(
-        service=make_mock_service(), agent_name="alice", base_dir=tmp_path, memory="initial",
+        service=make_mock_service(), agent_name="alice", agent_id="test", base_dir=tmp_path, memory="initial",
     )
     agent._prompt_manager.write_section("memory", "updated knowledge")
     agent.stop()
@@ -442,13 +457,13 @@ def test_agent_stop_persists_memory(tmp_path):
 
 def test_agent_name_stored(tmp_path):
     """agent_name is stored but no longer validated for path safety."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="any name 日本語", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="any name 日本語", agent_id="test", base_dir=tmp_path)
     assert agent.agent_name == "any name 日本語"
 
 
 def test_base_dir_must_exist(tmp_path):
     with pytest.raises(FileNotFoundError):
-        BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path / "nonexistent")
+        BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path / "nonexistent")
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +472,7 @@ def test_base_dir_must_exist(tmp_path):
 
 def test_add_tool_raises_after_start(tmp_path):
     """add_tool() must raise RuntimeError after start()."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("foo", schema={"type": "object", "properties": {}}, handler=lambda args: {}, description="test")
     agent.start()
     try:
@@ -469,7 +484,7 @@ def test_add_tool_raises_after_start(tmp_path):
 
 def test_remove_tool_raises_after_start(tmp_path):
     """remove_tool() must raise RuntimeError after start()."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("foo", schema={"type": "object", "properties": {}}, handler=lambda args: {}, description="test")
     agent.start()
     try:
@@ -481,7 +496,7 @@ def test_remove_tool_raises_after_start(tmp_path):
 
 def test_add_tool_works_before_start(tmp_path):
     """add_tool() works fine before start()."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent.add_tool("foo", schema={"type": "object", "properties": {}}, handler=lambda args: {"ok": True}, description="test")
     assert "foo" in agent._mcp_handlers
     agent.stop(timeout=1.0)
@@ -493,7 +508,7 @@ def test_add_tool_works_before_start(tmp_path):
 
 def test_queued_messages_concatenated(tmp_path):
     """Multiple queued messages should be concatenated into one."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     msg1 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in mail box.\n  From: alice — hello")
     msg2 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in mail box.\n  From: bob — world")
     msg3 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in imap box.\n  From: charlie — meeting")
@@ -512,7 +527,7 @@ def test_queued_messages_concatenated(tmp_path):
 
 def test_single_message_not_modified(tmp_path):
     """A single message with nothing queued should pass through unchanged."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     original = _make_message(MSG_REQUEST, "alice", "hello")
     result = agent._concat_queued_messages(original)
     assert result is original
@@ -520,7 +535,7 @@ def test_single_message_not_modified(tmp_path):
 
 def test_concat_preserves_first_sender(tmp_path):
     """Concatenated result keeps the first message's sender."""
-    agent = BaseAgent(service=make_mock_service(), agent_name="test", base_dir=tmp_path)
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     msg1 = _make_message(MSG_REQUEST, "alice", "task for you")
     msg2 = _make_message(MSG_REQUEST, "system", "[system] 1 new message in mail box.")
     agent.inbox.put(msg1)

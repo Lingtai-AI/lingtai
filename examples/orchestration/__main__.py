@@ -28,7 +28,7 @@ if env_path.exists():
 
 from lingtai import Agent, AgentConfig
 from lingtai.llm import LLMService
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 ADMIN_PORT = 8301
 USER_PORT = 8300
@@ -99,8 +99,7 @@ def main():
         },
     )
 
-    mail_svc = TCPMailService(
-        listen_port=ADMIN_PORT,
+    mail_svc = FilesystemMailService(
         working_dir=PLAYGROUND / "admin",
     )
 

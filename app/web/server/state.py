@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from lingtai import Agent, AgentConfig
 from lingtai.llm import LLMService
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 
 @dataclass
@@ -19,9 +19,8 @@ class AgentEntry:
     name: str
     key: str
     address: str
-    port: int
     agent: Agent
-    mail_service: TCPMailService
+    mail_service: FilesystemMailService
     working_dir: Path
 
 
@@ -35,10 +34,10 @@ class AppState:
         self.agents: dict[str, AgentEntry] = {}
         self.user_mailbox: list[dict] = []
         self._mailbox_lock = threading.Lock()
-        self.user_mail: TCPMailService | None = None
+        self.user_mail: FilesystemMailService | None = None
 
     def _on_user_mail(self, payload: dict) -> None:
-        """Callback when user's TCPMailService receives an email."""
+        """Callback when user's FilesystemMailService receives an email."""
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         entry = {
             "id": f"mail_{uuid4().hex[:8]}",
@@ -69,9 +68,9 @@ class AppState:
         config: AgentConfig | None = None,
         admin: dict | None = None,
     ) -> AgentEntry:
-        """Create Agent + TCPMailService, wire together, store in registry."""
+        """Create Agent + FilesystemMailService, wire together, store in registry."""
         working_dir = self.base_dir / agent_name
-        mail_svc = TCPMailService(listen_port=port, working_dir=working_dir)
+        mail_svc = FilesystemMailService(working_dir=working_dir)
         agent = Agent(
             agent_name=agent_name,
             service=llm,
@@ -86,8 +85,7 @@ class AppState:
             agent_name=agent_name,
             name=name,
             key=key,
-            address=f"127.0.0.1:{port}",
-            port=port,
+            address=str(working_dir),
             agent=agent,
             mail_service=mail_svc,
             working_dir=working_dir,
@@ -97,7 +95,9 @@ class AppState:
 
     def start_all(self) -> None:
         """Start user mailbox listener + all agents."""
-        self.user_mail = TCPMailService(listen_port=self.user_port)
+        user_dir = self.base_dir / "_user"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        self.user_mail = FilesystemMailService(working_dir=user_dir)
         self.user_mail.listen(on_message=self._on_user_mail)
         for entry in self.agents.values():
             entry.agent.start()

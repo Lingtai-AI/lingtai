@@ -1,4 +1,4 @@
-"""Avatar capability — spawn peer agents on free TCP ports.
+"""Avatar capability — spawn peer agents with filesystem mail.
 
 Maintains an append-only ledger (delegates/ledger.jsonl) that records every
 spawn event.  Each line is a timestamped record of what was spawned,
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -76,7 +75,7 @@ DESCRIPTION = get_description("en")
 
 
 class AvatarManager:
-    """Spawns avatar (分身) peer agents on free TCP ports.
+    """Spawns avatar (分身) peer agents with filesystem mail.
 
     Keeps an in-memory reference table for live status checks and an
     append-only JSONL ledger on disk that records every spawn.
@@ -146,7 +145,7 @@ class AvatarManager:
 
     def _spawn(self, args: dict) -> dict:
         from ..agent import Agent
-        from lingtai_kernel.services.mail import TCPMailService
+        from lingtai_kernel.services.mail import FilesystemMailService
 
         parent = self._agent
         reasoning = args.get("_reasoning")
@@ -213,10 +212,9 @@ class AvatarManager:
 
         # Spawn peer agent
         import secrets
-        port = self._get_free_port()
         avatar_id = secrets.token_hex(3)
         avatar_working_dir = parent._base_dir / avatar_id
-        mail_svc = TCPMailService(listen_port=port, working_dir=avatar_working_dir)
+        mail_svc = FilesystemMailService(working_dir=avatar_working_dir)
 
         # Resolve combo for LLM config
         combo_name = args.get("combo")
@@ -290,7 +288,6 @@ class AvatarManager:
             "avatar", peer_name,
             address=address,
             agent_id=avatar.agent_id,
-            port=port,
             mission=reasoning or "",
             privileges=admin,
             capabilities=cap_names,
@@ -306,15 +303,6 @@ class AvatarManager:
             "agent_id": avatar.agent_id,
             "agent_name": avatar.agent_name,
         }
-
-    @staticmethod
-    def _get_free_port() -> int:
-        """Get an available TCP port from the OS."""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        return port
 
 
 def _build_schema(agent: "Agent") -> dict:

@@ -2,45 +2,70 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
-from lingtai.services.mail import TCPMailService
+from pathlib import Path
+
+from lingtai.services.mail import FilesystemMailService
 
 
 class CLIChannel:
-    """CLI channel that exchanges messages with the agent via TCP mail.
+    """CLI channel that exchanges messages with the agent via filesystem mail.
 
-    Starts a TCPMailService listener on cli_port to receive replies.
-    Sends messages to the agent on agent_port.
+    Creates a FilesystemMailService in a temp directory to receive replies.
+    Sends messages to the agent's working directory.
     """
 
-    def __init__(self, agent_port: int, cli_port: int) -> None:
-        self._agent_port = agent_port
-        self._cli_port = cli_port
-        self._listener: TCPMailService | None = None
-        self._sender: TCPMailService | None = None
+    def __init__(self, agent_address: str, cli_dir: str | Path | None = None) -> None:
+        self._agent_address = agent_address
+        self._cli_dir = Path(cli_dir) if cli_dir else Path(tempfile.mkdtemp(prefix="lingtai_cli_"))
+        self._listener: FilesystemMailService | None = None
+        self._sender: FilesystemMailService | None = None
 
     @property
     def address(self) -> str:
-        return f"cli@localhost:{self._cli_port}"
+        return str(self._cli_dir)
 
     def start(self) -> None:
-        """Start the TCP listener for incoming replies."""
-        self._listener = TCPMailService(listen_port=self._cli_port)
+        """Start the filesystem mail listener for incoming replies."""
+        # Create a minimal .agent.json and heartbeat so the CLI dir looks like an agent
+        import json, time
+        self._cli_dir.mkdir(parents=True, exist_ok=True)
+        agent_json = self._cli_dir / ".agent.json"
+        if not agent_json.is_file():
+            agent_json.write_text(json.dumps({"agent_id": "cli", "agent_name": "cli"}))
+        heartbeat = self._cli_dir / ".agent.heartbeat"
+        heartbeat.write_text(str(time.time()))
+        # Keep heartbeat alive
+        self._heartbeat_stop = threading.Event()
+        def _heartbeat_loop():
+            while not self._heartbeat_stop.is_set():
+                try:
+                    heartbeat.write_text(str(time.time()))
+                except OSError:
+                    pass
+                self._heartbeat_stop.wait(1.0)
+        self._heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+
+        self._listener = FilesystemMailService(working_dir=self._cli_dir)
         self._listener.listen(on_message=self._on_message)
-        self._sender = TCPMailService()
+        self._sender = FilesystemMailService(working_dir=self._cli_dir)
 
     def stop(self) -> None:
-        """Stop the TCP listener."""
+        """Stop the filesystem mail listener."""
+        if hasattr(self, '_heartbeat_stop'):
+            self._heartbeat_stop.set()
         if self._listener is not None:
             self._listener.stop()
 
     def send(self, text: str) -> None:
         """Send a message to the agent."""
         if self._sender is None:
-            self._sender = TCPMailService()
-        self._sender.send(f"localhost:{self._agent_port}", {
+            self._sender = FilesystemMailService(working_dir=self._cli_dir)
+        self._sender.send(self._agent_address, {
             "from": self.address,
-            "to": [f"localhost:{self._agent_port}"],
+            "to": [self._agent_address],
             "subject": "",
             "message": text,
         })

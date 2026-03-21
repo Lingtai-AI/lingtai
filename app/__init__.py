@@ -143,12 +143,18 @@ def _print_meta(cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def send_message(config_path: str, message: str) -> None:
-    """Send a one-shot TCP mail message to the agent."""
+    """Send a one-shot filesystem mail message to the agent."""
+    import tempfile
     cfg = load_config(config_path)
-    svc = FilesystemMailService()
-    svc.send(f"localhost:{cfg['agent_port']}", {
-        "from": "cli@local",
-        "to": [f"localhost:{cfg['agent_port']}"],
+    base_dir = Path(cfg["base_dir"]).expanduser()
+    agent_id = cfg["agent_id"]
+    agent_dir = base_dir / agent_id
+    # Create a temporary working dir for the sender
+    sender_dir = Path(tempfile.mkdtemp(prefix="lingtai_send_"))
+    svc = FilesystemMailService(working_dir=sender_dir)
+    svc.send(str(agent_dir), {
+        "from": str(sender_dir),
+        "to": [str(agent_dir)],
         "subject": "",
         "message": message,
     })
@@ -198,9 +204,8 @@ def main(config_path: str | None = None) -> None:
     agent_id = cfg["agent_id"]
     agent_dir = base_dir / agent_id
 
-    # Build mail service — working_dir enables disk-backed mailbox
+    # Build mail service — filesystem-based mailbox
     mail_service = FilesystemMailService(
-        listen_port=cfg["agent_port"],
         working_dir=agent_dir,
     )
 
@@ -260,7 +265,7 @@ def main(config_path: str | None = None) -> None:
     cli = None
     if cfg.get("cli"):
         from app.cli import CLIChannel
-        cli = CLIChannel(agent_port=cfg["agent_port"])
+        cli = CLIChannel(agent_address=str(agent_dir))
 
     # Signal handling
     stop_event = threading.Event()

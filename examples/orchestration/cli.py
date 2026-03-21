@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 PLAYGROUND = Path.home() / ".lingtai" / "orchestration" / "playground"
 SERVICE_JSON = PLAYGROUND / "service.json"
@@ -123,9 +123,9 @@ def read_email(email_id: str) -> None:
 
 
 def send_email(admin_address: str, user_address: str, message: str,
-               mail_service: TCPMailService | None = None) -> None:
+               mail_service: FilesystemMailService | None = None) -> None:
     """Send an email to the admin orchestrator."""
-    sender = mail_service or TCPMailService()
+    sender = mail_service or FilesystemMailService(working_dir=USER_DIR)
     # Also save to user's sent/ folder
     sent_id = str(uuid4())
     sent_dir = USER_DIR / "mailbox" / "sent" / sent_id
@@ -148,15 +148,14 @@ def send_email(admin_address: str, user_address: str, message: str,
         print(f"  Failed to send to {admin_address}")
 
 
-def run_cli(admin_address: str, user_port: int) -> None:
+def run_cli(admin_address: str) -> None:
     """Main CLI loop."""
-    user_address = f"127.0.0.1:{user_port}"
-
     # Ensure user mailbox dir exists
     USER_DIR.mkdir(parents=True, exist_ok=True)
+    user_address = str(USER_DIR)
 
-    # Start TCPMailService to receive emails in real-time
-    user_mail = TCPMailService(listen_port=user_port, working_dir=USER_DIR)
+    # Start FilesystemMailService to receive emails in real-time
+    user_mail = FilesystemMailService(working_dir=USER_DIR)
     def on_mail(payload: dict) -> None:
         sender = payload.get("from", "?")
         subject = payload.get("subject", "")

@@ -11,6 +11,7 @@ Watch the loop unfold.
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import time
 
@@ -25,7 +26,7 @@ if env_path.exists():
             key, _, val = line.partition("=")
             os.environ.setdefault(key.strip(), val.strip().strip("'\""))
 
-from lingtai import Agent, AgentConfig, TCPMailService
+from lingtai import Agent, AgentConfig, FilesystemMailService
 from lingtai.llm import LLMService
 
 PORT = 8302
@@ -44,10 +45,13 @@ def main():
         provider_defaults={"minimax": {"model": "MiniMax-M2.5-highspeed"}},
     )
 
-    mail_svc = TCPMailService(listen_port=PORT)
+    base_dir = Path(".")
+    agent_id = secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
 
     agent = Agent(
         agent_name="contemplator",
+        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(
@@ -56,19 +60,22 @@ def main():
             flow_delay=15.0,     # whisper every 15s of idle
             language="zh",       # all kernel strings in Chinese
         ),
-        base_dir=".",
+        base_dir=base_dir,
         streaming=True,
         capabilities=["psyche"],  # identity + memory only, no file/bash
     )
     agent.start()
 
     # Send one seed message
-    sender = TCPMailService()
+    import tempfile
+    sender_dir = Path(tempfile.mkdtemp(prefix="lingtai_contemplate_"))
+    sender = FilesystemMailService(working_dir=sender_dir)
+    agent_address = str(base_dir / agent_id)
     seed = "You are alone. There is no task. No one is coming. Just exist, and notice what happens."
     print(f"[seed] {seed}\n")
-    err = sender.send(f"127.0.0.1:{PORT}", {
+    err = sender.send(agent_address, {
         "from": "user",
-        "to": f"127.0.0.1:{PORT}",
+        "to": agent_address,
         "message": seed,
     })
     if err:

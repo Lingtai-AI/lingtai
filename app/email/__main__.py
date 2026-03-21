@@ -31,7 +31,7 @@ if env_path.exists():
 from lingtai import Agent, AgentConfig
 from lingtai.llm import LLMService
 from lingtai.services.logging import JSONLLoggingService
-from lingtai.services.mail import TCPMailService
+from lingtai.services.mail import FilesystemMailService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -137,9 +137,8 @@ def main():
         provider_defaults=provider_defaults,
     )
 
-    # TCP mail service for inter-agent communication
-    mail_svc = TCPMailService(
-        listen_port=agent_port,
+    # Filesystem mail service for inter-agent communication
+    mail_svc = FilesystemMailService(
         working_dir=playground / agent_name,
     )
 
