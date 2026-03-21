@@ -110,5 +110,14 @@ def test_diff_read_only(tmp_path):
 
 
 def test_invalid_agent_id_raises(tmp_path):
-    with pytest.raises(ValueError, match="agent_id must match"):
-        WorkingDir(base_dir=tmp_path, agent_id="bad agent!")
+    with pytest.raises(ValueError, match="non-empty path-safe"):
+        WorkingDir(base_dir=tmp_path, agent_id="")
+    with pytest.raises(ValueError, match="non-empty path-safe"):
+        WorkingDir(base_dir=tmp_path, agent_id="bad/id")
+
+
+def test_arbitrary_agent_id(tmp_path):
+    """agent_id can be any path-safe string, not just 12-char hex."""
+    wd = WorkingDir(base_dir=tmp_path, agent_id="orchestrator")
+    assert wd.path == tmp_path / "orchestrator"
+    assert wd.path.is_dir()

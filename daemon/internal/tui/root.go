@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"lingtai-daemon/internal/agent"
 	"lingtai-daemon/internal/config"
@@ -17,7 +19,15 @@ const (
 	ViewStatus View = iota
 	ViewWizard
 	ViewChat
+	ViewStarting // loading screen while agent boots
 )
+
+// agentStartedMsg is sent when the async agent startup completes.
+type agentStartedMsg struct {
+	config *config.Config
+	proc   *agent.Process
+	err    error
+}
 
 // RootModel is the top-level bubbletea model that routes between views.
 type RootModel struct {
@@ -30,6 +40,10 @@ type RootModel struct {
 	proc       *agent.Process
 	lingtaiDir string
 	configPath string
+
+	// Window dimensions — stored globally so new sub-models can be sized.
+	width  int
+	height int
 }
 
 // RootOpts configures the RootModel.
@@ -70,7 +84,25 @@ func (m RootModel) Init() tea.Cmd {
 	}
 }
 
+// windowSizeCmd returns a tea.Cmd that injects a synthetic WindowSizeMsg.
+func (m RootModel) windowSizeCmd() tea.Cmd {
+	if m.width == 0 && m.height == 0 {
+		return nil
+	}
+	w, h := m.width, m.height
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: w, Height: h}
+	}
+}
+
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Capture window size globally before routing to sub-views.
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = wsm.Width
+		m.height = wsm.Height
+		// Fall through to sub-view routing below.
+	}
+
 	switch msg := msg.(type) {
 	case StatusTransitionMsg:
 		switch msg.Target {
@@ -78,25 +110,47 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			os.MkdirAll(m.lingtaiDir, 0755)
 			m.wizard = setup.NewWizardModel(m.lingtaiDir)
 			m.view = ViewWizard
-			return m, m.wizard.Init()
+			return m, tea.Batch(m.wizard.Init(), m.windowSizeCmd())
 		case ViewChat:
-			// Start agent if not running
 			if m.proc == nil {
-				cfg, proc, err := m.startAgent()
-				if err != nil {
-					// Stay on status — agent failed to start
-					return m, nil
+				// Show loading screen, start agent asynchronously
+				m.view = ViewStarting
+				configPath := m.configPath
+				return m, func() tea.Msg {
+					cfg, err := config.Load(configPath)
+					if err != nil {
+						return agentStartedMsg{err: err}
+					}
+					proc, err := agent.Start(agent.StartOptions{
+						ConfigPath: configPath,
+						AgentPort:  cfg.AgentPort,
+						WorkingDir: cfg.WorkingDir(),
+						Headless:   true,
+					})
+					return agentStartedMsg{config: cfg, proc: proc, err: err}
 				}
-				m.config = cfg
-				m.proc = proc
-				m.chat = NewChat(cfg, proc)
 			}
 			m.view = ViewChat
-			return m, m.chat.Init()
+			return m, tea.Batch(m.chat.Init(), m.windowSizeCmd())
 		}
 
+	case agentStartedMsg:
+		if msg.err != nil {
+			// Failed — show error on status page
+			m.status.errMsg = fmt.Sprintf("Agent failed to start: %v", msg.err)
+			m.view = ViewStatus
+			return m, nil
+		}
+		m.config = msg.config
+		m.proc = msg.proc
+		m.chat = NewChat(msg.config, msg.proc)
+		m.view = ViewChat
+		// Inject WindowSizeMsg so ChatModel can initialize its viewport.
+		return m, tea.Batch(m.chat.Init(), m.windowSizeCmd())
+
 	case ChatExitMsg:
-		// Return to status, agent keeps running
+		// Stop mail listener before leaving chat
+		m.chat.stopListener()
 		m.status.scan()
 		m.view = ViewStatus
 		return m, nil
@@ -136,44 +190,31 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+var startingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75"))
+
 func (m RootModel) View() string {
 	switch m.view {
 	case ViewWizard:
 		return m.wizard.View()
 	case ViewChat:
 		return m.chat.View()
+	case ViewStarting:
+		return fmt.Sprintf("\n  %s  Starting agent...\n", startingStyle.Render("灵台"))
 	default:
 		return m.status.View()
 	}
-}
-
-// startAgent loads config and starts the Python agent process.
-func (m *RootModel) startAgent() (*config.Config, *agent.Process, error) {
-	cfg, err := config.Load(m.configPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	proc, err := agent.Start(agent.StartOptions{
-		ConfigPath: m.configPath,
-		AgentPort:  cfg.AgentPort,
-		WorkingDir: cfg.WorkingDir(),
-		Headless:   true,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg, proc, nil
 }
 
 // RunTUI starts the unified TUI.
 func RunTUI(opts RootOpts) {
 	m := NewRoot(opts)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		os.Exit(1)
 	}
-	// If agent was started, stop it
-	if m.proc != nil {
-		m.proc.Stop()
+	// Use the final model from p.Run() — not the stale original m.
+	if final, ok := finalModel.(RootModel); ok && final.proc != nil {
+		final.proc.Stop()
 	}
 }

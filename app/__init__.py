@@ -211,9 +211,11 @@ def main(config_path: str | None = None) -> None:
     else:
         covenant = _DEFAULT_COVENANT
 
-    # Create agent
+    # Create agent — use agent_name as agent_id so the working dir is
+    # stable across restarts (base_dir/orchestrator/ instead of base_dir/<random>/).
     agent = Agent(
         agent_name=agent_name,
+        agent_id=agent_name,
         service=llm,
         mail_service=mail_service,
         config=AgentConfig(

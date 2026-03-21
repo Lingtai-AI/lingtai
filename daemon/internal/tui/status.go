@@ -21,6 +21,7 @@ type StatusModel struct {
 	width      int
 	height     int
 	cursor     int
+	errMsg     string // shown once after agent start failure
 }
 
 type statusEntry struct {
@@ -69,6 +70,7 @@ func (m StatusModel) Init() tea.Cmd {
 func (m StatusModel) Update(msg tea.Msg) (StatusModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		m.errMsg = "" // clear error on any key
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -130,6 +132,10 @@ func (m StatusModel) View() string {
 			)
 			b.WriteString(line + "\n")
 		}
+	}
+
+	if m.errMsg != "" {
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(m.errMsg) + "\n")
 	}
 
 	b.WriteString("\n")

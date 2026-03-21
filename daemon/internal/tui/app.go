@@ -370,6 +370,14 @@ func (m *ChatModel) cycleNextSpirit() {
 	}
 }
 
+// stopListener shuts down the mail listener if running.
+func (m *ChatModel) stopListener() {
+	if m.listener != nil {
+		m.listener.Stop()
+		m.listener = nil
+	}
+}
+
 var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 func formatLogEvent(e logEvent) string {
