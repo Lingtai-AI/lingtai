@@ -29,18 +29,22 @@ Each mail service defines its own relative mailbox path within the working direc
 
 Mail-to-mail, email-to-email. Bridging between services is not lingtai's concern.
 
-## Handshake on Send
+## Handshake on Send (Identity + Health Check)
 
-Before writing to a recipient's inbox, the sender verifies the destination:
+Before writing to a recipient's inbox, the sender verifies the destination AND that the recipient is alive:
 
 1. Read `{address}/.agent.json`
 2. Verify it exists and is valid JSON
 3. If the recipient is in the sender's contacts, verify `agent_id` matches the contact's stored `agent_id`. If the recipient is NOT in contacts (e.g., replying to an unknown sender from a `from` field), skip `agent_id` verification — the `.agent.json` existence check alone is sufficient.
-4. If valid → write to `{address}/{mailbox_rel}/inbox/{uuid}/`
+4. Check `pid` field — verify the process is alive (`os.kill(pid, 0)` on Unix). If `pid` is `null` or the process is dead → error: "agent is not running"
+5. If all checks pass → write to `{address}/{mailbox_rel}/inbox/{uuid}/`
 
 Failure cases:
 - `.agent.json` missing → error: "no agent at this address"
 - `agent_id` mismatch (contact exists) → error: "agent at this address has changed"
+- `pid` is `null` or process dead → error: "agent is not running"
+
+This makes local mail a health-check protocol — agents always know whether peers are alive at the point of communication.
 
 ## Message Delivery
 
@@ -134,6 +138,7 @@ Humans get a working directory with the same structure as agents. The only disti
 {
   "agent_id": "human_zesen",
   "agent_name": "Zesen",
+  "pid": 54321,
   "started_at": "...",
   "working_dir": "/Users/huangzesen/agents/human_zesen",
   "admin": null,
@@ -141,6 +146,14 @@ Humans get a working directory with the same structure as agents. The only disti
   "address": "/Users/huangzesen/agents/human_zesen"
 }
 ```
+
+The `pid` field is the daemon's PID for human participants. If the daemon dies, agents can't reach the human — which is correct.
+
+### PID Lifecycle
+
+- **Startup**: agent writes `os.getpid()` to `.agent.json`
+- **Clean shutdown**: agent sets `pid` to `null`
+- **Crash**: stale PID left in file — the OS-level check (`os.kill(pid, 0)`) catches this. The PID either doesn't exist or belongs to a different process. On Unix, PID reuse is extremely unlikely in practice for short-lived agents.
 
 **Human's directory structure** (same as agent):
 ```
