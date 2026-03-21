@@ -1,6 +1,7 @@
 """灵台 app — main launch flow."""
 from __future__ import annotations
 
+import json
 import signal
 import sys
 import threading
@@ -193,12 +194,8 @@ def main(config_path: str | None = None) -> None:
     # Build mail service
     mail_service = TCPMailService(listen_port=cfg["agent_port"])
 
-    # Build logging service
     base_dir = Path(cfg["base_dir"]).expanduser()
     agent_name = cfg.get("agent_name", "orchestrator")
-    log_dir = base_dir / agent_name / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logging_service = TerminalLoggingService(log_dir / "events.jsonl")
 
     # Build capabilities and addons
     capabilities = _build_capabilities(cfg)
@@ -219,7 +216,6 @@ def main(config_path: str | None = None) -> None:
         agent_name=agent_name,
         service=llm,
         mail_service=mail_service,
-        logging_service=logging_service,
         config=AgentConfig(
             max_turns=cfg.get("max_turns", 50),
             language=cfg.get("language", "en"),
@@ -230,6 +226,26 @@ def main(config_path: str | None = None) -> None:
         capabilities=capabilities,
         addons=addons,
     )
+
+    # Copy combo.json to agent working dir for avatar spawning
+    combo_json_path = base_dir / agent_name / "combo.json"
+    if not combo_json_path.exists():
+        combo_record = {
+            "name": model_cfg.get("combo_name", ""),
+            "model": {
+                "provider": model_cfg["provider"],
+                "model": model_cfg["model"],
+                "api_key_env": model_cfg.get("api_key_env", ""),
+                "base_url": model_cfg.get("base_url", ""),
+            },
+            "config": {},
+            "env": {},
+        }
+        combo_json_path.parent.mkdir(parents=True, exist_ok=True)
+        combo_json_path.write_text(
+            json.dumps(combo_record, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     # CLI channel
     cli = None

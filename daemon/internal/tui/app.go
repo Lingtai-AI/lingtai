@@ -40,8 +40,11 @@ type logEvent struct {
 	Name     string      `json:"name,omitempty"`
 }
 
-// Model is the main TUI model.
-type Model struct {
+// ChatExitMsg signals that the chat view wants to return to the parent.
+type ChatExitMsg struct{}
+
+// ChatModel is the chat TUI model.
+type ChatModel struct {
 	config   *config.Config
 	proc     *agent.Process
 	mail     *agent.MailClient
@@ -66,7 +69,7 @@ type Model struct {
 }
 
 // New creates a new TUI model.
-func New(cfg *config.Config, proc *agent.Process) Model {
+func NewChat(cfg *config.Config, proc *agent.Process) ChatModel {
 	ti := textinput.New()
 	ti.Placeholder = i18n.S("type_message")
 	ti.Focus()
@@ -75,7 +78,7 @@ func New(cfg *config.Config, proc *agent.Process) Model {
 
 	mailClient := agent.NewMailClient(fmt.Sprintf("127.0.0.1:%d", cfg.AgentPort))
 
-	return Model{
+	return ChatModel{
 		config:     cfg,
 		proc:       proc,
 		mail:       mailClient,
@@ -87,21 +90,23 @@ func New(cfg *config.Config, proc *agent.Process) Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd {
+func (m ChatModel) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
 		m.pollMailEvents(),
 	)
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
-			return m, tea.Quit
+			return m, func() tea.Msg { return ChatExitMsg{} }
+		case tea.KeyEsc:
+			return m, func() tea.Msg { return ChatExitMsg{} }
 		case tea.KeyCtrlO:
 			m.verbose = !m.verbose
 			if m.verbose {
@@ -193,7 +198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) View() string {
+func (m ChatModel) View() string {
 	if !m.ready {
 		return "\n  Initializing..."
 	}
@@ -226,13 +231,13 @@ func (m Model) View() string {
 	return statusBar + "\n" + m.viewport.View() + "\n" + inputBox
 }
 
-func (m *Model) updateViewport() {
+func (m *ChatModel) updateViewport() {
 	content := strings.Join(m.messages, "\n")
 	m.viewport.SetContent(content)
 	m.viewport.GotoBottom()
 }
 
-func (m Model) pollMailEvents() tea.Cmd {
+func (m ChatModel) pollMailEvents() tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case msg := <-m.mailCh:
@@ -243,7 +248,7 @@ func (m Model) pollMailEvents() tea.Cmd {
 	}
 }
 
-func (m Model) verboseTick() tea.Cmd {
+func (m ChatModel) verboseTick() tea.Cmd {
 	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 		return verboseTickMsg(t)
 	})
@@ -251,7 +256,7 @@ func (m Model) verboseTick() tea.Cmd {
 
 // readVerboseLines reads new JSONL lines from the agent's log file starting
 // at verboseOffset. This is an on-demand read — no background goroutine.
-func (m *Model) readVerboseLines() {
+func (m *ChatModel) readVerboseLines() {
 	logPath := fmt.Sprintf("%s/%s/logs/events.jsonl", m.config.ProjectDir, m.activeName)
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -282,7 +287,7 @@ func (m *Model) readVerboseLines() {
 }
 
 // handleCommand processes /commands. Returns true if the input was a command.
-func (m *Model) handleCommand(text string) bool {
+func (m *ChatModel) handleCommand(text string) bool {
 	if strings.HasPrefix(text, "/list") {
 		spirits := manage.ScanSpirits(m.config.ProjectDir)
 		if len(spirits) == 0 {
@@ -331,7 +336,7 @@ func (m *Model) handleCommand(text string) bool {
 }
 
 // switchDaemon changes the target daemon the TUI talks to.
-func (m *Model) switchDaemon(name string, port int) {
+func (m *ChatModel) switchDaemon(name string, port int) {
 	m.activeName = name
 	m.activePort = port
 	m.mail = agent.NewMailClient(fmt.Sprintf("127.0.0.1:%d", port))
@@ -342,7 +347,7 @@ func (m *Model) switchDaemon(name string, port int) {
 }
 
 // cycleNextSpirit switches to the next running spirit via Tab.
-func (m *Model) cycleNextSpirit() {
+func (m *ChatModel) cycleNextSpirit() {
 	spirits := manage.ScanSpirits(m.config.ProjectDir)
 	if len(spirits) == 0 {
 		return
@@ -395,11 +400,3 @@ func formatLogEvent(e logEvent) string {
 	return ""
 }
 
-// Run starts the TUI.
-func Run(cfg *config.Config, proc *agent.Process) {
-	m := New(cfg, proc)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
-}

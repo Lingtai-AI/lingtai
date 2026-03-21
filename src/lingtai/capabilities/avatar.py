@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
 from pathlib import Path
@@ -55,13 +56,9 @@ def get_schema(lang: str = "en") -> dict:
                 "type": "object",
                 "description": t(lang, "avatar.admin"),
             },
-            "provider": {
+            "combo": {
                 "type": "string",
-                "description": t(lang, "avatar.provider"),
-            },
-            "model": {
-                "type": "string",
-                "description": t(lang, "avatar.model"),
+                "description": t(lang, "avatar.combo"),
             },
         },
         "required": ["name"],
@@ -84,6 +81,16 @@ class AvatarManager:
         self._agent = agent
         self._max_agents = max_agents  # 0 = unlimited
         self._peers: dict[str, "Agent"] = {}  # name -> live Agent reference
+
+        # Load parent's combo for default avatar LLM config
+        try:
+            combo_path = Path(agent._working_dir) / "combo.json"
+            if combo_path.is_file():
+                self._parent_combo = json.loads(combo_path.read_text(encoding="utf-8"))
+            else:
+                self._parent_combo = None
+        except (json.JSONDecodeError, OSError, TypeError):
+            self._parent_combo = None
 
     # ------------------------------------------------------------------
     # Handler
@@ -204,9 +211,31 @@ class AvatarManager:
         avatar_working_dir = parent._base_dir / peer_name
         mail_svc = TCPMailService(listen_port=port, working_dir=avatar_working_dir)
 
+        # Resolve combo for LLM config
+        combo_name = args.get("combo")
+        if combo_name:
+            combo_path = Path.home() / ".lingtai" / "combos" / f"{combo_name}.json"
+            combo_data = json.loads(combo_path.read_text(encoding="utf-8"))
+        elif self._parent_combo:
+            combo_data = self._parent_combo
+            combo_name = combo_data.get("name", "")
+        else:
+            combo_data = None
+
+        if combo_data:
+            model_cfg = combo_data.get("model", {})
+            peer_provider = model_cfg.get("provider", parent._config.provider)
+            peer_model = model_cfg.get("model", parent._config.model)
+            # Set API key from combo's env section
+            env_vars = combo_data.get("env", {})
+            for key, val in env_vars.items():
+                if val:
+                    os.environ.setdefault(key, val)
+        else:
+            peer_provider = parent._config.provider
+            peer_model = parent._config.model
+
         from lingtai_kernel.config import AgentConfig
-        peer_provider = args.get("provider") or parent._config.provider
-        peer_model = args.get("model") or parent._config.model
         peer_config = AgentConfig(
             max_turns=parent._config.max_turns,
             provider=peer_provider,
@@ -230,6 +259,15 @@ class AvatarManager:
         )
         avatar.start()
 
+        # Copy combo.json to the avatar's working dir
+        if combo_data:
+            combo_json_path = avatar._working_dir / "combo.json"
+            combo_json_path.parent.mkdir(parents=True, exist_ok=True)
+            combo_json_path.write_text(
+                json.dumps(combo_data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
         if reasoning:
             avatar.send(reasoning, sender=parent.agent_id)
 
@@ -244,6 +282,7 @@ class AvatarManager:
             mission=reasoning or "",
             privileges=admin,
             capabilities=cap_names,
+            combo=combo_name or "",
             provider=peer_provider,
             model=peer_model,
         )
@@ -266,41 +305,28 @@ class AvatarManager:
 
 
 def _build_schema(agent: "Agent") -> dict:
-    """Build avatar schema with available providers from LLMService."""
+    """Build avatar schema with available combos from ~/.lingtai/combos/."""
     import copy
     lang = agent._config.language
     schema = copy.deepcopy(get_schema(lang))
 
-    try:
-        defaults = agent.service._provider_defaults
-        available = sorted(str(k) for k in defaults.keys() if isinstance(k, str))
-    except (AttributeError, TypeError):
-        available = []
-    if not available:
-        try:
-            available = [str(agent.service.provider)]
-        except (AttributeError, TypeError):
-            available = []
+    # Scan ~/.lingtai/combos/*.json for saved combo names
+    combos_dir = Path.home() / ".lingtai" / "combos"
+    combo_names: list[str] = []
+    if combos_dir.is_dir():
+        for p in sorted(combos_dir.glob("*.json")):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                name = data.get("name", p.stem)
+                combo_names.append(name)
+            except (json.JSONDecodeError, OSError):
+                continue
 
-    provider_models: list[str] = []
-    try:
-        for pname, pdefaults in agent.service._provider_defaults.items():
-            if isinstance(pdefaults, dict):
-                m = pdefaults.get("model", "")
-                if m:
-                    provider_models.append(f"{pname}: {m}")
-    except (AttributeError, TypeError):
-        pass
-
-    schema["properties"]["provider"]["description"] = t(
-        lang, "avatar.provider_dynamic", available=", ".join(available)
-    )
-    schema["properties"]["provider"]["enum"] = available
-
-    if provider_models:
-        schema["properties"]["model"]["description"] = t(
-            lang, "avatar.model_dynamic", known="; ".join(provider_models)
-        )
+    if combo_names:
+        schema["properties"]["combo"]["enum"] = combo_names
+    else:
+        # No combos available — remove combo property (parent's combo is the only option)
+        schema["properties"].pop("combo", None)
 
     return schema
 

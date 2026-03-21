@@ -202,8 +202,8 @@ type testResultMsg struct {
 	result TestResult
 }
 
-// wizardModel is the Bubble Tea model for the setup wizard.
-type wizardModel struct {
+// WizardModel is the Bubble Tea model for the setup wizard.
+type WizardModel struct {
 	step      step
 	fields    map[step][]field
 	focus     int // index of focused field within current step
@@ -246,6 +246,15 @@ type wizardModel struct {
 	written []string // files written
 }
 
+// Done returns whether the wizard has finished.
+func (m WizardModel) Done() bool { return m.done }
+
+// Err returns any error from the wizard.
+func (m WizardModel) Err() error { return m.err }
+
+// Written returns the list of files written by the wizard.
+func (m WizardModel) Written() []string { return m.written }
+
 func newTextInput(placeholder string, defaultVal string) textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = placeholder
@@ -255,7 +264,7 @@ func newTextInput(placeholder string, defaultVal string) textinput.Model {
 	return ti
 }
 
-func newWizardModel(outputDir string) wizardModel {
+func NewWizardModel(outputDir string) WizardModel {
 	// Detect initial language index
 	initialLangIdx := 0
 	for idx, code := range i18n.Languages {
@@ -265,7 +274,7 @@ func newWizardModel(outputDir string) wizardModel {
 		}
 	}
 
-	m := wizardModel{
+	m := WizardModel{
 		step:        StepCombo,
 		outputDir:   outputDir,
 		langIdx:     initialLangIdx,
@@ -356,7 +365,7 @@ func newWizardModel(outputDir string) wizardModel {
 
 // loadExisting reads config.json, model.json, and .env from outputDir/configs/
 // and pre-fills the wizard fields so returning users see their saved values.
-func (m *wizardModel) loadExisting() {
+func (m *WizardModel) loadExisting() {
 	configsDir := filepath.Join(m.outputDir, "configs")
 	configPath := filepath.Join(configsDir, "config.json")
 	data, err := os.ReadFile(configPath)
@@ -531,11 +540,11 @@ func (m *wizardModel) loadExisting() {
 	}
 }
 
-func (m wizardModel) Init() tea.Cmd {
+func (m WizardModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case testResultMsg:
 		r := msg.result
@@ -951,18 +960,18 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *wizardModel) syncProviderDefaults() {
+func (m *WizardModel) syncProviderDefaults() {
 	p := providers[m.providerIdx]
 	m.fields[StepModel][0].input.SetValue(p)
 	m.fields[StepModel][1].input.SetValue(providerModels[p])
 	m.fields[StepModel][3].input.SetValue(providerEndpoints[p])
 }
 
-func (m *wizardModel) mmIsLocal(row int) bool {
+func (m *WizardModel) mmIsLocal(row int) bool {
 	return mmCaps[row].providers[m.mmRows[row].providerIdx] == "local"
 }
 
-func (m *wizardModel) mmBlurCurrent() {
+func (m *WizardModel) mmBlurCurrent() {
 	if m.mmCol == 1 {
 		m.mmRows[m.mmRow].keyInput.Blur()
 	}
@@ -971,7 +980,7 @@ func (m *wizardModel) mmBlurCurrent() {
 	}
 }
 
-func (m *wizardModel) mmFocusCurrent() {
+func (m *WizardModel) mmFocusCurrent() {
 	if m.mmCol == 1 {
 		m.mmRows[m.mmRow].keyInput.Focus()
 	}
@@ -980,13 +989,13 @@ func (m *wizardModel) mmFocusCurrent() {
 	}
 }
 
-func (m *wizardModel) mmMoveRow(delta int) {
+func (m *WizardModel) mmMoveRow(delta int) {
 	m.mmBlurCurrent()
 	m.mmRow = (m.mmRow + delta + len(mmCaps)) % len(mmCaps)
 	m.mmFocusCurrent()
 }
 
-func (m *wizardModel) mmTabNext() {
+func (m *WizardModel) mmTabNext() {
 	m.mmBlurCurrent()
 	if m.mmIsLocal(m.mmRow) {
 		m.mmRow = (m.mmRow + 1) % len(mmCaps)
@@ -1001,7 +1010,7 @@ func (m *wizardModel) mmTabNext() {
 	m.mmFocusCurrent()
 }
 
-func (m *wizardModel) mmTabPrev() {
+func (m *WizardModel) mmTabPrev() {
 	m.mmBlurCurrent()
 	if m.mmCol == 0 {
 		m.mmRow = (m.mmRow - 1 + len(mmCaps)) % len(mmCaps)
@@ -1016,7 +1025,7 @@ func (m *wizardModel) mmTabPrev() {
 	m.mmFocusCurrent()
 }
 
-func (m *wizardModel) syncMMDefaults(row int) {
+func (m *WizardModel) syncMMDefaults(row int) {
 	cap := mmCaps[row]
 	p := cap.providers[m.mmRows[row].providerIdx]
 	if ep, ok := cap.endpoints[p]; ok {
@@ -1027,7 +1036,7 @@ func (m *wizardModel) syncMMDefaults(row int) {
 }
 
 // mmApplyQuickSetup fills all non-local mmRows from the quick setup keys and endpoint.
-func (m *wizardModel) mmApplyQuickSetup() {
+func (m *WizardModel) mmApplyQuickSetup() {
 	ep := mmQuickEndpoints[m.mmQuickEndpoint]
 	apiKey := m.mmQuickKey1.Value()
 	mcpKey := m.mmQuickKey2.Value()
@@ -1048,7 +1057,7 @@ func (m *wizardModel) mmApplyQuickSetup() {
 	}
 }
 
-func (m *wizardModel) advanceStep() {
+func (m *WizardModel) advanceStep() {
 	// Blur current fields
 	if m.step == StepMultimodal {
 		m.mmBlurCurrent()
@@ -1076,7 +1085,7 @@ func (m *wizardModel) advanceStep() {
 }
 
 // applyCombo pre-fills wizard fields from a saved combo.
-func (m *wizardModel) applyCombo(c combo.Combo) {
+func (m *WizardModel) applyCombo(c combo.Combo) {
 	// Set env vars from combo
 	for k, v := range c.Env {
 		os.Setenv(k, v)
@@ -1127,7 +1136,7 @@ func (m *wizardModel) applyCombo(c combo.Combo) {
 	m.comboName.SetValue(c.Name)
 }
 
-func (m wizardModel) renderMMChooser() string {
+func (m WizardModel) renderMMChooser() string {
 	var b strings.Builder
 
 	choices := []string{
@@ -1154,7 +1163,7 @@ func (m wizardModel) renderMMChooser() string {
 	return b.String()
 }
 
-func (m wizardModel) renderMMQuick() string {
+func (m WizardModel) renderMMQuick() string {
 	var b strings.Builder
 
 	b.WriteString(promptStyle.Render("MiniMax Quick Setup") + "\n\n")
@@ -1202,7 +1211,7 @@ func (m wizardModel) renderMMQuick() string {
 	return b.String()
 }
 
-func (m wizardModel) renderMsgChooser() string {
+func (m WizardModel) renderMsgChooser() string {
 	var b strings.Builder
 
 	choices := []struct{ name, desc string }{
@@ -1233,7 +1242,7 @@ func (m wizardModel) renderMsgChooser() string {
 	return b.String()
 }
 
-func (m wizardModel) renderMsgFields(fieldStep step, title string) string {
+func (m WizardModel) renderMsgFields(fieldStep step, title string) string {
 	var b strings.Builder
 
 	b.WriteString(promptStyle.Render(title) + "\n\n")
@@ -1252,7 +1261,7 @@ func (m wizardModel) renderMsgFields(fieldStep step, title string) string {
 	return b.String()
 }
 
-func (m wizardModel) renderMultimodal() string {
+func (m WizardModel) renderMultimodal() string {
 	var b strings.Builder
 
 	// Column headers
@@ -1320,7 +1329,7 @@ func (m wizardModel) renderMultimodal() string {
 	return b.String()
 }
 
-func (m wizardModel) View() string {
+func (m WizardModel) View() string {
 	if m.done {
 		if m.err != nil {
 			return errorStyle.Render(fmt.Sprintf("Error: %v\n", m.err))
@@ -1482,7 +1491,7 @@ func (m wizardModel) View() string {
 	return b.String()
 }
 
-func (m wizardModel) renderReview() string {
+func (m WizardModel) renderReview() string {
 	var b strings.Builder
 
 	// Language
@@ -1568,7 +1577,7 @@ func (m wizardModel) renderReview() string {
 	return b.String()
 }
 
-func (m wizardModel) renderTestResult(b *strings.Builder, s step) {
+func (m WizardModel) renderTestResult(b *strings.Builder, s step) {
 	if tr, ok := m.testResults[s]; ok {
 		if tr.OK {
 			b.WriteString(fmt.Sprintf("  %s %s\n", successStyle.Render("\u2713"), tr.Message))
@@ -1578,7 +1587,7 @@ func (m wizardModel) renderTestResult(b *strings.Builder, s step) {
 	}
 }
 
-func (m wizardModel) fieldVal(s step, idx int) string {
+func (m WizardModel) fieldVal(s step, idx int) string {
 	fields, ok := m.fields[s]
 	if !ok || idx >= len(fields) {
 		return ""
@@ -1586,7 +1595,7 @@ func (m wizardModel) fieldVal(s step, idx int) string {
 	return fields[idx].input.Value()
 }
 
-func (m wizardModel) runTest() tea.Cmd {
+func (m WizardModel) runTest() tea.Cmd {
 	if m.step != StepMessaging {
 		return nil
 	}
@@ -1626,7 +1635,7 @@ func (m wizardModel) runTest() tea.Cmd {
 	}
 }
 
-func (m wizardModel) writeConfig() ([]string, error) {
+func (m WizardModel) writeConfig() ([]string, error) {
 	// Config files go to configs/ subdirectory
 	configsDir := filepath.Join(m.outputDir, "configs")
 	if err := os.MkdirAll(configsDir, 0755); err != nil {
@@ -1825,13 +1834,13 @@ func writeJSON(path string, data interface{}) error {
 
 // Run starts the interactive setup wizard, writing config to outputDir.
 func Run(outputDir string) error {
-	m := newWizardModel(outputDir)
+	m := NewWizardModel(outputDir)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("wizard error: %w", err)
 	}
-	if wm, ok := finalModel.(wizardModel); ok && wm.err != nil {
+	if wm, ok := finalModel.(WizardModel); ok && wm.err != nil {
 		return wm.err
 	}
 	return nil

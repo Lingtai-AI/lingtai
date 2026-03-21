@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"lingtai-daemon/internal/agent"
-	"lingtai-daemon/internal/config"
 	"lingtai-daemon/internal/i18n"
 	"lingtai-daemon/internal/setup"
 	"lingtai-daemon/internal/tui"
@@ -31,8 +29,9 @@ func main() {
 
 	cwd, _ := os.Getwd()
 	lingtaiDir := filepath.Join(cwd, ".lingtai")
+	configPath := filepath.Join(lingtaiDir, "configs", "config.json")
 
-	// lingtai setup — (re)configure current directory
+	// lingtai setup — standalone wizard
 	if len(positional) > 0 {
 		switch positional[0] {
 		case "setup":
@@ -48,43 +47,21 @@ func main() {
 		}
 	}
 
-	// Default: check cwd for .lingtai/
-	configPath := filepath.Join(lingtaiDir, "configs", "config.json")
+	// Determine initial view
+	opts := tui.RootOpts{
+		LingtaiDir: lingtaiDir,
+		ConfigPath: configPath,
+	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// No .lingtai/ — run setup wizard
-		fmt.Printf("\n  \033[1m\033[36m灵台\033[0m  No .lingtai/ found — starting setup.\n\n")
-		os.MkdirAll(lingtaiDir, 0755)
-		if err := setup.Run(lingtaiDir); err != nil {
-			fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
-			os.Exit(1)
-		}
-		// After setup, fall through to start agent
+		// No .lingtai/ — start with wizard
+		opts.InitialView = tui.ViewWizard
+	} else {
+		// .lingtai/ exists — start with status
+		opts.InitialView = tui.ViewStatus
 	}
 
-	// .lingtai/ exists — load config, start agent, open chat TUI
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31mError loading config: %v\033[0m\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\n  \033[1m\033[36m灵台\033[0m  Starting agent...\n")
-	proc, err := agent.Start(agent.StartOptions{
-		ConfigPath: configPath,
-		AgentPort:  cfg.AgentPort,
-		WorkingDir: cfg.WorkingDir(),
-		Headless:   true,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[31mError starting agent: %v\033[0m\n", err)
-		os.Exit(1)
-	}
-
-	tui.Run(cfg, proc)
-
-	// TUI exited — stop agent
-	proc.Stop()
+	tui.RunTUI(opts)
 }
 
 func printHelp() {
@@ -92,7 +69,7 @@ func printHelp() {
   灵台 LingTai — agent framework
 
   Usage:
-    lingtai              Start agent in current directory (setup if needed)
+    lingtai              Start TUI (setup if first time)
     lingtai setup        (Re)configure current directory
 
   Flags:
