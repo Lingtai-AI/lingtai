@@ -134,8 +134,8 @@ class AvatarManager:
         state = peer._state
         if state == AgentState.ACTIVE:
             return "active"
-        if state == AgentState.ERROR:
-            return "error"
+        if state == AgentState.STUCK:
+            return "stuck"
         if state == AgentState.DEAD:
             return "stopped"
         return "idle"
@@ -212,8 +212,10 @@ class AvatarManager:
             cap_names.append(cap_name)
 
         # Spawn peer agent
+        import secrets
         port = self._get_free_port()
-        avatar_working_dir = parent._base_dir / peer_name
+        avatar_id = secrets.token_hex(3)
+        avatar_working_dir = parent._base_dir / avatar_id
         mail_svc = TCPMailService(listen_port=port, working_dir=avatar_working_dir)
 
         # Resolve combo for LLM config
@@ -256,6 +258,7 @@ class AvatarManager:
 
         avatar = Agent(
             agent_name=peer_name,
+            agent_id=avatar_id,
             service=parent.service,
             mail_service=mail_svc,
             config=peer_config,

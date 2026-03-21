@@ -3,7 +3,7 @@
   "system.inner_voice": "[内省] {text}",
   "system.new_mail": "[系统] {box}有新书至。\n  寄者：{sender}\n  题：{subject}\n  发于：{sent_at}\n  {preview}...\n以 {tool}(action=\"check\") 查阅收信。",
   "system.mail_bounce": "[系统] 书信未达：{error}\n  收者：{address}\n  题：{subject}",
-  "system.error_revive": "[系统] 汝于 {ts} 误入歧途，今已唤醒……",
+  "system.stuck_revive": "[系统] 汝于 {ts} 误入歧途，今已唤醒……",
   "system.molt_wiped": "[系统] 对话之录已尽数清去，盖汝五度忽略蜕凡之警。查阅书信与藏经以复上下文，从头再起。",
   "system.molt_final": "[系统] 终告——倒数归零。上下文已满 {pressure}。即刻蜕凡，否则下轮尽失。书简报于未来之己：所为何事、已竟何功、尚余何务、当载何经。{tool}(object=context, action=molt, summary=<简报>)。",
   "system.molt_urgent": "[系统] 上下文之压：已满 {pressure}——距自动清去尚余 {remaining} {turns}。即刻将要务存入藏经（{tool} submit），而后蜕凡。蜕凡之摘要乃致未来己之简报——此为汝唯一之上下文。",
