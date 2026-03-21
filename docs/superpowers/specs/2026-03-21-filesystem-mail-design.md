@@ -53,7 +53,7 @@ The `.agent.heartbeat` file is a plain-text UTC timestamp, serving as the extern
 {working_dir}/.agent.heartbeat    ← "2026-03-21T10:00:00.500000Z"
 ```
 
-**Relationship to existing heartbeat**: The kernel already has a heartbeat daemon thread (`_heartbeat_loop`) that ticks every 1 second and handles AED (error detection/recovery). Currently it uses an in-memory integer counter — this changes to a UTC timestamp (`time.time()`), which is strictly more useful (the beat count is redundant with `lifetime`). The heartbeat thread writes this timestamp to `.agent.heartbeat` on each tick, but **only when the agent is healthy** (ACTIVE or IDLE state). When the agent is in ERROR or DEAD state, the file is NOT updated — so external observers correctly see it as stale.
+**Relationship to existing heartbeat**: The kernel already has a heartbeat daemon thread (`_heartbeat_loop`) that ticks every 1 second and handles AED (error detection/recovery). Currently it uses an in-memory integer counter — this changes to a UTC timestamp (`time.time()`), which is strictly more useful (the beat count is redundant with `lifetime`). The heartbeat thread writes this timestamp to `.agent.heartbeat` on each tick when the agent is alive (ACTIVE, IDLE, or STUCK). Only DEAD state stops writing — the file goes stale and external observers detect it.
 
 - **Writer**: the existing `_heartbeat_loop` thread (ticks every 1s). Writes the timestamp when state is `ACTIVE`, `IDLE`, or `STUCK`. The `STUCK` state means AED is in progress — the agent is still fighting to recover, so it's considered alive. Only `DEAD` state (AED failed after `cpr_timeout`) stops the heartbeat — the thread exits and the file goes stale. (Note: `ERROR` is renamed to `STUCK` as part of this work — see state rename below.)
 - **Reader**: any sender reads this file and compares against current UTC time. Alive if `now - heartbeat < 2s`.
@@ -63,7 +63,7 @@ The `.agent.heartbeat` file is a plain-text UTC timestamp, serving as the extern
 - **STUCK state** (formerly ERROR): heartbeat thread keeps running and keeps writing — AED is in progress, agent is still alive and attempting recovery. Mail can still be delivered.
 - **Human participant**: the Go daemon writes the human's heartbeat on its own tick.
 
-The mail polling thread runs independently and can still receive `kill` mail even when the heartbeat file is stale (agent in ERROR). This allows the daemon to force-terminate a stuck agent.
+The mail polling thread runs independently and can still receive `kill` mail even when the heartbeat file is stale (agent DEAD). This allows the daemon to force-terminate a dead agent.
 
 ## Message Delivery
 
@@ -286,7 +286,6 @@ Clean break. No backward compatibility layer.
 
 ## What This Enables
 
-- **Offline delivery**: mail queues up in inbox even when recipient isn't running
 - **Trivial attachments**: real files, no base64, no size limits
 - **Debuggable**: `ls` an agent's inbox, `cat` a message
 - **Stable addresses**: paths don't change across restarts
