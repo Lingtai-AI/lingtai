@@ -43,15 +43,22 @@ func List() ([]Combo, error) {
 			continue
 		}
 		var c Combo
-		if json.Unmarshal(data, &c) == nil && c.Name != "" {
-			combos = append(combos, c)
+		if err := json.Unmarshal(data, &c); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping invalid combo %s: %v\n", e.Name(), err)
+			continue
 		}
+		if c.Name == "" {
+			continue
+		}
+		combos = append(combos, c)
 	}
 	sort.Slice(combos, func(i, j int) bool { return combos[i].Name < combos[j].Name })
 	return combos, nil
 }
 
-// Save writes a combo to ~/.lingtai/combos/<name>.json with mode 0600.
+// Save writes a combo to ~/.lingtai/combos/<name>.json.
+// File is written with mode 0600 because combos contain API key values.
+// The combo directory itself should be user-readable only.
 func Save(c Combo) error {
 	dir := Dir()
 	if err := os.MkdirAll(dir, 0755); err != nil {

@@ -18,6 +18,8 @@ from app.config import load_config, resolve_env_vars
 # Default covenant
 # ---------------------------------------------------------------------------
 
+# Minimal fallback covenant — the wizard writes language-appropriate covenants
+# to the agent working dir. This is only used if no covenant.md exists.
 _DEFAULT_COVENANT = """\
 ## Communication
 - You have multiple communication channels. Use the same channel to reply.
@@ -91,7 +93,7 @@ def _build_capabilities(cfg: dict) -> dict:
     caps: dict = {
         "file": {},
         "psyche": {},
-        "avatar": {},
+        "avatar": {"max_agents": 10},
         "email": {},
     }
     if cfg.get("bash_policy"):
@@ -205,16 +207,26 @@ def main(config_path: str | None = None) -> None:
     # Print meta
     _print_meta(cfg)
 
+    # Resolve covenant — per-agent, in working dir
+    covenant_path = base_dir / agent_name / "covenant.md"
+    if covenant_path.is_file():
+        covenant = covenant_path.read_text(encoding="utf-8")
+    else:
+        covenant = _DEFAULT_COVENANT
+
     # Create agent
     agent = Agent(
         agent_name=agent_name,
         service=llm,
         mail_service=mail_service,
         logging_service=logging_service,
-        config=AgentConfig(max_turns=cfg.get("max_turns", 50)),
+        config=AgentConfig(
+            max_turns=cfg.get("max_turns", 50),
+            language=cfg.get("language", "en"),
+        ),
         base_dir=base_dir,
         streaming=cfg.get("streaming", True),
-        covenant=cfg.get("covenant", _DEFAULT_COVENANT),
+        covenant=covenant,
         capabilities=capabilities,
         addons=addons,
     )

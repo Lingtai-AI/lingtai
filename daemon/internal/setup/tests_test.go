@@ -26,17 +26,20 @@ func TestTestEnvVar_Missing(t *testing.T) {
 func TestWizardConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
+	// Config files live under configs/ subdirectory
+	configsDir := filepath.Join(dir, "configs")
+	os.MkdirAll(configsDir, 0755)
+
 	// Simulate what the wizard writes
 	modelJSON := `{"provider": "minimax", "model": "test-model", "api_key_env": "TEST_KEY"}`
-	os.WriteFile(filepath.Join(dir, "model.json"), []byte(modelJSON), 0644)
+	os.WriteFile(filepath.Join(configsDir, "model.json"), []byte(modelJSON), 0644)
 
 	configJSON := `{
 		"model": "model.json",
 		"agent_name": "wizard-test",
-		"agent_port": 9000,
-		"base_dir": "` + dir + `/agents"
+		"agent_port": 9000
 	}`
-	cfgPath := filepath.Join(dir, "config.json")
+	cfgPath := filepath.Join(configsDir, "config.json")
 	os.WriteFile(cfgPath, []byte(configJSON), 0644)
 
 	cfg, err := config.Load(cfgPath)
@@ -51,5 +54,18 @@ func TestWizardConfigRoundTrip(t *testing.T) {
 	}
 	if cfg.AgentPort != 9000 {
 		t.Errorf("agent_port: got %d, want %d", cfg.AgentPort, 9000)
+	}
+	// ConfigDir should be the configs/ subdirectory
+	if cfg.ConfigDir != configsDir {
+		t.Errorf("ConfigDir: got %q, want %q", cfg.ConfigDir, configsDir)
+	}
+	// ProjectDir should be the parent of configs/
+	if cfg.ProjectDir != dir {
+		t.Errorf("ProjectDir: got %q, want %q", cfg.ProjectDir, dir)
+	}
+	// WorkingDir should be project_dir/agent_name
+	expectedWorkDir := filepath.Join(dir, "wizard-test")
+	if cfg.WorkingDir() != expectedWorkDir {
+		t.Errorf("WorkingDir: got %q, want %q", cfg.WorkingDir(), expectedWorkDir)
 	}
 }

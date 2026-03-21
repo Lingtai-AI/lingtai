@@ -53,6 +53,13 @@ const (
 	StepTelegram step = 101
 )
 
+// StepGeneral field indices
+const (
+	fieldAgentName = 0
+	fieldAgentPort = 1
+	fieldBashPolicy = 2
+)
+
 func (s step) String() string {
 	switch s {
 	case StepCombo:
@@ -347,10 +354,11 @@ func newWizardModel(outputDir string) wizardModel {
 	return m
 }
 
-// loadExisting reads config.json, model.json, and .env from outputDir
+// loadExisting reads config.json, model.json, and .env from outputDir/configs/
 // and pre-fills the wizard fields so returning users see their saved values.
 func (m *wizardModel) loadExisting() {
-	configPath := filepath.Join(m.outputDir, "config.json")
+	configsDir := filepath.Join(m.outputDir, "configs")
+	configPath := filepath.Join(configsDir, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return // no existing config
@@ -362,7 +370,7 @@ func (m *wizardModel) loadExisting() {
 	}
 
 	// Load .env secrets
-	config.LoadDotenv(m.outputDir)
+	config.LoadDotenv(configsDir)
 
 	// Language
 	var lang string
@@ -382,8 +390,8 @@ func (m *wizardModel) loadExisting() {
 	if v, ok := raw["model"]; ok {
 		var modelPath string
 		if json.Unmarshal(v, &modelPath) == nil {
-			// It's a file path
-			modelData, err := os.ReadFile(filepath.Join(m.outputDir, modelPath))
+			// It's a file path — resolve relative to configs/ dir
+			modelData, err := os.ReadFile(filepath.Join(configsDir, modelPath))
 			if err == nil {
 				json.Unmarshal(modelData, &modelRaw)
 			}
@@ -513,13 +521,13 @@ func (m *wizardModel) loadExisting() {
 		json.Unmarshal(v, &bashPolicy)
 	}
 	if agentName != "" {
-		m.fields[StepGeneral][0].input.SetValue(agentName)
+		m.fields[StepGeneral][fieldAgentName].input.SetValue(agentName)
 	}
 	if agentPort > 0 {
-		m.fields[StepGeneral][1].input.SetValue(strconv.Itoa(agentPort))
+		m.fields[StepGeneral][fieldAgentPort].input.SetValue(strconv.Itoa(agentPort))
 	}
 	if bashPolicy != "" {
-		m.fields[StepGeneral][2].input.SetValue(bashPolicy)
+		m.fields[StepGeneral][fieldBashPolicy].input.SetValue(bashPolicy)
 	}
 }
 
@@ -1109,10 +1117,10 @@ func (m *wizardModel) applyCombo(c combo.Combo) {
 
 	// Set general config fields
 	if agentName, ok := c.Config["agent_name"].(string); ok {
-		m.fields[StepGeneral][0].input.SetValue(agentName)
+		m.fields[StepGeneral][fieldAgentName].input.SetValue(agentName)
 	}
 	if port, ok := c.Config["agent_port"].(float64); ok {
-		m.fields[StepGeneral][1].input.SetValue(fmt.Sprintf("%d", int(port)))
+		m.fields[StepGeneral][fieldAgentPort].input.SetValue(fmt.Sprintf("%d", int(port)))
 	}
 
 	// Pre-fill combo name for save
@@ -1543,9 +1551,9 @@ func (m wizardModel) renderReview() string {
 
 	// General
 	b.WriteString("\n" + promptStyle.Render("General:") + "\n")
-	b.WriteString(fmt.Sprintf("  Agent Name: %s\n", m.fieldVal(StepGeneral, 0)))
-	b.WriteString(fmt.Sprintf("  Port:       %s\n", m.fieldVal(StepGeneral, 1)))
-	if v := m.fieldVal(StepGeneral, 2); v != "" {
+	b.WriteString(fmt.Sprintf("  Agent Name: %s\n", m.fieldVal(StepGeneral, fieldAgentName)))
+	b.WriteString(fmt.Sprintf("  Port:       %s\n", m.fieldVal(StepGeneral, fieldAgentPort)))
+	if v := m.fieldVal(StepGeneral, fieldBashPolicy); v != "" {
 		b.WriteString(fmt.Sprintf("  Bash Policy: %s\n", v))
 	}
 
@@ -1676,12 +1684,12 @@ func (m wizardModel) writeConfig() ([]string, error) {
 	written = append(written, modelPath)
 
 	// 2. config.json
-	port, _ := strconv.Atoi(m.fieldVal(StepGeneral, 1))
+	port, _ := strconv.Atoi(m.fieldVal(StepGeneral, fieldAgentPort))
 	if port == 0 {
 		port = 8501
 	}
 
-	agentName := m.fieldVal(StepGeneral, 0)
+	agentName := m.fieldVal(StepGeneral, fieldAgentName)
 	cfg := map[string]interface{}{
 		"model":      "model.json",
 		"language":   i18n.Languages[m.langIdx],
@@ -1689,7 +1697,7 @@ func (m wizardModel) writeConfig() ([]string, error) {
 		"agent_port": port,
 	}
 
-	bashPolicy := m.fieldVal(StepGeneral, 2)
+	bashPolicy := m.fieldVal(StepGeneral, fieldBashPolicy)
 	if bashPolicy == "" {
 		bashPolicy = filepath.Join(configsDir, "bash_policy.json")
 	}
