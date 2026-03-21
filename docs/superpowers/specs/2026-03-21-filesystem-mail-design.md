@@ -35,12 +35,12 @@ Before writing to a recipient's inbox, the sender verifies the destination:
 
 1. Read `{address}/.agent.json`
 2. Verify it exists and is valid JSON
-3. Verify `agent_id` matches what the sender expects (from contacts)
+3. If the recipient is in the sender's contacts, verify `agent_id` matches the contact's stored `agent_id`. If the recipient is NOT in contacts (e.g., replying to an unknown sender from a `from` field), skip `agent_id` verification — the `.agent.json` existence check alone is sufficient.
 4. If valid → write to `{address}/{mailbox_rel}/inbox/{uuid}/`
 
 Failure cases:
 - `.agent.json` missing → error: "no agent at this address"
-- `agent_id` mismatch → error: "agent at this address has changed"
+- `agent_id` mismatch (contact exists) → error: "agent at this address has changed"
 
 ## Message Delivery
 
@@ -91,11 +91,10 @@ FilesystemMailService(working_dir: str | Path, mailbox_rel: str = "mailbox")
 class MailService(ABC):
     @property
     @abstractmethod
-    def address(self) -> str: ...          # own working dir path
+    def address(self) -> str: ...          # own working dir path (always set, never None)
 
     @abstractmethod
-    def send(self, address: str, payload: dict,
-             attachments: list[Path] | None = None) -> str | None: ...
+    def send(self, address: str, payload: dict) -> str | None: ...
              # returns None on success, error string on failure
 
     @abstractmethod
@@ -105,16 +104,20 @@ class MailService(ABC):
     def stop(self) -> None: ...
 ```
 
+The `address` property is narrowed from `str | None` to `str` — a filesystem mail service always has an address (its working dir).
+
+Attachments are listed in the `payload` dict under `"attachments"` (list of file paths). The `send()` implementation reads these paths and copies the files into the recipient's inbox. This preserves the existing calling convention in the mail intrinsic and email capability — no caller changes needed.
+
 ### Implementation
 
-- **`send(address, payload, attachments)`**: reads `{address}/.agent.json` for handshake verification, creates `{address}/{mailbox_rel}/inbox/{uuid}/`, writes `message.json`, copies attachment files into `attachments/` subfolder. Returns `None` on success, error string on failure.
+- **`send(address, payload)`**: reads `{address}/.agent.json` for handshake verification (see Handshake on Send), creates `{address}/{mailbox_rel}/inbox/{uuid}/`, writes `message.json`. If `payload["attachments"]` contains file paths, copies those files into the `attachments/` subfolder. Returns `None` on success, error string on failure.
 - **`listen(on_message)`**: starts a daemon thread that polls own `{mailbox_rel}/inbox/` for new message directories. Tracks seen UUIDs in a `set`. On new message: reads `message.json`, calls `on_message(payload)`. Loads existing UUIDs on startup to avoid re-notifying old messages.
 - **`stop()`**: signals the polling thread to exit.
 - **`address`** property: returns `str(working_dir)`.
 
 ### Poll interval
 
-~0.5 seconds (configurable). The polling thread is lightweight — just listing a directory for new entries.
+~0.5 seconds (configurable). The polling thread is lightweight — just listing a directory for new entries. Platform-native filesystem watchers (`inotify`/`FSEvents`) are a future optimization, not a current requirement.
 
 ## Notification Mechanism
 
@@ -174,8 +177,9 @@ Explicit introduction only. Agents know who they know.
 
 Introduction happens when:
 - The daemon starts an agent — it introduces the human and agent to each other by writing into both `contacts.json` files
-- An agent sends mail — the `from` field contains the sender's address
 - The host app configures contacts at construction
+
+Receiving mail from an unknown sender (address not in contacts) does NOT auto-add them to contacts. The `from` field is visible in the message, so the agent can see the sender's address — but adding to contacts is a deliberate action (via the email capability's contact management or programmatically by the host).
 
 No scanning of `base_dir`, no registry, no discovery protocol.
 
