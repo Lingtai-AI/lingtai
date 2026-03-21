@@ -150,11 +150,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.chat.Init(), m.windowSizeCmd())
 
 	case ChatExitMsg:
-		// Stop mail listener before leaving chat
-		m.chat.stopListener()
+		// Stop mail poller and heartbeat before leaving chat
+		m.chat.stopPoller()
 		m.status.scan()
 		m.view = ViewStatus
-		return m, nil
+		return m, m.status.Init()
 	}
 
 	// Route to active sub-view
@@ -173,7 +173,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.status.scan()
 			m.view = ViewStatus
-			return m, nil
+			return m, m.status.Init()
 		}
 		return m, cmd
 

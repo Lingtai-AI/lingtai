@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,7 +20,7 @@ import (
 	"lingtai-daemon/internal/manage"
 )
 
-// mailReceivedMsg wraps a received TCP mail message.
+// mailReceivedMsg wraps a received mail message from the poller.
 type mailReceivedMsg map[string]interface{}
 
 // verboseTickMsg triggers periodic JSONL re-read while verbose is on.
@@ -45,31 +45,36 @@ type ChatExitMsg struct{}
 
 // ChatModel is the chat TUI model.
 type ChatModel struct {
-	config   *config.Config
-	proc     *agent.Process
-	mail     *agent.MailClient
-	listener *agent.MailListener
-	mailCh   chan map[string]interface{}
+	config *config.Config
+	proc   *agent.Process
+	writer *agent.MailWriter
+	poller *agent.MailPoller
+	mailCh chan map[string]interface{}
+
+	// Human participant state
+	humanWorkdir string
+	humanID      string
+	heartbeatDone chan struct{}
 
 	viewport viewport.Model
 	input    textinput.Model
 	messages []string
 
 	// Verbose mode (Ctrl+O): on-demand JSONL rendering
-	verbose            bool
-	verboseOffset      int64 // byte offset into JSONL file — resume from here
-	verboseStartIdx    int   // index in messages[] where verbose output begins
+	verbose         bool
+	verboseOffset   int64 // byte offset into JSONL file — resume from here
+	verboseStartIdx int   // index in messages[] where verbose output begins
 
 	// Daemon switching: which daemon the TUI talks to
-	activeName string // agent name of current target
-	activePort int    // TCP port of current target
+	activeID   string // agent_id of current target (for filesystem paths)
+	activeName string // display name of current target (for UI)
 
 	width  int
 	height int
 	ready  bool
 }
 
-// New creates a new TUI model.
+// NewChat creates a new TUI model.
 func NewChat(cfg *config.Config, proc *agent.Process) ChatModel {
 	ti := textinput.New()
 	ti.Placeholder = i18n.S("type_message")
@@ -77,17 +82,43 @@ func NewChat(cfg *config.Config, proc *agent.Process) ChatModel {
 	ti.CharLimit = 4096
 	ti.Width = 80
 
-	mailClient := agent.NewMailClient(fmt.Sprintf("127.0.0.1:%d", cfg.AgentPort))
+	// Generate a human ID for the TUI user
+	humanID := "human-tui"
+
+	// Set up human working directory
+	humanWorkdir, _ := agent.SetupHumanWorkdir(cfg.ProjectDir, humanID, "human", cfg.Language)
+
+	// Start human heartbeat
+	heartbeatDone := make(chan struct{})
+	agent.StartHumanHeartbeat(humanWorkdir, heartbeatDone)
+
+	// Create MailWriter pointing to the agent's working directory
+	// The agent uses "mailbox" by default; email capability uses "email"
+	agentWorkdir := cfg.WorkingDir()
+	mailWriter := agent.NewMailWriter(agentWorkdir, "mailbox")
+
+	// Exchange contacts
+	agentMailboxDir := filepath.Join(agentWorkdir, "mailbox")
+	humanMailboxDir := filepath.Join(humanWorkdir, "mailbox")
+	agent.WriteContacts(agentMailboxDir, []map[string]interface{}{
+		{"name": "human", "address": humanWorkdir},
+	})
+	agent.WriteContacts(humanMailboxDir, []map[string]interface{}{
+		{"name": cfg.DisplayName(), "address": agentWorkdir},
+	})
 
 	return ChatModel{
-		config:     cfg,
-		proc:       proc,
-		mail:       mailClient,
-		mailCh:     make(chan map[string]interface{}, 32),
-		input:      ti,
-		messages:   []string{},
-		activeName: cfg.AgentName,
-		activePort: cfg.AgentPort,
+		config:        cfg,
+		proc:          proc,
+		writer:        mailWriter,
+		mailCh:        make(chan map[string]interface{}, 32),
+		humanWorkdir:  humanWorkdir,
+		humanID:       humanID,
+		heartbeatDone: heartbeatDone,
+		input:         ti,
+		messages:      []string{},
+		activeID:      cfg.AgentID,
+		activeName:    cfg.DisplayName(),
 	}
 }
 
@@ -135,8 +166,9 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, InputPrompt.Render("> ")+text)
 					m.updateViewport()
 
-					go m.mail.Send(map[string]interface{}{
-						"from":    fmt.Sprintf("cli@localhost:%d", m.config.CLIPort),
+					fromAddr := m.humanWorkdir
+					go m.writer.Send(map[string]interface{}{
+						"from":    fromAddr,
 						"message": text,
 					})
 				}
@@ -155,19 +187,18 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.YPosition = headerHeight
 			m.ready = true
 
-			if m.config.CLIPort > 0 {
-				mailCh := m.mailCh
-				listener, err := agent.NewMailListener(m.config.CLIPort, func(msg map[string]interface{}) {
-					mailCh <- msg
-				})
-				if err == nil {
-					m.listener = listener
-				}
-			}
+			// Start polling human's inbox for messages from the agent
+			humanInboxDir := filepath.Join(m.humanWorkdir, "mailbox", "inbox")
+			mailCh := m.mailCh
+			poller := agent.NewMailPoller(humanInboxDir, func(msg map[string]interface{}) {
+				mailCh <- msg
+			})
+			poller.Start()
+			m.poller = poller
 
 			m.messages = append(m.messages, AgentMsg.Render(fmt.Sprintf(
-				"%s — %s (port %d, PID %d)",
-				i18n.S("title"), m.config.AgentName, m.config.AgentPort, m.proc.PID(),
+				"%s — %s (PID %d)",
+				i18n.S("title"), m.config.AgentName, m.proc.PID(),
 			)))
 			m.updateViewport()
 		} else {
@@ -227,7 +258,7 @@ func (m ChatModel) View() string {
 		indicators = append(indicators, ActiveChannel.Render("CLI"))
 	}
 	if m.verbose {
-		indicators = append(indicators, ActiveChannel.Render("verbose ●"))
+		indicators = append(indicators, ActiveChannel.Render(i18n.S("verbose_on")))
 	}
 	statusRight := strings.Join(indicators, " ")
 	statusBar := StatusBarStyle.Width(m.width).Render(
@@ -265,7 +296,7 @@ func (m ChatModel) verboseTick() tea.Cmd {
 // readVerboseLines reads new JSONL lines from the agent's log file starting
 // at verboseOffset. This is an on-demand read — no background goroutine.
 func (m *ChatModel) readVerboseLines() {
-	logPath := fmt.Sprintf("%s/%s/logs/events.jsonl", m.config.ProjectDir, m.activeName)
+	logPath := fmt.Sprintf("%s/%s/logs/events.jsonl", m.config.ProjectDir, m.activeID)
 	f, err := os.Open(logPath)
 	if err != nil {
 		return
@@ -307,11 +338,11 @@ func (m *ChatModel) handleCommand(text string) bool {
 					status = "✗"
 				}
 				marker := ""
-				if s.Port == m.activePort {
-					marker = " ← active"
+				if s.AgentID == m.activeID {
+					marker = " " + i18n.S("active_marker")
 				}
 				m.messages = append(m.messages, DiaryMsg.Render(
-					fmt.Sprintf("  %s %-16s port:%d pid:%d%s", status, s.Name, s.Port, s.PID, marker),
+					fmt.Sprintf("  %s %-16s pid:%d%s", status, s.Name, s.PID, marker),
 				))
 			}
 		}
@@ -323,16 +354,11 @@ func (m *ChatModel) handleCommand(text string) bool {
 		if target == "" {
 			return false
 		}
-		// Try as port number first
-		if port, err := strconv.Atoi(target); err == nil {
-			m.switchDaemon(target, port)
-			return true
-		}
-		// Try as agent name — look up in running spirits
 		spirits := manage.ScanSpirits(m.config.ProjectDir)
+		// Try as agent name or agent_id
 		for _, s := range spirits {
-			if s.Name == target {
-				m.switchDaemon(s.Name, s.Port)
+			if s.Name == target || s.AgentID == target {
+				m.switchDaemon(s.AgentID, s.Name)
 				return true
 			}
 		}
@@ -344,13 +370,14 @@ func (m *ChatModel) handleCommand(text string) bool {
 }
 
 // switchDaemon changes the target daemon the TUI talks to.
-func (m *ChatModel) switchDaemon(name string, port int) {
+func (m *ChatModel) switchDaemon(id, name string) {
+	m.activeID = id
 	m.activeName = name
-	m.activePort = port
-	m.mail = agent.NewMailClient(fmt.Sprintf("127.0.0.1:%d", port))
+	agentWorkdir := filepath.Join(m.config.ProjectDir, id)
+	m.writer = agent.NewMailWriter(agentWorkdir, "mailbox")
 	m.verboseOffset = 0 // reset verbose to read new daemon's log from start
 	m.messages = append(m.messages, AgentMsg.Render(
-		fmt.Sprintf("%s %s (port %d)", i18n.S("switched_to"), name, port),
+		fmt.Sprintf("%s %s", i18n.S("switched_to"), name),
 	))
 }
 
@@ -363,7 +390,7 @@ func (m *ChatModel) cycleNextSpirit() {
 	// Find current index
 	currentIdx := -1
 	for i, s := range spirits {
-		if s.Port == m.activePort {
+		if s.AgentID == m.activeID {
 			currentIdx = i
 			break
 		}
@@ -372,17 +399,21 @@ func (m *ChatModel) cycleNextSpirit() {
 	for offset := 1; offset <= len(spirits); offset++ {
 		next := spirits[(currentIdx+offset)%len(spirits)]
 		if next.Alive {
-			m.switchDaemon(next.Name, next.Port)
+			m.switchDaemon(next.AgentID, next.Name)
 			return
 		}
 	}
 }
 
-// stopListener shuts down the mail listener if running.
-func (m *ChatModel) stopListener() {
-	if m.listener != nil {
-		m.listener.Stop()
-		m.listener = nil
+// stopPoller shuts down the mail poller and heartbeat if running.
+func (m *ChatModel) stopPoller() {
+	if m.poller != nil {
+		m.poller.Stop()
+		m.poller = nil
+	}
+	if m.heartbeatDone != nil {
+		close(m.heartbeatDone)
+		m.heartbeatDone = nil
 	}
 }
 
@@ -415,4 +446,3 @@ func formatLogEvent(e logEvent) string {
 	}
 	return ""
 }
-

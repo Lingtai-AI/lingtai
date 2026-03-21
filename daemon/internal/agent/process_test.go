@@ -1,23 +1,32 @@
 package agent
 
 import (
-	"net"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestWaitForPort_AlreadyOpen(t *testing.T) {
-	ln, _ := net.Listen("tcp", "127.0.0.1:19910")
-	defer ln.Close()
+func TestWaitForAgentJSON_AlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "test-agent")
+	os.MkdirAll(agentDir, 0755)
 
-	err := WaitForPort(19910, 2*time.Second)
+	// Write .agent.json before calling wait
+	manifest := map[string]interface{}{"agent_id": "test123"}
+	data, _ := json.MarshalIndent(manifest, "", "  ")
+	os.WriteFile(filepath.Join(agentDir, ".agent.json"), data, 0644)
+
+	err := WaitForAgentJSON(agentDir, 2*time.Second)
 	if err != nil {
 		t.Errorf("expected success, got %v", err)
 	}
 }
 
-func TestWaitForPort_Timeout(t *testing.T) {
-	err := WaitForPort(19911, 500*time.Millisecond)
+func TestWaitForAgentJSON_TimeoutProcess(t *testing.T) {
+	dir := t.TempDir()
+	err := WaitForAgentJSON(dir, 300*time.Millisecond)
 	if err == nil {
 		t.Error("expected timeout error")
 	}

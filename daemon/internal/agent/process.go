@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,7 +62,7 @@ func Start(opts StartOptions) (*Process, error) {
 
 	WritePIDFile(p.pidPath, cmd.Process.Pid, opts.AgentPort, opts.ConfigPath)
 
-	if err := WaitForPort(opts.AgentPort, 30*time.Second); err != nil {
+	if err := WaitForAgentJSON(opts.WorkingDir, 30*time.Second); err != nil {
 		cmd.Process.Kill()
 		RemovePIDFile(p.pidPath)
 		return nil, fmt.Errorf("agent failed to start: %w", err)
@@ -98,22 +97,3 @@ func (p *Process) PID() int {
 	return 0
 }
 
-func WaitForPort(port int, timeout time.Duration) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	deadline := time.Now().Add(timeout)
-	backoff := 100 * time.Millisecond
-
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, time.Second)
-		if err == nil {
-			conn.Close()
-			return nil
-		}
-		time.Sleep(backoff)
-		backoff = backoff * 2
-		if backoff > 5*time.Second {
-			backoff = 5 * time.Second
-		}
-	}
-	return fmt.Errorf("port %d not ready after %s", port, timeout)
-}
