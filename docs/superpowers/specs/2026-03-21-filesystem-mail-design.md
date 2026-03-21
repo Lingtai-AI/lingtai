@@ -47,20 +47,23 @@ This makes local mail a health-check protocol — agents always know whether pee
 
 ## Heartbeat
 
-The `.agent.heartbeat` file is a plain-text UTC timestamp, written by the agent's **main loop** (~1s interval). It serves as the sole liveness signal — no PID checks, no lock probing, fully cross-platform.
+The `.agent.heartbeat` file is a plain-text UTC timestamp, serving as the externally visible liveness signal — fully cross-platform (no PID checks, no lock probing).
 
 ```
 {working_dir}/.agent.heartbeat    ← "2026-03-21T10:00:00.500000Z"
 ```
 
-- **Writer**: the agent's `run_loop` — written at natural loop points (after LLM response, after tool execution, during `system.sleep`). NOT written by the mail polling thread.
+**Relationship to existing heartbeat**: The kernel already has a heartbeat daemon thread (`_heartbeat_loop`) that ticks every 1 second and handles AED (error detection/recovery). This is an in-memory integer counter. The `.agent.heartbeat` file is a new addition — the existing heartbeat thread writes it to disk as part of each tick, but **only when the agent is healthy** (ACTIVE or IDLE state). When the agent is in ERROR or DEAD state, the file is NOT updated — so external observers correctly see it as stale.
+
+- **Writer**: the existing `_heartbeat_loop` thread (ticks every 1s). Writes the timestamp only when state is ACTIVE or IDLE. During ERROR state the thread is busy with AED — the stale heartbeat file correctly signals "agent is unhealthy."
 - **Reader**: any sender reads this file and compares against current UTC time. Alive if `now - heartbeat < 2s`.
-- **Startup**: first heartbeat written when the agent's main loop begins.
-- **Clean shutdown**: `stop()` deletes the file.
-- **Crash / stuck**: heartbeat goes stale — the 2s threshold catches this naturally. A brain-dead agent (polling thread alive but main loop stuck) correctly shows as dead.
+- **Startup**: first heartbeat written when `_start_heartbeat()` is called.
+- **Clean shutdown**: `_stop_heartbeat()` deletes the file.
+- **Crash**: file contains a stale timestamp — the 2s threshold catches this naturally.
+- **ERROR state**: heartbeat thread keeps running (for AED), but stops writing file → senders see stale timestamp → correctly report "agent is not running."
 - **Human participant**: the Go daemon writes the human's heartbeat on its own tick.
 
-**Key design choice**: heartbeat comes from the main loop, not the polling thread. This ensures that an agent whose `run_loop` has failed or gotten stuck is correctly reported as dead, even if the inbox polling thread is still running. The polling thread can still receive `kill` mail to force-terminate the process.
+The mail polling thread runs independently and can still receive `kill` mail even when the heartbeat file is stale (agent in ERROR). This allows the daemon to force-terminate a stuck agent.
 
 ## Message Delivery
 
