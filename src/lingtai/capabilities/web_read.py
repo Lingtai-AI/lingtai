@@ -45,10 +45,8 @@ class WebReadManager:
 
     def __init__(
         self,
-        agent: "BaseAgent",
         web_read_service: Any | None = None,
     ) -> None:
-        self._agent = agent
         self._service = web_read_service
 
     def handle(self, args: dict) -> dict:
@@ -76,6 +74,6 @@ def setup(agent: "BaseAgent", web_read_service: Any | None = None,
           **kwargs: Any) -> WebReadManager:
     """Set up the web_read capability on an agent."""
     lang = agent._config.language
-    mgr = WebReadManager(agent, web_read_service=web_read_service)
+    mgr = WebReadManager(web_read_service=web_read_service)
     agent.add_tool("web_read", schema=get_schema(lang), handler=mgr.handle, description=get_description(lang))
     return mgr
