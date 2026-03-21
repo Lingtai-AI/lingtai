@@ -282,25 +282,36 @@ func (m *wizardModel) loadExisting() {
 		}
 	}
 
-	// Model — resolve from model.json or inline
-	var modelCfg struct {
-		Provider  string `json:"provider"`
-		Model     string `json:"model"`
-		APIKeyEnv string `json:"api_key_env"`
-		BaseURL   string `json:"base_url"`
-	}
+	// Model — resolve from model.json or inline (use raw map to capture sub-objects)
+	var modelRaw map[string]json.RawMessage
 	if v, ok := raw["model"]; ok {
 		var modelPath string
 		if json.Unmarshal(v, &modelPath) == nil {
 			// It's a file path
 			modelData, err := os.ReadFile(filepath.Join(m.outputDir, modelPath))
 			if err == nil {
-				json.Unmarshal(modelData, &modelCfg)
+				json.Unmarshal(modelData, &modelRaw)
 			}
 		} else {
-			json.Unmarshal(v, &modelCfg)
+			json.Unmarshal(v, &modelRaw)
 		}
 	}
+	if modelRaw == nil {
+		modelRaw = make(map[string]json.RawMessage)
+	}
+
+	// Parse main model fields
+	var modelCfg struct {
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		APIKeyEnv string `json:"api_key_env"`
+		BaseURL   string `json:"base_url"`
+	}
+	// Re-marshal modelRaw back to parse the struct fields
+	if b, err := json.Marshal(modelRaw); err == nil {
+		json.Unmarshal(b, &modelCfg)
+	}
+
 	if modelCfg.Provider != "" {
 		// Set provider index
 		for idx, p := range providers {
@@ -321,6 +332,70 @@ func (m *wizardModel) loadExisting() {
 	}
 	if modelCfg.BaseURL != "" {
 		m.fields[StepModel][3].input.SetValue(modelCfg.BaseURL)
+	}
+
+	// Vision sub-config
+	if vRaw, ok := modelRaw["vision"]; ok {
+		var vCfg struct {
+			Provider  string `json:"provider"`
+			Model     string `json:"model"`
+			APIKeyEnv string `json:"api_key_env"`
+			BaseURL   string `json:"base_url"`
+		}
+		if json.Unmarshal(vRaw, &vCfg) == nil {
+			if vCfg.Provider != "" {
+				for idx, p := range visionProviders {
+					if p == vCfg.Provider {
+						m.visionProviderIdx = idx
+						break
+					}
+				}
+				m.fields[StepVision][0].input.SetValue(vCfg.Provider)
+			}
+			if vCfg.Model != "" {
+				m.fields[StepVision][1].input.SetValue(vCfg.Model)
+			}
+			if vCfg.APIKeyEnv != "" {
+				if key := os.Getenv(vCfg.APIKeyEnv); key != "" {
+					m.fields[StepVision][2].input.SetValue(key)
+				}
+			}
+			if vCfg.BaseURL != "" {
+				m.fields[StepVision][3].input.SetValue(vCfg.BaseURL)
+			}
+		}
+	}
+
+	// Web search sub-config
+	if wsRaw, ok := modelRaw["web_search"]; ok {
+		var wsCfg struct {
+			Provider  string `json:"provider"`
+			Model     string `json:"model"`
+			APIKeyEnv string `json:"api_key_env"`
+			BaseURL   string `json:"base_url"`
+		}
+		if json.Unmarshal(wsRaw, &wsCfg) == nil {
+			if wsCfg.Provider != "" {
+				for idx, p := range webSearchProviders {
+					if p == wsCfg.Provider {
+						m.webSearchProviderIdx = idx
+						break
+					}
+				}
+				m.fields[StepWebSearch][0].input.SetValue(wsCfg.Provider)
+			}
+			if wsCfg.Model != "" {
+				m.fields[StepWebSearch][1].input.SetValue(wsCfg.Model)
+			}
+			if wsCfg.APIKeyEnv != "" {
+				if key := os.Getenv(wsCfg.APIKeyEnv); key != "" {
+					m.fields[StepWebSearch][2].input.SetValue(key)
+				}
+			}
+			if wsCfg.BaseURL != "" {
+				m.fields[StepWebSearch][3].input.SetValue(wsCfg.BaseURL)
+			}
+		}
 	}
 
 	// IMAP
@@ -712,6 +787,40 @@ func (m wizardModel) renderReview() string {
 		b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", endpoint))
 	}
 
+	// Vision
+	if visionProvider := m.fieldVal(StepVision, 0); visionProvider != "" && m.fieldVal(StepVision, 1) != "" {
+		b.WriteString("\n" + promptStyle.Render("Vision:") + "\n")
+		b.WriteString(fmt.Sprintf("  Provider:    %s\n", visionProvider))
+		b.WriteString(fmt.Sprintf("  Model:       %s\n", m.fieldVal(StepVision, 1)))
+		if m.fieldVal(StepVision, 2) != "" {
+			b.WriteString(fmt.Sprintf("  API key:     %s\n", "••••••••"))
+		} else {
+			b.WriteString(fmt.Sprintf("  API key:     %s\n", dimStyle.Render("reusing main key")))
+		}
+		if endpoint := m.fieldVal(StepVision, 3); endpoint != "" {
+			b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", endpoint))
+		}
+	} else {
+		b.WriteString("\n" + dimStyle.Render("Vision: skipped") + "\n")
+	}
+
+	// Web Search
+	if wsProvider := m.fieldVal(StepWebSearch, 0); wsProvider != "" && m.fieldVal(StepWebSearch, 1) != "" {
+		b.WriteString("\n" + promptStyle.Render("Web Search:") + "\n")
+		b.WriteString(fmt.Sprintf("  Provider:    %s\n", wsProvider))
+		b.WriteString(fmt.Sprintf("  Model:       %s\n", m.fieldVal(StepWebSearch, 1)))
+		if m.fieldVal(StepWebSearch, 2) != "" {
+			b.WriteString(fmt.Sprintf("  API key:     %s\n", "••••••••"))
+		} else {
+			b.WriteString(fmt.Sprintf("  API key:     %s\n", dimStyle.Render("reusing main key")))
+		}
+		if endpoint := m.fieldVal(StepWebSearch, 3); endpoint != "" {
+			b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", endpoint))
+		}
+	} else {
+		b.WriteString("\n" + dimStyle.Render("Web Search: skipped") + "\n")
+	}
+
 	// IMAP
 	if m.fieldVal(StepIMAP, 0) != "" {
 		b.WriteString("\n" + promptStyle.Render("IMAP/SMTP:") + "\n")
@@ -829,6 +938,47 @@ func (m wizardModel) writeConfig() ([]string, error) {
 	if endpoint := m.fieldVal(StepModel, 3); endpoint != "" {
 		modelCfg["base_url"] = endpoint
 	}
+
+	// Vision config (if not skipped)
+	if visionProvider := m.fieldVal(StepVision, 0); visionProvider != "" && m.fieldVal(StepVision, 1) != "" {
+		visionKeyEnv := apiKeyEnv // reuse main key by default
+		if visionKey := m.fieldVal(StepVision, 2); visionKey != "" {
+			visionKeyEnv = strings.ToUpper(visionProvider) + "_API_KEY"
+			if visionKeyEnv == apiKeyEnv {
+				visionKeyEnv = strings.ToUpper(visionProvider) + "_VISION_API_KEY"
+			}
+		}
+		visionCfg := map[string]interface{}{
+			"provider":    visionProvider,
+			"model":       m.fieldVal(StepVision, 1),
+			"api_key_env": visionKeyEnv,
+		}
+		if endpoint := m.fieldVal(StepVision, 3); endpoint != "" {
+			visionCfg["base_url"] = endpoint
+		}
+		modelCfg["vision"] = visionCfg
+	}
+
+	// Web search config (if not skipped)
+	if wsProvider := m.fieldVal(StepWebSearch, 0); wsProvider != "" && m.fieldVal(StepWebSearch, 1) != "" {
+		wsKeyEnv := apiKeyEnv // reuse main key by default
+		if wsKey := m.fieldVal(StepWebSearch, 2); wsKey != "" {
+			wsKeyEnv = strings.ToUpper(wsProvider) + "_API_KEY"
+			if wsKeyEnv == apiKeyEnv {
+				wsKeyEnv = strings.ToUpper(wsProvider) + "_WEB_SEARCH_API_KEY"
+			}
+		}
+		wsCfg := map[string]interface{}{
+			"provider":    wsProvider,
+			"model":       m.fieldVal(StepWebSearch, 1),
+			"api_key_env": wsKeyEnv,
+		}
+		if endpoint := m.fieldVal(StepWebSearch, 3); endpoint != "" {
+			wsCfg["base_url"] = endpoint
+		}
+		modelCfg["web_search"] = wsCfg
+	}
+
 	modelPath := filepath.Join(m.outputDir, "model.json")
 	if err := writeJSON(modelPath, modelCfg); err != nil {
 		return written, fmt.Errorf("writing model.json: %w", err)
@@ -887,6 +1037,22 @@ func (m wizardModel) writeConfig() ([]string, error) {
 	var envLines []string
 	if apiKey := m.fieldVal(StepModel, 2); apiKey != "" {
 		envLines = append(envLines, fmt.Sprintf("%s=%s", apiKeyEnv, apiKey))
+	}
+	if visionKey := m.fieldVal(StepVision, 2); visionKey != "" && visionKey != m.fieldVal(StepModel, 2) {
+		visionProvider := m.fieldVal(StepVision, 0)
+		visionKeyEnv := strings.ToUpper(visionProvider) + "_API_KEY"
+		if visionKeyEnv == apiKeyEnv {
+			visionKeyEnv = strings.ToUpper(visionProvider) + "_VISION_API_KEY"
+		}
+		envLines = append(envLines, fmt.Sprintf("%s=%s", visionKeyEnv, visionKey))
+	}
+	if wsKey := m.fieldVal(StepWebSearch, 2); wsKey != "" && wsKey != m.fieldVal(StepModel, 2) {
+		wsProvider := m.fieldVal(StepWebSearch, 0)
+		wsKeyEnv := strings.ToUpper(wsProvider) + "_API_KEY"
+		if wsKeyEnv == apiKeyEnv {
+			wsKeyEnv = strings.ToUpper(wsProvider) + "_WEB_SEARCH_API_KEY"
+		}
+		envLines = append(envLines, fmt.Sprintf("%s=%s", wsKeyEnv, wsKey))
 	}
 	if password := m.fieldVal(StepIMAP, 1); password != "" {
 		envLines = append(envLines, fmt.Sprintf("IMAP_PASSWORD=%s", password))
