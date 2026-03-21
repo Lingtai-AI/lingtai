@@ -51,7 +51,7 @@
   "avatar.name": "他我的名称（必填，例如 'researcher'、'analyst'）",
   "avatar.covenant": "他我的 covenant 覆盖（可选，默认 = 复制本我）",
   "avatar.memory": "注入的记忆/上下文（可选）",
-  "avatar.capabilities": "他我的能力名称（可选，默认 = 与本我相同，去掉 avatar）",
+  "avatar.capabilities": "他我的能力名称（可选，默认 = 与本我相同，含 avatar）",
   "avatar.admin": "授予他我的管理权限（可选，默认 = 无）。权限名到布尔值的字典，例如 {\"silence\": true}。只授予他我需要的权限。",
   "avatar.provider": "他我的 LLM 提供商（可选，默认 = 与本我相同）。使用配置中定义的提供商名称，例如 'minimax'、'gemini'、'openrouter'。",
   "avatar.model": "他我的 LLM 模型（可选，默认 = 与本我相同）。例如 'gemini-3-flash-preview'、'anthropic/claude-sonnet-4.6'。",

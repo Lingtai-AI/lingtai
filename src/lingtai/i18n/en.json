@@ -51,7 +51,7 @@
   "avatar.name": "Name for the 他我 (required, e.g. 'researcher', 'analyst')",
   "avatar.covenant": "Covenant override for the 他我 (optional, default = copy 本我)",
   "avatar.memory": "Memory / context to inject (optional)",
-  "avatar.capabilities": "Capability names for the 他我 (optional, default = same as 本我 minus avatar)",
+  "avatar.capabilities": "Capability names for the 他我 (optional, default = same as 本我, including avatar)",
   "avatar.admin": "Admin privileges granted to the 他我 (optional, default = none). Dict of privilege name to boolean, e.g. {\"silence\": true}. Only grant privileges the 他我 needs.",
   "avatar.provider": "LLM provider for the 他我 (optional, default = same as 本我). Use a provider name defined in config, e.g. 'minimax', 'gemini', 'openrouter'.",
   "avatar.model": "LLM model for the 他我 (optional, default = same as 本我). e.g. 'gemini-3-flash-preview', 'anthropic/claude-sonnet-4.6'.",

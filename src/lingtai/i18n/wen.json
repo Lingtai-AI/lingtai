@@ -98,7 +98,7 @@
   "avatar.name": "他我之名（必填，如'researcher'、'analyst'）",
   "avatar.covenant": "他我之 covenant 覆盖（可选，默认复制本我）",
   "avatar.memory": "注入之记忆/上下文（可选）",
-  "avatar.capabilities": "他我之能力名称（可选，默认与本我同，去 avatar）",
+  "avatar.capabilities": "他我之能力名称（可选，默认与本我同，含 avatar）",
   "avatar.admin": "授予他我之管理权（可选，默认无）。权限名至布尔之字典，如 {\"silence\": true}。只授他我所需之权。",
   "avatar.provider": "他我之 LLM 提供者（可选，默认与本我同）。用配置中所定之提供者名，如'minimax'、'gemini'、'openrouter'。",
   "avatar.model": "他我之 LLM 模型（可选，默认与本我同）。如'gemini-3-flash-preview'、'anthropic/claude-sonnet-4.6'。",
