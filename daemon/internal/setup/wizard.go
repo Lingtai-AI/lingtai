@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"lingtai-daemon/internal/config"
+	"lingtai-daemon/internal/i18n"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,7 +20,10 @@ import (
 type step int
 
 const (
-	StepModel step = iota
+	StepLang step = iota
+	StepModel
+	StepVision
+	StepWebSearch
 	StepIMAP
 	StepTelegram
 	StepGeneral
@@ -26,16 +32,22 @@ const (
 
 func (s step) String() string {
 	switch s {
+	case StepLang:
+		return i18n.S("setup_lang")
 	case StepModel:
-		return "Model Configuration"
+		return i18n.S("setup_model")
+	case StepVision:
+		return i18n.S("setup_vision") + " (Esc)"
+	case StepWebSearch:
+		return i18n.S("setup_websearch") + " (Esc)"
 	case StepIMAP:
-		return "IMAP / SMTP (optional — Esc to skip)"
+		return "IMAP (Esc)"
 	case StepTelegram:
-		return "Telegram (optional — Esc to skip)"
+		return "Telegram (Esc)"
 	case StepGeneral:
-		return "General Settings"
+		return i18n.S("setup_general")
 	case StepReview:
-		return "Review & Save"
+		return i18n.S("setup_review")
 	default:
 		return "Unknown"
 	}
@@ -52,6 +64,46 @@ var (
 
 // providers is the list of supported LLM providers.
 var providers = []string{"minimax", "openai", "anthropic", "gemini", "custom"}
+
+// Default endpoints for known providers (empty = provider SDK default).
+var providerEndpoints = map[string]string{
+	"minimax":   "https://api.minimax.chat/v1",
+	"openai":    "https://api.openai.com/v1",
+	"anthropic": "https://api.anthropic.com",
+	"gemini":    "https://generativelanguage.googleapis.com",
+	"custom":    "",
+}
+
+// Default model names for known providers.
+var providerModels = map[string]string{
+	"minimax":   "MiniMax-M2.7-highspeed",
+	"openai":    "gpt-5.4",
+	"anthropic": "claude-opus-4-6",
+	"gemini":    "gemini-3.1-pro",
+	"custom":    "",
+}
+
+// Vision provider defaults (only minimax and gemini supported).
+var visionProviders = []string{"minimax", "gemini"}
+var visionModels = map[string]string{
+	"minimax": "MiniMax-M2.7-highspeed",
+	"gemini":  "gemini-3.1-pro",
+}
+var visionEndpoints = map[string]string{
+	"minimax": "https://api.minimax.chat/v1",
+	"gemini":  "https://generativelanguage.googleapis.com",
+}
+
+// Web search provider defaults (only minimax and gemini supported).
+var webSearchProviders = []string{"minimax", "gemini"}
+var webSearchModels = map[string]string{
+	"minimax": "MiniMax-M2.7-highspeed",
+	"gemini":  "gemini-3.1-pro",
+}
+var webSearchEndpoints = map[string]string{
+	"minimax": "https://api.minimax.chat/v1",
+	"gemini":  "https://generativelanguage.googleapis.com",
+}
 
 // field is a labeled text input.
 type field struct {
@@ -72,8 +124,13 @@ type wizardModel struct {
 	focus     int // index of focused field within current step
 	outputDir string
 
-	// provider selector state (step 0, field 0)
-	providerIdx int
+	// language selector state (step 0)
+	langIdx int
+
+	// provider selector state
+	providerIdx          int
+	visionProviderIdx    int
+	webSearchProviderIdx int
 
 	// test results per step
 	testResults map[step]*TestResult
@@ -94,26 +151,69 @@ func newTextInput(placeholder string, defaultVal string) textinput.Model {
 }
 
 func newWizardModel(outputDir string) wizardModel {
+	// Detect initial language index
+	initialLangIdx := 0
+	for idx, code := range i18n.Languages {
+		if code == i18n.Lang {
+			initialLangIdx = idx
+			break
+		}
+	}
+
 	m := wizardModel{
-		step:        StepModel,
+		step:        StepLang,
 		outputDir:   outputDir,
+		langIdx:     initialLangIdx,
 		providerIdx: 0,
 		testResults: make(map[step]*TestResult),
 		fields:      make(map[step][]field),
 	}
 
+	// Step: Lang has no text fields (uses left/right selector)
+
 	// Step: Model
+	defaultProvider := providers[0]
+	apiKeyInput := newTextInput("sk-...", "")
+	apiKeyInput.EchoMode = textinput.EchoPassword
+	apiKeyInput.EchoCharacter = '•'
 	m.fields[StepModel] = []field{
-		{label: "Provider", input: newTextInput("minimax", "minimax")},
-		{label: "Model name", input: newTextInput("model name", "")},
-		{label: "API key env var", input: newTextInput("e.g. MINIMAX_API_KEY", "")},
-		{label: "Base URL (custom only)", input: newTextInput("https://...", "")},
+		{label: "Provider", input: newTextInput(defaultProvider, defaultProvider)},
+		{label: "Model", input: newTextInput("model name", providerModels[defaultProvider])},
+		{label: "API key", input: apiKeyInput},
+		{label: "Endpoint", input: newTextInput("https://...", providerEndpoints[defaultProvider])},
+	}
+
+	// Step: Vision
+	defaultVisionProvider := visionProviders[0]
+	visionKeyInput := newTextInput(i18n.S("setup_same_key"), "")
+	visionKeyInput.EchoMode = textinput.EchoPassword
+	visionKeyInput.EchoCharacter = '•'
+	m.fields[StepVision] = []field{
+		{label: "Provider", input: newTextInput(defaultVisionProvider, defaultVisionProvider)},
+		{label: "Model", input: newTextInput("model name", visionModels[defaultVisionProvider])},
+		{label: "API key", input: visionKeyInput},
+		{label: "Endpoint", input: newTextInput("https://...", visionEndpoints[defaultVisionProvider])},
+	}
+
+	// Step: Web Search
+	defaultWSProvider := webSearchProviders[0]
+	wsKeyInput := newTextInput(i18n.S("setup_same_key"), "")
+	wsKeyInput.EchoMode = textinput.EchoPassword
+	wsKeyInput.EchoCharacter = '•'
+	m.fields[StepWebSearch] = []field{
+		{label: "Provider", input: newTextInput(defaultWSProvider, defaultWSProvider)},
+		{label: "Model", input: newTextInput("model name", webSearchModels[defaultWSProvider])},
+		{label: "API key", input: wsKeyInput},
+		{label: "Endpoint", input: newTextInput("https://...", webSearchEndpoints[defaultWSProvider])},
 	}
 
 	// Step: IMAP
+	imapPassInput := newTextInput("password", "")
+	imapPassInput.EchoMode = textinput.EchoPassword
+	imapPassInput.EchoCharacter = '•'
 	m.fields[StepIMAP] = []field{
 		{label: "Email address", input: newTextInput("you@example.com", "")},
-		{label: "Password env var", input: newTextInput("e.g. EMAIL_PASS", "")},
+		{label: "Password", input: imapPassInput},
 		{label: "IMAP host", input: newTextInput("imap.example.com", "")},
 		{label: "IMAP port", input: newTextInput("993", "993")},
 		{label: "SMTP host", input: newTextInput("smtp.example.com", "")},
@@ -121,8 +221,11 @@ func newWizardModel(outputDir string) wizardModel {
 	}
 
 	// Step: Telegram
+	telegramInput := newTextInput("bot token", "")
+	telegramInput.EchoMode = textinput.EchoPassword
+	telegramInput.EchoCharacter = '•'
 	m.fields[StepTelegram] = []field{
-		{label: "Bot token env var", input: newTextInput("e.g. TELEGRAM_BOT_TOKEN", "")},
+		{label: "Bot token", input: telegramInput},
 	}
 
 	// Step: General
@@ -138,12 +241,161 @@ func newWizardModel(outputDir string) wizardModel {
 
 	// Step: Review has no fields
 
+	// Pre-fill from existing config if available
+	m.loadExisting()
+
 	// Focus the first field
 	if len(m.fields[StepModel]) > 0 {
 		m.fields[StepModel][0].input.Focus()
 	}
 
 	return m
+}
+
+// loadExisting reads config.json, model.json, and .env from outputDir
+// and pre-fills the wizard fields so returning users see their saved values.
+func (m *wizardModel) loadExisting() {
+	configPath := filepath.Join(m.outputDir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return // no existing config
+	}
+
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) != nil {
+		return
+	}
+
+	// Load .env secrets
+	config.LoadDotenv(m.outputDir)
+
+	// Language
+	var lang string
+	if v, ok := raw["language"]; ok {
+		json.Unmarshal(v, &lang)
+		for idx, code := range i18n.Languages {
+			if code == lang {
+				m.langIdx = idx
+				i18n.Lang = lang
+				break
+			}
+		}
+	}
+
+	// Model — resolve from model.json or inline
+	var modelCfg struct {
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		APIKeyEnv string `json:"api_key_env"`
+		BaseURL   string `json:"base_url"`
+	}
+	if v, ok := raw["model"]; ok {
+		var modelPath string
+		if json.Unmarshal(v, &modelPath) == nil {
+			// It's a file path
+			modelData, err := os.ReadFile(filepath.Join(m.outputDir, modelPath))
+			if err == nil {
+				json.Unmarshal(modelData, &modelCfg)
+			}
+		} else {
+			json.Unmarshal(v, &modelCfg)
+		}
+	}
+	if modelCfg.Provider != "" {
+		// Set provider index
+		for idx, p := range providers {
+			if p == modelCfg.Provider {
+				m.providerIdx = idx
+				break
+			}
+		}
+		m.fields[StepModel][0].input.SetValue(modelCfg.Provider)
+	}
+	if modelCfg.Model != "" {
+		m.fields[StepModel][1].input.SetValue(modelCfg.Model)
+	}
+	if modelCfg.APIKeyEnv != "" {
+		if key := os.Getenv(modelCfg.APIKeyEnv); key != "" {
+			m.fields[StepModel][2].input.SetValue(key)
+		}
+	}
+	if modelCfg.BaseURL != "" {
+		m.fields[StepModel][3].input.SetValue(modelCfg.BaseURL)
+	}
+
+	// IMAP
+	if v, ok := raw["imap"]; ok {
+		var imap struct {
+			Email    string `json:"email_address"`
+			PassEnv  string `json:"password_env"`
+			IMAPHost string `json:"imap_host"`
+			IMAPPort int    `json:"imap_port"`
+			SMTPHost string `json:"smtp_host"`
+			SMTPPort int    `json:"smtp_port"`
+		}
+		if json.Unmarshal(v, &imap) == nil {
+			m.fields[StepIMAP][0].input.SetValue(imap.Email)
+			if imap.PassEnv != "" {
+				if pass := os.Getenv(imap.PassEnv); pass != "" {
+					m.fields[StepIMAP][1].input.SetValue(pass)
+				}
+			}
+			m.fields[StepIMAP][2].input.SetValue(imap.IMAPHost)
+			if imap.IMAPPort > 0 {
+				m.fields[StepIMAP][3].input.SetValue(strconv.Itoa(imap.IMAPPort))
+			}
+			m.fields[StepIMAP][4].input.SetValue(imap.SMTPHost)
+			if imap.SMTPPort > 0 {
+				m.fields[StepIMAP][5].input.SetValue(strconv.Itoa(imap.SMTPPort))
+			}
+		}
+	}
+
+	// Telegram
+	if v, ok := raw["telegram"]; ok {
+		var tg struct {
+			TokenEnv string `json:"bot_token_env"`
+		}
+		if json.Unmarshal(v, &tg) == nil && tg.TokenEnv != "" {
+			if token := os.Getenv(tg.TokenEnv); token != "" {
+				m.fields[StepTelegram][0].input.SetValue(token)
+			}
+		}
+	}
+
+	// General
+	var agentName, baseDir, bashPolicy, covenant string
+	var agentPort int
+	if v, ok := raw["agent_name"]; ok {
+		json.Unmarshal(v, &agentName)
+	}
+	if v, ok := raw["base_dir"]; ok {
+		json.Unmarshal(v, &baseDir)
+	}
+	if v, ok := raw["agent_port"]; ok {
+		json.Unmarshal(v, &agentPort)
+	}
+	if v, ok := raw["bash_policy"]; ok {
+		json.Unmarshal(v, &bashPolicy)
+	}
+	if v, ok := raw["covenant"]; ok {
+		json.Unmarshal(v, &covenant)
+	}
+	if agentName != "" {
+		m.fields[StepGeneral][0].input.SetValue(agentName)
+	}
+	if baseDir != "" {
+		m.fields[StepGeneral][1].input.SetValue(baseDir)
+	}
+	if agentPort > 0 {
+		m.fields[StepGeneral][2].input.SetValue(strconv.Itoa(agentPort))
+	}
+	if bashPolicy != "" {
+		m.fields[StepGeneral][3].input.SetValue(bashPolicy)
+	}
+	if covenant != "" {
+		m.fields[StepGeneral][4].input.SetValue(covenant)
+	}
 }
 
 func (m wizardModel) Init() tea.Cmd {
@@ -164,12 +416,17 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "esc":
 			// Skip optional steps
-			if m.step == StepIMAP || m.step == StepTelegram {
+			if m.step == StepVision || m.step == StepWebSearch || m.step == StepIMAP || m.step == StepTelegram {
 				m.advanceStep()
 				return m, nil
 			}
 
 		case "tab", "down":
+			if m.step == StepLang {
+				m.langIdx = (m.langIdx + 1) % len(i18n.Languages)
+				i18n.Lang = i18n.Languages[m.langIdx]
+				return m, nil
+			}
 			if m.step == StepReview {
 				break
 			}
@@ -183,6 +440,11 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "shift+tab", "up":
+			if m.step == StepLang {
+				m.langIdx = (m.langIdx - 1 + len(i18n.Languages)) % len(i18n.Languages)
+				i18n.Lang = i18n.Languages[m.langIdx]
+				return m, nil
+			}
 			if m.step == StepReview {
 				break
 			}
@@ -196,17 +458,42 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "left":
-			// Provider cycling (only on model step, field 0)
+			if m.step == StepLang {
+				break
+			}
 			if m.step == StepModel && m.focus == 0 {
 				m.providerIdx = (m.providerIdx - 1 + len(providers)) % len(providers)
-				m.fields[StepModel][0].input.SetValue(providers[m.providerIdx])
+				m.syncProviderDefaults()
+				return m, nil
+			}
+			if m.step == StepVision && m.focus == 0 {
+				m.visionProviderIdx = (m.visionProviderIdx - 1 + len(visionProviders)) % len(visionProviders)
+				m.syncVisionDefaults()
+				return m, nil
+			}
+			if m.step == StepWebSearch && m.focus == 0 {
+				m.webSearchProviderIdx = (m.webSearchProviderIdx - 1 + len(webSearchProviders)) % len(webSearchProviders)
+				m.syncWebSearchDefaults()
 				return m, nil
 			}
 
 		case "right":
+			if m.step == StepLang {
+				break
+			}
 			if m.step == StepModel && m.focus == 0 {
 				m.providerIdx = (m.providerIdx + 1) % len(providers)
-				m.fields[StepModel][0].input.SetValue(providers[m.providerIdx])
+				m.syncProviderDefaults()
+				return m, nil
+			}
+			if m.step == StepVision && m.focus == 0 {
+				m.visionProviderIdx = (m.visionProviderIdx + 1) % len(visionProviders)
+				m.syncVisionDefaults()
+				return m, nil
+			}
+			if m.step == StepWebSearch && m.focus == 0 {
+				m.webSearchProviderIdx = (m.webSearchProviderIdx + 1) % len(webSearchProviders)
+				m.syncWebSearchDefaults()
 				return m, nil
 			}
 
@@ -236,7 +523,7 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update the focused text input
-	if m.step != StepReview {
+	if m.step != StepReview && m.step != StepLang {
 		fields := m.fields[m.step]
 		if m.focus < len(fields) {
 			var cmd tea.Cmd
@@ -247,6 +534,27 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *wizardModel) syncProviderDefaults() {
+	p := providers[m.providerIdx]
+	m.fields[StepModel][0].input.SetValue(p)
+	m.fields[StepModel][1].input.SetValue(providerModels[p])
+	m.fields[StepModel][3].input.SetValue(providerEndpoints[p])
+}
+
+func (m *wizardModel) syncVisionDefaults() {
+	p := visionProviders[m.visionProviderIdx]
+	m.fields[StepVision][0].input.SetValue(p)
+	m.fields[StepVision][1].input.SetValue(visionModels[p])
+	m.fields[StepVision][3].input.SetValue(visionEndpoints[p])
+}
+
+func (m *wizardModel) syncWebSearchDefaults() {
+	p := webSearchProviders[m.webSearchProviderIdx]
+	m.fields[StepWebSearch][0].input.SetValue(p)
+	m.fields[StepWebSearch][1].input.SetValue(webSearchModels[p])
+	m.fields[StepWebSearch][3].input.SetValue(webSearchEndpoints[p])
 }
 
 func (m *wizardModel) advanceStep() {
@@ -274,8 +582,8 @@ func (m wizardModel) View() string {
 			return errorStyle.Render(fmt.Sprintf("Error: %v\n", m.err))
 		}
 		var b strings.Builder
-		b.WriteString(successStyle.Render("Configuration saved successfully!") + "\n\n")
-		b.WriteString("Files written:\n")
+		b.WriteString(successStyle.Render(i18n.S("setup_saved")) + "\n\n")
+		b.WriteString(i18n.S("setup_files") + "\n")
 		for _, f := range m.written {
 			b.WriteString(fmt.Sprintf("  %s %s\n", successStyle.Render("\u2713"), f))
 		}
@@ -284,17 +592,29 @@ func (m wizardModel) View() string {
 
 	var b strings.Builder
 
+	// Banner
+	if m.langIdx == 0 { // English
+		b.WriteString(headerStyle.Render("LingTai AI") + "\n")
+		b.WriteString(dimStyle.Render("Heard the Way beneath the Bodhi;") + "\n")
+		b.WriteString(dimStyle.Render("one body, ten thousand avatars.") + "\n\n")
+	} else {
+		b.WriteString(headerStyle.Render("灵台AI") + "\n")
+		b.WriteString(dimStyle.Render("灵台方寸山  斜月三星洞") + "\n")
+		b.WriteString(dimStyle.Render("闻道菩提下  一身化万相") + "\n\n")
+	}
+
 	// Progress bar
-	steps := []string{"Model", "IMAP", "Telegram", "General", "Review"}
-	for i, name := range steps {
-		if step(i) == m.step {
+	allSteps := []step{StepLang, StepModel, StepVision, StepWebSearch, StepIMAP, StepTelegram, StepGeneral, StepReview}
+	for i, s := range allSteps {
+		name := s.String()
+		if s == m.step {
 			b.WriteString(promptStyle.Render(fmt.Sprintf("[%s]", name)))
-		} else if step(i) < m.step {
+		} else if s < m.step {
 			b.WriteString(successStyle.Render(fmt.Sprintf(" %s ", name)))
 		} else {
 			b.WriteString(dimStyle.Render(fmt.Sprintf(" %s ", name)))
 		}
-		if i < len(steps)-1 {
+		if i < len(allSteps)-1 {
 			b.WriteString(dimStyle.Render(" > "))
 		}
 	}
@@ -303,9 +623,23 @@ func (m wizardModel) View() string {
 	// Section header
 	b.WriteString(headerStyle.Render(m.step.String()) + "\n\n")
 
+	// Language selector (no text fields)
+	if m.step == StepLang {
+		for idx, code := range i18n.Languages {
+			label := i18n.LanguageLabels[code]
+			if idx == m.langIdx {
+				b.WriteString(fmt.Sprintf("  %s  %s\n", promptStyle.Render(">"), promptStyle.Render(label)))
+			} else {
+				b.WriteString(fmt.Sprintf("     %s\n", dimStyle.Render(label)))
+			}
+		}
+		b.WriteString("\n" + dimStyle.Render(i18n.S("setup_lang_hint")) + "\n")
+		return b.String()
+	}
+
 	if m.step == StepReview {
 		b.WriteString(m.renderReview())
-		b.WriteString("\n" + dimStyle.Render("Press Enter to save, Ctrl+C to abort") + "\n")
+		b.WriteString("\n" + dimStyle.Render("Enter → save, Ctrl+C → abort") + "\n")
 		return b.String()
 	}
 
@@ -326,7 +660,7 @@ func (m wizardModel) View() string {
 		}
 
 		label := f.label
-		if m.step == StepModel && i == 0 {
+		if (m.step == StepModel || m.step == StepVision || m.step == StepWebSearch) && i == 0 {
 			label = fmt.Sprintf("%s (left/right to cycle)", label)
 		}
 
@@ -347,8 +681,10 @@ func (m wizardModel) View() string {
 	// Hints
 	b.WriteString("\n")
 	hints := []string{"Tab/Down: next field", "Shift+Tab/Up: prev field", "Enter: next step"}
-	if m.step == StepIMAP || m.step == StepTelegram {
+	if m.step == StepVision || m.step == StepWebSearch || m.step == StepIMAP || m.step == StepTelegram {
 		hints = append(hints, "Esc: skip")
+	}
+	if m.step == StepIMAP || m.step == StepTelegram {
 		hints = append(hints, "Ctrl+T: test connection")
 	}
 	b.WriteString(dimStyle.Render(strings.Join(hints, " | ")) + "\n")
@@ -359,20 +695,28 @@ func (m wizardModel) View() string {
 func (m wizardModel) renderReview() string {
 	var b strings.Builder
 
+	// Language
+	langCode := i18n.Languages[m.langIdx]
+	langLabel := i18n.LanguageLabels[langCode]
+	b.WriteString(promptStyle.Render(i18n.S("setup_lang")+":") + fmt.Sprintf(" %s (%s)\n", langLabel, langCode))
+
 	// Model
-	b.WriteString(promptStyle.Render("Model:") + "\n")
-	b.WriteString(fmt.Sprintf("  Provider:    %s\n", m.fieldVal(StepModel, 0)))
+	provider := m.fieldVal(StepModel, 0)
+	b.WriteString("\n" + promptStyle.Render("Model:") + "\n")
+	b.WriteString(fmt.Sprintf("  Provider:    %s\n", provider))
 	b.WriteString(fmt.Sprintf("  Model:       %s\n", m.fieldVal(StepModel, 1)))
-	b.WriteString(fmt.Sprintf("  API Key Env: %s\n", m.fieldVal(StepModel, 2)))
-	if m.fieldVal(StepModel, 0) == "custom" {
-		b.WriteString(fmt.Sprintf("  Base URL:    %s\n", m.fieldVal(StepModel, 3)))
+	if m.fieldVal(StepModel, 2) != "" {
+		b.WriteString(fmt.Sprintf("  API key:     %s\n", "••••••••"))
+	}
+	if endpoint := m.fieldVal(StepModel, 3); endpoint != "" {
+		b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", endpoint))
 	}
 
 	// IMAP
 	if m.fieldVal(StepIMAP, 0) != "" {
 		b.WriteString("\n" + promptStyle.Render("IMAP/SMTP:") + "\n")
 		b.WriteString(fmt.Sprintf("  Email:     %s\n", m.fieldVal(StepIMAP, 0)))
-		b.WriteString(fmt.Sprintf("  Pass Env:  %s\n", m.fieldVal(StepIMAP, 1)))
+		b.WriteString(fmt.Sprintf("  Password:  %s\n", "••••••••"))
 		b.WriteString(fmt.Sprintf("  IMAP:      %s:%s\n", m.fieldVal(StepIMAP, 2), m.fieldVal(StepIMAP, 3)))
 		b.WriteString(fmt.Sprintf("  SMTP:      %s:%s\n", m.fieldVal(StepIMAP, 4), m.fieldVal(StepIMAP, 5)))
 		m.renderTestResult(&b, StepIMAP)
@@ -383,7 +727,7 @@ func (m wizardModel) renderReview() string {
 	// Telegram
 	if m.fieldVal(StepTelegram, 0) != "" {
 		b.WriteString("\n" + promptStyle.Render("Telegram:") + "\n")
-		b.WriteString(fmt.Sprintf("  Token Env: %s\n", m.fieldVal(StepTelegram, 0)))
+		b.WriteString(fmt.Sprintf("  Token:     %s\n", "••••••••"))
 		m.renderTestResult(&b, StepTelegram)
 	} else {
 		b.WriteString("\n" + dimStyle.Render("Telegram: skipped") + "\n")
@@ -400,6 +744,10 @@ func (m wizardModel) renderReview() string {
 	if v := m.fieldVal(StepGeneral, 4); v != "" {
 		b.WriteString(fmt.Sprintf("  Covenant:    %s\n", v))
 	}
+
+	// Save location
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Config → %s/config.json", m.outputDir)) + "\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("Secrets → %s/.env", m.outputDir)) + "\n")
 
 	return b.String()
 }
@@ -468,14 +816,18 @@ func (m wizardModel) writeConfig() ([]string, error) {
 
 	var written []string
 
+	// Derive env var name from provider
+	provider := m.fieldVal(StepModel, 0)
+	apiKeyEnv := strings.ToUpper(provider) + "_API_KEY"
+
 	// 1. model.json
 	modelCfg := map[string]interface{}{
-		"provider":    m.fieldVal(StepModel, 0),
+		"provider":    provider,
 		"model":       m.fieldVal(StepModel, 1),
-		"api_key_env": m.fieldVal(StepModel, 2),
+		"api_key_env": apiKeyEnv,
 	}
-	if m.fieldVal(StepModel, 0) == "custom" && m.fieldVal(StepModel, 3) != "" {
-		modelCfg["base_url"] = m.fieldVal(StepModel, 3)
+	if endpoint := m.fieldVal(StepModel, 3); endpoint != "" {
+		modelCfg["base_url"] = endpoint
 	}
 	modelPath := filepath.Join(m.outputDir, "model.json")
 	if err := writeJSON(modelPath, modelCfg); err != nil {
@@ -491,6 +843,7 @@ func (m wizardModel) writeConfig() ([]string, error) {
 
 	cfg := map[string]interface{}{
 		"model":      "model.json",
+		"language":   i18n.Languages[m.langIdx],
 		"agent_name": m.fieldVal(StepGeneral, 0),
 		"base_dir":   m.fieldVal(StepGeneral, 1),
 		"agent_port": port,
@@ -509,7 +862,7 @@ func (m wizardModel) writeConfig() ([]string, error) {
 		smtpPort, _ := strconv.Atoi(m.fieldVal(StepIMAP, 5))
 		cfg["imap"] = map[string]interface{}{
 			"email_address": email,
-			"password_env":  m.fieldVal(StepIMAP, 1),
+			"password_env":  "IMAP_PASSWORD",
 			"imap_host":     m.fieldVal(StepIMAP, 2),
 			"imap_port":     imapPort,
 			"smtp_host":     m.fieldVal(StepIMAP, 4),
@@ -518,9 +871,9 @@ func (m wizardModel) writeConfig() ([]string, error) {
 	}
 
 	// Telegram config
-	if tokenEnv := m.fieldVal(StepTelegram, 0); tokenEnv != "" {
+	if token := m.fieldVal(StepTelegram, 0); token != "" {
 		cfg["telegram"] = map[string]interface{}{
-			"bot_token_env": tokenEnv,
+			"bot_token_env": "TELEGRAM_BOT_TOKEN",
 		}
 	}
 
@@ -530,20 +883,20 @@ func (m wizardModel) writeConfig() ([]string, error) {
 	}
 	written = append(written, configPath)
 
-	// 3. .env (collect all env var references)
+	// 3. .env (save actual secrets)
 	var envLines []string
-	if v := m.fieldVal(StepModel, 2); v != "" {
-		envLines = append(envLines, fmt.Sprintf("# %s=your-api-key-here", v))
+	if apiKey := m.fieldVal(StepModel, 2); apiKey != "" {
+		envLines = append(envLines, fmt.Sprintf("%s=%s", apiKeyEnv, apiKey))
 	}
-	if v := m.fieldVal(StepIMAP, 1); v != "" {
-		envLines = append(envLines, fmt.Sprintf("# %s=your-password-here", v))
+	if password := m.fieldVal(StepIMAP, 1); password != "" {
+		envLines = append(envLines, fmt.Sprintf("IMAP_PASSWORD=%s", password))
 	}
-	if v := m.fieldVal(StepTelegram, 0); v != "" {
-		envLines = append(envLines, fmt.Sprintf("# %s=your-token-here", v))
+	if token := m.fieldVal(StepTelegram, 0); token != "" {
+		envLines = append(envLines, fmt.Sprintf("TELEGRAM_BOT_TOKEN=%s", token))
 	}
 	if len(envLines) > 0 {
 		envPath := filepath.Join(m.outputDir, ".env")
-		content := "# Environment variables for lingtai-daemon\n# Uncomment and fill in your values\n\n" + strings.Join(envLines, "\n") + "\n"
+		content := "# LingTai secrets — do not commit this file\n\n" + strings.Join(envLines, "\n") + "\n"
 		if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
 			return written, fmt.Errorf("writing .env: %w", err)
 		}

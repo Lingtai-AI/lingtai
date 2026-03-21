@@ -20,10 +20,21 @@ func S(key string) string {
 }
 
 // Renamed from "strings" to "translations" to avoid shadowing the built-in strings package.
+// Languages is the ordered list of supported language codes.
+var Languages = []string{"en", "zh", "lzh"}
+
+// LanguageLabels maps language codes to display labels (shown in language selector).
+var LanguageLabels = map[string]string{
+	"en":  "English",
+	"zh":  "中文",
+	"lzh": "文言",
+}
+
 var translations = map[string]map[string]string{
 	"en": {
-		"title":           "Daemon",
+		"title":           "LingTai",
 		"setup_title":     "Setup Wizard",
+		"setup_lang":      "Language",
 		"manage_title":    "Running Spirits",
 		"starting":        "Starting agent...",
 		"shutting_down":   "Shutting down...",
@@ -45,12 +56,19 @@ var translations = map[string]map[string]string{
 		"setup_general":   "General Settings",
 		"setup_review":    "Review",
 		"setup_done":      "Setup Complete",
+		"setup_lang_hint": "↑/↓ to select, Enter to confirm",
+		"setup_saved":     "Configuration saved successfully!",
+		"setup_files":     "Files written:",
+		"setup_vision":    "Vision",
+		"setup_websearch": "Web Search",
+		"setup_same_key":  "leave blank to reuse main key",
 	},
 	"zh": {
-		"title":           "器灵",
+		"title":           "灵台",
 		"setup_title":     "设置向导",
+		"setup_lang":      "语言",
 		"manage_title":    "运行中的器灵",
-		"starting":        "正在启动代理...",
+		"starting":        "正在启动...",
 		"shutting_down":   "正在关闭...",
 		"connected":       "已连接",
 		"disconnected":    "未连接",
@@ -70,6 +88,44 @@ var translations = map[string]map[string]string{
 		"setup_general":   "基本设置",
 		"setup_review":    "确认",
 		"setup_done":      "设置完成",
+		"setup_lang_hint": "↑/↓ 选择，Enter 确认",
+		"setup_saved":     "配置保存成功！",
+		"setup_files":     "已写入文件：",
+		"setup_vision":    "视觉模型",
+		"setup_websearch": "搜索模型",
+		"setup_same_key":  "留空则复用主密钥",
+	},
+	"lzh": {
+		"title":           "灵台",
+		"setup_title":     "初设",
+		"setup_lang":      "言语",
+		"manage_title":    "诸器灵",
+		"starting":        "启灵中……",
+		"shutting_down":   "收灵中……",
+		"connected":       "已通",
+		"disconnected":    "未通",
+		"press_ctrl_c":    "按 Ctrl+C 止之",
+		"type_message":    "书信于此……",
+		"no_spirits":      "无器灵运行。",
+		"name":            "名",
+		"pid":             "号",
+		"port":            "埠",
+		"uptime":          "历时",
+		"status":          "状",
+		"running":         "运行",
+		"dead":            "已殁（残号）",
+		"setup_model":     "模型之设",
+		"setup_imap":      "邮驿之设",
+		"setup_telegram":  "电报之设",
+		"setup_general":   "通则",
+		"setup_review":    "审定",
+		"setup_done":      "初设已毕",
+		"setup_lang_hint": "↑/↓ 择之，Enter 定之",
+		"setup_saved":     "设定已录！",
+		"setup_files":     "所录之档：",
+		"setup_vision":    "目视之设",
+		"setup_websearch": "搜寻之设",
+		"setup_same_key":  "留白则沿用主钥",
 	},
 }
 
