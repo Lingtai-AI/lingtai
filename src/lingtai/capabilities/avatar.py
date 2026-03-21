@@ -80,8 +80,9 @@ class AvatarManager:
     append-only JSONL ledger on disk that records every spawn.
     """
 
-    def __init__(self, agent: "Agent"):
+    def __init__(self, agent: "Agent", max_agents: int = 0):
         self._agent = agent
+        self._max_agents = max_agents  # 0 = unlimited
         self._peers: dict[str, "Agent"] = {}  # name -> live Agent reference
 
     # ------------------------------------------------------------------
@@ -177,6 +178,12 @@ class AvatarManager:
             # stopped — clean up stale reference before spawning fresh
             self._peers.pop(peer_name, None)
 
+        # Agent count guard
+        if self._max_agents > 0:
+            live = len(list(parent._base_dir.glob("*/.agent.json")))
+            if live >= self._max_agents:
+                return {"error": f"Agent limit reached ({live}/{self._max_agents})"}
+
         # Resolve spawn parameters
         covenant = args.get("covenant") or parent._prompt_manager.read_section("covenant") or ""
         memory = args.get("memory", "")
@@ -186,8 +193,6 @@ class AvatarManager:
         caps: dict[str, dict] = {}
         cap_names: list[str] = []
         for cap_name, cap_kwargs in parent._capabilities:
-            if cap_name == "avatar":
-                continue
             if requested is not None and cap_name not in requested:
                 continue
             caps[cap_name] = dict(cap_kwargs)
@@ -299,10 +304,10 @@ def _build_schema(agent: "Agent") -> dict:
     return schema
 
 
-def setup(agent: "Agent") -> AvatarManager:
+def setup(agent: "Agent", max_agents: int = 0) -> AvatarManager:
     """Set up the avatar capability on an agent."""
     lang = agent._config.language
-    mgr = AvatarManager(agent)
+    mgr = AvatarManager(agent, max_agents=max_agents)
     schema = _build_schema(agent)
     agent.add_tool("avatar", schema=schema, handler=mgr.handle, description=get_description(lang))
     return mgr
