@@ -231,7 +231,7 @@ def main(config_path: str | None = None) -> None:
     combo_json_path = base_dir / agent_name / "combo.json"
     if not combo_json_path.exists():
         combo_record = {
-            "name": model_cfg.get("combo_name", ""),
+            "name": cfg.get("combo_name", ""),
             "model": {
                 "provider": model_cfg["provider"],
                 "model": model_cfg["model"],

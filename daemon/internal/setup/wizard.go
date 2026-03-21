@@ -1699,11 +1699,15 @@ func (m WizardModel) writeConfig() ([]string, error) {
 	}
 
 	agentName := m.fieldVal(StepGeneral, fieldAgentName)
+	comboNameVal := m.comboName.Value()
 	cfg := map[string]interface{}{
 		"model":      "model.json",
 		"language":   i18n.Languages[m.langIdx],
 		"agent_name": agentName,
 		"agent_port": port,
+	}
+	if comboNameVal != "" {
+		cfg["combo_name"] = comboNameVal
 	}
 
 	bashPolicy := m.fieldVal(StepGeneral, fieldBashPolicy)

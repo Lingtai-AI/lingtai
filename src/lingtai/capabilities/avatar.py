@@ -215,6 +215,8 @@ class AvatarManager:
         combo_name = args.get("combo")
         if combo_name:
             combo_path = Path.home() / ".lingtai" / "combos" / f"{combo_name}.json"
+            if not combo_path.is_file():
+                return {"error": f"Combo not found: {combo_name}"}
             combo_data = json.loads(combo_path.read_text(encoding="utf-8"))
         elif self._parent_combo:
             combo_data = self._parent_combo
