@@ -611,6 +611,7 @@ class EmailManager:
             "subject": subject,
             "message": message_text,
             "type": mail_type,
+            "identity": self._agent._build_manifest(),
         }
         if cc:
             base_payload["cc"] = cc
