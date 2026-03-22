@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,9 @@ import (
 	"lingtai-daemon/internal/i18n"
 	"lingtai-daemon/internal/manage"
 )
+
+// statusTickMsg triggers periodic status refresh.
+type statusTickMsg time.Time
 
 // StatusModel shows all agents in this project's .lingtai/.
 type StatusModel struct {
@@ -44,7 +48,7 @@ func (m *StatusModel) scan() {
 	m.spirits = nil
 	spirits := manage.ScanSpirits(m.lingtaiDir)
 	for _, s := range spirits {
-		comboName := readComboName(filepath.Join(m.lingtaiDir, s.Name, "combo.json"))
+		comboName := readComboName(filepath.Join(m.lingtaiDir, s.AgentID, "combo.json"))
 		m.spirits = append(m.spirits, statusEntry{spirit: s, comboName: comboName})
 	}
 }
@@ -64,11 +68,18 @@ func readComboName(path string) string {
 }
 
 func (m StatusModel) Init() tea.Cmd {
-	return nil
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+		return statusTickMsg(t)
+	})
 }
 
 func (m StatusModel) Update(msg tea.Msg) (StatusModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case statusTickMsg:
+		m.scan()
+		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return statusTickMsg(t)
+		})
 	case tea.KeyMsg:
 		m.errMsg = "" // clear error on any key
 		switch msg.String() {
@@ -88,8 +99,15 @@ func (m StatusModel) Update(msg tea.Msg) (StatusModel, tea.Cmd) {
 				}
 			}
 			m.scan()
-		case "r", "R":
-			m.scan()
+		case "l", "L":
+			// Cycle TUI language
+			for idx, code := range i18n.Languages {
+				if code == i18n.Lang {
+					i18n.Lang = i18n.Languages[(idx+1)%len(i18n.Languages)]
+					i18n.SaveTUILang(i18n.Lang)
+					break
+				}
+			}
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width

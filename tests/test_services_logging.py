@@ -123,7 +123,7 @@ class TestBaseAgentLoggingIntegration:
         from lingtai_kernel.tool_executor import ToolExecutor
 
         agent = BaseAgent(
-            service=make_mock_service(), agent_name="test",
+            service=make_mock_service(), agent_name="test", agent_id="test",
             base_dir=tmp_path,
         )
         agent.add_tool("greet", schema={"type": "object", "properties": {}}, handler=lambda args: {"status": "ok"})
@@ -159,7 +159,7 @@ class TestBaseAgentLoggingIntegration:
         from lingtai_kernel.tool_executor import ToolExecutor
 
         agent = BaseAgent(
-            service=make_mock_service(), agent_name="test",
+            service=make_mock_service(), agent_name="test", agent_id="test",
             base_dir=tmp_path,
         )
         agent.add_tool("greet", schema={"type": "object", "properties": {}}, handler=lambda args: {"status": "ok"})
@@ -188,7 +188,7 @@ class TestBaseAgentLoggingIntegration:
     def test_state_change_logged(self, tmp_path):
         """State transitions are logged."""
         agent = BaseAgent(
-            service=make_mock_service(), agent_name="test",
+            service=make_mock_service(), agent_name="test", agent_id="test",
             base_dir=tmp_path,
         )
         agent._set_state(AgentState.ACTIVE, reason="test")

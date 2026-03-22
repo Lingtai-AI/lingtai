@@ -11,12 +11,16 @@ func TestLoadConfig_Basic(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.json")
 	os.WriteFile(cfgPath, []byte(`{
 		"model": {"provider": "minimax", "model": "test", "api_key_env": "K"},
+		"agent_id": "abc123",
 		"agent_name": "myagent"
 	}`), 0644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.AgentID != "abc123" {
+		t.Errorf("got %q, want %q", cfg.AgentID, "abc123")
 	}
 	if cfg.AgentName != "myagent" {
 		t.Errorf("got %q, want %q", cfg.AgentName, "myagent")
@@ -27,15 +31,13 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 	os.WriteFile(cfgPath, []byte(`{
-		"model": {"provider": "minimax", "model": "test", "api_key_env": "K"}
+		"model": {"provider": "minimax", "model": "test", "api_key_env": "K"},
+		"agent_id": "abc123"
 	}`), 0644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.AgentName != "orchestrator" {
-		t.Errorf("agent_name default: got %q, want %q", cfg.AgentName, "orchestrator")
 	}
 	if cfg.AgentPort != 8501 {
 		t.Errorf("agent_port default: got %d, want %d", cfg.AgentPort, 8501)
@@ -48,6 +50,19 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_MissingAgentID(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	os.WriteFile(cfgPath, []byte(`{
+		"model": {"provider": "minimax", "model": "test", "api_key_env": "K"}
+	}`), 0644)
+
+	_, err := Load(cfgPath)
+	if err == nil {
+		t.Error("expected error for missing agent_id")
+	}
+}
+
 func TestLoadConfig_ModelFromFile(t *testing.T) {
 	dir := t.TempDir()
 	modelPath := filepath.Join(dir, "model.json")
@@ -55,7 +70,7 @@ func TestLoadConfig_ModelFromFile(t *testing.T) {
 		"provider": "openai", "model": "gpt-4o", "api_key_env": "OAI_KEY"
 	}`), 0644)
 	cfgPath := filepath.Join(dir, "config.json")
-	os.WriteFile(cfgPath, []byte(`{"model": "model.json"}`), 0644)
+	os.WriteFile(cfgPath, []byte(`{"model": "model.json", "agent_id": "abc123"}`), 0644)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -70,7 +85,8 @@ func TestLoadConfig_ModelInline(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 	os.WriteFile(cfgPath, []byte(`{
-		"model": {"provider": "anthropic", "model": "claude", "api_key_env": "ANT"}
+		"model": {"provider": "anthropic", "model": "claude", "api_key_env": "ANT"},
+		"agent_id": "abc123"
 	}`), 0644)
 
 	cfg, err := Load(cfgPath)
@@ -85,7 +101,7 @@ func TestLoadConfig_ModelInline(t *testing.T) {
 func TestLoadConfig_MissingModel(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
-	os.WriteFile(cfgPath, []byte(`{"agent_name": "x"}`), 0644)
+	os.WriteFile(cfgPath, []byte(`{"agent_id": "abc123"}`), 0644)
 
 	_, err := Load(cfgPath)
 	if err == nil {
@@ -124,5 +140,16 @@ func TestResolveEnvVar_Missing(t *testing.T) {
 	_, err := ResolveEnvVar("NONEXISTENT_VAR")
 	if err == nil {
 		t.Error("expected error for missing env var")
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	cfg := &Config{AgentID: "abc123", AgentName: "alice"}
+	if cfg.DisplayName() != "alice" {
+		t.Errorf("got %q, want %q", cfg.DisplayName(), "alice")
+	}
+	cfg.AgentName = ""
+	if cfg.DisplayName() != "abc123" {
+		t.Errorf("got %q, want %q", cfg.DisplayName(), "abc123")
 	}
 }

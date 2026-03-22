@@ -39,5 +39,5 @@ app/web/frontend/dist/
 # Superpowers brainstorm sessions
 .superpowers/
 
-# Runtime data symlink
-.lingtai
+# Runtime data (agent working dirs, configs)
+.lingtai/

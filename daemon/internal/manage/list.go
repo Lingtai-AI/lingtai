@@ -14,13 +14,16 @@ import (
 )
 
 // Spirit represents a running (or stale) agent.
+// Spirit represents a running (or stale) agent.
 type Spirit struct {
-	Name    string
-	PID     int
-	Port    int
-	Config  string
-	Started time.Time
-	Alive   bool
+	AgentID   string // directory name (stable hex ID)
+	AgentName string // human-readable name (may be empty)
+	Name      string // display name: AgentName if set, else AgentID
+	PID       int
+	Port      int
+	Config    string
+	Started   time.Time
+	Alive     bool
 }
 
 // ScanSpirits scans base_dir for agent.pid files.
@@ -49,13 +52,32 @@ func ScanSpirits(baseDir string) []Spirit {
 			continue
 		}
 		started, _ := time.Parse(time.RFC3339, info.Started)
+
+		// Read agent_name from .agent.json manifest
+		agentID := entry.Name()
+		agentName := ""
+		manifestPath := filepath.Join(baseDir, agentID, ".agent.json")
+		if mdata, err := os.ReadFile(manifestPath); err == nil {
+			var manifest struct {
+				AgentName string `json:"agent_name"`
+			}
+			json.Unmarshal(mdata, &manifest)
+			agentName = manifest.AgentName
+		}
+		displayName := agentName
+		if displayName == "" {
+			displayName = agentID
+		}
+
 		spirits = append(spirits, Spirit{
-			Name:    entry.Name(),
-			PID:     info.PID,
-			Port:    info.Port,
-			Config:  info.Config,
-			Started: started,
-			Alive:   isAlive(info.PID),
+			AgentID:   agentID,
+			AgentName: agentName,
+			Name:      displayName,
+			PID:       info.PID,
+			Port:      info.Port,
+			Config:    info.Config,
+			Started:   started,
+			Alive:     isAlive(info.PID),
 		})
 	}
 	return spirits
@@ -99,7 +121,7 @@ func FormatTable(spirits []Spirit) string {
 			s.Name, s.PID, s.Port, uptime, status,
 		)
 	}
-	result += fmt.Sprintf("\n  \033[2mStop with: kill <PID>\033[0m\n")
+	result += fmt.Sprintf("\n  \033[2m%s\033[0m\n", i18n.S("stop_hint"))
 	return result
 }
 

@@ -1,6 +1,6 @@
 """Library capability — standalone knowledge store.
 
-A structured knowledge archive persisted in system/library.json.
+A structured knowledge archive persisted in library/library.json.
 Agents submit, browse, read, organize, and delete entries.
 Completely decoupled from psyche and memory — the agent decides
 what to do with the knowledge it retrieves.
@@ -91,8 +91,8 @@ class LibraryManager:
         self._working_dir = agent._working_dir
         self._max_entries = library_limit if library_limit is not None else self.DEFAULT_MAX_ENTRIES
 
-        self._library_json = self._working_dir / "system" / "library.json"
-        self._exports_dir = self._working_dir / "system" / "exports"
+        self._library_json = self._working_dir / "library" / "library.json"
+        self._exports_dir = self._working_dir / "exports"
         self._entries: list[dict] = self._load_entries()
 
     # ------------------------------------------------------------------

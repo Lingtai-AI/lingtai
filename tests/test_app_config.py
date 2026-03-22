@@ -14,9 +14,11 @@ def test_load_config_basic(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "model": {"provider": "minimax", "model": "test", "api_key_env": "TEST_KEY"},
+        "agent_id": "abc123",
         "agent_name": "test-agent",
     }))
     cfg = load_config(str(cfg_file))
+    assert cfg["agent_id"] == "abc123"
     assert cfg["agent_name"] == "test-agent"
 
 
@@ -24,17 +26,27 @@ def test_load_config_defaults(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "model": {"provider": "minimax", "model": "test", "api_key_env": "K"},
+        "agent_id": "abc123",
     }))
     cfg = load_config(str(cfg_file))
-    assert cfg["agent_name"] == "orchestrator"
+    assert cfg["agent_name"] == ""
     assert cfg["max_turns"] == 50
     assert cfg["agent_port"] == 8501
     assert cfg["cli"] is False
 
 
+def test_load_config_missing_agent_id(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({
+        "model": {"provider": "minimax", "model": "test", "api_key_env": "K"},
+    }))
+    with pytest.raises(ValueError, match="agent_id"):
+        load_config(str(cfg_file))
+
+
 def test_load_config_missing_model(tmp_path):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({"agent_name": "x"}))
+    cfg_file.write_text(json.dumps({"agent_id": "abc123", "agent_name": "x"}))
     with pytest.raises(ValueError, match="model"):
         load_config(str(cfg_file))
 
@@ -45,7 +57,7 @@ def test_load_model_config_from_file(tmp_path):
         "provider": "minimax", "model": "MiniMax-M2.7-highspeed", "api_key_env": "MINIMAX_API_KEY",
     }))
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({"model": "model.json"}))
+    cfg_file.write_text(json.dumps({"model": "model.json", "agent_id": "abc123"}))
     cfg = load_config(str(cfg_file))
     assert cfg["_model_config"]["provider"] == "minimax"
 
@@ -54,6 +66,7 @@ def test_load_model_config_inline(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "model": {"provider": "openai", "model": "gpt-4o", "api_key_env": "OAI"},
+        "agent_id": "abc123",
     }))
     cfg = load_config(str(cfg_file))
     assert cfg["_model_config"]["provider"] == "openai"
@@ -78,6 +91,7 @@ def test_load_dotenv(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "model": {"provider": "x", "model": "x", "api_key_env": "MY_TEST_VAR"},
+        "agent_id": "abc123",
     }))
     os.environ.pop("MY_TEST_VAR", None)
     cfg = load_config(str(cfg_file))
@@ -91,6 +105,6 @@ def test_load_config_file_not_found():
 
 def test_load_model_file_not_found(tmp_path):
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({"model": "nonexistent.json"}))
+    cfg_file.write_text(json.dumps({"model": "nonexistent.json", "agent_id": "abc123"}))
     with pytest.raises(FileNotFoundError, match="nonexistent"):
         load_config(str(cfg_file))

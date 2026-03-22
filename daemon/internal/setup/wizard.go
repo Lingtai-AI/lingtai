@@ -1,7 +1,9 @@
 package setup
 
 import (
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,6 +20,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// generateAgentID returns a 6-character hex string.
+func generateAgentID() string {
+	b := make([]byte, 3)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 //go:embed defaults/covenant_en.md
 var defaultCovenantEN string
 
@@ -27,11 +36,6 @@ var defaultCovenantZH string
 //go:embed defaults/covenant_wen.md
 var defaultCovenantWEN string
 
-//go:embed defaults/tool_translation.md
-var toolTranslationWEN string
-
-//go:embed defaults/tool_translation_zh.md
-var toolTranslationZH string
 
 //go:embed defaults/bash_policy.json
 var defaultBashPolicy string
@@ -40,8 +44,8 @@ var defaultBashPolicy string
 type step int
 
 const (
-	StepCombo step = iota
-	StepLang
+	StepLang step = iota
+	StepCombo
 	StepModel
 	StepMultimodal
 	StepMessaging
@@ -55,10 +59,12 @@ const (
 
 // StepGeneral field indices
 const (
-	fieldAgentName = 0
-	fieldAgentPort = 1
-	fieldAgentLang = 2
-	fieldBashPolicy = 3
+	fieldAgentName  = 0
+	fieldAgentPort  = 1
+	fieldAgentLang  = 2
+	fieldLifetime   = 3
+	fieldFlowDelay  = 4
+	fieldBashPolicy = 5
 )
 
 func (s step) String() string {
@@ -210,6 +216,7 @@ type WizardModel struct {
 	fields    map[step][]field
 	focus     int // index of focused field within current step
 	outputDir string
+	agentID   string // stable 12-char hex, determines working dir
 
 	// combo selection state
 	combos    []combo.Combo
@@ -277,9 +284,16 @@ func NewWizardModel(outputDir string) WizardModel {
 		}
 	}
 
+	// Start at StepLang if TUI language not yet saved, otherwise skip to StepCombo
+	initialStep := StepLang
+	if i18n.LoadTUILang() != "" {
+		initialStep = StepCombo
+	}
+
 	m := WizardModel{
-		step:        StepCombo,
+		step:        initialStep,
 		outputDir:   outputDir,
+		agentID:     generateAgentID(),
 		langIdx:      initialLangIdx,
 		agentLangIdx: initialLangIdx,
 		providerIdx: 0,
@@ -352,6 +366,8 @@ func NewWizardModel(outputDir string) WizardModel {
 		{label: "field_agent_name", input: newTextInput("orchestrator", "orchestrator")},
 		{label: "field_agent_port", input: newTextInput("8501", "8501")},
 		{label: "field_agent_lang", input: newTextInput("", "")}, // placeholder, rendered as selector
+		{label: "field_lifetime", input: newTextInput("86400", "86400")},
+		{label: "field_flow_delay", input: newTextInput("120", "120")},
 		{label: "field_bash_policy", input: newTextInput("", "")},
 	}
 
@@ -522,8 +538,14 @@ func (m *WizardModel) loadExisting() {
 	}
 
 	// General
-	var agentName, bashPolicy string
+	var agentID, agentName, bashPolicy string
 	var agentPort int
+	if v, ok := raw["agent_id"]; ok {
+		json.Unmarshal(v, &agentID)
+		if agentID != "" {
+			m.agentID = agentID
+		}
+	}
 	if v, ok := raw["agent_name"]; ok {
 		json.Unmarshal(v, &agentName)
 	}
@@ -541,6 +563,20 @@ func (m *WizardModel) loadExisting() {
 	}
 	if bashPolicy != "" {
 		m.fields[StepGeneral][fieldBashPolicy].input.SetValue(bashPolicy)
+	}
+
+	var lifetime, flowDelay float64
+	if v, ok := raw["lifetime"]; ok {
+		json.Unmarshal(v, &lifetime)
+	}
+	if v, ok := raw["flow_delay"]; ok {
+		json.Unmarshal(v, &flowDelay)
+	}
+	if lifetime > 0 {
+		m.fields[StepGeneral][fieldLifetime].input.SetValue(fmt.Sprintf("%.0f", lifetime))
+	}
+	if flowDelay > 0 {
+		m.fields[StepGeneral][fieldFlowDelay].input.SetValue(fmt.Sprintf("%.0f", flowDelay))
 	}
 }
 
@@ -805,9 +841,15 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.runTest()
 
 		case "enter":
+			if m.step == StepLang {
+				// Save TUI language choice
+				i18n.SaveTUILang(i18n.Languages[m.langIdx])
+				m.advanceStep()
+				return m, nil
+			}
 			if m.step == StepCombo {
 				if m.comboIdx == -1 {
-					// Create new — advance to StepLang
+					// Create new — advance to StepModel
 					m.advanceStep()
 				} else {
 					// Apply combo and skip to StepGeneral
@@ -1156,9 +1198,9 @@ func (m WizardModel) renderMMChooser() string {
 		i18n.S("mm_skip"),
 	}
 	descs := []string{
-		"Enter two API keys — fills vision, web search, talk, compose, draw automatically",
-		"Configure each capability individually with any provider",
-		"Skip multimodal setup for now",
+		i18n.S("mm_quick_desc"),
+		i18n.S("mm_manual_desc"),
+		i18n.S("mm_skip_desc"),
 	}
 
 	for i, choice := range choices {
@@ -1191,7 +1233,7 @@ func (m WizardModel) renderMMQuick() string {
 	b.WriteString("\n")
 
 	// Key 1: MINIMAX_API_KEY
-	label1 := "MINIMAX_API_KEY (vision, web search)"
+	label1 := "MINIMAX_API_KEY " + i18n.S("mm_key_vision_desc")
 	if m.mmQuickFocus == 1 {
 		b.WriteString(fmt.Sprintf("  %s %s\n", promptStyle.Render(">"), promptStyle.Render(label1)))
 		b.WriteString(fmt.Sprintf("    %s\n", m.mmQuickKey1.View()))
@@ -1200,13 +1242,13 @@ func (m WizardModel) renderMMQuick() string {
 		if m.mmQuickKey1.Value() != "" {
 			b.WriteString(fmt.Sprintf("    %s\n", "••••••••"))
 		} else {
-			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render("(not set)")))
+			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render(i18n.S("not_set"))))
 		}
 	}
 	b.WriteString("\n")
 
 	// Key 2: MINIMAX_MCP_API_KEY
-	label2 := "MINIMAX_MCP_API_KEY (talk, compose, draw)"
+	label2 := "MINIMAX_MCP_API_KEY " + i18n.S("mm_key_mcp_desc")
 	if m.mmQuickFocus == 2 {
 		b.WriteString(fmt.Sprintf("  %s %s\n", promptStyle.Render(">"), promptStyle.Render(label2)))
 		b.WriteString(fmt.Sprintf("    %s\n", m.mmQuickKey2.View()))
@@ -1215,11 +1257,11 @@ func (m WizardModel) renderMMQuick() string {
 		if m.mmQuickKey2.Value() != "" {
 			b.WriteString(fmt.Sprintf("    %s\n", "••••••••"))
 		} else {
-			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render("(not set)")))
+			b.WriteString(fmt.Sprintf("    %s\n", dimStyle.Render(i18n.S("not_set"))))
 		}
 	}
 
-	b.WriteString("\n" + dimStyle.Render("Tab: next field | ←/→: cycle endpoint | Enter: apply & continue | Esc: back") + "\n")
+	b.WriteString("\n" + dimStyle.Render(i18n.S("mm_quick_hint")) + "\n")
 	return b.String()
 }
 
@@ -1227,9 +1269,9 @@ func (m WizardModel) renderMsgChooser() string {
 	var b strings.Builder
 
 	choices := []struct{ name, desc string }{
-		{i18n.S("msg_imap"), "Connect to an IMAP/SMTP email account"},
-		{i18n.S("msg_telegram"), "Connect a Telegram bot"},
-		{i18n.S("msg_skip"), "Skip external messaging setup"},
+		{i18n.S("msg_imap"), i18n.S("msg_imap_desc")},
+		{i18n.S("msg_telegram"), i18n.S("msg_telegram_desc")},
+		{i18n.S("msg_skip"), i18n.S("msg_skip_desc")},
 	}
 
 	// Show checkmarks for completed configs
@@ -1250,7 +1292,7 @@ func (m WizardModel) renderMsgChooser() string {
 		}
 	}
 
-	b.WriteString("\n" + dimStyle.Render("↑/↓ to select, Enter to configure, Esc to go back") + "\n")
+	b.WriteString("\n" + dimStyle.Render(i18n.S("msg_chooser_hint")) + "\n")
 	return b.String()
 }
 
@@ -1269,7 +1311,7 @@ func (m WizardModel) renderMsgFields(fieldStep step, title string) string {
 		b.WriteString(fmt.Sprintf("  %s\n", f.input.View()))
 	}
 
-	b.WriteString("\n" + dimStyle.Render("Tab/↓: next field | Enter: save & back | Esc: back | Ctrl+T: test") + "\n")
+	b.WriteString("\n" + dimStyle.Render(i18n.S("msg_fields_hint")) + "\n")
 	return b.String()
 }
 
@@ -1278,7 +1320,7 @@ func (m WizardModel) renderMultimodal() string {
 
 	// Column headers
 	b.WriteString(fmt.Sprintf("  %-16s %-20s %-24s %s\n",
-		"Capability", "Provider", "API Key", "Endpoint"))
+		i18n.S("mm_col_capability"), i18n.S("mm_col_provider"), i18n.S("mm_col_api_key"), i18n.S("mm_col_endpoint")))
 	b.WriteString("  " + strings.Repeat("\u2500", 72) + "\n")
 
 	for i, cap := range mmCaps {
@@ -1311,32 +1353,32 @@ func (m WizardModel) renderMultimodal() string {
 		// Key
 		var keyStr string
 		if isLocal {
-			keyStr = fmt.Sprintf("%-22s", dimStyle.Render("no config needed"))
+			keyStr = fmt.Sprintf("%-22s", dimStyle.Render(i18n.S("no_config_needed")))
 		} else if isActive && m.mmCol == 1 {
 			keyStr = state.keyInput.View()
 		} else if state.keyInput.Value() != "" {
 			keyStr = fmt.Sprintf("%-22s", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022")
 		} else {
-			keyStr = fmt.Sprintf("%-22s", dimStyle.Render("(no key)"))
+			keyStr = fmt.Sprintf("%-22s", dimStyle.Render(i18n.S("no_key")))
 		}
 
 		// Endpoint
 		var epStr string
 		if isLocal {
-			epStr = dimStyle.Render("runs locally")
+			epStr = dimStyle.Render(i18n.S("runs_locally"))
 		} else if isActive && m.mmCol == 2 {
 			epStr = state.endpointInput.View()
 		} else if state.endpointInput.Value() != "" {
 			epStr = state.endpointInput.Value()
 		} else {
-			epStr = dimStyle.Render("(no endpoint)")
+			epStr = dimStyle.Render(i18n.S("no_endpoint"))
 		}
 
 		b.WriteString(fmt.Sprintf("%s%s %s %s  %s\n", cursor, capName, provStr, keyStr, epStr))
 	}
 
 	// Hints
-	b.WriteString("\n" + dimStyle.Render("\u2191/\u2193: move row | Tab: next field | \u2190/\u2192: cycle provider | Enter: next step | Esc: back") + "\n")
+	b.WriteString("\n" + dimStyle.Render(i18n.S("mm_grid_hint")) + "\n")
 
 	return b.String()
 }
@@ -1358,18 +1400,15 @@ func (m WizardModel) View() string {
 	var b strings.Builder
 
 	// Banner
-	if m.langIdx == 0 {
-		b.WriteString(headerStyle.Render("LingTai AI") + "\n")
-		b.WriteString(dimStyle.Render("Awakened beneath the Bodhi;") + "\n")
-		b.WriteString(dimStyle.Render("one mind, thousand avatars.") + "\n\n")
-	} else {
-		b.WriteString(headerStyle.Render("灵台AI") + "\n")
-		b.WriteString(dimStyle.Render("灵台方寸山  斜月三星洞") + "\n")
-		b.WriteString(dimStyle.Render("闻道菩提下  一心化万相") + "\n\n")
-	}
+	b.WriteString(headerStyle.Render(i18n.S("banner_title")) + "\n")
+	b.WriteString(dimStyle.Render(i18n.S("banner_line1")) + "\n")
+	b.WriteString(dimStyle.Render(i18n.S("banner_line2")) + "\n\n")
 
-	// Progress bar
-	allSteps := []step{StepCombo, StepLang, StepModel, StepMultimodal, StepMessaging, StepGeneral, StepReview}
+	// Progress bar — skip StepLang if TUI language already saved
+	allSteps := []step{StepLang, StepCombo, StepModel, StepMultimodal, StepMessaging, StepGeneral, StepReview}
+	if i18n.LoadTUILang() != "" {
+		allSteps = []step{StepCombo, StepModel, StepMultimodal, StepMessaging, StepGeneral, StepReview}
+	}
 	for i, s := range allSteps {
 		name := s.String()
 		if s == m.step {
@@ -1456,7 +1495,7 @@ func (m WizardModel) View() string {
 
 	if m.step == StepReview {
 		b.WriteString(m.renderReview())
-		b.WriteString("\n" + dimStyle.Render("Enter → save, Ctrl+C → abort") + "\n")
+		b.WriteString("\n" + dimStyle.Render(i18n.S("review_save_hint")) + "\n")
 		return b.String()
 	}
 
@@ -1507,7 +1546,7 @@ func (m WizardModel) View() string {
 
 	// Hints
 	b.WriteString("\n")
-	hints := []string{"Tab/Down: next field", "Shift+Tab/Up: prev field", "Enter: next step"}
+	hints := []string{i18n.S("hint_tab_next"), i18n.S("hint_tab_prev"), i18n.S("hint_enter_next")}
 	b.WriteString(dimStyle.Render(strings.Join(hints, " | ")) + "\n")
 
 	return b.String()
@@ -1523,14 +1562,14 @@ func (m WizardModel) renderReview() string {
 
 	// Model
 	provider := m.fieldVal(StepModel, 0)
-	b.WriteString("\n" + promptStyle.Render("Model:") + "\n")
-	b.WriteString(fmt.Sprintf("  Provider:    %s\n", provider))
-	b.WriteString(fmt.Sprintf("  Model:       %s\n", m.fieldVal(StepModel, 1)))
+	b.WriteString("\n" + promptStyle.Render(i18n.S("review_model")) + "\n")
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_provider"), provider))
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", "Model:", m.fieldVal(StepModel, 1)))
 	if m.fieldVal(StepModel, 2) != "" {
-		b.WriteString(fmt.Sprintf("  API key:     %s\n", "••••••••"))
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_api_key"), "••••••••"))
 	}
 	if endpoint := m.fieldVal(StepModel, 3); endpoint != "" {
-		b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", endpoint))
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_endpoint"), endpoint))
 	}
 
 	// Multimodal capabilities
@@ -1538,55 +1577,57 @@ func (m WizardModel) renderReview() string {
 		state := m.mmRows[i]
 		p := cap.providers[state.providerIdx]
 		if p == "local" {
-			b.WriteString(fmt.Sprintf("\n"+dimStyle.Render("%s: runs locally")+"\n", cap.name))
+			b.WriteString(fmt.Sprintf("\n"+dimStyle.Render("%s: "+i18n.S("runs_locally"))+"\n", cap.name))
 			continue
 		}
 		key := state.keyInput.Value()
 		ep := state.endpointInput.Value()
 		if key == "" && ep == "" {
-			b.WriteString(fmt.Sprintf("\n"+dimStyle.Render("%s: skipped")+"\n", cap.name))
+			b.WriteString(fmt.Sprintf("\n"+dimStyle.Render("%s: "+i18n.S("review_skipped"))+"\n", cap.name))
 			continue
 		}
 		b.WriteString(fmt.Sprintf("\n"+promptStyle.Render("%s:")+"\n", cap.name))
-		b.WriteString(fmt.Sprintf("  Provider:    %s\n", p))
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_provider"), p))
 		if key != "" {
-			b.WriteString(fmt.Sprintf("  API key:     %s\n", "••••••••"))
+			b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_api_key"), "••••••••"))
 		} else {
-			b.WriteString(fmt.Sprintf("  API key:     %s\n", dimStyle.Render("reusing main key")))
+			b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_api_key"), dimStyle.Render(i18n.S("review_reusing_key"))))
 		}
 		if ep != "" {
-			b.WriteString(fmt.Sprintf("  Endpoint:    %s\n", ep))
+			b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_endpoint"), ep))
 		}
 	}
 
 	// IMAP
 	if m.fieldVal(StepIMAP, 0) != "" {
-		b.WriteString("\n" + promptStyle.Render("IMAP/SMTP:") + "\n")
-		b.WriteString(fmt.Sprintf("  Email:     %s\n", m.fieldVal(StepIMAP, 0)))
-		b.WriteString(fmt.Sprintf("  Password:  %s\n", "••••••••"))
-		b.WriteString(fmt.Sprintf("  IMAP:      %s:%s\n", m.fieldVal(StepIMAP, 2), m.fieldVal(StepIMAP, 3)))
-		b.WriteString(fmt.Sprintf("  SMTP:      %s:%s\n", m.fieldVal(StepIMAP, 4), m.fieldVal(StepIMAP, 5)))
+		b.WriteString("\n" + promptStyle.Render(i18n.S("review_imap")) + "\n")
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_email"), m.fieldVal(StepIMAP, 0)))
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_password"), "••••••••"))
+		b.WriteString(fmt.Sprintf("  %-14s %s:%s\n", i18n.S("review_imap_server"), m.fieldVal(StepIMAP, 2), m.fieldVal(StepIMAP, 3)))
+		b.WriteString(fmt.Sprintf("  %-14s %s:%s\n", i18n.S("review_smtp_server"), m.fieldVal(StepIMAP, 4), m.fieldVal(StepIMAP, 5)))
 		m.renderTestResult(&b, StepIMAP)
 	} else {
-		b.WriteString("\n" + dimStyle.Render("IMAP/SMTP: skipped") + "\n")
+		b.WriteString("\n" + dimStyle.Render(i18n.S("review_imap_skipped")) + "\n")
 	}
 
 	// Telegram
 	if m.fieldVal(StepTelegram, 0) != "" {
-		b.WriteString("\n" + promptStyle.Render("Telegram:") + "\n")
-		b.WriteString(fmt.Sprintf("  Token:     %s\n", "••••••••"))
+		b.WriteString("\n" + promptStyle.Render(i18n.S("review_telegram")) + "\n")
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_token"), "••••••••"))
 		m.renderTestResult(&b, StepTelegram)
 	} else {
-		b.WriteString("\n" + dimStyle.Render("Telegram: skipped") + "\n")
+		b.WriteString("\n" + dimStyle.Render(i18n.S("review_telegram_skipped")) + "\n")
 	}
 
 	// General
-	b.WriteString("\n" + promptStyle.Render("General:") + "\n")
-	b.WriteString(fmt.Sprintf("  Agent Name:     %s\n", m.fieldVal(StepGeneral, fieldAgentName)))
-	b.WriteString(fmt.Sprintf("  Port:           %s\n", m.fieldVal(StepGeneral, fieldAgentPort)))
-	b.WriteString(fmt.Sprintf("  Agent Language: %s (%s)\n", i18n.LanguageLabels[i18n.Languages[m.agentLangIdx]], i18n.Languages[m.agentLangIdx]))
+	b.WriteString("\n" + promptStyle.Render(i18n.S("review_general")) + "\n")
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_agent_name"), m.fieldVal(StepGeneral, fieldAgentName)))
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_port"), m.fieldVal(StepGeneral, fieldAgentPort)))
+	b.WriteString(fmt.Sprintf("  %-14s %s (%s)\n", i18n.S("review_agent_lang"), i18n.LanguageLabels[i18n.Languages[m.agentLangIdx]], i18n.Languages[m.agentLangIdx]))
+	b.WriteString(fmt.Sprintf("  %-14s %ss\n", i18n.S("review_lifetime"), m.fieldVal(StepGeneral, fieldLifetime)))
+	b.WriteString(fmt.Sprintf("  %-14s %ss\n", i18n.S("review_flow_delay"), m.fieldVal(StepGeneral, fieldFlowDelay)))
 	if v := m.fieldVal(StepGeneral, fieldBashPolicy); v != "" {
-		b.WriteString(fmt.Sprintf("  Bash Policy:    %s\n", v))
+		b.WriteString(fmt.Sprintf("  %-14s %s\n", i18n.S("review_bash_policy"), v))
 	}
 
 	// Combo name
@@ -1594,8 +1635,8 @@ func (m WizardModel) renderReview() string {
 	b.WriteString(m.comboName.View() + "\n")
 
 	// Save location
-	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Config → %s/configs/config.json", m.outputDir)) + "\n")
-	b.WriteString(dimStyle.Render(fmt.Sprintf("Secrets → %s/configs/.env", m.outputDir)) + "\n")
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("%s %s/configs/config.json", i18n.S("review_config_path"), m.outputDir)) + "\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%s %s/configs/.env", i18n.S("review_secrets_path"), m.outputDir)) + "\n")
 
 	return b.String()
 }
@@ -1725,6 +1766,7 @@ func (m WizardModel) writeConfig() ([]string, error) {
 	comboNameVal := m.comboName.Value()
 	cfg := map[string]interface{}{
 		"model":      "model.json",
+		"agent_id":   m.agentID,
 		"language":   i18n.Languages[m.agentLangIdx],
 		"agent_name": agentName,
 		"agent_port": port,
@@ -1734,6 +1776,18 @@ func (m WizardModel) writeConfig() ([]string, error) {
 	if comboNameVal != "" {
 		cfg["combo_name"] = comboNameVal
 	}
+
+	lifetime, _ := strconv.ParseFloat(m.fieldVal(StepGeneral, fieldLifetime), 64)
+	if lifetime <= 0 {
+		lifetime = 86400
+	}
+	cfg["lifetime"] = lifetime
+
+	flowDelay, _ := strconv.ParseFloat(m.fieldVal(StepGeneral, fieldFlowDelay), 64)
+	if flowDelay <= 0 {
+		flowDelay = 120
+	}
+	cfg["flow_delay"] = flowDelay
 
 	bashPolicy := m.fieldVal(StepGeneral, fieldBashPolicy)
 	if bashPolicy == "" {
@@ -1809,22 +1863,16 @@ func (m WizardModel) writeConfig() ([]string, error) {
 	}
 
 	// 5. Default covenant — written to agent working dir (per-agent, not per-project)
-	agentDir := filepath.Join(m.outputDir, agentName)
+	agentDir := filepath.Join(m.outputDir, m.agentID)
 	os.MkdirAll(agentDir, 0755)
 	covenantPath := filepath.Join(agentDir, "covenant.md")
 	if _, err := os.Stat(covenantPath); os.IsNotExist(err) {
 		defaultCovenant := defaultCovenantEN
-		toolTranslation := ""
 		langCode := i18n.Languages[m.langIdx]
 		if langCode == "lzh" {
 			defaultCovenant = defaultCovenantWEN
-			toolTranslation = toolTranslationWEN
 		} else if langCode == "zh" {
 			defaultCovenant = defaultCovenantZH
-			toolTranslation = toolTranslationZH
-		}
-		if toolTranslation != "" {
-			defaultCovenant += "\n---\n\n" + toolTranslation
 		}
 		os.WriteFile(covenantPath, []byte(defaultCovenant), 0644)
 		written = append(written, covenantPath)

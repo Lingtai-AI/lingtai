@@ -34,12 +34,15 @@ type Config struct {
 	IMAP       IMAPConfig     `json:"imap,omitempty"`
 	Telegram   TelegramConfig `json:"telegram,omitempty"`
 	CLI        bool           `json:"cli"`
+	AgentID    string         `json:"agent_id"`
 	AgentName  string         `json:"agent_name"`
 	BashPolicy string         `json:"bash_policy,omitempty"`
 	MaxTurns   int            `json:"max_turns"`
 	AgentPort  int            `json:"agent_port"`
 	CLIPort    int            `json:"cli_port,omitempty"`
 	Language   string         `json:"language"`
+	Lifetime   float64        `json:"lifetime,omitempty"`
+	FlowDelay  float64        `json:"flow_delay,omitempty"`
 
 	// Internal — derived, not serialized
 	ConfigDir  string `json:"-"` // directory containing config.json (configs/)
@@ -84,10 +87,12 @@ func Load(path string) (*Config, error) {
 	cfg.ConfigDir = configDir
 	cfg.ProjectDir = projectDir
 
-	// Apply defaults for zero values
-	if cfg.AgentName == "" {
-		cfg.AgentName = "orchestrator"
+	// Validate required fields
+	if cfg.AgentID == "" {
+		return nil, fmt.Errorf("'agent_id' field is required in config.json")
 	}
+
+	// Apply defaults for zero values
 	if cfg.MaxTurns == 0 {
 		cfg.MaxTurns = 50
 	}
@@ -99,6 +104,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Language == "" {
 		cfg.Language = "en"
+	}
+	if cfg.Lifetime == 0 {
+		cfg.Lifetime = 86400
+	}
+	if cfg.FlowDelay == 0 {
+		cfg.FlowDelay = 120
 	}
 
 	// Resolve model config
@@ -168,7 +179,15 @@ func ResolveEnvVar(name string) (string, error) {
 	return val, nil
 }
 
-// WorkingDir returns the agent's working directory: {project_dir}/{agent_name}
+// WorkingDir returns the agent's working directory: {project_dir}/{agent_id}
 func (c *Config) WorkingDir() string {
-	return filepath.Join(c.ProjectDir, c.AgentName)
+	return filepath.Join(c.ProjectDir, c.AgentID)
+}
+
+// DisplayName returns AgentName if set, otherwise AgentID.
+func (c *Config) DisplayName() string {
+	if c.AgentName != "" {
+		return c.AgentName
+	}
+	return c.AgentID
 }

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 _DEFAULTS = {
-    "agent_name": "orchestrator",
+    "agent_name": "",
     "max_turns": 50,
     "agent_port": 8501,
     "cli": False,
@@ -44,6 +44,10 @@ def load_config(config_path: str) -> dict:
     # Apply defaults
     for key, default in _DEFAULTS.items():
         cfg.setdefault(key, default)
+
+    # Validate required fields
+    if not cfg.get("agent_id"):
+        raise ValueError("'agent_id' field is required in config.json")
 
     # Resolve model config
     model_raw = cfg.get("model")

@@ -36,6 +36,7 @@ func TestWizardConfigRoundTrip(t *testing.T) {
 
 	configJSON := `{
 		"model": "model.json",
+		"agent_id": "abc123",
 		"agent_name": "wizard-test",
 		"agent_port": 9000
 	}`
@@ -63,8 +64,8 @@ func TestWizardConfigRoundTrip(t *testing.T) {
 	if cfg.ProjectDir != dir {
 		t.Errorf("ProjectDir: got %q, want %q", cfg.ProjectDir, dir)
 	}
-	// WorkingDir should be project_dir/agent_name
-	expectedWorkDir := filepath.Join(dir, "wizard-test")
+	// WorkingDir should be project_dir/agent_id
+	expectedWorkDir := filepath.Join(dir, "abc123")
 	if cfg.WorkingDir() != expectedWorkDir {
 		t.Errorf("WorkingDir: got %q, want %q", cfg.WorkingDir(), expectedWorkDir)
 	}
