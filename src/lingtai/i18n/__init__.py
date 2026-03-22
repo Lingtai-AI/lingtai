@@ -5,12 +5,11 @@ Usage: t(lang, key, **kwargs)
   key: dotted string ID ("read.description")
   kwargs: template substitutions
 
-The kernel ships en.json + zh.json (kernel-level strings only).
-Lingtai ships en.json + zh.json + wen.json covering both capability
-strings and kernel strings for languages the kernel doesn't carry.
-On first load of a non-kernel language (e.g. "wen"), kernel-level
-keys are injected into the kernel's i18n cache via register_strings()
-so that kernel-level t() calls resolve correctly.
+The kernel ships en.json + zh.json + wen.json (kernel-level strings).
+Lingtai ships en.json + zh.json + wen.json covering capability strings.
+On first load, any kernel-level keys found in lingtai's tables are
+injected into the kernel's i18n cache via register_strings() so that
+kernel-level t() calls resolve correctly (additive, not destructive).
 """
 from __future__ import annotations
 

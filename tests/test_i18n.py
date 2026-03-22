@@ -173,3 +173,13 @@ def test_all_capabilities_zh_no_key_fallback(cap_name):
     assert not _looks_like_i18n_key(desc), f"{cap_name} zh description is a fallback key: {desc}"
     for d in _get_all_descriptions(mod.get_schema("zh").get("properties", {})):
         assert not _looks_like_i18n_key(d), f"{cap_name} zh schema has key-like description: {d}"
+
+
+@pytest.mark.parametrize("cap_name", _ALL_CAPABILITIES)
+def test_all_capabilities_wen_no_key_fallback(cap_name):
+    """Classical Chinese (wen) schema descriptions should not fall back to raw i18n keys."""
+    mod = importlib.import_module(f"lingtai.capabilities.{cap_name}")
+    desc = mod.get_description("wen")
+    assert not _looks_like_i18n_key(desc), f"{cap_name} wen description is a fallback key: {desc}"
+    for d in _get_all_descriptions(mod.get_schema("wen").get("properties", {})):
+        assert not _looks_like_i18n_key(d), f"{cap_name} wen schema has key-like description: {d}"
