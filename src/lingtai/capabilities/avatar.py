@@ -6,12 +6,13 @@ to whom, with what mission, privileges, and capabilities.  The ledger is
 never mutated — only appended to.  It forms a responsibility map that the
 parent can consult before spawning again.
 
-Lifecycle management (kill, revive) is handled by the email capability,
-not here.  The avatar tool's only job is to spawn avatars (分身).
+Lifecycle management (silence, quell, revive, annihilate) is handled by
+the system intrinsic's karma/nirvana actions, not here.  The avatar
+tool's only job is to spawn avatars (分身).
 
 Usage:
     Agent(capabilities=["avatar"])
-    # avatar(name="researcher", ...)   — spawn or re-activate
+    # avatar(name="researcher", ...)   — spawn a new avatar
 """
 from __future__ import annotations
 
@@ -119,27 +120,6 @@ class AvatarManager:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     # ------------------------------------------------------------------
-    # Live status (reads from in-memory agent refs)
-    # ------------------------------------------------------------------
-
-    def _live_status(self, name: str) -> str:
-        """Get live status of an avatar from the kernel's AgentState."""
-        from lingtai_kernel.state import AgentState
-        peer = self._peers.get(name)
-        if peer is None:
-            return "stopped"
-        if peer._thread is None or not peer._thread.is_alive():
-            return "stopped"
-        state = peer._state
-        if state == AgentState.ACTIVE:
-            return "active"
-        if state == AgentState.STUCK:
-            return "stuck"
-        if state == AgentState.DEAD:
-            return "stopped"
-        return "idle"
-
-    # ------------------------------------------------------------------
     # Core spawn
     # ------------------------------------------------------------------
 
@@ -154,39 +134,19 @@ class AvatarManager:
         # Check if this peer already exists and is live
         existing = self._peers.get(peer_name)
         if existing is not None:
-            status = self._live_status(peer_name)
-            if status == "active":
+            from lingtai_kernel.handshake import is_alive
+            if is_alive(str(existing.working_dir)):
                 return {
                     "status": "already_active",
                     "address": existing._mail_service.address if existing._mail_service else None,
                     "agent_id": existing.agent_id,
                     "agent_name": existing.agent_name,
-                    "message": f"'{peer_name}' is currently active. Use email to communicate.",
-                }
-            elif status == "idle":
-                if reasoning:
-                    existing.send(reasoning, sender=parent.agent_id)
-                    self._append_ledger(
-                        "reactivate", peer_name, mission=reasoning,
-                    )
-                return {
-                    "status": "reactivated",
-                    "address": existing._mail_service.address if existing._mail_service else None,
-                    "agent_id": existing.agent_id,
-                    "agent_name": existing.agent_name,
-                    "message": f"'{peer_name}' was idle — sent new mission briefing.",
-                }
-            elif status == "error":
-                return {
-                    "status": status,
-                    "agent_name": peer_name,
                     "message": (
-                        f"'{peer_name}' is {status}. "
-                        f"To revive: spawn a new avatar with the SAME agent name "
-                        f"(use email to kill it first, then spawn again)."
+                        f"'{peer_name}' is already running. "
+                        f"Use mail to communicate, or system intrinsic to manage lifecycle."
                     ),
                 }
-            # stopped — clean up stale reference before spawning fresh
+            # Not alive — clean up stale reference
             self._peers.pop(peer_name, None)
 
         # Agent count guard
