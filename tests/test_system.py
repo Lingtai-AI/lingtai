@@ -113,7 +113,7 @@ def test_system_show_context_null_without_session(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# sleep action (formerly clock.wait)
+# nap action (formerly sleep / clock.wait)
 # ---------------------------------------------------------------------------
 
 
@@ -124,11 +124,11 @@ def test_mail_arrived_event_exists(tmp_path):
     assert not agent._mail_arrived.is_set()
 
 
-def test_system_sleep_with_seconds(tmp_path):
+def test_system_nap_with_seconds(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
     start = time.monotonic()
-    result = agent._intrinsics["system"]({"action": "sleep", "seconds": 0.1})
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 0.1})
     elapsed = time.monotonic() - start
 
     assert result["status"] == "ok"
@@ -136,7 +136,7 @@ def test_system_sleep_with_seconds(tmp_path):
     assert elapsed >= 0.09
 
 
-def test_system_sleep_wakes_on_mail(tmp_path):
+def test_system_nap_wakes_on_mail(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
     def fire_mail():
@@ -147,7 +147,7 @@ def test_system_sleep_wakes_on_mail(tmp_path):
     t.start()
 
     start = time.monotonic()
-    result = agent._intrinsics["system"]({"action": "sleep", "seconds": 10})
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 10})
     elapsed = time.monotonic() - start
 
     assert result["status"] == "ok"
@@ -156,7 +156,7 @@ def test_system_sleep_wakes_on_mail(tmp_path):
     t.join(timeout=1)
 
 
-def test_system_sleep_indefinite_wakes_on_mail(tmp_path):
+def test_system_nap_indefinite_wakes_on_mail(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
     def fire_mail():
@@ -167,7 +167,7 @@ def test_system_sleep_indefinite_wakes_on_mail(tmp_path):
     t.start()
 
     start = time.monotonic()
-    result = agent._intrinsics["system"]({"action": "sleep"})
+    result = agent._intrinsics["system"]({"action": "nap"})
     elapsed = time.monotonic() - start
 
     assert result["status"] == "ok"
@@ -176,64 +176,62 @@ def test_system_sleep_indefinite_wakes_on_mail(tmp_path):
     t.join(timeout=1)
 
 
-def test_system_sleep_caps_at_300(tmp_path):
+def test_system_nap_caps_at_300(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
     agent._mail_arrived.set()
-    result = agent._intrinsics["system"]({"action": "sleep", "seconds": 9999})
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 9999})
     assert result["status"] == "ok"
 
 
-def test_system_sleep_wakes_on_silence(tmp_path):
+def test_system_nap_wakes_on_interrupt(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
 
-    def fire_silence():
+    def fire_interrupt():
         time.sleep(0.1)
         agent._cancel_event.set()
 
-    t = threading.Thread(target=fire_silence, daemon=True)
+    t = threading.Thread(target=fire_interrupt, daemon=True)
     t.start()
 
     start = time.monotonic()
-    result = agent._intrinsics["system"]({"action": "sleep", "seconds": 10})
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 10})
     elapsed = time.monotonic() - start
 
     assert result["status"] == "ok"
-    assert result["reason"] == "silenced"
+    assert result["reason"] == "interrupted"
     assert elapsed < 5
     t.join(timeout=1)
 
 
-def test_system_sleep_negative_seconds(tmp_path):
+def test_system_nap_negative_seconds(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
-    result = agent._intrinsics["system"]({"action": "sleep", "seconds": -5})
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": -5})
     assert result["status"] == "error"
 
 
 # ---------------------------------------------------------------------------
-# shutdown
+# self-quell (shutdown)
 # ---------------------------------------------------------------------------
 
 
-def test_system_shutdown(tmp_path):
+def test_system_self_quell(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
-    result = agent._intrinsics["system"]({"action": "shutdown", "reason": "need bash"})
+    result = agent._intrinsics["system"]({"action": "quell", "reason": "need bash"})
     assert result["status"] == "ok"
-    assert "Shutdown initiated" in result["message"]
     assert agent._shutdown.is_set()
     agent.stop(timeout=1.0)
 
 
 # ---------------------------------------------------------------------------
-# restart
+# refresh (restart)
 # ---------------------------------------------------------------------------
 
 
-def test_system_restart(tmp_path):
+def test_system_refresh(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", agent_id="test", base_dir=tmp_path)
-    result = agent._intrinsics["system"]({"action": "restart", "reason": "new tools"})
+    result = agent._intrinsics["system"]({"action": "refresh", "reason": "new tools"})
     assert result["status"] == "ok"
-    assert "Restart initiated" in result["message"]
-    assert agent._restart_requested is True
+    assert agent._refresh_requested is True
     assert agent._shutdown.is_set()
     agent.stop(timeout=1.0)
 

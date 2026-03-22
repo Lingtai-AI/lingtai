@@ -24,16 +24,16 @@ def _make_agent(tmp_path, **kwargs):
 class TestSignalFiles:
     """Signal file detection in heartbeat loop."""
 
-    def test_silence_signal_sets_cancel_event(self, tmp_path):
+    def test_interrupt_signal_sets_cancel_event(self, tmp_path):
         agent = _make_agent(tmp_path)
         agent.start()
         try:
-            # Write .silence signal file
-            (agent.working_dir / ".silence").write_text("")
+            # Write .interrupt signal file
+            (agent.working_dir / ".interrupt").write_text("")
             # Wait for heartbeat to detect it
             time.sleep(2.0)
             assert agent._cancel_event.is_set()
-            assert not (agent.working_dir / ".silence").exists(), "signal file should be deleted"
+            assert not (agent.working_dir / ".interrupt").exists(), "signal file should be deleted"
         finally:
             agent.stop()
 
@@ -52,13 +52,13 @@ class TestSignalFiles:
 class TestSystemIntrinsicKarma:
     """Karma actions in system intrinsic."""
 
-    def test_silence_requires_karma_admin(self, tmp_path):
+    def test_interrupt_requires_karma_admin(self, tmp_path):
         agent = _make_agent(tmp_path, admin={})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "silence", "address": "/some/path"})
+        result = handle(agent, {"action": "interrupt", "address": "/some/path"})
         assert "error" in result
 
-    def test_silence_with_karma_admin(self, tmp_path):
+    def test_interrupt_with_karma_admin(self, tmp_path):
         target_dir = tmp_path / "target"
         target_dir.mkdir()
         (target_dir / ".agent.json").write_text('{"agent_id": "t1"}')
@@ -68,9 +68,9 @@ class TestSystemIntrinsicKarma:
         sender_base.mkdir()
         agent = _make_agent(sender_base, admin={"karma": True})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "silence", "address": str(target_dir)})
-        assert result["status"] == "silenced"
-        assert (target_dir / ".silence").is_file()
+        result = handle(agent, {"action": "interrupt", "address": str(target_dir)})
+        assert result["status"] == "interrupted"
+        assert (target_dir / ".interrupt").is_file()
 
     def test_quell_writes_signal_file(self, tmp_path):
         target_dir = tmp_path / "target"
@@ -98,21 +98,21 @@ class TestSystemIntrinsicKarma:
         result = handle(agent, {"action": "quell", "address": str(target_dir)})
         assert "error" in result
 
-    def test_silence_self_rejected(self, tmp_path):
+    def test_interrupt_self_rejected(self, tmp_path):
         agent = _make_agent(tmp_path, admin={"karma": True})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "silence", "address": str(agent.working_dir)})
+        result = handle(agent, {"action": "interrupt", "address": str(agent.working_dir)})
         assert "error" in result
 
-    def test_annihilate_requires_nirvana_admin(self, tmp_path):
+    def test_nirvana_requires_nirvana_admin(self, tmp_path):
         sender_base = tmp_path / "sender"
         sender_base.mkdir()
         agent = _make_agent(sender_base, admin={"karma": True})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "annihilate", "address": "/some/path"})
+        result = handle(agent, {"action": "nirvana", "address": "/some/path"})
         assert "error" in result
 
-    def test_annihilate_with_nirvana_admin(self, tmp_path):
+    def test_nirvana_with_nirvana_admin(self, tmp_path):
         target_dir = tmp_path / "target"
         target_dir.mkdir()
         (target_dir / ".agent.json").write_text('{"agent_id": "t1"}')
@@ -121,14 +121,14 @@ class TestSystemIntrinsicKarma:
         sender_base.mkdir()
         agent = _make_agent(sender_base, admin={"karma": True, "nirvana": True})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "annihilate", "address": str(target_dir)})
-        assert result["status"] == "annihilated"
+        result = handle(agent, {"action": "nirvana", "address": str(target_dir)})
+        assert result["status"] == "nirvana"
         assert not target_dir.exists()
 
-    def test_annihilate_self_rejected(self, tmp_path):
+    def test_nirvana_self_rejected(self, tmp_path):
         agent = _make_agent(tmp_path, admin={"karma": True, "nirvana": True})
         from lingtai_kernel.intrinsics.system import handle
-        result = handle(agent, {"action": "annihilate", "address": str(agent.working_dir)})
+        result = handle(agent, {"action": "nirvana", "address": str(agent.working_dir)})
         assert "error" in result
 
     def test_revive_rejects_alive_target(self, tmp_path):
