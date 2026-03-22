@@ -43,10 +43,9 @@ avatars (分身) — specialized subagents that act as extensions of yourself.
   - Your address so they can email results back
   - Any peer addresses they need to collaborate with
 - After spawning, you can email avatars to check progress or give updates.
-- To silence an avatar (interrupt + idle), send type="silence" email.
-  The agent stays alive and revives on the next normal email.
-- To kill an avatar (hard stop), send type="kill" email.
-  To revive: spawn a new avatar with the SAME name. Update your contacts with the new address.
+- To interrupt an avatar's current work: system(action="interrupt", address=<working_dir>) (requires admin.karma)
+- To quell an avatar (dormant): system(action="quell", address=<working_dir>) (requires admin.karma)
+- To revive a dormant avatar: system(action="revive", address=<working_dir>) (requires admin.karma)
 - Maximum 10 subagents at a time.
 
 ## Friends
@@ -85,7 +84,7 @@ def setup(llm: LLMService, base_dir: Path) -> AppState:
         },
         covenant=COVENANT,
         config=AgentConfig(max_turns=100, soul_delay=5.0, language="zh"),
-        admin={"silence": True, "kill": True},
+        admin={"karma": True},
     )
 
     return state
