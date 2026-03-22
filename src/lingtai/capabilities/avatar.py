@@ -135,7 +135,7 @@ class AvatarManager:
             return "active"
         if state == AgentState.STUCK:
             return "stuck"
-        if state == AgentState.DEAD:
+        if state == AgentState.DORMANT:
             return "stopped"
         return "idle"
 
