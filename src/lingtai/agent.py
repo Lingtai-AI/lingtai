@@ -55,18 +55,21 @@ class Agent(BaseAgent):
         # Persist LLM config for revive (self-sufficient agents contract)
         _service = args[0] if args else kwargs.get("service")
         if _service is not None:
-            import json as _json
-            llm_config: dict[str, Any] = {
-                "provider": _service._provider,
-                "model": _service._model,
-            }
-            if getattr(_service, "_base_url", None):
-                llm_config["base_url"] = _service._base_url
-            llm_dir = self._working_dir / "system"
-            llm_dir.mkdir(exist_ok=True)
-            (llm_dir / "llm.json").write_text(
-                _json.dumps(llm_config, ensure_ascii=False)
-            )
+            try:
+                import json as _json
+                llm_config: dict[str, Any] = {
+                    "provider": _service._provider,
+                    "model": _service._model,
+                }
+                if getattr(_service, "_base_url", None):
+                    llm_config["base_url"] = _service._base_url
+                llm_dir = self._working_dir / "system"
+                llm_dir.mkdir(exist_ok=True)
+                (llm_dir / "llm.json").write_text(
+                    _json.dumps(llm_config, ensure_ascii=False)
+                )
+            except (TypeError, AttributeError, OSError):
+                pass  # LLM config not available (e.g., mock service in tests)
 
         # Auto-create FileIOService if not provided by host
         if self._file_io is None:
