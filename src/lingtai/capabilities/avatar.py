@@ -6,12 +6,13 @@ to whom, with what mission, privileges, and capabilities.  The ledger is
 never mutated — only appended to.  It forms a responsibility map that the
 parent can consult before spawning again.
 
-Lifecycle management (kill, revive) is handled by the email capability,
-not here.  The avatar tool's only job is to spawn avatars (分身).
+Lifecycle management (silence, quell, revive, annihilate) is handled by
+the system intrinsic's karma/nirvana actions, not here.  The avatar
+tool's only job is to spawn avatars (分身).
 
 Usage:
     Agent(capabilities=["avatar"])
-    # avatar(name="researcher", ...)   — spawn or re-activate
+    # avatar(name="researcher", ...)   — spawn a new avatar
 """
 from __future__ import annotations
 

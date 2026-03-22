@@ -167,8 +167,8 @@ class TestReviveLingtai:
 
         svc = MagicMock()
         svc.create_session.return_value = MagicMock()
-        svc._provider = "mock"
-        svc._model = "test-model"
+        svc.provider = "mock"
+        svc.model = "test-model"
         svc._base_url = None
 
         # Create an agent — this should persist LLM config
@@ -189,8 +189,8 @@ class TestReviveLingtai:
 
         svc = MagicMock()
         svc.create_session.return_value = MagicMock()
-        svc._provider = "mock"
-        svc._model = "test-model"
+        svc.provider = "mock"
+        svc.model = "test-model"
         svc._base_url = None
 
         # Create a "dormant" agent — construct, persist, don't start
@@ -212,8 +212,8 @@ class TestReviveLingtai:
         # Patch LLMService so reconstruction doesn't fail (no adapter registered for "mock")
         mock_svc = MagicMock()
         mock_svc.create_session.return_value = MagicMock()
-        mock_svc._provider = "mock"
-        mock_svc._model = "test-model"
+        mock_svc.provider = "mock"
+        mock_svc.model = "test-model"
         mock_svc._base_url = None
 
         with patch("lingtai.agent.LLMService", return_value=mock_svc):

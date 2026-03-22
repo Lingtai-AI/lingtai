@@ -61,8 +61,8 @@ class Agent(BaseAgent):
             try:
                 import json as _json
                 llm_config: dict[str, Any] = {
-                    "provider": _service._provider,
-                    "model": _service._model,
+                    "provider": _service.provider,
+                    "model": _service.model,
                 }
                 if getattr(_service, "_base_url", None):
                     llm_config["base_url"] = _service._base_url
@@ -232,12 +232,19 @@ class Agent(BaseAgent):
             base_url=llm_config.get("base_url"),
         )
 
+        # Reconstruct capabilities from manifest
+        caps_raw = agent_meta.get("capabilities")  # [(name, kwargs), ...]
+        capabilities = None
+        if caps_raw:
+            capabilities = {name: kw for name, kw in caps_raw}
+
         # Reconstruct Agent — use the existing working dir (same agent_id)
         revived = Agent(
             svc,
             agent_name=agent_meta.get("agent_name"),
             agent_id=agent_meta.get("agent_id"),
             base_dir=str(target.parent),
+            capabilities=capabilities,
         )
         revived.start()
         return revived
