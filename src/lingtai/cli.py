@@ -58,6 +58,9 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
         soul_delay=soul["delay"],
         max_turns=m["max_turns"],
         language=m["language"],
+        context_limit=m["context_limit"],
+        molt_pressure=m["molt_pressure"],
+        molt_prompt=m["molt_prompt"],
     )
 
     agent = Agent(
@@ -72,6 +75,11 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
         memory=data["memory"],
         capabilities=m["capabilities"],
     )
+
+    # Inject principle (raw text before all sections)
+    principle = data.get("principle", "")
+    if principle:
+        agent._prompt_manager.write_section("principle", principle, protected=True)
 
     # Restore molt count from previous run (if resuming)
     prev_manifest = working_dir / ".agent.json"

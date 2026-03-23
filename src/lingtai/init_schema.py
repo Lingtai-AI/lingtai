@@ -7,6 +7,7 @@ def validate_init(data: dict) -> None:
 
     _require_keys(data, {
         "manifest": dict,
+        "principle": str,
         "covenant": str,
         "memory": str,
         "prompt": str,
@@ -20,6 +21,9 @@ def validate_init(data: dict) -> None:
         "capabilities": dict,
         "soul": dict,
         "vigil": (int, float),
+        "context_limit": (int, type(None)),
+        "molt_pressure": (int, float),
+        "molt_prompt": str,
         "max_turns": int,
         "admin": dict,
         "streaming": bool,
