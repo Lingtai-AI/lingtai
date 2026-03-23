@@ -17,14 +17,14 @@ class GeminiTranscriptionService(TranscriptionService):
     Args:
         api_key: Gemini API key. If not provided, reads from
             ``GEMINI_API_KEY`` environment variable.
-        model: Model name (default ``"gemini-2.5-flash-preview"``).
+        model: Model name (default ``"gemini-3-flash-preview"``).
     """
 
     def __init__(
         self,
         *,
         api_key: str | None = None,
-        model: str = "gemini-2.5-flash-preview",
+        model: str = "gemini-3-flash-preview",
     ) -> None:
         self._api_key = api_key
         self._model = model
