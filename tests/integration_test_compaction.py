@@ -24,7 +24,7 @@ if env_path.exists():
             v = v.strip().strip("'\"")  # strip surrounding quotes
             os.environ.setdefault(k.strip(), v)
 
-from lingtai_kernel.llm.service import LLMService, COMPACTION_PROMPT, get_context_limit
+from lingtai.llm.service import LLMService, get_context_limit
 from lingtai_kernel.llm.interface import TextBlock
 
 
@@ -108,7 +108,7 @@ def main():
     def summarizer(text: str) -> str:
         target_tokens = int(FAKE_CTX_WINDOW * 0.2)
         prompt = (
-            f"{COMPACTION_PROMPT}\n"
+            "Summarize the following conversation concisely, preserving key facts and decisions.\n"
             f"Target summary length: ~{target_tokens} tokens.\n\n"
             f"Conversation history:\n{text}"
         )

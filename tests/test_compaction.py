@@ -18,7 +18,7 @@ from lingtai_kernel.llm.interface import (
     ToolResultBlock,
 )
 from lingtai_kernel.llm.base import ChatSession, FunctionSchema
-from lingtai_kernel.llm.service import LLMService, get_context_limit
+from lingtai.llm.service import LLMService, get_context_limit
 
 
 # ---------------------------------------------------------------------------

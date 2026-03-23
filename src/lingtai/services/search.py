@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from lingtai_kernel.llm.service import LLMService
+    from lingtai.llm.service import LLMService
 
 
 @dataclass

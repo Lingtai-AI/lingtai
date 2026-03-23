@@ -12,7 +12,7 @@ from typing import Any
 from pathlib import Path
 
 from lingtai_kernel.base_agent import BaseAgent
-from lingtai_kernel.llm.service import LLMService
+from lingtai.llm.service import LLMService
 from lingtai_kernel.prompt import build_system_prompt
 
 _BASE_PROMPTS: dict[str, str] = {}

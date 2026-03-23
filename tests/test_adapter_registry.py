@@ -1,7 +1,7 @@
 """Tests for LLMService adapter registry."""
 from __future__ import annotations
 from unittest.mock import MagicMock
-from lingtai_kernel.llm.service import LLMService
+from lingtai.llm.service import LLMService
 from lingtai.llm.base import LLMAdapter
 
 

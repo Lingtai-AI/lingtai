@@ -2,7 +2,7 @@
 
 from lingtai_kernel.llm.base import ChatSession, LLMResponse, ToolCall, FunctionSchema
 from lingtai_kernel.llm.interface import ChatInterface
-from lingtai_kernel.llm.service import LLMService
+from .service import LLMService  # concrete implementation
 from .base import LLMAdapter  # now from lingtai, not kernel
 
 __all__ = [
