@@ -51,11 +51,12 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
 
     mail_service = FilesystemMailService(working_dir=working_dir)
 
+    soul = m["soul"]
+
     config = AgentConfig(
-        provider=llm["provider"],
-        model=llm["model"],
         vigil=m["vigil"],
-        soul_delay=m["soul_delay"],
+        soul_delay=soul["delay"],
+        awaken=soul["awaken"],
         max_turns=m["max_turns"],
         language=m["language"],
     )
@@ -72,6 +73,15 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
         memory=data["memory"],
         capabilities=m["capabilities"],
     )
+
+    # Restore molt count from previous run (if resuming)
+    prev_manifest = working_dir / ".agent.json"
+    if prev_manifest.is_file():
+        try:
+            prev = json.loads(prev_manifest.read_text())
+            agent._molt_count = prev.get("molt_count", 0)
+        except (json.JSONDecodeError, OSError):
+            pass
 
     return agent
 

@@ -15,21 +15,6 @@ from lingtai_kernel.base_agent import BaseAgent
 from lingtai.llm.service import LLMService
 from lingtai_kernel.prompt import build_system_prompt
 
-_BASE_PROMPTS: dict[str, str] = {}
-
-
-def _load_base_prompt(lang: str = "en") -> str:
-    """Load base_prompt[_lang].md shipped with the package."""
-    if lang not in _BASE_PROMPTS:
-        base = Path(__file__).parent
-        if lang != "en":
-            path = base / f"base_prompt_{lang}.md"
-            if path.is_file():
-                _BASE_PROMPTS[lang] = path.read_text().strip()
-                return _BASE_PROMPTS[lang]
-        _BASE_PROMPTS[lang] = (base / "base_prompt.md").read_text().strip()
-    return _BASE_PROMPTS[lang]
-
 
 class Agent(BaseAgent):
     """BaseAgent with composable capabilities.
@@ -152,7 +137,7 @@ class Agent(BaseAgent):
         return data
 
     def _build_system_prompt(self) -> str:
-        """Override kernel's prompt builder to inject lingtai's base prompt."""
+        """Override kernel's prompt builder to inject tool descriptions."""
         lang = self._config.language
         lines = []
         from lingtai_kernel.intrinsics import ALL_INTRINSICS
@@ -169,7 +154,6 @@ class Agent(BaseAgent):
             )
         return build_system_prompt(
             prompt_manager=self._prompt_manager,
-            base_prompt=_load_base_prompt(lang),
             language=lang,
         )
 
@@ -287,6 +271,7 @@ class Agent(BaseAgent):
             config=revived_config,
             combo_name=combo_name,
         )
+        revived._molt_count = agent_meta.get("molt_count", 0)
         revived.start()
         return revived
 

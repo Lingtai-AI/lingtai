@@ -17,12 +17,18 @@ def validate_init(data: dict) -> None:
         "language": str,
         "llm": dict,
         "capabilities": dict,
+        "soul": dict,
         "vigil": (int, float),
-        "soul_delay": (int, float),
         "max_turns": int,
         "admin": dict,
         "streaming": bool,
     }, prefix="manifest")
+
+    soul = manifest["soul"]
+    _require_keys(soul, {
+        "delay": (int, float),
+        "awaken": bool,
+    }, prefix="manifest.soul")
 
     llm = manifest["llm"]
     _require_keys(llm, {
