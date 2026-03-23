@@ -619,9 +619,6 @@ class OpenAIResponsesSession(ChatSession):
 class OpenAIAdapter(LLMAdapter):
     """Adapter that wraps the ``openai`` SDK for OpenAI and compatible APIs."""
 
-    supports_web_search = True
-    supports_vision = True
-
     def __init__(
         self,
         api_key: str,
@@ -842,51 +839,6 @@ class OpenAIAdapter(LLMAdapter):
     def is_quota_error(self, exc: Exception) -> bool:
         """Check if the exception is an OpenAI rate-limit error."""
         return isinstance(exc, openai.RateLimitError)
-
-    # -- Web search methods --------------------------------------------------------
-
-    def web_search(self, query: str, model: str) -> LLMResponse:
-        """Execute a web search via OpenAI's native search API."""
-        if self.base_url:
-            return LLMResponse(text="")  # Only native OpenAI supports web search
-        return self._search_openai(query, model)
-
-    def _search_openai(self, query: str, model: str) -> LLMResponse:
-        """Web search via OpenAI native API."""
-        try:
-            raw = self._client.chat.completions.create(
-                model="gpt-4o-search-preview",
-                web_search_options={},
-                messages=[{"role": "user", "content": query}],
-            )
-            return _parse_response(raw)
-        except Exception as e:
-            logger.warning("Web search failed for openai: %s", e)
-            return LLMResponse(text="")
-
-    def generate_vision(
-        self, question: str, image_bytes: bytes, *, model: str = "",
-        mime_type: str = "image/png",
-    ) -> LLMResponse:
-        """One-shot vision via OpenAI's multimodal API."""
-        import base64
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
-        data_url = f"data:{mime_type};base64,{b64}"
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                    {"type": "text", "text": question},
-                ],
-            }
-        ]
-        raw = self._client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=1024,
-        )
-        return _parse_response(raw)
 
     # -- Convenience properties ------------------------------------------------
 

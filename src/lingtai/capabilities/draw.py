@@ -1,12 +1,8 @@
-"""Draw capability — text-to-image generation via MiniMax MCP."""
+"""Draw capability — text-to-image generation via ImageGenService."""
 from __future__ import annotations
 
-import hashlib
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-import requests
 
 from lingtai_kernel.logging import get_logger
 
@@ -14,7 +10,7 @@ from ..i18n import t
 
 if TYPE_CHECKING:
     from lingtai_kernel.base_agent import BaseAgent
-    from ..services.mcp import MCPClient
+    from ..services.image_gen import ImageGenService
 
 logger = get_logger()
 
@@ -45,97 +41,54 @@ DESCRIPTION = get_description("en")
 
 
 class DrawManager:
-    """Manages text-to-image generation via MiniMax MCP."""
+    """Manages text-to-image generation via ImageGenService."""
 
-    def __init__(self, *, working_dir: Path, mcp_client: "MCPClient") -> None:
+    def __init__(self, *, working_dir: Path, image_gen_service: "ImageGenService") -> None:
         self._working_dir = working_dir
-        self._mcp = mcp_client
+        self._image_gen_service = image_gen_service
 
     def handle(self, args: dict) -> dict:
         prompt = args.get("prompt")
         if not prompt:
             return {"status": "error", "message": "Missing required parameter: prompt"}
 
-        mcp_args: dict[str, Any] = {"prompt": prompt}
         aspect_ratio = args.get("aspect_ratio")
-        if aspect_ratio:
-            mcp_args["aspect_ratio"] = aspect_ratio
-
-        # Save to working_dir/media/images/
         out_dir = self._working_dir / "media" / "images"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        mcp_args["output_directory"] = str(out_dir)
 
         try:
-            result = self._mcp.call_tool("text_to_image", mcp_args)
+            path = self._image_gen_service.generate(
+                prompt,
+                aspect_ratio=aspect_ratio,
+                output_dir=out_dir,
+            )
+            return {"status": "ok", "file_path": str(path)}
         except Exception as exc:
-            return {"status": "error", "message": f"MCP call failed: {exc}"}
-
-        if isinstance(result, dict) and result.get("status") == "error":
-            return {"status": "error", "message": result.get("message", "Unknown error")}
-
-        # The MCP returns a text result with image URLs or a saved file path.
-        # Parse the response to find the output file or URL.
-        result_text = _extract_text(result)
-
-        # If MCP saved to output_directory, find the file
-        image_files = sorted(out_dir.glob("*.jpeg")) + sorted(out_dir.glob("*.jpg")) + sorted(out_dir.glob("*.png"))
-        if image_files:
-            latest = image_files[-1]
-            return {"status": "ok", "file_path": str(latest)}
-
-        # Fallback: if MCP returned a URL, download it
-        url = _extract_url(result_text)
-        if url:
-            try:
-                resp = requests.get(url, timeout=60)
-                resp.raise_for_status()
-                ts = int(time.time())
-                short_hash = hashlib.md5(prompt.encode()).hexdigest()[:4]
-                filename = f"draw_{ts}_{short_hash}.jpeg"
-                out_path = out_dir / filename
-                out_path.write_bytes(resp.content)
-                return {"status": "ok", "file_path": str(out_path)}
-            except Exception as exc:
-                return {"status": "error", "message": f"Failed to download image: {exc}"}
-
-        return {"status": "error", "message": f"Unexpected MCP response: {result_text}"}
-
-
-def _extract_text(result: Any) -> str:
-    """Extract text from an MCP call result."""
-    if isinstance(result, dict):
-        return result.get("text", str(result))
-    return str(result)
-
-
-def _extract_url(text: str) -> str | None:
-    """Extract the first HTTP(S) URL from text."""
-    import re
-    match = re.search(r"https?://\S+", text)
-    return match.group(0).rstrip("']") if match else None
-
-
-def _auto_create_mcp_client(**kwargs: Any) -> "MCPClient":
-    """Create a MiniMax media MCP client for this capability."""
-    from ..llm.minimax.mcp_media_client import create_minimax_media_client
-    return create_minimax_media_client(
-        api_key=kwargs.get("api_key"),
-        api_host=kwargs.get("api_host"),
-    )
+            return {"status": "error", "message": str(exc)}
 
 
 def setup(agent: "BaseAgent", **kwargs: Any) -> DrawManager:
     """Set up the draw capability on an agent.
 
-    Accepts ``mcp_client`` kwarg for an explicit MCP client.
-    If not provided, auto-creates one connected to the full ``minimax-mcp``
-    server (requires ``MINIMAX_API_KEY`` env var).
+    Requires either ``image_gen_service`` or ``provider`` + ``api_key``.
+    Raises ``ValueError`` if neither is provided.
     """
-    mcp_client = kwargs.get("mcp_client")
-    if mcp_client is None:
-        mcp_client = _auto_create_mcp_client(**kwargs)
+    image_gen_service = kwargs.get("image_gen_service")
+
+    if image_gen_service is None:
+        provider = kwargs.get("provider")
+        if provider is None:
+            raise ValueError(
+                "draw capability requires 'image_gen_service' or 'provider'. "
+                "Example: capabilities={'draw': {'provider': 'minimax', 'api_key': '...'}}"
+            )
+        from ..services.image_gen import create_image_gen_service
+        image_gen_service = create_image_gen_service(
+            provider,
+            api_key=kwargs.get("api_key"),
+            api_host=kwargs.get("api_host"),
+        )
+
     lang = agent._config.language
-    mgr = DrawManager(working_dir=agent.working_dir, mcp_client=mcp_client)
+    mgr = DrawManager(working_dir=agent.working_dir, image_gen_service=image_gen_service)
     agent.add_tool("draw", schema=get_schema(lang), handler=mgr.handle, description=get_description(lang))
     return mgr

@@ -1,7 +1,8 @@
 """Listen capability — speech transcription and music appreciation.
 
-Uses faster-whisper (local Whisper model) for transcription and
-librosa for music analysis. Both run locally, no API keys needed.
+Transcription is backed by a pluggable ``TranscriptionService`` (default:
+WhisperTranscriptionService — local, free). Music appreciation uses
+librosa and runs locally.
 """
 from __future__ import annotations
 
@@ -11,6 +12,10 @@ from typing import TYPE_CHECKING, Any
 from lingtai_kernel.logging import get_logger
 
 from ..i18n import t
+from ..services.transcription import (
+    TranscriptionService,
+    create_transcription_service,
+)
 
 if TYPE_CHECKING:
     from lingtai_kernel.base_agent import BaseAgent
@@ -45,11 +50,16 @@ DESCRIPTION = get_description("en")
 
 
 class ListenManager:
-    """Manages audio transcription (faster-whisper) and appreciation (librosa)."""
+    """Manages audio transcription (via TranscriptionService) and appreciation (librosa)."""
 
-    def __init__(self, *, working_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        working_dir: Path,
+        transcription_service: TranscriptionService | None = None,
+    ) -> None:
         self._working_dir = working_dir
-        self._whisper_model = None
+        self._transcription_service = transcription_service
         self._librosa = None
 
     def handle(self, args: dict) -> dict:
@@ -73,46 +83,35 @@ class ListenManager:
         return self._appreciate(path)
 
     # ------------------------------------------------------------------
-    # Transcribe — faster-whisper
+    # Transcribe — delegates to TranscriptionService
     # ------------------------------------------------------------------
 
     def _transcribe(self, path: Path) -> dict:
         try:
-            model = self._get_whisper_model()
+            svc = self._ensure_transcription_service()
         except Exception as exc:
-            return {"status": "error", "message": f"Failed to load Whisper model: {exc}"}
+            return {"status": "error", "message": f"Failed to load transcription service: {exc}"}
 
         try:
-            segments, info = model.transcribe(str(path))
-            segments = list(segments)
+            result = svc.transcribe(path)
         except Exception as exc:
             return {"status": "error", "message": f"Transcription failed: {exc}"}
-
-        transcript = []
-        for seg in segments:
-            transcript.append({
-                "start": round(seg.start, 1),
-                "end": round(seg.end, 1),
-                "text": seg.text.strip(),
-            })
-
-        full_text = " ".join(seg["text"] for seg in transcript)
 
         return {
             "status": "ok",
             "action": "transcribe",
-            "language": info.language,
-            "language_probability": round(info.language_probability, 2),
-            "duration": round(info.duration, 1),
-            "text": full_text,
-            "segments": transcript,
+            "language": result.language,
+            "language_probability": result.language_probability,
+            "duration": result.duration,
+            "text": result.text,
+            "segments": result.segments,
         }
 
-    def _get_whisper_model(self):
-        if self._whisper_model is None:
-            from faster_whisper import WhisperModel
-            self._whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-        return self._whisper_model
+    def _ensure_transcription_service(self) -> TranscriptionService:
+        """Lazy-create default WhisperTranscriptionService if none was injected."""
+        if self._transcription_service is None:
+            self._transcription_service = create_transcription_service("whisper")
+        return self._transcription_service
 
     # ------------------------------------------------------------------
     # Appreciate — librosa
@@ -239,13 +238,38 @@ class ListenManager:
         return self._librosa
 
 
-def setup(agent: "BaseAgent", **kwargs: Any) -> ListenManager:
+def setup(
+    agent: "BaseAgent",
+    *,
+    provider: str = "whisper",
+    api_key: str | None = None,
+    transcription_service: TranscriptionService | None = None,
+    **kwargs: Any,
+) -> ListenManager:
     """Set up the listen capability on an agent.
 
-    No external service needed — both backends run locally.
-    Optional kwargs: whisper_model (str, default 'base').
+    Args:
+        agent: The agent to attach the capability to.
+        provider: Transcription provider — ``"whisper"`` (default, local)
+            or ``"gemini"`` (cloud).
+        api_key: API key for cloud providers (e.g., Gemini).
+        transcription_service: Pre-built service instance. If provided,
+            ``provider`` and ``api_key`` are ignored.
+        **kwargs: Extra kwargs forwarded to the transcription service
+            constructor (e.g., ``model_size``, ``device``).
     """
     lang = agent._config.language
-    mgr = ListenManager(working_dir=agent.working_dir)
+
+    # Build transcription service if not injected
+    if transcription_service is None:
+        svc_kwargs = dict(kwargs)
+        if api_key is not None:
+            svc_kwargs["api_key"] = api_key
+        transcription_service = create_transcription_service(provider, **svc_kwargs)
+
+    mgr = ListenManager(
+        working_dir=agent.working_dir,
+        transcription_service=transcription_service,
+    )
     agent.add_tool("listen", schema=get_schema(lang), handler=mgr.handle, description=get_description(lang))
     return mgr

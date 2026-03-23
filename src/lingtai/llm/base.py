@@ -19,8 +19,6 @@ from .api_gate import APICallGate
 class LLMAdapter(ABC):
     """Abstract interface that every LLM provider adapter must implement."""
 
-    supports_web_search: bool = False
-
     _gate: APICallGate | None = None
 
     def _setup_gate(self, max_rpm: int) -> None:

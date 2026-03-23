@@ -4,7 +4,7 @@ Manages a singleton MCPClient instance and MiniMax-specific config
 (API keys, API host, enable/disable).
 
 The MCP server uses multiple API keys for different tools:
-  MINIMAX_API_KEY     — web_search, vision (code plan key)
+  MINIMAX_API_KEY     — vision (code plan key)
   MINIMAX_MCP_API_KEY — talk, compose, draw
 
 All keys from the host environment are passed through to the subprocess.

@@ -580,7 +580,8 @@ def test_base_agent_has_no_non_kernel_imports():
     source = (kernel_dir / "base_agent.py").read_text()
     tree = ast.parse(source)
 
-    non_kernel = {"services.file_io", "services.mcp", "services.vision", "services.search",
+    non_kernel = {"services.file_io", "services.mcp", "services.vision", "services.websearch",
+                  "services.tts", "services.image_gen", "services.transcription", "services.music_gen",
                   "capabilities", "addons", "agent"}
 
     for node in ast.walk(tree):

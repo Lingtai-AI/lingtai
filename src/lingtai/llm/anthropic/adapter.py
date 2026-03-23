@@ -133,32 +133,6 @@ def _parse_response(raw) -> LLMResponse:
     )
 
 
-def _parse_search_response(raw) -> LLMResponse:
-    """Parse an Anthropic response that used web search tool."""
-    text_parts: list[str] = []
-    for block in raw.content:
-        if block.type == "text":
-            text_parts.append(block.text)
-
-    usage = UsageMetadata()
-    if raw.usage:
-        cache_read = getattr(raw.usage, "cache_read_input_tokens", 0) or 0
-        cache_write = getattr(raw.usage, "cache_creation_input_tokens", 0) or 0
-        raw_input = getattr(raw.usage, "input_tokens", 0) or 0
-        usage = UsageMetadata(
-            input_tokens=raw_input + cache_read + cache_write,
-            output_tokens=getattr(raw.usage, "output_tokens", 0) or 0,
-            thinking_tokens=getattr(raw.usage, "thinking_tokens", 0) or 0,
-            cached_tokens=cache_read,
-        )
-
-    return LLMResponse(
-        text="\n".join(text_parts),
-        usage=usage,
-        raw=raw,
-    )
-
-
 def _tool_result_to_dict(block: ToolResultBlock) -> dict:
     """Convert a canonical ToolResultBlock to Anthropic tool_result dict."""
     return {
@@ -529,8 +503,6 @@ class AnthropicChatSession(ChatSession):
 class AnthropicAdapter(LLMAdapter):
     """Adapter that wraps the ``anthropic`` SDK for Claude models."""
 
-    supports_web_search = True
-    supports_vision = True
 
     def __init__(
         self,
@@ -698,59 +670,6 @@ class AnthropicAdapter(LLMAdapter):
     def is_quota_error(self, exc: Exception) -> bool:
         """Check if the exception is an Anthropic rate-limit error."""
         return isinstance(exc, anthropic.RateLimitError)
-
-    def web_search(self, query: str, model: str) -> LLMResponse:
-        """Execute a web search via Anthropic's native web search tool."""
-        if self._base_url:
-            return LLMResponse(text="")
-
-        try:
-            raw = self._client.messages.create(
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": query}],
-                tools=[
-                    {
-                        "type": "web_search_20250305",
-                        "name": "web_search",
-                        "max_uses": 5,
-                    }
-                ],
-            )
-            return _parse_search_response(raw)
-        except Exception as e:
-            logger.warning("Anthropic web search failed: %s", e)
-            return LLMResponse(text="")
-
-    def generate_vision(
-        self, question: str, image_bytes: bytes, *, model: str = "",
-        mime_type: str = "image/png",
-    ) -> LLMResponse:
-        """One-shot vision via Anthropic's multimodal API."""
-        import base64
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime_type,
-                            "data": b64,
-                        },
-                    },
-                    {"type": "text", "text": question},
-                ],
-            }
-        ]
-        raw = self._client.messages.create(
-            model=model,
-            max_tokens=1024,
-            messages=messages,
-        )
-        return _parse_response(raw)
 
     # -- Convenience properties ------------------------------------------------
 

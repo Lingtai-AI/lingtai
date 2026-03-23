@@ -1,11 +1,11 @@
-"""Vision capability — image understanding via LLM or VisionService.
+"""Vision capability — image understanding via VisionService.
 
-Adds the ability to analyze images. Uses VisionService if provided,
-otherwise falls back to the LLM's multimodal vision endpoint.
+Adds the ability to analyze images. Requires a VisionService instance,
+created either explicitly or via the ``provider``/``api_key`` factory.
 
 Usage:
-    agent.add_capability("vision")  # uses LLM fallback
-    agent.add_capability("vision", vision_service=my_svc)  # uses dedicated service
+    agent.add_capability("vision", vision_service=my_svc)
+    agent.add_capability("vision", provider="anthropic", api_key="sk-...")
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..i18n import t
+from ..services.vision import VisionService, create_vision_service
 
 if TYPE_CHECKING:
     from lingtai_kernel.base_agent import BaseAgent
@@ -40,26 +41,17 @@ def get_schema(lang: str = "en") -> dict:
 SCHEMA = get_schema("en")
 DESCRIPTION = get_description("en")
 
-_MIME_BY_EXT: dict[str, str] = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-}
-
 
 class VisionManager:
-    """Handles vision tool calls."""
+    """Handles vision tool calls via a VisionService."""
 
     def __init__(
         self,
         agent: "BaseAgent",
-        vision_service: Any | None = None,
-        vision_provider: str | None = None,
+        vision_service: VisionService,
     ) -> None:
         self._agent = agent
         self._vision_service = vision_service
-        self._vision_provider = vision_provider
 
     def handle(self, args: dict) -> dict:
         image_path = args.get("image_path", "")
@@ -75,45 +67,39 @@ class VisionManager:
         if not path.is_file():
             return {"status": "error", "message": f"Image file not found: {path}"}
 
-        # Try VisionService first
-        if self._vision_service is not None:
-            try:
-                analysis = self._vision_service.analyze_image(str(path), prompt=question)
-                return {"status": "ok", "analysis": analysis}
-            except NotImplementedError:
-                pass  # Fall through to direct LLM call
-
-        # Fall back to direct adapter call
-        provider = self._vision_provider or self._agent.service.provider
-        if provider is None:
-            return {
-                "status": "error",
-                "message": "Vision provider not configured. Pass provider='...' in capability kwargs.",
-            }
         try:
-            adapter = self._agent.service.get_adapter(provider)
-        except RuntimeError:
-            return {
-                "status": "error",
-                "message": f"Vision provider {provider!r} not available.",
-            }
-        image_bytes = path.read_bytes()
-        mime = _MIME_BY_EXT.get(path.suffix.lower(), "image/png")
-        defaults = self._agent.service._get_provider_defaults(provider)
-        model = defaults.get("model", "") if defaults else ""
-        response = adapter.generate_vision(question, image_bytes, model=model, mime_type=mime)
-        if not response.text:
-            return {
-                "status": "error",
-                "message": "Vision analysis returned no response.",
-            }
-        return {"status": "ok", "analysis": response.text}
+            analysis = self._vision_service.analyze_image(str(path), prompt=question)
+            if not analysis:
+                return {
+                    "status": "error",
+                    "message": "Vision analysis returned no response.",
+                }
+            return {"status": "ok", "analysis": analysis}
+        except Exception as e:
+            return {"status": "error", "message": f"Vision analysis failed: {e}"}
 
 
-def setup(agent: "BaseAgent", vision_service: Any | None = None,
-          provider: str | None = None, **kwargs: Any) -> VisionManager:
-    """Set up the vision capability on an agent."""
+def setup(
+    agent: "BaseAgent",
+    vision_service: VisionService | None = None,
+    provider: str | None = None,
+    api_key: str | None = None,
+    **kwargs: Any,
+) -> VisionManager:
+    """Set up the vision capability on an agent.
+
+    Requires either ``vision_service`` or ``provider`` + ``api_key``.
+    Raises ``ValueError`` if neither is provided.
+    """
+    if vision_service is None and provider is not None:
+        vision_service = create_vision_service(provider, api_key=api_key, **kwargs)
+    elif vision_service is None:
+        raise ValueError(
+            "vision capability requires 'vision_service' or 'provider' + 'api_key'. "
+            "Example: capabilities={'vision': {'provider': 'gemini', 'api_key': '...'}}"
+        )
+
     lang = agent._config.language
-    mgr = VisionManager(agent, vision_service=vision_service, vision_provider=provider)
+    mgr = VisionManager(agent, vision_service=vision_service)
     agent.add_tool("vision", schema=get_schema(lang), handler=mgr.handle, description=get_description(lang))
     return mgr

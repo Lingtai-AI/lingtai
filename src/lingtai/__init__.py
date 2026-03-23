@@ -16,9 +16,13 @@ from .capabilities.email import EmailManager
 # Services
 from .services.file_io import FileIOService, LocalFileIOService, GrepMatch
 from lingtai_kernel.services.mail import MailService, FilesystemMailService
-from .services.vision import VisionService, LLMVisionService
-from .services.search import SearchService, LLMSearchService, SearchResult
 from lingtai_kernel.services.logging import LoggingService, JSONLLoggingService
+from .services.vision import VisionService, create_vision_service
+from .services.websearch import SearchService, SearchResult, create_search_service
+from .services.tts import TTSService, create_tts_service
+from .services.image_gen import ImageGenService, create_image_gen_service
+from .services.transcription import TranscriptionService, TranscriptionResult, create_transcription_service
+from .services.music_gen import MusicGenService, create_music_gen_service
 
 __all__ = [
     # Core
@@ -41,11 +45,20 @@ __all__ = [
     "GrepMatch",
     "MailService",
     "FilesystemMailService",
-    "VisionService",
-    "LLMVisionService",
-    "SearchService",
-    "LLMSearchService",
-    "SearchResult",
     "LoggingService",
     "JSONLLoggingService",
+    "VisionService",
+    "create_vision_service",
+    "SearchService",
+    "SearchResult",
+    "create_search_service",
+    "TTSService",
+    "create_tts_service",
+    "ImageGenService",
+    "create_image_gen_service",
+    "TranscriptionService",
+    "TranscriptionResult",
+    "create_transcription_service",
+    "MusicGenService",
+    "create_music_gen_service",
 ]
