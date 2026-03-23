@@ -46,12 +46,11 @@ def main():
     )
 
     base_dir = Path(".")
-    agent_id = secrets.token_hex(3)
-    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
+    agent_dir = base_dir / secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=agent_dir)
 
     agent = Agent(
         agent_name="contemplator",
-        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(
@@ -59,7 +58,7 @@ def main():
             soul_delay=15.0,     # whisper every 15s of idle
             language="zh",       # all kernel strings in Chinese
         ),
-        base_dir=base_dir,
+        working_dir=agent_dir,
         streaming=True,
         capabilities=["psyche"],  # identity + memory only, no file/bash
     )
@@ -69,7 +68,7 @@ def main():
     import tempfile
     sender_dir = Path(tempfile.mkdtemp(prefix="lingtai_contemplate_"))
     sender = FilesystemMailService(working_dir=sender_dir)
-    agent_address = str(base_dir / agent_id)
+    agent_address = str(agent_dir)
     seed = "You are alone. There is no task. No one is coming. Just exist, and notice what happens."
     print(f"[seed] {seed}\n")
     err = sender.send(agent_address, {

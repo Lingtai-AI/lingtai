@@ -46,16 +46,15 @@ def main():
     )
 
     base_dir = Path(".")
-    agent_id = secrets.token_hex(3)
-    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
+    agent_dir = base_dir / secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=agent_dir)
 
     agent = Agent(
         agent_name="assistant",
-        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
-        base_dir=base_dir,
+        working_dir=agent_dir,
         streaming=True,
         capabilities={
             "file": {},
@@ -69,7 +68,7 @@ def main():
     )
     agent.start()
 
-    agent_address = str(base_dir / agent_id)
+    agent_address = str(agent_dir)
     print(f"Agent address: {agent_address}")
     print("Type messages below. Press Ctrl+C to quit.\n")
 

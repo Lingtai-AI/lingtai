@@ -181,17 +181,16 @@ def main():
     )
 
     base_dir = Path(".")
-    agent_id = secrets.token_hex(3)
-    mail_svc = FilesystemMailService(working_dir=base_dir / agent_id)
+    agent_dir = base_dir / secrets.token_hex(3)
+    mail_svc = FilesystemMailService(working_dir=agent_dir)
 
     policy = str(Path(__file__).parent / "bash_policy.json")
     agent = Agent(
         agent_name="assistant",
-        agent_id=agent_id,
         service=llm,
         mail_service=mail_svc,
         config=AgentConfig(max_turns=20),
-        base_dir=base_dir,
+        working_dir=agent_dir,
         role="You are a helpful AI assistant.",
         capabilities={"email": {}, "bash": {"policy_file": policy}, "file": {}},
     )
