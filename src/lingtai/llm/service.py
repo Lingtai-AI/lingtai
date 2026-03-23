@@ -250,16 +250,21 @@ class LLMService(LLMServiceABC):
         # Fast path — no lock needed for reads of an already-cached adapter
         if cache_key in self._adapters:
             return self._adapters[cache_key]
-        if base_url is None and (provider, None) in self._adapters:
-            return self._adapters[(provider, None)]
+        # When no base_url specified, find any cached adapter for this provider
+        if base_url is None:
+            for (p, _url), adapter in self._adapters.items():
+                if p == provider:
+                    return adapter
 
         # Slow path — lock to prevent duplicate adapter creation
         with self._adapter_lock:
             # Double-check after acquiring lock
             if cache_key in self._adapters:
                 return self._adapters[cache_key]
-            if base_url is None and (provider, None) in self._adapters:
-                return self._adapters[(provider, None)]
+            if base_url is None:
+                for (p, _url), adapter in self._adapters.items():
+                    if p == provider:
+                        return adapter
 
             # Need to create a new adapter — check API key first
             api_key = self._key_resolver(provider)
