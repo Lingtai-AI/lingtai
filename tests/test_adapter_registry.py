@@ -2,7 +2,7 @@
 from __future__ import annotations
 from unittest.mock import MagicMock
 from lingtai_kernel.llm.service import LLMService
-from lingtai_kernel.llm.base import LLMAdapter
+from lingtai.llm.base import LLMAdapter
 
 
 def _make_stub_adapter(**kwargs):

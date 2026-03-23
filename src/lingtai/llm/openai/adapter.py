@@ -20,12 +20,12 @@ from lingtai_kernel.logging import get_logger
 from lingtai_kernel.llm.base import (
     ChatSession,
     FunctionSchema,
-    LLMAdapter,
     LLMResponse,
     ToolCall,
-    ToolResultBlock,
     UsageMetadata,
 )
+from lingtai_kernel.llm.interface import ToolResultBlock
+from lingtai.llm.base import LLMAdapter
 from lingtai_kernel.llm.interface import ChatInterface, TextBlock, ToolCallBlock
 from ..interface_converters import to_openai
 from lingtai_kernel.llm.streaming import StreamingAccumulator

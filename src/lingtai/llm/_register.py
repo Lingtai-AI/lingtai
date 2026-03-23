@@ -10,6 +10,11 @@ from __future__ import annotations
 def register_all_adapters() -> None:
     from lingtai_kernel.llm.service import LLMService
 
+    # Guard: kernel LLMService is now an ABC — registration requires the
+    # concrete subclass (Task 16). Skip silently until that lands.
+    if not hasattr(LLMService, "register_adapter"):
+        return
+
     def _gemini(*, model=None, defaults=None, api_key=None, max_rpm=0, **_kw):
         from .gemini.adapter import GeminiAdapter
         kw: dict = {}

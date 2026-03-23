@@ -12,7 +12,7 @@ Usage in config.json providers section:
   "bedrock":     {"api_compat": "anthropic",  "base_url": "https://...", ...}
   "vertex":      {"api_compat": "gemini",     ...}
 """
-from lingtai_kernel.llm.base import LLMAdapter
+from lingtai.llm.base import LLMAdapter
 
 from .defaults import DEFAULTS  # noqa: F401 — re-exported for consumers
 

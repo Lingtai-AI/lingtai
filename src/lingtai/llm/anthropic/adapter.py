@@ -27,12 +27,12 @@ logger = get_logger()
 from lingtai_kernel.llm.base import (
     ChatSession,
     FunctionSchema,
-    LLMAdapter,
     LLMResponse,
     ToolCall,
-    ToolResultBlock,
     UsageMetadata,
 )
+from lingtai_kernel.llm.interface import ToolResultBlock
+from lingtai.llm.base import LLMAdapter
 from lingtai_kernel.llm.interface import ChatInterface
 from ..interface_converters import to_anthropic
 from lingtai_kernel.llm.streaming import StreamingAccumulator

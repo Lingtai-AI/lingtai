@@ -16,7 +16,7 @@ def test_get_context_limit_empty():
 
 def test_adapter_base_class_has_no_multimodal_methods():
     """LLMAdapter ABC should not define multimodal convenience methods."""
-    from lingtai_kernel.llm.base import LLMAdapter
+    from lingtai.llm.base import LLMAdapter
     # These methods were removed — they live on individual adapters only
     for method in ("web_search", "generate_vision", "generate_image",
                    "generate_music", "text_to_speech",
