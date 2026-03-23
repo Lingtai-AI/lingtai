@@ -73,7 +73,7 @@
   "email.type": "Email type (for send). Defaults to 'normal'.",
   "email.name": "Contact's human-readable name (for add_contact, edit_contact)",
   "email.note": "Free-text note about the contact (for add_contact, edit_contact)",
-  "email.agent_id": "The contact's agent_id (12-char hex). Used for delivery verification. Optional.",
+  "email.contact_address": "The contact's address (working directory path). Optional.",
   "email.schedule_action": "create: start a recurring send (requires address, message + schedule.interval, schedule.count). cancel: stop a running schedule (requires schedule.schedule_id). list: show all schedules with progress.",
   "email.schedule_interval": "Seconds between each send (for create)",
   "email.schedule_count": "Total number of sends (for create)",

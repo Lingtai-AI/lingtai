@@ -110,10 +110,6 @@ def get_schema(lang: str = "en") -> dict:
                 "type": "string",
                 "description": t(lang, "email.note"),
             },
-            "agent_id": {
-                "type": "string",
-                "description": t(lang, "email.agent_id"),
-            },
             "schedule": {
                 "type": "object",
                 "properties": {
@@ -606,7 +602,7 @@ class EmailManager:
 
         sender = (self._agent._mail_service.address
                   if self._agent._mail_service is not None and self._agent._mail_service.address
-                  else self._agent.agent_id)
+                  else str(self._agent._working_dir))
 
         # Build visible payload (no bcc)
         base_payload = {
@@ -798,7 +794,7 @@ class EmailManager:
         my_address = (
             self._agent._mail_service.address
             if self._agent._mail_service
-            else self._agent.agent_id
+            else str(self._agent._working_dir)
         )
 
         reply_to = original["from"]
@@ -979,19 +975,15 @@ class EmailManager:
         if not name:
             return {"error": "name is required"}
         note = args.get("note", "")
-        agent_id = args.get("agent_id", "")
-
         contacts = self._load_contacts()
         # Upsert by address
         for c in contacts:
             if c["address"] == address:
                 c["name"] = name
                 c["note"] = note
-                if agent_id:
-                    c["agent_id"] = agent_id
                 self._save_contacts(contacts)
                 return {"status": "updated", "contact": c}
-        entry: dict = {"address": address, "name": name, "agent_id": agent_id, "note": note}
+        entry: dict = {"address": address, "name": name, "note": note}
         contacts.append(entry)
         self._save_contacts(contacts)
         return {"status": "added", "contact": entry}
@@ -1018,8 +1010,6 @@ class EmailManager:
                     c["name"] = args["name"]
                 if "note" in args:
                     c["note"] = args["note"]
-                if "agent_id" in args:
-                    c["agent_id"] = args["agent_id"]
                 self._save_contacts(contacts)
                 return {"status": "updated", "contact": c}
         return {"error": f"Contact not found: {address}"}

@@ -73,7 +73,7 @@
   "email.type": "邮件类型（用于 send）。默认为 'normal'。",
   "email.name": "联系人的可读名称（用于 add_contact、edit_contact）",
   "email.note": "关于联系人的自由文本备注（用于 add_contact、edit_contact）",
-  "email.agent_id": "联系人的 agent_id（12位十六进制）。用于投递验证。可选。",
+  "email.contact_address": "联系人的地址（工作目录路径）。可选。",
   "email.schedule_action": "create：启动定期发送（需要 address、message + schedule.interval、schedule.count）。cancel：停止运行中的计划（需要 schedule.schedule_id）。list：显示所有计划及进度。",
   "email.schedule_interval": "每次发送之间的秒数（用于 create）",
   "email.schedule_count": "总发送次数（用于 create）",

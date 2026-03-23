@@ -381,7 +381,7 @@ def _setup_receiver(tmp_path, name, stop_event):
     from lingtai_kernel.services.mail import FilesystemMailService
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / ".agent.json").write_text(json.dumps({"agent_id": name, "agent_name": name}))
+    (d / ".agent.json").write_text(json.dumps({"agent_name": name}))
     (d / ".agent.heartbeat").write_text(str(time.time()))
     def _hb():
         while not stop_event.is_set():
