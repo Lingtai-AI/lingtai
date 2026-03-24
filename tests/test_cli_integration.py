@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from lingtai.cli import load_init, build_agent, write_pid, remove_pid
+from lingtai.cli import load_init, build_agent
 from lingtai_kernel.state import AgentState
 
 
@@ -57,13 +57,11 @@ def test_full_boot_and_quell_shutdown(mock_llm_cls, tmp_path):
 
     data = load_init(tmp_path)
     agent = build_agent(data, tmp_path)
-    write_pid(tmp_path)
 
     agent.start()
 
-    # Verify agent is running and files are created
+    # Verify agent is running and manifest is created
     assert agent.state == AgentState.IDLE
-    assert (tmp_path / ".agent.pid").is_file()
     assert (tmp_path / ".agent.json").is_file()
 
     # Touch .quell to trigger shutdown via heartbeat
@@ -75,9 +73,6 @@ def test_full_boot_and_quell_shutdown(mock_llm_cls, tmp_path):
     assert agent._shutdown.is_set()
     assert agent.state == AgentState.DORMANT
     assert not (tmp_path / ".quell").exists(), "signal file should be deleted"
-
-    remove_pid(tmp_path)
-    assert not (tmp_path / ".agent.pid").is_file()
 
 
 @patch("lingtai.cli.LLMService")
@@ -92,20 +87,3 @@ def test_load_init_and_build_agent(mock_llm_cls, tmp_path):
     assert agent.agent_name == "integration-test"
     assert agent._config.max_turns == 5
     assert agent._config.language == "en"
-
-
-@patch("lingtai.cli.LLMService")
-def test_pid_lifecycle(mock_llm_cls, tmp_path):
-    """write_pid creates .agent.pid, remove_pid deletes it."""
-    _write_init(tmp_path)
-
-    write_pid(tmp_path)
-    pid_file = tmp_path / ".agent.pid"
-    assert pid_file.is_file()
-    assert pid_file.read_text().strip().isdigit()
-
-    remove_pid(tmp_path)
-    assert not pid_file.is_file()
-
-    # remove_pid on missing file is a no-op
-    remove_pid(tmp_path)

@@ -91,3 +91,114 @@ def test_bool_rejected_for_numeric_field():
     data["manifest"]["vigil"] = True
     with pytest.raises(ValueError, match="manifest.vigil.*number.*bool"):
         validate_init(data)
+
+
+# --- optional fields ---
+
+
+def test_env_file_optional():
+    data = _valid_init()
+    validate_init(data)  # no env_file — should pass
+    data["env_file"] = "~/.lingtai/.env"
+    validate_init(data)  # with env_file — should pass
+
+
+def test_env_file_wrong_type():
+    data = _valid_init()
+    data["env_file"] = 123
+    with pytest.raises(ValueError, match="env_file.*str"):
+        validate_init(data)
+
+
+def test_api_key_env_optional():
+    data = _valid_init()
+    data["manifest"]["llm"]["api_key_env"] = "MY_KEY"
+    validate_init(data)
+
+
+def test_api_key_env_wrong_type():
+    data = _valid_init()
+    data["manifest"]["llm"]["api_key_env"] = 123
+    with pytest.raises(ValueError, match="api_key_env.*str"):
+        validate_init(data)
+
+
+# --- addons ---
+
+
+def test_addons_optional():
+    data = _valid_init()
+    validate_init(data)  # no addons — should pass
+
+
+def test_addons_imap_valid():
+    data = _valid_init()
+    data["addons"] = {
+        "imap": {
+            "email_address": "test@gmail.com",
+            "email_password": "secret",
+        },
+    }
+    validate_init(data)
+
+
+def test_addons_imap_with_env():
+    data = _valid_init()
+    data["addons"] = {
+        "imap": {
+            "email_address": "test@gmail.com",
+            "email_password_env": "IMAP_PASS",
+        },
+    }
+    validate_init(data)
+
+
+def test_addons_imap_missing_password():
+    data = _valid_init()
+    data["addons"] = {
+        "imap": {
+            "email_address": "test@gmail.com",
+        },
+    }
+    with pytest.raises(ValueError, match="email_password"):
+        validate_init(data)
+
+
+def test_addons_imap_missing_email():
+    data = _valid_init()
+    data["addons"] = {
+        "imap": {
+            "email_password": "secret",
+        },
+    }
+    with pytest.raises(ValueError, match="email_address"):
+        validate_init(data)
+
+
+def test_addons_telegram_valid():
+    data = _valid_init()
+    data["addons"] = {
+        "telegram": {
+            "bot_token": "123:ABC",
+        },
+    }
+    validate_init(data)
+
+
+def test_addons_telegram_with_env():
+    data = _valid_init()
+    data["addons"] = {
+        "telegram": {
+            "bot_token_env": "TG_TOKEN",
+        },
+    }
+    validate_init(data)
+
+
+def test_addons_telegram_missing_token():
+    data = _valid_init()
+    data["addons"] = {
+        "telegram": {},
+    }
+    with pytest.raises(ValueError, match="bot_token"):
+        validate_init(data)

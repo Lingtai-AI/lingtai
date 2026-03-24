@@ -37,15 +37,53 @@ def load_init(working_dir: Path) -> dict:
     return data
 
 
+def load_env_file(path: str | Path) -> None:
+    """Load a .env file into os.environ. Existing vars are not overwritten."""
+    env_path = Path(path).expanduser()
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, val = line.partition("=")
+        if not _:
+            continue
+        key = key.strip()
+        val = val.strip().strip("'\"")
+        if key not in os.environ:
+            os.environ[key] = val
+
+
+def resolve_env(value: str | None, env_name: str | None) -> str | None:
+    """Resolve a value from env var name, falling back to raw value.
+
+    If env_name is provided and the env var is set, use it.
+    Otherwise return the raw value as-is.
+    """
+    if env_name:
+        env_val = os.environ.get(env_name)
+        if env_val:
+            return env_val
+    return value
+
+
 def build_agent(data: dict, working_dir: Path) -> Agent:
     """Construct LLMService, MailService, and Agent from validated init data."""
+    # Load env file if specified
+    env_file = data.get("env_file")
+    if env_file:
+        load_env_file(env_file)
+
     m = data["manifest"]
     llm = m["llm"]
+
+    api_key = resolve_env(llm["api_key"], llm.get("api_key_env"))
 
     service = LLMService(
         provider=llm["provider"],
         model=llm["model"],
-        api_key=llm["api_key"],
+        api_key=api_key,
         base_url=llm["base_url"],
     )
 
@@ -63,6 +101,9 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
         molt_prompt=m["molt_prompt"],
     )
 
+    # Build addons dict — resolve *_env fields
+    addons = _resolve_addons(data.get("addons"))
+
     agent = Agent(
         service,
         agent_name=m["agent_name"],
@@ -74,6 +115,7 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
         covenant=data["covenant"],
         memory=data["memory"],
         capabilities=m["capabilities"],
+        addons=addons,
     )
 
     # Inject principle (raw text before all sections)
@@ -93,22 +135,36 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
     return agent
 
 
-def write_pid(working_dir: Path) -> None:
-    (working_dir / ".agent.pid").write_text(str(os.getpid()))
+def _resolve_addons(addons: dict | None) -> dict | None:
+    """Resolve *_env fields in addon configs to actual values."""
+    if not addons:
+        return addons
 
+    resolved = {}
 
-def remove_pid(working_dir: Path) -> None:
-    pid_file = working_dir / ".agent.pid"
-    if pid_file.is_file():
-        pid_file.unlink()
+    if "imap" in addons:
+        imap = dict(addons["imap"])
+        imap["email_password"] = resolve_env(
+            imap.get("email_password"),
+            imap.pop("email_password_env", None),
+        )
+        resolved["imap"] = imap
+
+    if "telegram" in addons:
+        tg = dict(addons["telegram"])
+        tg["bot_token"] = resolve_env(
+            tg.get("bot_token"),
+            tg.pop("bot_token_env", None),
+        )
+        resolved["telegram"] = tg
+
+    return resolved or None
 
 
 def run(working_dir: Path) -> None:
     """Full boot sequence: load, build, start, block, stop."""
     data = load_init(working_dir)
     agent = build_agent(data, working_dir)
-
-    write_pid(working_dir)
 
     # Signal handlers: SIGTERM/SIGINT → touch .quell and unblock main thread
     quell_file = working_dir / ".quell"
@@ -136,7 +192,6 @@ def run(working_dir: Path) -> None:
             agent.stop(timeout=10.0)
         except Exception:
             pass
-        remove_pid(working_dir)
 
 
 def main() -> None:
