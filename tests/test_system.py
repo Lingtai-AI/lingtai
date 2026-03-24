@@ -157,24 +157,12 @@ def test_system_nap_wakes_on_mail(tmp_path):
     t.join(timeout=1)
 
 
-def test_system_nap_indefinite_wakes_on_mail(tmp_path):
+def test_system_nap_requires_seconds(tmp_path):
+    """nap without seconds returns error — indefinite wait not allowed."""
     agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
-
-    def fire_mail():
-        time.sleep(0.1)
-        agent._mail_arrived.set()
-
-    t = threading.Thread(target=fire_mail, daemon=True)
-    t.start()
-
-    start = time.monotonic()
     result = agent._intrinsics["system"]({"action": "nap"})
-    elapsed = time.monotonic() - start
-
-    assert result["status"] == "ok"
-    assert result["reason"] == "mail_arrived"
-    assert elapsed < 5
-    t.join(timeout=1)
+    assert result["status"] == "error"
+    assert "required" in result["message"]
 
 
 def test_system_nap_caps_at_300(tmp_path):
