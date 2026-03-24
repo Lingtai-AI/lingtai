@@ -112,7 +112,7 @@ New `.agent.json`:
 
 `lingtai_kernel.llm.service` contains a **concrete** `LLMService` class that mixes protocol with implementation:
 
-- Protocol: `create_session()`, `resume_session()`, `generate()`, `make_tool_result()`, `.model`, `.provider`
+- Protocol: `create_session()`, `generate()`, `make_tool_result()`, `.model`, `.provider`
 - Implementation: adapter registry (class-level), adapter cache, key resolution, built-in context window registry, session ID generation, session tracking
 
 `lingtai_kernel.llm.base` contains `LLMAdapter` ABC and `APICallGate` import — adapter concepts in the kernel.
@@ -154,10 +154,9 @@ class LLMService(ABC):
         interface: ChatInterface | None = None,
     ) -> ChatSession: ...
 
-    @abstractmethod
-    def resume_session(
-        self, saved_state: dict, *, thinking: str = "high"
-    ) -> ChatSession: ...
+    # resume_session() removed — restore_chat now uses
+    # create_session(interface=restored_interface) to rebuild
+    # with current system prompt and tools.
 
     @abstractmethod
     def generate(
@@ -212,7 +211,7 @@ No `api_gate.py`. No adapter concept. No key resolution.
 
 **Note on `streaming.py`:** `StreamingAccumulator` is a utility used by adapter implementations. It stays in the kernel as a shared building block — it has no adapter dependencies, just processes chunks into `LLMResponse` objects.
 
-**Note on `generate()`:** The kernel's agent loop never calls `generate()` — SessionManager uses `create_session()` + `session.send()`. Soul whisper also uses `create_session()`. `generate()` is a one-shot convenience method used by integration tests and capability-level code. It belongs in the ABC for completeness, but implementors should know the core agent loop only requires `create_session()`, `resume_session()`, and `make_tool_result()`.
+**Note on `generate()`:** The kernel's agent loop never calls `generate()` — SessionManager uses `create_session()` + `session.send()`. Soul whisper also uses `create_session()`. `generate()` is a one-shot convenience method used by integration tests and capability-level code. It belongs in the ABC for completeness, but implementors should know the core agent loop only requires `create_session()` (with `interface=` for session restoration) and `make_tool_result()`.
 
 ### Migration path
 
