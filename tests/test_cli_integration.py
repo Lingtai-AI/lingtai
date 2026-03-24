@@ -24,7 +24,7 @@ def _write_init(tmp_path: Path) -> None:
             },
             "capabilities": {},
             "soul": {"delay": 5},
-            "vigil": 10,
+            "stamina": 10,
             "context_limit": None,
             "molt_pressure": 0.8,
             "molt_prompt": "",
