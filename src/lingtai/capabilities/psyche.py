@@ -133,11 +133,7 @@ class PsycheManager:
         else:
             self._agent._prompt_manager.delete_section("covenant")
         self._agent._token_decomp_dirty = True
-
-        if self._agent._chat is not None:
-            self._agent._chat.update_system_prompt(
-                self._agent._build_system_prompt()
-            )
+        self._agent._flush_system_prompt()
 
         rel_path = "system/character.md"
         git_diff, commit_hash = self._agent._workdir.diff_and_commit(
@@ -192,13 +188,10 @@ class PsycheManager:
 
         combined = "\n\n".join(parts)
 
-        # Delegate to eigen for the actual write
-        result = self._eigen_handler({
+        # Delegate to eigen for the actual write (eigen auto-loads into prompt)
+        return self._eigen_handler({
             "object": "memory", "action": "edit", "content": combined,
         })
-        # Auto-load into system prompt
-        self._memory_load({})
-        return result
 
     def _memory_load(self, args: dict) -> dict:
         """Delegate to eigen's memory load."""
