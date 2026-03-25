@@ -91,38 +91,12 @@ def test_send_does_not_call_compaction():
     svc.check_and_compact.assert_not_called()
 
 
-def test_send_stale_interaction_recovery():
-    """When a stale interaction error occurs, send() should create a new session and retry."""
-    sm, svc, mock_session = make_session_manager()
-    sm.interaction_id = "stale-id"
-
-    # Make send_with_timeout raise a stale interaction error on first call
-    from lingtai_kernel.llm_utils import _is_stale_interaction_error
-    stale_error = Exception("interaction not found")
-
-    call_count = [0]
-    def fake_send_with_timeout(**kwargs):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            raise stale_error
-        return mock_session.send.return_value
-
-    with patch("lingtai_kernel.session.send_with_timeout", side_effect=fake_send_with_timeout), \
-         patch("lingtai_kernel.session._is_stale_interaction_error", return_value=True):
-        response = sm.send("hello")
-
-    assert response.text == "hello"
-    # interaction_id should be cleared after stale error
-    assert svc.create_session.call_count == 2  # initial + recovery
-
-
-def test_send_non_stale_error_propagates():
-    """Non-stale errors should propagate normally."""
+def test_send_error_propagates():
+    """LLM errors should propagate — AED retry is handled by the message loop, not session."""
     sm, _, _ = make_session_manager()
 
-    with patch("lingtai_kernel.session.send_with_timeout", side_effect=ValueError("real error")), \
-         patch("lingtai_kernel.session._is_stale_interaction_error", return_value=False):
-        with pytest.raises(ValueError, match="real error"):
+    with patch("lingtai_kernel.session.send_with_timeout", side_effect=ValueError("llm error")):
+        with pytest.raises(ValueError, match="llm error"):
             sm.send("hello")
 
 
@@ -144,92 +118,6 @@ def test_send_logs_llm_call():
     sm.send("hello")
     assert "llm_call" in events
     assert "llm_response" in events
-
-
-# ------------------------------------------------------------------
-# _on_reset() — rollback on server error
-# ------------------------------------------------------------------
-
-def test_on_reset_creates_new_session():
-    sm, svc, _ = make_session_manager()
-    sm.ensure_session()
-
-    # Build a mock chat with interface
-    mock_chat = MagicMock()
-    mock_iface = MagicMock()
-    mock_iface.last_assistant_entry.return_value = None
-    mock_iface.entries = []
-    mock_chat.interface = mock_iface
-
-    new_session = MagicMock()
-    svc.create_session.return_value = new_session
-
-    result_chat, rollback_msg = sm._on_reset(mock_chat, "failed msg")
-
-    assert result_chat is new_session
-    assert "server error" in rollback_msg
-    assert "no tool calls found" in rollback_msg
-
-
-def test_on_reset_summarizes_tool_calls():
-    sm, svc, _ = make_session_manager()
-    sm.ensure_session()
-
-    from lingtai_kernel.llm.interface import ToolCallBlock
-
-    mock_chat = MagicMock()
-    mock_iface = MagicMock()
-    # Simulate a failed assistant turn with tool calls
-    tool_block = ToolCallBlock(name="read_file", args={"path": "/tmp/test"}, id="tc1")
-    mock_entry = MagicMock()
-    mock_entry.content = [tool_block]
-    mock_iface.last_assistant_entry.return_value = mock_entry
-    mock_iface.entries = []
-    mock_chat.interface = mock_iface
-
-    new_session = MagicMock()
-    svc.create_session.return_value = new_session
-
-    _, rollback_msg = sm._on_reset(mock_chat, "failed")
-
-    assert "read_file" in rollback_msg
-    assert "/tmp/test" in rollback_msg
-
-
-def test_on_reset_drops_trailing_turns():
-    sm, svc, _ = make_session_manager()
-    sm.ensure_session()
-
-    mock_chat = MagicMock()
-    mock_iface = MagicMock()
-    mock_iface.last_assistant_entry.return_value = None
-    mock_iface.entries = []
-    mock_chat.interface = mock_iface
-
-    svc.create_session.return_value = MagicMock()
-    sm._on_reset(mock_chat, "failed")
-
-    # Should have called drop_trailing twice (assistant turn, then tool results)
-    assert mock_iface.drop_trailing.call_count == 2
-
-
-def test_on_reset_passes_interface_to_new_session():
-    sm, svc, _ = make_session_manager()
-    sm.ensure_session()
-
-    mock_chat = MagicMock()
-    mock_iface = MagicMock()
-    mock_iface.last_assistant_entry.return_value = None
-    mock_iface.entries = []
-    mock_chat.interface = mock_iface
-
-    svc.create_session.return_value = MagicMock()
-    sm._on_reset(mock_chat, "failed")
-
-    # The new session should receive the interface for history continuity
-    call_kwargs = svc.create_session.call_args[1]
-    assert call_kwargs["interface"] is mock_iface
-    assert call_kwargs["tracked"] is False
 
 
 # ------------------------------------------------------------------
