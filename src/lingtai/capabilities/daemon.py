@@ -21,7 +21,7 @@ from ..i18n import t
 if TYPE_CHECKING:
     from ..agent import Agent
 
-from lingtai_kernel.llm.base import FunctionSchema, ToolCall
+from lingtai_kernel.llm.base import FunctionSchema
 from lingtai_kernel.message import MSG_REQUEST, _make_message
 
 
@@ -203,13 +203,14 @@ class DaemonManager:
                     )
                 )
 
-            # Drain follow-up and inject atomically with tool results
-            followup = self._drain_followup(em_id)
-            if followup:
-                tool_results.append(followup)
-
             response = session.send(tool_results)
             turns += 1
+
+            # Inject follow-up as a separate user message
+            followup = self._drain_followup(em_id)
+            if followup:
+                response = session.send(followup)
+                turns += 1
 
         return response.text or "[no output]"
 
@@ -233,9 +234,10 @@ class DaemonManager:
         if not tasks:
             return {"status": "error", "message": "No tasks provided"}
 
-        # Clear completed emanations first
+        # Clear completed emanations and stale pools
         self._emanations = {k: v for k, v in self._emanations.items()
                             if not v["future"].done()}
+        self._pools = [(p, c) for p, c in self._pools if not c.is_set()]
 
         # Capacity check against pruned registry
         running = len(self._emanations)
