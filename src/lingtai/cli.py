@@ -10,14 +10,11 @@ from pathlib import Path
 from lingtai.config_resolve import (
     resolve_env,
     load_env_file,
-    _resolve_capabilities,
-    _resolve_addons,
 )
 from lingtai.init_schema import validate_init
 from lingtai.llm.service import LLMService
 from lingtai.agent import Agent
 from lingtai_kernel.services.mail import FilesystemMailService
-from lingtai_kernel.config import AgentConfig
 
 
 def load_init(working_dir: Path) -> dict:
@@ -43,8 +40,13 @@ def load_init(working_dir: Path) -> dict:
 
 
 def build_agent(data: dict, working_dir: Path) -> Agent:
-    """Construct LLMService, MailService, and Agent from validated init data."""
-    # Load env file if specified
+    """Construct Agent from validated init data.
+
+    Creates a minimal Agent (LLMService + working_dir + mail_service),
+    then delegates all setup to _perform_refresh() which reads init.json.
+    This ensures boot and live refresh share one code path.
+    """
+    # Load env file if specified (needed for LLM API key resolution)
     env_file = data.get("env_file")
     if env_file:
         load_env_file(env_file)
@@ -63,42 +65,17 @@ def build_agent(data: dict, working_dir: Path) -> Agent:
 
     mail_service = FilesystemMailService(working_dir=working_dir)
 
-    soul = m["soul"]
-
-    config = AgentConfig(
-        stamina=m["stamina"],
-        soul_delay=soul["delay"],
-        max_turns=m["max_turns"],
-        language=m["language"],
-        context_limit=m["context_limit"],
-        molt_pressure=m["molt_pressure"],
-        molt_prompt=m["molt_prompt"],
-    )
-
-    # Build addons dict — resolve *_env fields
-    addons = _resolve_addons(data.get("addons"))
-
-    # Resolve *_env fields in capability kwargs
-    capabilities = _resolve_capabilities(m["capabilities"])
-
+    # Minimal construction — _perform_refresh reads init.json for everything else
     agent = Agent(
         service,
         agent_name=m["agent_name"],
         working_dir=working_dir,
         mail_service=mail_service,
-        config=config,
-        admin=m["admin"],
         streaming=m["streaming"],
-        covenant=data["covenant"],
-        memory=data["memory"],
-        capabilities=capabilities,
-        addons=addons,
     )
 
-    # Inject principle (raw text before all sections)
-    principle = data.get("principle", "")
-    if principle:
-        agent._prompt_manager.write_section("principle", principle, protected=True)
+    # Full setup from init.json (capabilities, addons, config, covenant, etc.)
+    agent._perform_refresh()
 
     # Restore molt count from previous run (if resuming)
     prev_manifest = working_dir / ".agent.json"

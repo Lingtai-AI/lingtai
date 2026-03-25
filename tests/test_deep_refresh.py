@@ -145,3 +145,26 @@ def test_deep_refresh_at_boot_no_history(tmp_path):
     cap_names = [name for name, _ in agent._capabilities]
     assert "read" in cap_names
     assert agent._sealed is True
+
+
+def test_cli_build_agent_uses_refresh(tmp_path):
+    """cli.build_agent() constructs agent via _perform_refresh from init.json."""
+    from lingtai.cli import load_init, build_agent
+
+    init = _make_init(capabilities={"read": {}}, covenant="Be helpful.")
+    (tmp_path / "init.json").write_text(json.dumps(init))
+
+    data = load_init(tmp_path)
+    agent = build_agent(data, tmp_path)
+
+    # Capabilities loaded from init.json via _perform_refresh
+    cap_names = [name for name, _ in agent._capabilities]
+    assert "read" in cap_names
+
+    # Covenant loaded
+    covenant_content = agent._prompt_manager.read_section("covenant")
+    assert covenant_content is not None
+    assert "Be helpful" in covenant_content
+
+    # Cleanup
+    agent._workdir.release_lock()

@@ -91,9 +91,15 @@ def test_build_agent_constructs_correctly(mock_mail, mock_agent, mock_llm, tmp_p
     call_kwargs = mock_agent.call_args
     assert call_kwargs.kwargs["agent_name"] == "test-agent"
     assert call_kwargs.kwargs["working_dir"] == tmp_path
-    assert call_kwargs.kwargs["covenant"] == "Be helpful."
-    assert call_kwargs.kwargs["memory"] == "I remember nothing."
     assert call_kwargs.kwargs["streaming"] is False
+    # covenant, memory, capabilities, addons no longer passed to constructor —
+    # they are loaded by _perform_refresh() from init.json
+    assert "covenant" not in call_kwargs.kwargs
+    assert "memory" not in call_kwargs.kwargs
+    assert "capabilities" not in call_kwargs.kwargs
+    assert "addons" not in call_kwargs.kwargs
+    # _perform_refresh() is called on the constructed agent
+    mock_agent.return_value._perform_refresh.assert_called_once()
 
 
 # --- env file and env var resolution ---
@@ -211,7 +217,7 @@ def test_build_agent_env_file_loaded(mock_mail, mock_agent, mock_llm, tmp_path):
 @patch("lingtai.cli.Agent")
 @patch("lingtai.cli.FilesystemMailService")
 def test_build_agent_passes_addons(mock_mail, mock_agent, mock_llm, tmp_path):
-    """Addons from init.json are passed through to Agent."""
+    """Addons from init.json are handled by _perform_refresh, not constructor."""
     from lingtai.cli import load_init, build_agent
 
     _write_init(tmp_path)
@@ -227,18 +233,17 @@ def test_build_agent_passes_addons(mock_mail, mock_agent, mock_llm, tmp_path):
 
     build_agent(data, tmp_path)
 
+    # Addons no longer passed to constructor — handled by _perform_refresh
     call_kwargs = mock_agent.call_args.kwargs
-    assert call_kwargs["addons"] is not None
-    assert "imap" in call_kwargs["addons"]
-    assert call_kwargs["addons"]["imap"]["email_address"] == "test@gmail.com"
-    assert call_kwargs["addons"]["imap"]["email_password"] == "secret"
+    assert "addons" not in call_kwargs
+    mock_agent.return_value._perform_refresh.assert_called_once()
 
 
 @patch("lingtai.cli.LLMService")
 @patch("lingtai.cli.Agent")
 @patch("lingtai.cli.FilesystemMailService")
 def test_build_agent_resolves_addon_env(mock_mail, mock_agent, mock_llm, tmp_path):
-    """Addon *_env fields are resolved from environment."""
+    """Addon *_env fields are resolved by _perform_refresh via init.json."""
     from lingtai.cli import load_init, build_agent
 
     _write_init(tmp_path)
@@ -261,22 +266,21 @@ def test_build_agent_resolves_addon_env(mock_mail, mock_agent, mock_llm, tmp_pat
         os.environ.pop("TEST_IMAP_PASS", None)
         os.environ.pop("TEST_TG_TOKEN", None)
 
-    addons = mock_agent.call_args.kwargs["addons"]
-    assert addons["imap"]["email_password"] == "imap-secret"
-    assert "email_password_env" not in addons["imap"]
-    assert addons["telegram"]["bot_token"] == "tg-secret"
-    assert "bot_token_env" not in addons["telegram"]
+    # Addons no longer passed to constructor — handled by _perform_refresh
+    assert "addons" not in mock_agent.call_args.kwargs
+    mock_agent.return_value._perform_refresh.assert_called_once()
 
 
 @patch("lingtai.cli.LLMService")
 @patch("lingtai.cli.Agent")
 @patch("lingtai.cli.FilesystemMailService")
 def test_build_agent_no_addons(mock_mail, mock_agent, mock_llm, tmp_path):
-    """No addons field means addons=None."""
+    """No addons field — _perform_refresh handles this gracefully."""
     from lingtai.cli import load_init, build_agent
 
     _write_init(tmp_path)
     data = load_init(tmp_path)
     build_agent(data, tmp_path)
 
-    assert mock_agent.call_args.kwargs["addons"] is None
+    assert "addons" not in mock_agent.call_args.kwargs
+    mock_agent.return_value._perform_refresh.assert_called_once()
