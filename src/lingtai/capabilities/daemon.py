@@ -98,6 +98,68 @@ class DaemonManager:
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
+    def _build_tool_surface(self, requested: list[str]) -> tuple[list[FunctionSchema], dict]:
+        """Build filtered tool schemas and dispatch map for an emanation."""
+        from ..capabilities import _GROUPS
+
+        # Expand groups and filter blacklist
+        tool_names: set[str] = set()
+        for name in requested:
+            if name in EMANATION_BLACKLIST:
+                continue
+            if name in _GROUPS:
+                tool_names.update(_GROUPS[name])
+            else:
+                tool_names.add(name)
+
+        # Identify MCP tools (all non-capability, non-blacklisted)
+        capability_names = {cap_name for cap_name, _ in self._agent._capabilities}
+        all_registered = {s.name for s in self._agent._tool_schemas}
+        mcp_names = all_registered - capability_names - EMANATION_BLACKLIST
+        tool_names |= mcp_names
+
+        # Validate requested tools exist
+        available = {s.name for s in self._agent._tool_schemas}
+        missing = tool_names - available
+        if missing:
+            raise ValueError(f"Unknown tools for emanation: {missing}")
+
+        # Build schemas and dispatch
+        schema_map = {s.name: s for s in self._agent._tool_schemas}
+        schemas = [schema_map[n] for n in sorted(tool_names) if n in schema_map]
+        dispatch = {n: self._agent._tool_handlers[n]
+                    for n in tool_names if n in self._agent._tool_handlers}
+        return schemas, dispatch
+
+    def _build_emanation_prompt(self, task: str, schemas: list[FunctionSchema]) -> str:
+        """Build the system prompt for an emanation."""
+        lines = [
+            "You are a daemon emanation (分神) — a focused subagent dispatched by an agent.",
+            "You have one task. Complete it, then provide your final report as text.",
+            "Your intermediate text output will be seen by the main agent — treat it as a progress report.",
+            'When you are done, explicitly state "task done" and summarize what you accomplished.',
+            "",
+            "You work in the agent's working directory. Other subagents may be working",
+            "concurrently on different tasks in the same directory. Do not modify files",
+            "outside your assigned scope.",
+        ]
+
+        # Tool descriptions
+        tool_lines = []
+        for s in schemas:
+            if s.description:
+                tool_lines.append(f"### {s.name}\n{s.description}")
+        if tool_lines:
+            lines.append("")
+            lines.append("## tools")
+            lines.extend(tool_lines)
+
+        lines.append("")
+        lines.append("Your task:")
+        lines.append(task)
+
+        return "\n".join(lines)
+
     # Placeholder implementations — filled in subsequent tasks
     def _handle_emanate(self, tasks):
         return {"status": "error", "message": "not yet implemented"}
