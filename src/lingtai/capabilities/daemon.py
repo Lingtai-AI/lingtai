@@ -229,18 +229,136 @@ class DaemonManager:
             entry["followup_buffer"] = ""
         return text or None
 
-    # Placeholder implementations — filled in subsequent tasks
-    def _handle_emanate(self, tasks):
-        return {"status": "error", "message": "not yet implemented"}
+    def _handle_emanate(self, tasks: list[dict]) -> dict:
+        if not tasks:
+            return {"status": "error", "message": "No tasks provided"}
 
-    def _handle_list(self):
-        return {"emanations": []}
+        # Clear completed emanations first
+        self._emanations = {k: v for k, v in self._emanations.items()
+                            if not v["future"].done()}
 
-    def _handle_ask(self, em_id, message):
-        return {"status": "error", "message": "not yet implemented"}
+        # Capacity check against pruned registry
+        running = len(self._emanations)
+        if running + len(tasks) > self._max_emanations:
+            lang = self._agent._config.language
+            return {"status": "error",
+                    "message": t(lang, "daemon.limit_reached",
+                                 running=running, requested=len(tasks),
+                                 max=self._max_emanations)}
 
-    def _handle_reclaim(self):
-        return {"status": "reclaimed", "cancelled": 0}
+        cancel_event = threading.Event()
+        pool = ThreadPoolExecutor(max_workers=len(tasks))
+        self._pools.append((pool, cancel_event))
+
+        ids = []
+        for spec in tasks:
+            em_id = f"em-{self._next_id}"
+            self._next_id += 1
+            ids.append(em_id)
+
+            future = pool.submit(
+                self._run_emanation,
+                em_id, spec["task"], spec["tools"],
+                spec.get("model"), cancel_event,
+            )
+            future.add_done_callback(
+                lambda f, eid=em_id, task=spec["task"]:
+                    self._on_emanation_done(eid, task, f)
+            )
+            self._emanations[em_id] = {
+                "future": future,
+                "task": spec["task"],
+                "start_time": time.time(),
+                "cancel_event": cancel_event,
+                "followup_buffer": "",
+                "followup_lock": threading.Lock(),
+            }
+
+        # Start watchdog
+        watchdog = threading.Thread(
+            target=self._watchdog, args=(cancel_event, self._timeout),
+            daemon=True,
+        )
+        watchdog.start()
+
+        self._log("daemon_emanate", ids=ids, count=len(tasks),
+                  tasks=[{"task": s["task"][:80], "tools": s["tools"]} for s in tasks])
+
+        return {"status": "dispatched", "count": len(tasks), "ids": ids}
+
+    def _handle_list(self) -> dict:
+        emanations = []
+        for em_id, entry in self._emanations.items():
+            elapsed = time.time() - entry["start_time"]
+            future = entry["future"]
+            if future.done():
+                exc = future.exception()
+                if exc:
+                    status = "failed"
+                else:
+                    status = "done"
+            else:
+                status = "running"
+            info = {"id": em_id, "task": entry["task"][:80],
+                    "status": status, "elapsed_s": round(elapsed)}
+            if status == "failed" and exc:
+                info["error"] = str(exc)
+            emanations.append(info)
+        return {"emanations": emanations}
+
+    def _handle_ask(self, em_id: str, message: str) -> dict:
+        entry = self._emanations.get(em_id)
+        if not entry:
+            return {"status": "error", "message": f"Unknown emanation: {em_id}"}
+        if entry["future"].done():
+            return {"status": "error", "message": "not running"}
+        with entry["followup_lock"]:
+            if entry["followup_buffer"]:
+                entry["followup_buffer"] += "\n\n" + message
+            else:
+                entry["followup_buffer"] = message
+        self._log("daemon_ask", em_id=em_id, message_length=len(message))
+        return {"status": "sent", "id": em_id}
+
+    def _handle_reclaim(self) -> dict:
+        cancelled = sum(1 for e in self._emanations.values()
+                        if not e["future"].done())
+        for pool, cancel in self._pools:
+            cancel.set()
+            pool.shutdown(wait=False, cancel_futures=True)
+        self._pools.clear()
+        self._emanations.clear()
+        self._log("daemon_reclaim", cancelled_count=cancelled)
+        return {"status": "reclaimed", "cancelled": cancelled}
+
+    def _on_emanation_done(self, em_id: str, task_summary: str, future) -> None:
+        elapsed = 0.0
+        entry = self._emanations.get(em_id)
+        if entry:
+            elapsed = time.time() - entry["start_time"]
+        try:
+            text = future.result()
+            self._log("daemon_result", em_id=em_id, status="done",
+                      text_length=len(text), elapsed_ms=round(elapsed * 1000))
+        except Exception as e:
+            text = f"Failed: {e}"
+            self._log("daemon_error", em_id=em_id,
+                      exception=type(e).__name__, exception_message=str(e))
+        self._notify_parent(em_id, text)
+
+    def _watchdog(self, cancel_event: threading.Event, timeout: float) -> None:
+        """Kill emanations that exceed the timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if cancel_event.is_set():
+                return
+            time.sleep(1.0)
+        cancel_event.set()
+
+    def _log(self, event_type: str, **fields) -> None:
+        """Log through the parent agent's logging system."""
+        if hasattr(self._agent, '_log'):
+            self._agent._log(event_type, **fields)
 
 
 def setup(agent: "Agent", max_emanations: int = 4,

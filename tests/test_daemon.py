@@ -166,6 +166,118 @@ def test_run_emanation_respects_cancel_before_first_send(tmp_path):
     mock_session.send.assert_not_called()
 
 
+def test_handle_emanate_dispatches_and_returns_ids(tmp_path):
+    """emanate dispatches tasks and returns sequential IDs."""
+    agent = _make_agent(tmp_path, ["file", "daemon"])
+    agent.inbox = queue.Queue()
+    mgr = agent.get_capability("daemon")
+
+    mock_session = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = "done"
+    mock_resp.tool_calls = []
+    mock_session.send = MagicMock(return_value=mock_resp)
+    agent.service.create_session = MagicMock(return_value=mock_session)
+
+    result = mgr.handle({"action": "emanate", "tasks": [
+        {"task": "task A", "tools": ["file"]},
+        {"task": "task B", "tools": ["file"]},
+    ]})
+    assert result["status"] == "dispatched"
+    assert result["count"] == 2
+    assert result["ids"] == ["em-1", "em-2"]
+
+    time.sleep(1)
+
+    messages = []
+    while not agent.inbox.empty():
+        messages.append(agent.inbox.get_nowait())
+    assert len(messages) == 2
+
+
+def test_handle_emanate_rejects_over_limit(tmp_path):
+    """emanate rejects when max_emanations would be exceeded."""
+    agent = _make_agent(tmp_path, {"daemon": {"max_emanations": 1}})
+    mgr = agent.get_capability("daemon")
+
+    mgr._emanations["em-0"] = {"future": MagicMock(done=MagicMock(return_value=False))}
+    result = mgr.handle({"action": "emanate", "tasks": [
+        {"task": "x", "tools": ["file"]},
+    ]})
+    assert result["status"] == "error"
+    assert "Too many" in result["message"] or "running" in result["message"]
+
+
+def test_handle_list_shows_status(tmp_path):
+    """list returns emanation statuses."""
+    agent = _make_agent(tmp_path, ["daemon"])
+    mgr = agent.get_capability("daemon")
+
+    done_future = MagicMock()
+    done_future.done.return_value = True
+    done_future.exception.return_value = None
+    running_future = MagicMock()
+    running_future.done.return_value = False
+
+    mgr._emanations = {
+        "em-1": {"future": done_future, "task": "task A", "start_time": time.time() - 10, "cancel_event": threading.Event()},
+        "em-2": {"future": running_future, "task": "task B", "start_time": time.time() - 5, "cancel_event": threading.Event()},
+    }
+    result = mgr._handle_list()
+    assert len(result["emanations"]) == 2
+    statuses = {e["id"]: e["status"] for e in result["emanations"]}
+    assert statuses["em-1"] == "done"
+    assert statuses["em-2"] == "running"
+
+
+def test_handle_ask_sends_followup(tmp_path):
+    """ask buffers a follow-up for a running emanation."""
+    agent = _make_agent(tmp_path, ["daemon"])
+    mgr = agent.get_capability("daemon")
+    mgr._emanations["em-1"] = {
+        "future": MagicMock(done=MagicMock(return_value=False)),
+        "task": "x",
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    result = mgr._handle_ask("em-1", "also check tests/")
+    assert result["status"] == "sent"
+    assert mgr._emanations["em-1"]["followup_buffer"] == "also check tests/"
+
+
+def test_handle_ask_collapses_multiple(tmp_path):
+    """Multiple asks collapse into one buffer."""
+    agent = _make_agent(tmp_path, ["daemon"])
+    mgr = agent.get_capability("daemon")
+    mgr._emanations["em-1"] = {
+        "future": MagicMock(done=MagicMock(return_value=False)),
+        "task": "x",
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    mgr._handle_ask("em-1", "first")
+    mgr._handle_ask("em-1", "second")
+    assert mgr._emanations["em-1"]["followup_buffer"] == "first\n\nsecond"
+
+
+def test_handle_reclaim_cancels_all(tmp_path):
+    """reclaim sets cancel events and clears registry."""
+    agent = _make_agent(tmp_path, ["daemon"])
+    mgr = agent.get_capability("daemon")
+    cancel = threading.Event()
+    pool = MagicMock()
+    mgr._pools = [(pool, cancel)]
+    mgr._emanations = {
+        "em-1": {"future": MagicMock(done=MagicMock(return_value=False)), "cancel_event": cancel},
+    }
+    result = mgr._handle_reclaim()
+    assert result["status"] == "reclaimed"
+    assert result["cancelled"] == 1
+    assert cancel.is_set()
+    assert len(mgr._emanations) == 0
+    pool.shutdown.assert_called_once()
+
+
 def test_run_emanation_respects_cancel_mid_loop(tmp_path):
     """Emanation exits on cancel event between tool-call rounds."""
     agent = _make_agent(tmp_path, ["file", "daemon"])
