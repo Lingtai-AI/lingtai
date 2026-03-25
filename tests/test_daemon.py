@@ -89,3 +89,111 @@ def test_build_emanation_prompt_includes_task(tmp_path):
     prompt = mgr._build_emanation_prompt("Find all TODOs", schemas)
     assert "Find all TODOs" in prompt
     assert "daemon emanation" in prompt.lower() or "分神" in prompt
+
+
+def test_run_emanation_returns_text(tmp_path):
+    """Emanation runs a tool loop and returns final text."""
+    agent = _make_agent(tmp_path, ["file", "daemon"])
+    mgr = agent.get_capability("daemon")
+
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = "Task done. Found 3 files."
+    mock_response.tool_calls = []
+    mock_session.send = MagicMock(return_value=mock_response)
+    agent.service.create_session = MagicMock(return_value=mock_session)
+
+    cancel = threading.Event()
+    em_id = "em-test"
+    mgr._emanations[em_id] = {
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    result = mgr._run_emanation(em_id, "find stuff", ["file"], None, cancel)
+    assert "Found 3 files" in result
+
+
+def test_run_emanation_dispatches_tools(tmp_path):
+    """Emanation dispatches tool calls and feeds results back."""
+    agent = _make_agent(tmp_path, ["file", "daemon"])
+    agent.inbox = queue.Queue()
+    mgr = agent.get_capability("daemon")
+
+    mock_handler = MagicMock(return_value={"content": "file text"})
+    agent._tool_handlers["read"] = mock_handler
+
+    tc = ToolCall(name="read", args={"file_path": "/tmp/x"}, id="tc-1")
+    resp1 = MagicMock()
+    resp1.text = ""
+    resp1.tool_calls = [tc]
+    resp2 = MagicMock()
+    resp2.text = "Task done. Read the file."
+    resp2.tool_calls = []
+
+    mock_session = MagicMock()
+    mock_session.send = MagicMock(side_effect=[resp1, resp2])
+    agent.service.create_session = MagicMock(return_value=mock_session)
+    agent.service.make_tool_result = MagicMock(return_value="mock_result")
+
+    cancel = threading.Event()
+    em_id = "em-test"
+    mgr._emanations[em_id] = {
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    result = mgr._run_emanation(em_id, "read a file", ["file"], None, cancel)
+    assert "Read the file" in result
+    assert mock_handler.called
+
+
+def test_run_emanation_respects_cancel_before_first_send(tmp_path):
+    """Emanation exits immediately if pre-cancelled (before first LLM call)."""
+    agent = _make_agent(tmp_path, ["file", "daemon"])
+    mgr = agent.get_capability("daemon")
+
+    mock_session = MagicMock()
+    agent.service.create_session = MagicMock(return_value=mock_session)
+
+    cancel = threading.Event()
+    cancel.set()
+    em_id = "em-test"
+    mgr._emanations[em_id] = {
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    result = mgr._run_emanation(em_id, "do stuff", ["file"], None, cancel)
+    assert result == "[cancelled]"
+    mock_session.send.assert_not_called()
+
+
+def test_run_emanation_respects_cancel_mid_loop(tmp_path):
+    """Emanation exits on cancel event between tool-call rounds."""
+    agent = _make_agent(tmp_path, ["file", "daemon"])
+    mgr = agent.get_capability("daemon")
+
+    tc = ToolCall(name="read", args={}, id="tc-1")
+    resp = MagicMock()
+    resp.text = ""
+    resp.tool_calls = [tc]
+
+    mock_session = MagicMock()
+    agent.service.create_session = MagicMock(return_value=mock_session)
+    agent.service.make_tool_result = MagicMock(return_value="mock_result")
+    agent._tool_handlers["read"] = MagicMock(return_value={})
+
+    cancel = threading.Event()
+    call_count = [0]
+    def send_and_cancel(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            cancel.set()
+        return resp
+    mock_session.send = send_and_cancel
+
+    em_id = "em-test"
+    mgr._emanations[em_id] = {
+        "followup_buffer": "",
+        "followup_lock": threading.Lock(),
+    }
+    result = mgr._run_emanation(em_id, "do stuff", ["file"], None, cancel)
+    assert result == "[cancelled]"

@@ -160,6 +160,75 @@ class DaemonManager:
 
         return "\n".join(lines)
 
+    def _run_emanation(self, em_id: str, task: str, tool_names: list[str],
+                       model: str | None, cancel_event: threading.Event) -> str:
+        """Run a single emanation's tool loop. Called in a worker thread."""
+        schemas, dispatch = self._build_tool_surface(tool_names)
+        system_prompt = self._build_emanation_prompt(task, schemas)
+
+        if cancel_event.is_set():
+            return "[cancelled]"
+
+        session = self._agent.service.create_session(
+            system_prompt=system_prompt,
+            tools=schemas or None,
+            model=model or self._default_model,
+            thinking="default",
+            tracked=False,
+        )
+
+        response = session.send(task)
+        turns = 0
+        while response.tool_calls and turns < self._max_turns:
+            if cancel_event.is_set():
+                return "[cancelled]"
+
+            # Intermediate text → notify parent
+            if response.text:
+                self._notify_parent(em_id, response.text)
+
+            tool_results = []
+            for tc in response.tool_calls:
+                handler = dispatch.get(tc.name)
+                if handler is None:
+                    result = {"status": "error", "message": f"Unknown tool: {tc.name}"}
+                else:
+                    try:
+                        result = handler(tc.args or {})
+                    except Exception as e:
+                        result = {"status": "error", "message": str(e)}
+                tool_results.append(
+                    self._agent.service.make_tool_result(
+                        tc.name, result, tool_call_id=tc.id,
+                    )
+                )
+
+            # Drain follow-up and inject atomically with tool results
+            followup = self._drain_followup(em_id)
+            if followup:
+                tool_results.append(followup)
+
+            response = session.send(tool_results)
+            turns += 1
+
+        return response.text or "[no output]"
+
+    def _notify_parent(self, em_id: str, text: str) -> None:
+        """Send a [daemon] notification to parent's inbox."""
+        notification = f"[daemon:{em_id}]\n\n{text}"
+        msg = _make_message(MSG_REQUEST, "daemon", notification)
+        self._agent.inbox.put(msg)
+
+    def _drain_followup(self, em_id: str) -> str | None:
+        """Drain the follow-up buffer for a specific emanation."""
+        entry = self._emanations.get(em_id)
+        if not entry:
+            return None
+        with entry["followup_lock"]:
+            text = entry["followup_buffer"]
+            entry["followup_buffer"] = ""
+        return text or None
+
     # Placeholder implementations — filled in subsequent tasks
     def _handle_emanate(self, tasks):
         return {"status": "error", "message": "not yet implemented"}
