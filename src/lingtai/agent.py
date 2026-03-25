@@ -409,6 +409,9 @@ class Agent(BaseAgent):
             saved_interface = self._session.chat.interface
 
         # Tear down
+        # Cancel soul timer to prevent racing on config/service during rebuild
+        self._cancel_soul_timer()
+
         for name, mgr in self._addon_managers.items():
             if hasattr(mgr, "stop"):
                 try:
@@ -473,6 +476,7 @@ class Agent(BaseAgent):
             molt_prompt=m["molt_prompt"],
         )
         self._soul_delay = max(1.0, self._config.soul_delay)
+        self._session._config = self._config
 
         # Reload covenant and memory
         covenant = data.get("covenant", "")
