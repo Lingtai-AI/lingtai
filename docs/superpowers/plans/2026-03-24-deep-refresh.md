@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `refresh` fully reconstruct the agent from `init.json` + `mcp/servers.json`, preserving only conversation history and working directory files. Make `lingtai run` (CLI boot) use the same `_perform_refresh()` code path so construction and refresh share one implementation.
+**Goal:** Make `refresh` fully reconstruct the agent from `init.json` + `mcp/servers.json`, preserving only conversation history and working directory files. Make `lingtai run` (CLI boot) use the same `_perform_refresh()` code path so construction and refresh share one implementation. Add timely chat history persistence (file write after every interaction).
 
-**Architecture:** `Agent._perform_refresh()` overrides the kernel's MCP-only version. It reads `init.json` (the operator's declaration of intent) and `mcp/servers.json` (MCP tool registry), tears down all runtime state (capabilities, addons, MCP clients, tool registrations, prompt sections, capability flags), then re-runs the full setup sequence. `cli.py`'s `build_agent()` constructs a minimal Agent (just LLMService + working_dir + mail_service) then calls `_perform_refresh()` — one code path for both boot and live refresh.
+**Architecture:** `Agent._perform_refresh()` overrides the kernel's MCP-only version. It reads `init.json` (the operator's declaration of intent) and `mcp/servers.json` (MCP tool registry), tears down all runtime state (capabilities, addons, MCP clients, tool registrations, prompt sections, capability flags), then re-runs the full setup sequence. `cli.py`'s `build_agent()` constructs a minimal Agent (just LLMService + working_dir + mail_service) then calls `_perform_refresh()` — one code path for both boot and live refresh. Chat history is written to disk after every completed interaction for crash resilience.
 
 **Tech Stack:** Python 3.11+, existing lingtai/lingtai-kernel infrastructure. No new dependencies.
 
@@ -17,6 +17,7 @@
 | `src/lingtai/config_resolve.py` | Create | Shared env-resolution helpers extracted from `cli.py` |
 | `src/lingtai/agent.py` | Modify | Add `_perform_refresh()` override, `_read_init()` helper |
 | `src/lingtai/cli.py` | Modify | Simplify `build_agent()` to use `_perform_refresh()`, import helpers from `config_resolve` |
+| `lingtai-kernel: base_agent.py` | Modify | Add `_save_chat_history()` (file-only), call after every `_handle_message` |
 | `tests/test_deep_refresh.py` | Create | Tests for deep refresh and CLI boot via refresh |
 
 ---
@@ -855,7 +856,87 @@ git commit -m "test: edge cases for deep refresh — invalid json, removal, hist
 
 ---
 
-### Task 5: Final verification
+### Task 5: Timely chat history persistence (kernel change)
+
+**Files:**
+- Modify: `../lingtai-kernel/src/lingtai_kernel/base_agent.py`
+
+Chat history should be written to disk after every completed interaction, not just on state transitions. The file write is cheap (JSON serialize + write_text). Git commits are handled separately by the Time Machine snapshot system (see `2026-03-24-time-machine.md`).
+
+- [ ] **Step 1: Add `_save_chat_history()` — file write only**
+
+Add to `base_agent.py`, alongside existing `_persist_chat_history()`:
+
+```python
+def _save_chat_history(self) -> None:
+    """Write chat history to disk (no git commit).
+
+    Called after every completed interaction for crash resilience.
+    Git commits are handled by the periodic snapshot system.
+    """
+    history_dir = self._working_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+    try:
+        state = self.get_chat_state()
+        if state:
+            (history_dir / "chat_history.json").write_text(
+                json.dumps(state, ensure_ascii=False)
+            )
+    except Exception as e:
+        logger.warning(f"[{self.agent_name}] Failed to save chat history: {e}")
+```
+
+- [ ] **Step 2: Call `_save_chat_history()` after every `_handle_message`**
+
+In `_run_loop`, after line 698 (`self._handle_message(msg)`) succeeds (inside the `break` of the try/except), add the save:
+
+```python
+while True:
+    try:
+        self._handle_message(msg)
+        self._save_chat_history()  # <-- add this line
+        break  # success
+    except Exception as e:
+        ...
+```
+
+- [ ] **Step 3: Simplify `_persist_chat_history()` to use `_save_chat_history()`**
+
+`_persist_chat_history()` still exists for the state-transition calls (AED timeout, loop exit) but delegates the file write:
+
+```python
+def _persist_chat_history(self) -> None:
+    """Save chat history and status to history/ — called on state transitions."""
+    self._save_chat_history()
+    history_dir = self._working_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+    try:
+        (history_dir / "status.json").write_text(
+            json.dumps(self.status(), ensure_ascii=False, indent=2)
+        )
+    except Exception as e:
+        logger.warning(f"[{self.agent_name}] Failed to persist session state: {e}")
+```
+
+Note: the `diff_and_commit` calls are removed — git commits will be handled by the Time Machine snapshot system.
+
+- [ ] **Step 4: Smoke-test the kernel**
+
+Run: `python -c "import lingtai_kernel.base_agent; print('ok')"`
+Expected: `ok`
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd ../lingtai-kernel
+git add src/lingtai_kernel/base_agent.py
+git commit -m "feat: timely chat history persistence — file write after every interaction"
+cd ../lingtai
+```
+
+---
+
+### Task 6: Final verification
 
 - [ ] **Step 1: Run full test suite**
 
