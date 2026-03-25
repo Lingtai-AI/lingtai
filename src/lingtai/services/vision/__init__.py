@@ -60,20 +60,30 @@ def _read_image(image_path: str) -> tuple[bytes, str]:
     return image_bytes, mime_type
 
 
-def create_vision_service(provider: str, *, api_key: str, **kwargs) -> VisionService:
+def create_vision_service(provider: str, *, api_key: str | None = None, **kwargs) -> VisionService:
     """Factory — create a VisionService for the given provider.
 
     Args:
-        provider: Provider name ("anthropic", "openai", "gemini", "minimax").
-        api_key: API key for the provider.
+        provider: Provider name ("anthropic", "openai", "gemini", "minimax", "local").
+        api_key: API key for the provider (not required for "local").
         **kwargs: Additional provider-specific kwargs (e.g., model, base_url).
 
     Returns:
         A VisionService instance.
 
     Raises:
-        ValueError: If the provider is not supported.
+        ValueError: If the provider is not supported or api_key missing for API providers.
     """
+    if provider == "local":
+        from .local import LocalVisionService
+        return LocalVisionService(**kwargs)
+
+    if api_key is None:
+        raise ValueError(
+            f"api_key is required for provider {provider!r}. "
+            f"Use provider='local' for on-device vision without an API key."
+        )
+
     if provider == "anthropic":
         from .anthropic import AnthropicVisionService
         return AnthropicVisionService(api_key=api_key, **kwargs)
@@ -89,5 +99,5 @@ def create_vision_service(provider: str, *, api_key: str, **kwargs) -> VisionSer
     else:
         raise ValueError(
             f"Unsupported vision provider: {provider!r}. "
-            f"Supported: anthropic, openai, gemini, minimax."
+            f"Supported: anthropic, openai, gemini, minimax, local."
         )
