@@ -1,24 +1,32 @@
-"""Avatar capability — spawn peer agents with filesystem mail.
+"""Avatar capability — spawn independent peer agents (分身).
 
-Maintains an append-only ledger (delegates/ledger.jsonl) that records every
-spawn event.  Each line is a timestamped record of what was spawned,
-to whom, with what mission, privileges, and capabilities.  The ledger is
-never mutated — only appended to.  It forms a responsibility map that the
-parent can consult before spawning again.
+Shallow (投胎): Copy init.json to a new working dir, strip name, launch.
+    The avatar gets the same LLM config + capabilities but no identity,
+    no memory, no history.  A fresh life.
 
-Lifecycle management (interrupt, sleep/lull, cpr, nirvana) is handled by
-the system intrinsic's karma/nirvana actions, not here.  The avatar
-tool's only job is to spawn avatars (分身).
+Deep (二重身): Copy the entire working dir (system/, library/, exports/)
+    plus init.json to a new dir, strip name + history, launch.
+    The avatar is a doppelgänger — same character, memory, knowledge —
+    but starts a fresh conversation.
+
+Both modes launch `lingtai run <dir>` as a fully detached process.
+The avatar is an independent life — it survives the parent's death.
+
+Maintains an append-only ledger (delegates/ledger.jsonl) that records
+every spawn event.
 
 Usage:
     Agent(capabilities=["avatar"])
-    # avatar(name="researcher")           — spawn a blank avatar
-    # avatar(name="clone", mirror=True)   — spawn a deep copy of self
+    # avatar(name="researcher")                    — shallow (投胎)
+    # avatar(name="clone", type="deep")            — deep (二重身)
 """
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,9 +48,10 @@ def get_schema(lang: str = "en") -> dict:
                 "type": "string",
                 "description": t(lang, "avatar.name"),
             },
-            "mirror": {
-                "type": "boolean",
-                "description": t(lang, "avatar.mirror"),
+            "type": {
+                "type": "string",
+                "enum": ["shallow", "deep"],
+                "description": t(lang, "avatar.type"),
             },
         },
         "required": ["name"],
@@ -51,16 +60,16 @@ def get_schema(lang: str = "en") -> dict:
 
 
 class AvatarManager:
-    """Spawns avatar (分身) peer agents with filesystem mail.
+    """Spawns avatar (分身) peer agents as detached processes.
 
-    Keeps an in-memory reference table for live status checks and an
-    append-only JSONL ledger on disk that records every spawn.
+    Each avatar gets its own working directory with init.json and is
+    launched via `lingtai run`.  No in-process references — liveness
+    is checked via the filesystem (handshake.is_alive).
     """
 
     def __init__(self, agent: "Agent", max_agents: int = 0):
         self._agent = agent
         self._max_agents = max_agents  # 0 = unlimited
-        self._peers: dict[str, "Agent"] = {}  # name -> live Agent reference
 
     # ------------------------------------------------------------------
     # Handler
@@ -89,31 +98,28 @@ class AvatarManager:
     # ------------------------------------------------------------------
 
     def _spawn(self, args: dict) -> dict:
-        from ..agent import Agent
-        from lingtai_kernel.services.mail import FilesystemMailService
-
         parent = self._agent
         reasoning = args.get("_reasoning")
         peer_name = args.get("name", "avatar")
-        mirror = args.get("mirror", False)
+        avatar_type = args.get("type", "shallow")
+
+        if avatar_type not in ("shallow", "deep"):
+            return {"error": "type must be 'shallow' or 'deep'"}
 
         # Check if this peer already exists and is live
-        existing = self._peers.get(peer_name)
-        if existing is not None:
-            from lingtai_kernel.handshake import is_alive
-            if is_alive(str(existing.working_dir)):
-                return {
-                    "status": "already_active",
-                    "address": existing._mail_service.address if existing._mail_service else None,
-                    "working_dir": str(existing._working_dir),
-                    "agent_name": existing.agent_name,
-                    "message": (
-                        f"'{peer_name}' is already running. "
-                        f"Use mail to communicate, or system intrinsic to manage lifecycle."
-                    ),
-                }
-            # Not alive — clean up stale reference
-            self._peers.pop(peer_name, None)
+        from lingtai_kernel.handshake import is_alive
+        for record in self._read_ledger():
+            if record.get("name") == peer_name:
+                wd = record.get("working_dir", "")
+                if wd and is_alive(wd):
+                    return {
+                        "status": "already_active",
+                        "working_dir": wd,
+                        "message": (
+                            f"'{peer_name}' is already running. "
+                            f"Use mail to communicate, or system intrinsic to manage lifecycle."
+                        ),
+                    }
 
         # Agent count guard
         if self._max_agents > 0:
@@ -123,115 +129,140 @@ class AvatarManager:
                 lang = parent._config.language
                 return {"error": t(lang, "avatar.limit_reached", live=live, max=self._max_agents)}
 
-        # Always inherit parent's covenant
-        covenant = parent._prompt_manager.read_section("covenant") or ""
+        # Parent must have init.json
+        parent_init_path = parent._working_dir / "init.json"
+        if not parent_init_path.is_file():
+            return {"error": "parent has no init.json — cannot spawn avatar"}
 
-        # All capabilities inherited from parent
-        caps: dict[str, dict] = {}
-        cap_names: list[str] = []
-        for cap_name, cap_kwargs in parent._capabilities:
-            caps[cap_name] = dict(cap_kwargs)
-            cap_names.append(cap_name)
+        try:
+            parent_init = json.loads(parent_init_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            return {"error": f"failed to read parent init.json: {e}"}
 
         # Working dir: sibling of parent
         import secrets
         avatar_id = secrets.token_hex(3)
         avatar_working_dir = parent._working_dir.parent / avatar_id
-        mail_svc = FilesystemMailService(working_dir=avatar_working_dir)
 
-        # Inherit parent's LLM config
-        from lingtai_kernel.config import AgentConfig
-        peer_config = AgentConfig(
-            max_turns=parent._config.max_turns,
-            provider=parent._config.provider,
-            model=parent._config.model,
-            retry_timeout=parent._config.retry_timeout,
-            thinking_budget=parent._config.thinking_budget,
-            language=parent._config.language,
+        # Prepare the avatar's working directory
+        if avatar_type == "deep":
+            self._prepare_deep(parent._working_dir, avatar_working_dir)
+        else:
+            avatar_working_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write avatar's init.json (modified copy of parent's)
+        avatar_init = self._make_avatar_init(parent_init, peer_name, reasoning or "")
+        (avatar_working_dir / "init.json").write_text(
+            json.dumps(avatar_init, indent=2, ensure_ascii=False)
         )
 
-        avatar = Agent(
-            agent_name=peer_name,
-            service=parent.service,
-            mail_service=mail_svc,
-            config=peer_config,
-            working_dir=avatar_working_dir,
-            streaming=parent._streaming,
-            covenant=covenant,
-            capabilities=caps,
-            admin={},
-        )
+        # Launch as detached process
+        pid = self._launch(avatar_working_dir)
 
-        # Mirror: copy identity files from parent before start
-        if mirror:
-            self._copy_identity(parent._working_dir, avatar._working_dir)
-
-        avatar.start()
-
-        # Copy combo.json if parent has one
-        combo_path = parent._working_dir / "combo.json"
-        if combo_path.is_file():
-            shutil.copy2(combo_path, avatar._working_dir / "combo.json")
-
-        if reasoning:
-            avatar.send(reasoning, sender=str(parent._working_dir))
-
-        # Record
-        self._peers[peer_name] = avatar
-        address = mail_svc.address
+        # Record in ledger
         self._append_ledger(
             "avatar", peer_name,
-            address=address,
-            working_dir=str(avatar._working_dir),
+            working_dir=str(avatar_working_dir),
             mission=reasoning or "",
-            capabilities=cap_names,
-            mirror=mirror,
-            provider=parent._config.provider,
-            model=parent._config.model,
-            language=parent._config.language,
+            type=avatar_type,
+            pid=pid,
         )
 
         return {
             "status": "ok",
-            "address": address,
-            "agent_name": avatar.agent_name,
+            "working_dir": str(avatar_working_dir),
+            "agent_name": peer_name,
+            "type": avatar_type,
+            "pid": pid,
         }
 
     # ------------------------------------------------------------------
-    # Mirror — deep copy identity files
+    # Init.json construction
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _copy_identity(src: Path, dst: Path) -> None:
-        """Copy identity files from parent to avatar working directory."""
-        # system/character.md
-        src_char = src / "system" / "character.md"
-        if src_char.is_file():
-            dst_char = dst / "system" / "character.md"
-            dst_char.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_char, dst_char)
+    def _make_avatar_init(parent_init: dict, name: str, reasoning: str) -> dict:
+        """Build avatar's init.json from parent's, setting name and prompt."""
+        init = json.loads(json.dumps(parent_init))  # deep copy
+        init["manifest"]["agent_name"] = name
+        init["prompt"] = reasoning
+        # Avatar has no admin privileges
+        init["manifest"]["admin"] = {}
+        return init
 
-        # system/memory.md
-        src_mem = src / "system" / "memory.md"
-        if src_mem.is_file():
-            dst_mem = dst / "system" / "memory.md"
-            dst_mem.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_mem, dst_mem)
+    # ------------------------------------------------------------------
+    # Deep copy — 二重身
+    # ------------------------------------------------------------------
 
-        # library/library.json
-        src_lib = src / "library" / "library.json"
-        if src_lib.is_file():
-            dst_lib = dst / "library" / "library.json"
-            dst_lib.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_lib, dst_lib)
+    @staticmethod
+    def _prepare_deep(src: Path, dst: Path) -> None:
+        """Copy identity + knowledge from parent, excluding runtime state."""
+        dst.mkdir(parents=True, exist_ok=True)
 
-        # exports/ directory
+        # system/ (character, memory, covenant, etc.)
+        src_system = src / "system"
+        if src_system.is_dir():
+            dst_system = dst / "system"
+            if dst_system.exists():
+                shutil.rmtree(dst_system)
+            shutil.copytree(src_system, dst_system)
+
+        # library/
+        src_lib = src / "library"
+        if src_lib.is_dir():
+            dst_lib = dst / "library"
+            if dst_lib.exists():
+                shutil.rmtree(dst_lib)
+            shutil.copytree(src_lib, dst_lib)
+
+        # exports/
         src_exports = src / "exports"
         if src_exports.is_dir():
             dst_exports = dst / "exports"
             if dst_exports.exists():
                 shutil.rmtree(dst_exports)
             shutil.copytree(src_exports, dst_exports)
+
+        # combo.json
+        src_combo = src / "combo.json"
+        if src_combo.is_file():
+            shutil.copy2(src_combo, dst / "combo.json")
+
+        # Explicitly do NOT copy: history/, mailbox/, delegates/,
+        # .agent.json, .agent.heartbeat, logs/
+
+    # ------------------------------------------------------------------
+    # Process launch
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _launch(working_dir: Path) -> int:
+        """Launch `lingtai run <dir>` as a fully detached process."""
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "lingtai", "run", str(working_dir)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return proc.pid
+
+    # ------------------------------------------------------------------
+    # Ledger reading
+    # ------------------------------------------------------------------
+
+    def _read_ledger(self) -> list[dict]:
+        """Read all ledger records."""
+        if not self._ledger_path.is_file():
+            return []
+        records = []
+        for line in self._ledger_path.read_text().splitlines():
+            if line.strip():
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return records
 
 
 def setup(agent: "Agent", max_agents: int = 0) -> AvatarManager:
