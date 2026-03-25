@@ -168,3 +168,94 @@ def test_cli_build_agent_uses_refresh(tmp_path):
 
     # Cleanup
     agent._workdir.release_lock()
+
+
+def test_deep_refresh_invalid_init_keeps_old_config(tmp_path):
+    """If init.json is invalid, refresh logs error and keeps old state."""
+    init = _make_init(capabilities={"read": {}})
+    agent = _make_agent(tmp_path, init)
+    agent._perform_refresh()  # initial setup
+
+    agent._sealed = True
+    mock_session = MagicMock()
+    mock_session.chat = MagicMock()
+    mock_session.chat.interface = MagicMock()
+    agent._session = mock_session
+
+    # Write invalid init.json
+    (tmp_path / "init.json").write_text("not json")
+
+    old_caps = list(agent._capabilities)
+    agent._perform_refresh()
+
+    # Old capabilities preserved (refresh was a no-op)
+    assert agent._capabilities == old_caps
+
+
+def test_deep_refresh_removes_old_capabilities(tmp_path):
+    """Capabilities removed from init.json are gone after refresh."""
+    init = _make_init(capabilities={"read": {}, "write": {}})
+    agent = _make_agent(tmp_path, init)
+    agent._perform_refresh()  # initial setup
+
+    agent._sealed = True
+    mock_session = MagicMock()
+    mock_session.chat = MagicMock()
+    mock_session.chat.interface = MagicMock()
+    agent._session = mock_session
+
+    assert len(agent._capabilities) == 2
+
+    # Remove "write" from init.json
+    new_init = _make_init(capabilities={"read": {}})
+    (tmp_path / "init.json").write_text(json.dumps(new_init))
+
+    agent._perform_refresh()
+
+    cap_names = [name for name, _ in agent._capabilities]
+    assert "read" in cap_names
+    assert "write" not in cap_names
+
+
+def test_deep_refresh_preserves_chat_history(tmp_path):
+    """ChatInterface is passed through to _rebuild_session after refresh."""
+    agent = _make_agent(tmp_path, _make_init())
+    agent._sealed = True
+
+    mock_interface = MagicMock()
+    mock_session = MagicMock()
+    mock_session.chat = MagicMock()
+    mock_session.chat.interface = mock_interface
+    agent._session = mock_session
+
+    agent._perform_refresh()
+
+    mock_session._rebuild_session.assert_called_once_with(mock_interface)
+
+
+def test_deep_refresh_clears_stale_prompt_sections(tmp_path):
+    """Prompt sections from old capabilities don't survive refresh."""
+    agent = _make_agent(tmp_path, _make_init())
+
+    # Simulate a stale prompt section from a removed capability
+    agent._prompt_manager.write_section("some_old_section", "stale content")
+    assert agent._prompt_manager.read_section("some_old_section") is not None
+
+    agent._perform_refresh()
+
+    # Stale section should be gone
+    assert agent._prompt_manager.read_section("some_old_section") is None
+
+
+def test_deep_refresh_reseals(tmp_path):
+    """Tool surface is re-sealed after refresh completes."""
+    agent = _make_agent(tmp_path, _make_init())
+    agent._sealed = True
+    mock_session = MagicMock()
+    mock_session.chat = MagicMock()
+    mock_session.chat.interface = MagicMock()
+    agent._session = mock_session
+
+    agent._perform_refresh()
+
+    assert agent._sealed is True
