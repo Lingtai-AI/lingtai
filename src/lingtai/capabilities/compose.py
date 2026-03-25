@@ -35,10 +35,6 @@ def get_schema(lang: str = "en") -> dict:
     }
 
 
-# Backward compat
-SCHEMA: dict[str, Any] = get_schema("en")
-DESCRIPTION = get_description("en")
-
 
 class ComposeManager:
     """Manages music generation via MusicGenService."""

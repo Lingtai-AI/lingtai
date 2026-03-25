@@ -333,7 +333,8 @@ def test_export_to_memory_edit_workflow(tmp_path):
 
 
 def test_schema_has_all_fields():
-    from lingtai.capabilities.library import SCHEMA
+    from lingtai.capabilities.library import get_schema
+    SCHEMA = get_schema("en")
     actions = SCHEMA["properties"]["action"]["enum"]
     assert set(actions) == {"submit", "filter", "view", "consolidate", "delete", "export"}
     props = SCHEMA["properties"]

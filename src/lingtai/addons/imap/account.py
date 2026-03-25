@@ -1104,11 +1104,7 @@ class IMAPAccount:
                 self._folders = {}
                 self._folder_by_role = {}
                 for name, val in data["folders"].items():
-                    if isinstance(val, dict):
-                        role = val.get("role") or None
-                    else:
-                        # Backward compat: bare string
-                        role = val if isinstance(val, str) and val else None
+                    role = val.get("role") or None if isinstance(val, dict) else None
                     self._folders[name] = role
                     if role and role not in self._folder_by_role:
                         self._folder_by_role[role] = name
@@ -1128,9 +1124,6 @@ class IMAPAccount:
                         self._capabilities.add("MOVE")
                     if self._has_uidplus:
                         self._capabilities.add("UIDPLUS")
-                elif isinstance(caps, str):
-                    # Backward compat: space-separated string
-                    self._parse_capabilities(caps)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load IMAP state for %s: %s", self._email_address, e)
 

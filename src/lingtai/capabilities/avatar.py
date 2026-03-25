@@ -49,10 +49,6 @@ def get_schema(lang: str = "en") -> dict:
     }
 
 
-# Backward compat
-SCHEMA = get_schema("en")
-DESCRIPTION = get_description("en")
-
 
 class AvatarManager:
     """Spawns avatar (分身) peer agents with filesystem mail.

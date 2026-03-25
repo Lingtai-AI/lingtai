@@ -44,10 +44,6 @@ def get_schema(lang: str = "en") -> dict:
     }
 
 
-# Backward compat
-SCHEMA: dict[str, Any] = get_schema("en")
-DESCRIPTION = get_description("en")
-
 
 class ListenManager:
     """Manages audio transcription (via TranscriptionService) and appreciation (librosa)."""

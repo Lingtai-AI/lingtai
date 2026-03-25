@@ -269,19 +269,22 @@ def test_molt_delegates_to_eigen(tmp_path):
 
 
 def test_psyche_schema_has_correct_objects():
-    from lingtai.capabilities.psyche import SCHEMA
+    from lingtai.capabilities.psyche import get_schema
+    SCHEMA = get_schema("en")
     objects = SCHEMA["properties"]["object"]["enum"]
     assert set(objects) == {"character", "memory", "context"}
 
 
 def test_psyche_schema_has_correct_actions():
-    from lingtai.capabilities.psyche import SCHEMA
+    from lingtai.capabilities.psyche import get_schema
+    SCHEMA = get_schema("en")
     actions = SCHEMA["properties"]["action"]["enum"]
     assert set(actions) == {"update", "load", "edit", "molt"}
 
 
 def test_psyche_schema_has_files_field():
-    from lingtai.capabilities.psyche import SCHEMA
+    from lingtai.capabilities.psyche import get_schema
+    SCHEMA = get_schema("en")
     assert "files" in SCHEMA["properties"]
 
 

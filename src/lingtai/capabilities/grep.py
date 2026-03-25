@@ -30,10 +30,6 @@ def get_schema(lang: str = "en") -> dict:
     }
 
 
-# Backward compat
-SCHEMA = get_schema("en")
-DESCRIPTION = get_description("en")
-
 
 def setup(agent: "BaseAgent") -> None:
     """Set up the grep capability on an agent."""
