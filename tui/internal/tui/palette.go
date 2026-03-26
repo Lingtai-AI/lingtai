@@ -1,0 +1,130 @@
+package tui
+
+import (
+	"strings"
+
+	"github.com/anthropics/lingtai-tui/i18n"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// PaletteSelectMsg is sent when the user selects a command from the palette.
+type PaletteSelectMsg struct {
+	Command string
+}
+
+// Command represents a slash command in the palette.
+type Command struct {
+	Name        string // e.g. "manage"
+	Description string // i18n key for description
+}
+
+// PaletteModel is the command palette overlay.
+type PaletteModel struct {
+	commands []Command
+	filtered []Command
+	cursor   int
+	filter   string
+	width    int
+}
+
+func NewPaletteModel() PaletteModel {
+	cmds := DefaultCommands()
+	return PaletteModel{
+		commands: cmds,
+		filtered: cmds,
+	}
+}
+
+// DefaultCommands returns all slash commands.
+func DefaultCommands() []Command {
+	return []Command{
+		{Name: "manage", Description: "palette.manage"},
+		{Name: "viz", Description: "palette.viz"},
+		{Name: "setup", Description: "palette.setup"},
+		{Name: "settings", Description: "palette.settings"},
+		{Name: "presets", Description: "palette.presets"},
+		{Name: "lang", Description: "palette.lang"},
+		{Name: "help", Description: "palette.help"},
+		{Name: "quit", Description: "palette.quit"},
+	}
+}
+
+func (m PaletteModel) Init() tea.Cmd { return nil }
+
+func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "down":
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+			}
+			return m, nil
+		case "enter":
+			if m.cursor < len(m.filtered) {
+				cmd := m.filtered[m.cursor]
+				return m, func() tea.Msg {
+					return PaletteSelectMsg{Command: cmd.Name}
+				}
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// SetFilter updates the filter string and refilters commands.
+// filter should be the text after "/" (e.g., "man" from "/man").
+func (m *PaletteModel) SetFilter(filter string) {
+	m.filter = filter
+	m.filtered = nil
+	for _, cmd := range m.commands {
+		if filter == "" || strings.HasPrefix(cmd.Name, filter) {
+			m.filtered = append(m.filtered, cmd)
+		}
+	}
+	if m.cursor >= len(m.filtered) {
+		m.cursor = max(0, len(m.filtered)-1)
+	}
+}
+
+func (m PaletteModel) View() string {
+	if len(m.filtered) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	border := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorSubtle).
+		Padding(0, 1)
+
+	for idx, cmd := range m.filtered {
+		cursor := "  "
+		if idx == m.cursor {
+			cursor = "> "
+		}
+		name := "/" + cmd.Name
+		desc := i18n.T(cmd.Description)
+		line := cursor + lipgloss.NewStyle().Bold(true).Render(padRight(name, 12)) + StyleSubtle.Render(desc)
+		b.WriteString(line)
+		if idx < len(m.filtered)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return border.Render(b.String())
+}
+
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s + " "
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}

@@ -12,9 +12,8 @@ var (
 	ColorHuman     = lipgloss.Color("#a0aec0")
 	ColorSubtle    = lipgloss.Color("#4a5568")
 
-	StyleTitle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
-	StyleSubtle    = lipgloss.NewStyle().Foreground(ColorSubtle)
-	StyleStatusBar = lipgloss.NewStyle().Background(lipgloss.Color("#1a1a2e")).Padding(0, 1)
+	StyleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
+	StyleSubtle = lipgloss.NewStyle().Foreground(ColorSubtle)
 )
 
 func StateColor(state string) lipgloss.Color {
