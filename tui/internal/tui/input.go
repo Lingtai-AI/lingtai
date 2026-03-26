@@ -58,36 +58,34 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 		case "enter":
 			return m, func() tea.Msg { return SendMsg{} }
 		case "up":
-			if len(m.history) > 0 && m.historyIdx < len(m.history)-1 {
+			// History only when input is empty or single-line with no content
+			if m.textarea.Value() == "" && len(m.history) > 0 && m.historyIdx < len(m.history)-1 {
 				m.historyIdx++
 				m.textarea.SetValue(m.history[len(m.history)-1-m.historyIdx])
 				m.textarea.CursorEnd()
+				m.textarea.SetHeight(m.calcHeight())
+				return m, nil
 			}
-			return m, nil
+			// Otherwise let textarea handle cursor movement
 		case "down":
-			if m.historyIdx > 0 {
-				m.historyIdx--
-				m.textarea.SetValue(m.history[len(m.history)-1-m.historyIdx])
-				m.textarea.CursorEnd()
-			} else if m.historyIdx == 0 {
-				m.historyIdx = -1
-				m.textarea.SetValue("")
+			if m.textarea.Value() == "" && m.historyIdx >= 0 {
+				if m.historyIdx > 0 {
+					m.historyIdx--
+					m.textarea.SetValue(m.history[len(m.history)-1-m.historyIdx])
+					m.textarea.CursorEnd()
+				} else {
+					m.historyIdx = -1
+					m.textarea.SetValue("")
+				}
+				m.textarea.SetHeight(m.calcHeight())
+				return m, nil
 			}
-			return m, nil
+			// Otherwise let textarea handle cursor movement
 		}
 		// Forward to textarea for all other keys (including ctrl+j for newline)
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
-
-		// Auto-grow height based on content
-		lines := strings.Count(m.textarea.Value(), "\n") + 1
-		if lines > 6 {
-			lines = 6
-		}
-		if lines < 1 {
-			lines = 1
-		}
-		m.textarea.SetHeight(lines)
+		m.textarea.SetHeight(m.calcHeight())
 
 		// After update, check if slash is first char → activate palette
 		newVal := m.textarea.Value()
@@ -132,16 +130,38 @@ func (m InputModel) View() string {
 	return rendered + pad + hint
 }
 
+// calcHeight returns the display height accounting for word-wrap.
+func (m InputModel) calcHeight() int {
+	val := m.textarea.Value()
+	if val == "" {
+		return 1
+	}
+	w := m.textarea.Width()
+	if w <= 0 {
+		w = 80
+	}
+	total := 0
+	for _, line := range strings.Split(val, "\n") {
+		// Each logical line takes at least 1 row, plus extra for wrapping
+		lineLen := len([]rune(line))
+		rows := 1
+		if lineLen > w {
+			rows = (lineLen + w - 1) / w
+		}
+		total += rows
+	}
+	if total > 6 {
+		total = 6
+	}
+	if total < 1 {
+		total = 1
+	}
+	return total
+}
+
 // LineCount returns the number of display lines in the input.
 func (m InputModel) LineCount() int {
-	lines := strings.Count(m.textarea.Value(), "\n") + 1
-	if lines > 6 {
-		lines = 6
-	}
-	if lines < 1 {
-		lines = 1
-	}
-	return lines
+	return m.calcHeight()
 }
 
 func (m InputModel) Value() string {

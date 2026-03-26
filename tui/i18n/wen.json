@@ -32,6 +32,7 @@
   "mail.cpr_alive": "器灵尚在。",
   "mail.rename_prompt": "入器灵新名：",
   "mail.renamed": "器灵已更名为 %s。",
+  "mail.refreshing": "重启器灵中...",
   "mail.refreshed": "器灵已重启。",
   "mail.lang_prompt": "入器灵言（en 英文, zh 现代汉语, wen 文言）：",
   "mail.lang_changed": "器灵言已换为 %s。",

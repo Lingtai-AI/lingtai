@@ -68,8 +68,11 @@ type MailModel struct {
 	height       int
 	ready        bool
 	pollRate     time.Duration // refresh interval
-	orchAlive    bool
-	orchState    string // agent state from .agent.json
+	orchAlive        bool
+	orchState        string // agent state from .agent.json
+	sysMessages      []ChatMessage // persistent system messages (survive refresh)
+	lastInputLines   int
+	lastPaletteLines int
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRate int) MailModel {
@@ -97,6 +100,32 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRa
 		palette:      palette,
 		pollRate:     time.Duration(pollRate) * time.Second,
 	}
+}
+
+// syncViewportHeight recalculates viewport height from current input/palette size.
+// Returns true if the height actually changed.
+func (m *MailModel) syncViewportHeight() bool {
+	if !m.ready {
+		return false
+	}
+	inputLines := m.input.LineCount()
+	paletteLines := 0
+	if m.input.IsPaletteActive() {
+		paletteLines = m.palette.LineCount()
+	}
+	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines {
+		return false
+	}
+	m.lastInputLines = inputLines
+	m.lastPaletteLines = paletteLines
+	// Layout: header(2) + viewport + sep(1) + palette(N) + input(N) + status(1)
+	footerHeight := 1 + paletteLines + inputLines + 1
+	vpHeight := m.height - 2 - footerHeight
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.viewport.Height = vpHeight
+	return true
 }
 
 func (m MailModel) refreshMail() tea.Msg {
@@ -183,29 +212,27 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width)
-		// Layout: header(2) + viewport + footer(sep + input(N lines) + status)
-		inputHeight := 1
-		if m.ready {
-			inputHeight = m.input.LineCount()
-		}
-		footerHeight := 1 + inputHeight + 1 // sep + input + status
-		vpHeight := msg.Height - 2 - footerHeight
-		if vpHeight < 1 {
-			vpHeight = 1
-		}
 		if !m.ready {
+			inputLines := m.input.LineCount()
+			footerHeight := 1 + inputLines + 1
+			vpHeight := msg.Height - 2 - footerHeight
+			if vpHeight < 1 {
+				vpHeight = 1
+			}
 			m.viewport = viewport.New(msg.Width, vpHeight)
 			m.viewport.SetContent(m.renderMessages())
+			m.lastInputLines = inputLines
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = vpHeight
+			m.lastInputLines = -1 // force recalculate
+			m.syncViewportHeight()
 		}
 		return m, nil
 
 	case mailRefreshMsg:
 		prevCount := len(m.messages)
-		m.messages = msg.messages
+		m.messages = append(msg.messages, m.sysMessages...)
 		m.orchAlive = msg.alive
 		m.orchState = msg.state
 		if m.ready {
@@ -224,15 +251,32 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	case SendMsg:
 		text := m.input.Value()
-		if text != "" && m.orchestrator != "" {
+		if text == "" {
+			return m, nil
+		}
+		// If text starts with /, treat as slash command
+		if len(text) > 1 && text[0] == '/' {
+			parts := strings.SplitN(text[1:], " ", 2)
+			cmd := parts[0]
+			args := ""
+			if len(parts) > 1 {
+				args = strings.TrimSpace(parts[1])
+			}
+			m.input.Reset()
+			m.syncViewportHeight()
+			return m, func() tea.Msg { return PaletteSelectMsg{Command: cmd, Args: args} }
+		}
+		if m.orchestrator != "" {
 			fs.WriteMail(m.orchestrator, m.humanDir, m.humanAddr, m.orchAddr, "", text)
 			m.input.Reset()
+			m.syncViewportHeight()
 			return m, m.refreshMail
 		}
 		return m, nil
 
 	case PaletteSelectMsg:
 		m.input.Reset()
+		m.syncViewportHeight()
 		// Forward to app
 		return m, func() tea.Msg { return PaletteSelectMsg{Command: msg.Command} }
 
@@ -240,17 +284,38 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// If palette is active, route to palette
 		if m.input.IsPaletteActive() {
 			switch msg.String() {
-			case "enter", "up", "down":
+			case "enter":
+				// If input has args (space after /cmd), parse as command+args
+				val := m.input.Value()
+				if strings.Contains(val, " ") {
+					parts := strings.SplitN(val[1:], " ", 2)
+					cmd := parts[0]
+					args := ""
+					if len(parts) > 1 {
+						args = strings.TrimSpace(parts[1])
+					}
+					m.input.Reset()
+					return m, func() tea.Msg { return PaletteSelectMsg{Command: cmd, Args: args} }
+				}
+				// No args — select from palette
+				m.input.Reset()
+				m.syncViewportHeight()
+				var cmd tea.Cmd
+				m.palette, cmd = m.palette.Update(msg)
+				return m, cmd
+			case "up", "down":
 				var cmd tea.Cmd
 				m.palette, cmd = m.palette.Update(msg)
 				return m, cmd
 			case "esc":
 				m.input.Reset()
+				m.syncViewportHeight()
 				return m, nil
 			default:
 				// Forward typing to input, then update palette filter
 				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
+				m.syncViewportHeight()
 				// Extract filter from input (text after "/")
 				val := m.input.Value()
 				if len(val) > 1 {
@@ -296,6 +361,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// If input is focused, forward keys to input
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		if m.syncViewportHeight() && m.viewport.AtBottom() {
+			m.viewport.GotoBottom()
+		}
 		// Check if slash was typed
 		if m.input.IsPaletteActive() {
 			val := m.input.Value()
@@ -359,6 +427,8 @@ func (m MailModel) renderMessages() string {
 			nameStyle := lipgloss.NewStyle().Foreground(ColorActive).Bold(true)
 			if msg.IsFromMe {
 				nameStyle = lipgloss.NewStyle().Foreground(ColorMail).Bold(true)
+			} else if msg.From == i18n.T("mail.system_sender") {
+				nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#48bb78")).Bold(true)
 			}
 			name := nameStyle.Render(msg.From)
 			// Short timestamp (HH:MM)
@@ -386,6 +456,23 @@ func (m MailModel) renderMessages() string {
 		}
 	}
 	return b.String()
+}
+
+// AddSystemMessage appends a persistent system message that survives refresh.
+func (m *MailModel) AddSystemMessage(body string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	msg := ChatMessage{
+		From:      i18n.T("mail.system_sender"),
+		Body:      body,
+		Timestamp: now,
+		Type:      "mail",
+	}
+	m.messages = append(m.messages, msg)
+	m.sysMessages = append(m.sysMessages, msg)
+	if m.ready {
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+	}
 }
 
 func (m MailModel) View() string {

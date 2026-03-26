@@ -157,8 +157,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewChangeMsg:
 		return a.switchToView(msg.View)
 
+	case refreshDoneMsg:
+		a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
+		return a, a.mail.refreshMail
+
 	case PaletteSelectMsg:
-		return a.handlePaletteCommand(msg.Command)
+		return a.handlePaletteCommand(msg.Command, msg.Args)
 
 	case FirstRunDoneMsg:
 		// First-run complete: launch agent and switch to mail
@@ -280,99 +284,57 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) handlePaletteCommand(command string) (tea.Model, tea.Cmd) {
+func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	switch command {
 	case "interrupt":
 		if a.orchDir != "" {
 			interruptFile := filepath.Join(a.orchDir, ".interrupt")
 			os.WriteFile(interruptFile, []byte(""), 0o644)
-			a.mail.messages = append(a.mail.messages, ChatMessage{
-				From: i18n.T("mail.system_sender"),
-				Body: i18n.T("mail.interrupted"),
-				Type: "mail",
-			})
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
-			}
+			a.mail.AddSystemMessage(i18n.T("mail.interrupted"))
 		}
 		return a, nil
 	case "sleep":
 		if a.orchDir != "" {
 			sleepFile := filepath.Join(a.orchDir, ".sleep")
 			os.WriteFile(sleepFile, []byte(""), 0o644)
-			a.mail.messages = append(a.mail.messages, ChatMessage{
-				From: i18n.T("mail.system_sender"),
-				Body: i18n.T("mail.sleep_sent"),
-				Type: "mail",
-			})
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
-			}
+			a.mail.AddSystemMessage(i18n.T("mail.sleep_sent"))
 		}
 		return a, nil
 	case "cpr":
 		if a.orchDir != "" && a.lingtaiCmd != "" {
 			if !fs.IsAlive(a.orchDir, 3.0) {
 				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
-				a.mail.messages = append(a.mail.messages, ChatMessage{
-					From: i18n.T("mail.system_sender"),
-					Body: i18n.TF("mail.cpr", a.orchName),
-					Type: "mail",
-				})
+				a.mail.AddSystemMessage(i18n.TF("mail.cpr", a.orchName))
 			} else {
-				a.mail.messages = append(a.mail.messages, ChatMessage{
-					From: i18n.T("mail.system_sender"),
-					Body: i18n.T("mail.cpr_alive"),
-					Type: "mail",
-				})
-			}
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
+				a.mail.AddSystemMessage(i18n.T("mail.cpr_alive"))
 			}
 		}
 		return a, nil
 	case "rename":
 		if a.orchDir != "" {
-			a.pendingRename = true
-			a.mail.messages = append(a.mail.messages, ChatMessage{
-				From: i18n.T("mail.system_sender"),
-				Body: i18n.T("mail.rename_prompt"),
-				Type: "mail",
-			})
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
+			if args != "" {
+				a.doRename(args)
+				return a, a.mail.refreshMail
 			}
+			a.pendingRename = true
+			a.mail.AddSystemMessage(i18n.T("mail.rename_prompt"))
 		}
 		return a, nil
 	case "lang":
 		if a.orchDir != "" {
-			a.pendingLang = true
-			a.mail.messages = append(a.mail.messages, ChatMessage{
-				From: i18n.T("mail.system_sender"),
-				Body: i18n.T("mail.lang_prompt"),
-				Type: "mail",
-			})
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
+			if args != "" {
+				a.doLang(args)
+			} else {
+				a.mail.AddSystemMessage(i18n.T("mail.lang_prompt"))
 			}
 		}
 		return a, nil
 	case "refresh":
 		if a.orchDir != "" && a.lingtaiCmd != "" {
-			a.hardRefresh()
-			a.mail.messages = append(a.mail.messages, ChatMessage{
-				From: i18n.T("mail.system_sender"),
-				Body: i18n.T("mail.refreshed"),
-				Type: "mail",
-			})
-			if a.mail.ready {
-				a.mail.viewport.SetContent(a.mail.renderMessages())
-				a.mail.viewport.GotoBottom()
+			a.mail.AddSystemMessage(i18n.T("mail.refreshing"))
+			return a, func() tea.Msg {
+				a.hardRefresh()
+				return refreshDoneMsg{}
 			}
 		}
 		return a, nil
@@ -456,36 +418,16 @@ func (a *App) doRename(newName string) {
 	}
 	a.orchName = newName
 	a.mail.orchName = newName
-
-	// Hard refresh: suspend + cpr so the agent picks up the new name
 	a.hardRefresh()
-
-	a.mail.messages = append(a.mail.messages, ChatMessage{
-		From: i18n.T("mail.system_sender"),
-		Body: i18n.TF("mail.renamed", newName),
-		Type: "mail",
-	})
-	if a.mail.ready {
-		a.mail.viewport.SetContent(a.mail.renderMessages())
-		a.mail.viewport.GotoBottom()
-	}
+	a.mail.AddSystemMessage(i18n.TF("mail.renamed", newName))
 }
 
 func (a *App) doLang(lang string) {
 	valid := map[string]bool{"en": true, "zh": true, "wen": true}
 	if !valid[lang] {
-		a.mail.messages = append(a.mail.messages, ChatMessage{
-			From: i18n.T("mail.system_sender"),
-			Body: i18n.TF("mail.lang_invalid", lang),
-			Type: "mail",
-		})
-		if a.mail.ready {
-			a.mail.viewport.SetContent(a.mail.renderMessages())
-			a.mail.viewport.GotoBottom()
-		}
+		a.mail.AddSystemMessage(i18n.TF("mail.lang_invalid", lang))
 		return
 	}
-	// Update init.json
 	initPath := filepath.Join(a.orchDir, "init.json")
 	if data, err := os.ReadFile(initPath); err == nil {
 		var initData map[string]interface{}
@@ -498,23 +440,10 @@ func (a *App) doLang(lang string) {
 			}
 		}
 	}
-	// Copy matching covenant
 	if covenantSrc := preset.CovenantForLang(lang); covenantSrc != nil {
 		os.WriteFile(filepath.Join(a.orchDir, "covenant.md"), covenantSrc, 0o644)
 	}
-	// Hard refresh
-	if a.lingtaiCmd != "" {
-		a.hardRefresh()
-	}
-	a.mail.messages = append(a.mail.messages, ChatMessage{
-		From: i18n.T("mail.system_sender"),
-		Body: i18n.TF("mail.lang_changed", lang),
-		Type: "mail",
-	})
-	if a.mail.ready {
-		a.mail.viewport.SetContent(a.mail.renderMessages())
-		a.mail.viewport.GotoBottom()
-	}
+	a.mail.AddSystemMessage(i18n.TF("mail.lang_changed", lang))
 }
 
 // hardRefresh suspends the orchestrator and relaunches it.
@@ -543,6 +472,8 @@ func (a App) sendSize() tea.Cmd {
 	w, h := a.width, a.height
 	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
 }
+
+type refreshDoneMsg struct{}
 
 func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {

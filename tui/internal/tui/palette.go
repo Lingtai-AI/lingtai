@@ -11,6 +11,7 @@ import (
 // PaletteSelectMsg is sent when the user selects a command from the palette.
 type PaletteSelectMsg struct {
 	Command string
+	Args    string // optional argument (e.g. "/rename foo" → Args="foo")
 }
 
 // Command represents a slash command in the palette.
@@ -119,6 +120,14 @@ func fuzzyMatch(cmd, filter string) bool {
 		}
 	}
 	return si == len(filter)
+}
+
+// LineCount returns the terminal lines the palette occupies (0 if empty).
+func (m PaletteModel) LineCount() int {
+	if len(m.filtered) == 0 {
+		return 0
+	}
+	return len(m.filtered) + 2 // border top + commands + border bottom
 }
 
 func (m PaletteModel) View() string {

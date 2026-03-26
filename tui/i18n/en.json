@@ -32,6 +32,7 @@
   "mail.cpr_alive": "Agent is already alive.",
   "mail.rename_prompt": "Enter new name for the agent:",
   "mail.renamed": "Agent renamed to %s.",
+  "mail.refreshing": "Restarting agent...",
   "mail.refreshed": "Agent restarted.",
   "mail.lang_prompt": "Enter agent language (en English, zh 现代汉语, wen 文言):",
   "mail.lang_changed": "Agent language changed to %s.",
