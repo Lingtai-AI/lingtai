@@ -7,11 +7,11 @@ const path = require('path');
 const platformKey = `${os.platform()}-${os.arch() === 'x64' ? 'x64' : os.arch()}`;
 
 const packageMap = {
-  'darwin-arm64': '@lingtai/tui-darwin-arm64',
-  'darwin-x64': '@lingtai/tui-darwin-x64',
-  'linux-x64': '@lingtai/tui-linux-x64',
-  'linux-arm64': '@lingtai/tui-linux-arm64',
-  'win32-x64': '@lingtai/tui-win32-x64',
+  'darwin-arm64': 'lingtai-darwin-arm64',
+  'darwin-x64': 'lingtai-darwin-x64',
+  'linux-x64': 'lingtai-linux-x64',
+  'linux-arm64': 'lingtai-linux-arm64',
+  'win32-x64': 'lingtai-win32-x64',
 };
 
 const pkg = packageMap[platformKey];
