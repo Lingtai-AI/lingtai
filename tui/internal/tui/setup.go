@@ -90,8 +90,8 @@ func (m SetupModel) View() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("setup.title"))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("setup.back"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render("·") + " " + StyleTitle.Render(i18n.T("setup.title"))
+	escHint := lipgloss.NewStyle().Foreground(ColorAccent).Render("[esc] ") + StyleSubtle.Render(i18n.T("setup.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -116,9 +116,9 @@ func (m SetupModel) View() string {
 
 	// Hints
 	if m.currentKey != "" {
-		b.WriteString(StyleSubtle.Render("  [Enter] " + i18n.T("setup.keep_or_save") + "    [Esc] " + i18n.T("setup.back")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Enter] " + i18n.T("setup.keep_or_save") + "  [Esc] " + i18n.T("setup.back")) + "\n")
 	} else {
-		b.WriteString(StyleSubtle.Render("  [Enter] " + i18n.T("setup.save") + "    [Esc] " + i18n.T("setup.back")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Enter] " + i18n.T("setup.save") + "  [Esc] " + i18n.T("setup.back")) + "\n")
 	}
 
 	return b.String()
