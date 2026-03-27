@@ -48,6 +48,7 @@ func DefaultCommands() []Command {
 		{Name: "nickname", Description: "palette.nickname"},
 		{Name: "rename", Description: "palette.rename"},
 		{Name: "lang", Description: "palette.lang"},
+		{Name: "clear", Description: "palette.clear"},
 		{Name: "refresh", Description: "palette.refresh"},
 		{Name: "manage", Description: "palette.manage"},
 		{Name: "viz", Description: "palette.viz"},
