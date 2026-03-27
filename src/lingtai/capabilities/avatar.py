@@ -145,6 +145,14 @@ class AvatarManager:
         else:
             avatar_working_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve relative file paths to absolute so avatar can find them
+        for key in ("env_file", "covenant_file", "comment_file"):
+            val = parent_init.get(key)
+            if val and not os.path.isabs(val):
+                resolved = parent._working_dir / val
+                if resolved.is_file():
+                    parent_init[key] = str(resolved)
+
         # Write avatar's init.json (modified copy of parent's)
         avatar_comment = args.get("comment", "")
         avatar_init = self._make_avatar_init(parent_init, peer_name, reasoning or "", comment=avatar_comment)
