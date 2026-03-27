@@ -11,6 +11,9 @@ import (
 //go:embed all:covenant
 var covenantFS embed.FS
 
+//go:embed all:templates
+var templatesFS embed.FS
+
 // Preset is a reusable agent template stored at ~/.lingtai/presets/.
 type Preset struct {
 	Name        string                 `json:"name"`
@@ -200,6 +203,29 @@ func EnsureCovenants(globalDir string) {
 	}
 }
 
+// EnsureTemplates copies embedded example files to ~/.lingtai/templates/.
+func EnsureTemplates(globalDir string) {
+	dir := filepath.Join(globalDir, "templates")
+	entries, err := templatesFS.ReadDir("templates")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		target := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(target); err == nil {
+			continue // already exists
+		}
+		os.MkdirAll(dir, 0o755)
+		data, err := templatesFS.ReadFile("templates/" + e.Name())
+		if err == nil {
+			os.WriteFile(target, data, 0o644)
+		}
+	}
+}
+
 // CovenantPath returns the absolute path to the covenant file for a language.
 func CovenantPath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "covenant", lang, "covenant.md")
@@ -243,12 +269,20 @@ func GenerateInitJSON(p Preset, agentName, lingtaiDir, globalDir string) error {
 	manifest["max_turns"] = 100
 	manifest["streaming"] = true
 
+	// Comment: persistent app-level system prompt for the orchestrator
+	comment := "You are the 本我 (orchestrator) — the primary agent the human interacts with. " +
+		"Templates and examples for setting up IMAP email and Telegram integrations " +
+		"are available at " + filepath.Join(globalDir, "templates") + "/ — " +
+		"guide the human there if they want to connect external services. " +
+		"Covenants for all languages are at " + filepath.Join(globalDir, "covenant") + "/."
+
 	initJSON := map[string]interface{}{
 		"manifest":      manifest,
 		"covenant_file": CovenantPath(globalDir, lang),
 		"principle":     "",
 		"memory":        "",
 		"prompt":        "",
+		"comment":       comment,
 	}
 
 	data, err := json.MarshalIndent(initJSON, "", "  ")

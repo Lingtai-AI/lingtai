@@ -74,8 +74,9 @@ func main() {
 		}
 	}
 
-	// Ensure covenant files at ~/.lingtai/covenant/
+	// Ensure covenant files and templates at ~/.lingtai/
 	preset.EnsureCovenants(globalDir)
+	preset.EnsureTemplates(globalDir)
 
 	// Load settings
 	settings := tui.LoadSettings(lingtaiDir)
