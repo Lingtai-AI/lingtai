@@ -480,13 +480,7 @@ func (m FirstRunModel) View() string {
 			}
 			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(p.Name)
 			desc := StyleSubtle.Render("  " + p.Description)
-			icons := StyleSubtle.Render("  " + p.CapabilityIcons())
-			// Add warning if provider key is missing
-			if m.presetNeedsKey(p) {
-				warnStyle := lipgloss.NewStyle().Foreground(ColorStuck)
-				icons += " " + warnStyle.Render("⚠️")
-			}
-			b.WriteString(cursor + name + desc + icons + "\n")
+			b.WriteString(cursor + name + desc + "\n")
 		}
 		// Quick config panel
 		if m.quickEditMode {
