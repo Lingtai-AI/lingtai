@@ -287,19 +287,49 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	switch command {
-	case "interrupt":
-		if a.orchDir != "" {
-			interruptFile := filepath.Join(a.orchDir, ".interrupt")
-			os.WriteFile(interruptFile, []byte(""), 0o644)
-			a.mail.AddSystemMessage(i18n.T("mail.interrupted"))
-		}
-		return a, nil
 	case "sleep":
 		if a.orchDir != "" {
 			sleepFile := filepath.Join(a.orchDir, ".sleep")
 			os.WriteFile(sleepFile, []byte(""), 0o644)
 			a.mail.AddSystemMessage(i18n.T("mail.sleep_sent"))
 		}
+		return a, nil
+	case "sleep-all":
+		agents, _ := fs.DiscoverAgents(a.projectDir)
+		count := 0
+		for _, agent := range agents {
+			if agent.IsHuman {
+				continue
+			}
+			if fs.IsAlive(agent.WorkingDir, 3.0) {
+				sleepFile := filepath.Join(agent.WorkingDir, ".sleep")
+				os.WriteFile(sleepFile, []byte(""), 0o644)
+				count++
+			}
+		}
+		a.mail.AddSystemMessage(i18n.TF("mail.sleep_all", count))
+		return a, nil
+	case "suspend":
+		if a.orchDir != "" {
+			suspendFile := filepath.Join(a.orchDir, ".suspend")
+			os.WriteFile(suspendFile, []byte(""), 0o644)
+			a.mail.AddSystemMessage(i18n.TF("mail.suspended", a.orchName))
+		}
+		return a, nil
+	case "suspend-all":
+		agents, _ := fs.DiscoverAgents(a.projectDir)
+		count := 0
+		for _, agent := range agents {
+			if agent.IsHuman {
+				continue
+			}
+			if fs.IsAlive(agent.WorkingDir, 3.0) {
+				suspendFile := filepath.Join(agent.WorkingDir, ".suspend")
+				os.WriteFile(suspendFile, []byte(""), 0o644)
+				count++
+			}
+		}
+		a.mail.AddSystemMessage(i18n.TF("mail.suspended_all", count))
 		return a, nil
 	case "cpr":
 		if a.orchDir != "" && a.lingtaiCmd != "" {
@@ -387,8 +417,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "help":
 		// Render help inline as a system message in the chat stream
 		helpText := i18n.T("help.title") + "\n" +
-			i18n.T("help.interrupt") + "\n" +
 			i18n.T("help.sleep") + "\n" +
+			i18n.T("help.sleep_all") + "\n" +
+			i18n.T("help.suspend") + "\n" +
+			i18n.T("help.suspend_all") + "\n" +
 			i18n.T("help.cpr") + "\n" +
 			i18n.T("help.nickname") + "\n" +
 			i18n.T("help.rename") + "\n" +
