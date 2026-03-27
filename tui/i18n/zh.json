@@ -92,6 +92,8 @@
   "firstrun.created": "Agent 已创建：%s",
   "firstrun.error": "错误：%s",
   "firstrun.select_hint": "↑↓ 选择  [enter] 确认",
+  "firstrun.enter_dir": "输入 %s 的文件夹名（ASCII，无空格）：",
+  "firstrun.dir_exists": "文件夹 '%s' 已存在，请换一个名字。",
   "firstrun.create_hint": "[Enter] 创建    [Esc] 返回",
 
   "palette.interrupt": "打断 Agent（取消当前回合）",

@@ -92,6 +92,8 @@
   "firstrun.created": "Agent created: %s",
   "firstrun.error": "Error: %s",
   "firstrun.select_hint": "↑↓ select  [enter] choose",
+  "firstrun.enter_dir": "Enter folder name for %s (ASCII, no spaces):",
+  "firstrun.dir_exists": "Folder '%s' already exists. Choose another name.",
   "firstrun.create_hint": "[Enter] Create    [Esc] Back",
 
   "palette.interrupt": "Interrupt agent (cancel current turn)",

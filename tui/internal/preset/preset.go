@@ -237,8 +237,8 @@ func DefaultPreset() Preset {
 }
 
 // GenerateInitJSON creates a full init.json from a preset at .lingtai/<agentName>/init.json.
-func GenerateInitJSON(p Preset, agentName, lingtaiDir, globalDir string) error {
-	agentDir := filepath.Join(lingtaiDir, agentName)
+func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string) error {
+	agentDir := filepath.Join(lingtaiDir, dirName)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
 	}

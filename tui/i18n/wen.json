@@ -92,6 +92,8 @@
   "firstrun.created": "器灵已创：%s",
   "firstrun.error": "误：%s",
   "firstrun.select_hint": "↑↓ 择  [enter] 定",
+  "firstrun.enter_dir": "入 %s 之文件夹名（ASCII，无空格）：",
+  "firstrun.dir_exists": "文件夹 '%s' 已存，请另取。",
   "firstrun.create_hint": "[Enter] 建    [Esc] 返",
 
   "palette.interrupt": "断灵（止当回）",

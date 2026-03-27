@@ -203,7 +203,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		agentName := p.Name
-		if err := preset.GenerateInitJSON(p, agentName, a.projectDir, a.globalDir); err != nil {
+		if err := preset.GenerateInitJSON(p, agentName, agentName, a.projectDir, a.globalDir); err != nil {
 			return a, nil
 		}
 		orchDir := filepath.Join(a.projectDir, agentName)

@@ -77,7 +77,7 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 
 		globalDir := filepath.Join(tmpDir, ".lingtai-global")
 		EnsureCovenants(globalDir)
-		if err := GenerateInitJSON(p, "test-agent", lingtaiDir, globalDir); err != nil {
+		if err := GenerateInitJSON(p, "test-agent", "test-agent", lingtaiDir, globalDir); err != nil {
 			t.Fatalf("GenerateInitJSON() error: %v", err)
 		}
 

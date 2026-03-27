@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -26,6 +27,7 @@ const (
 	stepEditPreset
 	stepNewPreset
 	stepNameAgent
+	stepDirAgent
 	stepLaunching
 )
 
@@ -36,6 +38,8 @@ type FirstRunModel struct {
 	presets   []preset.Preset
 	cursor    int
 	nameInput textinput.Model
+	dirInput  textinput.Model
+	agentName string // stored after stepNameAgent
 	message   string
 	baseDir   string // .lingtai/ directory
 	globalDir string
@@ -52,10 +56,15 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	ti.CharLimit = 64
 	ti.Width = 40
 
+	di := textinput.New()
+	di.CharLimit = 64
+	di.Width = 40
+
 	m := FirstRunModel{
 		baseDir:   baseDir,
 		globalDir: globalDir,
 		nameInput: ti,
+		dirInput:  di,
 	}
 
 	if !hasPresets {
@@ -210,20 +219,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if name == "" {
 					name = m.presets[m.cursor].Name
 				}
-				// Generate init.json and launch
-				p := m.presets[m.cursor]
-				if err := preset.GenerateInitJSON(p, name, m.baseDir, m.globalDir); err != nil {
-					m.message = i18n.TF("firstrun.error", err)
-					return m, nil
-				}
-				m.step = stepLaunching
-				m.message = i18n.TF("firstrun.created", name)
-
-				orchDir := filepath.Join(m.baseDir, name)
-				orchName := name
-				return m, func() tea.Msg {
-					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: orchName}
-				}
+				m.agentName = name
+				m.dirInput.SetValue(name)
+				m.dirInput.Focus()
+				m.step = stepDirAgent
+				return m, textinput.Blink
 			case "esc":
 				m.step = stepPickPreset
 				return m, nil
@@ -232,6 +232,41 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			default:
 				var cmd tea.Cmd
 				m.nameInput, cmd = m.nameInput.Update(msg)
+				return m, cmd
+			}
+
+		case stepDirAgent:
+			switch msg.String() {
+			case "enter":
+				dirName := m.dirInput.Value()
+				if dirName == "" {
+					dirName = m.agentName
+				}
+				// Check collision
+				orchDir := filepath.Join(m.baseDir, dirName)
+				if _, err := os.Stat(orchDir); err == nil {
+					m.message = i18n.TF("firstrun.dir_exists", dirName)
+					return m, nil
+				}
+				// Generate init.json and launch
+				p := m.presets[m.cursor]
+				if err := preset.GenerateInitJSON(p, m.agentName, dirName, m.baseDir, m.globalDir); err != nil {
+					m.message = i18n.TF("firstrun.error", err)
+					return m, nil
+				}
+				m.step = stepLaunching
+				m.message = i18n.TF("firstrun.created", m.agentName)
+				return m, func() tea.Msg {
+					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
+				}
+			case "esc":
+				m.step = stepNameAgent
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			default:
+				var cmd tea.Cmd
+				m.dirInput, cmd = m.dirInput.Update(msg)
 				return m, cmd
 			}
 		}
@@ -320,6 +355,15 @@ func (m FirstRunModel) View() string {
 		selectedPreset := m.presets[m.cursor].Name
 		b.WriteString("  " + i18n.TF("firstrun.enter_name", selectedPreset) + "\n\n")
 		b.WriteString("  " + m.nameInput.View() + "\n\n")
+		b.WriteString(StyleSubtle.Render("  "+i18n.T("firstrun.create_hint")) + "\n")
+
+	case stepDirAgent:
+		b.WriteString("  " + i18n.TF("firstrun.enter_dir", m.agentName) + "\n\n")
+		b.WriteString("  " + m.dirInput.View() + "\n\n")
+		if m.message != "" {
+			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f56565"))
+			b.WriteString("  " + errStyle.Render(m.message) + "\n\n")
+		}
 		b.WriteString(StyleSubtle.Render("  "+i18n.T("firstrun.create_hint")) + "\n")
 
 	case stepLaunching:
