@@ -183,13 +183,35 @@ func CovenantForLang(lang string) []byte {
 	return data
 }
 
+// EnsureCovenants copies embedded covenants to ~/.lingtai/covenant/{lang}/covenant.md.
+// Called once on TUI startup.
+func EnsureCovenants(globalDir string) {
+	for _, lang := range []string{"en", "zh", "wen"} {
+		dir := filepath.Join(globalDir, "covenant", lang)
+		target := filepath.Join(dir, "covenant.md")
+		if _, err := os.Stat(target); err == nil {
+			continue // already exists
+		}
+		os.MkdirAll(dir, 0o755)
+		data := CovenantForLang(lang)
+		if data != nil {
+			os.WriteFile(target, data, 0o644)
+		}
+	}
+}
+
+// CovenantPath returns the absolute path to the covenant file for a language.
+func CovenantPath(globalDir, lang string) string {
+	return filepath.Join(globalDir, "covenant", lang, "covenant.md")
+}
+
 // DefaultPreset returns the first built-in preset (minimax).
 func DefaultPreset() Preset {
 	return minimaxPreset()
 }
 
 // GenerateInitJSON creates a full init.json from a preset at .lingtai/<agentName>/init.json.
-func GenerateInitJSON(p Preset, agentName, lingtaiDir string) error {
+func GenerateInitJSON(p Preset, agentName, lingtaiDir, globalDir string) error {
 	agentDir := filepath.Join(lingtaiDir, agentName)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
@@ -221,16 +243,9 @@ func GenerateInitJSON(p Preset, agentName, lingtaiDir string) error {
 	manifest["max_turns"] = 100
 	manifest["streaming"] = true
 
-	// Copy language-matched covenant into agent dir
-	covenantData := CovenantForLang(lang)
-	covenantPath := filepath.Join(agentDir, "covenant.md")
-	if err := os.WriteFile(covenantPath, covenantData, 0o644); err != nil {
-		return fmt.Errorf("write covenant: %w", err)
-	}
-
 	initJSON := map[string]interface{}{
 		"manifest":      manifest,
-		"covenant_file": "covenant.md",
+		"covenant_file": CovenantPath(globalDir, lang),
 		"principle":     "",
 		"memory":        "",
 		"prompt":        "",

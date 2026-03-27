@@ -74,6 +74,9 @@ func main() {
 		}
 	}
 
+	// Ensure covenant files at ~/.lingtai/covenant/
+	preset.EnsureCovenants(globalDir)
+
 	// Load settings
 	settings := tui.LoadSettings(lingtaiDir)
 	i18n.SetLang(settings.Language)

@@ -212,7 +212,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				// Generate init.json and launch
 				p := m.presets[m.cursor]
-				if err := preset.GenerateInitJSON(p, name, m.baseDir); err != nil {
+				if err := preset.GenerateInitJSON(p, name, m.baseDir, m.globalDir); err != nil {
 					m.message = i18n.TF("firstrun.error", err)
 					return m, nil
 				}

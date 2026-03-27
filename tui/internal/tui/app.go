@@ -203,7 +203,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		agentName := p.Name
-		if err := preset.GenerateInitJSON(p, agentName, a.projectDir); err != nil {
+		if err := preset.GenerateInitJSON(p, agentName, a.projectDir, a.globalDir); err != nil {
 			return a, nil
 		}
 		orchDir := filepath.Join(a.projectDir, agentName)
@@ -449,13 +449,12 @@ func (a *App) doLang(lang string) {
 			if m, ok := initData["manifest"].(map[string]interface{}); ok {
 				m["language"] = lang
 			}
+			initData["covenant_file"] = preset.CovenantPath(a.globalDir, lang)
+			delete(initData, "covenant") // use file, not inline
 			if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
 				os.WriteFile(initPath, out, 0o644)
 			}
 		}
-	}
-	if covenantSrc := preset.CovenantForLang(lang); covenantSrc != nil {
-		os.WriteFile(filepath.Join(a.orchDir, "covenant.md"), covenantSrc, 0o644)
 	}
 	a.mail.AddSystemMessage(i18n.TF("mail.lang_changed", lang))
 }
