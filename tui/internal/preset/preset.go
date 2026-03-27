@@ -261,8 +261,8 @@ func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string
 	if admin, ok := p.Manifest["admin"]; ok {
 		manifest["admin"] = admin
 	}
-	manifest["soul"] = map[string]interface{}{"delay": 30}
-	manifest["stamina"] = 3600
+	manifest["soul"] = map[string]interface{}{"delay": 120}
+	manifest["stamina"] = 36000
 	manifest["context_limit"] = nil
 	manifest["molt_pressure"] = 0.8
 	manifest["molt_prompt"] = ""

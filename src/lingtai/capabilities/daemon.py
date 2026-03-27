@@ -75,15 +75,16 @@ class DaemonManager:
     # Short results (e.g. "[cancelled]") are suppressed to avoid notification storms.
     _NOTIFY_MIN_LEN = 20
 
-    def __init__(self, agent: "Agent", max_emanations: int = 4,
+    def __init__(self, agent: "Agent", max_emanations: int = 2,
                  max_turns: int = 30, timeout: float = 300.0,
-                 notify_threshold: int = 20):
+                 notify_threshold: int = 20, max_result_chars: int = 2000):
         self._agent = agent
         self._max_emanations = max_emanations
         self._max_turns = max_turns
         self._timeout = timeout
         self._default_model = agent.service.model
         self._notify_threshold = notify_threshold
+        self._max_result_chars = max_result_chars
 
         # Emanation registry: em_id → entry dict
         self._emanations: dict[str, dict] = {}
@@ -353,8 +354,11 @@ class DaemonManager:
             self._log("daemon_error", em_id=em_id,
                       exception=type(e).__name__, exception_message=str(e))
 
+        # Truncate long results
+        if len(text) > self._max_result_chars:
+            text = text[:self._max_result_chars] + f"\n[truncated — {len(text)} chars total]"
+
         # Suppress notifications for short results to prevent notification storms
-        # (e.g. "[cancelled]", "[no output]")
         if len(text) < self._notify_threshold:
             self._log("daemon_result", em_id=em_id, status="suppressed_short",
                       text_length=len(text))
@@ -376,20 +380,15 @@ class DaemonManager:
             self._agent._log(event_type, **fields)
 
 
-def setup(agent: "Agent", max_emanations: int = 4,
+def setup(agent: "Agent", max_emanations: int = 2,
           max_turns: int = 30, timeout: float = 300.0,
-          notify_threshold: int = 20) -> DaemonManager:
-    """Set up the daemon capability on an agent.
-
-    Args:
-        notify_threshold: Minimum result text length to trigger a parent
-            notification. Short results (e.g. "[cancelled]", "[no output]") are
-            suppressed to avoid notification storms. Default: 20.
-    """
+          notify_threshold: int = 20, max_result_chars: int = 2000) -> DaemonManager:
+    """Set up the daemon capability on an agent."""
     lang = agent._config.language
     mgr = DaemonManager(agent, max_emanations=max_emanations,
                         max_turns=max_turns, timeout=timeout,
-                        notify_threshold=notify_threshold)
+                        notify_threshold=notify_threshold,
+                        max_result_chars=max_result_chars)
     schema = get_schema(lang)
     agent.add_tool("daemon", schema=schema, handler=mgr.handle,
                    description=get_description(lang))
