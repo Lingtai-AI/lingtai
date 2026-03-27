@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	Keys map[string]string `json:"keys,omitempty"` // provider → key, e.g. {"minimax": "xxx", "gemini": "xxx"}
+	Keys     map[string]string `json:"keys,omitempty"`     // provider → key, e.g. {"minimax": "xxx", "gemini": "xxx"}
+	Language string            `json:"language,omitempty"` // TUI language: "en", "zh", "wen"
 }
 
 func GlobalDir() (string, error) {
@@ -32,7 +33,7 @@ func LoadConfig(dir string) (Config, error) {
 	}
 	// Try new format first
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err == nil && cfg.Keys != nil {
+	if err := json.Unmarshal(data, &cfg); err == nil && (cfg.Keys != nil || cfg.Language != "") {
 		return cfg, nil
 	}
 	// Fallback: try legacy format (minimax_api_key)

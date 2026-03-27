@@ -432,7 +432,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		settings := LoadSettings(a.projectDir)
-		a.settings = NewSettingsModel(a.projectDir, settings)
+		a.settings = NewSettingsModel(a.projectDir, a.globalDir, settings)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
@@ -583,12 +583,17 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		settings := LoadSettings(a.projectDir)
-		a.settings = NewSettingsModel(a.projectDir, settings)
+		a.settings = NewSettingsModel(a.projectDir, a.globalDir, settings)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
 		a.presets = NewPresetsModel()
 		return a, tea.Batch(a.presets.Init(), a.sendSize())
+	case "welcome":
+		a.currentView = appViewFirstRun
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true)
+		a.firstRun.welcomeOnly = true
+		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 	}
 	return a, nil
 }

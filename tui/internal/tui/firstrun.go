@@ -23,7 +23,8 @@ type FirstRunDoneMsg struct {
 type firstRunStep int
 
 const (
-	stepAPIKey firstRunStep = iota
+	stepWelcome firstRunStep = iota
+	stepAPIKey
 	stepPickPreset
 	stepPresetKey
 	stepEditPreset
@@ -77,6 +78,9 @@ type FirstRunModel struct {
 	editCursor  int
 	// Focus state for combined name+dir step
 	focusOnDir bool
+	// Welcome page language selector
+	langCursor   int
+	welcomeOnly  bool // true when opened from /settings (return to mail after language pick)
 	// Quick config (provider/model) in preset selection
 	quickProvider textinput.Model
 	quickModel    textinput.Model
@@ -117,36 +121,36 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		existingKeys = make(map[string]string)
 	}
 
+	// Pre-set language cursor from global config
+	langCursor := 0
+	langOptions := []string{"en", "zh", "wen"}
+	if cfg.Language != "" {
+		for i, l := range langOptions {
+			if l == cfg.Language {
+				langCursor = i
+				break
+			}
+		}
+	}
+
 	m := FirstRunModel{
+		step:            stepWelcome,
 		baseDir:         baseDir,
 		globalDir:       globalDir,
 		nameInput:       ti,
 		dirInput:        di,
 		hasPresets:      hasPresets,
+		langCursor:      langCursor,
 		quickProvider:   qp,
 		quickModel:      qm,
 		presetKeyInput:  pki,
 		existingKeys:    existingKeys,
 	}
 
-	if !hasPresets {
-		m.step = stepAPIKey
-		m.setup = NewSetupModel(globalDir)
-	} else {
-		m.step = stepPickPreset
-		m.presets, _ = preset.List()
-	}
-
 	return m
 }
 
 func (m FirstRunModel) Init() tea.Cmd {
-	switch m.step {
-	case stepAPIKey:
-		return m.setup.Init()
-	case stepPickPreset:
-		return nil
-	}
 	return nil
 }
 
@@ -172,6 +176,57 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch m.step {
+		case stepWelcome:
+			langs := []string{"en", "zh", "wen"}
+			switch msg.String() {
+			case "up":
+				if m.langCursor > 0 {
+					m.langCursor--
+					i18n.SetLang(langs[m.langCursor])
+				}
+			case "down":
+				if m.langCursor < len(langs)-1 {
+					m.langCursor++
+					i18n.SetLang(langs[m.langCursor])
+				}
+			case "enter":
+				lang := langs[m.langCursor]
+				// Save language to global config
+				cfg, _ := config.LoadConfig(m.globalDir)
+				cfg.Language = lang
+				config.SaveConfig(m.globalDir, cfg)
+				// Opened from /settings — return to mail
+				if m.welcomeOnly {
+					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+				}
+				// Reload keys after potential config change
+				m.existingKeys = cfg.Keys
+				if m.existingKeys == nil {
+					m.existingKeys = make(map[string]string)
+				}
+				// Proceed to next step
+				if !m.hasPresets {
+					m.step = stepAPIKey
+					m.setup = NewSetupModel(m.globalDir)
+					return m, m.setup.Init()
+				}
+				m.step = stepPickPreset
+				m.presets, _ = preset.List()
+				return m, nil
+			case "esc":
+				if m.welcomeOnly {
+					// Restore original language and return
+					cfg, _ := config.LoadConfig(m.globalDir)
+					if cfg.Language != "" {
+						i18n.SetLang(cfg.Language)
+					}
+					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+				}
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+
 		case stepAPIKey:
 			var cmd tea.Cmd
 			m.setup, cmd = m.setup.Update(msg)
@@ -291,9 +346,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "enter":
 				key := m.presetKeyInput.Value()
 				if key != "" {
-					// Save key to Config.Keys
+					// Save key to Config.Keys (preserve existing config fields)
 					m.existingKeys[m.selectedProvider] = key
-					cfg := config.Config{Keys: m.existingKeys}
+					cfg, _ := config.LoadConfig(m.globalDir)
+					cfg.Keys = m.existingKeys
 					config.SaveConfig(m.globalDir, cfg)
 				} else if m.existingKeys[m.selectedProvider] == "" {
 					// Empty and no existing key, require input
@@ -458,6 +514,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 func (m FirstRunModel) View() string {
 	var b strings.Builder
 
+	switch m.step {
+	case stepWelcome:
+		return m.viewWelcome()
+	default:
+		// non-welcome steps: show standard title bar
+	}
+
 	// Title
 	title := StyleTitle.Render("  " + i18n.T("firstrun.welcome"))
 	b.WriteString(title + "\n")
@@ -597,6 +660,61 @@ func (m FirstRunModel) View() string {
 	}
 
 	return b.String()
+}
+
+// viewWelcome renders the welcome/language selection page.
+func (m FirstRunModel) viewWelcome() string {
+	langLabels := []string{"English", "现代汉语", "文言"}
+
+	// Build content lines (without vertical centering first)
+	var content strings.Builder
+
+	// Product name
+	titleText := i18n.T("welcome.title")
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+	content.WriteString(centerText(titleStyle.Render(titleText), m.width) + "\n\n")
+
+	// Poem (two lines)
+	poemStyle := StyleSubtle
+	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line1")), m.width) + "\n")
+	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line2")), m.width) + "\n\n\n")
+
+	// Language selector
+	for i, label := range langLabels {
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		if i == m.langCursor {
+			cursor = "> "
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		}
+		line := cursor + style.Render(label)
+		content.WriteString(centerText(line, m.width) + "\n")
+	}
+
+	// Footer hints
+	content.WriteString("\n")
+	hints := StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Enter] " + i18n.T("welcome.confirm"))
+	content.WriteString(centerText(hints, m.width) + "\n")
+
+	// Vertical centering: pad top to center the content block
+	contentStr := content.String()
+	contentLines := strings.Count(contentStr, "\n")
+	topPad := (m.height - contentLines) / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+
+	return strings.Repeat("\n", topPad) + contentStr
+}
+
+// centerText centers a string within the given width.
+func centerText(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	pad := (width - w) / 2
+	return strings.Repeat(" ", pad) + s
 }
 
 // getPresetProvider extracts provider name from a preset

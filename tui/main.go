@@ -81,7 +81,13 @@ func main() {
 
 	// Load settings
 	settings := tui.LoadSettings(lingtaiDir)
-	i18n.SetLang(settings.Language)
+	// Language is global (stored in ~/.lingtai/config.json)
+	globalCfg, _ := config.LoadConfig(globalDir)
+	if globalCfg.Language != "" {
+		i18n.SetLang(globalCfg.Language)
+	} else {
+		i18n.SetLang(settings.Language)
+	}
 
 	// Detect state
 	hasPresets := preset.HasAny()

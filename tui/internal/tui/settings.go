@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -71,22 +72,32 @@ type SettingField struct {
 
 // SettingsModel is the /settings view.
 type SettingsModel struct {
-	cursor   int
-	settings Settings
-	fields   []SettingField
-	baseDir  string
-	width    int
-	height   int
+	cursor    int
+	settings  Settings
+	fields    []SettingField
+	baseDir   string
+	globalDir string
+	width     int
+	height    int
 }
 
-func NewSettingsModel(baseDir string, settings Settings) SettingsModel {
-	// Build fields
+func NewSettingsModel(baseDir, globalDir string, settings Settings) SettingsModel {
+	// Read language from global config
 	langOptions := []string{"en", "zh", "wen"}
 	langCurrent := 0
-	for i, l := range langOptions {
-		if l == settings.Language {
-			langCurrent = i
-			break
+	if globalCfg, err := config.LoadConfig(globalDir); err == nil && globalCfg.Language != "" {
+		for i, l := range langOptions {
+			if l == globalCfg.Language {
+				langCurrent = i
+				break
+			}
+		}
+	} else {
+		for i, l := range langOptions {
+			if l == settings.Language {
+				langCurrent = i
+				break
+			}
 		}
 	}
 
@@ -113,9 +124,10 @@ func NewSettingsModel(baseDir string, settings Settings) SettingsModel {
 	}
 
 	return SettingsModel{
-		settings: settings,
-		fields:   fields,
-		baseDir:  baseDir,
+		settings:  settings,
+		fields:    fields,
+		baseDir:   baseDir,
+		globalDir: globalDir,
 	}
 }
 
@@ -132,6 +144,11 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		case "enter":
+			// Open welcome page when pressing Enter on the language field
+			if m.fields[m.cursor].Key == "language" {
+				return m, func() tea.Msg { return ViewChangeMsg{View: "welcome"} }
+			}
 		case "up":
 			if m.cursor > 0 {
 				m.cursor--
@@ -163,6 +180,11 @@ func (m *SettingsModel) applyField(f *SettingField) {
 	case "language":
 		m.settings.Language = val
 		i18n.SetLang(val)
+		// Save language to global config
+		if cfg, err := config.LoadConfig(m.globalDir); err == nil {
+			cfg.Language = val
+			config.SaveConfig(m.globalDir, cfg)
+		}
 	case "poll_rate":
 		rate := 1
 		fmt.Sscanf(val, "%d", &rate)
@@ -176,16 +198,21 @@ func (m *SettingsModel) applyField(f *SettingField) {
 func (m SettingsModel) View() string {
 	var b strings.Builder
 
-	// Title bar
-	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("settings.title"))
+	// Title bar: product name · settings
+	titleText := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(i18n.T("welcome.title"))
+	titleBar := titleText + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("settings.title"))
 	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("settings.back"))
-	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
+	padding := m.width - lipgloss.Width(titleBar) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
-		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
+		b.WriteString(titleBar + strings.Repeat(" ", padding) + escHint + "\n")
 	} else {
-		b.WriteString(title + "  " + escHint + "\n")
+		b.WriteString(titleBar + "  " + escHint + "\n")
 	}
-	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
+	b.WriteString(strings.Repeat("─", m.width) + "\n")
+
+	// Poem decoration
+	b.WriteString(StyleFaint.Render("  "+i18n.T("welcome.poem_line1")) + "\n")
+	b.WriteString(StyleFaint.Render("  "+i18n.T("welcome.poem_line2")) + "\n\n")
 
 	// Fields
 	for i, f := range m.fields {
@@ -216,8 +243,12 @@ func (m SettingsModel) View() string {
 
 	// Footer
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render(fmt.Sprintf("  ↑↓ %s  ←→ %s  [esc] %s",
-		i18n.T("settings.select"), i18n.T("settings.change"), i18n.T("settings.back"))) + "\n")
+	hints := fmt.Sprintf("  ↑↓ %s  ←→ %s", i18n.T("settings.select"), i18n.T("settings.change"))
+	if m.fields[m.cursor].Key == "language" {
+		hints += "  [Enter] " + i18n.T("settings.welcome")
+	}
+	hints += "  [esc] " + i18n.T("settings.back")
+	b.WriteString(StyleFaint.Render(hints) + "\n")
 
 	return b.String()
 }
