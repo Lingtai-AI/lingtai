@@ -3,14 +3,14 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 // 墨韵灵台调色板
-// 灵感：中国水墨画 · 明镜台 · 古典印章
+// 灵感：中国水墨画 · 明镜台 · 古印章
 var (
 	// 核心色
 	ColorBG          = lipgloss.Color("#0d0d0f")   // 墨黑（背景）
 	ColorSurface     = lipgloss.Color("#151518")   // 玄色（面板）
 	ColorBorder     = lipgloss.Color("#2a2a30")   // 墨线（分割线）
 	ColorText       = lipgloss.Color("#e8e4df")   // 宣纸白（主文字）
-	ColorTextDim    = lipgloss.Color("#8a8680")   // 旧纸灰（次要文字）
+	ColorTextDim    = lipgloss.Color("#8a8680")   // 旧墨灰（次要文字）
 	ColorSubtle    = ColorTextDim                    // 别名，兼容旧代码
 	ColorTextFaint  = lipgloss.Color("#4a4845")   // 淡墨（极淡文字）
 
@@ -35,6 +35,11 @@ var (
 	ColorAccent     = lipgloss.Color("#c49a6c")   // 琥珀（光）
 	ColorCursor     = lipgloss.Color("#c49a6c")   // 琥珀（光标）
 
+	// 代码块色（来自 preset-ux）
+	ColorCodeBlockBg = lipgloss.Color("#2d3748")
+	ColorCodeText    = lipgloss.Color("#e2e8f0")
+	ColorInlineCode  = lipgloss.Color("#f7fafc")
+
 	// Lipgloss 样式
 	StyleTitle   = lipgloss.NewStyle().
 			Bold(true).
@@ -49,6 +54,16 @@ var (
 	StyleAccent   = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorAccent)
+
+	// 代码块样式（来自 preset-ux）
+	StyleCodeBlock = lipgloss.NewStyle().
+			Background(ColorCodeBlockBg).
+			Foreground(ColorCodeText).
+			Width(0) // don't constrain width
+
+	StyleInlineCode = lipgloss.NewStyle().
+			Background(ColorCodeBlockBg).
+			Foreground(ColorCodeText)
 
 	// 边框字符
 	RuneBorder   = "─"

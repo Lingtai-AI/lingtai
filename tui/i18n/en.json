@@ -22,7 +22,7 @@
   "mail.you": "you",
   "mail.title": "Mail",
   "mail.sending": "Sending...",
-  "mail.placeholder": "Type a message...",
+  "mail.placeholder": "Type a message or / for commands...",
   "mail.subject_label": "Subject:",
   "mail.system_sender": "system",
   "mail.launch_failed": "Failed to launch agent: %s",
@@ -86,6 +86,14 @@
   "presets.nirvana": "Nirvana",
   "presets.create": "Create",
   "presets.cancel": "Cancel",
+  "presets.quick_config": "Quick Config",
+  "presets.apply": "Apply",
+  "presets.toggle": "toggle",
+
+  "common.quit": "Quit",
+
+  "firstrun.next": "Next",
+  "firstrun.create": "Create",
 
   "firstrun.welcome": "Welcome to 灵台",
   "firstrun.no_presets": "No presets found. Let's set up.",
@@ -129,6 +137,7 @@
   "hints.verbose_off": "ctrl+o off",
   "hints.extended_off": "ctrl+e off",
   "hints.commands": "/ commands",
+  "hints.empty_input": "Type / for commands",
 
   "error.python_missing": "Python 3.11+ required. Install from python.org.",
   "error.pip_failed": "Failed to install lingtai. Check internet connection.",

@@ -22,7 +22,7 @@
   "mail.you": "你",
   "mail.title": "邮件",
   "mail.sending": "发送中...",
-  "mail.placeholder": "输入消息...",
+  "mail.placeholder": "输入消息或 / 查看命令...",
   "mail.subject_label": "主题：",
   "mail.system_sender": "系统",
   "mail.launch_failed": "启动 Agent失败：%s",
@@ -86,6 +86,14 @@
   "presets.nirvana": "涅槃",
   "presets.create": "创建",
   "presets.cancel": "取消",
+  "presets.quick_config": "快速配置",
+  "presets.apply": "应用",
+  "presets.toggle": "切换",
+
+  "common.quit": "退出",
+
+  "firstrun.next": "下一步",
+  "firstrun.create": "创建",
 
   "firstrun.welcome": "欢迎使用灵台",
   "firstrun.no_presets": "未找到预设，请先配置。",
@@ -129,6 +137,7 @@
   "hints.verbose_off": "ctrl+o 关闭",
   "hints.extended_off": "ctrl+e 关闭",
   "hints.commands": "/ 命令",
+  "hints.empty_input": "输入 / 查看命令",
 
   "error.python_missing": "需要 Python 3.11+，请从 python.org 安装。",
   "error.pip_failed": "安装 lingtai 失败，请检查网络。",

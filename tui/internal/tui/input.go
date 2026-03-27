@@ -117,7 +117,7 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 }
 
 func (m InputModel) View() string {
-	hint := lipgloss.NewStyle().Foreground(ColorSubtle).Render("[/]")
+	hint := lipgloss.NewStyle().Foreground(ColorSubtle).Render("[/?]")
 	// Use textarea's own rendered view (handles cursor, wrapping, multiline)
 	taView := m.textarea.View()
 	// Prefix first line with "> ", indent continuations

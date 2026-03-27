@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -385,6 +386,139 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// renderMarkdown converts basic markdown to styled terminal output.
+// It handles: headers, code blocks, inline code, links, bold, lists, and tables.
+func (m MailModel) renderMarkdown(text string) string {
+	// If no markdown chars detected, return as-is
+	if !strings.ContainsAny(text, "#*_`-[") {
+		return text
+	}
+
+	var b strings.Builder
+	lines := strings.Split(text, "\n")
+
+	// Regex patterns
+	headerRe := regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
+	bulletRe := regexp.MustCompile(`^[\-\*]\s+(.*)$`)
+	orderedRe := regexp.MustCompile(`^\d+\.\s+(.*)$`)
+	codeBlockRe := regexp.MustCompilePOSIX("```")
+	inlineCodeRe := regexp.MustCompile("`([^`]+)`")
+	linkRe := regexp.MustCompile(`\[([^\]]+)\]\(([^\)]+)\)`)
+	boldRe := regexp.MustCompile(`\*\*([^\*]+)\*\*`)
+	tableRe := regexp.MustCompile(`^\|(.+)\|$`)
+	_ = tableRe // TODO: implement table rendering
+
+	inCodeBlock := false
+
+	for _, line := range lines {
+		// Check for code block markers
+		if codeBlockRe.MatchString(line) {
+			if inCodeBlock {
+				// End code block
+				b.WriteString("\n")
+				inCodeBlock = false
+			} else {
+				// Start code block
+				b.WriteString("\n")
+				inCodeBlock = true
+			}
+			continue
+		}
+
+		if inCodeBlock {
+			// Inside code block - render with code style
+			codeLine := StyleCodeBlock.Render("  " + line)
+			b.WriteString(codeLine + "\n")
+			continue
+		}
+
+		// Headers
+		if matches := headerRe.FindStringSubmatch(line); len(matches) == 3 {
+			level := len(matches[1])
+			content := matches[2]
+			// Apply bold styling, with stronger emphasis for lower levels
+			switch level {
+			case 1:
+				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Render("  " + content) + "\n")
+			case 2:
+				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render("  " + content) + "\n")
+			default:
+				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(ColorSubtle).Render("  " + content) + "\n")
+			}
+			continue
+		}
+
+		// Process the line: links, bold, inline code
+		processed := line
+
+		// Links: [text](url) -> text (url)
+		processed = linkRe.ReplaceAllString(processed, "$1 ($2)")
+
+		// Bold: **text** -> bold text
+		// Need to handle this carefully to avoid breaking
+		processed = boldRe.ReplaceAllString(processed, "\x00BOLD\x00$1\x00BOLDEND\x00")
+
+		// Inline code: `code` -> styled
+		processed = inlineCodeRe.ReplaceAllString(processed, "\x00CODE\x00$1\x00CODEEND\x00")
+
+		// Split by markers to process styles
+		parts := strings.Split(processed, "\x00")
+		for _, part := range parts {
+			switch {
+			case strings.HasPrefix(part, "BOLD"):
+				b.WriteString(lipgloss.NewStyle().Bold(true).Render(strings.TrimPrefix(part, "BOLD")))
+			case strings.HasPrefix(part, "BOLDEND"):
+				// end bold - nothing to do in lipgloss
+			case strings.HasPrefix(part, "CODE"):
+				b.WriteString(StyleInlineCode.Render(strings.TrimPrefix(part, "CODE")))
+			case strings.HasPrefix(part, "CODEEND"):
+				// end code
+			default:
+				b.WriteString(part)
+			}
+		}
+		b.WriteString("\n")
+
+		// Bullet lists
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "- ") ||
+			strings.HasPrefix(strings.TrimLeft(line, " \t"), "* ") {
+			if matches := bulletRe.FindStringSubmatch(line); len(matches) == 2 {
+				b.WriteString("    • " + matches[1] + "\n")
+				continue
+			}
+		}
+
+		// Ordered lists
+		if matched, _ := regexp.MatchString(`^\d+\.\s+`, line); matched {
+			if matches := orderedRe.FindStringSubmatch(line); len(matches) == 2 {
+				b.WriteString("    " + matches[0] + "\n")
+				continue
+			}
+		}
+
+		// Tables - detect and render as aligned
+		if strings.HasPrefix(line, "|") && strings.HasSuffix(line, "|") {
+			cols := strings.Split(strings.Trim(line, "|"), "|")
+			if len(cols) > 0 {
+				// Simple table rendering with padding
+				row := "  "
+				for i, col := range cols {
+					col = strings.TrimSpace(col)
+					if i == 0 {
+						row += lipgloss.NewStyle().Bold(true).Render(col)
+					} else {
+						row += "  " + col
+					}
+				}
+				b.WriteString(row + "\n")
+				continue
+			}
+		}
+	}
+
+	return b.String()
+}
+
 func (m MailModel) renderMessages() string {
 	if len(m.messages) == 0 {
 		return "\n" + StyleFaint.Render("  · " + i18n.T("mail.no_messages"))
@@ -451,7 +585,10 @@ func (m MailModel) renderMessages() string {
 			if bodyWidth < 20 {
 				bodyWidth = 20
 			}
-			wrappedBody := lipgloss.NewStyle().Width(bodyWidth).Foreground(ColorText).Render(msg.Body)
+			// Render markdown first
+			renderedBody := m.renderMarkdown(msg.Body)
+			wrappedBody := lipgloss.NewStyle().Width(bodyWidth).Render(renderedBody)
+			// Indent continuation lines to align with first line
 			lines := strings.Split(wrappedBody, "\n")
 			b.WriteString("\n" + prefix + lines[0] + "\n")
 			indent := strings.Repeat(" ", prefixWidth)
@@ -519,13 +656,18 @@ func (m MailModel) View() string {
 		inputSection = m.input.View()
 	}
 
-	// Status bar: left = flash or base dir, right = hints
+	// Status bar: left = flash or dir path or empty input hint, right = hints
 	var leftLabel string
 	if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("◉ " + m.statusFlash)
 	} else {
 		m.statusFlash = ""
-		leftLabel = StyleSubtle.Render("  " + m.baseDir)
+		// Show empty input hint when input is empty, otherwise show baseDir
+		if m.input.Value() == "" && !m.input.IsPaletteActive() {
+			leftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#718096")).Render("  " + i18n.T("hints.empty_input"))
+		} else {
+			leftLabel = StyleSubtle.Render("  " + m.baseDir)
+		}
 	}
 
 	var hints string
