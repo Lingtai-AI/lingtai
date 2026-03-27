@@ -149,6 +149,7 @@ class EmailManager:
         self._last_sent: dict[str, tuple[str, int]] = {}
         self._dup_free_passes = 2  # allow this many identical sends
         self._schedule_events: dict[str, threading.Event] = {}
+        self._schedule_lock = threading.Lock()  # protect _schedule_events
 
     @property
     def _mailbox_path(self) -> Path:
@@ -374,7 +375,8 @@ class EmailManager:
         self._write_schedule(sched_path, record)
 
         # Signal in-memory event
-        event = self._schedule_events.get(schedule_id)
+        with self._schedule_lock:
+            event = self._schedule_events.get(schedule_id)
         if event is not None:
             event.set()
 
@@ -454,7 +456,8 @@ class EmailManager:
 
     def _spawn_schedule_thread(self, schedule_id: str, record: dict) -> None:
         event = threading.Event()
-        self._schedule_events[schedule_id] = event
+        with self._schedule_lock:
+            self._schedule_events[schedule_id] = event
         t = threading.Thread(
             target=self._schedule_loop,
             args=(schedule_id, record, event),
@@ -512,7 +515,8 @@ class EmailManager:
                 if cancel_event.wait(interval):
                     break
 
-        self._schedule_events.pop(schedule_id, None)
+        with self._schedule_lock:
+            self._schedule_events.pop(schedule_id, None)
 
     # ------------------------------------------------------------------
     # Schedule recovery

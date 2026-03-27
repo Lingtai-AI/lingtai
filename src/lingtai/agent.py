@@ -45,24 +45,7 @@ class Agent(BaseAgent):
         super().__init__(*args, **kwargs)
 
         # Persist LLM config for revive (self-sufficient agents contract)
-        _service = args[0] if args else kwargs.get("service")
-        if _service is not None:
-            try:
-                import json as _json
-                llm_config: dict[str, Any] = {
-                    "provider": _service.provider,
-                    "model": _service.model,
-                }
-                _base_url = getattr(_service, "_base_url", None)
-                if isinstance(_base_url, str) and _base_url:
-                    llm_config["base_url"] = _base_url
-                llm_dir = self._working_dir / "system"
-                llm_dir.mkdir(exist_ok=True)
-                (llm_dir / "llm.json").write_text(
-                    _json.dumps(llm_config, ensure_ascii=False)
-                )
-            except (TypeError, AttributeError, OSError):
-                pass  # LLM config not available (e.g., mock service in tests)
+        self._persist_llm_config()
 
         # Auto-create FileIOService if not provided by host
         if self._file_io is None:
@@ -108,6 +91,31 @@ class Agent(BaseAgent):
         # Re-write manifest now that capabilities are registered
         if self._capabilities:
             self._workdir.write_manifest(self._build_manifest())
+
+    def _persist_llm_config(self) -> None:
+        """Persist LLM config to llm.json for agent revive.
+
+        Extracted from __init__ to avoid duplication.
+        """
+        _service = getattr(self, "service", None)
+        if _service is None:
+            return
+        try:
+            import json as _json
+            llm_config: dict[str, Any] = {
+                "provider": _service.provider,
+                "model": _service.model,
+            }
+            _base_url = getattr(_service, "_base_url", None)
+            if isinstance(_base_url, str) and _base_url:
+                llm_config["base_url"] = _base_url
+            llm_dir = self._working_dir / "system"
+            llm_dir.mkdir(exist_ok=True)
+            (llm_dir / "llm.json").write_text(
+                _json.dumps(llm_config, ensure_ascii=False)
+            )
+        except (TypeError, AttributeError, OSError):
+            pass  # LLM config not available (e.g., mock service in tests)
 
     def _setup_capability(self, name: str, **kwargs: Any) -> Any:
         """Load a named capability.
@@ -251,6 +259,12 @@ class Agent(BaseAgent):
             if not llm_path.is_file():
                 return None
             llm_config = json.loads(llm_path.read_text())
+
+        # Validate required keys before accessing
+        if not llm_config.get("provider") or not llm_config.get("model"):
+            self._log("cpr_invalid_llm_config", path=str(target),
+                      llm_keys=list(llm_config.keys()))
+            return None
 
         svc = LLMService(
             provider=llm_config["provider"],
@@ -563,22 +577,7 @@ class Agent(BaseAgent):
         self._load_mcp_from_workdir()
 
         # Persist LLM config
-        try:
-            import json as _json
-            llm_config: dict = {
-                "provider": self.service.provider,
-                "model": self.service.model,
-            }
-            _base_url = getattr(self.service, "_base_url", None)
-            if isinstance(_base_url, str) and _base_url:
-                llm_config["base_url"] = _base_url
-            llm_dir = self._working_dir / "system"
-            llm_dir.mkdir(exist_ok=True)
-            (llm_dir / "llm.json").write_text(
-                _json.dumps(llm_config, ensure_ascii=False)
-            )
-        except (TypeError, AttributeError, OSError):
-            pass
+        self._persist_llm_config()
 
         # Re-write manifest and identity
         self._update_identity()

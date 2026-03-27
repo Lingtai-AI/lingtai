@@ -22,6 +22,9 @@ class MiniMaxSearchService(SearchService):
         api_key: MiniMax API key.
     """
 
+    # Class-level flag to ensure atexit is registered only once.
+    _atexit_registered = False
+
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
         self._client = None
@@ -48,7 +51,9 @@ class MiniMaxSearchService(SearchService):
             env=env,
         )
         self._client.start()
-        atexit.register(self.close)
+        if not MiniMaxSearchService._atexit_registered:
+            atexit.register(self.close)
+            MiniMaxSearchService._atexit_registered = True
         return self._client
 
     def close(self) -> None:
