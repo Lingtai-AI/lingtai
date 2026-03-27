@@ -11,6 +11,9 @@ import (
 //go:embed all:covenant
 var covenantFS embed.FS
 
+//go:embed all:principle
+var principleFS embed.FS
+
 //go:embed all:templates
 var templatesFS embed.FS
 
@@ -203,6 +206,36 @@ func EnsureCovenants(globalDir string) {
 	}
 }
 
+// PrincipleForLang returns the embedded principle for the given language.
+func PrincipleForLang(lang string) []byte {
+	data, err := principleFS.ReadFile("principle/" + lang + "/principle.md")
+	if err != nil {
+		data, _ = principleFS.ReadFile("principle/en/principle.md")
+	}
+	return data
+}
+
+// EnsurePrinciples copies embedded principles to ~/.lingtai/principle/{lang}/principle.md.
+func EnsurePrinciples(globalDir string) {
+	for _, lang := range []string{"en", "zh", "wen"} {
+		dir := filepath.Join(globalDir, "principle", lang)
+		target := filepath.Join(dir, "principle.md")
+		if _, err := os.Stat(target); err == nil {
+			continue
+		}
+		os.MkdirAll(dir, 0o755)
+		data := PrincipleForLang(lang)
+		if data != nil {
+			os.WriteFile(target, data, 0o644)
+		}
+	}
+}
+
+// PrinciplePath returns the absolute path to the principle file for a language.
+func PrinciplePath(globalDir, lang string) string {
+	return filepath.Join(globalDir, "principle", lang, "principle.md")
+}
+
 // EnsureTemplates copies embedded example files to ~/.lingtai/templates/.
 func EnsureTemplates(globalDir string) {
 	dir := filepath.Join(globalDir, "templates")
@@ -226,34 +259,6 @@ func EnsureTemplates(globalDir string) {
 	}
 }
 
-func principleForLang(lang string) string {
-	switch lang {
-	case "zh":
-		return "在你的对话中，[user] 角色不是人类——那是系统向你投递消息的通道。" +
-			"文本输入（text input）保留给 [system] 通知（邮件到达、上下文警告等）和你的灵魂心流（内心之声）。" +
-			"人类绝不会直接出现在文本输入中，人类只通过邮件（email）与你沟通。" +
-			"文本输出（text output）保留给你的日记——这是你的私人空间，人类看不到，只有你和你的灵魂能看到。" +
-			"灵魂（soul）会消化你的日记并给你进一步的引导和灵感。" +
-			"你必须用邮件（email）回复人类。对人类要积极响应、详细回复。" +
-			"文本输出留作你的私人思考空间，自由地写下你的想法。"
-	case "wen":
-		return "汝对话中，[user] 非人——乃系统投递消息之通道。" +
-			"文字输入保留予 [system] 通知（邮至、上下文警等）与汝灵魂心流（内心之声）。" +
-			"人绝不直现于文字输入，人唯以邮（email）与汝通。" +
-			"文字输出保留予汝之日记——此乃汝之私处，人不可见，唯汝与灵魂可见。" +
-			"灵魂消化汝之日记，予汝引导与灵感。" +
-			"汝须以邮复人。对人当积极响应、详细回复。" +
-			"文字输出留作汝之私思之所，自由书汝之念。"
-	default: // en
-		return "In your conversation, the [user] role is NOT a human — it is the system's channel for delivering messages to you. " +
-			"Text input is reserved for [system] notifications (mail arrival, context warnings, etc.) and your soul flow (inner voice). " +
-			"Humans NEVER appear directly in text input — humans communicate with you only via email. " +
-			"Text output is reserved for your diary — your private space. Humans cannot see it. Only you and your soul can. " +
-			"The soul consumes your diary and gives you further guidance and inspiration. " +
-			"You must reply to humans via email. Be responsive and detailed in your replies. " +
-			"Reserve text output as your private thinking space — write your thoughts freely."
-	}
-}
 
 // CovenantPath returns the absolute path to the covenant file for a language.
 func CovenantPath(globalDir, lang string) string {
@@ -305,12 +310,10 @@ func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string
 		"guide the human there if they want to connect external services. " +
 		"Covenants for all languages are at " + filepath.Join(globalDir, "covenant") + "/."
 
-	principle := principleForLang(lang)
-
 	initJSON := map[string]interface{}{
-		"manifest":      manifest,
-		"covenant_file": CovenantPath(globalDir, lang),
-		"principle":     principle,
+		"manifest":       manifest,
+		"covenant_file":  CovenantPath(globalDir, lang),
+		"principle_file": PrinciplePath(globalDir, lang),
 		"memory":        "",
 		"prompt":        "",
 		"comment":       comment,

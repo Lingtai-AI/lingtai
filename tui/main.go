@@ -76,6 +76,7 @@ func main() {
 
 	// Ensure covenant files and templates at ~/.lingtai/
 	preset.EnsureCovenants(globalDir)
+	preset.EnsurePrinciples(globalDir)
 	preset.EnsureTemplates(globalDir)
 
 	// Load settings

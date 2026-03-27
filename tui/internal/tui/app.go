@@ -482,7 +482,9 @@ func (a *App) doLang(lang string) {
 				m["language"] = lang
 			}
 			initData["covenant_file"] = preset.CovenantPath(a.globalDir, lang)
-			delete(initData, "covenant") // use file, not inline
+			initData["principle_file"] = preset.PrinciplePath(a.globalDir, lang)
+			delete(initData, "covenant")   // use file, not inline
+			delete(initData, "principle")  // use file, not inline
 			if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
 				os.WriteFile(initPath, out, 0o644)
 			}
