@@ -177,8 +177,8 @@ func (m SettingsModel) View() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("settings.title"))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("settings.back"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("settings.title"))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("settings.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -216,7 +216,7 @@ func (m SettingsModel) View() string {
 
 	// Footer
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleSubtle.Render(fmt.Sprintf("  ↑↓ %s  ←→ %s                [esc] %s",
+	b.WriteString(StyleFaint.Render(fmt.Sprintf("  ↑↓ %s  ←→ %s  [esc] %s",
 		i18n.T("settings.select"), i18n.T("settings.change"), i18n.T("settings.back"))) + "\n")
 
 	return b.String()

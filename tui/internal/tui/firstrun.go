@@ -475,17 +475,15 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.pick_preset"), stepNum, total)) + "\n\n")
 		for i, p := range m.presets {
 			cursor := "  "
-			selectedStyle := lipgloss.NewStyle()
 			if i == m.cursor {
 				cursor = "> "
-				selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorActive)
 			}
-			name := selectedStyle.Render(p.Name)
+			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(p.Name)
 			desc := StyleSubtle.Render("  " + p.Description)
 			icons := StyleSubtle.Render("  " + p.CapabilityIcons())
 			// Add warning if provider key is missing
 			if m.presetNeedsKey(p) {
-				warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b"))
+				warnStyle := lipgloss.NewStyle().Foreground(ColorStuck)
 				icons += " " + warnStyle.Render("⚠️")
 			}
 			b.WriteString(cursor + name + desc + icons + "\n")
@@ -495,14 +493,14 @@ func (m FirstRunModel) View() string {
 			b.WriteString("\n  " + StyleTitle.Render(i18n.T("presets.quick_config")) + "\n\n")
 			b.WriteString("  Provider: " + m.quickProvider.View() + "\n")
 			b.WriteString("  Model:    " + m.quickModel.View() + "\n")
-			b.WriteString("\n" + StyleSubtle.Render("  [Enter] "+i18n.T("presets.apply")+
+			b.WriteString("\n" + StyleFaint.Render("  [Enter] "+i18n.T("presets.apply")+
 				"  [Esc] "+i18n.T("presets.cancel")) + "\n")
 		} else {
-			b.WriteString("\n" + StyleSubtle.Render("  "+i18n.T("firstrun.select_hint")+
+			b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")+
 				"  [e] "+i18n.T("presets.edit")+
 				"  [p] "+i18n.T("presets.quick_config")+
 				"  [n] "+i18n.T("presets.new")) + "\n")
-			b.WriteString(StyleSubtle.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
+			b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 		}
 
 	case stepPresetKey:
@@ -516,8 +514,8 @@ func (m FirstRunModel) View() string {
 		}
 		b.WriteString("  " + i18n.TF("firstrun.enter_provider_key", providerName) + "\n\n")
 		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
-		b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("setup.save")+
-			"    [Esc] "+i18n.T("setup.back")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
+			"  [Esc] "+i18n.T("setup.back")) + "\n")
 
 	case stepEditPreset:
 		stepNum, total := stepProgress(m.step, m.hasPresets)
@@ -559,7 +557,7 @@ func (m FirstRunModel) View() string {
 				b.WriteString(cursor + label + ": " + displayVal + "\n")
 			}
 		}
-		b.WriteString("\n" + StyleSubtle.Render("  ↑↓ "+i18n.T("settings.select")+
+		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("settings.select")+
 			"  ←→/space "+i18n.T("settings.change")+
 			"  [esc] "+i18n.T("presets.back")) + "\n")
 
@@ -567,8 +565,8 @@ func (m FirstRunModel) View() string {
 		stepNum, total := stepProgress(m.step, m.hasPresets)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("presets.enter_name"), stepNum, total)) + "\n\n")
 		b.WriteString("  " + m.nameInput.View() + "\n\n")
-		b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("presets.create")+
-			"    [Esc] "+i18n.T("presets.cancel")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("presets.create")+
+			"  [Esc] "+i18n.T("presets.cancel")) + "\n")
 
 	case stepAgentNameDir:
 		stepNum, total := stepProgress(m.step, m.hasPresets)
@@ -589,10 +587,10 @@ func (m FirstRunModel) View() string {
 		b.WriteString(dirCursor + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
 
 		if m.message != "" {
-			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f56565"))
+			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
-		b.WriteString("\n" + StyleSubtle.Render("  [Tab] "+i18n.T("firstrun.toggle_field")+
+		b.WriteString("\n" + StyleFaint.Render("  [Tab] "+i18n.T("firstrun.toggle_field")+
 			"  [Enter] "+i18n.T("firstrun.create_agent")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 

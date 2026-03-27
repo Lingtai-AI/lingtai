@@ -400,8 +400,8 @@ func (m PresetsModel) viewList() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("presets.title"))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("presets.back"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("presets.title"))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("presets.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -419,7 +419,7 @@ func (m PresetsModel) viewList() string {
 		if i == m.cursor {
 			cursor = "> "
 		}
-		name := lipgloss.NewStyle().Bold(true).Render(p.Name)
+		name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(p.Name)
 		desc := StyleSubtle.Render("  " + p.Description)
 		b.WriteString(cursor + name + desc + "\n")
 	}
@@ -433,7 +433,7 @@ func (m PresetsModel) viewList() string {
 		i18n.T("presets.delete"),
 		i18n.T("presets.back"),
 	)
-	b.WriteString(StyleSubtle.Render(hints) + "\n")
+	b.WriteString(StyleFaint.Render(hints) + "\n")
 
 	return b.String()
 }
@@ -442,8 +442,8 @@ func (m PresetsModel) viewEditor() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.TF("presets.editor_title", m.editPreset.Name))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("presets.back"))
+	title := StyleTitle.Render(i18n.TF("presets.editor_title", m.editPreset.Name))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("presets.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -498,7 +498,7 @@ func (m PresetsModel) viewEditor() string {
 
 	// Footer
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleSubtle.Render(fmt.Sprintf("  ↑↓ %s  ←→/space %s           [esc] %s",
+	b.WriteString(StyleFaint.Render(fmt.Sprintf("  ↑↓ %s  ←→/space %s  [esc] %s",
 		i18n.T("settings.select"), i18n.T("settings.change"), i18n.T("presets.back"))) + "\n")
 
 	return b.String()
@@ -507,13 +507,13 @@ func (m PresetsModel) viewEditor() string {
 func (m PresetsModel) viewNew() string {
 	var b strings.Builder
 
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("presets.new"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("presets.new"))
 	b.WriteString(title + "\n")
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
 
 	b.WriteString("  " + i18n.T("presets.enter_name") + "\n\n")
 	b.WriteString("  " + m.nameInput.View() + "\n\n")
-	b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("presets.create")+"    [Esc] "+i18n.T("presets.cancel")) + "\n")
+	b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("presets.create")+"  [Esc] "+i18n.T("presets.cancel")) + "\n")
 
 	return b.String()
 }

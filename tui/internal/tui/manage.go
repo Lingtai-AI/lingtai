@@ -113,8 +113,8 @@ func (m ManageModel) View() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("manage.title"))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("manage.back"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("manage.title"))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("manage.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -139,9 +139,9 @@ func (m ManageModel) View() string {
 			cursor = "> "
 		}
 		stateStyle := lipgloss.NewStyle().Foreground(StateColor(a.State))
-		aliveStr := "●"
+		aliveStr := lipgloss.NewStyle().Foreground(ColorAgent).Render("●")
 		if !a.Alive {
-			aliveStr = "○"
+			aliveStr = lipgloss.NewStyle().Foreground(ColorTextFaint).Render("○")
 		}
 		line := fmt.Sprintf("%s%-15s %s  %s",
 			cursor,
@@ -160,8 +160,8 @@ func (m ManageModel) View() string {
 		i18n.T("manage.interrupt"),
 		i18n.T("manage.revive"),
 	)
-	b.WriteString(StyleSubtle.Render(hints) + "\n")
-	b.WriteString(StyleSubtle.Render(fmt.Sprintf("  ↑↓ %s                          [esc] %s",
+	b.WriteString(StyleFaint.Render(hints) + "\n")
+	b.WriteString(StyleFaint.Render(fmt.Sprintf("  ↑↓ %s  [esc] %s",
 		i18n.T("manage.select"), i18n.T("manage.back"))) + "\n")
 
 	if m.message != "" {

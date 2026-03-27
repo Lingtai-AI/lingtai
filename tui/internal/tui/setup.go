@@ -169,8 +169,8 @@ func (m SetupModel) View() string {
 	var b strings.Builder
 
 	// Title bar
-	title := StyleTitle.Render("  " + i18n.T("app.title") + " — " + i18n.T("setup.title"))
-	escHint := StyleSubtle.Render("[esc] " + i18n.T("setup.back"))
+	title := StyleTitle.Render(i18n.T("app.title")) + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("setup.title"))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("setup.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
@@ -207,7 +207,7 @@ func (m SetupModel) viewProviderSelection(b *strings.Builder) {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(StyleSubtle.Render("  [↑↓] "+i18n.T("setup.navigate")+"    [Enter] "+i18n.T("setup.confirm")) + "\n")
+	b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("setup.navigate")+"  [Enter] "+i18n.T("setup.confirm")) + "\n")
 
 	// Error
 	if m.err != nil {
