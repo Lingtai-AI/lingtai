@@ -387,66 +387,71 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 func (m MailModel) renderMessages() string {
 	if len(m.messages) == 0 {
-		return "\n" + StyleSubtle.Render("  "+i18n.T("mail.no_messages"))
+		return "\n" + StyleFaint.Render("  · " + i18n.T("mail.no_messages"))
 	}
+
+	humanStyle    := lipgloss.NewStyle().Foreground(ColorHuman).Bold(true)
+	agentStyle    := lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
+	systemStyle   := lipgloss.NewStyle().Foreground(ColorSystem).Bold(true)
+	thinkingStyle := lipgloss.NewStyle().Foreground(ColorThinking)
+	toolStyle     := lipgloss.NewStyle().Foreground(ColorTool)
+	sepStyle      := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	var b strings.Builder
 	for _, msg := range m.messages {
 		switch msg.Type {
 		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
-			// Event types — decreasing brightness by depth:
-			//   thinking/diary = medium (#718096)
-			//   tool/text = dimmest (#4a5568, same as ColorSubtle)
-			wrapWidth := m.width - 6 // "  ┊ " prefix
+			wrapWidth := m.width - 6
 			if wrapWidth < 20 {
 				wrapWidth = 20
 			}
-			var eventStyle lipgloss.Style
+			var evStyle lipgloss.Style
 			switch msg.Type {
 			case "thinking", "diary":
-				eventStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#718096"))
-			default: // tool_call, tool_result, text_input, text_output
-				eventStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4a5568"))
+				evStyle = thinkingStyle
+			default:
+				evStyle = toolStyle
 			}
-			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render("[" + msg.Type + "] " + msg.Body)
+	wrapped := lipgloss.NewStyle().Width(wrapWidth - 8).Render(msg.Body)
 			for _, line := range strings.Split(wrapped, "\n") {
-				b.WriteString(eventStyle.Render("  \u250a "+line) + "\n")
+				b.WriteString(evStyle.Render("  · ") + line + "\n")
 			}
 
 		default: // "mail"
 			if m.verbose != verboseOff {
-				// Show headers
-				header := StyleSubtle.Render(fmt.Sprintf("  \u250a %s \u2192 %s", msg.From, msg.To))
+				header := StyleFaint.Render("  · ") +
+					humanStyle.Render(msg.From) + sepStyle.Render(" → ") + sepStyle.Render(msg.To)
 				if msg.Subject != "" {
-					header += StyleSubtle.Render(fmt.Sprintf(" | %s %s", i18n.T("mail.subject_label"), msg.Subject))
+					header += sepStyle.Render(" │ ") + sepStyle.Render(i18n.T("mail.subject_label")) + sepStyle.Render(" " + msg.Subject)
 				}
-				header += StyleSubtle.Render(fmt.Sprintf(" | %s", msg.Timestamp))
+				header += sepStyle.Render(" │ ") + sepStyle.Render(msg.Timestamp)
 				b.WriteString(header + "\n")
 			}
 
-			nameStyle := lipgloss.NewStyle().Foreground(ColorActive).Bold(true)
+			var nameStyle lipgloss.Style
 			if msg.IsFromMe {
-				nameStyle = lipgloss.NewStyle().Foreground(ColorMail).Bold(true)
+				nameStyle = humanStyle
 			} else if msg.From == i18n.T("mail.system_sender") {
-				nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#48bb78")).Bold(true)
+				nameStyle = systemStyle
+			} else {
+				nameStyle = agentStyle
 			}
 			name := nameStyle.Render(msg.From)
-			// Short timestamp (HH:MM)
+
 			ts := ""
 			if msg.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, msg.Timestamp); err == nil {
-					ts = StyleSubtle.Render(" " + t.Local().Format("2006-01-02-15:04:05"))
+					ts = StyleFaint.Render(" " + t.Local().Format("15:04"))
 				}
 			}
-			// Wrap body to fit terminal width (indent 2 + name + ": ")
+
 			prefix := fmt.Sprintf("  %s%s: ", name, ts)
 			prefixWidth := lipgloss.Width(prefix)
 			bodyWidth := m.width - prefixWidth
 			if bodyWidth < 20 {
 				bodyWidth = 20
 			}
-			wrappedBody := lipgloss.NewStyle().Width(bodyWidth).Render(msg.Body)
-			// Indent continuation lines to align with first line
+			wrappedBody := lipgloss.NewStyle().Width(bodyWidth).Foreground(ColorText).Render(msg.Body)
 			lines := strings.Split(wrappedBody, "\n")
 			b.WriteString("\n" + prefix + lines[0] + "\n")
 			indent := strings.Repeat(" ", prefixWidth)
@@ -457,6 +462,8 @@ func (m MailModel) renderMessages() string {
 	}
 	return b.String()
 }
+
+
 
 // humanName returns the human's display name. Prefers nickname from .agent.json,
 // falls back to i18n "mail.you".
@@ -482,7 +489,7 @@ func (m MailModel) View() string {
 	}
 
 	// Build header: left = app title, right = agent [state]
-	titleLeft := StyleTitle.Render("  " + i18n.T("app.brand"))
+	titleLeft := StyleTitle.Render(i18n.T("app.brand"))
 
 	// State badge with color
 	stateKey := m.orchState
@@ -490,22 +497,9 @@ func (m MailModel) View() string {
 		stateKey = "unknown"
 	}
 	stateLabel := i18n.T("state." + stateKey)
-	var stateStyle lipgloss.Style
-	switch stateKey {
-	case "active":
-		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#48bb78"))
-	case "idle":
-		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4299e1"))
-	case "asleep":
-		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ecc94b"))
-	case "stuck":
-		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ed8936"))
-	case "suspended":
-		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f56565"))
-	default:
-		stateStyle = StyleSubtle
-	}
-	titleRight := StyleTitle.Render(m.orchName) + " " + stateStyle.Render("["+stateLabel+"]")
+	stateStyle := lipgloss.NewStyle().Foreground(StateColor(stateKey))
+	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+	titleRight := orchNameStyle.Render(m.orchName) + " " + stateStyle.Render("◉ "+stateLabel)
 
 	padding := m.width - lipgloss.Width(titleLeft) - lipgloss.Width(titleRight) - 1
 	var titleLine string
@@ -525,28 +519,29 @@ func (m MailModel) View() string {
 		inputSection = m.input.View()
 	}
 
-	// Status bar: left = flash or dir path, right = hints
+	// Status bar: left = flash or base dir, right = hints
 	var leftLabel string
 	if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
-		leftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#48bb78")).Render("  " + m.statusFlash)
+		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("◉ " + m.statusFlash)
 	} else {
 		m.statusFlash = ""
 		leftLabel = StyleSubtle.Render("  " + m.baseDir)
 	}
+
 	var hints string
 	switch m.verbose {
 	case verboseOff:
-		hints = StyleSubtle.Render(i18n.T("hints.verbose") + "  " + i18n.T("hints.extended") + "  " + i18n.T("hints.commands"))
+		hints = StyleFaint.Render(i18n.T("hints.verbose")+" · "+i18n.T("hints.extended")+" · "+i18n.T("hints.commands"))
 	case verboseThinking:
-		hints = lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("hints.verbose_off")) +
-			StyleSubtle.Render("  " + i18n.T("hints.extended") + "  " + i18n.T("hints.commands"))
+		hints = lipgloss.NewStyle().Foreground(ColorAgent).Render(i18n.T("hints.verbose_off")) +
+			StyleFaint.Render(" · " + i18n.T("hints.extended") + " · " + i18n.T("hints.commands"))
 	case verboseExtended:
-		hints = StyleSubtle.Render(i18n.T("hints.verbose") + "  ") +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#718096")).Render(i18n.T("hints.extended_off")) +
-			StyleSubtle.Render("  " + i18n.T("hints.commands"))
+		hints = StyleFaint.Render(i18n.T("hints.verbose") + " · ") +
+			lipgloss.NewStyle().Foreground(ColorTextFaint).Render(i18n.T("hints.extended_off")) +
+			StyleFaint.Render(" · " + i18n.T("hints.commands"))
 	}
 	if m.input.HasNewlines() {
-		newlineHint := lipgloss.NewStyle().Foreground(lipgloss.Color("#718096")).Render("  " + i18n.T("hints.newline"))
+		newlineHint := StyleFaint.Render(" · " + i18n.T("hints.newline"))
 		hints += newlineHint
 	}
 	statusPad := m.width - lipgloss.Width(leftLabel) - lipgloss.Width(hints) - 1

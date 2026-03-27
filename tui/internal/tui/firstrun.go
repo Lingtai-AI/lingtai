@@ -361,7 +361,7 @@ func (m FirstRunModel) View() string {
 		b.WriteString("  " + i18n.TF("firstrun.enter_dir", m.agentName) + "\n\n")
 		b.WriteString("  " + m.dirInput.View() + "\n\n")
 		if m.message != "" {
-			errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f56565"))
+			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("  " + errStyle.Render(m.message) + "\n\n")
 		}
 		b.WriteString(StyleSubtle.Render("  "+i18n.T("firstrun.create_hint")) + "\n")
