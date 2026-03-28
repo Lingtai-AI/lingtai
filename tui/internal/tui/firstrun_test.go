@@ -25,16 +25,6 @@ func TestGetPresetProvider(t *testing.T) {
 			wantProv: "minimax",
 		},
 		{
-			name: "gemini preset",
-			preset: preset.Preset{
-				Name: "gemini",
-				Manifest: map[string]interface{}{
-					"llm": map[string]interface{}{"provider": "gemini"},
-				},
-			},
-			wantProv: "gemini",
-		},
-		{
 			name: "custom preset",
 			preset: preset.Preset{
 				Name: "custom",
@@ -68,15 +58,11 @@ func TestNeedsKey(t *testing.T) {
 	m := FirstRunModel{
 		existingKeys: map[string]string{
 			"minimax": "my-minimax-key",
-			// gemini key missing
 		},
 	}
 
 	if m.needsKey("minimax") {
 		t.Error("minimax has key, should not need")
-	}
-	if !m.needsKey("gemini") {
-		t.Error("gemini missing key, should need")
 	}
 	if !m.needsKey("custom") {
 		t.Error("custom missing key, should need")
@@ -96,17 +82,17 @@ func TestPresetNeedsKey(t *testing.T) {
 			"llm": map[string]interface{}{"provider": "minimax"},
 		},
 	}
-	geminiPreset := preset.Preset{
-		Name: "gemini",
+	customPreset := preset.Preset{
+		Name: "custom",
 		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{"provider": "gemini"},
+			"llm": map[string]interface{}{"provider": "custom"},
 		},
 	}
 
 	if m.presetNeedsKey(minimaxPreset) {
 		t.Error("minimax preset should not need key")
 	}
-	if !m.presetNeedsKey(geminiPreset) {
-		t.Error("gemini preset should need key (not configured)")
+	if !m.presetNeedsKey(customPreset) {
+		t.Error("custom preset should need key (not configured)")
 	}
 }

@@ -76,7 +76,16 @@ class MiniMaxImageGenService(ImageGenService):
             + sorted(output_dir.glob("*.png"))
         )
         if image_files:
-            return image_files[-1]
+            latest = image_files[-1]
+            # Rename to a unique timestamped name to prevent overwrites
+            ts = int(time.time())
+            short_hash = hashlib.md5(prompt.encode()).hexdigest()[:4]
+            unique_name = f"draw_{ts}_{short_hash}{latest.suffix}"
+            unique_path = output_dir / unique_name
+            if latest.name != unique_name:
+                latest.rename(unique_path)
+                return unique_path
+            return latest
 
         # Fallback: download from URL in result text
         result_text = self._extract_text(result)

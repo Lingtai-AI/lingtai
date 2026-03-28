@@ -21,7 +21,7 @@ func TestSaveAndLoadConfig_NewFormat(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{Keys: map[string]string{
 		"minimax": "test-minimax-key",
-		"gemini":  "test-gemini-key",
+		"custom":  "test-custom-key",
 	}}
 	if err := SaveConfig(dir, cfg); err != nil {
 		t.Fatalf("save: %v", err)
@@ -36,8 +36,8 @@ func TestSaveAndLoadConfig_NewFormat(t *testing.T) {
 	if loaded.Keys["minimax"] != "test-minimax-key" {
 		t.Errorf("Keys[minimax] = %q, want %q", loaded.Keys["minimax"], "test-minimax-key")
 	}
-	if loaded.Keys["gemini"] != "test-gemini-key" {
-		t.Errorf("Keys[gemini] = %q, want %q", loaded.Keys["gemini"], "test-gemini-key")
+	if loaded.Keys["custom"] != "test-custom-key" {
+		t.Errorf("Keys[custom] = %q, want %q", loaded.Keys["custom"], "test-custom-key")
 	}
 }
 
@@ -90,12 +90,12 @@ func TestMigrateConfig(t *testing.T) {
 }
 
 func TestMigrateConfig_Empty(t *testing.T) {
-	cfg := &Config{Keys: map[string]string{"gemini": "existing-gemini"}}
+	cfg := &Config{Keys: map[string]string{"custom": "existing-custom"}}
 	MigrateConfig(cfg, "legacy-minimax")
 	if cfg.Keys["minimax"] != "legacy-minimax" {
 		t.Errorf("Keys[minimax] = %q, want %q", cfg.Keys["minimax"], "legacy-minimax")
 	}
-	if cfg.Keys["gemini"] != "existing-gemini" {
-		t.Errorf("Keys[gemini] = %q, should not change", cfg.Keys["gemini"])
+	if cfg.Keys["custom"] != "existing-custom" {
+		t.Errorf("Keys[custom] = %q, should not change", cfg.Keys["custom"])
 	}
 }

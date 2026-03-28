@@ -21,9 +21,13 @@ class MiniMaxVisionService(VisionService):
         self,
         *,
         api_key: str,
-        api_host: str = "https://api.minimaxi.com",
+        api_host: str | None = None,
     ) -> None:
         self._api_key = api_key
+        if not api_host:
+            raise RuntimeError(
+                "api_host is required for MiniMax vision service."
+            )
         self._api_host = api_host
         self._client = None  # lazy init
 

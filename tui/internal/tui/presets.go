@@ -249,7 +249,7 @@ func buildEditFields(p preset.Preset) []presetField {
 		endpoints := []string{"international", "china"}
 		epCurrent := 0
 		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-			if bu, ok := llm["base_url"].(string); ok && bu == "https://api.minimax.chat/anthropic" {
+			if bu, ok := llm["base_url"].(string); ok && bu == "https://api.minimaxi.com/anthropic" {
 				epCurrent = 1
 			}
 		}
@@ -346,9 +346,9 @@ func applyEditField(p *preset.Preset, f *presetField) {
 		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 			switch val {
 			case "international":
-				llm["base_url"] = nil
+				llm["base_url"] = "https://api.minimax.io/anthropic"
 			case "china":
-				llm["base_url"] = "https://api.minimax.chat/anthropic"
+				llm["base_url"] = "https://api.minimaxi.com/anthropic"
 			}
 		}
 	case "language":

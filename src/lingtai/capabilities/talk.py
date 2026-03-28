@@ -102,7 +102,10 @@ def setup(
                 "capabilities={'talk': {'provider': 'minimax', 'api_key': '...'}}"
             )
         from ..services.tts import create_tts_service
+        from ._media_host import resolve_media_host
 
+        if "api_host" not in kwargs:
+            kwargs["api_host"] = resolve_media_host(agent)
         tts_service = create_tts_service(provider, api_key=api_key, **kwargs)
 
     lang = agent._config.language

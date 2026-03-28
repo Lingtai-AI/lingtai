@@ -74,16 +74,22 @@ func VerifyVenv(globalDir string) error {
 }
 
 func EnsureVenv(globalDir string) error {
-	return ensureVenv(globalDir, false)
+	return ensureVenv(globalDir, false, nil)
 }
+
+// ProgressFunc is called with an i18n key to report setup progress.
+type ProgressFunc func(key string)
 
 // EnsureVenvQuiet creates the venv without writing to stdout/stderr.
 // Used when running inside the TUI (alt-screen).
-func EnsureVenvQuiet(globalDir string) error {
-	return ensureVenv(globalDir, true)
+func EnsureVenvQuiet(globalDir string, progress ProgressFunc) error {
+	return ensureVenv(globalDir, true, progress)
 }
 
-func ensureVenv(globalDir string, quiet bool) error {
+func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
+	if progress == nil {
+		progress = func(string) {}
+	}
 	if !NeedsVenv(globalDir) {
 		return nil
 	}
@@ -92,6 +98,9 @@ func ensureVenv(globalDir string, quiet bool) error {
 	if pythonCmd == "" {
 		return fmt.Errorf("Python 3.11+ is required. Install it from python.org and try again")
 	}
+
+	// Step 1: create venv
+	progress("welcome.step_venv")
 	os.MkdirAll(filepath.Dir(venvPath), 0o755)
 	cmd := exec.Command(pythonCmd, "-m", "venv", venvPath)
 	if !quiet {
@@ -101,6 +110,9 @@ func ensureVenv(globalDir string, quiet bool) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
+
+	// Step 2: pip install
+	progress("welcome.step_install")
 	var pipCmd string
 	if runtime.GOOS == "windows" {
 		pipCmd = filepath.Join(venvPath, "Scripts", "pip.exe")

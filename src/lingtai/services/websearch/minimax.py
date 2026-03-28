@@ -25,8 +25,9 @@ class MiniMaxSearchService(SearchService):
     # Class-level flag to ensure atexit is registered only once.
     _atexit_registered = False
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, api_host: str | None = None) -> None:
         self._api_key = api_key
+        self._api_host = api_host
         self._client = None
 
     def _ensure_client(self):
@@ -40,10 +41,14 @@ class MiniMaxSearchService(SearchService):
                 "uvx not found. Please install uv: "
                 "https://docs.astral.sh/uv/getting-started/installation/"
             )
+        if not self._api_host:
+            raise RuntimeError(
+                "api_host is required for MiniMax search service."
+            )
         env = {
             **os.environ,
             "MINIMAX_API_KEY": self._api_key,
-            "MINIMAX_API_HOST": os.getenv("MINIMAX_API_HOST", "https://api.minimaxi.com"),
+            "MINIMAX_API_HOST": self._api_host,
         }
         self._client = MCPClient(
             command=uvx_path,

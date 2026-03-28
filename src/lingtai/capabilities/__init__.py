@@ -18,6 +18,7 @@ _BUILTIN: dict[str, str] = {
     "draw": ".draw",
     "compose": ".compose",
     "talk": ".talk",
+    "video": ".video",
     "listen": ".listen",
     "vision": ".vision",
     "web_search": ".web_search",

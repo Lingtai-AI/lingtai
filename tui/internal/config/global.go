@@ -7,7 +7,7 @@ import (
 )
 
 type Config struct {
-	Keys     map[string]string `json:"keys,omitempty"`     // provider → key, e.g. {"minimax": "xxx", "gemini": "xxx"}
+	Keys     map[string]string `json:"keys,omitempty"`     // provider → key, e.g. {"minimax": "xxx"}
 	Language string            `json:"language,omitempty"` // TUI language: "en", "zh", "wen"
 }
 

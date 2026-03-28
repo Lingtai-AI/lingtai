@@ -36,8 +36,7 @@ def create_minimax_media_client(
 
     Args:
         api_key: MiniMax API key. Falls back to ``MINIMAX_API_KEY`` env var.
-        api_host: API host URL. Falls back to ``MINIMAX_API_HOST`` env var,
-            then to ``https://api.minimaxi.com``.
+        api_host: API host URL (required).
         resource_mode: ``"url"`` (return download URLs) or ``"local"``
             (save files in subprocess). Default ``"url"`` — capabilities
             handle downloading themselves.
@@ -62,7 +61,11 @@ def create_minimax_media_client(
             "MINIMAX_API_KEY not provided and environment variable not set."
         )
 
-    resolved_host = api_host or os.getenv("MINIMAX_API_HOST") or "https://api.minimaxi.com"
+    if not api_host:
+        raise RuntimeError(
+            "api_host is required for MiniMax media MCP client."
+        )
+    resolved_host = api_host
 
     env = {
         **os.environ,

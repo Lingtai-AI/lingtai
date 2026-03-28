@@ -37,7 +37,7 @@ class MiniMaxTTSService(TTSService):
     Args:
         api_key: MiniMax API key.  Falls back to ``MINIMAX_API_KEY``.
         api_host: API host URL.  Falls back to ``MINIMAX_API_HOST``,
-            then ``https://api.minimaxi.com``.
+            then ``https://api.minimax.io``.
     """
 
     def __init__(

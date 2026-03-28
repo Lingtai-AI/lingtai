@@ -100,6 +100,13 @@
   "draw.prompt": "欲生之图像描述",
   "draw.aspect_ratio": "宽高比（如'1:1'、'16:9'、'9:16'）。默认：'1:1'",
 
+  "video.description": "造影之器——以文生影，或以图化动。供详细之提示词——越具体效果越佳。支以文生影（默认）与以图生影（供 first_frame_image）。导演模型支于提示词中嵌镜头运动之令：[Truck left]、[Pan right]、[Push in]、[Pull out]、[Zoom in]、[Zoom out]、[Tilt up]、[Static shot] 等。造影需数分钟——须耐心候之。输出：MP4 影片存于工作目录之 media/videos/。结合绘相可先生静图，再以造影化动之。",
+  "video.prompt": "欲生之影片描述。用导演模型时，可于提示词中嵌镜头之令如 [Zoom in]、[Pan left]、[Static shot]。",
+  "video.first_frame_image": "用作首帧之图像路径（以图生影之式）。供之则自择 I2V 模型。省略则以文生影。",
+  "video.model": "所用之模型。T2V 模型：'T2V-01'、'T2V-01-Director'。I2V 模型：'I2V-01'、'I2V-01-Director'、'I2V-01-live'。最新：'MiniMax-Hailuo-02'（至佳画质）。导演模型支于提示词中嵌镜头运动之令。默认：依输入自择。",
+  "video.duration": "影片时长（秒）。仅 MiniMax-Hailuo-02 模型可用。可选：6 或 10。默认：模型之默认值。",
+  "video.resolution": "影片分辨率。仅 MiniMax-Hailuo-02 模型可用。可选：'768P' 或 '1080P'。默认：模型之默认值。",
+
   "listen.description": "聆听之器——听音辨言或赏乐品律。辨言以本地 Whisper 模型（最宜语音；歌中之词或有不确）。赏乐以信号处理提取乐之特征（调性、节奏、音色、动态——最宜乐；于语音无用）。两者皆于本地运行，无 API 之费。若内置分析不足，可自撰脚本深入析之。",
   "listen.audio_path": "音声文件之路径（mp3、wav 等）",
   "listen.action": "择其操作：\n- 'transcribe'：听音辨言——以本地 Whisper 模型将语音化为文字。最宜口语与清晰之言。于歌唱亦可，然歌词或有不确——歌中误听甚常。\n- 'appreciate'：赏乐品律——以信号处理（librosa）析乐。返结构化数据：估调性、节奏/BPM、频段能量、频谱特征（亮度、带宽）、动态/能量随时之曲线、节拍规律性。此皆数值测量而非主观描述——汝当将数解读为有意义之评。最宜乐与声设计。于语音无用——会给频谱数据而无语义。\n若分析不足以满需，汝随时可自撰脚本深入析之。",

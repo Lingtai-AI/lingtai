@@ -90,6 +90,9 @@ def setup(
     Raises ``ValueError`` if neither is provided.
     """
     if vision_service is None and provider is not None:
+        from ._media_host import resolve_media_host
+        if "api_host" not in kwargs:
+            kwargs["api_host"] = resolve_media_host(agent)
         vision_service = create_vision_service(provider, api_key=api_key, **kwargs)
     elif vision_service is None:
         raise ValueError(

@@ -50,6 +50,7 @@ def create_search_service(
     *,
     api_key: str | None = None,
     model: str | None = None,
+    api_host: str | None = None,
 ) -> SearchService:
     """Factory — create a SearchService for the given provider.
 
@@ -102,7 +103,7 @@ def create_search_service(
 
     if name == "minimax":
         from .minimax import MiniMaxSearchService
-        return MiniMaxSearchService(api_key=_require_key())
+        return MiniMaxSearchService(api_key=_require_key(), api_host=api_host)
 
     raise ValueError(
         f"Unknown web search provider: {provider!r}. "

@@ -84,10 +84,11 @@ def setup(agent: "BaseAgent", **kwargs: Any) -> ComposeManager:
                 "Example: capabilities={'compose': {'provider': 'minimax', 'api_key': '...'}}"
             )
         from ..services.music_gen import create_music_gen_service
+        from ._media_host import resolve_media_host
         music_gen_service = create_music_gen_service(
             provider,
             api_key=kwargs.get("api_key"),
-            api_host=kwargs.get("api_host"),
+            api_host=kwargs.get("api_host") or resolve_media_host(agent),
         )
 
     lang = agent._config.language

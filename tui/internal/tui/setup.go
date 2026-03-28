@@ -20,14 +20,13 @@ const (
 	stepEnterKey
 )
 
-// Supported providers
+// Supported providers — display names resolved via i18n at render time.
 var providers = []struct {
-	id   string
-	name string
+	id      string
+	nameKey string // i18n key for display name
 }{
-	{"minimax", "MiniMax"},
-	{"gemini", "Gemini"},
-	{"custom", "Custom"},
+	{"minimax", "setup.provider_minimax"},
+	{"custom", "setup.provider_custom"},
 }
 
 // SetupModel handles API key configuration (provider-agnostic).
@@ -125,7 +124,7 @@ func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
 		if m.existingKeys[provider] == "" {
 			m.step = stepEnterKey
 			m.input.Reset()
-			m.input.Placeholder = fmt.Sprintf("Enter %s API key", providers[m.providerIdx].name)
+			m.input.Placeholder = i18n.TF("firstrun.enter_provider_key", i18n.T(providers[m.providerIdx].nameKey))
 			return m, textinput.Blink
 		}
 		// Has existing key, save and done
@@ -200,11 +199,12 @@ func (m SetupModel) viewProviderSelection(b *strings.Builder) {
 		if selected {
 			prefix = "  ● "
 		}
+		name := i18n.T(p.nameKey)
 		masked := maskKey(m.existingKeys[p.id])
 		if masked != "" {
-			b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, p.name, masked))
+			b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, name, masked))
 		} else {
-			b.WriteString(fmt.Sprintf("%s%s\n", prefix, p.name))
+			b.WriteString(fmt.Sprintf("%s%s\n", prefix, name))
 		}
 	}
 
@@ -219,8 +219,8 @@ func (m SetupModel) viewProviderSelection(b *strings.Builder) {
 }
 
 func (m SetupModel) viewKeyInput(b *strings.Builder) {
-	provider := providers[m.providerIdx].name
-	b.WriteString(fmt.Sprintf("  %s: %s\n\n", i18n.T("setup.provider"), provider))
+	providerName := i18n.T(providers[m.providerIdx].nameKey)
+	b.WriteString(fmt.Sprintf("  %s: %s\n\n", i18n.T("setup.provider"), providerName))
 
 	// Show existing key if any
 	existingKey := maskKey(m.existingKeys[providers[m.providerIdx].id])

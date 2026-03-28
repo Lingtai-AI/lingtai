@@ -27,6 +27,9 @@ type bootstrapDoneMsg struct{}
 // bootstrapErrMsg signals that background setup failed.
 type bootstrapErrMsg struct{ err string }
 
+// bootstrapProgressMsg reports a setup progress step (i18n key).
+type bootstrapProgressMsg struct{ key string }
+
 type firstRunStep int
 
 const (
@@ -96,16 +99,23 @@ type FirstRunModel struct {
 	langCursor   int
 	welcomeOnly  bool // true when opened from /settings (return to mail after language pick)
 	// Bootstrap state (venv + assets install)
-	setupDone    bool   // true when bootstrap goroutine finishes
-	setupErr     string // non-empty if bootstrap failed
+	setupDone    bool           // true when bootstrap goroutine finishes
+	setupErr     string         // non-empty if bootstrap failed
+	setupStatus  string         // current progress i18n key
+	progressCh   chan string     // channel for progress updates
 	// Quick config (provider/model) in preset selection
 	quickProvider textinput.Model
 	quickModel    textinput.Model
 	quickEditMode bool
 	// Embedded key input for preset's provider
-	presetKeyInput   textinput.Model
-	selectedProvider string // provider of currently selected preset
-	existingKeys     map[string]string // loaded from Config.Keys
+	presetKeyInput    textinput.Model
+	presetEndpointIn  textinput.Model // base_url for custom provider
+	presetModelIn     textinput.Model // model name for custom provider
+	presetKeyFieldIdx int             // 0=compat, 1=endpoint, 2=model, 3=key (custom); 0=region,1=key (minimax)
+	minimaxRegion     int             // 0=international, 1=china
+	customCompat      int             // 0=openai, 1=anthropic
+	selectedProvider  string          // provider of currently selected preset
+	existingKeys      map[string]string // loaded from Config.Keys
 }
 
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
@@ -130,6 +140,16 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	pki := textinput.New()
 	pki.CharLimit = 128
 	pki.Width = 50
+
+	pei := textinput.New() // endpoint input for custom provider
+	pei.CharLimit = 256
+	pei.Width = 50
+	pei.Placeholder = "https://api.example.com/v1"
+
+	pmi := textinput.New() // model input for custom provider
+	pmi.CharLimit = 64
+	pmi.Width = 50
+	pmi.Placeholder = "model-name"
 
 	si := textinput.New()
 	si.CharLimit = 10
@@ -180,12 +200,15 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		langCursor:      langCursor,
 		quickProvider:   qp,
 		quickModel:      qm,
-		presetKeyInput:  pki,
-		existingKeys:    existingKeys,
+		presetKeyInput:   pki,
+		presetEndpointIn: pei,
+		presetModelIn:    pmi,
+		existingKeys:     existingKeys,
 		staminaInput:    si,
 		ctxLimitInput:   ci,
 		soulDelayInput:  sdi,
 		moltPressInput:  mpi,
+		progressCh:      make(chan string, 4),
 	}
 
 	return m
@@ -196,20 +219,43 @@ func (m FirstRunModel) Init() tea.Cmd {
 		// Already bootstrapped — immediately signal done
 		return func() tea.Msg { return bootstrapDoneMsg{} }
 	}
-	return m.runBootstrap
+	return tea.Batch(
+		m.runBootstrap(m.progressCh),
+		waitForProgress(m.progressCh),
+	)
+}
+
+// waitForProgress listens on the progress channel and emits tea messages.
+func waitForProgress(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		key, ok := <-ch
+		if !ok {
+			return nil // channel closed, bootstrap goroutine handles done/err
+		}
+		return bootstrapProgressMsg{key: key}
+	}
 }
 
 // runBootstrap runs venv creation + asset population in a goroutine.
-func (m FirstRunModel) runBootstrap() tea.Msg {
-	// Venv (slow — creates venv + pip install). Quiet mode: no stdout/stderr leak.
-	if err := config.EnsureVenvQuiet(m.globalDir); err != nil {
-		return bootstrapErrMsg{err: err.Error()}
+func (m FirstRunModel) runBootstrap(ch chan<- string) tea.Cmd {
+	return func() tea.Msg {
+		progress := func(key string) {
+			ch <- key
+		}
+		// Venv (slow — creates venv + pip install). Quiet mode: no stdout/stderr leak.
+		if err := config.EnsureVenvQuiet(m.globalDir, progress); err != nil {
+			close(ch)
+			return bootstrapErrMsg{err: err.Error()}
+		}
+		// Assets + default presets (fast)
+		progress("welcome.step_presets")
+		if err := preset.Bootstrap(m.globalDir); err != nil {
+			close(ch)
+			return bootstrapErrMsg{err: err.Error()}
+		}
+		close(ch)
+		return bootstrapDoneMsg{}
 	}
-	// Assets + default presets (fast)
-	if err := preset.Bootstrap(m.globalDir); err != nil {
-		return bootstrapErrMsg{err: err.Error()}
-	}
-	return bootstrapDoneMsg{}
 }
 
 func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
@@ -219,8 +265,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case bootstrapProgressMsg:
+		m.setupStatus = msg.key
+		return m, waitForProgress(m.progressCh)
+
 	case bootstrapDoneMsg:
 		m.setupDone = true
+		m.setupStatus = ""
 		return m, nil
 
 	case bootstrapErrMsg:
@@ -298,6 +349,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, nil
 
 		case stepAPIKey:
+			// Esc on provider selection goes back to welcome (not mail)
+			if msg.String() == "esc" && m.setup.step == stepSelectProvider {
+				m.step = stepWelcome
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.setup, cmd = m.setup.Update(msg)
 			return m, cmd
@@ -352,10 +408,21 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					provider := m.getPresetProvider(p)
 					m.selectedProvider = provider
 					// Check if key is needed and missing
-					if m.needsKey(provider) {
+					if m.needsKey(provider) || provider == "custom" {
 						m.step = stepPresetKey
 						m.presetKeyInput.Reset()
-						m.presetKeyInput.Focus()
+						m.presetEndpointIn.Reset()
+						m.presetModelIn.Reset()
+						m.presetKeyFieldIdx = 0
+						if provider == "custom" {
+							// field 0 = compat selector (no text focus)
+							m.customCompat = 0
+						} else if provider == "minimax" {
+							// field 0 = region selector (no text focus)
+							m.presetKeyInput.Blur()
+						} else {
+							m.presetKeyInput.Focus()
+						}
 						return m, textinput.Blink
 					}
 					// Key exists, proceed to name/dir
@@ -393,7 +460,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.step = stepNewPreset
 				return m, textinput.Blink
 			case "esc":
-				// Already at start, ctrl+c to quit
+				m.step = stepWelcome
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -401,24 +468,92 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, nil
 
 		case stepPresetKey:
-			// Embedded key input for selected preset's provider
+			isCustom := m.selectedProvider == "custom"
+			isMinimax := m.selectedProvider == "minimax"
+			fieldCount := 1 // default: key only
+			if isCustom {
+				fieldCount = 4 // compat + endpoint + model + key
+			}
+			if isMinimax {
+				fieldCount = 2 // region + key
+			}
 			switch msg.String() {
 			case "esc":
 				m.step = stepPickPreset
 				return m, nil
+			case "up":
+				if isCustom || isMinimax {
+					m.presetKeyFieldIdx = (m.presetKeyFieldIdx - 1 + fieldCount) % fieldCount
+					if isMinimax && m.presetKeyFieldIdx == 0 {
+						m.presetKeyInput.Blur()
+						return m, nil
+					}
+					return m, m.focusPresetKeyField()
+				}
+				return m, nil
+			case "down", "tab":
+				if isCustom || isMinimax {
+					m.presetKeyFieldIdx = (m.presetKeyFieldIdx + 1) % fieldCount
+					if isMinimax && m.presetKeyFieldIdx == 0 {
+						m.presetKeyInput.Blur()
+						return m, nil
+					}
+					return m, m.focusPresetKeyField()
+				}
+				return m, nil
+			case "left", "right":
+				// Toggle region for minimax
+				if isMinimax && m.presetKeyFieldIdx == 0 {
+					m.minimaxRegion = 1 - m.minimaxRegion
+					return m, nil
+				}
+				// Toggle compat for custom
+				if isCustom && m.presetKeyFieldIdx == 0 {
+					m.customCompat = 1 - m.customCompat
+					return m, nil
+				}
 			case "enter":
 				key := m.presetKeyInput.Value()
+				if isCustom {
+					endpoint := m.presetEndpointIn.Value()
+					model := m.presetModelIn.Value()
+					if endpoint == "" || model == "" || key == "" {
+						return m, nil // require all fields
+					}
+					compat := "openai"
+					if m.customCompat == 1 {
+						compat = "anthropic"
+					}
+					p := m.presets[m.cursor]
+					if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+						llm["base_url"] = endpoint
+						llm["model"] = model
+						llm["api_compat"] = compat
+					}
+					preset.Save(p)
+					m.presets, _ = preset.List()
+				}
+				if isMinimax {
+					// Write base_url based on region
+					p := m.presets[m.cursor]
+					if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+						if m.minimaxRegion == 0 {
+							llm["base_url"] = "https://api.minimaxi.com/anthropic"
+						} else {
+							llm["base_url"] = "https://api.minimax.io/anthropic"
+						}
+					}
+					preset.Save(p)
+					m.presets, _ = preset.List()
+				}
 				if key != "" {
-					// Save key to Config.Keys (preserve existing config fields)
 					m.existingKeys[m.selectedProvider] = key
 					cfg, _ := config.LoadConfig(m.globalDir)
 					cfg.Keys = m.existingKeys
 					config.SaveConfig(m.globalDir, cfg)
 				} else if m.existingKeys[m.selectedProvider] == "" {
-					// Empty and no existing key, require input
 					return m, nil
 				}
-				// Proceed to name/dir
 				p := m.presets[m.cursor]
 				m.enterAgentNameDir(p)
 				return m, textinput.Blink
@@ -426,7 +561,22 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, tea.Quit
 			default:
 				var cmd tea.Cmd
-				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				if isCustom {
+					switch m.presetKeyFieldIdx {
+					case 0:
+						// compat selector — no text input
+					case 1:
+						m.presetEndpointIn, cmd = m.presetEndpointIn.Update(msg)
+					case 2:
+						m.presetModelIn, cmd = m.presetModelIn.Update(msg)
+					case 3:
+						m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+					}
+				} else if isMinimax && m.presetKeyFieldIdx == 1 {
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				} else if !isMinimax {
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				}
 				return m, cmd
 			}
 
@@ -638,8 +788,17 @@ func (m FirstRunModel) View() string {
 			if i == m.cursor {
 				cursor = "> "
 			}
-			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(p.Name)
-			desc := StyleSubtle.Render("  " + p.Description)
+			// i18n: try preset.name_<id> and preset.desc_<id>, fall back to raw fields
+			displayName := i18n.T("preset.name_" + p.Name)
+			if displayName == "preset.name_"+p.Name {
+				displayName = p.Name
+			}
+			displayDesc := i18n.T("preset.desc_" + p.Name)
+			if displayDesc == "preset.desc_"+p.Name {
+				displayDesc = p.Description
+			}
+			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
+			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + desc + "\n")
 		}
 		// Quick config panel
@@ -658,18 +817,67 @@ func (m FirstRunModel) View() string {
 		}
 
 	case stepPresetKey:
-		providerName := m.selectedProvider
-		if providerName == "minimax" {
-			providerName = "MiniMax"
-		} else if providerName == "gemini" {
-			providerName = "Gemini"
-		} else {
-			providerName = "Custom"
+		providerName := i18n.T("setup.provider_" + m.selectedProvider)
+		if providerName == "setup.provider_"+m.selectedProvider {
+			providerName = m.selectedProvider
 		}
 		b.WriteString("  " + i18n.TF("firstrun.enter_provider_key", providerName) + "\n\n")
-		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
-		b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
-			"  [Esc] "+i18n.T("setup.back")) + "\n")
+		if m.selectedProvider == "custom" {
+			warnStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
+			b.WriteString("  " + warnStyle.Render(i18n.T("firstrun.custom_cost_warn")) + "\n\n")
+			// Compat selector
+			openaiLabel := "OpenAI"
+			anthropicLabel := "Anthropic"
+			if m.customCompat == 0 {
+				openaiLabel = "● " + openaiLabel
+				anthropicLabel = "○ " + anthropicLabel
+			} else {
+				openaiLabel = "○ " + openaiLabel
+				anthropicLabel = "● " + anthropicLabel
+			}
+			compatStyle := lipgloss.NewStyle()
+			if m.presetKeyFieldIdx == 0 {
+				compatStyle = compatStyle.Bold(true).Foreground(ColorAccent)
+			}
+			b.WriteString("  " + i18n.T("firstrun.api_compat") + ":  " + compatStyle.Render(openaiLabel+"  "+anthropicLabel) + "\n")
+			b.WriteString("  " + i18n.T("presets.endpoint") + ":    " + m.presetEndpointIn.View() + "\n")
+			b.WriteString("  " + i18n.T("presets.model") + ":       " + m.presetModelIn.View() + "\n")
+			b.WriteString("  " + i18n.T("setup.api_key_label") + "     " + m.presetKeyInput.View() + "\n\n")
+			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
+				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Enter] "+i18n.T("setup.save")+
+				"  [Esc] "+i18n.T("setup.back")) + "\n")
+		} else if m.selectedProvider == "minimax" {
+			// Region toggle
+			intlLabel := i18n.T("firstrun.region_intl")
+			chinaLabel := i18n.T("firstrun.region_china")
+			if m.minimaxRegion == 0 {
+				chinaLabel = "● " + chinaLabel
+				intlLabel = "○ " + intlLabel
+			} else {
+				chinaLabel = "○ " + chinaLabel
+				intlLabel = "● " + intlLabel
+			}
+			regionStyle := lipgloss.NewStyle()
+			if m.presetKeyFieldIdx == 0 {
+				regionStyle = regionStyle.Bold(true).Foreground(ColorAccent)
+			}
+			b.WriteString("  " + i18n.T("firstrun.region") + ":  " + regionStyle.Render(chinaLabel+"  "+intlLabel) + "\n")
+			endpointURL := "api.minimaxi.com/anthropic"
+			if m.minimaxRegion == 1 {
+				endpointURL = "api.minimax.io/anthropic"
+			}
+			b.WriteString("            " + StyleFaint.Render(endpointURL) + "\n")
+			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
+			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
+				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Enter] "+i18n.T("setup.save")+
+				"  [Esc] "+i18n.T("setup.back")) + "\n")
+		} else {
+			b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
+			b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
+				"  [Esc] "+i18n.T("setup.back")) + "\n")
+		}
 
 	case stepEditPreset:
 		stepNum, total := stepProgress(m.step, m.hasPresets)
@@ -843,6 +1051,8 @@ func (m FirstRunModel) viewWelcome() string {
 		} else if m.setupDone {
 			doneStyle := lipgloss.NewStyle().Foreground(ColorAgent)
 			content.WriteString(centerText(doneStyle.Render(i18n.T("welcome.ready")), m.width) + "\n")
+		} else if m.setupStatus != "" {
+			content.WriteString(centerText(StyleFaint.Render(i18n.T(m.setupStatus)), m.width) + "\n")
 		} else {
 			content.WriteString(centerText(StyleFaint.Render(i18n.T("welcome.installing")), m.width) + "\n")
 		}
@@ -920,6 +1130,32 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 
 // focusAgentField focuses the input at m.fieldIdx and blurs all others.
 // Returns the blink command for the newly focused input.
+func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
+	m.presetEndpointIn.Blur()
+	m.presetModelIn.Blur()
+	m.presetKeyInput.Blur()
+	if m.selectedProvider == "minimax" {
+		switch m.presetKeyFieldIdx {
+		case 0:
+			return nil // region selector — no text focus
+		case 1:
+			return m.presetKeyInput.Focus()
+		}
+		return nil
+	}
+	switch m.presetKeyFieldIdx {
+	case 0:
+		return nil // compat selector — no text focus
+	case 1:
+		return m.presetEndpointIn.Focus()
+	case 2:
+		return m.presetModelIn.Focus()
+	case 3:
+		return m.presetKeyInput.Focus()
+	}
+	return nil
+}
+
 func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	m.nameInput.Blur()
 	m.dirInput.Blur()

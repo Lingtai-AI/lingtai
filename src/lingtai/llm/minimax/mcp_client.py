@@ -114,7 +114,11 @@ def get_minimax_mcp_client() -> MCPClient:
             )
 
         # Build subprocess environment — inherit everything, add extras
-        host = _api_host or "https://api.minimaxi.com"
+        if not _api_host:
+            raise RuntimeError(
+                "MiniMax MCP api_host not set. Call set_api_host() first."
+            )
+        host = _api_host
         env = {**os.environ, "MINIMAX_API_HOST": host, **_extra_env}
 
         # Verify at least one API key is present

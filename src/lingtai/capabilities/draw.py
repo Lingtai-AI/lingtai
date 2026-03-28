@@ -78,10 +78,11 @@ def setup(agent: "BaseAgent", **kwargs: Any) -> DrawManager:
                 "Example: capabilities={'draw': {'provider': 'minimax', 'api_key': '...'}}"
             )
         from ..services.image_gen import create_image_gen_service
+        from ._media_host import resolve_media_host
         image_gen_service = create_image_gen_service(
             provider,
             api_key=kwargs.get("api_key"),
-            api_host=kwargs.get("api_host"),
+            api_host=kwargs.get("api_host") or resolve_media_host(agent),
         )
 
     lang = agent._config.language

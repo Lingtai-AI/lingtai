@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -53,6 +54,16 @@ func List() ([]Preset, error) {
 		}
 		presets = append(presets, p)
 	}
+	// Put minimax first (recommended)
+	sort.Slice(presets, func(i, j int) bool {
+		if presets[i].Name == "minimax" {
+			return true
+		}
+		if presets[j].Name == "minimax" {
+			return false
+		}
+		return presets[i].Name < presets[j].Name
+	})
 	return presets, nil
 }
 
@@ -110,11 +121,10 @@ func EnsureDefault() error {
 	return nil
 }
 
-// BuiltinPresets returns the three built-in presets.
+// BuiltinPresets returns the built-in presets.
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
-		geminiPreset(),
 		customPreset(),
 	}
 }
@@ -134,28 +144,7 @@ func minimaxPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": mm, "psyche": e(), "library": e(),
-				"vision": mm, "talk": mm, "draw": mm, "compose": mm,
-				"listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
-			},
-			"admin": map[string]interface{}{"karma": true},
-		},
-	}
-}
-
-func geminiPreset() Preset {
-	gm := map[string]interface{}{"provider": "gemini", "api_key_env": "GEMINI_API_KEY"}
-	return Preset{
-		Name:        "gemini",
-		Description: "Gemini 3.0 Flash — vision + web search via Gemini",
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "gemini", "model": "gemini-3.0-flash",
-				"api_key": nil, "api_key_env": "GEMINI_API_KEY", "base_url": nil,
-			},
-			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": gm, "psyche": e(), "library": e(),
-				"vision": gm,
+				"vision": mm, "talk": mm, "draw": mm, "video": mm, "compose": mm,
 				"listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
@@ -166,7 +155,7 @@ func geminiPreset() Preset {
 func customPreset() Preset {
 	return Preset{
 		Name:        "custom",
-		Description: "Custom provider — bring your own API key",
+		Description: "OpenAI-compatible API — web search + web browse",
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "custom", "model": "",
@@ -175,7 +164,7 @@ func customPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": e(), "psyche": e(), "library": e(),
-				"vision": e(), "listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
+				"web_read": e(), "avatar": e(), "daemon": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 		},

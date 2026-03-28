@@ -105,8 +105,6 @@ func providerToEnvKey(provider string) string {
 	switch provider {
 	case "minimax":
 		return "MINIMAX_API_KEY"
-	case "gemini":
-		return "GEMINI_API_KEY"
 	default:
 		return "LLM_API_KEY"
 	}

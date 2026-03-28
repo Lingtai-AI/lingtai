@@ -53,14 +53,14 @@ func TestEnsureDefault_CreatesBuiltinPresets(t *testing.T) {
 			t.Fatalf("EnsureDefault() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 3 {
-			t.Fatalf("expected 3 presets, got %d", len(presets))
+		if len(presets) != 2 {
+			t.Fatalf("expected 2 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
 			names[p.Name] = true
 		}
-		for _, want := range []string{"minimax", "gemini", "custom"} {
+		for _, want := range []string{"minimax", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}

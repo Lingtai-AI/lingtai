@@ -86,8 +86,10 @@ def setup(
         model: Optional model override for the provider.
     """
     if search_service is None and provider is not None:
+        from ._media_host import resolve_media_host
         search_service = create_search_service(
             provider, api_key=api_key, model=model,
+            api_host=resolve_media_host(agent),
         )
     elif search_service is None and provider is None:
         raise ValueError(
