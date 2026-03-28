@@ -326,7 +326,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case capCheckErrMsg:
 		m.capLoading = false
 		m.capErr = msg.err
+		// Populate capInfos with empty entries so Space toggle works
 		m.capInfos = make(map[string]capInfo)
+		for _, name := range m.capOrder {
+			m.capInfos[name] = capInfo{}
+		}
 		// Fallback: select all capabilities from the preset
 		p := m.presets[m.cursor]
 		if capsMap, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
@@ -1187,6 +1191,7 @@ func (m *FirstRunModel) applyCapSelections() {
 
 	for _, name := range m.capOrder {
 		if name == "file" {
+			delete(caps, "file") // remove group key; individual keys below
 			fileKeys := []string{"read", "write", "edit", "glob", "grep"}
 			if m.capSelected[name] {
 				for _, fk := range fileKeys {
