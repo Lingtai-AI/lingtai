@@ -53,7 +53,7 @@ func NewSetupModel(globalDir string) SetupModel {
 	// Load existing keys for display
 	existingKeys := make(map[string]string)
 	cfg, err := config.LoadConfig(globalDir)
-	if err == nil {
+	if err == nil && cfg.Keys != nil {
 		existingKeys = cfg.Keys
 	}
 
@@ -145,7 +145,8 @@ func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
 	}
 	if key == "" {
 		// Keep existing key, save and done
-		cfg := config.Config{Keys: m.existingKeys}
+		cfg, _ := config.LoadConfig(m.globalDir)
+		cfg.Keys = m.existingKeys
 		if err := config.SaveConfig(m.globalDir, cfg); err != nil {
 			m.err = err
 			return m, nil
@@ -156,7 +157,8 @@ func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
 
 	// Save new key
 	m.existingKeys[provider] = key
-	cfg := config.Config{Keys: m.existingKeys}
+	cfg, _ := config.LoadConfig(m.globalDir)
+	cfg.Keys = m.existingKeys
 	if err := config.SaveConfig(m.globalDir, cfg); err != nil {
 		m.err = err
 		return m, nil

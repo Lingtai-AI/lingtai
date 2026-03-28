@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -19,6 +20,12 @@ type FirstRunDoneMsg struct {
 	OrchDir  string // full path to orchestrator directory
 	OrchName string // agent name
 }
+
+// bootstrapDoneMsg signals that background setup (venv + assets) finished.
+type bootstrapDoneMsg struct{}
+
+// bootstrapErrMsg signals that background setup failed.
+type bootstrapErrMsg struct{ err string }
 
 type firstRunStep int
 
@@ -77,10 +84,20 @@ type FirstRunModel struct {
 	editFields  []presetField
 	editCursor  int
 	// Focus state for combined name+dir step
-	focusOnDir bool
+	focusOnDir bool // legacy — replaced by fieldIdx
+	fieldIdx   int  // 0=name, 1=dir, 2=lang, 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure
+	// Agent config text inputs
+	agentLangIdx     int // cycle: 0=en, 1=zh, 2=wen
+	staminaInput     textinput.Model
+	ctxLimitInput    textinput.Model
+	soulDelayInput   textinput.Model
+	moltPressInput   textinput.Model
 	// Welcome page language selector
 	langCursor   int
 	welcomeOnly  bool // true when opened from /settings (return to mail after language pick)
+	// Bootstrap state (venv + assets install)
+	setupDone    bool   // true when bootstrap goroutine finishes
+	setupErr     string // non-empty if bootstrap failed
 	// Quick config (provider/model) in preset selection
 	quickProvider textinput.Model
 	quickModel    textinput.Model
@@ -114,6 +131,26 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	pki.CharLimit = 128
 	pki.Width = 50
 
+	si := textinput.New()
+	si.CharLimit = 10
+	si.Width = 15
+	si.Prompt = ""
+
+	ci := textinput.New()
+	ci.CharLimit = 10
+	ci.Width = 15
+	ci.Prompt = ""
+
+	sdi := textinput.New()
+	sdi.CharLimit = 10
+	sdi.Width = 15
+	sdi.Prompt = ""
+
+	mpi := textinput.New()
+	mpi.CharLimit = 6
+	mpi.Width = 15
+	mpi.Prompt = ""
+
 	// Load existing keys from Config.Keys
 	cfg, _ := config.LoadConfig(globalDir)
 	existingKeys := cfg.Keys
@@ -145,13 +182,34 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		quickModel:      qm,
 		presetKeyInput:  pki,
 		existingKeys:    existingKeys,
+		staminaInput:    si,
+		ctxLimitInput:   ci,
+		soulDelayInput:  sdi,
+		moltPressInput:  mpi,
 	}
 
 	return m
 }
 
 func (m FirstRunModel) Init() tea.Cmd {
-	return nil
+	if m.welcomeOnly {
+		// Already bootstrapped — immediately signal done
+		return func() tea.Msg { return bootstrapDoneMsg{} }
+	}
+	return m.runBootstrap
+}
+
+// runBootstrap runs venv creation + asset population in a goroutine.
+func (m FirstRunModel) runBootstrap() tea.Msg {
+	// Venv (slow — creates venv + pip install). Quiet mode: no stdout/stderr leak.
+	if err := config.EnsureVenvQuiet(m.globalDir); err != nil {
+		return bootstrapErrMsg{err: err.Error()}
+	}
+	// Assets + default presets (fast)
+	if err := preset.Bootstrap(m.globalDir); err != nil {
+		return bootstrapErrMsg{err: err.Error()}
+	}
+	return bootstrapDoneMsg{}
 }
 
 func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
@@ -161,9 +219,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case bootstrapDoneMsg:
+		m.setupDone = true
+		return m, nil
+
+	case bootstrapErrMsg:
+		m.setupDone = true
+		m.setupErr = msg.err
+		return m, nil
+
 	case SetupDoneMsg:
-		// API key saved -> create default preset -> move to preset picker
-		preset.EnsureDefault()
+		// API key saved -> move to preset picker (presets already created by Bootstrap)
 		m.presets, _ = preset.List()
 		// Reload keys after setup saves
 		cfg, _ := config.LoadConfig(m.globalDir)
@@ -190,6 +256,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					i18n.SetLang(langs[m.langCursor])
 				}
 			case "enter":
+				if !m.setupDone {
+					return m, nil // blocked — still installing
+				}
 				lang := langs[m.langCursor]
 				// Save language to global config
 				cfg, _ := config.LoadConfig(m.globalDir)
@@ -204,7 +273,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.existingKeys == nil {
 					m.existingKeys = make(map[string]string)
 				}
-				// Proceed to next step
+				// Bootstrap created presets — check if API key needed
+				m.hasPresets = preset.HasAny()
 				if !m.hasPresets {
 					m.step = stepAPIKey
 					m.setup = NewSetupModel(m.globalDir)
@@ -289,14 +359,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						return m, textinput.Blink
 					}
 					// Key exists, proceed to name/dir
-					m.step = stepAgentNameDir
-					defaultName := p.Name
-					m.agentName = defaultName
-					m.agentDir = defaultName
-					m.nameInput.SetValue(defaultName)
-					m.dirInput.SetValue(defaultName)
-					m.focusOnDir = false
-					m.nameInput.Focus()
+					m.enterAgentNameDir(p)
 					return m, textinput.Blink
 				}
 			case "e":
@@ -356,15 +419,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil
 				}
 				// Proceed to name/dir
-				m.step = stepAgentNameDir
 				p := m.presets[m.cursor]
-				defaultName := p.Name
-				m.agentName = defaultName
-				m.agentDir = defaultName
-				m.nameInput.SetValue(defaultName)
-				m.dirInput.SetValue(defaultName)
-				m.focusOnDir = false
-				m.nameInput.Focus()
+				m.enterAgentNameDir(p)
 				return m, textinput.Blink
 			case "ctrl+c":
 				return m, tea.Quit
@@ -454,14 +510,22 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, nil
 
 		case stepAgentNameDir:
+			langs := []string{"en", "zh", "wen"}
 			switch msg.String() {
-			case "tab":
-				// Toggle focus between name and dir
-				m.focusOnDir = !m.focusOnDir
-				if m.focusOnDir {
-					m.dirInput.Focus()
-				} else {
-					m.nameInput.Focus()
+			case "tab", "down":
+				m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
+				return m, m.focusAgentField()
+			case "up":
+				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
+				return m, m.focusAgentField()
+			case "left":
+				if m.fieldIdx == 2 { // language cycle
+					m.agentLangIdx = (m.agentLangIdx - 1 + len(langs)) % len(langs)
+				}
+				return m, nil
+			case "right":
+				if m.fieldIdx == 2 { // language cycle
+					m.agentLangIdx = (m.agentLangIdx + 1) % len(langs)
 				}
 				return m, nil
 			case "enter":
@@ -481,9 +545,33 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.message = i18n.TF("firstrun.dir_exists", dirName)
 					return m, nil
 				}
+				// Parse numeric fields
+				stamina, err := strconv.ParseFloat(m.staminaInput.Value(), 64)
+				if err != nil || stamina <= 0 {
+					stamina = 36000
+				}
+				ctxLimit, err := strconv.Atoi(m.ctxLimitInput.Value())
+				if err != nil || ctxLimit <= 0 {
+					ctxLimit = 200000
+				}
+				soulDelay, err := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
+				if err != nil || soulDelay <= 0 {
+					soulDelay = 120
+				}
+				moltPress, err := strconv.ParseFloat(m.moltPressInput.Value(), 64)
+				if err != nil || moltPress <= 0 || moltPress > 1 {
+					moltPress = 0.8
+				}
 				// Generate init.json and launch
 				p := m.presets[m.cursor]
-				if err := preset.GenerateInitJSON(p, m.agentName, dirName, m.baseDir, m.globalDir); err != nil {
+				opts := preset.AgentOpts{
+					Language:     langs[m.agentLangIdx],
+					Stamina:      stamina,
+					ContextLimit: ctxLimit,
+					SoulDelay:    soulDelay,
+					MoltPressure: moltPress,
+				}
+				if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
 					m.message = i18n.TF("firstrun.error", err)
 					return m, nil
 				}
@@ -499,10 +587,19 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, tea.Quit
 			default:
 				var cmd tea.Cmd
-				if !m.focusOnDir {
+				switch m.fieldIdx {
+				case 0:
 					m.nameInput, cmd = m.nameInput.Update(msg)
-				} else {
+				case 1:
 					m.dirInput, cmd = m.dirInput.Update(msg)
+				case 3:
+					m.staminaInput, cmd = m.staminaInput.Update(msg)
+				case 4:
+					m.ctxLimitInput, cmd = m.ctxLimitInput.Update(msg)
+				case 5:
+					m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
+				case 6:
+					m.moltPressInput, cmd = m.moltPressInput.Update(msg)
 				}
 				return m, cmd
 			}
@@ -629,25 +726,52 @@ func (m FirstRunModel) View() string {
 		stepNum, total := stepProgress(m.step, m.hasPresets)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n\n")
 
-		// Name field
-		nameCursor := "  "
-		if !m.focusOnDir {
-			nameCursor = "> "
-		}
-		b.WriteString(nameCursor + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
+		langs := []string{"en", "zh", "wen"}
 
-		// Dir field
-		dirCursor := "  "
-		if m.focusOnDir {
-			dirCursor = "> "
+		// Helper: cursor prefix for field index
+		cur := func(idx int) string {
+			if idx == m.fieldIdx {
+				return "> "
+			}
+			return "  "
 		}
-		b.WriteString(dirCursor + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
+
+		// 0: Name
+		b.WriteString(cur(0) + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
+
+		// 1: Dir
+		b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
+
+		// 2: Language (cycle selector)
+		langVal := langs[m.agentLangIdx]
+		if m.fieldIdx == 2 {
+			langVal = lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render("< " + langVal + " >")
+		}
+		b.WriteString(cur(2) + i18n.T("firstrun.language") + ": " + langVal + "\n")
+
+		// 3-6: Numeric text inputs with hints
+		type numField struct {
+			idx   int
+			label string
+			hint  string
+			view  string
+		}
+		numFields := []numField{
+			{3, i18n.T("firstrun.stamina"), i18n.T("firstrun.stamina_hint"), m.staminaInput.View()},
+			{4, i18n.T("firstrun.context_limit"), i18n.T("firstrun.context_limit_hint"), m.ctxLimitInput.View()},
+			{5, i18n.T("firstrun.soul_delay"), i18n.T("firstrun.soul_delay_hint"), m.soulDelayInput.View()},
+			{6, i18n.T("firstrun.molt_pressure"), i18n.T("firstrun.molt_pressure_hint"), m.moltPressInput.View()},
+		}
+		for _, nf := range numFields {
+			hint := StyleFaint.Render(" (" + nf.hint + ")")
+			b.WriteString(cur(nf.idx) + nf.label + ": " + nf.view + hint + "\n")
+		}
 
 		if m.message != "" {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
-		b.WriteString("\n" + StyleFaint.Render("  [Tab] "+i18n.T("firstrun.toggle_field")+
+		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("firstrun.toggle_field")+
 			"  [Enter] "+i18n.T("firstrun.create_agent")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
@@ -668,6 +792,25 @@ func (m FirstRunModel) viewWelcome() string {
 
 	// Build content lines (without vertical centering first)
 	var content strings.Builder
+
+	// Braille logo (𢘐 — U+22610)
+	logoLines := []string{
+		"⠀⠀⠀⠀⠀⣶⣤⠀⠀⠀⠀⠀⠀⠀⣰⣶⡤⠀⠀⠀⠀⠀⠀⠀⠀",
+		"⠀⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⢰⣿⠏⢷⡀⠀⠀⠀⠀⠀⠀⠀",
+		"⠀⠀⠀⡀⠀⣿⡇⠰⣄⠀⠀⠀⣠⣿⠋⠀⠈⢻⣦⡀⠀⠀⠀⠀⠀",
+		"⠀⠀⢸⡇⠀⣿⡇⠀⢹⣷⡄⣴⠟⠁⠀⠀⠀⠀⠙⢿⣦⣄⠀⠀⠀",
+		"⠀⣠⣿⠇⠀⣿⡇⠀⠈⢛⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠙⠿⣿⣶⡄",
+		"⠘⠿⠋⠀⠀⣿⡇⠠⠖⠋⣤⣤⠤⠤⠤⣤⣤⠤⠤⠴⠾⠷⠄⠁⠀",
+		"⠀⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀",
+		"⠀⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀",
+		"⠀⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠀⠀⠀⠀⣠⣤⡀⠀",
+		"⠀⠀⠀⠀⠀⠿⠃⠀⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠁",
+	}
+	logoStyle := lipgloss.NewStyle().Foreground(ColorAgent)
+	for _, line := range logoLines {
+		content.WriteString(centerText(logoStyle.Render(line), m.width) + "\n")
+	}
+	content.WriteString("\n")
 
 	// Product name
 	titleText := i18n.T("welcome.title")
@@ -691,9 +834,28 @@ func (m FirstRunModel) viewWelcome() string {
 		content.WriteString(centerText(line, m.width) + "\n")
 	}
 
+	// Bootstrap status
+	if !m.welcomeOnly {
+		content.WriteString("\n")
+		if m.setupErr != "" {
+			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
+			content.WriteString(centerText(errStyle.Render(i18n.TF("welcome.setup_failed", m.setupErr)), m.width) + "\n")
+		} else if m.setupDone {
+			doneStyle := lipgloss.NewStyle().Foreground(ColorAgent)
+			content.WriteString(centerText(doneStyle.Render(i18n.T("welcome.ready")), m.width) + "\n")
+		} else {
+			content.WriteString(centerText(StyleFaint.Render(i18n.T("welcome.installing")), m.width) + "\n")
+		}
+	}
+
 	// Footer hints
 	content.WriteString("\n")
-	hints := StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Enter] " + i18n.T("welcome.confirm"))
+	var hints string
+	if m.setupDone || m.welcomeOnly {
+		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Enter] " + i18n.T("welcome.confirm"))
+	} else {
+		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  (" + i18n.T("welcome.installing") + ")")
+	}
 	content.WriteString(centerText(hints, m.width) + "\n")
 
 	// Vertical centering: pad top to center the content block
@@ -715,6 +877,76 @@ func centerText(s string, width int) string {
 	}
 	pad := (width - w) / 2
 	return strings.Repeat(" ", pad) + s
+}
+
+// agentNameDirFieldCount is the number of fields in stepAgentNameDir.
+const agentNameDirFieldCount = 7 // name, dir, lang, stamina, ctx_limit, soul_delay, molt_pressure
+
+// enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.
+func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
+	defaultName := p.Name
+	m.agentName = defaultName
+	m.agentDir = defaultName
+	m.nameInput.SetValue(defaultName)
+	m.dirInput.SetValue(defaultName)
+	m.fieldIdx = 0
+	m.focusOnDir = false
+	m.nameInput.Focus()
+	m.dirInput.Blur()
+
+	// Language — inherit from preset, fallback "en"
+	m.agentLangIdx = 0
+	if l, ok := p.Manifest["language"].(string); ok {
+		for i, lang := range []string{"en", "zh", "wen"} {
+			if lang == l {
+				m.agentLangIdx = i
+				break
+			}
+		}
+	}
+
+	// Numeric defaults
+	m.staminaInput.SetValue("36000")
+	m.ctxLimitInput.SetValue("200000")
+	m.soulDelayInput.SetValue("120")
+	m.moltPressInput.SetValue("0.8")
+	m.staminaInput.Blur()
+	m.ctxLimitInput.Blur()
+	m.soulDelayInput.Blur()
+	m.moltPressInput.Blur()
+
+	m.step = stepAgentNameDir
+}
+
+// focusAgentField focuses the input at m.fieldIdx and blurs all others.
+// Returns the blink command for the newly focused input.
+func (m *FirstRunModel) focusAgentField() tea.Cmd {
+	m.nameInput.Blur()
+	m.dirInput.Blur()
+	m.staminaInput.Blur()
+	m.ctxLimitInput.Blur()
+	m.soulDelayInput.Blur()
+	m.moltPressInput.Blur()
+	m.focusOnDir = false
+
+	switch m.fieldIdx {
+	case 0:
+		return m.nameInput.Focus()
+	case 1:
+		m.focusOnDir = true
+		return m.dirInput.Focus()
+	case 2:
+		return nil // language — cycle selector, no text input
+	case 3:
+		return m.staminaInput.Focus()
+	case 4:
+		return m.ctxLimitInput.Focus()
+	case 5:
+		return m.soulDelayInput.Focus()
+	case 6:
+		return m.moltPressInput.Focus()
+	}
+	return nil
 }
 
 // getPresetProvider extracts provider name from a preset

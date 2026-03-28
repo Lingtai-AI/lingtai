@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -451,7 +452,24 @@ func (m MailModel) renderMessages() string {
 			if bodyWidth < 20 {
 				bodyWidth = 20
 			}
-			wrappedBody := lipgloss.NewStyle().Width(bodyWidth).Render(msg.Body)
+			// Render markdown for agent messages, plain wrap for user/system
+			var wrappedBody string
+			if !msg.IsFromMe && msg.From != i18n.T("mail.system_sender") {
+				r, err := glamour.NewTermRenderer(
+					glamour.WithStandardStyle("dark"),
+					glamour.WithWordWrap(bodyWidth),
+				)
+				if err == nil {
+					if rendered, rerr := r.Render(msg.Body); rerr == nil {
+						wrappedBody = strings.TrimRight(rendered, "\n")
+					}
+				}
+				if wrappedBody == "" {
+					wrappedBody = lipgloss.NewStyle().Width(bodyWidth).Render(msg.Body)
+				}
+			} else {
+				wrappedBody = lipgloss.NewStyle().Width(bodyWidth).Render(msg.Body)
+			}
 			// Indent continuation lines to align with first line
 			lines := strings.Split(wrappedBody, "\n")
 			b.WriteString("\n" + prefix + lines[0] + "\n")

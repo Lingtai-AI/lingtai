@@ -74,6 +74,16 @@ func VerifyVenv(globalDir string) error {
 }
 
 func EnsureVenv(globalDir string) error {
+	return ensureVenv(globalDir, false)
+}
+
+// EnsureVenvQuiet creates the venv without writing to stdout/stderr.
+// Used when running inside the TUI (alt-screen).
+func EnsureVenvQuiet(globalDir string) error {
+	return ensureVenv(globalDir, true)
+}
+
+func ensureVenv(globalDir string, quiet bool) error {
 	if !NeedsVenv(globalDir) {
 		return nil
 	}
@@ -84,8 +94,10 @@ func EnsureVenv(globalDir string) error {
 	}
 	os.MkdirAll(filepath.Dir(venvPath), 0o755)
 	cmd := exec.Command(pythonCmd, "-m", "venv", venvPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if !quiet {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
@@ -96,8 +108,10 @@ func EnsureVenv(globalDir string) error {
 		pipCmd = filepath.Join(venvPath, "bin", "pip")
 	}
 	install := exec.Command(pipCmd, "install", "lingtai")
-	install.Stdout = os.Stdout
-	install.Stderr = os.Stderr
+	if !quiet {
+		install.Stdout = os.Stdout
+		install.Stderr = os.Stderr
+	}
 	if err := install.Run(); err != nil {
 		return fmt.Errorf("failed to install lingtai. Check your internet connection and try again: %w", err)
 	}

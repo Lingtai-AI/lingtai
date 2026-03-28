@@ -258,6 +258,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if a.pendingLang {
 				a.pendingLang = false
 				a.doLang(text)
+				return a, func() tea.Msg {
+					a.hardRefresh()
+					return refreshDoneMsg{}
+				}
 			}
 			return a, a.mail.refreshMail
 		}

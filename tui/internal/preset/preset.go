@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,23 +191,6 @@ func CovenantForLang(lang string) []byte {
 	return data
 }
 
-// EnsureCovenants copies embedded covenants to ~/.lingtai/covenant/{lang}/covenant.md.
-// Called once on TUI startup.
-func EnsureCovenants(globalDir string) {
-	for _, lang := range []string{"en", "zh", "wen"} {
-		dir := filepath.Join(globalDir, "covenant", lang)
-		target := filepath.Join(dir, "covenant.md")
-		if _, err := os.Stat(target); err == nil {
-			continue // already exists
-		}
-		os.MkdirAll(dir, 0o755)
-		data := CovenantForLang(lang)
-		if data != nil {
-			os.WriteFile(target, data, 0o644)
-		}
-	}
-}
-
 // PrincipleForLang returns the embedded principle for the given language.
 func PrincipleForLang(lang string) []byte {
 	data, err := principleFS.ReadFile("principle/" + lang + "/principle.md")
@@ -216,48 +200,37 @@ func PrincipleForLang(lang string) []byte {
 	return data
 }
 
-// EnsurePrinciples copies embedded principles to ~/.lingtai/principle/{lang}/principle.md.
-func EnsurePrinciples(globalDir string) {
-	for _, lang := range []string{"en", "zh", "wen"} {
-		dir := filepath.Join(globalDir, "principle", lang)
-		target := filepath.Join(dir, "principle.md")
-		if _, err := os.Stat(target); err == nil {
-			continue
-		}
-		os.MkdirAll(dir, 0o755)
-		data := PrincipleForLang(lang)
-		if data != nil {
-			os.WriteFile(target, data, 0o644)
-		}
-	}
-}
-
 // PrinciplePath returns the absolute path to the principle file for a language.
 func PrinciplePath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "principle", lang, "principle.md")
 }
 
-// EnsureTemplates copies embedded example files to ~/.lingtai/templates/.
-func EnsureTemplates(globalDir string) {
-	dir := filepath.Join(globalDir, "templates")
-	entries, err := templatesFS.ReadDir("templates")
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+// populate mirrors an embedded FS subtree to globalDir, skipping existing files.
+func populate(globalDir string, fsys embed.FS, root string) {
+	fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
-		target := filepath.Join(dir, e.Name())
+		rel, _ := filepath.Rel(root, path)
+		target := filepath.Join(globalDir, root, rel)
 		if _, err := os.Stat(target); err == nil {
-			continue // already exists
+			return nil // already exists
 		}
-		os.MkdirAll(dir, 0o755)
-		data, err := templatesFS.ReadFile("templates/" + e.Name())
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		data, err := fsys.ReadFile(path)
 		if err == nil {
 			os.WriteFile(target, data, 0o644)
 		}
-	}
+		return nil
+	})
+}
+
+// Bootstrap populates all embedded assets and default presets at ~/.lingtai/.
+func Bootstrap(globalDir string) error {
+	populate(globalDir, covenantFS, "covenant")
+	populate(globalDir, principleFS, "principle")
+	populate(globalDir, templatesFS, "templates")
+	return EnsureDefault()
 }
 
 
@@ -271,20 +244,49 @@ func DefaultPreset() Preset {
 	return minimaxPreset()
 }
 
-// GenerateInitJSON creates a full init.json from a preset at .lingtai/<agentName>/init.json.
+// AgentOpts holds per-agent configuration values set at creation time.
+type AgentOpts struct {
+	Language     string  // "en", "zh", or "wen"
+	Stamina      float64 // max uptime in seconds
+	ContextLimit int     // token budget
+	SoulDelay    float64 // seconds between soul cycles
+	MoltPressure float64 // 0–1 ratio triggering molt
+}
+
+// DefaultAgentOpts returns sensible defaults for agent creation.
+func DefaultAgentOpts() AgentOpts {
+	return AgentOpts{
+		Language:     "en",
+		Stamina:      36000,
+		ContextLimit: 200000,
+		SoulDelay:    120,
+		MoltPressure: 0.8,
+	}
+}
+
+// GenerateInitJSON creates a full init.json from a preset using default opts.
 func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string) error {
+	opts := DefaultAgentOpts()
+	// Inherit language from preset if set
+	if l, ok := p.Manifest["language"].(string); ok && l != "" {
+		opts.Language = l
+	}
+	return GenerateInitJSONWithOpts(p, agentName, dirName, lingtaiDir, globalDir, opts)
+}
+
+// GenerateInitJSONWithOpts creates a full init.json from a preset with explicit agent options.
+func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts) error {
 	agentDir := filepath.Join(lingtaiDir, dirName)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
 	}
 
-	// Build manifest with defaults
+	// Build manifest with opts
 	manifest := make(map[string]interface{})
 	manifest["agent_name"] = agentName
-	// Use language from preset, default to "en"
-	lang := "en"
-	if l, ok := p.Manifest["language"].(string); ok && l != "" {
-		lang = l
+	lang := opts.Language
+	if lang == "" {
+		lang = "en"
 	}
 	manifest["language"] = lang
 	if llm, ok := p.Manifest["llm"]; ok {
@@ -296,10 +298,10 @@ func GenerateInitJSON(p Preset, agentName, dirName, lingtaiDir, globalDir string
 	if admin, ok := p.Manifest["admin"]; ok {
 		manifest["admin"] = admin
 	}
-	manifest["soul"] = map[string]interface{}{"delay": 120}
-	manifest["stamina"] = 36000
-	manifest["context_limit"] = 200000
-	manifest["molt_pressure"] = 0.8
+	manifest["soul"] = map[string]interface{}{"delay": opts.SoulDelay}
+	manifest["stamina"] = opts.Stamina
+	manifest["context_limit"] = opts.ContextLimit
+	manifest["molt_pressure"] = opts.MoltPressure
 	manifest["molt_prompt"] = ""
 	manifest["max_turns"] = 100
 	manifest["streaming"] = true

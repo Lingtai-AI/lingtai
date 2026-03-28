@@ -66,35 +66,38 @@ func main() {
 	}
 	defer srv.Stop(context.Background())
 
-	// Ensure Python venv (only print if actually installing)
-	if config.NeedsVenv(globalDir) {
-		fmt.Println("Setting up Python environment (first run)...")
-		if err := config.EnsureVenv(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-		}
-	}
+	// First run = no config.json in ~/.lingtai/
+	configPath := filepath.Join(globalDir, "config.json")
+	_, configErr := os.Stat(configPath)
+	needsFirstRun := os.IsNotExist(configErr)
 
-	// Ensure covenant files and templates at ~/.lingtai/
-	preset.EnsureCovenants(globalDir)
-	preset.EnsurePrinciples(globalDir)
-	preset.EnsureTemplates(globalDir)
-
-	// Load settings
-	settings := tui.LoadSettings(lingtaiDir)
-	// Language is global (stored in ~/.lingtai/config.json)
+	// Load global config and settings
 	globalCfg, _ := config.LoadConfig(globalDir)
+	settings := tui.LoadSettings(lingtaiDir)
 	if globalCfg.Language != "" {
 		i18n.SetLang(globalCfg.Language)
 	} else {
 		i18n.SetLang(settings.Language)
 	}
 
-	// Detect state
-	hasPresets := preset.HasAny()
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 
-	// Determine if first-run is needed
-	needsFirstRun := !hasPresets || len(orchestrators) == 0
+	if !needsFirstRun {
+		// Returning user — ensure runtime + assets (fast no-ops if already exist)
+		if config.NeedsVenv(globalDir) {
+			fmt.Println("Setting up Python environment...")
+			if err := config.EnsureVenv(globalDir); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			}
+		}
+		preset.Bootstrap(globalDir)
+	}
+	// If needsFirstRun: welcome page goroutine handles everything
+
+	// Also need first-run if no orchestrator in this project
+	if len(orchestrators) == 0 {
+		needsFirstRun = true
+	}
 
 	// If 本我 found but not alive, auto-launch it
 	if !needsFirstRun && len(orchestrators) == 1 {
