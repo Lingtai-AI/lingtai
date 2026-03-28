@@ -99,7 +99,8 @@ type FirstRunModel struct {
 	presetKeyInput    textinput.Model
 	presetEndpointIn  textinput.Model // base_url for custom provider
 	presetModelIn     textinput.Model // model name for custom provider
-	presetKeyFieldIdx int             // 0=compat, 1=endpoint, 2=model, 3=key (custom); 0=region,1=key (minimax)
+	presetNameIn      textinput.Model // preset name for custom provider (separate from nameInput)
+	presetKeyFieldIdx int             // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region,1=key (minimax)
 	minimaxRegion     int             // 0=international, 1=china
 	customCompat      int             // 0=openai, 1=anthropic
 	selectedProvider  string          // provider of currently selected preset
@@ -129,6 +130,11 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	pmi.CharLimit = 64
 	pmi.Width = 50
 	pmi.Placeholder = "model-name"
+
+	pni := textinput.New() // preset name input for custom provider
+	pni.CharLimit = 64
+	pni.Width = 50
+	pni.Placeholder = "my-preset"
 
 	si := textinput.New()
 	si.CharLimit = 10
@@ -180,6 +186,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		presetKeyInput:   pki,
 		presetEndpointIn: pei,
 		presetModelIn:    pmi,
+		presetNameIn:     pni,
 		existingKeys:     existingKeys,
 		staminaInput:    si,
 		ctxLimitInput:   ci,
@@ -356,6 +363,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.presetKeyInput.Reset()
 						m.presetEndpointIn.Reset()
 						m.presetModelIn.Reset()
+						m.presetNameIn.Reset()
 						m.presetKeyFieldIdx = 0
 						if provider == "custom" {
 							// field 0 = compat selector (no text focus)
@@ -427,10 +435,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "enter":
 				key := m.presetKeyInput.Value()
+				var newPresetName string
 				if isCustom {
 					endpoint := m.presetEndpointIn.Value()
 					model := m.presetModelIn.Value()
-					name := m.nameInput.Value()
+					name := m.presetNameIn.Value()
 					if endpoint == "" || model == "" || key == "" || name == "" {
 						return m, nil // require all fields
 					}
@@ -438,30 +447,39 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					if m.customCompat == 1 {
 						compat = "anthropic"
 					}
-					p := m.presets[m.cursor]
-					p.Name = name
-					if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+					// Clone the template — don't mutate the original
+					clone := preset.Clone(m.presets[m.cursor], name)
+					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
 						llm["base_url"] = endpoint
 						llm["model"] = model
 						llm["api_compat"] = compat
 					}
-					preset.Save(p)
-					m.presets, _ = preset.List()
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					newPresetName = name
 				}
 				if isMinimax {
-					// Write base_url and auto-name based on region
+					// Clone the template with auto-name based on region
 					p := m.presets[m.cursor]
-					if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-						if m.minimaxRegion == 0 {
-							llm["base_url"] = "https://api.minimaxi.com/anthropic"
-							p.Name = "minimax_cn"
-						} else {
-							llm["base_url"] = "https://api.minimax.io/anthropic"
-							p.Name = "minimax_intl"
-						}
+					var name, baseURL string
+					if m.minimaxRegion == 0 {
+						name = "minimax_cn"
+						baseURL = "https://api.minimaxi.com/anthropic"
+					} else {
+						name = "minimax_intl"
+						baseURL = "https://api.minimax.io/anthropic"
 					}
-					preset.Save(p)
-					m.presets, _ = preset.List()
+					clone := preset.Clone(p, name)
+					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
+						llm["base_url"] = baseURL
+					}
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					newPresetName = name
 				}
 				if key != "" {
 					m.existingKeys[m.selectedProvider] = key
@@ -470,6 +488,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					config.SaveConfig(m.globalDir, cfg)
 				} else if m.existingKeys[m.selectedProvider] == "" {
 					return m, nil
+				}
+				// Reload presets and find the newly created one
+				m.presets, _ = preset.List()
+				if len(m.presets) == 0 {
+					m.message = i18n.T("firstrun.no_presets")
+					return m, nil
+				}
+				if newPresetName != "" {
+					for i, p := range m.presets {
+						if p.Name == newPresetName {
+							m.cursor = i
+							break
+						}
+					}
+				}
+				if m.cursor >= len(m.presets) {
+					m.cursor = 0
 				}
 				p := m.presets[m.cursor]
 				m.enterAgentNameDir(p)
@@ -489,7 +524,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					case 3:
 						m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 					case 4:
-						m.nameInput, cmd = m.nameInput.Update(msg)
+						m.presetNameIn, cmd = m.presetNameIn.Update(msg)
 					}
 				} else if isMinimax && m.presetKeyFieldIdx == 1 {
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
@@ -671,7 +706,7 @@ func (m FirstRunModel) View() string {
 			b.WriteString("  " + i18n.T("presets.endpoint") + ":    " + m.presetEndpointIn.View() + "\n")
 			b.WriteString("  " + i18n.T("presets.model") + ":       " + m.presetModelIn.View() + "\n")
 			b.WriteString("  " + i18n.T("setup.api_key_label") + "     " + m.presetKeyInput.View() + "\n")
-			b.WriteString("  " + i18n.T("presets.enter_name") + " " + m.nameInput.View() + "\n\n")
+			b.WriteString("  " + i18n.T("presets.enter_name") + " " + m.presetNameIn.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
 				"  [←→] "+i18n.T("firstrun.toggle_region")+
 				"  [Enter] "+i18n.T("setup.save")+
@@ -912,7 +947,7 @@ func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
 	m.presetEndpointIn.Blur()
 	m.presetModelIn.Blur()
 	m.presetKeyInput.Blur()
-	m.nameInput.Blur()
+	m.presetNameIn.Blur()
 	if m.selectedProvider == "minimax" {
 		switch m.presetKeyFieldIdx {
 		case 0:
@@ -932,7 +967,7 @@ func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
 	case 3:
 		return m.presetKeyInput.Focus()
 	case 4:
-		return m.nameInput.Focus()
+		return m.presetNameIn.Focus()
 	}
 	return nil
 }

@@ -101,6 +101,21 @@ func Save(p Preset) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// Clone creates a deep copy of a preset with a new name.
+// The original preset is not modified.
+func Clone(src Preset, newName string) Preset {
+	// Deep copy via JSON round-trip to avoid shared map references
+	manifest := make(map[string]interface{})
+	if data, err := json.Marshal(src.Manifest); err == nil {
+		json.Unmarshal(data, &manifest)
+	}
+	return Preset{
+		Name:        newName,
+		Description: src.Description,
+		Manifest:    manifest,
+	}
+}
+
 // Delete removes a preset file.
 func Delete(name string) error {
 	path := filepath.Join(PresetsDir(), name+".json")
