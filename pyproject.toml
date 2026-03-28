@@ -11,19 +11,9 @@ license = "MIT"
 dependencies = [
     "lingtai-kernel>=0.1.0",
     "httpx>=0.27",
-]
-
-[project.optional-dependencies]
-minimax = ["openai>=1.0"]
-gemini = ["google-genai>=1.0"]
-openai = ["openai>=1.0"]
-anthropic = ["anthropic>=0.40"]
-mcp = ["mcp>=1.0"]
-search = ["ddgs>=7.0", "trafilatura>=2.0"]
-all = [
-    "google-genai>=1.0",
     "openai>=1.0",
     "anthropic>=0.40",
+    "google-genai>=1.0",
     "mcp>=1.0",
     "ddgs>=7.0",
     "trafilatura>=2.0",

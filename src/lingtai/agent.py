@@ -358,8 +358,7 @@ class Agent(BaseAgent):
             return None
 
         try:
-            from .config_resolve import load_jsonc
-            data = load_jsonc(init_path)
+            data = json.loads(init_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, ValueError):
             self._log("refresh_init_error", error="failed to read init.json")
             return None

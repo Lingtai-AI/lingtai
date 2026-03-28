@@ -119,7 +119,20 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 	} else {
 		pipCmd = filepath.Join(venvPath, "bin", "pip")
 	}
-	install := exec.Command(pipCmd, "install", "lingtai")
+	// Dev mode: editable install from local source if available
+	home, _ := os.UserHomeDir()
+	kernelSrc := filepath.Join(home, "Documents", "GitHub", "lingtai-kernel")
+	lingtaiSrc := filepath.Join(home, "Documents", "GitHub", "lingtai")
+	var install *exec.Cmd
+	if _, err := os.Stat(filepath.Join(lingtaiSrc, "pyproject.toml")); err == nil {
+		args := []string{"install", "-e", lingtaiSrc}
+		if _, err := os.Stat(filepath.Join(kernelSrc, "pyproject.toml")); err == nil {
+			args = []string{"install", "-e", kernelSrc, "-e", lingtaiSrc}
+		}
+		install = exec.Command(pipCmd, args...)
+	} else {
+		install = exec.Command(pipCmd, "install", "lingtai")
+	}
 	if !quiet {
 		install.Stdout = os.Stdout
 		install.Stderr = os.Stderr

@@ -67,8 +67,7 @@ def setup(
         config_path = Path(config)
         if not config_path.is_file():
             raise FileNotFoundError(f"Telegram config not found: {config_path}")
-        from lingtai.config_resolve import load_jsonc
-        file_cfg = load_jsonc(config_path)
+        file_cfg = json.loads(config_path.read_text(encoding="utf-8"))
         if accounts is None:
             accounts = file_cfg.get("accounts")
         if bot_token is None:

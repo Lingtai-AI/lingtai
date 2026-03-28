@@ -36,7 +36,7 @@ python -m pytest tests/test_agent.py::test_agent_starts_and_stops -v
 python -c "import lingtai"
 ```
 
-No hard dependencies — only the active LLM provider's SDK needs to be installed. Optional deps: `pip install lingtai[gemini]`, `lingtai[openai]`, `lingtai[anthropic]`, `lingtai[minimax]`, or `lingtai[all]`.
+All dependencies (LLM provider SDKs, MCP, search) are required — no optional extras. Never add `[project.optional-dependencies]` to `pyproject.toml`.
 
 ## Architecture
 

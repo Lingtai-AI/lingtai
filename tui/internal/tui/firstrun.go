@@ -368,6 +368,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						if provider == "custom" {
 							// field 0 = compat selector (no text focus)
 							m.customCompat = 0
+							m.presetEndpointIn.SetValue("https://openrouter.ai/api/v1")
+							m.presetNameIn.SetValue("openrouter")
 						} else if provider == "minimax" {
 							// field 0 = region selector (no text focus)
 							m.presetKeyInput.Blur()
