@@ -179,7 +179,7 @@ func customPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": e(), "psyche": e(), "library": e(),
-				"vision": e(), "web_read": e(), "avatar": e(), "daemon": e(),
+				"web_read": e(), "avatar": e(), "daemon": e(),
 				"listen": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
@@ -452,6 +452,7 @@ func (p Preset) CapabilityIcons() string {
 		"talk":       "🔊",
 		"draw":       "🎨",
 		"compose":    "🎵",
+		"video":      "🎬",
 		"listen":     "👂",
 		"web_read":   "📖",
 		"avatar":     "👤",

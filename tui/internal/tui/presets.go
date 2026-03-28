@@ -55,7 +55,7 @@ type presetField struct {
 // AllCapabilities is the list of all available capability names.
 var AllCapabilities = []string{
 	"file", "email", "bash", "web_search", "psyche", "library",
-	"vision", "talk", "draw", "compose", "listen", "web_read",
+	"vision", "talk", "draw", "compose", "video", "listen", "web_read",
 	"avatar", "daemon",
 }
 
