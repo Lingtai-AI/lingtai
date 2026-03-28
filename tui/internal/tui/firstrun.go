@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +29,14 @@ type bootstrapDoneMsg struct{}
 // bootstrapErrMsg signals that background setup failed.
 type bootstrapErrMsg struct{ err string }
 
+// capCheckDoneMsg delivers the parsed check-caps result.
+type capCheckDoneMsg struct {
+	infos map[string]capInfo
+}
+
+// capCheckErrMsg signals that check-caps failed.
+type capCheckErrMsg struct{ err string }
+
 // bootstrapProgressMsg reports a setup progress step (i18n key).
 type bootstrapProgressMsg struct{ key string }
 
@@ -37,16 +47,24 @@ const (
 	stepAPIKey
 	stepPickPreset
 	stepPresetKey
+	stepCapabilities
 	stepAgentNameDir
 	stepLaunching
 )
 
-// stepCount is the total number of wizard steps (for progress display)
-const totalSteps = 4
+// capInfo holds provider metadata for a single capability (from check-caps).
+type capInfo struct {
+	Providers []string `json:"providers"`
+	Default   *string  `json:"default"`
+}
 
 // stepProgress returns the 1-based index and total for progress display
 func stepProgress(step firstRunStep, hasPresets bool) (current int, total int) {
-	total = totalSteps
+	if hasPresets {
+		total = 4
+	} else {
+		total = 5
+	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
 		return 1, total
@@ -54,10 +72,18 @@ func stepProgress(step firstRunStep, hasPresets bool) (current int, total int) {
 		return 2, total
 	case step == stepPickPreset || step == stepPresetKey:
 		return 1, total
-	case step == stepAgentNameDir:
+	case step == stepCapabilities:
+		if hasPresets {
+			return 2, total
+		}
 		return 3, total
-	case step == stepLaunching:
+	case step == stepAgentNameDir:
+		if hasPresets {
+			return 3, total
+		}
 		return 4, total
+	case step == stepLaunching:
+		return total, total
 	}
 	return 1, total
 }
@@ -105,6 +131,13 @@ type FirstRunModel struct {
 	customCompat      int             // 0=openai, 1=anthropic
 	selectedProvider  string          // provider of currently selected preset
 	existingKeys      map[string]string // loaded from Config.Keys
+	// Capability selection state (stepCapabilities)
+	capInfos     map[string]capInfo // from check-caps CLI output
+	capSelected  map[string]bool    // user toggle state
+	capOrder     []string           // ordered list matching AllCapabilities
+	capCursor    int                // current cursor position (0..len-1)
+	capLoading   bool               // true while check-caps is running
+	capErr       string             // error message if check-caps fails
 }
 
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
@@ -263,6 +296,45 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.setupErr = msg.err
 		return m, nil
 
+	case capCheckDoneMsg:
+		m.capLoading = false
+		m.capInfos = msg.infos
+		p := m.presets[m.cursor]
+		provider := m.getPresetProvider(p)
+		presetCaps := make(map[string]bool)
+		if capsMap, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
+			for k := range capsMap {
+				presetCaps[k] = true
+			}
+		}
+		// Also treat "file" group as present if any of read/write/edit/glob/grep are
+		if presetCaps["read"] || presetCaps["write"] || presetCaps["edit"] || presetCaps["glob"] || presetCaps["grep"] {
+			presetCaps["file"] = true
+		}
+		for _, name := range m.capOrder {
+			info, ok := m.capInfos[name]
+			if !ok {
+				continue
+			}
+			compat := m.isCapCompatible(info, provider)
+			if compat && presetCaps[name] {
+				m.capSelected[name] = true
+			}
+		}
+		return m, nil
+
+	case capCheckErrMsg:
+		m.capLoading = false
+		m.capErr = msg.err
+		// Fallback: select all capabilities from the preset
+		p := m.presets[m.cursor]
+		if capsMap, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
+			for k := range capsMap {
+				m.capSelected[k] = true
+			}
+		}
+		return m, nil
+
 	case SetupDoneMsg:
 		// API key saved -> move to preset picker (presets already created by Bootstrap)
 		m.presets, _ = preset.List()
@@ -378,9 +450,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						}
 						return m, textinput.Blink
 					}
-					// Key exists, proceed to name/dir
-					m.enterAgentNameDir(p)
-					return m, textinput.Blink
+					// Key exists, proceed to capabilities
+					return m, m.enterCapabilities()
 				}
 			case "esc":
 				m.step = stepWelcome
@@ -508,9 +579,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor >= len(m.presets) {
 					m.cursor = 0
 				}
-				p := m.presets[m.cursor]
-				m.enterAgentNameDir(p)
-				return m, textinput.Blink
+				return m, m.enterCapabilities()
 			case "ctrl+c":
 				return m, tea.Quit
 			default:
@@ -535,6 +604,51 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, cmd
 			}
+
+		case stepCapabilities:
+			if m.capLoading {
+				return m, nil
+			}
+			colSize := (len(m.capOrder) + 1) / 2
+			switch msg.String() {
+			case "up":
+				if m.capCursor > 0 {
+					m.capCursor--
+				}
+			case "down":
+				if m.capCursor < len(m.capOrder)-1 {
+					m.capCursor++
+				}
+			case "left":
+				if m.capCursor >= colSize {
+					m.capCursor -= colSize
+				}
+			case "right":
+				if m.capCursor < colSize && m.capCursor+colSize < len(m.capOrder) {
+					m.capCursor += colSize
+				}
+			case " ":
+				name := m.capOrder[m.capCursor]
+				info, ok := m.capInfos[name]
+				if !ok {
+					return m, nil
+				}
+				provider := m.getPresetProvider(m.presets[m.cursor])
+				if m.isCapCompatible(info, provider) || m.isCapLocal(info) {
+					m.capSelected[name] = !m.capSelected[name]
+				}
+			case "enter":
+				m.applyCapSelections()
+				p := m.presets[m.cursor]
+				m.enterAgentNameDir(p)
+				return m, textinput.Blink
+			case "esc":
+				m.step = stepPickPreset
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
 
 		case stepAgentNameDir:
 			langs := []string{"en", "zh", "wen"}
@@ -745,6 +859,84 @@ func (m FirstRunModel) View() string {
 				"  [Esc] "+i18n.T("setup.back")) + "\n")
 		}
 
+	case stepCapabilities:
+		stepNum, total := stepProgress(m.step, m.hasPresets)
+		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_caps")) + "\n\n")
+
+		if m.capLoading {
+			b.WriteString("  " + StyleSubtle.Render(i18n.T("firstrun.checking_caps")) + "\n")
+			return b.String()
+		}
+
+		if m.capErr != "" {
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(m.capErr) + "\n\n")
+		}
+
+		provider := m.getPresetProvider(m.presets[m.cursor])
+		colSize := (len(m.capOrder) + 1) / 2
+		dimStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
+		cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+
+		for row := 0; row < colSize; row++ {
+			var line string
+			for col := 0; col < 2; col++ {
+				idx := row + col*colSize
+				if idx >= len(m.capOrder) {
+					break
+				}
+				name := m.capOrder[idx]
+				info := m.capInfos[name]
+				compat := m.isCapCompatible(info, provider)
+				local := m.isCapLocal(info)
+
+				var checkbox, hint string
+				isCurrent := idx == m.capCursor
+
+				if compat || local {
+					if m.capSelected[name] {
+						checkbox = "[x]"
+					} else {
+						checkbox = "[ ]"
+					}
+					if !compat && local {
+						hint = "(local)"
+					}
+				} else {
+					checkbox = "[-]"
+					hint = strings.Join(info.Providers, ", ")
+				}
+
+				prefix := "  "
+				if isCurrent {
+					prefix = "> "
+				}
+
+				cell := prefix + checkbox + " " + name
+				if hint != "" {
+					cell += "  " + hint
+				}
+
+				if !compat && !local {
+					cell = dimStyle.Render(cell)
+				} else if isCurrent {
+					cell = cursorStyle.Render(cell)
+				}
+
+				cellWidth := 38
+				visWidth := lipgloss.Width(cell)
+				if visWidth < cellWidth {
+					cell += strings.Repeat(" ", cellWidth-visWidth)
+				}
+				line += cell
+			}
+			b.WriteString(line + "\n")
+		}
+
+		b.WriteString("\n" + StyleFaint.Render("  ↑↓←→ "+i18n.T("settings.select")+
+			"  space "+i18n.T("settings.change")+
+			"  [Enter] "+i18n.T("firstrun.confirm_caps")+
+			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+
 	case stepAgentNameDir:
 		stepNum, total := stepProgress(m.step, m.hasPresets)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n\n")
@@ -907,6 +1099,103 @@ func centerText(s string, width int) string {
 
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir.
 const agentNameDirFieldCount = 7 // name, dir, lang, stamina, ctx_limit, soul_delay, molt_pressure
+
+// runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
+func (m FirstRunModel) runCheckCaps() tea.Cmd {
+	return func() tea.Msg {
+		python := config.LingtaiCmd(m.globalDir)
+		cmd := exec.Command(python, "-m", "lingtai", "check-caps")
+		out, err := cmd.Output()
+		if err != nil {
+			return capCheckErrMsg{err: fmt.Sprintf("check-caps failed: %v", err)}
+		}
+		var infos map[string]capInfo
+		if err := json.Unmarshal(out, &infos); err != nil {
+			return capCheckErrMsg{err: fmt.Sprintf("check-caps parse error: %v", err)}
+		}
+		return capCheckDoneMsg{infos: infos}
+	}
+}
+
+// enterCapabilities transitions to stepCapabilities.
+func (m *FirstRunModel) enterCapabilities() tea.Cmd {
+	m.step = stepCapabilities
+	m.capLoading = true
+	m.capErr = ""
+	m.capCursor = 0
+	m.capOrder = AllCapabilities
+	m.capSelected = make(map[string]bool)
+	m.capInfos = nil
+	return m.runCheckCaps()
+}
+
+// isCapCompatible checks if a capability works with the given provider.
+func (m FirstRunModel) isCapCompatible(info capInfo, provider string) bool {
+	if len(info.Providers) == 0 {
+		return true
+	}
+	if info.Default != nil {
+		return true
+	}
+	for _, p := range info.Providers {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// isCapLocal checks if a capability has a "local" provider option.
+func (m FirstRunModel) isCapLocal(info capInfo) bool {
+	for _, p := range info.Providers {
+		if p == "local" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyCapSelections writes the user's capability selections back into the preset manifest.
+func (m *FirstRunModel) applyCapSelections() {
+	p := &m.presets[m.cursor]
+	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		caps = make(map[string]interface{})
+		p.Manifest["capabilities"] = caps
+	}
+
+	for _, name := range m.capOrder {
+		if name == "file" {
+			fileKeys := []string{"read", "write", "edit", "glob", "grep"}
+			if m.capSelected[name] {
+				for _, fk := range fileKeys {
+					if _, exists := caps[fk]; !exists {
+						caps[fk] = map[string]interface{}{}
+					}
+				}
+			} else {
+				for _, fk := range fileKeys {
+					delete(caps, fk)
+				}
+			}
+			continue
+		}
+
+		if m.capSelected[name] {
+			if _, exists := caps[name]; !exists {
+				info := m.capInfos[name]
+				provider := m.getPresetProvider(*p)
+				if !m.isCapCompatible(info, provider) && m.isCapLocal(info) {
+					caps[name] = map[string]interface{}{"provider": "local"}
+				} else {
+					caps[name] = map[string]interface{}{}
+				}
+			}
+		} else {
+			delete(caps, name)
+		}
+	}
+}
 
 // enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.
 func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
