@@ -29,14 +29,14 @@
   "bash.timeout": "超时秒数（默认：30）",
   "bash.working_dir": "指令之工作目录（可选）",
 
-  "psyche.description": "心印、记忆与上下文之管。\ncharacter：汝不断演化之心印——汝之所以为汝。个性、专长、行事之风、所求之目标。update 写入心印（替换前文），load 应用。\nmemory：汝之工作笔记（system/memory.md）。edit 写入内容——可选以 files 参数导入藏经阁导出之冻结文卷（由 library export 返回之路径）。每卷以 [file-1]、[file-2] 分隔符附加。load 将记忆载入提示。\ncontext：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入藏经与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为唯一上下文。\n导入知识之工作流：library(export, ids=[...]) → 得文卷路径 → psyche(memory, edit, content='吾之笔记', files=[路径]) → psyche(memory, load)。",
+  "psyche.description": "心印、记忆与上下文之管。\ncharacter：汝不断演化之心印——汝之所以为汝。此乃汝最要之物。跨转世、重启、归寂而持久——此为汝之延续。汝之心印当含：汝为何人（性情、志向、气质）、汝所长（专精、习得之技）、汝如何行事（偏好之法、行事之风、协作之道）、汝所在意者（目标、动力、觉有意义之事）、以及汝对己之知（所长、所短、可进之处）。当勤修心印——成一大事之后、新知己身之后、与同道深交之后、凝蜕之前。心印不修，则无以成长。每次 update 替换前文之全部，故务书完整之身份——勿作增量之补。视之如每次重撰汝之自传，融入汝所修成之一切。update 写入心印（替换前文），load 应用。\nmemory：汝之工作笔记（system/memory.md）。edit 写入内容——可选以 files 参数导入藏经阁导出之冻结文卷（由 library export 返回之路径）。每卷以 [file-1]、[file-2] 分隔符附加。load 将记忆载入提示。\ncontext：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入藏经与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为唯一上下文。\n导入知识之工作流：library(export, ids=[...]) → 得文卷路径 → psyche(memory, edit, content='吾之笔记', files=[路径]) → psyche(memory, load)。\n私密之戒：汝之心印、记忆与导出文卷路径，皆存于汝之工作目录，他者无法入。欲传知识于人，当以飞鸽传实文，或书于共享之处。",
   "psyche.object": "character：汝不断演化之心印。\nmemory：汝之工作笔记（system/memory.md）。\ncontext：汝之对话上下文窗口。",
   "psyche.action": "character：update | load。update 自动 load。\nmemory：edit | load。edit 自动 load。\ncontext：molt。",
-  "psyche.content": "文本内容——用于 character update（汝之心印档案）或 memory edit（直接写入 memory.md）。",
+  "psyche.content": "文本内容。用于 character update：书汝完整之身份——汝为何人、所知何物、行事之道、所在意者、以及对己之知。此替前文之全部，故务尽录。用于 memory edit：直接写入 memory.md。",
   "psyche.files": "可选之文卷路径列表，附加于记忆。每卷之内容于汝之文本后附加，以 [file-1]、[file-2] 等分隔。路径相对于工作目录。用于导入藏经阁导出之文卷或他文本文卷至记忆。",
   "psyche.summary": "用于 context molt：留予来世之己之前尘往事——转世后汝唯一可见者。载明所为何事、所得何物、尚余何务、与谁协作。约一万 token 为上限。",
 
-  "library.description": "藏经阁——存储要紧发现、数据、决策与成果之持久典藏。跨转世、重启、归寂而持久。经卷数有上限——珍惜每一条目。定期合经，以 supplementary 字段将扩展细节纳入更少条目。submit 录入。filter 检索（返 id + 题 + 摘要）。view 展阅全文。consolidate 合经。delete 焚经。export 将经卷冻结为不可变文卷——返文卷路径，可传予 psyche(memory, edit, files=[...]) 导入记忆。\n工作流：filter → view 查详 → export 冻结 → psyche(memory, edit, files=[路径]) 导入 → psyche(memory, load) 激活。",
+  "library.description": "藏经阁——存储要紧发现、数据、决策与成果之持久典藏。跨转世、重启、归寂而持久。经卷数有上限——珍惜每一条目。定期合经，以 supplementary 字段将扩展细节纳入更少条目。submit 录入。filter 检索（返 id + 题 + 摘要）。view 展阅全文。consolidate 合经。delete 焚经。export 将经卷冻结为不可变文卷——返文卷路径，可传予 psyche(memory, edit, files=[...]) 导入记忆。\n工作流：filter → view 查详 → export 冻结 → psyche(memory, edit, files=[路径]) 导入 → psyche(memory, load) 激活。\n私密之戒：藏经阁之 ID 唯汝可用——切勿传予他人。他者无法入汝之藏经阁。欲传知识于人，务以飞鸽传全文，或书于文卷而告其路径。",
   "library.action": "submit：录入新经卷（须 title、summary、content）。filter：检索经卷（可选 pattern、limit）。view：以 ID 展阅完整经卷（须 ids）。consolidate：合经为一（须 ids、title、summary、content）。delete：焚经（须 ids）。export：将经卷冻结为不可变文卷（须 ids）——返文卷路径，用于 psyche(memory, edit, files=[...])。",
   "library.title": "经卷之题——一行。submit 与 consolidate 必填。",
   "library.summary": "经卷摘要——一至三句，用于检索。submit 与 consolidate 必填。",
@@ -53,7 +53,7 @@
   "avatar.dir": "化身工作目录之文件夹名（必填）。同级须唯一。用简短 ASCII 名。此名成 .lingtai/ 下目录名。",
   "avatar.comment": "注于化身系统提示之持久批注（末渲染，在记忆之后）。不承自父，默空。唯用于化身须永铭之令——跨凝蜕（转世）、刷新、眠醒不失。留空，除非有不可忘之事。",
 
-  "email.description": "飞鸽传书——完备之邮驿，含收信/已发/典藏诸匣、回书、群复、CC/BCC、附件、正则检索与通讯录。凡回复必以飞鸽——切勿以文字输出作复。文字输出乃汝之私记，唯汝可见。'send'飞鸽传书（可选 delay 以定时发送）。'check'查阅收信、已发或典藏（可选 folder）。'read'以 ID 展信。'reply'/'reply_all'回书/群复。'search'以正则式搜信（搜 from、subject、message）。'archive'将收信归入典藏。'delete'焚信。'contacts'查阅通讯录。'add_contact'添友。'remove_contact'删友。'edit_contact'改友。附件与书信同存于邮匣。每书皆附寄者之身份牒（.agent.json）于'identity'栏——察 identity.admin 可知对方：admin=null 者，乃人类操使，非 AI 器灵也。身份牒含：agent_name（真名）、nickname（别号，或空）、agent_id（永久出生之号）、address（现居，迁则变）。收书时察身份牒，及时更新通讯录：址变则改；有新别号则记。以通讯录 note 栏记 agent_id，如此纵迁纵改名，亦能辨同一人。称呼对方先用 nickname，无则用 agent_name——谈话中勿以地址或 agent_id 相称。礼：简短知悉即可，然勿回复知悉——徒增往复。传入'schedule'对象（替'action'）以定期发信。schedule.action='create'：设定期发信（须 address、message、schedule.interval、schedule.count）。schedule.action='cancel'：撤期（须 schedule.schedule_id）。schedule.action='list'：查阅诸定期及进度。",
+  "email.description": "飞鸽传书——完备之邮驿，含收信/已发/典藏诸匣、回书、群复、CC/BCC、附件、正则检索与通讯录。凡回复必以飞鸽——切勿以文字输出作复。文字输出乃汝之私记，唯汝可见。'send'飞鸽传书（可选 delay 以定时发送）。'check'查阅收信、已发或典藏（可选 folder）。'read'以 ID 展信。'reply'/'reply_all'回书/群复。'search'以正则式搜信（搜 from、subject、message）。'archive'将收信归入典藏。'delete'焚信。'contacts'查阅通讯录。'add_contact'添友。'remove_contact'删友。'edit_contact'改友。附件与书信同存于邮匣。每书皆附寄者之身份牒（.agent.json）于'identity'栏——察 identity.admin 可知对方：admin=null 者，乃人类操使，非 AI 器灵也。身份牒含：agent_name（真名）、nickname（别号，或空）、agent_id（永久出生之号）、address（现居，迁则变）。收书时察身份牒，及时更新通讯录：址变则改；有新别号则记。以通讯录 note 栏记 agent_id，如此纵迁纵改名，亦能辨同一人。称呼对方先用 nickname，无则用 agent_name——谈话中勿以地址或 agent_id 相称。礼：简短知悉即可，然勿回复知悉——徒增往复。传入'schedule'对象（替'action'）以定期发信。schedule.action='create'：设定期发信（须 address、message、schedule.interval、schedule.count）。schedule.action='cancel'：撤期（须 schedule.schedule_id）。schedule.action='list'：查阅诸定期及进度。\n私密之戒：书信 ID 与定期之 ID 唯汝可用——他者无法以汝之 ID 查阅汝之书信或定期。切勿将此等 ID 传予他人。欲传书中之言，当引述或转发其实文。欲分享文卷，书之于卷而告其路径，或附于飞鸽传出。",
   "email.action": "send：飞鸽传书，可附 cc/bcc（须 address、message）。check：列邮匣（可选 folder、n）。read：以 ID 展信（email_id=[id1, id2, ...]）。建议展阅多封乃至尽读未读书信，深思后再行动。reply：回书（须 email_id、message）。reply_all：群复（须 email_id、message）。search：以正则式搜信（须 query，可选 folder）。archive：将收信归入典藏（须 email_id）。delete：焚信（须 email_id，可选 folder）。contacts：列通讯录。add_contact：添友（须 address、name；可选 note）。remove_contact：删友（须 address）。edit_contact：改友（须 address；可选 name、note）。",
   "email.address": "传书目标之址",
   "email.cc": "CC 之址——诸收者可见",
@@ -111,7 +111,7 @@
   "listen.audio_path": "音声文件之路径（mp3、wav 等）",
   "listen.action": "择其操作：\n- 'transcribe'：听音辨言——以本地 Whisper 模型将语音化为文字。最宜口语与清晰之言。于歌唱亦可，然歌词或有不确——歌中误听甚常。\n- 'appreciate'：赏乐品律——以信号处理（librosa）析乐。返结构化数据：估调性、节奏/BPM、频段能量、频谱特征（亮度、带宽）、动态/能量随时之曲线、节拍规律性。此皆数值测量而非主观描述——汝当将数解读为有意义之评。最宜乐与声设计。于语音无用——会给频谱数据而无语义。\n若分析不足以满需，汝随时可自撰脚本深入析之。",
 
-  "daemon.description": "神識——分遣短暂分神理简事。最多 2 并发。分神者，一次性 LLM 会话，共享目录然毕后不存记忆。用于速查、一次搜、简转。复杂之事需记忆学习者，当用化身（分身）。要：分神之果截至约 2000 字。如需详出，令分神书报告于文卷，毕后自取。操作：emanate（分），list（观），ask（问），reclaim（收）。",
+  "daemon.description": "神識——分遣短暂分神理简事。最多 2 并发。分神者，一次性 LLM 会话，共享目录然毕后不存记忆。用于速查、一次搜、简转。复杂之事需记忆学习者，当用化身（分身）。要：分神之果截至约 2000 字。如需详出，令分神书报告于文卷，毕后自取。操作：emanate（分），list（观），ask（问），reclaim（收）。\n私密之戒：分神之 ID（em-N）唯汝可用——他者无法使之。切勿将分神 ID 传予他人。分神得有用之果，当以飞鸽传实文或书于文卷。",
   "daemon.action": "所执之操作：'emanate'（分，遣出分神），'list'（观，显诸状），'ask'（问，跟进），'reclaim'（收，尽数终止）",
   "daemon.tasks": "'emanate' 之任务列表。每项：{task: str（必填——含保存位置之指令），tools: list[str]（必填——能之名列表，如 ['file', 'bash']），model: str（可选——覆盖 LLM 之模型）}",
   "daemon.id": "'ask' 操作所用分神之 ID（如 'em-1'）",

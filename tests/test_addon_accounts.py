@@ -27,7 +27,7 @@ def test_list_with_accounts(tmp_path, monkeypatch):
     from lingtai.addons.accounts import list_addon_accounts
 
     result = list_addon_accounts("imap")
-    assert sorted(result) == ["personal", "work"]
+    assert result == ["personal", "work"]
 
 
 def test_list_skips_dirs_without_config(tmp_path, monkeypatch):
@@ -115,3 +115,21 @@ def test_delete_missing_raises(tmp_path, monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         delete_addon_account("imap", "ghost")
+
+
+def test_save_rejects_path_traversal(tmp_path, monkeypatch):
+    """Alias with path traversal components is rejected."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from lingtai.addons.accounts import save_addon_account
+
+    with pytest.raises(ValueError):
+        save_addon_account("imap", "../../etc", {"x": 1})
+
+
+def test_list_rejects_bad_addon_name(tmp_path, monkeypatch):
+    """Addon name with slashes is rejected."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from lingtai.addons.accounts import list_addon_accounts
+
+    with pytest.raises(ValueError):
+        list_addon_accounts("../secrets")

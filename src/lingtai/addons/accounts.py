@@ -9,8 +9,17 @@ into their working directory when attaching an addon.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
+
+_VALID_COMPONENT = re.compile(r'^[A-Za-z0-9_\-\.]+$')
+
+
+def _validate_component(name: str, label: str) -> None:
+    """Ensure name is a safe single path component (no slashes, no ..)."""
+    if not name or not _VALID_COMPONENT.match(name) or name in (".", ".."):
+        raise ValueError(f"Invalid {label}: {name!r}")
 
 
 def _addons_dir() -> Path:
@@ -19,6 +28,7 @@ def _addons_dir() -> Path:
 
 def list_addon_accounts(addon_name: str) -> list[str]:
     """Return sorted list of alias names that have a config.json."""
+    _validate_component(addon_name, "addon_name")
     addon_dir = _addons_dir() / addon_name
     if not addon_dir.is_dir():
         return []
@@ -34,6 +44,8 @@ def load_addon_account(addon_name: str, alias: str) -> dict:
 
     Raises FileNotFoundError if the alias or config.json does not exist.
     """
+    _validate_component(addon_name, "addon_name")
+    _validate_component(alias, "alias")
     cfg_path = _addons_dir() / addon_name / alias / "config.json"
     if not cfg_path.is_file():
         raise FileNotFoundError(
@@ -48,6 +60,8 @@ def save_addon_account(addon_name: str, alias: str, config: dict) -> Path:
     Creates directories as needed. Overwrites existing config.
     Returns the path to the written file.
     """
+    _validate_component(addon_name, "addon_name")
+    _validate_component(alias, "alias")
     cfg_dir = _addons_dir() / addon_name / alias
     cfg_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = cfg_dir / "config.json"
@@ -63,6 +77,8 @@ def delete_addon_account(addon_name: str, alias: str) -> None:
 
     Raises FileNotFoundError if the alias does not exist.
     """
+    _validate_component(addon_name, "addon_name")
+    _validate_component(alias, "alias")
     alias_dir = _addons_dir() / addon_name / alias
     if not alias_dir.is_dir():
         raise FileNotFoundError(
