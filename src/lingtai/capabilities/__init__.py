@@ -69,3 +69,38 @@ def setup_capability(agent: "BaseAgent", name: str, **kwargs: Any) -> Any:
             f"Capability module {name!r} does not export a setup() function"
         )
     return setup_fn(agent, **kwargs)
+
+
+def get_all_providers() -> dict[str, dict]:
+    """Return provider metadata for all user-facing capabilities.
+
+    Returns a dict mapping capability name to
+    ``{"providers": [...], "default": ... }``.
+    Used by ``lingtai check-caps`` CLI.
+    """
+    _USER_FACING: dict[str, str] = {
+        "file": ".read",
+        "email": ".email",
+        "bash": ".bash",
+        "web_search": ".web_search",
+        "psyche": ".psyche",
+        "library": ".library",
+        "vision": ".vision",
+        "talk": ".talk",
+        "draw": ".draw",
+        "compose": ".compose",
+        "video": ".video",
+        "listen": ".listen",
+        "web_read": ".web_read",
+        "avatar": ".avatar",
+        "daemon": ".daemon",
+    }
+    result = {}
+    for name, module_path in _USER_FACING.items():
+        mod = importlib.import_module(module_path, package=__package__)
+        providers = getattr(mod, "PROVIDERS", None)
+        if providers is not None:
+            result[name] = dict(providers)
+        else:
+            result[name] = {"providers": [], "default": "builtin"}
+    return result

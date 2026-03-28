@@ -167,6 +167,8 @@ def main() -> None:
     run_parser = sub.add_parser("run", help="Boot agent into sleep — wakes on external messages")
     run_parser.add_argument("working_dir", type=Path, help="Agent working directory containing init.json")
 
+    sub.add_parser("check-caps", help="Output capability provider metadata as JSON")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -175,6 +177,9 @@ def main() -> None:
             print(f"error: {working_dir} is not a directory", file=sys.stderr)
             sys.exit(1)
         run(working_dir)
+    elif args.command == "check-caps":
+        from lingtai.capabilities import get_all_providers
+        print(json.dumps(get_all_providers()))
     else:
         parser.print_help()
         sys.exit(1)
