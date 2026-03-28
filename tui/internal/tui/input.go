@@ -143,37 +143,43 @@ func (m InputModel) View() string {
 	return rendered + pad + hint
 }
 
-// calcHeight returns the display height accounting for word-wrap.
-func (m InputModel) calcHeight() int {
+// calcHeight returns the display height by reading the textarea's own rendered
+// output. This ensures we stay in sync with its internal word-wrap logic
+// regardless of character width (CJK, emoji, etc.).
+//
+// Pointer receiver: textarea.Model contains pointer fields (viewport, cache),
+// so a value-receiver copy would still mutate the real viewport via the shared
+// pointer. We use a pointer receiver and explicitly save/restore the height.
+func (m *InputModel) calcHeight() int {
 	val := m.textarea.Value()
 	if val == "" {
 		return 1
 	}
-	w := m.textarea.Width()
-	if w <= 0 {
-		w = 80
-	}
+	// Temporarily inflate height so View() renders all content unclipped.
+	oldHeight := m.textarea.Height()
+	m.textarea.SetHeight(6)
+	rendered := m.textarea.View()
+	m.textarea.SetHeight(oldHeight)
+	// Count non-blank rendered lines. textarea pads unused rows with spaces,
+	// so trimming to empty distinguishes real content from padding. When
+	// content exceeds 6 lines the textarea clips to 6, so the cap is free.
 	total := 0
-	for _, line := range strings.Split(val, "\n") {
-		// Each logical line takes at least 1 row, plus extra for wrapping
-		lineLen := len([]rune(line))
-		rows := 1
-		if lineLen > w {
-			rows = (lineLen + w - 1) / w
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.TrimSpace(line) != "" {
+			total++
 		}
-		total += rows
-	}
-	if total > 6 {
-		total = 6
 	}
 	if total < 1 {
 		total = 1
+	}
+	if total > 6 {
+		total = 6
 	}
 	return total
 }
 
 // LineCount returns the number of display lines in the input.
-func (m InputModel) LineCount() int {
+func (m *InputModel) LineCount() int {
 	return m.calcHeight()
 }
 
