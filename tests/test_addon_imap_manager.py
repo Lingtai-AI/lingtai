@@ -433,7 +433,7 @@ def test_on_imap_received_notifies_agent(tmp_path):
     assert log_args[0][0] == "imap_received"
 
     # Should have signaled mail arrival
-    agent._mail_arrived.set.assert_called_once()
+    agent._wake_nap.assert_called_once_with("mail_arrived")
 
 
 # ---------------------------------------------------------------------------

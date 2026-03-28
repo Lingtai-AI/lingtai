@@ -22,7 +22,9 @@ def _make_mock_agent(tmp_path: Path, *, address: str = "127.0.0.1:9999") -> Magi
     agent._working_dir = tmp_path / "workdir"
     agent._working_dir.mkdir(parents=True, exist_ok=True)
     agent._admin = {}
-    agent._mail_arrived = threading.Event()
+    agent._nap_wake = threading.Event()
+    agent._nap_wake_reason = ""
+    agent._wake_nap = lambda reason: (setattr(agent, '_nap_wake_reason', reason), agent._nap_wake.set())
     agent._log = MagicMock()
 
     mail_svc = MagicMock()
@@ -156,9 +158,9 @@ class TestSelfSend:
         assert msg["subject"] == "note to self"
         assert msg["message"] == "remember this"
 
-    def test_self_send_sets_mail_arrived(self, tmp_path):
+    def test_self_send_wakes_nap(self, tmp_path):
         agent = _make_mock_agent(tmp_path)
-        assert not agent._mail_arrived.is_set()
+        assert not agent._nap_wake.is_set()
         handle(agent, {
             "action": "send",
             "address": "127.0.0.1:9999",
@@ -166,7 +168,8 @@ class TestSelfSend:
             "message": "self",
         })
         time.sleep(0.2)
-        assert agent._mail_arrived.is_set()
+        assert agent._nap_wake.is_set()
+        assert agent._nap_wake_reason == "mail_arrived"
 
     def test_self_send_no_mail_service_still_works(self, tmp_path):
         """When no mail service, self-send matches on working_dir path."""
@@ -462,7 +465,8 @@ class TestOutboxAndMailman:
         time.sleep(0.2)
         inbox = agent._working_dir / "mailbox" / "inbox"
         assert len(list(inbox.iterdir())) == 1
-        assert agent._mail_arrived.is_set()
+        assert agent._nap_wake.is_set()
+        assert agent._nap_wake_reason == "mail_arrived"
         agent._mail_service.send.assert_not_called()
         sent = agent._working_dir / "mailbox" / "sent"
         assert len(list(sent.iterdir())) == 1

@@ -118,11 +118,12 @@ def test_system_show_context_null_without_session(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_mail_arrived_event_exists(tmp_path):
-    """Agent should have a _mail_arrived threading.Event."""
+def test_nap_wake_event_exists(tmp_path):
+    """Agent should have _nap_wake threading.Event and _nap_wake_reason str."""
     agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
-    assert isinstance(agent._mail_arrived, threading.Event)
-    assert not agent._mail_arrived.is_set()
+    assert isinstance(agent._nap_wake, threading.Event)
+    assert not agent._nap_wake.is_set()
+    assert agent._nap_wake_reason == ""
 
 
 def test_system_nap_with_seconds(tmp_path):
@@ -142,7 +143,7 @@ def test_system_nap_wakes_on_mail(tmp_path):
 
     def fire_mail():
         time.sleep(0.1)
-        agent._mail_arrived.set()
+        agent._wake_nap("mail_arrived")
 
     t = threading.Thread(target=fire_mail, daemon=True)
     t.start()
@@ -167,9 +168,16 @@ def test_system_nap_requires_seconds(tmp_path):
 
 def test_system_nap_caps_at_300(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
-    agent._mail_arrived.set()
+
+    def fire_wake():
+        time.sleep(0.1)
+        agent._wake_nap("mail_arrived")
+
+    t = threading.Thread(target=fire_wake, daemon=True)
+    t.start()
     result = agent._intrinsics["system"]({"action": "nap", "seconds": 9999})
     assert result["status"] == "ok"
+    t.join(timeout=1)
 
 
 def test_system_nap_wakes_on_interrupt(tmp_path):
@@ -196,6 +204,40 @@ def test_system_nap_negative_seconds(tmp_path):
     agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
     result = agent._intrinsics["system"]({"action": "nap", "seconds": -5})
     assert result["status"] == "error"
+
+
+def test_nap_clears_stale_event(tmp_path):
+    """Nap should NOT exit immediately if _nap_wake was set before the nap started."""
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
+    # Simulate stale event from earlier mail
+    agent._wake_nap("mail_arrived")
+
+    start = time.monotonic()
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 0.3})
+    elapsed = time.monotonic() - start
+
+    assert result["status"] == "ok"
+    assert result["reason"] == "timeout"
+    # Should have actually waited, not exited instantly
+    assert elapsed >= 0.25
+
+
+def test_nap_returns_soul_arrived_reason(tmp_path):
+    """Nap should return reason='soul_arrived' when woken by soul flow."""
+    agent = BaseAgent(service=make_mock_service(), agent_name="test", working_dir=tmp_path / "test")
+
+    def fire_soul():
+        time.sleep(0.1)
+        agent._wake_nap("soul_arrived")
+
+    t = threading.Thread(target=fire_soul, daemon=True)
+    t.start()
+
+    result = agent._intrinsics["system"]({"action": "nap", "seconds": 10})
+
+    assert result["status"] == "ok"
+    assert result["reason"] == "soul_arrived"
+    t.join(timeout=1)
 
 
 # ---------------------------------------------------------------------------

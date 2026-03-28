@@ -198,7 +198,7 @@ def test_on_incoming_persists_and_notifies(tmp_path):
     assert len(msg_dirs) == 1
 
     # Should notify agent
-    agent._mail_arrived.set.assert_called_once()
+    agent._wake_nap.assert_called_once_with("message_received")
     agent.inbox.put.assert_called_once()
     agent._log.assert_called_once()
 
