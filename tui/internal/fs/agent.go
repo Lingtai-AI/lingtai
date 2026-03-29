@@ -153,6 +153,25 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 	return nodes, nil
 }
 
+// AgentContext holds live context window state from .context.json.
+type AgentContext struct {
+	TotalTokens int     `json:"total_tokens"`
+	WindowSize  int     `json:"window_size"`
+	UsagePct    float64 `json:"usage_pct"`
+}
+
+// ReadContext reads .context.json from an agent directory.
+// Returns zero struct if missing or unreadable.
+func ReadContext(dir string) AgentContext {
+	var ctx AgentContext
+	data, err := os.ReadFile(filepath.Join(dir, ".context.json"))
+	if err != nil {
+		return ctx
+	}
+	json.Unmarshal(data, &ctx)
+	return ctx
+}
+
 // TokenTotals holds summed token usage across multiple agents.
 type TokenTotals struct {
 	Input    int64
