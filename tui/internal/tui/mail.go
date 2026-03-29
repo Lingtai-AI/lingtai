@@ -133,6 +133,9 @@ func (m *MailModel) syncViewportHeight() bool {
 }
 
 func (m MailModel) refreshMail() tea.Msg {
+	// Refresh human location (no-op if cache is <1h old)
+	go fs.UpdateHumanLocation(m.humanDir)
+
 	var chatMsgs []ChatMessage
 
 	// Read inbox (messages FROM 本我 to human)
