@@ -25,7 +25,7 @@ type PropsModel struct {
 	// Left panel: selected agent
 	selectedDir     string         // working dir of the agent shown on left (defaults to orchDir)
 	selectedTokens  fs.TokenTotals // cached token ledger for selected agent
-	selectedContext fs.AgentContext // cached .context.json for selected agent
+	selectedStatus fs.AgentStatus  // cached .status.json for selected agent
 	agentDirs       []string       // all discovered agent dirs (for picker)
 	agentNodes      []fs.AgentNode // discovered agents (for picker display)
 
@@ -51,7 +51,7 @@ type propsLoadMsg struct {
 	network         fs.Network
 	tokens          fs.TokenTotals
 	selectedTokens  fs.TokenTotals
-	selectedContext fs.AgentContext
+	selectedStatus fs.AgentStatus
 	adminStart      string
 	agentDirs       []string
 	agentNodes      []fs.AgentNode
@@ -68,7 +68,7 @@ func (m PropsModel) loadData() tea.Msg {
 	}
 	totals := fs.AggregateTokens(dirs)
 	selectedTokens := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
-	selectedContext := fs.ReadContext(m.selectedDir)
+	selectedStatus := fs.ReadStatus(m.selectedDir)
 
 	var adminStart string
 	if raw, err := fs.ReadAgentRaw(m.orchDir); err == nil {
@@ -88,7 +88,7 @@ func (m PropsModel) loadData() tea.Msg {
 		network:         net,
 		tokens:          totals,
 		selectedTokens:  selectedTokens,
-		selectedContext: selectedContext,
+		selectedStatus: selectedStatus,
 		adminStart:      adminStart,
 		agentDirs:       allDirs,
 		agentNodes:      net.Nodes,
@@ -107,7 +107,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.network = msg.network
 		m.tokens = msg.tokens
 		m.selectedTokens = msg.selectedTokens
-		m.selectedContext = msg.selectedContext
+		m.selectedStatus = msg.selectedStatus
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
@@ -148,7 +148,7 @@ func (m PropsModel) updatePicker(msg tea.KeyMsg) (PropsModel, tea.Cmd) {
 		if m.pickerIdx < len(m.agentNodes) {
 			m.selectedDir = m.agentNodes[m.pickerIdx].WorkingDir
 			m.selectedTokens = fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
-			m.selectedContext = fs.ReadContext(m.selectedDir)
+			m.selectedStatus = fs.ReadStatus(m.selectedDir)
 		}
 		m.pickerOpen = false
 	}
@@ -313,7 +313,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 	})
 
 	// Context window (from cached .context.json)
-	if m.selectedContext.UsagePct > 0 {
+	if m.selectedStatus.Tokens.Context.UsagePct > 0 {
 		lines = append(lines, "")
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_context")))
 		lines = append(lines, "")
@@ -321,7 +321,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 		if barW < 10 {
 			barW = 10
 		}
-		pct := m.selectedContext.UsagePct
+		pct := m.selectedStatus.Tokens.Context.UsagePct
 		filled := int(pct / 100.0 * float64(barW))
 		if filled > barW {
 			filled = barW

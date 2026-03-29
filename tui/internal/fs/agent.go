@@ -153,23 +153,34 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 	return nodes, nil
 }
 
-// AgentContext holds live context window state from .context.json.
-type AgentContext struct {
-	TotalTokens int     `json:"total_tokens"`
-	WindowSize  int     `json:"window_size"`
-	UsagePct    float64 `json:"usage_pct"`
+// AgentStatus holds live runtime status from .status.json (same as system("show")).
+type AgentStatus struct {
+	Tokens struct {
+		Context struct {
+			SystemTokens  int     `json:"system_tokens"`
+			ToolsTokens   int     `json:"tools_tokens"`
+			HistoryTokens int     `json:"history_tokens"`
+			TotalTokens   int     `json:"total_tokens"`
+			WindowSize    int     `json:"window_size"`
+			UsagePct      float64 `json:"usage_pct"`
+		} `json:"context"`
+	} `json:"tokens"`
+	Runtime struct {
+		UptimeSeconds float64 `json:"uptime_seconds"`
+		StaminaLeft   float64 `json:"stamina_left"`
+	} `json:"runtime"`
 }
 
-// ReadContext reads .context.json from an agent directory.
+// ReadStatus reads .status.json from an agent directory.
 // Returns zero struct if missing or unreadable.
-func ReadContext(dir string) AgentContext {
-	var ctx AgentContext
-	data, err := os.ReadFile(filepath.Join(dir, ".context.json"))
+func ReadStatus(dir string) AgentStatus {
+	var s AgentStatus
+	data, err := os.ReadFile(filepath.Join(dir, ".status.json"))
 	if err != nil {
-		return ctx
+		return s
 	}
-	json.Unmarshal(data, &ctx)
-	return ctx
+	json.Unmarshal(data, &s)
+	return s
 }
 
 // TokenTotals holds summed token usage across multiple agents.
