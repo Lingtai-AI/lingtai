@@ -255,12 +255,14 @@ class EmailManager:
             summary["folder"] = "inbox"
             if e.get("cc"):
                 summary["cc"] = e["cc"]
+            self._inject_identity(summary, e)
             return summary
         if e.get("_folder") == "archive":
             summary = _message_summary(e, read_set)
             summary["folder"] = "archive"
             if e.get("cc"):
                 summary["cc"] = e["cc"]
+            self._inject_identity(summary, e)
             return summary
         # Sent — own summary logic
         eid = e.get("_mailbox_id", "")
@@ -276,6 +278,22 @@ class EmailManager:
         if e.get("cc"):
             entry["cc"] = e["cc"]
         return entry
+
+    @staticmethod
+    def _inject_identity(summary: dict, raw: dict) -> None:
+        """Surface identity card fields in check/read results."""
+        identity = raw.get("identity")
+        if not identity or not isinstance(identity, dict):
+            return
+        admin = identity.get("admin")
+        summary["is_human"] = admin is None
+        loc = identity.get("location")
+        if isinstance(loc, dict) and loc.get("timezone"):
+            summary["location"] = {
+                "city": loc.get("city", ""),
+                "region": loc.get("region", ""),
+                "timezone": loc.get("timezone", ""),
+            }
 
     # ------------------------------------------------------------------
     # Action dispatch
@@ -778,6 +796,7 @@ class EmailManager:
                 entry["cc"] = data["cc"]
             if data.get("attachments"):
                 entry["attachments"] = data["attachments"]
+            self._inject_identity(entry, data)
             results.append(entry)
 
         result = {"status": "ok", "emails": results}
