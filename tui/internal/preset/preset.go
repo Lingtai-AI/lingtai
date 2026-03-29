@@ -82,6 +82,15 @@ func HasAny() bool {
 	return len(presets) > 0
 }
 
+// First returns the first available preset, or an empty Preset if none exist.
+func First() Preset {
+	presets, _ := List()
+	if len(presets) > 0 {
+		return presets[0]
+	}
+	return Preset{Manifest: map[string]interface{}{}}
+}
+
 // Load reads a single preset by name.
 func Load(name string) (Preset, error) {
 	path := filepath.Join(PresetsDir(), name+".json")

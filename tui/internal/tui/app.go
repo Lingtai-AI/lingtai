@@ -472,7 +472,6 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			i18n.T("help.setup") + "\n" +
 			i18n.T("help.settings") + "\n" +
 			i18n.T("help.presets") + "\n" +
-			i18n.T("help.tutorial") + "\n" +
 			i18n.T("help.help") + "\n" +
 			i18n.T("help.verbose")
 		a.mail.messages = append(a.mail.messages, ChatMessage{
@@ -485,81 +484,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			a.mail.viewport.GotoBottom()
 		}
 		return a, nil
-	case "tutorial":
-		return a.handleTutorial()
 	case "quit":
 		return a, tea.Quit
 	}
 	return a, nil
-}
-
-func (a *App) handleTutorial() (App, tea.Cmd) {
-	tutorialDir := filepath.Join(a.projectDir, "tutorial")
-	if _, err := os.Stat(tutorialDir); err == nil {
-		// Tutorial exists — switch to it
-		a.orchDir = tutorialDir
-		a.orchName = "guide"
-		// Launch if not alive
-		if a.lingtaiCmd != "" && !fs.IsAlive(tutorialDir, 2.0) {
-			process.LaunchAgent(a.lingtaiCmd, tutorialDir)
-		}
-		humanDir := filepath.Join(a.projectDir, "human")
-		addr := humanAddr(a.projectDir)
-		a.currentView = appViewMail
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, tutorialDir, "guide", a.appSettings.PollRate)
-		return *a, tea.Batch(a.mail.Init(), a.sendSize())
-	}
-
-	// Create tutorial from current orchestrator's LLM config
-	p := a.buildPresetFromOrch()
-	globalCfg, _ := config.LoadConfig(a.globalDir)
-	lang := globalCfg.Language
-	if lang == "" {
-		lang = "en"
-	}
-	if err := preset.GenerateTutorialInit(p, a.projectDir, a.globalDir, lang); err != nil {
-		a.mail.AddSystemMessage(i18n.TF("mail.error", err))
-		return *a, nil
-	}
-	config.MarkTutorialDone(a.globalDir)
-
-	// Launch and switch
-	if a.lingtaiCmd != "" {
-		process.LaunchAgent(a.lingtaiCmd, tutorialDir)
-	}
-	absHumanDir, _ := filepath.Abs(filepath.Join(a.projectDir, "human"))
-	fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+absHumanDir)
-
-	a.orchDir = tutorialDir
-	a.orchName = "guide"
-	humanDir := filepath.Join(a.projectDir, "human")
-	addr := humanAddr(a.projectDir)
-	a.currentView = appViewMail
-	a.mail = NewMailModel(humanDir, addr, a.projectDir, tutorialDir, "guide", a.appSettings.PollRate)
-	return *a, tea.Batch(a.mail.Init(), a.sendSize())
-}
-
-// buildPresetFromOrch reads the current orchestrator's init.json and builds a Preset.
-func (a *App) buildPresetFromOrch() preset.Preset {
-	p := preset.Preset{Manifest: map[string]interface{}{}}
-	initPath := filepath.Join(a.orchDir, "init.json")
-	data, err := os.ReadFile(initPath)
-	if err != nil {
-		return p
-	}
-	var init map[string]interface{}
-	if err := json.Unmarshal(data, &init); err != nil {
-		return p
-	}
-	if m, ok := init["manifest"].(map[string]interface{}); ok {
-		if llm, ok := m["llm"]; ok {
-			p.Manifest["llm"] = llm
-		}
-		if caps, ok := m["capabilities"]; ok {
-			p.Manifest["capabilities"] = caps
-		}
-	}
-	return p
 }
 
 func (a *App) doRename(newName string) {
