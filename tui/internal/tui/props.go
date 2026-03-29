@@ -152,6 +152,13 @@ func (m PropsModel) View() string {
 	if rightW < 20 {
 		rightW = 20
 	}
+	// Safety: don't exceed terminal width
+	if leftW+1+rightW > m.width && m.width > 1 {
+		rightW = m.width - leftW - 1
+		if rightW < 0 {
+			rightW = 0
+		}
+	}
 
 	leftContent := m.renderLeft(leftW)
 	rightContent := m.renderRight(rightW)
@@ -185,7 +192,7 @@ func (m PropsModel) View() string {
 	content := body.String()
 
 	contentLines := strings.Count(content, "\n")
-	usedLines := contentLines + 3
+	usedLines := contentLines + 4 // header(2) + separator "\n" + footer(2) - 1 trailing
 	if remaining := m.height - usedLines; remaining > 0 {
 		filler := padToWidth("", leftW) + sep + "\n"
 		content += strings.Repeat(filler, remaining)
@@ -370,29 +377,30 @@ func (m PropsModel) renderRight(maxW int) string {
 		}
 	}
 	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_agents")+": ")+
-		valueStyle.Render(fmt.Sprintf("%d  (%d %s, %d %s)",
-			totalAgents, agentCount, i18n.T("props.network_agents"), humanCount, i18n.T("props.network_humans"))))
+		valueStyle.Render(fmt.Sprintf("%d", totalAgents))+
+		labelStyle.Render(fmt.Sprintf("  (%d %s, %d %s)",
+			agentCount, i18n.T("props.network_agents"), humanCount, i18n.T("props.network_humans"))))
 
 	var stateParts []string
 	if stats.Active > 0 {
 		c := lipgloss.NewStyle().Foreground(StateColor("ACTIVE"))
-		stateParts = append(stateParts, c.Render(fmt.Sprintf("Active: %d", stats.Active)))
+		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.active"), stats.Active)))
 	}
 	if stats.Idle > 0 {
 		c := lipgloss.NewStyle().Foreground(StateColor("IDLE"))
-		stateParts = append(stateParts, c.Render(fmt.Sprintf("Idle: %d", stats.Idle)))
+		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.idle"), stats.Idle)))
 	}
 	if stats.Stuck > 0 {
 		c := lipgloss.NewStyle().Foreground(StateColor("STUCK"))
-		stateParts = append(stateParts, c.Render(fmt.Sprintf("Stuck: %d", stats.Stuck)))
+		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.stuck"), stats.Stuck)))
 	}
 	if stats.Asleep > 0 {
 		c := lipgloss.NewStyle().Foreground(StateColor("ASLEEP"))
-		stateParts = append(stateParts, c.Render(fmt.Sprintf("Asleep: %d", stats.Asleep)))
+		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.asleep"), stats.Asleep)))
 	}
 	if stats.Suspended > 0 {
 		c := lipgloss.NewStyle().Foreground(StateColor("SUSPENDED"))
-		stateParts = append(stateParts, c.Render(fmt.Sprintf("Suspended: %d", stats.Suspended)))
+		stateParts = append(stateParts, c.Render(fmt.Sprintf("%s: %d", i18n.T("state.suspended"), stats.Suspended)))
 	}
 	if len(stateParts) > 0 {
 		lines = append(lines, "  "+strings.Join(stateParts, "  "))
@@ -472,7 +480,7 @@ func (m PropsModel) renderPicker() string {
 
 	content := strings.Join(lines, "\n")
 
-	usedLines := len(lines) + 3
+	usedLines := len(lines) + 4 // header(2) + separator "\n" + footer(2) - 1 trailing
 	if remaining := m.height - usedLines; remaining > 0 {
 		content += strings.Repeat("\n", remaining)
 	}
@@ -481,6 +489,9 @@ func (m PropsModel) renderPicker() string {
 }
 
 func formatComma(n int64) string {
+	if n < 0 {
+		return "-" + formatComma(-n)
+	}
 	s := fmt.Sprintf("%d", n)
 	if len(s) <= 3 {
 		return s
