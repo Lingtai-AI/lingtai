@@ -27,11 +27,13 @@ func main() {
 			fmt.Println("       lingtai-tui tutorial [project-dir]")
 			fmt.Println("       lingtai-tui suspend [project-dir]")
 			fmt.Println("       lingtai-tui purge")
+			fmt.Println("       lingtai-tui list")
 			fmt.Println()
 			fmt.Println("  project-dir  Path to the project (default: current directory)")
 			fmt.Println("  tutorial     Start or resume the guided tutorial")
 			fmt.Println("  suspend      Suspend all agents in the project and exit")
 			fmt.Println("  purge        Kill ALL lingtai processes on this machine")
+			fmt.Println("  list         Show all running lingtai processes")
 			os.Exit(0)
 		}
 		if arg == "--version" || arg == "-v" {
@@ -48,6 +50,10 @@ func main() {
 		}
 		if arg == "purge" {
 			purgeMain()
+			return
+		}
+		if arg == "list" {
+			listMain()
 			return
 		}
 	}
