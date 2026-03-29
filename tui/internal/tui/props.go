@@ -312,29 +312,23 @@ func (m PropsModel) renderLeft(maxW int) string {
 		{"max_turns", i18n.T("props.max_turns")},
 	})
 
-	// Context window (from cached .context.json)
-	if m.selectedStatus.Tokens.Context.UsagePct > 0 {
+	// Context window (from cached .status.json)
+	ctx := m.selectedStatus.Tokens.Context
+	if ctx.WindowSize > 0 {
 		lines = append(lines, "")
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_context")))
 		lines = append(lines, "")
-		barW := maxW - 8
-		if barW < 10 {
-			barW = 10
+		pctColor := ColorAgent
+		if ctx.UsagePct > 80 {
+			pctColor = lipgloss.Color("#e06c75")
+		} else if ctx.UsagePct > 60 {
+			pctColor = lipgloss.Color("#e5c07b")
 		}
-		pct := m.selectedStatus.Tokens.Context.UsagePct
-		filled := int(pct / 100.0 * float64(barW))
-		if filled > barW {
-			filled = barW
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
-		barColor := ColorAgent
-		if pct > 80 {
-			barColor = lipgloss.Color("#e06c75")
-		} else if pct > 60 {
-			barColor = lipgloss.Color("#e5c07b")
-		}
-		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(barColor).Render(bar))
-		lines = append(lines, "  "+labelStyle.Render(fmt.Sprintf("%.1f%%", pct)))
+		lines = append(lines, "  "+labelStyle.Render("usage:   ")+lipgloss.NewStyle().Foreground(pctColor).Render(
+			fmt.Sprintf("%s / %s (%.1f%%)", formatComma(int64(ctx.TotalTokens)), formatComma(int64(ctx.WindowSize)), ctx.UsagePct)))
+		lines = append(lines, "  "+labelStyle.Render("system:  ")+valueStyle.Render(formatComma(int64(ctx.SystemTokens))))
+		lines = append(lines, "  "+labelStyle.Render("tools:   ")+valueStyle.Render(formatComma(int64(ctx.ToolsTokens))))
+		lines = append(lines, "  "+labelStyle.Render("history: ")+valueStyle.Render(formatComma(int64(ctx.HistoryTokens))))
 	}
 
 	// Capabilities
