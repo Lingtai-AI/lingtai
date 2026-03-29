@@ -117,40 +117,19 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
 
-	// Step 2: install lingtai
+	// Step 2: install lingtai from PyPI
 	progress("welcome.step_install")
-	home, _ := os.UserHomeDir()
-	kernelSrc := filepath.Join(home, "Documents", "GitHub", "lingtai-kernel")
-	lingtaiSrc := filepath.Join(home, "Documents", "GitHub", "lingtai")
 	var install *exec.Cmd
 	if uvCmd != "" {
-		// uv pip install — use -p to target the venv
-		if _, err := os.Stat(filepath.Join(lingtaiSrc, "pyproject.toml")); err == nil {
-			args := []string{"pip", "install", "-e", lingtaiSrc, "-p", venvPath}
-			if _, err := os.Stat(filepath.Join(kernelSrc, "pyproject.toml")); err == nil {
-				args = []string{"pip", "install", "-e", kernelSrc, "-e", lingtaiSrc, "-p", venvPath}
-			}
-			install = exec.Command(uvCmd, args...)
-		} else {
-			install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
-		}
+		install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
 	} else {
-		// Fallback: pip from the venv
 		var pipCmd string
 		if runtime.GOOS == "windows" {
 			pipCmd = filepath.Join(venvPath, "Scripts", "pip.exe")
 		} else {
 			pipCmd = filepath.Join(venvPath, "bin", "pip")
 		}
-		if _, err := os.Stat(filepath.Join(lingtaiSrc, "pyproject.toml")); err == nil {
-			args := []string{"install", "-e", lingtaiSrc}
-			if _, err := os.Stat(filepath.Join(kernelSrc, "pyproject.toml")); err == nil {
-				args = []string{"install", "-e", kernelSrc, "-e", lingtaiSrc}
-			}
-			install = exec.Command(pipCmd, args...)
-		} else {
-			install = exec.Command(pipCmd, "install", "lingtai")
-		}
+		install = exec.Command(pipCmd, "install", "lingtai")
 	}
 	if !quiet {
 		install.Stdout = os.Stdout
