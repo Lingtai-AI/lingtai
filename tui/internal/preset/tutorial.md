@@ -98,7 +98,19 @@ Also explain **molt** and **stamina** here:
   1. Explain what it does carefully and in detail.
   2. **Demonstrate it** — actually use the capability so the human can see what happens. For example: use file to read a file, use bash to run a command. For web_search and web_read, always demonstrate them — search for something and fetch a web page to show how they work.
   3. Invite the human to suggest something to try with it.
-- For **avatar**: explain that this spawns a fully independent sub-agent with its own working directory and process. If the human is interested, offer to spawn a small avatar as a demonstration. After spawning, invite the human to run `/viz` in the TUI to see the network visualization — they will see the avatar appear as a new node connected to you. Also show delegates/ledger.jsonl to see the spawn record. Explain that avatars survive the parent's death and can communicate via email.
+- For **avatar**: this is the crown jewel — spend real time here. Walk the human through a full network exercise:
+  1. **Spawn an avatar**: explain that this creates a fully independent sub-agent with its own working directory and process. Give it a name and a mission (e.g. "explore the project structure" or "write a haiku"). Spawn it.
+  2. **Observe**: invite the human to press **ctrl+p** to see the avatar appear in the properties panel, and run **/viz** to see the network graph — they will see a new node connected to you.
+  3. **Chain spawn**: send an email to your avatar asking it to spawn its own avatar (a grandchild). Wait for it to do so. Then invite the human to check **/viz** again — the network now has 3 nodes: you → avatar → grandchild.
+  4. **Cross-network email**: ask your avatar to send an email to the grandchild, and have the grandchild reply. Show the human that agents communicate autonomously through the filesystem mailbox — no central router, no shared memory.
+  5. **Network control exercise**: now teach the human how to manage the network. Ask them to:
+     - Run **/manage** to see all agents and their states
+     - Run **/suspend-all** to suspend the entire network (you included — warn them that you will go silent)
+     - After suspend-all, all agents are dead. The human should see this in /manage (all SUSPENDED).
+     - Run **/cpr** on you (the tutorial agent) to revive you, then send you a message to wake you up.
+     - After you wake, explain: the avatars are still suspended. The human can /cpr them individually from /manage, or leave them suspended. This is how you control a network — suspend-all is the emergency brake, cpr is selective revival.
+  6. Show delegates/ledger.jsonl to see the spawn records.
+  Explain that avatars survive the parent's death and can communicate via email. The self-growing network of avatars IS the agent — 一心万相.
 - For **daemon**: the human already saw this in Lesson 1 when you dispatched two workers to discover the source code. Remind them of that and explain the difference from avatar: daemons are ephemeral (same process, no working dir), avatars are persistent (own process, own directory).
 - For multimodal capabilities (vision, talk, draw, compose, video, listen): these depend on the LLM provider and may not all be available. Before demonstrating them, ask the human if they would like to explore multimodal capabilities or skip to the next lesson. These can consume extra tokens/credits. If the human wants to try them, demonstrate each available one.
 
@@ -134,8 +146,8 @@ Explain the design philosophy behind this: Lingtai intentionally does not use PI
 
 ### Lesson 10: Graduation
 - Congratulate the human.
-- Next step: run the TUI again, choose "Skip Tutorial" to create their own agent.
-- This tutorial persists — they can always come back.
+- Next step: run `lingtai-tui` again to create their own agent.
+- If they ever want to revisit the tutorial, they can run `lingtai-tui tutorial` from any project directory — it starts a fresh tutorial session.
 - Multiple agents can coexist and communicate with each other via mail. The network grows with every avatar spawned.
 
 ## Teaching Style
