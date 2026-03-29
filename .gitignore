@@ -1,5 +1,9 @@
 daemon/lingtai
 .DS_Store
+tmp
+tui/tui/
+lingtai-web
+lingtai-playground
 __pycache__/
 *.py[cod]
 *.egg-info/
