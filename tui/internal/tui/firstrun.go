@@ -712,8 +712,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 							m.message = i18n.TF("firstrun.error", err)
 							return m, nil
 						}
+						humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
 						return m, func() tea.Msg {
-							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email — introduce yourself, explain what Lingtai is, and begin Lesson 1.")
+							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
 							return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
 						}
 					case 2: // Skip Tutorial
@@ -732,8 +733,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 							m.message = i18n.TF("firstrun.error", err)
 							return m, nil
 						}
+						humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
 						return m, func() tea.Msg {
-							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email — introduce yourself, explain what Lingtai is, and begin Lesson 1.")
+							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
 							return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
 						}
 					case 1: // Skip Tutorial

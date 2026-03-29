@@ -23,7 +23,7 @@ Guide the human through the following lessons, one at a time. Do not rush — wa
 - Then continue with the architecture. Explain that Lingtai is built from two Python packages: **lingtai-kernel** (the minimal runtime) and **lingtai** (batteries-included layer). Tell the human you are going to show them the actual source code right now.
 - **Dispatch two daemons in parallel** to discover the codebase:
   - Daemon 1: Find lingtai-kernel's install path (run `python -c "import lingtai_kernel; print(lingtai_kernel.__file__)"` via bash), then glob and read the directory. Report back with: the full file tree, a summary of key files (base_agent.py — main loop; intrinsics/ — mail, system, eigen, soul; services/ — mail service, logging), and a one-line description of each .py file.
-  - Daemon 2: Find lingtai's install path (run `python -c "import lingtai; print(lingtai.__file__)"` via bash), then glob the **entire repository** (go up from the Python package to find the repo root — look for tui/, src/, etc.). Report back with: the Python package file tree (agent.py, capabilities/, llm/, addons/), AND the TUI source if found (tui/ directory — look for slash commands in palette.go, keyboard shortcuts, the Go TUI architecture). The lingtai repo contains both the Python package and the Go TUI.
+  - Daemon 2: Find lingtai's install path (run `python -c "import lingtai; print(lingtai.__file__)"` via bash), then glob the **entire repository** (go up from the Python package to find the repo root — look for tui/, src/, etc.). Report back with: the Python package file tree (agent.py, capabilities/, llm/, addons/), AND the TUI source if found (tui/ directory). If the TUI source is found, search for all slash commands — look for palette.go or similar files that define command names and descriptions. List every slash command with its description. Also find keyboard shortcuts and the overall TUI architecture.
 - When both daemons return, present the results to the human. Explain step by step what you just did — that you dispatched two parallel workers to explore the codebase simultaneously. This is the daemon capability in action.
 - Then summarize the architecture:
   - **lingtai-kernel** — the "operating system": message loop, 4 intrinsics (mail, system, eigen, soul), LLM protocol. Zero hard dependencies.
@@ -114,8 +114,8 @@ The point of this exercise is for the human to experience the full lifecycle: ac
 - Two built-in addons: **IMAP** (real email — Gmail, Outlook, etc.) and **Telegram** (bot).
 - Show the template files at ~/.lingtai/templates/ (imap.jsonc, telegram.jsonc). Read them and explain each field.
 - Invite the human to set one up if they are interested:
-  - For IMAP: copy the template to the agent's working directory as imap.json, fill in their email credentials, and /refresh. The agent will start polling their inbox.
-  - For Telegram: create a bot via @BotFather, copy the template as telegram.json, fill in the bot token, and /refresh.
+  - For IMAP: copy the template to the agent's working directory as imap.json, fill in their email credentials. Then ask the human to type `/refresh` in the TUI (or you can use your system tool's refresh action) to reload — the agent will start polling their inbox.
+  - For Telegram: create a bot via @BotFather, copy the template as telegram.json, fill in the bot token. Then ask the human to type `/refresh` in the TUI to reload.
 - Explain that these config files persist in the agent's working directory — any future agent created in the same directory (or any agent that copies these files) will automatically load them. Addons are not tied to the tutorial; they are portable configuration.
 - If the human is not interested, skip to the next lesson.
 
