@@ -13,7 +13,7 @@
   "firstrun.enter_dir": "输入 %s 的文件夹名（ASCII，无空格）：",
   "firstrun.enter_name": "输入Agent 名称（默认：%s）：",
   "firstrun.api_compat": "API",
-  "firstrun.custom_cost_warn": "⚠ Token 消耗量大，费用自负，本软件不承担任何责任。",
+  "firstrun.custom_cost_warn": "⚠ 灵台会消耗数亿 Token，所有 API 费用由您自行承担。",
   "firstrun.region": "节点",
   "firstrun.region_intl": "国际",
   "firstrun.region_china": "中国",

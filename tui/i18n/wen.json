@@ -13,7 +13,7 @@
   "firstrun.enter_dir": "入 %s 之文件夹名（ASCII，无空格）：",
   "firstrun.enter_name": "入器灵名（默认：%s）：",
   "firstrun.api_compat": "API",
-  "firstrun.custom_cost_warn": "⚠ 词元耗甚，费用自负，本软件概不负责。",
+  "firstrun.custom_cost_warn": "⚠ 灵台耗词元以亿计，一切费用自负。",
   "firstrun.region": "节点",
   "firstrun.region_intl": "国际",
   "firstrun.region_china": "中国",

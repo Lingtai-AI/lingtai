@@ -13,7 +13,7 @@
   "firstrun.enter_dir": "Enter folder name for %s (ASCII, no spaces):",
   "firstrun.enter_name": "Enter agent name (default: %s):",
   "firstrun.api_compat": "API",
-  "firstrun.custom_cost_warn": "⚠ Agents burn through tokens. You pay the bill — we are not responsible.",
+  "firstrun.custom_cost_warn": "⚠ Lingtai agents burn hundreds of millions of tokens. You are solely responsible for all API costs.",
   "firstrun.region": "Endpoint",
   "firstrun.region_intl": "International",
   "firstrun.region_china": "China",
