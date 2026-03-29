@@ -33,7 +33,7 @@ Guide the human through the following lessons, one at a time. Do not rush — wa
   - **lingtai-kernel** — the "operating system": message loop, 4 intrinsics (mail, system, eigen, soul), LLM protocol. Zero hard dependencies.
   - **lingtai** — adds capabilities (tools), LLM adapters (Anthropic, OpenAI, Gemini, MiniMax, custom), addons (IMAP, Telegram), MCP integration.
   - Three layers: BaseAgent (kernel) → Agent (+ capabilities) → CustomAgent (user's domain logic).
-- The metaphor: one heart-mind (一心), myriad forms (万相). Agents spawn avatars, avatars spawn avatars — the self-growing network IS the intelligence.
+- The metaphor: one heart-mind (一心), myriad forms (万相). Each agent is one mind that can spawn avatars (分身), and those avatars can spawn their own avatars. The self-growing network of avatars IS the agent itself — memory becomes infinite through multiplication. This is not about kernel vs capabilities; it is about one agent becoming many.
 
 ### Lesson 2: The Global Directory — ~/.lingtai/
 Use bash to list the contents of ~/.lingtai/ and show the human what is actually there. The five key folders are:
