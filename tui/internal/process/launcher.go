@@ -80,32 +80,8 @@ func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 		cmd.Stderr = logFile
 	}
 
-	// Inject API keys from ~/.lingtai-tui/config.json into subprocess env
-	cmd.Env = os.Environ()
-	if globalDir, err := config.GlobalDir(); err == nil {
-		if cfg, err := config.LoadConfig(globalDir); err == nil {
-			for provider, key := range cfg.Keys {
-				if key == "" {
-					continue
-				}
-				envKey := providerToEnvKey(provider)
-				cmd.Env = append(cmd.Env, envKey+"="+key)
-			}
-		}
-	}
-
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("launch agent: %w", err)
 	}
 	return cmd, nil
-}
-
-// providerToEnvKey maps provider name to environment variable name
-func providerToEnvKey(provider string) string {
-	switch provider {
-	case "minimax":
-		return "MINIMAX_API_KEY"
-	default:
-		return "LLM_API_KEY"
-	}
 }
