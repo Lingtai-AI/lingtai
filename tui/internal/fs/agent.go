@@ -18,6 +18,7 @@ type agentManifest struct {
 	// Capabilities can be []string (from TUI-generated) or [][]interface{} (from live agent).
 	// We don't need to parse it — just ignore unknown shapes.
 	Capabilities json.RawMessage `json:"capabilities"`
+	Location     Location        `json:"location"`
 }
 
 // ReadAgent reads .agent.json from dir and returns an AgentNode.
@@ -36,7 +37,7 @@ func ReadAgent(dir string) (AgentNode, error) {
 	isHuman := m.Admin == nil || string(*m.Admin) == "null"
 
 	// Parse capabilities from either []string or [["name", {}], ...] format
-	caps := parseCapabilities(m.Capabilities)
+	caps := ParseCapabilities(m.Capabilities)
 
 	return AgentNode{
 		Address:      m.Address,
@@ -45,12 +46,13 @@ func ReadAgent(dir string) (AgentNode, error) {
 		State:        m.State,
 		IsHuman:      isHuman,
 		Capabilities: caps,
+		Location:     m.Location,
 		WorkingDir:   dir,
 	}, nil
 }
 
-// parseCapabilities handles both []string and [][]interface{} formats.
-func parseCapabilities(raw json.RawMessage) []string {
+// ParseCapabilities handles both []string and [][]interface{} formats.
+func ParseCapabilities(raw json.RawMessage) []string {
 	if raw == nil {
 		return nil
 	}
@@ -75,6 +77,51 @@ func parseCapabilities(raw json.RawMessage) []string {
 		return names
 	}
 	return nil
+}
+
+// ReadInitManifest reads init.json from dir, extracts manifest fields,
+// and flattens the llm sub-object (model, provider, base_url) to top level.
+func ReadInitManifest(dir string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "init.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read init.json: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse init.json: %w", err)
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("no manifest in init.json")
+	}
+	// Flatten llm sub-object into top level
+	if llm, ok := manifest["llm"].(map[string]interface{}); ok {
+		for _, key := range []string{"model", "provider", "base_url", "api_compat", "api_key_env"} {
+			if v, ok := llm[key]; ok && v != nil {
+				manifest[key] = v
+			}
+		}
+	}
+	// Flatten soul.delay into soul_delay
+	if soul, ok := manifest["soul"].(map[string]interface{}); ok {
+		if v, ok := soul["delay"]; ok {
+			manifest["soul_delay"] = v
+		}
+	}
+	return manifest, nil
+}
+
+// ReadAgentRaw reads .agent.json from dir and returns the full JSON as an ordered map.
+func ReadAgentRaw(dir string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ".agent.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	return raw, nil
 }
 
 // DiscoverAgents scans baseDir for subdirectories with .agent.json manifests.

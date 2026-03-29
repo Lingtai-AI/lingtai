@@ -1,6 +1,16 @@
 // internal/fs/types.go
 package fs
 
+// Location holds cached geolocation from ipinfo.io.
+type Location struct {
+	City       string `json:"city"`
+	Region     string `json:"region"`
+	Country    string `json:"country"`
+	Timezone   string `json:"timezone"`
+	Loc        string `json:"loc"`
+	ResolvedAt string `json:"resolved_at"`
+}
+
 // AgentNode represents a discovered agent in the network.
 type AgentNode struct {
 	Address      string   `json:"address"`
@@ -10,6 +20,7 @@ type AgentNode struct {
 	Alive        bool     `json:"alive"`
 	IsHuman      bool     `json:"is_human"`
 	Capabilities []string `json:"capabilities"`
+	Location     Location `json:"location"`
 	WorkingDir   string   `json:"-"` // not serialized to API
 }
 
