@@ -23,9 +23,10 @@ type PropsModel struct {
 	height  int
 
 	// Left panel: selected agent
-	selectedDir string       // working dir of the agent shown on left (defaults to orchDir)
-	agentDirs   []string     // all discovered agent dirs (for picker)
-	agentNodes  []fs.AgentNode // discovered agents (for picker display)
+	selectedDir    string         // working dir of the agent shown on left (defaults to orchDir)
+	selectedTokens fs.TokenTotals // cached token ledger for selected agent
+	agentDirs      []string       // all discovered agent dirs (for picker)
+	agentNodes     []fs.AgentNode // discovered agents (for picker display)
 
 	// Right panel: dashboard snapshot
 	network    fs.Network
@@ -46,11 +47,12 @@ func NewPropsModel(baseDir, orchDir string) PropsModel {
 }
 
 type propsLoadMsg struct {
-	network    fs.Network
-	tokens     fs.TokenTotals
-	adminStart string
-	agentDirs  []string
-	agentNodes []fs.AgentNode
+	network        fs.Network
+	tokens         fs.TokenTotals
+	selectedTokens fs.TokenTotals
+	adminStart     string
+	agentDirs      []string
+	agentNodes     []fs.AgentNode
 }
 
 func (m PropsModel) loadData() tea.Msg {
@@ -63,12 +65,13 @@ func (m PropsModel) loadData() tea.Msg {
 		}
 	}
 	totals := fs.AggregateTokens(dirs)
+	selectedTokens := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
 
 	var adminStart string
 	if raw, err := fs.ReadAgentRaw(m.orchDir); err == nil {
 		if v, ok := raw["created_at"].(string); ok && v != "" {
 			adminStart = v
-		} else if v, ok := raw["started_at"].(string); ok {
+		} else if v, ok := raw["started_at"].(string); ok && v != "" {
 			adminStart = v
 		}
 	}
@@ -79,11 +82,12 @@ func (m PropsModel) loadData() tea.Msg {
 	}
 
 	return propsLoadMsg{
-		network:    net,
-		tokens:     totals,
-		adminStart: adminStart,
-		agentDirs:  allDirs,
-		agentNodes: net.Nodes,
+		network:        net,
+		tokens:         totals,
+		selectedTokens: selectedTokens,
+		adminStart:     adminStart,
+		agentDirs:      allDirs,
+		agentNodes:     net.Nodes,
 	}
 }
 
@@ -98,6 +102,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 	case propsLoadMsg:
 		m.network = msg.network
 		m.tokens = msg.tokens
+		m.selectedTokens = msg.selectedTokens
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
@@ -137,6 +142,7 @@ func (m PropsModel) updatePicker(msg tea.KeyMsg) (PropsModel, tea.Cmd) {
 	case "enter":
 		if m.pickerIdx < len(m.agentNodes) {
 			m.selectedDir = m.agentNodes[m.pickerIdx].WorkingDir
+			m.selectedTokens = fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
 		}
 		m.pickerOpen = false
 	}
@@ -316,17 +322,16 @@ func (m PropsModel) renderLeft(maxW int) string {
 		}
 	}
 
-	// Tokens (from ledger)
-	ledger := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
-	if ledger.APICalls > 0 {
+	// Tokens (from cached ledger)
+	if m.selectedTokens.APICalls > 0 {
 		lines = append(lines, "")
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_tokens")))
 		lines = append(lines, "")
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(ledger.Input))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(ledger.Output))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("thinking: %s", formatComma(ledger.Thinking))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s", formatComma(ledger.Cached))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", ledger.APICalls)))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(m.selectedTokens.Input))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(m.selectedTokens.Output))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("thinking: %s", formatComma(m.selectedTokens.Thinking))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s", formatComma(m.selectedTokens.Cached))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", m.selectedTokens.APICalls)))
 	}
 
 	// Admin
