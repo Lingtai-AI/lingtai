@@ -61,6 +61,7 @@ Then show YOUR own directory (tutorial/) as a live example. Glob it and walk thr
 - mailbox/ — inbox, sent, archive
 - logs/, history/ — event log, conversation history
 - Signal files (.sleep, .suspend, .interrupt, .prompt) — how the TUI talks to the agent process
+After walking through the directory, invite the human to press **ctrl+p** to open the properties panel in the TUI. This shows the same agent info (identity, LLM config, capabilities, context usage, tokens) as a live dashboard. Let them explore it, then press ctrl+p again to close.
 Invite the human to ask about anything that looks interesting.
 
 ### Lesson 4: Identity — How the System Prompt Works
