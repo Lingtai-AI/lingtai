@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { Network } from './types';
 import { fetchNetwork } from './api';
-import { Graph } from './Graph';
+import { Graph, type EdgeMode } from './Graph';
 import { BottomBar } from './BottomBar';
 import { inkBg, ColorTextDim } from './theme';
+import { t } from './i18n';
 
 export default function App() {
   const [network, setNetwork] = useState<Network | null>(null);
+  const [edgeMode, setEdgeMode] = useState<EdgeMode>('avatar');
 
   useEffect(() => {
     const poll = () => fetchNetwork().then(setNetwork).catch(console.error);
@@ -15,10 +17,12 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  const lang = network?.lang ?? 'en';
+
   if (!network) {
     return (
       <div style={{ background: inkBg, color: ColorTextDim, height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        Connecting...
+        {t(lang, 'connecting')}
       </div>
     );
   }
@@ -26,9 +30,14 @@ export default function App() {
   return (
     <div style={{ background: inkBg, height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1 }}>
-        <Graph network={network} />
+        <Graph network={network} edgeMode={edgeMode} />
       </div>
-      <BottomBar network={network} />
+      <BottomBar
+        network={network}
+        edgeMode={edgeMode}
+        lang={lang}
+        onToggle={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
+      />
     </div>
   );
 }
