@@ -71,6 +71,14 @@ def validate_init(data: dict) -> None:
         "base_url": (str, type(None)),
     }, prefix="manifest.llm")
 
+    # If api_key_env is set without api_key, env_file must be provided
+    if llm.get("api_key_env") and not llm.get("api_key"):
+        if not data.get("env_file"):
+            raise ValueError(
+                "manifest.llm.api_key_env is set but no env_file provided "
+                "— the agent cannot resolve the API key without it"
+            )
+
     # Validate addons if present
     addons = data.get("addons")
     if addons is not None:
