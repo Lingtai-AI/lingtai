@@ -306,6 +306,33 @@ func (m PropsModel) renderLeft(maxW int) string {
 		{"max_turns", i18n.T("props.max_turns")},
 	})
 
+	// Context window
+	if ctx, ok := raw["context"].(map[string]interface{}); ok {
+		if pct, ok := ctx["usage_pct"].(float64); ok {
+			lines = append(lines, "")
+			lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_context")))
+			lines = append(lines, "")
+			// Usage bar
+			barW := maxW - 8
+			if barW < 10 {
+				barW = 10
+			}
+			filled := int(pct / 100.0 * float64(barW))
+			if filled > barW {
+				filled = barW
+			}
+			bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
+			barColor := ColorAgent // green-ish
+			if pct > 80 {
+				barColor = lipgloss.Color("#e06c75") // red
+			} else if pct > 60 {
+				barColor = lipgloss.Color("#e5c07b") // yellow
+			}
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(barColor).Render(bar))
+			lines = append(lines, "  "+labelStyle.Render(fmt.Sprintf("%.1f%%", pct)))
+		}
+	}
+
 	// Capabilities
 	if caps, ok := raw["capabilities"]; ok && caps != nil {
 		lines = append(lines, "")
