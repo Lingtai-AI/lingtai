@@ -182,10 +182,14 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
     if (mode === 'avatar') {
       for (const e of net.avatar_edges)
         edges.push({ src: e.parent, tgt: e.child, weight: 1 });
+      // Human → 本我: connect to non-human nodes that aren't avatar children
       const human = net.nodes.find(n => n.is_human);
-      const firstAgent = net.nodes.find(n => !n.is_human);
-      if (human && firstAgent && !edges.some(e => e.src === human.address && e.tgt === firstAgent.address))
-        edges.push({ src: human.address, tgt: firstAgent.address, weight: 1 });
+      if (human) {
+        const children = new Set(edges.map(e => e.tgt));
+        for (const n of net.nodes)
+          if (!n.is_human && !children.has(n.address))
+            edges.push({ src: human.address, tgt: n.address, weight: 1 });
+      }
     } else {
       for (const e of net.mail_edges)
         edges.push({ src: e.sender, tgt: e.recipient, weight: e.count });
