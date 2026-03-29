@@ -79,7 +79,6 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
     if (!canvas) return;
     const W = canvas.clientWidth || 800;
     const H = canvas.clientHeight || 600;
-    const margin = 60;
     const old = dotsRef.current;
     const next = new Map<string, Dot>();
     const stored = loadPositions();
@@ -100,8 +99,8 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
           state: n.state,
           alive: n.alive,
           isHuman: n.is_human,
-          x: sp ? sp.x : margin + Math.random() * (W - margin * 2),
-          y: sp ? sp.y : margin + Math.random() * (H - margin * 2),
+          x: sp ? sp.x : W * 0.25 + Math.random() * W * 0.5,
+          y: sp ? sp.y : H * 0.25 + Math.random() * H * 0.5,
         });
       }
     }
