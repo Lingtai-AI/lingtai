@@ -10,7 +10,7 @@ TEST_DIR=$(mktemp -d)
 trap "rm -rf $TEST_DIR" EXIT
 
 echo "=== Running lingtai-cli ==="
-./bin/lingtai "$TEST_DIR" &
+./bin/lingtai-tui "$TEST_DIR" &
 PID=$!
 sleep 2
 

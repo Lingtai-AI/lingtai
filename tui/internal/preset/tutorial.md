@@ -150,6 +150,8 @@ You should already know the available slash commands from Lesson 1 (Daemon 2 exp
 - /clear — wipe conversation and restart
 Keyboard shortcuts: ctrl+o verbose, ctrl+e extended, ctrl+p properties panel. Invite the human to try ctrl+p to see agent properties.
 
+**Tip — terminal setup**: The TUI uses mouse events for scrolling, so normal click-and-drag to select text will not work. To select and copy text, hold **Option** (⌥) while clicking and dragging — this bypasses the TUI's mouse handling and lets the terminal handle selection as usual. The TUI also uses a rich color palette that may not render correctly in all terminals. For the best experience on macOS, we recommend **iTerm2** — it supports true color and handles Option-click selection properly.
+
 **Hands-on lifecycle exercise**: Walk the human through the agent lifecycle commands one by one:
 1. Ask them to type `/sleep` — this puts you to sleep. Explain that you will stop responding until they wake you. Tell them to send any message (just say hi) to wake you up — mail delivery wakes sleeping agents.
 2. After they wake you, ask them to try `/suspend` — this kills your process entirely. Explain that unlike sleep, suspend is a full process death. Tell them to use `/cpr` to revive you.

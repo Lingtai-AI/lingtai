@@ -7,16 +7,16 @@ web-build: web-deps
 	cd web && npm run build
 
 go-build: web-build
-	go build -o bin/lingtai .
+	go build -o bin/lingtai-tui .
 
 build: go-build
 
 cross-compile: web-build
-	GOOS=darwin GOARCH=arm64 go build -o bin/lingtai-darwin-arm64 .
-	GOOS=darwin GOARCH=amd64 go build -o bin/lingtai-darwin-x64 .
-	GOOS=linux GOARCH=amd64 go build -o bin/lingtai-linux-x64 .
-	GOOS=linux GOARCH=arm64 go build -o bin/lingtai-linux-arm64 .
-	GOOS=windows GOARCH=amd64 go build -o bin/lingtai-win32-x64.exe .
+	GOOS=darwin GOARCH=arm64 go build -o bin/lingtai-tui-darwin-arm64 .
+	GOOS=darwin GOARCH=amd64 go build -o bin/lingtai-tui-darwin-x64 .
+	GOOS=linux GOARCH=amd64 go build -o bin/lingtai-tui-linux-x64 .
+	GOOS=linux GOARCH=arm64 go build -o bin/lingtai-tui-linux-arm64 .
+	GOOS=windows GOARCH=amd64 go build -o bin/lingtai-tui-win32-x64.exe .
 
 clean:
 	rm -rf bin/ web/dist/

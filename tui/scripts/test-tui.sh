@@ -11,7 +11,7 @@ rm -rf "$TEST_DIR"
 
 # Rebuild
 cd "$(dirname "$0")/.."
-go build -o bin/lingtai .
+go build -o bin/lingtai-tui .
 
-echo "Launching: bin/lingtai $TEST_DIR"
-exec ./bin/lingtai "$TEST_DIR"
+echo "Launching: bin/lingtai-tui $TEST_DIR"
+exec ./bin/lingtai-tui "$TEST_DIR"
