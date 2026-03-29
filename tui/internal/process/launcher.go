@@ -80,7 +80,7 @@ func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 		cmd.Stderr = logFile
 	}
 
-	// Inject API keys from ~/.lingtai/config.json into subprocess env
+	// Inject API keys from ~/.lingtai-tui/config.json into subprocess env
 	cmd.Env = os.Environ()
 	if globalDir, err := config.GlobalDir(); err == nil {
 		if cfg, err := config.LoadConfig(globalDir); err == nil {

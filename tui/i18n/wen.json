@@ -6,7 +6,7 @@
   "error.agent_timeout": "启灵失败，检日志：%s",
   "error.pip_failed": "安装失败，检网络。",
   "error.python_missing": "需 Python 3.11+。",
-  "error.venv_broken": "lingtai 损，删 ~/.lingtai/env/ 后重启。",
+  "error.venv_broken": "lingtai 损，删 ~/.lingtai-tui/env/ 后重启。",
   "firstrun.create_hint": "[Enter] 建    [Esc] 返",
   "firstrun.created": "器灵已创：%s",
   "firstrun.dir_exists": "文件夹 '%s' 已存，请另取。",

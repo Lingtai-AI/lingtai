@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthropics/lingtai-tui/internal/config"
 )
 
 //go:embed all:covenant
@@ -23,17 +25,17 @@ var templatesFS embed.FS
 //go:embed tutorial.md
 var tutorialMD []byte
 
-// Preset is a reusable agent template stored at ~/.lingtai/presets/.
+// Preset is a reusable agent template stored at ~/.lingtai-tui/presets/.
 type Preset struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Manifest    map[string]interface{} `json:"manifest"`
 }
 
-// PresetsDir returns ~/.lingtai/presets/.
+// PresetsDir returns ~/.lingtai-tui/presets/.
 func PresetsDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".lingtai", "presets")
+	return filepath.Join(home, config.GlobalDirName, "presets")
 }
 
 // List returns all presets from the presets directory.
@@ -270,8 +272,8 @@ func populate(globalDir string, fsys embed.FS, root string) {
 	})
 }
 
-// migrateAddonTemplates copies legacy ~/.lingtai/templates/{imap,telegram}.jsonc
-// to ~/.lingtai/addons/{addon}/example/config.json as plain JSON.
+// migrateAddonTemplates copies legacy ~/.lingtai-tui/templates/{imap,telegram}.jsonc
+// to ~/.lingtai-tui/addons/{addon}/example/config.json as plain JSON.
 // Skips if the target already exists.
 func migrateAddonTemplates(globalDir string) {
 	for _, addon := range []string{"imap", "telegram"} {
@@ -331,7 +333,7 @@ func stripJSONC(data []byte) []byte {
 	return []byte(text)
 }
 
-// Bootstrap populates all embedded assets and default presets at ~/.lingtai/.
+// Bootstrap populates all embedded assets and default presets at ~/.lingtai-tui/.
 func Bootstrap(globalDir string) error {
 	populate(globalDir, covenantFS, "covenant")
 	populate(globalDir, principleFS, "principle")

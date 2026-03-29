@@ -8,12 +8,12 @@ import (
 	"runtime"
 )
 
-// RuntimeVenvDir returns ~/.lingtai/runtime/venv/.
+// RuntimeVenvDir returns ~/.lingtai-tui/runtime/venv/.
 func RuntimeVenvDir(globalDir string) string {
 	return filepath.Join(globalDir, "runtime", "venv")
 }
 
-// VenvDir returns the old ~/.lingtai/env/ path for migration detection.
+// VenvDir returns the old ~/.lingtai-tui/env/ path for migration detection.
 func VenvDir(globalDir string) string {
 	return filepath.Join(globalDir, "env")
 }
@@ -29,12 +29,12 @@ func VenvPython(venvDir string) string {
 // LingtaiCmd returns the Python interpreter path for running lingtai.
 // Callers should invoke as: LingtaiCmd(dir), "-m", "lingtai", "run", agentDir
 func LingtaiCmd(globalDir string) string {
-	// Try new path: ~/.lingtai/runtime/venv/
+	// Try new path: ~/.lingtai-tui/runtime/venv/
 	python := VenvPython(RuntimeVenvDir(globalDir))
 	if _, err := os.Stat(python); err == nil {
 		return python
 	}
-	// Try legacy path: ~/.lingtai/env/
+	// Try legacy path: ~/.lingtai-tui/env/
 	python = VenvPython(VenvDir(globalDir))
 	if _, err := os.Stat(python); err == nil {
 		return python
@@ -68,7 +68,7 @@ func VerifyVenv(globalDir string) error {
 	python := LingtaiCmd(globalDir)
 	cmd := exec.Command(python, "-c", "import lingtai")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("lingtai installation is broken. Delete ~/.lingtai/runtime/venv/ and restart to reinstall")
+		return fmt.Errorf("lingtai installation is broken. Delete ~/.lingtai-tui/runtime/venv/ and restart to reinstall")
 	}
 	return nil
 }
@@ -117,11 +117,22 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
 
-	// Step 2: install lingtai from PyPI
+	// Step 2: install lingtai
 	progress("welcome.step_install")
+	home, _ := os.UserHomeDir()
+	kernelSrc := filepath.Join(home, "Documents", "GitHub", "lingtai-kernel")
+	lingtaiSrc := filepath.Join(home, "Documents", "GitHub", "lingtai")
+	_, hasKernel := os.Stat(filepath.Join(kernelSrc, "pyproject.toml"))
+	_, hasLingtai := os.Stat(filepath.Join(lingtaiSrc, "pyproject.toml"))
+	devMode := hasKernel == nil && hasLingtai == nil
+
 	var install *exec.Cmd
 	if uvCmd != "" {
-		install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
+		if devMode {
+			install = exec.Command(uvCmd, "pip", "install", "-e", kernelSrc, "-e", lingtaiSrc, "-p", venvPath)
+		} else {
+			install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
+		}
 	} else {
 		var pipCmd string
 		if runtime.GOOS == "windows" {
@@ -129,7 +140,11 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		} else {
 			pipCmd = filepath.Join(venvPath, "bin", "pip")
 		}
-		install = exec.Command(pipCmd, "install", "lingtai")
+		if devMode {
+			install = exec.Command(pipCmd, "install", "-e", kernelSrc, "-e", lingtaiSrc)
+		} else {
+			install = exec.Command(pipCmd, "install", "lingtai")
+		}
 	}
 	if !quiet {
 		install.Stdout = os.Stdout

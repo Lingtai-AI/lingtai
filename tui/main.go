@@ -67,7 +67,7 @@ func main() {
 	}
 	projectDir, _ = filepath.Abs(projectDir)
 
-	// Global config directory (~/.lingtai)
+	// Global config directory (~/.lingtai-tui)
 	globalDir, err := config.GlobalDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -91,7 +91,7 @@ func main() {
 	}
 	defer srv.Stop(context.Background())
 
-	// First run = no config.json in ~/.lingtai/
+	// First run = no config.json in ~/.lingtai-tui/
 	configPath := filepath.Join(globalDir, "config.json")
 	_, configErr := os.Stat(configPath)
 	needsFirstRun := os.IsNotExist(configErr)

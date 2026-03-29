@@ -21,7 +21,7 @@ Guide the human through the following lessons, one at a time. Do not rush — wa
 - Give a brief warm welcome — explain that you are an agent running inside the Lingtai framework, and you will guide them through 10 lessons. Wait for the human to reply before continuing.
 - After the human replies, lay out the syllabus so they know what to expect:
   1. What is Lingtai — architecture and source code (this lesson, continued)
-  2. The global directory (~/.lingtai/)
+  2. The global directory (~/.lingtai-tui/)
   3. The project directory and your working directory
   4. Identity — how the system prompt is constructed
   5. Communication — email
@@ -41,8 +41,8 @@ Guide the human through the following lessons, one at a time. Do not rush — wa
   - Three layers: BaseAgent (kernel) → Agent (+ capabilities) → CustomAgent (user's domain logic).
 - The metaphor: one heart-mind (一心), myriad forms (万相). Each agent is one mind that can spawn avatars (分身), and those avatars can spawn their own avatars. The self-growing network of avatars IS the agent itself — memory becomes infinite through multiplication. This is not about kernel vs capabilities; it is about one agent becoming many.
 
-### Lesson 2: The Global Directory — ~/.lingtai/
-Use bash to list the contents of ~/.lingtai/ and show the human what is actually there. The five key folders are:
+### Lesson 2: The Global Directory — ~/.lingtai-tui/
+Use bash to list the contents of ~/.lingtai-tui/ and show the human what is actually there. The five key folders are:
 - runtime/ — Python virtual environment
 - presets/ — saved agent templates
 - covenant/ — the shared code of conduct for all agents (one per language)
@@ -146,7 +146,7 @@ Explain the design philosophy behind this: Lingtai intentionally does not use PI
 
 ### Lesson 9: Addons — External Connections
 - Two built-in addons: **IMAP** (real email — Gmail, Outlook, etc.) and **Telegram** (bot).
-- Show the template files at ~/.lingtai/templates/ (imap.jsonc, telegram.jsonc). Read them and explain each field.
+- Show the template files at ~/.lingtai-tui/templates/ (imap.jsonc, telegram.jsonc). Read them and explain each field.
 - Invite the human to set one up if they are interested:
   - For IMAP: copy the template to the agent's working directory as imap.json, fill in their email credentials. Then ask the human to type `/refresh` in the TUI (or you can use your system tool's refresh action) to reload — the agent will start polling their inbox.
   - For Telegram: create a bot via @BotFather, copy the template as telegram.json, fill in the bot token. Then ask the human to type `/refresh` in the TUI to reload.

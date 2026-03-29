@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 )
 
+// GlobalDirName is the name of the global config directory under $HOME.
+const GlobalDirName = ".lingtai-tui"
+
 type Config struct {
 	Keys     map[string]string `json:"keys,omitempty"`     // provider → key, e.g. {"minimax": "xxx"}
 	Language string            `json:"language,omitempty"` // TUI language: "en", "zh", "wen"
@@ -16,7 +19,7 @@ func GlobalDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".lingtai")
+	dir := filepath.Join(home, GlobalDirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

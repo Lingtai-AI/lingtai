@@ -6,7 +6,7 @@
   "error.agent_timeout": "Agent启动失败，请检查日志：%s",
   "error.pip_failed": "安装 lingtai 失败，请检查网络。",
   "error.python_missing": "需要 Python 3.11+，请从 python.org 安装。",
-  "error.venv_broken": "lingtai 损坏，请删除 ~/.lingtai/env/ 后重启。",
+  "error.venv_broken": "lingtai 损坏，请删除 ~/.lingtai-tui/env/ 后重启。",
   "firstrun.create_hint": "[Enter] 创建    [Esc] 返回",
   "firstrun.created": "Agent 已创建：%s",
   "firstrun.dir_exists": "文件夹 '%s' 已存在，请换一个名字。",

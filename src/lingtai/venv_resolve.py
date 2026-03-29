@@ -2,8 +2,8 @@
 
 Resolution order:
 1. init.json → venv_path → test → use if working
-2. ~/.lingtai/runtime/venv/ → test → use if working
-3. Neither → create ~/.lingtai/runtime/venv/ automatically
+2. ~/.lingtai-tui/runtime/venv/ → test → use if working
+3. Neither → create ~/.lingtai-tui/runtime/venv/ automatically
 """
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ import sys
 from pathlib import Path
 
 
-_DEFAULT_RUNTIME_DIR = Path.home() / ".lingtai" / "runtime" / "venv"
+_DEFAULT_RUNTIME_DIR = Path.home() / ".lingtai-tui" / "runtime" / "venv"
 
 
 def resolve_venv(init_data: dict | None = None) -> Path:
     """Return the path to a working venv directory.
 
-    Tries init.json venv_path first, then ~/.lingtai/runtime/venv/.
+    Tries init.json venv_path first, then ~/.lingtai-tui/runtime/venv/.
     Auto-creates the global venv if nothing works.
     """
     # 1. init.json venv_path
@@ -28,7 +28,7 @@ def resolve_venv(init_data: dict | None = None) -> Path:
         if _test_venv(venv):
             return venv
 
-    # 2. ~/.lingtai/runtime/venv/
+    # 2. ~/.lingtai-tui/runtime/venv/
     if _test_venv(_DEFAULT_RUNTIME_DIR):
         return _DEFAULT_RUNTIME_DIR
 
