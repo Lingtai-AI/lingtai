@@ -20,7 +20,7 @@ type AgentNode struct {
 	Alive        bool     `json:"alive"`
 	IsHuman      bool     `json:"is_human"`
 	Capabilities []string `json:"capabilities"`
-	Location     Location `json:"location"`
+	Location     *Location `json:"location,omitempty"`
 	WorkingDir   string   `json:"-"` // not serialized to API
 }
 

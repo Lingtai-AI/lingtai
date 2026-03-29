@@ -18,7 +18,7 @@ type agentManifest struct {
 	// Capabilities can be []string (from TUI-generated) or [][]interface{} (from live agent).
 	// We don't need to parse it — just ignore unknown shapes.
 	Capabilities json.RawMessage `json:"capabilities"`
-	Location     Location        `json:"location"`
+	Location     *Location       `json:"location,omitempty"`
 }
 
 // ReadAgent reads .agent.json from dir and returns an AgentNode.
@@ -46,7 +46,7 @@ func ReadAgent(dir string) (AgentNode, error) {
 		State:        m.State,
 		IsHuman:      isHuman,
 		Capabilities: caps,
-		Location:     m.Location,
+		Location:     m.Location, // nil if absent from JSON
 		WorkingDir:   dir,
 	}, nil
 }

@@ -3,6 +3,7 @@ package fs
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,11 +22,15 @@ type ipinfoResponse struct {
 // ResolveLocation queries ipinfo.io and returns a populated Location.
 func ResolveLocation() (Location, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://ipinfo.io/json")
+	resp, err := client.Get("https://ipinfo.io/json")
 	if err != nil {
 		return Location{}, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return Location{}, fmt.Errorf("ipinfo.io returned %d", resp.StatusCode)
+	}
 
 	var info ipinfoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
