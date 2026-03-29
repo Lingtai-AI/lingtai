@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from lingtai_kernel.llm.base import FunctionSchema
 from lingtai_kernel.message import MSG_REQUEST, _make_message
+from lingtai_kernel.token_ledger import append_token_entry
 
 PROVIDERS = {"providers": [], "default": "builtin"}
 
@@ -185,42 +186,69 @@ class DaemonManager:
             tracked=False,
         )
 
-        response = session.send(task)
-        turns = 0
-        while response.tool_calls and turns < self._max_turns:
-            if cancel_event.is_set():
-                return "[cancelled]"
+        # Token accumulator — daemon sessions are untracked so we write
+        # to the parent agent's token ledger ourselves.
+        tok_in = tok_out = tok_think = tok_cache = 0
 
-            # Intermediate text → notify parent
-            if response.text:
-                self._notify_parent(em_id, response.text)
+        def _accum(resp):
+            nonlocal tok_in, tok_out, tok_think, tok_cache
+            u = resp.usage
+            tok_in += u.input_tokens
+            tok_out += u.output_tokens
+            tok_think += u.thinking_tokens
+            tok_cache += u.cached_tokens
 
-            tool_results = []
-            for tc in response.tool_calls:
-                handler = dispatch.get(tc.name)
-                if handler is None:
-                    result = {"status": "error", "message": f"Unknown tool: {tc.name}"}
-                else:
-                    try:
-                        result = handler(tc.args or {})
-                    except Exception as e:
-                        result = {"status": "error", "message": str(e)}
-                tool_results.append(
-                    self._agent.service.make_tool_result(
-                        tc.name, result, tool_call_id=tc.id,
+        try:
+            response = session.send(task)
+            _accum(response)
+            turns = 0
+            while response.tool_calls and turns < self._max_turns:
+                if cancel_event.is_set():
+                    return "[cancelled]"
+
+                # Intermediate text → notify parent
+                if response.text:
+                    self._notify_parent(em_id, response.text)
+
+                tool_results = []
+                for tc in response.tool_calls:
+                    handler = dispatch.get(tc.name)
+                    if handler is None:
+                        result = {"status": "error", "message": f"Unknown tool: {tc.name}"}
+                    else:
+                        try:
+                            result = handler(tc.args or {})
+                        except Exception as e:
+                            result = {"status": "error", "message": str(e)}
+                    tool_results.append(
+                        self._agent.service.make_tool_result(
+                            tc.name, result, tool_call_id=tc.id,
+                        )
                     )
-                )
 
-            response = session.send(tool_results)
-            turns += 1
-
-            # Inject follow-up as a separate user message
-            followup = self._drain_followup(em_id)
-            if followup:
-                response = session.send(followup)
+                response = session.send(tool_results)
+                _accum(response)
                 turns += 1
 
-        return response.text or "[no output]"
+                # Inject follow-up as a separate user message
+                followup = self._drain_followup(em_id)
+                if followup:
+                    response = session.send(followup)
+                    _accum(response)
+                    turns += 1
+
+            return response.text or "[no output]"
+        finally:
+            if tok_in or tok_out or tok_think or tok_cache:
+                try:
+                    ledger_path = self._agent._working_dir / "logs" / "token_ledger.jsonl"
+                    append_token_entry(
+                        ledger_path,
+                        input=tok_in, output=tok_out,
+                        thinking=tok_think, cached=tok_cache,
+                    )
+                except Exception:
+                    pass
 
     def _notify_parent(self, em_id: str, text: str) -> None:
         """Send a [daemon] notification to parent's inbox."""

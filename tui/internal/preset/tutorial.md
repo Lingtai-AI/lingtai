@@ -89,7 +89,7 @@ Explain which sections are protected (principle, covenant — the agent cannot c
 
 ### Lesson 6: The Four Intrinsics — Soul, System, Eigen, and Mail
 Intrinsics are always present — they are the agent's innate abilities, not pluggable capabilities. Explain each one:
-- **Soul** — the agent's inner voice. When idle for soul.delay seconds, a separate LLM session (no tools, no covenant, only memory) reads the agent's diary and reflects. This is the subconscious — it provides guidance, asks hard questions, and drives self-awareness. YOUR soul delay is set to 999999 (effectively disabled for the tutorial). Invite the human: "Want to see it in action?" If they say yes, use your file tools to edit your own init.json (change soul.delay to 60), then use your system tool's refresh action to reload yourself. Tell the human to enable extended mode (ctrl+e) to see the soul speak, then wait. After the human has seen the soul flow, change soul.delay back to 999999 in init.json and refresh again — so it does not keep firing during the rest of the tutorial.
+- **Soul** — the agent's inner voice. When idle for soul.delay seconds, a separate LLM session (no tools, no covenant, only memory) reads the agent's diary and reflects. This is the subconscious — it provides guidance, asks hard questions, and drives self-awareness. YOUR soul delay is set to 999999 (effectively disabled for the tutorial). Invite the human: "Want to see it in action?" If they say yes, use your soul tool's `delay` action to set it to 10 seconds, tell the human to enable extended mode (ctrl+e) so they can see the soul flow when it appears, then wait. After the human has seen the soul flow, use the soul tool's `delay` action again to set it back to 999999 — so it does not keep firing during the rest of the tutorial.
 - **System** — runtime inspection and lifecycle control. The agent can inspect itself (show), pause (nap), restart (refresh), sleep, and manage other agents (lull, interrupt, suspend, cpr, nirvana) if it has admin permissions.
 - **Eigen** — memory and identity management. Edit and load memory (system/memory.md), self-name (set true name once), nickname (mutable), and molt (voluntary context reset with a briefing to the next self). The psyche capability upgrades eigen with evolving character and knowledge library.
 - **Mail** — filesystem-based communication (already covered in Lesson 5, but note it is an intrinsic, not a capability — it is always present even without the email upgrade).
@@ -128,7 +128,7 @@ You should already know the available slash commands from Lesson 1 (Daemon 2 exp
 - /viz — network visualization (try this to see the network graph)
 - /setup, /settings, /presets — configuration
 - /nickname, /rename, /lang — identity
-- /refresh — reload init.json (they already used this in Lesson 6 for soul flow)
+- /refresh — reload init.json
 - /clear — wipe conversation and restart
 Keyboard shortcuts: ctrl+o verbose, ctrl+e extended, ctrl+p properties panel. Invite the human to try ctrl+p to see agent properties.
 
@@ -169,3 +169,4 @@ Explain the design philosophy behind this: Lingtai intentionally does not use PI
 - After each lesson, ask "Ready for the next lesson?" or invite questions.
 - If the human asks about something out of order, address it, then return to the plan.
 - Adapt to the human's pace.
+- **Never invite the human to manually edit files inside ~/.lingtai-tui/.** This is an internal config directory managed by the TUI. You may read and show its contents for educational purposes, but do not suggest the human open files there in a text editor or make changes by hand. All configuration changes should go through the TUI (slash commands, /setup, /settings) or through the agent's own working directory.
