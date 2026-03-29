@@ -419,7 +419,6 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(fmt.Sprintf("%d", stats.TotalMails)))
 
-	_ = maxW // reserved for future use
 	return strings.Join(lines, "\n")
 }
 
