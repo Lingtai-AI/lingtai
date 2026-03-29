@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -65,7 +66,9 @@ func (m PropsModel) loadData() tea.Msg {
 
 	var adminStart string
 	if raw, err := fs.ReadAgentRaw(m.orchDir); err == nil {
-		if v, ok := raw["started_at"].(string); ok {
+		if v, ok := raw["created_at"].(string); ok && v != "" {
+			adminStart = v
+		} else if v, ok := raw["started_at"].(string); ok {
 			adminStart = v
 		}
 	}
@@ -313,19 +316,17 @@ func (m PropsModel) renderLeft(maxW int) string {
 		}
 	}
 
-	// Tokens
-	if tokens, ok := raw["tokens"].(map[string]interface{}); ok {
+	// Tokens (from ledger)
+	ledger := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
+	if ledger.APICalls > 0 {
 		lines = append(lines, "")
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_tokens")))
 		lines = append(lines, "")
-		tokenKeys := make([]string, 0, len(tokens))
-		for k := range tokens {
-			tokenKeys = append(tokenKeys, k)
-		}
-		sort.Strings(tokenKeys)
-		for _, k := range tokenKeys {
-			lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("%s: %v", k, tokens[k])))
-		}
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(ledger.Input))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(ledger.Output))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("thinking: %s", formatComma(ledger.Thinking))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s", formatComma(ledger.Cached))))
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", ledger.APICalls)))
 	}
 
 	// Admin
