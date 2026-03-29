@@ -64,6 +64,17 @@ func NeedsSetup(dir string) bool {
 	return len(cfg.Keys) == 0
 }
 
+// TutorialDone returns true if the user has completed or skipped the tutorial.
+func TutorialDone(globalDir string) bool {
+	_, err := os.Stat(filepath.Join(globalDir, ".tutorial"))
+	return err == nil
+}
+
+// MarkTutorialDone writes a .tutorial marker to the global dir.
+func MarkTutorialDone(globalDir string) {
+	os.WriteFile(filepath.Join(globalDir, ".tutorial"), []byte("done\n"), 0o644)
+}
+
 // MigrateConfig migrates legacy config (minimax_api_key) to new format (keys).
 func MigrateConfig(cfg *Config, legacyKey string) {
 	if legacyKey != "" && cfg.Keys == nil {

@@ -674,6 +674,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "enter":
 				m.applyCapSelections()
+				if config.TutorialDone(m.globalDir) {
+					// Already did tutorial — skip straight to agent creation
+					p := m.presets[m.cursor]
+					m.enterAgentNameDir(p)
+					m.step = stepAgentNameDir
+					return m, textinput.Blink
+				}
 				m.step = stepTutorial
 				m.tutorialCursor = 0
 				return m, nil
@@ -706,6 +713,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.tutorialCursor++
 				}
 			case "enter":
+				config.MarkTutorialDone(m.globalDir)
 				if tutorialExists {
 					switch m.tutorialCursor {
 					case 0: // Resume Tutorial
