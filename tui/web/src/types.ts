@@ -40,4 +40,5 @@ export interface Network {
   contact_edges: ContactEdge[];
   mail_edges: MailEdge[];
   stats: NetworkStats;
+  lang: string;
 }
