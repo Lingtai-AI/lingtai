@@ -1079,6 +1079,7 @@ func (m FirstRunModel) View() string {
 		}
 
 		b.WriteString("  " + i18n.T("firstrun.tutorial_desc") + "\n")
+		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.tutorial_patience")) + "\n")
 		if tutorialExists {
 			b.WriteString("  " + StyleSubtle.Render(i18n.T("firstrun.tutorial_resuming")) + "\n")
 		}
