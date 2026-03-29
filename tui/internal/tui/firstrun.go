@@ -694,73 +694,37 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 		case stepTutorial:
 			tutorialDir := filepath.Join(m.baseDir, "tutorial")
-			tutorialExists := false
-			if _, err := os.Stat(tutorialDir); err == nil {
-				tutorialExists = true
-			}
-			// Option count: exists → resume/fresh/skip (3), new → start/skip (2)
-			optCount := 2
-			if tutorialExists {
-				optCount = 3
-			}
 			switch msg.String() {
 			case "up":
 				if m.tutorialCursor > 0 {
 					m.tutorialCursor--
 				}
 			case "down":
-				if m.tutorialCursor < optCount-1 {
+				if m.tutorialCursor < 1 {
 					m.tutorialCursor++
 				}
 			case "enter":
 				config.MarkTutorialDone(m.globalDir)
-				if tutorialExists {
-					switch m.tutorialCursor {
-					case 0: // Resume Tutorial
-						return m, func() tea.Msg {
-							return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
-						}
-					case 1: // Start Fresh
-						os.RemoveAll(tutorialDir)
-						p := m.presets[m.cursor]
-						langs := []string{"en", "zh", "wen"}
-						lang := langs[m.langCursor]
-						if err := preset.GenerateTutorialInit(p, m.baseDir, m.globalDir, lang); err != nil {
-							m.message = i18n.TF("firstrun.error", err)
-							return m, nil
-						}
-						humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
-						return m, func() tea.Msg {
-							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
-							return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
-						}
-					case 2: // Skip Tutorial
-						p := m.presets[m.cursor]
-						m.enterAgentNameDir(p)
-						m.step = stepAgentNameDir
-						return m, textinput.Blink
+				switch m.tutorialCursor {
+				case 0: // Start Tutorial
+					os.RemoveAll(tutorialDir)
+					p := m.presets[m.cursor]
+					langs := []string{"en", "zh", "wen"}
+					lang := langs[m.langCursor]
+					if err := preset.GenerateTutorialInit(p, m.baseDir, m.globalDir, lang); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
 					}
-				} else {
-					switch m.tutorialCursor {
-					case 0: // Start Tutorial
-						p := m.presets[m.cursor]
-						langs := []string{"en", "zh", "wen"}
-						lang := langs[m.langCursor]
-						if err := preset.GenerateTutorialInit(p, m.baseDir, m.globalDir, lang); err != nil {
-							m.message = i18n.TF("firstrun.error", err)
-							return m, nil
-						}
-						humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
-						return m, func() tea.Msg {
-							fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
-							return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
-						}
-					case 1: // Skip Tutorial
-						p := m.presets[m.cursor]
-						m.enterAgentNameDir(p)
-						m.step = stepAgentNameDir
-						return m, textinput.Blink
+					humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
+					return m, func() tea.Msg {
+						fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
+						return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
 					}
+				case 1: // Skip Tutorial
+					p := m.presets[m.cursor]
+					m.enterAgentNameDir(p)
+					m.step = stepAgentNameDir
+					return m, textinput.Blink
 				}
 			case "esc":
 				m.step = stepCapabilities
@@ -1072,34 +1036,16 @@ func (m FirstRunModel) View() string {
 		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 		b.WriteString("\n  " + titleStyle.Render(i18n.T("firstrun.tutorial_title")) + "\n\n")
 
-		tutorialDir := filepath.Join(m.baseDir, "tutorial")
-		tutorialExists := false
-		if _, err := os.Stat(tutorialDir); err == nil {
-			tutorialExists = true
-		}
-
 		b.WriteString("  " + i18n.T("firstrun.tutorial_desc") + "\n")
 		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.tutorial_patience")) + "\n")
-		if tutorialExists {
-			b.WriteString("  " + StyleSubtle.Render(i18n.T("firstrun.tutorial_resuming")) + "\n")
-		}
 		b.WriteString("\n")
 
 		type tutorialOpt struct {
 			label string
 		}
-		var opts []tutorialOpt
-		if tutorialExists {
-			opts = []tutorialOpt{
-				{i18n.T("firstrun.tutorial_resume")},
-				{i18n.T("firstrun.tutorial_fresh")},
-				{i18n.T("firstrun.tutorial_skip")},
-			}
-		} else {
-			opts = []tutorialOpt{
-				{i18n.T("firstrun.tutorial_start")},
-				{i18n.T("firstrun.tutorial_skip")},
-			}
+		opts := []tutorialOpt{
+			{i18n.T("firstrun.tutorial_start")},
+			{i18n.T("firstrun.tutorial_skip")},
 		}
 
 		for i, opt := range opts {

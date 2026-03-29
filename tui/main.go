@@ -167,22 +167,20 @@ func tutorialMain() {
 
 	tutorialDir := filepath.Join(lingtaiDir, "tutorial")
 
-	// Create tutorial if it doesn't exist
-	if _, err := os.Stat(tutorialDir); os.IsNotExist(err) {
-		// Load first available preset for LLM config
-		p := preset.First()
-		globalCfg, _ := config.LoadConfig(globalDir)
-		lang := globalCfg.Language
-		if lang == "" {
-			lang = "en"
-		}
-		if err := preset.GenerateTutorialInit(p, lingtaiDir, globalDir, lang); err != nil {
-			fmt.Fprintf(os.Stderr, "error creating tutorial: %v\n", err)
-			os.Exit(1)
-		}
-		humanAddr, _ := filepath.Abs(filepath.Join(lingtaiDir, "human"))
-		fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
+	// Always start fresh — wipe any previous tutorial
+	os.RemoveAll(tutorialDir)
+	p := preset.First()
+	globalCfg, _ := config.LoadConfig(globalDir)
+	lang := globalCfg.Language
+	if lang == "" {
+		lang = "en"
 	}
+	if err := preset.GenerateTutorialInit(p, lingtaiDir, globalDir, lang); err != nil {
+		fmt.Fprintf(os.Stderr, "error creating tutorial: %v\n", err)
+		os.Exit(1)
+	}
+	humanAddr, _ := filepath.Abs(filepath.Join(lingtaiDir, "human"))
+	fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
 	config.MarkTutorialDone(globalDir)
 
 	// Launch tutorial agent if not alive
@@ -202,8 +200,7 @@ func tutorialMain() {
 	}
 	defer srv.Stop(context.Background())
 
-	// Load global config and settings
-	globalCfg, _ := config.LoadConfig(globalDir)
+	// Load settings
 	settings := tui.LoadSettings(lingtaiDir)
 	if globalCfg.Language != "" {
 		i18n.SetLang(globalCfg.Language)
@@ -213,8 +210,8 @@ func tutorialMain() {
 
 	// Launch TUI directly into the tutorial agent
 	app := tui.NewApp(globalDir, lingtaiDir, srv.URL(), false, []string{"tutorial"}, settings)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
+	prog := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	if _, err := prog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
