@@ -41,10 +41,18 @@ func LingtaiCmd(globalDir string) string {
 	return python
 }
 
-// NeedsVenv returns true if no working runtime venv exists.
+// NeedsVenv returns true if no working runtime venv exists
+// or if lingtai is not importable inside it.
 func NeedsVenv(globalDir string) bool {
-	_, err := os.Stat(VenvPython(RuntimeVenvDir(globalDir)))
-	return err != nil
+	python := VenvPython(RuntimeVenvDir(globalDir))
+	if _, err := os.Stat(python); err != nil {
+		return true
+	}
+	// Venv exists — verify lingtai is importable
+	if err := exec.Command(python, "-c", "import lingtai").Run(); err != nil {
+		return true
+	}
+	return false
 }
 
 func VerifyVenv(globalDir string) error {
