@@ -46,27 +46,14 @@ lingtai-tui
 - **化** — 分身（avatar）是完全独立的智能体，作为单独进程运行，生存不依赖于创建者。神識（daemon）是临时的并行工作者，适合短平快的任务。
 - **生** — 智能体就是一个目录。凝蜕（molt）压缩上下文、重启会话——智能体可以无限期存活。记忆和身份跨凝蜕存续。
 
-## 快速开始
-
-TUI 会引导你创建第一个智能体——选择 LLM 供应商、配置能力、启动。运行 `lingtai-tui tutorial` 可以体验引导式教程。
+## 快速开始 — 10 秒
 
 ```bash
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
-Python 运行时（`pip install lingtai`）会在首次启动时自动安装。
-
-<details>
-<summary>不使用 Homebrew</summary>
-
-```bash
-pip install lingtai
-```
-
-然后直接使用 Python API（见下方[扩展](#扩展)）。
-
-</details>
+就这样。TUI 自动搞定一切——Python 运行时、依赖、你的第一个智能体。运行 `lingtai-tui tutorial` 体验引导式教程。
 
 ## 架构
 
@@ -143,36 +130,6 @@ CustomAgent(Agent)     — 你的领域逻辑
 ```
 
 没有 `agent_id`。路径即身份。智能体通过写入彼此的 `mailbox/inbox/` 通信——如同在邻居门口投信。
-
-## 扩展
-
-组合能力：
-
-```python
-agent = Agent(
-    service=service,
-    working_dir="/agents/bajie",
-    capabilities=["file", "bash", "email", "avatar"],
-)
-```
-
-子类化：
-
-```python
-class ResearchAgent(Agent):
-    def __init__(self, **kwargs):
-        super().__init__(
-            capabilities=["file", "vision", "web_search", "avatar"],
-            **kwargs,
-        )
-        self.add_tool("query_db", schema={...}, handler=db_handler)
-```
-
-接入 MCP 服务器：
-
-```python
-await agent.connect_mcp("npx -y @modelcontextprotocol/server-filesystem /data")
-```
 
 ## 一心化万相
 

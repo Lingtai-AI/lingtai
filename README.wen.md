@@ -46,27 +46,14 @@ lingtai-tui
 - **化** — 分身者，完全独立之器灵也，为单独进程而运行，其生不系于造者。神識者，临时之并行工者也，宜短平快之务。
 - **生** — 器灵即一目录。凝蜕压缩上下文、重启会话——器灵可以无限期而存。记忆与身份跨凝蜕而续。
 
-## 速启
-
-TUI 引导汝创第一器灵——择 LLM 供者、配能力、启之。运行 `lingtai-tui tutorial` 可循引导教程。
+## 速启 — 十息
 
 ```bash
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
-Python 运行时（`pip install lingtai`）首启时自动安装。
-
-<details>
-<summary>不用 Homebrew</summary>
-
-```bash
-pip install lingtai
-```
-
-直接使用 Python API（见下方[扩展](#扩展)）。
-
-</details>
+足矣。TUI 自备一切——Python 运行时、依赖、汝之第一器灵。运行 `lingtai-tui tutorial` 可循引导教程。
 
 ## 制式
 
@@ -143,36 +130,6 @@ CustomAgent(Agent)     — 汝之领域逻辑
 ```
 
 无 `agent_id`。路径即身份。器灵以写入彼此之 `mailbox/inbox/` 通信——如投书于邻舍之门。
-
-## 扩展
-
-组合能力：
-
-```python
-agent = Agent(
-    service=service,
-    working_dir="/agents/bajie",
-    capabilities=["file", "bash", "email", "avatar"],
-)
-```
-
-子类化：
-
-```python
-class ResearchAgent(Agent):
-    def __init__(self, **kwargs):
-        super().__init__(
-            capabilities=["file", "vision", "web_search", "avatar"],
-            **kwargs,
-        )
-        self.add_tool("query_db", schema={...}, handler=db_handler)
-```
-
-接入 MCP 服务器：
-
-```python
-await agent.connect_mcp("npx -y @modelcontextprotocol/server-filesystem /data")
-```
 
 ## 一心化万相
 

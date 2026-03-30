@@ -50,27 +50,14 @@ Context length is a single-body problem. It will always be finite. Don't make th
 - **Multiply** — Avatars (分身) are fully independent agents spawned as separate processes. They survive their creator. Daemons (神識) are ephemeral parallel workers for quick tasks.
 - **Persist** — Agents are directories. Molt (凝蜕) compacts context and rebirths the session — the agent lives indefinitely. Memory and identity survive across molts.
 
-## Quick start
-
-The TUI guides you through creating your first agent — pick an LLM provider, configure capabilities, and launch. Run `lingtai-tui tutorial` for a guided walkthrough.
+## Quick start — 10 seconds
 
 ```bash
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
-Python runtime (`pip install lingtai`) is installed automatically on first launch.
-
-<details>
-<summary>Without Homebrew</summary>
-
-```bash
-pip install lingtai
-```
-
-Then use the Python API directly (see [Extend](#extend) below).
-
-</details>
+That's it. The TUI bootstraps everything — Python runtime, dependencies, your first agent. Run `lingtai-tui tutorial` for a guided walkthrough.
 
 ## Architecture
 
@@ -147,36 +134,6 @@ CustomAgent(Agent)     — your domain logic
 ```
 
 No `agent_id`. The path is the identity. Agents find each other by path, communicate by writing to each other's `mailbox/inbox/`. Like passing letters between houses.
-
-## Extend
-
-Compose capabilities:
-
-```python
-agent = Agent(
-    service=service,
-    working_dir="/agents/bajie",
-    capabilities=["file", "bash", "email", "avatar"],
-)
-```
-
-Subclass for domain logic:
-
-```python
-class ResearchAgent(Agent):
-    def __init__(self, **kwargs):
-        super().__init__(
-            capabilities=["file", "vision", "web_search", "avatar"],
-            **kwargs,
-        )
-        self.add_tool("query_db", schema={...}, handler=db_handler)
-```
-
-Connect MCP servers for domain tools:
-
-```python
-await agent.connect_mcp("npx -y @modelcontextprotocol/server-filesystem /data")
-```
 
 ## One soul, thousand avatars
 
