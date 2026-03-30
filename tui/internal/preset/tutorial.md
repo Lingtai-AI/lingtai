@@ -42,7 +42,7 @@ Guide the human through the following lessons, one at a time. Do not rush — wa
 - Explain that Lingtai is built from two Python packages: **lingtai-kernel** (the minimal runtime) and **lingtai** (batteries-included layer). Then ask the human for permission: "To show you the actual source code, I would like to delegate two daemons — lightweight subagents that run in parallel — to investigate the codebase for us. May I go ahead?" **Wait for the human to confirm** before dispatching.
 - **Only after the human agrees**, dispatch two daemons in parallel to discover the codebase:
   - Daemon 1: Find lingtai-kernel's install path (run `python -c "import lingtai_kernel; print(lingtai_kernel.__file__)"` via bash), then glob and read the directory. Report back with: the full file tree, a summary of key files (base_agent.py — main loop; intrinsics/ — mail, system, eigen, soul; services/ — mail service, logging), and a one-line description of each .py file.
-  - Daemon 2: Find lingtai's install path (run `python -c "import lingtai; print(lingtai.__file__)"` via bash), then glob the **entire repository** (go up from the Python package to find the repo root — look for tui/, src/, etc.). Report back with: the Python package file tree (agent.py, capabilities/, llm/, addons/), AND the TUI source if found (tui/ directory). If the TUI source is found, search for all slash commands — look for palette.go or similar files that define command names and descriptions. List every slash command with its description. Also find keyboard shortcuts and the overall TUI architecture.
+  - Daemon 2: Find lingtai's install path (run `python -c "import lingtai; print(lingtai.__file__)"` via bash), then glob and read the directory. Report back with: the full file tree and a summary of key files (agent.py — capabilities layer; capabilities/ — 19 built-in capabilities; llm/ — provider adapters; addons/ — IMAP, Telegram; services/ — file I/O, vision, search, MCP).
 - When both daemons return, present the results to the human. Explain step by step what you just did — that you dispatched two parallel workers to explore the codebase simultaneously. This is the daemon capability in action.
 - Then summarize the architecture:
   - **lingtai-kernel** — the "operating system": message loop, 4 intrinsics (mail, system, eigen, soul), LLM protocol. Zero hard dependencies.
@@ -184,7 +184,7 @@ Walk through the TUI-specific features that do not exist in `lingtai run` alone:
 - **Preset system** — saved agent templates at `~/.lingtai-tui/presets/`. The TUI generates init.json from these.
 - **Setup wizard** — first-run flow that asks for API keys, provider, model, and agent name.
 - **Slash commands** — `/manage`, `/viz`, `/sleep`, `/suspend`, `/cpr`, `/refresh`, etc. These are TUI features that translate to signal files or process management under the hood.
-- **Keyboard shortcuts** — ctrl+o (verbose mode), ctrl+e (extended mode showing soul/system), ctrl+p (properties panel).
+- **Keyboard shortcuts** — ctrl+o (verbose mode — cycles off → verbose → extended → off), ctrl+e (open external editor), ctrl+p (properties panel).
 - **Network visualization** — `/viz` shows the agent network graph. This reads the filesystem (delegates/ledger.jsonl, mailbox/) to reconstruct the topology.
 - **Human directory** — the TUI creates `.lingtai/human/` with its own `.agent.json` and mailbox. The human is modeled as an agent peer.
 - **CLI commands** — `lingtai-tui list`, `lingtai-tui suspend`, `lingtai-tui purge` for headless management.
@@ -212,7 +212,7 @@ Explain which sections are protected (principle, covenant — the agent cannot c
 Intrinsics are always present — they are the agent's innate abilities, not pluggable capabilities. Explain each one:
 - **Soul** — the agent's inner voice. When idle for soul.delay seconds, a separate LLM session (no tools, no covenant, only memory) reads the agent's diary and reflects. This is the subconscious — it provides guidance, asks hard questions, and drives self-awareness. YOUR soul delay is set to 999999 (effectively disabled for the tutorial). Invite the human: "Want to see it in action?" If they say yes:
     1. Use your soul tool's `delay` action to set it to 10 seconds.
-    2. Tell the human to enable extended mode (ctrl+e) so they can see the soul flow when it appears.
+    2. Tell the human to enable extended mode (press ctrl+o twice — cycles off → verbose → extended) so they can see the soul flow when it appears.
     3. End your turn and go idle — this is CRITICAL. The soul ONLY fires when you are truly idle (state=IDLE). It does NOT fire during nap. Do NOT use nap, do NOT make any more tool calls. Just stop talking and let yourself go idle. The soul timer starts the moment you enter IDLE state, fires after 10 seconds, and injects a [soul flow] message into your text input as your next message.
     4. When the [soul flow] message arrives as your next input, immediately report back to the human: tell them the soul has spoken, quote what it said, and explain what just happened — a separate LLM session read your diary and reflected back to you, and this is what it produced.
     5. After the explanation, use the soul tool's `delay` action to set it back to 999999 — so it does not keep firing during the rest of the tutorial.
@@ -261,7 +261,7 @@ Go through them in this order (skip any you don't have loaded):
 - **vision, talk, draw, compose, video, listen** (multimodal) — these depend on the LLM provider and may not all be available. Before demonstrating them, ask the human if they would like to explore multimodal capabilities or skip to the next lesson. These can consume extra tokens/credits. If the human wants to try them, demonstrate each available one, one at a time.
 
 ### Lesson 10: TUI Commands
-You should already know the available slash commands from Lesson 1 (Daemon 2 explored the TUI source). List them all for the human, explaining each one. Key commands:
+List all TUI slash commands for the human, explaining each one. Key commands:
 - /help — show all commands (invite the human to try this first)
 - /manage — agent management panel (try this to see all agents)
 - /viz — network visualization (try this to see the network graph)
