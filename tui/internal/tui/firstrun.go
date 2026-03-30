@@ -107,13 +107,25 @@ type FirstRunModel struct {
 	width      int
 	height     int
 	hasPresets bool
-	fieldIdx   int // 0=name, 1=dir, 2=lang, 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure
+	fieldIdx   int // see agentNameDirFieldCount for field indices
 	// Agent config text inputs
 	agentLangIdx   int // cycle: 0=en, 1=zh, 2=wen
 	staminaInput   textinput.Model
 	ctxLimitInput  textinput.Model
 	soulDelayInput textinput.Model
 	moltPressInput textinput.Model
+	// Authority toggles
+	karmaIdx   int // 0=true, 1=false
+	nirvanaIdx int // 0=false, 1=true
+	// Prompt path inputs
+	covenantInput  textinput.Model
+	principleInput textinput.Model
+	soulFlowInput  textinput.Model
+	commentInput   textinput.Model
+	// Track whether user manually edited prompt paths (dirty = don't auto-update on lang change)
+	covenantDirty  bool
+	principleDirty bool
+	soulFlowDirty  bool
 	// Welcome page language selector
 	langCursor  int
 	welcomeOnly bool // true when opened from /settings (return to mail after language pick)
@@ -192,6 +204,26 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	mpi.Width = 15
 	mpi.Prompt = ""
 
+	covi := textinput.New()
+	covi.CharLimit = 256
+	covi.Width = 50
+	covi.Prompt = ""
+
+	prini := textinput.New()
+	prini.CharLimit = 256
+	prini.Width = 50
+	prini.Prompt = ""
+
+	sfli := textinput.New()
+	sfli.CharLimit = 256
+	sfli.Width = 50
+	sfli.Prompt = ""
+
+	comi := textinput.New()
+	comi.CharLimit = 256
+	comi.Width = 50
+	comi.Prompt = ""
+
 	// Load existing keys from Config.Keys
 	cfg, _ := config.LoadConfig(globalDir)
 	existingKeys := cfg.Keys
@@ -228,6 +260,11 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		ctxLimitInput:    ci,
 		soulDelayInput:   sdi,
 		moltPressInput:   mpi,
+		covenantInput:    covi,
+		principleInput:   prini,
+		soulFlowInput:    sfli,
+		commentInput:     comi,
+		nirvanaIdx:       1, // default false (1=false)
 		progressCh:       make(chan string, 4),
 	}
 
@@ -746,13 +783,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
 				return m, m.focusAgentField()
 			case "left":
-				if m.fieldIdx == 2 { // language cycle
+				switch m.fieldIdx {
+				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx - 1 + len(langs)) % len(langs)
+					m.updatePromptPaths()
+				case 7: // karma
+					m.karmaIdx = (m.karmaIdx + 1) % 2
+				case 8: // nirvana
+					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
 				}
 				return m, nil
 			case "right":
-				if m.fieldIdx == 2 { // language cycle
+				switch m.fieldIdx {
+				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx + 1) % len(langs)
+					m.updatePromptPaths()
+				case 7: // karma
+					m.karmaIdx = (m.karmaIdx + 1) % 2
+				case 8: // nirvana
+					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
 				}
 				return m, nil
 			case "enter":
@@ -766,13 +815,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				m.agentName = name
 				m.agentDir = dirName
-				// Check collision
 				orchDir := filepath.Join(m.baseDir, dirName)
 				if _, err := os.Stat(orchDir); err == nil {
 					m.message = i18n.TF("firstrun.dir_exists", dirName)
 					return m, nil
 				}
-				// Parse numeric fields
 				stamina, err := strconv.ParseFloat(m.staminaInput.Value(), 64)
 				if err != nil || stamina <= 0 {
 					stamina = 36000
@@ -789,14 +836,19 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || moltPress <= 0 || moltPress > 1 {
 					moltPress = 0.8
 				}
-				// Generate init.json and launch
 				p := m.presets[m.cursor]
 				opts := preset.AgentOpts{
-					Language:     langs[m.agentLangIdx],
-					Stamina:      stamina,
-					ContextLimit: ctxLimit,
-					SoulDelay:    soulDelay,
-					MoltPressure: moltPress,
+					Language:      langs[m.agentLangIdx],
+					Stamina:       stamina,
+					ContextLimit:  ctxLimit,
+					SoulDelay:     soulDelay,
+					MoltPressure:  moltPress,
+					Karma:         m.karmaIdx == 0,
+					Nirvana:       m.nirvanaIdx == 0,
+					CovenantFile:  m.covenantInput.Value(),
+					PrincipleFile: m.principleInput.Value(),
+					SoulFile:      m.soulFlowInput.Value(),
+					CommentFile:   m.commentInput.Value(),
 				}
 				if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
 					m.message = i18n.TF("firstrun.error", err)
@@ -827,6 +879,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
 				case 6:
 					m.moltPressInput, cmd = m.moltPressInput.Update(msg)
+				case 9:
+					m.covenantInput, cmd = m.covenantInput.Update(msg)
+					m.covenantDirty = true
+				case 10:
+					m.principleInput, cmd = m.principleInput.Update(msg)
+					m.principleDirty = true
+				case 11:
+					m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
+					m.soulFlowDirty = true
+				case 12:
+					m.commentInput, cmd = m.commentInput.Update(msg)
 				}
 				return m, cmd
 			}
@@ -1071,11 +1134,11 @@ func (m FirstRunModel) View() string {
 
 	case stepAgentNameDir:
 		stepNum, total := stepProgress(m.step, m.hasPresets)
-		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n\n")
+		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n")
 
 		langs := []string{"en", "zh", "wen"}
+		sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 
-		// Helper: cursor prefix for field index
 		cur := func(idx int) string {
 			if idx == m.fieldIdx {
 				return "> "
@@ -1083,20 +1146,29 @@ func (m FirstRunModel) View() string {
 			return "  "
 		}
 
-		// 0: Name
-		b.WriteString(cur(0) + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
-
-		// 1: Dir
-		b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
-
-		// 2: Language (cycle selector)
-		langVal := langs[m.agentLangIdx]
-		if m.fieldIdx == 2 {
-			langVal = lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render("< " + langVal + " >")
+		boolLabel := func(idx int) string {
+			if idx == 0 {
+				return "true"
+			}
+			return "false"
 		}
-		b.WriteString(cur(2) + i18n.T("firstrun.language") + ": " + langVal + "\n")
 
-		// 3-6: Numeric text inputs with hints
+		renderToggle := func(val string, active bool) string {
+			if active {
+				return lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render("< " + val + " >")
+			}
+			return val
+		}
+
+		// ── Identity ──
+		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_identity")+" ──") + "\n")
+		b.WriteString(cur(0) + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
+		b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
+		langVal := langs[m.agentLangIdx]
+		b.WriteString(cur(2) + i18n.T("firstrun.language") + ": " + renderToggle(langVal, m.fieldIdx == 2) + "\n")
+
+		// ── Runtime ──
+		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_runtime")+" ──") + "\n")
 		type numField struct {
 			idx   int
 			label string
@@ -1114,11 +1186,29 @@ func (m FirstRunModel) View() string {
 			b.WriteString(cur(nf.idx) + nf.label + ": " + nf.view + hint + "\n")
 		}
 
+		// ── Authority ──
+		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_authority")+" ──") + "\n")
+		karmaVal := boolLabel(m.karmaIdx)
+		karmaHint := StyleFaint.Render(" (" + i18n.T("firstrun.karma_hint") + ")")
+		b.WriteString(cur(7) + i18n.T("firstrun.karma") + ": " + renderToggle(karmaVal, m.fieldIdx == 7) + karmaHint + "\n")
+		nirvanaVal := boolLabel(m.nirvanaIdx)
+		nirvanaHint := StyleFaint.Render(" (" + i18n.T("firstrun.nirvana_hint") + ")")
+		b.WriteString(cur(8) + i18n.T("firstrun.nirvana") + ": " + renderToggle(nirvanaVal, m.fieldIdx == 8) + nirvanaHint + "\n")
+
+		// ── Prompts ──
+		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_prompts")+" ──") + "\n")
+		b.WriteString(cur(9) + i18n.T("firstrun.covenant") + ": " + m.covenantInput.View() + "\n")
+		b.WriteString(cur(10) + i18n.T("firstrun.principle") + ": " + m.principleInput.View() + "\n")
+		b.WriteString(cur(11) + i18n.T("firstrun.soul_flow") + ": " + m.soulFlowInput.View() + "\n")
+		commentHint := StyleFaint.Render(" (" + i18n.T("firstrun.comment_hint") + ")")
+		b.WriteString(cur(12) + i18n.T("firstrun.comment") + ": " + m.commentInput.View() + commentHint + "\n")
+
 		if m.message != "" {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("firstrun.toggle_field")+
+			"  ←→ "+i18n.T("firstrun.toggle_region")+
 			"  [Enter] "+i18n.T("firstrun.create_agent")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
@@ -1231,7 +1321,12 @@ func centerText(s string, width int) string {
 }
 
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir.
-const agentNameDirFieldCount = 7 // name, dir, lang, stamina, ctx_limit, soul_delay, molt_pressure
+const agentNameDirFieldCount = 13
+// Field indices:
+// 0=name, 1=dir, 2=lang,
+// 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure,
+// 7=karma, 8=nirvana,
+// 9=covenant, 10=principle, 11=soul_flow, 12=comment
 
 // runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
 func (m FirstRunModel) runCheckCaps() tea.Cmd {
@@ -1363,6 +1458,19 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
 
+	// Pre-fill prompt paths based on language
+	langs := []string{"en", "zh", "wen"}
+	lang := langs[m.agentLangIdx]
+	m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
+	m.principleInput.SetValue(preset.PrinciplePath(m.globalDir, lang))
+	m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
+	m.commentInput.SetValue("")
+	m.covenantDirty = false
+	m.principleDirty = false
+	m.soulFlowDirty = false
+	m.karmaIdx = 0  // true
+	m.nirvanaIdx = 1 // false
+
 	m.step = stepAgentNameDir
 }
 
@@ -1404,6 +1512,10 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	m.ctxLimitInput.Blur()
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
+	m.covenantInput.Blur()
+	m.principleInput.Blur()
+	m.soulFlowInput.Blur()
+	m.commentInput.Blur()
 
 	switch m.fieldIdx {
 	case 0:
@@ -1411,7 +1523,7 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	case 1:
 		return m.dirInput.Focus()
 	case 2:
-		return nil // language — cycle selector, no text input
+		return nil // language — cycle selector
 	case 3:
 		return m.staminaInput.Focus()
 	case 4:
@@ -1420,8 +1532,34 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 		return m.soulDelayInput.Focus()
 	case 6:
 		return m.moltPressInput.Focus()
+	case 7, 8:
+		return nil // karma/nirvana — cycle selectors
+	case 9:
+		return m.covenantInput.Focus()
+	case 10:
+		return m.principleInput.Focus()
+	case 11:
+		return m.soulFlowInput.Focus()
+	case 12:
+		return m.commentInput.Focus()
 	}
 	return nil
+}
+
+// updatePromptPaths updates prompt path fields when language changes,
+// but only if the user hasn't manually edited them.
+func (m *FirstRunModel) updatePromptPaths() {
+	langs := []string{"en", "zh", "wen"}
+	lang := langs[m.agentLangIdx]
+	if !m.covenantDirty {
+		m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
+	}
+	if !m.principleDirty {
+		m.principleInput.SetValue(preset.PrinciplePath(m.globalDir, lang))
+	}
+	if !m.soulFlowDirty {
+		m.soulFlowInput.SetValue(preset.SoulFlowPath(m.globalDir, lang))
+	}
 }
 
 // getPresetProvider extracts provider name from a preset
