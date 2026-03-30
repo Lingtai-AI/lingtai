@@ -20,7 +20,7 @@ jobs:
           - goos: darwin
             goarch: amd64
             asset: lingtai-darwin-x64
-            runner: macos-13
+            runner: macos-14
           - goos: linux
             goarch: amd64
             asset: lingtai-linux-x64
