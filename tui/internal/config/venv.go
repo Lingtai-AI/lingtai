@@ -111,6 +111,15 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
 
+	// Verify Python version is 3.11+
+	venvPython := VenvPython(venvPath)
+	verOut, err := exec.Command(venvPython, "-c",
+		"import sys; print(sys.version_info >= (3, 11))").Output()
+	if err != nil || strings.TrimSpace(string(verOut)) != "True" {
+		os.RemoveAll(venvPath)
+		return fmt.Errorf("Python 3.11+ is required. Found older version in venv. Install python@3.13 and try again")
+	}
+
 	// Step 2: install lingtai
 	progress("welcome.step_install")
 	home, _ := os.UserHomeDir()
