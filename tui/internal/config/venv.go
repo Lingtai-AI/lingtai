@@ -13,11 +13,6 @@ func RuntimeVenvDir(globalDir string) string {
 	return filepath.Join(globalDir, "runtime", "venv")
 }
 
-// VenvDir returns the old ~/.lingtai-tui/env/ path for migration detection.
-func VenvDir(globalDir string) string {
-	return filepath.Join(globalDir, "env")
-}
-
 // VenvPython returns the Python executable path inside a venv directory.
 func VenvPython(venvDir string) string {
 	if runtime.GOOS == "windows" {
@@ -29,13 +24,7 @@ func VenvPython(venvDir string) string {
 // LingtaiCmd returns the Python interpreter path for running lingtai.
 // Callers should invoke as: LingtaiCmd(dir), "-m", "lingtai", "run", agentDir
 func LingtaiCmd(globalDir string) string {
-	// Try new path: ~/.lingtai-tui/runtime/venv/
 	python := VenvPython(RuntimeVenvDir(globalDir))
-	if _, err := os.Stat(python); err == nil {
-		return python
-	}
-	// Try legacy path: ~/.lingtai-tui/env/
-	python = VenvPython(VenvDir(globalDir))
 	if _, err := os.Stat(python); err == nil {
 		return python
 	}
@@ -45,20 +34,13 @@ func LingtaiCmd(globalDir string) string {
 			return path
 		}
 	}
-	return VenvPython(RuntimeVenvDir(globalDir))
+	return python
 }
 
 // NeedsVenv returns true if no working runtime venv exists.
 func NeedsVenv(globalDir string) bool {
-	// Check new path
-	if _, err := os.Stat(VenvPython(RuntimeVenvDir(globalDir))); err == nil {
-		return false
-	}
-	// Check legacy path
-	if _, err := os.Stat(VenvPython(VenvDir(globalDir))); err == nil {
-		return false
-	}
-	return true
+	_, err := os.Stat(VenvPython(RuntimeVenvDir(globalDir)))
+	return err != nil
 }
 
 func VerifyVenv(globalDir string) error {

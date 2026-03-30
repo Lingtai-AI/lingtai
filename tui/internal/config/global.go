@@ -35,19 +35,10 @@ func LoadConfig(dir string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	// Try new format first
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err == nil && (cfg.Keys != nil || cfg.Language != "") {
-		return cfg, nil
-	}
-	// Fallback: try legacy format (minimax_api_key)
-	var legacy struct {
-		MiniMaxAPIKey string `json:"minimax_api_key,omitempty"`
-	}
-	if err := json.Unmarshal(data, &legacy); err != nil {
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
-	MigrateConfig(&cfg, legacy.MiniMaxAPIKey)
 	return cfg, nil
 }
 
@@ -112,12 +103,3 @@ func MarkTutorialDone(globalDir string) {
 	os.WriteFile(filepath.Join(globalDir, ".tutorial"), []byte("done\n"), 0o644)
 }
 
-// MigrateConfig migrates legacy config (minimax_api_key) to new format (keys).
-func MigrateConfig(cfg *Config, legacyKey string) {
-	if legacyKey != "" && cfg.Keys == nil {
-		cfg.Keys = make(map[string]string)
-	}
-	if legacyKey != "" && cfg.Keys != nil && cfg.Keys["minimax"] == "" {
-		cfg.Keys["minimax"] = legacyKey
-	}
-}

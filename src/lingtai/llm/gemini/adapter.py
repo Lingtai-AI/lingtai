@@ -599,8 +599,6 @@ class InteractionsChatSession(ChatSession):
         - str → wrapped as ``[{"type": "text", "text": ...}]``
         - list of ToolResultBlock → converted to FunctionResultContentParam dicts
         - list of FunctionResultContentParam dicts → passed as-is
-        - list of Part objects (legacy Chat API format) → converted to
-          FunctionResultContentParam dicts
         """
         if isinstance(message, str):
             return [{"type": "text", "text": message}]
@@ -615,7 +613,6 @@ class InteractionsChatSession(ChatSession):
                 if isinstance(item, dict) and "type" in item:
                     converted.append(item)
                 elif isinstance(item, ToolResultBlock):
-                    # Canonical ToolResultBlock from make_tool_result()
                     content = item.content
                     converted.append(
                         {
@@ -627,37 +624,7 @@ class InteractionsChatSession(ChatSession):
                             "name": item.name,
                         }
                     )
-                elif hasattr(item, "function_response") and item.function_response:
-                    # Legacy Chat API Part objects
-                    fr = item.function_response
-                    converted.append(
-                        {
-                            "type": "function_result",
-                            "call_id": getattr(fr, "id", "") or fr.name,
-                            "result": json.dumps(fr.response)
-                            if not isinstance(fr.response, str)
-                            else fr.response,
-                            "name": fr.name,
-                        }
-                    )
-                elif hasattr(item, "inline_data") and item.inline_data:
-                    # Legacy Chat API Part with image data
-                    import base64
-
-                    converted.append(
-                        {
-                            "type": "inline_data",
-                            "data": base64.b64encode(item.inline_data.data).decode(
-                                "ascii"
-                            ),
-                            "mime_type": item.inline_data.mime_type,
-                        }
-                    )
-                elif hasattr(item, "text") and item.text is not None:
-                    # Legacy Chat API Part with text
-                    converted.append({"type": "text", "text": item.text})
                 else:
-                    # Unknown item type — pass through and let the API handle it
                     converted.append(item)
             return converted
 

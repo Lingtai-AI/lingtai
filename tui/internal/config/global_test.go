@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -60,42 +58,3 @@ func TestNeedsSetup_EmptyKeys(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_LegacyMigration(t *testing.T) {
-	dir := t.TempDir()
-	legacyJSON := `{"minimax_api_key": "legacy-minimax-key"}`
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(legacyJSON), 0644); err != nil {
-		t.Fatalf("write legacy config: %v", err)
-	}
-	cfg, err := LoadConfig(dir)
-	if err != nil {
-		t.Fatalf("load after migration: %v", err)
-	}
-	if cfg.Keys == nil {
-		t.Fatal("Keys should be initialized after migration")
-	}
-	if cfg.Keys["minimax"] != "legacy-minimax-key" {
-		t.Errorf("Keys[minimax] = %q, want %q (migrated)", cfg.Keys["minimax"], "legacy-minimax-key")
-	}
-}
-
-func TestMigrateConfig(t *testing.T) {
-	cfg := &Config{}
-	MigrateConfig(cfg, "legacy-key")
-	if cfg.Keys == nil {
-		t.Fatal("Keys should be initialized")
-	}
-	if cfg.Keys["minimax"] != "legacy-key" {
-		t.Errorf("Keys[minimax] = %q, want %q", cfg.Keys["minimax"], "legacy-key")
-	}
-}
-
-func TestMigrateConfig_Empty(t *testing.T) {
-	cfg := &Config{Keys: map[string]string{"custom": "existing-custom"}}
-	MigrateConfig(cfg, "legacy-minimax")
-	if cfg.Keys["minimax"] != "legacy-minimax" {
-		t.Errorf("Keys[minimax] = %q, want %q", cfg.Keys["minimax"], "legacy-minimax")
-	}
-	if cfg.Keys["custom"] != "existing-custom" {
-		t.Errorf("Keys[custom] = %q, should not change", cfg.Keys["custom"])
-	}
-}

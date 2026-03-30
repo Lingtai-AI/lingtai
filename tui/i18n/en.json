@@ -6,7 +6,7 @@
   "error.agent_timeout": "Agent failed to start. Check logs at %s",
   "error.pip_failed": "Failed to install lingtai. Check internet connection.",
   "error.python_missing": "Python 3.11+ required. Install from python.org.",
-  "error.venv_broken": "lingtai broken. Delete ~/.lingtai-tui/env/ and restart.",
+  "error.venv_broken": "lingtai broken. Delete ~/.lingtai-tui/runtime/venv/ and restart.",
   "firstrun.create_hint": "[Enter] Create    [Esc] Back",
   "firstrun.created": "Agent created: %s",
   "firstrun.dir_exists": "Folder '%s' already exists. Choose another name.",
