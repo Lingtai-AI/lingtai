@@ -13,6 +13,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/lingtai?color=%237dab8f)](https://pypi.org/project/lingtai/)
 [![License](https://img.shields.io/github/license/huangzesen/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/huangzesen/lingtai-kernel)
+[![Blog](https://img.shields.io/badge/博客-lingtai.ai-%23d4a853)](https://lingtai.ai)
 
 </div>
 
@@ -149,6 +150,10 @@ class ResearchAgent(Agent):
 ```python
 await agent.connect_mcp("npx -y @modelcontextprotocol/server-filesystem /data")
 ```
+
+## 了解更多
+
+设计哲学、架构解析、开发笔记，尽在 **[lingtai.ai](https://lingtai.ai)**。
 
 ## 许可
 
