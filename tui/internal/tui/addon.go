@@ -21,7 +21,6 @@ type AddonModel struct {
 	cursor  int
 	inputs  [2]textinput.Model // 0=imap, 1=telegram
 	orchDir string
-	saved   bool
 	width   int
 	height  int
 }
@@ -64,7 +63,6 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.saveAddonPaths()
-			m.saved = true
 			return m, func() tea.Msg { return AddonSavedMsg{} }
 		case "up":
 			if m.cursor > 0 {
