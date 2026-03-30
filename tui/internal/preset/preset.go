@@ -22,6 +22,9 @@ var principleFS embed.FS
 //go:embed all:templates
 var templatesFS embed.FS
 
+//go:embed all:soul
+var soulFS embed.FS
+
 //go:embed tutorial.md
 var tutorialMD []byte
 
@@ -276,9 +279,12 @@ func populate(globalDir string, fsys embed.FS, root string) {
 func Bootstrap(globalDir string) error {
 	populate(globalDir, covenantFS, "covenant")
 	populate(globalDir, principleFS, "principle")
+	populate(globalDir, soulFS, "soul")
 	populate(globalDir, templatesFS, "templates")
-	// Tutorial comment file
-	tutorialPath := filepath.Join(globalDir, "tutorial.md")
+	// Tutorial comment file — now in tutorial/ subfolder
+	tutorialDir := filepath.Join(globalDir, "tutorial")
+	os.MkdirAll(tutorialDir, 0o755)
+	tutorialPath := filepath.Join(tutorialDir, "tutorial.md")
 	if _, err := os.Stat(tutorialPath); err != nil {
 		os.WriteFile(tutorialPath, tutorialMD, 0o644)
 	}
@@ -292,7 +298,12 @@ func CovenantPath(globalDir, lang string) string {
 
 // TutorialCommentPath returns the absolute path to the tutorial comment file.
 func TutorialCommentPath(globalDir string) string {
-	return filepath.Join(globalDir, "tutorial.md")
+	return filepath.Join(globalDir, "tutorial", "tutorial.md")
+}
+
+// SoulFlowPath returns the absolute path to the soul flow file for a language.
+func SoulFlowPath(globalDir, lang string) string {
+	return filepath.Join(globalDir, "soul", lang, "soul-flow.md")
 }
 
 // DefaultPreset returns the first built-in preset (minimax).
