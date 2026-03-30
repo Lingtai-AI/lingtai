@@ -37,7 +37,11 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: tui/go.mod
+          go-version: '1.24'
+          cache-dependency-path: tui/go.sum
+
+      - name: Ensure web dist exists
+        run: mkdir -p tui/web/dist && echo '<!DOCTYPE html><html><body>viz</body></html>' > tui/web/dist/index.html
 
       - name: Build
         working-directory: tui
