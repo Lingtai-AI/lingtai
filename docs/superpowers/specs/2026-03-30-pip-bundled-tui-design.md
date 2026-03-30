@@ -1,20 +1,30 @@
-# Design: Distribute lingtai via pip with bundled TUI binary
+# Design: Distribute lingtai-tui via Homebrew, Python via pip
 
 **Date:** 2026-03-30
 **Status:** Approved
 
 ## Goal
 
-`pip install lingtai` becomes the single install method for both the Python agent framework and the TUI binary. Platform-specific wheels include the pre-built `lingtai-tui` Go binary. No separate install script, no curl, no git clone required for end users.
+Two distribution channels, each handling what it's good at:
+- **Homebrew** distributes the TUI binary: `brew install huangzesen/lingtai/lingtai-tui`
+- **PyPI** distributes the Python agent package: TUI bootstraps `pip install lingtai` into an isolated venv
+
+The TUI checks for Python package updates on every launch and auto-upgrades.
 
 ## User Flows
 
-### End user (release)
+### End user (install)
 
 ```sh
-pip install lingtai        # installs Python package + TUI binary
-lingtai-tui                # runs the TUI (first run: bootstraps venv + presets)
-pip install --upgrade lingtai  # upgrades everything
+brew install huangzesen/lingtai/lingtai-tui
+lingtai-tui                    # first run: creates venv, pip install lingtai, bootstraps presets
+```
+
+### End user (upgrade)
+
+```sh
+brew upgrade lingtai-tui                       # upgrades TUI binary
+# Python package auto-upgrades on next lingtai-tui launch
 ```
 
 ### Developer (local)
@@ -23,169 +33,184 @@ pip install --upgrade lingtai  # upgrades everything
 git clone https://github.com/huangzesen/lingtai.git
 cd lingtai
 pip install -e .                           # Python package in editable mode
-cd tui && go build -o bin/lingtai-tui .    # build TUI binary, put on PATH
+cd tui && go build -o bin/lingtai-tui .    # build TUI binary, add to PATH
 ```
 
-The `lingtai-tui` entry point wrapper falls back to `lingtai-tui` on PATH if the bundled binary is not present (editable installs don't include it).
+Dev mode detection in the TUI is unchanged — if local source repos exist, it installs with `-e` from source instead of PyPI.
 
-## Package Structure
+## Homebrew Tap
 
-### Wheels (4 platform-specific)
+### Repository: `huangzesen/homebrew-lingtai`
 
-```
-lingtai-0.4.0-py3-none-macosx_11_0_arm64.whl
-lingtai-0.4.0-py3-none-macosx_10_9_x86_64.whl
-lingtai-0.4.0-py3-none-manylinux_2_17_x86_64.whl
-lingtai-0.4.0-py3-none-manylinux_2_17_aarch64.whl
-```
+Contains a single formula: `lingtai-tui.rb`
 
-Each wheel contains:
-- `lingtai/` — the full Python package (same as today)
-- `lingtai/bin/lingtai-tui` — single Go binary for that platform (~23MB)
+```ruby
+class LingtaiTui < Formula
+  desc "Terminal UI for the Lingtai AI agent framework"
+  homepage "https://github.com/huangzesen/lingtai"
+  version "0.3.0"
+  license "MIT"
 
-Plus one source distribution (sdist) without any binary.
+  on_macos do
+    on_arm do
+      url "https://github.com/huangzesen/lingtai/releases/download/v0.3.0/lingtai-darwin-arm64"
+      sha256 "PLACEHOLDER"
+    end
+    on_intel do
+      url "https://github.com/huangzesen/lingtai/releases/download/v0.3.0/lingtai-darwin-x64"
+      sha256 "PLACEHOLDER"
+    end
+  end
 
-### Entry Points
+  on_linux do
+    on_arm do
+      url "https://github.com/huangzesen/lingtai/releases/download/v0.3.0/lingtai-linux-arm64"
+      sha256 "PLACEHOLDER"
+    end
+    on_intel do
+      url "https://github.com/huangzesen/lingtai/releases/download/v0.3.0/lingtai-linux-x64"
+      sha256 "PLACEHOLDER"
+    end
+  end
 
-```toml
-[project.scripts]
-lingtai = "lingtai.cli:main"           # existing Python CLI
-lingtai-tui = "lingtai._tui:main"      # new: launches bundled Go binary
-```
+  def install
+    bin.install stable.url.split("/").last => "lingtai-tui"
+  end
 
-### TUI Launcher (`src/lingtai/_tui.py`)
-
-```python
-"""Launch the bundled lingtai-tui binary, or fall back to PATH."""
-from __future__ import annotations
-
-import os
-import sys
-
-
-def main() -> None:
-    # Try bundled binary first
-    bundled = os.path.join(os.path.dirname(__file__), "bin", "lingtai-tui")
-    if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
-        os.execvp(bundled, [bundled] + sys.argv[1:])
-
-    # Fall back to PATH (dev mode: user built TUI separately)
-    import shutil
-    path_binary = shutil.which("lingtai-tui")
-    if path_binary:
-        os.execvp(path_binary, [path_binary] + sys.argv[1:])
-
-    print("lingtai-tui binary not found.", file=sys.stderr)
-    print("Install: pip install lingtai", file=sys.stderr)
-    print("Or build from source: cd tui && go build -o bin/lingtai-tui .", file=sys.stderr)
-    sys.exit(1)
+  test do
+    assert_match "lingtai-tui", shell_output("#{bin}/lingtai-tui version 2>&1", 0)
+  end
+end
 ```
 
-## pyproject.toml Changes
+### GitHub Actions: `.github/workflows/release.yml` (in lingtai repo)
 
-```toml
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "lingtai"
-version = "0.4.0"
-# ... rest unchanged ...
-
-[project.scripts]
-lingtai = "lingtai.cli:main"
-lingtai-tui = "lingtai._tui:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-lingtai = ["i18n/*.json", "capabilities/*.json", "addons/*/*.json", "bin/*"]
-```
-
-Key addition: `"bin/*"` in package-data to include the TUI binary.
-
-## GitHub Actions CI
-
-### Workflow: `.github/workflows/release.yml`
-
-**Trigger:** Push tag matching `v*` (e.g. `v0.4.0`).
+**Trigger:** Push tag matching `v*`
 
 **Jobs:**
 
-#### 1. `build-wheels` (matrix: 4 platforms)
+#### 1. `build` (matrix: 4 platforms)
 
-| Runner | GOOS | GOARCH | Wheel platform tag |
-|--------|------|--------|--------------------|
-| `macos-14` (arm64) | darwin | arm64 | `macosx_11_0_arm64` |
-| `macos-13` (x64) | darwin | amd64 | `macosx_10_9_x86_64` |
-| `ubuntu-latest` | linux | amd64 | `manylinux_2_17_x86_64` |
-| `ubuntu-latest` | linux | arm64 | `manylinux_2_17_aarch64` |
+| GOOS | GOARCH | Asset name |
+|------|--------|------------|
+| darwin | arm64 | `lingtai-darwin-arm64` |
+| darwin | amd64 | `lingtai-darwin-x64` |
+| linux | amd64 | `lingtai-linux-x64` |
+| linux | arm64 | `lingtai-linux-arm64` |
 
 Each job:
 1. Checkout repo
 2. Set up Go
-3. Cross-compile TUI: `GOOS=$GOOS GOARCH=$GOARCH go build -o src/lingtai/bin/lingtai-tui ./tui/`
-4. Set up Python 3.11
-5. Build wheel: `python -m build --wheel`
-6. Rename wheel to include correct platform tag (using `wheel tags` or manual rename)
-7. Upload wheel as artifact
+3. Build: `CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o lingtai-${GOOS}-${ARCH} ./tui/`
+4. Upload binary as release asset
 
-For Linux arm64: use `GOARCH=arm64` cross-compilation on `ubuntu-latest` (no need for actual arm64 runner — Go cross-compiles natively).
+#### 2. `release`
 
-#### 2. `build-sdist`
+1. Create GitHub release from tag
+2. Attach all 4 binaries
 
-1. Checkout repo
-2. Build source dist: `python -m build --sdist` (no binary included)
-3. Upload as artifact
+#### 3. `update-homebrew`
 
-#### 3. `publish` (depends on build-wheels + build-sdist)
+1. Compute sha256 for each binary
+2. Update formula in `huangzesen/homebrew-lingtai` repo (via GitHub API or checkout + push)
 
-1. Download all artifacts (4 wheels + 1 sdist)
-2. Upload to PyPI via `twine` using `PYPI_API_TOKEN` secret
+## TUI Auto-Upgrade Check
 
-### Wheel Platform Tagging
+### Current behavior (unchanged)
 
-The wheels must have correct platform tags so pip selects the right one. Since we're using `py3-none-{platform}`, the approach:
+On every launch, the TUI calls `NeedsVenv()` — if no venv exists, it creates one and `pip install lingtai`.
 
-- Build with setuptools (produces `py3-none-any.whl`)
-- Use `wheel tags` to retag to the correct platform: `wheel tags --platform-tag macosx_11_0_arm64 lingtai-0.4.0-py3-none-any.whl`
-- Or use a custom build script that sets the tag directly
+### New behavior: version check on every launch
+
+Add to the TUI startup path (in `main.go` or `venv.go`):
+
+1. Read the currently installed lingtai version: `python -c "import lingtai; print(lingtai.__version__)"`
+2. Check the latest version on PyPI: `curl -s https://pypi.org/pypi/lingtai/json | jq -r .info.version` (or equivalent Go HTTP call)
+3. If versions differ, run `pip install --upgrade lingtai` in the venv
+4. This runs on every TUI launch, but the version check is fast (~100ms HTTP call). The pip upgrade only runs when needed.
+
+The check should be **non-blocking** — if PyPI is unreachable, skip silently and use the installed version. Don't block the TUI from starting.
+
+Implementation in `venv.go`:
+
+```go
+// CheckUpgrade compares installed version to PyPI latest.
+// Returns true if upgrade was performed.
+func CheckUpgrade(globalDir string) bool {
+    python := VenvPython(RuntimeVenvDir(globalDir))
+
+    // Get installed version
+    installed, err := exec.Command(python, "-c",
+        "import lingtai; print(lingtai.__version__)").Output()
+    if err != nil {
+        return false
+    }
+
+    // Get latest from PyPI (with 3s timeout)
+    client := &http.Client{Timeout: 3 * time.Second}
+    resp, err := client.Get("https://pypi.org/pypi/lingtai/json")
+    if err != nil {
+        return false  // offline, skip
+    }
+    defer resp.Body.Close()
+    var pypi struct{ Info struct{ Version string } }
+    json.NewDecoder(resp.Body).Decode(&pypi)
+
+    if strings.TrimSpace(string(installed)) == pypi.Info.Version {
+        return false  // up to date
+    }
+
+    // Upgrade
+    pip := filepath.Join(filepath.Dir(python), "pip")
+    exec.Command(pip, "install", "--upgrade", "lingtai").Run()
+    return true
+}
+```
+
+Called from `main.go` startup, after `NeedsVenv` check, before launching agents.
 
 ## Files to Create
 
-| File | Purpose |
-|------|---------|
-| `src/lingtai/_tui.py` | TUI launcher wrapper |
-| `src/lingtai/bin/.gitkeep` | Placeholder for binary dir (binary itself is gitignored) |
-| `.github/workflows/release.yml` | CI: build + publish |
+| File | Repo | Purpose |
+|------|------|---------|
+| `lingtai-tui.rb` | `huangzesen/homebrew-lingtai` | Homebrew formula |
+| `.github/workflows/release.yml` | `huangzesen/lingtai` | CI: build binaries + GitHub release + update formula |
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `pyproject.toml` | Add `lingtai-tui` entry point, add `bin/*` to package-data |
-| `.gitignore` | Add `src/lingtai/bin/lingtai-tui` (binary is build artifact, not committed) |
+| File | Repo | Change |
+|------|------|--------|
+| `tui/internal/config/venv.go` | `huangzesen/lingtai` | Add `CheckUpgrade()` function |
+| `tui/main.go` | `huangzesen/lingtai` | Call `CheckUpgrade()` on startup |
 
 ## Files to Delete
 
-| File | Reason |
+| File | Repo | Reason |
+|------|------|--------|
+| `install.sh` | `huangzesen/lingtai` | Replaced by `brew install huangzesen/lingtai/lingtai-tui` |
+
+## Files to Revert (from earlier this session)
+
+| File | Change |
 |------|--------|
-| `install.sh` | Replaced by `pip install lingtai` |
-
-## TUI Venv Bootstrap
-
-No changes needed. The TUI still creates `~/.lingtai-tui/runtime/venv/` and runs `pip install lingtai`. Since the user already pip-installed lingtai, pip resolves from local cache — fast, no network needed.
+| `src/lingtai/_tui.py` | Delete (no longer needed) |
+| `src/lingtai/bin/.gitkeep` | Delete (no longer needed) |
+| `pyproject.toml` | Remove `lingtai-tui` entry point, remove `bin/*` from package-data |
+| `.gitignore` | Remove `src/lingtai/bin/lingtai-tui` line |
 
 ## What Does NOT Change
 
-- `lingtai-kernel` remains a separate PyPI package (listed as dependency)
+- `lingtai-kernel` remains a separate PyPI package
 - All runtime behavior (venv isolation, agent processes, filesystem protocol)
 - The TUI's own behavior, commands, and views
 - `lingtai run` Python CLI
 - The TUI Go source code in `tui/`
+- PyPI distribution of the Python `lingtai` package (pure Python, no binary)
 
-## Version Bump
+## Distribution Summary
 
-This will be version `0.4.0` since it changes the distribution model.
+| Component | Channel | Install | Upgrade |
+|-----------|---------|---------|---------|
+| TUI binary | Homebrew | `brew install huangzesen/lingtai/lingtai-tui` | `brew upgrade lingtai-tui` |
+| Python agent | PyPI (via TUI) | Auto on first `lingtai-tui` run | Auto on every `lingtai-tui` launch |
+| Python agent (dev) | Local source | `pip install -e .` | `git pull` |
