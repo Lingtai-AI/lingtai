@@ -182,6 +182,17 @@ func tutorialMain() {
 	preset.Bootstrap(globalDir)
 
 	lingtaiDir := filepath.Join(projectDir, ".lingtai")
+
+	// Check for phantom processes before creating .lingtai/
+	if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
+		self, _ := os.Executable()
+		out, _ := exec.Command(self, "list", projectDir).Output()
+		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
+			fmt.Print(string(out))
+			os.Exit(1)
+		}
+	}
+
 	if err := process.InitProject(lingtaiDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
