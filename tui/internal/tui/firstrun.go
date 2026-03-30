@@ -320,6 +320,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Resize text inputs to use available terminal width
+		inputWidth := msg.Width - 20
+		if inputWidth < 40 {
+			inputWidth = 40
+		}
+		m.nameInput.Width = inputWidth
+		m.dirInput.Width = inputWidth
+		m.covenantInput.Width = inputWidth
+		m.principleInput.Width = inputWidth
+		m.soulFlowInput.Width = inputWidth
+		m.commentInput.Width = inputWidth
 		return m, nil
 
 	case bootstrapProgressMsg:

@@ -15,6 +15,11 @@ import (
 // SendMsg is emitted when the user presses Enter in the input box.
 type SendMsg struct{}
 
+// OpenEditorMsg is emitted when user presses Ctrl+E to open external editor.
+type OpenEditorMsg struct {
+	Text string
+}
+
 // InputModel wraps a textarea with slash-command palette detection.
 // Enter sends the message (via SendMsg). Ctrl+J inserts a newline.
 type InputModel struct {
@@ -94,6 +99,11 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 				m.textarea.SetHeight(1)
 			}
 			return m, nil
+		case "ctrl+e":
+			// Open external editor with current text
+			return m, func() tea.Msg {
+				return OpenEditorMsg{Text: m.textarea.Value()}
+			}
 		}
 		// Forward to textarea for all other keys (including ctrl+j for newline)
 		var cmd tea.Cmd
