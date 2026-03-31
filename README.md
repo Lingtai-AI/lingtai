@@ -10,7 +10,7 @@
 >
 > *灵台者有持，而不知其所持，而不可持者也。*
 > *The soul holds something, yet knows not what it holds — and what it holds cannot be held.*
-> — 庄子 · 庚桑楚
+> — Zhuangzi · Gengsang Chu (庄子 · 庚桑楚)
 
 [English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
 
