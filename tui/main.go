@@ -31,16 +31,15 @@ func main() {
 		if arg == "--help" || arg == "-h" {
 			fmt.Println("Usage: lingtai-tui")
 			fmt.Println("       lingtai-tui tutorial")
-			fmt.Println("       lingtai-tui suspend")
 			fmt.Println("       lingtai-tui purge [dir]")
 			fmt.Println("       lingtai-tui list [dir]")
+			fmt.Println("       lingtai-tui clean")
 			fmt.Println()
 			fmt.Println("  (no args)    Launch TUI in current directory")
 			fmt.Println("  tutorial     Start or resume the guided tutorial")
-			fmt.Println("  suspend      Suspend all agents in current directory")
 			fmt.Println("  purge        Kill lingtai processes (all, or only those in <dir>)")
 			fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
-			fmt.Println("  clean        Suspend all agents, remove .lingtai/ in current directory")
+			fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 			os.Exit(0)
 		}
 		if arg == "--version" || arg == "-v" || arg == "version" {
@@ -49,10 +48,6 @@ func main() {
 		}
 		if arg == "tutorial" {
 			tutorialMain()
-			return
-		}
-		if arg == "suspend" {
-			suspendMain()
 			return
 		}
 		if arg == "purge" {
@@ -293,42 +288,6 @@ func tutorialMain() {
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
-	}
-}
-
-func suspendMain() {
-	projectDir, _ := os.Getwd()
-	projectDir, _ = filepath.Abs(projectDir)
-
-	lingtaiDir := filepath.Join(projectDir, ".lingtai")
-	if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "No .lingtai/ found in %s\n", projectDir)
-		os.Exit(1)
-	}
-
-	agents, err := fs.DiscoverAgents(lingtaiDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error discovering agents: %v\n", err)
-		os.Exit(1)
-	}
-
-	count := 0
-	for _, agent := range agents {
-		if agent.IsHuman {
-			continue
-		}
-		if !fs.IsAlive(agent.WorkingDir, 3.0) {
-			continue
-		}
-		fmt.Printf("Suspending %s...\n", agent.AgentName)
-		fs.SuspendAndWait(agent.WorkingDir, 5*time.Second)
-		count++
-	}
-
-	if count == 0 {
-		fmt.Println("No active agents found.")
-	} else {
-		fmt.Printf("Suspended %d agent(s).\n", count)
 	}
 }
 
