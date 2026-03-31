@@ -66,6 +66,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Print version and check for updates (3s timeout)
+	latestVersion := config.CheckTUIUpgrade(version)
+	if latestVersion != "" {
+		fmt.Printf("lingtai-tui %s (latest: %s)\n", version, latestVersion)
+		fmt.Printf("  Upgrade now? [Y/n] ")
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		answer := strings.TrimSpace(strings.ToLower(line))
+		if answer != "n" && answer != "no" {
+			fmt.Println("  Upgrading...")
+			cmd := exec.Command("brew", "upgrade", "huangzesen/lingtai/lingtai-tui")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "  Upgrade failed: %v\n", err)
+			} else {
+				fmt.Println("  Upgraded! Restarting...")
+				self, _ := os.Executable()
+				syscallExec(self, os.Args, os.Environ())
+			}
+		}
+	} else {
+		fmt.Println("lingtai-tui " + version)
+	}
+
 	// Always start in current directory
 	projectDir, _ := os.Getwd()
 	projectDir, _ = filepath.Abs(projectDir)
@@ -150,29 +175,6 @@ func main() {
 			if lingtaiCmd != "" {
 				if _, err := process.LaunchAgent(lingtaiCmd, orchDir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: failed to launch agent: %v\n", err)
-				}
-			}
-		}
-	}
-
-	// Check for TUI binary upgrade (non-blocking, 3s timeout)
-	if !needsFirstRun {
-		if latest := config.CheckTUIUpgrade(version); latest != "" {
-			fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
-			fmt.Printf("    Upgrade now? (brew upgrade huangzesen/lingtai/lingtai-tui) [y/N] ")
-			reader := bufio.NewReader(os.Stdin)
-			line, _ := reader.ReadString('\n')
-			if strings.TrimSpace(strings.ToLower(line)) == "y" {
-				fmt.Println("    Upgrading...")
-				cmd := exec.Command("brew", "upgrade", "lingtai-tui")
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					fmt.Fprintf(os.Stderr, "    Upgrade failed: %v\n", err)
-				} else {
-					fmt.Println("    Upgraded! Restarting...")
-					self, _ := os.Executable()
-					syscallExec(self, os.Args, os.Environ())
 				}
 			}
 		}
