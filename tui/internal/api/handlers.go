@@ -2,15 +2,17 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
+
+var topologyMu sync.Mutex
 
 func NewNetworkHandler(baseDir string) http.HandlerFunc {
 	topologyPath := filepath.Join(baseDir, ".tui-asset", "topology.jsonl")
@@ -43,8 +45,58 @@ func NewNetworkHandler(baseDir string) http.HandlerFunc {
 	}
 }
 
+// NewTopologyHandler serves the full topology tape as a JSON array.
+func NewTopologyHandler(baseDir string) http.HandlerFunc {
+	topologyPath := filepath.Join(baseDir, ".tui-asset", "topology.jsonl")
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(topologyPath)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Write([]byte("[]"))
+			return
+		}
+
+		// Parse JSONL → JSON array
+		var entries []json.RawMessage
+		for _, line := range splitLines(data) {
+			if len(line) > 0 {
+				entries = append(entries, json.RawMessage(line))
+			}
+		}
+		if entries == nil {
+			entries = []json.RawMessage{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(entries)
+	}
+}
+
+func splitLines(data []byte) [][]byte {
+	var lines [][]byte
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			if i > start {
+				lines = append(lines, data[start:i])
+			}
+			start = i + 1
+		}
+	}
+	if start < len(data) {
+		lines = append(lines, data[start:])
+	}
+	return lines
+}
+
 // appendTopology writes one JSONL line: {"t": <unix_ms>, "net": <network>}
 func appendTopology(path string, network fs.Network) {
+	topologyMu.Lock()
+	defer topologyMu.Unlock()
+
 	entry := struct {
 		T   int64      `json:"t"`
 		Net fs.Network `json:"net"`
@@ -68,5 +120,5 @@ func appendTopology(path string, network fs.Network) {
 		}
 	}
 	defer f.Close()
-	fmt.Fprint(f, string(line))
+	f.Write(line)
 }

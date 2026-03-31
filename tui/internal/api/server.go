@@ -17,6 +17,7 @@ type Server struct {
 func NewServer(baseDir string, staticFS fs.FS) *Server {
 	mux := http.NewServeMux()
 	mux.Handle("/api/network", NewNetworkHandler(baseDir))
+	mux.Handle("/api/topology", NewTopologyHandler(baseDir))
 	if staticFS != nil {
 		mux.Handle("/", http.FileServer(http.FS(staticFS)))
 	}

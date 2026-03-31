@@ -10,6 +10,8 @@ const locales: Record<string, Record<string, string>> = {
     'edge.avatar': 'avatar',
     'edge.email': 'email',
     'topbar.live': 'LIVE',
+    'topbar.replay': 'REPLAY',
+    'topbar.no_tape': 'No history yet',
   },
   zh: {
     'connecting': '连接中...',
@@ -22,6 +24,8 @@ const locales: Record<string, Record<string, string>> = {
     'edge.avatar': '分身',
     'edge.email': '书信',
     'topbar.live': '实时',
+    'topbar.replay': '回放',
+    'topbar.no_tape': '尚无记录',
   },
   wen: {
     'connecting': '候连中...',
@@ -34,6 +38,8 @@ const locales: Record<string, Record<string, string>> = {
     'edge.avatar': '分身',
     'edge.email': '书信',
     'topbar.live': '观',
+    'topbar.replay': '溯',
+    'topbar.no_tape': '无迹',
   },
 };
 

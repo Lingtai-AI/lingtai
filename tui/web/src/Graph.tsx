@@ -154,17 +154,19 @@ function findNearest(dots: Map<string, Dot>, mx: number, my: number): Dot | null
   return best;
 }
 
-export function Graph({ network, edgeMode, theme, bullets }: {
+export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
   network: Network;
   edgeMode: EdgeMode;
   theme: Theme;
   bullets: Bullet[];
+  vizMode?: 'live' | 'replay';
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Map<string, Dot>>(new Map());
   const networkRef = useRef(network);
   const edgeModeRef = useRef(edgeMode);
   const themeRef = useRef(theme);
+  const vizModeRef = useRef(vizMode ?? 'live');
   const animRef = useRef(0);
   const grabbedRef = useRef<Dot | null>(null);
 
@@ -179,6 +181,7 @@ export function Graph({ network, edgeMode, theme, bullets }: {
   networkRef.current = network;
   edgeModeRef.current = edgeMode;
   themeRef.current = theme;
+  vizModeRef.current = vizMode ?? 'live';
 
   // Absorb new bullets from props into mutable ref
   useEffect(() => {
@@ -194,33 +197,61 @@ export function Graph({ network, edgeMode, theme, bullets }: {
     const W = canvas.clientWidth || 800;
     const H = canvas.clientHeight || 600;
     const old = dotsRef.current;
-    const next = new Map<string, Dot>();
-    const stored = loadPositions();
-    const layout = computeLayout(network, W, H);
+    const isReplay = vizModeRef.current === 'replay';
 
-    for (const n of network.nodes) {
-      const prev = old.get(n.address);
-      if (prev) {
-        prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
-        prev.state = n.state;
-        prev.alive = n.alive;
-        prev.isHuman = n.is_human;
-        next.set(n.address, prev);
-      } else {
-        const sp = stored[n.address];
-        const lp = layout[n.address];
-        next.set(n.address, {
-          id: n.address,
-          name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
-          state: n.state,
-          alive: n.alive,
-          isHuman: n.is_human,
-          x: sp ? sp.x : lp ? lp.x : W * 0.5,
-          y: sp ? sp.y : lp ? lp.y : H * 0.5,
-        });
+    // In replay mode, keep all existing dots (frozen positions) and just
+    // update state/visibility. activeAddresses tracks who is "on screen".
+    const activeAddresses = new Set(network.nodes.map(n => n.address));
+
+    if (isReplay) {
+      // Update existing dots with new state from this frame
+      for (const n of network.nodes) {
+        const prev = old.get(n.address);
+        if (prev) {
+          prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
+          prev.state = n.state;
+          prev.alive = n.alive;
+          prev.isHuman = n.is_human;
+        }
+        // Don't create new dots in replay — positions are frozen from live
       }
+      // Mark hidden dots (not in this frame) as empty state
+      for (const d of old.values()) {
+        if (!activeAddresses.has(d.id)) {
+          d.state = '__hidden__';
+        }
+      }
+      // dotsRef stays as-is (positions frozen)
+    } else {
+      // Live mode: full sync as before
+      const next = new Map<string, Dot>();
+      const stored = loadPositions();
+      const layout = computeLayout(network, W, H);
+
+      for (const n of network.nodes) {
+        const prev = old.get(n.address);
+        if (prev) {
+          prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
+          prev.state = n.state;
+          prev.alive = n.alive;
+          prev.isHuman = n.is_human;
+          next.set(n.address, prev);
+        } else {
+          const sp = stored[n.address];
+          const lp = layout[n.address];
+          next.set(n.address, {
+            id: n.address,
+            name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
+            state: n.state,
+            alive: n.alive,
+            isHuman: n.is_human,
+            x: sp ? sp.x : lp ? lp.x : W * 0.5,
+            y: sp ? sp.y : lp ? lp.y : H * 0.5,
+          });
+        }
+      }
+      dotsRef.current = next;
     }
-    dotsRef.current = next;
   }, [network]);
 
   const screenToWorld = useCallback((sx: number, sy: number) => {
@@ -348,6 +379,7 @@ export function Graph({ network, edgeMode, theme, bullets }: {
       const a = dots.get(e.src);
       const b = dots.get(e.tgt);
       if (!a || !b) continue;
+      if (a.state === '__hidden__' || b.state === '__hidden__') continue;
 
       const isAvatar = mode === 'avatar';
       const rgb = isAvatar ? th.amberRgb : hexRgb(th.edgeColors.mail);
@@ -433,6 +465,7 @@ export function Graph({ network, edgeMode, theme, bullets }: {
     // ── Dots + labels ──────────────────────────────────────
     const humanRgb: [number, number, number] = hexRgb(th.text);
     for (const d of dots.values()) {
+      if (d.state === '__hidden__') continue; // not in current replay frame
       const isAgent = !d.isHuman;
       const stateHex = isAgent ? (th.stateColors[d.state] || th.stateColors['']) : '';
       const [dr, dg, db] = d.isHuman ? humanRgb : hexRgb(stateHex);
