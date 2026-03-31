@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/network-demo.gif" alt="Agent network growing — one soul spawning avatars that communicate and multiply" width="100%">
+
 # 灵台 LingTai
 
 **Agent OS — self-growing agent orchestration**
@@ -25,10 +27,6 @@ A Unix-style Agent OS. **Think** with any LLM. **Communicate** through filesyste
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
-
-<div align="center">
-<img src="docs/assets/network-demo.gif" alt="Agent network growing — one soul spawning avatars that communicate and multiply" width="800">
-</div>
 
 ## Why Lingtai
 
