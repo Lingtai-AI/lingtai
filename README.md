@@ -36,6 +36,8 @@ lingtai-tui
 
 That's it. The TUI bootstraps everything — Python runtime, dependencies, and a guided tutorial on first launch. Use `lingtai-tui tutorial` anytime to revisit the guide.
 
+> **Recommended:** Use [iTerm2](https://iterm2.com/) for proper text selection and true color support.
+
 ## Why Lingtai
 
 Most agent frameworks orchestrate with code — DAGs, chains, routers. Lingtai orchestrates like humans do: **autonomous agents communicating through messages**. This pattern scaled to 8 billion nodes over 10,000 years. We see no reason it can't do 10 billion.
