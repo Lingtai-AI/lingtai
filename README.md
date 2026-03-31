@@ -36,7 +36,7 @@ lingtai-tui
 
 That's it. The TUI bootstraps everything — Python runtime, dependencies, and a guided tutorial on first launch. Use `lingtai-tui tutorial` anytime to revisit the guide.
 
-> **Recommended:** Use [iTerm2](https://iterm2.com/) for proper text selection and true color support.
+> **Recommended:** [iTerm2](https://iterm2.com/) on macOS, [Windows Terminal](https://aka.ms/terminal) on WSL — for clipboard and true color support.
 
 ## Why Lingtai
 
