@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -14,6 +16,9 @@ import (
 
 // SetupDoneMsg is emitted when API key setup completes.
 type SetupDoneMsg struct{}
+
+// SetupEditorDoneMsg is emitted when the external editor returns with the API key.
+type SetupEditorDoneMsg struct{ Text string }
 
 // Provider selection state
 const (
@@ -84,6 +89,11 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case SetupEditorDoneMsg:
+		if msg.Text != "" {
+			m.input.SetValue(msg.Text)
+		}
+		return m, textinput.Blink
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
@@ -110,6 +120,29 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		case "ctrl+e":
+			if m.step == stepEnterKey {
+				// Open external editor for pasting API key
+				tmpFile, err := os.CreateTemp("", "lingtai-key-*.txt")
+				if err != nil {
+					return m, nil
+				}
+				tmpFile.WriteString(m.input.Value())
+				tmpFile.Close()
+				editor := os.Getenv("EDITOR")
+				if editor == "" {
+					editor = "vim"
+				}
+				return m, tea.ExecProcess(exec.Command(editor, tmpFile.Name()), func(err error) tea.Msg {
+					if err != nil {
+						os.Remove(tmpFile.Name())
+						return nil
+					}
+					content, _ := os.ReadFile(tmpFile.Name())
+					os.Remove(tmpFile.Name())
+					return SetupEditorDoneMsg{Text: strings.TrimSpace(string(content))}
+				})
+			}
 		}
 	}
 	var cmd tea.Cmd
@@ -240,7 +273,7 @@ func (m SetupModel) viewKeyInput(b *strings.Builder) {
 	}
 
 	// Hints
-	b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("setup.save")+"    [Esc] "+i18n.T("setup.back")) + "\n")
+	b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("setup.save")+"    [Ctrl+E] editor    [Esc] "+i18n.T("setup.back")) + "\n")
 }
 
 func (m SetupModel) Done() bool { return m.done }

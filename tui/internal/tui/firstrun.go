@@ -26,6 +26,9 @@ type FirstRunDoneMsg struct {
 	OrchName string // agent name
 }
 
+// PresetKeyEditorDoneMsg is emitted when an external editor returns with field text.
+type PresetKeyEditorDoneMsg struct{ Text string }
+
 // bootstrapDoneMsg signals that background setup (venv + assets) finished.
 type bootstrapDoneMsg struct{}
 
@@ -416,6 +419,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.step = stepPickPreset
 		return m, nil
 
+	case PresetKeyEditorDoneMsg:
+		if msg.Text != "" {
+			if focused := m.focusedPresetKeyInput(); focused != nil {
+				focused.SetValue(msg.Text)
+			}
+		}
+		return m, textinput.Blink
+
 	case tea.KeyPressMsg:
 		switch m.step {
 		case stepWelcome:
@@ -541,6 +552,30 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				fieldCount = 2 // region + key
 			}
 			switch msg.String() {
+			case "ctrl+e":
+				// Open external editor for the currently focused text field
+				focused := m.focusedPresetKeyInput()
+				if focused != nil {
+					tmpFile, err := os.CreateTemp("", "lingtai-field-*.txt")
+					if err != nil {
+						return m, nil
+					}
+					tmpFile.WriteString(focused.Value())
+					tmpFile.Close()
+					editor := os.Getenv("EDITOR")
+					if editor == "" {
+						editor = "vim"
+					}
+					return m, tea.ExecProcess(exec.Command(editor, tmpFile.Name()), func(err error) tea.Msg {
+						if err != nil {
+							os.Remove(tmpFile.Name())
+							return nil
+						}
+						content, _ := os.ReadFile(tmpFile.Name())
+						os.Remove(tmpFile.Name())
+						return PresetKeyEditorDoneMsg{Text: strings.TrimSpace(string(content))}
+					})
+				}
 			case "esc":
 				m.step = stepPickPreset
 				return m, nil
@@ -1488,6 +1523,29 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 
 // focusAgentField focuses the input at m.fieldIdx and blurs all others.
 // Returns the blink command for the newly focused input.
+// focusedPresetKeyInput returns a pointer to the currently focused text input
+// in the preset key step, or nil if the current field is a selector (no text).
+func (m *FirstRunModel) focusedPresetKeyInput() *textinput.Model {
+	if m.selectedProvider == "minimax" {
+		switch m.presetKeyFieldIdx {
+		case 1:
+			return &m.presetKeyInput
+		}
+		return nil
+	}
+	switch m.presetKeyFieldIdx {
+	case 1:
+		return &m.presetEndpointIn
+	case 2:
+		return &m.presetModelIn
+	case 3:
+		return &m.presetKeyInput
+	case 4:
+		return &m.presetNameIn
+	}
+	return nil
+}
+
 func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
 	m.presetEndpointIn.Blur()
 	m.presetModelIn.Blur()
