@@ -1,20 +1,23 @@
 import type { Network } from './types';
 import type { EdgeMode } from './Graph';
+import type { Theme } from './theme';
 import { Stats } from './Stats';
 import { Kanban } from './Kanban';
-import { inkBorder, inkEdgeColors } from './theme';
 import { t } from './i18n';
 
-export function BottomBar({ network, edgeMode, lang, onToggle }: {
+export function BottomBar({ network, edgeMode, lang, theme, themeMode, onToggle, onToggleTheme }: {
   network: Network;
   edgeMode: EdgeMode;
   lang: string;
+  theme: Theme;
+  themeMode: 'dark' | 'light';
   onToggle: () => void;
+  onToggleTheme: () => void;
 }) {
   return (
     <div style={{
-      background: 'rgba(13,13,15,0.95)',
-      borderTop: `1px solid ${inkBorder}`,
+      background: theme.barBg,
+      borderTop: `1px solid ${theme.border}`,
       padding: '10px 16px',
       display: 'flex',
       alignItems: 'flex-start',
@@ -23,11 +26,11 @@ export function BottomBar({ network, edgeMode, lang, onToggle }: {
       overflowY: 'auto',
       flexShrink: 0,
     }}>
-      <Stats stats={network.stats} lang={lang} />
-      <div style={{ display: 'flex', flexShrink: 0, alignSelf: 'center', borderRadius: 4, overflow: 'hidden', border: `1px solid ${inkBorder}` }}>
+      <Stats stats={network.stats} lang={lang} theme={theme} />
+      <div style={{ display: 'flex', flexShrink: 0, alignSelf: 'center', borderRadius: 4, overflow: 'hidden', border: `1px solid ${theme.border}` }}>
         {(['avatar', 'email'] as EdgeMode[]).map(mode => {
           const active = edgeMode === mode;
-          const color = mode === 'avatar' ? inkEdgeColors.avatar : inkEdgeColors.mail;
+          const color = mode === 'avatar' ? theme.edgeColors.avatar : theme.edgeColors.mail;
           return (
             <button
               key={mode}
@@ -35,7 +38,7 @@ export function BottomBar({ network, edgeMode, lang, onToggle }: {
               style={{
                 background: active ? color + '30' : 'transparent',
                 border: 'none',
-                borderRight: mode === 'avatar' ? `1px solid ${inkBorder}` : 'none',
+                borderRight: mode === 'avatar' ? `1px solid ${theme.border}` : 'none',
                 padding: '3px 10px',
                 cursor: active ? 'default' : 'pointer',
                 color: active ? color : color + '66',
@@ -48,7 +51,26 @@ export function BottomBar({ network, edgeMode, lang, onToggle }: {
           );
         })}
       </div>
-      <Kanban nodes={network.nodes} lang={lang} />
+      {/* Theme toggle */}
+      <button
+        onClick={onToggleTheme}
+        style={{
+          background: 'transparent',
+          border: `1px solid ${theme.border}`,
+          borderRadius: 4,
+          padding: '3px 10px',
+          cursor: 'pointer',
+          color: theme.textDim,
+          fontSize: 10,
+          letterSpacing: 0.5,
+          flexShrink: 0,
+          alignSelf: 'center',
+        }}
+        title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        {themeMode === 'dark' ? '☀' : '☽'}
+      </button>
+      <Kanban nodes={network.nodes} lang={lang} theme={theme} />
     </div>
   );
 }

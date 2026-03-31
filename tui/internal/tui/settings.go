@@ -19,14 +19,16 @@ type Settings struct {
 	PollRate     int    `json:"poll_rate"`
 	Verbose      bool   `json:"verbose"`
 	Orchestrator string `json:"orchestrator,omitempty"`
+	MailPageSize int    `json:"mail_page_size,omitempty"`
 }
 
 // DefaultSettings returns sensible defaults.
 func DefaultSettings() Settings {
 	return Settings{
-		Language: "en",
-		PollRate: 1,
-		Verbose:  false,
+		Language:     "en",
+		PollRate:     1,
+		Verbose:      false,
+		MailPageSize: 50,
 	}
 }
 
@@ -47,6 +49,9 @@ func LoadSettings(baseDir string) Settings {
 	}
 	if s.PollRate == 0 {
 		s.PollRate = 1
+	}
+	if s.MailPageSize == 0 {
+		s.MailPageSize = 50
 	}
 	return s
 }
@@ -117,10 +122,21 @@ func NewSettingsModel(baseDir, globalDir string, settings Settings) SettingsMode
 		verboseCurrent = 1
 	}
 
+	pageSizeOptions := []string{"20", "50", "100", "200"}
+	pageSizeCurrent := 1 // default to 50
+	pageSizeStr := fmt.Sprintf("%d", settings.MailPageSize)
+	for i, p := range pageSizeOptions {
+		if p == pageSizeStr {
+			pageSizeCurrent = i
+			break
+		}
+	}
+
 	fields := []SettingField{
 		{Key: "language", Label: "settings.language", Options: langOptions, Current: langCurrent},
 		{Key: "poll_rate", Label: "settings.poll_rate", Options: pollOptions, Current: pollCurrent},
 		{Key: "verbose", Label: "settings.verbose", Options: verboseOptions, Current: verboseCurrent},
+		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 	}
 
 	return SettingsModel{
@@ -191,6 +207,10 @@ func (m *SettingsModel) applyField(f *SettingField) {
 		m.settings.PollRate = rate
 	case "verbose":
 		m.settings.Verbose = val == "on"
+	case "mail_page_size":
+		size := 50
+		fmt.Sscanf(val, "%d", &size)
+		m.settings.MailPageSize = size
 	}
 	SaveSettings(m.baseDir, m.settings)
 }

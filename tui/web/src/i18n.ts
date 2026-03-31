@@ -9,6 +9,7 @@ const locales: Record<string, Record<string, string>> = {
     'mails': 'mails',
     'edge.avatar': 'avatar',
     'edge.email': 'email',
+    'topbar.live': 'LIVE',
   },
   zh: {
     'connecting': '连接中...',
@@ -20,6 +21,7 @@ const locales: Record<string, Record<string, string>> = {
     'mails': '邮',
     'edge.avatar': '分身',
     'edge.email': '书信',
+    'topbar.live': '实时',
   },
   wen: {
     'connecting': '候连中...',
@@ -31,6 +33,7 @@ const locales: Record<string, Record<string, string>> = {
     'mails': '邮',
     'edge.avatar': '分身',
     'edge.email': '书信',
+    'topbar.live': '观',
   },
 };
 

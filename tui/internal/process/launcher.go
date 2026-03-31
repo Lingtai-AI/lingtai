@@ -43,6 +43,11 @@ func InitProject(lingtaiDir string) error {
 	if err := os.WriteFile(contactsPath, []byte("[]"), 0o644); err != nil {
 		return fmt.Errorf("write contacts: %w", err)
 	}
+	// TUI asset directory — viz data, topology snapshots, NOT agent state
+	tuiAssetDir := filepath.Join(lingtaiDir, ".tui-asset")
+	if err := os.MkdirAll(tuiAssetDir, 0o755); err != nil {
+		return fmt.Errorf("create .tui-asset: %w", err)
+	}
 	return nil
 }
 

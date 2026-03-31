@@ -26,7 +26,9 @@ func NewServer(baseDir string, staticFS fs.FS) *Server {
 }
 
 func (s *Server) Start(portFile string) error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Bind 0.0.0.0 so Windows host can reach WSL2; safe on all platforms
+	// since the TUI is a local tool, not a public-facing server.
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

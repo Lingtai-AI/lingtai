@@ -36,7 +36,7 @@ type ViewChangeMsg struct {
 }
 
 type mailRefreshMsg struct {
-	messages []ChatMessage
+	cache    fs.MailCache // incrementally updated cache
 	alive    bool
 	state    string // active, idle, stuck, asleep, suspended, or ""
 	orchName string // agent name from .agent.json (may change at runtime)
@@ -70,7 +70,10 @@ type MailModel struct {
 	orchName         string // 本我 agent name
 	baseDir          string // .lingtai/ directory
 	verbose          verboseLevel
-	messages         []ChatMessage
+	messages         []ChatMessage // derived from cache on each refresh
+	cache            fs.MailCache  // incremental mail cache
+	pageSize         int           // max messages shown (from settings)
+	loadedExtra      int           // additional older messages loaded via ctrl+u
 	viewport         viewport.Model
 	input            InputModel
 	palette          PaletteModel
@@ -84,10 +87,11 @@ type MailModel struct {
 	statusExpiry     time.Time // when to clear the flash
 	lastInputLines   int
 	lastPaletteLines int
+	lastBannerLines  int
 	pendingMessage   string // full text from editor, sent on Enter
 }
 
-func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRate int) MailModel {
+func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRate, pageSize int) MailModel {
 	input := NewInputModel(humanDir)
 	input.textarea.Focus()
 	palette := NewPaletteModel()
@@ -101,6 +105,9 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRa
 	if pollRate <= 0 {
 		pollRate = 1
 	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	return MailModel{
 		humanDir:     humanDir,
 		humanAddr:    humanAddr,
@@ -111,10 +118,12 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pollRa
 		input:        input,
 		palette:      palette,
 		pollRate:     time.Duration(pollRate) * time.Second,
+		cache:        fs.NewMailCache(humanDir),
+		pageSize:     pageSize,
 	}
 }
 
-// syncViewportHeight recalculates viewport height from current input/palette size.
+// syncViewportHeight recalculates viewport height from current input/palette/banner size.
 // Returns true if the height actually changed.
 func (m *MailModel) syncViewportHeight() bool {
 	if !m.ready {
@@ -125,14 +134,16 @@ func (m *MailModel) syncViewportHeight() bool {
 	if m.input.IsPaletteActive() {
 		paletteLines = m.palette.LineCount()
 	}
-	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines {
+	bannerLines := m.bannerLineCount()
+	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines && bannerLines == m.lastBannerLines {
 		return false
 	}
 	m.lastInputLines = inputLines
 	m.lastPaletteLines = paletteLines
-	// Layout: header(2) + viewport + sep(1) + palette(N) + input(N) + border(1) + status(1)
+	m.lastBannerLines = bannerLines
+	// Layout: header(2) + topBanner(0-1) + viewport + bottomBanner(0-1) + sep(1) + palette(N) + input(N) + border(1) + status(1)
 	footerHeight := 1 + paletteLines + inputLines + 1 + 1
-	vpHeight := m.height - 2 - footerHeight
+	vpHeight := m.height - 2 - bannerLines - footerHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
@@ -140,56 +151,47 @@ func (m *MailModel) syncViewportHeight() bool {
 	return true
 }
 
+// bannerLineCount returns the total lines reserved for top and bottom banners.
+func (m *MailModel) bannerLineCount() int {
+	n := 0
+	if m.hasMoreOlder() {
+		n++ // top banner
+	}
+	if m.loadedExtra > 0 {
+		n++ // bottom banner (reserved when expanded)
+	}
+	return n
+}
+
+// hasMoreOlder returns true when there are messages beyond the visible window.
+func (m *MailModel) hasMoreOlder() bool {
+	return len(m.messages) > m.pageSize+m.loadedExtra
+}
+
+// olderCount returns how many messages are hidden above the visible window.
+func (m *MailModel) olderCount() int {
+	hidden := len(m.messages) - m.pageSize - m.loadedExtra
+	if hidden < 0 {
+		return 0
+	}
+	return hidden
+}
+
+// visibleMessages returns the tail of m.messages limited by pageSize + loadedExtra.
+func (m *MailModel) visibleMessages() []ChatMessage {
+	limit := m.pageSize + m.loadedExtra
+	if limit >= len(m.messages) {
+		return m.messages
+	}
+	return m.messages[len(m.messages)-limit:]
+}
+
 func (m MailModel) refreshMail() tea.Msg {
 	// Refresh human location (no-op if cache is <1h old)
 	go fs.UpdateHumanLocation(m.humanDir)
 
-	var chatMsgs []ChatMessage
-
-	// Read inbox (messages FROM 本我 to human)
-	inbox, _ := fs.ReadInbox(m.humanDir)
-	for _, msg := range inbox {
-		parts := strings.Split(msg.From, "/")
-		fromName := parts[len(parts)-1]
-		chatMsgs = append(chatMsgs, ChatMessage{
-			From:        fromName,
-			To:          m.humanName(),
-			Subject:     msg.Subject,
-			Body:        msg.Message,
-			Timestamp:   msg.ReceivedAt,
-			IsFromMe:    false,
-			Type:        "mail",
-			Attachments: msg.Attachments,
-		})
-	}
-
-	// Read sent (messages FROM human to 本我)
-	sent, _ := fs.ReadSent(m.humanDir)
-	for _, msg := range sent {
-		chatMsgs = append(chatMsgs, ChatMessage{
-			From:        m.humanName(),
-			To:          m.orchName,
-			Subject:     msg.Subject,
-			Body:        msg.Message,
-			Timestamp:   msg.ReceivedAt,
-			IsFromMe:    true,
-			Type:        "mail",
-			Attachments: msg.Attachments,
-		})
-	}
-
-	// If verbose, read events
-	if m.verbose != verboseOff && m.orchestrator != "" {
-		eventsPath := filepath.Join(m.orchestrator, "logs", "events.jsonl")
-		extended := m.verbose == verboseExtended
-		events := ReadEvents(eventsPath, extended)
-		chatMsgs = append(chatMsgs, events...)
-	}
-
-	// Sort by timestamp
-	sort.Slice(chatMsgs, func(i, j int) bool {
-		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp
-	})
+	// Incremental cache refresh — only reads new messages from disk
+	cache := m.cache.Refresh()
 
 	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
 	state := ""
@@ -205,7 +207,49 @@ func (m MailModel) refreshMail() tea.Msg {
 	if !alive {
 		state = "suspended"
 	}
-	return mailRefreshMsg{messages: chatMsgs, alive: alive, state: state, orchName: orchName}
+	return mailRefreshMsg{cache: cache, alive: alive, state: state, orchName: orchName}
+}
+
+// buildMessages converts cached MailMessages to ChatMessages, merges with
+// events if verbose, and sorts chronologically.
+func (m *MailModel) buildMessages() {
+	chatMsgs := make([]ChatMessage, 0, len(m.cache.Messages))
+	humanName := m.humanName()
+	for _, msg := range m.cache.Messages {
+		parts := strings.Split(msg.From, "/")
+		fromName := parts[len(parts)-1]
+		isFromMe := msg.From == m.humanAddr || fromName == "human"
+		cm := ChatMessage{
+			From:        fromName,
+			To:          m.orchName,
+			Subject:     msg.Subject,
+			Body:        msg.Message,
+			Timestamp:   msg.ReceivedAt,
+			IsFromMe:    isFromMe,
+			Type:        "mail",
+			Attachments: msg.Attachments,
+		}
+		if isFromMe {
+			cm.From = humanName
+		} else {
+			cm.To = humanName
+		}
+		chatMsgs = append(chatMsgs, cm)
+	}
+
+	// If verbose, read events
+	if m.verbose != verboseOff && m.orchestrator != "" {
+		eventsPath := filepath.Join(m.orchestrator, "logs", "events.jsonl")
+		extended := m.verbose == verboseExtended
+		events := ReadEvents(eventsPath, extended)
+		chatMsgs = append(chatMsgs, events...)
+	}
+
+	// Sort by timestamp
+	sort.Slice(chatMsgs, func(i, j int) bool {
+		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp
+	})
+	m.messages = chatMsgs
 }
 
 func (m MailModel) Init() tea.Cmd {
@@ -244,7 +288,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.viewport = viewport.New()
 			m.viewport.SetWidth(msg.Width)
 			m.viewport.SetHeight(vpHeight)
-			m.viewport.SetContent(m.renderMessages())
+			m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
 			m.lastInputLines = inputLines
 			m.ready = true
 		} else {
@@ -255,15 +299,17 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailRefreshMsg:
-		m.messages = msg.messages
+		m.cache = msg.cache
 		m.orchAlive = msg.alive
 		m.orchState = msg.state
 		if msg.orchName != "" {
 			m.orchName = msg.orchName
 		}
+		m.buildMessages()
 		if m.ready {
 			atBottom := m.viewport.AtBottom()
-			m.viewport.SetContent(m.renderMessages())
+			m.syncViewportHeight()
+			m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
 			if atBottom {
 				m.viewport.GotoBottom()
 			}
@@ -403,6 +449,29 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			}
 			return m, m.refreshMail
 
+		case "ctrl+u":
+			if m.ready && m.viewport.AtTop() && m.hasMoreOlder() {
+				m.loadedExtra += m.pageSize
+				m.syncViewportHeight()
+				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+
+		case "ctrl+d":
+			if m.ready && m.viewport.AtBottom() && m.loadedExtra > 0 {
+				m.loadedExtra = 0
+				m.syncViewportHeight()
+				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+				m.viewport.GotoBottom()
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+
 		case "pgup", "pgdown":
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -436,8 +505,8 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m MailModel) renderMessages() string {
-	if len(m.messages) == 0 {
+func (m MailModel) renderMessages(msgs []ChatMessage) string {
+	if len(msgs) == 0 {
 		return "\n" + StyleFaint.Render("  "+RuneBullet+" "+i18n.T("mail.no_messages"))
 	}
 
@@ -449,7 +518,7 @@ func (m MailModel) renderMessages() string {
 	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	var b strings.Builder
-	for _, msg := range m.messages {
+	for _, msg := range msgs {
 		switch msg.Type {
 		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
 			wrapWidth := m.width - 6
@@ -621,6 +690,20 @@ func (m MailModel) View() string {
 
 	footer := sep + "\n" + inputSection + "\n" + statusBar
 
+	// Top banner: "▲ N older — ctrl+u to load"
+	topBanner := ""
+	if m.hasMoreOlder() {
+		bannerText := i18n.TF("mail.load_more", m.olderCount())
+		topBanner = StyleFaint.Render(centerText(bannerText, m.width)) + "\n"
+	}
+
+	// Bottom banner: "▼ ctrl+d to collapse to recent"
+	bottomBanner := ""
+	if m.loadedExtra > 0 {
+		bannerText := i18n.T("mail.collapse")
+		bottomBanner = StyleFaint.Render(centerText(bannerText, m.width)) + "\n"
+	}
+
 	// Viewport fills the middle
-	return header + "\n" + m.viewport.View() + "\n" + footer
+	return header + "\n" + topBanner + m.viewport.View() + "\n" + bottomBanner + footer
 }

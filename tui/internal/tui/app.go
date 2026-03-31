@@ -118,7 +118,7 @@ func NewApp(globalDir, projectDir, vizURL string, needsFirstRun bool, orchestrat
 		app.currentView = appViewMail
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
-		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, settings.PollRate)
+		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, settings.PollRate, settings.MailPageSize)
 		app.manage = NewManageModel(projectDir, lingtaiCmd)
 	}
 
@@ -197,7 +197,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.appSettings.PollRate)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.appSettings.PollRate, a.appSettings.MailPageSize)
 		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -243,7 +243,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.appSettings.PollRate)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.appSettings.PollRate, a.appSettings.MailPageSize)
 		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -525,7 +525,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			Type: "mail",
 		})
 		if a.mail.ready {
-			a.mail.viewport.SetContent(a.mail.renderMessages())
+			a.mail.viewport.SetContent(a.mail.renderMessages(a.mail.visibleMessages()))
 			a.mail.viewport.GotoBottom()
 		}
 		return a, nil
@@ -684,6 +684,15 @@ func (a App) View() tea.View {
 	return v
 }
 
+func isWSL() bool {
+	b, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(string(b))
+	return strings.Contains(s, "microsoft") || strings.Contains(s, "wsl")
+}
+
 func openBrowser(url string) {
 	if url == "" {
 		return
@@ -695,8 +704,21 @@ func openBrowser(url string) {
 		cmd = "open"
 		args = []string{url}
 	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
+		if isWSL() {
+			// Prefer wslview (wslu) — handles WSL→Windows browser opening natively.
+			// Fallback: powershell.exe Start-Process (more reliable than cmd.exe start
+			// with URLs containing colons).
+			if path, err := exec.LookPath("wslview"); err == nil {
+				cmd = path
+				args = []string{url}
+			} else {
+				cmd = "powershell.exe"
+				args = []string{"-NoProfile", "-Command", "Start-Process", "'" + url + "'"}
+			}
+		} else {
+			cmd = "xdg-open"
+			args = []string{url}
+		}
 	case "windows":
 		cmd = "rundll32"
 		args = []string{"url.dll,FileProtocolHandler", url}

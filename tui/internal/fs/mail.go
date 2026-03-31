@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,85 @@ func ReadInbox(dir string) ([]MailMessage, error) {
 
 func ReadSent(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "sent"))
+}
+
+// MailCache tracks already-loaded messages for incremental refresh.
+// Each Refresh call reads only new messages from disk.
+type MailCache struct {
+	inboxSeen map[string]struct{} // UUID dirs already loaded from inbox
+	sentSeen  map[string]struct{} // UUID dirs already loaded from sent
+	Messages  []MailMessage       // full sorted merged slice (inbox + sent)
+	inboxDir  string
+	sentDir   string
+}
+
+// NewMailCache creates an empty cache for the given human directory.
+func NewMailCache(humanDir string) MailCache {
+	return MailCache{
+		inboxSeen: make(map[string]struct{}),
+		sentSeen:  make(map[string]struct{}),
+		inboxDir:  filepath.Join(humanDir, "mailbox", "inbox"),
+		sentDir:   filepath.Join(humanDir, "mailbox", "sent"),
+	}
+}
+
+// Refresh scans inbox and sent folders for new messages, returning an updated
+// cache. The receiver is not mutated — safe to call from a goroutine.
+func (c MailCache) Refresh() MailCache {
+	out := MailCache{
+		inboxSeen: make(map[string]struct{}, len(c.inboxSeen)+16),
+		sentSeen:  make(map[string]struct{}, len(c.sentSeen)+16),
+		Messages:  make([]MailMessage, len(c.Messages)),
+		inboxDir:  c.inboxDir,
+		sentDir:   c.sentDir,
+	}
+	copy(out.Messages, c.Messages)
+	for k := range c.inboxSeen {
+		out.inboxSeen[k] = struct{}{}
+	}
+	for k := range c.sentSeen {
+		out.sentSeen[k] = struct{}{}
+	}
+
+	// Scan inbox for new entries
+	out.scanFolder(out.inboxDir, out.inboxSeen)
+	// Scan sent for new entries
+	out.scanFolder(out.sentDir, out.sentSeen)
+
+	// Sort by ReceivedAt (RFC3339 strings sort lexicographically)
+	sort.Slice(out.Messages, func(i, j int) bool {
+		return out.Messages[i].ReceivedAt < out.Messages[j].ReceivedAt
+	})
+	return out
+}
+
+// scanFolder reads UUID directories not yet in seen, loads their message.json,
+// and appends to Messages.
+func (c *MailCache) scanFolder(folder string, seen map[string]struct{}) {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		msgPath := filepath.Join(folder, name, "message.json")
+		data, err := os.ReadFile(msgPath)
+		if err != nil {
+			continue
+		}
+		var msg MailMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		seen[name] = struct{}{}
+		c.Messages = append(c.Messages, msg)
+	}
 }
 
 func readMailFolder(folder string) ([]MailMessage, error) {

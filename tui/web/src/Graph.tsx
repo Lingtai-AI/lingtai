@@ -1,13 +1,17 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { Network } from './types';
-import { inkStateColors, inkBg, amberRgb } from './theme';
+import type { Theme } from './theme';
 
 export type EdgeMode = 'avatar' | 'email';
 
 const NODE_R = 4;
 const HIT_R = 15;
-const GREEN = [125, 171, 143];
 const STORAGE_KEY = 'lingtai-viz-positions';
+
+// Bullet travel time in ms
+const BULLET_DURATION = 800;
+// Impact expand + fade time in ms
+const IMPACT_DURATION = 600;
 
 function rgba(r: number, g: number, b: number, a: number) {
   return `rgba(${r},${g},${b},${a})`;
@@ -26,6 +30,21 @@ interface Dot {
   isHuman: boolean;
   x: number;
   y: number;
+}
+
+/** A bullet flying from sender → recipient. */
+export interface Bullet {
+  src: string;   // sender address (resolve to dot position at draw time)
+  dst: string;   // recipient address
+  born: number;  // timestamp when spawned (ms, performance.now scale)
+}
+
+/** An impact burst at the recipient after bullet arrives. */
+interface Impact {
+  x: number;
+  y: number;
+  born: number;
+  rgb: [number, number, number];
 }
 
 function loadPositions(): Record<string, { x: number; y: number }> {
@@ -53,14 +72,10 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
   const nodes = network.nodes;
   if (nodes.length === 0) return pos;
 
-  // Identify human and avatar children
   const human = nodes.find(n => n.is_human);
   const childSet = new Set(network.avatar_edges.map(e => e.child));
-
-  // Admin = non-human nodes not in avatar children set
   const admins = nodes.filter(n => !n.is_human && !childSet.has(n.address));
 
-  // Build parent → children map
   const childrenOf = new Map<string, string[]>();
   for (const e of network.avatar_edges) {
     const list = childrenOf.get(e.parent) || [];
@@ -69,14 +84,12 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
   }
 
   const cy = H * 0.5;
-  const LEVEL_DX = W * 0.12; // uniform horizontal spacing per depth level
+  const LEVEL_DX = W * 0.12;
 
-  // Place human on the far left
   if (human) {
     pos[human.address] = { x: W * 0.20, y: cy };
   }
 
-  // Admin at ~1/3 from left — if multiple, spread vertically
   const adminX = W / 3;
   const adminSpacing = Math.min(80, H * 0.3);
   const adminStartY = cy - ((admins.length - 1) * adminSpacing) / 2;
@@ -84,7 +97,6 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
     pos[admins[i].address] = { x: adminX, y: adminStartY + i * adminSpacing };
   }
 
-  // Walk avatar tree left-to-right: children placed one LEVEL_DX to the right, spread vertically
   const placed = new Set(Object.keys(pos));
 
   function placeChildren(parentAddr: string, depth: number) {
@@ -107,12 +119,10 @@ function computeLayout(network: Network, W: number, H: number): Record<string, {
     }
   }
 
-  // Start tree walk from each admin
   for (const admin of admins) {
     placeChildren(admin.address, 1);
   }
 
-  // Orphans — place to the right of admins, spread vertically
   const orphans = nodes.filter(n => !placed.has(n.address));
   if (orphans.length > 0) {
     const orphanX = adminX + LEVEL_DX;
@@ -144,18 +154,40 @@ function findNearest(dots: Map<string, Dot>, mx: number, my: number): Dot | null
   return best;
 }
 
-export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeMode }) {
+export function Graph({ network, edgeMode, theme, bullets }: {
+  network: Network;
+  edgeMode: EdgeMode;
+  theme: Theme;
+  bullets: Bullet[];
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Map<string, Dot>>(new Map());
   const networkRef = useRef(network);
   const edgeModeRef = useRef(edgeMode);
+  const themeRef = useRef(theme);
   const animRef = useRef(0);
   const grabbedRef = useRef<Dot | null>(null);
 
+  // Mutable particle arrays — written by draw loop, not React state
+  const bulletsRef = useRef<Bullet[]>([]);
+  const impactsRef = useRef<Impact[]>([]);
+
+  // Pan state
+  const panRef = useRef({ x: 0, y: 0 });
+  const panningRef = useRef<{ startX: number; startY: number; panStartX: number; panStartY: number } | null>(null);
+
   networkRef.current = network;
   edgeModeRef.current = edgeMode;
+  themeRef.current = theme;
 
-  // Sync dots with network — preserve positions for existing nodes
+  // Absorb new bullets from props into mutable ref
+  useEffect(() => {
+    if (bullets.length > 0) {
+      bulletsRef.current.push(...bullets);
+    }
+  }, [bullets]);
+
+  // Sync dots with network
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -175,7 +207,6 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
         prev.isHuman = n.is_human;
         next.set(n.address, prev);
       } else {
-        // localStorage overrides computed layout
         const sp = stored[n.address];
         const lp = layout[n.address];
         next.set(n.address, {
@@ -192,27 +223,49 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
     dotsRef.current = next;
   }, [network]);
 
-  // Drag handlers
+  const screenToWorld = useCallback((sx: number, sy: number) => {
+    const pan = panRef.current;
+    return { x: sx - pan.x, y: sy - pan.y };
+  }, []);
+
+  // Drag & pan handlers
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const onMouseDown = (e: MouseEvent) => {
-      const dot = findNearest(dotsRef.current, e.offsetX, e.offsetY);
+      const world = screenToWorld(e.offsetX, e.offsetY);
+      const dot = findNearest(dotsRef.current, world.x, world.y);
       if (dot) {
         grabbedRef.current = dot;
         canvas.style.cursor = 'grabbing';
-        e.preventDefault();
+      } else {
+        panningRef.current = {
+          startX: e.offsetX,
+          startY: e.offsetY,
+          panStartX: panRef.current.x,
+          panStartY: panRef.current.y,
+        };
+        canvas.style.cursor = 'move';
       }
+      e.preventDefault();
     };
 
     const onMouseMove = (e: MouseEvent) => {
       const grabbed = grabbedRef.current;
+      const panning = panningRef.current;
       if (grabbed) {
-        grabbed.x = e.offsetX;
-        grabbed.y = e.offsetY;
+        const world = screenToWorld(e.offsetX, e.offsetY);
+        grabbed.x = world.x;
+        grabbed.y = world.y;
+      } else if (panning) {
+        panRef.current = {
+          x: panning.panStartX + (e.offsetX - panning.startX),
+          y: panning.panStartY + (e.offsetY - panning.startY),
+        };
       } else {
-        const hover = findNearest(dotsRef.current, e.offsetX, e.offsetY);
+        const world = screenToWorld(e.offsetX, e.offsetY);
+        const hover = findNearest(dotsRef.current, world.x, world.y);
         canvas.style.cursor = hover ? 'grab' : 'default';
       }
     };
@@ -222,6 +275,10 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
         grabbedRef.current = null;
         canvas.style.cursor = 'default';
         savePositions(dotsRef.current);
+      }
+      if (panningRef.current) {
+        panningRef.current = null;
+        canvas.style.cursor = 'default';
       }
     };
 
@@ -236,7 +293,7 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
       canvas.removeEventListener('mouseup', onMouseUp);
       canvas.removeEventListener('mouseleave', onMouseUp);
     };
-  }, []);
+  }, [screenToWorld]);
 
   const draw = useCallback((now: number) => {
     const canvas = canvasRef.current;
@@ -250,23 +307,28 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
     if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
       canvas.width = W * dpr;
       canvas.height = H * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
+
+    const th = themeRef.current;
+    const pan = panRef.current;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(pan.x, pan.y);
 
     const dots = dotsRef.current;
     const net = networkRef.current;
     const mode = edgeModeRef.current;
 
-    // Heartbeat pulse: 1s cycle, sin wave 0→1→0
     const pulse = 0.5 + 0.5 * Math.sin(now * Math.PI * 2 / 1000);
 
-    // Edges
+    // ── Edges ──────────────────────────────────────────────
     const edges: Array<{ src: string; tgt: string; weight: number }> = [];
     if (mode === 'avatar') {
       for (const e of net.avatar_edges)
         edges.push({ src: e.parent, tgt: e.child, weight: 1 });
-      // Human → 本我: connect to non-human nodes that aren't avatar children
       const human = net.nodes.find(n => n.is_human);
       if (human) {
         const children = new Set(edges.map(e => e.tgt));
@@ -288,27 +350,94 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
       if (!a || !b) continue;
 
       const isAvatar = mode === 'avatar';
-      const rgb = isAvatar ? amberRgb : GREEN;
+      const rgb = isAvatar ? th.amberRgb : hexRgb(th.edgeColors.mail);
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = rgba(rgb[0], rgb[1], rgb[2], 0.35);
+      ctx.strokeStyle = rgba(rgb[0], rgb[1], rgb[2], th.edgeOpacity);
       ctx.lineWidth = isAvatar ? 0.8 : Math.min(0.8 + (e.weight || 1) * 0.3, 2.5);
       ctx.setLineDash(isAvatar ? [] : [4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // Dots + labels
-    const HUMAN_RGB: [number, number, number] = [232, 228, 223]; // 宣纸白
+    // ── Bullets (flying mail) ──────────────────────────────
+    const mailRgb = hexRgb(th.edgeColors.mail);
+    const liveBullets: Bullet[] = [];
+    for (const b of bulletsRef.current) {
+      const age = now - b.born;
+      if (age < 0) {
+        // Not yet born (staggered delay) — keep it
+        liveBullets.push(b);
+        continue;
+      }
+      const t = age / BULLET_DURATION;
+      if (t > 1) {
+        // Arrived — spawn impact at destination
+        const dst = dots.get(b.dst);
+        if (dst) {
+          impactsRef.current.push({ x: dst.x, y: dst.y, born: now, rgb: mailRgb });
+        }
+        continue; // remove bullet
+      }
+
+      const src = dots.get(b.src);
+      const dst = dots.get(b.dst);
+      if (!src || !dst) continue;
+
+      // Ease-out for deceleration feel
+      const ease = 1 - (1 - t) * (1 - t);
+      const bx = src.x + (dst.x - src.x) * ease;
+      const by = src.y + (dst.y - src.y) * ease;
+
+      // Bullet dot — bright, small
+      ctx.beginPath();
+      ctx.arc(bx, by, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(mailRgb[0], mailRgb[1], mailRgb[2], 0.9);
+      ctx.fill();
+
+      // Bullet trail — short fading tail
+      const tailT = Math.max(0, ease - 0.08);
+      const tx = src.x + (dst.x - src.x) * tailT;
+      const ty = src.y + (dst.y - src.y) * tailT;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(bx, by);
+      ctx.strokeStyle = rgba(mailRgb[0], mailRgb[1], mailRgb[2], 0.4);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      liveBullets.push(b);
+    }
+    bulletsRef.current = liveBullets;
+
+    // ── Impacts (arrival bursts) ───────────────────────────
+    const liveImpacts: Impact[] = [];
+    for (const imp of impactsRef.current) {
+      const age = now - imp.born;
+      const t = age / IMPACT_DURATION;
+      if (t > 1) continue; // expired
+
+      const radius = 3 + t * 10;
+      const alpha = 0.6 * (1 - t);
+      ctx.beginPath();
+      ctx.arc(imp.x, imp.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(imp.rgb[0], imp.rgb[1], imp.rgb[2], alpha);
+      ctx.fill();
+
+      liveImpacts.push(imp);
+    }
+    impactsRef.current = liveImpacts;
+
+    // ── Dots + labels ──────────────────────────────────────
+    const humanRgb: [number, number, number] = hexRgb(th.text);
     for (const d of dots.values()) {
       const isAgent = !d.isHuman;
-      // Agent dot color = state color; human = 宣纸白
-      const stateHex = isAgent ? (inkStateColors[d.state] || inkStateColors['']) : '';
-      const [dr, dg, db] = d.isHuman ? HUMAN_RGB : hexRgb(stateHex);
+      const stateHex = isAgent ? (th.stateColors[d.state] || th.stateColors['']) : '';
+      const [dr, dg, db] = d.isHuman ? humanRgb : hexRgb(stateHex);
 
-      // ACTIVE halo (agents only)
+      // ACTIVE halo
       if (isAgent && d.state === 'ACTIVE') {
         ctx.beginPath();
         ctx.arc(d.x, d.y, NODE_R + 5, 0, Math.PI * 2);
@@ -316,7 +445,7 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
         ctx.fill();
       }
 
-      // Heartbeat glow — pulses only for alive agents (not humans)
+      // Heartbeat glow
       const beats = isAgent && d.alive;
       const glowAlpha = beats ? 0.04 + pulse * 0.08 : 0.06;
       const glowR = beats ? NODE_R * 3 + pulse * 4 : NODE_R * 3;
@@ -332,11 +461,14 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
       ctx.fill();
 
       // Name label
-      ctx.font = '9px sans-serif';
+      const [lr, lg, lb] = th.labelColorRgb;
+      ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillStyle = rgba(dr, dg, db, 0.55);
-      ctx.fillText(d.name, d.x, d.y + NODE_R + 12);
+      ctx.fillStyle = rgba(lr, lg, lb, 0.9);
+      ctx.fillText(d.name, d.x, d.y + NODE_R + 13);
     }
+
+    ctx.restore();
 
     animRef.current = requestAnimationFrame(draw);
   }, []);
@@ -349,7 +481,7 @@ export function Graph({ network, edgeMode }: { network: Network; edgeMode: EdgeM
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: '100%', height: '100%', background: inkBg, display: 'block' }}
+      style={{ width: '100%', height: '100%', background: theme.bg, display: 'block' }}
     />
   );
 }
