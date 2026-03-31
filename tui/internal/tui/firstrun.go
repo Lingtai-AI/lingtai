@@ -26,6 +26,9 @@ type FirstRunDoneMsg struct {
 	OrchName string // agent name
 }
 
+// SetupSavedMsg is emitted when /setup rewrites the current agent's init.json.
+type SetupSavedMsg struct{}
+
 // PresetKeyEditorDoneMsg is emitted when an external editor returns with field text.
 type PresetKeyEditorDoneMsg struct{ Text string }
 
@@ -66,8 +69,10 @@ type capInfo struct {
 }
 
 // stepProgress returns the 1-based index and total for progress display
-func stepProgress(step firstRunStep, hasPresets bool) (current int, total int) {
-	if hasPresets {
+func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
+	if setupMode {
+		total = 3 // preset → capabilities → details
+	} else if hasPresets {
 		total = 4
 	} else {
 		total = 5
@@ -80,12 +85,12 @@ func stepProgress(step firstRunStep, hasPresets bool) (current int, total int) {
 	case step == stepPickPreset || step == stepPresetKey:
 		return 1, total
 	case step == stepCapabilities:
-		if hasPresets {
+		if setupMode || hasPresets {
 			return 2, total
 		}
 		return 3, total
 	case step == stepAgentNameDir:
-		if hasPresets {
+		if setupMode || hasPresets {
 			return 3, total
 		}
 		return 4, total
@@ -133,6 +138,9 @@ type FirstRunModel struct {
 	// Welcome page language selector
 	langCursor  int
 	welcomeOnly bool // true when opened from /settings (return to mail after language pick)
+	setupMode   bool // true when opened from /setup (skip welcome/bootstrap/tutorial, esc→mail)
+	setupOrchDir  string // current agent dir (setup mode only — overwrites init.json here)
+	setupOrchName string // current agent name (setup mode only — prefills name input)
 	// Bootstrap state (venv + assets install)
 	setupDone    bool        // true when bootstrap goroutine finishes
 	setupErr     string      // non-empty if bootstrap failed
@@ -275,7 +283,23 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	return m
 }
 
+// NewSetupModeModel creates a FirstRunModel for /setup — skips welcome/bootstrap/tutorial,
+// starts at preset selection with presets preloaded, and overwrites the current agent on completion.
+func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunModel {
+	m := NewFirstRunModel(baseDir, globalDir, true)
+	m.setupMode = true
+	m.setupOrchDir = orchDir
+	m.setupOrchName = orchName
+	m.step = stepPickPreset
+	m.presets, _ = preset.List()
+	return m
+}
+
 func (m FirstRunModel) Init() tea.Cmd {
+	if m.setupMode {
+		// Already bootstrapped — no init needed, just blink for text inputs
+		return nil
+	}
 	if m.welcomeOnly {
 		// Already bootstrapped — immediately signal done
 		return func() tea.Msg { return bootstrapDoneMsg{} }
@@ -534,6 +558,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, m.enterCapabilities()
 				}
 			case "esc":
+				if m.setupMode {
+					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+				}
 				m.step = stepWelcome
 				return m, nil
 			case "ctrl+c":
@@ -776,8 +803,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "enter":
 				m.applyCapSelections()
-				if config.TutorialDone(m.globalDir) {
-					// Already did tutorial — skip straight to agent creation
+				if m.setupMode || config.TutorialDone(m.globalDir) {
+					// Setup mode or already did tutorial — skip straight to agent creation
 					p := m.presets[m.cursor]
 					m.enterAgentNameDir(p)
 					m.step = stepAgentNameDir
@@ -842,9 +869,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			switch msg.String() {
 			case "tab", "down":
 				m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
+				if m.setupMode && m.fieldIdx == 1 { // skip dir field
+					m.fieldIdx = 2
+				}
 				return m, m.focusAgentField()
 			case "up":
 				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
+				if m.setupMode && m.fieldIdx == 1 { // skip dir field
+					m.fieldIdx = 0
+				}
 				return m, m.focusAgentField()
 			case "left":
 				switch m.fieldIdx {
@@ -872,17 +905,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				name := m.nameInput.Value()
 				if name == "" {
 					name = m.presets[m.cursor].Name
-				}
-				dirName := m.dirInput.Value()
-				if dirName == "" {
-					dirName = name
-				}
-				m.agentName = name
-				m.agentDir = dirName
-				orchDir := filepath.Join(m.baseDir, dirName)
-				if _, err := os.Stat(orchDir); err == nil {
-					m.message = i18n.TF("firstrun.dir_exists", dirName)
-					return m, nil
 				}
 				stamina, err := strconv.ParseFloat(m.staminaInput.Value(), 64)
 				if err != nil || stamina <= 0 {
@@ -914,6 +936,27 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					SoulFile:      m.soulFlowInput.Value(),
 					CommentFile:   m.commentInput.Value(),
 				}
+				if m.setupMode {
+					// Overwrite current agent's init.json in-place
+					dirName := filepath.Base(m.setupOrchDir)
+					m.agentName = name
+					if err := preset.GenerateInitJSONWithOpts(p, name, dirName, m.baseDir, m.globalDir, opts); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					return m, func() tea.Msg { return SetupSavedMsg{} }
+				}
+				dirName := m.dirInput.Value()
+				if dirName == "" {
+					dirName = name
+				}
+				m.agentName = name
+				m.agentDir = dirName
+				orchDir := filepath.Join(m.baseDir, dirName)
+				if _, err := os.Stat(orchDir); err == nil {
+					m.message = i18n.TF("firstrun.dir_exists", dirName)
+					return m, nil
+				}
 				if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
 					m.message = i18n.TF("firstrun.error", err)
 					return m, nil
@@ -924,7 +967,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
 				}
 			case "esc":
-				m.step = stepTutorial
+				if m.setupMode {
+					m.step = stepCapabilities
+				} else {
+					m.step = stepTutorial
+				}
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -979,13 +1026,13 @@ func (m FirstRunModel) View() string {
 
 	switch m.step {
 	case stepAPIKey:
-		stepNum, total := stepProgress(m.step, m.hasPresets)
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d", stepNum, total)) + "\n\n")
 		b.WriteString("  " + i18n.T("firstrun.no_presets") + "\n\n")
 		b.WriteString(m.setup.View())
 
 	case stepPickPreset:
-		stepNum, total := stepProgress(m.step, m.hasPresets)
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.pick_preset"), stepNum, total)) + "\n\n")
 		savedCount := preset.SavedCount(m.presets)
 		for i, p := range m.presets {
@@ -1087,7 +1134,7 @@ func (m FirstRunModel) View() string {
 		}
 
 	case stepCapabilities:
-		stepNum, total := stepProgress(m.step, m.hasPresets)
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_caps")) + "\n\n")
 
 		if m.capLoading {
@@ -1204,7 +1251,7 @@ func (m FirstRunModel) View() string {
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
 	case stepAgentNameDir:
-		stepNum, total := stepProgress(m.step, m.hasPresets)
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n")
 
 		langs := []string{"en", "zh", "wen"}
@@ -1234,7 +1281,11 @@ func (m FirstRunModel) View() string {
 		// ── Identity ──
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_identity")+" ──") + "\n")
 		b.WriteString(cur(0) + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
-		b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
+		if m.setupMode {
+			b.WriteString("  " + i18n.T("firstrun.agent_dir") + ": " + StyleFaint.Render(m.setupOrchDir) + "\n")
+		} else {
+			b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
+		}
 		langVal := langs[m.agentLangIdx]
 		b.WriteString(cur(2) + i18n.T("firstrun.language") + ": " + renderToggle(langVal, m.fieldIdx == 2) + "\n")
 
@@ -1278,13 +1329,17 @@ func (m FirstRunModel) View() string {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
+		enterLabel := i18n.T("firstrun.create_agent")
+		if m.setupMode {
+			enterLabel = i18n.T("setup.save")
+		}
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("firstrun.toggle_field")+
 			"  ←→ "+i18n.T("firstrun.toggle_region")+
-			"  [Enter] "+i18n.T("firstrun.create_agent")+
+			"  [Enter] "+enterLabel+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
 	case stepLaunching:
-		stepNum, total := stepProgress(m.step, m.hasPresets)
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)) + i18n.T("firstrun.launching") + "\n\n")
 		if m.message != "" {
 			b.WriteString("  " + m.message + "\n")
@@ -1500,6 +1555,9 @@ func (m *FirstRunModel) applyCapSelections() {
 // enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.
 func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	defaultName := p.Name
+	if m.setupMode && m.setupOrchName != "" {
+		defaultName = m.setupOrchName
+	}
 	m.agentName = defaultName
 	m.agentDir = defaultName
 	m.nameInput.SetValue(defaultName)

@@ -28,6 +28,7 @@ const (
 	appViewPresets
 	appViewProps
 	appViewAddon
+	appViewDoctor
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -41,6 +42,7 @@ type App struct {
 	props       PropsModel
 	firstRun    FirstRunModel
 	addon       AddonModel
+	doctor      DoctorModel
 
 	globalDir     string
 	projectDir    string // .lingtai/ directory
@@ -155,6 +157,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.props, cmd = a.props.Update(msg)
 		case appViewAddon:
 			a.addon, cmd = a.addon.Update(msg)
+		case appViewDoctor:
+			a.doctor, cmd = a.doctor.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		}
@@ -164,6 +168,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ViewChangeMsg:
 		return a.switchToView(msg.View)
+
+	case doctorResultMsg:
+		if a.currentView == appViewDoctor {
+			a.doctor, _ = a.doctor.Update(msg)
+		}
+		return a, nil
 
 	case refreshDoneMsg:
 		a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
@@ -196,6 +206,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AddonSavedMsg:
 		a.mail.AddSystemMessage(i18n.T("addon.saved"))
+		return a.switchToView("mail")
+
+	case SetupSavedMsg:
+		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 
 	case SetupDoneMsg:
@@ -448,6 +462,13 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewManage
 		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
 		return a, tea.Batch(a.manage.Init(), a.sendSize())
+	case "doctor":
+		if a.orchDir != "" {
+			a.currentView = appViewDoctor
+			a.doctor = NewDoctorModel(a.orchDir)
+			return a, tea.Batch(a.doctor.Init(), a.sendSize())
+		}
+		return a, nil
 	case "viz":
 		// Open browser, stay on mail
 		openBrowser(a.vizURL)
@@ -460,9 +481,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "setup":
-		a.currentView = appViewSetup
-		a.setup = NewSetupModel(a.globalDir)
-		return a, tea.Batch(a.setup.Init(), a.sendSize())
+		a.currentView = appViewFirstRun
+		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
+		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 	case "settings":
 		a.currentView = appViewSettings
 		settings := LoadSettings(a.projectDir)
@@ -475,6 +496,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "help":
 		// Render help inline as a system message in the chat stream
 		helpText := i18n.T("help.title") + "\n" +
+			i18n.T("help.doctor") + "\n" +
 			i18n.T("help.sleep") + "\n" +
 			i18n.T("help.sleep_all") + "\n" +
 			i18n.T("help.suspend") + "\n" +
@@ -598,9 +620,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
 		return a, tea.Batch(a.manage.Init(), a.sendSize())
 	case "setup":
-		a.currentView = appViewSetup
-		a.setup = NewSetupModel(a.globalDir)
-		return a, tea.Batch(a.setup.Init(), a.sendSize())
+		a.currentView = appViewFirstRun
+		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
+		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 	case "settings":
 		a.currentView = appViewSettings
 		settings := LoadSettings(a.projectDir)
