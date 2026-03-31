@@ -1242,9 +1242,8 @@ func (m FirstRunModel) View() string {
 			b.WriteString(line + "\n")
 		}
 
-		warnStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
-		b.WriteString("\n  " + warnStyle.Render(i18n.T("firstrun.caps_warning")) + "\n")
-		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.caps_recommend")) + "\n")
+		b.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.caps_recommend")) + "\n")
+		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.caps_change_later")) + "\n")
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓←→ "+i18n.T("settings.select")+
 			"  space "+i18n.T("settings.change")+
 			"  Ctrl+A "+i18n.T("firstrun.caps_toggle_all")+

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -155,10 +156,26 @@ func main() {
 	}
 
 	// Check for TUI binary upgrade (non-blocking, 3s timeout)
-	if latest := config.CheckTUIUpgrade(version); latest != "" {
-		fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
-		fmt.Println("    Run: brew upgrade lingtai-tui")
-		fmt.Println()
+	if !needsFirstRun {
+		if latest := config.CheckTUIUpgrade(version); latest != "" {
+			fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
+			fmt.Printf("    Upgrade now? (brew upgrade lingtai-tui) [y/N] ")
+			reader := bufio.NewReader(os.Stdin)
+			line, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(line)) == "y" {
+				fmt.Println("    Upgrading...")
+				cmd := exec.Command("brew", "upgrade", "lingtai-tui")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					fmt.Fprintf(os.Stderr, "    Upgrade failed: %v\n", err)
+				} else {
+					fmt.Println("    Upgraded! Restarting...")
+					self, _ := os.Executable()
+					syscallExec(self, os.Args, os.Environ())
+				}
+			}
+		}
 	}
 
 	// Launch TUI
@@ -259,13 +276,6 @@ func tutorialMain() {
 		i18n.SetLang(globalCfg.Language)
 	} else {
 		i18n.SetLang(settings.Language)
-	}
-
-	// Check for TUI binary upgrade
-	if latest := config.CheckTUIUpgrade(version); latest != "" {
-		fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
-		fmt.Println("    Run: brew upgrade lingtai-tui")
-		fmt.Println()
 	}
 
 	// Launch TUI directly into the tutorial agent
