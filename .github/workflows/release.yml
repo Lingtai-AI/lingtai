@@ -40,8 +40,15 @@ jobs:
           go-version: '1.24'
           cache-dependency-path: tui/go.sum
 
-      - name: Ensure web dist exists
-        run: mkdir -p tui/web/dist && echo '<!DOCTYPE html><html><body>viz</body></html>' > tui/web/dist/index.html
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: tui/web/package-lock.json
+
+      - name: Build web frontend
+        working-directory: tui/web
+        run: npm ci && npm run build
 
       - name: Build
         working-directory: tui
