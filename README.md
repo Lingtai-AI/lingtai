@@ -36,15 +36,21 @@ lingtai-tui
 
 That's it. The TUI bootstraps everything — Python runtime, dependencies, and a guided tutorial on first launch. Use `lingtai-tui tutorial` anytime to revisit the guide.
 
-> The TUI is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app. Text selection requires [iTerm2](https://iterm2.com/) (hold Option + drag). On WSL, use [Windows Terminal](https://aka.ms/terminal) and Ctrl+V to paste. Ctrl+E opens an external editor as a last resort.
+> The TUI is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app designed for **dark terminals** — use a dark background for the best experience. Text selection requires [iTerm2](https://iterm2.com/) (hold Option + drag). On Windows Terminal, hold Shift to select text; Ctrl+V to paste. Ctrl+E opens an external editor as a last resort.
 
 ## Why Lingtai
 
-Most agent frameworks orchestrate with code — DAGs, chains, routers. Lingtai orchestrates like humans do: **autonomous agents communicating through messages**. This pattern scaled to 8 billion nodes over 10,000 years. We see no reason it can't do 10 billion.
+**This is not a coding agent.** This is an architecture for agents as autonomous creatures with dignity — agents that live, sleep, forget, and grow.
+
+Most agent frameworks orchestrate with code — DAGs, chains, routers. Lingtai orchestrates like humans do: **fully asynchronous agents communicating through messages**. No shared memory. No central controller. Each agent is a peer, not a tool.
+
+This is the architecture that built human civilization. Asynchronous message-passing between autonomous nodes — scaled from tribes to cities to nations to a network of 8 billion over 100,000 years. We're not inventing a new pattern. We're giving AI the one that already works.
 
 | | DAG / Chain frameworks | Lingtai |
 |---|---|---|
+| Philosophy | Agents as tools | Agents as creatures |
 | Orchestration | Code-defined pipelines | Agents talk to agents |
+| Communication | Synchronous function calls | Asynchronous mail — like humans |
 | Scaling | Add more steps | Agents spawn avatars |
 | Memory | Shared state / vector DB | Each agent owns its directory |
 | Failure | Pipeline breaks | Individual agents sleep; network continues |
