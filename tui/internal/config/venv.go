@@ -188,6 +188,40 @@ func findPython() string {
 	return ""
 }
 
+// CheckTUIUpgrade compares the running TUI version against the latest GitHub release.
+// Returns the latest version string if an upgrade is available, or "" if up-to-date.
+// Non-blocking: silently returns "" on any error (offline, timeout, etc.).
+func CheckTUIUpgrade(currentVersion string) string {
+	if currentVersion == "" || currentVersion == "dev" {
+		return ""
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/huangzesen/lingtai/releases/latest")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return ""
+	}
+
+	latest := strings.TrimPrefix(release.TagName, "v")
+	current := strings.TrimPrefix(currentVersion, "v")
+
+	if latest != current {
+		return release.TagName
+	}
+	return ""
+}
+
 // CheckUpgrade compares installed lingtai version to PyPI latest.
 // Runs pip install --upgrade if a newer version is available.
 // Returns true if an upgrade was performed.

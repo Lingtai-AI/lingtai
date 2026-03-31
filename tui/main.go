@@ -20,6 +20,9 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/tui"
 )
 
+// version is set at build time via -ldflags "-X main.version=v0.4.2"
+var version = "dev"
+
 func main() {
 	// Handle flags
 	if len(os.Args) > 1 {
@@ -38,8 +41,8 @@ func main() {
 			fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
 			os.Exit(0)
 		}
-		if arg == "--version" || arg == "-v" {
-			fmt.Println("lingtai-tui 0.1.1")
+		if arg == "--version" || arg == "-v" || arg == "version" {
+			fmt.Println("lingtai-tui " + version)
 			os.Exit(0)
 		}
 		if arg == "tutorial" {
@@ -151,6 +154,13 @@ func main() {
 		}
 	}
 
+	// Check for TUI binary upgrade (non-blocking, 3s timeout)
+	if latest := config.CheckTUIUpgrade(version); latest != "" {
+		fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
+		fmt.Println("    Run: brew upgrade lingtai-tui")
+		fmt.Println()
+	}
+
 	// Launch TUI
 	app := tui.NewApp(globalDir, lingtaiDir, srv.URL(), needsFirstRun, orchestrators, settings)
 	p := tea.NewProgram(app)
@@ -249,6 +259,13 @@ func tutorialMain() {
 		i18n.SetLang(globalCfg.Language)
 	} else {
 		i18n.SetLang(settings.Language)
+	}
+
+	// Check for TUI binary upgrade
+	if latest := config.CheckTUIUpgrade(version); latest != "" {
+		fmt.Printf("  ⬆ New version available: %s → %s\n", version, latest)
+		fmt.Println("    Run: brew upgrade lingtai-tui")
+		fmt.Println()
 	}
 
 	// Launch TUI directly into the tutorial agent
