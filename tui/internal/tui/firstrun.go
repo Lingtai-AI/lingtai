@@ -1032,6 +1032,7 @@ func (m FirstRunModel) View() string {
 			b.WriteString("  " + i18n.T("presets.enter_name") + " " + m.presetNameIn.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
 				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Ctrl+E] editor (allows pasting)"+
 				"  [Enter] "+i18n.T("setup.save")+
 				"  [Esc] "+i18n.T("setup.back")) + "\n")
 		} else if m.selectedProvider == "minimax" {
@@ -1058,11 +1059,13 @@ func (m FirstRunModel) View() string {
 			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
 				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Ctrl+E] editor (allows pasting)"+
 				"  [Enter] "+i18n.T("setup.save")+
 				"  [Esc] "+i18n.T("setup.back")) + "\n")
 		} else {
 			b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
+				"  [Ctrl+E] editor (allows pasting)"+
 				"  [Esc] "+i18n.T("setup.back")) + "\n")
 		}
 
