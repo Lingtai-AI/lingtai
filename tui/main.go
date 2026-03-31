@@ -40,6 +40,18 @@ func main() {
 			fmt.Println("  purge        Kill lingtai processes (all, or only those in <dir>)")
 			fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
 			fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
+			fmt.Println()
+			// Show directories
+			home, _ := os.UserHomeDir()
+			globalDir := filepath.Join(home, ".lingtai-tui")
+			fmt.Printf("  Global config: %s\n", globalDir)
+			cwd, _ := os.Getwd()
+			localDir := filepath.Join(cwd, ".lingtai")
+			if _, err := os.Stat(localDir); err == nil {
+				fmt.Printf("  Working dir:   %s\n", localDir)
+			} else {
+				fmt.Printf("  Working dir:   (no .lingtai/ in %s)\n", cwd)
+			}
 			os.Exit(0)
 		}
 		if arg == "--version" || arg == "-v" || arg == "version" {
