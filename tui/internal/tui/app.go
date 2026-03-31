@@ -317,6 +317,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.addon.Update(msg)
 		a.addon = updated
 		return a, cmd
+	case appViewDoctor:
+		updated, cmd := a.doctor.Update(msg)
+		a.doctor = updated
+		return a, cmd
 	}
 
 	return a, nil
@@ -671,6 +675,8 @@ func (a App) View() tea.View {
 		content = a.props.View()
 	case appViewAddon:
 		content = a.addon.View()
+	case appViewDoctor:
+		content = a.doctor.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

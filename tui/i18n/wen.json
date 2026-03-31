@@ -281,6 +281,7 @@
   "state.unknown": "未知",
   "palette.doctor": "诊连",
   "help.doctor": "/doctor    — 诊连",
+  "doctor.title": "诊",
   "doctor.checking": "诊中...",
   "doctor.last_error": "前误：%s",
   "doctor.config_error": "配误：%s",

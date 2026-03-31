@@ -281,6 +281,7 @@
   "state.unknown": "未知",
   "palette.doctor": "诊断连接问题",
   "help.doctor": "/doctor    — 诊断连接问题",
+  "doctor.title": "诊断",
   "doctor.checking": "正在检查连接...",
   "doctor.last_error": "最近错误：%s",
   "doctor.config_error": "配置错误：%s",

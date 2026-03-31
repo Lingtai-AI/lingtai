@@ -91,7 +91,7 @@ func (m DoctorModel) View() string {
 		} else if line.OK {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorAgent).Render(line.Text) + "\n")
 		} else {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorError).Render(line.Text) + "\n")
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(line.Text) + "\n")
 		}
 	}
 
@@ -353,6 +353,9 @@ func probeLLM(provider, model, apiKey, baseURL string) (probeStatus, string) {
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return probeOK, ""
+	case resp.StatusCode == 404 || resp.StatusCode == 405:
+		// /v1/models not supported but server responded — connectivity and auth OK
 		return probeOK, ""
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
