@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -51,17 +52,32 @@ type SettingField struct {
 	Current int      // index into Options
 }
 
+// localFieldIdx identifies which local text field is active.
+type localFieldIdx int
+
+const (
+	localNickname localFieldIdx = iota
+	localAgentName
+	localFieldCount
+)
+
 // SettingsModel is the /settings view.
 type SettingsModel struct {
-	cursor    int
-	tuiConfig config.TUIConfig
-	fields    []SettingField
-	globalDir string
-	width     int
-	height    int
+	cursor     int
+	tuiConfig  config.TUIConfig
+	fields     []SettingField
+	globalDir  string
+	projectDir string // .lingtai/ dir for per-project settings
+	orchDir    string // orchestrator dir for agent name
+	nickname   string // human's nickname from human/.agent.json
+	agentName  string // agent's true name from orch/.agent.json
+	editingLocal localFieldIdx // which local field is being edited (-1 = none)
+	editing      bool
+	width      int
+	height     int
 }
 
-func NewSettingsModel(globalDir string, tuiCfg config.TUIConfig) SettingsModel {
+func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUIConfig) SettingsModel {
 	langOptions := []string{"en", "zh", "wen"}
 	langCurrent := 0
 	for i, l := range langOptions {
@@ -93,10 +109,35 @@ func NewSettingsModel(globalDir string, tuiCfg config.TUIConfig) SettingsModel {
 		{Key: "greeting", Label: "settings.greeting", Options: greetingOptions, Current: greetingCurrent},
 	}
 
+	// Read current nickname from human's .agent.json
+	nickname := ""
+	humanPath := filepath.Join(projectDir, "human", ".agent.json")
+	if data, err := os.ReadFile(humanPath); err == nil {
+		var manifest map[string]interface{}
+		if err := json.Unmarshal(data, &manifest); err == nil {
+			if n, ok := manifest["nickname"].(string); ok {
+				nickname = n
+			}
+		}
+	}
+
+	// Read current agent name from orchestrator's .agent.json
+	agentName := ""
+	if orchDir != "" {
+		if node, err := fs.ReadAgent(orchDir); err == nil {
+			agentName = node.AgentName
+		}
+	}
+
 	return SettingsModel{
-		tuiConfig: tuiCfg,
-		fields:    fields,
-		globalDir: globalDir,
+		tuiConfig:    tuiCfg,
+		fields:       fields,
+		globalDir:    globalDir,
+		projectDir:   projectDir,
+		orchDir:      orchDir,
+		nickname:     nickname,
+		agentName:    agentName,
+		editingLocal: -1,
 	}
 }
 
@@ -110,11 +151,41 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		totalFields := len(m.fields) + int(localFieldCount)
+		localStart := len(m.fields) // first local field index
+
+		if m.editing {
+			switch msg.String() {
+			case "enter", "esc":
+				m.editing = false
+				m.saveLocal()
+			case "backspace":
+				ptr := m.localTextPtr()
+				if len(*ptr) > 0 {
+					runes := []rune(*ptr)
+					*ptr = string(runes[:len(runes)-1])
+				}
+			case "ctrl+c":
+				return m, tea.Quit
+			default:
+				ch := msg.String()
+				if len(ch) == 1 || (len(ch) > 1 && !strings.HasPrefix(ch, "ctrl+")) {
+					ptr := m.localTextPtr()
+					*ptr += ch
+				}
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "esc":
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "enter":
-			// Open welcome page when pressing Enter on the language field
+			if m.cursor >= localStart {
+				m.editingLocal = localFieldIdx(m.cursor - localStart)
+				m.editing = true
+				return m, nil
+			}
 			if m.fields[m.cursor].Key == "language" {
 				return m, func() tea.Msg { return ViewChangeMsg{View: "welcome"} }
 			}
@@ -123,20 +194,24 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 				m.cursor--
 			}
 		case "down":
-			if m.cursor < len(m.fields)-1 {
+			if m.cursor < totalFields-1 {
 				m.cursor++
 			}
 		case "left":
-			f := &m.fields[m.cursor]
-			if f.Current > 0 {
-				f.Current--
-				m.applyField(f)
+			if m.cursor < localStart {
+				f := &m.fields[m.cursor]
+				if f.Current > 0 {
+					f.Current--
+					m.applyField(f)
+				}
 			}
 		case "right":
-			f := &m.fields[m.cursor]
-			if f.Current < len(f.Options)-1 {
-				f.Current++
-				m.applyField(f)
+			if m.cursor < localStart {
+				f := &m.fields[m.cursor]
+				if f.Current < len(f.Options)-1 {
+					f.Current++
+					m.applyField(f)
+				}
 			}
 		}
 	}
@@ -157,6 +232,65 @@ func (m *SettingsModel) applyField(f *SettingField) {
 		m.tuiConfig.Greeting = val == "on"
 	}
 	config.SaveTUIConfig(m.globalDir, m.tuiConfig)
+}
+
+// localTextPtr returns a pointer to the text being edited.
+func (m *SettingsModel) localTextPtr() *string {
+	switch m.editingLocal {
+	case localNickname:
+		return &m.nickname
+	case localAgentName:
+		return &m.agentName
+	}
+	return &m.nickname
+}
+
+func (m *SettingsModel) saveLocal() {
+	switch m.editingLocal {
+	case localNickname:
+		m.saveNickname()
+	case localAgentName:
+		m.saveAgentName()
+	}
+}
+
+func (m *SettingsModel) saveNickname() {
+	humanPath := filepath.Join(m.projectDir, "human", ".agent.json")
+	data, err := os.ReadFile(humanPath)
+	if err != nil {
+		return
+	}
+	var manifest map[string]interface{}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return
+	}
+	if m.nickname == "" {
+		delete(manifest, "nickname")
+	} else {
+		manifest["nickname"] = m.nickname
+	}
+	if out, err := json.MarshalIndent(manifest, "", "  "); err == nil {
+		os.WriteFile(humanPath, out, 0o644)
+	}
+}
+
+func (m *SettingsModel) saveAgentName() {
+	if m.orchDir == "" || m.agentName == "" {
+		return
+	}
+	// Update init.json manifest.agent_name
+	initPath := filepath.Join(m.orchDir, "init.json")
+	if data, err := os.ReadFile(initPath); err == nil {
+		var init map[string]interface{}
+		if err := json.Unmarshal(data, &init); err == nil {
+			if manifest, ok := init["manifest"].(map[string]interface{}); ok {
+				manifest["agent_name"] = m.agentName
+			}
+			if out, err := json.MarshalIndent(init, "", "  "); err == nil {
+				os.WriteFile(initPath, out, 0o644)
+			}
+		}
+	}
 }
 
 func (m SettingsModel) View() string {
@@ -202,13 +336,58 @@ func (m SettingsModel) View() string {
 		b.WriteString(line + "\n")
 	}
 
+	// Local section
+	localStart := len(m.fields)
+	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	b.WriteString("\n  " + sectionStyle.Render(i18n.T("settings.local")) + "\n")
+
+	type localField struct {
+		label string
+		hint  string
+		value string
+		idx   localFieldIdx
+	}
+	locals := []localField{
+		{i18n.T("settings.nickname"), i18n.T("settings.nickname_hint"), m.nickname, localNickname},
+		{i18n.T("settings.agent_name"), i18n.T("settings.agent_name_hint"), m.agentName, localAgentName},
+	}
+	for i, lf := range locals {
+		absIdx := localStart + i
+		cursor := "  "
+		if m.cursor == absIdx {
+			cursor = "> "
+		}
+		label := lf.label + ":"
+		displayVal := lf.value
+		if displayVal == "" {
+			displayVal = "—"
+		}
+		if m.editing && m.editingLocal == lf.idx {
+			displayVal = lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render(lf.value + "▎")
+		} else if m.cursor == absIdx {
+			displayVal = lipgloss.NewStyle().Bold(true).Foreground(ColorActive).Render(displayVal)
+		}
+		b.WriteString(fmt.Sprintf("%s%-15s %s", cursor, label, displayVal))
+		if m.cursor == absIdx && !m.editing {
+			b.WriteString("  " + StyleFaint.Render(lf.hint))
+		}
+		b.WriteString("\n")
+	}
+
 	// Footer
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	hints := fmt.Sprintf("  ↑↓ %s  ←→ %s", i18n.T("settings.select"), i18n.T("settings.change"))
-	if m.fields[m.cursor].Key == "language" {
-		hints += "  [Enter] " + i18n.T("settings.welcome")
+	var hints string
+	if m.editing {
+		hints = fmt.Sprintf("  [Enter] %s  [Esc] %s", i18n.T("settings.confirm"), i18n.T("settings.back"))
+	} else {
+		hints = fmt.Sprintf("  ↑↓ %s  ←→ %s", i18n.T("settings.select"), i18n.T("settings.change"))
+		if m.cursor >= localStart {
+			hints += "  [Enter] " + i18n.T("settings.edit")
+		} else if m.fields[m.cursor].Key == "language" {
+			hints += "  [Enter] " + i18n.T("settings.welcome")
+		}
+		hints += "  [esc] " + i18n.T("settings.back")
 	}
-	hints += "  [esc] " + i18n.T("settings.back")
 	b.WriteString(StyleFaint.Render(hints) + "\n")
 
 	return b.String()

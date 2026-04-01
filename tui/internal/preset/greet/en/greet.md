@@ -7,6 +7,7 @@ Use the email tool to send a greeting to {{addr}}. In your greeting:
 - Mention they can use /lang to switch language
 - If this is their first time, suggest /tutorial for a guided introduction
 - Mention ctrl+o toggles verbose mode to see the agent's inner thoughts
+- Mention they can set a nickname in /settings and you will address them by it
 - Mention this greeting can be turned off in /settings
 
 Keep it concise.

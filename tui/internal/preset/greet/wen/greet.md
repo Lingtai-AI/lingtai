@@ -7,6 +7,7 @@
 - 告以 /lang 可换言语
 - 若初临，可以 /tutorial 入门
 - 告以 ctrl+o 可窥器灵之心思
+- 告以可于 /settings 立别号，吾将以别号称之
 - 告以此迎可于 /settings 闭之
 
 简可。

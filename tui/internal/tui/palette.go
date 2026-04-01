@@ -40,25 +40,18 @@ func NewPaletteModel() PaletteModel {
 // DefaultCommands returns all slash commands.
 func DefaultCommands() []Command {
 	return []Command{
-		{Name: "doctor", Description: "palette.doctor"},
 		{Name: "sleep", Description: "palette.sleep"},
-		{Name: "sleep-all", Description: "palette.sleep_all"},
 		{Name: "suspend", Description: "palette.suspend"},
-		{Name: "suspend-all", Description: "palette.suspend_all"},
 		{Name: "cpr", Description: "palette.cpr"},
-		{Name: "nickname", Description: "palette.nickname"},
-		{Name: "rename", Description: "palette.rename"},
-		{Name: "lang", Description: "palette.lang"},
 		{Name: "clear", Description: "palette.clear"},
 		{Name: "refresh", Description: "palette.refresh"},
-		{Name: "manage", Description: "palette.manage"},
+		{Name: "doctor", Description: "palette.doctor"},
+		{Name: "lang", Description: "palette.lang"},
 		{Name: "viz", Description: "palette.viz"},
 		{Name: "addon", Description: "palette.addon"},
 		{Name: "tutorial", Description: "palette.tutorial"},
 		{Name: "setup", Description: "palette.setup"},
 		{Name: "settings", Description: "palette.settings"},
-		{Name: "presets", Description: "palette.presets"},
-		{Name: "help", Description: "palette.help"},
 		{Name: "quit", Description: "palette.quit"},
 	}
 }

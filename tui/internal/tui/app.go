@@ -22,10 +22,8 @@ type appView int
 const (
 	appViewFirstRun appView = iota
 	appViewMail
-	appViewManage
 	appViewSetup
 	appViewSettings
-	appViewPresets
 	appViewProps
 	appViewAddon
 	appViewDoctor
@@ -36,10 +34,8 @@ const (
 type App struct {
 	currentView appView
 	mail        MailModel
-	manage      ManageModel
 	setup       SetupModel
 	settings    SettingsModel
-	presets     PresetsModel
 	props       PropsModel
 	firstRun    FirstRunModel
 	addon       AddonModel
@@ -54,9 +50,8 @@ type App struct {
 	lingtaiCmd    string
 	width         int
 	height        int
-	tuiConfig     config.TUIConfig
-	pendingRename bool
-	pendingLang   bool
+	tuiConfig   config.TUIConfig
+	pendingLang bool
 }
 
 func humanAddr(projectDir string) string {
@@ -122,7 +117,7 @@ func NewApp(globalDir, projectDir, vizURL string, needsFirstRun bool, orchestrat
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
 		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, tuiCfg.Greeting, globalDir, tuiCfg.Language)
-		app.manage = NewManageModel(projectDir, lingtaiCmd)
+
 	}
 
 	return app
@@ -148,14 +143,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch a.currentView {
 		case appViewMail:
 			a.mail, cmd = a.mail.Update(msg)
-		case appViewManage:
-			a.manage, cmd = a.manage.Update(msg)
 		case appViewSetup:
 			a.setup, cmd = a.setup.Update(msg)
 		case appViewSettings:
 			a.settings, cmd = a.settings.Update(msg)
-		case appViewPresets:
-			a.presets, cmd = a.presets.Update(msg)
 		case appViewProps:
 			a.props, cmd = a.props.Update(msg)
 		case appViewAddon:
@@ -203,7 +194,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
 		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language)
-		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
+
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
@@ -217,7 +208,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
 		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, false, a.globalDir, a.tuiConfig.Language)
-		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
+
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
 	case AddonSavedMsg:
@@ -260,7 +251,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
 		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language)
-		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
+
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
@@ -287,31 +278,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.firstRun = updated
 		return a, cmd
 	case appViewMail:
-		// Intercept SendMsg for pending rename or lang
-		if _, ok := msg.(SendMsg); ok && (a.pendingRename || a.pendingLang) {
+		// Intercept SendMsg for pending lang
+		if _, ok := msg.(SendMsg); ok && a.pendingLang {
 			text := strings.TrimSpace(a.mail.input.Value())
 			a.mail.input.Reset()
-			if a.pendingRename {
-				a.pendingRename = false
-				if text != "" {
-					a.doRename(text)
-				}
-			} else if a.pendingLang {
-				a.pendingLang = false
-				a.doLang(text)
-				return a, func() tea.Msg {
-					a.hardRefresh()
-					return refreshDoneMsg{}
-				}
+			a.pendingLang = false
+			a.doLang(text)
+			return a, func() tea.Msg {
+				a.hardRefresh()
+				return refreshDoneMsg{}
 			}
-			return a, a.mail.refreshMail
 		}
 		updated, cmd := a.mail.Update(msg)
 		a.mail = updated
-		return a, cmd
-	case appViewManage:
-		updated, cmd := a.manage.Update(msg)
-		a.manage = updated
 		return a, cmd
 	case appViewSetup:
 		var cmd tea.Cmd
@@ -320,10 +299,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewSettings:
 		updated, cmd := a.settings.Update(msg)
 		a.settings = updated
-		return a, cmd
-	case appViewPresets:
-		updated, cmd := a.presets.Update(msg)
-		a.presets = updated
 		return a, cmd
 	case appViewProps:
 		updated, cmd := a.props.Update(msg)
@@ -349,92 +324,67 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	switch command {
 	case "sleep":
-		if a.orchDir != "" {
-			sleepFile := filepath.Join(a.orchDir, ".sleep")
-			os.WriteFile(sleepFile, []byte(""), 0o644)
+		if args == "all" {
+			agents, _ := fs.DiscoverAgents(a.projectDir)
+			count := 0
+			for _, agent := range agents {
+				if agent.IsHuman {
+					continue
+				}
+				if fs.IsAlive(agent.WorkingDir, 3.0) {
+					os.WriteFile(filepath.Join(agent.WorkingDir, ".sleep"), []byte(""), 0o644)
+					count++
+				}
+			}
+			a.mail.AddSystemMessage(i18n.TF("mail.sleep_all", count))
+		} else if a.orchDir != "" {
+			os.WriteFile(filepath.Join(a.orchDir, ".sleep"), []byte(""), 0o644)
 			a.mail.AddSystemMessage(i18n.T("mail.sleep_sent"))
 		}
 		return a, nil
-	case "sleep-all":
-		agents, _ := fs.DiscoverAgents(a.projectDir)
-		count := 0
-		for _, agent := range agents {
-			if agent.IsHuman {
-				continue
-			}
-			if fs.IsAlive(agent.WorkingDir, 3.0) {
-				sleepFile := filepath.Join(agent.WorkingDir, ".sleep")
-				os.WriteFile(sleepFile, []byte(""), 0o644)
-				count++
-			}
-		}
-		a.mail.AddSystemMessage(i18n.TF("mail.sleep_all", count))
-		return a, nil
 	case "suspend":
-		if a.orchDir != "" {
-			suspendFile := filepath.Join(a.orchDir, ".suspend")
-			os.WriteFile(suspendFile, []byte(""), 0o644)
+		if args == "all" {
+			agents, _ := fs.DiscoverAgents(a.projectDir)
+			count := 0
+			for _, agent := range agents {
+				if agent.IsHuman {
+					continue
+				}
+				if fs.IsAlive(agent.WorkingDir, 3.0) {
+					schedulesDir := filepath.Join(agent.WorkingDir, "mailbox", "schedules")
+					os.MkdirAll(schedulesDir, 0o755)
+					os.WriteFile(filepath.Join(schedulesDir, ".cancel"), []byte(""), 0o644)
+					os.WriteFile(filepath.Join(agent.WorkingDir, ".suspend"), []byte(""), 0o644)
+					count++
+				}
+			}
+			a.mail.AddSystemMessage(i18n.TF("mail.suspended_all", count))
+		} else if a.orchDir != "" {
+			os.WriteFile(filepath.Join(a.orchDir, ".suspend"), []byte(""), 0o644)
 			a.mail.AddSystemMessage(i18n.TF("mail.suspended", a.orchName))
 		}
 		return a, nil
-	case "suspend-all":
-		agents, _ := fs.DiscoverAgents(a.projectDir)
-		count := 0
-		for _, agent := range agents {
-			if agent.IsHuman {
-				continue
-			}
-			if fs.IsAlive(agent.WorkingDir, 3.0) {
-				// Cancel all schedules
-				schedulesDir := filepath.Join(agent.WorkingDir, "mailbox", "schedules")
-				os.MkdirAll(schedulesDir, 0o755)
-				os.WriteFile(filepath.Join(schedulesDir, ".cancel"), []byte(""), 0o644)
-				// Suspend
-				suspendFile := filepath.Join(agent.WorkingDir, ".suspend")
-				os.WriteFile(suspendFile, []byte(""), 0o644)
-				count++
-			}
-		}
-		a.mail.AddSystemMessage(i18n.TF("mail.suspended_all", count))
-		return a, nil
 	case "cpr":
-		if a.orchDir != "" && a.lingtaiCmd != "" {
+		if args == "all" {
+			agents, _ := fs.DiscoverAgents(a.projectDir)
+			count := 0
+			for _, agent := range agents {
+				if agent.IsHuman {
+					continue
+				}
+				if !fs.IsAlive(agent.WorkingDir, 3.0) && a.lingtaiCmd != "" {
+					process.LaunchAgent(a.lingtaiCmd, agent.WorkingDir)
+					count++
+				}
+			}
+			a.mail.AddSystemMessage(i18n.TF("mail.cpr_all", count))
+		} else if a.orchDir != "" && a.lingtaiCmd != "" {
 			if !fs.IsAlive(a.orchDir, 3.0) {
 				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
 				a.mail.AddSystemMessage(i18n.TF("mail.cpr", a.orchName))
 			} else {
 				a.mail.AddSystemMessage(i18n.T("mail.cpr_alive"))
 			}
-		}
-		return a, nil
-	case "nickname":
-		if args != "" {
-			humanPath := filepath.Join(a.projectDir, "human", ".agent.json")
-			if data, err := os.ReadFile(humanPath); err == nil {
-				var manifest map[string]interface{}
-				if err := json.Unmarshal(data, &manifest); err == nil {
-					manifest["nickname"] = args
-					if out, err := json.MarshalIndent(manifest, "", "  "); err == nil {
-						os.WriteFile(humanPath, out, 0o644)
-					}
-				}
-			}
-			a.mail.AddSystemMessage(i18n.TF("mail.nick_set", args))
-		} else {
-			a.mail.AddSystemMessage(i18n.T("mail.nick_prompt"))
-		}
-		return a, nil
-	case "rename":
-		if a.orchDir != "" {
-			if args != "" {
-				a.doRename(args)
-				return a, func() tea.Msg {
-					a.hardRefresh()
-					return refreshDoneMsg{}
-				}
-			}
-			a.pendingRename = true
-			a.mail.AddSystemMessage(i18n.T("mail.rename_prompt"))
 		}
 		return a, nil
 	case "lang":
@@ -482,10 +432,6 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
-	case "manage":
-		a.currentView = appViewManage
-		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
-		return a, tea.Batch(a.manage.Init(), a.sendSize())
 	case "doctor":
 		if a.orchDir != "" {
 			a.currentView = appViewDoctor
@@ -515,68 +461,12 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
-		a.settings = NewSettingsModel(a.globalDir, tuiCfg)
+		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
-	case "presets":
-		a.currentView = appViewPresets
-		a.presets = NewPresetsModel()
-		return a, tea.Batch(a.presets.Init(), a.sendSize())
-	case "help":
-		// Render help inline as a system message in the chat stream
-		helpText := i18n.T("help.title") + "\n" +
-			i18n.T("help.doctor") + "\n" +
-			i18n.T("help.sleep") + "\n" +
-			i18n.T("help.sleep_all") + "\n" +
-			i18n.T("help.suspend") + "\n" +
-			i18n.T("help.suspend_all") + "\n" +
-			i18n.T("help.cpr") + "\n" +
-			i18n.T("help.nickname") + "\n" +
-			i18n.T("help.rename") + "\n" +
-			i18n.T("help.lang") + "\n" +
-			i18n.T("help.clear") + "\n" +
-			i18n.T("help.refresh") + "\n" +
-			i18n.T("help.addon") + "\n" +
-			i18n.T("help.manage") + "\n" +
-			i18n.T("help.viz") + "\n" +
-			i18n.T("help.setup") + "\n" +
-			i18n.T("help.settings") + "\n" +
-			i18n.T("help.presets") + "\n" +
-			i18n.T("help.tutorial") + "\n" +
-			i18n.T("help.help") + "\n" +
-			i18n.T("help.verbose")
-		a.mail.messages = append(a.mail.messages, ChatMessage{
-			From: i18n.T("mail.system_sender"),
-			Body: helpText,
-			Type: "mail",
-		})
-		if a.mail.ready {
-			a.mail.viewport.SetContent(a.mail.renderMessages(a.mail.visibleMessages()))
-			a.mail.viewport.GotoBottom()
-		}
-		return a, nil
 	case "quit":
 		return a, tea.Quit
 	}
 	return a, nil
-}
-
-func (a *App) doRename(newName string) {
-	// Update init.json agent_name
-	initPath := filepath.Join(a.orchDir, "init.json")
-	if data, err := os.ReadFile(initPath); err == nil {
-		var init map[string]interface{}
-		if err := json.Unmarshal(data, &init); err == nil {
-			if m, ok := init["manifest"].(map[string]interface{}); ok {
-				m["agent_name"] = newName
-			}
-			if out, err := json.MarshalIndent(init, "", "  "); err == nil {
-				os.WriteFile(initPath, out, 0o644)
-			}
-		}
-	}
-	a.orchName = newName
-	a.mail.orchName = newName
-	a.mail.AddSystemMessage(i18n.TF("mail.renamed", newName))
 }
 
 func (a *App) doLang(lang string) {
@@ -644,10 +534,6 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
-	case "manage":
-		a.currentView = appViewManage
-		a.manage = NewManageModel(a.projectDir, a.lingtaiCmd)
-		return a, tea.Batch(a.manage.Init(), a.sendSize())
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
@@ -655,12 +541,8 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
-		a.settings = NewSettingsModel(a.globalDir, tuiCfg)
+		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
-	case "presets":
-		a.currentView = appViewPresets
-		a.presets = NewPresetsModel()
-		return a, tea.Batch(a.presets.Init(), a.sendSize())
 	case "props":
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir)
@@ -688,14 +570,10 @@ func (a App) View() tea.View {
 		content = a.firstRun.View()
 	case appViewMail:
 		content = a.mail.View()
-	case appViewManage:
-		content = a.manage.View()
 	case appViewSetup:
 		content = a.setup.View()
 	case appViewSettings:
 		content = a.settings.View()
-	case appViewPresets:
-		content = a.presets.View()
 	case appViewProps:
 		content = a.props.View()
 	case appViewAddon:
