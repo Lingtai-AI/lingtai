@@ -57,7 +57,7 @@
   "firstrun.confirm_caps": "确认",
   "firstrun.caps_recommend": "强烈建议全选，尤其是首次使用。",
   "firstrun.caps_change_later": "可在聊天页用 /setup 和 /refresh 修改。",
-  "firstrun.addons_section": "扩展插件（选中 = 设置指南注入系统提示词）",
+  "firstrun.addons_section": "扩展插件 — 创建后可让 Agent 帮你设置",
   "firstrun.caps_toggle_all": "全选/全不选",
   "firstrun.tutorial_title": "教程",
   "firstrun.tutorial_desc": "通过教程Agent学习灵台的使用方法。",
