@@ -87,13 +87,17 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	pageSizeOptions := []string{"20", "50", "100", "200"}
-	pageSizeCurrent := 1 // default to 50
-	pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
-	for i, p := range pageSizeOptions {
-		if p == pageSizeStr {
-			pageSizeCurrent = i
-			break
+	pageSizeOptions := []string{"100", "200", "unlimited"}
+	pageSizeCurrent := 0 // default to 100
+	if tuiCfg.MailPageSize <= 0 {
+		pageSizeCurrent = 2 // unlimited
+	} else {
+		pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
+		for i, p := range pageSizeOptions {
+			if p == pageSizeStr {
+				pageSizeCurrent = i
+				break
+			}
 		}
 	}
 
@@ -225,9 +229,13 @@ func (m *SettingsModel) applyField(f *SettingField) {
 		m.tuiConfig.Language = val
 		i18n.SetLang(val)
 	case "mail_page_size":
-		size := 50
-		fmt.Sscanf(val, "%d", &size)
-		m.tuiConfig.MailPageSize = size
+		if val == "unlimited" {
+			m.tuiConfig.MailPageSize = 0
+		} else {
+			size := 100
+			fmt.Sscanf(val, "%d", &size)
+			m.tuiConfig.MailPageSize = size
+		}
 	case "greeting":
 		m.tuiConfig.Greeting = val == "on"
 	}
@@ -323,7 +331,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "greeting" {
+		if f.Key == "greeting" || (f.Key == "mail_page_size" && value == "unlimited") {
 			displayVal = i18n.T("settings." + value)
 		}
 

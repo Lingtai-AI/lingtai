@@ -43,7 +43,7 @@ type TUIConfig struct {
 func DefaultTUIConfig() TUIConfig {
 	return TUIConfig{
 		Language:     "en",
-		MailPageSize: 50,
+		MailPageSize: 100,
 		Greeting:     true,
 	}
 }
@@ -61,8 +61,8 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	if tc.Language == "" {
 		tc.Language = "en"
 	}
-	if tc.MailPageSize == 0 {
-		tc.MailPageSize = 50
+	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
+		tc.MailPageSize = 100 // migrate old values below minimum
 	}
 	// Greeting defaults to true when absent from JSON.
 	if !strings.Contains(string(data), `"greeting"`) {

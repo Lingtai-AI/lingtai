@@ -532,6 +532,13 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
+		// Reload config in case settings changed it
+		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
+		ps := a.tuiConfig.MailPageSize
+		if ps <= 0 {
+			ps = 999999 // unlimited
+		}
+		a.mail.pageSize = ps
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 	case "setup":

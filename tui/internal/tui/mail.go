@@ -143,7 +143,7 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		}
 	}
 	if pageSize <= 0 {
-		pageSize = 50
+		pageSize = 999999 // unlimited
 	}
 	return MailModel{
 		humanDir:     humanDir,
