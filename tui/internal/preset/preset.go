@@ -404,7 +404,8 @@ func WriteAddonComment(agentDir, globalDir string, addons []string, userCommentF
 
 	b.WriteString("## Add-ons\n\n")
 	b.WriteString("The following add-ons are available but not yet configured.\n")
-	b.WriteString("When the human asks to set one up, read the setup guide and help them.\n\n")
+	b.WriteString("When the human asks to set one up, read the setup guide and help them.\n")
+	b.WriteString("After creating the config, give the human the config file path and remind them to use /addon to enter it, then /refresh to activate.\n\n")
 
 	for _, addon := range addons {
 		setupPath := filepath.Join(globalDir, "addons", addon, "SETUP.md")
