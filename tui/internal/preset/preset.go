@@ -419,7 +419,7 @@ func WriteAddonComment(agentDir, globalDir string, addons []string, userCommentF
 		b.WriteString("- After setup, tell the human to use /addon to set the config path, then /refresh.\n\n")
 	}
 
-	outPath := filepath.Join(agentDir, "comment.md")
+	outPath := filepath.Join(agentDir, "system", "comment.md")
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return ""
 	}
