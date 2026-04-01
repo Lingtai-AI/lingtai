@@ -20,13 +20,12 @@ function formatDateTime(unixMs: number): string {
   return `${mon}-${day} ${h}:${m}:${s}`;
 }
 
-export function TopBar({ lang, theme, vizMode, playing, speed, speeds, replayTime, tapeRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed }: {
+export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed }: {
   lang: string;
   theme: Theme;
   vizMode: VizMode;
   playing: boolean;
   speed: number;
-  speeds: number[];
   replayTime: number;
   tapeRange: [number, number];
   onEnterReplay: () => void;
@@ -132,23 +131,31 @@ export function TopBar({ lang, theme, vizMode, playing, speed, speeds, replayTim
         {playing ? '⏸' : '▶'}
       </button>
 
-      {/* Speed selector */}
-      <div style={{ display: 'flex', gap: 2 }}>
-        {speeds.map(s => (
-          <button
-            key={s}
-            onClick={() => onChangeSpeed(s)}
-            style={{
-              ...btnStyle(s === speed),
-              borderRadius: 2,
-              padding: '2px 5px',
-              minWidth: 28,
-              textAlign: 'center' as const,
-            }}
-          >
-            {s}×
-          </button>
-        ))}
+      {/* Speed input */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+        <input
+          type="number"
+          min={1}
+          max={9999}
+          value={speed}
+          onChange={e => {
+            const v = Math.max(1, Math.min(9999, Number(e.target.value) || 1));
+            onChangeSpeed(v);
+          }}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${theme.border}`,
+            borderRadius: 4,
+            padding: '2px 4px',
+            color: theme.stateColors['ACTIVE'],
+            fontSize: 11,
+            fontFamily: 'monospace',
+            width: 48,
+            textAlign: 'right' as const,
+            outline: 'none',
+          }}
+        />
+        <span style={{ fontSize: 10, color: theme.textDim }}>×</span>
       </div>
 
       {/* Scrubber */}

@@ -38,7 +38,7 @@ function diffMailBullets(prev: Network | null, next: Network, realNow: number): 
 
 export type VizMode = 'live' | 'replay';
 
-const SPEEDS = [1, 2, 5, 10, 25, 50, 100];
+const DEFAULT_SPEED = 10;
 
 export default function App() {
   const [network, setNetwork] = useState<Network | null>(null);
@@ -48,7 +48,7 @@ export default function App() {
 
   // Viz mode
   const [vizMode, setVizMode] = useState<VizMode>('live');
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [playing, setPlaying] = useState(false);
   const [replayTime, setReplayTime] = useState(0); // virtual clock (unix ms)
   const [tapeRange, setTapeRange] = useState<[number, number]>([0, 0]);
@@ -251,7 +251,6 @@ export default function App() {
         vizMode={vizMode}
         playing={playing}
         speed={speed}
-        speeds={SPEEDS}
         replayTime={replayTime}
         tapeRange={tapeRange}
         onEnterReplay={enterReplay}
