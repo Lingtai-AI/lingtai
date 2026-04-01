@@ -4,8 +4,8 @@ You are helping the human set up IMAP email for this agent. Your job is to **cre
 
 ## Rules
 
-- **Secrets go in the .env file** (path in your init.json under `env_file`), never in config JSON.
-- **Config files go under** `~/.lingtai-tui/addons/imap/<account>/config.json` where `<account>` is the email address. Each account gets its own directory.
+- **Find the .env file path** by reading your `init.json` — look for the `env_file` field. Secrets go there, never in config JSON.
+- **Config files go under** `~/.lingtai-tui/addons/imap/<account>/config.json` where `<account>` is the email address. Each account gets its own directory. Do NOT put config files in the agent's working directory.
 - **Never edit the example template** at `~/.lingtai-tui/addons/imap/example/config.json` — it is a reference, not a working config.
 - **Activation requires the human** to type `/addon` in the TUI, enter the config path, then `/refresh`. You cannot do this yourself.
 
@@ -22,7 +22,7 @@ Ask the human for:
 
 Once you have the email address and app password:
 
-1. **Add the password to the .env file** — append this line:
+1. **Read your init.json** to find the `env_file` path. Then **append the password** to that .env file:
    ```
    IMAP_PASSWORD=<the app password they gave you>
    ```
