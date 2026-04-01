@@ -30,13 +30,11 @@ func main() {
 		arg := os.Args[1]
 		if arg == "--help" || arg == "-h" {
 			fmt.Println("Usage: lingtai-tui")
-			fmt.Println("       lingtai-tui tutorial")
 			fmt.Println("       lingtai-tui purge [dir]")
 			fmt.Println("       lingtai-tui list [dir]")
 			fmt.Println("       lingtai-tui clean")
 			fmt.Println()
 			fmt.Println("  (no args)    Launch TUI in current directory")
-			fmt.Println("  tutorial     Start or resume the guided tutorial")
 			fmt.Println("  purge        Kill lingtai processes (all, or only those in <dir>)")
 			fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
 			fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
@@ -57,10 +55,6 @@ func main() {
 		if arg == "--version" || arg == "-v" || arg == "version" {
 			fmt.Println("lingtai-tui " + version)
 			os.Exit(0)
-		}
-		if arg == "tutorial" {
-			tutorialMain()
-			return
 		}
 		if arg == "purge" {
 			purgeMain()
@@ -209,100 +203,6 @@ func main() {
 	}
 }
 
-func tutorialMain() {
-	projectDir, _ := os.Getwd()
-	projectDir, _ = filepath.Abs(projectDir)
-
-	globalDir, err := config.GlobalDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Need setup first
-	if config.NeedsSetup(globalDir) {
-		fmt.Fprintf(os.Stderr, "Run lingtai-tui first to complete setup.\n")
-		os.Exit(1)
-	}
-
-	// Ensure runtime
-	if config.NeedsVenv(globalDir) {
-		fmt.Println("Setting up Python environment...")
-		if err := config.EnsureVenv(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		if config.CheckUpgrade(globalDir) {
-			fmt.Println("Upgraded lingtai to latest version.")
-		}
-	}
-	preset.Bootstrap(globalDir)
-
-	lingtaiDir := filepath.Join(projectDir, ".lingtai")
-
-	// Check for phantom processes before creating .lingtai/
-	if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
-		self, _ := os.Executable()
-		out, _ := exec.Command(self, "list", projectDir).Output()
-		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
-			fmt.Print(string(out))
-			os.Exit(1)
-		}
-	}
-
-	if err := process.InitProject(lingtaiDir); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	tutorialDir := filepath.Join(lingtaiDir, "tutorial")
-
-	// Kill old tutorial if running, then wipe
-	fs.SuspendAndWait(tutorialDir, 3*time.Second)
-	os.RemoveAll(tutorialDir)
-	p := preset.First()
-	tutorialTuiCfg := config.LoadTUIConfig(globalDir)
-	lang := tutorialTuiCfg.Language
-	if err := preset.GenerateTutorialInit(p, lingtaiDir, globalDir, lang); err != nil {
-		fmt.Fprintf(os.Stderr, "error creating tutorial: %v\n", err)
-		os.Exit(1)
-	}
-	humanAddr, _ := filepath.Abs(filepath.Join(lingtaiDir, "human"))
-	fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
-	config.MarkTutorialDone(globalDir)
-
-	// Launch tutorial agent if not alive
-	lingtaiCmd := config.LingtaiCmd(globalDir)
-	if lingtaiCmd != "" && !fs.IsAlive(tutorialDir, 2.0) {
-		if _, err := process.LaunchAgent(lingtaiCmd, tutorialDir); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to launch tutorial: %v\n", err)
-		}
-	}
-
-	// Start API server
-	srv := api.NewServer(lingtaiDir, WebFS())
-	portFile := filepath.Join(lingtaiDir, ".port")
-	if err := srv.Start(portFile); err != nil {
-		fmt.Fprintf(os.Stderr, "error starting server: %v\n", err)
-		os.Exit(1)
-	}
-	defer srv.Stop(context.Background())
-
-	// Load TUI config
-	config.MigrateLegacyLanguage(globalDir)
-	tuiCfg := config.LoadTUIConfig(globalDir)
-	i18n.SetLang(tuiCfg.Language)
-
-	// Launch TUI directly into the tutorial agent
-	app := tui.NewApp(globalDir, lingtaiDir, srv.URL(), false, []string{"tutorial"}, tuiCfg)
-	prog := tea.NewProgram(app)
-	if _, err := prog.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
 func cleanMain() {
 	projectDir, _ := os.Getwd()
 	projectDir, _ = filepath.Abs(projectDir)
@@ -313,8 +213,31 @@ func cleanMain() {
 		os.Exit(1)
 	}
 
-	// Suspend all agents first
+	// Count agents
 	agents, _ := fs.DiscoverAgents(lingtaiDir)
+	agentCount := 0
+	for _, agent := range agents {
+		if !agent.IsHuman {
+			agentCount++
+		}
+	}
+
+	// Confirm
+	if agentCount > 0 {
+		fmt.Printf("This will suspend %d agent(s) and remove %s\n", agentCount, lingtaiDir)
+	} else {
+		fmt.Printf("This will remove %s\n", lingtaiDir)
+	}
+	fmt.Print("Proceed? [y/N] ")
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		fmt.Println("Aborted.")
+		return
+	}
+
+	// Suspend all agents first
 	for _, agent := range agents {
 		if agent.IsHuman {
 			continue

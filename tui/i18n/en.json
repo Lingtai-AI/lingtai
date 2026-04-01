@@ -163,7 +163,7 @@
   "palette.manage": "Agent management",
   "palette.nickname": "Set your display name",
   "palette.presets": "Manage agent presets",
-  "palette.tutorial": "Start or resume tutorial",
+  "palette.tutorial": "Start guided tutorial (resets working directory)",
   "palette.quit": "Quit lingtai-tui",
   "palette.clear": "Wipe conversation history and restart",
   "palette.refresh": "Hard restart agent (reload init.json)",
@@ -299,5 +299,14 @@
   "doctor.suggest_setup": "→ Update API key in /setup, then /refresh.",
   "doctor.suggest_wait": "→ Wait a moment, then /cpr.",
   "doctor.suggest_network": "→ Check your network connection, then /cpr.",
-  "doctor.suggest_refresh": "→ Fix config, then /refresh."
+  "doctor.suggest_refresh": "→ Fix config, then /refresh.",
+  "tutorial.title": "Tutorial",
+  "tutorial.warning": "⚠ This will destroy all data in the working directory.",
+  "tutorial.path": "  %s",
+  "tutorial.detail": "All agents, mail history, and files will be permanently removed and replaced with a tutorial agent.",
+  "tutorial.patience": "The guide will greet you — please allow ~30 seconds for startup.",
+  "tutorial.preparing": "Preparing",
+  "tutorial.done": "Ready",
+  "tutorial.start": "Start Tutorial",
+  "tutorial.cancel": "Cancel"
 }

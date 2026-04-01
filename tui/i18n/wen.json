@@ -163,7 +163,7 @@
   "palette.manage": "器灵管辖",
   "palette.nickname": "设别号",
   "palette.presets": "预设管辖",
-  "palette.tutorial": "启教/续教",
+  "palette.tutorial": "启教（重置工作目录）",
   "palette.quit": "退",
   "palette.clear": "清对话历史重启",
   "palette.refresh": "重启器灵（重载 init.json）",
@@ -299,5 +299,14 @@
   "doctor.suggest_setup": "→ /setup 换钥，后 /refresh。",
   "doctor.suggest_wait": "→ 稍候，后 /cpr。",
   "doctor.suggest_network": "→ 查网，后 /cpr。",
-  "doctor.suggest_refresh": "→ 修配，后 /refresh。"
+  "doctor.suggest_refresh": "→ 修配，后 /refresh。",
+  "tutorial.title": "初入山门",
+  "tutorial.warning": "⚠ 此举将尽毁工作目录之一切。",
+  "tutorial.path": "  %s",
+  "tutorial.detail": "诸灵、书信、文件悉毁，化为教程之境。",
+  "tutorial.patience": "祖师将先行问候，启约三十息，请稍候。",
+  "tutorial.preparing": "初入山门",
+  "tutorial.done": "备矣",
+  "tutorial.start": "入门",
+  "tutorial.cancel": "返"
 }

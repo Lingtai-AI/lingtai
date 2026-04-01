@@ -36,11 +36,18 @@ type ViewChangeMsg struct {
 	View string
 }
 
+type pulseTickMsg time.Time
+
+func pulseTick() tea.Cmd {
+	return tea.Every(150*time.Millisecond, func(t time.Time) tea.Msg { return pulseTickMsg(t) })
+}
+
 type mailRefreshMsg struct {
-	cache    fs.MailCache // incrementally updated cache
-	alive    bool
-	state    string // active, idle, stuck, asleep, suspended, or ""
-	orchName string // agent name from .agent.json (may change at runtime)
+	cache        fs.MailCache // incrementally updated cache
+	alive        bool
+	state        string // active, idle, stuck, asleep, suspended, or ""
+	orchName     string // agent name from .agent.json (may change at runtime)
+	orchNickname string // nickname from .agent.json
 }
 type tickMsg time.Time
 
@@ -63,12 +70,37 @@ const (
 	verboseExtended                     // ctrl+o cycle: everything (+ text_input, text_output, tool_call, tool_result)
 )
 
+// spinnerFrames is a star-burst spinner shown flanking the thinking quote.
+var spinnerFrames = []string{"✶", "✸", "✹", "✺", "✹", "✸"}
+
+// thinkingQuotes are short phrases shown rotating in the header while thinking.
+// Chinese: segments from the three Bodhi verses (菩提偈).
+// English: Buddhist concepts and sutric phrases.
+// Classical Chinese: same as Chinese (shared literary tradition).
+var thinkingQuotesMap = map[string][]string{
+	"zh": {
+		"菩提本无树", "明镜亦非台", "佛性常清净", "何处有尘埃",
+		"身是菩提树", "心为明镜台", "明镜本清净", "何处染尘埃",
+		"菩提本无树", "明镜亦非台", "本来无一物", "何处惹尘埃",
+	},
+	"wen": {
+		"菩提本无树", "明镜亦非台", "佛性常清净", "何处有尘埃",
+		"身是菩提树", "心为明镜台", "明镜本清净", "何处染尘埃",
+		"菩提本无树", "明镜亦非台", "本来无一物", "何处惹尘埃",
+	},
+	"en": {
+		"Cogitating", "Meditating", "Contemplating", "Deliberating", "Ruminating",
+		"Perceiving", "Discerning", "Reasoning", "Examining", "Reflecting",
+	},
+}
+
 type MailModel struct {
 	humanDir         string
 	humanAddr        string
 	orchestrator     string // 本我 directory path (full path under .lingtai/)
 	orchAddr         string // 本我 address (from .agent.json)
-	orchName         string // 本我 agent name
+	orchName         string // 本我 agent name (true name)
+	orchNickname     string // 本我 nickname (display name override)
 	baseDir          string // .lingtai/ directory
 	verbose          verboseLevel
 	messages         []ChatMessage // derived from cache on each refresh
@@ -94,6 +126,9 @@ type MailModel struct {
 	greetChecked   bool   // true after first refresh check
 	greetGlobalDir string // ~/.lingtai-tui/ for reading greet template
 	greetLang      string // current language
+	wasActive      bool   // true if previous refresh was ACTIVE
+	quoteIdx       int    // which quote to show (advances on each ACTIVE transition)
+	pulseTick      int    // pulse animation counter while ACTIVE
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, greeting bool, globalDir, lang string) MailModel {
@@ -201,18 +236,28 @@ func (m MailModel) refreshMail() tea.Msg {
 	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
 	state := ""
 	orchName := m.orchName
+	orchNickname := ""
 	if m.orchestrator != "" {
 		if node, err := fs.ReadAgent(m.orchestrator); err == nil {
 			state = node.State
 			if node.AgentName != "" {
 				orchName = node.AgentName
 			}
+			orchNickname = node.Nickname
 		}
 	}
 	if !alive {
 		state = "suspended"
 	}
-	return mailRefreshMsg{cache: cache, alive: alive, state: state, orchName: orchName}
+	return mailRefreshMsg{cache: cache, alive: alive, state: state, orchName: orchName, orchNickname: orchNickname}
+}
+
+// orchDisplayName returns the nickname if set, otherwise the agent name.
+func (m MailModel) orchDisplayName() string {
+	if m.orchNickname != "" {
+		return m.orchNickname
+	}
+	return m.orchName
 }
 
 // buildMessages converts cached MailMessages to ChatMessages, merges with
@@ -224,9 +269,14 @@ func (m *MailModel) buildMessages() {
 		parts := strings.Split(msg.From, "/")
 		fromName := parts[len(parts)-1]
 		isFromMe := msg.From == m.humanAddr || fromName == "human"
+		// Use agent's display name from .agent.json instead of folder name
+		displayFrom := fromName
+		if !isFromMe {
+			displayFrom = m.orchDisplayName()
+		}
 		cm := ChatMessage{
-			From:        fromName,
-			To:          m.orchName,
+			From:        displayFrom,
+			To:          m.orchDisplayName(),
 			Subject:     msg.Subject,
 			Body:        msg.Message,
 			Timestamp:   msg.ReceivedAt,
@@ -307,6 +357,7 @@ func (m MailModel) Init() tea.Cmd {
 		m.input.Init(),
 		m.refreshMail,
 		tickEvery(m.pollRate),
+		pulseTick(),
 	)
 }
 
@@ -355,6 +406,14 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if msg.orchName != "" {
 			m.orchName = msg.orchName
 		}
+		m.orchNickname = msg.orchNickname
+		isActive := strings.EqualFold(m.orchState, "ACTIVE")
+		if isActive && !m.wasActive {
+			// Just became active — advance to next quote, reset pulse
+			m.quoteIdx++
+			m.pulseTick = 0
+		}
+		m.wasActive = isActive
 		m.buildMessages()
 		// Auto-greet: on first refresh, if history is empty, write .prompt
 		if !m.greetChecked {
@@ -374,6 +433,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case pulseTickMsg:
+		if strings.EqualFold(m.orchState, "ACTIVE") {
+			m.pulseTick++
+		}
+		return m, pulseTick()
 
 	case tickMsg:
 		return m, tea.Batch(m.refreshMail, tickEvery(m.pollRate))
@@ -690,7 +755,7 @@ func (m MailModel) View() string {
 		return "\n  " + i18n.T("app.loading")
 	}
 
-	// Build header: left = app title, right = agent [state]
+	// Build header: left = app title, center = thinking quote, right = agent [state]
 	titleLeft := StyleTitle.Render("  " + i18n.T("app.brand"))
 
 	// State badge with color
@@ -701,14 +766,48 @@ func (m MailModel) View() string {
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	titleRight := orchNameStyle.Render(m.orchName) + " " + stateStyle.Render("◉ "+stateLabel)
+	titleRight := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render("◉ "+stateLabel)
 
-	padding := m.width - lipgloss.Width(titleLeft) - lipgloss.Width(titleRight) - 1
+	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
+	titleCenter := ""
+	if strings.EqualFold(m.orchState, "ACTIVE") {
+		quotes := thinkingQuotesMap[i18n.Lang()]
+		if quotes == nil {
+			quotes = thinkingQuotesMap["en"]
+		}
+		quote := quotes[m.quoteIdx%len(quotes)]
+		spinner := spinnerFrames[m.pulseTick%len(spinnerFrames)]
+		shades := []string{
+			"#3a5a6a", "#4a6a7a", "#5a7a8a", "#6a8a9a",
+			"#7a9aaa", "#8aaaba", "#7a9aaa", "#6a8a9a",
+			"#5a7a8a", "#4a6a7a",
+		}
+		shade := lipgloss.Color(shades[m.pulseTick%len(shades)])
+		style := lipgloss.NewStyle().Foreground(shade)
+		titleCenter = style.Render(spinner + " " + quote + " " + spinner)
+	}
+
+	leftW := lipgloss.Width(titleLeft)
+	rightW := lipgloss.Width(titleRight)
+	centerW := lipgloss.Width(titleCenter)
 	var titleLine string
-	if padding > 0 {
-		titleLine = titleLeft + strings.Repeat(" ", padding) + titleRight
+	if titleCenter != "" {
+		// Three-part layout: left ... center ... right
+		gapTotal := m.width - leftW - centerW - rightW - 1
+		if gapTotal > 0 {
+			leftGap := gapTotal / 2
+			rightGap := gapTotal - leftGap
+			titleLine = titleLeft + strings.Repeat(" ", leftGap) + titleCenter + strings.Repeat(" ", rightGap) + titleRight
+		} else {
+			titleLine = titleLeft + " " + titleCenter + " " + titleRight
+		}
 	} else {
-		titleLine = titleLeft + "  " + titleRight
+		padding := m.width - leftW - rightW - 1
+		if padding > 0 {
+			titleLine = titleLeft + strings.Repeat(" ", padding) + titleRight
+		} else {
+			titleLine = titleLeft + "  " + titleRight
+		}
 	}
 	header := titleLine + "\n" + strings.Repeat("\u2500", m.width)
 

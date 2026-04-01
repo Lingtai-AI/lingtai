@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
-	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -57,7 +55,6 @@ const (
 	stepPickPreset
 	stepPresetKey
 	stepCapabilities
-	stepTutorial
 	stepAgentNameDir
 	stepLaunching
 )
@@ -73,9 +70,9 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 	if setupMode {
 		total = 3 // preset → capabilities → details
 	} else if hasPresets {
-		total = 4
+		total = 3 // preset → capabilities → details
 	} else {
-		total = 5
+		total = 4 // api key → preset → capabilities → details
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -165,7 +162,6 @@ type FirstRunModel struct {
 	capLoading  bool               // true while check-caps is running
 	capErr      string             // error message if check-caps fails
 	// Tutorial step state
-	tutorialCursor int // 0=start/resume, 1=fresh (if exists), last=skip
 }
 
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
@@ -828,61 +824,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "enter":
 				m.applyCapSelections()
-				if m.setupMode || config.TutorialDone(m.globalDir) {
-					// Setup mode or already did tutorial — skip straight to agent creation
-					p := m.presets[m.cursor]
-					m.enterAgentNameDir(p)
-					m.step = stepAgentNameDir
-					return m, textinput.Blink
-				}
-				m.step = stepTutorial
-				m.tutorialCursor = 0
-				return m, nil
+				p := m.presets[m.cursor]
+				m.enterAgentNameDir(p)
+				m.step = stepAgentNameDir
+				return m, textinput.Blink
 			case "esc":
 				m.step = stepPickPreset
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			}
-			return m, nil
-
-		case stepTutorial:
-			tutorialDir := filepath.Join(m.baseDir, "tutorial")
-			switch msg.String() {
-			case "up":
-				if m.tutorialCursor > 0 {
-					m.tutorialCursor--
-				}
-			case "down":
-				if m.tutorialCursor < 1 {
-					m.tutorialCursor++
-				}
-			case "enter":
-				config.MarkTutorialDone(m.globalDir)
-				switch m.tutorialCursor {
-				case 0: // Start Tutorial
-					fs.SuspendAndWait(tutorialDir, 3*time.Second)
-					os.RemoveAll(tutorialDir)
-					p := m.presets[m.cursor]
-					langs := []string{"en", "zh", "wen"}
-					lang := langs[m.langCursor]
-					if err := preset.GenerateTutorialInit(p, m.baseDir, m.globalDir, lang); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					humanAddr, _ := filepath.Abs(filepath.Join(m.baseDir, "human"))
-					return m, func() tea.Msg {
-						fs.WritePrompt(tutorialDir, "You have just been created as the tutorial guide. A new user is waiting. Send them a welcome email to introduce yourself and begin Lesson 1. The human's email address is: "+humanAddr)
-						return FirstRunDoneMsg{OrchDir: tutorialDir, OrchName: "guide"}
-					}
-				case 1: // Skip Tutorial
-					p := m.presets[m.cursor]
-					m.enterAgentNameDir(p)
-					m.step = stepAgentNameDir
-					return m, textinput.Blink
-				}
-			case "esc":
-				m.step = stepCapabilities
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -992,11 +939,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
 				}
 			case "esc":
-				if m.setupMode {
-					m.step = stepCapabilities
-				} else {
-					m.step = stepTutorial
-				}
+				m.step = stepCapabilities
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -1273,41 +1216,6 @@ func (m FirstRunModel) View() string {
 			"  space "+i18n.T("settings.change")+
 			"  Ctrl+A "+i18n.T("firstrun.caps_toggle_all")+
 			"  [Enter] "+i18n.T("firstrun.confirm_caps")+
-			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
-
-	case stepTutorial:
-		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-		b.WriteString("\n  " + titleStyle.Render(i18n.T("firstrun.tutorial_title")) + "\n\n")
-
-		b.WriteString("  " + i18n.T("firstrun.tutorial_desc") + "\n")
-		b.WriteString("  " + i18n.T("firstrun.tutorial_patience") + "\n")
-		b.WriteString("  " + i18n.T("firstrun.tutorial_status_hint") + "\n")
-		b.WriteString("\n")
-
-		type tutorialOpt struct {
-			label string
-		}
-		opts := []tutorialOpt{
-			{i18n.T("firstrun.tutorial_start")},
-			{i18n.T("firstrun.tutorial_skip")},
-		}
-
-		for i, opt := range opts {
-			cursor := "  "
-			style := lipgloss.NewStyle().Foreground(ColorText)
-			if i == m.tutorialCursor {
-				cursor = "> "
-				style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString(cursor + style.Render(opt.label) + "\n")
-		}
-
-		if m.message != "" {
-			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
-			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
-		}
-		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+
-			"  [Enter] "+i18n.T("welcome.confirm")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
 	case stepAgentNameDir:
