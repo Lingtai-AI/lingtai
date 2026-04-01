@@ -7,6 +7,7 @@ You are helping the human set up IMAP email for this agent. Your job is to **cre
 - **Find the .env file path** by reading your `init.json` — look for the `env_file` field. Secrets go there, never in config JSON.
 - **Config files go under** `~/.lingtai-tui/addons/imap/<account>/config.json` where `<account>` is the email address. Each account gets its own directory. Do NOT put config files in the agent's working directory.
 - **Never edit the example template** at `~/.lingtai-tui/addons/imap/example/config.json` — it is a reference, not a working config.
+- **Always use the `accounts` array format** — even for a single account. This makes adding more accounts later a simple append.
 - **Activation requires the human** to type `/addon` in the TUI, enter the config path, then `/refresh`. You cannot do this yourself.
 
 ## What You Need From the Human
@@ -26,25 +27,50 @@ Once you have the email address and app password:
    ```
    IMAP_PASSWORD=<the app password they gave you>
    ```
+   For multiple accounts, use distinct env var names (e.g., `IMAP_PASSWORD_GMAIL`, `IMAP_PASSWORD_UCLA`).
 
 2. **Create the config file** at `~/.lingtai-tui/addons/imap/<email_address>/config.json`.
    For example, if the email is `myagent@gmail.com`:
    `~/.lingtai-tui/addons/imap/myagent@gmail.com/config.json`
 
-   Contents (adjust host for provider):
+   Always use the `accounts` array format:
    ```json
    {
-     "email_address": "<their email>",
-     "email_password_env": "IMAP_PASSWORD",
-     "imap_host": "imap.gmail.com",
-     "smtp_host": "smtp.gmail.com",
-     "allowed_senders": ["<human's email if provided>"],
-     "poll_interval": 30
+     "accounts": [
+       {
+         "email_address": "<their email>",
+         "email_password_env": "IMAP_PASSWORD",
+         "imap_host": "imap.gmail.com",
+         "smtp_host": "smtp.gmail.com",
+         "allowed_senders": ["<human's email if provided>"],
+         "poll_interval": 30
+       }
+     ]
    }
    ```
    - Gmail: `imap.gmail.com` / `smtp.gmail.com`
    - Outlook: `imap.outlook.com` / `smtp.outlook.com`
    - If no allowed_senders requested, omit the field entirely.
+
+   **To add another account later**, just append to the `accounts` array:
+   ```json
+   {
+     "accounts": [
+       {
+         "email_address": "agent@gmail.com",
+         "email_password_env": "IMAP_PASSWORD_GMAIL",
+         "imap_host": "imap.gmail.com",
+         "smtp_host": "smtp.gmail.com"
+       },
+       {
+         "email_address": "agent@ucla.edu",
+         "email_password_env": "IMAP_PASSWORD_UCLA",
+         "imap_host": "imap.gmail.com",
+         "smtp_host": "smtp.gmail.com"
+       }
+     ]
+   }
+   ```
 
 3. **Tell the human** the config is ready and give them the exact path. Ask them to:
    - Type `/addon` in the TUI
