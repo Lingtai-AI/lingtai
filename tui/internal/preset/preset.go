@@ -404,21 +404,13 @@ func WriteAddonComment(agentDir, globalDir string, addons []string, userCommentF
 
 	b.WriteString("## Add-ons\n\n")
 	b.WriteString("The following add-ons are available but not yet configured.\n")
-	b.WriteString("When the human asks to set one up, read the setup guide and **create the config file yourself**.\n")
-	b.WriteString("Do NOT just list the steps — actively help by writing the file.\n\n")
+	b.WriteString("When the human asks to set one up, read the setup guide and help them.\n\n")
 
-	addonNames := map[string]string{"imap": "IMAP Email", "telegram": "Telegram Bot"}
 	for _, addon := range addons {
-		name, ok := addonNames[addon]
-		if !ok {
-			continue
-		}
 		setupPath := filepath.Join(globalDir, "addons", addon, "SETUP.md")
-		b.WriteString("### " + name + "\n")
-		b.WriteString("- Setup guide (read this first): " + setupPath + "\n")
-		b.WriteString("- Config location: ~/.lingtai-tui/addons/" + addon + "/<account>/config.json\n")
-		b.WriteString("- After creating the config, tell the human to use /addon to enter the path, then /refresh.\n\n")
+		b.WriteString("- " + addon + ": " + setupPath + "\n")
 	}
+	b.WriteString("\n")
 
 	outPath := filepath.Join(agentDir, "system", "comment.md")
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
