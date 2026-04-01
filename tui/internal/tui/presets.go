@@ -313,17 +313,6 @@ func buildEditFields(p preset.Preset) []presetField {
 		})
 	}
 
-	// Addons (shown as checkboxes — these control comment generation, not init.json addons block)
-	for _, addonName := range AllAddons {
-		fields = append(fields, presetField{
-			Key:     "addon:" + addonName,
-			Label:   addonName,
-			Options: boolOpts,
-			Current: 1, // default selected
-			IsBool:  true,
-		})
-	}
-
 	return fields
 }
 
@@ -479,17 +468,11 @@ func (m PresetsModel) viewEditor() string {
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
 
 	capStarted := false
-	addonStarted := false
 	for i, f := range m.editFields {
 		// Capability section header
 		if strings.HasPrefix(f.Key, "cap:") && !capStarted {
 			capStarted = true
 			b.WriteString("\n  " + i18n.T("presets.capabilities") + ":\n")
-		}
-		// Addon section header
-		if strings.HasPrefix(f.Key, "addon:") && !addonStarted {
-			addonStarted = true
-			b.WriteString("\n  " + i18n.T("presets.addons") + ":\n")
 		}
 
 		cursor := "  "
@@ -498,8 +481,8 @@ func (m PresetsModel) viewEditor() string {
 		}
 
 		var label string
-		if strings.HasPrefix(f.Key, "cap:") || strings.HasPrefix(f.Key, "addon:") {
-			label = f.Label // capability/addon name directly
+		if strings.HasPrefix(f.Key, "cap:") {
+			label = f.Label // capability name directly
 		} else {
 			label = i18n.T(f.Label)
 		}
@@ -521,7 +504,7 @@ func (m PresetsModel) viewEditor() string {
 			}
 		}
 
-		if strings.HasPrefix(f.Key, "cap:") || strings.HasPrefix(f.Key, "addon:") {
+		if strings.HasPrefix(f.Key, "cap:") {
 			b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, displayVal, label))
 		} else {
 			b.WriteString(fmt.Sprintf("%s%-15s %s\n", cursor, label+":", displayVal))

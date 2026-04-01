@@ -381,15 +381,10 @@ func GreetPath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "greet", lang, "greet.md")
 }
 
-// AddonCommentPath returns the absolute path to the addon comment file.
-func AddonCommentPath(globalDir string) string {
-	return filepath.Join(globalDir, "addons", "comment.md")
-}
-
-// WriteAddonComment generates addons/comment.md with setup pointers for selected addons.
-// If userCommentFile is non-empty and exists, its content is prepended.
+// WriteAddonComment generates comment.md in the agent's directory with setup pointers
+// for selected addons. If userCommentFile is non-empty and exists, its content is prepended.
 // Returns the path to the written file, or "" if no addons selected.
-func WriteAddonComment(globalDir string, addons []string, userCommentFile string) string {
+func WriteAddonComment(agentDir, globalDir string, addons []string, userCommentFile string) string {
 	if len(addons) == 0 {
 		return ""
 	}
@@ -410,24 +405,21 @@ func WriteAddonComment(globalDir string, addons []string, userCommentFile string
 	b.WriteString("## Add-ons\n\n")
 	b.WriteString("The following add-ons are enabled. Read each setup guide to help the human configure them.\n\n")
 
+	addonNames := map[string]string{"imap": "IMAP Email", "telegram": "Telegram Bot"}
 	for _, addon := range addons {
+		name, ok := addonNames[addon]
+		if !ok {
+			continue
+		}
 		setupPath := filepath.Join(globalDir, "addons", addon, "SETUP.md")
 		templatePath := filepath.Join(globalDir, "addons", addon, "example", "config.json")
-		switch addon {
-		case "imap":
-			b.WriteString("### IMAP Email\n")
-			b.WriteString("- Setup guide: " + setupPath + "\n")
-			b.WriteString("- Config template: " + templatePath + "\n")
-			b.WriteString("- After setup, tell the human to use /addon to set the config path, then /refresh.\n\n")
-		case "telegram":
-			b.WriteString("### Telegram Bot\n")
-			b.WriteString("- Setup guide: " + setupPath + "\n")
-			b.WriteString("- Config template: " + templatePath + "\n")
-			b.WriteString("- After setup, tell the human to use /addon to set the config path, then /refresh.\n\n")
-		}
+		b.WriteString("### " + name + "\n")
+		b.WriteString("- Setup guide: " + setupPath + "\n")
+		b.WriteString("- Config template: " + templatePath + "\n")
+		b.WriteString("- After setup, tell the human to use /addon to set the config path, then /refresh.\n\n")
 	}
 
-	outPath := AddonCommentPath(globalDir)
+	outPath := filepath.Join(agentDir, "comment.md")
 	os.MkdirAll(filepath.Dir(outPath), 0o755)
 	os.WriteFile(outPath, []byte(b.String()), 0o644)
 	return outPath
