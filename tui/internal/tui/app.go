@@ -536,7 +536,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 		ps := a.tuiConfig.MailPageSize
 		if ps <= 0 {
-			ps = 999999 // unlimited
+			ps = unlimitedPageSize
 		}
 		a.mail.pageSize = ps
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)

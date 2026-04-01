@@ -420,8 +420,12 @@ func WriteAddonComment(agentDir, globalDir string, addons []string, userCommentF
 	}
 
 	outPath := filepath.Join(agentDir, "comment.md")
-	os.MkdirAll(filepath.Dir(outPath), 0o755)
-	os.WriteFile(outPath, []byte(b.String()), 0o644)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return ""
+	}
+	if err := os.WriteFile(outPath, []byte(b.String()), 0o644); err != nil {
+		return ""
+	}
 	return outPath
 }
 

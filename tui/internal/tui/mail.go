@@ -19,6 +19,9 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
+// unlimitedPageSize is the effective page size when the user selects "unlimited".
+const unlimitedPageSize = 999999
+
 // ChatMessage represents a single message in the chat stream.
 type ChatMessage struct {
 	From        string
@@ -143,7 +146,7 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		}
 	}
 	if pageSize <= 0 {
-		pageSize = 999999 // unlimited
+		pageSize = unlimitedPageSize
 	}
 	return MailModel{
 		humanDir:     humanDir,

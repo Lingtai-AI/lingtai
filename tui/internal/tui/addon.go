@@ -111,10 +111,19 @@ func (m AddonModel) View() string {
 	}
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
 
+	// Description
+	b.WriteString(StyleSubtle.Render("  "+i18n.T("addon.desc")) + "\n")
+	b.WriteString(StyleSubtle.Render("  "+i18n.T("addon.desc_template")) + "\n")
+	b.WriteString(StyleSubtle.Render("  "+i18n.T("addon.desc_empty")) + "\n\n")
+
 	// Fields
 	labels := [2]string{
 		i18n.T("addon.imap_path"),
 		i18n.T("addon.telegram_path"),
+	}
+	hints := [2]string{
+		i18n.T("addon.imap_hint"),
+		i18n.T("addon.telegram_hint"),
 	}
 
 	for i, input := range m.inputs {
@@ -124,15 +133,16 @@ func (m AddonModel) View() string {
 		}
 		label := labels[i] + ":"
 		b.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
-		b.WriteString(fmt.Sprintf("    %s\n\n", input.View()))
+		b.WriteString(fmt.Sprintf("    %s\n", input.View()))
+		b.WriteString(StyleFaint.Render("    "+hints[i]) + "\n\n")
 	}
 
 	// Footer
 	b.WriteString(strings.Repeat("─", m.width) + "\n")
-	hints := fmt.Sprintf("  ↑↓/tab %s  [esc] %s",
+	footerHints := fmt.Sprintf("  ↑↓/tab %s  [esc] %s",
 		i18n.T("addon.navigate"),
 		i18n.T("addon.save_exit"))
-	b.WriteString(StyleFaint.Render(hints) + "\n")
+	b.WriteString(StyleFaint.Render(footerHints) + "\n")
 
 	return b.String()
 }
