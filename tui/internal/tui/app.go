@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +45,6 @@ type App struct {
 
 	globalDir     string
 	projectDir    string // .lingtai/ directory
-	vizURL        string
 	orchDir       string // full path to orchestrator dir
 	orchName      string
 	lingtaiCmd    string
@@ -67,15 +67,14 @@ func humanAddr(projectDir string) string {
 }
 
 // NewApp creates the root app model.
-func NewApp(globalDir, projectDir, vizURL string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig) App {
+func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig) App {
 	lingtaiCmd := config.LingtaiCmd(globalDir)
 
 	app := App{
-		globalDir: globalDir,
+		globalDir:  globalDir,
 		projectDir: projectDir,
-		vizURL:    vizURL,
 		lingtaiCmd: lingtaiCmd,
-		tuiConfig: tuiCfg,
+		tuiConfig:  tuiCfg,
 	}
 
 	if needsFirstRun {
@@ -440,8 +439,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "viz":
-		// Open browser, stay on mail
-		openBrowser(a.vizURL)
+		url := a.portalURL()
+		if url != "" {
+			openBrowser(url)
+		}
 		return a, nil
 	case "addon":
 		if a.orchDir != "" {
@@ -594,6 +595,50 @@ func (a App) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// portalURL checks if lingtai-portal is running by reading .portal/port.
+// If not running, attempts to spawn it. Returns the URL or empty string.
+func (a *App) portalURL() string {
+	portFile := filepath.Join(a.projectDir, ".portal", "port")
+
+	// Check if portal is already running
+	if data, err := os.ReadFile(portFile); err == nil {
+		port := strings.TrimSpace(string(data))
+		url := "http://localhost:" + port
+		// Quick health check
+		client := &http.Client{Timeout: 500 * time.Millisecond}
+		if resp, err := client.Get(url + "/api/network"); err == nil {
+			resp.Body.Close()
+			return url
+		}
+		// Stale port file — remove it
+		os.Remove(portFile)
+	}
+
+	// Try to spawn portal
+	portalCmd, _ := exec.LookPath("lingtai-portal")
+	if portalCmd == "" {
+		return ""
+	}
+	cmd := exec.Command(portalCmd, "--dir", filepath.Dir(a.projectDir))
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return ""
+	}
+	// Release the process so it survives TUI exit
+	cmd.Process.Release()
+
+	// Wait for port file to appear (up to 3 seconds)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		if data, err := os.ReadFile(portFile); err == nil {
+			return "http://localhost:" + strings.TrimSpace(string(data))
+		}
+	}
+	return ""
 }
 
 func isWSL() bool {

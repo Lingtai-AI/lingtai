@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
-	"github.com/anthropics/lingtai-tui/internal/api"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -135,15 +133,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start API server
-	srv := api.NewServer(lingtaiDir, WebFS())
-	portFile := filepath.Join(lingtaiDir, ".port")
-	if err := srv.Start(portFile); err != nil {
-		fmt.Fprintf(os.Stderr, "error starting server: %v\n", err)
-		os.Exit(1)
-	}
-	defer srv.Stop(context.Background())
-
 	// First run = no config.json in ~/.lingtai-tui/
 	configPath := filepath.Join(globalDir, "config.json")
 	_, configErr := os.Stat(configPath)
@@ -195,7 +184,7 @@ func main() {
 	}
 
 	// Launch TUI
-	app := tui.NewApp(globalDir, lingtaiDir, srv.URL(), needsFirstRun, orchestrators, tuiCfg)
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, orchestrators, tuiCfg)
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
