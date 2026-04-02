@@ -113,14 +113,9 @@ def setup(
     mgr = TelegramManager(agent=agent, service=svc, working_dir=working_dir)
     mgr_ref[0] = mgr
 
-    account_names = ", ".join(svc.list_accounts())
     agent.add_tool(
         "telegram", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
-        system_prompt=(
-            f"Telegram bot accounts: {account_names}\n"
-            f"Use telegram(action=...) for Telegram conversations."
-        ),
     )
 
-    log.info("Telegram addon configured: %s", account_names)
+    log.info("Telegram addon configured: %s", ", ".join(svc.list_accounts()))
     return mgr

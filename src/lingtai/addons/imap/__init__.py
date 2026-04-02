@@ -143,22 +143,8 @@ def setup(
     mgr = IMAPMailManager(agent, service=imap_svc, tcp_alias=str(bridge_dir))
     mgr._bridge = bridge
 
-    # Build system prompt listing all configured accounts
-    addr_lines = "\n".join(
-        f"  - {acct['email_address']}"
-        for acct in account_list
-    )
-    system_prompt = (
-        f"IMAP email accounts:\n{addr_lines}\n"
-        f"Internal bridge: {bridge_dir} "
-        f"(other agents can send to this address to relay via IMAP/SMTP)\n"
-        f"Use imap(action=...) for external email. "
-        f"Use email(action=...) for inter-agent communication."
-    )
-
     agent.add_tool(
         "imap", schema=SCHEMA, handler=mgr.handle, description=DESCRIPTION,
-        system_prompt=system_prompt,
     )
 
     log.info(

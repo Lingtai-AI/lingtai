@@ -150,7 +150,13 @@ DESCRIPTION = (
     "Every response includes account and tcp_alias fields. "
     "Actions: send, check, read, reply, search, delete, move, flag, folders, "
     "contacts, add_contact, remove_contact, edit_contact, accounts. "
-    "Email IDs use compound key format: account:folder:uid."
+    "Email IDs use compound key format: account:folder:uid.\n"
+    "REPLY POLICY: "
+    "When a human contacts you via internal email (email tool), reply via internal email. "
+    "When you receive an IMAP email from an external address, do NOT reply unless: "
+    "(1) you have explicit guidance on how to handle IMAP replies, or "
+    "(2) you can confirm the sender is the same human who contacts you via internal email. "
+    "Unknown external senders require confirmation from your human before replying."
 )
 
 
