@@ -14,6 +14,7 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/tui"
@@ -123,6 +124,14 @@ func main() {
 		out, _ := exec.Command(self, "list", projectDir).Output()
 		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
 			fmt.Print(string(out))
+			os.Exit(1)
+		}
+	}
+
+	// If .lingtai/ exists, run migrations before anything else
+	if _, err := os.Stat(lingtaiDir); err == nil {
+		if err := migrate.Run(lingtaiDir); err != nil {
+			fmt.Fprintf(os.Stderr, "migration error: %v\n", err)
 			os.Exit(1)
 		}
 	}
