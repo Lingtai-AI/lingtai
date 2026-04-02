@@ -19,6 +19,10 @@ func ReadSent(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "sent"))
 }
 
+func ReadArchive(dir string) ([]MailMessage, error) {
+	return readMailFolder(filepath.Join(dir, "mailbox", "archive"))
+}
+
 // MailCache tracks already-loaded messages for incremental refresh.
 // Each Refresh call reads only new messages from disk.
 type MailCache struct {

@@ -49,7 +49,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
 	}
 
-	// Count from inbox only — sent would double-count
+	// Count from inbox + archive — messages exist in exactly one folder
 	mailEdges := buildMailEdges(nodes)
 	stats := computeStats(nodes, mailEdges)
 
@@ -71,7 +71,9 @@ func buildMailEdges(nodes []AgentNode) []MailEdge {
 			continue
 		}
 		inbox, _ := ReadInbox(n.WorkingDir)
-		for _, msg := range inbox {
+		archive, _ := ReadArchive(n.WorkingDir)
+		allMail := append(inbox, archive...)
+		for _, msg := range allMail {
 			recipients := resolveRecipients(msg.To)
 			for _, r := range recipients {
 				counts[edgeKey{msg.From, r}]++
