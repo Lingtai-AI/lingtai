@@ -29,6 +29,7 @@ const (
 	appViewAddon
 	appViewDoctor
 	appViewTutorial
+	appViewNirvana
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -42,6 +43,7 @@ type App struct {
 	addon       AddonModel
 	doctor      DoctorModel
 	tutorial    TutorialConfirmModel
+	nirvana     NirvanaModel
 
 	globalDir     string
 	projectDir    string // .lingtai/ directory
@@ -157,6 +159,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.doctor, cmd = a.doctor.Update(msg)
 		case appViewTutorial:
 			a.tutorial, cmd = a.tutorial.Update(msg)
+		case appViewNirvana:
+			a.nirvana, cmd = a.nirvana.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		}
@@ -213,6 +217,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
+	case NirvanaDoneMsg:
+		// Nirvana complete: .lingtai/ wiped, go to first-run
+		a.orchDir = ""
+		a.orchName = ""
+		a.currentView = appViewFirstRun
+		hasPresets := preset.HasAny()
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, hasPresets)
+		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
+
 	case AddonSavedMsg:
 		a.mail.AddSystemMessage(i18n.T("addon.saved"))
 		return a.switchToView("mail")
@@ -267,7 +280,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana {
 				return a, tea.Quit
 			}
 		}
@@ -317,6 +330,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewTutorial:
 		updated, cmd := a.tutorial.Update(msg)
 		a.tutorial = updated
+		return a, cmd
+	case appViewNirvana:
+		updated, cmd := a.nirvana.Update(msg)
+		a.nirvana = updated
 		return a, cmd
 	}
 
@@ -469,6 +486,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
 		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
+	case "nirvana":
+		a.currentView = appViewNirvana
+		a.nirvana = NewNirvanaModel(a.projectDir)
+		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
 	case "quit":
 		return a, tea.Quit
 	}
@@ -597,6 +618,8 @@ func (a App) View() tea.View {
 		content = a.doctor.View()
 	case appViewTutorial:
 		content = a.tutorial.View()
+	case appViewNirvana:
+		content = a.nirvana.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

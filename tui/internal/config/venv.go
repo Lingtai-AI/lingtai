@@ -157,7 +157,38 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 	if err := verify.Run(); err != nil {
 		return fmt.Errorf("lingtai installed but import failed — check for missing dependencies: %w", err)
 	}
+
+	// Step 4: symlink lingtai CLI into ~/.local/bin so it's on PATH
+	linkLingtaiCLI(venvPath)
+
 	return nil
+}
+
+// linkLingtaiCLI creates a symlink from ~/.local/bin/lingtai to the venv's
+// lingtai entry point. Silently does nothing on error (best-effort).
+func linkLingtaiCLI(venvPath string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	src := filepath.Join(venvPath, "bin", "lingtai")
+	if runtime.GOOS == "windows" {
+		src = filepath.Join(venvPath, "Scripts", "lingtai.exe")
+	}
+	if _, err := os.Stat(src); err != nil {
+		return
+	}
+
+	localBin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(localBin, 0o755)
+	dst := filepath.Join(localBin, "lingtai")
+	if runtime.GOOS == "windows" {
+		dst = filepath.Join(localBin, "lingtai.exe")
+	}
+
+	// Remove stale symlink if it exists
+	os.Remove(dst)
+	os.Symlink(src, dst)
 }
 
 func findUV() string {

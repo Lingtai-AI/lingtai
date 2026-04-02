@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -33,6 +34,10 @@ type PropsModel struct {
 	network    fs.Network
 	tokens     fs.TokenTotals
 	adminStart string // admin agent's started_at timestamp
+
+	// Scrollable viewport for content
+	viewport viewport.Model
+	ready    bool // viewport initialized
 
 	// Agent picker overlay
 	pickerOpen bool
@@ -97,11 +102,32 @@ func (m PropsModel) loadData() tea.Msg {
 
 func (m PropsModel) Init() tea.Cmd { return m.loadData }
 
+// propsHeaderLines is the number of lines used by the header (title + separator).
+const propsHeaderLines = 2
+
+// propsFooterLines is the number of lines used by the footer (separator + hints).
+const propsFooterLines = 2
+
 func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		vpHeight := m.height - propsHeaderLines - propsFooterLines
+		if vpHeight < 1 {
+			vpHeight = 1
+		}
+		if !m.ready {
+			m.viewport = viewport.New()
+			m.viewport.SetWidth(m.width)
+			m.viewport.SetHeight(vpHeight)
+			m.ready = true
+		} else {
+			m.viewport.SetWidth(m.width)
+			m.viewport.SetHeight(vpHeight)
+		}
+		m.syncViewportContent()
 
 	case propsLoadMsg:
 		m.network = msg.network
@@ -111,6 +137,13 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
+		m.syncViewportContent()
+
+	case tea.MouseWheelMsg:
+		if !m.pickerOpen {
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
 
 	case tea.KeyPressMsg:
 		if m.pickerOpen {
@@ -127,15 +160,34 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 					break
 				}
 			}
+			m.syncViewportContent()
+			return m, nil
+		default:
+			// Forward navigation keys (up/down/pgup/pgdn/home/end) to viewport
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		}
 	}
 	return m, nil
+}
+
+// syncViewportContent re-renders left+right panels into the viewport.
+func (m *PropsModel) syncViewportContent() {
+	if !m.ready {
+		return
+	}
+	if m.pickerOpen {
+		m.viewport.SetContent(m.renderPicker())
+	} else {
+		m.viewport.SetContent(m.renderBody())
+	}
 }
 
 func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+t":
 		m.pickerOpen = false
+		m.syncViewportContent()
 	case "up", "k":
 		if m.pickerIdx > 0 {
 			m.pickerIdx--
@@ -151,6 +203,7 @@ func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
 			m.selectedStatus = fs.ReadStatus(m.selectedDir)
 		}
 		m.pickerOpen = false
+		m.syncViewportContent()
 	}
 	return m, nil
 }
@@ -160,7 +213,7 @@ type propsField struct {
 	label string
 }
 
-func (m PropsModel) View() string {
+func (m PropsModel) renderBody() string {
 	leftW := m.width/2 - 1
 	rightW := m.width - leftW - 1
 	if leftW < 20 {
@@ -195,31 +248,48 @@ func (m PropsModel) View() string {
 	}
 
 	sep := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
+
+	// Pad to viewport height so the separator column runs full-screen
+	vpHeight := m.height - propsHeaderLines - propsFooterLines
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	for len(leftLines) < vpHeight {
+		leftLines = append(leftLines, "")
+	}
+	for len(rightLines) < vpHeight {
+		rightLines = append(rightLines, "")
+	}
+	if len(leftLines) > len(rightLines) {
+		for len(rightLines) < len(leftLines) {
+			rightLines = append(rightLines, "")
+		}
+	} else {
+		for len(leftLines) < len(rightLines) {
+			leftLines = append(leftLines, "")
+		}
+	}
+
 	var body strings.Builder
-	for i := 0; i < maxLines; i++ {
+	for i := 0; i < len(leftLines); i++ {
 		l := padToWidth(leftLines[i], leftW)
 		body.WriteString(l + sep + rightLines[i] + "\n")
 	}
 
+	return strings.TrimRight(body.String(), "\n")
+}
+
+func (m PropsModel) View() string {
 	header := StyleTitle.Render("  "+i18n.T("props.title")) + "\n" + strings.Repeat("\u2500", m.width)
 
+	scrollHint := ""
+	if m.ready && !m.viewport.AtBottom() {
+		scrollHint = " " + RuneBullet + " ↑↓ scroll"
+	}
 	footer := strings.Repeat("\u2500", m.width) + "\n" +
-		StyleFaint.Render("  "+i18n.T("hints.props_off")+" "+RuneBullet+" esc "+i18n.T("manage.back")+" "+RuneBullet+" "+i18n.T("hints.props_select"))
+		StyleFaint.Render("  "+i18n.T("hints.props_off")+" "+RuneBullet+" esc "+i18n.T("manage.back")+" "+RuneBullet+" "+i18n.T("hints.props_select")+scrollHint)
 
-	content := body.String()
-
-	contentLines := strings.Count(content, "\n")
-	usedLines := contentLines + 4 // header(2) + separator "\n" + footer(2) - 1 trailing
-	if remaining := m.height - usedLines; remaining > 0 {
-		filler := padToWidth("", leftW) + sep + "\n"
-		content += strings.Repeat(filler, remaining)
-	}
-
-	if m.pickerOpen {
-		content = m.renderPicker()
-	}
-
-	return header + "\n" + content + footer
+	return header + "\n" + m.viewport.View() + "\n" + footer
 }
 
 func padToWidth(s string, w int) string {
@@ -511,14 +581,7 @@ func (m PropsModel) renderPicker() string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+StyleFaint.Render("↑↓ "+i18n.T("manage.select")+"  [enter]  [esc/ctrl+t] "+i18n.T("manage.back")))
 
-	content := strings.Join(lines, "\n")
-
-	usedLines := len(lines) + 4 // header(2) + separator "\n" + footer(2) - 1 trailing
-	if remaining := m.height - usedLines; remaining > 0 {
-		content += strings.Repeat("\n", remaining)
-	}
-
-	return content
+	return strings.Join(lines, "\n")
 }
 
 func formatComma(n int64) string {

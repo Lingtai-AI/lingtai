@@ -52,6 +52,7 @@ func DefaultCommands() []Command {
 		{Name: "tutorial", Description: "palette.tutorial"},
 		{Name: "setup", Description: "palette.setup"},
 		{Name: "settings", Description: "palette.settings"},
+		{Name: "nirvana", Description: "palette.nirvana"},
 		{Name: "quit", Description: "palette.quit"},
 	}
 }

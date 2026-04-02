@@ -118,8 +118,8 @@ jobs:
             version "${VERSION}"
             license "MIT"
 
-            depends_on "uv"
-            depends_on "python@3.13"
+            depends_on "uv" => :recommended
+            depends_on "python@3.13" => :recommended
 
             on_macos do
               on_arm do
