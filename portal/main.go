@@ -54,16 +54,14 @@ func main() {
 	portalDir := filepath.Join(lingtaiDir, ".portal")
 	os.MkdirAll(portalDir, 0o755)
 
-	// Start server
+	// Start server and background topology recorder
 	srv := api.NewServer(lingtaiDir, WebFS())
+	srv.StartRecording(lingtaiDir)
 	portFile := filepath.Join(portalDir, "port")
 	if err := srv.Start(portFile, port); err != nil {
 		fmt.Fprintf(os.Stderr, "error starting server: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Start background topology recorder
-	srv.StartRecording(lingtaiDir)
 
 	fmt.Printf("lingtai-portal serving %s\n", lingtaiDir)
 	fmt.Printf("  %s\n", srv.URL())

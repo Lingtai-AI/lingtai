@@ -43,7 +43,7 @@ func Run(lingtaiDir string) error {
 
 	if current > CurrentVersion {
 		return fmt.Errorf(
-			"data version %d is newer than this binary supports (%d); upgrade lingtai-portal",
+			"data version %d is newer than this binary supports (%d); upgrade lingtai-tui",
 			current, CurrentVersion,
 		)
 	}
