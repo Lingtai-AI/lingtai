@@ -457,6 +457,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		case stepWelcome:
 			langs := []string{"en", "zh", "wen"}
 			switch msg.String() {
+			case "ctrl+t":
+				// Cycle through registered themes
+				names := ThemeNames()
+				tuiCfg := config.LoadTUIConfig(m.globalDir)
+				current := tuiCfg.Theme
+				if current == "" {
+					current = DefaultThemeName
+				}
+				next := names[0]
+				for i, n := range names {
+					if n == current {
+						next = names[(i+1)%len(names)]
+						break
+					}
+				}
+				tuiCfg.Theme = next
+				SetThemeByName(next)
+				config.SaveTUIConfig(m.globalDir, tuiCfg)
+				return m, nil
 			case "up":
 				if m.langCursor > 0 {
 					m.langCursor--
@@ -1493,9 +1512,9 @@ func (m FirstRunModel) viewWelcome() string {
 	content.WriteString("\n")
 	var hints string
 	if m.setupDone || m.welcomeOnly {
-		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Enter] " + i18n.T("welcome.confirm"))
+		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Enter] " + i18n.T("welcome.confirm") + "  [Ctrl+T] " + i18n.T("settings.theme"))
 	} else {
-		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  (" + i18n.T("welcome.installing") + ")")
+		hints = StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") + "  [Ctrl+T] " + i18n.T("settings.theme") + "  (" + i18n.T("welcome.installing") + ")")
 	}
 	content.WriteString(centerText(hints, m.width) + "\n")
 

@@ -107,10 +107,29 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		greetingCurrent = 0
 	}
 
+	themeOptions := ThemeNames()
+	themeCurrent := 0
+	for i, t := range themeOptions {
+		if t == tuiCfg.Theme {
+			themeCurrent = i
+			break
+		}
+	}
+	// If no theme is set, find the default
+	if tuiCfg.Theme == "" {
+		for i, t := range themeOptions {
+			if t == DefaultThemeName {
+				themeCurrent = i
+				break
+			}
+		}
+	}
+
 	fields := []SettingField{
 		{Key: "language", Label: "settings.language", Options: langOptions, Current: langCurrent},
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "greeting", Label: "settings.greeting", Options: greetingOptions, Current: greetingCurrent},
+		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
 	}
 
 	// Read current nickname from human's .agent.json
@@ -238,6 +257,9 @@ func (m *SettingsModel) applyField(f *SettingField) {
 		}
 	case "greeting":
 		m.tuiConfig.Greeting = val == "on"
+	case "theme":
+		m.tuiConfig.Theme = val
+		SetThemeByName(val)
 	}
 	config.SaveTUIConfig(m.globalDir, m.tuiConfig)
 }

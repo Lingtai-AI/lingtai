@@ -37,6 +37,7 @@ type TUIConfig struct {
 	Language     string `json:"language"`
 	MailPageSize int    `json:"mail_page_size"`
 	Greeting     bool   `json:"greeting"`
+	Theme        string `json:"theme,omitempty"` // theme name: "ink-dark" (default), etc.
 }
 
 // DefaultTUIConfig returns sensible defaults.

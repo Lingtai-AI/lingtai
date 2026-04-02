@@ -218,6 +218,7 @@
   "settings.agent_name_hint": "requires /refresh to take effect",
   "settings.edit": "edit",
   "settings.confirm": "confirm",
+  "settings.theme": "Theme",
   "setup.api_key_label": "API Key:",
   "setup.back": "Back",
   "setup.confirm": "Confirm",

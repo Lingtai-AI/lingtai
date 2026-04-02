@@ -218,6 +218,7 @@
   "settings.agent_name_hint": "需 /refresh 生效",
   "settings.edit": "编辑",
   "settings.confirm": "确认",
+  "settings.theme": "主题",
   "setup.api_key_label": "API 密钥：",
   "setup.back": "返回",
   "setup.confirm": "确认",

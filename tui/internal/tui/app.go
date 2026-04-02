@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type appView int
@@ -68,6 +69,9 @@ func humanAddr(projectDir string) string {
 
 // NewApp creates the root app model.
 func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig) App {
+	// Apply persisted theme (or default).
+	SetThemeByName(tuiCfg.Theme)
+
 	lingtaiCmd := config.LingtaiCmd(globalDir)
 
 	app := App{
@@ -590,6 +594,15 @@ func (a App) View() tea.View {
 		content = a.doctor.View()
 	case appViewTutorial:
 		content = a.tutorial.View()
+	}
+	// Paint the active theme's background across the full terminal area.
+	if ActiveTheme().PaintBG && a.width > 0 && a.height > 0 {
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height).
+			Background(ColorBG).
+			Foreground(ColorText).
+			Render(content)
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

@@ -42,7 +42,7 @@ type ViewChangeMsg struct {
 type pulseTickMsg time.Time
 
 func pulseTick() tea.Cmd {
-	return tea.Every(150*time.Millisecond, func(t time.Time) tea.Msg { return pulseTickMsg(t) })
+	return tea.Every(250*time.Millisecond, func(t time.Time) tea.Msg { return pulseTickMsg(t) })
 }
 
 type mailRefreshMsg struct {
@@ -125,9 +125,9 @@ type MailModel struct {
 	lastPaletteLines int
 	lastBannerLines  int
 	pendingMessage   string // full text from editor, sent on Enter
+	globalDir      string // ~/.lingtai-tui/
 	greetEnabled   bool   // from settings
 	greetChecked   bool   // true after first refresh check
-	greetGlobalDir string // ~/.lingtai-tui/ for reading greet template
 	greetLang      string // current language
 	wasActive      bool   // true if previous refresh was ACTIVE
 	quoteIdx       int    // which quote to show (advances on each ACTIVE transition)
@@ -160,8 +160,8 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		pollRate:     1 * time.Second,
 		cache:        fs.NewMailCache(humanDir),
 		pageSize:     pageSize,
+		globalDir:      globalDir,
 		greetEnabled:   greeting,
-		greetGlobalDir: globalDir,
 		greetLang:      lang,
 		quoteIdx:       -1,
 	}
@@ -314,7 +314,7 @@ func (m *MailModel) buildMessages() {
 // buildGreetPrompt reads the greet template, replaces placeholders, and returns
 // the final prompt string. Returns "" if the template file is missing.
 func (m *MailModel) buildGreetPrompt() string {
-	path := preset.GreetPath(m.greetGlobalDir, m.greetLang)
+	path := preset.GreetPath(m.globalDir, m.greetLang)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -703,7 +703,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			var wrappedBody string
 			if !msg.IsFromMe && msg.From != i18n.T("mail.system_sender") {
 				r, err := glamour.NewTermRenderer(
-					glamour.WithStandardStyle("dark"),
+					glamour.WithStandardStyle(ActiveTheme().GlamourStyle),
 					glamour.WithWordWrap(bodyWidth),
 				)
 				if err == nil {
@@ -781,11 +781,7 @@ func (m MailModel) View() string {
 		}
 		quote := quotes[m.quoteIdx%len(quotes)]
 		spinner := spinnerFrames[m.pulseTick%len(spinnerFrames)]
-		shades := []string{
-			"#3a5a6a", "#4a6a7a", "#5a7a8a", "#6a8a9a",
-			"#7a9aaa", "#8aaaba", "#7a9aaa", "#6a8a9a",
-			"#5a7a8a", "#4a6a7a",
-		}
+		shades := ActiveTheme().PulseShades
 		shade := lipgloss.Color(shades[m.pulseTick%len(shades)])
 		style := lipgloss.NewStyle().Foreground(shade)
 		titleCenter = style.Render(spinner + " " + quote + " " + spinner)
