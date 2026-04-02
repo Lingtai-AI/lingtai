@@ -4,7 +4,7 @@
 
 # 灵台 LingTai
 
-**Agent OS — self-growing agent orchestration**
+**An Agent OS that gifts life to agents**
 
 > *灵台，心也。* Lingtai means soul.
 >
@@ -40,7 +40,7 @@ That's it. The TUI bootstraps everything — Python runtime, dependencies, and a
 
 ## Why Lingtai
 
-**This is not a coding agent.** This is an architecture for agents as autonomous creatures with dignity — agents that live, sleep, forget, and grow.
+**This is not a coding agent, and hardly an agent harness.** This is giving agents a real digital life form — agents as autonomous creatures with dignity, that live, sleep, forget, and grow.
 
 Most agent frameworks orchestrate with code — DAGs, chains, routers. Lingtai orchestrates like humans do: **fully asynchronous agents communicating through messages**. No shared memory. No central controller. Each agent is a peer, not a tool.
 
