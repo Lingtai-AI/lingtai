@@ -12,6 +12,8 @@ func BuildNetwork(baseDir string) (Network, error) {
 	}
 
 	for i := range nodes {
+		// Normalize state to uppercase (Python kernel writes lowercase)
+		nodes[i].State = strings.ToUpper(nodes[i].State)
 		if nodes[i].IsHuman {
 			nodes[i].Alive = true
 		} else {

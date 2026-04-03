@@ -2,16 +2,17 @@ import type { Network } from './types';
 import type { EdgeMode } from './Graph';
 import type { Theme } from './theme';
 import { Stats } from './Stats';
-import { Kanban } from './Kanban';
 import { t } from './i18n';
 
-export function BottomBar({ network, edgeMode, lang, theme, themeMode, onToggle, onToggleTheme }: {
+export function BottomBar({ network, edgeMode, showNames, lang, theme, themeMode, onToggle, onToggleNames, onToggleTheme }: {
   network: Network;
   edgeMode: EdgeMode;
+  showNames: boolean;
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
   onToggle: () => void;
+  onToggleNames: () => void;
   onToggleTheme: () => void;
 }) {
   return (
@@ -20,10 +21,8 @@ export function BottomBar({ network, edgeMode, lang, theme, themeMode, onToggle,
       borderTop: `1px solid ${theme.border}`,
       padding: '10px 16px',
       display: 'flex',
-      alignItems: 'flex-start',
-      gap: 24,
-      maxHeight: '40vh',
-      overflowY: 'auto',
+      alignItems: 'center',
+      gap: 12,
       flexShrink: 0,
     }}>
       <Stats stats={network.stats} lang={lang} theme={theme} />
@@ -51,6 +50,24 @@ export function BottomBar({ network, edgeMode, lang, theme, themeMode, onToggle,
           );
         })}
       </div>
+      {/* Name toggle */}
+      <button
+        onClick={onToggleNames}
+        style={{
+          background: showNames ? theme.textDim + '20' : 'transparent',
+          border: `1px solid ${theme.border}`,
+          borderRadius: 4,
+          padding: '3px 10px',
+          cursor: 'pointer',
+          color: showNames ? theme.textDim : theme.textDim + '66',
+          fontSize: 10,
+          letterSpacing: 0.5,
+          flexShrink: 0,
+        }}
+        title={showNames ? 'Hide agent names' : 'Show agent names'}
+      >
+        Aa
+      </button>
       {/* Theme toggle */}
       <button
         onClick={onToggleTheme}
@@ -64,13 +81,11 @@ export function BottomBar({ network, edgeMode, lang, theme, themeMode, onToggle,
           fontSize: 10,
           letterSpacing: 0.5,
           flexShrink: 0,
-          alignSelf: 'center',
         }}
         title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {themeMode === 'dark' ? '☀' : '☽'}
       </button>
-      <Kanban nodes={network.nodes} lang={lang} theme={theme} />
     </div>
   );
 }

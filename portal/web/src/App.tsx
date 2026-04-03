@@ -43,6 +43,7 @@ const DEFAULT_SPEED = 10;
 export default function App() {
   const [network, setNetwork] = useState<Network | null>(null);
   const [edgeMode, setEdgeMode] = useState<EdgeMode>('avatar');
+  const [showNames, setShowNames] = useState(true);
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>(loadThemePreference);
   const [bullets, setBullets] = useState<Bullet[]>([]);
 
@@ -290,15 +291,18 @@ export default function App() {
           theme={theme}
           bullets={bullets}
           vizMode={vizMode}
+          showNames={showNames}
         />
       </div>
       <BottomBar
         network={network}
         edgeMode={edgeMode}
+        showNames={showNames}
         lang={lang}
         theme={theme}
         themeMode={themeMode}
         onToggle={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
+        onToggleNames={() => setShowNames(v => !v)}
         onToggleTheme={toggleTheme}
       />
     </div>

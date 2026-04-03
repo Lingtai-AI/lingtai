@@ -32,6 +32,9 @@ interface Dot {
   y: number;
 }
 
+/** Normalize state to uppercase for theme/color matching (kernel writes lowercase). */
+function normState(s: string): string { return s ? s.toUpperCase() : ''; }
+
 /** A bullet flying from sender → recipient. */
 export interface Bullet {
   src: string;   // sender address (resolve to dot position at draw time)
@@ -154,12 +157,13 @@ function findNearest(dots: Map<string, Dot>, mx: number, my: number): Dot | null
   return best;
 }
 
-export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
+export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = true }: {
   network: Network;
   edgeMode: EdgeMode;
   theme: Theme;
   bullets: Bullet[];
   vizMode?: 'live' | 'replay';
+  showNames?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Map<string, Dot>>(new Map());
@@ -167,6 +171,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
   const edgeModeRef = useRef(edgeMode);
   const themeRef = useRef(theme);
   const vizModeRef = useRef(vizMode ?? 'live');
+  const showNamesRef = useRef(showNames);
   const animRef = useRef(0);
   const grabbedRef = useRef<Dot | null>(null);
 
@@ -182,6 +187,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
   edgeModeRef.current = edgeMode;
   themeRef.current = theme;
   vizModeRef.current = vizMode ?? 'live';
+  showNamesRef.current = showNames;
 
   // Absorb new bullets from props into mutable ref
   useEffect(() => {
@@ -214,7 +220,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
         const prev = old.get(n.address);
         if (prev) {
           prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
-          prev.state = n.state;
+          prev.state = normState(n.state);
           prev.alive = n.alive;
           prev.isHuman = n.is_human;
         } else {
@@ -225,7 +231,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
           old.set(n.address, {
             id: n.address,
             name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
-            state: n.state,
+            state: normState(n.state),
             alive: n.alive,
             isHuman: n.is_human,
             x: sp ? sp.x : lp ? lp.x : W * 0.5,
@@ -249,7 +255,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
         const prev = old.get(n.address);
         if (prev) {
           prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
-          prev.state = n.state;
+          prev.state = normState(n.state);
           prev.alive = n.alive;
           prev.isHuman = n.is_human;
           next.set(n.address, prev);
@@ -259,7 +265,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
           next.set(n.address, {
             id: n.address,
             name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
-            state: n.state,
+            state: normState(n.state),
             alive: n.alive,
             isHuman: n.is_human,
             x: sp ? sp.x : lp ? lp.x : W * 0.5,
@@ -511,6 +517,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
       ctx.fill();
 
       // Name label
+      if (!showNamesRef.current) continue;
       const [lr, lg, lb] = th.labelColorRgb;
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';

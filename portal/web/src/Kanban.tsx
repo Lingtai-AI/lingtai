@@ -8,7 +8,7 @@ export function Kanban({ nodes, lang, theme }: { nodes: AgentNode[]; lang: strin
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10 }}>
       {states.map(state => {
-        const agents = nodes.filter(n => !n.is_human && n.state === state);
+        const agents = nodes.filter(n => !n.is_human && (n.state || '').toUpperCase() === state);
         if (agents.length === 0) return null;
         const color = theme.stateColors[state] || theme.stateColors[''];
         const label = state ? t(lang, `state.${state.toLowerCase()}`) : '—';
