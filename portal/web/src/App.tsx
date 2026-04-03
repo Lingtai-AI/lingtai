@@ -282,7 +282,6 @@ export default function App() {
         tapeRange={tapeRange}
         viewRange={viewRange}
         edgeMode={edgeMode}
-        showNames={showNames}
         showFilter={showFilter}
         onEnterReplay={enterReplay}
         onExitReplay={exitReplay}
@@ -292,7 +291,6 @@ export default function App() {
         onSetViewRange={changeViewRange}
         onToggleTheme={toggleTheme}
         onToggleEdgeMode={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
-        onToggleNames={() => setShowNames(v => !v)}
         onToggleFilter={() => setShowFilter(v => !v)}
       />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -318,7 +316,10 @@ export default function App() {
             <FilterPanel
               network={network}
               filter={filter}
+              lang={lang}
               theme={theme}
+              showNames={showNames}
+              onToggleNames={() => setShowNames(v => !v)}
               onChange={setFilter}
             />
           </div>

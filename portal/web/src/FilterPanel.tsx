@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Network } from './types';
 import type { Theme } from './theme';
+import { t } from './i18n';
 
 export interface FilterState {
   hiddenNodes: Set<string>;
@@ -13,7 +14,6 @@ export function defaultFilter(): FilterState {
   return { hiddenNodes: new Set(), showDirect: true, showCC: true, showBCC: true };
 }
 
-/** Ink-wash toggle — a small pill that slides between on/off. */
 function Toggle({ on, color, onChange }: { on: boolean; color: string; onChange: () => void }) {
   return (
     <button
@@ -47,10 +47,13 @@ function Toggle({ on, color, onChange }: { on: boolean; color: string; onChange:
   );
 }
 
-export function FilterPanel({ network, filter, theme, onChange }: {
+export function FilterPanel({ network, filter, lang, theme, showNames, onToggleNames, onChange }: {
   network: Network;
   filter: FilterState;
+  lang: string;
   theme: Theme;
+  showNames: boolean;
+  onToggleNames: () => void;
   onChange: (f: FilterState) => void;
 }) {
   const [tab, setTab] = useState<'nodes' | 'mail'>('nodes');
@@ -73,18 +76,35 @@ export function FilterPanel({ network, filter, theme, onChange }: {
       userSelect: 'none',
       fontFamily: "'Georgia', 'Noto Serif SC', serif",
     }}>
-      {/* Tab strip — ink-wash underline style */}
+      {/* Name toggle row — top of sidebar */}
+      <div
+        onClick={onToggleNames}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 10px',
+          cursor: 'pointer',
+          borderBottom: `1px solid ${theme.border}`,
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 11, color: theme.text }}>{t(lang, 'menu.names')}</span>
+        <Toggle on={showNames} color={theme.gold} onChange={() => {}} />
+      </div>
+
+      {/* Tab strip */}
       <div style={{
         display: 'flex',
         flexShrink: 0,
         borderBottom: `1px solid ${theme.border}`,
       }}>
-        {(['nodes', 'mail'] as const).map(t => {
-          const active = tab === t;
+        {(['nodes', 'mail'] as const).map(tb => {
+          const active = tab === tb;
           return (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tb}
+              onClick={() => setTab(tb)}
               style={{
                 flex: 1,
                 background: 'transparent',
@@ -101,7 +121,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                 transition: 'color 0.2s, border-color 0.2s',
               }}
             >
-              {t === 'nodes' ? '器灵' : '书信'}
+              {t(lang, `filter.${tb}`)}
             </button>
           );
         })}
@@ -115,7 +135,6 @@ export function FilterPanel({ network, filter, theme, onChange }: {
       }}>
         {tab === 'nodes' && (
           <>
-            {/* Quick actions */}
             <div style={{
               display: 'flex',
               gap: 4,
@@ -137,7 +156,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                   fontFamily: 'inherit',
                 }}
               >
-                all
+                {t(lang, 'filter.all')}
               </button>
               <button
                 onClick={() => {
@@ -155,11 +174,10 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                   fontFamily: 'inherit',
                 }}
               >
-                none
+                {t(lang, 'filter.none')}
               </button>
             </div>
 
-            {/* Node list */}
             {agents.map(a => {
               const visible = !filter.hiddenNodes.has(a.address);
               const baseName = a.nickname || a.agent_name || a.address.split('/').pop() || '?';
@@ -184,7 +202,6 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                   onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = theme.textDim + '0a'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                 >
-                  {/* State dot */}
                   <span style={{
                     width: 6,
                     height: 6,
@@ -194,7 +211,6 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                     boxShadow: visible ? `0 0 3px ${stateColor}50` : 'none',
                     transition: 'box-shadow 0.2s',
                   }} />
-                  {/* Name */}
                   <span style={{
                     fontSize: 10,
                     color: visible ? theme.text : theme.textDim,
@@ -207,7 +223,6 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                   }}>
                     {baseName}
                   </span>
-                  {/* Human badge */}
                   {a.is_human && (
                     <span style={{
                       fontSize: 8,
@@ -218,10 +233,9 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                       letterSpacing: 0.3,
                       flexShrink: 0,
                     }}>
-                      人
+                      {t(lang, 'filter.human')}
                     </span>
                   )}
-                  {/* Toggle */}
                   <Toggle on={visible} color={stateColor} onChange={() => {}} />
                 </div>
               );
@@ -238,14 +252,14 @@ export function FilterPanel({ network, filter, theme, onChange }: {
               lineHeight: 1.5,
               fontStyle: 'italic',
             }}>
-              Edge thickness reflects selected types
+              {t(lang, 'filter.mail_desc')}
             </p>
 
             {([
-              { key: 'showDirect' as const, label: 'Direct', sub: '收件人 · To' },
-              { key: 'showCC' as const, label: 'CC', sub: '抄送 · Carbon Copy' },
-              { key: 'showBCC' as const, label: 'BCC', sub: '密送 · Blind Copy' },
-            ]).map(({ key, label, sub }) => (
+              { key: 'showDirect' as const, labelKey: 'filter.direct', subKey: 'filter.direct_sub' },
+              { key: 'showCC' as const, labelKey: 'filter.cc', subKey: 'filter.cc_sub' },
+              { key: 'showBCC' as const, labelKey: 'filter.bcc', subKey: 'filter.bcc_sub' },
+            ]).map(({ key, labelKey, subKey }) => (
               <div
                 key={key}
                 onClick={() => onChange({ ...filter, [key]: !filter[key] })}
@@ -266,7 +280,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                     fontWeight: 500,
                     transition: 'color 0.2s',
                   }}>
-                    {label}
+                    {t(lang, labelKey)}
                   </div>
                   <div style={{
                     fontSize: 8,
@@ -274,7 +288,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
                     marginTop: 1,
                     letterSpacing: 0.3,
                   }}>
-                    {sub}
+                    {t(lang, subKey)}
                   </div>
                 </div>
               </div>

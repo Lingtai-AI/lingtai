@@ -35,7 +35,6 @@ function fromDatetimeLocal(val: string): number {
   return new Date(val).getTime();
 }
 
-/** Edge mode segmented control */
 function EdgeToggle({ edgeMode, lang, theme, onToggle }: {
   edgeMode: EdgeMode;
   lang: string;
@@ -77,113 +76,7 @@ function EdgeToggle({ edgeMode, lang, theme, onToggle }: {
   );
 }
 
-/** Hamburger menu button + dropdown */
-function HamburgerMenu({ theme, themeMode, showNames, showFilter, onToggleTheme, onToggleNames, onToggleFilter }: {
-  theme: Theme;
-  themeMode: 'dark' | 'light';
-  showNames: boolean;
-  showFilter: boolean;
-  onToggleTheme: () => void;
-  onToggleNames: () => void;
-  onToggleFilter: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const itemStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    width: '100%',
-    background: 'none',
-    border: 'none',
-    padding: '6px 12px',
-    cursor: 'pointer',
-    color: theme.text,
-    fontSize: 11,
-    textAlign: 'left',
-    transition: 'background 0.1s',
-    fontFamily: "'Georgia', 'Noto Serif SC', serif",
-  };
-
-  return (
-    <div style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          background: open ? theme.textDim + '18' : 'transparent',
-          border: `1px solid ${theme.border}`,
-          borderRadius: 4,
-          padding: '2px 6px',
-          cursor: 'pointer',
-          color: theme.textDim,
-          fontSize: 14,
-          lineHeight: 1,
-          transition: 'background 0.15s',
-        }}
-      >
-        ☰
-      </button>
-      {open && (
-        <>
-          {/* Invisible overlay to close on click outside */}
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-          />
-          <div style={{
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 4,
-            background: theme.barBg,
-            border: `1px solid ${theme.border}`,
-            borderRadius: 6,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-            zIndex: 100,
-            minWidth: 140,
-            overflow: 'hidden',
-          }}>
-            <button
-              onClick={() => { onToggleNames(); setOpen(false); }}
-              style={itemStyle}
-              onMouseEnter={e => { e.currentTarget.style.background = theme.textDim + '10'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-            >
-              <span>Names</span>
-              <span style={{ color: showNames ? theme.gold : theme.textDim + '40', fontSize: 10 }}>
-                {showNames ? '✓' : ''}
-              </span>
-            </button>
-            <button
-              onClick={() => { onToggleFilter(); setOpen(false); }}
-              style={itemStyle}
-              onMouseEnter={e => { e.currentTarget.style.background = theme.textDim + '10'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-            >
-              <span>Filter</span>
-              <span style={{ color: showFilter ? theme.gold : theme.textDim + '40', fontSize: 10 }}>
-                {showFilter ? '✓' : ''}
-              </span>
-            </button>
-            <div style={{ height: 1, background: theme.border, margin: '2px 0' }} />
-            <button
-              onClick={() => { onToggleTheme(); setOpen(false); }}
-              style={itemStyle}
-              onMouseEnter={e => { e.currentTarget.style.background = theme.textDim + '10'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-            >
-              <span>{themeMode === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-              <span style={{ fontSize: 12 }}>{themeMode === 'dark' ? '☀' : '☽'}</span>
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replayTime, tapeRange, viewRange, edgeMode, showNames, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleEdgeMode, onToggleNames, onToggleFilter }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replayTime, tapeRange, viewRange, edgeMode, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleEdgeMode, onToggleFilter }: {
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
@@ -194,7 +87,6 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
   tapeRange: [number, number];
   viewRange: [number, number];
   edgeMode: EdgeMode;
-  showNames: boolean;
   showFilter: boolean;
   onEnterReplay: () => void;
   onExitReplay: () => void;
@@ -204,7 +96,6 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
   onSetViewRange: (range: [number, number]) => void;
   onToggleTheme: () => void;
   onToggleEdgeMode: () => void;
-  onToggleNames: () => void;
   onToggleFilter: () => void;
 }) {
   const [now, setNow] = useState(() => new Date());
@@ -228,16 +119,23 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
     flexShrink: 0,
   });
 
-  const hamburger = (
-    <HamburgerMenu
-      theme={theme}
-      themeMode={themeMode}
-      showNames={showNames}
-      showFilter={showFilter}
-      onToggleTheme={onToggleTheme}
-      onToggleNames={onToggleNames}
-      onToggleFilter={onToggleFilter}
-    />
+  const rightControls = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button onClick={onToggleTheme} style={btnStyle()}>
+        {themeMode === 'dark' ? '☀' : '☽'}
+      </button>
+      <button
+        onClick={onToggleFilter}
+        style={{
+          ...btnStyle(showFilter),
+          fontSize: 14,
+          lineHeight: 1,
+          padding: '2px 6px',
+        }}
+      >
+        ☰
+      </button>
+    </div>
   );
 
   if (vizMode === 'live') {
@@ -280,7 +178,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
           {'⏮ ' + t(lang, 'topbar.replay')}
         </button>
 
-        {/* Right: clock + hamburger */}
+        {/* Right: clock + theme + hamburger */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{
             fontFamily: 'monospace',
@@ -290,7 +188,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
           }}>
             {formatTime(now)}
           </div>
-          {hamburger}
+          {rightControls}
         </div>
       </div>
     );
@@ -336,7 +234,6 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
         </button>
         <EdgeToggle edgeMode={edgeMode} lang={lang} theme={theme} onToggle={onToggleEdgeMode} />
 
-        {/* Separator */}
         <div style={{ width: 1, height: 16, background: theme.border, flexShrink: 0 }} />
 
         {/* Play / Pause */}
@@ -414,8 +311,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
           {formatDateTime(replayTime)}
         </div>
 
-        {/* Hamburger */}
-        {hamburger}
+        {rightControls}
       </div>
 
       {/* Trim row */}
