@@ -13,6 +13,40 @@ export function defaultFilter(): FilterState {
   return { hiddenNodes: new Set(), showDirect: true, showCC: true, showBCC: true };
 }
 
+/** Ink-wash toggle — a small pill that slides between on/off. */
+function Toggle({ on, color, onChange }: { on: boolean; color: string; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      style={{
+        width: 28,
+        height: 14,
+        borderRadius: 7,
+        border: 'none',
+        background: on ? color + '40' : 'rgba(128,128,128,0.15)',
+        position: 'relative',
+        cursor: 'pointer',
+        transition: 'background 0.2s',
+        flexShrink: 0,
+        padding: 0,
+      }}
+    >
+      <span style={{
+        display: 'block',
+        width: 10,
+        height: 10,
+        borderRadius: '50%',
+        background: on ? color : 'rgba(128,128,128,0.4)',
+        position: 'absolute',
+        top: 2,
+        left: on ? 16 : 2,
+        transition: 'left 0.2s, background 0.2s',
+        boxShadow: on ? `0 0 4px ${color}60` : 'none',
+      }} />
+    </button>
+  );
+}
+
 export function FilterPanel({ network, filter, theme, onChange }: {
   network: Network;
   filter: FilterState;
@@ -20,21 +54,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
   onChange: (f: FilterState) => void;
 }) {
   const [tab, setTab] = useState<'nodes' | 'mail'>('nodes');
-
-  const agents = (network.nodes || []);
-
-  const tabStyle = (active: boolean): React.CSSProperties => ({
-    background: active ? theme.stateColors['ACTIVE'] + '20' : 'transparent',
-    border: 'none',
-    borderBottom: active ? `2px solid ${theme.stateColors['ACTIVE']}` : '2px solid transparent',
-    padding: '6px 12px',
-    cursor: 'pointer',
-    color: active ? theme.text : theme.textDim,
-    fontSize: 11,
-    fontWeight: active ? 600 : 400,
-    flex: 1,
-    textAlign: 'center' as const,
-  });
+  const agents = network.nodes || [];
 
   const toggleNode = (addr: string) => {
     const next = new Set(filter.hiddenNodes);
@@ -43,6 +63,7 @@ export function FilterPanel({ network, filter, theme, onChange }: {
   };
 
   const allVisible = filter.hiddenNodes.size === 0;
+  const noneVisible = filter.hiddenNodes.size === agents.length;
 
   return (
     <div style={{
@@ -50,111 +71,213 @@ export function FilterPanel({ network, filter, theme, onChange }: {
       flexDirection: 'column',
       height: '100%',
       userSelect: 'none',
+      fontFamily: "'Georgia', 'Noto Serif SC', serif",
     }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
-        <button onClick={() => setTab('nodes')} style={tabStyle(tab === 'nodes')}>Nodes</button>
-        <button onClick={() => setTab('mail')} style={tabStyle(tab === 'mail')}>Mail</button>
+      {/* Tab strip — ink-wash underline style */}
+      <div style={{
+        display: 'flex',
+        flexShrink: 0,
+        borderBottom: `1px solid ${theme.border}`,
+      }}>
+        {(['nodes', 'mail'] as const).map(t => {
+          const active = tab === t;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                borderBottom: active ? `2px solid ${theme.gold}` : '2px solid transparent',
+                padding: '8px 0 6px',
+                cursor: 'pointer',
+                color: active ? theme.gold : theme.textDim + '80',
+                fontSize: 10,
+                fontWeight: 500,
+                letterSpacing: 1.5,
+                textTransform: 'uppercase',
+                fontFamily: 'inherit',
+                transition: 'color 0.2s, border-color 0.2s',
+              }}
+            >
+              {t === 'nodes' ? '器灵' : '书信'}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Content */}
-      <div style={{ padding: '8px 10px', overflowY: 'auto', flex: 1 }}>
+      {/* Content area */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '8px 0',
+      }}>
         {tab === 'nodes' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {/* Select all / none */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+          <>
+            {/* Quick actions */}
+            <div style={{
+              display: 'flex',
+              gap: 4,
+              padding: '0 10px 6px',
+              borderBottom: `1px solid ${theme.border}40`,
+              marginBottom: 4,
+            }}>
               <button
                 onClick={() => onChange({ ...filter, hiddenNodes: new Set() })}
                 style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: allVisible ? theme.textDim + '66' : theme.stateColors['ACTIVE'],
-                  fontSize: 9, padding: 0,
+                  background: allVisible ? theme.gold + '18' : 'transparent',
+                  border: `1px solid ${allVisible ? theme.gold + '40' : theme.border}`,
+                  borderRadius: 3,
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  color: allVisible ? theme.gold : theme.textDim,
+                  fontSize: 9,
+                  letterSpacing: 0.5,
+                  fontFamily: 'inherit',
                 }}
               >
                 all
               </button>
               <button
                 onClick={() => {
-                  const all = new Set(agents.map(a => a.address));
-                  onChange({ ...filter, hiddenNodes: all });
+                  onChange({ ...filter, hiddenNodes: new Set(agents.map(a => a.address)) });
                 }}
                 style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: theme.textDim,
-                  fontSize: 9, padding: 0,
+                  background: noneVisible ? theme.gold + '18' : 'transparent',
+                  border: `1px solid ${noneVisible ? theme.gold + '40' : theme.border}`,
+                  borderRadius: 3,
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  color: noneVisible ? theme.gold : theme.textDim,
+                  fontSize: 9,
+                  letterSpacing: 0.5,
+                  fontFamily: 'inherit',
                 }}
               >
                 none
               </button>
             </div>
+
+            {/* Node list */}
             {agents.map(a => {
               const visible = !filter.hiddenNodes.has(a.address);
               const baseName = a.nickname || a.agent_name || a.address.split('/').pop() || '?';
-              const name = a.is_human ? `${baseName} (human)` : baseName;
-              const stateColor = a.is_human ? theme.text : (theme.stateColors[(a.state || '').toUpperCase()] || theme.stateColors['']);
+              const stateColor = a.is_human
+                ? theme.text
+                : (theme.stateColors[(a.state || '').toUpperCase()] || theme.stateColors['']);
+
               return (
-                <label
+                <div
                   key={a.address}
+                  onClick={() => toggleNode(a.address)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: 8,
+                    padding: '5px 10px',
                     cursor: 'pointer',
-                    fontSize: 10,
-                    color: visible ? theme.text : theme.textDim + '66',
-                    padding: '2px 0',
+                    opacity: visible ? 1 : 0.35,
+                    transition: 'opacity 0.15s, background 0.15s',
+                    borderRadius: 2,
                   }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = theme.textDim + '0a'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={visible}
-                    onChange={() => toggleNode(a.address)}
-                    style={{ accentColor: stateColor, margin: 0 }}
-                  />
+                  {/* State dot */}
                   <span style={{
-                    width: 5, height: 5, borderRadius: '50%',
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
                     background: stateColor,
                     flexShrink: 0,
-                    opacity: visible ? 1 : 0.3,
+                    boxShadow: visible ? `0 0 3px ${stateColor}50` : 'none',
+                    transition: 'box-shadow 0.2s',
                   }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {name}
+                  {/* Name */}
+                  <span style={{
+                    fontSize: 10,
+                    color: visible ? theme.text : theme.textDim,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: 1,
+                    fontFamily: a.is_human ? 'inherit' : "'SF Mono', 'Menlo', monospace",
+                    letterSpacing: a.is_human ? 0.5 : 0,
+                  }}>
+                    {baseName}
                   </span>
-                </label>
+                  {/* Human badge */}
+                  {a.is_human && (
+                    <span style={{
+                      fontSize: 8,
+                      color: theme.gold,
+                      border: `1px solid ${theme.gold}40`,
+                      borderRadius: 2,
+                      padding: '0 3px',
+                      letterSpacing: 0.3,
+                      flexShrink: 0,
+                    }}>
+                      人
+                    </span>
+                  )}
+                  {/* Toggle */}
+                  <Toggle on={visible} color={stateColor} onChange={() => {}} />
+                </div>
               );
             })}
-          </div>
+          </>
         )}
 
         {tab === 'mail' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <p style={{ fontSize: 9, color: theme.textDim, margin: '0 0 4px' }}>
-              Edge thickness reflects selected types.
+          <div style={{ padding: '4px 10px' }}>
+            <p style={{
+              fontSize: 9,
+              color: theme.textDim,
+              margin: '0 0 10px',
+              lineHeight: 1.5,
+              fontStyle: 'italic',
+            }}>
+              Edge thickness reflects selected types
             </p>
+
             {([
-              { key: 'showDirect' as const, label: 'Direct (To)' },
-              { key: 'showCC' as const, label: 'CC' },
-              { key: 'showBCC' as const, label: 'BCC' },
-            ]).map(({ key, label }) => (
-              <label
+              { key: 'showDirect' as const, label: 'Direct', sub: '收件人 · To' },
+              { key: 'showCC' as const, label: 'CC', sub: '抄送 · Carbon Copy' },
+              { key: 'showBCC' as const, label: 'BCC', sub: '密送 · Blind Copy' },
+            ]).map(({ key, label, sub }) => (
+              <div
                 key={key}
+                onClick={() => onChange({ ...filter, [key]: !filter[key] })}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 10,
+                  padding: '8px 0',
                   cursor: 'pointer',
-                  fontSize: 11,
-                  color: filter[key] ? theme.text : theme.textDim + '66',
+                  borderBottom: `1px solid ${theme.border}30`,
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={filter[key]}
-                  onChange={() => onChange({ ...filter, [key]: !filter[key] })}
-                  style={{ accentColor: theme.edgeColors.mail, margin: 0 }}
-                />
-                {label}
-              </label>
+                <Toggle on={filter[key]} color={theme.edgeColors.mail} onChange={() => {}} />
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    fontSize: 11,
+                    color: filter[key] ? theme.text : theme.textDim + '66',
+                    fontWeight: 500,
+                    transition: 'color 0.2s',
+                  }}>
+                    {label}
+                  </div>
+                  <div style={{
+                    fontSize: 8,
+                    color: theme.textDim + '80',
+                    marginTop: 1,
+                    letterSpacing: 0.3,
+                  }}>
+                    {sub}
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         )}
