@@ -419,7 +419,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = rgba(rgb[0], rgb[1], rgb[2], th.edgeOpacity);
-      ctx.lineWidth = isAvatar ? 0.8 : Math.min(0.8 + (e.weight || 1) * 0.5, 5);
+      ctx.lineWidth = isAvatar ? 0.8 : Math.min(0.8 + (e.weight || 1) * 0.3, 3);
       ctx.setLineDash(isAvatar ? [] : [4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
