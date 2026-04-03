@@ -80,6 +80,7 @@ type MailMessage struct {
 	Message    string                 `json:"message"`
 	Type        string                 `json:"type"`
 	ReceivedAt  string                 `json:"received_at"`
+	SentAt      string                 `json:"sent_at,omitempty"`
 	Attachments []string               `json:"attachments,omitempty"`
 	Identity    map[string]interface{} `json:"identity,omitempty"`
 }
