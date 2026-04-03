@@ -52,6 +52,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [replayTime, setReplayTime] = useState(0); // virtual clock (unix ms)
   const [tapeRange, setTapeRange] = useState<[number, number]>([0, 0]);
+  const [viewRange, setViewRange] = useState<[number, number]>([0, 0]); // user-adjustable sub-range
 
   // Replay engine refs (mutable, read by rAF loop)
   const replayRef = useRef({
@@ -63,6 +64,7 @@ export default function App() {
     tape: [] as TapeFrame[],
     prevNet: null as Network | null,
     lastDisplayedTime: 0,  // throttle setReplayTime
+    viewEnd: 0,            // user-chosen end bound (0 = full tape)
   });
   const replayAnimRef = useRef(0);
 
@@ -106,8 +108,8 @@ export default function App() {
       r.lastRealTime = now;
       r.virtualTime += dt * r.speed;
 
-      // Clamp to tape range
-      const lastT = r.tape[r.tape.length - 1]?.t ?? 0;
+      // Clamp to view range end
+      const lastT = r.viewEnd > 0 ? r.viewEnd : (r.tape[r.tape.length - 1]?.t ?? 0);
       if (r.virtualTime > lastT) {
         r.virtualTime = lastT;
         r.playing = false;
@@ -156,6 +158,7 @@ export default function App() {
     const t0 = frames[0].t;
     const t1 = frames[frames.length - 1].t;
     setTapeRange([t0, t1]);
+    setViewRange([t0, t1]);
     setReplayTime(t0);
     setPlaying(true);
     setVizMode('replay');
@@ -170,6 +173,7 @@ export default function App() {
     ref.speed = speed;
     ref.prevNet = null;
     ref.lastDisplayedTime = 0;
+    ref.viewEnd = t1;
 
     startReplayLoop();
   }, [speed, startReplayLoop]);
@@ -186,11 +190,17 @@ export default function App() {
   const togglePlaying = useCallback(() => {
     const r = replayRef.current;
     if (!r.playing) {
-      // If at end, restart
-      if (r.frameIndex >= r.tape.length - 1) {
-        r.virtualTime = r.tape[0]?.t ?? 0;
+      // If at end, restart from view range start
+      const viewEnd = r.viewEnd > 0 ? r.viewEnd : (r.tape[r.tape.length - 1]?.t ?? 0);
+      if (r.virtualTime >= viewEnd || r.frameIndex >= r.tape.length - 1) {
+        const viewStart = viewRange[0];
+        r.virtualTime = viewStart;
+        // Find frame index for view start
         r.frameIndex = 0;
-        r.prevNet = null;
+        for (let i = r.tape.length - 1; i >= 0; i--) {
+          if (r.tape[i].t <= viewStart) { r.frameIndex = i; break; }
+        }
+        r.prevNet = r.frameIndex > 0 ? r.tape[r.frameIndex - 1].net : null;
       }
       r.lastRealTime = performance.now();
       r.playing = true;
@@ -201,7 +211,7 @@ export default function App() {
       setPlaying(false);
       // rAF loop stops itself when r.playing is false
     }
-  }, [startReplayLoop]);
+  }, [startReplayLoop, viewRange]);
 
   const seekTo = useCallback((unixMs: number) => {
     const r = replayRef.current;
@@ -221,6 +231,18 @@ export default function App() {
     setSpeed(s);
     replayRef.current.speed = s;
   }, []);
+
+  const changeViewRange = useCallback((range: [number, number]) => {
+    const [t0, t1] = tapeRange;
+    const v0 = Math.max(t0, Math.min(range[0], range[1]));
+    const v1 = Math.min(t1, Math.max(range[0], range[1]));
+    setViewRange([v0, v1]);
+    replayRef.current.viewEnd = v1;
+    // If current position is outside new range, seek to start
+    if (replayRef.current.virtualTime < v0 || replayRef.current.virtualTime > v1) {
+      seekTo(v0);
+    }
+  }, [tapeRange, seekTo]);
 
   // ── Theme ────────────────────────────────────────────────────
 
@@ -253,11 +275,13 @@ export default function App() {
         speed={speed}
         replayTime={replayTime}
         tapeRange={tapeRange}
+        viewRange={viewRange}
         onEnterReplay={enterReplay}
         onExitReplay={exitReplay}
         onTogglePlaying={togglePlaying}
         onSeek={seekTo}
         onChangeSpeed={changeSpeed}
+        onSetViewRange={changeViewRange}
       />
       <div style={{ flex: 1, minHeight: 0 }}>
         <Graph

@@ -20,7 +20,23 @@ function formatDateTime(unixMs: number): string {
   return `${mon}-${day} ${h}:${m}:${s}`;
 }
 
-export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed }: {
+/** Convert unix ms to datetime-local input value (YYYY-MM-DDTHH:MM) */
+function toDatetimeLocal(unixMs: number): string {
+  const d = new Date(unixMs);
+  const y = d.getFullYear();
+  const mon = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${mon}-${day}T${h}:${m}`;
+}
+
+/** Convert datetime-local input value to unix ms */
+function fromDatetimeLocal(val: string): number {
+  return new Date(val).getTime();
+}
+
+export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeRange, viewRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange }: {
   lang: string;
   theme: Theme;
   vizMode: VizMode;
@@ -28,13 +44,16 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
   speed: number;
   replayTime: number;
   tapeRange: [number, number];
+  viewRange: [number, number];
   onEnterReplay: () => void;
   onExitReplay: () => void;
   onTogglePlaying: () => void;
   onSeek: (unixMs: number) => void;
   onChangeSpeed: (s: number) => void;
+  onSetViewRange: (range: [number, number]) => void;
 }) {
   const [now, setNow] = useState(() => new Date());
+  const [trimming, setTrimming] = useState(false);
 
   useEffect(() => {
     if (vizMode !== 'live') return;
@@ -106,9 +125,24 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
 
   // ── Replay mode ──────────────────────────────────────────────
 
-  const [t0, t1] = tapeRange;
-  const duration = t1 - t0 || 1;
-  const progress = (replayTime - t0) / duration;
+  const [v0, v1] = viewRange;
+  const [tape0, tape1] = tapeRange;
+  const duration = v1 - v0 || 1;
+  const progress = (replayTime - v0) / duration;
+  const isTrimmed = v0 !== tape0 || v1 !== tape1;
+
+  const dtInputStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    padding: '1px 4px',
+    color: theme.gold,
+    fontSize: 10,
+    fontFamily: 'monospace',
+    outline: 'none',
+    width: 145,
+    colorScheme: 'dark',
+  };
 
   return (
     <div style={{
@@ -116,81 +150,137 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
       borderBottom: `1px solid ${theme.border}`,
       padding: '6px 16px',
       display: 'flex',
-      alignItems: 'center',
-      gap: 10,
+      flexDirection: 'column',
+      gap: trimming ? 6 : 0,
       flexShrink: 0,
       userSelect: 'none',
     }}>
-      {/* Back to live */}
-      <button onClick={onExitReplay} style={btnStyle()}>
-        {'● ' + t(lang, 'topbar.live')}
-      </button>
+      {/* Main row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Back to live */}
+        <button onClick={onExitReplay} style={btnStyle()}>
+          {'● ' + t(lang, 'topbar.live')}
+        </button>
 
-      {/* Play / Pause */}
-      <button onClick={onTogglePlaying} style={btnStyle(playing)}>
-        {playing ? '⏸' : '▶'}
-      </button>
+        {/* Play / Pause */}
+        <button onClick={onTogglePlaying} style={btnStyle(playing)}>
+          {playing ? '⏸' : '▶'}
+        </button>
 
-      {/* Speed input */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+        {/* Speed input */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={speed}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^0-9]/g, '');
+              if (raw === '') return;
+              const v = Math.max(1, Math.min(9999, Number(raw)));
+              onChangeSpeed(v);
+            }}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${theme.border}`,
+              borderRadius: 4,
+              padding: '2px 4px',
+              color: theme.stateColors['ACTIVE'],
+              fontSize: 11,
+              fontFamily: 'monospace',
+              width: 48,
+              textAlign: 'right' as const,
+              outline: 'none',
+            }}
+          />
+          <span style={{ fontSize: 10, color: theme.textDim }}>×</span>
+        </div>
+
+        {/* Scrubber — uses viewRange */}
         <input
-          type="text"
-          inputMode="numeric"
-          value={speed}
-          onChange={e => {
-            const raw = e.target.value.replace(/[^0-9]/g, '');
-            if (raw === '') return;
-            const v = Math.max(1, Math.min(9999, Number(raw)));
-            onChangeSpeed(v);
-          }}
+          type="range"
+          min={v0}
+          max={v1}
+          step={1000}
+          value={replayTime}
+          onChange={e => onSeek(Number(e.target.value))}
           style={{
-            background: 'transparent',
-            border: `1px solid ${theme.border}`,
-            borderRadius: 4,
-            padding: '2px 4px',
-            color: theme.stateColors['ACTIVE'],
-            fontSize: 11,
-            fontFamily: 'monospace',
-            width: 48,
-            textAlign: 'right' as const,
-            outline: 'none',
+            flex: 1,
+            accentColor: theme.stateColors['ACTIVE'],
+            cursor: 'pointer',
+            height: 4,
           }}
         />
-        <span style={{ fontSize: 10, color: theme.textDim }}>×</span>
+
+        {/* Progress % */}
+        <span style={{ fontSize: 10, color: theme.textDim, minWidth: 32, textAlign: 'right' }}>
+          {Math.round(progress * 100)}%
+        </span>
+
+        {/* Trim toggle */}
+        <button
+          onClick={() => {
+            if (trimming && isTrimmed) {
+              // Closing trim panel — keep the trim
+            }
+            setTrimming(!trimming);
+          }}
+          style={btnStyle(trimming || isTrimmed)}
+          title="Set start/end time"
+        >
+          ✂
+        </button>
+
+        {/* Virtual clock */}
+        <div style={{
+          fontFamily: 'monospace',
+          fontSize: 12,
+          color: theme.gold,
+          letterSpacing: 1,
+          minWidth: 110,
+          textAlign: 'right',
+        }}>
+          {formatDateTime(replayTime)}
+        </div>
       </div>
 
-      {/* Scrubber */}
-      <input
-        type="range"
-        min={t0}
-        max={t1}
-        step={1000}
-        value={replayTime}
-        onChange={e => onSeek(Number(e.target.value))}
-        style={{
-          flex: 1,
-          accentColor: theme.stateColors['ACTIVE'],
-          cursor: 'pointer',
-          height: 4,
-        }}
-      />
-
-      {/* Progress % */}
-      <span style={{ fontSize: 10, color: theme.textDim, minWidth: 32, textAlign: 'right' }}>
-        {Math.round(progress * 100)}%
-      </span>
-
-      {/* Virtual clock */}
-      <div style={{
-        fontFamily: 'monospace',
-        fontSize: 12,
-        color: theme.gold,
-        letterSpacing: 1,
-        minWidth: 110,
-        textAlign: 'right',
-      }}>
-        {formatDateTime(replayTime)}
-      </div>
+      {/* Trim row — shown when trimming */}
+      {trimming && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+          <span style={{ fontSize: 9, color: theme.textDim }}>from</span>
+          <input
+            type="datetime-local"
+            value={toDatetimeLocal(v0)}
+            min={toDatetimeLocal(tape0)}
+            max={toDatetimeLocal(v1)}
+            onChange={e => {
+              const ms = fromDatetimeLocal(e.target.value);
+              if (!isNaN(ms)) onSetViewRange([ms, v1]);
+            }}
+            style={dtInputStyle}
+          />
+          <span style={{ fontSize: 9, color: theme.textDim }}>to</span>
+          <input
+            type="datetime-local"
+            value={toDatetimeLocal(v1)}
+            min={toDatetimeLocal(v0)}
+            max={toDatetimeLocal(tape1)}
+            onChange={e => {
+              const ms = fromDatetimeLocal(e.target.value);
+              if (!isNaN(ms)) onSetViewRange([v0, ms]);
+            }}
+            style={dtInputStyle}
+          />
+          {isTrimmed && (
+            <button
+              onClick={() => onSetViewRange([tape0, tape1])}
+              style={{ ...btnStyle(), fontSize: 9 }}
+              title="Reset to full range"
+            >
+              reset
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
