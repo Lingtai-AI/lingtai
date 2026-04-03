@@ -36,9 +36,10 @@ function fromDatetimeLocal(val: string): number {
   return new Date(val).getTime();
 }
 
-export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeRange, viewRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replayTime, tapeRange, viewRange, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme }: {
   lang: string;
   theme: Theme;
+  themeMode: 'dark' | 'light';
   vizMode: VizMode;
   playing: boolean;
   speed: number;
@@ -51,6 +52,7 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
   onSeek: (unixMs: number) => void;
   onChangeSpeed: (s: number) => void;
   onSetViewRange: (range: [number, number]) => void;
+  onToggleTheme: () => void;
 }) {
   const [now, setNow] = useState(() => new Date());
   const [trimming, setTrimming] = useState(false);
@@ -110,14 +112,19 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
           {'⏮ ' + t(lang, 'topbar.replay')}
         </button>
 
-        {/* Right: clock */}
-        <div style={{
-          fontFamily: 'monospace',
-          fontSize: 12,
-          color: theme.textDim,
-          letterSpacing: 1,
-        }}>
-          {formatTime(now)}
+        {/* Right: clock + theme */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            fontFamily: 'monospace',
+            fontSize: 12,
+            color: theme.textDim,
+            letterSpacing: 1,
+          }}>
+            {formatTime(now)}
+          </div>
+          <button onClick={onToggleTheme} style={btnStyle()}>
+            {themeMode === 'dark' ? '☀' : '☽'}
+          </button>
         </div>
       </div>
     );
@@ -230,7 +237,7 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
           ✂
         </button>
 
-        {/* Virtual clock */}
+        {/* Virtual clock + theme */}
         <div style={{
           fontFamily: 'monospace',
           fontSize: 12,
@@ -241,6 +248,10 @@ export function TopBar({ lang, theme, vizMode, playing, speed, replayTime, tapeR
         }}>
           {formatDateTime(replayTime)}
         </div>
+
+        <button onClick={onToggleTheme} style={btnStyle()}>
+          {themeMode === 'dark' ? '☀' : '☽'}
+        </button>
       </div>
 
       {/* Trim row — shown when trimming */}

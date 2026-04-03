@@ -4,16 +4,14 @@ import type { Theme } from './theme';
 import { Stats } from './Stats';
 import { t } from './i18n';
 
-export function BottomBar({ network, edgeMode, showNames, lang, theme, themeMode, onToggle, onToggleNames, onToggleTheme }: {
+export function BottomBar({ network, edgeMode, showNames, lang, theme, onToggle, onToggleNames }: {
   network: Network;
   edgeMode: EdgeMode;
   showNames: boolean;
   lang: string;
   theme: Theme;
-  themeMode: 'dark' | 'light';
   onToggle: () => void;
   onToggleNames: () => void;
-  onToggleTheme: () => void;
 }) {
   return (
     <div style={{
@@ -66,25 +64,7 @@ export function BottomBar({ network, edgeMode, showNames, lang, theme, themeMode
         }}
         title={showNames ? 'Hide agent names' : 'Show agent names'}
       >
-        Aa
-      </button>
-      {/* Theme toggle */}
-      <button
-        onClick={onToggleTheme}
-        style={{
-          background: 'transparent',
-          border: `1px solid ${theme.border}`,
-          borderRadius: 4,
-          padding: '3px 10px',
-          cursor: 'pointer',
-          color: theme.textDim,
-          fontSize: 10,
-          letterSpacing: 0.5,
-          flexShrink: 0,
-        }}
-        title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-      >
-        {themeMode === 'dark' ? '☀' : '☽'}
+        {showNames ? 'name ✓' : 'name'}
       </button>
     </div>
   );

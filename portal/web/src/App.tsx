@@ -271,6 +271,7 @@ export default function App() {
       <TopBar
         lang={lang}
         theme={theme}
+        themeMode={themeMode}
         vizMode={vizMode}
         playing={playing}
         speed={speed}
@@ -283,6 +284,7 @@ export default function App() {
         onSeek={seekTo}
         onChangeSpeed={changeSpeed}
         onSetViewRange={changeViewRange}
+        onToggleTheme={toggleTheme}
       />
       <div style={{ flex: 1, minHeight: 0 }}>
         <Graph
@@ -300,10 +302,8 @@ export default function App() {
         showNames={showNames}
         lang={lang}
         theme={theme}
-        themeMode={themeMode}
         onToggle={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
         onToggleNames={() => setShowNames(v => !v)}
-        onToggleTheme={toggleTheme}
       />
     </div>
   );
