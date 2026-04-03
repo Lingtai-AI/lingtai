@@ -204,7 +204,12 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
     const activeAddresses = new Set(network.nodes.map(n => n.address));
 
     if (isReplay) {
-      // Update existing dots with new state from this frame
+      // Update existing dots and create new ones for nodes not yet seen.
+      // Layout and stored positions are computed lazily — only when a
+      // genuinely new node appears — to avoid the cost on most frames.
+      const stored = loadPositions();
+      let layout: Record<string, { x: number; y: number }> | null = null;
+
       for (const n of network.nodes) {
         const prev = old.get(n.address);
         if (prev) {
@@ -212,16 +217,28 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode }: {
           prev.state = n.state;
           prev.alive = n.alive;
           prev.isHuman = n.is_human;
+        } else {
+          // Node appeared in a tape frame but wasn't in dotsRef yet — create it
+          if (!layout) layout = computeLayout(network, W, H);
+          const sp = stored[n.address];
+          const lp = layout[n.address];
+          old.set(n.address, {
+            id: n.address,
+            name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
+            state: n.state,
+            alive: n.alive,
+            isHuman: n.is_human,
+            x: sp ? sp.x : lp ? lp.x : W * 0.5,
+            y: sp ? sp.y : lp ? lp.y : H * 0.5,
+          });
         }
-        // Don't create new dots in replay — positions are frozen from live
       }
-      // Mark hidden dots (not in this frame) as empty state
+      // Mark dots not in this frame as hidden
       for (const d of old.values()) {
         if (!activeAddresses.has(d.id)) {
           d.state = '__hidden__';
         }
       }
-      // dotsRef stays as-is (positions frozen)
     } else {
       // Live mode: full sync as before
       const next = new Map<string, Dot>();
