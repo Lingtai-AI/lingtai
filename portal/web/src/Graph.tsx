@@ -32,9 +32,6 @@ interface Dot {
   y: number;
 }
 
-/** Normalize state to uppercase for theme/color matching (kernel writes lowercase). */
-function normState(s: string): string { return s ? s.toUpperCase() : ''; }
-
 /** A bullet flying from sender → recipient. */
 export interface Bullet {
   src: string;   // sender address (resolve to dot position at draw time)
@@ -223,7 +220,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
         const prev = old.get(n.address);
         if (prev) {
           prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
-          prev.state = normState(n.state);
+          prev.state = n.state;
           prev.alive = n.alive;
           prev.isHuman = n.is_human;
         } else {
@@ -234,7 +231,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
           old.set(n.address, {
             id: n.address,
             name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
-            state: normState(n.state),
+            state: n.state,
             alive: n.alive,
             isHuman: n.is_human,
             x: sp ? sp.x : lp ? lp.x : W * 0.5,
@@ -258,7 +255,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
         const prev = old.get(n.address);
         if (prev) {
           prev.name = n.nickname || n.agent_name || n.address.split('/').pop() || '?';
-          prev.state = normState(n.state);
+          prev.state = n.state;
           prev.alive = n.alive;
           prev.isHuman = n.is_human;
           next.set(n.address, prev);
@@ -268,7 +265,7 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
           next.set(n.address, {
             id: n.address,
             name: n.nickname || n.agent_name || n.address.split('/').pop() || '?',
-            state: normState(n.state),
+            state: n.state,
             alive: n.alive,
             isHuman: n.is_human,
             x: sp ? sp.x : lp ? lp.x : W * 0.5,
@@ -386,12 +383,12 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
     // ── Edges ──────────────────────────────────────────────
     const edges: Array<{ src: string; tgt: string; weight: number }> = [];
     if (mode === 'avatar') {
-      for (const e of (net.avatar_edges || []))
+      for (const e of net.avatar_edges)
         edges.push({ src: e.parent, tgt: e.child, weight: 1 });
-      const human = (net.nodes || []).find(n => n.is_human);
+      const human = net.nodes.find(n => n.is_human);
       if (human) {
         const children = new Set(edges.map(e => e.tgt));
-        for (const n of (net.nodes || []))
+        for (const n of net.nodes)
           if (!n.is_human && !children.has(n.address))
             edges.push({ src: human.address, tgt: n.address, weight: 1 });
       }
@@ -399,11 +396,11 @@ export function Graph({ network, edgeMode, theme, bullets, vizMode, showNames = 
       const sd = filt?.showDirect ?? true;
       const sc = filt?.showCC ?? true;
       const sb = filt?.showBCC ?? true;
-      for (const e of (net.mail_edges || [])) {
+      for (const e of net.mail_edges) {
         const w = (sd ? (e.direct || 0) : 0) + (sc ? (e.cc || 0) : 0) + (sb ? (e.bcc || 0) : 0);
         if (w > 0) edges.push({ src: e.sender, tgt: e.recipient, weight: w });
       }
-      for (const e of (net.contact_edges || []))
+      for (const e of net.contact_edges)
         if (!edges.some(x => x.src === e.owner && x.tgt === e.target))
           edges.push({ src: e.owner, tgt: e.target, weight: 0 });
     }
