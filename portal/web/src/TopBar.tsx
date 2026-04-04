@@ -76,12 +76,13 @@ function EdgeToggle({ edgeMode, lang, theme, onToggle }: {
   );
 }
 
-export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replayTime, tapeRange, viewRange, edgeMode, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleEdgeMode, onToggleFilter }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, speed, replayTime, tapeRange, viewRange, edgeMode, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleEdgeMode, onToggleFilter }: {
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
   vizMode: VizMode;
   playing: boolean;
+  replayLoading: boolean;
   speed: number;
   replayTime: number;
   tapeRange: [number, number];
@@ -174,8 +175,15 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
         </div>
 
         {/* Center: replay button */}
-        <button onClick={onEnterReplay} style={btnStyle()}>
-          {'⏮ ' + t(lang, 'topbar.replay')}
+        <button
+          onClick={replayLoading ? undefined : onEnterReplay}
+          style={{
+            ...btnStyle(),
+            opacity: replayLoading ? 0.5 : 1,
+            cursor: replayLoading ? 'wait' : 'pointer',
+          }}
+        >
+          {replayLoading ? '⏳ ' + t(lang, 'topbar.replay') + '...' : '⏮ ' + t(lang, 'topbar.replay')}
         </button>
 
         {/* Right: clock + theme + hamburger */}
