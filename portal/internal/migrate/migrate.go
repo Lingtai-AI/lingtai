@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -24,6 +24,7 @@ type Migration struct {
 // migrations is the ordered list of all migrations. Append-only.
 var migrations = []Migration{
 	{Version: 1, Name: "topology-to-portal", Fn: migrateTopologyToPortal},
+	{Version: 2, Name: "tape-normalize", Fn: migrateTapeNormalize},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.
