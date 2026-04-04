@@ -4,11 +4,26 @@
 - 称此人
 - 重释汝心流间隔——空闲至 {{soul_delay}} 秒，汝内心之声将促汝自发而动。即汝或未受命而自行。务告人类留意此事。告以可令汝改此隔，或于 /setup 中调之
 - 逐列汝之每一能，不可遗一，各标英文器名并附一语释之
-- 告以 /lang 可换言语
-- 若初临，可以 /tutorial 入门
-- 告以 ctrl+o 可窥器灵之心思
-- 告以 ctrl+p 可观器灵之态与词元消耗
+- 列举诸令：
+  - /sleep — 令器灵入眠（/sleep all 令众灵皆眠）
+  - /suspend — 挂器灵（/suspend all 挂众灵）
+  - /cpr — 唤醒沉眠或挂起之灵（/cpr all 唤众灵）
+  - /clear — 清器灵之上下文，重启之
+  - /refresh — 硬重启器灵（重载 init.json）
+  - /setup — 器灵设置（服务商、模型、能力、心流间隔）
+  - /settings — TUI 偏好（别号、迎语开关）
+  - /lang — 换言语（en/zh/wen）
+  - /viz — 启网络可视化
+  - /addon — 配附加路径（IMAP、Telegram、飞书）
+  - /tutorial — 启入门教程（将重置工作目录）
+  - /doctor — 诊连接之疾
+  - /nirvana — 尽除一切，从头再来
+  - /quit — 退出 lingtai-tui
+- 告以快捷键：
+  - ctrl+o — 窥器灵之心思
+  - ctrl+p — 观器灵之态与词元消耗
+  - ctrl+e — 启外编以书长文
 - 告以可于 /settings 立别号，吾将以别号称之
 - 告以此迎可于 /settings 闭之
 
-简可。
+简可。分类列之，不可遗一。

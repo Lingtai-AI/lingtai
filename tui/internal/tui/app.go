@@ -185,13 +185,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handlePaletteCommand(msg.Command, msg.Args)
 
 	case FirstRunDoneMsg:
-		// First-run complete: launch agent and switch to mail
+		// First-run complete: launch agent and switch to mail.
+		// Ensure human folder exists before launching — InitProject is
+		// idempotent and prevents the race where the agent tries to
+		// send mail before the human mailbox is ready.
+		if err := process.InitProject(a.projectDir); err != nil {
+			a.currentView = appViewMail
+			humanDir := filepath.Join(a.projectDir, "human")
+			addr := humanAddr(a.projectDir)
+			a.mail = NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, false, a.globalDir, a.tuiConfig.Language)
+			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
+			return a, tea.Batch(a.mail.Init(), a.sendSize())
+		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
 		// Launch the agent
 		var launchErr string
 		if a.lingtaiCmd != "" {
-			if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
+			if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir); err != nil {
 				launchErr = i18n.TF("mail.launch_failed", err)
 			}
 		}
@@ -218,7 +229,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
 	case NirvanaDoneMsg:
-		// Nirvana complete: .lingtai/ wiped, go to first-run
+		// Nirvana complete: .lingtai/ wiped, go to first-run.
+		// Re-init project to recreate the human folder so agents can
+		// deliver mail once the new orchestrator starts.
+		process.InitProject(a.projectDir)
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -245,6 +259,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UsePresetMsg:
 		// Create agent from preset
+		process.InitProject(a.projectDir)
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil
@@ -256,7 +271,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		orchDir := filepath.Join(a.projectDir, agentName)
 		var launchErr string
 		if a.lingtaiCmd != "" {
-			if _, err := process.LaunchAgent(a.lingtaiCmd, orchDir); err != nil {
+			if _, err := process.LaunchAgent(a.lingtaiCmd, orchDir, a.globalDir); err != nil {
 				launchErr = i18n.TF("mail.launch_failed", err)
 			}
 		}
@@ -392,14 +407,14 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 					continue
 				}
 				if !fs.IsAlive(agent.WorkingDir, 3.0) && a.lingtaiCmd != "" {
-					process.LaunchAgent(a.lingtaiCmd, agent.WorkingDir)
+					process.LaunchAgent(a.lingtaiCmd, agent.WorkingDir, a.globalDir)
 					count++
 				}
 			}
 			a.mail.AddSystemMessage(i18n.TF("mail.cpr_all", count))
 		} else if a.orchDir != "" && a.lingtaiCmd != "" {
 			if !fs.IsAlive(a.orchDir, 3.0) {
-				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+				process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
 				a.mail.AddSystemMessage(i18n.TF("mail.cpr", a.orchName))
 			} else {
 				a.mail.AddSystemMessage(i18n.T("mail.cpr_alive"))
@@ -437,7 +452,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				// Wipe conversation history (token ledger is preserved)
 				os.Remove(filepath.Join(a.orchDir, "history", "chat_history.jsonl"))
 				// Relaunch with clean context
-				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+				process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
 				return refreshDoneMsg{}
 			}
 		}
@@ -463,7 +478,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		if url != "" {
 			openBrowser(url)
 		} else {
-			a.mail.AddSystemMessage("lingtai-portal not found. Install it or add it to PATH.")
+			a.mail.AddSystemMessage("lingtai-portal not found on PATH. Run: brew link --overwrite lingtai-tui")
 		}
 		return a, nil
 	case "addon":
@@ -541,7 +556,7 @@ func (a *App) hardRefresh() {
 	// Clean signal files before relaunch
 	os.Remove(suspendFile)
 	// Relaunch
-	process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+	process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
 }
 
 // tryLock is defined in lock_unix.go / lock_windows.go

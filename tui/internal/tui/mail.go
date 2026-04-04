@@ -30,6 +30,7 @@ type ChatMessage struct {
 	Body        string
 	Timestamp   string
 	IsFromMe    bool     // human sent this
+	IsFromOrch  bool     // orchestrator (主我) sent this
 	Type        string   // "mail", "thinking", "diary"
 	Attachments []string // file paths attached to the message
 }
@@ -275,11 +276,16 @@ func (m *MailModel) buildMessages() {
 		parts := strings.Split(msg.From, "/")
 		fromName := parts[len(parts)-1]
 		isFromMe := msg.From == m.humanAddr || fromName == "human"
-		// Use agent's display name from .agent.json instead of folder name
+		// Use sender's identity from the message envelope when available
 		displayFrom := fromName
 		if !isFromMe {
-			displayFrom = m.orchDisplayName()
+			if nick, ok := msg.Identity["nickname"].(string); ok && nick != "" {
+				displayFrom = nick
+			} else if name, ok := msg.Identity["agent_name"].(string); ok && name != "" {
+				displayFrom = name
+			}
 		}
+		isFromOrch := !isFromMe && (msg.From == m.orchAddr || msg.From == m.orchestrator)
 		cm := ChatMessage{
 			From:        displayFrom,
 			To:          m.orchDisplayName(),
@@ -287,6 +293,7 @@ func (m *MailModel) buildMessages() {
 			Body:        msg.Message,
 			Timestamp:   msg.ReceivedAt,
 			IsFromMe:    isFromMe,
+			IsFromOrch:  isFromOrch,
 			Type:        "mail",
 			Attachments: msg.Attachments,
 		}
@@ -638,6 +645,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 
 	humanStyle := lipgloss.NewStyle().Foreground(ColorHuman).Bold(true)
 	agentStyle := lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
+	avatarStyle := lipgloss.NewStyle().Foreground(ColorIdle).Bold(true)
 	systemStyle := lipgloss.NewStyle().Foreground(ColorSystem).Bold(true)
 	thinkingStyle := lipgloss.NewStyle().Foreground(ColorThinking)
 	toolStyle := lipgloss.NewStyle().Foreground(ColorTool)
@@ -679,8 +687,10 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = humanStyle
 			} else if msg.From == i18n.T("mail.system_sender") {
 				nameStyle = systemStyle
-			} else {
+			} else if msg.IsFromOrch {
 				nameStyle = agentStyle
+			} else {
+				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
 			// Short timestamp (HH:MM)

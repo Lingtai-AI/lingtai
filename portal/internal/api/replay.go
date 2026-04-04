@@ -33,9 +33,11 @@ type ReplayFrame struct {
 
 // FrameDelta holds only the fields that changed relative to the previous frame.
 type FrameDelta struct {
-	Nodes []fs.AgentNode   `json:"nodes,omitempty"`
-	Mail  []fs.MailEdge    `json:"mail,omitempty"`
-	Stats *fs.NetworkStats `json:"stats,omitempty"`
+	Nodes        []fs.AgentNode   `json:"nodes,omitempty"`
+	AvatarEdges  []fs.AvatarEdge  `json:"avatar_edges,omitempty"`
+	ContactEdges []fs.ContactEdge `json:"contact_edges,omitempty"`
+	Mail         []fs.MailEdge    `json:"mail,omitempty"`
+	Stats        *fs.NetworkStats `json:"stats,omitempty"`
 }
 
 // ChunkInfo is a manifest entry describing one chunk.
@@ -111,6 +113,34 @@ func computeDelta(prev, curr *fs.Network) *FrameDelta {
 		if !currNodes[n.Address] {
 			// Emit a tombstone with only the address filled in.
 			delta.Nodes = append(delta.Nodes, fs.AgentNode{Address: n.Address})
+			hasChange = true
+		}
+	}
+
+	// --- Avatar edge changes ---
+	type avatarKey struct{ parent, child string }
+	prevAvatars := make(map[avatarKey]fs.AvatarEdge, len(prev.AvatarEdges))
+	for _, e := range prev.AvatarEdges {
+		prevAvatars[avatarKey{e.Parent, e.Child}] = e
+	}
+	for _, e := range curr.AvatarEdges {
+		k := avatarKey{e.Parent, e.Child}
+		if pe, ok := prevAvatars[k]; !ok || pe != e {
+			delta.AvatarEdges = append(delta.AvatarEdges, e)
+			hasChange = true
+		}
+	}
+
+	// --- Contact edge changes ---
+	type contactKey struct{ owner, target string }
+	prevContacts := make(map[contactKey]fs.ContactEdge, len(prev.ContactEdges))
+	for _, e := range prev.ContactEdges {
+		prevContacts[contactKey{e.Owner, e.Target}] = e
+	}
+	for _, e := range curr.ContactEdges {
+		k := contactKey{e.Owner, e.Target}
+		if pe, ok := prevContacts[k]; !ok || pe != e {
+			delta.ContactEdges = append(delta.ContactEdges, e)
 			hasChange = true
 		}
 	}
