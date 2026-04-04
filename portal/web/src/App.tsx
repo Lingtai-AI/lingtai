@@ -58,6 +58,7 @@ export default function App() {
   const [tapeRange, setTapeRange] = useState<[number, number]>([0, 0]);
   const [viewRange, setViewRange] = useState<[number, number]>([0, 0]); // user-adjustable sub-range
   const [replayLoading, setReplayLoading] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   // Replay engine refs (mutable, read by rAF loop)
   const replayRef = useRef({
@@ -345,6 +346,39 @@ export default function App() {
     }
   }, [findChunkForTime, loadAndMergeChunk]);
 
+  const rebuildCache = useCallback(async () => {
+    setRebuilding(true);
+    try {
+      const res = await fetch('/api/topology/rebuild', { method: 'POST' });
+      if (!res.ok) throw new Error(`Rebuild failed: ${res.status}`);
+      // Re-enter replay with fresh data
+      const cm = chunkManagerRef.current;
+      cm.loadedChunks.clear();
+      cm.loadedOrder = [];
+      cm.loading.clear();
+
+      const manifest = await fetchManifest();
+      if (manifest.chunks && manifest.chunks.length > 0) {
+        cm.manifest = manifest;
+        const chunksToLoad = manifest.chunks.slice(-3);
+        await Promise.all(chunksToLoad.map(c => loadAndMergeChunk(c)));
+
+        const tape = replayRef.current.tape;
+        if (tape.length > 0) {
+          const t0 = manifest.tape_start;
+          const t1 = manifest.tape_end;
+          setTapeRange([t0, t1]);
+          setViewRange([t0, t1]);
+          replayRef.current.viewEnd = t1;
+          seekTo(tape[0].t);
+        }
+      }
+    } catch (err) {
+      console.error('Rebuild failed:', err);
+    }
+    setRebuilding(false);
+  }, [loadAndMergeChunk, seekTo]);
+
   const changeSpeed = useCallback((s: number) => {
     setSpeed(s);
     replayRef.current.speed = s;
@@ -392,6 +426,7 @@ export default function App() {
         vizMode={vizMode}
         playing={playing}
         replayLoading={replayLoading}
+        rebuilding={rebuilding}
         speed={speed}
         replayTime={replayTime}
         tapeRange={tapeRange}
@@ -400,6 +435,7 @@ export default function App() {
         onEnterReplay={enterReplay}
         onExitReplay={exitReplay}
         onTogglePlaying={togglePlaying}
+        onRebuild={rebuildCache}
         onSeek={seekTo}
         onChangeSpeed={changeSpeed}
         onSetViewRange={changeViewRange}

@@ -34,13 +34,14 @@ function fromDatetimeLocal(val: string): number {
   return new Date(val).getTime();
 }
 
-export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, speed, replayTime, tapeRange, viewRange, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleFilter }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, rebuilding, speed, replayTime, tapeRange, viewRange, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onRebuild, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleFilter }: {
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
   vizMode: VizMode;
   playing: boolean;
   replayLoading: boolean;
+  rebuilding: boolean;
   speed: number;
   replayTime: number;
   tapeRange: [number, number];
@@ -49,6 +50,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading
   onEnterReplay: () => void;
   onExitReplay: () => void;
   onTogglePlaying: () => void;
+  onRebuild: () => void;
   onSeek: (unixMs: number) => void;
   onChangeSpeed: (s: number) => void;
   onSetViewRange: (range: [number, number]) => void;
@@ -205,6 +207,30 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading
           {playing ? '⏸' : '▶'}
         </button>
 
+        {/* Trim toggle */}
+        <button
+          onClick={() => setTrimming(!trimming)}
+          style={btnStyle(trimming || isTrimmed)}
+          title="Set start/end time"
+        >
+          ✂
+        </button>
+
+        {/* Rebuild */}
+        <button
+          onClick={rebuilding ? undefined : onRebuild}
+          style={{
+            ...btnStyle(),
+            opacity: rebuilding ? 0.5 : 1,
+            cursor: rebuilding ? 'wait' : 'pointer',
+          }}
+          title="Rebuild replay cache"
+        >
+          {rebuilding ? '⏳' : '🔄'}
+        </button>
+
+        <div style={{ width: 1, height: 16, background: theme.border, flexShrink: 0 }} />
+
         {/* Speed input */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
           <input
@@ -253,15 +279,6 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading
         <span style={{ fontSize: 10, color: theme.textDim, minWidth: 32, textAlign: 'right' }}>
           {Math.round(progress * 100)}%
         </span>
-
-        {/* Trim toggle */}
-        <button
-          onClick={() => setTrimming(!trimming)}
-          style={btnStyle(trimming || isTrimmed)}
-          title="Set start/end time"
-        >
-          ✂
-        </button>
 
         {/* Virtual clock */}
         <div style={{
