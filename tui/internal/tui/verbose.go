@@ -8,13 +8,15 @@ import (
 	"time"
 )
 
-// thinkingTypes are shown in ctrl+o mode
+// thinkingTypes are shown in ctrl+o level 1: text input/output + soul
 var thinkingTypes = map[string]bool{
-	"thinking": true,
-	"diary":    true,
+	"thinking":    true,
+	"diary":       true,
+	"text_input":  true,
+	"text_output": true,
 }
 
-// extendedTypes are additionally shown in ctrl+e mode
+// extendedTypes are shown in ctrl+o level 2: + pure tool calling info
 var extendedTypes = map[string]bool{
 	"thinking":    true,
 	"diary":       true,
@@ -71,6 +73,45 @@ func ReadEvents(eventsPath string, extended bool) []ChatMessage {
 		})
 	}
 
+	return events
+}
+
+// ReadInsightEvents reads only "insight" events from events.jsonl.
+func ReadInsightEvents(eventsPath string) []ChatMessage {
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var events []ChatMessage
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		var entry map[string]interface{}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue
+		}
+		if eventType, _ := entry["type"].(string); eventType != "insight" {
+			continue
+		}
+		text, _ := entry["text"].(string)
+		if text == "" {
+			continue
+		}
+		ts := ""
+		if tsFloat, ok := entry["ts"].(float64); ok {
+			ts = time.Unix(int64(tsFloat), 0).UTC().Format(time.RFC3339)
+		}
+		question, _ := entry["question"].(string)
+		events = append(events, ChatMessage{
+			Body:      text,
+			Timestamp: ts,
+			Type:      "insight",
+			Question:  question,
+		})
+	}
 	return events
 }
 

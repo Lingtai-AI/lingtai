@@ -31,8 +31,9 @@ type ChatMessage struct {
 	Timestamp   string
 	IsFromMe    bool     // human sent this
 	IsFromOrch  bool     // orchestrator (主我) sent this
-	Type        string   // "mail", "thinking", "diary"
+	Type        string   // "mail", "thinking", "diary", "insight"
 	Attachments []string // file paths attached to the message
+	Question    string   // question text (for /btw insight events)
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -70,8 +71,8 @@ type verboseLevel int
 
 const (
 	verboseOff      verboseLevel = iota // normal: mail only
-	verboseThinking                     // ctrl+o cycle: mail + thinking + diary
-	verboseExtended                     // ctrl+o cycle: everything (+ text_input, text_output, tool_call, tool_result)
+	verboseThinking                     // ctrl+o cycle: mail + soul (thinking, diary, text_input, text_output)
+	verboseExtended                     // ctrl+o cycle: everything (+ tool_call, tool_result)
 )
 
 // spinnerFrames is a star-burst spinner shown flanking the thinking quote.
@@ -133,11 +134,12 @@ type MailModel struct {
 	wasActive      bool   // true if previous refresh was ACTIVE
 	quoteIdx       int    // which quote to show (advances on each ACTIVE transition)
 	pulseTick      int    // pulse animation counter while ACTIVE
-	showEditorWarn bool   // one-time vim warning overlay
-	editorWarnText string // text to pass to editor after warning
+	showEditorWarn  bool   // one-time vim warning overlay
+	editorWarnText  string // text to pass to editor after warning
+	insightsEnabled bool   // from settings — show insight events
 }
 
-func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, greeting bool, globalDir, lang string) MailModel {
+func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, greeting bool, globalDir, lang string, insights bool) MailModel {
 	input := NewInputModel(humanDir)
 	input.textarea.Focus()
 	palette := NewPaletteModel()
@@ -164,9 +166,10 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		cache:        fs.NewMailCache(humanDir),
 		pageSize:     pageSize,
 		globalDir:      globalDir,
-		greetEnabled:   greeting,
-		greetLang:      lang,
-		quoteIdx:       -1,
+		greetEnabled:    greeting,
+		greetLang:       lang,
+		quoteIdx:        -1,
+		insightsEnabled: insights,
 	}
 }
 
@@ -311,6 +314,13 @@ func (m *MailModel) buildMessages() {
 		extended := m.verbose == verboseExtended
 		events := ReadEvents(eventsPath, extended)
 		chatMsgs = append(chatMsgs, events...)
+	}
+
+	// Read insight events independently of verbose mode
+	if m.insightsEnabled && m.orchestrator != "" {
+		eventsPath := filepath.Join(m.orchestrator, "logs", "events.jsonl")
+		insights := ReadInsightEvents(eventsPath)
+		chatMsgs = append(chatMsgs, insights...)
 	}
 
 	// Sort by timestamp
@@ -661,7 +671,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			}
 			var evStyle lipgloss.Style
 			switch msg.Type {
-			case "thinking", "diary":
+			case "thinking", "diary", "text_input", "text_output":
 				evStyle = thinkingStyle
 			default:
 				evStyle = toolStyle
@@ -669,6 +679,37 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render("[" + msg.Type + "] " + msg.Body)
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
+			}
+
+		case "insight":
+			wrapWidth := m.width - 6
+			if wrapWidth < 20 {
+				wrapWidth = 20
+			}
+			barWidth := min(wrapWidth, 44)
+			insightStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+
+			if msg.Question != "" {
+				// /btw box: ┌─ btw ─── / question / ├─── / answer / └───
+				b.WriteString(insightStyle.Render("  ┌─ btw "+strings.Repeat("─", max(barWidth-8, 1))) + "\n")
+				wrapped := lipgloss.NewStyle().Width(max(wrapWidth-4, 10)).Render(msg.Question)
+				for _, line := range strings.Split(wrapped, "\n") {
+					b.WriteString(insightStyle.Render("  │ "+line) + "\n")
+				}
+				b.WriteString(insightStyle.Render("  ├"+strings.Repeat("─", max(barWidth-1, 1))) + "\n")
+				wrapped = lipgloss.NewStyle().Width(max(wrapWidth-4, 10)).Render(msg.Body)
+				for _, line := range strings.Split(wrapped, "\n") {
+					b.WriteString(insightStyle.Render("  │ "+line) + "\n")
+				}
+				b.WriteString(insightStyle.Render("  └"+strings.Repeat("─", max(barWidth-1, 1))) + "\n")
+			} else {
+				// auto-insight: ★ insight ─── / bullets / ───
+				b.WriteString(insightStyle.Render("  ★ insight "+strings.Repeat("─", max(barWidth-11, 1))) + "\n")
+				wrapped := lipgloss.NewStyle().Width(max(wrapWidth-2, 10)).Render(msg.Body)
+				for _, line := range strings.Split(wrapped, "\n") {
+					b.WriteString(insightStyle.Render("  "+line) + "\n")
+				}
+				b.WriteString(insightStyle.Render("  "+strings.Repeat("─", barWidth)) + "\n")
 			}
 
 		default: // "mail"
