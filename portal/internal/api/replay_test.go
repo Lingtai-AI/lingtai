@@ -139,9 +139,9 @@ func TestCompileChunks_CreatesCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, net, ts)
 	}
 
-	manifest, err := compileChunks(topologyPath, replayDir)
+	manifest, err := fullCompile(topologyPath, replayDir)
 	if err != nil {
-		t.Fatalf("compileChunks: %v", err)
+		t.Fatalf("fullCompile: %v", err)
 	}
 
 	if manifest.TapeStart != 3600000 {
@@ -165,7 +165,7 @@ func TestCompileChunks_CreatesCache(t *testing.T) {
 	}
 }
 
-func TestCompileChunks_UsesExistingCache(t *testing.T) {
+func TestBuildManifest_UsesExistingCache(t *testing.T) {
 	dir := t.TempDir()
 	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
 	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
@@ -181,7 +181,8 @@ func TestCompileChunks_UsesExistingCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, net, ts)
 	}
 
-	m1, err := compileChunks(topologyPath, replayDir)
+	// First: fullCompile to seed caches
+	m1, err := fullCompile(topologyPath, replayDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +191,8 @@ func TestCompileChunks_UsesExistingCache(t *testing.T) {
 	info1, _ := os.Stat(hour1File)
 	modTime1 := info1.ModTime()
 
-	m2, err := compileChunks(topologyPath, replayDir)
+	// Second: buildManifest should reuse cached chunks
+	m2, err := buildManifest(topologyPath, replayDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +225,7 @@ func TestLoadChunk_FromCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, n, ts)
 	}
 
-	compileChunks(topologyPath, replayDir)
+	fullCompile(topologyPath, replayDir)
 
 	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
 	if err != nil {
@@ -291,7 +293,7 @@ func TestChunkHandler(t *testing.T) {
 
 	// Compile first so cache exists
 	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
-	compileChunks(topologyPath, replayDir)
+	fullCompile(topologyPath, replayDir)
 
 	handler := NewChunkHandler(baseDir)
 	req := httptest.NewRequest("GET", "/api/topology/chunk?start=3600000", nil)

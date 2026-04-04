@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -209,7 +210,141 @@ func hourBucket(t int64) int64 {
 	return (t / hourMs) * hourMs
 }
 
-func compileChunks(topologyPath, replayDir string) (ReplayManifest, error) {
+// buildManifest constructs the manifest from cached chunk files on disk
+// plus a quick tail-scan of the JSONL for the current (uncached) hour.
+// This is O(current_hour_frames) instead of O(all_frames).
+func buildManifest(topologyPath, replayDir string) (ReplayManifest, error) {
+	os.MkdirAll(replayDir, 0o755)
+
+	// 1. Read cached chunk files from disk
+	entries, _ := os.ReadDir(replayDir)
+	var chunks []ChunkInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json.gz") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json.gz")
+		hourStart, err := strconv.ParseInt(name, 10, 64)
+		if err != nil {
+			continue
+		}
+		// Read the chunk header to get frame count and end time
+		chunk, err := readChunkCache(filepath.Join(replayDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		chunks = append(chunks, ChunkInfo{
+			Start:  hourStart,
+			End:    chunk.End,
+			Frames: len(chunk.Frames),
+		})
+	}
+
+	// 2. Scan JSONL tail for frames not covered by any cache.
+	// Find the latest cached hour boundary to know where to start scanning.
+	var latestCached int64
+	for _, c := range chunks {
+		if c.Start > latestCached {
+			latestCached = c.Start
+		}
+	}
+	scanFrom := latestCached + hourMs // start scanning after the last cached hour
+
+	tailFrames, err := scanJSONLFrom(topologyPath, scanFrom)
+	if err != nil && !os.IsNotExist(err) {
+		return ReplayManifest{}, err
+	}
+
+	// Group tail frames by hour and add as uncached chunks
+	if len(tailFrames) > 0 {
+		type hourGroup struct {
+			start  int64
+			frames []fs.TapeFrame
+		}
+		var tailHours []*hourGroup
+		hourIndex := make(map[int64]*hourGroup)
+
+		for _, f := range tailFrames {
+			bucket := hourBucket(f.T)
+			g, ok := hourIndex[bucket]
+			if !ok {
+				g = &hourGroup{start: bucket}
+				hourIndex[bucket] = g
+				tailHours = append(tailHours, g)
+			}
+			g.frames = append(g.frames, f)
+		}
+
+		// Cache all completed tail hours (all except the last)
+		for i, g := range tailHours {
+			info := ChunkInfo{
+				Start:  g.start,
+				End:    g.frames[len(g.frames)-1].T,
+				Frames: len(g.frames),
+			}
+			chunks = append(chunks, info)
+
+			// Cache all but the last (current) hour
+			if i < len(tailHours)-1 {
+				cachePath := filepath.Join(replayDir, strconv.FormatInt(g.start, 10)+".json.gz")
+				chunk := deltaEncode(g.frames, defaultKeyframeInterval)
+				writeChunkCache(cachePath, chunk)
+			}
+		}
+	}
+
+	if len(chunks) == 0 {
+		return ReplayManifest{}, nil
+	}
+
+	// Sort chunks by start time
+	sort.Slice(chunks, func(i, j int) bool { return chunks[i].Start < chunks[j].Start })
+
+	return ReplayManifest{
+		TapeStart: chunks[0].Start,
+		TapeEnd:   chunks[len(chunks)-1].End,
+		Chunks:    chunks,
+	}, nil
+}
+
+// scanJSONLFrom reads topology.jsonl and returns frames with T >= fromMs.
+// Scans from the beginning but skips frames before fromMs. For large files
+// where most data is cached, only the tail is collected.
+func scanJSONLFrom(topologyPath string, fromMs int64) ([]fs.TapeFrame, error) {
+	f, err := os.Open(topologyPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var frames []fs.TapeFrame
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Quick timestamp extraction without full unmarshal for skipping
+		var frame fs.TapeFrame
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame.T < fromMs {
+			continue
+		}
+		frames = append(frames, frame)
+	}
+	return frames, nil
+}
+
+// fullCompile does a complete re-scan of topology.jsonl, rebuilding all caches.
+// Used by the rebuild endpoint. This is the slow path — O(all_frames).
+func fullCompile(topologyPath, replayDir string) (ReplayManifest, error) {
+	// Clear existing caches
+	os.RemoveAll(replayDir)
+	os.MkdirAll(replayDir, 0o755)
+
 	f, err := os.Open(topologyPath)
 	if err != nil {
 		return ReplayManifest{}, err
@@ -248,8 +383,6 @@ func compileChunks(topologyPath, replayDir string) (ReplayManifest, error) {
 		return ReplayManifest{}, nil
 	}
 
-	os.MkdirAll(replayDir, 0o755)
-
 	lastHourStart := hours[len(hours)-1].start
 
 	manifest := ReplayManifest{
@@ -267,9 +400,6 @@ func compileChunks(topologyPath, replayDir string) (ReplayManifest, error) {
 
 		if g.start != lastHourStart {
 			cachePath := filepath.Join(replayDir, strconv.FormatInt(g.start, 10)+".json.gz")
-			if _, err := os.Stat(cachePath); err == nil {
-				continue
-			}
 			chunk := deltaEncode(g.frames, defaultKeyframeInterval)
 			if err := writeChunkCache(cachePath, chunk); err != nil {
 				return ReplayManifest{}, fmt.Errorf("cache chunk %d: %w", g.start, err)
@@ -357,49 +487,51 @@ func loadChunk(replayDir, topologyPath string, hourStart int64) (ReplayChunk, er
 	return deltaEncode(frames, defaultKeyframeInterval), nil
 }
 
-// cachedManifest avoids re-scanning the full JSONL on every manifest request.
-// Invalidated when the topology file grows.
-var (
-	manifestCache     *ReplayManifest
-	manifestCacheSize int64
-)
-
 // NewManifestHandler serves GET /api/topology/manifest.
+// Builds the manifest from cached chunks + a tail scan — fast even for large tapes.
 func NewManifestHandler(baseDir string) http.HandlerFunc {
 	topologyPath := filepath.Join(baseDir, ".portal", "topology.jsonl")
 	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		TopologyMu.Lock()
-		// Check if cached manifest is still valid (file hasn't grown)
-		fi, _ := os.Stat(topologyPath)
-		fileSize := int64(0)
-		if fi != nil {
-			fileSize = fi.Size()
-		}
-		if manifestCache != nil && fileSize == manifestCacheSize {
-			manifest := *manifestCache
-			TopologyMu.Unlock()
-			if manifest.Chunks == nil {
-				manifest.Chunks = []ChunkInfo{}
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			json.NewEncoder(w).Encode(manifest)
-			return
-		}
-
-		manifest, err := compileChunks(topologyPath, replayDir)
-		if err == nil {
-			manifestCache = &manifest
-			manifestCacheSize = fileSize
-		}
+		manifest, err := buildManifest(topologyPath, replayDir)
 		TopologyMu.Unlock()
 
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			json.NewEncoder(w).Encode(ReplayManifest{Chunks: []ChunkInfo{}})
+			return
+		}
+		if manifest.Chunks == nil {
+			manifest.Chunks = []ChunkInfo{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(manifest)
+	}
+}
+
+// NewRebuildHandler serves POST /api/topology/rebuild.
+// Forces a full re-scan of topology.jsonl and rebuilds all chunk caches.
+func NewRebuildHandler(baseDir string) http.HandlerFunc {
+	topologyPath := filepath.Join(baseDir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		TopologyMu.Lock()
+		manifest, err := fullCompile(topologyPath, replayDir)
+		TopologyMu.Unlock()
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if manifest.Chunks == nil {
