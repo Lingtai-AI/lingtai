@@ -1,6 +1,8 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/anthropics/lingtai-portal/internal/fs"
@@ -113,5 +115,120 @@ func TestDeltaEncode_NodeChanges(t *testing.T) {
 	}
 	if chunk.Frames[1].Delta.Nodes[0].State != "SUSPENDED" {
 		t.Errorf("delta node state = %q, want SUSPENDED", chunk.Frames[1].Delta.Nodes[0].State)
+	}
+}
+
+func TestCompileChunks_CreatesCache(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+
+	net := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 1},
+	}
+	for _, ts := range []int64{3600000, 3601000, 3602000, 3603000, 7200000, 7201000, 7202000, 7203000} {
+		AppendTopologyAt(topologyPath, net, ts)
+	}
+
+	manifest, err := compileChunks(topologyPath, replayDir)
+	if err != nil {
+		t.Fatalf("compileChunks: %v", err)
+	}
+
+	if manifest.TapeStart != 3600000 {
+		t.Errorf("TapeStart = %d, want 3600000", manifest.TapeStart)
+	}
+	if manifest.TapeEnd != 7203000 {
+		t.Errorf("TapeEnd = %d, want 7203000", manifest.TapeEnd)
+	}
+	if len(manifest.Chunks) != 2 {
+		t.Fatalf("len(Chunks) = %d, want 2", len(manifest.Chunks))
+	}
+
+	hour1File := filepath.Join(replayDir, "3600000.json.gz")
+	if _, err := os.Stat(hour1File); err != nil {
+		t.Errorf("hour-1 cache file missing: %v", err)
+	}
+
+	hour2File := filepath.Join(replayDir, "7200000.json.gz")
+	if _, err := os.Stat(hour2File); !os.IsNotExist(err) {
+		t.Errorf("hour-2 (current) chunk should not be cached, but file exists")
+	}
+}
+
+func TestCompileChunks_UsesExistingCache(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+
+	net := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 1},
+	}
+	for _, ts := range []int64{3600000, 3601000, 7200000, 7201000} {
+		AppendTopologyAt(topologyPath, net, ts)
+	}
+
+	m1, err := compileChunks(topologyPath, replayDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hour1File := filepath.Join(replayDir, "3600000.json.gz")
+	info1, _ := os.Stat(hour1File)
+	modTime1 := info1.ModTime()
+
+	m2, err := compileChunks(topologyPath, replayDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info2, _ := os.Stat(hour1File)
+	if !info2.ModTime().Equal(modTime1) {
+		t.Error("hour-1 cache was rewritten, should have been reused")
+	}
+
+	if m1.TapeStart != m2.TapeStart || m1.TapeEnd != m2.TapeEnd {
+		t.Error("manifests differ between compilations")
+	}
+}
+
+func TestLoadChunk_FromCache(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+
+	net := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{{Sender: "a", Recipient: "b", Count: 3, Direct: 3}},
+		Stats:        fs.NetworkStats{Active: 1, TotalMails: 3},
+	}
+	for _, ts := range []int64{3600000, 3601000, 3602000, 7200000} {
+		n := net
+		n.MailEdges = []fs.MailEdge{{Sender: "a", Recipient: "b", Count: int(ts / 1000), Direct: int(ts / 1000)}}
+		AppendTopologyAt(topologyPath, n, ts)
+	}
+
+	compileChunks(topologyPath, replayDir)
+
+	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
+	if err != nil {
+		t.Fatalf("loadChunk: %v", err)
+	}
+
+	if chunk.Start != 3600000 {
+		t.Errorf("chunk.Start = %d, want 3600000", chunk.Start)
+	}
+	if len(chunk.Frames) != 3 {
+		t.Errorf("len(Frames) = %d, want 3", len(chunk.Frames))
 	}
 }

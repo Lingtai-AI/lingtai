@@ -1,7 +1,14 @@
 package api
 
 import (
+	"bufio"
+	"compress/gzip"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/anthropics/lingtai-portal/internal/fs"
 )
@@ -159,4 +166,162 @@ func nodesEqual(a, b fs.AgentNode) bool {
 	aLoc, _ := json.Marshal(a.Location)
 	bLoc, _ := json.Marshal(b.Location)
 	return string(aLoc) == string(bLoc)
+}
+
+// ---------------------------------------------------------------------------
+// Chunk compilation and caching
+// ---------------------------------------------------------------------------
+
+const hourMs int64 = 3600 * 1000
+
+func hourBucket(t int64) int64 {
+	return (t / hourMs) * hourMs
+}
+
+func compileChunks(topologyPath, replayDir string) (ReplayManifest, error) {
+	f, err := os.Open(topologyPath)
+	if err != nil {
+		return ReplayManifest{}, err
+	}
+	defer f.Close()
+
+	type hourGroup struct {
+		start  int64
+		frames []fs.TapeFrame
+	}
+	var hours []*hourGroup
+	hourIndex := make(map[int64]*hourGroup)
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var frame fs.TapeFrame
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		bucket := hourBucket(frame.T)
+		g, ok := hourIndex[bucket]
+		if !ok {
+			g = &hourGroup{start: bucket}
+			hourIndex[bucket] = g
+			hours = append(hours, g)
+		}
+		g.frames = append(g.frames, frame)
+	}
+
+	if len(hours) == 0 {
+		return ReplayManifest{}, nil
+	}
+
+	os.MkdirAll(replayDir, 0o755)
+
+	lastHourStart := hours[len(hours)-1].start
+
+	manifest := ReplayManifest{
+		TapeStart: hours[0].frames[0].T,
+		TapeEnd:   hours[len(hours)-1].frames[len(hours[len(hours)-1].frames)-1].T,
+	}
+
+	for _, g := range hours {
+		info := ChunkInfo{
+			Start:  g.start,
+			End:    g.frames[len(g.frames)-1].T,
+			Frames: len(g.frames),
+		}
+		manifest.Chunks = append(manifest.Chunks, info)
+
+		if g.start != lastHourStart {
+			cachePath := filepath.Join(replayDir, strconv.FormatInt(g.start, 10)+".json.gz")
+			if _, err := os.Stat(cachePath); err == nil {
+				continue
+			}
+			chunk := deltaEncode(g.frames, defaultKeyframeInterval)
+			if err := writeChunkCache(cachePath, chunk); err != nil {
+				return ReplayManifest{}, fmt.Errorf("cache chunk %d: %w", g.start, err)
+			}
+		}
+	}
+
+	return manifest, nil
+}
+
+func writeChunkCache(path string, chunk ReplayChunk) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gw := gzip.NewWriter(f)
+	if err := json.NewEncoder(gw).Encode(chunk); err != nil {
+		gw.Close()
+		return err
+	}
+	return gw.Close()
+}
+
+func readChunkCache(path string) (ReplayChunk, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return ReplayChunk{}, err
+	}
+	defer f.Close()
+
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return ReplayChunk{}, err
+	}
+	defer gr.Close()
+
+	var chunk ReplayChunk
+	if err := json.NewDecoder(gr).Decode(&chunk); err != nil {
+		return ReplayChunk{}, err
+	}
+	return chunk, nil
+}
+
+func loadChunk(replayDir, topologyPath string, hourStart int64) (ReplayChunk, error) {
+	cachePath := filepath.Join(replayDir, strconv.FormatInt(hourStart, 10)+".json.gz")
+	if chunk, err := readChunkCache(cachePath); err == nil {
+		return chunk, nil
+	}
+
+	f, err := os.Open(topologyPath)
+	if err != nil {
+		return ReplayChunk{}, err
+	}
+	defer f.Close()
+
+	hourEnd := hourStart + hourMs
+	var frames []fs.TapeFrame
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var frame fs.TapeFrame
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame.T < hourStart {
+			continue
+		}
+		if frame.T >= hourEnd {
+			break
+		}
+		frames = append(frames, frame)
+	}
+
+	if len(frames) == 0 {
+		return ReplayChunk{Start: hourStart, End: hourStart}, nil
+	}
+
+	return deltaEncode(frames, defaultKeyframeInterval), nil
 }
