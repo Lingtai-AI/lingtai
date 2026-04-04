@@ -242,24 +242,6 @@ func customPreset() Preset {
 	}
 }
 
-// CovenantForLang returns the embedded covenant for the given language.
-func CovenantForLang(lang string) []byte {
-	data, err := covenantFS.ReadFile("covenant/" + lang + "/covenant.md")
-	if err != nil {
-		data, _ = covenantFS.ReadFile("covenant/en/covenant.md")
-	}
-	return data
-}
-
-// PrincipleForLang returns the embedded principle for the given language.
-func PrincipleForLang(lang string) []byte {
-	data, err := principleFS.ReadFile("principle/" + lang + "/principle.md")
-	if err != nil {
-		data, _ = principleFS.ReadFile("principle/en/principle.md")
-	}
-	return data
-}
-
 // PrinciplePath returns the absolute path to the principle file for a language.
 func PrinciplePath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "principle", lang, "principle.md")

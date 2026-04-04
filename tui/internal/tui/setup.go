@@ -232,5 +232,3 @@ func (m SetupModel) viewKeyInput(b *strings.Builder) {
 	// Hints
 	b.WriteString(StyleSubtle.Render("  [Enter] "+i18n.T("setup.save")+"    [Esc] "+i18n.T("setup.back")) + "\n")
 }
-
-func (m SetupModel) Done() bool { return m.done }
