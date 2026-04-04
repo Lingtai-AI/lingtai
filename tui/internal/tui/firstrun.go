@@ -387,6 +387,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case capCheckDoneMsg:
 		m.capLoading = false
 		m.capInfos = msg.infos
+		// Backfill capabilities not returned by check-caps so they're toggleable
+		for _, name := range m.capOrder {
+			if _, ok := m.capInfos[name]; !ok {
+				m.capInfos[name] = capInfo{}
+			}
+		}
 		p := m.presets[m.cursor]
 		provider := m.getPresetProvider(p)
 		presetCaps := make(map[string]bool)
@@ -1571,7 +1577,7 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.capErr = ""
 	m.capCursor = 0
 	m.capOrder = AllCapabilities
-	m.capSelected = make(map[string]bool)
+	m.capSelected = map[string]bool{"skills": true}
 	m.capInfos = nil
 	m.addonSelected = map[string]bool{"imap": true, "telegram": true, "feishu": true}
 	m.addonOrder = AllAddons
