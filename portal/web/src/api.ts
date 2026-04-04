@@ -78,7 +78,7 @@ export function reconstructFrames(chunk: ReplayChunk): TapeFrame[] {
       current = rf.net;
     } else if (current) {
       // Delta — apply changes to a copy of the current network
-      const net = structuredClone(current);
+      const net: Network = structuredClone(current);
 
       if (rf.d) {
         // Apply node changes
@@ -117,7 +117,7 @@ export function reconstructFrames(chunk: ReplayChunk): TapeFrame[] {
       continue; // skip delta before first keyframe (shouldn't happen)
     }
 
-    frames.push({ t: rf.t, net: current });
+    frames.push({ t: rf.t, net: current! });
   }
 
   return frames;
