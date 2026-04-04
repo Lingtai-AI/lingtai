@@ -57,7 +57,7 @@ type presetField struct {
 var AllCapabilities = []string{
 	"file", "email", "bash", "web_search", "psyche", "library",
 	"vision", "talk", "draw", "compose", "video", "listen", "web_read",
-	"avatar", "daemon",
+	"avatar", "daemon", "skills",
 }
 
 // AllAddons is the list of available addon names.

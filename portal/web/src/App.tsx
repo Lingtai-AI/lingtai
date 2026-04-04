@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Network } from './types';
-import { fetchNetwork, fetchTopology, type TapeFrame } from './api';
+import { fetchNetwork, type TapeFrame, fetchManifest, fetchChunk, reconstructFrames, type ReplayManifest, type ChunkInfo } from './api';
 import { Graph, type EdgeMode, type Bullet } from './Graph';
 import { TopBar } from './TopBar';
 import { BottomBar } from './BottomBar';
@@ -57,6 +57,8 @@ export default function App() {
   const [replayTime, setReplayTime] = useState(0); // virtual clock (unix ms)
   const [tapeRange, setTapeRange] = useState<[number, number]>([0, 0]);
   const [viewRange, setViewRange] = useState<[number, number]>([0, 0]); // user-adjustable sub-range
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   // Replay engine refs (mutable, read by rAF loop)
   const replayRef = useRef({
@@ -71,6 +73,15 @@ export default function App() {
     viewEnd: 0,            // user-chosen end bound (0 = full tape)
   });
   const replayAnimRef = useRef(0);
+
+  // Chunk manager: tracks which chunks are loaded
+  const chunkManagerRef = useRef({
+    manifest: null as ReplayManifest | null,
+    loadedChunks: new Map<number, TapeFrame[]>(),
+    loadedOrder: [] as number[],                   // FIFO eviction order
+    loading: new Set<number>(),
+  });
+  const MAX_LOADED_CHUNKS = 3;
 
   // Live mode: use a ref for prev network to avoid stale closures
   const prevNetworkRef = useRef<Network | null>(null);
@@ -100,6 +111,75 @@ export default function App() {
   }, []);
 
   // ── Replay mode ──────────────────────────────────────────────
+
+  const loadAndMergeChunk = useCallback(async (chunkInfo: ChunkInfo): Promise<TapeFrame[]> => {
+    const cm = chunkManagerRef.current;
+    const cached = cm.loadedChunks.get(chunkInfo.start);
+    if (cached) return cached;
+    if (cm.loading.has(chunkInfo.start)) return [];
+
+    cm.loading.add(chunkInfo.start);
+    try {
+      const chunk = await fetchChunk(chunkInfo.start);
+      const frames = reconstructFrames(chunk);
+      cm.loadedChunks.set(chunkInfo.start, frames);
+      cm.loadedOrder.push(chunkInfo.start);
+      cm.loading.delete(chunkInfo.start);
+
+      while (cm.loadedOrder.length > MAX_LOADED_CHUNKS) {
+        const evict = cm.loadedOrder.shift()!;
+        cm.loadedChunks.delete(evict);
+      }
+
+      rebuildTape();
+      return frames;
+    } catch (err) {
+      cm.loading.delete(chunkInfo.start);
+      console.error('Failed to load chunk:', err);
+      return [];
+    }
+  }, []);
+
+  const rebuildTape = useCallback(() => {
+    const cm = chunkManagerRef.current;
+    const allFrames: TapeFrame[] = [];
+    const sortedKeys = Array.from(cm.loadedChunks.keys()).sort((a, b) => a - b);
+    for (const key of sortedKeys) {
+      allFrames.push(...cm.loadedChunks.get(key)!);
+    }
+    replayRef.current.tape = allFrames;
+  }, []);
+
+  const findChunkForTime = useCallback((unixMs: number): ChunkInfo | null => {
+    const manifest = chunkManagerRef.current.manifest;
+    if (!manifest) return null;
+    for (const c of manifest.chunks) {
+      if (unixMs >= c.start && unixMs <= c.end) return c;
+    }
+    if (manifest.chunks.length > 0) {
+      if (unixMs < manifest.chunks[0].start) return manifest.chunks[0];
+      return manifest.chunks[manifest.chunks.length - 1];
+    }
+    return null;
+  }, []);
+
+  const maybePrefetch = useCallback((virtualTime: number) => {
+    const manifest = chunkManagerRef.current.manifest;
+    if (!manifest) return;
+    const currentChunk = findChunkForTime(virtualTime);
+    if (!currentChunk) return;
+
+    const chunkDuration = currentChunk.end - currentChunk.start;
+    if (chunkDuration > 0 && (virtualTime - currentChunk.start) / chunkDuration > 0.8) {
+      const idx = manifest.chunks.indexOf(currentChunk);
+      if (idx >= 0 && idx < manifest.chunks.length - 1) {
+        const nextChunk = manifest.chunks[idx + 1];
+        if (!chunkManagerRef.current.loadedChunks.has(nextChunk.start)) {
+          loadAndMergeChunk(nextChunk);
+        }
+      }
+    }
+  }, [findChunkForTime, loadAndMergeChunk]);
 
   const startReplayLoop = useCallback(() => {
     cancelAnimationFrame(replayAnimRef.current);
@@ -135,6 +215,7 @@ export default function App() {
       }
 
       if (newBullets.length > 0) setBullets(newBullets);
+      maybePrefetch(r.virtualTime);
 
       // Throttle setReplayTime — update only when displayed second changes
       const displayedSec = Math.floor(r.virtualTime / 1000);
@@ -147,47 +228,73 @@ export default function App() {
     };
 
     replayAnimRef.current = requestAnimationFrame(tick);
-  }, []);
+  }, [maybePrefetch]);
 
   const enterReplay = useCallback(async () => {
-    let frames: TapeFrame[];
+    setReplayLoading(true);
+
     try {
-      frames = await fetchTopology();
+      const manifest = await fetchManifest();
+      if (!manifest.chunks || manifest.chunks.length === 0) {
+        setReplayLoading(false);
+        return;
+      }
+
+      const cm = chunkManagerRef.current;
+      cm.manifest = manifest;
+      cm.loadedChunks.clear();
+      cm.loadedOrder = [];
+      cm.loading.clear();
+
+      const chunksToLoad = manifest.chunks.slice(-MAX_LOADED_CHUNKS);
+      await Promise.all(chunksToLoad.map(c => loadAndMergeChunk(c)));
+
+      const tape = replayRef.current.tape;
+      if (tape.length === 0) {
+        setReplayLoading(false);
+        return;
+      }
+
+      const t0 = manifest.tape_start;
+      const t1 = manifest.tape_end;
+      const playStart = tape[0].t;
+
+      setTapeRange([t0, t1]);
+      setViewRange([t0, t1]);
+      setReplayTime(playStart);
+      setPlaying(true);
+      setVizMode('replay');
+      setNetwork(tape[0].net);
+
+      const ref = replayRef.current;
+      ref.virtualTime = playStart;
+      ref.frameIndex = 0;
+      ref.lastRealTime = performance.now();
+      ref.playing = true;
+      ref.speed = speed;
+      ref.prevNet = null;
+      ref.lastDisplayedTime = 0;
+      ref.viewEnd = t1;
+
+      setReplayLoading(false);
+      startReplayLoop();
     } catch (err) {
-      console.error('Failed to load topology:', err);
-      return;
+      console.error('Failed to enter replay:', err);
+      setReplayLoading(false);
     }
-    if (frames.length === 0) return;
-
-    const t0 = frames[0].t;
-    const t1 = frames[frames.length - 1].t;
-    setTapeRange([t0, t1]);
-    setViewRange([t0, t1]);
-    setReplayTime(t0);
-    setPlaying(true);
-    setVizMode('replay');
-    setNetwork(frames[0].net);
-
-    const ref = replayRef.current;
-    ref.tape = frames;
-    ref.virtualTime = t0;
-    ref.frameIndex = 0;
-    ref.lastRealTime = performance.now();
-    ref.playing = true;
-    ref.speed = speed;
-    ref.prevNet = null;
-    ref.lastDisplayedTime = 0;
-    ref.viewEnd = t1;
-
-    startReplayLoop();
-  }, [speed, startReplayLoop]);
+  }, [speed, startReplayLoop, loadAndMergeChunk]);
 
   const exitReplay = useCallback(() => {
     cancelAnimationFrame(replayAnimRef.current);
     replayRef.current.playing = false;
     setVizMode('live');
     setPlaying(false);
-    // Reset prev network so live mode doesn't fire stale diffs
+    setReplayLoading(false);
+    const cm = chunkManagerRef.current;
+    cm.manifest = null;
+    cm.loadedChunks.clear();
+    cm.loadedOrder = [];
+    cm.loading.clear();
     prevNetworkRef.current = null;
   }, []);
 
@@ -217,9 +324,15 @@ export default function App() {
     }
   }, [startReplayLoop, viewRange]);
 
-  const seekTo = useCallback((unixMs: number) => {
+  const seekTo = useCallback(async (unixMs: number) => {
     const r = replayRef.current;
     r.virtualTime = unixMs;
+
+    const targetChunk = findChunkForTime(unixMs);
+    if (targetChunk && !chunkManagerRef.current.loadedChunks.has(targetChunk.start)) {
+      await loadAndMergeChunk(targetChunk);
+    }
+
     let idx = 0;
     for (let i = r.tape.length - 1; i >= 0; i--) {
       if (r.tape[i].t <= unixMs) { idx = i; break; }
@@ -228,8 +341,43 @@ export default function App() {
     r.prevNet = idx > 0 ? r.tape[idx - 1].net : null;
     r.lastRealTime = performance.now();
     setReplayTime(unixMs);
-    setNetwork(r.tape[idx].net);
-  }, []);
+    if (r.tape[idx]) {
+      setNetwork(r.tape[idx].net);
+    }
+  }, [findChunkForTime, loadAndMergeChunk]);
+
+  const rebuildCache = useCallback(async () => {
+    setRebuilding(true);
+    try {
+      const res = await fetch('/api/topology/rebuild', { method: 'POST' });
+      if (!res.ok) throw new Error(`Rebuild failed: ${res.status}`);
+      // Re-enter replay with fresh data
+      const cm = chunkManagerRef.current;
+      cm.loadedChunks.clear();
+      cm.loadedOrder = [];
+      cm.loading.clear();
+
+      const manifest = await fetchManifest();
+      if (manifest.chunks && manifest.chunks.length > 0) {
+        cm.manifest = manifest;
+        const chunksToLoad = manifest.chunks.slice(-3);
+        await Promise.all(chunksToLoad.map(c => loadAndMergeChunk(c)));
+
+        const tape = replayRef.current.tape;
+        if (tape.length > 0) {
+          const t0 = manifest.tape_start;
+          const t1 = manifest.tape_end;
+          setTapeRange([t0, t1]);
+          setViewRange([t0, t1]);
+          replayRef.current.viewEnd = t1;
+          seekTo(tape[0].t);
+        }
+      }
+    } catch (err) {
+      console.error('Rebuild failed:', err);
+    }
+    setRebuilding(false);
+  }, [loadAndMergeChunk, seekTo]);
 
   const changeSpeed = useCallback((s: number) => {
     setSpeed(s);
@@ -277,20 +425,21 @@ export default function App() {
         themeMode={themeMode}
         vizMode={vizMode}
         playing={playing}
+        replayLoading={replayLoading}
+        rebuilding={rebuilding}
         speed={speed}
         replayTime={replayTime}
         tapeRange={tapeRange}
         viewRange={viewRange}
-        edgeMode={edgeMode}
         showFilter={showFilter}
         onEnterReplay={enterReplay}
         onExitReplay={exitReplay}
         onTogglePlaying={togglePlaying}
+        onRebuild={rebuildCache}
         onSeek={seekTo}
         onChangeSpeed={changeSpeed}
         onSetViewRange={changeViewRange}
         onToggleTheme={toggleTheme}
-        onToggleEdgeMode={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
         onToggleFilter={() => setShowFilter(v => !v)}
       />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -329,6 +478,8 @@ export default function App() {
         network={network}
         lang={lang}
         theme={theme}
+        edgeMode={edgeMode}
+        onToggleEdgeMode={() => setEdgeMode(m => m === 'avatar' ? 'email' : 'avatar')}
       />
     </div>
   );

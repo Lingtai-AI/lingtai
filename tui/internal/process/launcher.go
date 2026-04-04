@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 func InitProject(lingtaiDir string) error {
@@ -48,6 +49,8 @@ func InitProject(lingtaiDir string) error {
 	if err := os.MkdirAll(tuiAssetDir, 0o755); err != nil {
 		return fmt.Errorf("create .tui-asset: %w", err)
 	}
+	// Bundled skills — write to .lingtai/.skills/ (shared across all agents)
+	preset.PopulateBundledSkills(lingtaiDir)
 	return nil
 }
 

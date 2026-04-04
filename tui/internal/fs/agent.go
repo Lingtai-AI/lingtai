@@ -118,6 +118,12 @@ func WritePrompt(agentDir, content string) error {
 	return os.WriteFile(filepath.Join(agentDir, ".prompt"), []byte(content), 0o644)
 }
 
+// WriteInquiry writes a .inquiry signal file to trigger soul.inquiry.
+// The agent's heartbeat loop picks this up and runs a one-shot inquiry.
+func WriteInquiry(agentDir, question string) error {
+	return os.WriteFile(filepath.Join(agentDir, ".inquiry"), []byte(question), 0o644)
+}
+
 // ReadAgentRaw reads .agent.json from dir and returns the full JSON as an ordered map.
 func ReadAgentRaw(dir string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(filepath.Join(dir, ".agent.json"))

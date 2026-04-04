@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,6 +29,7 @@ const (
 	appViewDoctor
 	appViewTutorial
 	appViewNirvana
+	appViewSkills
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -39,6 +39,7 @@ type App struct {
 	setup       SetupModel
 	settings    SettingsModel
 	props       PropsModel
+	skills      SkillsModel
 	firstRun    FirstRunModel
 	addon       AddonModel
 	doctor      DoctorModel
@@ -53,7 +54,6 @@ type App struct {
 	width         int
 	height        int
 	tuiConfig   config.TUIConfig
-	pendingLang bool
 }
 
 func humanAddr(projectDir string) string {
@@ -120,7 +120,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []st
 		app.currentView = appViewMail
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
-		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, tuiCfg.Greeting, globalDir, tuiCfg.Language)
+		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, tuiCfg.Greeting, globalDir, tuiCfg.Language, tuiCfg.Insights)
 
 	}
 
@@ -161,6 +161,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tutorial, cmd = a.tutorial.Update(msg)
 		case appViewNirvana:
 			a.nirvana, cmd = a.nirvana.Update(msg)
+		case appViewSkills:
+			a.skills, cmd = a.skills.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		}
@@ -185,7 +187,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handlePaletteCommand(msg.Command, msg.Args)
 
 	case FirstRunDoneMsg:
-		// First-run complete: launch agent and switch to mail
+		// First-run complete: launch agent and switch to mail.
+		// Ensure human folder exists before launching — InitProject is
+		// idempotent and prevents the race where the agent tries to
+		// send mail before the human mailbox is ready.
+		if err := process.InitProject(a.projectDir); err != nil {
+			a.currentView = appViewMail
+			humanDir := filepath.Join(a.projectDir, "human")
+			addr := humanAddr(a.projectDir)
+			a.mail = NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, false, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
+			return a, tea.Batch(a.mail.Init(), a.sendSize())
+		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
 		// Launch the agent
@@ -199,7 +212,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -213,12 +226,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, false, a.globalDir, a.tuiConfig.Language)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, false, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
 
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
 	case NirvanaDoneMsg:
-		// Nirvana complete: .lingtai/ wiped, go to first-run
+		// Nirvana complete: .lingtai/ wiped, go to first-run.
+		// Re-init project to recreate the human folder so agents can
+		// deliver mail once the new orchestrator starts.
+		process.InitProject(a.projectDir)
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -245,6 +261,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UsePresetMsg:
 		// Create agent from preset
+		process.InitProject(a.projectDir)
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil
@@ -265,7 +282,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.tuiConfig.Greeting, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -280,7 +297,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills {
 				return a, tea.Quit
 			}
 		}
@@ -293,17 +310,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.firstRun = updated
 		return a, cmd
 	case appViewMail:
-		// Intercept SendMsg for pending lang
-		if _, ok := msg.(SendMsg); ok && a.pendingLang {
-			text := strings.TrimSpace(a.mail.input.Value())
-			a.mail.input.Reset()
-			a.pendingLang = false
-			a.doLang(text)
-			return a, func() tea.Msg {
-				a.hardRefresh()
-				return refreshDoneMsg{}
-			}
-		}
 		updated, cmd := a.mail.Update(msg)
 		a.mail = updated
 		return a, cmd
@@ -334,6 +340,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewNirvana:
 		updated, cmd := a.nirvana.Update(msg)
 		a.nirvana = updated
+		return a, cmd
+	case appViewSkills:
+		updated, cmd := a.skills.Update(msg)
+		a.skills = updated
 		return a, cmd
 	}
 
@@ -407,17 +417,8 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "lang":
-		if a.orchDir != "" {
-			if args != "" {
-				a.doLang(args)
-				return a, func() tea.Msg {
-					a.hardRefresh()
-					return refreshDoneMsg{}
-				}
-			} else {
-				a.mail.AddSystemMessage(i18n.T("mail.lang_prompt"))
-			}
-		}
+		// Redirect to /settings — agent language is now configured there
+		a.mail.AddSystemMessage(i18n.T("mail.lang_moved"))
 		return a, nil
 	case "clear":
 		if a.orchDir != "" && a.lingtaiCmd != "" {
@@ -463,7 +464,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		if url != "" {
 			openBrowser(url)
 		} else {
-			a.mail.AddSystemMessage("lingtai-portal not found. Install it or add it to PATH.")
+			a.mail.AddSystemMessage("lingtai-portal not found on PATH. Run: brew link --overwrite lingtai-tui")
 		}
 		return a, nil
 	case "addon":
@@ -490,35 +491,26 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNirvana
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
+	case "agents":
+		a.currentView = appViewProps
+		a.props = NewPropsModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "skills":
+		a.currentView = appViewSkills
+		a.skills = NewSkillsModel(a.projectDir)
+		return a, tea.Batch(a.skills.Init(), a.sendSize())
+	case "btw":
+		if a.orchDir != "" && args != "" {
+			fs.WriteInquiry(a.orchDir, args)
+			a.mail.AddSystemMessage(i18n.TF("mail.btw_sent", args))
+		} else if args == "" {
+			a.mail.AddSystemMessage(i18n.T("mail.btw_usage"))
+		}
+		return a, nil
 	case "quit":
 		return a, tea.Quit
 	}
 	return a, nil
-}
-
-func (a *App) doLang(lang string) {
-	valid := map[string]bool{"en": true, "zh": true, "wen": true}
-	if !valid[lang] {
-		a.mail.AddSystemMessage(i18n.TF("mail.lang_invalid", lang))
-		return
-	}
-	initPath := filepath.Join(a.orchDir, "init.json")
-	if data, err := os.ReadFile(initPath); err == nil {
-		var initData map[string]interface{}
-		if err := json.Unmarshal(data, &initData); err == nil {
-			if m, ok := initData["manifest"].(map[string]interface{}); ok {
-				m["language"] = lang
-			}
-			initData["covenant_file"] = preset.CovenantPath(a.globalDir, lang)
-			initData["principle_file"] = preset.PrinciplePath(a.globalDir, lang)
-			delete(initData, "covenant")  // use file, not inline
-			delete(initData, "principle") // use file, not inline
-			if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
-				os.WriteFile(initPath, out, 0o644)
-			}
-		}
-	}
-	a.mail.AddSystemMessage(i18n.TF("mail.lang_changed", lang))
 }
 
 // hardRefresh suspends the orchestrator and relaunches it.
@@ -566,6 +558,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			ps = unlimitedPageSize
 		}
 		a.mail.pageSize = ps
+		a.mail.insightsEnabled = a.tuiConfig.Insights
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)
@@ -579,10 +572,14 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
 		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
-	case "props":
+	case "props", "agents":
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "skills":
+		a.currentView = appViewSkills
+		a.skills = NewSkillsModel(a.projectDir)
+		return a, tea.Batch(a.skills.Init(), a.sendSize())
 	case "addon":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
@@ -620,6 +617,8 @@ func (a App) View() tea.View {
 		content = a.tutorial.View()
 	case appViewNirvana:
 		content = a.nirvana.View()
+	case appViewSkills:
+		content = a.skills.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

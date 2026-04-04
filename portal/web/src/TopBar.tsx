@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Theme } from './theme';
 import type { VizMode } from './App';
-import type { EdgeMode } from './Graph';
 import { t } from './i18n';
 
 function formatTime(date: Date): string {
@@ -35,67 +34,27 @@ function fromDatetimeLocal(val: string): number {
   return new Date(val).getTime();
 }
 
-function EdgeToggle({ edgeMode, lang, theme, onToggle }: {
-  edgeMode: EdgeMode;
-  lang: string;
-  theme: Theme;
-  onToggle: () => void;
-}) {
-  return (
-    <div style={{
-      display: 'flex',
-      borderRadius: 4,
-      overflow: 'hidden',
-      border: `1px solid ${theme.border}`,
-      flexShrink: 0,
-    }}>
-      {(['avatar', 'email'] as EdgeMode[]).map(mode => {
-        const active = edgeMode === mode;
-        const color = mode === 'avatar' ? theme.edgeColors.avatar : theme.edgeColors.mail;
-        return (
-          <button
-            key={mode}
-            onClick={active ? undefined : onToggle}
-            style={{
-              background: active ? color + '25' : 'transparent',
-              border: 'none',
-              borderRight: mode === 'avatar' ? `1px solid ${theme.border}` : 'none',
-              padding: '2px 10px',
-              cursor: active ? 'default' : 'pointer',
-              color: active ? color : color + '55',
-              fontSize: 10,
-              letterSpacing: 0.5,
-              transition: 'all 0.15s',
-            }}
-          >
-            {t(lang, `edge.${mode}`)}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replayTime, tapeRange, viewRange, edgeMode, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleEdgeMode, onToggleFilter }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, rebuilding, speed, replayTime, tapeRange, viewRange, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onRebuild, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleFilter }: {
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
   vizMode: VizMode;
   playing: boolean;
+  replayLoading: boolean;
+  rebuilding: boolean;
   speed: number;
   replayTime: number;
   tapeRange: [number, number];
   viewRange: [number, number];
-  edgeMode: EdgeMode;
   showFilter: boolean;
   onEnterReplay: () => void;
   onExitReplay: () => void;
   onTogglePlaying: () => void;
+  onRebuild: () => void;
   onSeek: (unixMs: number) => void;
   onChangeSpeed: (s: number) => void;
   onSetViewRange: (range: [number, number]) => void;
   onToggleTheme: () => void;
-  onToggleEdgeMode: () => void;
   onToggleFilter: () => void;
 }) {
   const [now, setNow] = useState(() => new Date());
@@ -150,7 +109,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
         flexShrink: 0,
         userSelect: 'none',
       }}>
-        {/* Left: live indicator + edge mode */}
+        {/* Left: live indicator + replay/rebuild/trim buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{
@@ -170,13 +129,21 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
               {t(lang, 'topbar.live')}
             </span>
           </div>
-          <EdgeToggle edgeMode={edgeMode} lang={lang} theme={theme} onToggle={onToggleEdgeMode} />
-        </div>
 
-        {/* Center: replay button */}
-        <button onClick={onEnterReplay} style={btnStyle()}>
-          {'⏮ ' + t(lang, 'topbar.replay')}
-        </button>
+          <div style={{ width: 1, height: 16, background: theme.border, flexShrink: 0 }} />
+
+          {/* Replay button */}
+          <button
+            onClick={replayLoading ? undefined : onEnterReplay}
+            style={{
+              ...btnStyle(),
+              opacity: replayLoading ? 0.5 : 1,
+              cursor: replayLoading ? 'wait' : 'pointer',
+            }}
+          >
+            {replayLoading ? '⏳ ' + t(lang, 'topbar.replay') + '...' : '⏮ ' + t(lang, 'topbar.replay')}
+          </button>
+        </div>
 
         {/* Right: clock + theme + hamburger */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -228,11 +195,10 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
     }}>
       {/* Main row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Left: back to live + edge mode */}
+        {/* Left: back to live */}
         <button onClick={onExitReplay} style={btnStyle()}>
           {'● ' + t(lang, 'topbar.live')}
         </button>
-        <EdgeToggle edgeMode={edgeMode} lang={lang} theme={theme} onToggle={onToggleEdgeMode} />
 
         <div style={{ width: 1, height: 16, background: theme.border, flexShrink: 0 }} />
 
@@ -240,6 +206,31 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
         <button onClick={onTogglePlaying} style={btnStyle(playing)}>
           {playing ? '⏸' : '▶'}
         </button>
+
+        {/* Trim toggle */}
+        <button
+          onClick={() => setTrimming(!trimming)}
+          style={btnStyle(trimming || isTrimmed)}
+          title="Set start/end time"
+        >
+          ✂
+        </button>
+
+        {/* Rebuild */}
+        <button
+          onClick={rebuilding ? undefined : onRebuild}
+          style={{
+            ...btnStyle(),
+            opacity: rebuilding ? 0.5 : 1,
+            cursor: rebuilding ? 'wait' : 'pointer',
+            userSelect: 'auto',
+          }}
+          title={rebuilding ? 'Rebuilding...' : 'Rebuild replay cache'}
+        >
+          {rebuilding ? '⏳' : '⟳'}
+        </button>
+
+        <div style={{ width: 1, height: 16, background: theme.border, flexShrink: 0 }} />
 
         {/* Speed input */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -289,15 +280,6 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, speed, replay
         <span style={{ fontSize: 10, color: theme.textDim, minWidth: 32, textAlign: 'right' }}>
           {Math.round(progress * 100)}%
         </span>
-
-        {/* Trim toggle */}
-        <button
-          onClick={() => setTrimming(!trimming)}
-          style={btnStyle(trimming || isTrimmed)}
-          title="Set start/end time"
-        >
-          ✂
-        </button>
 
         {/* Virtual clock */}
         <div style={{

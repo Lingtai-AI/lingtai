@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -106,6 +107,20 @@ func (m DoctorModel) View() string {
 // runDoctor performs the /doctor diagnostic and returns a doctorResultMsg.
 func runDoctor(orchDir string) doctorResultMsg {
 	var lines []doctorLine
+
+	// Phase 0: check lingtai-portal on PATH
+	if _, err := exec.LookPath("lingtai-portal"); err == nil {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.portal_ok"), OK: true,
+		})
+	} else {
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.portal_missing"),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.suggest_portal"), Hint: true,
+		})
+	}
 
 	// Phase 1: read events.jsonl for recent errors
 	lastErr := findLastAPIError(orchDir)

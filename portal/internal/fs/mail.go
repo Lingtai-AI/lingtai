@@ -15,10 +15,6 @@ func ReadInbox(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "inbox"))
 }
 
-func ReadSent(dir string) ([]MailMessage, error) {
-	return readMailFolder(filepath.Join(dir, "mailbox", "sent"))
-}
-
 func ReadArchive(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "archive"))
 }
