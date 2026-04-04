@@ -212,6 +212,10 @@ func printHelp() {
 	fmt.Println("  suspend      Gracefully suspend agents via signal files (all, or those in <dir>)")
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 	fmt.Println()
+	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
+	fmt.Println("  They are the bodies of your agents — files, memory, mail, identity.")
+	fmt.Println("  Always purge or suspend before deleting them.")
+	fmt.Println()
 	home, _ := os.UserHomeDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	fmt.Printf("  Global config: %s\n", globalDir)
@@ -253,7 +257,9 @@ func showWelcome(globalDir string) {
 
 	printWelcomeInfo()
 	fmt.Println()
-	fmt.Println("  Run lingtai-tui --help to see CLI commands anytime.")
+	printHelp()
+	fmt.Println()
+	fmt.Println("  Run lingtai-tui --help to see this info again.")
 	fmt.Println()
 
 	fmt.Print("  Press Enter to continue...")
@@ -297,14 +303,34 @@ func cleanMain() {
 		return
 	}
 
-	// Suspend all agents first
+	// Signal all agents at once (touch .suspend in every folder)
+	var alive []string
 	for _, agent := range agents {
 		if agent.IsHuman {
 			continue
 		}
+		suspendFile := filepath.Join(agent.WorkingDir, ".suspend")
+		os.WriteFile(suspendFile, []byte(""), 0o644)
 		if fs.IsAlive(agent.WorkingDir, 3.0) {
-			fmt.Printf("Suspending %s...\n", agent.AgentName)
-			fs.SuspendAndWait(agent.WorkingDir, 5*time.Second)
+			alive = append(alive, agent.WorkingDir)
+		}
+	}
+	// Wait for all to die (poll, max 10s)
+	if len(alive) > 0 {
+		fmt.Printf("Suspending %d agent(s)...\n", len(alive))
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			allDead := true
+			for _, dir := range alive {
+				if fs.IsAlive(dir, 3.0) {
+					allDead = false
+					break
+				}
+			}
+			if allDead {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
 	}
 
