@@ -125,11 +125,18 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
+	insightsOptions := []string{"off", "on"}
+	insightsCurrent := 1 // default on
+	if !tuiCfg.Insights {
+		insightsCurrent = 0
+	}
+
 	fields := []SettingField{
 		{Key: "language", Label: "settings.language", Options: langOptions, Current: langCurrent},
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "greeting", Label: "settings.greeting", Options: greetingOptions, Current: greetingCurrent},
 		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
+		{Key: "insights", Label: "settings.insights", Options: insightsOptions, Current: insightsCurrent},
 	}
 
 	// Read current nickname from human's .agent.json
@@ -257,6 +264,8 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		}
 	case "greeting":
 		m.tuiConfig.Greeting = val == "on"
+	case "insights":
+		m.tuiConfig.Insights = val == "on"
 	case "theme":
 		m.tuiConfig.Theme = val
 		SetThemeByName(val)
@@ -356,7 +365,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "greeting" || (f.Key == "mail_page_size" && value == "unlimited") {
+		if f.Key == "greeting" || f.Key == "insights" || (f.Key == "mail_page_size" && value == "unlimited") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)

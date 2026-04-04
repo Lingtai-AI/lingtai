@@ -589,6 +589,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			ps = unlimitedPageSize
 		}
 		a.mail.pageSize = ps
+		a.mail.insightsEnabled = a.tuiConfig.Insights
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)
