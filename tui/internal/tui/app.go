@@ -202,7 +202,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Launch the agent
 		var launchErr string
 		if a.lingtaiCmd != "" {
-			if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir); err != nil {
+			if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 				launchErr = i18n.TF("mail.launch_failed", err)
 			}
 		}
@@ -271,7 +271,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		orchDir := filepath.Join(a.projectDir, agentName)
 		var launchErr string
 		if a.lingtaiCmd != "" {
-			if _, err := process.LaunchAgent(a.lingtaiCmd, orchDir, a.globalDir); err != nil {
+			if _, err := process.LaunchAgent(a.lingtaiCmd, orchDir); err != nil {
 				launchErr = i18n.TF("mail.launch_failed", err)
 			}
 		}
@@ -407,14 +407,14 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 					continue
 				}
 				if !fs.IsAlive(agent.WorkingDir, 3.0) && a.lingtaiCmd != "" {
-					process.LaunchAgent(a.lingtaiCmd, agent.WorkingDir, a.globalDir)
+					process.LaunchAgent(a.lingtaiCmd, agent.WorkingDir)
 					count++
 				}
 			}
 			a.mail.AddSystemMessage(i18n.TF("mail.cpr_all", count))
 		} else if a.orchDir != "" && a.lingtaiCmd != "" {
 			if !fs.IsAlive(a.orchDir, 3.0) {
-				process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
+				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
 				a.mail.AddSystemMessage(i18n.TF("mail.cpr", a.orchName))
 			} else {
 				a.mail.AddSystemMessage(i18n.T("mail.cpr_alive"))
@@ -452,7 +452,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				// Wipe conversation history (token ledger is preserved)
 				os.Remove(filepath.Join(a.orchDir, "history", "chat_history.jsonl"))
 				// Relaunch with clean context
-				process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
+				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
 				return refreshDoneMsg{}
 			}
 		}
@@ -505,6 +505,14 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNirvana
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
+	case "btw":
+		if a.orchDir != "" && args != "" {
+			fs.WriteInquiry(a.orchDir, args)
+			a.mail.AddSystemMessage(i18n.TF("mail.btw_sent", args))
+		} else if args == "" {
+			a.mail.AddSystemMessage(i18n.T("mail.btw_usage"))
+		}
+		return a, nil
 	case "quit":
 		return a, tea.Quit
 	}
@@ -556,7 +564,7 @@ func (a *App) hardRefresh() {
 	// Clean signal files before relaunch
 	os.Remove(suspendFile)
 	// Relaunch
-	process.LaunchAgent(a.lingtaiCmd, a.orchDir, a.globalDir)
+	process.LaunchAgent(a.lingtaiCmd, a.orchDir)
 }
 
 // tryLock is defined in lock_unix.go / lock_windows.go

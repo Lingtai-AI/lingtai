@@ -38,6 +38,7 @@ type TUIConfig struct {
 	MailPageSize   int    `json:"mail_page_size"`
 	Greeting       bool   `json:"greeting"`
 	Theme          string `json:"theme,omitempty"` // theme name: "ink-dark" (default), etc.
+	Insights       bool   `json:"insights"`
 }
 
 // DefaultTUIConfig returns sensible defaults.
@@ -46,6 +47,7 @@ func DefaultTUIConfig() TUIConfig {
 		Language:     "en",
 		MailPageSize: 100,
 		Greeting:     true,
+		Insights:     true,
 	}
 }
 
@@ -68,6 +70,9 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	// Greeting defaults to true when absent from JSON.
 	if !strings.Contains(string(data), `"greeting"`) {
 		tc.Greeting = true
+	}
+	if !strings.Contains(string(data), `"insights"`) {
+		tc.Insights = true
 	}
 	return tc
 }

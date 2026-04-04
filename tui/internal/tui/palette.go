@@ -40,6 +40,7 @@ func NewPaletteModel() PaletteModel {
 // DefaultCommands returns all slash commands.
 func DefaultCommands() []Command {
 	return []Command{
+		{Name: "btw", Description: "palette.btw"},
 		{Name: "sleep", Description: "palette.sleep"},
 		{Name: "suspend", Description: "palette.suspend"},
 		{Name: "cpr", Description: "palette.cpr"},
