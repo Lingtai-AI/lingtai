@@ -423,6 +423,10 @@ func (m PropsModel) renderLeft(maxW int) string {
 	if m.selectedTokens.APICalls > 0 {
 		lines = append(lines, "")
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_tokens")))
+		if m.selectedStatus.Tokens.Estimated {
+			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
+			lines = append(lines, "  "+warnStyle.Render("⚠ estimated (provider did not return usage)"))
+		}
 		lines = append(lines, "")
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(m.selectedTokens.Input))))
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(m.selectedTokens.Output))))

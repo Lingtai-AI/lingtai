@@ -162,7 +162,8 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 // AgentStatus holds live runtime status from .status.json (same as system("show")).
 type AgentStatus struct {
 	Tokens struct {
-		Context struct {
+		Estimated bool `json:"estimated"`
+		Context   struct {
 			SystemTokens  int     `json:"system_tokens"`
 			ToolsTokens   int     `json:"tools_tokens"`
 			HistoryTokens int     `json:"history_tokens"`

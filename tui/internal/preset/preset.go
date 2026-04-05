@@ -238,6 +238,7 @@ func customPreset() Preset {
 				"listen": e(), "skills": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
+			"streaming": false,
 		},
 	}
 }
