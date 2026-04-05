@@ -319,12 +319,17 @@ func CheckUpgrade(globalDir string) bool {
 	} else {
 		pipCmd = filepath.Join(filepath.Dir(python), "pip")
 	}
+	fmt.Printf("Upgrading lingtai %s → %s...\n", installed, pypi.Info.Version)
 	uvCmd := findUV()
+	var cmd *exec.Cmd
 	if uvCmd != "" {
-		exec.Command(uvCmd, "pip", "install", "--upgrade", "lingtai",
-			"-p", RuntimeVenvDir(globalDir)).Run()
+		cmd = exec.Command(uvCmd, "pip", "install", "--upgrade", "lingtai",
+			"-p", RuntimeVenvDir(globalDir))
 	} else {
-		exec.Command(pipCmd, "install", "--upgrade", "lingtai").Run()
+		cmd = exec.Command(pipCmd, "install", "--upgrade", "lingtai")
 	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 	return true
 }
