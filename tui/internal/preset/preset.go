@@ -509,7 +509,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	manifest["molt_pressure"] = opts.MoltPressure
 	manifest["molt_prompt"] = ""
 	manifest["max_turns"] = 100
-	manifest["streaming"] = true
+	manifest["streaming"] = false
 
 	// Resolve file paths — use opts if set, fallback to language defaults
 	covenantFile := opts.CovenantFile
@@ -607,7 +607,7 @@ func GenerateTutorialInit(p Preset, lingtaiDir, globalDir, lang string) error {
 	manifest["molt_pressure"] = 0.8
 	manifest["molt_prompt"] = ""
 	manifest["max_turns"] = 100
-	manifest["streaming"] = true
+	manifest["streaming"] = false
 
 	initJSON := map[string]interface{}{
 		"manifest":       manifest,
