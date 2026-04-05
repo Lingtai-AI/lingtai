@@ -119,9 +119,9 @@ func ReadInsightEvents(eventsPath string) []ChatMessage {
 }
 
 // ReadSoulInquiries reads soul_inquiry.jsonl and returns ChatMessages for
-// human-sourced inquiries (from /btw). These are displayed independently of
-// the events.jsonl insight path so results survive even if the insight event
-// was lost due to a crash.
+// ReadSoulInquiries reads soul_inquiry.jsonl and returns ChatMessages for
+// human-sourced inquiries (from /btw) and auto-insights. Agent-internal
+// inquiries (source: "agent") are excluded.
 func ReadSoulInquiries(logPath string) []ChatMessage {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -139,7 +139,7 @@ func ReadSoulInquiries(logPath string) []ChatMessage {
 			continue
 		}
 		source, _ := entry["source"].(string)
-		if source != "human" {
+		if source != "human" && source != "insight" {
 			continue
 		}
 		voice, _ := entry["voice"].(string)
@@ -147,12 +147,15 @@ func ReadSoulInquiries(logPath string) []ChatMessage {
 			continue
 		}
 		ts, _ := entry["ts"].(string)
-		prompt, _ := entry["prompt"].(string)
+		question := ""
+		if source == "human" {
+			question, _ = entry["prompt"].(string)
+		}
 		msgs = append(msgs, ChatMessage{
 			Body:      voice,
 			Timestamp: ts,
 			Type:      "insight",
-			Question:  prompt,
+			Question:  question,
 		})
 	}
 	return msgs

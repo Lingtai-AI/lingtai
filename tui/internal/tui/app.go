@@ -519,13 +519,24 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewSkills
 		a.skills = NewSkillsModel(a.projectDir)
 		return a, tea.Batch(a.skills.Init(), a.sendSize())
+	case "insights":
+		if a.orchDir != "" {
+			if !fs.IsAlive(a.orchDir, 3.0) {
+				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+				return a, nil
+			}
+			question := i18n.T("insight.auto_question")
+			fs.WriteInquiry(a.orchDir, "insight", question)
+			a.mail.AddSystemMessage(i18n.T("mail.insight_sent"))
+		}
+		return a, nil
 	case "btw":
 		if a.orchDir != "" && args != "" {
 			if !fs.IsAlive(a.orchDir, 3.0) {
 				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
-			fs.WriteInquiry(a.orchDir, args)
+			fs.WriteInquiry(a.orchDir, "human", args)
 			a.mail.AddSystemMessage(i18n.TF("mail.btw_sent", args))
 		} else if args == "" {
 			a.mail.AddSystemMessage(i18n.T("mail.btw_usage"))

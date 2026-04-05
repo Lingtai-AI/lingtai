@@ -34,6 +34,7 @@ type ChatMessage struct {
 	Type        string   // "mail", "thinking", "diary", "insight"
 	Attachments []string // file paths attached to the message
 	Question    string   // question text (for /btw insight events)
+	Dismissed   bool     // true after user presses Esc; only show in verbose
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -134,6 +135,10 @@ type MailModel struct {
 	wasActive      bool   // true if previous refresh was ACTIVE
 	quoteIdx       int    // which quote to show (advances on each ACTIVE transition)
 	pulseTick      int    // pulse animation counter while ACTIVE
+	inquiryState   string    // "", "sent", "taken" — tracks /btw lifecycle
+	insightPending bool      // true when waiting for 5s insight delay
+	insightAt      time.Time // when to fire the auto-insight
+	dismissedInsights map[string]bool // dismissed insight timestamps
 	showEditorWarn  bool   // one-time vim warning overlay
 	editorWarnText  string // text to pass to editor after warning
 	insightsEnabled bool   // from settings — show insight events
@@ -168,8 +173,9 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		globalDir:      globalDir,
 		greetEnabled:    greeting,
 		greetLang:       lang,
-		quoteIdx:        -1,
-		insightsEnabled: insights,
+		quoteIdx:          -1,
+		insightsEnabled:    insights,
+		dismissedInsights: make(map[string]bool),
 	}
 }
 
@@ -335,6 +341,12 @@ func (m *MailModel) buildMessages() {
 	sort.Slice(chatMsgs, func(i, j int) bool {
 		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp
 	})
+	// Restore dismissed state for insights
+	for i := range chatMsgs {
+		if chatMsgs[i].Type == "insight" && m.dismissedInsights[chatMsgs[i].Timestamp] {
+			chatMsgs[i].Dismissed = true
+		}
+	}
 	m.messages = chatMsgs
 }
 
@@ -439,13 +451,43 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		m.orchNickname = msg.orchNickname
 		isActive := strings.EqualFold(m.orchState, "ACTIVE")
+		isIdle := strings.EqualFold(m.orchState, "IDLE")
 		if isActive && !m.wasActive {
 			// Just became active — advance to next quote, reset pulse
 			m.quoteIdx++
 			m.pulseTick = 0
+			m.insightPending = false
+		}
+		insightDone := fileExists(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
+		if isIdle && m.wasActive && !m.insightPending && !insightDone && m.insightsEnabled {
+			// Just became idle — schedule auto-insight in 5s
+			m.insightPending = true
+			m.insightAt = time.Now().Add(5 * time.Second)
+		}
+		if m.insightPending && time.Now().After(m.insightAt) {
+			m.insightPending = false
+			if m.orchestrator != "" && isIdle {
+				question := i18n.T("insight.auto_question")
+				fs.WriteInquiry(m.orchestrator, "insight", question)
+				// Write sentinel to prevent re-firing
+				os.WriteFile(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"), []byte(""), 0o644)
+			}
 		}
 		m.wasActive = isActive
 		m.buildMessages()
+		// Track /btw inquiry lifecycle
+		if m.orchestrator != "" {
+			inquiryExists := fileExists(filepath.Join(m.orchestrator, ".inquiry"))
+			takenExists := fileExists(filepath.Join(m.orchestrator, ".inquiry.taken"))
+			switch {
+			case inquiryExists:
+				m.inquiryState = "sent"
+			case takenExists:
+				m.inquiryState = "taken"
+			default:
+				m.inquiryState = ""
+			}
+		}
 		// Auto-greet: on first refresh, if history is empty, write .prompt
 		if !m.greetChecked {
 			m.greetChecked = true
@@ -499,6 +541,8 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		if m.orchestrator != "" {
 			fs.WriteMail(m.orchestrator, m.humanDir, m.humanAddr, m.orchAddr, "", text)
+			// Human sent a real message — allow new insight after next idle
+			os.Remove(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
 			m.input.Reset()
 			m.syncViewportHeight()
 			return m, m.refreshMail
@@ -620,6 +664,27 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 
+		case "esc":
+			// Dismiss all visible insights
+			changed := false
+			for _, msg := range m.messages {
+				if msg.Type == "insight" && !msg.Dismissed {
+					if m.dismissedInsights == nil {
+						m.dismissedInsights = make(map[string]bool)
+					}
+					m.dismissedInsights[msg.Timestamp] = true
+					changed = true
+				}
+			}
+			if changed {
+				m.buildMessages()
+				if m.ready {
+					m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+					m.viewport.GotoBottom()
+				}
+			}
+			return m, nil
+
 		case "pgup", "pgdown":
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -687,36 +752,47 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			}
 
 		case "insight":
+			// Dismissed insights only show in verbose mode
+			if msg.Dismissed && m.verbose == verboseOff {
+				continue
+			}
 			wrapWidth := m.width - 6
 			if wrapWidth < 20 {
 				wrapWidth = 20
 			}
-			barWidth := min(wrapWidth, 44)
-			insightStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+			fullBar := m.width - 4
+			barStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
+			labelStyle := lipgloss.NewStyle().Foreground(ColorAccent)
 
-			if msg.Question != "" {
-				// /btw: full-width lines
-				fullBar := m.width - 2
-				b.WriteString(insightStyle.Render("  ─ btw "+strings.Repeat("─", max(fullBar-7, 1))) + "\n")
-				wrapped := lipgloss.NewStyle().Width(max(wrapWidth-2, 10)).Render(msg.Question)
-				for _, line := range strings.Split(wrapped, "\n") {
-					b.WriteString(insightStyle.Render("  "+line) + "\n")
-				}
-				b.WriteString(insightStyle.Render("  "+strings.Repeat("─", fullBar)) + "\n")
-				wrapped = lipgloss.NewStyle().Width(max(wrapWidth-2, 10)).Render(msg.Body)
-				for _, line := range strings.Split(wrapped, "\n") {
-					b.WriteString(insightStyle.Render("  "+line) + "\n")
-				}
-				b.WriteString(insightStyle.Render("  "+strings.Repeat("─", fullBar)) + "\n")
-			} else {
-				// auto-insight: ★ insight ─── / bullets / ───
-				b.WriteString(insightStyle.Render("  ★ insight "+strings.Repeat("─", max(barWidth-11, 1))) + "\n")
-				wrapped := lipgloss.NewStyle().Width(max(wrapWidth-2, 10)).Render(msg.Body)
-				for _, line := range strings.Split(wrapped, "\n") {
-					b.WriteString(insightStyle.Render("  "+line) + "\n")
-				}
-				b.WriteString(insightStyle.Render("  "+strings.Repeat("─", barWidth)) + "\n")
+			// Label: "/btw › question" or "★ insight", with dismiss hint if undismissed
+			var label string
+			dismissHint := ""
+			if !msg.Dismissed {
+				dismissHint = " " + barStyle.Render(i18n.T("mail.esc_dismiss"))
 			}
+			if msg.Question != "" {
+				label = labelStyle.Render("/btw › ") + msg.Question + dismissHint
+			} else {
+				label = labelStyle.Render("★ insight") + dismissHint
+			}
+
+			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
+			b.WriteString("  " + label + "\n")
+			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
+			r, err := glamour.NewTermRenderer(
+				glamour.WithStandardStyle(ActiveTheme().GlamourStyle),
+				glamour.WithWordWrap(max(wrapWidth-2, 10)),
+			)
+			if err == nil {
+				rendered, err := r.Render(msg.Body)
+				if err == nil {
+					rendered = strings.Trim(rendered, "\n")
+					for _, line := range strings.Split(rendered, "\n") {
+						b.WriteString("  " + line + "\n")
+					}
+				}
+			}
+			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
 
 		default: // "mail"
 			if m.verbose != verboseOff {
@@ -807,6 +883,11 @@ func (m MailModel) humanName() string {
 func (m *MailModel) AddSystemMessage(body string) {
 	m.statusFlash = body
 	m.statusExpiry = time.Now().Add(5 * time.Second)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // launchEditor creates a temp file and opens $EDITOR (default: vim).
@@ -934,7 +1015,9 @@ func (m MailModel) View() string {
 
 	// Status bar: left = flash or dir path, right = hints
 	var leftLabel string
-	if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
+	if m.inquiryState == "sent" || m.inquiryState == "taken" {
+		leftLabel = lipgloss.NewStyle().Foreground(ColorAccent).Render("  ◉ " + i18n.T("mail.btw_thinking"))
+	} else if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("  ◉ " + m.statusFlash)
 	} else {
 		m.statusFlash = ""

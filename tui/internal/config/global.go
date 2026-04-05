@@ -47,7 +47,7 @@ func DefaultTUIConfig() TUIConfig {
 		Language:     "en",
 		MailPageSize: 100,
 		Greeting:     true,
-		Insights:     true,
+		Insights:     false,
 	}
 }
 
@@ -71,9 +71,8 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	if !strings.Contains(string(data), `"greeting"`) {
 		tc.Greeting = true
 	}
-	if !strings.Contains(string(data), `"insights"`) {
-		tc.Insights = true
-	}
+	// Insights defaults to false when absent from JSON.
+	// No override needed — zero value of bool is false.
 	return tc
 }
 

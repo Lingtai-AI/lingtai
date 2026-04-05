@@ -119,9 +119,19 @@ func WritePrompt(agentDir, content string) error {
 }
 
 // WriteInquiry writes a .inquiry signal file to trigger soul.inquiry.
-// The agent's heartbeat loop picks this up and runs a one-shot inquiry.
-func WriteInquiry(agentDir, question string) error {
-	return os.WriteFile(filepath.Join(agentDir, ".inquiry"), []byte(question), 0o644)
+// No-op if .inquiry or .inquiry.taken already exists (one at a time).
+// Format: first line is source ("human", "insight"), rest is question.
+func WriteInquiry(agentDir, source, question string) error {
+	inquiryPath := filepath.Join(agentDir, ".inquiry")
+	takenPath := filepath.Join(agentDir, ".inquiry.taken")
+	if _, err := os.Stat(inquiryPath); err == nil {
+		return nil // already pending
+	}
+	if _, err := os.Stat(takenPath); err == nil {
+		return nil // already being processed
+	}
+	content := source + "\n" + question
+	return os.WriteFile(inquiryPath, []byte(content), 0o644)
 }
 
 // ReadAgentRaw reads .agent.json from dir and returns the full JSON as an ordered map.

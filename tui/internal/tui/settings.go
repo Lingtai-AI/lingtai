@@ -127,9 +127,9 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 	}
 
 	insightsOptions := []string{"off", "on"}
-	insightsCurrent := 1 // default on
-	if !tuiCfg.Insights {
-		insightsCurrent = 0
+	insightsCurrent := 0
+	if tuiCfg.Insights {
+		insightsCurrent = 1
 	}
 
 	// Read agent language from init.json
@@ -435,12 +435,15 @@ func (m SettingsModel) View() string {
 			displayVal = dimValStyle.Render(displayVal)
 		}
 
-		b.WriteString(cursor + label + " " + displayVal)
-		// Show /refresh hint for agent fields
-		if f.Key == "agent_lang" && i == m.cursor {
-			b.WriteString("  " + StyleFaint.Render(i18n.T("settings.agent_lang_hint")))
+		b.WriteString(cursor + label + " " + displayVal + "\n")
+		// Show description for selected field
+		if i == m.cursor {
+			descKey := "settings." + f.Key + "_desc"
+			desc := i18n.T(descKey)
+			if desc != descKey { // key exists
+				b.WriteString("  " + StyleFaint.Render(desc) + "\n")
+			}
 		}
-		b.WriteString("\n")
 	}
 
 	// Local text fields

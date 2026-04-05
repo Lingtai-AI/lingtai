@@ -29,6 +29,7 @@
   - /settings — TUI 偏好（别号、迎语开关、器灵言语）
   - /agents — 观网络中诸灵之性与数
   - /skills — 观已安技艺
+  - /insights — 请灵省察（观当前事之得失）
   - /viz — 启器灵网络可视化（拓扑、邮流、诸灵之态）
   - /addon — 配附加路径（IMAP、Telegram、飞书）
   - /tutorial — 菩提祖师将引汝览代码与设计之道（将重置工作目录）

@@ -29,6 +29,7 @@ After you have been idle for {{soul_delay}} seconds, your inner voice — the so
   - /settings — TUI preferences (nickname, greeting toggle, agent language)
   - /agents — properties and statistics of all agents in the network
   - /skills — view installed skills
+  - /insights — request an insight from the agent (observations about the current task)
   - /viz — open agent network visualization (topology, mail flows, agent states)
   - /addon — configure addon paths (IMAP, Telegram, Feishu)
   - /tutorial — a guide will walk you through the codebase and design concepts (resets working directory)

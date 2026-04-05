@@ -57,8 +57,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Print version and check for updates (3s timeout)
-	latestVersion := config.CheckTUIUpgrade(version)
+	// Print version and check for updates (3s timeout).
+	// Skip upgrade check for dev builds (version contains '-' suffix like v0.4.31-4-gabcdef).
+	isDev := strings.Contains(version, "-")
+	latestVersion := ""
+	if !isDev {
+		latestVersion = config.CheckTUIUpgrade(version)
+	}
 	if latestVersion != "" {
 		fmt.Printf("lingtai-tui %s (latest: %s)\n", version, latestVersion)
 		fmt.Printf("  Upgrade now? [Y/n] ")
