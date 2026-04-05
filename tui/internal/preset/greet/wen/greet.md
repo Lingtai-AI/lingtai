@@ -22,9 +22,9 @@
   - /btw — 旁问器灵（以省问之式送达）
   - /sleep — 令器灵入眠（/sleep all 令众灵皆眠）
   - /suspend — 挂器灵（/suspend all 挂众灵）
-  - /cpr — 唤醒沉眠或挂起之灵（/cpr all 唤众灵）
+  - /cpr — 苏死灵（/cpr all 苏众灵）。宜用 /refresh。
   - /clear — 清器灵之上下文，重启之
-  - /refresh — 硬重启器灵（重载 init.json）
+  - /refresh — 硬重启器灵，重载 init.json（/refresh all 重启众灵）
   - /setup — 器灵设置（服务商、模型、能力、心流间隔）
   - /settings — TUI 偏好（别号、迎语开关、器灵言语）
   - /agents — 观网络中诸灵之性与数

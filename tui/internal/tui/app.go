@@ -183,6 +183,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
 		return a, a.mail.refreshMail
 
+	case refreshAllDoneMsg:
+		a.mail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
+		return a, a.mail.refreshMail
+
 	case PaletteSelectMsg:
 		return a.handlePaletteCommand(msg.Command, msg.Args)
 
@@ -444,7 +448,23 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "refresh":
-		if a.orchDir != "" && a.lingtaiCmd != "" {
+		if args == "all" && a.lingtaiCmd != "" {
+			a.mail.AddSystemMessage(i18n.T("mail.refreshing_all"))
+			lingtaiCmd := a.lingtaiCmd
+			projectDir := a.projectDir
+			return a, func() tea.Msg {
+				agents, _ := fs.DiscoverAgents(projectDir)
+				count := 0
+				for _, agent := range agents {
+					if agent.IsHuman {
+						continue
+					}
+					hardRefreshDir(lingtaiCmd, agent.WorkingDir)
+					count++
+				}
+				return refreshAllDoneMsg{count: count}
+			}
+		} else if a.orchDir != "" && a.lingtaiCmd != "" {
 			a.mail.AddSystemMessage(i18n.T("mail.refreshing"))
 			return a, func() tea.Msg {
 				a.hardRefresh()
@@ -519,21 +539,22 @@ func (a *App) hardRefresh() {
 	if a.orchDir == "" || a.lingtaiCmd == "" {
 		return
 	}
-	// Suspend
-	suspendFile := filepath.Join(a.orchDir, ".suspend")
+	hardRefreshDir(a.lingtaiCmd, a.orchDir)
+}
+
+// hardRefreshDir suspends the agent in the given directory and relaunches it.
+func hardRefreshDir(lingtaiCmd, dir string) {
+	suspendFile := filepath.Join(dir, ".suspend")
 	os.WriteFile(suspendFile, []byte(""), 0o644)
-	// Wait for lock file to be released (process fully exited)
-	lockFile := filepath.Join(a.orchDir, ".agent.lock")
+	lockFile := filepath.Join(dir, ".agent.lock")
 	for i := 0; i < 40; i++ { // 40 × 250ms = 10s max
 		if tryLock(lockFile) {
 			break
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	// Clean signal files before relaunch
 	os.Remove(suspendFile)
-	// Relaunch
-	process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+	process.LaunchAgent(lingtaiCmd, dir)
 }
 
 // tryLock is defined in lock_unix.go / lock_windows.go
@@ -546,6 +567,7 @@ func (a App) sendSize() tea.Cmd {
 }
 
 type refreshDoneMsg struct{}
+type refreshAllDoneMsg struct{ count int }
 
 func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {

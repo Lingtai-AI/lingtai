@@ -22,9 +22,9 @@
   - /btw — 向器灵旁问（以洞察问询的形式送达）
   - /sleep — 令器灵入眠（/sleep all 令所有器灵入眠）
   - /suspend — 挂起器灵（/suspend all 挂起所有器灵）
-  - /cpr — 唤醒沉睡或挂起的器灵（/cpr all 唤醒全部）
+  - /cpr — 唤醒已死亡的器灵（/cpr all 唤醒全部）。一般建议使用 /refresh。
   - /clear — 清空器灵上下文窗口并重启
-  - /refresh — 硬重启器灵（重新加载 init.json）
+  - /refresh — 硬重启器灵，重新加载 init.json（/refresh all 全部重启）
   - /setup — 器灵设置（服务商、模型、能力、心流间隔）
   - /settings — TUI 偏好设置（昵称、问候开关、器灵语言）
   - /agents — 查看网络中所有器灵的属性与统计

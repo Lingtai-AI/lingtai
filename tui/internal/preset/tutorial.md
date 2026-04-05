@@ -239,8 +239,8 @@ Start with avatar. This is the most important and distinctive capability — dem
      - Run **/doctor** to see all agents and their states (many will be ACTIVE, processing the email storm)
      - Run **/suspend-all** to kill the entire network instantly (you included — warn them you will go silent)
      - After suspend-all, all agents are dead. The human should see this in /doctor (all SUSPENDED). The email storm stops. Silence.
-     - Run **/cpr** on you (the tutorial agent) to revive you, then send you a message to wake you up
-     - After you wake, explain: every other agent is still suspended. The human has full control. They can /cpr individual agents from /doctor to selectively revive them, or leave the network frozen. This is how you manage a Lingtai network — let it grow, then suspend-all when it gets too hot, then selectively revive what you need.
+     - Run **/refresh** on you (the tutorial agent) to revive you, then send you a message to wake you up
+     - After you wake, explain: every other agent is still suspended. The human has full control. They can /refresh individual agents to selectively revive them (or /cpr for a lighter revive of dead agents), or leave the network frozen. This is how you manage a Lingtai network — let it grow, then suspend-all when it gets too hot, then selectively revive what you need.
   7. Show delegates/ledger.jsonl to see the full spawn tree.
   Explain that avatars survive the parent's death and can communicate via email. The self-growing network of avatars IS the agent — 一心万相. But with great multiplication comes great responsibility: always keep `/suspend-all` within reach.
 
@@ -273,7 +273,7 @@ List all TUI slash commands for the human, explaining each one. Key commands:
 - /settings — TUI preferences (nickname, greeting toggle, agent language)
 - /btw — ask the agent a side question (insight inquiry)
 - /sleep, /suspend, /cpr [all] — lifecycle control
-- /refresh — reload init.json (needed after /addon changes)
+- /refresh [all] — hard restart agent, reload init.json (preferred over /cpr for most cases)
 - /clear — wipe conversation and restart
 - /quit — quit lingtai-tui
 - /nirvana — wipe everything and start fresh (use with caution)
@@ -288,9 +288,9 @@ Keyboard shortcuts: ctrl+o cycles through three verbose modes:
 
 **Hands-on lifecycle exercise**: Walk the human through the agent lifecycle commands one by one:
 1. Ask them to type `/sleep` — this puts you to sleep. Explain that you will stop responding until they wake you. Tell them to send any message (just say hi) to wake you up — mail delivery wakes sleeping agents.
-2. After they wake you, ask them to try `/suspend` — this kills your process entirely. Explain that unlike sleep, suspend is a full process death. Tell them to use `/cpr` to revive you.
-3. After `/cpr`, explain that the agent is now alive again but in ASLEEP state — it needs a message to wake up. Tell the human to send you a message (just say hi) to wake you. After you wake, briefly explain `/sleep-all` and `/suspend-all` — these affect all agents in the project, useful when managing multiple agents.
-The point of this exercise is for the human to experience the full lifecycle: active → sleep → wake (by sending mail), active → suspend → cpr → wake (by sending mail). They need to understand the difference between sleep (gentle, wakes on mail) and suspend (hard kill, needs /cpr then a message to wake).
+2. After they wake you, ask them to try `/suspend` — this kills your process entirely. Explain that unlike sleep, suspend is a full process death. Tell them to use `/refresh` to revive you (explain that `/cpr` also works but `/refresh` is preferred as it fully reloads config).
+3. After `/refresh`, explain that the agent is now alive again but in ASLEEP state — it needs a message to wake up. Tell the human to send you a message (just say hi) to wake you. After you wake, briefly explain `/sleep-all` and `/suspend-all` — these affect all agents in the project, useful when managing multiple agents. Also mention `/refresh all` which hard-restarts all agents.
+The point of this exercise is for the human to experience the full lifecycle: active → sleep → wake (by sending mail), active → suspend → refresh → wake (by sending mail). They need to understand the difference between sleep (gentle, wakes on mail) and suspend (hard kill, needs /refresh or /cpr then a message to wake).
 
 **Critical warning — agents survive ctrl-c**: After the lifecycle exercise, explicitly warn the human: closing the TUI (ctrl-c, /quit, or closing the terminal) does NOT stop agent processes. Agents are independent Python processes that keep running in the background. Teach the human the three CLI management commands they can run from any terminal without the TUI:
 - `lingtai-tui list` — show all running lingtai processes on the machine (PID, uptime, agent name, project)
@@ -300,7 +300,7 @@ Invite the human to try `lingtai-tui list` right now in a separate terminal to s
 
 **Never delete an agent's directory without suspending it first** — this creates a phantom process. If they accidentally do, `lingtai-tui purge` is the cleanup tool.
 
-Remind the human of the design philosophy from Lesson 4: all lifecycle management works through signal files that the heartbeat thread polls — no PID files, no OS-specific IPC. `/sleep` creates `.sleep`, `/suspend` creates `.suspend`, `/cpr` relaunches `lingtai run`. That is why you must use the proper shutdown flow instead of just killing processes.
+Remind the human of the design philosophy from Lesson 4: all lifecycle management works through signal files that the heartbeat thread polls — no PID files, no OS-specific IPC. `/sleep` creates `.sleep`, `/suspend` creates `.suspend`, `/refresh` (or `/cpr`) relaunches `lingtai run`. That is why you must use the proper shutdown flow instead of just killing processes.
 
 ### Lesson 11: Addons — External Connections
 Three built-in addons: **IMAP** (real email — Gmail, Outlook, etc.), **Telegram** (bot), and **Feishu** (Lark bot via long WebSocket).

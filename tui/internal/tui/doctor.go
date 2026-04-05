@@ -152,7 +152,7 @@ func runDoctor(orchDir string) doctorResultMsg {
 		})
 		if lastErr != "" {
 			lines = append(lines, doctorLine{
-				Text: i18n.T("doctor.suggest_cpr"), Hint: true,
+				Text: i18n.T("doctor.suggest_revive"), Hint: true,
 			})
 		} else {
 			lines = append(lines, doctorLine{
@@ -199,7 +199,7 @@ func runDoctor(orchDir string) doctorResultMsg {
 			Text: i18n.TF("doctor.llm_unknown", detail),
 		})
 		lines = append(lines, doctorLine{
-			Text: i18n.T("doctor.suggest_cpr"), Hint: true,
+			Text: i18n.T("doctor.suggest_refresh"), Hint: true,
 		})
 	}
 

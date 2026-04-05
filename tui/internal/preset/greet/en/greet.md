@@ -22,9 +22,9 @@ After you have been idle for {{soul_delay}} seconds, your inner voice — the so
   - /btw — ask the agent a side question (delivered as an insight inquiry)
   - /sleep — put agent to sleep (/sleep all for all agents)
   - /suspend — suspend agent (/suspend all for all agents)
-  - /cpr — revive a sleeping or suspended agent (/cpr all for all)
+  - /cpr — revive a dead agent (/cpr all for all). Prefer /refresh for most cases.
   - /clear — clear agent context window and restart
-  - /refresh — hard restart agent (reload init.json)
+  - /refresh — hard restart agent, reload init.json (/refresh all for all)
   - /setup — agent setup (provider, model, capabilities, soul delay)
   - /settings — TUI preferences (nickname, greeting toggle, agent language)
   - /agents — properties and statistics of all agents in the network
