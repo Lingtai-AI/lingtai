@@ -31,13 +31,16 @@
 
 **macOS:**
 ```bash
+# Install Homebrew if you don't have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
 **Linux / WSL:**
 ```bash
-# 1. Install Homebrew (if not already installed)
+# 1. Install Homebrew
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # 2. Install build tools (required for Homebrew on Linux)

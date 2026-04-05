@@ -28,6 +28,9 @@ Unix 之道，器灵之制。**思**以任意 LLM。**通**以文件系统传书
 
 **macOS：**
 ```bash
+# 安 Homebrew（若未有）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```

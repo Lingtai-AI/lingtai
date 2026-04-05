@@ -28,6 +28,9 @@ Unix 风格的智能体操作系统。**思考**用任意 LLM。**通信**靠文
 
 **macOS：**
 ```bash
+# 安装 Homebrew（如果尚未安装）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
