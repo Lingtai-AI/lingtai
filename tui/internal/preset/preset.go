@@ -257,9 +257,6 @@ func populate(globalDir string, fsys embed.FS, root string) {
 		}
 		rel, _ := filepath.Rel(root, path)
 		target := filepath.Join(globalDir, root, rel)
-		if _, err := os.Stat(target); err == nil {
-			return nil // already exists
-		}
 		os.MkdirAll(filepath.Dir(target), 0o755)
 		data, err := fsys.ReadFile(path)
 		if err == nil {
@@ -343,9 +340,7 @@ func Bootstrap(globalDir string) error {
 	tutorialDir := filepath.Join(globalDir, "tutorial")
 	os.MkdirAll(tutorialDir, 0o755)
 	tutorialPath := filepath.Join(tutorialDir, "tutorial.md")
-	if _, err := os.Stat(tutorialPath); err != nil {
-		os.WriteFile(tutorialPath, tutorialMD, 0o644)
-	}
+	os.WriteFile(tutorialPath, tutorialMD, 0o644)
 	migrateAddonTemplates(globalDir)
 	return EnsureDefault()
 }
@@ -361,9 +356,6 @@ func PopulateBundledSkills(lingtaiDir string) {
 		}
 		rel, _ := filepath.Rel("skills", path)
 		target := filepath.Join(skillsDir, rel)
-		if _, err := os.Stat(target); err == nil {
-			return nil // already exists — don't overwrite
-		}
 		os.MkdirAll(filepath.Dir(target), 0o755)
 		data, err := skillsFS.ReadFile(path)
 		if err == nil {
