@@ -73,6 +73,7 @@
   "hints.verbose": "ctrl+o soul",
   "hints.verbose_on": "ctrl+o soul",
   "mail.btw_sent": "Inquiry sent: %s",
+  "mail.btw_suspended": "Agent is not running. Try /refresh first.",
   "mail.btw_usage": "Usage: /btw <question>",
   "mail.cpr": "Reviving %s...",
   "mail.cpr_alive": "Agent is already alive.",

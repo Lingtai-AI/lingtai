@@ -104,15 +104,58 @@ func ReadInsightEvents(eventsPath string) []ChatMessage {
 		if tsFloat, ok := entry["ts"].(float64); ok {
 			ts = time.Unix(int64(tsFloat), 0).UTC().Format(time.RFC3339)
 		}
-		question, _ := entry["question"].(string)
+		// Skip /btw results — these are now read from soul_inquiry.jsonl
+		// via ReadSoulInquiries to avoid duplication.
+		if q, _ := entry["question"].(string); q != "" {
+			continue
+		}
 		events = append(events, ChatMessage{
 			Body:      text,
 			Timestamp: ts,
 			Type:      "insight",
-			Question:  question,
 		})
 	}
 	return events
+}
+
+// ReadSoulInquiries reads soul_inquiry.jsonl and returns ChatMessages for
+// human-sourced inquiries (from /btw). These are displayed independently of
+// the events.jsonl insight path so results survive even if the insight event
+// was lost due to a crash.
+func ReadSoulInquiries(logPath string) []ChatMessage {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var msgs []ChatMessage
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		var entry map[string]interface{}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue
+		}
+		source, _ := entry["source"].(string)
+		if source != "human" {
+			continue
+		}
+		voice, _ := entry["voice"].(string)
+		if voice == "" {
+			continue
+		}
+		ts, _ := entry["ts"].(string)
+		prompt, _ := entry["prompt"].(string)
+		msgs = append(msgs, ChatMessage{
+			Body:      voice,
+			Timestamp: ts,
+			Type:      "insight",
+			Question:  prompt,
+		})
+	}
+	return msgs
 }
 
 func extractEventText(entry map[string]interface{}, eventType string) string {

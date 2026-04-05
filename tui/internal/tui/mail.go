@@ -323,6 +323,14 @@ func (m *MailModel) buildMessages() {
 		chatMsgs = append(chatMsgs, insights...)
 	}
 
+	// Read human inquiry results from soul_inquiry.jsonl.
+	// Not gated by insightsEnabled — /btw is a direct human action, always shown.
+	if m.orchestrator != "" {
+		inquiryPath := filepath.Join(m.orchestrator, "logs", "soul_inquiry.jsonl")
+		inquiries := ReadSoulInquiries(inquiryPath)
+		chatMsgs = append(chatMsgs, inquiries...)
+	}
+
 	// Sort by timestamp
 	sort.Slice(chatMsgs, func(i, j int) bool {
 		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp

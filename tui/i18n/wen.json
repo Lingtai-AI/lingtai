@@ -73,6 +73,7 @@
   "hints.verbose": "ctrl+o 灵台",
   "hints.verbose_on": "ctrl+o 灵台",
   "mail.btw_sent": "旁问已遣：%s",
+  "mail.btw_suspended": "灵未醒，先 /refresh。",
   "mail.btw_usage": "用：/btw <问>",
   "mail.cpr": "复苏 %s 中...",
   "mail.cpr_alive": "器灵尚在。",

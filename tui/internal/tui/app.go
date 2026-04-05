@@ -521,6 +521,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.skills.Init(), a.sendSize())
 	case "btw":
 		if a.orchDir != "" && args != "" {
+			if !fs.IsAlive(a.orchDir, 3.0) {
+				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+				return a, nil
+			}
 			fs.WriteInquiry(a.orchDir, args)
 			a.mail.AddSystemMessage(i18n.TF("mail.btw_sent", args))
 		} else if args == "" {

@@ -73,6 +73,7 @@
   "hints.verbose": "ctrl+o 灵台",
   "hints.verbose_on": "ctrl+o 灵台",
   "mail.btw_sent": "已发送旁问：%s",
+  "mail.btw_suspended": "Agent 未运行���请先 /refresh。",
   "mail.btw_usage": "用法：/btw <问题>",
   "mail.cpr": "正在复苏 %s...",
   "mail.cpr_alive": "Agent 仍在运行。",
