@@ -27,16 +27,30 @@
 <p align="center">Agents spawn avatars, avatars spawn avatars. The network IS the product.</p>
 <p align="center"><b>Orchestration as a Service.</b></p>
 
-## Quick start — 10 seconds
+## Quick start
 
+**macOS:**
 ```bash
+brew install huangzesen/lingtai/lingtai-tui
+lingtai-tui
+```
+
+**Linux / WSL:**
+```bash
+# 1. Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2. Install build tools (required for Homebrew on Linux)
+sudo apt install build-essential
+
+# 3. Install lingtai-tui
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
 That's it. The TUI bootstraps everything — Python runtime, dependencies, and a guided tutorial on first launch. Type `/tutorial` in the TUI anytime to revisit the guide.
 
-> The TUI is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app designed for **dark terminals** — use a dark background for the best experience. Text selection requires [iTerm2](https://iterm2.com/) (hold Option + drag). On Windows Terminal, hold Shift to select text; Ctrl+V to paste. Ctrl+E opens an external editor as a last resort.
+> The TUI is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app designed for **dark terminals** — use a dark background for the best experience. Text selection: hold **Option** on macOS (iTerm2), **Shift** on Windows Terminal / Linux. Ctrl+V to paste. Ctrl+E opens an external editor.
 
 <details>
 <summary><b>Build from source</b> (requires Go 1.24+)</summary>

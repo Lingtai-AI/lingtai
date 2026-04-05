@@ -24,16 +24,30 @@
 
 Unix 之道，器灵之制。**思**以任意 LLM。**通**以文件系统传书。**化分身**能脱造者而独存。**自生长**为不断扩展之网——无中央之调度，无共享之状态。万物皆文卷。
 
-## 速启 — 十息
+## 速启
 
+**macOS：**
 ```bash
+brew install huangzesen/lingtai/lingtai-tui
+lingtai-tui
+```
+
+**Linux / WSL：**
+```bash
+# 一、安 Homebrew（若未有）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 二、安构建之器（Linux 上 Homebrew 所须）
+sudo apt install build-essential
+
+# 三、安 lingtai-tui
 brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
 足矣。TUI 自备一切——Python 运行时、依赖、首启自带引导。于 TUI 中输入 `/tutorial` 可重返教程。
 
-> TUI 以墨韵为底，**宜用深色终端**。
+> TUI 以墨韵为底，**宜用深色终端**。选文：macOS 按 **Option**（iTerm2），Windows Terminal / Linux 按 **Shift**。Ctrl+V 以粘。Ctrl+E 启外编。
 
 <details>
 <summary><b>自源码编译</b>（需 Go 1.24+）</summary>
