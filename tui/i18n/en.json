@@ -279,7 +279,7 @@
   "tutorial.done": "Ready",
   "tutorial.start": "Start Tutorial",
   "tutorial.cancel": "Cancel",
-  "palette.agents": "Agent network dashboard",
+  "palette.kanban": "Agent network dashboard",
   "palette.skills": "View installed skills",
   "palette.insights": "Request an insight from the agent now",
   "skills.title": "Skills",

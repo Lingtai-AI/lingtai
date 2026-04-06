@@ -279,7 +279,7 @@
   "tutorial.done": "就绪",
   "tutorial.start": "开始教程",
   "tutorial.cancel": "取消",
-  "palette.agents": "智能体网络看板",
+  "palette.kanban": "智能体网络看板",
   "palette.skills": "查看已安装技能",
   "palette.insights": "立即请求器灵洞察",
   "skills.title": "技能",

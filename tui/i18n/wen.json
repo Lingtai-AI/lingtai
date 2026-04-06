@@ -279,7 +279,7 @@
   "tutorial.cancel": "返",
   "addon.feishu_path": "飞书配",
   "addon.feishu_hint": "如: ~/.lingtai-tui/addons/feishu/example/config.json",
-  "palette.agents": "器灵网络之看板",
+  "palette.kanban": "器灵网络之看板",
   "palette.skills": "查阅已安技艺",
   "palette.insights": "即求灵之省",
   "skills.title": "技艺",

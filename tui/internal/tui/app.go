@@ -503,7 +503,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNirvana
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
-	case "agents":
+	case "kanban":
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
@@ -601,7 +601,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
 		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
-	case "props", "agents":
+	case "props", "kanban":
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
