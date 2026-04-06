@@ -79,14 +79,26 @@ func (s *Server) StartRecording(baseDir string) {
 			if err == nil && len(frames) > 0 {
 				os.MkdirAll(filepath.Dir(topologyPath), 0o755)
 				os.Remove(topologyPath)
-				// Clear replay chunk cache since tape was rebuilt
 				os.RemoveAll(filepath.Join(baseDir, ".portal", "replay"))
+
+				// Write all frames in one pass — no mutex, bulk write
 				total := len(frames)
-				for i, f := range frames {
-					AppendTopologyAt(topologyPath, f.Net, f.T)
-					if i%100 == 0 || i == total-1 {
-						os.WriteFile(progressPath, []byte(fmt.Sprintf("%d/%d", i+1, total)), 0o644)
+				tmpPath := topologyPath + ".tmp"
+				f, _ := os.Create(tmpPath)
+				if f != nil {
+					for i, frame := range frames {
+						line, err := json.Marshal(frame)
+						if err == nil {
+							f.Write(line)
+							f.Write([]byte("\n"))
+						}
+						if i%500 == 0 || i == total-1 {
+							f.Sync()
+							os.WriteFile(progressPath, []byte(fmt.Sprintf("%d/%d", i+1, total)), 0o644)
+						}
 					}
+					f.Close()
+					os.Rename(tmpPath, topologyPath)
 				}
 			}
 			os.Remove(progressPath)
