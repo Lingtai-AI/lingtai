@@ -241,7 +241,7 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading
             onChange={e => {
               const raw = e.target.value.replace(/[^0-9]/g, '');
               if (raw === '') return;
-              const v = Math.max(1, Math.min(9999, Number(raw)));
+              const v = Math.max(1, Number(raw));
               onChangeSpeed(v);
             }}
             style={{
