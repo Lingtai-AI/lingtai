@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -678,26 +677,17 @@ func (a App) View() tea.View {
 	return v
 }
 
-// portalURL checks if lingtai-portal is running by reading .portal/port.
-// If not running, attempts to spawn it. Returns the URL or empty string.
+// portalURL kills any existing portal and spawns a fresh one.
+// Returns the URL or empty string if lingtai-portal is not on PATH.
 func (a *App) portalURL() string {
 	portFile := filepath.Join(a.projectDir, ".portal", "port")
 
-	// Check if portal is already running
-	if data, err := os.ReadFile(portFile); err == nil {
-		port := strings.TrimSpace(string(data))
-		url := "http://localhost:" + port
-		// Quick health check
-		client := &http.Client{Timeout: 500 * time.Millisecond}
-		if resp, err := client.Get(url + "/api/network"); err == nil {
-			resp.Body.Close()
-			return url
-		}
-		// Stale port file — remove it
-		os.Remove(portFile)
-	}
+	// Kill existing portal so we always get a fresh instance with the latest binary
+	exec.Command("pkill", "-f", "lingtai-portal.*--dir.*"+filepath.Dir(a.projectDir)).Run()
+	os.Remove(portFile)
+	time.Sleep(300 * time.Millisecond)
 
-	// Try to spawn portal
+	// Spawn fresh portal
 	portalCmd, _ := exec.LookPath("lingtai-portal")
 	if portalCmd == "" {
 		return ""
