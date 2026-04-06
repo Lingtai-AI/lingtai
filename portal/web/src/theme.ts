@@ -73,21 +73,6 @@ export const lightTheme: Theme = {
   edgeOpacity:  0.50,
 };
 
-// ── Convenience re-exports (backward compat) ──────────────────────
-
-export const inkStateColors = darkStateColors;
-export const inkBg = darkTheme.bg;
-export const ColorText = darkTheme.text;
-export const ColorTextDim = darkTheme.textDim;
-export const inkBorder = darkTheme.border;
-export const inkEdgeColors = darkTheme.edgeColors;
-export const gold = darkTheme.gold;
-export const goldRgb = darkTheme.goldRgb;
-export const amberRgb = darkTheme.amberRgb;
-export const stateColors = darkStateColors;
-export const edgeColors = darkTheme.edgeColors;
-export const bg = darkTheme.bg;
-
 // ── Theme selection ────────────────────────────────────────────────
 
 const THEME_KEY = 'lingtai-viz-theme';
