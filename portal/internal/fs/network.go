@@ -52,8 +52,18 @@ func BuildNetwork(baseDir string) (Network, error) {
 	}
 
 	// Count from inbox + archive — messages exist in exactly one folder
-	mailEdges := buildMailEdges(nodes)
+	mailEdges := buildMailEdges(nodes, baseDir)
 	stats := computeStats(nodes, mailEdges)
+
+	// Relativize all edge addresses so they match AgentNode.Address format
+	for i := range avatarEdges {
+		avatarEdges[i].Parent = RelativizeAddress(avatarEdges[i].Parent, baseDir)
+		avatarEdges[i].Child = RelativizeAddress(avatarEdges[i].Child, baseDir)
+	}
+	for i := range contactEdges {
+		contactEdges[i].Owner = RelativizeAddress(contactEdges[i].Owner, baseDir)
+		contactEdges[i].Target = RelativizeAddress(contactEdges[i].Target, baseDir)
+	}
 
 	return Network{
 		Nodes:        nodes,
@@ -64,7 +74,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 	}, nil
 }
 
-func buildMailEdges(nodes []AgentNode) []MailEdge {
+func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 	type edgeKey struct{ sender, recipient string }
 	type edgeCounts struct{ direct, cc, bcc int }
 	counts := make(map[edgeKey]*edgeCounts)
@@ -78,6 +88,10 @@ func buildMailEdges(nodes []AgentNode) []MailEdge {
 		return c
 	}
 
+	rel := func(addr string) string {
+		return RelativizeAddress(ResolveAddress(addr, baseDir), baseDir)
+	}
+
 	for _, n := range nodes {
 		if n.WorkingDir == "" {
 			continue
@@ -86,18 +100,19 @@ func buildMailEdges(nodes []AgentNode) []MailEdge {
 		archive, _ := ReadArchive(n.WorkingDir)
 		allMail := append(inbox, archive...)
 		for _, msg := range allMail {
+			from := rel(msg.From)
 			// Direct recipients (To field)
 			recipients := resolveRecipients(msg.To)
 			for _, r := range recipients {
-				ensure(edgeKey{msg.From, r}).direct++
+				ensure(edgeKey{from, rel(r)}).direct++
 			}
 			// CC recipients
 			for _, r := range msg.CC {
-				ensure(edgeKey{msg.From, r}).cc++
+				ensure(edgeKey{from, rel(r)}).cc++
 			}
 			// BCC recipients
 			for _, r := range msg.BCC {
-				ensure(edgeKey{msg.From, r}).bcc++
+				ensure(edgeKey{from, rel(r)}).bcc++
 			}
 		}
 	}

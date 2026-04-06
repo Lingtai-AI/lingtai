@@ -142,6 +142,15 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 	if contactEdges == nil {
 		contactEdges = []ContactEdge{}
 	}
+	// Relativize static edges so they match AgentNode.Address format
+	for i := range avatarEdges {
+		avatarEdges[i].Parent = RelativizeAddress(avatarEdges[i].Parent, baseDir)
+		avatarEdges[i].Child = RelativizeAddress(avatarEdges[i].Child, baseDir)
+	}
+	for i := range contactEdges {
+		contactEdges[i].Owner = RelativizeAddress(contactEdges[i].Owner, baseDir)
+		contactEdges[i].Target = RelativizeAddress(contactEdges[i].Target, baseDir)
+	}
 
 	// 5. Build frames at 3-second intervals
 	const intervalMs int64 = 3000
@@ -208,12 +217,12 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 			mailIdx++
 		}
 
-		// Snapshot current cumulative mail counts into edges
+		// Snapshot current cumulative mail counts into edges (relativized)
 		var mailEdges []MailEdge
 		for k, c := range mailCounts {
 			mailEdges = append(mailEdges, MailEdge{
-				Sender:    k.sender,
-				Recipient: k.recipient,
+				Sender:    RelativizeAddress(k.sender, baseDir),
+				Recipient: RelativizeAddress(k.recipient, baseDir),
 				Count:     c.direct + c.cc + c.bcc,
 				Direct:    c.direct,
 				CC:        c.cc,

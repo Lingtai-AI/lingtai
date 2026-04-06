@@ -152,11 +152,11 @@ func TestReconstructTape_Basic(t *testing.T) {
 		}
 	}
 
-	// Check that the last frame has a mail edge with Direct=1
+	// Check that the last frame has a mail edge with Direct=1 (relative names)
 	lastFrame := frames[len(frames)-1]
 	foundMail := false
 	for _, e := range lastFrame.Net.MailEdges {
-		if e.Sender == agentDir && e.Recipient == humanDir && e.Direct == 1 {
+		if e.Sender == "agent-a" && e.Recipient == "human" && e.Direct == 1 {
 			foundMail = true
 		}
 	}

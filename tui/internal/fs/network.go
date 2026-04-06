@@ -50,8 +50,18 @@ func BuildNetwork(baseDir string) (Network, error) {
 	}
 
 	// Count from inbox only — sent would double-count
-	mailEdges := buildMailEdges(nodes)
+	mailEdges := buildMailEdges(nodes, baseDir)
 	stats := computeStats(nodes, mailEdges)
+
+	// Relativize all edge addresses so they match AgentNode.Address format
+	for i := range avatarEdges {
+		avatarEdges[i].Parent = RelativizeAddress(avatarEdges[i].Parent, baseDir)
+		avatarEdges[i].Child = RelativizeAddress(avatarEdges[i].Child, baseDir)
+	}
+	for i := range contactEdges {
+		contactEdges[i].Owner = RelativizeAddress(contactEdges[i].Owner, baseDir)
+		contactEdges[i].Target = RelativizeAddress(contactEdges[i].Target, baseDir)
+	}
 
 	return Network{
 		Nodes:        nodes,
@@ -62,7 +72,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 	}, nil
 }
 
-func buildMailEdges(nodes []AgentNode) []MailEdge {
+func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 	type edgeKey struct{ sender, recipient string }
 	counts := make(map[edgeKey]int)
 
@@ -72,9 +82,10 @@ func buildMailEdges(nodes []AgentNode) []MailEdge {
 		}
 		inbox, _ := ReadInbox(n.WorkingDir)
 		for _, msg := range inbox {
+			from := RelativizeAddress(ResolveAddress(msg.From, baseDir), baseDir)
 			recipients := resolveRecipients(msg.To)
 			for _, r := range recipients {
-				counts[edgeKey{msg.From, r}]++
+				counts[edgeKey{from, RelativizeAddress(ResolveAddress(r, baseDir), baseDir)}]++
 			}
 		}
 	}
