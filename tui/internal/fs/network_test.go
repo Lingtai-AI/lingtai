@@ -2,7 +2,6 @@ package fs
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,28 +17,29 @@ func setupTestNetwork(t *testing.T) string {
 	os.MkdirAll(filepath.Join(aliceDir, "delegates"), 0o755)
 
 	writeJSON(t, filepath.Join(aliceDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "alice", "address": aliceDir, "state": "ACTIVE",
+		"agent_name": "alice", "address": "alice", "state": "ACTIVE",
 		"admin": map[string]interface{}{"karma": true},
 	})
 
-	bobDir := filepath.Join(base, "bob")
-	ledger := fmt.Sprintf(`{"event":"avatar","name":"bob","working_dir":%q,"ts":1000}`, bobDir)
+	// Ledger uses relative name
+	ledger := `{"event":"avatar","name":"bob","working_dir":"bob","ts":1000}`
 	os.WriteFile(filepath.Join(aliceDir, "delegates", "ledger.jsonl"), []byte(ledger+"\n"), 0o644)
 
-	contacts := []map[string]string{{"address": bobDir, "name": "bob"}}
+	// Contacts use relative name
+	contacts := []map[string]string{{"address": "bob", "name": "bob"}}
 	data, _ := json.Marshal(contacts)
 	os.WriteFile(filepath.Join(aliceDir, "mailbox", "contacts.json"), data, 0o644)
 
-	os.MkdirAll(filepath.Join(bobDir, "mailbox", "inbox"), 0o755)
-	writeJSON(t, filepath.Join(bobDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "bob", "address": bobDir, "state": "IDLE",
+	os.MkdirAll(filepath.Join(base, "bob", "mailbox", "inbox"), 0o755)
+	writeJSON(t, filepath.Join(base, "bob", ".agent.json"), map[string]interface{}{
+		"agent_name": "bob", "address": "bob", "state": "IDLE",
 		"admin": map[string]interface{}{"karma": false},
 	})
 
 	humanDir := filepath.Join(base, "human")
 	os.MkdirAll(filepath.Join(humanDir, "mailbox", "inbox"), 0o755)
 	writeJSON(t, filepath.Join(humanDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "human", "address": humanDir, "admin": nil,
+		"agent_name": "human", "address": "human", "admin": nil,
 	})
 
 	return base
