@@ -18,7 +18,7 @@ func writeAgentManifest(t *testing.T, agentDir, name string, isHuman bool) {
 	}
 	m := map[string]interface{}{
 		"agent_name": name,
-		"address":    agentDir,
+		"address":    name, // relative name, not absolute path
 		"state":      "ACTIVE",
 	}
 	if !isHuman {
@@ -90,7 +90,7 @@ func TestReconstructTape_Basic(t *testing.T) {
 	writeEvent(t, agentDir, map[string]interface{}{
 		"type":       "agent_state",
 		"ts":         float64(t0.Unix()),
-		"address":    agentDir,
+		"address":    "agent-a",
 		"agent_name": "agent-a",
 		"old":        "asleep",
 		"new":        "active",
@@ -101,7 +101,7 @@ func TestReconstructTape_Basic(t *testing.T) {
 	writeEvent(t, agentDir, map[string]interface{}{
 		"type":       "heartbeat_start",
 		"ts":         float64(t1.Unix()),
-		"address":    agentDir,
+		"address":    "agent-a",
 		"agent_name": "agent-a",
 	})
 
@@ -109,8 +109,8 @@ func TestReconstructTape_Basic(t *testing.T) {
 	emailTime := t0.Add(2 * time.Second)
 	writeMailMessage(t, humanDir, "inbox", "msg-001", MailMessage{
 		ID:         "msg-001",
-		From:       agentDir,
-		To:         humanDir,
+		From:       "agent-a",
+		To:         "human",
 		ReceivedAt: emailTime.Format(time.RFC3339),
 	})
 
@@ -199,7 +199,7 @@ func TestReconstructTape_StateTransitions(t *testing.T) {
 	writeEvent(t, agentDir, map[string]interface{}{
 		"type":       "agent_state",
 		"ts":         float64(t0.Unix()),
-		"address":    agentDir,
+		"address":    "agent-b",
 		"agent_name": "agent-b",
 		"old":        "asleep",
 		"new":        "active",
@@ -210,7 +210,7 @@ func TestReconstructTape_StateTransitions(t *testing.T) {
 	writeEvent(t, agentDir, map[string]interface{}{
 		"type":       "agent_state",
 		"ts":         float64(t1.Unix()),
-		"address":    agentDir,
+		"address":    "agent-b",
 		"agent_name": "agent-b",
 		"old":        "active",
 		"new":        "suspended",
@@ -221,7 +221,7 @@ func TestReconstructTape_StateTransitions(t *testing.T) {
 	writeEvent(t, agentDir, map[string]interface{}{
 		"type":       "agent_state",
 		"ts":         float64(t2.Unix()),
-		"address":    agentDir,
+		"address":    "agent-b",
 		"agent_name": "agent-b",
 		"old":        "suspended",
 		"new":        "active",

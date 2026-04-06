@@ -112,16 +112,18 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 		if e.Address == "" {
 			continue
 		}
-		if _, ok := firstEventTs[e.Address]; !ok {
-			firstEventTs[e.Address] = e.Ts
+		resolved := ResolveAddress(e.Address, baseDir)
+		if _, ok := firstEventTs[resolved]; !ok {
+			firstEventTs[resolved] = e.Ts
 		}
 	}
 	// Agents with mail but no events: use their first mail timestamp
 	for _, m := range allMail {
 		from := m.msg.From
 		if from != "" {
-			if _, ok := firstEventTs[from]; !ok {
-				firstEventTs[from] = m.ts
+			resolved := ResolveAddress(from, baseDir)
+			if _, ok := firstEventTs[resolved]; !ok {
+				firstEventTs[resolved] = m.ts
 			}
 		}
 	}
@@ -183,7 +185,8 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 		for eventIdx < len(allEvents) && allEvents[eventIdx].Ts <= tSec {
 			ev := allEvents[eventIdx]
 			if ev.Type == "agent_state" && ev.Address != "" {
-				agentState[ev.Address] = strings.ToUpper(ev.New)
+				resolved := ResolveAddress(ev.Address, baseDir)
+				agentState[resolved] = strings.ToUpper(ev.New)
 			}
 			eventIdx++
 		}
@@ -191,15 +194,16 @@ func ReconstructTape(baseDir string) ([]TapeFrame, error) {
 		// Advance mail frontier — only process new messages
 		for mailIdx < len(allMail) && allMail[mailIdx].ts <= tSec {
 			msg := allMail[mailIdx].msg
+			from := ResolveAddress(msg.From, baseDir)
 			recipients := resolveRecipients(msg.To)
 			for _, r := range recipients {
-				ensure(edgeKey{msg.From, r}).direct++
+				ensure(edgeKey{from, ResolveAddress(r, baseDir)}).direct++
 			}
 			for _, r := range msg.CC {
-				ensure(edgeKey{msg.From, r}).cc++
+				ensure(edgeKey{from, ResolveAddress(r, baseDir)}).cc++
 			}
 			for _, r := range msg.BCC {
-				ensure(edgeKey{msg.From, r}).bcc++
+				ensure(edgeKey{from, ResolveAddress(r, baseDir)}).bcc++
 			}
 			mailIdx++
 		}
