@@ -3,8 +3,15 @@ package migrate
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// lingtaiPrefixRe matches any absolute path ending in /.lingtai/ — i.e. any
+// string like "/Users/alice/project/.lingtai/" regardless of where the project
+// lived previously. This handles directories that were moved or renamed since
+// the paths were written.
+var lingtaiPrefixRe = regexp.MustCompile(`/[^\x00"]*?/\.lingtai/`)
 
 // migrateRelativeAddressing replaces absolute .lingtai/ paths with relative
 // directory names in all files under each agent directory.
@@ -12,22 +19,21 @@ import (
 // Detection: any .agent.json whose "address" field contains a "/" character
 // is still using absolute paths.
 //
-// Method: for every file in every agent subdirectory, replace the string
-// "<lingtaiDir>/" with "" (empty), turning absolute paths into relative names.
-// Only the current lingtaiDir prefix is stripped — absolute paths to other
-// .lingtai/ directories (cross-network addresses) are preserved.
+// Method: for every file in every agent subdirectory, strip any absolute path
+// prefix ending in /.lingtai/ — turning paths like
+// "/old/path/.lingtai/本我" into just "本我". This handles both the current
+// directory and any previous directory the .lingtai/ may have lived at.
 func migrateRelativeAddressing(lingtaiDir string) error {
 	lingtaiDir, _ = filepath.Abs(lingtaiDir)
-	prefix := lingtaiDir + "/"
 
-	// Check if migration is needed
+	// Check if migration is needed: any .agent.json with "/" in address?
 	needed := false
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		manifestPath := filepath.Join(lingtaiDir, entry.Name(), ".agent.json")
@@ -35,7 +41,7 @@ func migrateRelativeAddressing(lingtaiDir string) error {
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(data), prefix) {
+		if strings.Contains(string(data), "/.lingtai/") {
 			needed = true
 			break
 		}
@@ -44,7 +50,7 @@ func migrateRelativeAddressing(lingtaiDir string) error {
 		return nil
 	}
 
-	// Walk every agent subdirectory and replace prefix in all files
+	// Walk every agent subdirectory and strip .lingtai/ prefixes in all files
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -54,7 +60,7 @@ func migrateRelativeAddressing(lingtaiDir string) error {
 			continue
 		}
 		agentDir := filepath.Join(lingtaiDir, entry.Name())
-		if err := rewriteDir(agentDir, prefix); err != nil {
+		if err := rewriteDir(agentDir); err != nil {
 			return err
 		}
 	}
@@ -66,8 +72,8 @@ func migrateRelativeAddressing(lingtaiDir string) error {
 	return nil
 }
 
-// rewriteDir walks all files under dir and replaces prefix with "" in their contents.
-func rewriteDir(dir, prefix string) error {
+// rewriteDir walks all files under dir and strips /.lingtai/ prefixes.
+func rewriteDir(dir string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -82,12 +88,16 @@ func rewriteDir(dir, prefix string) error {
 		if err != nil {
 			return nil // skip unreadable
 		}
-		if !strings.Contains(string(data), prefix) {
+		content := string(data)
+		if !strings.Contains(content, "/.lingtai/") {
 			return nil // nothing to replace
 		}
-		newData := strings.ReplaceAll(string(data), prefix, "")
+		newContent := lingtaiPrefixRe.ReplaceAllString(content, "")
+		if newContent == content {
+			return nil
+		}
 		tmpPath := path + ".tmp"
-		if err := os.WriteFile(tmpPath, []byte(newData), info.Mode()); err != nil {
+		if err := os.WriteFile(tmpPath, []byte(newContent), info.Mode()); err != nil {
 			return err
 		}
 		return os.Rename(tmpPath, path)
