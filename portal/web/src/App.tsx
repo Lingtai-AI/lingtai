@@ -58,6 +58,7 @@ export default function App() {
   const [tapeRange, setTapeRange] = useState<[number, number]>([0, 0]);
   const [viewRange, setViewRange] = useState<[number, number]>([0, 0]); // user-adjustable sub-range
   const [replayLoading, setReplayLoading] = useState(false);
+  const [replayProgress, setReplayProgress] = useState('');
   const [rebuilding, setRebuilding] = useState(false);
 
   // Replay engine refs (mutable, read by rAF loop)
@@ -232,9 +233,21 @@ export default function App() {
 
   const enterReplay = useCallback(async () => {
     setReplayLoading(true);
+    setReplayProgress('');
+
+    // Poll manifest to show reconstruction progress
+    const pollId = setInterval(async () => {
+      try {
+        const m = await fetchManifest();
+        const total = m.chunks?.reduce((s: number, c: ChunkInfo) => s + c.frames, 0) ?? 0;
+        if (total > 0) setReplayProgress(`${total}`);
+      } catch { /* ignore */ }
+    }, 500);
 
     try {
       const manifest = await fetchManifest();
+      clearInterval(pollId);
+      setReplayProgress('');
       if (!manifest.chunks || manifest.chunks.length === 0) {
         setReplayLoading(false);
         return;
@@ -279,6 +292,8 @@ export default function App() {
       setReplayLoading(false);
       startReplayLoop();
     } catch (err) {
+      clearInterval(pollId);
+      setReplayProgress('');
       console.error('Failed to enter replay:', err);
       setReplayLoading(false);
     }
@@ -426,6 +441,7 @@ export default function App() {
         vizMode={vizMode}
         playing={playing}
         replayLoading={replayLoading}
+        replayProgress={replayProgress}
         rebuilding={rebuilding}
         speed={speed}
         replayTime={replayTime}

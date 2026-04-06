@@ -34,13 +34,14 @@ function fromDatetimeLocal(val: string): number {
   return new Date(val).getTime();
 }
 
-export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, rebuilding, speed, replayTime, tapeRange, viewRange, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onRebuild, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleFilter }: {
+export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading, replayProgress, rebuilding, speed, replayTime, tapeRange, viewRange, showFilter, onEnterReplay, onExitReplay, onTogglePlaying, onRebuild, onSeek, onChangeSpeed, onSetViewRange, onToggleTheme, onToggleFilter }: {
   lang: string;
   theme: Theme;
   themeMode: 'dark' | 'light';
   vizMode: VizMode;
   playing: boolean;
   replayLoading: boolean;
+  replayProgress: string;
   rebuilding: boolean;
   speed: number;
   replayTime: number;
@@ -141,7 +142,9 @@ export function TopBar({ lang, theme, themeMode, vizMode, playing, replayLoading
               cursor: replayLoading ? 'wait' : 'pointer',
             }}
           >
-            {replayLoading ? '⏳ ' + t(lang, 'topbar.replay') + '...' : '⏮ ' + t(lang, 'topbar.replay')}
+            {replayLoading
+              ? '⏳ ' + t(lang, 'topbar.replay') + (replayProgress ? ` (${replayProgress})` : '...')
+              : '⏮ ' + t(lang, 'topbar.replay')}
           </button>
         </div>
 
