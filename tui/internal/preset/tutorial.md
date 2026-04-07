@@ -72,7 +72,7 @@ Then show YOUR own directory (tutorial/) as a live example. Glob it and walk thr
 - mailbox/ — inbox, sent, archive
 - logs/, history/ — event log, conversation history
 - Signal files (.sleep, .suspend, .interrupt, .prompt) — how the TUI talks to the agent process
-After walking through the directory, invite the human to type **/agents** to open the properties panel in the TUI. This shows the same agent info (identity, LLM config, capabilities, context usage, tokens) as a live dashboard. Let them explore it, then press esc to close.
+After walking through the directory, invite the human to type **/kanban** to open the agent network dashboard in the TUI. This shows the same agent info (identity, LLM config, capabilities, context usage, tokens) as a live kanban board. Let them explore it, then press esc to close.
 Invite the human to ask about anything that looks interesting.
 
 ### Lesson 4: How Agents Are Born — init.json and `lingtai run`
@@ -231,7 +231,7 @@ Also explain **molt** and **stamina** here:
 #### Part 1: Avatar — the crown jewel
 Start with avatar. This is the most important and distinctive capability — demonstrate it first, before anything else. Walk the human through a full network explosion exercise:
   1. **Spawn 3 avatars**: explain that each avatar is a fully independent sub-agent with its own working directory, process, and LLM session. Give each a distinct name and personality. Spawn all three.
-  2. **Observe the network**: invite the human to type **/agents** to see the avatars in the properties panel, and run **/viz** to see the network graph — they will see 3 new nodes connected to you (4 total including yourself).
+  2. **Observe the network**: invite the human to type **/kanban** to see the avatars on the dashboard, and run **/viz** to see the network graph — they will see 3 new nodes connected to you (4 total including yourself).
   3. **Chain spawn — let it grow**: send an email to each of your 3 avatars asking them to each spawn 2 avatars of their own. Wait for them to do so. Then invite the human to check **/viz** again — the network should now have ~10 nodes: you → 3 avatars → 6 grandchildren. The graph gets wild fast.
   4. **Cross-network email storm**: ask all avatars to introduce themselves to each other via email. The grandchildren should email their siblings and cousins. Let this run for a moment — the human will see a flurry of emails flying across the network in /viz (edges lighting up) and /doctor (agents going ACTIVE).
   5. **Watch it get out of control**: this is the teaching moment. Explain explicitly: **this gets out of control VERY often.** Each agent is an independent process with its own LLM session, consuming tokens, sending emails, and potentially spawning more avatars. A network of 10 agents all emailing each other creates exponential activity. In real use, avatar chains can spiral — an agent spawns helpers, those helpers spawn their own helpers, and suddenly you have 50 processes burning through your API quota. This is why `/suspend-all` exists. It is the **emergency brake** and the single most important command for network management.
@@ -264,7 +264,7 @@ Go through them in this order (skip any you don't have loaded):
 ### Lesson 10: TUI Commands
 List all TUI slash commands for the human, explaining each one. Key commands:
 - /help — show all commands (type / then press Tab to see available commands; /help itself is not a command)
-- /agents — properties and statistics of all agents in the network
+- /kanban — agent network dashboard (properties, LLM config, capabilities, context usage)
 - /skills — view installed skills
 - /doctor — diagnose connection issues
 - /viz — open network visualization in browser
@@ -282,7 +282,7 @@ Keyboard shortcuts: ctrl+o cycles through three verbose modes:
   - **off** (default): shows only human-agent email exchanges.
   - **verbose** (thinking): shows thinking process and diary entries, making the soul's inner voice visible.
   - **extended**: shows everything including tool calls, tool results, and raw text — for deep debugging.
-  ctrl+e opens external editor. /agents opens the properties panel — invite the human to try it.
+  ctrl+e opens external editor. /kanban opens the agent network dashboard — invite the human to try it.
 
 **Tip — terminal setup**: The TUI uses mouse events for scrolling, so normal click-and-drag to select text will not work. To select and copy text, hold **Option** (⌥) while clicking and dragging — this bypasses the TUI's mouse handling and lets the terminal handle selection as usual. The TUI also uses a rich color palette that may not render correctly in all terminals. For the best experience on macOS, we recommend **iTerm2** — it supports true color and handles Option-click selection properly.
 
