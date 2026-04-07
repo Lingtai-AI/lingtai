@@ -110,6 +110,9 @@ func main() {
 	// First-time welcome — show once, write .firstrun sentinel
 	showWelcome(globalDir)
 
+	// Periodic running-agent reminder (every 4 hours, gated by marker file).
+	maybeShowAgentCount(globalDir)
+
 	lingtaiDir := filepath.Join(projectDir, ".lingtai")
 
 	// If .lingtai/ doesn't exist, check for phantom processes before creating it
@@ -253,6 +256,48 @@ func printWelcomeInfo() {
 	fmt.Println("    • Agent files live in .lingtai/ — deleting it without stopping")
 	fmt.Println("      agents creates phantoms. Use lingtai-tui purge to clean up")
 	fmt.Println("    • Agents act on their own after idle timeout (soul flow)")
+}
+
+// agentCheckInterval is how often maybeShowAgentCount re-scans for running
+// agents on TUI startup.
+const agentCheckInterval = 4 * time.Hour
+
+// maybeShowAgentCount prints a one-line reminder of how many `lingtai run`
+// processes are currently alive on this machine, but only if the marker
+// file at ~/.lingtai-tui/.last_agent_check is missing or older than
+// agentCheckInterval. After any scan the marker's mtime is refreshed so
+// the next check is suppressed until another interval has passed.
+//
+// When any agents are found, the user must press Enter to continue — this
+// is the whole point of the reminder: agents keep running after the TUI
+// exits, so it's worth making sure the human sees the count before diving
+// back into the interface.
+func maybeShowAgentCount(globalDir string) {
+	marker := filepath.Join(globalDir, ".last_agent_check")
+	if info, err := os.Stat(marker); err == nil {
+		if time.Since(info.ModTime()) < agentCheckInterval {
+			return // checked recently, stay quiet
+		}
+	}
+
+	n := countRunningAgents()
+
+	// Refresh marker regardless of count, so we don't rescan for another
+	// interval even when nothing is running.
+	os.MkdirAll(globalDir, 0o755)
+	now := time.Now()
+	if err := os.WriteFile(marker, nil, 0o644); err == nil {
+		os.Chtimes(marker, now, now)
+	}
+
+	if n == 0 {
+		return
+	}
+
+	fmt.Printf("%d agent(s) running. Use 'lingtai-tui list' to see.\n", n)
+	fmt.Print("Press Enter to continue...")
+	reader := bufio.NewReader(os.Stdin)
+	reader.ReadString('\n')
 }
 
 // showWelcome displays a one-time welcome page for first-time users.

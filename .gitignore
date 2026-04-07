@@ -46,6 +46,12 @@ node_modules/
 # Superpowers specs and plans (local only)
 docs/specs/
 docs/superpowers/
+docs/plans/
+portal/docs/
+
+# Local scratch and release tarballs
+/work
+lingtai.tar.gz
 
 # Superpowers brainstorm sessions
 .superpowers/
