@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -131,11 +132,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "migration error: %v\n", err)
 			os.Exit(1)
 		}
-		// Sanity check: init.json must be either present in all agent dirs
-		// OR absent in all of them. Any mixed state means corruption (half-
-		// published, interrupted rehydration, manual tampering, …) and the
-		// TUI refuses to proceed rather than limp along with a broken network.
+		// Sanity checks: init.json all-or-nothing, and exactly one orchestrator.
+		// Both refuse to launch on failure rather than limp along with a
+		// broken network. Run before any mutation so the on-disk state is
+		// preserved exactly as the user left it.
 		if err := checkInitJSONInvariant(lingtaiDir); err != nil {
+			fmt.Fprint(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		if err := checkOrchestratorInvariant(lingtaiDir); err != nil {
 			fmt.Fprint(os.Stderr, err.Error())
 			os.Exit(1)
 		}
@@ -198,10 +203,10 @@ func main() {
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 
-	// Also need first-run if no orchestrator in this project
-	if len(orchestrators) == 0 {
-		needsFirstRun = true
-	}
+	// Note: we no longer need to check len(orchestrators) == 0 here.
+	// checkOrchestratorInvariant has already refused launch in that case
+	// (when .lingtai/ exists), and when .lingtai/ doesn't exist needsFirstRun
+	// is already true from the config.json check above.
 
 	// Do NOT auto-relaunch stopped agents on TUI startup. The TUI's job is
 	// to attach to whatever state the agent is in, not to second-guess why
@@ -313,8 +318,8 @@ func checkInitJSONInvariant(lingtaiDir string) error {
 		}
 	}
 
-	// Mixed state is the only failure mode. All-present, all-absent, and
-	// zero-agents are all legitimate; the caller figures out which one.
+	// Mixed state is the only failure mode. All-present and all-absent
+	// are both legitimate; the caller figures out which one.
 	if len(withInit) > 0 && len(withoutInit) > 0 {
 		var msg strings.Builder
 		msg.WriteString("\nerror: corrupted network — init.json is present in some agents but missing in others\n\n")
@@ -328,13 +333,106 @@ func checkInitJSONInvariant(lingtaiDir string) error {
 		}
 		msg.WriteString("\nA healthy network has init.json in either every agent or none.\n")
 		msg.WriteString("Mixed state usually means an interrupted rehydration, a partial\n")
-		msg.WriteString("publish, or manual tampering. Fix the network by either:\n")
-		msg.WriteString("  - deleting the stray init.json files (if this should be a fresh\n")
-		msg.WriteString("    clone awaiting rehydration), or\n")
-		msg.WriteString("  - regenerating the missing init.json files from their .agent.json\n")
-		msg.WriteString("    blueprints (if this should be a running network).\n")
+		msg.WriteString("publish, or manual tampering.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("This suspends any running agents and removes .lingtai/ so you can start over.\n")
 		return fmt.Errorf("%s", msg.String())
 	}
+	return nil
+}
+
+// checkOrchestratorInvariant enforces "exactly one orchestrator per network".
+//
+// A healthy network has exactly one agent whose .agent.json declares at least
+// one truthy admin flag (the same definition tui.IsOrchestrator uses). Any
+// other count is corruption:
+//
+//   - zero agents in .lingtai/             → empty network, no root will
+//   - agents present but zero orchestrators → headless network
+//   - two or more orchestrators            → competing wills
+//
+// All three cases refuse to launch. The error message points the user at
+// `lingtai-tui clean` for recovery, which suspends running agents and
+// removes .lingtai/ so they can re-run the first-run wizard cleanly.
+//
+// Dot-prefixed directories under .lingtai/ are helper dirs and are skipped,
+// matching checkInitJSONInvariant.
+func checkOrchestratorInvariant(lingtaiDir string) error {
+	entries, err := os.ReadDir(lingtaiDir)
+	if err != nil {
+		return nil // missing .lingtai/ is handled elsewhere
+	}
+	var allAgents, orchestrators []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		manifestPath := filepath.Join(lingtaiDir, entry.Name(), ".agent.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue // not an agent dir (no .agent.json) — skip
+		}
+		var manifest map[string]interface{}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return fmt.Errorf("\nerror: corrupted network — cannot parse %s: %v\n\nTo recover, run:  lingtai-tui clean\n", manifestPath, err)
+		}
+		allAgents = append(allAgents, entry.Name())
+		if tui.IsOrchestrator(manifest) {
+			orchestrators = append(orchestrators, entry.Name())
+		}
+	}
+
+	// Zero agents: corrupt under strict rules. A complete network must
+	// have at least one orchestrator. An empty .lingtai/ means something
+	// created the directory without finishing setup (most commonly: the
+	// user cancelled the first-run wizard mid-flow).
+	if len(allAgents) == 0 {
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — .lingtai/ exists but contains no agents\n\n")
+		msg.WriteString("A complete network must have at least one orchestrator agent. An empty\n")
+		msg.WriteString(".lingtai/ usually means the first-run wizard was cancelled mid-flow,\n")
+		msg.WriteString("leaving behind a partially-created directory.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		return fmt.Errorf("%s", msg.String())
+	}
+
+	// Zero orchestrators among existing agents: headless network.
+	if len(orchestrators) == 0 {
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — no orchestrator found\n\n")
+		msg.WriteString(fmt.Sprintf("Found %d agent(s), but none has admin privileges:\n", len(allAgents)))
+		for _, n := range allAgents {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nEvery network must have exactly one orchestrator — an agent whose\n")
+		msg.WriteString(".agent.json contains an `admin` field with at least one truthy value\n")
+		msg.WriteString("(e.g. `\"admin\": {\"karma\": true}`). Without an orchestrator, there is\n")
+		msg.WriteString("no root will to launch.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		return fmt.Errorf("%s", msg.String())
+	}
+
+	// Two or more orchestrators: competing wills.
+	if len(orchestrators) > 1 {
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — multiple orchestrators found\n\n")
+		msg.WriteString(fmt.Sprintf("Found %d orchestrator agents (a network must have exactly one):\n", len(orchestrators)))
+		for _, n := range orchestrators {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nA network has exactly one root will. Multiple orchestrators usually\n")
+		msg.WriteString("mean two networks were merged, or someone manually edited an agent's\n")
+		msg.WriteString(".agent.json to add an admin flag.\n")
+		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
+		msg.WriteString("Then re-run lingtai-tui to start the first-run wizard from scratch.\n")
+		msg.WriteString("\nIf you want to keep the existing agents, edit each non-orchestrator's\n")
+		msg.WriteString(".agent.json to set `\"admin\": {}` (empty map) before re-running.\n")
+		return fmt.Errorf("%s", msg.String())
+	}
+
+	// Exactly one orchestrator: healthy.
 	return nil
 }
 
