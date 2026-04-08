@@ -88,3 +88,18 @@ func TestBuildNetwork_NoDuplicateNodesFromLedger(t *testing.T) {
 		seen[n.Address] = true
 	}
 }
+
+func TestBuildNetwork_WorkingDirAlwaysAbsolute(t *testing.T) {
+	base := setupPortalTestNetwork(t)
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+
+	for _, n := range net.Nodes {
+		if !filepath.IsAbs(n.WorkingDir) {
+			t.Errorf("node %s has relative WorkingDir: %s", n.AgentName, n.WorkingDir)
+		}
+	}
+}

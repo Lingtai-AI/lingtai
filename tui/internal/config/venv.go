@@ -296,16 +296,12 @@ func EnsureAddons(globalDir, agentDir string) error {
 		"feishu":  "lingtai-feishu",
 	}
 
-	// Detect dev mode: both lingtai and lingtai-kernel exist as editable installs
-	home, _ := os.UserHomeDir()
-	kernelSrc := filepath.Join(home, "Documents", "GitHub", "lingtai-kernel")
-	lingtaiSrc := filepath.Join(home, "Documents", "GitHub", "lingtai")
-	_, hasKernel := os.Stat(filepath.Join(kernelSrc, "pyproject.toml"))
-	_, hasLingtai := os.Stat(filepath.Join(lingtaiSrc, "pyproject.toml"))
-	devMode := hasKernel == nil && hasLingtai == nil
-
+	// Detect dev mode: lingtai-kernel is installed as an editable package.
+	// Use pip show to find the actual source location instead of hardcoding paths.
 	venvPath := RuntimeVenvDir(globalDir)
 	uvCmd := findUV()
+	kernelSrc := pipShowEditableLocation(venvPath, "lingtai-kernel", uvCmd)
+	devMode := kernelSrc != ""
 
 	for addonName := range addonsRaw {
 		pkgName, hasMapping := packageMap[addonName]
@@ -321,12 +317,9 @@ func EnsureAddons(globalDir, agentDir string) error {
 
 		var install *exec.Cmd
 		if devMode {
-			// In dev mode, install the addon's editable path from the local lingtai-kernel repo
+			// In dev mode, install the addon's editable path from the local lingtai-kernel repo.
+			// kernelSrc already points to the editable install location (from pipShowEditableLocation).
 			addonSrc := filepath.Join(kernelSrc, "src", "addons", "lingtai_"+addonName)
-			if _, err := os.Stat(addonSrc); err != nil {
-				// Fallback: try lingtai-kernel/src/addons/lingtai_{name}
-				addonSrc = filepath.Join(kernelSrc, "addons", "lingtai_"+addonName)
-			}
 			if uvCmd != "" {
 				install = exec.Command(uvCmd, "pip", "install", "-e", addonSrc, "-p", venvPath)
 			} else {
@@ -363,6 +356,28 @@ func pipShowInstalled(venvPath, pkgName, uvCmd string) bool {
 		cmd = exec.Command(pipCmd, "show", pkgName)
 	}
 	return cmd.Run() == nil
+}
+
+// pipShowEditableLocation returns the editable project location of a package, or "" if not installed as editable.
+// Looks for the "Editable project location:" field in pip show output.
+func pipShowEditableLocation(venvPath, pkgName, uvCmd string) string {
+	pipCmd := pipBin(venvPath)
+	var cmd *exec.Cmd
+	if uvCmd != "" {
+		cmd = exec.Command(uvCmd, "pip", "show", pkgName, "-p", venvPath)
+	} else {
+		cmd = exec.Command(pipCmd, "show", pkgName)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Editable project location:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Editable project location:"))
+		}
+	}
+	return ""
 }
 
 // pipBin returns the pip executable path for a venv.
