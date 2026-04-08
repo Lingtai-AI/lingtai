@@ -176,11 +176,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case refreshDoneMsg:
-		a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
+		if msg.err != nil {
+			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
+		} else {
+			a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
+		}
 		return a, a.mail.refreshMail
 
 	case refreshAllDoneMsg:
-		a.mail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
+		if len(msg.failures) > 0 {
+			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
+		} else {
+			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
+		}
 		return a, a.mail.refreshMail
 
 	case PaletteSelectMsg:
@@ -462,20 +470,22 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			return a, func() tea.Msg {
 				agents, _ := fs.DiscoverAgents(projectDir)
 				count := 0
+				var failures []string
 				for _, agent := range agents {
 					if agent.IsHuman {
 						continue
 					}
-					hardRefreshDir(lingtaiCmd, agent.WorkingDir)
 					count++
+					if err := hardRefreshDir(lingtaiCmd, agent.WorkingDir); err != nil {
+						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
+					}
 				}
-				return refreshAllDoneMsg{count: count}
+				return refreshAllDoneMsg{count: count, failures: failures}
 			}
 		} else if a.orchDir != "" && a.lingtaiCmd != "" {
 			a.mail.AddSystemMessage(i18n.T("mail.refreshing"))
 			return a, func() tea.Msg {
-				a.hardRefresh()
-				return refreshDoneMsg{}
+				return refreshDoneMsg{err: a.hardRefresh()}
 			}
 		}
 		return a, nil
@@ -614,8 +624,11 @@ func (a App) sendSize() tea.Cmd {
 	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
 }
 
-type refreshDoneMsg struct{}
-type refreshAllDoneMsg struct{ count int }
+type refreshDoneMsg struct{ err error }
+type refreshAllDoneMsg struct {
+	count    int
+	failures []string
+}
 
 func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {
