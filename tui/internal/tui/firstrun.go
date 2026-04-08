@@ -48,6 +48,14 @@ type capCheckErrMsg struct{ err string }
 // bootstrapProgressMsg reports a setup progress step (i18n key).
 type bootstrapProgressMsg struct{ key string }
 
+// rehydrateDoneMsg is emitted when RehydrateNetwork finishes during the
+// rehydration flow's stepPropagate. Carries the worker count on success
+// or a non-empty error string on failure.
+type rehydrateDoneMsg struct {
+	workers int
+	err     string
+}
+
 type firstRunStep int
 
 const (
@@ -57,6 +65,7 @@ const (
 	stepPresetKey
 	stepCapabilities
 	stepAgentNameDir
+	stepPropagate // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -140,6 +149,15 @@ type FirstRunModel struct {
 	setupOrchDir  string // current agent dir (setup mode only — overwrites init.json here)
 	setupOrchName string // current agent name (setup mode only — prefills name input)
 	setupLoadedAddonNames []string // addon names loaded from existing init.json (setup mode)
+	// Rehydration mode (agora cloned network): runs the normal first-run wizard
+	// but prefills the orchestrator name/dir from .agent.json, locks the dir
+	// (can't be edited), and adds stepPropagate at the end to propagate the
+	// orchestrator's init.json to every other agent via preset.RehydrateNetwork.
+	rehydrateMode     bool
+	rehydrateOrchDir  string // existing orchestrator directory name (not a full path)
+	rehydrateOrchName string // existing orchestrator agent_name from its .agent.json
+	rehydrateWorkers  int    // count of workers propagated (set at stepPropagate completion)
+	rehydrateErr      string // non-empty if RehydrateNetwork failed
 	// Bootstrap state (venv + assets install)
 	setupDone    bool        // true when bootstrap goroutine finishes
 	setupErr     string      // non-empty if bootstrap failed
@@ -321,6 +339,34 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	return m
 }
 
+// NewRehydrateModel creates a FirstRunModel for the agora rehydration flow.
+// Unlike NewSetupModeModel, rehydration runs the FULL first-run wizard
+// (welcome, bootstrap, tutorial, preset, capabilities, agent name, etc.) —
+// the user is genuinely setting up a network for the first time on their
+// machine. The only differences from a fresh first-run are:
+//
+//   - The orchestrator's agent name is prefilled from the existing
+//     .agent.json's agent_name field (the user can still edit it).
+//   - The orchestrator's directory name is locked to the existing directory
+//     (cannot be renamed — the directory already exists on disk).
+//   - The dir-exists check is skipped in the save handler (normal first-run
+//     refuses to overwrite an existing directory; rehydration expects it).
+//   - After the orchestrator's init.json is written, the wizard advances to
+//     stepPropagate instead of stepLaunching, which calls
+//     preset.RehydrateNetwork to propagate the new init.json to every
+//     non-orchestrator agent. stepPropagate then advances to stepLaunching
+//     as usual.
+//
+// orchDir is the existing orchestrator directory name (not a full path),
+// and orchName is the agent_name read from that directory's .agent.json.
+func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets bool) FirstRunModel {
+	m := NewFirstRunModel(baseDir, globalDir, hasPresets)
+	m.rehydrateMode = true
+	m.rehydrateOrchDir = orchDir
+	m.rehydrateOrchName = orchName
+	return m
+}
+
 func (m FirstRunModel) Init() tea.Cmd {
 	if m.setupMode {
 		// Already bootstrapped — no init needed, just blink for text inputs
@@ -344,6 +390,21 @@ func waitForProgress(ch <-chan string) tea.Cmd {
 			return nil // channel closed, bootstrap goroutine handles done/err
 		}
 		return bootstrapProgressMsg{key: key}
+	}
+}
+
+// runRehydratePropagation runs preset.RehydrateNetwork in the background
+// and emits a rehydrateDoneMsg with the worker count or an error. Called
+// after the orchestrator's init.json has been written in rehydration mode.
+func (m FirstRunModel) runRehydratePropagation() tea.Cmd {
+	baseDir := m.baseDir
+	orchDir := m.rehydrateOrchDir
+	return func() tea.Msg {
+		n, err := preset.RehydrateNetwork(baseDir, orchDir)
+		if err != nil {
+			return rehydrateDoneMsg{workers: n, err: err.Error()}
+		}
+		return rehydrateDoneMsg{workers: n}
 	}
 }
 
@@ -407,6 +468,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case bootstrapErrMsg:
 		m.setupDone = true
 		m.setupErr = msg.err
+		return m, nil
+
+	case rehydrateDoneMsg:
+		m.rehydrateWorkers = msg.workers
+		m.rehydrateErr = msg.err
+		// User presses Enter on the propagate page to advance to stepLaunching,
+		// see the KeyPressMsg handler for stepPropagate below.
 		return m, nil
 
 	case capCheckDoneMsg:
@@ -957,13 +1025,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			switch msg.String() {
 			case "tab", "down":
 				m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
-				if m.setupMode && m.fieldIdx == 1 { // skip dir field
+				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 2
 				}
 				return m, m.focusAgentField()
 			case "up":
 				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
-				if m.setupMode && m.fieldIdx == 1 { // skip dir field
+				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 0
 				}
 				return m, m.focusAgentField()
@@ -1049,16 +1117,33 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if dirName == "" {
 					dirName = name
 				}
+				// Rehydration: directory is locked to the existing orchestrator
+				// directory regardless of what's in the dir input.
+				if m.rehydrateMode && m.rehydrateOrchDir != "" {
+					dirName = m.rehydrateOrchDir
+				}
 				m.agentName = name
 				m.agentDir = dirName
 				orchDir := filepath.Join(m.baseDir, dirName)
-				if _, err := os.Stat(orchDir); err == nil {
-					m.message = i18n.TF("firstrun.dir_exists", dirName)
-					return m, nil
+				// Rehydration: the directory always already exists (that's the
+				// whole point), so skip the "dir already exists" refusal.
+				if !m.rehydrateMode {
+					if _, err := os.Stat(orchDir); err == nil {
+						m.message = i18n.TF("firstrun.dir_exists", dirName)
+						return m, nil
+					}
 				}
 				if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
 					m.message = i18n.TF("firstrun.error", err)
 					return m, nil
+				}
+				// Rehydration: after the orchestrator's init.json is written,
+				// advance to stepPropagate to copy it to every other agent.
+				// The propagate step will advance to stepLaunching itself.
+				if m.rehydrateMode {
+					m.step = stepPropagate
+					m.message = ""
+					return m, m.runRehydratePropagation()
 				}
 				m.step = stepLaunching
 				m.message = i18n.TF("firstrun.created", m.agentName)
@@ -1099,6 +1184,28 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, cmd
 			}
+
+		case stepPropagate:
+			// Only Enter (to advance after result) or ctrl+c are valid.
+			// Ignore Enter until rehydrateDoneMsg has arrived.
+			switch msg.String() {
+			case "enter":
+				if m.rehydrateWorkers == 0 && m.rehydrateErr == "" {
+					return m, nil // still running
+				}
+				if m.rehydrateErr != "" {
+					return m, tea.Quit
+				}
+				orchDir := filepath.Join(m.baseDir, m.rehydrateOrchDir)
+				m.step = stepLaunching
+				m.message = i18n.TF("firstrun.created", m.agentName)
+				return m, func() tea.Msg {
+					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
+				}
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
 		}
 
 	default:
@@ -1469,6 +1576,23 @@ func (m FirstRunModel) View() string {
 			"  [Enter] "+enterLabel+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
+	case stepPropagate:
+		// Rehydration: we've written the orchestrator's init.json and are
+		// propagating it to the worker agents via preset.RehydrateNetwork.
+		// The propagation is fast (few file reads/writes per agent) so the
+		// user usually sees this for a beat, then the result line, then
+		// presses Enter to advance.
+		b.WriteString("\n  " + StyleTitle.Render("Propagating config to worker agents") + "\n\n")
+		if m.rehydrateErr != "" {
+			b.WriteString("  ✗ rehydration failed: " + m.rehydrateErr + "\n\n")
+			b.WriteString(StyleFaint.Render("  Press Enter to exit. Run `lingtai-tui clean` and try again.") + "\n")
+		} else if m.rehydrateWorkers > 0 {
+			b.WriteString(fmt.Sprintf("  ✓ rehydrated %d worker agent(s)\n\n", m.rehydrateWorkers))
+			b.WriteString(StyleFaint.Render("  Press Enter to launch the network.") + "\n")
+		} else {
+			b.WriteString("  Running…\n")
+		}
+
 	case stepLaunching:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)) + i18n.T("firstrun.launching") + "\n\n")
@@ -1701,13 +1825,24 @@ func (m *FirstRunModel) applyCapSelections() {
 // enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.
 func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	defaultName := p.Name
+	defaultDir := p.Name
 	if m.setupMode && m.setupOrchName != "" {
 		defaultName = m.setupOrchName
 	}
+	if m.rehydrateMode {
+		// Rehydration: prefill name from existing .agent.json, lock dir to
+		// the existing directory. The dir input is displayed but not editable.
+		if m.rehydrateOrchName != "" {
+			defaultName = m.rehydrateOrchName
+		}
+		if m.rehydrateOrchDir != "" {
+			defaultDir = m.rehydrateOrchDir
+		}
+	}
 	m.agentName = defaultName
-	m.agentDir = defaultName
+	m.agentDir = defaultDir
 	m.nameInput.SetValue(defaultName)
-	m.dirInput.SetValue(defaultName)
+	m.dirInput.SetValue(defaultDir)
 	m.fieldIdx = 0
 	m.nameInput.Focus()
 	m.dirInput.Blur()

@@ -126,6 +126,11 @@ func main() {
 		}
 	}
 
+	// Rehydration state: set below if the network needs rehydration (cloned
+	// agora network with no init.json files but an intact .agent.json blueprint).
+	var needsRehydration bool
+	var rehydrateOrchDir, rehydrateOrchName string
+
 	// If .lingtai/ exists, run migrations before anything else
 	if _, err := os.Stat(lingtaiDir); err == nil {
 		if err := migrate.Run(lingtaiDir); err != nil {
@@ -136,13 +141,24 @@ func main() {
 		// Both refuse to launch on failure rather than limp along with a
 		// broken network. Run before any mutation so the on-disk state is
 		// preserved exactly as the user left it.
-		if err := checkInitJSONInvariant(lingtaiDir); err != nil {
+		nr, err := checkInitJSONInvariant(lingtaiDir)
+		if err != nil {
 			fmt.Fprint(os.Stderr, err.Error())
 			os.Exit(1)
 		}
+		needsRehydration = nr
 		if err := checkOrchestratorInvariant(lingtaiDir); err != nil {
 			fmt.Fprint(os.Stderr, err.Error())
 			os.Exit(1)
+		}
+		// If the network needs rehydration, find the orchestrator's dir and
+		// name from its .agent.json blueprint so the wizard can prefill them.
+		if needsRehydration {
+			rehydrateOrchDir, rehydrateOrchName = findOrchestratorBlueprint(lingtaiDir)
+			if rehydrateOrchDir == "" {
+				fmt.Fprintln(os.Stderr, "error: rehydration needed but could not locate orchestrator")
+				os.Exit(1)
+			}
 		}
 		// One-time check: warn about legacy addon-instruction blocks in
 		// agent comment.md files (left over from older TUI versions before
@@ -171,6 +187,13 @@ func main() {
 	configPath := filepath.Join(globalDir, "config.json")
 	_, configErr := os.Stat(configPath)
 	needsFirstRun := os.IsNotExist(configErr)
+
+	// Rehydration forces us into the first-run wizard regardless of whether
+	// the user has a global config.json — cloned networks always need to be
+	// walked through setup before they can launch.
+	if needsRehydration {
+		needsFirstRun = true
+	}
 
 	// Load TUI config (migrate language from legacy config.json if needed)
 	config.MigrateLegacyLanguage(globalDir)
@@ -219,7 +242,7 @@ func main() {
 	// user creates a new agent through the first-run wizard.
 
 	// Launch TUI
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, orchestrators, tuiCfg)
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -286,16 +309,20 @@ func notifyLegacyAddonComments(lingtaiDir string) {
 //   - no agent has init.json (cloned network awaiting rehydration; the
 //     rehydration path runs the first-run wizard with agent names pre-
 //     filled from each .agent.json), or
-//   - no agents exist at all (legitimate just-created state).
+//   - no agents exist at all (checkOrchestratorInvariant will catch this).
 //
 // Only mixed state (some agents with init.json, some without) is corrupt.
 //
+// Returns (needsRehydration, error). needsRehydration is true when at
+// least one agent exists and every agent is missing init.json — the
+// caller (main.go) routes into the rehydration wizard in that case.
+//
 // Dot-prefixed directories under .lingtai/ (.skills/, .portal/, .addons/,
 // .tui-asset/) are helper dirs, not agents, and are skipped.
-func checkInitJSONInvariant(lingtaiDir string) error {
+func checkInitJSONInvariant(lingtaiDir string) (needsRehydration bool, err error) {
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
-		return nil // missing .lingtai/ is handled elsewhere
+		return false, nil // missing .lingtai/ is handled elsewhere
 	}
 	var withInit, withoutInit []string
 	for _, entry := range entries {
@@ -314,7 +341,7 @@ func checkInitJSONInvariant(lingtaiDir string) error {
 		} else if os.IsNotExist(err) {
 			withoutInit = append(withoutInit, entry.Name())
 		} else {
-			return fmt.Errorf("sanity check: cannot stat %s: %w", initPath, err)
+			return false, fmt.Errorf("sanity check: cannot stat %s: %w", initPath, err)
 		}
 	}
 
@@ -336,9 +363,13 @@ func checkInitJSONInvariant(lingtaiDir string) error {
 		msg.WriteString("publish, or manual tampering.\n")
 		msg.WriteString("\nTo recover, run:  lingtai-tui clean\n")
 		msg.WriteString("This suspends any running agents and removes .lingtai/ so you can start over.\n")
-		return fmt.Errorf("%s", msg.String())
+		return false, fmt.Errorf("%s", msg.String())
 	}
-	return nil
+	// All-absent with at least one agent: rehydration needed.
+	if len(withInit) == 0 && len(withoutInit) > 0 {
+		return true, nil
+	}
+	return false, nil
 }
 
 // checkOrchestratorInvariant enforces "exactly one orchestrator per network".
@@ -434,6 +465,46 @@ func checkOrchestratorInvariant(lingtaiDir string) error {
 
 	// Exactly one orchestrator: healthy.
 	return nil
+}
+
+// findOrchestratorBlueprint returns the (dirName, agentName) of the single
+// orchestrator in .lingtai/. Assumes checkOrchestratorInvariant has already
+// passed (so exactly one orchestrator exists). Returns empty strings if no
+// orchestrator is found.
+//
+// dirName is the filesystem directory name (what the dir is called on disk).
+// agentName is the value of the .agent.json's agent_name field (may differ
+// from dirName if the user renamed the agent via the wizard).
+func findOrchestratorBlueprint(lingtaiDir string) (dirName, agentName string) {
+	entries, err := os.ReadDir(lingtaiDir)
+	if err != nil {
+		return "", ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		manifestPath := filepath.Join(lingtaiDir, entry.Name(), ".agent.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+		var manifest map[string]interface{}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			continue
+		}
+		if !tui.IsOrchestrator(manifest) {
+			continue
+		}
+		dirName = entry.Name()
+		if name, ok := manifest["agent_name"].(string); ok && name != "" {
+			agentName = name
+		} else {
+			agentName = dirName
+		}
+		return dirName, agentName
+	}
+	return "", ""
 }
 
 func printHelp() {

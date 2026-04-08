@@ -63,7 +63,14 @@ func humanAddr(projectDir string) string {
 }
 
 // NewApp creates the root app model.
-func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig) App {
+// NewApp constructs the top-level TUI app.
+//
+// rehydrateOrchDir and rehydrateOrchName, when both non-empty, signal that
+// the network is a cloned agora network awaiting rehydration. The app
+// enters first-run view with a FirstRunModel constructed via
+// NewRehydrateModel, which prefills the orchestrator's name/dir and adds
+// a final stepPropagate page to copy the new init.json to every worker.
+func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig, rehydrateOrchDir, rehydrateOrchName string) App {
 	// Apply persisted theme (or default).
 	SetThemeByName(tuiCfg.Theme)
 
@@ -79,7 +86,11 @@ func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []st
 	if needsFirstRun {
 		app.currentView = appViewFirstRun
 		hasPresets := preset.HasAny()
-		app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets)
+		if rehydrateOrchDir != "" && rehydrateOrchName != "" {
+			app.firstRun = NewRehydrateModel(projectDir, globalDir, rehydrateOrchDir, rehydrateOrchName, hasPresets)
+		} else {
+			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets)
+		}
 	} else {
 		// Determine orchestrator
 		localSettings := LoadSettings(projectDir)
