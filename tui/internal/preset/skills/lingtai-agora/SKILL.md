@@ -12,6 +12,21 @@ Walk the human through the steps below carefully. Each step is either *mechanica
 
 All scripts live alongside this SKILL.md under `scripts/`. The canonical `.gitignore` template lives at `assets/gitignore.template`. You run the scripts with `python3 <path-to-script> ...`; resolve the absolute path from this skill's location in `.lingtai/.skills/lingtai-agora/`.
 
+## How to talk to the human during this skill
+
+**Use the `email` tool for every message to the human. Never rely on text output.**
+
+This is a multi-round conversation with real latency between turns. The human may not be watching their terminal, the portal, or any specific surface — they will see your messages reliably only through their inbox. Every question you need answered, every status update the human needs to know, every final confirmation before a destructive or externally-visible action (deleting files, pushing to GitHub) — all of it goes through `email(action="send", address="human", ...)`.
+
+Symptoms that you've drifted into text-output mode:
+- You find yourself writing a message and realizing you haven't called `email` in the last several turns.
+- The human sends the same question twice in a row (they didn't see your reply).
+- The human says something like "reply with email", "answer me with email", "where's your response".
+
+If any of those happen, stop, switch to email immediately, and catch up by re-sending the most recent answer through `email(action="send", ...)`. Don't argue about the channel — just fix it.
+
+The one exception: run-time tool output (script results, `git status`, `du -sh`) is fine to narrate in your own working turns, because you are reasoning about it yourself. The rule is specifically about *messages directed at the human*.
+
 ## Step 0: Decide the project name
 
 Infer a default name from the current project folder's basename (the directory that contains `.lingtai/`). Ask the human:
