@@ -11,7 +11,8 @@ import (
 const CurrentVersion = 7
 
 type metaFile struct {
-	Version int `json:"version"`
+	Version                       int  `json:"version"`
+	AddonCommentCleanupNotified  bool `json:"addon_comment_cleanup_notified,omitempty"`
 }
 
 // Migration represents a single versioned migration step.
@@ -35,17 +36,18 @@ var migrations = []Migration{
 // Run executes all pending migrations on the given .lingtai/ directory.
 // It reads the current version from meta.json (or assumes 0 if missing),
 // runs migrations sequentially, and writes the new version atomically.
+// Preserves all sibling fields in meta.json (e.g. addon_comment_cleanup_notified)
+// across the version bump.
 func Run(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 
-	current := 0
+	var meta metaFile
 	if data, err := os.ReadFile(metaPath); err == nil {
-		var m metaFile
-		if err := json.Unmarshal(data, &m); err != nil {
+		if err := json.Unmarshal(data, &meta); err != nil {
 			return fmt.Errorf("parse meta.json: %w", err)
 		}
-		current = m.Version
 	}
+	current := meta.Version
 
 	if current > CurrentVersion {
 		return fmt.Errorf(
@@ -67,15 +69,40 @@ func Run(lingtaiDir string) error {
 		}
 	}
 
-	// Write new version atomically (write temp + rename)
-	newMeta, _ := json.Marshal(metaFile{Version: CurrentVersion})
+	// Bump version while preserving sibling fields, then write atomically.
+	meta.Version = CurrentVersion
+	return persistMeta(lingtaiDir, &meta)
+}
+
+// loadMeta reads meta.json. Returns a zero metaFile if the file is missing.
+func loadMeta(lingtaiDir string) (*metaFile, error) {
+	var meta metaFile
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "meta.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &meta, nil
+		}
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse meta.json: %w", err)
+	}
+	return &meta, nil
+}
+
+// persistMeta serializes meta.json atomically (temp + rename).
+func persistMeta(lingtaiDir string, meta *metaFile) error {
+	metaPath := filepath.Join(lingtaiDir, "meta.json")
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal meta.json: %w", err)
+	}
 	tmpPath := metaPath + ".tmp"
-	if err := os.WriteFile(tmpPath, newMeta, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
 		return fmt.Errorf("write meta.json.tmp: %w", err)
 	}
 	if err := os.Rename(tmpPath, metaPath); err != nil {
 		return fmt.Errorf("rename meta.json: %w", err)
 	}
-
 	return nil
 }
