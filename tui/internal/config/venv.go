@@ -271,15 +271,20 @@ func CheckTUIUpgrade(currentVersion string) string {
 	return ""
 }
 
-// EnsureAddons installs addon packages required by an agent before launch.
-// Reads init.json["addons"], detects dev vs release mode, and runs pip install.
-// Package name mapping: imap→lingtai-imap, telegram→lingtai-telegram, feishu→lingtai-feishu.
-func EnsureAddons(globalDir, agentDir string) error {
-	// Read agent's init.json to find declared addons
+// EnsureAddons verifies that every addon declared in an agent's init.json is
+// importable by the Python interpreter that will run the agent.
+//
+// Addons ship as submodules of the lingtai package (lingtai.addons.<name>),
+// so installing the lingtai wheel — or having it as an editable install — is
+// sufficient to make every bundled addon available. There is nothing to
+// pip-install per addon. This function only checks importability and returns
+// a clear error if an addon is missing, so callers can surface the failure
+// instead of silently launching an agent that will crash on first use.
+func EnsureAddons(python, agentDir string) error {
 	initPath := filepath.Join(agentDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return nil // no init.json → no addons to install
+		return nil // no init.json → no addons to verify
 	}
 	var init map[string]interface{}
 	if err := json.Unmarshal(data, &init); err != nil {
@@ -290,96 +295,21 @@ func EnsureAddons(globalDir, agentDir string) error {
 		return nil // no addons declared
 	}
 
-	// Package name follows lingtai-<addon> convention
-	// Detect dev mode: lingtai-kernel is installed as an editable package.
-	venvPath := RuntimeVenvDir(globalDir)
-	uvCmd := findUV()
-	kernelSrc := pipShowEditableLocation(venvPath, "lingtai-kernel", uvCmd)
-	devMode := kernelSrc != ""
-
 	for addonName := range addonsRaw {
-		pkgName := "lingtai-" + addonName
-
-		// Skip if already installed
-		if pipShowInstalled(venvPath, pkgName, uvCmd) {
-			continue
-		}
-
-		var install *exec.Cmd
-		if devMode {
-			// In dev mode, install the addon's editable path from the local lingtai-kernel repo.
-			// kernelSrc already points to the editable install location (from pipShowEditableLocation).
-			addonSrc := filepath.Join(kernelSrc, "src", "addons", "lingtai_"+addonName)
-			if uvCmd != "" {
-				install = exec.Command(uvCmd, "pip", "install", "-e", addonSrc, "-p", venvPath)
-			} else {
-				pipCmd := pipBin(venvPath)
-				install = exec.Command(pipCmd, "install", "-e", addonSrc)
-			}
-		} else {
-			// Release mode: install from PyPI
-			if uvCmd != "" {
-				install = exec.Command(uvCmd, "pip", "install", pkgName, "-p", venvPath)
-			} else {
-				pipCmd := pipBin(venvPath)
-				install = exec.Command(pipCmd, "install", pkgName)
-			}
-		}
-
+		modulePath := "lingtai.addons." + addonName
+		cmd := exec.Command(python, "-c", "import "+modulePath)
 		var stderr bytes.Buffer
-		install.Stderr = &stderr
-		if err := install.Run(); err != nil {
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
 			errMsg := strings.TrimSpace(stderr.String())
 			if errMsg != "" {
-				return fmt.Errorf("ensure addons: pip install %s failed: %s", pkgName, errMsg)
+				return fmt.Errorf("addon %q not importable as %s: %s (try: pip install --upgrade lingtai)", addonName, modulePath, errMsg)
 			}
-			return fmt.Errorf("ensure addons: pip install %s failed: %w", pkgName, err)
+			return fmt.Errorf("addon %q not importable as %s: %w (try: pip install --upgrade lingtai)", addonName, modulePath, err)
 		}
 	}
 
 	return nil
-}
-
-// pipShowInstalled returns true if the named package is already installed in the venv.
-func pipShowInstalled(venvPath, pkgName, uvCmd string) bool {
-	pipCmd := pipBin(venvPath)
-	var cmd *exec.Cmd
-	if uvCmd != "" {
-		cmd = exec.Command(uvCmd, "pip", "show", pkgName, "-p", venvPath)
-	} else {
-		cmd = exec.Command(pipCmd, "show", pkgName)
-	}
-	return cmd.Run() == nil
-}
-
-// pipShowEditableLocation returns the editable project location of a package, or "" if not installed as editable.
-// Looks for the "Editable project location:" field in pip show output.
-func pipShowEditableLocation(venvPath, pkgName, uvCmd string) string {
-	pipCmd := pipBin(venvPath)
-	var cmd *exec.Cmd
-	if uvCmd != "" {
-		cmd = exec.Command(uvCmd, "pip", "show", pkgName, "-p", venvPath)
-	} else {
-		cmd = exec.Command(pipCmd, "show", pkgName)
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "Editable project location:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Editable project location:"))
-		}
-	}
-	return ""
-}
-
-// pipBin returns the pip executable path for a venv.
-func pipBin(venvPath string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(venvPath, "Scripts", "pip.exe")
-	}
-	return filepath.Join(venvPath, "bin", "pip")
 }
 
 // CheckUpgrade compares installed lingtai version to PyPI latest.
