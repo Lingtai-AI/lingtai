@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
@@ -282,33 +283,22 @@ func EnsureAddons(globalDir, agentDir string) error {
 	}
 	var init map[string]interface{}
 	if err := json.Unmarshal(data, &init); err != nil {
-		return nil
+		return fmt.Errorf("parse init.json at %s: %w", initPath, err)
 	}
 	addonsRaw, ok := init["addons"].(map[string]interface{})
 	if !ok || len(addonsRaw) == 0 {
 		return nil // no addons declared
 	}
 
-	// Build addon name → package name map (internal name → pip package name)
-	packageMap := map[string]string{
-		"imap":    "lingtai-imap",
-		"telegram": "lingtai-telegram",
-		"feishu":  "lingtai-feishu",
-	}
-
+	// Package name follows lingtai-<addon> convention
 	// Detect dev mode: lingtai-kernel is installed as an editable package.
-	// Use pip show to find the actual source location instead of hardcoding paths.
 	venvPath := RuntimeVenvDir(globalDir)
 	uvCmd := findUV()
 	kernelSrc := pipShowEditableLocation(venvPath, "lingtai-kernel", uvCmd)
 	devMode := kernelSrc != ""
 
 	for addonName := range addonsRaw {
-		pkgName, hasMapping := packageMap[addonName]
-		if !hasMapping {
-			// No known mapping — skip (may be a third-party addon)
-			continue
-		}
+		pkgName := "lingtai-" + addonName
 
 		// Skip if already installed
 		if pipShowInstalled(venvPath, pkgName, uvCmd) {
@@ -336,9 +326,13 @@ func EnsureAddons(globalDir, agentDir string) error {
 			}
 		}
 
-		install.Stdout = os.Stdout
-		install.Stderr = os.Stderr
+		var stderr bytes.Buffer
+		install.Stderr = &stderr
 		if err := install.Run(); err != nil {
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg != "" {
+				return fmt.Errorf("ensure addons: pip install %s failed: %s", pkgName, errMsg)
+			}
 			return fmt.Errorf("ensure addons: pip install %s failed: %w", pkgName, err)
 		}
 	}
