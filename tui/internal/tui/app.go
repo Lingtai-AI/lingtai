@@ -457,8 +457,8 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				// Wipe conversation history (token ledger is preserved)
 				os.Remove(filepath.Join(a.orchDir, "history", "chat_history.jsonl"))
 				// Relaunch with clean context
-				process.LaunchAgent(a.lingtaiCmd, a.orchDir)
-				return refreshDoneMsg{}
+				_, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+				return refreshDoneMsg{err: err}
 			}
 		}
 		return a, nil
