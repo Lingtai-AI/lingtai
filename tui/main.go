@@ -131,6 +131,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "migration error: %v\n", err)
 			os.Exit(1)
 		}
+		// Sanity check: init.json must be either present in all agent dirs
+		// OR absent in all of them. Any mixed state means corruption (half-
+		// published, interrupted rehydration, manual tampering, …) and the
+		// TUI refuses to proceed rather than limp along with a broken network.
+		if err := checkInitJSONInvariant(lingtaiDir); err != nil {
+			fmt.Fprint(os.Stderr, err.Error())
+			os.Exit(1)
+		}
 		// One-time check: warn about legacy addon-instruction blocks in
 		// agent comment.md files (left over from older TUI versions before
 		// the skill system replaced WriteAddonComment). The check runs
@@ -264,6 +272,70 @@ func notifyLegacyAddonComments(lingtaiDir string) {
 	if err := migrate.MarkAddonCommentNotified(lingtaiDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to mark addon comment notification: %v\n", err)
 	}
+}
+
+// checkInitJSONInvariant enforces the all-or-nothing rule for per-agent
+// init.json files. A healthy network is one of:
+//
+//   - every agent has init.json (normal running state), or
+//   - no agent has init.json (cloned network awaiting rehydration; the
+//     rehydration path runs the first-run wizard with agent names pre-
+//     filled from each .agent.json), or
+//   - no agents exist at all (legitimate just-created state).
+//
+// Only mixed state (some agents with init.json, some without) is corrupt.
+//
+// Dot-prefixed directories under .lingtai/ (.skills/, .portal/, .addons/,
+// .tui-asset/) are helper dirs, not agents, and are skipped.
+func checkInitJSONInvariant(lingtaiDir string) error {
+	entries, err := os.ReadDir(lingtaiDir)
+	if err != nil {
+		return nil // missing .lingtai/ is handled elsewhere
+	}
+	var withInit, withoutInit []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		agentDir := filepath.Join(lingtaiDir, entry.Name())
+		// Only consider directories that look like agents (have .agent.json).
+		// Skips "human/" and any other non-agent helper folders.
+		if _, err := os.Stat(filepath.Join(agentDir, ".agent.json")); err != nil {
+			continue
+		}
+		initPath := filepath.Join(agentDir, "init.json")
+		if _, err := os.Stat(initPath); err == nil {
+			withInit = append(withInit, entry.Name())
+		} else if os.IsNotExist(err) {
+			withoutInit = append(withoutInit, entry.Name())
+		} else {
+			return fmt.Errorf("sanity check: cannot stat %s: %w", initPath, err)
+		}
+	}
+
+	// Mixed state is the only failure mode. All-present, all-absent, and
+	// zero-agents are all legitimate; the caller figures out which one.
+	if len(withInit) > 0 && len(withoutInit) > 0 {
+		var msg strings.Builder
+		msg.WriteString("\nerror: corrupted network — init.json is present in some agents but missing in others\n\n")
+		msg.WriteString(fmt.Sprintf("  with init.json (%d):\n", len(withInit)))
+		for _, n := range withInit {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString(fmt.Sprintf("\n  missing init.json (%d):\n", len(withoutInit)))
+		for _, n := range withoutInit {
+			msg.WriteString(fmt.Sprintf("    %s\n", n))
+		}
+		msg.WriteString("\nA healthy network has init.json in either every agent or none.\n")
+		msg.WriteString("Mixed state usually means an interrupted rehydration, a partial\n")
+		msg.WriteString("publish, or manual tampering. Fix the network by either:\n")
+		msg.WriteString("  - deleting the stray init.json files (if this should be a fresh\n")
+		msg.WriteString("    clone awaiting rehydration), or\n")
+		msg.WriteString("  - regenerating the missing init.json files from their .agent.json\n")
+		msg.WriteString("    blueprints (if this should be a running network).\n")
+		return fmt.Errorf("%s", msg.String())
+	}
+	return nil
 }
 
 func printHelp() {
