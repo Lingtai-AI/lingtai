@@ -53,7 +53,10 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 		}
 		agentDir := filepath.Join(lingtaiDir, entry.Name())
 
-		// Must have .agent.json to qualify as an agent dir (skips human/ etc.)
+		// Must have .agent.json to qualify as an agent dir. Also require
+		// that .agent.json's admin field is non-nil: the human/ placeholder
+		// has admin: null, which distinguishes it from real agents. This
+		// matches the same rule used by main.go's isAgentDir() helper.
 		blueprintPath := filepath.Join(agentDir, ".agent.json")
 		blueprintData, err := os.ReadFile(blueprintPath)
 		if err != nil {
@@ -62,6 +65,10 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 		var blueprint map[string]interface{}
 		if err := json.Unmarshal(blueprintData, &blueprint); err != nil {
 			return workersRehydrated, fmt.Errorf("parse %s: %w", blueprintPath, err)
+		}
+		// admin == nil (missing or explicit null) means human placeholder — skip.
+		if adminRaw, ok := blueprint["admin"]; !ok || adminRaw == nil {
+			continue
 		}
 
 		// Skip agents that already have init.json — rehydration is only
