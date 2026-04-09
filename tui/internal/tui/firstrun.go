@@ -1406,6 +1406,9 @@ func (m FirstRunModel) View() string {
 		dimStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
 		cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 
+		// Build the left block (grid + addon list) into a separate builder so
+		// that in wide mode we can join it horizontally with a side pane.
+		var leftBlock strings.Builder
 		for row := 0; row < colSize; row++ {
 			var line string
 			for col := 0; col < 2; col++ {
@@ -1419,7 +1422,7 @@ func (m FirstRunModel) View() string {
 				local := m.isCapLocal(info)
 
 				var checkbox, hint string
-				isCurrent := idx == m.capCursor
+				isCurrent := idx == m.capCursor && !m.inAddonZone
 
 				if compat || local {
 					if m.capSelected[name] {
@@ -1458,11 +1461,11 @@ func (m FirstRunModel) View() string {
 				}
 				line += cell
 			}
-			b.WriteString(line + "\n")
+			leftBlock.WriteString(line + "\n")
 		}
 
 		// Addon section
-		b.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.addons_section")) + "\n\n")
+		leftBlock.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.addons_section")) + "\n\n")
 		for i, name := range m.addonOrder {
 			var checkbox string
 			if m.addonSelected[name] {
@@ -1474,14 +1477,56 @@ func (m FirstRunModel) View() string {
 			isCurrent := m.inAddonZone && i == m.addonCursor
 			if isCurrent {
 				cell := "> " + checkbox + " " + name
-				b.WriteString(cursorStyle.Render(cell) + "\n")
+				leftBlock.WriteString(cursorStyle.Render(cell) + "\n")
 			} else {
-				b.WriteString(prefix + checkbox + " " + name + "\n")
+				leftBlock.WriteString(prefix + checkbox + " " + name + "\n")
 			}
 		}
 
-		b.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.caps_recommend")) + "\n")
-		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.caps_change_later")) + "\n")
+		// Wide-mode layout: grid/addons on the left, description side pane on
+		// the right. Threshold is capsWidePaneThreshold columns. Below it, we
+		// fall back to the narrow layout (description collapses to one line).
+		wide := m.width >= capsWidePaneThreshold
+		if wide {
+			// Left column fixed at 2 * cellWidth(38) + margin, right column fills
+			// the rest up to a comfortable reading width.
+			leftWidth := 80
+			paneWidth := m.width - leftWidth - 4
+			if paneWidth > 60 {
+				paneWidth = 60
+			}
+			if paneWidth < 30 {
+				// Not actually enough room for a useful pane — fall back to narrow.
+				wide = false
+			} else {
+				pane := m.renderCapsSidePane(paneWidth)
+				// Indent the pane by 2 spaces for visual separation from the grid.
+				paneIndented := "  " + strings.ReplaceAll(pane, "\n", "\n  ")
+				combined := lipgloss.JoinHorizontal(lipgloss.Top, leftBlock.String(), paneIndented)
+				b.WriteString(combined + "\n")
+			}
+		}
+		if !wide {
+			b.WriteString(leftBlock.String())
+			// Narrow mode: show just the one-line summary of the focused item,
+			// in the spot where caps_recommend used to live.
+			_, desc := m.focusedItemDesc()
+			summary := descSummaryLine(desc)
+			if summary != "" {
+				b.WriteString("\n  " + StyleAccent.Render("▸ ") + summary + "\n")
+			}
+		}
+
+		// Footer. In narrow mode we keep the recommend/change-later guidance
+		// right above the key hints. In wide mode the side pane carries the
+		// per-item detail, so we fold recommend + change-later into a single
+		// compact line above the key hints.
+		if wide {
+			b.WriteString("\n  " + StyleFaint.Render(i18n.T("firstrun.caps_recommend")+"  "+i18n.T("firstrun.caps_change_later")) + "\n")
+		} else {
+			b.WriteString("\n  " + StyleAccent.Render(i18n.T("firstrun.caps_recommend")) + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.caps_change_later")) + "\n")
+		}
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓←→ "+i18n.T("settings.select")+
 			"  space "+i18n.T("settings.change")+
 			"  Ctrl+A "+i18n.T("firstrun.caps_toggle_all")+
@@ -1724,6 +1769,123 @@ func (m FirstRunModel) runCheckCaps() tea.Cmd {
 		}
 		return capCheckDoneMsg{infos: infos}
 	}
+}
+
+// capsWidePaneThreshold is the terminal width at or above which the
+// capabilities page splits into a left grid + right description pane.
+// Below this, the description collapses to a single line under the grid.
+const capsWidePaneThreshold = 110
+
+// focusedItemDesc returns the raw i18n description for whichever item
+// the cursor is currently on — a capability when inAddonZone is false,
+// an addon otherwise. Returns "" if nothing is focused (shouldn't happen).
+func (m FirstRunModel) focusedItemDesc() (name, desc string) {
+	if m.inAddonZone {
+		if m.addonCursor < 0 || m.addonCursor >= len(m.addonOrder) {
+			return "", ""
+		}
+		name = m.addonOrder[m.addonCursor]
+		return name, i18n.T("firstrun.addon_desc." + name)
+	}
+	if m.capCursor < 0 || m.capCursor >= len(m.capOrder) {
+		return "", ""
+	}
+	name = m.capOrder[m.capCursor]
+	return name, i18n.T("firstrun.cap_desc." + name)
+}
+
+// descSummaryLine returns the first line of a multi-line description
+// (the one-sentence summary, by convention). Returns "" for an empty desc.
+func descSummaryLine(desc string) string {
+	if desc == "" {
+		return ""
+	}
+	if i := strings.IndexByte(desc, '\n'); i >= 0 {
+		return desc[:i]
+	}
+	return desc
+}
+
+// renderCapsSidePane renders the wide-mode right-hand description pane.
+// It shows the currently-focused item's full description plus dynamic
+// provider metadata for capabilities. Lines are hard-wrapped to paneWidth.
+func (m FirstRunModel) renderCapsSidePane(paneWidth int) string {
+	name, desc := m.focusedItemDesc()
+	if name == "" {
+		return ""
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
+
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(name) + "\n\n")
+
+	// Static description from i18n — may contain \n separators.
+	for _, line := range strings.Split(desc, "\n") {
+		for _, wrapped := range wrapLine(line, paneWidth) {
+			b.WriteString(wrapped + "\n")
+		}
+	}
+
+	// Dynamic capability metadata — only applies to capabilities, not addons.
+	if !m.inAddonZone {
+		if info, ok := m.capInfos[name]; ok && len(info.Providers) > 0 {
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " " + strings.Join(info.Providers, ", ") + "\n")
+			if info.Default != nil && *info.Default != "" {
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_default")) + " " + *info.Default + "\n")
+			}
+			provider := m.getPresetProvider(m.presets[m.cursor])
+			compat := m.isCapCompatible(info, provider)
+			local := m.isCapLocal(info)
+			switch {
+			case compat:
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_compatible") + "\n")
+			case local:
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_local_only") + "\n")
+			default:
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_incompatible") + "\n")
+			}
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// wrapLine wraps a single line of text to the given width using simple
+// space-based word wrapping. CJK text without spaces is returned unwrapped
+// since char-boundary wrapping would corrupt multi-byte glyphs; the side
+// pane is sized so this is rarely needed.
+func wrapLine(s string, width int) []string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return []string{s}
+	}
+	// Only attempt wrapping if the line contains ASCII spaces. For CJK
+	// strings without spaces we return as-is rather than risk splitting
+	// a multi-byte character in half.
+	if !strings.ContainsRune(s, ' ') {
+		return []string{s}
+	}
+	var out []string
+	words := strings.Split(s, " ")
+	line := ""
+	for _, w := range words {
+		if line == "" {
+			line = w
+			continue
+		}
+		if lipgloss.Width(line)+1+lipgloss.Width(w) > width {
+			out = append(out, line)
+			line = w
+		} else {
+			line += " " + w
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
 }
 
 // enterCapabilities transitions to stepCapabilities.
