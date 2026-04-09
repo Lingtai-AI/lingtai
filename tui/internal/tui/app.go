@@ -87,7 +87,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []st
 		if rehydrateOrchDir != "" && rehydrateOrchName != "" {
 			app.firstRun = NewRehydrateModel(projectDir, globalDir, rehydrateOrchDir, rehydrateOrchName, hasPresets)
 		} else {
-			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets)
+			app.firstRun = NewFirstRunModel(projectDir, globalDir, hasPresets, "")
 		}
 	} else {
 		// Determine orchestrator
@@ -252,7 +252,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.orchName = ""
 		a.currentView = appViewFirstRun
 		hasPresets := preset.HasAny()
-		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, hasPresets)
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, hasPresets, "")
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 
 	case AddonSavedMsg:
@@ -673,7 +673,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "welcome":
 		a.currentView = appViewFirstRun
-		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true)
+		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true, "")
 		a.firstRun.welcomeOnly = true
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 	}

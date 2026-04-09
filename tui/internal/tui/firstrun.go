@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -65,7 +66,9 @@ const (
 	stepPresetKey
 	stepCapabilities
 	stepAgentNameDir
-	stepPropagate // rehydration only — runs after orchestrator save, before launch
+	stepRecipe            // picks one of 5 recipes (greeter, plain, adaptive, tutorial, custom)
+	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
+	stepPropagate         // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -78,11 +81,11 @@ type capInfo struct {
 // stepProgress returns the 1-based index and total for progress display
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
 	if setupMode {
-		total = 3 // preset → capabilities → details
+		total = 4 // preset → capabilities → details → recipe
 	} else if hasPresets {
-		total = 3 // preset → capabilities → details
+		total = 4 // preset → capabilities → details → recipe
 	} else {
-		total = 4 // api key → preset → capabilities → details
+		total = 5 // api key → preset → capabilities → details → recipe
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -101,6 +104,11 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 			return 3, total
 		}
 		return 4, total
+	case step == stepRecipe || step == stepRecipeSwapConfirm:
+		if setupMode || hasPresets {
+			return 4, total
+		}
+		return 5, total
 	case step == stepLaunching:
 		return total, total
 	}
@@ -176,21 +184,38 @@ type FirstRunModel struct {
 	selectedProvider  string            // provider of currently selected preset
 	existingKeys      map[string]string // loaded from Config.Keys
 	// Capability selection state (stepCapabilities)
-	capInfos    map[string]capInfo // from check-caps CLI output
-	capSelected map[string]bool    // user toggle state
-	capOrder    []string           // ordered list matching AllCapabilities
-	capCursor   int                // current cursor position (0..len-1)
-	capLoading  bool               // true while check-caps is running
-	capErr      string             // error message if check-caps fails
+	capInfos     map[string]capInfo // from check-caps CLI output
+	capSelected  map[string]bool    // user toggle state
+	capProviders map[string]string  // user's chosen provider per capability (only for caps with ≥2 compatible options)
+	capOrder     []string           // ordered list matching AllCapabilities
+	capCursor    int                // current cursor position (0..len-1)
+	capLoading   bool               // true while check-caps is running
+	capErr       string             // error message if check-caps fails
 	// Addon selection state (shown below capabilities)
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
 	addonCursor   int             // cursor when in addon zone
 	inAddonZone   bool            // true when cursor is in addon section
-	// Tutorial step state
+
+	// Recipe picker state (stepRecipe)
+	recipeIdx         int             // cursor in recipe list (0..4: greeter, plain, adaptive, tutorial, custom)
+	recipeCustomInput textinput.Model // folder path input for custom recipe
+	recipeCustomErr   string          // validation error message
+	currentRecipe     string          // loaded from .tui-asset/.recipe in setup mode
+	currentCustomDir  string          // loaded from .tui-asset/.recipe in setup mode
+	preselectedRecipe string          // set by constructor for post-nirvana fresh start
+
+	// Pending save state (captured at end of stepAgentNameDir, consumed by stepRecipe)
+	pendingAgentOpts preset.AgentOpts
+	pendingDirName   string
+
+	// Swap-confirm state (stepRecipeSwapConfirm — wired in Task 9)
+	pendingRecipeName string
+	pendingCustomDir  string
+	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
 }
 
-func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel {
+func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
 	ti := textinput.New()
 	ti.CharLimit = 64
 	ti.SetWidth(40)
@@ -264,6 +289,11 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 	comi.SetWidth(50)
 	comi.Prompt = ""
 
+	rci := textinput.New()
+	rci.CharLimit = 512
+	rci.SetWidth(50)
+	rci.Placeholder = ".lingtai-recipe/ or absolute path"
+
 	// Load existing keys from Config.Keys
 	cfg, _ := config.LoadConfig(globalDir)
 	existingKeys := cfg.Keys
@@ -302,10 +332,22 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 		covenantInput:    covi,
 		principleInput:   prini,
 		soulFlowInput:    sfli,
-		commentInput:     comi,
-		nirvanaIdx:       1, // default false (1=false)
-		progressCh:       make(chan string, 4),
+		commentInput:      comi,
+		nirvanaIdx:        1, // default false (1=false)
+		progressCh:        make(chan string, 4),
+		recipeCustomInput: rci,
+		preselectedRecipe: preselectedRecipe,
 	}
+
+	// Pre-fill custom path from project-local convention.
+	// The projectDir is one level up from baseDir (.lingtai/).
+	projectDir := filepath.Dir(baseDir)
+	if local := preset.ProjectLocalRecipeDir(projectDir); local != "" {
+		m.recipeCustomInput.SetValue(local)
+	}
+
+	// Set recipe cursor from preselectedRecipe
+	m.recipeIdx = recipeNameToIdx(preselectedRecipe)
 
 	return m
 }
@@ -313,7 +355,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool) FirstRunModel 
 // NewSetupModeModel creates a FirstRunModel for /setup — skips welcome/bootstrap/tutorial,
 // starts at preset selection with presets preloaded, and overwrites the current agent on completion.
 func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunModel {
-	m := NewFirstRunModel(baseDir, globalDir, true)
+	m := NewFirstRunModel(baseDir, globalDir, true, "")
 	m.setupMode = true
 	m.setupOrchDir = orchDir
 	m.setupOrchName = orchName
@@ -334,6 +376,16 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 				}
 			}
 		}
+	}
+
+	// Load current recipe state for pre-selection
+	state, _ := preset.LoadRecipeState(baseDir)
+	m.currentRecipe = state.Recipe
+	m.currentCustomDir = state.CustomDir
+	m.preselectedRecipe = state.Recipe
+	m.recipeIdx = recipeNameToIdx(state.Recipe)
+	if state.Recipe == preset.RecipeCustom && state.CustomDir != "" {
+		m.recipeCustomInput.SetValue(state.CustomDir)
 	}
 
 	return m
@@ -360,7 +412,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 // orchDir is the existing orchestrator directory name (not a full path),
 // and orchName is the agent_name read from that directory's .agent.json.
 func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets bool) FirstRunModel {
-	m := NewFirstRunModel(baseDir, globalDir, hasPresets)
+	m := NewFirstRunModel(baseDir, globalDir, hasPresets, "")
 	m.rehydrateMode = true
 	m.rehydrateOrchDir = orchDir
 	m.rehydrateOrchName = orchName
@@ -514,6 +566,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.capSelected[name] = true
 			}
 		}
+		m.initCapProviders()
 		return m, nil
 
 	case capCheckErrMsg:
@@ -535,6 +588,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		if m.capSelected["read"] || m.capSelected["write"] || m.capSelected["edit"] || m.capSelected["glob"] || m.capSelected["grep"] {
 			m.capSelected["file"] = true
 		}
+		m.initCapProviders()
 		return m, nil
 
 	case SetupDoneMsg:
@@ -989,6 +1043,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.capSelected[name] = !m.capSelected[name]
 					}
 				}
+			case "tab":
+				// Cycle the provider for the focused capability (if it has ≥2 compatible options).
+				if !m.inAddonZone {
+					name := m.capOrder[m.capCursor]
+					info := m.capInfos[name]
+					presetProvider := m.getPresetProvider(m.presets[m.cursor])
+					compat := m.compatibleProviders(info, presetProvider)
+					if len(compat) >= 2 {
+						cur := m.capProviders[name]
+						for i, p := range compat {
+							if p == cur {
+								m.capProviders[name] = compat[(i+1)%len(compat)]
+								break
+							}
+						}
+					}
+				}
 			case "ctrl+a":
 				provider := m.getPresetProvider(m.presets[m.cursor])
 				// If all selectable caps are selected, deselect all; otherwise select all
@@ -1078,7 +1149,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || moltPress <= 0 || moltPress > 1 {
 					moltPress = 0.8
 				}
-				p := m.presets[m.cursor]
 				opts := preset.AgentOpts{
 					Language:      langs[m.agentLangIdx],
 					Stamina:       stamina,
@@ -1090,66 +1160,45 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					CovenantFile:  m.covenantInput.Value(),
 					PrincipleFile: m.principleInput.Value(),
 					SoulFile:      m.soulFlowInput.Value(),
-					CommentFile:   m.commentInput.Value(),
+					// CommentFile is set by stepRecipe from the chosen recipe
 				}
-				// Resolve agent directory and generate addon comment file
 				var selectedAddons []string
-				for _, name := range m.addonOrder {
-					if m.addonSelected[name] {
-						selectedAddons = append(selectedAddons, name)
+				for _, addonName := range m.addonOrder {
+					if m.addonSelected[addonName] {
+						selectedAddons = append(selectedAddons, addonName)
 					}
 				}
-				// Seed init.json addons from user's selection. GenerateInitJSONWithOpts
-				// will auto-populate init.json["addons"] with fixed-convention config
-				// paths unless an existing init.json already has a user-edited addons field.
 				opts.Addons = selectedAddons
-				if m.setupMode {
-					// Overwrite current agent's init.json in-place
-					dirName := filepath.Base(m.setupOrchDir)
-					m.agentName = name
-					if err := preset.GenerateInitJSONWithOpts(p, name, dirName, m.baseDir, m.globalDir, opts); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					return m, func() tea.Msg { return SetupSavedMsg{} }
-				}
+
 				dirName := m.dirInput.Value()
 				if dirName == "" {
 					dirName = name
 				}
-				// Rehydration: directory is locked to the existing orchestrator
-				// directory regardless of what's in the dir input.
 				if m.rehydrateMode && m.rehydrateOrchDir != "" {
 					dirName = m.rehydrateOrchDir
 				}
 				m.agentName = name
 				m.agentDir = dirName
-				orchDir := filepath.Join(m.baseDir, dirName)
-				// Rehydration: the directory always already exists (that's the
-				// whole point), so skip the "dir already exists" refusal.
-				if !m.rehydrateMode {
+
+				// Validate dir doesn't already exist (first-run only, not setup/rehydrate)
+				if !m.setupMode && !m.rehydrateMode {
+					orchDir := filepath.Join(m.baseDir, dirName)
 					if _, err := os.Stat(orchDir); err == nil {
 						m.message = i18n.TF("firstrun.dir_exists", dirName)
 						return m, nil
 					}
 				}
-				if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
-					m.message = i18n.TF("firstrun.error", err)
-					return m, nil
+
+				// Stash for stepRecipe to consume
+				m.pendingAgentOpts = opts
+				m.pendingDirName = dirName
+				if m.setupMode {
+					m.pendingDirName = filepath.Base(m.setupOrchDir)
 				}
-				// Rehydration: after the orchestrator's init.json is written,
-				// advance to stepPropagate to copy it to every other agent.
-				// The propagate step will advance to stepLaunching itself.
-				if m.rehydrateMode {
-					m.step = stepPropagate
-					m.message = ""
-					return m, m.runRehydratePropagation()
-				}
-				m.step = stepLaunching
-				m.message = i18n.TF("firstrun.created", m.agentName)
-				return m, func() tea.Msg {
-					return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
-				}
+
+				m.step = stepRecipe
+				m.message = ""
+				return m, nil
 			case "esc":
 				m.step = stepCapabilities
 				return m, nil
@@ -1184,6 +1233,69 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, cmd
 			}
+
+
+		case stepRecipe:
+			switch msg.String() {
+			case "up":
+				if m.recipeIdx > 0 {
+					m.recipeIdx--
+					m.recipeCustomErr = ""
+				}
+				return m, nil
+			case "down":
+				if m.recipeIdx < 4 {
+					m.recipeIdx++
+					m.recipeCustomErr = ""
+				}
+				return m, nil
+			case "esc":
+				m.step = stepAgentNameDir
+				m.message = ""
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			case "enter":
+				recipeName := recipeIdxToName(m.recipeIdx)
+				customDir := ""
+				if recipeName == preset.RecipeCustom {
+					customDir = m.recipeCustomInput.Value()
+					if err := preset.ValidateCustomDir(customDir); err != nil {
+						m.recipeCustomErr = err.Error()
+						return m, nil
+					}
+				}
+
+				// Mid-life recipe change detection -> route to swap confirm (Task 9)
+				if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
+					m.pendingRecipeName = recipeName
+					m.pendingCustomDir = customDir
+					m.step = stepRecipeSwapConfirm
+					m.swapConfirmIdx = 0
+					return m, nil
+				}
+
+				// First-run or unchanged recipe: save directly
+				return m.performRecipeSave(recipeName, customDir)
+			default:
+				if m.recipeIdx == 4 { // custom selected -- forward to input
+					var cmd tea.Cmd
+					m.recipeCustomInput, cmd = m.recipeCustomInput.Update(msg)
+					return m, cmd
+				}
+				return m, nil
+			}
+
+		case stepRecipeSwapConfirm:
+			// Placeholder -- Task 9 wires the confirm page UI
+			switch msg.String() {
+			case "esc":
+				m.step = stepRecipe
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
 
 		case stepPropagate:
 			// Only Enter (to advance after result) or ctrl+c are valid.
@@ -1240,6 +1352,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
 			case 12:
 				m.commentInput, cmd = m.commentInput.Update(msg)
+			}
+		case stepRecipe:
+			if m.recipeIdx == 4 {
+				m.recipeCustomInput, cmd = m.recipeCustomInput.Update(msg)
 			}
 		case stepAPIKey:
 			m.setup, cmd = m.setup.Update(msg)
@@ -1423,6 +1539,7 @@ func (m FirstRunModel) View() string {
 
 				var checkbox, hint string
 				isCurrent := idx == m.capCursor && !m.inAddonZone
+				compatProvs := m.compatibleProviders(info, provider)
 
 				if compat || local {
 					if m.capSelected[name] {
@@ -1432,6 +1549,11 @@ func (m FirstRunModel) View() string {
 					}
 					if !compat && local {
 						hint = "(local)"
+					} else if len(compatProvs) >= 2 {
+						// Show active provider when there's a choice
+						if prov := m.capProviders[name]; prov != "" {
+							hint = "(" + prov + ")"
+						}
 					}
 				} else {
 					checkbox = "[-]"
@@ -1508,12 +1630,20 @@ func (m FirstRunModel) View() string {
 		}
 		if !wide {
 			b.WriteString(leftBlock.String())
-			// Narrow mode: show just the one-line summary of the focused item,
-			// in the spot where caps_recommend used to live.
-			_, desc := m.focusedItemDesc()
+			// Narrow mode: show the one-line summary + active provider for the
+			// focused item, in the spot where caps_recommend used to live.
+			focusName, desc := m.focusedItemDesc()
 			summary := descSummaryLine(desc)
 			if summary != "" {
-				b.WriteString("\n  " + StyleAccent.Render("▸ ") + summary + "\n")
+				provHint := ""
+				if !m.inAddonZone {
+					info := m.capInfos[focusName]
+					compatProvs := m.compatibleProviders(info, provider)
+					if prov := m.capProviders[focusName]; prov != "" && len(compatProvs) >= 2 {
+						provHint = StyleFaint.Render(" ["+prov+"]") + StyleFaint.Render(" tab "+i18n.T("firstrun.cap_provider_cycle"))
+					}
+				}
+				b.WriteString("\n  " + StyleAccent.Render("▸ ") + summary + provHint + "\n")
 			}
 		}
 
@@ -1529,6 +1659,7 @@ func (m FirstRunModel) View() string {
 		}
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓←→ "+i18n.T("settings.select")+
 			"  space "+i18n.T("settings.change")+
+			"  tab "+i18n.T("firstrun.cap_provider_cycle")+
 			"  Ctrl+A "+i18n.T("firstrun.caps_toggle_all")+
 			"  [Enter] "+i18n.T("firstrun.confirm_caps")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
@@ -1620,6 +1751,13 @@ func (m FirstRunModel) View() string {
 			"  ←→ "+i18n.T("firstrun.toggle_region")+
 			"  [Enter] "+enterLabel+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+
+	case stepRecipe:
+		return m.viewRecipe()
+
+	case stepRecipeSwapConfirm:
+		// Placeholder -- Task 9 renders the swap confirm page
+		return ""
 
 	case stepPropagate:
 		// Rehydration: we've written the orchestrator's init.json and are
@@ -1832,20 +1970,32 @@ func (m FirstRunModel) renderCapsSidePane(paneWidth int) string {
 	if !m.inAddonZone {
 		if info, ok := m.capInfos[name]; ok && len(info.Providers) > 0 {
 			b.WriteString("\n")
-			b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " " + strings.Join(info.Providers, ", ") + "\n")
+			presetProvider := m.getPresetProvider(m.presets[m.cursor])
+			compatProvs := m.compatibleProviders(info, presetProvider)
+			activeProv := m.capProviders[name]
+
+			if len(compatProvs) >= 2 {
+				// Render a provider picker: Providers: name1 · [name2] · name3
+				activeStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorActive)
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " ")
+				for i, p := range compatProvs {
+					if i > 0 {
+						b.WriteString(labelStyle.Render(" · "))
+					}
+					if p == activeProv {
+						b.WriteString(activeStyle.Render("[" + p + "]"))
+					} else {
+						b.WriteString(p)
+					}
+				}
+				b.WriteString("\n")
+				b.WriteString(labelStyle.Render("  [tab] "+i18n.T("firstrun.cap_provider_cycle")) + "\n")
+			} else if len(compatProvs) == 1 {
+				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_providers")) + " " + compatProvs[0] + "\n")
+			}
+
 			if info.Default != nil && *info.Default != "" {
 				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_default")) + " " + *info.Default + "\n")
-			}
-			provider := m.getPresetProvider(m.presets[m.cursor])
-			compat := m.isCapCompatible(info, provider)
-			local := m.isCapLocal(info)
-			switch {
-			case compat:
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_compatible") + "\n")
-			case local:
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_local_only") + "\n")
-			default:
-				b.WriteString(labelStyle.Render(i18n.T("firstrun.cap_meta_status")) + " " + i18n.T("firstrun.cap_meta_incompatible") + "\n")
 			}
 		}
 	}
@@ -1888,6 +2038,58 @@ func wrapLine(s string, width int) []string {
 	return out
 }
 
+// compatibleProviders returns the subset of a capability's providers that
+// work with the current preset. A provider is considered usable if it
+// matches the preset's LLM provider string OR if the capability has a
+// non-nil default (meaning it has a free/builtin fallback like duckduckgo
+// or whisper that works regardless of the LLM provider).
+func (m FirstRunModel) compatibleProviders(info capInfo, presetProvider string) []string {
+	if len(info.Providers) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range info.Providers {
+		if p == presetProvider {
+			out = append(out, p)
+		} else if info.Default != nil && p == *info.Default {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// initCapProviders sets the initial provider choice per capability based on
+// the preset manifest. Called after check-caps completes and capInfos is populated.
+func (m *FirstRunModel) initCapProviders() {
+	m.capProviders = make(map[string]string)
+	p := m.presets[m.cursor]
+	presetProvider := m.getPresetProvider(p)
+	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
+	for _, name := range m.capOrder {
+		info := m.capInfos[name]
+		compat := m.compatibleProviders(info, presetProvider)
+		if len(compat) == 0 {
+			continue
+		}
+		// If the preset already specifies a provider for this cap, use it
+		// (as long as it's in the compatible set).
+		if capCfg, ok := caps[name].(map[string]interface{}); ok {
+			if prov, ok := capCfg["provider"].(string); ok {
+				for _, c := range compat {
+					if c == prov {
+						m.capProviders[name] = prov
+						break
+					}
+				}
+			}
+		}
+		// If still unset, default to the first compatible provider.
+		if m.capProviders[name] == "" {
+			m.capProviders[name] = compat[0]
+		}
+	}
+}
+
 // enterCapabilities transitions to stepCapabilities.
 func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.step = stepCapabilities
@@ -1896,6 +2098,7 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.capCursor = 0
 	m.capOrder = AllCapabilities
 	m.capSelected = map[string]bool{"skills": true}
+	m.capProviders = nil
 	m.capInfos = nil
 	m.addonOrder = AllAddons
 	m.addonCursor = 0
@@ -1969,15 +2172,18 @@ func (m *FirstRunModel) applyCapSelections() {
 		}
 
 		if m.capSelected[name] {
-			if _, exists := caps[name]; !exists {
-				info := m.capInfos[name]
-				provider := m.getPresetProvider(*p)
-				if !m.isCapCompatible(info, provider) && m.isCapLocal(info) {
-					caps[name] = map[string]interface{}{"provider": "local"}
-				} else {
-					caps[name] = map[string]interface{}{}
+			capCfg := map[string]interface{}{}
+			// Preserve existing config fields (e.g. api_key_env) if the preset
+			// already specified them, then overlay the user's provider choice.
+			if existing, ok := caps[name].(map[string]interface{}); ok {
+				for k, v := range existing {
+					capCfg[k] = v
 				}
 			}
+			if prov, ok := m.capProviders[name]; ok && prov != "" {
+				capCfg["provider"] = prov
+			}
+			caps[name] = capCfg
 		} else {
 			delete(caps, name)
 		}
@@ -2191,4 +2397,140 @@ func (m FirstRunModel) needsKey(provider string) bool {
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
 	provider := m.getPresetProvider(p)
 	return m.needsKey(provider)
+}
+
+func recipeNameToIdx(name string) int {
+	switch name {
+	case preset.RecipePlain:
+		return 1
+	case preset.RecipeAdaptive:
+		return 2
+	case preset.RecipeTutorial:
+		return 3
+	case preset.RecipeCustom:
+		return 4
+	default:
+		return 0 // greeter
+	}
+}
+
+func recipeIdxToName(idx int) string {
+	switch idx {
+	case 1:
+		return preset.RecipePlain
+	case 2:
+		return preset.RecipeAdaptive
+	case 3:
+		return preset.RecipeTutorial
+	case 4:
+		return preset.RecipeCustom
+	default:
+		return preset.RecipeGreeter
+	}
+}
+
+func recipeChanged(oldRecipe, oldCustomDir, newRecipe, newCustomDir string) bool {
+	if oldRecipe == "" {
+		return false // legacy project, no current recipe
+	}
+	if oldRecipe != newRecipe {
+		return true
+	}
+	if oldRecipe == preset.RecipeCustom && oldCustomDir != newCustomDir {
+		return true
+	}
+	return false
+}
+
+// viewRecipe renders the recipe picker page.
+func (m FirstRunModel) viewRecipe() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+	b.WriteString("\n  " + titleStyle.Render(i18n.T("recipe.title")) + "\n\n")
+	b.WriteString("  " + i18n.T("recipe.hint") + "\n\n")
+
+	for i := 0; i < 5; i++ {
+		name := recipeIdxToName(i)
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		if i == m.recipeIdx {
+			cursor = "> "
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		}
+		label := i18n.T("recipe.name." + name)
+		desc := i18n.T("recipe.desc." + name)
+		b.WriteString(cursor + style.Render(label) + "\n")
+		b.WriteString("    " + StyleFaint.Render(desc) + "\n")
+	}
+
+	if m.recipeIdx == 4 { // custom
+		b.WriteString("\n  " + i18n.T("recipe.custom_path") + "\n")
+		b.WriteString("  " + m.recipeCustomInput.View() + "\n")
+		if m.recipeCustomErr != "" {
+			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
+			b.WriteString("  " + errStyle.Render(m.recipeCustomErr) + "\n")
+		}
+	}
+
+	b.WriteString("\n" + StyleFaint.Render(
+		"  ↑↓ "+i18n.T("welcome.select_lang")+
+			"  [Enter] "+i18n.T("welcome.confirm")+
+			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+	return b.String()
+}
+
+// performRecipeSave executes the full save for the chosen recipe and the
+// previously-stashed AgentOpts/dirName.
+func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
+	lang := m.pendingAgentOpts.Language
+	if lang == "" {
+		lang = "en"
+	}
+
+	// Resolve comment path from recipe
+	commentPath := resolveRecipeComment(m.globalDir, recipeName, customDir, lang)
+	opts := m.pendingAgentOpts
+	opts.CommentFile = commentPath
+
+	p := m.presets[m.cursor]
+	dirName := m.pendingDirName
+
+	// Write init.json
+	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
+		m.message = i18n.TF("firstrun.error", err)
+		m.step = stepAgentNameDir
+		return m, nil
+	}
+
+	// Apply recipe: write .prompt + .tui-asset/.recipe
+	orchDir := filepath.Join(m.baseDir, dirName)
+	humanDir := filepath.Join(m.baseDir, "human")
+	humanAddr := "human"
+	if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
+		humanAddr = humanNode.Address
+	}
+	soulDelayStr := fmt.Sprintf("%v", opts.SoulDelay)
+	if err := applyRecipe(
+		m.baseDir, orchDir, m.globalDir, humanDir, humanAddr,
+		recipeName, customDir, lang, soulDelayStr,
+	); err != nil {
+		m.message = i18n.TF("firstrun.error", err)
+		m.step = stepAgentNameDir
+		return m, nil
+	}
+
+	if m.setupMode {
+		return m, func() tea.Msg { return SetupSavedMsg{} }
+	}
+	if m.rehydrateMode {
+		m.step = stepPropagate
+		m.message = ""
+		return m, m.runRehydratePropagation()
+	}
+	m.step = stepLaunching
+	m.message = i18n.TF("firstrun.created", m.agentName)
+	return m, func() tea.Msg {
+		return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
+	}
 }
