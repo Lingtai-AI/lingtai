@@ -28,6 +28,9 @@ var soulFS embed.FS
 //go:embed all:greet
 var greetFS embed.FS
 
+//go:embed all:recipe_assets
+var recipeAssetsFS embed.FS
+
 //go:embed tutorial.md
 var tutorialMD []byte
 
@@ -272,6 +275,18 @@ func Bootstrap(globalDir string) error {
 	populate(globalDir, soulFS, "soul")
 	populate(globalDir, greetFS, "greet")
 	populate(globalDir, templatesFS, "templates")
+	populate(globalDir, recipeAssetsFS, "recipe_assets")
+	// Rename recipe_assets -> recipes at the target path.
+	// populate() mirrors the embed root name; we want ~/.lingtai-tui/recipes/
+	// not ~/.lingtai-tui/recipe_assets/.
+	src := filepath.Join(globalDir, "recipe_assets")
+	dst := filepath.Join(globalDir, "recipes")
+	if _, err := os.Stat(src); err == nil {
+		// If dst already exists (previous launch), refresh its contents by
+		// removing and re-populating — same as other bootstrap assets.
+		os.RemoveAll(dst)
+		os.Rename(src, dst)
+	}
 	// Tutorial comment file — now in tutorial/ subfolder
 	tutorialDir := filepath.Join(globalDir, "tutorial")
 	os.MkdirAll(tutorialDir, 0o755)

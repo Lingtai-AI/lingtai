@@ -90,3 +90,27 @@ func TestLoadRecipeState_MalformedJSON(t *testing.T) {
 		t.Errorf("LoadRecipeState(malformed) err = nil, want error")
 	}
 }
+
+func TestBootstrap_CreatesRecipeDirs(t *testing.T) {
+	globalDir := t.TempDir()
+	if err := Bootstrap(globalDir); err != nil {
+		t.Fatalf("Bootstrap err = %v", err)
+	}
+	// All four bundled recipes should have directories
+	for _, name := range BundledRecipes() {
+		dir := RecipeDir(globalDir, name)
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Errorf("recipe dir %s not created: %v", name, err)
+			continue
+		}
+		if !info.IsDir() {
+			t.Errorf("recipe dir %s is not a directory", name)
+		}
+	}
+	// Greeter should have a greet.md resolvable in en
+	greet := ResolveGreetPath(RecipeDir(globalDir, RecipeGreeter), "en")
+	if greet == "" {
+		t.Errorf("greeter/en/greet.md not resolvable after Bootstrap")
+	}
+}
