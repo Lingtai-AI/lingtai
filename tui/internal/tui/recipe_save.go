@@ -53,7 +53,7 @@ func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string 
 }
 
 // substituteGreetPlaceholders replaces canonical placeholder tokens in a greet
-// template. Matches the substitutions previously performed by mail.buildGreetPrompt.
+// template with runtime values before writing to .prompt.
 func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay string) string {
 	out := template
 	out = strings.ReplaceAll(out, "{{time}}", time.Now().Format("2006-01-02 15:04"))
