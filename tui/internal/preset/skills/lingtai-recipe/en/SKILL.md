@@ -88,23 +88,27 @@ version: 1.0.0
 # Skill content here...
 ```
 
-**i18n:** Each skill can have language-specific versions. The TUI resolves:
-1. `skills/<name>/<lang>/SKILL.md` — language-specific (preferred)
-2. `skills/<name>/SKILL.md` — root fallback (language-agnostic)
+**i18n:** Each skill can have language-specific versions. The TUI uses the lang fallback chain (see below) to resolve the best available version.
 
-**Symlink naming:** The TUI creates symlinks in `.lingtai/.skills/` named `<recipe>-<skill>-<lang>` (lang-specific) or `<recipe>-<skill>` (root fallback). This prevents collisions across recipes.
+**Symlink naming:** The TUI creates symlinks in `.lingtai/.skills/` named `<recipe>-<skill>-<lang>` (where `<lang>` is the *resolved* language, not the requested one) or `<recipe>-<skill>` (root fallback). This prevents collisions across recipes.
 
 **Scripts and assets:** Place them alongside `SKILL.md` in the same language directory. They are self-contained per language.
 
-## i18n Fallback Rules
+## i18n Fallback Chain
 
-All recipe files use the same resolution pattern:
+All recipe files (greet.md, comment.md, skill directories) use the same fallback chain:
 
-1. Try `<recipe>/<lang>/<file>` — language-specific version
-2. Try `<recipe>/<file>` — root fallback
-3. Skip if neither exists
+| User language | Resolution order |
+|---|---|
+| `wen` (classical Chinese) | `wen/` → `zh/` → `en/` → root |
+| `zh` (Chinese) | `zh/` → `en/` → root |
+| `en` (English) | `en/` → root |
+| other | `<lang>/` → `en/` → root |
 
-This applies to `greet.md`, `comment.md`, and skill directories.
+This means:
+- A `wen` user without a `wen/` directory gets Chinese content before English
+- You don't need to provide all three locales — `zh` covers `wen`, `en` covers everything
+- Root-level files are the ultimate fallback for any language
 
 ## Recipe Types
 
