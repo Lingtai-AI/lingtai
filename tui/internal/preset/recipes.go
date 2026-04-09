@@ -48,23 +48,66 @@ func ResolveCommentPath(recipeDir, lang string) string {
 	return resolveRecipeFile(recipeDir, lang, "comment.md")
 }
 
+// langFallbackChain returns the ordered list of languages to try for a given
+// lang. The convention is: wen → zh → en → root (""). This ensures that
+// classical Chinese falls back to simplified Chinese before English, and
+// every language ultimately falls back to a root-level file.
+func langFallbackChain(lang string) []string {
+	switch lang {
+	case "wen":
+		return []string{"wen", "zh", "en", ""}
+	case "zh":
+		return []string{"zh", "en", ""}
+	case "en":
+		return []string{"en", ""}
+	case "":
+		return []string{""}
+	default:
+		return []string{lang, "en", ""}
+	}
+}
+
 func resolveRecipeFile(recipeDir, lang, filename string) string {
 	if recipeDir == "" {
 		return ""
 	}
-	// 1. Try lang-specific: <dir>/<lang>/<filename>
-	if lang != "" {
-		langPath := filepath.Join(recipeDir, lang, filename)
-		if info, err := os.Stat(langPath); err == nil && !info.IsDir() {
-			return langPath
+	for _, l := range langFallbackChain(lang) {
+		var path string
+		if l == "" {
+			path = filepath.Join(recipeDir, filename)
+		} else {
+			path = filepath.Join(recipeDir, l, filename)
+		}
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
 		}
 	}
-	// 2. Try root: <dir>/<filename>
-	rootPath := filepath.Join(recipeDir, filename)
-	if info, err := os.Stat(rootPath); err == nil && !info.IsDir() {
-		return rootPath
+	return ""
+}
+
+// ResolveSkillDir returns the absolute path to a skill directory within a
+// recipe, applying the lang fallback chain (wen → zh → en → root):
+//
+//	<recipeDir>/skills/<skillName>/<lang>/SKILL.md → that dir
+//	... fallback langs ...
+//	<recipeDir>/skills/<skillName>/SKILL.md → that dir
+//	empty string (no match)
+func ResolveSkillDir(recipeDir, skillName, lang string) string {
+	if recipeDir == "" {
+		return ""
 	}
-	// 3. No match
+	base := filepath.Join(recipeDir, "skills", skillName)
+	for _, l := range langFallbackChain(lang) {
+		var dir string
+		if l == "" {
+			dir = base
+		} else {
+			dir = filepath.Join(base, l)
+		}
+		if info, err := os.Stat(filepath.Join(dir, "SKILL.md")); err == nil && !info.IsDir() {
+			return dir
+		}
+	}
 	return ""
 }
 

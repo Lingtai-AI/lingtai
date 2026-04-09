@@ -152,3 +152,117 @@ func TestProjectLocalRecipeDir_IsFile(t *testing.T) {
 		t.Errorf("ProjectLocalRecipeDir(file) = %q, want empty", got)
 	}
 }
+
+func TestLangFallbackChain(t *testing.T) {
+	tests := []struct {
+		lang string
+		want []string
+	}{
+		{"wen", []string{"wen", "zh", "en", ""}},
+		{"zh", []string{"zh", "en", ""}},
+		{"en", []string{"en", ""}},
+		{"", []string{""}},
+		{"fr", []string{"fr", "en", ""}},
+	}
+	for _, tt := range tests {
+		got := langFallbackChain(tt.lang)
+		if len(got) != len(tt.want) {
+			t.Errorf("langFallbackChain(%q) len = %d, want %d", tt.lang, len(got), len(tt.want))
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("langFallbackChain(%q)[%d] = %q, want %q", tt.lang, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestResolveGreetPath_WenFallsBackToZh(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "zh"), 0o755)
+	os.WriteFile(filepath.Join(dir, "zh", "greet.md"), []byte("zh greet"), 0o644)
+
+	got := ResolveGreetPath(dir, "wen")
+	want := filepath.Join(dir, "zh", "greet.md")
+	if got != want {
+		t.Errorf("ResolveGreetPath wen→zh fallback, got %q, want %q", got, want)
+	}
+}
+
+func TestResolveGreetPath_ZhFallsBackToEn(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "en"), 0o755)
+	os.WriteFile(filepath.Join(dir, "en", "greet.md"), []byte("en greet"), 0o644)
+
+	got := ResolveGreetPath(dir, "zh")
+	want := filepath.Join(dir, "en", "greet.md")
+	if got != want {
+		t.Errorf("ResolveGreetPath zh→en fallback, got %q, want %q", got, want)
+	}
+}
+
+func TestResolveSkillDir_WenFallsBackToZh(t *testing.T) {
+	dir := t.TempDir()
+	zhDir := filepath.Join(dir, "skills", "my-skill", "zh")
+	os.MkdirAll(zhDir, 0o755)
+	os.WriteFile(filepath.Join(zhDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o644)
+
+	got := ResolveSkillDir(dir, "my-skill", "wen")
+	if got != zhDir {
+		t.Errorf("ResolveSkillDir wen→zh fallback = %q, want %q", got, zhDir)
+	}
+}
+
+func TestResolveSkillDir_LangSpecific(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills", "my-skill", "en")
+	os.MkdirAll(skillDir, 0o755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o644)
+
+	got := ResolveSkillDir(dir, "my-skill", "en")
+	if got != skillDir {
+		t.Errorf("ResolveSkillDir lang-specific = %q, want %q", got, skillDir)
+	}
+}
+
+func TestResolveSkillDir_FallbackToRoot(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills", "my-skill")
+	os.MkdirAll(skillDir, 0o755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o644)
+
+	got := ResolveSkillDir(dir, "my-skill", "zh")
+	if got != skillDir {
+		t.Errorf("ResolveSkillDir fallback = %q, want %q", got, skillDir)
+	}
+}
+
+func TestResolveSkillDir_NoMatch(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0o755)
+
+	got := ResolveSkillDir(dir, "my-skill", "en")
+	if got != "" {
+		t.Errorf("ResolveSkillDir no match = %q, want empty", got)
+	}
+}
+
+func TestResolveSkillDir_EmptyRecipeDir(t *testing.T) {
+	got := ResolveSkillDir("", "my-skill", "en")
+	if got != "" {
+		t.Errorf("ResolveSkillDir empty recipeDir = %q, want empty", got)
+	}
+}
+
+func TestResolveSkillDir_EmptyLang(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills", "my-skill")
+	os.MkdirAll(skillDir, 0o755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o644)
+
+	got := ResolveSkillDir(dir, "my-skill", "")
+	if got != skillDir {
+		t.Errorf("ResolveSkillDir empty lang = %q, want %q", got, skillDir)
+	}
+}

@@ -200,6 +200,15 @@ func main() {
 	tuiCfg := config.LoadTUIConfig(globalDir)
 	i18n.SetLang(tuiCfg.Language)
 
+	// Recipe skills — symlink skills from all known recipes into .lingtai/.skills/.
+	// On first run, no custom recipe is set yet, so only bundled recipe skills are
+	// linked. Custom/agora recipe skills are picked up on the next launch.
+	// LoadRecipeState returns zero-value on error, so customDir is "" and bundled +
+	// agora recipe skills are still linked even if .recipe is corrupt.
+	recipeState, _ := preset.LoadRecipeState(lingtaiDir)
+	preset.LinkRecipeSkills(lingtaiDir, globalDir, tuiCfg.Language, recipeState.CustomDir)
+	preset.PruneStaleSkillSymlinks(lingtaiDir)
+
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 
 	if !needsFirstRun {
