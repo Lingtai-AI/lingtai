@@ -81,13 +81,18 @@ func linkRecipeDir(skillsDir, recipeDir, recipeName, lang string, claimed map[st
 			continue
 		}
 
-		// Compute symlink name
+		// Compute symlink name. The resolved dir might be a fallback lang
+		// (e.g., zh/ when user asked for wen), so derive the suffix from the
+		// actual resolved path, not the requested lang.
+		base := filepath.Join(recipeDir, "skills", skillName)
 		var linkName string
-		langDir := filepath.Join(recipeDir, "skills", skillName, lang)
-		if resolved == langDir {
-			linkName = fmt.Sprintf("%s-%s-%s", recipeName, skillName, lang)
-		} else {
+		if resolved == base {
+			// Root fallback — no lang suffix
 			linkName = fmt.Sprintf("%s-%s", recipeName, skillName)
+		} else {
+			// Lang-specific — suffix is the directory name under the skill
+			resolvedLang := filepath.Base(resolved)
+			linkName = fmt.Sprintf("%s-%s-%s", recipeName, skillName, resolvedLang)
 		}
 
 		// Collision detection: first writer wins
