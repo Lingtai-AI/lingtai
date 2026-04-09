@@ -276,6 +276,8 @@ List all TUI slash commands for the human, explaining each one. Key commands:
 - /refresh [all] — hard restart agent, reload init.json (preferred over /cpr for most cases)
 - /clear — wipe conversation and restart
 - /quit — quit lingtai-tui
+- /projects — browse registered projects
+- /agora — browse published networks (/agora publish to start publishing)
 - /nirvana — wipe everything and start fresh (use with caution)
 - /setup — configure agent or choose a different launch recipe (e.g. Tutorial)
 Keyboard shortcuts: ctrl+o cycles through three verbose modes:

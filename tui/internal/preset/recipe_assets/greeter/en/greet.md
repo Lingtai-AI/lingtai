@@ -32,6 +32,8 @@ After you have been idle for {{soul_delay}} seconds, your inner voice — the so
   - /insights — request an insight from the agent (observations about the current task)
   - /viz — open agent network visualization (topology, mail flows, agent states)
   - /addon — configure addon paths (IMAP, Telegram, Feishu)
+  - /projects — browse registered projects
+  - /agora — browse published networks (/agora publish to start publishing)
   - /doctor — diagnose connection issues
   - /nirvana — wipe everything and start fresh
   - /quit — quit lingtai-tui

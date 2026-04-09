@@ -32,6 +32,8 @@
   - /insights — 请求器灵洞察（对当前任务的观察与建议）
   - /viz — 打开器灵网络可视化（拓扑、邮件流向、器灵状态）
   - /addon — 配置附加路径（IMAP、Telegram、飞书）
+  - /projects — 浏览已注册项目
+  - /agora — 浏览已发布的网络（/agora publish 开始发布）
   - /doctor — 诊断连接问题
   - /nirvana — 清除一切，从头开始
   - /quit — 退出 lingtai-tui

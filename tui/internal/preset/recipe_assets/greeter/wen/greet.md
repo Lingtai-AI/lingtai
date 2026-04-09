@@ -32,6 +32,8 @@
   - /insights — 请灵省察（观当前事之得失）
   - /viz — 启器灵网络可视化（拓扑、邮流、诸灵之态）
   - /addon — 配附加路径（IMAP、Telegram、飞书）
+  - /projects — 览已籍之事
+  - /agora — 览已发之网（/agora publish 以发之）
   - /doctor — 诊连接之疾
   - /nirvana — 尽除一切，从头再来
   - /quit — 退出 lingtai-tui
