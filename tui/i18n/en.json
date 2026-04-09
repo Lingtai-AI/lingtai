@@ -149,6 +149,7 @@
   "palette.sleep": "Put agent to sleep (/sleep all for all)",
   "palette.suspend": "Suspend agent (/suspend all for all)",
   "palette.viz": "Open network visualization",
+  "preset.delete": "Delete saved preset",
   "preset.saved": "Saved Presets",
   "preset.templates": "New Preset",
   "presets.endpoint": "Endpoint",

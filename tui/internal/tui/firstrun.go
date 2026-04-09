@@ -771,6 +771,22 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					return m, textinput.Blink
 				}
+			case "backspace", "delete":
+				// Delete a saved (non-builtin) preset
+				if m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
+					name := m.presets[m.cursor].Name
+					if err := preset.Delete(name); err == nil {
+						// Refresh the list
+						m.presets, _ = preset.List()
+						if m.cursor >= len(m.presets) {
+							m.cursor = len(m.presets) - 1
+						}
+						if m.cursor < 0 {
+							m.cursor = 0
+						}
+					}
+				}
+				return m, nil
 			case "esc":
 				if m.setupMode {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
@@ -1461,6 +1477,10 @@ func (m FirstRunModel) View() string {
 			b.WriteString(cursor + name + desc + "\n")
 		}
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
+		// Show delete hint when cursor is on a saved (non-builtin) preset
+		if m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
+			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("preset.delete")) + "\n")
+		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
 	case stepPresetKey:

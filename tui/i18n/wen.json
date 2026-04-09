@@ -144,6 +144,7 @@
   "palette.sleep": "令眠（/sleep all 诸灵）",
   "palette.suspend": "假死（/suspend all 诸灵）",
   "palette.viz": "网络观",
+  "preset.delete": "删已存预设",
   "preset.saved": "已存预设",
   "preset.templates": "新建预设",
   "presets.endpoint": "端",

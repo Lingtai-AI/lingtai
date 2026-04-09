@@ -144,6 +144,7 @@
   "palette.sleep": "令 Agent 休眠（/sleep all 全部）",
   "palette.suspend": "假死 Agent（/suspend all 全部）",
   "palette.viz": "打开网络可视化",
+  "preset.delete": "删除已保存的预设",
   "preset.saved": "已保存预设",
   "preset.templates": "新建预设",
   "presets.endpoint": "API 接口",
