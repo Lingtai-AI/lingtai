@@ -621,6 +621,15 @@ func (a App) sendSize() tea.Cmd {
 	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
 }
 
+// RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
+// chooses "Fresh start (wipe .lingtai/ and reconfigure)". The app routes
+// this to NirvanaModel and stores the recipe so post-nirvana first-run
+// can pre-select it.
+type RecipeFreshStartMsg struct {
+	Recipe    string
+	CustomDir string
+}
+
 type refreshDoneMsg struct{ err error }
 type refreshAllDoneMsg struct {
 	count    int

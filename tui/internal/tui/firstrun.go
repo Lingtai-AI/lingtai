@@ -1287,13 +1287,37 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 
 		case stepRecipeSwapConfirm:
-			// Placeholder -- Task 9 wires the confirm page UI
 			switch msg.String() {
+			case "up":
+				if m.swapConfirmIdx > 0 {
+					m.swapConfirmIdx--
+				}
+				return m, nil
+			case "down":
+				if m.swapConfirmIdx < 2 {
+					m.swapConfirmIdx++
+				}
+				return m, nil
 			case "esc":
 				m.step = stepRecipe
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
+			case "enter":
+				switch m.swapConfirmIdx {
+				case 0: // Swap in place
+					return m.performRecipeSave(m.pendingRecipeName, m.pendingCustomDir)
+				case 1: // Fresh start
+					return m, func() tea.Msg {
+						return RecipeFreshStartMsg{
+							Recipe:    m.pendingRecipeName,
+							CustomDir: m.pendingCustomDir,
+						}
+					}
+				case 2: // Cancel
+					m.step = stepRecipe
+					return m, nil
+				}
 			}
 			return m, nil
 
@@ -1756,8 +1780,7 @@ func (m FirstRunModel) View() string {
 		return m.viewRecipe()
 
 	case stepRecipeSwapConfirm:
-		// Placeholder -- Task 9 renders the swap confirm page
-		return ""
+		return m.viewRecipeSwapConfirm()
 
 	case stepPropagate:
 		// Rehydration: we've written the orchestrator's init.json and are
@@ -2443,6 +2466,52 @@ func recipeChanged(oldRecipe, oldCustomDir, newRecipe, newCustomDir string) bool
 }
 
 // viewRecipe renders the recipe picker page.
+func (m FirstRunModel) viewRecipeSwapConfirm() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
+
+	b.WriteString("\n  " + titleStyle.Render(i18n.T("recipe.swap_title")) + "\n\n")
+	b.WriteString("  " + i18n.TF("recipe.swap_hint", m.currentRecipe, m.pendingRecipeName) + "\n\n")
+
+	type option struct {
+		label string
+		desc  string
+		warn  bool
+	}
+	opts := []option{
+		{i18n.T("recipe.swap_inplace"), i18n.T("recipe.swap_inplace_desc"), false},
+		{i18n.T("recipe.swap_fresh"), i18n.T("recipe.swap_fresh_desc"), true},
+		{i18n.T("recipe.swap_cancel"), "", false},
+	}
+
+	for i, opt := range opts {
+		cursor := "  "
+		labelStyle := lipgloss.NewStyle().Foreground(ColorText)
+		if i == m.swapConfirmIdx {
+			cursor = "> "
+			if opt.warn {
+				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
+			} else {
+				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+			}
+		} else if opt.warn {
+			labelStyle = warnStyle
+		}
+		b.WriteString(cursor + labelStyle.Render(opt.label) + "\n")
+		if opt.desc != "" {
+			b.WriteString("    " + StyleFaint.Render(opt.desc) + "\n")
+		}
+	}
+
+	b.WriteString("\n" + StyleFaint.Render(
+		"  ↑↓ "+i18n.T("welcome.select_lang")+
+			"  [Enter] "+i18n.T("welcome.confirm")+
+			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+	return b.String()
+}
+
 func (m FirstRunModel) viewRecipe() string {
 	var b strings.Builder
 
