@@ -20,5 +20,7 @@ jobs:
           pip install git-filter-repo
           git filter-repo --path-glob 'tui/packages/*/bin/lingtai' --invert-paths --force
 
-          git remote add hf https://huangzs:${HF_TOKEN}@huggingface.co/huangzs/lingtai
+          # HF requires token-based auth via credential helper
+          git config credential.helper '!f() { echo "username=huangzs"; echo "password=${HF_TOKEN}"; }; f'
+          git remote add hf https://huggingface.co/huangzs/lingtai
           git push hf main --force
