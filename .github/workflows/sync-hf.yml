@@ -1,0 +1,24 @@
+name: Sync to HuggingFace
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Filter large binaries and push to HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Rewrite history to strip binaries that exceed HF's 10MB limit
+          pip install git-filter-repo
+          git filter-repo --path-glob 'tui/packages/*/bin/lingtai' --invert-paths --force
+
+          git remote add hf https://huangzs:${HF_TOKEN}@huggingface.co/huangzs/lingtai
+          git push hf main --force
