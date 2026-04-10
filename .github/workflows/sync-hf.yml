@@ -20,7 +20,8 @@ jobs:
           pip install git-filter-repo
           git filter-repo --path-glob 'tui/packages/*/bin/lingtai' --invert-paths --force
 
-          # HF requires token-based auth via credential helper
-          git config credential.helper '!f() { echo "username=huangzs"; echo "password=${HF_TOKEN}"; }; f'
-          git remote add hf https://huggingface.co/huangzs/lingtai
-          git push hf main --force
+          # Auth via GIT_ASKPASS (survives filter-repo config reset)
+          echo '#!/bin/sh' > /tmp/git-askpass.sh
+          echo "echo \$HF_TOKEN" >> /tmp/git-askpass.sh
+          chmod +x /tmp/git-askpass.sh
+          GIT_ASKPASS=/tmp/git-askpass.sh git push https://huangzs@huggingface.co/huangzs/lingtai main --force
