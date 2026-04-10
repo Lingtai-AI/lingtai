@@ -68,9 +68,8 @@ const (
 	stepCapabilities
 	stepAgentNameDir
 	stepRecipe            // picks one of 5 recipes (greeter, plain, adaptive, tutorial, custom)
-	stepRecipeSwapConfirm  // mid-life only — confirms recipe change (Task 9 wires this)
-	stepSecretaryConfirm   // confirms secretary agent launch (default yes)
-	stepPropagate          // rehydration only — runs after orchestrator save, before launch
+	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
+	stepPropagate         // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -114,7 +113,7 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 			return 4, total
 		}
 		return 5, total
-	case step == stepSecretaryConfirm || step == stepLaunching:
+	case step == stepLaunching:
 		return total, total
 	}
 	return 1, total
@@ -227,9 +226,9 @@ type FirstRunModel struct {
 	pendingCustomDir  string
 	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
 
-	// Secretary confirm state (stepSecretaryConfirm)
-	secretaryConfirmIdx int  // 0=yes, 1=no
-	secretarySetupDone  bool // true after secretary init.json is written
+	// Secretary toggle on recipe page (default: true)
+	secretaryEnabled   bool // whether to launch secretary agent
+	secretarySetupDone bool // true after secretary init.json is written
 }
 
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
@@ -351,6 +350,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		soulFlowInput:    sfli,
 		commentInput:      comi,
 		nirvanaIdx:        1, // default false (1=false)
+		secretaryEnabled:  true, // default: launch secretary
 		progressCh:        make(chan string, 4),
 		recipeCustomInput: rci,
 		preselectedRecipe: preselectedRecipe,
@@ -1378,6 +1378,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 
 		case stepRecipe:
+			secretaryIdx := m.recipeMaxIdx() + 1
 			switch msg.String() {
 			case "up":
 				if m.recipeIdx > 0 {
@@ -1392,7 +1393,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "down":
-				if m.recipeIdx < m.recipeMaxIdx() {
+				if m.recipeIdx < secretaryIdx {
 					m.recipeIdx++
 					m.recipeCustomErr = ""
 				}
@@ -1403,6 +1404,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "ctrl+o":
+				if m.recipeIdx == secretaryIdx {
+					return m, nil // no preview for secretary toggle
+				}
 				recipeDir := m.resolveCurrentRecipeDir()
 				if recipeDir == "" {
 					return m, nil
@@ -1420,7 +1424,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
-			case "enter":
+			case "enter", " ":
+				// Secretary toggle: enter/space toggles the checkbox
+				if m.recipeIdx == secretaryIdx {
+					m.secretaryEnabled = !m.secretaryEnabled
+					return m, nil
+				}
+
 				recipeName := m.recipeIdxToName(m.recipeIdx)
 				customDir := ""
 				if recipeName == preset.RecipeImported {
@@ -1485,40 +1495,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.step = stepRecipe
 					return m, nil
 				}
-			}
-			return m, nil
-
-		case stepSecretaryConfirm:
-			switch msg.String() {
-			case "up", "down":
-				m.secretaryConfirmIdx = 1 - m.secretaryConfirmIdx // toggle 0↔1
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			case "enter":
-				orchDir := filepath.Join(m.baseDir, m.pendingDirName)
-				launchSecretary := m.secretaryConfirmIdx == 0
-				if launchSecretary {
-					if err := setupSecretary(m.baseDir, m.globalDir, m.pendingDirName); err != nil {
-						m.message = i18n.TF("firstrun.created", m.agentName) + fmt.Sprintf("\n  Secretary setup failed: %v", err)
-					} else {
-						m.secretarySetupDone = true
-						m.message = i18n.TF("firstrun.created", m.agentName)
-					}
-				} else {
-					m.message = i18n.TF("firstrun.created", m.agentName)
-				}
-				m.step = stepLaunching
-				return m, func() tea.Msg {
-					return FirstRunDoneMsg{
-						OrchDir:         orchDir,
-						OrchName:        m.agentName,
-						LaunchSecretary: launchSecretary && m.secretarySetupDone,
-					}
-				}
-			case "esc":
-				m.step = stepRecipe
-				return m, nil
 			}
 			return m, nil
 
@@ -2030,23 +2006,6 @@ func (m FirstRunModel) View() string {
 
 	case stepRecipeSwapConfirm:
 		return m.viewRecipeSwapConfirm()
-
-	case stepSecretaryConfirm:
-		var b strings.Builder
-		b.WriteString("\n  A secretary agent will run in the background to maintain\n")
-		b.WriteString("  session briefs for your agents. It uses the same LLM provider\n")
-		b.WriteString("  as your orchestrator.\n\n")
-		options := []string{"Yes, launch secretary", "No, skip"}
-		selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-		for i, opt := range options {
-			if i == m.secretaryConfirmIdx {
-				b.WriteString("  " + selectedStyle.Render("> "+opt) + "\n")
-			} else {
-				b.WriteString("    " + StyleSubtle.Render(opt) + "\n")
-			}
-		}
-		b.WriteString("\n")
-		return b.String()
 
 	case stepPropagate:
 		// Rehydration: we've written the orchestrator's init.json and are
@@ -2894,6 +2853,24 @@ func (m FirstRunModel) viewRecipe() string {
 		}
 	}
 
+	// Secretary toggle
+	secretaryIdx := m.recipeMaxIdx() + 1
+	leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
+	{
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		if secretaryIdx == m.recipeIdx {
+			cursor = "> "
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		}
+		check := "☐"
+		if m.secretaryEnabled {
+			check = "☑"
+		}
+		leftBlock.WriteString(cursor + style.Render(check+" Secretary agent") + "\n")
+		leftBlock.WriteString("    " + StyleFaint.Render("Background agent that maintains session briefs") + "\n")
+	}
+
 	b.WriteString(leftBlock.String())
 
 	b.WriteString("\n" + StyleFaint.Render(
@@ -3068,9 +3045,25 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		m.message = ""
 		return m, m.runRehydratePropagation()
 	}
-	// Show secretary confirmation before launching
-	m.step = stepSecretaryConfirm
-	m.secretaryConfirmIdx = 0 // default to yes
-	m.message = ""
-	return m, nil
+	// Setup secretary if enabled (orchDir already declared above)
+	launchSecretary := m.secretaryEnabled
+	if launchSecretary {
+		if err := setupSecretary(m.baseDir, m.globalDir, dirName); err != nil {
+			m.message = i18n.TF("firstrun.created", m.agentName) + fmt.Sprintf("\n  Secretary setup failed: %v", err)
+			launchSecretary = false
+		} else {
+			m.secretarySetupDone = true
+			m.message = i18n.TF("firstrun.created", m.agentName)
+		}
+	} else {
+		m.message = i18n.TF("firstrun.created", m.agentName)
+	}
+	m.step = stepLaunching
+	return m, func() tea.Msg {
+		return FirstRunDoneMsg{
+			OrchDir:         orchDir,
+			OrchName:        m.agentName,
+			LaunchSecretary: launchSecretary && m.secretarySetupDone,
+		}
+	}
 }
