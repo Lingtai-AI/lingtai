@@ -12,9 +12,11 @@ A **launch recipe** is a named directory that shapes an orchestrator's first-con
 
 ```
 my-recipe/
+  recipe.json             # Required — name and description
   en/
-    greet.md              # First message to new users
-    comment.md            # Persistent behavioral instructions
+    recipe.json           # Optional — lang-specific override
+    greet.md
+    comment.md
   zh/
     greet.md
     comment.md
@@ -93,6 +95,23 @@ version: 1.0.0
 **Symlink naming:** The TUI creates symlinks in `.lingtai/.skills/` named `<recipe>-<skill>-<lang>` (lang-specific) or `<recipe>-<skill>` (root fallback). This prevents collisions across recipes.
 
 **Scripts and assets:** Place them alongside `SKILL.md` in the same language directory. They are self-contained per language.
+
+## recipe.json — Recipe Manifest
+
+Every recipe must contain a `recipe.json` at root level (language-specific overrides are optional):
+
+```json
+{
+  "name": "My Recipe Name",
+  "description": "One-line description of what this recipe does"
+}
+```
+
+- `name` — **required**, displayed in the TUI recipe picker
+- `description` — **required**, shown as hint text in the picker
+- Extra fields are ignored but tolerated (forward-compatible)
+
+Without a valid `recipe.json`, the recipe will not be recognized as importable. The TUI only auto-detects `.lingtai-recipe/` directories that contain a valid manifest.
 
 ## i18n Fallback Rules
 

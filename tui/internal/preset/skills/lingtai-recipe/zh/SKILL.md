@@ -12,9 +12,11 @@ version: 1.0.0
 
 ```
 my-recipe/
+  recipe.json             # 必须 — 名称和描述
   en/
-    greet.md              # 给新用户的第一条消息
-    comment.md            # 持久行为指令
+    recipe.json           # 可选 — 语言特定版本
+    greet.md
+    comment.md
   zh/
     greet.md
     comment.md
@@ -80,6 +82,23 @@ version: 1.0.0
 **国际化：** 每个技能可有语言特定版本。解析规则：先尝试 `<lang>/`，回退到根目录。
 
 **链接命名：** TUI 在 `.lingtai/.skills/` 中创建符号链接，名为 `<配方名>-<技能名>-<语言>`（语言特定）或 `<配方名>-<技能名>`（根目录回退）。
+
+## recipe.json — 配方清单
+
+每个配方的根目录必须包含 `recipe.json`（语言特定版本可选）：
+
+```json
+{
+  "name": "配方名称",
+  "description": "一行描述"
+}
+```
+
+- `name` — **必须**，显示在 TUI 配方选择器中
+- `description` — **必须**，作为提示文本显示
+- 额外字段会被忽略但不会报错（向前兼容）
+
+没有有效 `recipe.json` 的配方不会被识别为可导入。TUI 仅自动检测包含有效清单的 `.lingtai-recipe/` 目录。
 
 ## 国际化回退规则
 
