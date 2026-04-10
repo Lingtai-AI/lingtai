@@ -121,12 +121,20 @@ func (sc *SessionCache) append(entries ...SessionEntry) {
 }
 
 // dumpHours dumps all completed hours from fromHour up to (but not including) toHour.
+// Capped at 24 hours to avoid pathological dumps when the TUI resumes after a long gap
+// (e.g., upgrading from a version without the dump feature).
 func (sc *SessionCache) dumpHours(fromHour, toHour time.Time) {
 	if sc.projectPath == "" {
 		return
 	}
 	hash := ProjectHash(sc.projectPath)
 	histDir := briefHistoryDir(sc.briefBase, hash)
+
+	// Cap: only dump the most recent 24 hours to avoid spike on long gaps.
+	earliest := toHour.Add(-24 * time.Hour)
+	if fromHour.Before(earliest) {
+		fromHour = earliest
+	}
 
 	for h := fromHour; h.Before(toHour); h = h.Add(time.Hour) {
 		// Collect entries for this hour.
