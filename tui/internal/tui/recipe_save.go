@@ -52,6 +52,19 @@ func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string 
 	return preset.ResolveCommentPath(recipeDir, lang)
 }
 
+// resolveRecipeCovenant returns the covenant.md path for a recipe, if the
+// recipe provides one. Returns empty string if the recipe does not override
+// the system-wide covenant.
+func resolveRecipeCovenant(globalDir, recipeName, customDir, lang string) string {
+	var recipeDir string
+	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+		recipeDir = customDir
+	} else {
+		recipeDir = preset.RecipeDir(globalDir, recipeName)
+	}
+	return preset.ResolveCovenantPath(recipeDir, lang)
+}
+
 // substituteGreetPlaceholders replaces canonical placeholder tokens in a greet
 // template with runtime values before writing to .prompt.
 func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay string) string {

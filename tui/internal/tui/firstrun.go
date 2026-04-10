@@ -74,6 +74,9 @@ const (
 	stepLaunching
 )
 
+// zhipuCodingModels lists models available on the Zhipu GLM Coding Plan.
+var zhipuCodingModels = []string{"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"}
+
 // capInfo holds provider metadata for a single capability (from check-caps).
 type capInfo struct {
 	Providers []string `json:"providers"`
@@ -179,9 +182,11 @@ type FirstRunModel struct {
 	presetEndpointIn  textinput.Model   // base_url for custom provider
 	presetModelIn     textinput.Model   // model name for custom provider
 	presetNameIn      textinput.Model   // preset name for custom provider (separate from nameInput)
-	presetKeyFieldIdx int               // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region, 1=model, 2=key (minimax)
+	presetKeyFieldIdx int               // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region, 1=model, 2=key (minimax/zhipu)
 	minimaxRegion     int               // 0=china, 1=international
 	minimaxModel      int               // 0=highspeed, 1=standard
+	zhipuRegion       int               // 0=china, 1=international
+	zhipuModel        int               // 0=GLM-5.1, 1=GLM-5-Turbo, 2=GLM-4.7, 3=GLM-4.5-Air
 	customCompat      int               // 0=openai, 1=anthropic
 	selectedProvider  string            // provider of currently selected preset
 	existingKeys      map[string]string // loaded from Config.Keys
@@ -571,7 +576,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		minimaxOnly := map[string]bool{"vision": true, "talk": true, "draw": true, "compose": true, "video": true}
 		for _, name := range m.capOrder {
 			if _, ok := m.capInfos[name]; !ok {
-				if provider == "custom" && minimaxOnly[name] {
+				if (provider == "custom" || provider == "zhipu") && minimaxOnly[name] {
 					continue
 				}
 				m.capInfos[name] = capInfo{}
@@ -801,6 +806,30 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 								m.minimaxModel = 1 // standard
 							}
 						}
+					} else if provider == "zhipu" {
+						// field 0 = region selector (no text focus)
+						m.presetKeyInput.Blur()
+						// Prefill region from saved preset's base_url
+						m.zhipuRegion = 0 // default China
+						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+							if baseURL, ok := llm["base_url"].(string); ok && strings.Contains(baseURL, "api.z.ai") {
+								m.zhipuRegion = 1 // International
+							}
+						}
+						// Prefill model from saved preset
+						m.zhipuModel = 0 // default GLM-5.1
+						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+							if model, ok := llm["model"].(string); ok {
+								switch model {
+								case "GLM-5-Turbo":
+									m.zhipuModel = 1
+								case "GLM-4.7":
+									m.zhipuModel = 2
+								case "GLM-4.5-Air":
+									m.zhipuModel = 3
+								}
+							}
+						}
 					} else {
 						m.presetKeyInput.Focus()
 					}
@@ -840,11 +869,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		case stepPresetKey:
 			isCustom := m.selectedProvider == "custom"
 			isMinimax := m.selectedProvider == "minimax"
+			isZhipu := m.selectedProvider == "zhipu"
 			fieldCount := 1 // default: key only
 			if isCustom {
 				fieldCount = 5 // compat + endpoint + model + key + name
 			}
 			if isMinimax {
+				fieldCount = 3 // region + model + key
+			}
+			if isZhipu {
 				fieldCount = 3 // region + model + key
 			}
 			switch msg.String() {
@@ -881,9 +914,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.step = stepPickPreset
 				return m, nil
 			case "up":
-				if isCustom || isMinimax {
+				if isCustom || isMinimax || isZhipu {
 					m.presetKeyFieldIdx = (m.presetKeyFieldIdx - 1 + fieldCount) % fieldCount
-					if isMinimax && m.presetKeyFieldIdx < 2 {
+					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
 						m.presetKeyInput.Blur()
 						return m, nil
 					}
@@ -891,9 +924,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "down", "tab":
-				if isCustom || isMinimax {
+				if isCustom || isMinimax || isZhipu {
 					m.presetKeyFieldIdx = (m.presetKeyFieldIdx + 1) % fieldCount
-					if isMinimax && m.presetKeyFieldIdx < 2 {
+					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
 						m.presetKeyInput.Blur()
 						return m, nil
 					}
@@ -909,6 +942,20 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// Toggle model for minimax
 				if isMinimax && m.presetKeyFieldIdx == 1 {
 					m.minimaxModel = 1 - m.minimaxModel
+					return m, nil
+				}
+				// Toggle region for zhipu
+				if isZhipu && m.presetKeyFieldIdx == 0 {
+					m.zhipuRegion = 1 - m.zhipuRegion
+					return m, nil
+				}
+				// Cycle model for zhipu (4 options): right=forward, left=backward
+				if isZhipu && m.presetKeyFieldIdx == 1 {
+					if msg.String() == "right" {
+						m.zhipuModel = (m.zhipuModel + 1) % len(zhipuCodingModels)
+					} else {
+						m.zhipuModel = (m.zhipuModel + len(zhipuCodingModels) - 1) % len(zhipuCodingModels)
+					}
 					return m, nil
 				}
 				// Toggle compat for custom
@@ -970,6 +1017,30 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					newPresetName = name
 				}
+				if isZhipu {
+					// Clone the template with auto-name based on region
+					p := m.presets[m.cursor]
+					var name, baseURL string
+					if m.zhipuRegion == 0 {
+						name = "zhipu_cn"
+						baseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
+					} else {
+						name = "zhipu_intl"
+						baseURL = "https://api.z.ai/api/coding/paas/v4"
+					}
+					model := zhipuCodingModels[m.zhipuModel]
+					clone := preset.Clone(p, name)
+					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
+						llm["base_url"] = baseURL
+						llm["model"] = model
+						llm["api_compat"] = "openai"
+					}
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					newPresetName = name
+				}
 				if key != "" {
 					m.existingKeys[m.selectedProvider] = key
 					cfg, _ := config.LoadConfig(m.globalDir)
@@ -1013,9 +1084,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					case 4:
 						m.presetNameIn, cmd = m.presetNameIn.Update(msg)
 					}
-				} else if isMinimax && m.presetKeyFieldIdx == 2 {
+				} else if (isMinimax || isZhipu) && m.presetKeyFieldIdx == 2 {
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-				} else if !isMinimax {
+				} else if !isMinimax && !isZhipu {
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 				}
 				return m, cmd
@@ -1615,6 +1686,47 @@ func (m FirstRunModel) View() string {
 				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
 			}
 			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(hsLabel+"  "+stdLabel) + "\n")
+			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
+			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
+				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Ctrl+E] editor (allows pasting)"+
+				"  [Enter] "+i18n.T("setup.save")+
+				"  [Esc] "+i18n.T("setup.back")) + "\n")
+		} else if m.selectedProvider == "zhipu" {
+			// Region toggle
+			intlLabel := i18n.T("firstrun.region_intl")
+			chinaLabel := i18n.T("firstrun.region_china")
+			if m.zhipuRegion == 0 {
+				chinaLabel = "● " + chinaLabel
+				intlLabel = "○ " + intlLabel
+			} else {
+				chinaLabel = "○ " + chinaLabel
+				intlLabel = "● " + intlLabel
+			}
+			regionStyle := lipgloss.NewStyle()
+			if m.presetKeyFieldIdx == 0 {
+				regionStyle = regionStyle.Bold(true).Foreground(ColorAccent)
+			}
+			b.WriteString("  " + i18n.T("firstrun.region") + ":  " + regionStyle.Render(chinaLabel+"  "+intlLabel) + "\n")
+			endpointURL := "open.bigmodel.cn/api/coding/paas/v4"
+			if m.zhipuRegion == 1 {
+				endpointURL = "api.z.ai/api/coding/paas/v4"
+			}
+			b.WriteString("            " + StyleFaint.Render(endpointURL) + "\n")
+			// Model cycle (4 options)
+			var modelLabels []string
+			for i, name := range zhipuCodingModels {
+				if i == m.zhipuModel {
+					modelLabels = append(modelLabels, "● "+name)
+				} else {
+					modelLabels = append(modelLabels, "○ "+name)
+				}
+			}
+			modelStyle := lipgloss.NewStyle()
+			if m.presetKeyFieldIdx == 1 {
+				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
+			}
+			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n")
 			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
 				"  [←→] "+i18n.T("firstrun.toggle_region")+
@@ -2404,8 +2516,8 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 // focusedPresetKeyInput returns a pointer to the currently focused text input
 // in the preset key step, or nil if the current field is a selector (no text).
 func (m *FirstRunModel) focusedPresetKeyInput() *textinput.Model {
-	if m.selectedProvider == "minimax" {
-		// minimax key field (idx 2) is a textarea — handled separately
+	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" {
+		// minimax/zhipu key field (idx 2) is a textarea — handled separately
 		return nil
 	}
 	switch m.presetKeyFieldIdx {
@@ -2424,10 +2536,10 @@ func (m *FirstRunModel) focusedPresetKeyInput() *textinput.Model {
 
 // focusedPresetKeyTextarea returns a pointer to presetKeyInput if it's focused.
 func (m *FirstRunModel) focusedPresetKeyTextarea() *textarea.Model {
-	if m.selectedProvider == "minimax" && m.presetKeyFieldIdx == 2 {
+	if (m.selectedProvider == "minimax" || m.selectedProvider == "zhipu") && m.presetKeyFieldIdx == 2 {
 		return &m.presetKeyInput
 	}
-	if m.selectedProvider != "minimax" && m.selectedProvider != "custom" {
+	if m.selectedProvider != "minimax" && m.selectedProvider != "zhipu" && m.selectedProvider != "custom" {
 		return &m.presetKeyInput
 	}
 	if m.selectedProvider == "custom" && m.presetKeyFieldIdx == 3 {
@@ -2441,7 +2553,7 @@ func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
 	m.presetModelIn.Blur()
 	m.presetKeyInput.Blur()
 	m.presetNameIn.Blur()
-	if m.selectedProvider == "minimax" {
+	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" {
 		switch m.presetKeyFieldIdx {
 		case 0, 1:
 			return nil // region/model selector — no text focus
@@ -2958,10 +3070,14 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		lang = "en"
 	}
 
-	// Resolve comment path from recipe
+	// Resolve comment and covenant paths from recipe
 	commentPath := resolveRecipeComment(m.globalDir, recipeName, customDir, lang)
+	covenantPath := resolveRecipeCovenant(m.globalDir, recipeName, customDir, lang)
 	opts := m.pendingAgentOpts
 	opts.CommentFile = commentPath
+	if covenantPath != "" {
+		opts.CovenantFile = covenantPath
+	}
 
 	p := m.presets[m.cursor]
 	dirName := m.pendingDirName
