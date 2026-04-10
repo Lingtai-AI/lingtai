@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/secretary"
@@ -132,14 +133,60 @@ func (m SecretaryModel) Update(msg tea.Msg) (SecretaryModel, tea.Cmd) {
 }
 
 func (m SecretaryModel) View() string {
+	// Build status header: secretary name + state badge (mirrors mail view pattern)
+	header := m.renderStatusHeader()
+
+	var content string
 	switch m.mode {
 	case 1:
-		return m.projects.View()
+		content = m.projects.View()
 	case 2:
-		return m.kanban.View()
+		content = m.kanban.View()
 	default:
-		return m.briefs.View()
+		content = m.briefs.View()
 	}
+	return header + content
+}
+
+// renderStatusHeader returns a single-line header showing the secretary agent's
+// name and state, matching the mail view's top-right status pattern.
+func (m SecretaryModel) renderStatusHeader() string {
+	secAgentDir := secretary.AgentDir(m.globalDir)
+	state := "suspended"
+	if fs.IsAlive(secAgentDir, 3.0) {
+		if node, err := fs.ReadAgent(secAgentDir); err == nil && node.State != "" {
+			state = node.State
+		} else {
+			state = "unknown"
+		}
+	}
+
+	stateLabel := strings.ToUpper(state)
+	stateStyle := lipgloss.NewStyle().Foreground(StateColor(stateLabel))
+	nameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
+
+	left := StyleTitle.Render("  Secretary")
+	right := nameStyle.Render("secretary") + " " + stateStyle.Render("◉ "+strings.ToLower(stateLabel)) + "  "
+
+	modeHints := []string{"briefs", "projects", "kanban"}
+	modeLabel := modeHints[m.mode]
+	center := StyleFaint.Render("[" + modeLabel + "]  ctrl+t toggle  ctrl+k kanban  ctrl+r refresh")
+
+	leftW := lipgloss.Width(left)
+	centerW := lipgloss.Width(center)
+	rightW := lipgloss.Width(right)
+	gapTotal := m.width - leftW - centerW - rightW
+	if gapTotal < 2 {
+		// Narrow terminal — skip center
+		gap := m.width - leftW - rightW
+		if gap < 0 {
+			gap = 0
+		}
+		return left + strings.Repeat(" ", gap) + right + "\n"
+	}
+	leftGap := gapTotal / 2
+	rightGap := gapTotal - leftGap
+	return left + strings.Repeat(" ", leftGap) + center + strings.Repeat(" ", rightGap) + right + "\n"
 }
 
 // buildSecretaryBriefs constructs the markdown entry list for the briefs viewer.
