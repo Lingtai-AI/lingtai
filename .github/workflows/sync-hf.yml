@@ -16,9 +16,19 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Rewrite history to strip binaries that exceed HF's 10MB limit
+          # Rewrite history to strip binaries rejected by HF
           pip install git-filter-repo
-          git filter-repo --path-glob 'tui/packages/*/bin/lingtai' --invert-paths --force
+          git filter-repo \
+            --path-glob 'tui/packages/*/bin/lingtai' \
+            --path-glob '*.gif' \
+            --path-glob '*.jpeg' \
+            --path-glob '*.jpg' \
+            --path-glob '*.png' \
+            --path-glob '*.ico' \
+            --path-glob '*.woff' \
+            --path-glob '*.woff2' \
+            --path-glob '*.ttf' \
+            --invert-paths --force
 
           # Auth via GIT_ASKPASS (survives filter-repo config reset)
           echo '#!/bin/sh' > /tmp/git-askpass.sh
