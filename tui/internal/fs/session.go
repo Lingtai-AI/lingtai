@@ -125,7 +125,7 @@ func (sc *SessionCache) dumpHours(fromHour, toHour time.Time) {
 	if sc.projectPath == "" {
 		return
 	}
-	hash := projectHash(sc.projectPath)
+	hash := ProjectHash(sc.projectPath)
 	histDir := briefHistoryDir(sc.briefBase, hash)
 
 	for h := fromHour; h.Before(toHour); h = h.Add(time.Hour) {

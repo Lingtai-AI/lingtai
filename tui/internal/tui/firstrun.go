@@ -22,8 +22,9 @@ import (
 
 // FirstRunDoneMsg is emitted when first-run flow completes.
 type FirstRunDoneMsg struct {
-	OrchDir  string // full path to orchestrator directory
-	OrchName string // agent name
+	OrchDir            string // full path to orchestrator directory
+	OrchName           string // agent name
+	LaunchSecretary    bool   // true if secretary agent should be launched
 }
 
 // SetupSavedMsg is emitted when /setup rewrites the current agent's init.json.
@@ -67,8 +68,9 @@ const (
 	stepCapabilities
 	stepAgentNameDir
 	stepRecipe            // picks one of 5 recipes (greeter, plain, adaptive, tutorial, custom)
-	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
-	stepPropagate         // rehydration only — runs after orchestrator save, before launch
+	stepRecipeSwapConfirm  // mid-life only — confirms recipe change (Task 9 wires this)
+	stepSecretaryConfirm   // confirms secretary agent launch (default yes)
+	stepPropagate          // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
 
@@ -112,7 +114,7 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 			return 4, total
 		}
 		return 5, total
-	case step == stepLaunching:
+	case step == stepSecretaryConfirm || step == stepLaunching:
 		return total, total
 	}
 	return 1, total
@@ -224,6 +226,10 @@ type FirstRunModel struct {
 	pendingRecipeName string
 	pendingCustomDir  string
 	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
+
+	// Secretary confirm state (stepSecretaryConfirm)
+	secretaryConfirmIdx int  // 0=yes, 1=no
+	secretarySetupDone  bool // true after secretary init.json is written
 }
 
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
@@ -1482,6 +1488,40 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			return m, nil
 
+		case stepSecretaryConfirm:
+			switch msg.String() {
+			case "up", "down":
+				m.secretaryConfirmIdx = 1 - m.secretaryConfirmIdx // toggle 0↔1
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			case "enter":
+				orchDir := filepath.Join(m.baseDir, m.pendingDirName)
+				launchSecretary := m.secretaryConfirmIdx == 0
+				if launchSecretary {
+					if err := setupSecretary(m.baseDir, m.globalDir, m.pendingDirName); err != nil {
+						m.message = i18n.TF("firstrun.created", m.agentName) + fmt.Sprintf("\n  Secretary setup failed: %v", err)
+					} else {
+						m.secretarySetupDone = true
+						m.message = i18n.TF("firstrun.created", m.agentName)
+					}
+				} else {
+					m.message = i18n.TF("firstrun.created", m.agentName)
+				}
+				m.step = stepLaunching
+				return m, func() tea.Msg {
+					return FirstRunDoneMsg{
+						OrchDir:         orchDir,
+						OrchName:        m.agentName,
+						LaunchSecretary: launchSecretary && m.secretarySetupDone,
+					}
+				}
+			case "esc":
+				m.step = stepRecipe
+				return m, nil
+			}
+			return m, nil
+
 		case stepPropagate:
 			// Only Enter (to advance after result) or ctrl+c are valid.
 			// Ignore Enter until rehydrateDoneMsg has arrived.
@@ -1990,6 +2030,23 @@ func (m FirstRunModel) View() string {
 
 	case stepRecipeSwapConfirm:
 		return m.viewRecipeSwapConfirm()
+
+	case stepSecretaryConfirm:
+		var b strings.Builder
+		b.WriteString("\n  A secretary agent will run in the background to maintain\n")
+		b.WriteString("  session briefs for your agents. It uses the same LLM provider\n")
+		b.WriteString("  as your orchestrator.\n\n")
+		options := []string{"Yes, launch secretary", "No, skip"}
+		selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		for i, opt := range options {
+			if i == m.secretaryConfirmIdx {
+				b.WriteString("  " + selectedStyle.Render("> "+opt) + "\n")
+			} else {
+				b.WriteString("    " + StyleSubtle.Render(opt) + "\n")
+			}
+		}
+		b.WriteString("\n")
+		return b.String()
 
 	case stepPropagate:
 		// Rehydration: we've written the orchestrator's init.json and are
@@ -2972,6 +3029,10 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		opts.ProceduresFile = proceduresPath
 	}
 
+	// Set brief file path for admin agents — the secretary maintains this file
+	projectPath := filepath.Dir(m.baseDir)
+	opts.BriefFile = fs.BriefFilePath(m.globalDir, projectPath)
+
 	p := m.presets[m.cursor]
 	dirName := m.pendingDirName
 
@@ -3007,9 +3068,9 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		m.message = ""
 		return m, m.runRehydratePropagation()
 	}
-	m.step = stepLaunching
-	m.message = i18n.TF("firstrun.created", m.agentName)
-	return m, func() tea.Msg {
-		return FirstRunDoneMsg{OrchDir: orchDir, OrchName: m.agentName}
-	}
+	// Show secretary confirmation before launching
+	m.step = stepSecretaryConfirm
+	m.secretaryConfirmIdx = 0 // default to yes
+	m.message = ""
+	return m, nil
 }

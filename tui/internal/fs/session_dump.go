@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// projectHash returns the first 12 hex chars of SHA-256(projectPath).
-func projectHash(projectPath string) string {
+// ProjectHash returns the first 12 hex chars of SHA-256(projectPath).
+func ProjectHash(projectPath string) string {
 	sum := sha256.Sum256([]byte(projectPath))
 	return hex.EncodeToString(sum[:])[:12]
 }
@@ -20,6 +20,12 @@ func projectHash(projectPath string) string {
 // briefHistoryDir returns <base>/brief/projects/<hash>/history/.
 func briefHistoryDir(base, hash string) string {
 	return filepath.Join(base, "brief", "projects", hash, "history")
+}
+
+// BriefFilePath returns <base>/brief/projects/<hash>/brief.md for a project.
+func BriefFilePath(base, projectPath string) string {
+	hash := ProjectHash(projectPath)
+	return filepath.Join(base, "brief", "projects", hash, "brief.md")
 }
 
 // renderMailEntry renders a mail SessionEntry to markdown.

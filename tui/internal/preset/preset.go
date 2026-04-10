@@ -74,13 +74,9 @@ func List() ([]Preset, error) {
 		if bi != bj {
 			return !bi // saved (non-builtin) before builtin
 		}
-		if bi { // both builtin: minimax first
-			if presets[i].Name == "minimax" {
-				return true
-			}
-			if presets[j].Name == "minimax" {
-				return false
-			}
+		if bi { // both builtin: minimax → zhipu → custom
+			order := map[string]int{"minimax": 0, "zhipu": 1, "custom": 2}
+			return order[presets[i].Name] < order[presets[j].Name]
 		}
 		return presets[i].Name < presets[j].Name
 	})
@@ -169,6 +165,7 @@ func EnsureDefault() error {
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
+		zhipuPreset(),
 		customPreset(),
 	}
 }
@@ -176,6 +173,7 @@ func BuiltinPresets() []Preset {
 // builtinNames is the set of built-in preset names.
 var builtinNames = map[string]bool{
 	"minimax": true,
+	"zhipu":   true,
 	"custom":  true,
 }
 
@@ -215,6 +213,28 @@ func minimaxPreset() Preset {
 				"skills": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func zhipuPreset() Preset {
+	return Preset{
+		Name:        "zhipu",
+		Description: "Zhipu GLM Coding Plan — OpenAI-compatible",
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "zhipu", "model": "GLM-5.1",
+				"api_key": nil, "api_key_env": "ZHIPU_API_KEY",
+				"base_url": nil, "api_compat": "openai",
+			},
+			"capabilities": map[string]interface{}{
+				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": e(), "psyche": e(), "library": e(),
+				"web_read": e(), "avatar": e(), "daemon": e(),
+				"listen": e(), "skills": e(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
 		},
 	}
@@ -364,6 +384,7 @@ type AgentOpts struct {
 	CovenantFile   string   // path to covenant file
 	PrincipleFile  string   // path to principle file
 	ProceduresFile string   // path to procedures file
+	BriefFile      string   // path to brief file (externally maintained by secretary)
 	SoulFile       string   // path to soul flow file
 	CommentFile   string   // path to comment file (optional)
 	Addons        []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
@@ -508,6 +529,12 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// Comment file — only if user specified one
 	if opts.CommentFile != "" {
 		initJSON["comment_file"] = opts.CommentFile
+	}
+
+	// Brief file — externally maintained by the secretary agent.
+	// Only set for admin agents (karma=true); avatars don't need it.
+	if opts.BriefFile != "" && opts.Karma {
+		initJSON["brief_file"] = opts.BriefFile
 	}
 
 	data, err := json.MarshalIndent(initJSON, "", "  ")

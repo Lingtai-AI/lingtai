@@ -14,6 +14,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
+	"github.com/anthropics/lingtai-tui/internal/secretary"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -30,6 +31,7 @@ const (
 	appViewNirvana
 	appViewSkills
 	appViewProjects
+	appViewSecretary
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -41,6 +43,7 @@ type App struct {
 	props       PropsModel
 	skills      MarkdownViewerModel
 	projects    ProjectsModel
+	secretary   SecretaryModel
 	firstRun    FirstRunModel
 	addon       AddonModel
 	doctor      DoctorModel
@@ -166,6 +169,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.nirvana, cmd = a.nirvana.Update(msg)
 		case appViewSkills:
 			a.skills, cmd = a.skills.Update(msg)
+		case appViewSecretary:
+			a.secretary, cmd = a.secretary.Update(msg)
 		case appViewProjects:
 			a.projects, cmd = a.projects.Update(msg)
 		case appViewFirstRun:
@@ -179,6 +184,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.switchToView(msg.View)
 
 	case MarkdownViewerCloseMsg:
+		a.currentView = appViewMail
+		return a, a.sendSize()
+
+	case SecretaryCloseMsg:
 		a.currentView = appViewMail
 		return a, a.sendSize()
 
@@ -232,6 +241,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.lingtaiCmd != "" {
 			if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 				launchErr = i18n.TF("mail.launch_failed", err)
+			}
+		}
+		// Launch secretary if confirmed
+		if msg.LaunchSecretary && a.lingtaiCmd != "" {
+			secDir := secretary.AgentDir(a.globalDir)
+			if _, err := process.LaunchAgent(a.lingtaiCmd, secDir); err != nil {
+				launchErr += "\nSecretary launch failed: " + err.Error()
 			}
 		}
 		// Initialize mail view
@@ -326,7 +342,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewProjects {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewSecretary && a.currentView != appViewProjects {
 				return a, tea.Quit
 			}
 		}
@@ -369,6 +385,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewSkills:
 		updated, cmd := a.skills.Update(msg)
 		a.skills = updated
+		return a, cmd
+	case appViewSecretary:
+		updated, cmd := a.secretary.Update(msg)
+		a.secretary = updated
 		return a, cmd
 	case appViewProjects:
 		updated, cmd := a.projects.Update(msg)
@@ -551,10 +571,15 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		sk, prob := scanSkills(skillsDir)
 		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
+	case "secretary":
+		a.currentView = appViewSecretary
+		a.secretary = NewSecretaryModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.secretary.Init(), a.sendSize())
 	case "projects":
-		a.currentView = appViewProjects
-		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		// Alias: open secretary view at projects tab
+		a.currentView = appViewSecretary
+		a.secretary = NewSecretaryModelAt(a.globalDir, a.projectDir, 1)
+		return a, tea.Batch(a.secretary.Init(), a.sendSize())
 	case "agora":
 		if args == "publish" {
 			if a.orchDir == "" {
@@ -724,10 +749,15 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		sk, prob := scanSkills(skillsDir)
 		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
+	case "secretary":
+		a.currentView = appViewSecretary
+		a.secretary = NewSecretaryModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.secretary.Init(), a.sendSize())
 	case "projects":
-		a.currentView = appViewProjects
-		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		// Alias: open secretary view at projects tab
+		a.currentView = appViewSecretary
+		a.secretary = NewSecretaryModelAt(a.globalDir, a.projectDir, 1)
+		return a, tea.Batch(a.secretary.Init(), a.sendSize())
 	case "agora":
 		a.currentView = appViewProjects
 		a.projects = NewAgoraModel(a.globalDir, a.projectDir)
@@ -769,6 +799,8 @@ func (a App) View() tea.View {
 		content = a.nirvana.View()
 	case appViewSkills:
 		content = a.skills.View()
+	case appViewSecretary:
+		content = a.secretary.View()
 	case appViewProjects:
 		content = a.projects.View()
 	}

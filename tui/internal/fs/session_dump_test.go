@@ -10,14 +10,14 @@ import (
 )
 
 func TestProjectHash(t *testing.T) {
-	hash := projectHash("/home/user/myproject")
+	hash := ProjectHash("/home/user/myproject")
 	if len(hash) != 12 {
 		t.Fatalf("hash length = %d, want 12", len(hash))
 	}
-	if hash != projectHash("/home/user/myproject") {
+	if hash != ProjectHash("/home/user/myproject") {
 		t.Fatal("hash is not deterministic")
 	}
-	if hash == projectHash("/home/user/other") {
+	if hash == ProjectHash("/home/user/other") {
 		t.Fatal("different paths should produce different hashes")
 	}
 }
@@ -212,7 +212,7 @@ func TestSessionCacheMultiHourDump(t *testing.T) {
 	os.MkdirAll(filepath.Join(humanDir, "logs"), 0o755)
 
 	projectPath := "/test/multi"
-	hash := projectHash(projectPath)
+	hash := ProjectHash(projectPath)
 	histDir := filepath.Join(dir, "brief", "projects", hash, "history")
 
 	sc := NewSessionCache(humanDir, projectPath)
@@ -257,7 +257,7 @@ func TestSessionCacheIdempotentDump(t *testing.T) {
 	os.MkdirAll(filepath.Join(humanDir, "logs"), 0o755)
 
 	projectPath := "/test/idempotent"
-	hash := projectHash(projectPath)
+	hash := ProjectHash(projectPath)
 	histDir := filepath.Join(dir, "brief", "projects", hash, "history")
 
 	sc := NewSessionCache(humanDir, projectPath)
@@ -304,7 +304,7 @@ func TestSessionCacheHourBoundaryDump(t *testing.T) {
 
 	// Use a known project path so we can predict the dump directory.
 	projectPath := "/test/project"
-	hash := projectHash(projectPath)
+	hash := ProjectHash(projectPath)
 	histDir := filepath.Join(dir, "brief", "projects", hash, "history")
 
 	// Create cache with overridden briefBase for testing.

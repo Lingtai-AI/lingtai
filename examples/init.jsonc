@@ -29,9 +29,13 @@
     // LLM configuration
     // -------------------------------------------------------
     "llm": {
-      // Provider: "minimax", "anthropic", "openai", "gemini",
+      // Provider: "minimax", "zhipu", "anthropic", "openai", "gemini",
       //           "deepseek", "grok", "qwen", "glm", "kimi" (OpenAI-compatible via custom adapter),
       //           or "custom" (generic — set api_compat + base_url for any OpenAI/Anthropic/Gemini-compatible API).
+      //
+      // "zhipu" uses GLM Coding Plan (subscription-based, OpenAI-compatible).
+      //   China endpoint:  https://open.bigmodel.cn/api/coding/paas/v4
+      //   Intl endpoint:   https://api.z.ai/api/coding/paas/v4
       "provider": "minimax",
 
       // Model name as recognized by the provider's API.
@@ -201,6 +205,15 @@
   // Core behavioral rules that persist across molts.
   "covenant": "You are a helpful assistant.",
   // Or use a file: "covenant_file": "covenant.md"
+
+  // Procedures — operational knowledge (e.g. molt checklist).
+  // Protected prompt section, persists as system/procedures.md.
+  // Or use a file: "procedures_file": "procedures.md"
+
+  // Brief — externally-maintained context written by the secretary agent.
+  // Protected prompt section, re-read from disk on /refresh and /cpr.
+  // Not inherited by avatars.
+  // Or use a file: "brief_file": "~/.lingtai-tui/brief/projects/<hash>/brief.md"
 
   // Initial memory — pre-loaded into system/memory.md.
   // The agent can edit this via the eigen intrinsic.
