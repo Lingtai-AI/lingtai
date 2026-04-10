@@ -17,9 +17,11 @@ my-recipe/
     recipe.json           # 可选 — 语言特定版本
     greet.md
     comment.md
+    covenant.md           # 可选 — 覆盖系统级公约
   zh/
     greet.md
     comment.md
+    covenant.md           # 可选
   skills/                 # 可选：配方附带技能
     my-skill/
       en/
@@ -30,7 +32,7 @@ my-recipe/
         SKILL.md
 ```
 
-## 三个组件
+## 四个组件
 
 ### 1. `greet.md` — 首次接触
 
@@ -65,7 +67,18 @@ my-recipe/
 - 保持精简——每个回合都会注入，每个 token 都算数
 - 如果配方附带技能，通过名称引用它们
 
-### 3. `skills/` — 配方附带技能
+### 3. `covenant.md` — 公约覆盖（可选）
+
+覆盖系统级公约（`~/.lingtai-tui/covenant/<lang>/covenant.md`）。当配方包含此文件时，使用配方的公约代替全局公约。
+
+**用途：** 某些配方需要根本不同的公约。例如，一个不应生成分身或参与网络的工具型智能体需要比默认更简单的公约。
+
+**规则：**
+- 无占位符——静态文本
+- 如果不存在，使用系统级公约（行为不变）
+- 遵循与 greet.md 和 comment.md 相同的国际化回退规则
+
+### 4. `skills/` — 配方附带技能
 
 可选。随配方一起分发的技能，TUI 启动时自动链接到 `.lingtai/.skills/`。
 
@@ -102,7 +115,7 @@ version: 1.0.0
 
 ## 国际化回退规则
 
-所有配方文件（greet.md、comment.md、技能目录）使用相同的解析规则：
+所有配方文件（greet.md、comment.md、covenant.md、技能目录）使用相同的解析规则：
 
 1. 尝试 `<lang>/` — 语言特定版本
 2. 回退到根目录

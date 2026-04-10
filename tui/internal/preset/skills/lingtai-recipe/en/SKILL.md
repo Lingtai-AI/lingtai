@@ -17,9 +17,11 @@ my-recipe/
     recipe.json           # Optional — lang-specific override
     greet.md
     comment.md
+    covenant.md           # Optional — overrides system-wide covenant
   zh/
     greet.md
     comment.md
+    covenant.md           # Optional
   skills/                 # Optional: recipe-shipped skills
     my-skill/
       en/
@@ -30,7 +32,7 @@ my-recipe/
         SKILL.md
 ```
 
-## The Three Components
+## The Four Components
 
 ### 1. `greet.md` — First Contact
 
@@ -74,7 +76,18 @@ Injected into the orchestrator's system prompt on every turn. The persistent pla
 - Keep it focused and concise — it's injected every turn, so every token counts
 - Reference skills by name if the recipe ships skills (the agent can load them on demand)
 
-### 3. `skills/` — Recipe-Shipped Skills
+### 3. `covenant.md` — Covenant Override (Optional)
+
+Overrides the system-wide covenant (`~/.lingtai-tui/covenant/<lang>/covenant.md`) for agents created with this recipe. When present, the recipe's covenant is used instead of the global one.
+
+**Purpose:** Some recipes need a fundamentally different covenant. For example, a utility agent that should never spawn avatars or participate in networks needs a simpler covenant than the default.
+
+**Rules:**
+- No placeholders — static text
+- If absent, the system-wide covenant is used (no change in behavior)
+- Follows the same i18n fallback as greet.md and comment.md
+
+### 4. `skills/` — Recipe-Shipped Skills
 
 Optional. Skills that travel with the recipe and are automatically symlinked into `.lingtai/.skills/` when the TUI starts.
 
@@ -115,7 +128,7 @@ Without a valid `recipe.json`, the recipe will not be recognized as importable. 
 
 ## i18n Fallback Rules
 
-All recipe files (greet.md, comment.md, skill directories) use the same resolution:
+All recipe files (greet.md, comment.md, covenant.md, skill directories) use the same resolution:
 
 1. Try `<lang>/` — language-specific version
 2. Fall back to root
