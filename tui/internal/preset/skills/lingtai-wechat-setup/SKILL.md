@@ -6,7 +6,7 @@ version: 1.0.0
 
 # WeChat Setup
 
-You are helping the human connect this agent to WeChat via Tencent's iLink Bot API. Unlike other addons, WeChat uses **QR code login** — there are no static credentials to paste.
+You are helping the human connect this agent to WeChat via Tencent's iLink Bot API. Unlike other addons, WeChat uses **QR code login** — there are no static credentials to paste. Your job is to **walk the human through setup and execute the steps yourself** — do not just list instructions and ask the human to do everything.
 
 ## Fixed-by-Convention Path
 
