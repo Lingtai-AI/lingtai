@@ -73,7 +73,7 @@ func humanAddr(projectDir string) string {
 // enters first-run view with a FirstRunModel constructed via
 // NewRehydrateModel, which prefills the orchestrator's name/dir and adds
 // a final stepPropagate page to copy the new init.json to every worker.
-func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []string, tuiCfg config.TUIConfig, rehydrateOrchDir, rehydrateOrchName string) App {
+func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orchestrators []string, tuiCfg config.TUIConfig, rehydrateOrchDir, rehydrateOrchName string) App {
 	// Apply persisted theme (or default).
 	SetThemeByName(tuiCfg.Theme)
 
@@ -86,7 +86,27 @@ func NewApp(globalDir, projectDir string, needsFirstRun bool, orchestrators []st
 		tuiConfig:  tuiCfg,
 	}
 
-	if needsFirstRun {
+	if needsRecovery && len(orchestrators) > 0 {
+		// Global config lost but agents intact — show setup for API keys,
+		// then propagate LLM config to all agents and go to mail view.
+		orchName := orchestrators[0]
+		orchDir := filepath.Join(projectDir, orchName)
+		// Check per-project settings for saved orchestrator
+		localSettings := LoadSettings(projectDir)
+		if localSettings.Orchestrator != "" {
+			for _, o := range orchestrators {
+				if o == localSettings.Orchestrator {
+					orchName = o
+					orchDir = filepath.Join(projectDir, o)
+					break
+				}
+			}
+		}
+		app.orchName = orchName
+		app.orchDir = orchDir
+		app.currentView = appViewFirstRun
+		app.firstRun = NewSetupModeModel(projectDir, globalDir, orchDir, orchName)
+	} else if needsFirstRun {
 		app.currentView = appViewFirstRun
 		hasPresets := preset.HasAny()
 		if rehydrateOrchDir != "" && rehydrateOrchName != "" {
@@ -236,6 +256,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
+		// Propagate LLM config to all agents in the network
+		PropagateOrchestratorLLM(a.projectDir, a.orchDir)
 		// Launch the agent
 		var launchErr string
 		if a.lingtaiCmd != "" {

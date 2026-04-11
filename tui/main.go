@@ -220,13 +220,15 @@ func main() {
 	// human/ inside. Without this fallback, a returning user (global
 	// config.json exists, so needsFirstRun would otherwise be false) would
 	// reach NewApp with no orchestrator to launch.
+	needsRecovery := false
 	if len(orchestrators) == 0 {
 		needsFirstRun = true
 	} else if needsFirstRun && !needsRehydration {
 		// Existing orchestrators found in .lingtai/ but global config is
 		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real
-		// and must not be duplicated — skip the first-run wizard.
+		// and must not be duplicated — show setup for API keys only.
 		needsFirstRun = false
+		needsRecovery = true
 	}
 
 	if !needsFirstRun {
@@ -264,7 +266,7 @@ func main() {
 	// user creates a new agent through the first-run wizard.
 
 	// Launch TUI
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
