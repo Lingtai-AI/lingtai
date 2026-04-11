@@ -57,6 +57,13 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 				delete(caps, name)
 			}
 		}
+		// Secretary uses library as a working scratchpad for drafts across molts.
+		// Raise the limit from default 20 to 100.
+		if lib, ok := caps["library"].(map[string]interface{}); ok {
+			lib["library_limit"] = 100
+		} else {
+			caps["library"] = map[string]interface{}{"library_limit": 100}
+		}
 	}
 
 	// Set secretary recipe files (no procedures override — inherits system-wide)

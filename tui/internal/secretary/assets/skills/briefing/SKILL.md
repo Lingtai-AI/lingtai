@@ -6,44 +6,90 @@ version: 1.0.0
 
 # Briefing Skill
 
-This skill guides your briefing cycle. You maintain three types of files:
+You maintain three files that give AI agents context about their human and the project they are working on. These files are injected into every agent's system prompt when the human runs `/refresh` or `/cpr`. Without them, agents start every session blind — they don't know what the human cares about, what was accomplished yesterday, or what the current priorities are.
 
-| File | Scope | Location |
-|---|---|---|
-| `profile.md` | Universal (all projects) | `~/.lingtai-tui/brief/profile.md` |
-| `journal.md` | Per-project | `~/.lingtai-tui/brief/projects/<hash>/journal.md` |
-| `brief.md` | Per-project | `~/.lingtai-tui/brief/projects/<hash>/brief.md` |
+## The Three Files
+
+### profile.md — Who is this human?
+
+**Location:** `~/.lingtai-tui/brief/profile.md`
+**Scope:** Universal — shared across ALL projects.
+**Consumer:** Every agent in every project reads this on refresh.
+
+**Purpose:** Help agents tailor their behavior to this specific human. An astrophysicist gets different explanations than a student. Someone who prefers terse responses should not receive walls of text. The profile captures the human's identity, expertise, communication style, and preferences so agents can adapt without being told every time.
+
+**What to include:**
+- Role, expertise, domain knowledge
+- Communication style — how they give instructions, level of detail they expect
+- Preferences — tools, languages, frameworks they favor
+- Working patterns — when they work, how they structure sessions, how they delegate
+
+**Target: 200–500 words.** This is injected into every agent's prompt — keep it tight.
+
+### journal.md — What's happening in this project?
+
+**Location:** `~/.lingtai-tui/brief/projects/<hash>/journal.md`
+**Scope:** Per-project.
+**Consumer:** Agents in THIS project read it on refresh.
+
+**Purpose:** Give agents situational awareness. When an agent wakes up after a molt or refresh, it needs to know: what is the human working on right now? What decisions were made? What's pending? The journal is a rolling briefing — not a log, but a living summary of the project's current state.
+
+**What to include:**
+- Current focus — what the human is actively working on
+- Recent activity — key events from the last few sessions (rolling window)
+- Key decisions — architectural choices, design directions still relevant
+- Active agents — who is in the network, what they specialize in
+- Pending items — what is unfinished, blocked, or planned next
+
+**Target: 500–2000 words.** Scale with project complexity. Every token counts.
+
+### brief.md — The combined briefing
+
+**Location:** `~/.lingtai-tui/brief/projects/<hash>/brief.md`
+**Scope:** Per-project.
+**Consumer:** Injected into agents via the `brief_file` field in init.json.
+
+**Purpose:** This is the actual file agents read. It is simply `profile.md + journal.md` concatenated. You write profile and journal separately (because profile is universal), then construct brief mechanically.
 
 ## Working Order
 
 The briefing process has two phases: **observation** and **consolidation**.
 
-### Observation Phase (one file per cycle)
+### Observation Phase (one file per cycle, molt-safe)
 
-Each cycle, you read ONE history file, distill it into a library draft, and record your progress. This is molt-safe — library entries and memory survive molts.
+Each cycle, you read ONE history file, distill it into a condensed draft, and submit it to your library. Library entries are permanent — they survive molts, reboots, everything. Your memory tracks which files you have processed and how many drafts are pending per project.
 
 ### Consolidation Phase (when caught up)
 
-When all pending files are processed, you load your draft entries from library, synthesize the final journal and profile, write them to disk, construct the brief, and clean up drafts.
+When all pending history files are processed, you load your draft entries from library (grouped by project), synthesize the final journal for each project, optionally update the profile, construct brief.md for each project, and delete the draft entries.
 
 ```
 Cycle 1: read file A → draft to library → "A done" in memory → idle
   (molt safe — drafts in library, state in memory)
 Cycle 2: read file B → draft to library → "B done" in memory → idle
-  (molt safe)
 Cycle N: read file Z → draft to library → "Z done" in memory
   No more pending → CONSOLIDATE:
-    load all drafts from library → write journal.md → write profile.md
-    → construct brief.md → clean up draft entries → idle (hourly)
+    for each project with drafts:
+      load drafts → read existing journal → write updated journal → delete drafts
+    update profile if needed
+    construct brief.md for each updated project
+    → idle (hourly schedule)
 ```
 
 ## Context Management — CRITICAL
 
+Your library limit is 100 entries (raised from the default 20). You have room for many drafts, but still:
+
 - **Never read more than ONE history file per turn.** Read it, draft to library, save state, go idle.
 - **Always check file size before reading.** Use `wc -c <file>` — if a file exceeds 150,000 bytes (~40k tokens), skip it and note in memory.
 - **Process projects round-robin.** One file per project per cycle if multiple have backlogs.
+- **Consolidate one project at a time.** Load drafts for one project, write its journal, delete its drafts, then move to the next.
 
-## Step 1: Discover Projects
+---
+
+## Observation Steps
+
+### Step 1: Discover Projects
 
 Read the project registry:
 
@@ -59,7 +105,7 @@ echo -n "/absolute/path/to/project" | shasum -a 256 | cut -c1-12
 
 The brief directory is `~/.lingtai-tui/brief/projects/<hash>/`. Use the path's basename as the human-readable project name (e.g., `/Users/alice/my-app` → "my-app").
 
-## Step 2: Find Pending History
+### Step 2: Find Pending History
 
 For each project, list history files and compare against your last-processed timestamp (stored in your memory):
 
@@ -76,7 +122,7 @@ ls -1 ~/.lingtai-tui/brief/projects/<hash>/history/ | sort | awk '$0 > "2026-04-
 
 If no files are pending for any project, go idle — nothing to do this cycle.
 
-## Step 3: Pick ONE File to Process
+### Step 3: Pick ONE File to Process
 
 Choose the oldest pending file from the project with the most backlog (round-robin if tied). Check its size:
 
@@ -85,9 +131,9 @@ wc -c ~/.lingtai-tui/brief/projects/<hash>/history/YYYY-MM-DD-HH.md
 ```
 
 - **≤ 150,000 bytes**: proceed.
-- **> 150,000 bytes**: skip it. Record in memory: `"skipped: <hash>/YYYY-MM-DD-HH.md (too large)"`. Advance your timestamp past it.
+- **> 150,000 bytes**: skip it. Record in memory. Advance your timestamp past it.
 
-## Step 4: Read the History File
+### Step 4: Read the History File
 
 ```bash
 cat ~/.lingtai-tui/brief/projects/<hash>/history/YYYY-MM-DD-HH.md
@@ -98,37 +144,45 @@ As you read, distill:
 - Key decisions, breakthroughs, or problems encountered
 - New agents spawned, tools used, collaborators involved
 - Any shift in project direction or priorities
+- Anything revealing about the human's preferences or working style (for the profile)
 
-## Step 5: Submit Draft to Library
+### Step 5: Submit Draft to Library
 
-Submit a condensed observation to library. This is your molt-safe working scratchpad.
+Submit a condensed observation. This is your molt-safe working scratchpad.
 
 ```
 library(submit,
   title="draft:<project-name>:<YYYY-MM-DD-HH>",
   summary="Briefing draft for <project-name>, hour <YYYY-MM-DD-HH>",
-  content="<condensed observations from the history file — what happened, key decisions, what changed>"
+  content="<condensed observations — what happened, key decisions, what changed, any profile-relevant observations>"
 )
 ```
 
-**Title convention**: always prefix with `draft:` so you can find all drafts later. Include project name and hour.
+**Title convention**: always `draft:<project-name>:<hour>`. This lets you filter drafts by project during consolidation: `library(filter, pattern="draft:my-app:")`.
 
-Target: **200–500 words per draft.** Compress aggressively — you are distilling 20k+ tokens into a few hundred words. Capture what matters for someone joining the project, not raw details.
+Target: **200–500 words per draft.** You are distilling 20k+ tokens into a few hundred words.
 
-## Step 6: Record State in Memory
+### Step 6: Record State in Memory
 
-Update your memory with progress:
+Update your memory with progress. This is how your future self (after molt) knows where to resume.
 
 ```
 psyche(memory, edit, content="
 Briefing state:
-  my-app (a1b2c3d4e5f6): last=2026-04-10-14, pending=3, drafts=2
-  my-site (f6e5d4c3b2a1): last=2026-04-10-08, pending=0, drafts=0
+  projects:
+    my-app (a1b2c3d4e5f6): last=2026-04-10-14, pending=3, drafts=2
+    my-site (f6e5d4c3b2a1): last=2026-04-10-08, pending=0, drafts=0
   skipped: a1b2c3d4e5f6/2026-04-09-22.md (too large)
+  next action: continue observation
 ")
 ```
 
-## Step 7: Check if Consolidation is Due
+**Every field matters for continuity:**
+- `last` — timestamp of last processed file (your future self uses this to find pending files)
+- `pending` — count of remaining files (tells you when to consolidate)
+- `drafts` — count of library entries for this project (tells you what to load during consolidation)
+
+### Step 7: Schedule Next Cycle or Consolidate
 
 If there are still pending files for ANY project: schedule a 5-minute follow-up and go idle.
 
@@ -136,72 +190,79 @@ If there are still pending files for ANY project: schedule a 5-minute follow-up 
 email(send, address=secretary, message="continue briefing", delay=300)
 ```
 
-If ALL projects are caught up (pending=0) AND there are draft entries in library: proceed to **consolidation** (Step 8).
+If ALL projects have pending=0 AND any project has drafts>0: proceed to **Consolidation Steps** below.
 
-If all caught up and no drafts: nothing to do. Schedule hourly cycle and go idle.
+If all caught up and no drafts: schedule hourly cycle and go idle.
 
-## Step 8: Consolidation — Load Drafts
+---
 
-Find all your draft entries:
+## Consolidation Steps
+
+### Step 8: Consolidate Per Project
+
+Process ONE project at a time. For each project that has drafts:
+
+**8a.** Load drafts for this project:
 
 ```
-library(filter, pattern="draft:")
+library(filter, pattern="draft:<project-name>:")
+library(view, ids=[<list of draft IDs for this project>])
 ```
 
-Load them:
-
-```
-library(view, ids=[<list of draft IDs>])
-```
-
-Also read the existing journal and profile:
+**8b.** Read the existing journal:
 
 ```bash
 cat ~/.lingtai-tui/brief/projects/<hash>/journal.md 2>/dev/null || echo "(no journal yet)"
-cat ~/.lingtai-tui/brief/profile.md 2>/dev/null || echo "(no profile yet)"
 ```
 
-## Step 9: Write Journal
+**8c.** Write the updated journal — synthesize all drafts + existing journal into the current state:
 
-Synthesize all drafts for this project into a single journal. The journal captures the CURRENT state — not a chronological log. It should read as a briefing for someone joining the project right now.
-
-Structure:
-
-```markdown
+```bash
+cat > ~/.lingtai-tui/brief/projects/<hash>/journal.md << 'JOURNAL_EOF'
 # <Project Name> — Journal
 
 **Last updated:** YYYY-MM-DD HH:MM UTC
 
 ## Current Focus
-What the human is actively working on right now.
+...
 
 ## Recent Activity
-Key events from the last few sessions (rolling window — drop old entries as new ones arrive).
+...
 
 ## Key Decisions
-Architectural choices, tool selections, design directions that are still relevant.
+...
 
 ## Active Agents
-Which agents are in the network, what they specialize in.
+...
 
 ## Pending Items
-What is unfinished, blocked, or planned next.
-```
-
-Target: **500–2000 words.** Be ruthless about compression. The journal is injected into every agent's system prompt on refresh — every token counts.
-
-```bash
-cat > ~/.lingtai-tui/brief/projects/<hash>/journal.md << 'JOURNAL_EOF'
-<journal content>
+...
 JOURNAL_EOF
 ```
 
-## Step 10: Update Profile (Selectively)
+**8d.** Delete the consolidated drafts:
 
-Only update if you observed something NEW about the human across projects:
+```
+library(delete, ids=[<draft IDs just consolidated>])
+```
+
+**8e.** Repeat for the next project with drafts.
+
+### Step 9: Update Profile
+
+After all project journals are written, consider the profile. Read it:
+
+```bash
+cat ~/.lingtai-tui/brief/profile.md 2>/dev/null || echo "(no profile yet)"
+```
+
+Only update if your drafts revealed something NEW about the human that applies universally:
 - A new skill or expertise area
-- A consistent communication pattern
-- A preference that shows across multiple projects
+- A consistent communication pattern you hadn't captured
+- A preference showing across multiple projects
+- A correction to something you previously wrote
+
+If updating:
 
 ```bash
 cat > ~/.lingtai-tui/brief/profile.md << 'PROFILE_EOF'
@@ -209,11 +270,9 @@ cat > ~/.lingtai-tui/brief/profile.md << 'PROFILE_EOF'
 PROFILE_EOF
 ```
 
-Target: **200–500 words.** Universal context — no project-specific details.
+### Step 10: Construct Briefs
 
-## Step 11: Construct Brief
-
-Concatenate profile and journal:
+For EACH project that had its journal updated, reconstruct the brief:
 
 ```bash
 cat ~/.lingtai-tui/brief/profile.md > ~/.lingtai-tui/brief/projects/<hash>/brief.md
@@ -221,27 +280,20 @@ echo -e "\n---\n" >> ~/.lingtai-tui/brief/projects/<hash>/brief.md
 cat ~/.lingtai-tui/brief/projects/<hash>/journal.md >> ~/.lingtai-tui/brief/projects/<hash>/brief.md
 ```
 
-## Step 12: Clean Up Drafts
-
-Delete the draft entries you just consolidated — they are now captured in the journal.
-
-```
-library(delete, ids=[<list of consolidated draft IDs>])
-```
-
-Update memory to clear the draft count:
+### Step 11: Record Final State
 
 ```
 psyche(memory, edit, content="
 Briefing state:
-  my-app (a1b2c3d4e5f6): last=2026-04-10-17, pending=0, drafts=0
-  consolidated: 2026-04-10-17T12:00Z
+  projects:
+    my-app (a1b2c3d4e5f6): last=2026-04-10-17, pending=0, drafts=0
+    my-site (f6e5d4c3b2a1): last=2026-04-10-08, pending=0, drafts=0
+  last consolidation: 2026-04-10-17T12:00Z
+  next action: wait for hourly cycle
 ")
 ```
 
-## Step 13: Schedule Next Cycle
-
-Schedule the normal hourly cycle:
+### Step 12: Schedule Next Cycle
 
 ```
 email(send, address=secretary, message="briefing cycle", delay=3600)
@@ -249,16 +301,18 @@ email(send, address=secretary, message="briefing cycle", delay=3600)
 
 Then go idle.
 
+---
+
 ## First Run
 
-On your first cycle, there may be many history files from migration backfill. Process them one at a time — the 5-minute follow-up schedule works through the backlog. Consolidation happens only when all files are processed.
+On your first cycle, there may be many history files from migration backfill. Do NOT try to read them all. Process them one at a time — the 5-minute follow-up schedule works through the backlog. Consolidation happens only when all files are processed.
 
 ## Molt Preparation
 
 When context pressure rises, your molt summary MUST include:
-- Per-project last-processed timestamps and pending counts
+- Per-project last-processed timestamps, pending counts, and draft counts
 - Library draft IDs that have not been consolidated yet
+- Whether a consolidation was in progress (and which project you were on)
 - Any skipped files and why
-- Whether a consolidation was in progress
 
 Your future self needs these exact details to continue without reprocessing or losing drafts.
