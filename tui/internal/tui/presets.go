@@ -13,4 +13,4 @@ var AllCapabilities = []string{
 }
 
 // AllAddons is the list of available addon names.
-var AllAddons = []string{"imap", "telegram", "feishu"}
+var AllAddons = []string{"imap", "telegram", "feishu", "wechat"}
