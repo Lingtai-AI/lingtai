@@ -616,8 +616,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			if !ok {
 				continue
 			}
-			compat := m.isCapCompatible(info, provider)
-			if (compat || m.isCapLocal(info)) && presetCaps[name] {
+			if m.isCapAvailable(name, info, provider) && presetCaps[name] {
 				m.capSelected[name] = true
 			}
 		}
@@ -1179,7 +1178,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						return m, nil
 					}
 					provider := m.getPresetProvider(m.presets[m.cursor])
-					if m.isCapCompatible(info, provider) || m.isCapLocal(info) {
+					if m.isCapAvailable(name, info, provider) {
 						m.capSelected[name] = !m.capSelected[name]
 					}
 				}
@@ -1202,18 +1201,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "ctrl+a":
 				provider := m.getPresetProvider(m.presets[m.cursor])
-				// If all selectable caps are selected, deselect all; otherwise select all
 				allSelected := true
 				for _, name := range m.capOrder {
 					info := m.capInfos[name]
-					if (m.isCapCompatible(info, provider) || m.isCapLocal(info)) && !m.capSelected[name] {
+					if m.isCapAvailable(name, info, provider) && !m.capSelected[name] {
 						allSelected = false
 						break
 					}
 				}
 				for _, name := range m.capOrder {
 					info := m.capInfos[name]
-					if m.isCapCompatible(info, provider) || m.isCapLocal(info) {
+					if m.isCapAvailable(name, info, provider) {
 						m.capSelected[name] = !allSelected
 					}
 				}
@@ -1784,26 +1782,20 @@ func (m FirstRunModel) View() string {
 				}
 				name := m.capOrder[idx]
 				info := m.capInfos[name]
-				compat := m.isCapCompatible(info, provider)
-				local := m.isCapLocal(info)
+				available := m.isCapAvailable(name, info, provider)
 
 				var checkbox, hint string
 				isCurrent := idx == m.capCursor && !m.inAddonZone
-				compatProvs := m.compatibleProviders(info, provider)
 
-				if compat || local {
+				if available {
 					if m.capSelected[name] {
 						checkbox = "[✓]"
 					} else {
 						checkbox = "[ ]"
 					}
-					if !compat && local {
-						hint = "(local)"
-					} else if len(compatProvs) >= 2 {
-						// Show active provider when there's a choice
-						if prov := m.capProviders[name]; prov != "" {
-							hint = "(" + prov + ")"
-						}
+					// Show provider name when one is configured
+					if prov := m.capProviders[name]; prov != "" {
+						hint = prov
 					}
 				} else {
 					checkbox = "[-]"
@@ -1820,7 +1812,7 @@ func (m FirstRunModel) View() string {
 					cell += "  " + hint
 				}
 
-				if !compat && !local {
+				if !available {
 					cell = dimStyle.Render(cell)
 				} else if isCurrent {
 					cell = cursorStyle.Render(cell)
@@ -2339,25 +2331,21 @@ func (m *FirstRunModel) initCapProviders() {
 	for _, name := range m.capOrder {
 		info := m.capInfos[name]
 		compat := m.compatibleProviders(info, presetProvider)
+
+		// If the preset explicitly configures a provider for this cap, use it
+		// even if check-caps doesn't list it (kernel may not be upgraded).
+		if capCfg, ok := caps[name].(map[string]interface{}); ok {
+			if prov, ok := capCfg["provider"].(string); ok && prov != "" {
+				m.capProviders[name] = prov
+				continue
+			}
+		}
+
 		if len(compat) == 0 {
 			continue
 		}
-		// If the preset already specifies a provider for this cap, use it
-		// (as long as it's in the compatible set).
-		if capCfg, ok := caps[name].(map[string]interface{}); ok {
-			if prov, ok := capCfg["provider"].(string); ok {
-				for _, c := range compat {
-					if c == prov {
-						m.capProviders[name] = prov
-						break
-					}
-				}
-			}
-		}
-		// If still unset, default to the first compatible provider.
-		if m.capProviders[name] == "" {
-			m.capProviders[name] = compat[0]
-		}
+		// Default to the first compatible provider.
+		m.capProviders[name] = compat[0]
 	}
 }
 
@@ -2400,6 +2388,29 @@ func (m FirstRunModel) isCapCompatible(info capInfo, provider string) bool {
 	for _, p := range info.Providers {
 		if p == provider {
 			return true
+		}
+	}
+	return false
+}
+
+// isCapAvailable returns true if a capability can be used with the current
+// preset. Checks three sources: check-caps provider list, local provider,
+// and preset manifest (which may configure a provider not yet in the
+// installed kernel's PROVIDERS list).
+func (m FirstRunModel) isCapAvailable(name string, info capInfo, provider string) bool {
+	if m.isCapCompatible(info, provider) {
+		return true
+	}
+	if m.isCapLocal(info) {
+		return true
+	}
+	// Preset explicitly configures this capability with the current provider
+	p := m.presets[m.cursor]
+	if caps, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
+		if cfg, ok := caps[name].(map[string]interface{}); ok {
+			if prov, _ := cfg["provider"].(string); prov == provider {
+				return true
+			}
 		}
 	}
 	return false
