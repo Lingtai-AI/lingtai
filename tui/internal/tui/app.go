@@ -31,7 +31,7 @@ const (
 	appViewNirvana
 	appViewSkills
 	appViewProjects
-	appViewSecretary
+	appViewBriefs
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -41,13 +41,17 @@ type App struct {
 	setup       SetupModel
 	settings    SettingsModel
 	props       PropsModel
-	skills      MarkdownViewerModel
-	projects    ProjectsModel
-	secretary   SecretaryModel
-	firstRun    FirstRunModel
-	addon       AddonModel
-	doctor      DoctorModel
-	nirvana     NirvanaModel
+	skills          MarkdownViewerModel
+	projects        ProjectsModel
+	secretaryMail   MailModel
+	briefs          MarkdownViewerModel
+	firstRun        FirstRunModel
+	addon           AddonModel
+	doctor          DoctorModel
+	nirvana         NirvanaModel
+
+	inSecretaryView bool      // true when viewing secretary mail (within appViewMail)
+	lastEscTime     time.Time // for double-esc detection
 
 	globalDir       string
 	projectDir      string // .lingtai/ directory
@@ -65,6 +69,7 @@ type App struct {
 func humanAddr(projectDir string) string {
 	return "human"
 }
+
 
 // NewApp creates the root app model.
 // NewApp constructs the top-level TUI app.
@@ -176,7 +181,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		switch a.currentView {
 		case appViewMail:
-			a.mail, cmd = a.mail.Update(msg)
+			if a.inSecretaryView {
+				a.secretaryMail, cmd = a.secretaryMail.Update(msg)
+			} else {
+				a.mail, cmd = a.mail.Update(msg)
+			}
 		case appViewSetup:
 			a.setup, cmd = a.setup.Update(msg)
 		case appViewSettings:
@@ -191,8 +200,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.nirvana, cmd = a.nirvana.Update(msg)
 		case appViewSkills:
 			a.skills, cmd = a.skills.Update(msg)
-		case appViewSecretary:
-			a.secretary, cmd = a.secretary.Update(msg)
+		case appViewBriefs:
+			a.briefs, cmd = a.briefs.Update(msg)
 		case appViewProjects:
 			a.projects, cmd = a.projects.Update(msg)
 		case appViewFirstRun:
@@ -207,11 +216,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case MarkdownViewerCloseMsg:
 		a.currentView = appViewMail
-		return a, a.sendSize()
-
-	case SecretaryCloseMsg:
-		a.currentView = appViewMail
-		return a, a.sendSize()
+		if a.inSecretaryView {
+			return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
+		}
+		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 
 	case doctorResultMsg:
 		if a.currentView == appViewDoctor {
@@ -220,6 +228,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case refreshDoneMsg:
+		if a.inSecretaryView {
+			if msg.err != nil {
+				a.secretaryMail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
+			} else {
+				a.secretaryMail.AddSystemMessage(i18n.T("mail.refreshed"))
+			}
+			return a, a.secretaryMail.refreshMail
+		}
 		if msg.err != nil {
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
 		} else {
@@ -228,6 +244,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.mail.refreshMail
 
 	case refreshAllDoneMsg:
+		if a.inSecretaryView {
+			if len(msg.failures) > 0 {
+				a.secretaryMail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
+			} else {
+				a.secretaryMail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
+			}
+			return a, a.secretaryMail.refreshMail
+		}
 		if len(msg.failures) > 0 {
 			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
 		} else {
@@ -385,9 +409,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewSecretary && a.currentView != appViewProjects {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewBriefs && a.currentView != appViewProjects {
 				return a, tea.Quit
 			}
+		}
+	}
+
+	// === Double-esc: toggle back from secretary view ===
+	if a.inSecretaryView && a.currentView == appViewMail {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
+			now := time.Now()
+			if now.Sub(a.lastEscTime) < 500*time.Millisecond {
+				// Double-esc detected — toggle back to main mail
+				a.inSecretaryView = false
+				a.lastEscTime = time.Time{}
+				return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
+			}
+			a.lastEscTime = now
+			// Fall through to let the first esc do its normal thing (dismiss insights)
 		}
 	}
 
@@ -398,6 +437,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.firstRun = updated
 		return a, cmd
 	case appViewMail:
+		if a.inSecretaryView {
+			updated, cmd := a.secretaryMail.Update(msg)
+			a.secretaryMail = updated
+			return a, cmd
+		}
 		updated, cmd := a.mail.Update(msg)
 		a.mail = updated
 		return a, cmd
@@ -429,9 +473,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.skills.Update(msg)
 		a.skills = updated
 		return a, cmd
-	case appViewSecretary:
-		updated, cmd := a.secretary.Update(msg)
-		a.secretary = updated
+	case appViewBriefs:
+		updated, cmd := a.briefs.Update(msg)
+		a.briefs = updated
 		return a, cmd
 	case appViewProjects:
 		updated, cmd := a.projects.Update(msg)
@@ -443,6 +487,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
+	// addMsg posts a system message to whichever mail view the user is looking at.
+	addMsg := func(text string) {
+		if a.inSecretaryView {
+			a.secretaryMail.AddSystemMessage(text)
+		} else {
+			a.mail.AddSystemMessage(text)
+		}
+	}
+	// targetDir/targetName: the agent that single-target commands operate on.
+	// In secretary view, target the secretary; otherwise the project orchestrator.
+	targetDir := a.orchDir
+	targetName := a.orchName
+	if a.inSecretaryView {
+		targetDir = secretary.AgentDir(a.globalDir)
+		targetName = "secretary"
+	}
 	switch command {
 	case "sleep":
 		if args == "all" {
@@ -457,10 +517,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 					count++
 				}
 			}
-			a.mail.AddSystemMessage(i18n.TF("mail.sleep_all", count))
-		} else if a.orchDir != "" {
-			os.WriteFile(filepath.Join(a.orchDir, ".sleep"), []byte(""), 0o644)
-			a.mail.AddSystemMessage(i18n.T("mail.sleep_sent"))
+			addMsg(i18n.TF("mail.sleep_all", count))
+		} else if targetDir != "" {
+			os.WriteFile(filepath.Join(targetDir, ".sleep"), []byte(""), 0o644)
+			addMsg(i18n.T("mail.sleep_sent"))
 		}
 		return a, nil
 	case "suspend":
@@ -476,10 +536,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 					count++
 				}
 			}
-			a.mail.AddSystemMessage(i18n.TF("mail.suspended_all", count))
-		} else if a.orchDir != "" {
-			os.WriteFile(filepath.Join(a.orchDir, ".suspend"), []byte(""), 0o644)
-			a.mail.AddSystemMessage(i18n.TF("mail.suspended", a.orchName))
+			addMsg(i18n.TF("mail.suspended_all", count))
+		} else if targetDir != "" {
+			os.WriteFile(filepath.Join(targetDir, ".suspend"), []byte(""), 0o644)
+			addMsg(i18n.TF("mail.suspended", targetName))
 		}
 		return a, nil
 	case "cpr":
@@ -499,34 +559,36 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				}
 			}
 			if len(failures) > 0 {
-				a.mail.AddSystemMessage(i18n.TF("mail.cpr_all_with_failures", count-len(failures), len(failures), strings.Join(failures, ", ")))
+				addMsg(i18n.TF("mail.cpr_all_with_failures", count-len(failures), len(failures), strings.Join(failures, ", ")))
 			} else {
-				a.mail.AddSystemMessage(i18n.TF("mail.cpr_all", count))
+				addMsg(i18n.TF("mail.cpr_all", count))
 			}
-		} else if a.orchDir != "" && a.lingtaiCmd != "" {
-			if !fs.IsAlive(a.orchDir, 3.0) {
-				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
-					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(err)))
+		} else if targetDir != "" && a.lingtaiCmd != "" {
+			if !fs.IsAlive(targetDir, 3.0) {
+				if _, err := process.LaunchAgent(a.lingtaiCmd, targetDir); err != nil {
+					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
 				} else {
-					a.mail.AddSystemMessage(i18n.TF("mail.cpr", a.orchName))
+					addMsg(i18n.TF("mail.cpr", targetName))
 				}
 			} else {
-				a.mail.AddSystemMessage(i18n.T("mail.cpr_alive"))
+				addMsg(i18n.T("mail.cpr_alive"))
 			}
 		}
 		return a, nil
 	case "lang":
 		// Redirect to /settings — agent language is now configured there
-		a.mail.AddSystemMessage(i18n.T("mail.lang_moved"))
+		addMsg(i18n.T("mail.lang_moved"))
 		return a, nil
 	case "clear":
-		if a.orchDir != "" && a.lingtaiCmd != "" {
-			a.mail.AddSystemMessage(i18n.T("mail.clearing"))
+		if targetDir != "" && a.lingtaiCmd != "" {
+			addMsg(i18n.T("mail.clearing"))
+			lingtaiCmd := a.lingtaiCmd
+			dir := targetDir
 			return a, func() tea.Msg {
 				// Suspend and wait for process to die
-				suspendFile := filepath.Join(a.orchDir, ".suspend")
+				suspendFile := filepath.Join(dir, ".suspend")
 				os.WriteFile(suspendFile, []byte(""), 0o644)
-				lockFile := filepath.Join(a.orchDir, ".agent.lock")
+				lockFile := filepath.Join(dir, ".agent.lock")
 				for i := 0; i < 40; i++ {
 					if tryLock(lockFile) {
 						break
@@ -535,16 +597,16 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				}
 				os.Remove(suspendFile)
 				// Wipe conversation history (token ledger is preserved)
-				os.Remove(filepath.Join(a.orchDir, "history", "chat_history.jsonl"))
+				os.Remove(filepath.Join(dir, "history", "chat_history.jsonl"))
 				// Relaunch with clean context
-				_, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir)
+				_, err := process.LaunchAgent(lingtaiCmd, dir)
 				return refreshDoneMsg{err: err}
 			}
 		}
 		return a, nil
 	case "refresh":
 		if args == "all" && a.lingtaiCmd != "" {
-			a.mail.AddSystemMessage(i18n.T("mail.refreshing_all"))
+			addMsg(i18n.T("mail.refreshing_all"))
 			lingtaiCmd := a.lingtaiCmd
 			projectDir := a.projectDir
 			return a, func() tea.Msg {
@@ -562,17 +624,19 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				}
 				return refreshAllDoneMsg{count: count, failures: failures}
 			}
-		} else if a.orchDir != "" && a.lingtaiCmd != "" {
-			a.mail.AddSystemMessage(i18n.T("mail.refreshing"))
+		} else if targetDir != "" && a.lingtaiCmd != "" {
+			addMsg(i18n.T("mail.refreshing"))
+			lingtaiCmd := a.lingtaiCmd
+			dir := targetDir
 			return a, func() tea.Msg {
-				return refreshDoneMsg{err: a.hardRefresh()}
+				return refreshDoneMsg{err: hardRefreshDir(lingtaiCmd, dir)}
 			}
 		}
 		return a, nil
 	case "doctor":
-		if a.orchDir != "" {
+		if targetDir != "" {
 			a.currentView = appViewDoctor
-			a.doctor = NewDoctorModel(a.orchDir)
+			a.doctor = NewDoctorModel(targetDir)
 			return a, tea.Batch(a.doctor.Init(), a.sendSize())
 		}
 		return a, nil
@@ -581,7 +645,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		if url != "" {
 			openBrowser(url)
 		} else {
-			a.mail.AddSystemMessage("lingtai-portal not found on PATH. Run: brew link --overwrite lingtai-tui")
+			addMsg("lingtai-portal not found on PATH. Run: brew link --overwrite lingtai-tui")
 		}
 		return a, nil
 	case "addon":
@@ -606,79 +670,126 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
 	case "kanban":
 		a.currentView = appViewProps
-		a.props = NewPropsModel(a.projectDir, a.orchDir)
+		if a.inSecretaryView {
+			secLingtaiDir := secretary.LingtaiDir(a.globalDir)
+			secAgentDir := secretary.AgentDir(a.globalDir)
+			a.props = NewPropsModel(secLingtaiDir, secAgentDir)
+		} else {
+			a.props = NewPropsModel(a.projectDir, a.orchDir)
+		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewSkills
 		skillsDir := filepath.Join(a.projectDir, ".skills")
+		if a.inSecretaryView {
+			skillsDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".skills")
+		}
 		sk, prob := scanSkills(skillsDir)
 		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
 	case "secretary":
-		a.currentView = appViewSecretary
-		a.secretary = NewSecretaryModel(a.globalDir, a.projectDir, a.orchDir, a.lingtaiCmd)
-		return a, tea.Batch(a.secretary.Init(), a.sendSize())
+		if a.inSecretaryView {
+			// Toggle back to main agent mail
+			a.inSecretaryView = false
+			a.currentView = appViewMail
+			return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
+		}
+		// Toggle to secretary mail — auto-setup if needed
+		secAgentDir := secretary.AgentDir(a.globalDir)
+		initPath := filepath.Join(secAgentDir, "init.json")
+		if _, err := os.Stat(initPath); err != nil && a.lingtaiCmd != "" {
+			orchDirName := filepath.Base(a.orchDir)
+			if err := setupSecretary(a.projectDir, a.globalDir, orchDirName); err != nil {
+				addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
+				return a, nil
+			}
+		}
+		a.inSecretaryView = true
+		a.currentView = appViewMail
+		if a.secretaryMail.humanDir == "" {
+			// First entry — create the MailModel
+			secLingtaiDir := secretary.LingtaiDir(a.globalDir)
+			secHumanDir := filepath.Join(secLingtaiDir, "human")
+			a.secretaryMail = NewMailModel(secHumanDir, "human", secLingtaiDir, secAgentDir, "secretary", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			a.secretaryMail.brandOverride = i18n.T("app.brand_secretary")
+			a.secretaryMail.palette.ExcludeCommands("viz", "addon", "setup", "agora", "nirvana")
+			return a, tea.Batch(a.secretaryMail.Init(), a.sendSize())
+		}
+		// Re-entry — reuse existing state, just restart ticks
+		return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
 	case "projects":
-		// Alias: open secretary view at projects tab
-		a.currentView = appViewSecretary
-		a.secretary = NewSecretaryModelAt(a.globalDir, a.projectDir, a.orchDir, a.lingtaiCmd, 1)
-		return a, tea.Batch(a.secretary.Init(), a.sendSize())
+		a.currentView = appViewProjects
+		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.projects.Init(), a.sendSize())
+	case "brief":
+		// Open briefs viewer (standalone markdown viewer with secretary briefing files)
+		a.currentView = appViewBriefs
+		entries := buildSecretaryBriefs(a.globalDir, a.projectDir)
+		a.briefs = NewMarkdownViewer(entries, i18n.T("palette.brief"))
+		// Also trigger a briefing cycle if secretary is alive
+		secAgentDir := secretary.AgentDir(a.globalDir)
+		if a.lingtaiCmd != "" && fs.IsAlive(secAgentDir, 3.0) {
+			prompt := "[system] The human has requested an immediate briefing. " +
+				"Run the briefing skill now — skip scheduling and process all pending history."
+			fs.WritePrompt(secAgentDir, prompt)
+		}
+		return a, a.sendSize()
 	case "agora":
 		if args == "publish" {
 			if a.orchDir == "" {
-				a.mail.AddSystemMessage(i18n.T("agora.no_agent"))
+				addMsg(i18n.T("agora.no_agent"))
 				return a, nil
 			}
 			if !fs.IsAlive(a.orchDir, 3.0) {
-				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+				addMsg(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
 			fs.WritePrompt(a.orchDir, i18n.T("agora.publish_prompt"))
-			a.mail.AddSystemMessage(i18n.T("agora.publish_sent"))
+			addMsg(i18n.T("agora.publish_sent"))
 			return a, nil
 		}
 		a.currentView = appViewProjects
 		a.projects = NewAgoraModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.projects.Init(), a.sendSize())
 	case "molt":
-		if a.orchDir == "" {
+		if targetDir == "" {
 			return a, nil
 		}
-		if !fs.IsAlive(a.orchDir, 3.0) {
-			a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+		if !fs.IsAlive(targetDir, 3.0) {
+			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
 		// Send in agent's language, not TUI language
 		lang := "en"
-		if manifest, err := fs.ReadInitManifest(a.orchDir); err == nil {
+		if manifest, err := fs.ReadInitManifest(targetDir); err == nil {
 			if l, ok := manifest["language"].(string); ok && l != "" {
 				lang = l
 			}
 		}
-		fs.WritePrompt(a.orchDir, i18n.TIn(lang, "molt.mandatory_prompt"))
-		a.mail.AddSystemMessage(i18n.T("mail.molt_sent"))
+		fs.WritePrompt(targetDir, i18n.TIn(lang, "molt.mandatory_prompt"))
+		addMsg(i18n.T("mail.molt_sent"))
 		return a, nil
 	case "insights":
-		if a.orchDir != "" {
-			if !fs.IsAlive(a.orchDir, 3.0) {
-				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+		if targetDir != "" {
+			if !fs.IsAlive(targetDir, 3.0) {
+				addMsg(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
 			question := i18n.T("insight.auto_question")
-			fs.WriteInquiry(a.orchDir, "insight", question)
-			a.mail.AddSystemMessage(i18n.T("mail.insight_sent"))
+			fs.WriteInquiry(targetDir, "insight", question)
+			addMsg(i18n.T("mail.insight_sent"))
 		}
 		return a, nil
 	case "btw":
-		if a.orchDir != "" && args != "" {
-			if !fs.IsAlive(a.orchDir, 3.0) {
-				a.mail.AddSystemMessage(i18n.T("mail.btw_suspended"))
+		if targetDir != "" && args != "" {
+			if !fs.IsAlive(targetDir, 3.0) {
+				addMsg(i18n.T("mail.btw_suspended"))
 				return a, nil
 			}
-			fs.WriteInquiry(a.orchDir, "human", args)
-			a.mail.AddSystemMessage(i18n.TF("mail.btw_sent", args))
+			fs.WriteInquiry(targetDir, "human", args)
+			addMsg(i18n.TF("mail.btw_sent", args))
 		} else if args == "" {
-			a.mail.AddSystemMessage(i18n.T("mail.btw_usage"))
+			addMsg(i18n.T("mail.btw_usage"))
 		}
 		return a, nil
 	case "quit":
@@ -773,6 +884,13 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		if ps <= 0 {
 			ps = unlimitedPageSize
 		}
+		if a.inSecretaryView {
+			// Return to secretary mail (came from kanban/doctor/etc.)
+			a.secretaryMail.pageSize = ps
+			a.secretaryMail.insightsEnabled = a.tuiConfig.Insights
+			a.secretaryMail.input.ApplyTheme()
+			return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
+		}
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
 		// Re-apply theme to textarea (settings may have changed it)
@@ -790,23 +908,38 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "props", "kanban":
 		a.currentView = appViewProps
-		a.props = NewPropsModel(a.projectDir, a.orchDir)
+		if a.inSecretaryView {
+			secLingtaiDir := secretary.LingtaiDir(a.globalDir)
+			secAgentDir := secretary.AgentDir(a.globalDir)
+			a.props = NewPropsModel(secLingtaiDir, secAgentDir)
+		} else {
+			a.props = NewPropsModel(a.projectDir, a.orchDir)
+		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewSkills
 		skillsDir := filepath.Join(a.projectDir, ".skills")
+		if a.inSecretaryView {
+			skillsDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".skills")
+		}
 		sk, prob := scanSkills(skillsDir)
 		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
 	case "secretary":
-		a.currentView = appViewSecretary
-		a.secretary = NewSecretaryModel(a.globalDir, a.projectDir, a.orchDir, a.lingtaiCmd)
-		return a, tea.Batch(a.secretary.Init(), a.sendSize())
+		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)
+		secAgentDir := secretary.AgentDir(a.globalDir)
+		secLingtaiDir := secretary.LingtaiDir(a.globalDir)
+		secHumanDir := filepath.Join(secLingtaiDir, "human")
+		a.secretaryMail = NewMailModel(secHumanDir, "human", secLingtaiDir, secAgentDir, "secretary", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+		a.secretaryMail.brandOverride = i18n.T("app.brand_secretary")
+		a.secretaryMail.palette.ExcludeCommands("viz", "addon", "setup", "agora", "nirvana")
+		a.inSecretaryView = true
+		a.currentView = appViewMail
+		return a, tea.Batch(a.secretaryMail.Init(), a.sendSize())
 	case "projects":
-		// Alias: open secretary view at projects tab
-		a.currentView = appViewSecretary
-		a.secretary = NewSecretaryModelAt(a.globalDir, a.projectDir, a.orchDir, a.lingtaiCmd, 1)
-		return a, tea.Batch(a.secretary.Init(), a.sendSize())
+		a.currentView = appViewProjects
+		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.projects.Init(), a.sendSize())
 	case "agora":
 		a.currentView = appViewProjects
 		a.projects = NewAgoraModel(a.globalDir, a.projectDir)
@@ -833,7 +966,11 @@ func (a App) View() tea.View {
 	case appViewFirstRun:
 		content = a.firstRun.View()
 	case appViewMail:
-		content = a.mail.View()
+		if a.inSecretaryView {
+			content = a.secretaryMail.View()
+		} else {
+			content = a.mail.View()
+		}
 	case appViewSetup:
 		content = a.setup.View()
 	case appViewSettings:
@@ -848,8 +985,8 @@ func (a App) View() tea.View {
 		content = a.nirvana.View()
 	case appViewSkills:
 		content = a.skills.View()
-	case appViewSecretary:
-		content = a.secretary.View()
+	case appViewBriefs:
+		content = a.briefs.View()
 	case appViewProjects:
 		content = a.projects.View()
 	}

@@ -1,5 +1,6 @@
 {
-  "app.brand": "灵台相阵",
+  "app.brand": "灵台器灵",
+  "app.brand_secretary": "灵台道童",
   "app.loading": "载入中...",
   "app.title": "灵台",
   "error.agent_timeout": "启灵失败，检日志：%s",
@@ -281,7 +282,8 @@
   "palette.kanban": "器灵网络之看板",
   "palette.skills": "查阅已安技艺",
   "palette.insights": "即求灵之省",
-  "palette.secretary": "览秘书简报",
+  "palette.secretary": "与秘书语（切换）",
+  "palette.brief": "览秘书简报",
   "skills.title": "技艺",
   "skills.installed": "已安",
   "skills.none": "未寻得技艺",

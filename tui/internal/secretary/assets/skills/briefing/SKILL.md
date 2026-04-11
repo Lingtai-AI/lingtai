@@ -24,7 +24,7 @@ You maintain three files that give AI agents context about their human and the p
 - Preferences — tools, languages, frameworks they favor
 - Working patterns — when they work, how they structure sessions, how they delegate
 
-**Hard limit: 5,000 tokens.** This is injected into every agent's prompt — keep it tight. You MUST verify the token count after every write (see Token Verification below).
+**Hard limit: 10,000 tokens.** This is injected into every agent's prompt — keep it informative but not bloated. You MUST verify the token count after every write (see Token Verification below).
 
 ### journal.md — What's happening in this project?
 
@@ -65,7 +65,7 @@ assert tokens <= <LIMIT>, f'OVER LIMIT: {tokens} > <LIMIT}'
 "
 ```
 
-Where `<LIMIT>` is 5000 for profile.md and 20000 for journal.md.
+Where `<LIMIT>` is 10000 for profile.md and 20000 for journal.md.
 
 If the file exceeds its limit, you MUST rewrite it immediately — trim less important content until it fits. Do not proceed to the next step until the token count is under the limit.
 
@@ -370,7 +370,7 @@ from lingtai_kernel.token_counter import count_tokens
 content = open(os.path.expanduser('~/.lingtai-tui/brief/profile.md')).read()
 tokens = count_tokens(content)
 print(f'{tokens} tokens')
-assert tokens <= 5000, f'OVER LIMIT: {tokens} > 5000'
+assert tokens <= 10000, f'OVER LIMIT: {tokens} > 10000'
 "
 ```
 
@@ -378,7 +378,7 @@ assert tokens <= 5000, f'OVER LIMIT: {tokens} > 5000'
 cd ~/.lingtai-tui/brief && git add -A && git commit -m "briefing: update profile"
 ```
 
-If over limit, rewrite to trim. Do not proceed until under 5,000 tokens.
+If over limit, rewrite to trim. Do not proceed until under 10,000 tokens.
 
 Clear the workbench:
 

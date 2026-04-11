@@ -138,6 +138,7 @@ type MailModel struct {
 	editorWarnText  string // text to pass to editor after warning
 	insightsEnabled bool   // from settings — show insight events
 	sessionCache   *fs.SessionCache // append-only session log
+	brandOverride  string // if set, replaces app.brand in header (e.g. "Lingtai Secretary")
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool) MailModel {
@@ -890,7 +891,11 @@ func (m MailModel) View() string {
 	}
 
 	// Build header: left = app title, center = thinking quote, right = agent [state]
-	titleLeft := StyleTitle.Render("  " + i18n.T("app.brand"))
+	brand := i18n.T("app.brand")
+	if m.brandOverride != "" {
+		brand = m.brandOverride + StyleFaint.Render("  esc·esc exit")
+	}
+	titleLeft := StyleTitle.Render("  " + brand)
 
 	// State badge with color
 	stateKey := m.orchState

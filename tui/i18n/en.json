@@ -1,5 +1,6 @@
 {
-  "app.brand": "Lingtai Orchestration",
+  "app.brand": "Lingtai Agent",
+  "app.brand_secretary": "Lingtai Secretary",
   "app.loading": "Loading...",
   "app.title": "灵台",
   "error.agent_timeout": "Agent failed to start. Check logs at %s",
@@ -286,7 +287,8 @@
   "palette.kanban": "Agent network dashboard",
   "palette.skills": "View installed skills",
   "palette.insights": "Request an insight from the agent now",
-  "palette.secretary": "View secretary briefs and status",
+  "palette.secretary": "Chat with the secretary (toggle)",
+  "palette.brief": "View secretary briefing files",
   "skills.title": "Skills",
   "skills.installed": "Installed",
   "skills.none": "No skills found",

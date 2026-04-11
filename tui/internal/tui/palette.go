@@ -57,10 +57,28 @@ func DefaultCommands() []Command {
 		{Name: "skills", Description: "palette.skills"},
 		{Name: "insights", Description: "palette.insights"},
 		{Name: "secretary", Description: "palette.secretary"},
+		{Name: "brief", Description: "palette.brief"},
 		{Name: "molt", Description: "palette.molt"},
 		{Name: "nirvana", Description: "palette.nirvana"},
 		{Name: "quit", Description: "palette.quit"},
 	}
+}
+
+// ExcludeCommands removes the named commands from the palette.
+func (m *PaletteModel) ExcludeCommands(names ...string) {
+	exclude := make(map[string]bool, len(names))
+	for _, n := range names {
+		exclude[n] = true
+	}
+	filtered := make([]Command, 0, len(m.commands))
+	for _, c := range m.commands {
+		if !exclude[c.Name] {
+			filtered = append(filtered, c)
+		}
+	}
+	m.commands = filtered
+	m.filtered = filtered
+	m.cursor = 0
 }
 
 func (m PaletteModel) Init() tea.Cmd { return nil }
