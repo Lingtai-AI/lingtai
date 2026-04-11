@@ -129,6 +129,13 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 		sc.inquiryOff = fileSize(filepath.Join(orchDir, "logs", "soul_inquiry.jsonl"))
 	}
 
+	// Regenerate history markdown files for the secretary.
+	if sc.projectPath != "" {
+		hash := ProjectHash(sc.projectPath)
+		histDir := briefHistoryDir(sc.briefBase, hash)
+		DumpAllHours(sc.entries, histDir)
+	}
+
 	// Set lastHour from the final entry.
 	if len(sc.entries) > 0 {
 		if t, err := time.Parse(time.RFC3339Nano, sc.entries[len(sc.entries)-1].Ts); err == nil {
