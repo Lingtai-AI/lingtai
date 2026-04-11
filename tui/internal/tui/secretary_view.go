@@ -55,7 +55,7 @@ func NewSecretaryModelAt(globalDir, projectDir, orchDir, lingtaiCmd string, star
 
 	return SecretaryModel{
 		mode:       startMode,
-		briefs:     NewMarkdownViewer(briefs, "Secretary Briefs"),
+		briefs:     NewMarkdownViewer(briefs, "Briefs"),
 		projects:   projects,
 		kanban:     kanban,
 		globalDir:  globalDir,
@@ -220,27 +220,27 @@ func (m SecretaryModel) renderStatusHeader() string {
 	left := StyleTitle.Render("  Secretary")
 	right := nameStyle.Render("secretary") + " " + stateStyle.Render("◉ "+strings.ToLower(stateLabel)) + "  "
 
+	// Row 1: title + state
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap1 := m.width - leftW - rightW
+	if gap1 < 0 {
+		gap1 = 0
+	}
+	row1 := left + strings.Repeat(" ", gap1) + right
+
+	// Row 2: mode + keybindings
 	modeHints := []string{"briefs", "projects", "kanban"}
 	modeLabel := modeHints[m.mode]
-	center := StyleFaint.Render("["+modeLabel+"]") +
-		"  " + StyleAccent.Render("ctrl+b") + StyleFaint.Render(" force brief") +
+	row2Left := "  " + StyleFaint.Render("["+modeLabel+"]") +
+		"  " + StyleAccent.Render("ctrl+b") + StyleFaint.Render(" brief") +
 		"  " + StyleFaint.Render("ctrl+r refresh  ctrl+s suspend  ctrl+t toggle  ctrl+k kanban")
-
-	leftW := lipgloss.Width(left)
-	centerW := lipgloss.Width(center)
-	rightW := lipgloss.Width(right)
-	gapTotal := m.width - leftW - centerW - rightW
-	if gapTotal < 2 {
-		// Narrow terminal — skip center
-		gap := m.width - leftW - rightW
-		if gap < 0 {
-			gap = 0
-		}
-		return left + strings.Repeat(" ", gap) + right + "\n"
+	row2 := row2Left
+	if lipgloss.Width(row2) > m.width {
+		row2 = row2Left[:m.width]
 	}
-	leftGap := gapTotal / 2
-	rightGap := gapTotal - leftGap
-	return left + strings.Repeat(" ", leftGap) + center + strings.Repeat(" ", rightGap) + right + "\n"
+
+	return row1 + "\n" + row2 + "\n"
 }
 
 // buildSecretaryBriefs constructs the markdown entry list for the briefs viewer.
