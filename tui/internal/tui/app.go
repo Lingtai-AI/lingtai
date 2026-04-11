@@ -59,6 +59,7 @@ type App struct {
 	tuiConfig       config.TUIConfig
 	pendingRecipe   string
 	pendingCustomDir string
+	recoveryMode    bool // global config lost, agents intact — setup then propagate
 }
 
 func humanAddr(projectDir string) string {
@@ -104,6 +105,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 		}
 		app.orchName = orchName
 		app.orchDir = orchDir
+		app.recoveryMode = true
 		app.currentView = appViewFirstRun
 		app.firstRun = NewSetupModeModel(projectDir, globalDir, orchDir, orchName)
 	} else if needsFirstRun {
@@ -314,6 +316,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.switchToView("mail")
 
 	case SetupSavedMsg:
+		if a.recoveryMode {
+			// Recovery: global config was lost but agents are intact.
+			// Propagate the new LLM + capabilities to all agents, init
+			// the mail view, and launch the orchestrator.
+			a.recoveryMode = false
+			a.tuiConfig = config.LoadTUIConfig(a.globalDir)
+			PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+			a.currentView = appViewMail
+			humanDir := filepath.Join(a.projectDir, "human")
+			addr := humanAddr(a.projectDir)
+			a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			if a.lingtaiCmd != "" {
+				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
+					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
+				}
+			}
+			return a, tea.Batch(a.mail.Init(), a.sendSize())
+		}
+		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
 		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 

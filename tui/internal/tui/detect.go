@@ -85,8 +85,12 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 			continue
 		}
 
-		// Replace LLM config
-		manifest["llm"] = orchLLM
+		// Replace LLM config (shallow copy to avoid shared references)
+		llmCopy := make(map[string]interface{}, len(orchLLM))
+		for k, v := range orchLLM {
+			llmCopy[k] = v
+		}
+		manifest["llm"] = llmCopy
 
 		// Replace capabilities — strip admin and addons
 		if orchCaps != nil {
@@ -95,6 +99,8 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 				capsCopy[k] = v
 			}
 			manifest["capabilities"] = capsCopy
+		} else {
+			delete(manifest, "capabilities")
 		}
 		manifest["admin"] = map[string]interface{}{"karma": false, "nirvana": false}
 		delete(initJSON, "addons")
