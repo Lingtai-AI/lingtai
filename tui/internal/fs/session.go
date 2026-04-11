@@ -3,6 +3,7 @@ package fs
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -243,7 +244,9 @@ func (sc *SessionCache) IngestEvents(orchDir string) {
 }
 
 // tailJSONL reads a JSONL file from the given byte offset, calls parseFn on each
-// line, and returns new SessionEntry values plus the updated offset.
+// complete line (terminated by \n), and returns new SessionEntry values plus the
+// updated offset. Lines without a trailing \n (partial writes at EOF) are NOT
+// consumed — they will be retried on the next poll.
 func (sc *SessionCache) tailJSONL(path string, offset int64, parseFn func([]byte) *SessionEntry) ([]SessionEntry, int64) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -259,22 +262,45 @@ func (sc *SessionCache) tailJSONL(path string, offset int64, parseFn func([]byte
 	if info.Size() < offset {
 		offset = 0 // file was truncated, restart from beginning
 	}
+	if info.Size() == offset {
+		return nil, offset // nothing new
+	}
 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, offset
 	}
 
+	// Read all new bytes from offset to current EOF.
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset
+	}
+
 	var entries []SessionEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if e := parseFn(scanner.Bytes()); e != nil {
+	consumed := int64(0)
+
+	for len(data) > 0 {
+		idx := bytes.IndexByte(data, '\n')
+		if idx < 0 {
+			// No newline — partial line at EOF, do not consume.
+			break
+		}
+		line := data[:idx]
+		data = data[idx+1:]
+		consumed += int64(idx) + 1
+
+		// Strip \r for \r\n endings.
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 {
+			continue
+		}
+
+		if e := parseFn(line); e != nil {
 			entries = append(entries, *e)
 		}
 	}
 
-	newOff, _ := f.Seek(0, io.SeekCurrent)
-	return entries, newOff
+	return entries, offset + consumed
 }
 
 func parseEvent(line []byte) *SessionEntry {
