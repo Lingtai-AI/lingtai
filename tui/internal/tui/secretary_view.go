@@ -209,6 +209,8 @@ func (m SecretaryModel) renderStatusHeader() string {
 		} else {
 			state = "unknown"
 		}
+	} else if fs.HasRefreshTaken(secAgentDir) {
+		state = "refreshing"
 	}
 
 	stateLabel := strings.ToUpper(state)

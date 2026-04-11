@@ -247,6 +247,7 @@
   "state.idle": "定",
   "state.stuck": "滞",
   "state.suspended": "假死",
+  "state.refreshing": "更衣",
   "palette.doctor": "诊连",
   "doctor.title": "诊",
   "doctor.checking": "诊中...",

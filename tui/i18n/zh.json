@@ -247,6 +247,7 @@
   "state.idle": "待命",
   "state.stuck": "卡顿",
   "state.suspended": "假死",
+  "state.refreshing": "沐浴",
   "palette.doctor": "诊断连接问题",
   "doctor.title": "诊断",
   "doctor.checking": "正在检查连接...",

@@ -252,6 +252,7 @@
   "state.idle": "idle",
   "state.stuck": "stuck",
   "state.suspended": "suspended",
+  "state.refreshing": "refreshing",
   "palette.doctor": "Diagnose connection issues",
   "doctor.title": "Doctor",
   "doctor.checking": "Checking connections...",

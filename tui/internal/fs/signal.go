@@ -23,10 +23,19 @@ func HasSignal(dir string, sig Signal) bool {
 	return err == nil
 }
 
+// HasRefreshTaken returns true if .refresh.taken exists — agent is mid-refresh.
+func HasRefreshTaken(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".refresh.taken"))
+	return err == nil
+}
+
 func CleanSignals(dir string) {
 	for _, sig := range []Signal{SignalSleep, SignalSuspend, SignalInterrupt} {
 		os.Remove(filepath.Join(dir, string(sig)))
 	}
+	// Clean refresh handshake files
+	os.Remove(filepath.Join(dir, ".refresh"))
+	os.Remove(filepath.Join(dir, ".refresh.taken"))
 }
 
 // SuspendAndWait sends a suspend signal and waits for the agent to die.

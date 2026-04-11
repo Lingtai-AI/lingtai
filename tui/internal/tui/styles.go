@@ -275,6 +275,8 @@ func StateColor(state string) color.Color {
 		return ColorAsleep
 	case "SUSPENDED":
 		return ColorSuspended
+	case "REFRESHING":
+		return ColorIdle
 	default:
 		return ColorTextDim
 	}

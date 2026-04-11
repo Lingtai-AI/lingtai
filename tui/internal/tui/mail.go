@@ -263,7 +263,11 @@ func (m MailModel) refreshMail() tea.Msg {
 		}
 	}
 	if !alive {
-		state = "suspended"
+		if fs.HasRefreshTaken(m.orchestrator) {
+			state = "refreshing"
+		} else {
+			state = "suspended"
+		}
 	}
 	return mailRefreshMsg{cache: cache, alive: alive, state: state, orchName: orchName, orchNickname: orchNickname}
 }
