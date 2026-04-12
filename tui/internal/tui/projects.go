@@ -28,7 +28,7 @@ type projectSource int
 
 const (
 	projectSourceRegistry projectSource = iota // registered projects from config
-	projectSourceAgora                         // published networks from ~/lingtai-agora/projects/
+	projectSourceAgora                         // exported networks from ~/lingtai-agora/networks/
 )
 
 // ProjectsModel is a two-panel view: project list (left) + agent details (right).
@@ -55,7 +55,7 @@ func NewProjectsModel(globalDir, projectDir string) ProjectsModel {
 	}
 }
 
-// NewAgoraModel creates a ProjectsModel that scans ~/lingtai-agora/projects/.
+// NewAgoraModel creates a ProjectsModel that scans ~/lingtai-agora/networks/.
 func NewAgoraModel(globalDir, projectDir string) ProjectsModel {
 	return ProjectsModel{
 		globalDir:  globalDir,
@@ -77,7 +77,7 @@ const (
 func (m ProjectsModel) loadData() tea.Msg {
 	var paths []string
 	if m.source == projectSourceAgora {
-		paths = scanAgoraProjects()
+		paths = scanAgoraNetworks()
 	} else {
 		paths = config.LoadAndPrune(m.globalDir)
 	}
@@ -99,18 +99,27 @@ func (m ProjectsModel) loadData() tea.Msg {
 	return projectsLoadMsg{projects: projects}
 }
 
-// scanAgoraProjects returns paths to all directories under ~/lingtai-agora/projects/
-// that contain a .lingtai/ subdirectory.
-func scanAgoraProjects() []string {
+// scanAgoraNetworks returns paths to all directories under ~/lingtai-agora/networks/
+// that contain a .lingtai/ subdirectory. Falls back to ~/lingtai-agora/projects/
+// for backward compatibility with pre-export naming.
+func scanAgoraNetworks() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	agoraDir := filepath.Join(home, "lingtai-agora", "projects")
+
+	// Try networks/ first, fall back to legacy projects/
+	agoraDir := filepath.Join(home, "lingtai-agora", "networks")
 	entries, err := os.ReadDir(agoraDir)
 	if err != nil {
-		return nil
+		// Fallback: try legacy projects/ path
+		agoraDir = filepath.Join(home, "lingtai-agora", "projects")
+		entries, err = os.ReadDir(agoraDir)
+		if err != nil {
+			return nil
+		}
 	}
+
 	var paths []string
 	for _, e := range entries {
 		if !e.IsDir() {

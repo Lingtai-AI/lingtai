@@ -42,11 +42,17 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, customDir string) {
 		linkRecipeDir(skillsDir, customDir, recipeName, lang, claimed)
 	}
 
-	// 3. Agora projects
+	// 3. Agora networks (try networks/ first, fall back to legacy projects/)
 	home, err := os.UserHomeDir()
 	if err == nil {
-		agoraRoot := filepath.Join(home, "lingtai-agora", "projects")
-		if entries, err := os.ReadDir(agoraRoot); err == nil {
+		agoraRoot := filepath.Join(home, "lingtai-agora", "networks")
+		entries, readErr := os.ReadDir(agoraRoot)
+		if readErr != nil {
+			// Fallback: try legacy projects/ path
+			agoraRoot = filepath.Join(home, "lingtai-agora", "projects")
+			entries, readErr = os.ReadDir(agoraRoot)
+		}
+		if readErr == nil {
 			for _, e := range entries {
 				if !e.IsDir() {
 					continue
