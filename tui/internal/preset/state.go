@@ -11,8 +11,8 @@ import (
 // project-level file tracking the currently selected launch recipe.
 // The Python kernel ignores this file.
 type RecipeState struct {
-	Recipe    string `json:"recipe"`               // one of the six recipe names (adaptive, greeter, plain, tutorial, custom, imported)
-	CustomDir string `json:"custom_dir,omitempty"` // set when Recipe == RecipeCustom or RecipeImported
+	Recipe    string `json:"recipe"`               // one of the seven recipe names (adaptive, greeter, plain, tutorial, custom, imported, agora)
+	CustomDir string `json:"custom_dir,omitempty"` // set when Recipe == RecipeCustom, RecipeImported, or RecipeAgora
 }
 
 // recipeStatePath returns the absolute path to .lingtai/.tui-asset/.recipe.
