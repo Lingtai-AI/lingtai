@@ -1,13 +1,21 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
+
+// recipeUsesCustomDir returns true for recipe types that store their directory
+// in customDir rather than under the bundled recipes path.
+func recipeUsesCustomDir(name string) bool {
+	return name == preset.RecipeCustom || name == preset.RecipeImported || name == preset.RecipeAgora
+}
 
 // applyRecipe writes .prompt (from recipe's greet file with placeholder
 // substitution) and .tui-asset/.recipe (recipe state tracking). Does NOT
@@ -18,7 +26,7 @@ func applyRecipe(
 	recipeName, customDir, lang, soulDelay string,
 ) error {
 	var recipeDir string
-	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+	if recipeUsesCustomDir(recipeName) {
 		recipeDir = customDir
 	} else {
 		recipeDir = preset.RecipeDir(globalDir, recipeName)
@@ -34,7 +42,7 @@ func applyRecipe(
 	}
 
 	state := preset.RecipeState{Recipe: recipeName}
-	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+	if recipeUsesCustomDir(recipeName) {
 		state.CustomDir = customDir
 	}
 	return preset.SaveRecipeState(lingtaiDir, state)
@@ -44,7 +52,7 @@ func applyRecipe(
 // caller to set on AgentOpts.CommentFile.
 func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string {
 	var recipeDir string
-	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+	if recipeUsesCustomDir(recipeName) {
 		recipeDir = customDir
 	} else {
 		recipeDir = preset.RecipeDir(globalDir, recipeName)
@@ -57,7 +65,7 @@ func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string 
 // the system-wide covenant.
 func resolveRecipeCovenant(globalDir, recipeName, customDir, lang string) string {
 	var recipeDir string
-	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+	if recipeUsesCustomDir(recipeName) {
 		recipeDir = customDir
 	} else {
 		recipeDir = preset.RecipeDir(globalDir, recipeName)
@@ -70,7 +78,7 @@ func resolveRecipeCovenant(globalDir, recipeName, customDir, lang string) string
 // the system-wide procedures.
 func resolveRecipeProcedures(globalDir, recipeName, customDir, lang string) string {
 	var recipeDir string
-	if recipeName == preset.RecipeCustom || recipeName == preset.RecipeImported {
+	if recipeUsesCustomDir(recipeName) {
 		recipeDir = customDir
 	} else {
 		recipeDir = preset.RecipeDir(globalDir, recipeName)
@@ -128,5 +136,16 @@ func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay 
 		}
 	}
 	out = strings.ReplaceAll(out, "{{location}}", loc)
+
+	// Generate slash command list from palette commands + i18n detailed descriptions
+	if strings.Contains(out, "{{commands}}") {
+		var cmds []string
+		for _, cmd := range DefaultCommands() {
+			desc := i18n.TIn(lang, cmd.Detail)
+			cmds = append(cmds, fmt.Sprintf("  - /%s — %s", cmd.Name, desc))
+		}
+		out = strings.ReplaceAll(out, "{{commands}}", strings.Join(cmds, "\n"))
+	}
+
 	return out
 }
