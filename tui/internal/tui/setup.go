@@ -92,13 +92,13 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		case "up", "left":
 			if m.step == stepSelectProvider {
 				m.providerIdx = (m.providerIdx - 1 + len(providers)) % len(providers)
+				return m, nil
 			}
-			return m, nil
 		case "down", "right":
 			if m.step == stepSelectProvider {
 				m.providerIdx = (m.providerIdx + 1) % len(providers)
+				return m, nil
 			}
-			return m, nil
 		case "tab":
 			if m.step == stepSelectProvider {
 				m.providerIdx = (m.providerIdx + 1) % len(providers)
