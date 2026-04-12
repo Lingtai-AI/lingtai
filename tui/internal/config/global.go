@@ -132,6 +132,9 @@ func WriteEnvFile(globalDir string, cfg Config) error {
 			continue
 		}
 		envKey := providerToEnvKey(provider)
+		if envKey == "" {
+			continue // OAuth providers don't use .env
+		}
 		lines = append(lines, envKey+"="+key)
 	}
 	path := EnvFilePath(globalDir)
@@ -145,6 +148,8 @@ func providerToEnvKey(provider string) string {
 		return "MINIMAX_API_KEY"
 	case "zhipu":
 		return "ZHIPU_API_KEY"
+	case "codex":
+		return "" // OAuth — no env var
 	default:
 		return "LLM_API_KEY"
 	}

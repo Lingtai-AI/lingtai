@@ -75,7 +75,7 @@ func List() ([]Preset, error) {
 			return !bi // saved (non-builtin) before builtin
 		}
 		if bi { // both builtin: minimax → zhipu → custom
-			order := map[string]int{"minimax": 0, "zhipu": 1, "custom": 2}
+			order := map[string]int{"minimax": 0, "zhipu": 1, "codex": 2, "custom": 3}
 			return order[presets[i].Name] < order[presets[j].Name]
 		}
 		return presets[i].Name < presets[j].Name
@@ -166,6 +166,7 @@ func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
 		zhipuPreset(),
+		codexPreset(),
 		customPreset(),
 	}
 }
@@ -174,6 +175,7 @@ func BuiltinPresets() []Preset {
 var builtinNames = map[string]bool{
 	"minimax": true,
 	"zhipu":   true,
+	"codex":   true,
 	"custom":  true,
 }
 
@@ -233,6 +235,30 @@ func zhipuPreset() Preset {
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": zp, "psyche": e(), "library": e(),
 				"vision": zp, "web_read": zp,
+				"avatar": e(), "daemon": e(),
+				"listen": e(), "skills": e(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func codexPreset() Preset {
+	cx := map[string]interface{}{"provider": "codex", "api_key_env": ""}
+	return Preset{
+		Name:        "codex",
+		Description: "ChatGPT account — vision + web search + tools",
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "codex", "model": "gpt-5.4",
+				"api_key": nil, "api_key_env": "",
+				"base_url": "https://chatgpt.com/backend-api",
+			},
+			"capabilities": map[string]interface{}{
+				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": cx, "psyche": e(), "library": e(),
+				"vision": cx, "web_read": cx,
 				"avatar": e(), "daemon": e(),
 				"listen": e(), "skills": e(),
 			},
