@@ -20,11 +20,11 @@ You can't just copy the folder. It's full of API keys, absolute paths, heartbeat
 
 You could write documentation. But the value isn't in the documentation — it's in the network itself. The agents, their blueprints, their mail archives, their skill configurations.
 
-## The solution: `/agora publish`
+## The solution: `/export network`
 
-Type `/agora publish` in the TUI. Your orchestrator will walk you through a 7-step publishing flow:
+Type `/export network` in the TUI. Your orchestrator will walk you through a 7-step publishing flow:
 
-1. **Name your project** and copy it to a staging area (`~/lingtai-agora/projects/<name>/`)
+1. **Name your project** and copy it to a staging area (`~/lingtai-agora/networks/<name>/`)
 2. **Scrub ephemeral state** — API keys, heartbeat files, process locks, logs, portal cache. Everything that's machine-specific gets removed. Everything that's network-specific stays.
 3. **Process mail** — you decide how much conversation history to keep. Recent context that helps new users understand the network? Keep it. Years of back-and-forth? Trim to the last month.
 4. **Review the project** — walk through every directory, flag large files, decide what to include. Nested git repos, datasets, credentials — you make the call on each one.
@@ -72,9 +72,9 @@ They didn't write a single line of configuration. They didn't read your document
 
 Two new commands in the palette:
 
-- **`/agora`** — browse all your published networks. Same two-panel view as `/projects`, but scanning `~/lingtai-agora/projects/` instead of the registry. See agent counts, states, and network stats at a glance.
+- **`/agora`** — browse all your published networks. Same two-panel view as `/projects`, but scanning `~/lingtai-agora/networks/` instead of the registry. See agent counts, states, and network stats at a glance.
 
-- **`/agora publish`** — kick off the publishing flow. The TUI writes a prompt to your orchestrator asking it to use the `lingtai-agora` skill. The agent reaches out to you via email and walks you through the process.
+- **`/export network`** — kick off the publishing flow. The TUI writes a prompt to your orchestrator asking it to use the `lingtai-agora` skill. The agent reaches out to you via email and walks you through the process.
 
 ## Try it
 
@@ -83,7 +83,7 @@ brew install huangzesen/lingtai/lingtai-tui
 lingtai-tui
 ```
 
-Build a network. Teach it something. Then type `/agora publish` and share it with the world.
+Build a network. Teach it something. Then type `/export network` and share it with the world.
 
 The network IS the product. Now you can ship it.
 
