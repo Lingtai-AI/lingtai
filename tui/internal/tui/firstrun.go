@@ -1495,7 +1495,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "down":
-				if m.swapConfirmIdx < 2 {
+				if m.swapConfirmIdx < 1 {
 					m.swapConfirmIdx++
 				}
 				return m, nil
@@ -1508,14 +1508,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				switch m.swapConfirmIdx {
 				case 0: // Swap in place
 					return m.performRecipeSave(m.pendingRecipeName, m.pendingCustomDir)
-				case 1: // Fresh start
-					return m, func() tea.Msg {
-						return RecipeFreshStartMsg{
-							Recipe:    m.pendingRecipeName,
-							CustomDir: m.pendingCustomDir,
-						}
-					}
-				case 2: // Cancel
+				case 1: // Cancel
 					m.step = stepRecipe
 					return m, nil
 				}
@@ -2810,7 +2803,6 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 	}
 	opts := []option{
 		{i18n.T("recipe.swap_inplace"), i18n.T("recipe.swap_inplace_desc"), false},
-		{i18n.T("recipe.swap_fresh"), i18n.T("recipe.swap_fresh_desc"), true},
 		{i18n.T("recipe.swap_cancel"), "", false},
 	}
 
@@ -2832,6 +2824,8 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 			b.WriteString("    " + StyleFaint.Render(opt.desc) + "\n")
 		}
 	}
+
+	b.WriteString("\n  " + StyleFaint.Render(i18n.T("recipe.swap_nirvana_hint")) + "\n")
 
 	b.WriteString("\n" + StyleFaint.Render(
 		"  ↑↓ "+i18n.T("welcome.select_lang")+

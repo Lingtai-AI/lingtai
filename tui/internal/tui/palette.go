@@ -58,7 +58,7 @@ func DefaultCommands() []Command {
 		{Name: "kanban", Description: "palette.kanban", Detail: "cmd.kanban"},
 		{Name: "projects", Description: "palette.projects", Detail: "cmd.projects"},
 		{Name: "agora", Description: "palette.agora", Detail: "cmd.agora"},
-		{Name: "export", Description: "palette.export"},
+		{Name: "export", Description: "palette.export", Detail: "cmd.export"},
 		{Name: "skills", Description: "palette.skills", Detail: "cmd.skills"},
 		{Name: "insights", Description: "palette.insights", Detail: "cmd.insights"},
 		{Name: "secretary", Description: "palette.secretary", Detail: "cmd.secretary"},

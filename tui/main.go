@@ -262,6 +262,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
 			os.Exit(1)
 		}
+		tui.ExportCommandsJSON(globalDir)
 		// Resolve human location in background (ipinfo.io, cached 1h)
 		humanDir := filepath.Join(lingtaiDir, "human")
 		go fs.UpdateHumanLocation(humanDir)

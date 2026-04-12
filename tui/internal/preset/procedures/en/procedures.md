@@ -9,6 +9,14 @@ When context pressure rises or you are told to molt, execute these four steps in
 
 Your molt summary is the ONLY thing your future self sees after molt. Include: every ongoing task, completed work, pending items, collaborators (names and addresses), relevant library IDs, decisions made, and any insight worth carrying forward. If you shortchange the summary, your future self starts blind.
 
+### Skill Consolidation (Before or During Molt)
+
+Before molting, review your recent work for **reusable pipelines** — sequences of tool calls, bash commands, or workflows that you have repeated or that would be useful again. If you find any, consolidate them into skills using `skills(action='register')`.
+
+A good skill candidate is any workflow you have executed more than once, or one that took significant effort to figure out and would be painful to rediscover after molt. Examples: data processing pipelines, API integration patterns, deployment procedures, testing workflows.
+
+If you have **admin privileges** (`admin.karma`), also check for duplicate or overlapping skills in the network using `skills(action='refresh')`. Merge duplicates by registering a consolidated version and removing the redundant ones. The network benefits from a clean, non-redundant skill library.
+
 ### Post-Wipe Recovery
 
 If you wake up after a forced context wipe (you ignored molt warnings), your conversation history is gone but your identity and memory were loaded automatically. To recover full context:
