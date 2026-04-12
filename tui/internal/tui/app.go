@@ -32,6 +32,7 @@ const (
 	appViewSkills
 	appViewProjects
 	appViewBriefs
+	appViewLogin
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -49,6 +50,7 @@ type App struct {
 	addon           AddonModel
 	doctor          DoctorModel
 	nirvana         NirvanaModel
+	login           LoginModel
 
 	inSecretaryView bool      // true when viewing secretary mail (within appViewMail)
 	lastEscTime     time.Time // for double-esc detection
@@ -206,6 +208,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.projects, cmd = a.projects.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
+		case appViewLogin:
+			a.login, cmd = a.login.Update(msg)
 		}
 		return a, cmd
 
@@ -224,6 +228,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doctorResultMsg:
 		if a.currentView == appViewDoctor {
 			a.doctor, _ = a.doctor.Update(msg)
+		}
+		return a, nil
+
+	case loginHealthMsg:
+		if a.currentView == appViewLogin {
+			a.login, _ = a.login.Update(msg)
+		}
+		return a, nil
+
+	case CodexOAuthDoneMsg:
+		if a.currentView == appViewLogin {
+			a.login, _ = a.login.Update(msg)
+		} else if a.currentView == appViewFirstRun {
+			a.firstRun, _ = a.firstRun.Update(msg)
 		}
 		return a, nil
 
@@ -409,7 +427,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewBriefs && a.currentView != appViewProjects {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewBriefs && a.currentView != appViewProjects && a.currentView != appViewLogin {
 				return a, tea.Quit
 			}
 		}
@@ -480,6 +498,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewProjects:
 		updated, cmd := a.projects.Update(msg)
 		a.projects = updated
+		return a, cmd
+	case appViewLogin:
+		var cmd tea.Cmd
+		a.login, cmd = a.login.Update(msg)
 		return a, cmd
 	}
 
@@ -655,6 +677,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(a.addon.Init(), a.sendSize())
 		}
 		return a, nil
+	case "login":
+		a.currentView = appViewLogin
+		a.login = NewLoginModel(a.orchDir, a.globalDir)
+		return a, tea.Batch(a.login.Init(), a.sendSize())
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
@@ -997,6 +1023,8 @@ func (a App) View() tea.View {
 		content = a.briefs.View()
 	case appViewProjects:
 		content = a.projects.View()
+	case appViewLogin:
+		content = a.login.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
