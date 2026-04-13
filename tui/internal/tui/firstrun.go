@@ -201,6 +201,7 @@ type FirstRunModel struct {
 	capProviders map[string]string  // user's chosen provider per capability (only for caps with ≥2 compatible options)
 	capOrder     []string           // ordered list matching AllCapabilities
 	capCursor    int                // current cursor position (0..len-1)
+	capAtKeep    bool               // true when "Keep current" is focused (setup mode only)
 	capLoading   bool               // true while check-caps is running
 	capErr       string             // error message if check-caps fails
 	// Addon selection state (shown below capabilities)
@@ -813,9 +814,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, cmd
 
 		case stepPickPreset:
+			presetMinIdx := 0
+			if m.setupMode {
+				presetMinIdx = -1 // allow "keep current" at index -1
+			}
 			switch msg.String() {
 			case "up":
-				if m.cursor > 0 {
+				if m.cursor > presetMinIdx {
 					m.cursor--
 				}
 			case "down":
@@ -823,6 +828,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.cursor++
 				}
 			case "enter":
+				if m.setupMode && m.cursor == -1 {
+					// Skip — keep existing preset, jump to capabilities
+					return m, m.enterCapabilities()
+				}
 				if m.cursor < len(m.presets) {
 					p := m.presets[m.cursor]
 					provider := m.getPresetProvider(p)
@@ -1229,7 +1238,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			colSize := (len(m.capOrder) + 1) / 2
 			switch msg.String() {
 			case "up":
-				if m.inAddonZone {
+				if m.capAtKeep {
+					// Already at "Keep current" — stay
+				} else if m.inAddonZone {
 					if m.addonCursor > 0 {
 						m.addonCursor--
 					} else {
@@ -1247,11 +1258,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						// Left column
 						if m.capCursor > 0 {
 							m.capCursor--
+						} else if m.setupMode {
+							m.capAtKeep = true
 						}
 					}
 				}
 			case "down":
-				if m.inAddonZone {
+				if m.capAtKeep {
+					m.capAtKeep = false
+					m.capCursor = 0
+				} else if m.inAddonZone {
 					if m.addonCursor < len(m.addonOrder)-1 {
 						m.addonCursor++
 					}
@@ -1277,14 +1293,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 				}
 			case "left":
-				if !m.inAddonZone && m.capCursor >= colSize {
+				if !m.capAtKeep && !m.inAddonZone && m.capCursor >= colSize {
 					m.capCursor -= colSize
 				}
 			case "right":
-				if !m.inAddonZone && m.capCursor < colSize && m.capCursor+colSize < len(m.capOrder) {
+				if !m.capAtKeep && !m.inAddonZone && m.capCursor < colSize && m.capCursor+colSize < len(m.capOrder) {
 					m.capCursor += colSize
 				}
 			case "space":
+				if m.capAtKeep {
+					return m, nil
+				}
 				if m.inAddonZone {
 					name := m.addonOrder[m.addonCursor]
 					m.addonSelected[name] = !m.addonSelected[name]
@@ -1301,7 +1320,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 			case "tab":
 				// Cycle the provider for the focused capability (if it has ≥2 compatible options).
-				if !m.inAddonZone {
+				if !m.capAtKeep && !m.inAddonZone {
 					name := m.capOrder[m.capCursor]
 					info := m.capInfos[name]
 					presetProvider := m.getPresetProvider(m.presets[m.cursor])
@@ -1333,12 +1352,21 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 				}
 			case "enter":
+				if m.capAtKeep {
+					// Skip — keep existing capabilities, jump to agent details
+					m.applyCapSelections()
+					p := m.presets[m.cursor]
+					m.enterAgentNameDir(p)
+					m.step = stepAgentNameDir
+					return m, textinput.Blink
+				}
 				m.applyCapSelections()
 				p := m.presets[m.cursor]
 				m.enterAgentNameDir(p)
 				m.step = stepAgentNameDir
 				return m, textinput.Blink
 			case "esc":
+				m.capAtKeep = false
 				m.step = stepPickPreset
 				return m, nil
 			case "ctrl+c":
@@ -1350,12 +1378,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			langs := []string{"en", "zh", "wen"}
 			switch msg.String() {
 			case "tab", "down":
+				if m.fieldIdx == -1 {
+					m.fieldIdx = 0
+					if (m.setupMode || m.rehydrateMode) {
+						m.fieldIdx = 0 // name field (dir is skipped)
+					}
+					return m, m.focusAgentField()
+				}
 				m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
 				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 2
 				}
 				return m, m.focusAgentField()
 			case "up":
+				if m.fieldIdx == 0 && m.setupMode {
+					m.fieldIdx = -1
+					return m, m.focusAgentField()
+				}
 				m.fieldIdx = (m.fieldIdx - 1 + agentNameDirFieldCount) % agentNameDirFieldCount
 				if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 { // skip dir field
 					m.fieldIdx = 0
@@ -1384,6 +1423,56 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "enter":
+				if m.fieldIdx == -1 && m.setupMode {
+					// Skip — keep existing agent settings, jump to recipe.
+					// Stash current values for stepRecipe.
+					stamina, _ := strconv.ParseFloat(m.staminaInput.Value(), 64)
+					if stamina <= 0 {
+						stamina = 36000
+					}
+					ctxLimit, _ := strconv.Atoi(m.ctxLimitInput.Value())
+					if ctxLimit <= 0 {
+						ctxLimit = 200000
+					}
+					soulDelay, _ := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
+					if soulDelay <= 0 {
+						soulDelay = 120
+					}
+					moltPress, _ := strconv.ParseFloat(m.moltPressInput.Value(), 64)
+					if moltPress <= 0 || moltPress > 1 {
+						moltPress = 0.8
+					}
+					opts := preset.AgentOpts{
+						Language:      langs[m.agentLangIdx],
+						Stamina:       stamina,
+						ContextLimit:  ctxLimit,
+						SoulDelay:     soulDelay,
+						MoltPressure:  moltPress,
+						Karma:         m.karmaIdx == 0,
+						Nirvana:       m.nirvanaIdx == 0,
+						CovenantFile:  m.covenantInput.Value(),
+						PrincipleFile: m.principleInput.Value(),
+						SoulFile:      m.soulFlowInput.Value(),
+					}
+					var selectedAddons []string
+					for _, addonName := range m.addonOrder {
+						if m.addonSelected[addonName] {
+							selectedAddons = append(selectedAddons, addonName)
+						}
+					}
+					opts.Addons = selectedAddons
+					m.pendingAgentOpts = opts
+					m.pendingDirName = filepath.Base(m.setupOrchDir)
+					m.agentName = m.nameInput.Value()
+					m.step = stepRecipe
+					m.message = ""
+					if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
+						m.recipeCustomInput.Focus()
+					} else {
+						m.recipeCustomInput.Blur()
+					}
+					return m, nil
+				}
 				name := m.nameInput.Value()
 				if name == "" {
 					name = m.presets[m.cursor].Name
@@ -1716,6 +1805,21 @@ func (m FirstRunModel) View() string {
 	case stepPickPreset:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.pick_preset"), stepNum, total)) + "\n\n")
+		if m.setupMode {
+			cursor := "  "
+			style := lipgloss.NewStyle()
+			if m.cursor == -1 {
+				cursor = "> "
+				style = style.Bold(true).Foreground(ColorAccent)
+			} else {
+				style = style.Bold(true).Foreground(ColorAgent)
+			}
+			keepLabel := i18n.T("setup.keep_current_preset")
+			b.WriteString(cursor + style.Render(keepLabel) + "\n")
+			keepDesc := i18n.T("setup.keep_current_preset_desc")
+			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
+			b.WriteString("\n  " + StyleFaint.Render("────") + "\n")
+		}
 		savedCount := preset.SavedCount(m.presets)
 		for i, p := range m.presets {
 			// Section headers between saved and template presets
@@ -1908,6 +2012,22 @@ func (m FirstRunModel) View() string {
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_caps")) + "\n\n")
 
+		if m.setupMode {
+			cursor := "  "
+			style := lipgloss.NewStyle()
+			if m.capAtKeep {
+				cursor = "> "
+				style = style.Bold(true).Foreground(ColorAccent)
+			} else {
+				style = style.Bold(true).Foreground(ColorAgent)
+			}
+			keepLabel := i18n.T("setup.keep_current_caps")
+			b.WriteString(cursor + style.Render(keepLabel) + "\n")
+			keepDesc := i18n.T("setup.keep_current_caps_desc")
+			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
+			b.WriteString("\n  " + StyleFaint.Render("────") + "\n\n")
+		}
+
 		if m.capLoading {
 			b.WriteString("  " + StyleSubtle.Render(i18n.T("firstrun.checking_caps")) + "\n")
 			return b.String()
@@ -2061,6 +2181,22 @@ func (m FirstRunModel) View() string {
 	case stepAgentNameDir:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n")
+
+		if m.setupMode {
+			cursor := "  "
+			style := lipgloss.NewStyle()
+			if m.fieldIdx == -1 {
+				cursor = "> "
+				style = style.Bold(true).Foreground(ColorAccent)
+			} else {
+				style = style.Bold(true).Foreground(ColorAgent)
+			}
+			keepLabel := i18n.T("setup.keep_current_settings")
+			b.WriteString(cursor + style.Render(keepLabel) + "\n")
+			keepDesc := i18n.T("setup.keep_current_settings_desc")
+			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
+			b.WriteString("\n  " + StyleFaint.Render("────") + "\n")
+		}
 
 		langs := []string{"en", "zh", "wen"}
 		sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
@@ -2505,6 +2641,7 @@ func (m *FirstRunModel) initCapProviders() {
 func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.step = stepCapabilities
 	m.capLoading = true
+	m.capAtKeep = false
 	m.capErr = ""
 	m.capCursor = 0
 	m.capOrder = AllCapabilities
