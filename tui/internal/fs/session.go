@@ -40,8 +40,8 @@ type SessionCache struct {
 }
 
 // NewSessionCache opens (or creates) session.jsonl and loads existing entries
-// into memory. For the TUI mail view, call RebuildFromSources immediately
-// after to rebuild from the canonical data sources (mail, events, inquiries).
+// into memory. Call RebuildFromSources or SyncFromSources after construction
+// depending on whether the cache is stale (see NeedsRebuild).
 func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 	logsDir := filepath.Join(humanDir, "logs")
 	os.MkdirAll(logsDir, 0o755)
@@ -56,6 +56,30 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 	}
 	sc.loadExisting()
 	return sc
+}
+
+// NeedsRebuild returns true if session.jsonl is missing, empty, or its mtime
+// is older than maxAge. When false, the caller can use SyncFromSources (fast
+// tail) instead of RebuildFromSources (full re-read).
+func (sc *SessionCache) NeedsRebuild(maxAge time.Duration) bool {
+	info, err := os.Stat(sc.path)
+	if err != nil || info.Size() == 0 {
+		return true
+	}
+	return time.Since(info.ModTime()) > maxAge
+}
+
+// SyncFromSources is the fast path: sets offsets to EOF for events and
+// inquiries (since loadExisting already has them), then calls Refresh to
+// tail only genuinely new entries. Mail dedup is handled by mailSeen.
+func (sc *SessionCache) SyncFromSources(cache MailCache, humanAddr, orchDir, orchName string) {
+	// Set offsets to current EOF so Refresh only reads new bytes.
+	if orchDir != "" {
+		sc.eventsOff = fileSize(filepath.Join(orchDir, "logs", "events.jsonl"))
+		sc.inquiryOff = fileSize(filepath.Join(orchDir, "logs", "soul_inquiry.jsonl"))
+	}
+	// Ingest any new mail (deduped via mailSeen populated by loadExisting).
+	sc.IngestMail(cache, humanAddr, orchDir, orchName)
 }
 
 func (sc *SessionCache) loadExisting() {
