@@ -155,9 +155,18 @@ All recipe files (greet.md, comment.md, covenant.md, procedures.md, skill direct
 |---|---|---|
 | Bundled | `~/.lingtai-tui/recipes/<name>/` | Always (shipped with TUI) |
 | Custom | User-specified directory | When set via `/setup` |
-| Agora | `<project>/.lingtai-recipe/` | When agora project exists |
+| Shared | `<project>/.lingtai-recipe/` | Auto-discovered by TUI at setup |
 
 All types follow the same directory structure and rules.
+
+## The `.lingtai-recipe/` Convention
+
+Both `/export recipe` and `/export network` produce a `.lingtai-recipe/` directory in the project root. This is the **unified convention** for all shared recipes:
+
+- **Exported recipe** = a repo with `.lingtai-recipe/` and `recipe.json` at root (no `.lingtai/`)
+- **Exported network** = a repo with `.lingtai-recipe/` AND `.lingtai/` (full network state)
+
+The recipient clones either kind of repo and opens it with `lingtai-tui`. The TUI auto-discovers `.lingtai-recipe/` via `ProjectLocalRecipeDir()` and uses it during setup. No manual path entry needed.
 
 ## How to Create a Custom Recipe
 
@@ -168,7 +177,7 @@ All types follow the same directory structure and rules.
 
 ## How to Publish a Recipe
 
-When you run `/export network` (or `/export recipe` for a recipe-only export), the export flow includes a step to create a launch recipe at `.lingtai-recipe/` in the project root. This recipe travels with the published network and is automatically used by recipients who clone it.
+Use `/export recipe` for a recipe-only export, or `/export network` for a full network snapshot. Both create `.lingtai-recipe/` in the output repo. The recipient clones the repo and opens it directly with `lingtai-tui` — no manual recipe path configuration needed.
 
 ## Testing
 
