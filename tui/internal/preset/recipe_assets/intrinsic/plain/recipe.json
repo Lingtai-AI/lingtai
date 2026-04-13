@@ -1,4 +1,4 @@
 {
   "name": "Plain",
-  "description": "Minimal — no greeting, no behavioral constraints"
+  "description": "No greeting, no behavioral constraints. The agent starts silent and waits for mail. For developers and power users who know the system."
 }
