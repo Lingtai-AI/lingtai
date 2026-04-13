@@ -445,7 +445,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	m.currentRecipe = state.Recipe
 	m.currentCustomDir = state.CustomDir
 	m.preselectedRecipe = state.Recipe
-	m.recipeIdx = m.recipeNameToIdx(state.Recipe)
+	m.recipeIdx = -1 // default to "keep current" in setup mode
 	if state.Recipe == preset.RecipeAgora && state.CustomDir != "" {
 		for i, ar := range m.agoraRecipes {
 			if ar.Dir == state.CustomDir {
@@ -1497,10 +1497,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 
 		case stepRecipe:
+			minIdx := 0
+			if m.setupMode {
+				minIdx = -1 // allow "keep current" at index -1
+			}
 			secretaryIdx := m.recipeMaxIdx() + 1
 			switch msg.String() {
 			case "up":
-				if m.recipeIdx > 0 {
+				if m.recipeIdx > minIdx {
 					m.recipeIdx--
 					m.recipeCustomErr = ""
 				}
@@ -1523,8 +1527,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "ctrl+o":
-				if m.recipeIdx == secretaryIdx {
-					return m, nil // no preview for secretary toggle
+				if m.recipeIdx == secretaryIdx || m.recipeIdx == -1 {
+					return m, nil // no preview for secretary toggle or keep-current
 				}
 				recipeDir := m.resolveCurrentRecipeDir()
 				if recipeDir == "" {
@@ -1544,6 +1548,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "ctrl+c":
 				return m, tea.Quit
 			case "enter", " ":
+				// "Keep current" — save init.json only, skip recipe/prompt rewrite
+				if m.recipeIdx == -1 {
+					return m.performSetupSaveOnly()
+				}
+
 				// Secretary toggle: enter/space toggles the checkbox
 				if m.recipeIdx == secretaryIdx {
 					m.secretaryEnabled = !m.secretaryEnabled
@@ -2965,6 +2974,21 @@ func (m FirstRunModel) viewRecipe() string {
 
 	var leftBlock strings.Builder
 
+	// Render "keep current recipe" option in setup mode
+	if m.setupMode {
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		if m.recipeIdx == -1 {
+			cursor = "> "
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		}
+		keepLabel := i18n.T("recipe.keep_current")
+		leftBlock.WriteString(cursor + style.Render(keepLabel) + "\n")
+		keepDesc := i18n.T("recipe.keep_current_desc")
+		leftBlock.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
+		leftBlock.WriteString("\n  " + StyleFaint.Render("────") + "\n")
+	}
+
 	// Render imported recipe slot (if detected)
 	if m.hasImportedRecipe() {
 		importedIdx := 0
@@ -3118,6 +3142,42 @@ func (m FirstRunModel) resolveCurrentRecipeDir() string {
 	default:
 		return preset.RecipeDir(m.globalDir, recipeName)
 	}
+}
+
+// performSetupSaveOnly writes init.json with the updated runtime settings
+// but keeps the current recipe and does not rewrite .prompt.
+func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
+	p := m.presets[m.cursor]
+	dirName := filepath.Base(m.setupOrchDir)
+
+	// Resolve prompt file paths from current recipe (so init.json stays consistent)
+	lang := m.pendingAgentOpts.Language
+	if lang == "" {
+		lang = "en"
+	}
+	state, _ := preset.LoadRecipeState(m.baseDir)
+	if state.Recipe != "" {
+		customDir := state.CustomDir
+		if commentPath := resolveRecipeComment(m.globalDir, state.Recipe, customDir, lang); commentPath != "" {
+			m.pendingAgentOpts.CommentFile = commentPath
+		}
+		if covenantPath := resolveRecipeCovenant(m.globalDir, state.Recipe, customDir, lang); covenantPath != "" {
+			m.pendingAgentOpts.CovenantFile = covenantPath
+		}
+		if proceduresPath := resolveRecipeProcedures(m.globalDir, state.Recipe, customDir, lang); proceduresPath != "" {
+			m.pendingAgentOpts.ProceduresFile = proceduresPath
+		}
+	}
+
+	projectPath := filepath.Dir(m.baseDir)
+	m.pendingAgentOpts.BriefFile = fs.BriefFilePath(m.globalDir, projectPath)
+
+	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, m.pendingAgentOpts); err != nil {
+		m.message = i18n.TF("firstrun.error", err)
+		m.step = stepAgentNameDir
+		return m, nil
+	}
+	return m, func() tea.Msg { return SetupSavedMsg{} }
 }
 
 // performRecipeSave executes the full save for the chosen recipe and the
