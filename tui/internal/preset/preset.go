@@ -19,6 +19,11 @@ var covenantFS embed.FS
 //go:embed all:principle
 var principleFS embed.FS
 
+// Procedures are not localized — a single procedures.md lives at the root.
+// ProceduresPath() checks for a lang-specific override first (<lang>/procedures.md),
+// then falls back to the root file. To add a localized version in the future,
+// create procedures/<lang>/procedures.md here and it will take precedence.
+//
 //go:embed all:procedures
 var proceduresFS embed.FS
 
@@ -296,13 +301,13 @@ func PrinciplePath(globalDir, lang string) string {
 }
 
 // ProceduresPath returns the absolute path to the procedures file for a language.
-// Falls back to English if the requested language file does not exist.
+// Checks the lang-specific path first, falls back to the root procedures.md.
 func ProceduresPath(globalDir, lang string) string {
 	p := filepath.Join(globalDir, "procedures", lang, "procedures.md")
 	if _, err := os.Stat(p); err == nil {
 		return p
 	}
-	return filepath.Join(globalDir, "procedures", "en", "procedures.md")
+	return filepath.Join(globalDir, "procedures", "procedures.md")
 }
 
 // populate mirrors an embedded FS subtree to globalDir, skipping existing files.
