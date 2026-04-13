@@ -64,10 +64,40 @@ func NewAgoraModel(globalDir, projectDir string) ProjectsModel {
 	}
 }
 
+// SetSize updates the model's dimensions. Used by parent models
+// that relay window size.
+func (m *ProjectsModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+	vpHeight := h - projectsHeaderLines - projectsFooterLines
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if !m.ready {
+		m.viewport = viewport.New()
+		m.viewport.SetWidth(w)
+		m.viewport.SetHeight(vpHeight)
+		m.ready = true
+	} else {
+		m.viewport.SetWidth(w)
+		m.viewport.SetHeight(vpHeight)
+	}
+	m.syncViewportContent()
+}
+
 // projectsLoadMsg carries the loaded project list.
 type projectsLoadMsg struct {
 	projects []projectEntry
 }
+
+// agoraDetailMsg is sent when the user presses Enter on a network/recipe in agora mode.
+type agoraDetailMsg struct {
+	name string // display name
+	dir  string // path to recipe directory
+}
+
+// agoraTabToggleMsg is sent when the user presses Ctrl+T in agora mode.
+type agoraTabToggleMsg struct{}
 
 const (
 	projectsHeaderLines = 2
@@ -182,6 +212,20 @@ func (m ProjectsModel) Update(msg tea.Msg) (ProjectsModel, tea.Cmd) {
 			if m.cursor < len(m.projects)-1 {
 				m.cursor++
 				m.syncViewportContent()
+			}
+			return m, nil
+		case "enter":
+			if m.source == projectSourceAgora && m.cursor < len(m.projects) {
+				proj := m.projects[m.cursor]
+				recipeDir := filepath.Join(proj.Path, ".lingtai-recipe")
+				return m, func() tea.Msg {
+					return agoraDetailMsg{name: proj.Name, dir: recipeDir}
+				}
+			}
+			return m, nil
+		case "ctrl+t":
+			if m.source == projectSourceAgora {
+				return m, func() tea.Msg { return agoraTabToggleMsg{} }
 			}
 			return m, nil
 		case "r":
@@ -386,8 +430,10 @@ func (m ProjectsModel) renderRight(maxW int) string {
 
 func (m ProjectsModel) View() string {
 	titleKey := "projects.title"
+	footerHintKey := "hints.projects_nav"
 	if m.source == projectSourceAgora {
 		titleKey = "agora.title"
+		footerHintKey = "hints.agora_networks"
 	}
 	title := StyleTitle.Render("  "+i18n.T(titleKey)) + "\n" + strings.Repeat("\u2500", m.width)
 
@@ -396,7 +442,7 @@ func (m ProjectsModel) View() string {
 		scrollHint = " " + RuneBullet + " pgup/pgdn scroll"
 	}
 	footer := strings.Repeat("\u2500", m.width) + "\n" +
-		StyleFaint.Render("  "+i18n.T("hints.projects_nav")+scrollHint)
+		StyleFaint.Render("  "+i18n.T(footerHintKey)+scrollHint)
 
 	return title + "\n" + m.viewport.View() + "\n" + footer
 }
