@@ -55,8 +55,8 @@ func NewProjectsModel(globalDir, projectDir string) ProjectsModel {
 	}
 }
 
-// NewAgoraModel creates a ProjectsModel that scans ~/lingtai-agora/networks/.
-func NewAgoraModel(globalDir, projectDir string) ProjectsModel {
+// NewAgoraProjectsModel creates a ProjectsModel that scans ~/lingtai-agora/networks/.
+func NewAgoraProjectsModel(globalDir, projectDir string) ProjectsModel {
 	return ProjectsModel{
 		globalDir:  globalDir,
 		projectDir: projectDir,

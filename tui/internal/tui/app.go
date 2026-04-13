@@ -32,6 +32,7 @@ const (
 	appViewSkills
 	appViewProjects
 	appViewBriefs
+	appViewAgora
 	appViewLogin
 )
 
@@ -44,6 +45,7 @@ type App struct {
 	props       PropsModel
 	skills          MarkdownViewerModel
 	projects        ProjectsModel
+	agora           AgoraModel
 	secretaryMail   MailModel
 	briefs          MarkdownViewerModel
 	firstRun        FirstRunModel
@@ -206,6 +208,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.briefs, cmd = a.briefs.Update(msg)
 		case appViewProjects:
 			a.projects, cmd = a.projects.Update(msg)
+		case appViewAgora:
+			a.agora, cmd = a.agora.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		case appViewLogin:
@@ -290,7 +294,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ensure human folder exists before launching — InitProject is
 		// idempotent and prevents the race where the agent tries to
 		// send mail before the human mailbox is ready.
-		if err := process.InitProject(a.projectDir); err != nil {
+		if err := process.InitProject(a.projectDir, a.globalDir); err != nil {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -338,7 +342,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Nirvana complete: .lingtai/ wiped, go to first-run.
 		// Re-init project to recreate the human folder so agents can
 		// deliver mail once the new orchestrator starts.
-		process.InitProject(a.projectDir)
+		process.InitProject(a.projectDir, a.globalDir)
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -391,7 +395,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UsePresetMsg:
 		// Create agent from preset
-		process.InitProject(a.projectDir)
+		process.InitProject(a.projectDir, a.globalDir)
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil
@@ -427,7 +431,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewBriefs && a.currentView != appViewProjects && a.currentView != appViewLogin {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewSkills && a.currentView != appViewBriefs && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin {
 				return a, tea.Quit
 			}
 		}
@@ -498,6 +502,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewProjects:
 		updated, cmd := a.projects.Update(msg)
 		a.projects = updated
+		return a, cmd
+	case appViewAgora:
+		updated, cmd := a.agora.Update(msg)
+		a.agora = updated
 		return a, cmd
 	case appViewLogin:
 		var cmd tea.Cmd
@@ -711,7 +719,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			skillsDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".skills")
 		}
 		sk, prob := scanSkills(skillsDir)
-		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
+		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, a.tuiConfig.Language, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
 	case "secretary":
 		if a.inSecretaryView {
@@ -761,9 +769,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, a.sendSize()
 	case "agora":
-		a.currentView = appViewProjects
-		a.projects = NewAgoraModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		a.currentView = appViewAgora
+		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.agora.Init(), a.sendSize())
 	case "export":
 		if args != "network" && args != "recipe" {
 			addMsg(i18n.T("export.help"))
@@ -957,7 +965,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			skillsDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".skills")
 		}
 		sk, prob := scanSkills(skillsDir)
-		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, sk, prob), i18n.T("skills.title"))
+		a.skills = NewMarkdownViewer(buildSkillEntries(skillsDir, a.tuiConfig.Language, sk, prob), i18n.T("skills.title"))
 		return a, a.sendSize()
 	case "secretary":
 		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)
@@ -975,9 +983,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.projects.Init(), a.sendSize())
 	case "agora":
-		a.currentView = appViewProjects
-		a.projects = NewAgoraModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		a.currentView = appViewAgora
+		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
+		return a, tea.Batch(a.agora.Init(), a.sendSize())
 	case "addon":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
@@ -1023,6 +1031,8 @@ func (a App) View() tea.View {
 		content = a.briefs.View()
 	case appViewProjects:
 		content = a.projects.View()
+	case appViewAgora:
+		content = a.agora.View()
 	case appViewLogin:
 		content = a.login.View()
 	}
