@@ -35,8 +35,9 @@ func DetectOrchestrators(baseDir string) []string {
 }
 
 // PropagateOrchestratorConfig reads the orchestrator's init.json and copies
-// its LLM config and capabilities to every other agent in the .lingtai/
-// network. Admin privileges and addons are stripped from non-orchestrators.
+// its LLM config, capabilities, and soul delay to every other agent in the
+// .lingtai/ network. Admin privileges and addons are stripped from
+// non-orchestrators. The secretary agent keeps its own soul delay (9999999).
 // Skips directories that are not agents (no init.json) and "human".
 func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 	orchInitPath := filepath.Join(orchDir, "init.json")
@@ -57,6 +58,7 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		return nil
 	}
 	orchCaps, _ := orchManifest["capabilities"].(map[string]interface{})
+	orchSoul, _ := orchManifest["soul"].(map[string]interface{})
 	orchEnvFile, _ := orchInit["env_file"].(string)
 
 	entries, err := os.ReadDir(baseDir)
@@ -102,6 +104,15 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		} else {
 			delete(manifest, "capabilities")
 		}
+		// Propagate soul delay (skip secretary — it uses 9999999 to disable soul)
+		if orchSoul != nil && entry.Name() != "secretary" {
+			soulCopy := make(map[string]interface{}, len(orchSoul))
+			for k, v := range orchSoul {
+				soulCopy[k] = v
+			}
+			manifest["soul"] = soulCopy
+		}
+
 		manifest["admin"] = map[string]interface{}{"karma": false, "nirvana": false}
 		delete(initJSON, "addons")
 
