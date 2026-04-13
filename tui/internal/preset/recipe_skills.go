@@ -90,7 +90,11 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 	}
 
 	// 4. Clean up stale group dirs that are no longer active.
+	// If a stray directory contains SKILL.md, it's a misplaced skill
+	// (agent wrote to .skills/<name>/ instead of .skills/custom/<name>/).
+	// Rescue it into custom/ rather than deleting it.
 	if entries, err := os.ReadDir(skillsDir); err == nil {
+		customDir := filepath.Join(skillsDir, "custom")
 		for _, e := range entries {
 			name := e.Name()
 			if activeGroups[name] || isHidden(name) {
@@ -101,7 +105,22 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 			if err != nil {
 				continue
 			}
-			if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			if info.IsDir() {
+				// Check if this is a misplaced skill (has SKILL.md)
+				if _, serr := os.Stat(filepath.Join(p, "SKILL.md")); serr == nil {
+					// Rescue into custom/
+					os.MkdirAll(customDir, 0o755)
+					dst := filepath.Join(customDir, name)
+					if _, derr := os.Stat(dst); derr != nil {
+						// Only move if not already in custom/
+						if err := os.Rename(p, dst); err == nil {
+							fmt.Printf("  rescued misplaced skill %q → custom/%s\n", name, name)
+							continue
+						}
+					}
+				}
+				os.RemoveAll(p)
+			} else if info.Mode()&os.ModeSymlink != 0 {
 				os.RemoveAll(p)
 			}
 		}

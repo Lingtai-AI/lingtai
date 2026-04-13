@@ -60,7 +60,9 @@ The skill store at `.lingtai/.skills/` is organized into group folders:
       SKILL.md
 ```
 
-**When creating a new skill, always place it under `.skills/custom/`.** Group folders can nest arbitrarily deep — a folder with `SKILL.md` is a skill; a folder containing only subfolders is a group.
+**When creating a new skill, always place it under `.skills/custom/`.** Never write directly to `.skills/<name>/` — the TUI manages the top-level namespace and will move or remove anything outside `custom/` on the next launch. If you put a skill at the wrong level, it will disappear.
+
+Group folders can nest arbitrarily deep — a folder with `SKILL.md` is a skill; a folder containing only subfolders is a group.
 
 ```
 custom/
