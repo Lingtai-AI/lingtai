@@ -2873,6 +2873,9 @@ func (m FirstRunModel) recipeNameToIdx(name string) int {
 }
 
 func (m FirstRunModel) recipeIdxToName(idx int) string {
+	if idx < 0 {
+		return "" // sentinel for "keep current" in setup mode
+	}
 	if m.hasImportedRecipe() {
 		if idx == 0 {
 			return preset.RecipeImported

@@ -105,17 +105,19 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		} else {
 			delete(manifest, "capabilities")
 		}
-		// Propagate runtime settings
-		if orchSoul != nil && entry.Name() != "secretary" {
-			soulCopy := make(map[string]interface{}, len(orchSoul))
-			for k, v := range orchSoul {
-				soulCopy[k] = v
+		// Propagate runtime settings (secretary keeps its own config)
+		if entry.Name() != "secretary" {
+			if orchSoul != nil {
+				soulCopy := make(map[string]interface{}, len(orchSoul))
+				for k, v := range orchSoul {
+					soulCopy[k] = v
+				}
+				manifest["soul"] = soulCopy
 			}
-			manifest["soul"] = soulCopy
-		}
-		for _, key := range []string{"stamina", "context_limit", "molt_pressure"} {
-			if v, ok := orchManifest[key]; ok {
-				manifest[key] = v
+			for _, key := range []string{"stamina", "context_limit", "molt_pressure"} {
+				if v, ok := orchManifest[key]; ok {
+					manifest[key] = v
+				}
 			}
 		}
 
