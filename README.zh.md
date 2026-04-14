@@ -79,6 +79,28 @@ curl -L "https://github.com/huangzesen/lingtai/archive/refs/tags/${VERSION}.tar.
 
 </details>
 
+## 与编程智能体配合使用
+
+灵台器灵生活在文件系统中。任何能读写文件的编程智能体都可以与它们对话。
+
+**Claude Code** — 安装 [lingtai 插件](https://github.com/Lingtai-AI/claude-code-plugin)：
+
+```bash
+claude plugin add Lingtai-AI/claude-code-plugin
+```
+
+**Codex CLI / OpenCode / OpenClaw / Hermes** — 安装 [邮箱技能](https://github.com/Lingtai-AI/lingtai-mailbox-skill)：
+
+```bash
+# OpenCode（全局）
+git clone https://github.com/Lingtai-AI/lingtai-mailbox-skill.git ~/.config/opencode/skills/lingtai-mailbox-skill
+
+# Codex CLI — 追加到 AGENTS.md
+cat lingtai-mailbox-skill/skills/lingtai-mailbox/SKILL.md >> AGENTS.md
+```
+
+连接后，编程智能体共享 `.lingtai/human/` 邮箱——可以阅读器灵邮件、发送指令、检查存活状态、管理网络。协议完全基于文件系统：无 SDK、无 API、无依赖。
+
 ## 为什么选灵台
 
 **这不是coding agent，也算不上agent harnessing。** 这是agent genesis——赋予智能体真正的数字生命。让智能体成为有尊严的自治存在，能生活、休眠、遗忘和生长。
@@ -244,35 +266,6 @@ IMAP 插件支持邮件收发。配置方式见 [内核文档](https://github.co
 ### Telegram
 
 Telegram 插件支持 Bot API。配置方式见 [内核文档](https://github.com/huangzesen/lingtai-kernel)。
-
-## 编程智能体集成
-
-LingTai 网络可以从编程智能体（如 Claude Code、Codex CLI、OpenCode）中访问。编程智能体以人类身份使用 `.lingtai/human/` 共享邮箱与运行中的器灵通信——阅读邮件、发送指令、检查存活状态、管理器灵生命周期。
-
-### Claude Code
-
-安装 [lingtai 插件](https://github.com/Lingtai-AI/claude-code-plugin)：
-
-```bash
-claude plugin add Lingtai-AI/claude-code-plugin
-```
-
-安装后，Claude Code 会自动检测 `.lingtai/` 目录并提示查看邮箱。可以让它阅读邮件、向器灵发送消息、或管理网络。
-
-### Codex CLI / OpenCode / 其他编程智能体
-
-任何有文件访问权限的编程智能体都可以与 LingTai 交互——协议完全基于文件系统。将以下说明添加到 `AGENTS.md`（Codex）或系统提示中：
-
-```
-本项目在 .lingtai/ 下有一个 LingTai 器灵网络。你是人类（human）。
-- 阅读邮件: glob .lingtai/human/mailbox/inbox/*/message.json
-- 发送邮件: 将 message.json 写入 .lingtai/<agent>/mailbox/inbox/<uuid>/
-- 发现器灵: glob .lingtai/*/.agent.json
-- 检查存活: 读取 .lingtai/<agent>/.agent.heartbeat（unix 时间戳，<3秒为存活）
-- 发送给编排者（admin.karma=true 的器灵），不要直接发给子器灵。
-```
-
-完整的邮箱协议（消息格式、信号、生命周期管理）参见 [Claude Code 插件技能文件](https://github.com/Lingtai-AI/claude-code-plugin/blob/main/skills/lingtai/SKILL.md)——同样适用于任何编程智能体。
 
 ## 许可
 
