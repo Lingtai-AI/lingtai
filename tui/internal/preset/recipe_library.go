@@ -6,23 +6,23 @@ import (
 	"path/filepath"
 )
 
-// LinkRecipeSkills creates grouped symlinks in <lingtaiDir>/.skills/ for
+// LinkRecipeLibrary creates grouped symlinks in <lingtaiDir>/.library/ for
 // skills from the active recipe, custom recipe, and agora recipes.
-// Called on every TUI startup after PopulateBundledSkills().
+// Called on every TUI startup after PopulateBundledLibrary().
 //
-// Each recipe's skills are placed under .skills/<recipe-name>/ as a group
+// Each recipe's skills are placed under .library/<recipe-name>/ as a group
 // folder. Individual skills within that group are symlinked to the
 // lang-resolved skill directory in the recipe.
 //
 // Only the active bundled recipe's skills are linked — inactive bundled
 // recipes do not contribute skills. Custom and agora recipes are always linked.
-func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir string) {
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+func LinkRecipeLibrary(lingtaiDir, globalDir, lang, activeRecipe, customDir string) {
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
 	// Track all recipe group dirs we create/update so we can detect stale ones.
 	activeGroups := make(map[string]bool)
-	activeGroups["intrinsic"] = true // managed by PopulateBundledSkills
+	activeGroups["intrinsic"] = true // managed by PopulateBundledLibrary
 	activeGroups["custom"] = true    // agent-created, never touched
 
 	// 1. Active bundled/example recipe only
@@ -30,7 +30,7 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 		recipeDir := RecipeDir(globalDir, activeRecipe)
 		if recipeDir != "" {
 			if info, err := os.Stat(recipeDir); err == nil && info.IsDir() {
-				linkRecipeDir(skillsDir, recipeDir, activeRecipe, lang)
+				linkRecipeDir(libraryDir, recipeDir, activeRecipe, lang)
 				activeGroups[activeRecipe] = true
 			}
 		}
@@ -50,7 +50,7 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 					if !e.IsDir() || e.Name() == activeRecipe {
 						continue
 					}
-					staleGroup := filepath.Join(skillsDir, e.Name())
+					staleGroup := filepath.Join(libraryDir, e.Name())
 					if _, err := os.Stat(staleGroup); err == nil {
 						os.RemoveAll(staleGroup)
 					}
@@ -62,7 +62,7 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 	// 2. Custom recipe (if set)
 	if customDir != "" {
 		recipeName := filepath.Base(customDir)
-		linkRecipeDir(skillsDir, customDir, recipeName, lang)
+		linkRecipeDir(libraryDir, customDir, recipeName, lang)
 		activeGroups[recipeName] = true
 	}
 
@@ -82,7 +82,7 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 				}
 				recipeDir := filepath.Join(agoraRoot, e.Name(), ".lingtai-recipe")
 				if info, err := os.Stat(recipeDir); err == nil && info.IsDir() {
-					linkRecipeDir(skillsDir, recipeDir, e.Name(), lang)
+					linkRecipeDir(libraryDir, recipeDir, e.Name(), lang)
 					activeGroups[e.Name()] = true
 				}
 			}
@@ -91,16 +91,16 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 
 	// 4. Clean up stale group dirs that are no longer active.
 	// If a stray directory contains SKILL.md, it's a misplaced skill
-	// (agent wrote to .skills/<name>/ instead of .skills/custom/<name>/).
+	// (agent wrote to .library/<name>/ instead of .library/custom/<name>/).
 	// Rescue it into custom/ rather than deleting it.
-	if entries, err := os.ReadDir(skillsDir); err == nil {
-		customDir := filepath.Join(skillsDir, "custom")
+	if entries, err := os.ReadDir(libraryDir); err == nil {
+		customDir := filepath.Join(libraryDir, "custom")
 		for _, e := range entries {
 			name := e.Name()
 			if activeGroups[name] || isHidden(name) {
 				continue
 			}
-			p := filepath.Join(skillsDir, name)
+			p := filepath.Join(libraryDir, name)
 			info, err := os.Lstat(p)
 			if err != nil {
 				continue
@@ -127,7 +127,7 @@ func LinkRecipeSkills(lingtaiDir, globalDir, lang, activeRecipe, customDir strin
 	}
 }
 
-// linkRecipeDir creates .skills/<recipeName>/ as a real directory and
+// linkRecipeDir creates .library/<recipeName>/ as a real directory and
 // symlinks each resolved skill into it.
 func linkRecipeDir(skillsDir, recipeDir, recipeName, lang string) {
 	skillsRoot := filepath.Join(recipeDir, "skills")
@@ -172,12 +172,12 @@ func linkRecipeDir(skillsDir, recipeDir, recipeName, lang string) {
 	}
 }
 
-// PruneStaleSkillSymlinks scans <lingtaiDir>/.skills/ and removes any
+// PruneStaleLibrarySymlinks scans <lingtaiDir>/.library/ and removes any
 // symlinks whose target no longer exists. Works recursively — handles
-// both flat legacy symlinks and grouped symlinks inside recipe folders.
-func PruneStaleSkillSymlinks(lingtaiDir string) {
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	pruneDir(skillsDir)
+// both flat legacy symlinks and grouped symlinks inside library folders.
+func PruneStaleLibrarySymlinks(lingtaiDir string) {
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	pruneDir(libraryDir)
 }
 
 func pruneDir(dir string) {

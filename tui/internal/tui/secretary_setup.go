@@ -49,8 +49,8 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 	secretaryCaps := map[string]interface{}{
 		"file": map[string]interface{}{}, "bash": map[string]interface{}{},
 		"email": map[string]interface{}{}, "psyche": map[string]interface{}{},
-		"library": map[string]interface{}{"library_limit": 100},
-		"skills": map[string]interface{}{},
+		"codex": map[string]interface{}{"codex_limit": 100},
+		"library": map[string]interface{}{},
 		"web_search": map[string]interface{}{}, "web_read": map[string]interface{}{},
 		"daemon": map[string]interface{}{},
 	}
@@ -61,9 +61,9 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 				secretaryCaps[name] = cfg
 			}
 		}
-		// Ensure library_limit is always raised for secretary
-		if lib, ok := secretaryCaps["library"].(map[string]interface{}); ok {
-			lib["library_limit"] = 100
+		// Ensure codex_limit is always raised for secretary
+		if lib, ok := secretaryCaps["codex"].(map[string]interface{}); ok {
+			lib["codex_limit"] = 100
 		}
 	}
 	manifest["capabilities"] = secretaryCaps
@@ -143,13 +143,13 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 		return fmt.Errorf("write secretary init.json: %w", err)
 	}
 
-	// Symlink briefing skill into the network-level .skills/ dir
-	// (.lingtai/.skills/ — sibling to agent dirs, not inside the agent dir)
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return fmt.Errorf("create secretary skills dir: %w", err)
+	// Symlink briefing skill into the network-level .library/ dir
+	// (.lingtai/.library/ — sibling to agent dirs, not inside the agent dir)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	if err := os.MkdirAll(libraryDir, 0o755); err != nil {
+		return fmt.Errorf("create secretary library dir: %w", err)
 	}
-	linkName := filepath.Join(skillsDir, "secretary-briefing")
+	linkName := filepath.Join(libraryDir, "secretary-briefing")
 	// Remove old symlink if exists (idempotent)
 	os.Remove(linkName)
 	skillSrc := secretary.SkillDir(globalDir)

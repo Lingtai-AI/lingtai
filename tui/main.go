@@ -191,9 +191,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: failed to register project: %v\n", err)
 	}
 	// Bundled (canonical) skills — written to globalDir/bundled-skills/
-	// and symlinked into .lingtai/.skills/intrinsic. Refreshed every
+	// and symlinked into .lingtai/.library/intrinsic. Refreshed every
 	// startup so projects pick up new or updated skills after a TUI upgrade.
-	preset.PopulateBundledSkills(lingtaiDir, globalDir)
+	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
 
 	// First run = no config.json in ~/.lingtai-tui/
 	configPath := filepath.Join(globalDir, "config.json")
@@ -212,14 +212,14 @@ func main() {
 	tuiCfg := config.LoadTUIConfig(globalDir)
 	i18n.SetLang(tuiCfg.Language)
 
-	// Recipe skills — symlink skills from all known recipes into .lingtai/.skills/.
+	// Recipe library — symlink skills from all known recipes into .lingtai/.library/.
 	// On first run, no custom recipe is set yet, so only bundled recipe skills are
 	// linked. Custom/agora recipe skills are picked up on the next launch.
 	// LoadRecipeState returns zero-value on error, so customDir is "" and bundled +
 	// agora recipe skills are still linked even if .recipe is corrupt.
 	recipeState, _ := preset.LoadRecipeState(lingtaiDir)
-	preset.LinkRecipeSkills(lingtaiDir, globalDir, tuiCfg.Language, recipeState.Recipe, recipeState.CustomDir)
-	preset.PruneStaleSkillSymlinks(lingtaiDir)
+	preset.LinkRecipeLibrary(lingtaiDir, globalDir, tuiCfg.Language, recipeState.Recipe, recipeState.CustomDir)
+	preset.PruneStaleLibrarySymlinks(lingtaiDir)
 
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 
@@ -385,7 +385,7 @@ func isAgentDir(lingtaiDir, entryName string) (bool, map[string]interface{}, err
 // least one agent exists and every agent is missing init.json — the
 // caller (main.go) routes into the rehydration wizard in that case.
 //
-// Dot-prefixed directories under .lingtai/ (.skills/, .portal/, .addons/,
+// Dot-prefixed directories under .lingtai/ (.library/, .portal/, .addons/,
 // .tui-asset/) are helper dirs and are skipped. The human/ placeholder
 // (which has .agent.json but with admin: null) is also skipped via
 // isAgentDir — it's not an agent, so it doesn't need init.json.
@@ -588,7 +588,7 @@ func printHelp() {
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 	fmt.Println()
 	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
-	fmt.Println("  They are the bodies of your agents — files, memory, mail, identity.")
+	fmt.Println("  They are the bodies of your agents — files, pad, mail, identity.")
 	fmt.Println("  Always purge or suspend before deleting them.")
 	fmt.Println()
 	home, _ := os.UserHomeDir()

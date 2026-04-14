@@ -8,15 +8,15 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// migrateSkillsGroups restructures .skills/ from flat layout to grouped layout.
+// migrateSkillsGroups restructures .library/ from flat layout to grouped layout.
 //
-// Old layout: .skills/<skill-name>/ (all flat — bundled, recipe, custom mixed)
-// New layout: .skills/intrinsic/ (symlink), .skills/<recipe>/ (group dirs),
-//             .skills/custom/ (agent-created)
+// Old layout: .library/<skill-name>/ (all flat — bundled, recipe, custom mixed)
+// New layout: .library/intrinsic/ (symlink), .library/<recipe>/ (group dirs),
+//             .library/custom/ (agent-created)
 //
 // This migration:
-// 1. Removes flat bundled skill dirs (they'll be re-created as .skills/intrinsic/ on next launch)
-// 2. Moves flat non-symlink, non-bundled skill dirs into .skills/custom/
+// 1. Removes flat bundled skill dirs (they'll be re-created as .library/intrinsic/ on next launch)
+// 2. Moves flat non-symlink, non-bundled skill dirs into .library/custom/
 // 3. Removes flat legacy recipe symlinks (they'll be re-created as grouped on next launch)
 func migrateSkillsGroups(lingtaiDir string) error {
 	skillsDir := filepath.Join(lingtaiDir, ".skills")

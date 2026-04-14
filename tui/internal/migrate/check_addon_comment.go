@@ -33,7 +33,7 @@ func CheckAddonComment(lingtaiDir string) ([]string, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		// Skip dot-prefixed entries (.portal/, .skills/, .addons/, .tui-asset/)
+		// Skip dot-prefixed entries (.portal/, .library/, .addons/, .tui-asset/)
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}

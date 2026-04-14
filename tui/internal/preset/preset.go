@@ -215,10 +215,10 @@ func minimaxPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": mm, "psyche": e(), "library": e(),
+				"web_search": mm, "psyche": e(), "codex": e(),
 				"vision": mm, "talk": mm, "draw": mm, "video": mm, "compose": mm,
 				"listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
-				"skills": e(),
+				"library": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -239,10 +239,10 @@ func zhipuPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": zp, "psyche": e(), "library": e(),
+				"web_search": zp, "psyche": e(), "codex": e(),
 				"vision": zp, "web_read": zp,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "skills": e(),
+				"listen": e(), "library": e(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -263,10 +263,10 @@ func codexPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": cx, "psyche": e(), "library": e(),
+				"web_search": cx, "psyche": e(), "codex": e(),
 				"vision": cx, "web_read": cx,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "skills": e(),
+				"listen": e(), "library": e(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -285,9 +285,9 @@ func customPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": e(), "psyche": e(), "library": e(),
+				"web_search": e(), "psyche": e(), "codex": e(),
 				"web_read": e(), "avatar": e(), "daemon": e(),
-				"listen": e(), "skills": e(),
+				"listen": e(), "library": e(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -354,19 +354,19 @@ func Bootstrap(globalDir string) error {
 	return EnsureDefault()
 }
 
-// PopulateBundledSkills writes the bundled (canonical) skills into a
+// PopulateBundledLibrary writes the bundled (canonical) skills into a
 // global staging directory (globalDir/bundled-skills/) and creates a
-// symlink at .lingtai/.skills/intrinsic → that staging directory.
+// symlink at .lingtai/.library/intrinsic → that staging directory.
 //
 // Called on every TUI startup so canonical skills stay in sync with the
 // shipped binary. The staging directory is shared across all projects;
 // per-project symlinks point to it.
 //
 // Also cleans up legacy flat bundled skill directories that older TUI
-// versions wrote directly into .skills/.
-func PopulateBundledSkills(lingtaiDir, globalDir string) {
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+// versions wrote directly into .library/.
+func PopulateBundledLibrary(lingtaiDir, globalDir string) {
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
 	// Write embedded skills to the global staging directory.
 	stagingDir := filepath.Join(globalDir, "bundled-skills")
@@ -384,8 +384,8 @@ func PopulateBundledSkills(lingtaiDir, globalDir string) {
 		return nil
 	})
 
-	// Symlink .skills/intrinsic → globalDir/bundled-skills/
-	intrinsicLink := filepath.Join(skillsDir, "intrinsic")
+	// Symlink .library/intrinsic → globalDir/bundled-skills/
+	intrinsicLink := filepath.Join(libraryDir, "intrinsic")
 	if existing, err := os.Readlink(intrinsicLink); err == nil {
 		if existing == stagingDir {
 			// Already correct
@@ -400,10 +400,10 @@ func PopulateBundledSkills(lingtaiDir, globalDir string) {
 	}
 
 	// Clean up legacy flat bundled skill directories written by older TUI
-	// versions directly into .skills/. Only non-symlink directories whose
+	// versions directly into .library/. Only non-symlink directories whose
 	// name matches a bundled skill are removed.
 	bundled := BundledSkillNames()
-	entries, _ := os.ReadDir(skillsDir)
+	entries, _ := os.ReadDir(libraryDir)
 	for _, e := range entries {
 		if e.Name() == "intrinsic" || e.Name() == "custom" {
 			continue
@@ -414,13 +414,13 @@ func PopulateBundledSkills(lingtaiDir, globalDir string) {
 		if !bundled[e.Name()] {
 			continue // not a bundled name — leave it alone
 		}
-		p := filepath.Join(skillsDir, e.Name())
+		p := filepath.Join(libraryDir, e.Name())
 		info, err := os.Lstat(p)
 		if err != nil {
 			continue
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			continue // symlink — managed by recipe_skills.go, leave it
+			continue // symlink — managed by recipe_library.go, leave it
 		}
 		os.RemoveAll(p)
 	}
@@ -429,7 +429,7 @@ func PopulateBundledSkills(lingtaiDir, globalDir string) {
 	staleSkills := []string{
 		"lingtai-agora", // renamed to lingtai-export-network in v0.4.40
 	}
-	customDir := filepath.Join(skillsDir, "custom")
+	customDir := filepath.Join(libraryDir, "custom")
 	for _, name := range staleSkills {
 		p := filepath.Join(customDir, name)
 		if _, err := os.Stat(p); err == nil {
@@ -600,7 +600,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"soul_file":        soulFile,
 		"env_file":       config.EnvFilePath(globalDir),
 		"venv_path":      filepath.Join(globalDir, "runtime", "venv"),
-		"memory":         "",
+		"pad":            "",
 		"prompt":         "",
 	}
 	if existingAddons != nil {
@@ -700,7 +700,8 @@ func (p Preset) CapabilityIcons() string {
 		"bash":       "💻",
 		"web_search": "🔍",
 		"psyche":     "🧠",
-		"library":    "📚",
+		"codex":      "📚",
+		"library":    "📜",
 		"vision":     "👁️",
 		"talk":       "🔊",
 		"draw":       "🎨",

@@ -55,7 +55,7 @@ func migrateRelativeAddressing(lingtaiDir string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		// Skip dot-directories (.portal, .tui-asset, .skills)
+		// Skip dot-directories (.portal, .tui-asset, .library)
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}

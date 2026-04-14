@@ -6,19 +6,19 @@ import (
 	"testing"
 )
 
-func TestLinkRecipeSkills_ActiveBundledRecipe(t *testing.T) {
+func TestLinkRecipeLibrary_ActiveBundledRecipe(t *testing.T) {
 	globalDir := t.TempDir()
 	recipeDir := filepath.Join(globalDir, "recipes", "intrinsic", "adaptive", "skills", "discovery", "en")
 	os.MkdirAll(recipeDir, 0o755)
 	os.WriteFile(filepath.Join(recipeDir, "SKILL.md"), []byte("---\nname: discovery\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "adaptive", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "adaptive", "")
 
-	linkPath := filepath.Join(skillsDir, "adaptive", "discovery")
+	linkPath := filepath.Join(libraryDir, "adaptive", "discovery")
 	info, err := os.Lstat(linkPath)
 	if err != nil {
 		t.Fatalf("symlink not created: %v", err)
@@ -36,7 +36,7 @@ func TestLinkRecipeSkills_ActiveBundledRecipe(t *testing.T) {
 	}
 }
 
-func TestLinkRecipeSkills_InactiveBundledRecipeNotLinked(t *testing.T) {
+func TestLinkRecipeLibrary_InactiveBundledRecipeNotLinked(t *testing.T) {
 	globalDir := t.TempDir()
 	// tutorial has skills but is NOT the active recipe
 	tutorialSkill := filepath.Join(globalDir, "recipes", "examples", "tutorial", "skills", "guide", "en")
@@ -44,37 +44,37 @@ func TestLinkRecipeSkills_InactiveBundledRecipeNotLinked(t *testing.T) {
 	os.WriteFile(filepath.Join(tutorialSkill, "SKILL.md"), []byte("---\nname: guide\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
 	// Active recipe is "greeter", not "tutorial"
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "greeter", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "greeter", "")
 
-	linkPath := filepath.Join(skillsDir, "tutorial", "guide")
+	linkPath := filepath.Join(libraryDir, "tutorial", "guide")
 	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
 		t.Fatalf("inactive bundled recipe skills should NOT be linked, but found: %v", linkPath)
 	}
 }
 
-func TestLinkRecipeSkills_RootFallback(t *testing.T) {
+func TestLinkRecipeLibrary_RootFallback(t *testing.T) {
 	globalDir := t.TempDir()
 	skillRoot := filepath.Join(globalDir, "recipes", "intrinsic", "plain", "skills", "helper")
 	os.MkdirAll(skillRoot, 0o755)
 	os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("---\nname: helper\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	LinkRecipeSkills(lingtaiDir, globalDir, "zh", "plain", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "zh", "plain", "")
 
-	linkPath := filepath.Join(skillsDir, "plain", "helper")
+	linkPath := filepath.Join(libraryDir, "plain", "helper")
 	if _, err := os.Lstat(linkPath); err != nil {
 		t.Fatalf("symlink not created for root fallback: %v", err)
 	}
 }
 
-func TestLinkRecipeSkills_CustomRecipe(t *testing.T) {
+func TestLinkRecipeLibrary_CustomRecipe(t *testing.T) {
 	globalDir := t.TempDir()
 
 	customRecipe := filepath.Join(t.TempDir(), "my-recipe")
@@ -84,37 +84,37 @@ func TestLinkRecipeSkills_CustomRecipe(t *testing.T) {
 	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: custom-skill\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "", customRecipe)
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "", customRecipe)
 
-	linkPath := filepath.Join(skillsDir, "my-recipe", "custom-skill")
+	linkPath := filepath.Join(libraryDir, "my-recipe", "custom-skill")
 	if _, err := os.Lstat(linkPath); err != nil {
 		t.Fatalf("custom recipe symlink not created: %v", err)
 	}
 }
 
-func TestLinkRecipeSkills_Idempotent(t *testing.T) {
+func TestLinkRecipeLibrary_Idempotent(t *testing.T) {
 	globalDir := t.TempDir()
 	recipeDir := filepath.Join(globalDir, "recipes", "intrinsic", "adaptive", "skills", "discovery", "en")
 	os.MkdirAll(recipeDir, 0o755)
 	os.WriteFile(filepath.Join(recipeDir, "SKILL.md"), []byte("---\nname: discovery\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "adaptive", "")
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "adaptive", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "adaptive", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "adaptive", "")
 
-	linkPath := filepath.Join(skillsDir, "adaptive", "discovery")
+	linkPath := filepath.Join(libraryDir, "adaptive", "discovery")
 	if _, err := os.Lstat(linkPath); err != nil {
 		t.Fatalf("symlink missing after idempotent call: %v", err)
 	}
 }
 
-func TestLinkRecipeSkills_SwitchRecipeCleansOld(t *testing.T) {
+func TestLinkRecipeLibrary_SwitchRecipeCleansOld(t *testing.T) {
 	globalDir := t.TempDir()
 
 	// Set up two bundled recipes with skills
@@ -127,46 +127,46 @@ func TestLinkRecipeSkills_SwitchRecipeCleansOld(t *testing.T) {
 	os.WriteFile(filepath.Join(adaptiveSkill, "SKILL.md"), []byte("---\nname: discovery\ndescription: test\n---\n"), 0o644)
 
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
 	// First launch with tutorial active
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "tutorial", "")
-	if _, err := os.Lstat(filepath.Join(skillsDir, "tutorial", "guide")); err != nil {
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "tutorial", "")
+	if _, err := os.Lstat(filepath.Join(libraryDir, "tutorial", "guide")); err != nil {
 		t.Fatalf("tutorial skill not linked: %v", err)
 	}
 
 	// Switch to adaptive
-	LinkRecipeSkills(lingtaiDir, globalDir, "en", "adaptive", "")
+	LinkRecipeLibrary(lingtaiDir, globalDir, "en", "adaptive", "")
 
 	// Tutorial group should be cleaned up
-	if _, err := os.Stat(filepath.Join(skillsDir, "tutorial")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(libraryDir, "tutorial")); !os.IsNotExist(err) {
 		t.Errorf("old tutorial group should be removed after switching to adaptive")
 	}
 	// Adaptive should be linked
-	if _, err := os.Lstat(filepath.Join(skillsDir, "adaptive", "discovery")); err != nil {
+	if _, err := os.Lstat(filepath.Join(libraryDir, "adaptive", "discovery")); err != nil {
 		t.Fatalf("adaptive skill not linked: %v", err)
 	}
 }
 
-func TestPruneStaleSkillSymlinks_RemovesBroken(t *testing.T) {
+func TestPruneStaleLibrarySymlinks_RemovesBroken(t *testing.T) {
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	brokenLink := filepath.Join(skillsDir, "stale-skill")
+	brokenLink := filepath.Join(libraryDir, "stale-skill")
 	os.Symlink("/nonexistent/path", brokenLink)
 
-	groupDir := filepath.Join(skillsDir, "old-recipe")
+	groupDir := filepath.Join(libraryDir, "old-recipe")
 	os.MkdirAll(groupDir, 0o755)
 	brokenGroupLink := filepath.Join(groupDir, "dead-skill")
 	os.Symlink("/nonexistent/path", brokenGroupLink)
 
-	realSkill := filepath.Join(skillsDir, "custom", "real-skill")
+	realSkill := filepath.Join(libraryDir, "custom", "real-skill")
 	os.MkdirAll(realSkill, 0o755)
 	os.WriteFile(filepath.Join(realSkill, "SKILL.md"), []byte("x"), 0o644)
 
-	PruneStaleSkillSymlinks(lingtaiDir)
+	PruneStaleLibrarySymlinks(lingtaiDir)
 
 	if _, err := os.Lstat(brokenLink); !os.IsNotExist(err) {
 		t.Errorf("broken flat symlink should have been removed")
@@ -179,10 +179,10 @@ func TestPruneStaleSkillSymlinks_RemovesBroken(t *testing.T) {
 	}
 }
 
-func TestPruneStaleSkillSymlinks_KeepsValidSymlinks(t *testing.T) {
+func TestPruneStaleLibrarySymlinks_KeepsValidSymlinks(t *testing.T) {
 	lingtaiDir := t.TempDir()
-	skillsDir := filepath.Join(lingtaiDir, ".skills")
-	groupDir := filepath.Join(skillsDir, "my-recipe")
+	libraryDir := filepath.Join(lingtaiDir, ".library")
+	groupDir := filepath.Join(libraryDir, "my-recipe")
 	os.MkdirAll(groupDir, 0o755)
 
 	targetDir := t.TempDir()
@@ -191,7 +191,7 @@ func TestPruneStaleSkillSymlinks_KeepsValidSymlinks(t *testing.T) {
 	validLink := filepath.Join(groupDir, "valid-skill")
 	os.Symlink(targetDir, validLink)
 
-	PruneStaleSkillSymlinks(lingtaiDir)
+	PruneStaleLibrarySymlinks(lingtaiDir)
 
 	if _, err := os.Lstat(validLink); err != nil {
 		t.Errorf("valid symlink should be kept: %v", err)
