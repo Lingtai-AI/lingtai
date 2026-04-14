@@ -33,32 +33,11 @@ Cross-compilation targets (darwin/linux/windows, amd64/arm64) are available via 
 
 ## Releases
 
-**IMPORTANT: Every GitHub release MUST include freshly compiled binaries.** Never upload stale tar.gz files from previous builds. The full release process:
+See `RELEASING.md` for the full process. Key points:
 
 1. Tag and push: `git tag v0.X.Y && git push origin v0.X.Y`
-2. Cross-compile both TUI and portal:
-   ```bash
-   cd tui && make cross-compile
-   cd ../portal && make cross-compile
-   ```
-3. Tar both binaries together. **Each tar MUST contain `lingtai-tui` AND `lingtai-portal`** (Homebrew's `bin.install` expects both):
-   ```bash
-   cd /path/to/repo
-   for arch in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
-     cp "tui/bin/lingtai-${arch}" lingtai-tui
-     cp "portal/bin/lingtai-portal-${arch}" lingtai-portal
-     tar czf "tui/bin/lingtai-${arch}.tar.gz" lingtai-tui lingtai-portal
-   done
-   rm -f lingtai-tui lingtai-portal
-   ```
-4. Create release with binaries:
-   ```bash
-   cd tui/bin
-   gh release create v0.X.Y --title "v0.X.Y" --notes "..." \
-     lingtai-darwin-arm64.tar.gz lingtai-darwin-x64.tar.gz \
-     lingtai-linux-x64.tar.gz lingtai-linux-arm64.tar.gz
-   ```
-5. Update the Homebrew tap (`huangzesen/homebrew-lingtai/lingtai-tui.rb`): bump version, update all sha256 checksums (`shasum -a 256 tui/bin/*.tar.gz`), commit and push.
+2. Create GitHub release: `gh release create v0.X.Y --title "v0.X.Y" --notes "..."` (no binary assets — Homebrew builds from source)
+3. Update Homebrew tap: bump version and sha256 in `huangzesen/homebrew-lingtai/lingtai-tui.rb`, commit and push
 
 ## Projects
 
