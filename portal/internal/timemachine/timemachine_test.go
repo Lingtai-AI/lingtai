@@ -182,6 +182,30 @@ func TestSelectKeepersUnderCap(t *testing.T) {
 	}
 }
 
+func TestStartStop(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	lingtaiDir := filepath.Join(dir, ".lingtai")
+	os.MkdirAll(lingtaiDir, 0o755)
+
+	// Write .gitignore (normally done by migration)
+	os.WriteFile(filepath.Join(lingtaiDir, ".gitignore"), []byte("# test\n"), 0o644)
+
+	stop := Start(lingtaiDir)
+	if stop == nil {
+		t.Fatal("Start returned nil")
+	}
+
+	// .git should have been created
+	if _, err := os.Stat(filepath.Join(lingtaiDir, ".git")); err != nil {
+		t.Error(".git not created by Start")
+	}
+
+	stop()
+}
+
 func TestRepoSizeBytes(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
