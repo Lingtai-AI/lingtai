@@ -18,6 +18,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
+	"github.com/anthropics/lingtai-tui/internal/timemachine"
 	"github.com/anthropics/lingtai-tui/internal/tui"
 )
 
@@ -52,6 +53,14 @@ func main() {
 		}
 		if arg == "suspend" {
 			suspendMain()
+			return
+		}
+		if arg == "timemachine" {
+			if len(os.Args) < 3 {
+				fmt.Fprintf(os.Stderr, "Usage: lingtai-tui timemachine <lingtaiDir>\n")
+				os.Exit(1)
+			}
+			timemachine.Run(os.Args[2])
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
@@ -265,6 +274,19 @@ func main() {
 		// Resolve human location in background (ipinfo.io, cached 1h)
 		humanDir := filepath.Join(lingtaiDir, "human")
 		go fs.UpdateHumanLocation(humanDir)
+
+		// Launch time machine daemon if not already running
+		if !timemachine.IsRunning(lingtaiDir) {
+			if orchDir := timemachine.FindOrchestrator(lingtaiDir); orchDir != "" {
+				self, _ := os.Executable()
+				tmCmd := exec.Command(self, "timemachine", lingtaiDir)
+				tmCmd.Stdout = nil
+				tmCmd.Stderr = nil
+				if err := tmCmd.Start(); err == nil {
+					tmCmd.Process.Release()
+				}
+			}
+		}
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 
