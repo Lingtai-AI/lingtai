@@ -47,13 +47,13 @@ func parseFrontmatter(text string) map[string]string {
 
 // ── Scan ────────────────────────────────────────────────────────────
 
-// scanSkills scans skillsDir recursively for skill folders.
+// scanLibrary scans the library directory recursively for skill folders.
 //
 // A directory with SKILL.md is a skill folder (leaf).
 // A directory containing only subdirectories (no loose files) is a group folder.
 // A directory with loose files but no SKILL.md is corrupted.
-func scanSkills(skillsDir string) ([]skillEntry, []skillProblem) {
-	entries, err := os.ReadDir(skillsDir)
+func scanLibrary(libraryDir string) ([]skillEntry, []skillProblem) {
+	entries, err := os.ReadDir(libraryDir)
 	if err != nil {
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func scanSkills(skillsDir string) ([]skillEntry, []skillProblem) {
 			continue
 		}
 		// Follow symlinks for stat
-		childPath := filepath.Join(skillsDir, e.Name())
+		childPath := filepath.Join(libraryDir, e.Name())
 		info, err := os.Stat(childPath)
 		if err != nil || !info.IsDir() {
 			continue
@@ -176,13 +176,13 @@ func parseSkillFile(skillFile, folderName, group string) (*skillEntry, *skillPro
 	}, nil
 }
 
-// buildSkillEntries converts scan results into MarkdownEntry items for the
+// buildLibraryEntries converts scan results into MarkdownEntry items for the
 // markdown viewer. Skills are grouped by their Group field (folder name).
 // "intrinsic" is always shown last. Empty group means ungrouped (legacy).
 //
 // For intrinsic skills with i18n variants (SKILL-{lang}.md), the viewer
 // concatenates SKILL.md + SKILL-{lang}.md (falling back to SKILL-en.md).
-func buildSkillEntries(skillsDir, lang string, skills []skillEntry, problems []skillProblem) []MarkdownEntry {
+func buildLibraryEntries(libraryDir, lang string, skills []skillEntry, problems []skillProblem) []MarkdownEntry {
 	// Collect groups in order: custom first, then recipe groups, intrinsic last.
 	type groupBucket struct {
 		name   string
@@ -247,7 +247,7 @@ func buildSkillEntries(skillsDir, lang string, skills []skillEntry, problems []s
 		for _, p := range problems {
 			entries = append(entries, MarkdownEntry{
 				Label:   p.Folder,
-				Group:   i18n.T("skills.problems"),
+				Group:   i18n.T("library.problems"),
 				Content: p.Reason,
 			})
 		}

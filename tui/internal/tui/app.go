@@ -736,8 +736,12 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		entries := buildLibraryEntries(a.projectDir)
-		a.library = NewMarkdownViewer(entries, i18n.T("palette.library"))
+		libraryDir := filepath.Join(a.projectDir, ".library")
+		if a.inSecretaryView {
+			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library")
+		}
+		sk, prob := scanLibrary(libraryDir)
+		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))
 		return a, a.sendSize()
 	case "secretary":
 		if a.inSecretaryView {
@@ -999,8 +1003,12 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		entries := buildLibraryEntries(a.projectDir)
-		a.library = NewMarkdownViewer(entries, i18n.T("palette.library"))
+		libraryDir := filepath.Join(a.projectDir, ".library")
+		if a.inSecretaryView {
+			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library")
+		}
+		sk, prob := scanLibrary(libraryDir)
+		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))
 		return a, a.sendSize()
 	case "secretary":
 		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)

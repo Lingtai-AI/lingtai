@@ -6,19 +6,19 @@ import (
 	"testing"
 )
 
-func TestScanSkills_FollowsSymlinks(t *testing.T) {
+func TestScanLibrary_FollowsSymlinks(t *testing.T) {
 	targetDir := t.TempDir()
 	os.WriteFile(filepath.Join(targetDir, "SKILL.md"), []byte("---\nname: symlinked-skill\ndescription: A symlinked skill\nversion: 1.0.0\n---\nBody here.\n"), 0o644)
 
-	skillsDir := filepath.Join(t.TempDir(), ".skills")
-	os.MkdirAll(skillsDir, 0o755)
-	os.Symlink(targetDir, filepath.Join(skillsDir, "test-skill-en"))
+	libraryDir := filepath.Join(t.TempDir(), ".library")
+	os.MkdirAll(libraryDir, 0o755)
+	os.Symlink(targetDir, filepath.Join(libraryDir, "test-skill-en"))
 
-	regularDir := filepath.Join(skillsDir, "regular-skill")
+	regularDir := filepath.Join(libraryDir, "regular-skill")
 	os.MkdirAll(regularDir, 0o755)
 	os.WriteFile(filepath.Join(regularDir, "SKILL.md"), []byte("---\nname: regular-skill\ndescription: A regular skill\nversion: 1.0.0\n---\nBody.\n"), 0o644)
 
-	skills, problems := scanSkills(skillsDir)
+	skills, problems := scanLibrary(libraryDir)
 	if len(problems) != 0 {
 		t.Errorf("unexpected problems: %v", problems)
 	}
@@ -32,13 +32,13 @@ func TestScanSkills_FollowsSymlinks(t *testing.T) {
 	}
 }
 
-func TestScanSkills_SkipsBrokenSymlinks(t *testing.T) {
-	skillsDir := filepath.Join(t.TempDir(), ".skills")
-	os.MkdirAll(skillsDir, 0o755)
+func TestScanLibrary_SkipsBrokenSymlinks(t *testing.T) {
+	libraryDir := filepath.Join(t.TempDir(), ".library")
+	os.MkdirAll(libraryDir, 0o755)
 
-	os.Symlink("/nonexistent", filepath.Join(skillsDir, "broken-skill"))
+	os.Symlink("/nonexistent", filepath.Join(libraryDir, "broken-skill"))
 
-	skills, problems := scanSkills(skillsDir)
+	skills, problems := scanLibrary(libraryDir)
 	if len(skills) != 0 {
 		t.Errorf("expected 0 skills, got %d", len(skills))
 	}

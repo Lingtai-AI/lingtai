@@ -7,9 +7,9 @@ type UsePresetMsg struct {
 
 // AllCapabilities is the list of all available capability names.
 var AllCapabilities = []string{
-	"file", "email", "bash", "web_search", "psyche", "library",
+	"file", "email", "bash", "web_search", "psyche", "codex",
 	"vision", "talk", "draw", "compose", "video", "listen", "web_read",
-	"avatar", "daemon", "skills",
+	"avatar", "daemon", "library",
 }
 
 // AllAddons is the list of available addon names.

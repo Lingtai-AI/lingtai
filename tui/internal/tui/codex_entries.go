@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-// libraryFile matches the JSON schema of library/library.json written by agents.
-type libraryFile struct {
-	Version int            `json:"version"`
-	Entries []libraryEntry `json:"entries"`
+// codexFile matches the JSON schema of codex/codex.json written by agents.
+type codexFile struct {
+	Version int          `json:"version"`
+	Entries []codexEntry `json:"entries"`
 }
 
-type libraryEntry struct {
+type codexEntry struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
 	Summary       string `json:"summary"`
@@ -25,11 +25,11 @@ type libraryEntry struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// buildLibraryEntries scans all agent directories under lingtaiDir for
-// library/library.json files and returns MarkdownEntry items grouped by
-// agent name. Each library entry becomes one sidebar item whose content
+// buildCodexEntries scans all agent directories under lingtaiDir for
+// codex/codex.json files and returns MarkdownEntry items grouped by
+// agent name. Each codex entry becomes one sidebar item whose content
 // is the entry's markdown content (with metadata header).
-func buildLibraryEntries(lingtaiDir string) []MarkdownEntry {
+func buildCodexEntries(lingtaiDir string) []MarkdownEntry {
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
 		return nil
@@ -37,27 +37,27 @@ func buildLibraryEntries(lingtaiDir string) []MarkdownEntry {
 
 	var result []MarkdownEntry
 
-	// Collect agents that have libraries, sorted by name
-	type agentLib struct {
+	// Collect agents that have codex archives, sorted by name
+	type agentCodex struct {
 		name    string
-		entries []libraryEntry
+		entries []codexEntry
 	}
-	var agents []agentLib
+	var agents []agentCodex
 
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		libPath := filepath.Join(lingtaiDir, entry.Name(), "library", "library.json")
-		data, err := os.ReadFile(libPath)
+		codexPath := filepath.Join(lingtaiDir, entry.Name(), "codex", "codex.json")
+		data, err := os.ReadFile(codexPath)
 		if err != nil {
 			continue
 		}
-		var lib libraryFile
-		if json.Unmarshal(data, &lib) != nil || len(lib.Entries) == 0 {
+		var cdx codexFile
+		if json.Unmarshal(data, &cdx) != nil || len(cdx.Entries) == 0 {
 			continue
 		}
-		agents = append(agents, agentLib{name: entry.Name(), entries: lib.Entries})
+		agents = append(agents, agentCodex{name: entry.Name(), entries: cdx.Entries})
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
