@@ -1,16 +1,27 @@
 package migrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-// migrateRenamePadCodexLibrary renames agent filesystem paths:
+// migrateRenamePadCodexLibrary renames agent filesystem paths and
+// rewrites init.json capability keys:
 //
+// Filesystem:
 //   - system/memory.md → system/pad.md
+//   - system/memory_append.json → system/pad_append.json
 //   - library/ → codex/ (including library.json → codex.json)
 //   - .skills/ → .library/
+//
+// init.json:
+//   - top-level "memory" field → "pad"
+//   - top-level "memory_file" field → "pad_file"
+//   - capabilities key "library" → "codex" (knowledge archive)
+//   - capabilities key "skills" → "library" (skill library)
+//   - capability config "library_limit" → "codex_limit"
 //
 // Runs on each agent directory found under lingtaiDir.
 // Also renames .lingtai/.skills/ → .lingtai/.library/ at the network level.
@@ -58,9 +69,12 @@ func migrateRenamePadCodexLibrary(lingtaiDir string) error {
 			filepath.Join(agentDir, ".library"),
 			".skills → .library (agent-level)",
 		)
+
+		// 5. Rewrite init.json capability keys and config fields
+		rewriteInitJSON(filepath.Join(agentDir, "init.json"))
 	}
 
-	// 5. .lingtai/.skills/ → .lingtai/.library/ (network-level)
+	// 6. .lingtai/.skills/ → .lingtai/.library/ (network-level)
 	safeRename(
 		filepath.Join(lingtaiDir, ".skills"),
 		filepath.Join(lingtaiDir, ".library"),
@@ -68,6 +82,79 @@ func migrateRenamePadCodexLibrary(lingtaiDir string) error {
 	)
 
 	return nil
+}
+
+// rewriteInitJSON rewrites capability names and config fields in an
+// agent's init.json. Handles both list and map capability formats.
+func rewriteInitJSON(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // no init.json — nothing to do
+	}
+
+	var init map[string]interface{}
+	if json.Unmarshal(data, &init) != nil {
+		return // corrupt — skip
+	}
+
+	changed := false
+
+	// Rename top-level "memory" → "pad"
+	if v, ok := init["memory"]; ok {
+		init["pad"] = v
+		delete(init, "memory")
+		changed = true
+	}
+
+	// Rename top-level "memory_file" → "pad_file"
+	if v, ok := init["memory_file"]; ok {
+		init["pad_file"] = v
+		delete(init, "memory_file")
+		changed = true
+	}
+
+	// Rename capability keys inside manifest.capabilities
+	manifest, _ := init["manifest"].(map[string]interface{})
+	if manifest != nil {
+		caps, _ := manifest["capabilities"].(map[string]interface{})
+		if caps != nil {
+			// "library" (old knowledge archive) → "codex"
+			if v, ok := caps["library"]; ok {
+				caps["codex"] = v
+				delete(caps, "library")
+				changed = true
+
+				// Rename library_limit → codex_limit inside the config
+				if cfg, ok := caps["codex"].(map[string]interface{}); ok {
+					if lim, ok := cfg["library_limit"]; ok {
+						cfg["codex_limit"] = lim
+						delete(cfg, "library_limit")
+					}
+				}
+			}
+
+			// "skills" (old skill library) → "library"
+			if v, ok := caps["skills"]; ok {
+				caps["library"] = v
+				delete(caps, "skills")
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
+		return
+	}
+
+	out, err := json.MarshalIndent(init, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		fmt.Printf("  warning: failed to rewrite %s: %v\n", path, err)
+	} else {
+		fmt.Printf("  migrated init.json capability keys\n")
+	}
 }
 
 // safeRename renames src → dst if src exists and dst does not.
