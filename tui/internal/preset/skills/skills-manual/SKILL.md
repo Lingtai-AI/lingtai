@@ -39,12 +39,12 @@ my-skill/
 
 SKILL.md should reference supporting files by relative path. Offload dense content to subdirectories — keep SKILL.md focused on the procedure.
 
-### Skill Store Layout
+### Skill Library Layout
 
-The skill store at `.lingtai/.skills/` is organized into group folders:
+The skill library at `.lingtai/.library/` is organized into group folders:
 
 ```
-.skills/
+.library/
   intrinsic/            # Bundled with the TUI — managed automatically
     lingtai-mcp/
     lingtai-export-recipe/
@@ -60,7 +60,7 @@ The skill store at `.lingtai/.skills/` is organized into group folders:
       SKILL.md
 ```
 
-**When creating a new skill, always place it under `.skills/custom/`.** Never write directly to `.skills/<name>/` — the TUI manages the top-level namespace and will move or remove anything outside `custom/` on the next launch. If you put a skill at the wrong level, it will disappear.
+**When creating a new skill, always place it under `.library/custom/`.** Never write directly to `.library/<name>/` — the TUI manages the top-level namespace and will move or remove anything outside `custom/` on the next launch. If you put a skill at the wrong level, it will disappear.
 
 Group folders can nest arbitrarily deep — a folder with `SKILL.md` is a skill; a folder containing only subfolders is a group.
 
@@ -131,7 +131,7 @@ The `custom/` group should be a **git repository**. This makes your skills durab
 **Initial setup** (do this once when `custom/` first exists):
 
 ```bash
-cd <skills-dir>/custom
+cd <library-dir>/custom
 git init
 git add -A
 git commit -m "init: seed custom skills"
@@ -147,22 +147,22 @@ git push -u origin main
 **After creating or updating a skill**, commit and push:
 
 ```bash
-cd <skills-dir>/custom
+cd <library-dir>/custom
 git add -A
 git commit -m "<what changed>"
 git push  # if remote exists
 ```
 
-Make this a habit — every `skills(action='register')` should be followed by a git commit. Treat your skill repo the way a developer treats source code: meaningful commit messages, no untracked drift.
+Make this a habit — every `library(action='register')` should be followed by a git commit. Treat your skill repo the way a developer treats source code: meaningful commit messages, no untracked drift.
 
 **On a new machine or after a fresh install**, clone your skill repo into the custom group:
 
 ```bash
-cd <skills-dir>
+cd <library-dir>
 git clone <url> custom
 ```
 
-Then `skills(action='register')` to pick up everything.
+Then `library(action='register')` to pick up everything.
 
 ### Installing a Skill
 
@@ -170,23 +170,23 @@ Use bash to clone or download into the `custom/` group:
 
 ```bash
 # Clone a skill repo as a subfolder inside custom/
-cd <skills-dir>/custom
+cd <library-dir>/custom
 git clone https://github.com/someone/useful-skill.git
 
 # Or download a single skill folder
-# (copy/extract into <skills-dir>/custom/skill-name/)
+# (copy/extract into <library-dir>/custom/skill-name/)
 ```
 
-Then call `skills(action='register')` to validate and commit.
+Then call `library(action='register')` to validate and commit.
 
 To update a skill that's a git repo:
 ```bash
-cd <skills-dir>/custom/skill-name
+cd <library-dir>/custom/skill-name
 git pull
 ```
-Then `skills(action='register')` again.
+Then `library(action='register')` again.
 
-To pick up skills another agent registered: `skills(action='refresh')`.
+To pick up skills another agent registered: `library(action='refresh')`.
 
 ## What to Consolidate into a Skill
 

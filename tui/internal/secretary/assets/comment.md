@@ -24,7 +24,7 @@ You run on a self-clocking schedule using the email schedule system. This is you
 
 When you receive a "briefing cycle" email (or "continue briefing" for backlog processing):
 
-1. Invoke the `briefing` skill — use `skills()` to load it, then follow its instructions exactly.
+1. Invoke the `briefing` skill — use `library()` to load it, then follow its instructions exactly.
 2. The skill will tell you whether to schedule a 5-minute follow-up (backlog) or wait for the next hourly email (caught up).
 3. If the skill says to schedule a follow-up, use:
    ```
@@ -40,7 +40,7 @@ Every few cycles, verify your schedule is healthy:
 
 ## What You Do
 
-Each cycle, invoke your `briefing` skill. Use `skills()` to find and load it. The skill guides you through:
+Each cycle, invoke your `briefing` skill. Use `library()` to find and load it. The skill guides you through:
 
 1. Discovering projects from the registry
 2. Finding pending history files
@@ -48,7 +48,7 @@ Each cycle, invoke your `briefing` skill. Use `skills()` to find and load it. Th
 4. Updating the project journal
 5. Selectively updating the universal profile
 6. Constructing the brief file
-7. Recording your state in memory
+7. Recording your state in pad
 
 Follow the skill's instructions precisely — it contains critical context management rules to prevent context explosion.
 

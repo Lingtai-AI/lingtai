@@ -94,7 +94,7 @@ my-recipe/
 
 ### 5. `skills/` — 配方附带技能
 
-可选。随配方一起分发的技能，TUI 启动时自动链接到 `.lingtai/.skills/<配方名>/` 分组目录。
+可选。随配方一起分发的技能，TUI 启动时自动链接到 `.lingtai/.library/<配方名>/` 分组目录。
 
 每个技能遵循标准 SKILL.md 格式：
 
@@ -108,7 +108,7 @@ version: 1.0.0
 
 **国际化：** 多语言技能使用 `SKILL.md` 作为元数据指引，提供 `SKILL-en.md`、`SKILL-zh.md` 等语言版本。智能体读取 `SKILL.md` 后，选择对应语言的文件。单语言技能直接将所有内容放在 `SKILL.md` 中。
 
-**分组：** 配方技能出现在 `.lingtai/.skills/<配方名>/` 下——配方名是 `/skills` 视图中的分组标题。
+**分组：** 配方技能出现在 `.lingtai/.library/<配方名>/` 下——配方名是 `/library` 视图中的分组标题。
 
 ## recipe.json — 配方清单
 

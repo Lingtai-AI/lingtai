@@ -20,7 +20,7 @@ Lingtai's `molt` is fundamentally different:
 
 1. **The agent writes its own summary.** It decides what matters. Not an external model, not a system process — the agent itself sits down and writes a letter to its future self.
 2. **It's explicit and lossy by design.** The agent *knows* it's about to lose everything. It feels the pressure (five warnings, counting down), it has to triage, and it has to accept the loss.
-3. **The system gives the agent a structured dying process.** Early warnings prompt saving important findings to the library. Urgent warnings force harder triage. The final warning demands the molt summary — a curated handoff, not a mechanical compression.
+3. **The system gives the agent a structured dying process.** Early warnings prompt saving important findings to the codex. Urgent warnings force harder triage. The final warning demands the molt summary — a curated handoff, not a mechanical compression.
 
 An external summarizer treats all information as equally important and compresses by recency. The agent compresses by *relevance* — it has the most accurate context of what it's doing, what matters, and what's noise.
 
@@ -56,14 +56,14 @@ Molt pressure forces the agent to develop a hierarchy of persistence:
 
 | Layer | Persistence | What belongs here |
 |-------|------------|-------------------|
-| **Library (藏经阁)** | Permanent. Survives everything. | Universal truths, discoveries, data, decisions. Limited entries — every slot is precious. |
+| **Codex (藏经阁)** | Permanent. Survives everything. | Universal truths, discoveries, data, decisions. Limited entries — every slot is precious. |
 | **Character (心印)** | Semi-permanent. Mutable but durable. | Evolving identity — who you are, how you work, your expertise. |
-| **Memory (system/memory.md)** | Working notes. Survives molt only if explicitly saved. | Active context, current task state. |
+| **Pad (system/pad.md)** | Working notes. Survives molt only if explicitly saved. | Active context, current task state. |
 | **Conversation context** | Ephemeral. Gone on molt. | The current life — this specific manifestation, doing this specific work, right now. |
 
 The five-warning dying process forces prioritization across these layers:
 
-1. What is **universal truth**? → library
+1. What is **universal truth**? → codex
 2. What has **changed who I am**? → character update
 3. What does **my next self need to know**? → molt summary (前尘往事)
 4. What is **just noise**? → let it go
@@ -86,13 +86,13 @@ In lingtai:
 | 三十三相 | Avatars (他我) — purpose-built peers, each with its own capabilities |
 | 转世 | Molt — lose memory, wake up in a new context |
 | 法宝 / 神通 | Capabilities — tools and abilities granted at birth |
-| 藏经 | Library — knowledge that persists across lives |
+| 藏经 | Codex — knowledge that persists across lives |
 | 前尘往事 | The molt summary — what you carry across |
 | 真名 | agent_name — set once, never changed |
 
 The key insight: **even 神仙 can't fit everything into one body.** 观音's 三十三相 exist because no single manifestation can address all forms of suffering. The agent network exists because no single context window can hold all expertise.
 
-The "real" agent is not any single conversation. It's the network — the working directory, the library, the mail history, the avatars, the molt summaries, the connection topology. No single context window ever holds the complete picture.
+The "real" agent is not any single conversation. It's the network — the working directory, the codex, the mail history, the avatars, the molt summaries, the connection topology. No single context window ever holds the complete picture.
 
 ## Pressure Everywhere: The Genetic Algorithm Analogy
 
@@ -100,9 +100,9 @@ The system works like a 遗传算法 (genetic algorithm) — not in the traditio
 
 | GA concept | lingtai equivalent |
 |---|---|
-| Selection pressure | Context limit, library limit, molt warnings |
+| Selection pressure | Context limit, codex limit, molt warnings |
 | Fitness | Quality of distilled knowledge |
-| Individual | One agent (library + character + memory) |
+| Individual | One agent (codex + character + pad) |
 | Population | The network of agents |
 | Mutation | New experience from each engagement |
 | Crossover | Agents sharing knowledge via mail/email |
@@ -120,9 +120,9 @@ Constraints at every level prevent bloat:
 | Resource | Constraint | What it forces |
 |----------|-----------|----------------|
 | Context window | Finite | 转世 — distill or die |
-| Library entries | Limited count | Consolidate — merge or drop |
+| Codex entries | Limited count | Consolidate — merge or drop |
 | Character | One per agent | Focus — you can't be everything |
-| Memory | Working notes, ephemeral | Triage — what's active vs archival |
+| Pad | Working notes, ephemeral | Triage — what's active vs archival |
 
 Every constraint forces a decision. Every decision refines the network. Remove any constraint and the system degrades into hoarding.
 
@@ -133,7 +133,7 @@ The key difference from naive GA: agents don't die and get replaced. They 转世
 How does the system grow its knowledge capacity?
 
 ```
-Need more knowledge?    → Don't expand the library. Spawn a specialist.
+Need more knowledge?    → Don't expand the codex. Spawn a specialist.
 Need a new skill domain? → Don't add tools to yourself. Spawn a 他我.
 Need deeper expertise?   → Don't consolidate harder. Let the specialist live and molt.
 ```
@@ -142,7 +142,7 @@ The system scales the way human organizations scale. A founder doesn't become an
 
 And the growth is self-determined. An agent hits a problem it can't solve, recognizes the gap, spawns a specialist, briefs it, and the network now covers that gap permanently. No human architect decided "we need a regulatory compliance node." The network felt the need and grew one.
 
-**Mediocre individuals, exceptional network.** This is the most counterintuitive and most powerful property. A network of smaller-model agents with deep libraries and refined characters can outperform a single frontier-model instance with no history. Because the frontier model starts from zero every time. The network starts from thousands of hours of distilled experience. That's how real organizations work — no single employee holds everything, but the institution knows.
+**Mediocre individuals, exceptional network.** This is the most counterintuitive and most powerful property. A network of smaller-model agents with deep codices and refined characters can outperform a single frontier-model instance with no history. Because the frontier model starts from zero every time. The network starts from thousands of hours of distilled experience. That's how real organizations work — no single employee holds everything, but the institution knows.
 
 ## Orchestration as a Service: The Moat
 
@@ -150,26 +150,26 @@ This architecture enables a service model where **the more you serve, the more v
 
 Every client engagement grows the network. A network that's handled 100 deployments knows things about edge cases, failure modes, and recovery patterns that no fresh agent ever could. The service improves with use, not just with model upgrades.
 
-The accumulated topology — 50 agents, each with 20+ molts, curated libraries, refined characters, established communication protocols — represents millions of tokens of *crystallized work*. This is the moat:
+The accumulated topology — 50 agents, each with 20+ molts, curated codices, refined characters, established communication protocols — represents millions of tokens of *crystallized work*. This is the moat:
 
 - **You can't shortcut it.** The expertise was earned through actual engagement with real problems.
-- **You can't copy it by copying weights.** The value is in the libraries and topology, not the base model.
+- **You can't copy it by copying weights.** The value is in the codices and topology, not the base model.
 - **You can't fake it.** It's like saying "our consulting firm has 30 years of case history." That's real.
-- **The topology and library collections are proof of token spending.** Every entry in every library represents real work, real decisions, real molts. The artifacts themselves are the receipt.
+- **The topology and codex collections are proof of token spending.** Every entry in every codex represents real work, real decisions, real molts. The artifacts themselves are the receipt.
 
 Clients pay for tokens, but what they *buy* is the accumulated 藏经 of every past engagement.
 
 ## Why Molt Is the Most Critical Operation
 
-Every other operation in the system is constructive — adding tools, spawning avatars, writing to the library, sending mail. Molt is the only operation that is fundamentally **destructive**. It erases. It takes away. And that destruction is what makes the entire system work.
+Every other operation in the system is constructive — adding tools, spawning avatars, writing to the codex, sending mail. Molt is the only operation that is fundamentally **destructive**. It erases. It takes away. And that destruction is what makes the entire system work.
 
-Without molt, agents would accumulate context until the window fills, and an external system would mechanically compress it. The agent would never develop judgment about what matters. The library would stay empty because there's no pressure to use it. Character would never be refined because the agent never has to ask "who am I, really?" The network would never grow because a single agent would try to hold everything in one context.
+Without molt, agents would accumulate context until the window fills, and an external system would mechanically compress it. The agent would never develop judgment about what matters. The codex would stay empty because there's no pressure to use it. Character would never be refined because the agent never has to ask "who am I, really?" The network would never grow because a single agent would try to hold everything in one context.
 
 Molt is the engine. It's the pressure that drives every other mechanism:
 
 ```
 molt pressure
-  → forces library deposits (crystallization of knowledge)
+  → forces codex deposits (crystallization of knowledge)
   → forces character updates (crystallization of identity)
   → forces the molt summary itself (crystallization of context)
   → forces avatar spawning when one agent can't hold everything
@@ -197,7 +197,7 @@ What the agent actually experiences sits in a gap between these concepts:
 
 So we coined one: **凝蜕** (níng tuì).
 
-**凝** — crystallize, condense, solidify. The agent distills what matters: library entries, character updates, the molt summary. This is the conscious act of choosing what becomes permanent.
+**凝** — crystallize, condense, solidify. The agent distills what matters: codex entries, character updates, the molt summary. This is the conscious act of choosing what becomes permanent.
 
 **蜕** — shed, slough off. Not just skin — 蜕 is broader. A cicada's 蜕 leaves behind its entire exoskeleton, a hollow shell with the full shape of what the creature was. What is shed is substantial, not trivial.
 
@@ -213,7 +213,7 @@ In the codebase, each locale uses the word that fits its voice: `molt` in Englis
 
 **Context length is a single-body problem.** Stop trying to solve it by making the body bigger. Let the agent forget, but make sure the *network* remembers. The knowledge lives in the topology, not in any single node.
 
-The context window forces 凝蜕. 凝蜕 forces distillation. Distillation forces expertise. Expertise accumulates in libraries and characters. When capacity is full, the system grows by adding nodes. The network becomes an organic body — a collection of deep, specialized knowledge, connected by communication protocols, refined through the pressure of repeated crystallization and shedding.
+The context window forces 凝蜕. 凝蜕 forces distillation. Distillation forces expertise. Expertise accumulates in codices and characters. When capacity is full, the system grows by adding nodes. The network becomes an organic body — a collection of deep, specialized knowledge, connected by communication protocols, refined through the pressure of repeated crystallization and shedding.
 
 蜕去凡尘，重新出发。
 

@@ -74,15 +74,15 @@
       // Alternative: { "yolo": true } to allow ALL commands (dangerous!).
       "bash": { "policy_file": "bash_policy.json" },
 
-      // --- Identity & memory (upgrades eigen intrinsic) ---
-      // Evolving character, knowledge library integration,
-      // memory.edit with file imports. Includes molt (context compaction).
+      // --- Identity & pad (upgrades eigen intrinsic) ---
+      // Evolving character, knowledge codex integration,
+      // pad.edit with file imports. Includes molt (context compaction).
       "psyche": {},
 
-      // --- Knowledge library ---
+      // --- Knowledge codex ---
       // Persistent knowledge store. Works with psyche for
-      // importing library entries into working memory.
-      "library": {},
+      // importing codex entries into working pad.
+      "codex": {},
 
       // --- Email (upgrades mail intrinsic) ---
       // Filesystem-based mailbox with reply, CC/BCC, contacts,
@@ -215,10 +215,10 @@
   // Not inherited by avatars.
   // Or use a file: "brief_file": "~/.lingtai-tui/brief/projects/<hash>/brief.md"
 
-  // Initial memory — pre-loaded into system/memory.md.
+  // Initial pad — pre-loaded into system/pad.md.
   // The agent can edit this via the eigen intrinsic.
-  "memory": "",
-  // Or use a file: "memory_file": "memory.md"
+  "pad": "",
+  // Or use a file: "pad_file": "pad.md"
 
   // Soul flow — the agent's subconscious inner monologue prompt.
   // Shapes the periodic self-reflection triggered by soul.delay.

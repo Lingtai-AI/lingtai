@@ -149,7 +149,7 @@ CustomAgent(Agent)     — 你的领域逻辑
 <td>
 
 `psyche` — 进化的身份与性格
-`library` — 知识归档与检索
+`codex` — 知识归档与检索
 `email` — 完整信箱系统
 
 </td>
@@ -171,7 +171,7 @@ CustomAgent(Agent)     — 你的领域逻辑
   .agent.json               ← 清单
   system/
     covenant.md             ← 盟约（跨凝蜕存续）
-    memory.md               ← 记忆
+    pad.md               ← 手记
   mailbox/
     inbox/                  ← 收到的信件
     outbox/                 ← 待发送

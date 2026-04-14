@@ -166,7 +166,7 @@ CustomAgent(Agent)     — your domain logic
 <td>
 
 `psyche` — evolving identity
-`library` — knowledge archive
+`codex` — knowledge archive
 `email` — full mailbox system
 
 </td>
@@ -188,7 +188,7 @@ CustomAgent(Agent)     — your domain logic
   .agent.json               ← manifest
   system/
     covenant.md             ← protected instructions (survive molts)
-    memory.md               ← working notes
+    pad.md               ← working notes
   mailbox/
     inbox/                  ← received messages
     outbox/                 ← pending sends
@@ -299,7 +299,7 @@ If you installed via Homebrew previously: `brew unlink lingtai-tui`
 **The dev loop:**
 - Edit Go code → `cd tui && make build` → restart lingtai-tui
 - Edit Python code → changes take effect immediately (editable install in the TUI venv)
-- Edit recipes/skills/i18n → `make build` (they're embedded in the Go binary)
+- Edit recipes/library/i18n → `make build` (they're embedded in the Go binary)
 
 > **Important:** The TUI runs agents in its own Python venv at `~/.lingtai-tui/runtime/venv/`. Installing the kernel with `pip install -e .` in your system Python does NOT affect running agents. Always install into the TUI's venv as shown in step 4.
 
@@ -310,7 +310,7 @@ lingtai/                          # This repo — Go frontends
 ├── tui/                          # Terminal UI (Go + Bubble Tea)
 │   ├── main.go                   # Entry point, CLI subcommands
 │   ├── internal/tui/             # Bubble Tea models (mail, palette, firstrun, ...)
-│   ├── internal/preset/          # Recipes, presets, procedures, skills, covenant
+│   ├── internal/preset/          # Recipes, presets, procedures, library, covenant
 │   ├── internal/fs/              # Filesystem ops (mail cache, agent discovery)
 │   ├── internal/secretary/       # Secretary agent (道童) embedded assets
 │   ├── i18n/                     # Translations (en.json, zh.json, wen.json)
@@ -334,7 +334,7 @@ lingtai-kernel/                   # Separate repo — Python runtime
 | TUI features (slash commands, views) | this repo | Go |
 | Portal features | this repo | Go + TypeScript |
 | Recipes | this repo, `tui/internal/preset/recipe_assets/` | Markdown |
-| Skills | this repo, `tui/internal/preset/skills/` | Markdown |
+| Library | this repo, `tui/internal/preset/skills/` | Markdown |
 | Translations | this repo, `tui/i18n/` | JSON |
 | Documentation | this repo | Markdown |
 

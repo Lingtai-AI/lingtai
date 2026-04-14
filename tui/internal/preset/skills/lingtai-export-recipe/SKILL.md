@@ -90,7 +90,7 @@ Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **No
 
 1. Read the current recipe state: `cat .lingtai/.tui-asset/.recipe`
 2. Examine the current comment.md (behavioral DNA) — find it via the recipe state
-3. List all installed skills: `ls -la .lingtai/.skills/`
+3. List all installed skills: `ls -la .lingtai/.library/`
 4. Scan the network structure: `ls .lingtai/*/` and `cat .lingtai/*/.agent.json`
 5. Skim recent mail for tone and delegation patterns: `ls .lingtai/*/mailbox/archive/ | head -20`
 
@@ -114,7 +114,7 @@ Send the human **one** email introducing the export flow and collecting all key 
 > 6. **Any behavioral constraints** — what should carry over from this network's culture?
 >
 > Here are the installed skills:
-> [list from ls .lingtai/.skills/]
+> [list from ls .lingtai/.library/]
 >
 > Answer as many as you can in one message and I'll draft everything in one pass."
 
@@ -172,12 +172,12 @@ Write `$RECIPE_DIR/en/comment.md`. This is the heart of the recipe. **Draw from 
 
 For each skill the human wants to include:
 
-1. Check if it's an intrinsic skill (in `.skills/intrinsic/`) — if so, don't copy it; it's already available everywhere
+1. Check if it's an intrinsic skill (in `.library/intrinsic/`) — if so, don't copy it; it's already available everywhere
 2. If it's a custom or recipe skill, copy the skill directory:
 
 ```bash
 mkdir -p $RECIPE_DIR/skills/<skill-name>
-cp -R .lingtai/.skills/custom/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
+cp -R .lingtai/.library/custom/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
 ```
 
 3. Verify each skill has a valid `SKILL.md` with proper frontmatter
@@ -234,6 +234,6 @@ Check `gh auth status` and follow the three-branch pattern:
 
 **The recipe is a seed, not a clone.** It shapes behavior — it does NOT reproduce the network's state, history, or data. That's what `/export network` is for. An exported recipe is an exported network without the network — same `.lingtai-recipe/` convention, no `.lingtai/`.
 
-**Intrinsic skills don't need copying.** Skills under `.skills/intrinsic/` are shipped with the TUI and already available in every installation.
+**Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI and already available in every installation.
 
 **The repo IS the project.** The recipient clones this repo and opens it directly with `lingtai-tui`. The TUI auto-discovers `.lingtai-recipe/` and uses it during setup. Do not instruct the recipient to copy files around — the repo structure is the final structure.

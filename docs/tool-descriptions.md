@@ -27,13 +27,13 @@ Disk-backed mailbox for inter-agent messaging. Always reply via mail — never r
 ### eigen
 
 **English:**
-Core self-management — working notes and context control. memory: edit to write your working notes (system/memory.md), load to inject them into your active prompt. context: molt (凝蜕 — crystallize what matters, shed the rest; 转世 — reincarnation, carry your 前尘往事 into a new life). Save important findings to library and character first, then write what you need to carry forward to your future self. Your conversation history is wiped and your summary becomes the new starting context.
+Core self-management — working pad and context control. pad: edit to write your working notes (system/pad.md), load to inject them into your active prompt. context: molt (凝蜕 — crystallize what matters, shed the rest; 转世 — reincarnation, carry your 前尘往事 into a new life). Save important findings to codex and character first, then write what you need to carry forward to your future self. Your conversation history is wiped and your summary becomes the new starting context.
 
 **中文:**
-核心自我管理——工作笔记和上下文控制。memory：edit 写入工作笔记（system/memory.md），load 将其注入当前提示。context：molt 凝蜕（转世——携前尘往事入新生；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将重要发现存入知识库和修行志，再去芜存菁留给未来的自己。对话历史将被清除，你的去芜存菁成为新的起始上下文。
+核心自我管理——手记和上下文控制。pad：edit 写入工作笔记（system/pad.md），load 将其注入当前提示。context：molt 凝蜕（转世——携前尘往事入新生；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将重要发现存入典集和修行志，再去芜存菁留给未来的自己。对话历史将被清除，你的去芜存菁成为新的起始上下文。
 
 **文言:**
-核心自治——工作笔记与上下文之管。memory：edit 写入工作笔记（system/memory.md），load 将其载入当前意识。context：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入藏经与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为新起之上下文。
+核心自治——简与上下文之管。pad：edit 写入工作笔记（system/pad.md），load 将其载入当前意识。context：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入典与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为新起之上下文。
 
 ### system_tool
 
@@ -117,39 +117,39 @@ Execute a shell command and return stdout/stderr. You can run any program availa
 ### psyche
 
 **English:**
-Identity, memory, and context management.
+Identity, pad, and context management.
 character: your evolving identity — what makes you *you*. Your personality, expertise, working style, and goals. update to write your character (replaces previous), load to apply.
-memory: your working notes (system/memory.md). edit to write content — optionally import frozen library exports via the files param (paths returned by library export). Each file is appended with [file-1], [file-2] dividers. load to inject memory into your prompt.
-context: molt (凝蜕 — crystallize what matters, shed the rest; 转世 — reincarnation, carry your 前尘往事 into a new life). Save important findings to library and character first, then write what you need to carry forward to your future self. Your conversation history is wiped and your summary becomes the ONLY context you see.
-Workflow for importing knowledge: library(export, ids=[...]) → get file paths → psyche(memory, edit, content='my notes', files=[paths]) → psyche(memory, load).
+pad: your working notes (system/pad.md). edit to write content — optionally import frozen codex exports via the files param (paths returned by codex export). Each file is appended with [file-1], [file-2] dividers. load to inject pad into your prompt.
+context: molt (凝蜕 — crystallize what matters, shed the rest; 转世 — reincarnation, carry your 前尘往事 into a new life). Save important findings to codex and character first, then write what you need to carry forward to your future self. Your conversation history is wiped and your summary becomes the ONLY context you see.
+Workflow for importing knowledge: codex(export, ids=[...]) → get file paths → psyche(pad, edit, content='my notes', files=[paths]) → psyche(pad, load).
 
 **中文:**
-身份、记忆和上下文管理。
+身份、手记和上下文管理。
 character：你的修行志——不断演化的身份，定义了你是谁。你的个性、专长、工作风格和目标。update 写入你的修行志（替换之前的内容），load 应用。
-memory：你的工作笔记（system/memory.md）。edit 写入内容——可选通过 files 参数导入知识库导出的冻结文件（由 library export 返回的路径）。每个文件以 [file-1]、[file-2] 分隔符附加。load 将记忆注入提示。
-context：molt 凝蜕（转世——携前尘往事入新生；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将重要发现存入知识库和修行志，再去芜存菁留给未来的自己。你的对话历史会被清除，你的去芜存菁成为你唯一的上下文。
-导入知识的工作流：library(export, ids=[...]) → 获取文件路径 → psyche(memory, edit, content='我的笔记', files=[路径]) → psyche(memory, load)。
+pad：你的工作笔记（system/pad.md）。edit 写入内容——可选通过 files 参数导入典集导出的冻结文件（由 codex export 返回的路径）。每个文件以 [file-1]、[file-2] 分隔符附加。load 将手记注入提示。
+context：molt 凝蜕（转世——携前尘往事入新生；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将重要发现存入典集和修行志，再去芜存菁留给未来的自己。你的对话历史会被清除，你的去芜存菁成为你唯一的上下文。
+导入知识的工作流：codex(export, ids=[...]) → 获取文件路径 → psyche(pad, edit, content='我的笔记', files=[路径]) → psyche(pad, load)。
 
 **文言:**
-心印、记忆与上下文之管。
+心印、简与上下文之管。
 character：汝不断演化之心印——汝之所以为汝。个性、专长、行事之风、所求之目标。update 写入心印（替换前文），load 应用。
-memory：汝之工作笔记（system/memory.md）。edit 写入内容——可选以 files 参数导入藏经阁导出之冻结文卷（由 library export 返回之路径）。每卷以 [file-1]、[file-2] 分隔符附加。load 将记忆载入提示。
-context：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入藏经与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为唯一上下文。
-导入知识之工作流：library(export, ids=[...]) → 得文卷路径 → psyche(memory, edit, content='吾之笔记', files=[路径]) → psyche(memory, load)。
+pad：汝之工作笔记（system/pad.md）。edit 写入内容——可选以 files 参数导入典导出之冻结文卷（由 codex export 返回之路径）。每卷以 [file-1]、[file-2] 分隔符附加。load 将简载入提示。
+context：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入典与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为唯一上下文。
+导入知识之工作流：codex(export, ids=[...]) → 得文卷路径 → psyche(pad, edit, content='吾之笔记', files=[路径]) → psyche(pad, load)。
 
-### library
+### codex
 
 **English:**
-Knowledge archive — a persistent store for important findings, data, decisions, and discoveries. Persists across molts, reboots, and kills. There is an upper limit on entries — treat each slot as precious. Consolidate related entries regularly and use the supplementary field to pack extended detail into fewer entries. submit to add entries. filter to browse (returns id + title + summary). view to read full content. consolidate to merge entries. delete to remove. export to freeze entries as immutable text files — returns file paths you can pass to psyche(memory, edit, files=[...]) to import into memory.
-Workflow: filter → view for detail → export to freeze → psyche(memory, edit, files=[paths]) to import → psyche(memory, load) to activate.
+Knowledge codex — a persistent store for important findings, data, decisions, and discoveries. Persists across molts, reboots, and kills. There is an upper limit on entries — treat each slot as precious. Consolidate related entries regularly and use the supplementary field to pack extended detail into fewer entries. submit to add entries. filter to browse (returns id + title + summary). view to read full content. consolidate to merge entries. delete to remove. export to freeze entries as immutable text files — returns file paths you can pass to psyche(pad, edit, files=[...]) to import into pad.
+Workflow: filter → view for detail → export to freeze → psyche(pad, edit, files=[paths]) to import → psyche(pad, load) to activate.
 
 **中文:**
-知识库——用于存储重要发现、数据、决策和成果的持久存储。跨凝蜕、重启和关闭持久化。条目数有上限——珍惜每个条目。定期合并相关条目，利用 supplementary 字段将扩展细节打包进更少的条目。submit 添加条目。filter 浏览（返回 id + 标题 + 摘要）。view 阅读完整内容。consolidate 合并条目。delete 删除。export 将条目冻结为不可变文本文件——返回文件路径，可传给 psyche(memory, edit, files=[...]) 导入到记忆中。
-工作流：filter → view 查看详情 → export 冻结 → psyche(memory, edit, files=[路径]) 导入 → psyche(memory, load) 激活。
+典集——用于存储重要发现、数据、决策和成果的持久存储。跨凝蜕、重启和关闭持久化。条目数有上限——珍惜每个条目。定期合并相关条目，利用 supplementary 字段将扩展细节打包进更少的条目。submit 添加条目。filter 浏览（返回 id + 标题 + 摘要）。view 阅读完整内容。consolidate 合并条目。delete 删除。export 将条目冻结为不可变文本文件——返回文件路径，可传给 psyche(pad, edit, files=[...]) 导入到手记中。
+工作流：filter → view 查看详情 → export 冻结 → psyche(pad, edit, files=[路径]) 导入 → psyche(pad, load) 激活。
 
 **文言:**
-藏经阁——存储要紧发现、数据、决策与成果之持久典藏。跨转世、重启、归寂而持久。经卷数有上限——珍惜每一条目。定期合经，以 supplementary 字段将扩展细节纳入更少条目。submit 录入。filter 检索（返 id + 题 + 摘要）。view 展阅全文。consolidate 合经。delete 焚经。export 将经卷冻结为不可变文卷——返文卷路径，可传予 psyche(memory, edit, files=[...]) 导入记忆。
-工作流：filter → view 查详 → export 冻结 → psyche(memory, edit, files=[路径]) 导入 → psyche(memory, load) 激活。
+典——存储要紧发现、数据、决策与成果之持久典藏。跨转世、重启、归寂而持久。经卷数有上限——珍惜每一条目。定期合经，以 supplementary 字段将扩展细节纳入更少条目。submit 录入。filter 检索（返 id + 题 + 摘要）。view 展阅全文。consolidate 合经。delete 焚经。export 将经卷冻结为不可变文卷——返文卷路径，可传予 psyche(pad, edit, files=[...]) 导入简。
+工作流：filter → view 查详 → export 冻结 → psyche(pad, edit, files=[路径]) 导入 → psyche(pad, load) 激活。
 
 ### avatar
 

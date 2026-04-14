@@ -54,7 +54,7 @@ Tell the human upfront: "If you would like to jump to any lesson, just let me kn
 Read YOUR init.json and walk through every field you find. **Do not recite a list of fields — read the file and explain what is there.** The human sees the real structure.
 
 Key patterns to explain:
-- The `_file` convention: for `principle`, `covenant`, `soul`, `procedures`, `memory`, `prompt`, `brief`, `comment` — inline text or a path to a shared file.
+- The `_file` convention: for `principle`, `covenant`, `soul`, `procedures`, `pad`, `prompt`, `brief`, `comment` — inline text or a path to a shared file.
 - `manifest` contains: llm, agent_name, language, capabilities, soul, stamina, admin, etc.
 - `addons` connects to external messaging services.
 - `env_file` for secrets.
@@ -94,7 +94,7 @@ This gives you the real, current section render order. Walk through each section
 
 Key concepts to explain:
 - Protected sections (principle, covenant, rules, procedures) cannot be changed by the agent
-- Editable sections (identity/lingtai, memory) are how the agent evolves
+- Editable sections (identity/lingtai, pad) are how the agent evolves
 - Brief is externally maintained by the secretary
 - Skills are discovered at runtime
 - Comment is app-level instructions (like your tutorial instructions)
@@ -118,7 +118,7 @@ python3 -c "from lingtai_kernel.intrinsics import ALL_INTRINSICS; print(list(ALL
 Walk through each one you find:
 - **Soul** — the subconscious. Offer to demonstrate: set delay to 10s, tell human to enable extended mode (ctrl+o twice), go idle, let the soul fire, then report what happened. Reset delay afterward.
 - **System** — runtime inspection and lifecycle control.
-- **Eigen** — memory, identity management, molt (voluntary context reset).
+- **Eigen** — pad, identity management, molt (voluntary context reset).
 - **Mail** — filesystem-based communication.
 
 Also explain **molt** (context reset with briefing to future self) and **stamina** (max uptime before auto-sleep).
@@ -164,10 +164,10 @@ Keyboard shortcuts: explain ctrl+o (three verbose modes: off → verbose → ext
 
 ## Lesson 11: Addons — External Connections
 
-**Discover available addons dynamically** — use `skills(action='refresh')` to find all addon setup skills. They follow the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
+**Discover available addons dynamically** — use `library(action='refresh')` to find all addon setup skills. They follow the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
 
 For each addon the human wants to set up:
-1. Use `skills()` to find and read the setup skill's SKILL.md
+1. Use `library()` to find and read the setup skill's SKILL.md
 2. Follow its instructions exactly — do not hardcode setup steps
 
 Key concepts to teach:

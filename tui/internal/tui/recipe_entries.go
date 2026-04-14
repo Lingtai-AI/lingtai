@@ -64,7 +64,7 @@ func buildRecipeEntries(recipeDir string) []MarkdownEntry {
 			if info, err := os.Stat(rootSkill); err == nil && !info.IsDir() {
 				entries = append(entries, MarkdownEntry{
 					Label: skillName + "/SKILL.md",
-					Group: i18n.T("skills.title"),
+					Group: i18n.T("library.title"),
 					Path:  rootSkill,
 				})
 			}
@@ -80,7 +80,7 @@ func buildRecipeEntries(recipeDir string) []MarkdownEntry {
 				if info, err := os.Stat(langSkill); err == nil && !info.IsDir() {
 					entries = append(entries, MarkdownEntry{
 						Label: skillName + "/SKILL.md (" + ld.Name() + ")",
-						Group: i18n.T("skills.title"),
+						Group: i18n.T("library.title"),
 						Path:  langSkill,
 					})
 				}

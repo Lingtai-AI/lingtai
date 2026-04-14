@@ -92,4 +92,4 @@ Setup on Feishu Open Platform:
 
 ## Config Reference
 
-See the example config at `.lingtai/.skills/lingtai-feishu-setup/assets/config.json` for a full reference of all available fields.
+See the example config at `.lingtai/.library/lingtai-feishu-setup/assets/config.json` for a full reference of all available fields.

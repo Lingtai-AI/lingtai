@@ -14,7 +14,7 @@ This is a reference document. It describes the structure of a LingTai project di
 .lingtai/
 ├── meta.json                    # Version tracking for migrations
 ├── .port                        # Portal port number (when portal is running)
-├── .skills/                     # Skill store
+├── .library/                     # Skill library
 │   ├── intrinsic/               # Bundled skills (symlink, managed by TUI)
 │   ├── <recipe-name>/           # Recipe skills (managed by TUI)
 │   └── custom/                  # Agent-created skills
@@ -65,7 +65,7 @@ Every agent (including `human/`) follows the same structure. Human directories h
 │   ├── rules.md                 # Protected: hard rules
 │   ├── procedures.md            # Protected: standard procedures
 │   ├── lingtai.md               # Editable: identity/character (agent-written)
-│   ├── memory.md                # Editable: long-term memory (agent-written)
+│   ├── pad.md                # Editable: long-term memory (agent-written)
 │   ├── brief.md                 # Externally maintained by secretary
 │   └── comment.md               # App-level instructions
 │

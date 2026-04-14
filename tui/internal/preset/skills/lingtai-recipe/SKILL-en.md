@@ -103,7 +103,7 @@ Overrides the system-wide procedures (`~/.lingtai-tui/procedures/<lang>/procedur
 
 ### 5. `skills/` — Recipe-Shipped Skills
 
-Optional. Skills that travel with the recipe and are automatically symlinked into `.lingtai/.skills/<recipe-name>/` as a group folder when the TUI starts.
+Optional. Skills that travel with the recipe and are automatically symlinked into `.lingtai/.library/<recipe-name>/` as a group folder when the TUI starts.
 
 Each skill follows the standard SKILL.md contract:
 
@@ -119,7 +119,7 @@ version: 1.0.0
 
 **i18n:** For multi-language skills, use `SKILL.md` as a frontmatter-only pointer and provide `SKILL-en.md`, `SKILL-zh.md`, etc. for full instructions. The agent reads `SKILL.md`, sees which lang variants are available, and reads the appropriate one. Single-language skills just put everything in `SKILL.md`.
 
-**Grouping:** Recipe skills appear in `.lingtai/.skills/<recipe-name>/` — the recipe name is the group header in the `/skills` viewer.
+**Grouping:** Recipe skills appear in `.lingtai/.library/<recipe-name>/` — the recipe name is the group header in the `/library` viewer.
 
 **Scripts and assets:** Place them alongside `SKILL.md` in the skill directory. They are self-contained per skill.
 

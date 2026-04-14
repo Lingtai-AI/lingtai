@@ -196,7 +196,7 @@ func (m MarkdownViewerModel) renderLeft(maxW int) string {
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
 
-	problemsGroup := i18n.T("skills.problems")
+	problemsGroup := i18n.T("library.problems")
 
 	var lines []string
 	lastGroup := ""

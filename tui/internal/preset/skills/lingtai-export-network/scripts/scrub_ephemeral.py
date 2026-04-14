@@ -26,7 +26,7 @@ specific state:
                                    configure their own addons after cloning)
 
 Preserved (canonical, durable):
-    .lingtai/.skills/             (canonical skills + user-added skills)
+    .lingtai/.library/             (canonical skills + user-added skills)
 
 Mail folders (inbox/outbox/sent/) are left alone — archive_mail.py handles
 them in step 2.
@@ -74,7 +74,7 @@ EPHEMERAL_NESTED = [
 # hold publisher-specific state: portal event streams, TUI caches, and
 # addon configs (which point at the publisher's accounts and credential
 # env vars). Recipients set up their own addons after cloning.
-# .lingtai/.skills/ is intentionally excluded — it is canonical
+# .lingtai/.library/ is intentionally excluded — it is canonical
 # configuration (bundled + user-added) that belongs in the published
 # network.
 PROJECT_EPHEMERAL_DIRS = [

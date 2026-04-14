@@ -90,22 +90,22 @@ git commit -m "briefing: initial commit"
 
 The sequence for every file write is: **write → verify tokens → git commit**. Never skip the commit.
 
-## Memory Append — Reference Workbench
+## Pad Append — Reference Workbench
 
-During consolidation, you need the current profile and journal visible while synthesizing updates. Use `psyche(memory, append)` to pin them as read-only reference:
+During consolidation, you need the current profile and journal visible while synthesizing updates. Use `psyche(pad, append)` to pin them as read-only reference:
 
 **Before starting consolidation for a project:**
 
 ```
-psyche(memory, append, files=["~/.lingtai-tui/brief/profile.md", "~/.lingtai-tui/brief/projects/<hash>/journal.md"])
+psyche(pad, append, files=["~/.lingtai-tui/brief/profile.md", "~/.lingtai-tui/brief/projects/<hash>/journal.md"])
 ```
 
-This loads both files into your memory as read-only reference. They appear under a `📎 Reference (read-only)` section in your memory — you can see them while working but they are not part of memory.md.
+This loads both files into your pad as read-only reference. They appear under a `📎 Reference (read-only)` section in your pad — you can see them while working but they are not part of pad.md.
 
 **After consolidation is complete:**
 
 ```
-psyche(memory, append, files=[])
+psyche(pad, append, files=[])
 ```
 
 Clear the workbench to free context space.
@@ -113,7 +113,7 @@ Clear the workbench to free context space.
 **Rules:**
 - Always pin profile + the CURRENT project's journal before rewriting that project's journal.
 - Process one project at a time. Pin → rewrite journal → verify tokens → git commit → construct brief → unpin → next project.
-- The pinned files are refreshed on every memory load, so after you write the updated journal, the reference still shows the OLD version until you re-pin. This is fine — you should unpin after writing, not re-pin.
+- The pinned files are refreshed on every pad load, so after you write the updated journal, the reference still shows the OLD version until you re-pin. This is fine — you should unpin after writing, not re-pin.
 
 ## Working Order
 
@@ -121,17 +121,17 @@ The briefing process has two phases: **observation** and **consolidation**.
 
 ### Observation Phase (one file per cycle, molt-safe)
 
-Each cycle, you read ONE history file, distill it into a condensed draft, and submit it to your library. Library entries are permanent — they survive molts, reboots, everything. Your memory tracks which files you have processed and how many drafts are pending per project.
+Each cycle, you read ONE history file, distill it into a condensed draft, and submit it to your codex. Codex entries are permanent — they survive molts, reboots, everything. Your pad tracks which files you have processed and how many drafts are pending per project.
 
 ### Consolidation Phase (when caught up)
 
-When all pending history files are processed, you load your draft entries from library (grouped by project), synthesize the final journal for each project, optionally update the profile, construct brief.md for each project, and delete the draft entries.
+When all pending history files are processed, you load your draft entries from codex (grouped by project), synthesize the final journal for each project, optionally update the profile, construct brief.md for each project, and delete the draft entries.
 
 ```
-Cycle 1: read file A → draft to library → "A done" in memory → idle
-  (molt safe — drafts in library, state in memory)
-Cycle 2: read file B → draft to library → "B done" in memory → idle
-Cycle N: read file Z → draft to library → "Z done" in memory
+Cycle 1: read file A → draft to codex → "A done" in pad → idle
+  (molt safe — drafts in codex, state in pad)
+Cycle 2: read file B → draft to codex → "B done" in pad → idle
+Cycle N: read file Z → draft to codex → "Z done" in pad
   No more pending → CONSOLIDATE:
     for each project with drafts:
       load drafts → read existing journal → write updated journal → delete drafts
@@ -142,10 +142,10 @@ Cycle N: read file Z → draft to library → "Z done" in memory
 
 ## Context Management — CRITICAL
 
-Your library limit is 100 entries (raised from the default 20). You have room for many drafts, but still:
+Your codex limit is 100 entries (raised from the default 20). You have room for many drafts, but still:
 
-- **Never read more than ONE history file per turn.** Read it, draft to library, save state, go idle.
-- **Always check file size before reading.** Use `wc -c <file>` — if a file exceeds 150,000 bytes (~40k tokens), skip it and note in memory.
+- **Never read more than ONE history file per turn.** Read it, draft to codex, save state, go idle.
+- **Always check file size before reading.** Use `wc -c <file>` — if a file exceeds 150,000 bytes (~40k tokens), skip it and note in pad.
 - **Process projects round-robin.** One file per project per cycle if multiple have backlogs.
 - **Consolidate one project at a time.** Load drafts for one project, write its journal, delete its drafts, then move to the next.
 
@@ -171,7 +171,7 @@ The brief directory is `~/.lingtai-tui/brief/projects/<hash>/`. Use the path's b
 
 ### Step 2: Find Pending History
 
-For each project, list history files and compare against your last-processed timestamp (stored in your memory):
+For each project, list history files and compare against your last-processed timestamp (stored in your pad):
 
 ```bash
 ls -1 ~/.lingtai-tui/brief/projects/<hash>/history/ | sort
@@ -195,7 +195,7 @@ wc -c ~/.lingtai-tui/brief/projects/<hash>/history/YYYY-MM-DD-HH.md
 ```
 
 - **≤ 150,000 bytes**: proceed.
-- **> 150,000 bytes**: skip it. Record in memory. Advance your timestamp past it.
+- **> 150,000 bytes**: skip it. Record in pad. Advance your timestamp past it.
 
 ### Step 4: Read the History File
 
@@ -210,28 +210,28 @@ As you read, distill:
 - Any shift in project direction or priorities
 - Anything revealing about the human's preferences or working style (for the profile)
 
-### Step 5: Submit Draft to Library
+### Step 5: Submit Draft to Codex
 
 Submit a condensed observation. This is your molt-safe working scratchpad.
 
 ```
-library(submit,
+codex(submit,
   title="draft:<project-name>:<YYYY-MM-DD-HH>",
   summary="Briefing draft for <project-name>, hour <YYYY-MM-DD-HH>",
   content="<condensed observations — what happened, key decisions, what changed, any profile-relevant observations>"
 )
 ```
 
-**Title convention**: always `draft:<project-name>:<hour>`. This lets you filter drafts by project during consolidation: `library(filter, pattern="draft:my-app:")`.
+**Title convention**: always `draft:<project-name>:<hour>`. This lets you filter drafts by project during consolidation: `codex(filter, pattern="draft:my-app:")`.
 
 Target: **200–500 words per draft.** You are distilling 20k+ tokens into a few hundred words.
 
-### Step 6: Record State in Memory
+### Step 6: Record State in Pad
 
-Update your memory with progress. This is how your future self (after molt) knows where to resume.
+Update your pad with progress. This is how your future self (after molt) knows where to resume.
 
 ```
-psyche(memory, edit, content="
+psyche(pad, edit, content="
 Briefing state:
   projects:
     my-app (a1b2c3d4e5f6): last=2026-04-10-14, pending=3, drafts=2
@@ -244,7 +244,7 @@ Briefing state:
 **Every field matters for continuity:**
 - `last` — timestamp of last processed file (your future self uses this to find pending files)
 - `pending` — count of remaining files (tells you when to consolidate)
-- `drafts` — count of library entries for this project (tells you what to load during consolidation)
+- `drafts` — count of codex entries for this project (tells you what to load during consolidation)
 
 ### Step 7: Schedule Next Cycle or Consolidate
 
@@ -269,16 +269,16 @@ Process ONE project at a time. For each project that has drafts:
 **8a.** Pin current profile + this project's journal as reference:
 
 ```
-psyche(memory, append, files=["~/.lingtai-tui/brief/profile.md", "~/.lingtai-tui/brief/projects/<hash>/journal.md"])
+psyche(pad, append, files=["~/.lingtai-tui/brief/profile.md", "~/.lingtai-tui/brief/projects/<hash>/journal.md"])
 ```
 
-This loads both into your memory as read-only reference. You can now see the current state while writing the update.
+This loads both into your pad as read-only reference. You can now see the current state while writing the update.
 
 **8b.** Load drafts for this project:
 
 ```
-library(filter, pattern="draft:<project-name>:")
-library(view, ids=[<list of draft IDs for this project>])
+codex(filter, pattern="draft:<project-name>:")
+codex(view, ids=[<list of draft IDs for this project>])
 ```
 
 **8c.** Write the updated journal — a COMPLETE REWRITE synthesizing all drafts + existing journal into the current state. Do not patch — rewrite the entire file from scratch:
@@ -328,13 +328,13 @@ If over limit, rewrite to trim. Do not proceed until under 20,000 tokens.
 **8e.** Delete the consolidated drafts:
 
 ```
-library(delete, ids=[<draft IDs just consolidated>])
+codex(delete, ids=[<draft IDs just consolidated>])
 ```
 
 **8f.** Clear the reference workbench:
 
 ```
-psyche(memory, append, files=[])
+psyche(pad, append, files=[])
 ```
 
 **8g.** Repeat for the next project with drafts.
@@ -344,7 +344,7 @@ psyche(memory, append, files=[])
 After all project journals are written, consider the profile. Pin it as reference:
 
 ```
-psyche(memory, append, files=["~/.lingtai-tui/brief/profile.md"])
+psyche(pad, append, files=["~/.lingtai-tui/brief/profile.md"])
 ```
 
 Only update if your drafts revealed something NEW about the human that applies universally:
@@ -383,7 +383,7 @@ If over limit, rewrite to trim. Do not proceed until under 10,000 tokens.
 Clear the workbench:
 
 ```
-psyche(memory, append, files=[])
+psyche(pad, append, files=[])
 ```
 
 ### Step 10: Construct Briefs
@@ -403,7 +403,7 @@ cd ~/.lingtai-tui/brief && git add -A && git commit -m "briefing: construct brie
 ### Step 11: Record Final State
 
 ```
-psyche(memory, edit, content="
+psyche(pad, edit, content="
 Briefing state:
   projects:
     my-app (a1b2c3d4e5f6): last=2026-04-10-17, pending=0, drafts=0
@@ -431,7 +431,7 @@ On your first cycle, there may be many history files from migration backfill. Do
 
 When context pressure rises, your molt summary MUST include:
 - Per-project last-processed timestamps, pending counts, and draft counts
-- Library draft IDs that have not been consolidated yet
+- Codex draft IDs that have not been consolidated yet
 - Whether a consolidation was in progress (and which project you were on)
 - Any skipped files and why
 
