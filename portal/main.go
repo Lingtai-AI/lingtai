@@ -15,7 +15,6 @@ import (
 	"github.com/anthropics/lingtai-portal/i18n"
 	"github.com/anthropics/lingtai-portal/internal/api"
 	"github.com/anthropics/lingtai-portal/internal/migrate"
-	"github.com/anthropics/lingtai-portal/internal/timemachine"
 )
 
 func main() {
@@ -58,7 +57,6 @@ func main() {
 	// Start server and background topology recorder
 	srv := api.NewServer(lingtaiDir, WebFS())
 	srv.StartRecording(lingtaiDir)
-	stopTimeMachine := timemachine.Start(lingtaiDir)
 	portFile := filepath.Join(portalDir, "port")
 	if err := srv.Start(portFile, port); err != nil {
 		fmt.Fprintf(os.Stderr, "error starting server: %v\n", err)
@@ -78,7 +76,6 @@ func main() {
 	<-sigCh
 
 	fmt.Println("\nShutting down...")
-	stopTimeMachine()
 	srv.Stop(context.Background())
 }
 
