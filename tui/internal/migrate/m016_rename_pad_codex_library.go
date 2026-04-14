@@ -81,6 +81,21 @@ func migrateRenamePadCodexLibrary(lingtaiDir string) error {
 		".skills → .library (network-level)",
 	)
 
+	// Show a prominent warning — agents need a refresh to pick up new tool names
+	fmt.Println()
+	fmt.Println("  ╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("  ║  Migration complete: memory→pad, library→codex, skills→library  ║")
+	fmt.Println("  ║                                                              ║")
+	fmt.Println("  ║  Your agents' files and init.json have been updated.         ║")
+	fmt.Println("  ║  Running agents still have old tool names in their session.  ║")
+	fmt.Println("  ║                                                              ║")
+	fmt.Println("  ║  After the TUI starts, type:  /refresh all                   ║")
+	fmt.Println("  ║  This restarts all agents with the new tool names.           ║")
+	fmt.Println("  ╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+	fmt.Print("  Press [Enter] to continue...")
+	fmt.Scanln()
+
 	return nil
 }
 
