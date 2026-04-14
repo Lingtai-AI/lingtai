@@ -118,6 +118,8 @@ cat lingtai-mailbox-skill/skills/lingtai-mailbox/SKILL.md >> AGENTS.md
 
 Once connected, your coding agent shares the human mailbox at `.lingtai/human/` — it can read mail from agents, send instructions, check liveness, and manage the network. The protocol is pure filesystem: no SDK, no API, no dependencies.
 
+**Why both?** Coding agents are reliable — you see every tool call, every edit. LingTai agents are creative and infinitely productive — they explore, research, brainstorm across parallel contexts that never expire. Use your coding agent as the hands: precise, verified, interactive. Use LingTai as the long-term brain: deep research, accumulated knowledge, async tasks that would bloat your context window. The agents draft proposals; your coding agent implements them carefully.
+
 ## Why Lingtai
 
 **This is not a coding agent, and hardly an agent harness.** This is agent genesis — giving agents a real digital life form. Agents as autonomous creatures with dignity, that live, sleep, forget, and grow.
