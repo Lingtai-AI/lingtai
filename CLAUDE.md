@@ -37,13 +37,14 @@ Cross-compilation targets (darwin/linux/windows, amd64/arm64) are available via 
 
 1. Tag and push: `git tag v0.X.Y && git push origin v0.X.Y`
 2. Cross-compile: `cd tui && make cross-compile`
-3. Re-tar the fresh binaries:
+3. Re-tar the fresh binaries. **The binary inside each tar MUST be named `lingtai-tui`** (not the cross-compile output name), because Homebrew's `bin.install "lingtai-tui"` expects that name:
    ```bash
    cd tui/bin
-   tar czf lingtai-darwin-arm64.tar.gz lingtai-darwin-arm64
-   tar czf lingtai-darwin-x64.tar.gz lingtai-darwin-x64
-   tar czf lingtai-linux-x64.tar.gz lingtai-linux-x64
-   tar czf lingtai-linux-arm64.tar.gz lingtai-linux-arm64
+   for arch in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+     cp "lingtai-${arch}" lingtai-tui
+     tar czf "lingtai-${arch}.tar.gz" lingtai-tui
+   done
+   rm lingtai-tui
    ```
 4. Create release with binaries: `gh release create v0.X.Y --title "v0.X.Y" --notes "..." lingtai-darwin-arm64.tar.gz lingtai-darwin-x64.tar.gz lingtai-linux-x64.tar.gz lingtai-linux-arm64.tar.gz`
 5. Update the Homebrew tap (`huangzesen/homebrew-lingtai/lingtai-tui.rb`): bump version, update all sha256 checksums (`shasum -a 256 *.tar.gz`), commit and push.
