@@ -23,9 +23,8 @@ type MarkdownEntry struct {
 // MarkdownViewerCloseMsg is sent when the user exits the viewer.
 type MarkdownViewerCloseMsg struct{}
 
-// MarkdownViewerModel is a two-panel view: entry list (left) + rendered
-// markdown content (right). It is a standalone tea.Model — callers build
-// the entry list and pass it in.
+// MarkdownViewerModel is a two-panel view with independent scrolling:
+// left panel (entry list) and right panel (rendered markdown content).
 type MarkdownViewerModel struct {
 	entries []MarkdownEntry
 	title   string
@@ -33,13 +32,19 @@ type MarkdownViewerModel struct {
 	height  int
 	cursor  int
 
-	viewport viewport.Model
-	ready    bool
+	leftVP  viewport.Model
+	rightVP viewport.Model
+	ready   bool
+
+	// focus tracks which panel receives scroll input
+	focus int // 0 = left, 1 = right
 }
 
 const (
 	mdvHeaderLines = 2
 	mdvFooterLines = 2
+	mdvFocusLeft   = 0
+	mdvFocusRight  = 1
 )
 
 // NewMarkdownViewer creates a viewer with the given entries and title.
@@ -47,13 +52,13 @@ func NewMarkdownViewer(entries []MarkdownEntry, title string) MarkdownViewerMode
 	return MarkdownViewerModel{
 		entries: entries,
 		title:   title,
+		focus:   mdvFocusRight, // default focus on content
 	}
 }
 
 func (m MarkdownViewerModel) Init() tea.Cmd { return nil }
 
 func (m MarkdownViewerModel) Update(msg tea.Msg) (MarkdownViewerModel, tea.Cmd) {
-	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -62,53 +67,64 @@ func (m MarkdownViewerModel) Update(msg tea.Msg) (MarkdownViewerModel, tea.Cmd) 
 		if vpHeight < 1 {
 			vpHeight = 1
 		}
+		leftW, _ := m.panelWidths()
 		if !m.ready {
-			m.viewport = viewport.New()
-			m.viewport.SetWidth(m.width)
-			m.viewport.SetHeight(vpHeight)
+			m.leftVP = viewport.New()
+			m.rightVP = viewport.New()
 			m.ready = true
-		} else {
-			m.viewport.SetWidth(m.width)
-			m.viewport.SetHeight(vpHeight)
 		}
-		m.syncContent()
+		m.leftVP.SetWidth(leftW)
+		m.leftVP.SetHeight(vpHeight)
+		m.rightVP.SetWidth(m.width - leftW - 1) // -1 for separator
+		m.rightVP.SetHeight(vpHeight)
+		m.syncLeft()
+		m.syncRight()
 
 	case tea.MouseWheelMsg:
-		m.viewport, cmd = m.viewport.Update(msg)
+		var cmd tea.Cmd
+		if m.focus == mdvFocusRight {
+			m.rightVP, cmd = m.rightVP.Update(msg)
+		} else {
+			m.leftVP, cmd = m.leftVP.Update(msg)
+		}
 		return m, cmd
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg { return MarkdownViewerCloseMsg{} }
+		case "tab":
+			m.focus = 1 - m.focus // toggle
+			return m, nil
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				m.syncContent()
+				m.syncLeft()
+				m.syncRight()
 			}
 			return m, nil
 		case "down", "j":
 			if m.cursor < len(m.entries)-1 {
 				m.cursor++
-				m.syncContent()
+				m.syncLeft()
+				m.syncRight()
 			}
 			return m, nil
 		default:
-			m.viewport, cmd = m.viewport.Update(msg)
+			// pgup/pgdn/home/end go to right panel
+			var cmd tea.Cmd
+			if m.focus == mdvFocusRight {
+				m.rightVP, cmd = m.rightVP.Update(msg)
+			} else {
+				m.leftVP, cmd = m.leftVP.Update(msg)
+			}
 			return m, cmd
 		}
 	}
 	return m, nil
 }
 
-func (m *MarkdownViewerModel) syncContent() {
-	if !m.ready {
-		return
-	}
-	m.viewport.SetContent(m.renderBody())
-}
-
-func (m MarkdownViewerModel) renderBody() string {
+func (m MarkdownViewerModel) panelWidths() (int, int) {
 	leftW := m.width / 3
 	if leftW < 25 {
 		leftW = 25
@@ -116,47 +132,62 @@ func (m MarkdownViewerModel) renderBody() string {
 	if leftW > 40 {
 		leftW = 40
 	}
-	rightW := m.width - leftW - 2 // -1 separator, -1 left padding
+	rightW := m.width - leftW - 1 // -1 for separator column
 	if rightW < 20 {
 		rightW = 20
 	}
-	if leftW+2+rightW > m.width && m.width > 2 {
-		rightW = m.width - leftW - 2
-		if rightW < 0 {
-			rightW = 0
+	return leftW, rightW
+}
+
+func (m *MarkdownViewerModel) syncLeft() {
+	if !m.ready {
+		return
+	}
+	leftW, _ := m.panelWidths()
+	m.leftVP.SetContent(m.renderLeft(leftW))
+
+	// Scroll to keep cursor visible
+	vpH := m.leftVP.Height()
+	if vpH <= 0 {
+		return
+	}
+	cursorLine := m.cursorLineInLeft()
+	top := m.leftVP.YOffset()
+	if cursorLine < top {
+		m.leftVP.SetYOffset(cursorLine)
+	} else if cursorLine >= top+vpH {
+		m.leftVP.SetYOffset(cursorLine - vpH + 1)
+	}
+}
+
+func (m *MarkdownViewerModel) syncRight() {
+	if !m.ready {
+		return
+	}
+	_, rightW := m.panelWidths()
+	m.rightVP.SetContent(m.renderRight(rightW))
+	m.rightVP.SetYOffset(0) // reset scroll on selection change
+}
+
+// cursorLineInLeft returns the line number of the cursor in the rendered left panel.
+func (m MarkdownViewerModel) cursorLineInLeft() int {
+	line := 0
+	lastGroup := ""
+	for i, e := range m.entries {
+		if e.Group != lastGroup {
+			if lastGroup != "" {
+				line++ // blank line between groups
+			}
+			line++ // group header
+			line++ // blank after header
+			lastGroup = e.Group
 		}
+		if i == m.cursor {
+			return line
+		}
+		line++
 	}
-
-	leftContent := m.renderLeft(leftW)
-	rightContent := m.renderRight(rightW)
-
-	leftLines := strings.Split(leftContent, "\n")
-	rightLines := strings.Split(rightContent, "\n")
-
-	vpHeight := m.height - mdvHeaderLines - mdvFooterLines
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-	for len(leftLines) < vpHeight {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < vpHeight {
-		rightLines = append(rightLines, "")
-	}
-	for len(leftLines) < len(rightLines) {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < len(leftLines) {
-		rightLines = append(rightLines, "")
-	}
-
-	sep := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
-	var body strings.Builder
-	for i := 0; i < len(leftLines); i++ {
-		l := padToWidth(leftLines[i], leftW)
-		body.WriteString(l + sep + " " + rightLines[i] + "\n")
-	}
-	return strings.TrimRight(body.String(), "\n")
+	return line
 }
 
 func (m MarkdownViewerModel) renderLeft(maxW int) string {
@@ -193,7 +224,13 @@ func (m MarkdownViewerModel) renderLeft(maxW int) string {
 			marker = "> "
 			style = selectedStyle
 		}
-		lines = append(lines, "  "+marker+style.Render(e.Label))
+		label := e.Label
+		// Truncate to fit panel width (accounting for marker + padding)
+		maxLabel := maxW - 6
+		if maxLabel > 0 && len(label) > maxLabel {
+			label = label[:maxLabel-3] + "..."
+		}
+		lines = append(lines, "  "+marker+style.Render(label))
 	}
 
 	if len(m.entries) == 0 {
@@ -256,11 +293,53 @@ func (m MarkdownViewerModel) View() string {
 	title := StyleTitle.Render("  "+m.title) + "\n" + strings.Repeat("\u2500", m.width)
 
 	scrollHint := ""
-	if m.ready && !m.viewport.AtBottom() {
+	if m.ready && !m.rightVP.AtBottom() {
 		scrollHint = " " + RuneBullet + " pgup/pgdn scroll"
 	}
+	focusHint := "tab switch"
 	footer := strings.Repeat("\u2500", m.width) + "\n" +
-		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+"  [Esc] "+i18n.T("firstrun.back")+scrollHint)
+		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+"  [Esc] "+i18n.T("firstrun.back")+" "+RuneBullet+" "+focusHint+scrollHint)
 
-	return title + "\n" + PaintViewportBG(m.viewport.View(), m.width) + "\n" + footer
+	if !m.ready {
+		return title + "\n\n  " + i18n.T("app.loading") + "\n\n" + footer
+	}
+
+	// Render both viewports and merge side by side
+	leftW, _ := m.panelWidths()
+	leftContent := m.leftVP.View()
+	rightContent := m.rightVP.View()
+
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+
+	vpHeight := m.height - mdvHeaderLines - mdvFooterLines
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+
+	// Pad to equal length
+	for len(leftLines) < vpHeight {
+		leftLines = append(leftLines, "")
+	}
+	for len(rightLines) < vpHeight {
+		rightLines = append(rightLines, "")
+	}
+
+	sep := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
+	var body strings.Builder
+	for i := 0; i < vpHeight; i++ {
+		l := ""
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		r := ""
+		if i < len(rightLines) {
+			r = rightLines[i]
+		}
+		l = padToWidth(l, leftW)
+		body.WriteString(l + sep + r + "\n")
+	}
+	merged := strings.TrimRight(body.String(), "\n")
+
+	return title + "\n" + PaintViewportBG(merged, m.width) + "\n" + footer
 }
