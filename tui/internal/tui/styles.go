@@ -273,16 +273,38 @@ var inTmux = os.Getenv("TMUX") != ""
 // PaintViewportBG applies explicit background color to each line of
 // viewport content. Only active inside tmux where terminal-level BG
 // doesn't propagate. Outside tmux this is a no-op.
+//
+// Uses raw ANSI codes to paint the background instead of lipgloss
+// Width() + Background(), which can produce rendering artifacts
+// when lines already contain ANSI sequences (the width padding
+// interacts badly with nested color resets in tmux).
 func PaintViewportBG(content string, width int) string {
 	if !inTmux || !activeTheme.PaintBG {
 		return content
 	}
-	style := lipgloss.NewStyle().
-		Background(ColorBG).
-		Width(width)
+	// Build the ANSI background escape from ColorBG.
+	bgStyle := lipgloss.NewStyle().Background(ColorBG)
+	// Render an empty string to extract the ANSI prefix/suffix.
+	probe := bgStyle.Render("")
+	// probe is "<ANSI-bg-on><ANSI-reset>". Split to get the prefix.
+	// We'll wrap each padded line with the bg prefix and a reset.
+	reset := "\033[0m"
+	bgPrefix := strings.TrimSuffix(probe, reset)
+	if bgPrefix == "" {
+		// Fallback: can't extract prefix, use lipgloss directly
+		bgPrefix = probe
+	}
+
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		lines[i] = style.Render(line)
+		// Measure visible width and pad with spaces to fill the terminal
+		visible := lipgloss.Width(line)
+		pad := ""
+		if visible < width {
+			pad = strings.Repeat(" ", width-visible)
+		}
+		// Wrap: reset any prior color state, apply BG, content + pad, reset
+		lines[i] = bgPrefix + line + pad + reset
 	}
 	return strings.Join(lines, "\n")
 }
