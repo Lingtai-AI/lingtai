@@ -172,6 +172,50 @@ func TestMigrateRelativeAddressing(t *testing.T) {
 	}
 }
 
+func TestMigrateTimeMachineGitignore(t *testing.T) {
+	dir := t.TempDir()
+	lingtaiDir := filepath.Join(dir, ".lingtai")
+	os.MkdirAll(lingtaiDir, 0o755)
+
+	if err := Run(lingtaiDir); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	gitignorePath := filepath.Join(lingtaiDir, ".gitignore")
+	data, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf(".gitignore not created: %v", err)
+	}
+
+	content := string(data)
+	required := []string{"**/.git/", "*.lock", "*.heartbeat", ".status.json", "*.pyc", "__pycache__/", "logs/", "history/", ".portal/"}
+	for _, pat := range required {
+		if !strings.Contains(content, pat) {
+			t.Errorf(".gitignore missing pattern %q", pat)
+		}
+	}
+}
+
+func TestMigrateTimeMachineGitignoreIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	lingtaiDir := filepath.Join(dir, ".lingtai")
+	os.MkdirAll(lingtaiDir, 0o755)
+
+	// Pre-existing .gitignore with custom content
+	existing := "custom-pattern\n"
+	os.WriteFile(filepath.Join(lingtaiDir, ".gitignore"), []byte(existing), 0o644)
+
+	if err := migrateTimeMachineGitignore(lingtaiDir); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+
+	// Should not overwrite existing .gitignore
+	data, _ := os.ReadFile(filepath.Join(lingtaiDir, ".gitignore"))
+	if string(data) != existing {
+		t.Error("migration should not overwrite existing .gitignore")
+	}
+}
+
 // helpers
 
 func writeFile(t *testing.T, path, content string) {
