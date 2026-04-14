@@ -3,7 +3,6 @@ package tui
 import (
 	"image/color"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -271,43 +270,27 @@ func rebuildStyles() {
 // background codes on every line of the viewport content.
 var inTmux = os.Getenv("TMUX") != ""
 
-// ansiSGR matches any ANSI SGR (Select Graphic Rendition) escape sequence.
-// These are the sequences that change text color, background, bold, etc.
-var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
 // PaintViewportBG applies explicit background color to every line of
 // viewport content. Only active inside tmux where terminal-level BG
 // doesn't propagate. Outside tmux this is a no-op.
 //
-// Strategy: after every ANSI SGR sequence in the content, re-inject
-// our background escape. This ensures the BG survives any inline
-// color change, reset (\033[0m), or default-bg (\033[49m]) that
-// lipgloss or glamour emits.
+// The content's own ANSI sequences are left completely untouched.
+// We only paint BG-colored spaces into the gap between the end of
+// each line's visible content and the right edge of the terminal.
 func PaintViewportBG(content string, width int) string {
 	if !inTmux || !activeTheme.PaintBG {
 		return content
 	}
-	// Extract the raw ANSI escape that sets our background color.
-	bgStyle := lipgloss.NewStyle().Background(ColorBG)
-	probe := bgStyle.Render("")
-	const reset = "\033[0m"
-	bgEsc := strings.TrimSuffix(probe, reset)
-	if bgEsc == "" {
-		return content
-	}
+	padStyle := lipgloss.NewStyle().Background(ColorBG)
 
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		// After every SGR sequence, re-apply our BG color.
-		patched := ansiSGR.ReplaceAllString(line, "${0}"+bgEsc)
-
-		// Pad to full terminal width
 		visible := lipgloss.Width(line)
-		pad := ""
 		if visible < width {
-			pad = strings.Repeat(" ", width-visible)
+			// Paint BG-colored spaces for the remaining width
+			pad := padStyle.Render(strings.Repeat(" ", width-visible))
+			lines[i] = line + pad
 		}
-		lines[i] = bgEsc + patched + pad + reset
 	}
 	return strings.Join(lines, "\n")
 }
