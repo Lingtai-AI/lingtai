@@ -17,7 +17,20 @@ import (
 	"github.com/anthropics/lingtai-portal/internal/migrate"
 )
 
+// version is set at build time via -ldflags "-X main.version=v0.4.2"
+var version = "dev"
+
 func main() {
+	// Handle version flag before flag.Parse so `version` as a positional
+	// subcommand does not trip the flag parser. Matches tui/main.go.
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		if arg == "--version" || arg == "-v" || arg == "version" {
+			fmt.Println("lingtai-portal " + version)
+			os.Exit(0)
+		}
+	}
+
 	var dir string
 	var port int
 	var open bool
