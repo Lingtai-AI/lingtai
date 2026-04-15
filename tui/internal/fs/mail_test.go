@@ -64,6 +64,16 @@ func TestWriteMail(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent len = %d, want 1", len(sent))
 	}
+
+	// `to` field must be written as []string, not string, so downstream
+	// displays (and the kernel reader) see a uniform list shape.
+	toSlice, ok := messages[0].To.([]interface{})
+	if !ok {
+		t.Fatalf("to type = %T, want []interface{} (list[str] on disk)", messages[0].To)
+	}
+	if len(toSlice) != 1 || toSlice[0] != "/recipient/alice" {
+		t.Errorf("to = %#v, want []interface{}{\"/recipient/alice\"}", toSlice)
+	}
 }
 
 func TestReadInbox_Empty(t *testing.T) {
