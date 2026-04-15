@@ -52,6 +52,20 @@ sudo apt install build-essential
 </details>
 
 <details>
+<summary><b>大陆用户：用 Gitee 镜像</b>（brew 从 GitHub 拉取失败时）</summary>
+
+如果 `brew install huangzesen/lingtai/lingtai-tui` 卡在 `brew tap` 步骤（GnuTLS / TLS 错误），改用 Gitee 镜像的 tap：
+
+```bash
+brew tap huangzesen/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
+brew install huangzesen/lingtai/lingtai-tui
+```
+
+公式本身与 GitHub 的 tap 一致——自动检测大陆网络，编译时使用 `goproxy.cn` + `registry.npmmirror.com`。Gitee tap 是镜像，公式更新可能比 GitHub 延迟几小时。
+
+</details>
+
+<details>
 <summary><b>从源码编译</b>（大陆用户推荐，需要 Go 1.24+）</summary>
 
 ```bash

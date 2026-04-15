@@ -74,6 +74,20 @@ The script auto-detects mainland China networks and switches to domestic Go/npm 
 </details>
 
 <details>
+<summary><b>Mainland China: use Gitee tap if GitHub is unreliable</b> (中国大陆)</summary>
+
+If `brew install huangzesen/lingtai/lingtai-tui` fails at the `brew tap` step (e.g., `GnuTLS` / TLS errors cloning from GitHub), use the Gitee-mirrored tap instead:
+
+```bash
+brew tap huangzesen/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
+brew install huangzesen/lingtai/lingtai-tui
+```
+
+The formula is identical to the GitHub tap — it auto-detects CN networks and uses `goproxy.cn` + `registry.npmmirror.com` for build dependencies. The Gitee tap is a mirror, so formula updates may lag GitHub by a few hours.
+
+</details>
+
+<details>
 <summary><b>Build from source manually</b> (requires Go 1.24+)</summary>
 
 ```bash
