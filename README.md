@@ -69,6 +69,8 @@ curl -sSL https://raw.githubusercontent.com/huangzesen/lingtai/main/install.sh |
 
 Requires Go 1.24+ and git. Node.js needed for portal only.
 
+The script auto-detects mainland China networks and switches to domestic Go/npm mirrors (`goproxy.cn`, `registry.npmmirror.com`) when `proxy.golang.org` is unreachable. Users elsewhere see no difference.
+
 </details>
 
 <details>

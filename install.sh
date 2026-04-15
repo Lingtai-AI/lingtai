@@ -22,6 +22,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Auto-detect CN-restricted networks. If proxy.golang.org is unreachable
+# within 3 seconds (typical on mainland China without VPN), fall back to
+# CN-accessible mirrors for Go modules, the Go checksum database, and npm.
+# Users elsewhere see no difference — the probe succeeds quickly and no
+# environment is touched. Explicit pre-set env vars are preserved.
+if command -v curl &>/dev/null && \
+   [ -z "${GOPROXY:-}" ] && \
+   ! curl -sSfL --max-time 3 -o /dev/null \
+     "https://proxy.golang.org/github.com/golang/go/@latest" 2>/dev/null; then
+  echo "==> proxy.golang.org unreachable; using China-friendly build mirrors."
+  export GOPROXY="https://goproxy.cn,direct"
+  export GOSUMDB="sum.golang.google.cn"
+  export NPM_CONFIG_REGISTRY="https://registry.npmmirror.com"
+fi
+
 # Detect install path — use Homebrew prefix if available, else /usr/local/bin
 if command -v brew &>/dev/null; then
   BIN_DIR="$(brew --prefix)/bin"
