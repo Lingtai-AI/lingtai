@@ -688,7 +688,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "doctor":
 		if targetDir != "" {
 			a.currentView = appViewDoctor
-			a.doctor = NewDoctorModel(targetDir)
+			a.doctor = NewDoctorModel(targetDir, a.globalDir)
 			return a, tea.Batch(a.doctor.Init(), a.sendSize())
 		}
 		return a, nil

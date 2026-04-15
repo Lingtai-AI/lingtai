@@ -384,26 +384,10 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		}
 	}
 
-	// Discover agora recipes
-	{
-		lang := "en"
-		if m.pendingAgentOpts.Language != "" {
-			lang = m.pendingAgentOpts.Language
-		}
-		m.agoraRecipes = preset.ScanAgoraRecipes(lang)
-	}
-
-	// Discover bundled recipes by category
-	{
-		lang := "en"
-		if m.pendingAgentOpts.Language != "" {
-			lang = m.pendingAgentOpts.Language
-		}
-		for _, cat := range preset.RecipeCategories {
-			m.categoryBoundaries = append(m.categoryBoundaries, len(m.discoveredRecipes))
-			m.discoveredRecipes = append(m.discoveredRecipes, preset.ScanCategory(m.globalDir, cat, lang)...)
-		}
-	}
+	// Discover recipes (agora + bundled). On first run this may come up empty
+	// because preset.Bootstrap hasn't populated globalDir/recipes/ yet; the
+	// bootstrapDoneMsg handler re-runs discoverRecipes once bootstrap finishes.
+	m.discoverRecipes()
 
 	// Default to imported recipe if detected and no explicit preselection
 	if m.importedRecipe != nil && preselectedRecipe == "" {
@@ -413,6 +397,24 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	}
 
 	return m
+}
+
+// discoverRecipes rescans agora and bundled recipes into the model. Safe to
+// call multiple times — resets the slices each call. Invoked from the
+// constructor and again from the bootstrapDoneMsg handler so first-run users
+// see bundled recipes as soon as preset.Bootstrap finishes writing them.
+func (m *FirstRunModel) discoverRecipes() {
+	lang := "en"
+	if m.pendingAgentOpts.Language != "" {
+		lang = m.pendingAgentOpts.Language
+	}
+	m.agoraRecipes = preset.ScanAgoraRecipes(lang)
+	m.discoveredRecipes = m.discoveredRecipes[:0]
+	m.categoryBoundaries = m.categoryBoundaries[:0]
+	for _, cat := range preset.RecipeCategories {
+		m.categoryBoundaries = append(m.categoryBoundaries, len(m.discoveredRecipes))
+		m.discoveredRecipes = append(m.discoveredRecipes, preset.ScanCategory(m.globalDir, cat, lang)...)
+	}
 }
 
 // NewSetupModeModel creates a FirstRunModel for /setup — skips welcome/bootstrap/tutorial,
@@ -605,6 +607,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		}
 		m.setupDone = true
 		m.setupStatus = ""
+		// Bundled recipes only exist on disk after preset.Bootstrap finishes.
+		// Re-scan and re-apply the constructor's default cursor logic so the
+		// recipe picker reflects the now-populated recipes/ directory on
+		// first run (otherwise the list stays empty until the user quits
+		// and relaunches the TUI).
+		m.discoverRecipes()
+		if m.importedRecipe != nil && m.preselectedRecipe == "" {
+			m.recipeIdx = 0
+		} else {
+			m.recipeIdx = m.recipeNameToIdx(m.preselectedRecipe)
+		}
 		return m, nil
 
 	case bootstrapErrMsg:

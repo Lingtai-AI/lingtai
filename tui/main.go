@@ -106,6 +106,10 @@ func main() {
 		fmt.Println("lingtai-tui " + version)
 	}
 
+	// Record the running binary version so /doctor can report it and
+	// detect TUI↔kernel version drift.
+	tui.SetTUIVersion(version)
+
 	// Always start in current directory
 	projectDir, _ := os.Getwd()
 	projectDir, _ = filepath.Abs(projectDir)

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,20 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/migrate"
 )
+
+// tuiVersion is set once at startup by main via SetTUIVersion.
+// Used by /doctor for the version-skew check.
+var tuiVersion = "dev"
+
+// SetTUIVersion records the running TUI binary version for doctor diagnostics.
+func SetTUIVersion(v string) {
+	if v != "" {
+		tuiVersion = v
+	}
+}
 
 // doctorResultMsg is sent when the async diagnostic completes.
 type doctorResultMsg struct {
@@ -25,27 +39,30 @@ type doctorResultMsg struct {
 
 type doctorLine struct {
 	Text string
-	OK   bool // true = green check, false = red cross
+	OK   bool // true = green check, false = red cross (ignored if Warn or Hint)
+	Warn bool // true = amber indicator (neutral info, e.g. version drift)
 	Hint bool // true = suggestion line (indented, dimmed)
 }
 
 // DoctorModel is the /doctor dedicated view.
 type DoctorModel struct {
-	orchDir string
-	lines   []doctorLine
-	loading bool
-	width   int
-	height  int
+	orchDir   string
+	globalDir string
+	lines     []doctorLine
+	loading   bool
+	width     int
+	height    int
 }
 
-func NewDoctorModel(orchDir string) DoctorModel {
-	return DoctorModel{orchDir: orchDir, loading: true}
+func NewDoctorModel(orchDir, globalDir string) DoctorModel {
+	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
 }
 
 func (m DoctorModel) Init() tea.Cmd {
 	orchDir := m.orchDir
+	globalDir := m.globalDir
 	return func() tea.Msg {
-		return runDoctor(orchDir)
+		return runDoctor(orchDir, globalDir)
 	}
 }
 
@@ -87,11 +104,14 @@ func (m DoctorModel) View() string {
 	}
 
 	for _, line := range m.lines {
-		if line.Hint {
+		switch {
+		case line.Hint:
 			b.WriteString("  " + StyleAccent.Render(line.Text) + "\n")
-		} else if line.OK {
+		case line.Warn:
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(line.Text) + "\n")
+		case line.OK:
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorAgent).Render(line.Text) + "\n")
-		} else {
+		default:
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(line.Text) + "\n")
 		}
 	}
@@ -105,7 +125,7 @@ func (m DoctorModel) View() string {
 // --- Diagnostic logic ---
 
 // runDoctor performs the /doctor diagnostic and returns a doctorResultMsg.
-func runDoctor(orchDir string) doctorResultMsg {
+func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	var lines []doctorLine
 
 	// Phase 0: check lingtai-portal on PATH
@@ -121,6 +141,13 @@ func runDoctor(orchDir string) doctorResultMsg {
 			Text: i18n.T("doctor.suggest_portal"), Hint: true,
 		})
 	}
+
+	// Phase 0.5: kernel health — these are the checks that catch "TUI upgraded
+	// but Python kernel is old/broken/missing", which is the most common cause
+	// of a post-upgrade regression (especially for CN users hitting mirror
+	// flakiness during install).
+	kernelOK := checkKernelHealth(orchDir, globalDir, &lines)
+	_ = kernelOK // intentionally not short-circuiting: LLM probe is still useful info
 
 	// Phase 1: read events.jsonl for recent errors
 	lastErr := findLastAPIError(orchDir)
@@ -440,6 +467,180 @@ func providerProbeConfig(provider, apiKey, baseURL string) (string, map[string]s
 		}
 		return "", nil
 	}
+}
+
+// --- Kernel health checks ---
+
+// checkKernelHealth runs K1–K6 and appends findings to lines.
+// Returns true if every hard check passed. Soft warnings (version drift) do
+// not affect the return value but still surface as Warn lines.
+func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
+	allOK := true
+
+	// K1. TUI binary version (always shown, informational)
+	*lines = append(*lines, doctorLine{
+		Text: i18n.TF("doctor.tui_version", tuiVersion), OK: true,
+	})
+
+	// K2. Which Python the TUI will use for agents.
+	python := config.LingtaiCmd(globalDir)
+	venvPython := config.VenvPython(config.RuntimeVenvDir(globalDir))
+	usingVenv := python == venvPython
+	if _, err := os.Stat(python); err != nil {
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.python_missing", python),
+		})
+		*lines = append(*lines, doctorLine{
+			Text: i18n.T("doctor.suggest_venv"), Hint: true,
+		})
+		return false // downstream checks need a working python
+	}
+	if usingVenv {
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.python_venv", python), OK: true,
+		})
+	} else {
+		// Fallback PATH python — works but means the TUI's managed venv is missing.
+		// Not a hard failure (dev installs hit this path), but worth surfacing.
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.python_fallback", python), Warn: true,
+		})
+	}
+
+	// K3. lingtai package importable, and capture version string.
+	kernelVersion, importErr := probeKernelImport(python)
+	if importErr != "" {
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.kernel_import_fail", importErr),
+		})
+		*lines = append(*lines, doctorLine{
+			Text: i18n.T("doctor.suggest_reinstall_kernel"), Hint: true,
+		})
+		return false // can't proceed with further kernel checks
+	}
+	*lines = append(*lines, doctorLine{
+		Text: i18n.TF("doctor.kernel_version", kernelVersion), OK: true,
+	})
+
+	// K4. Version drift between TUI binary and kernel (informational only).
+	if tuiVersion != "dev" && kernelVersion != "" {
+		tuiV := strings.TrimPrefix(tuiVersion, "v")
+		if tuiV != kernelVersion {
+			*lines = append(*lines, doctorLine{
+				Text: i18n.TF("doctor.version_drift", tuiV, kernelVersion), Warn: true,
+			})
+			*lines = append(*lines, doctorLine{
+				Text: i18n.T("doctor.suggest_upgrade_kernel"), Hint: true,
+			})
+		}
+	}
+
+	// K5. `python -m lingtai --help` exits 0 (catches broken entry points,
+	// missing CLI deps like click/typer, etc. that `import lingtai` alone misses).
+	if err, stderr := probeKernelCLI(python); err != nil {
+		detail := strings.TrimSpace(stderr)
+		if detail == "" {
+			detail = err.Error()
+		}
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.kernel_cli_fail", detail),
+		})
+		*lines = append(*lines, doctorLine{
+			Text: i18n.T("doctor.suggest_force_reinstall"), Hint: true,
+		})
+		allOK = false
+	}
+
+	// K6. Migration version in .lingtai/meta.json vs this binary's CurrentVersion.
+	// orchDir is <projectRoot>/.lingtai/<orchName>, so .lingtai/ is its parent.
+	lingtaiDir := filepath.Dir(orchDir)
+	projectVersion, metaErr := readMetaVersion(lingtaiDir)
+	switch {
+	case metaErr != nil:
+		// meta.json missing or unreadable — surface but don't fail the suite,
+		// since a project being opened for the first time legitimately has none.
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.meta_unreadable", metaErr.Error()), Warn: true,
+		})
+	case projectVersion == migrate.CurrentVersion:
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.migration_ok", projectVersion), OK: true,
+		})
+	case projectVersion > migrate.CurrentVersion:
+		// User downgraded the TUI. Data format is ahead of the binary.
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.migration_ahead", projectVersion, migrate.CurrentVersion),
+		})
+		*lines = append(*lines, doctorLine{
+			Text: i18n.T("doctor.suggest_upgrade_tui"), Hint: true,
+		})
+		allOK = false
+	default:
+		// projectVersion < CurrentVersion — migrations should have run at startup,
+		// so hitting this means a silent migration failure or a stale state.
+		*lines = append(*lines, doctorLine{
+			Text: i18n.TF("doctor.migration_behind", projectVersion, migrate.CurrentVersion),
+		})
+		*lines = append(*lines, doctorLine{
+			Text: i18n.T("doctor.suggest_restart_tui"), Hint: true,
+		})
+		allOK = false
+	}
+
+	return allOK
+}
+
+// probeKernelImport runs `python -c "import lingtai; print(lingtai.__version__)"`
+// capturing stderr on failure so we can surface the real ImportError
+// (not just "exit status 1"). Returns (version, "") on success, or ("", errMsg).
+func probeKernelImport(python string) (string, string) {
+	cmd := exec.Command(python, "-c", "import lingtai; print(lingtai.__version__)")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		// Collapse multi-line tracebacks to the last meaningful line
+		// (usually "ModuleNotFoundError: ..." or "ImportError: ...").
+		if idx := strings.LastIndex(detail, "\n"); idx >= 0 {
+			detail = strings.TrimSpace(detail[idx+1:])
+		}
+		return "", detail
+	}
+	return strings.TrimSpace(stdout.String()), ""
+}
+
+// probeKernelCLI runs `python -m lingtai --help` and reports failure with captured stderr.
+func probeKernelCLI(python string) (error, string) {
+	cmd := exec.Command(python, "-m", "lingtai", "--help")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return err, stderr.String()
+	}
+	return nil, ""
+}
+
+// readMetaVersion reads .lingtai/meta.json and returns the version field.
+// Returns (0, nil) if the file doesn't exist; (0, err) on parse failure.
+func readMetaVersion(lingtaiDir string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "meta.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var meta struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return 0, err
+	}
+	return meta.Version, nil
 }
 
 func extractErrorMessage(body string) string {
