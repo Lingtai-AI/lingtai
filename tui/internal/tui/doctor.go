@@ -522,18 +522,11 @@ func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
 		Text: i18n.TF("doctor.kernel_version", kernelVersion), OK: true,
 	})
 
-	// K4. Version drift between TUI binary and kernel (informational only).
-	if tuiVersion != "dev" && kernelVersion != "" {
-		tuiV := strings.TrimPrefix(tuiVersion, "v")
-		if tuiV != kernelVersion {
-			*lines = append(*lines, doctorLine{
-				Text: i18n.TF("doctor.version_drift", tuiV, kernelVersion), Warn: true,
-			})
-			*lines = append(*lines, doctorLine{
-				Text: i18n.T("doctor.suggest_upgrade_kernel"), Hint: true,
-			})
-		}
-	}
+	// Note: the TUI binary and the Python kernel (`lingtai` on PyPI) ship
+	// from separate repos with independent version numbers — they are NOT
+	// meant to track each other. An earlier version of /doctor warned on
+	// mismatch; that check was wrong and has been removed. Users see both
+	// versions via K1 and K3 above and can compare manually if relevant.
 
 	// K5. `python -m lingtai --help` exits 0 (catches broken entry points,
 	// missing CLI deps like click/typer, etc. that `import lingtai` alone misses).

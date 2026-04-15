@@ -291,8 +291,6 @@
   "doctor.kernel_version": "✓ lingtai 核版：%s",
   "doctor.kernel_import_fail": "✗ lingtai 核不可引：%s",
   "doctor.suggest_reinstall_kernel": "→ 重装核：~/.lingtai-tui/runtime/venv/bin/pip install --upgrade lingtai",
-  "doctor.version_drift": "⚠ TUI（%s）与核（%s）版本相左 — 升级后失灵，多因此。",
-  "doctor.suggest_upgrade_kernel": "→ 齐版：~/.lingtai-tui/runtime/venv/bin/pip install --upgrade lingtai",
   "doctor.kernel_cli_fail": "✗ `python -m lingtai --help` 败：%s",
   "doctor.suggest_force_reinstall": "→ 强重装：~/.lingtai-tui/runtime/venv/bin/pip install --force-reinstall lingtai",
   "doctor.meta_unreadable": "⚠ .lingtai/meta.json 不可读：%s",

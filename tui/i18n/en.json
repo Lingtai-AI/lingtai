@@ -296,8 +296,6 @@
   "doctor.kernel_version": "✓ lingtai kernel version: %s",
   "doctor.kernel_import_fail": "✗ Cannot import lingtai kernel: %s",
   "doctor.suggest_reinstall_kernel": "→ Reinstall kernel: ~/.lingtai-tui/runtime/venv/bin/pip install --upgrade lingtai",
-  "doctor.version_drift": "⚠ TUI (%s) and kernel (%s) versions differ — likely cause if things broke after upgrade.",
-  "doctor.suggest_upgrade_kernel": "→ Align versions: ~/.lingtai-tui/runtime/venv/bin/pip install --upgrade lingtai",
   "doctor.kernel_cli_fail": "✗ `python -m lingtai --help` failed: %s",
   "doctor.suggest_force_reinstall": "→ Force reinstall: ~/.lingtai-tui/runtime/venv/bin/pip install --force-reinstall lingtai",
   "doctor.meta_unreadable": "⚠ Cannot read .lingtai/meta.json: %s",
