@@ -1,51 +1,39 @@
 ---
 name: lingtai-feishu-setup
 description: Configure the Feishu (Lark) bot addon for this agent — read this when the human asks to set up a Feishu bot.
-version: 2.2.0
+version: 3.0.0
 ---
 
 # Feishu (Lark) Bot Setup
 
 You are helping the human set up a Feishu bot for this agent. Your job is to **create the config file yourself** — do not just list the steps and ask the human to do it.
 
-## Fixed-by-Convention Path
+## New Convention — Admin-Local `.secrets/`
 
-**The Feishu config file lives at a single fixed location, shared by all agents in this project:**
+**The Feishu config lives inside your own working directory:**
 
 ```
-.lingtai/.addons/feishu/config.json   (relative to project root)
+.secrets/feishu.json   (relative to your working directory)
 ```
 
-- **Do not try to change this path.** The TUI and the kernel both expect it exactly here.
-- The file is shared across all agents in the same project.
-- Feishu supports one bot per config file. If you need multiple bots per project, that's currently not supported by a single shared config — ask the human whether they really need this before proceeding.
-- From your agent's working directory, the relative path written in `init.json` is `../.addons/feishu/config.json`.
+- This file is **yours alone** — other agents in the network do not read it.
+- The `init.json` `addons.feishu.config` field is simply `.secrets/feishu.json` (no `../`, no absolute path).
+- Secrets go **directly in the JSON** as plaintext. No `*_env` indirection. No `.env` file involved. The config is self-contained.
+- Feishu supports one bot per config file. If the human needs multiple bots, ask them to clarify — that's not supported by a single config.
 
-## Migration Check (IMPORTANT — do this first)
+### Why
 
-Before creating or editing the config file, **read your own `init.json`** and check `addons.feishu.config`. If the path points to the old global location (`~/.lingtai-tui/addons/...`), you MUST fix it:
+Addons are an admin-only responsibility. Avatars should never configure addons — the orchestrator owns them. Colocating the config with the orchestrator's working directory makes that ownership explicit.
 
-1. Read your `init.json`
-2. If `addons.feishu.config` contains `~/.lingtai-tui/` or an absolute path, replace it with:
-   ```
-   ../.addons/feishu/config.json
-   ```
-3. If the `addons` field is missing entirely and Feishu is not wired up, add it:
-   ```json
-   "addons": {
-     "feishu": {
-       "config": "../.addons/feishu/config.json"
-     }
-   }
-   ```
+## Legacy Path (back-compat only)
 
-This is a one-time fix for agents created before the local-config convention. New agents already have the correct relative path.
+If your `init.json` already has `addons.feishu.config` pointing at `../.addons/feishu/config.json` and the old setup is working, **leave it alone**. The old path keeps functioning. Only create setup at the new path when the human is setting up Feishu for the first time, or explicitly asks to migrate.
 
 ## Rules
 
-- **Secrets go in .env, never in config JSON.** Read your `init.json` to find the `env_file` field, then append the credentials there. Reference them from `config.json` via `app_id_env` / `app_secret_env`.
-- **Activation:** after creating or editing the config, run `system(action="refresh")` yourself to reload. Do not ask the human to refresh for you.
-- **Troubleshooting:** if the addon fails to load, check that `.lingtai/.addons/feishu/config.json` exists, is valid JSON, and the referenced env vars are set in `.env`. Report back to the human with the specific problem.
+- **Secrets are plaintext in the JSON.** Do not use `app_id_env` or `app_secret_env`. The `.env` file is only for LLM API keys and other non-addon secrets.
+- **Activation:** after creating or editing `.secrets/feishu.json`, run `system(action="refresh")` yourself to reload. Do not ask the human to refresh for you.
+- **Troubleshooting:** if the addon fails to load, check that `.secrets/feishu.json` exists, is valid JSON, and that your `init.json` `addons.feishu.config` points at `.secrets/feishu.json`. Report back to the human with the specific problem.
 - **Status caveat:** after refresh, addon status may show `connected: false` even when working. Always verify by attempting actual operation — if it succeeds, the connection is fine.
 
 ## What You Need From the Human
@@ -53,28 +41,32 @@ This is a one-time fix for agents created before the local-config convention. Ne
 Ask the human for:
 1. **App ID** — from Feishu Open Platform Developer Console → Credentials (App ID, starts with `cli_`)
 2. **App Secret** — from the same Credentials page
-3. **Allowed open_ids** (optional) — Feishu open_id of users allowed to message the bot. If omitted, anyone can message.
+3. **Allowed users** (optional) — Feishu open_ids of users allowed to message the bot. If omitted, anyone can message.
    - To find a user's open_id: ask them to open the bot in Feishu — the open_id is visible in the developer console's contact directory.
 
 ## What You Do
 
 Once you have the App ID and App Secret:
 
-1. **Read your init.json** to find the `env_file` path. Then **append the credentials** to that .env file:
-   ```
-   FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxxxxxxxxxx
-   FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-   ```
-
-2. **Create the config file** at `.lingtai/.addons/feishu/config.json` relative to the project root:
+1. **Create the config file** at `.secrets/feishu.json` in your own working directory:
    ```json
    {
-     "app_id_env": "FEISHU_APP_ID",
-     "app_secret_env": "FEISHU_APP_SECRET",
+     "app_id": "cli_xxxxxxxxxxxxxxxxxxxxxxxx",
+     "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
      "allowed_users": ["ou_xxxxxxxxxxxxxxxx", "ou_yyyyyyyyyyyyyyyy"]
    }
    ```
    - If no allowed_users requested, omit the field entirely (open access).
+
+2. **Wire it into `init.json`.** Read your `init.json`. If `addons.feishu` is missing, add it:
+   ```json
+   "addons": {
+     "feishu": {
+       "config": ".secrets/feishu.json"
+     }
+   }
+   ```
+   If `addons.feishu.config` already exists and points at a legacy path (e.g. `../.addons/feishu/config.json`), see the "Legacy Path" section above — do **not** rewrite it unless the human asked you to migrate.
 
 3. **Activate:** run `system(action="refresh")` to reload the addon config. Then verify the bot is responding. Tell the human Feishu is configured.
 
