@@ -263,20 +263,20 @@ func TestSessionCacheIdempotentDump(t *testing.T) {
 	sc := NewSessionCache(humanDir, projectPath)
 	sc.briefBase = dir
 
+	// Hour 14 entries.
 	sc.append(SessionEntry{Ts: "2026-04-10T14:02:00Z", Type: "mail", From: "human", To: "agent", Body: "Hi"})
+	// Cross into hour 15 — triggers dump of hour 14.
 	sc.append(SessionEntry{Ts: "2026-04-10T15:00:00Z", Type: "mail", From: "agent", To: "human", Body: "Next"})
 
 	path14 := filepath.Join(histDir, "2026-04-10-14.md")
 	info1, _ := os.Stat(path14)
 	modTime1 := info1.ModTime()
 
-	// Create a new cache from the same session.jsonl — simulates TUI restart.
-	sc2 := NewSessionCache(humanDir, projectPath)
-	sc2.briefBase = dir
+	// Add more hour-15 entries on the same cache — hour 14 must NOT be rewritten.
+	sc.append(SessionEntry{Ts: "2026-04-10T15:30:00Z", Type: "thinking", Body: "hmm"})
 
-	// Append another hour-15 entry + hour-16 entry to trigger dump of hour 15.
-	sc2.append(SessionEntry{Ts: "2026-04-10T15:30:00Z", Type: "thinking", Body: "hmm"})
-	sc2.append(SessionEntry{Ts: "2026-04-10T16:00:00Z", Type: "mail", From: "human", To: "agent", Body: "Later"})
+	// Cross into hour 16 — triggers dump of hour 15.
+	sc.append(SessionEntry{Ts: "2026-04-10T16:00:00Z", Type: "mail", From: "human", To: "agent", Body: "Later"})
 
 	// Hour 14 file should NOT be rewritten (identical content).
 	info2, _ := os.Stat(path14)
@@ -284,7 +284,7 @@ func TestSessionCacheIdempotentDump(t *testing.T) {
 		t.Fatal("hour 14 should not have been rewritten")
 	}
 
-	// Hour 15 should now exist.
+	// Hour 15 should now exist with both the mail and thinking entries.
 	data15, err := os.ReadFile(filepath.Join(histDir, "2026-04-10-15.md"))
 	if err != nil {
 		t.Fatalf("hour 15 dump missing: %v", err)

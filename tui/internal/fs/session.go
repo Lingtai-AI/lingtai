@@ -30,7 +30,7 @@ type SessionEntry struct {
 type SessionCache struct {
 	path        string          // human/logs/session.jsonl
 	entries     []SessionEntry  // in-memory mirror of all entries
-	mailSeen    map[string]bool // mail dedup key (from|ts) already written
+	lastMailTs  string          // highest mail ReceivedAt ingested (watermark for live-session dedup)
 	eventsOff   int64           // byte offset in events.jsonl
 	inquiryOff  int64           // byte offset in soul_inquiry.jsonl
 	projectPath string          // absolute path of the project directory (parent of .lingtai/)
@@ -39,9 +39,8 @@ type SessionCache struct {
 	rebuilding  bool            // true during RebuildFromSources — suppress file writes
 }
 
-// NewSessionCache opens (or creates) session.jsonl and loads existing entries
-// into memory. Call RebuildFromSources or SyncFromSources after construction
-// depending on whether the cache is stale (see NeedsRebuild).
+// NewSessionCache opens (or creates) session.jsonl. Call RebuildFromSources
+// after construction to populate the cache from authoritative sources.
 func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 	logsDir := filepath.Join(humanDir, "logs")
 	os.MkdirAll(logsDir, 0o755)
@@ -50,75 +49,12 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 	home, _ := os.UserHomeDir()
 	sc := &SessionCache{
 		path:        path,
-		mailSeen:    make(map[string]bool),
 		projectPath: projectPath,
 		briefBase:   filepath.Join(home, ".lingtai-tui"),
 	}
-	sc.loadExisting()
 	return sc
 }
 
-// NeedsRebuild returns true if session.jsonl is missing, empty, or its mtime
-// is older than maxAge. When false, the caller can use SyncFromSources (fast
-// tail) instead of RebuildFromSources (full re-read).
-func (sc *SessionCache) NeedsRebuild(maxAge time.Duration) bool {
-	info, err := os.Stat(sc.path)
-	if err != nil || info.Size() == 0 {
-		return true
-	}
-	return time.Since(info.ModTime()) > maxAge
-}
-
-// SyncFromSources is the fast path: sets offsets to EOF for events and
-// inquiries (since loadExisting already has them), then calls Refresh to
-// tail only genuinely new entries. Mail dedup is handled by mailSeen.
-func (sc *SessionCache) SyncFromSources(cache MailCache, humanAddr, orchDir, orchName string) {
-	// Set offsets to current EOF so Refresh only reads new bytes.
-	if orchDir != "" {
-		sc.eventsOff = fileSize(filepath.Join(orchDir, "logs", "events.jsonl"))
-		sc.inquiryOff = fileSize(filepath.Join(orchDir, "logs", "soul_inquiry.jsonl"))
-	}
-	// Ingest any new mail (deduped via mailSeen populated by loadExisting).
-	sc.IngestMail(cache, humanAddr, orchDir, orchName)
-}
-
-func (sc *SessionCache) loadExisting() {
-	f, err := os.Open(sc.path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return
-	}
-	for len(data) > 0 {
-		idx := bytes.IndexByte(data, '\n')
-		if idx < 0 {
-			break
-		}
-		line := data[:idx]
-		data = data[idx+1:]
-		if len(line) == 0 {
-			continue
-		}
-		var e SessionEntry
-		if err := json.Unmarshal(line, &e); err != nil {
-			continue
-		}
-		sc.entries = append(sc.entries, e)
-		if e.Type == "mail" {
-			sc.mailSeen[e.From+"|"+e.Ts] = true
-		}
-	}
-
-	if len(sc.entries) > 0 {
-		if t, err := time.Parse(time.RFC3339, sc.entries[len(sc.entries)-1].Ts); err == nil {
-			sc.lastHour = t.Truncate(time.Hour)
-		}
-	}
-}
 
 // RebuildFromSources reads all three data sources from scratch, merges and
 // sorts them chronologically, writes session.jsonl, and sets offsets to EOF
@@ -127,7 +63,6 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	// Clear any prior state and suppress file writes during ingest
 	// (we'll write the sorted result in one shot at the end).
 	sc.entries = nil
-	sc.mailSeen = make(map[string]bool)
 	sc.eventsOff = 0
 	sc.inquiryOff = 0
 	sc.rebuilding = true
@@ -164,6 +99,15 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	if len(sc.entries) > 0 {
 		if t, err := time.Parse(time.RFC3339Nano, sc.entries[len(sc.entries)-1].Ts); err == nil {
 			sc.lastHour = t.Truncate(time.Hour)
+		}
+	}
+
+	// Set mail watermark to the max ReceivedAt so live-session IngestMail
+	// calls only accept strictly-newer mail.
+	sc.lastMailTs = ""
+	for _, e := range sc.entries {
+		if e.Type == "mail" && e.Ts > sc.lastMailTs {
+			sc.lastMailTs = e.Ts
 		}
 	}
 }
@@ -273,11 +217,12 @@ func (sc *SessionCache) Len() int {
 func (sc *SessionCache) IngestMail(cache MailCache, humanAddr, orchDir, orchName string) {
 	var newEntries []SessionEntry
 	for _, msg := range cache.Messages {
-		key := msg.From + "|" + msg.ReceivedAt
-		if sc.mailSeen[key] {
+		// Skip mail at or below the watermark — already ingested either in this
+		// session or in a prior rebuild. During RebuildFromSources the watermark
+		// is empty so this admits every mail.
+		if !sc.rebuilding && msg.ReceivedAt <= sc.lastMailTs {
 			continue
 		}
-		sc.mailSeen[key] = true
 
 		from := resolveMailFrom(msg, humanAddr)
 		to := resolveMailTo(msg, humanAddr, orchName)
@@ -291,6 +236,12 @@ func (sc *SessionCache) IngestMail(cache MailCache, humanAddr, orchDir, orchName
 			Body:        msg.Message,
 			Attachments: msg.Attachments,
 		})
+
+		// Advance watermark. During rebuild we set it in one shot at the end
+		// (see RebuildFromSources), so only track during live-session appends.
+		if !sc.rebuilding && msg.ReceivedAt > sc.lastMailTs {
+			sc.lastMailTs = msg.ReceivedAt
+		}
 	}
 	sc.append(newEntries...)
 }

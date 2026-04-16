@@ -174,15 +174,12 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		dismissedInsights: make(map[string]bool),
 		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
 	}
-	// Refresh mail cache before session sync so mail entries are included.
+	// Refresh mail cache before session rebuild so mail entries are included.
 	m.cache = m.cache.Refresh()
-	// If session.jsonl is fresh (written within 24h), just tail new entries.
-	// Otherwise rebuild from scratch (first launch, migration, long absence).
-	if m.sessionCache.NeedsRebuild(24 * time.Hour) {
-		m.sessionCache.RebuildFromSources(m.cache, humanAddr, orchDir, m.orchDisplayName())
-	} else {
-		m.sessionCache.SyncFromSources(m.cache, humanAddr, orchDir, m.orchDisplayName())
-	}
+	// Always rebuild session.jsonl from authoritative sources on launch. This is
+	// cheap (ms-scale) and avoids the entire class of dedup bugs that come from
+	// trying to patch an existing file across restarts.
+	m.sessionCache.RebuildFromSources(m.cache, humanAddr, orchDir, m.orchDisplayName())
 	return m
 }
 
