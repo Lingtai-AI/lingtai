@@ -480,6 +480,14 @@ func AddonConfigPathFromAgent(addon string) string {
 	return filepath.Join("..", ".addons", addon, "config.json")
 }
 
+// AddonSecretsPathFromAgent returns the path (relative to an agent's working
+// directory) where an addon's config file lives under the admin-local
+// .secrets/ convention introduced 2026-04-16. Used by first-creation seeding
+// to prefer the new path when it exists on disk.
+func AddonSecretsPathFromAgent(addon string) string {
+	return filepath.Join(".secrets", addon+".json")
+}
+
 // DefaultPreset returns the first built-in preset (minimax).
 func DefaultPreset() Preset {
 	return minimaxPreset()
@@ -622,13 +630,23 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		// creates the config later, they can re-run /setup to wire it up.
 		addonsField := make(map[string]interface{})
 		for _, name := range opts.Addons {
-			// Absolute path on disk: <lingtaiDir>/.addons/<name>/config.json.
-			// (lingtaiDir is already the .lingtai/ directory, so no leading
-			// ".lingtai/" — that's only in AddonConfigRelPath which is
-			// relative to the project root.)
+			// Prefer the new admin-local .secrets/<name>.json path (2026-04-16
+			// convention) when it exists inside this agent's working directory.
+			newAbsPath := filepath.Join(agentDir, ".secrets", name+".json")
+			if _, err := os.Stat(newAbsPath); err == nil {
+				addonsField[name] = map[string]interface{}{
+					"config": AddonSecretsPathFromAgent(name),
+				}
+				continue
+			}
+			// Fall back to the legacy project-shared path on disk:
+			// <lingtaiDir>/.addons/<name>/config.json. (lingtaiDir is already
+			// the .lingtai/ directory, so no leading ".lingtai/" — that's
+			// only in AddonConfigRelPath which is relative to the project
+			// root.)
 			absPath := filepath.Join(lingtaiDir, ".addons", name, "config.json")
 			if _, err := os.Stat(absPath); err != nil {
-				continue // config missing — skip silently
+				continue // config missing on both paths — skip silently
 			}
 			addonsField[name] = map[string]interface{}{
 				"config": AddonConfigPathFromAgent(name),
