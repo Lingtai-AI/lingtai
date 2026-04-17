@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
+	"github.com/anthropics/lingtai-tui/internal/postman"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/timemachine"
@@ -61,6 +63,10 @@ func main() {
 				os.Exit(1)
 			}
 			timemachine.Run(os.Args[2])
+			return
+		}
+		if arg == "postman" {
+			postmanMain()
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
@@ -604,6 +610,7 @@ func printHelp() {
 	fmt.Println("       lingtai-tui list [dir]")
 	fmt.Println("       lingtai-tui suspend [dir]")
 	fmt.Println("       lingtai-tui clean")
+	fmt.Println("       lingtai-tui postman [--port N] [dir ...]")
 	fmt.Println()
 	fmt.Println("  (no args)    Launch TUI in current directory")
 	fmt.Println("  purge        Kill all lingtai agent processes on this machine.")
@@ -612,6 +619,7 @@ func printHelp() {
 	fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
 	fmt.Println("  suspend      Gracefully suspend agents via signal files (all, or those in <dir>)")
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
+	fmt.Println("  postman      Start the mail relay daemon (UDP, port 7777 by default)")
 	fmt.Println()
 	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
 	fmt.Println("  They are the bodies of your agents — files, pad, mail, identity.")
@@ -786,6 +794,56 @@ func cleanMain() {
 	fmt.Println()
 	fmt.Println("To also remove global config, run:")
 	fmt.Println("  rm -rf ~/.lingtai-tui")
+}
+
+func postmanMain() {
+	globalDir, err := config.GlobalDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	port := postman.DefaultPort
+
+	// Parse optional --port flag
+	for i := 2; i < len(os.Args)-1; i++ {
+		if os.Args[i] == "--port" {
+			p, err := strconv.Atoi(os.Args[i+1])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid port: %s\n", os.Args[i+1])
+				os.Exit(1)
+			}
+			port = p
+		}
+	}
+
+	// Collect watch directories from remaining args
+	var watchDirs []string
+	for i := 2; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--port" {
+			i++ // skip port value
+			continue
+		}
+		abs, _ := filepath.Abs(arg)
+		watchDirs = append(watchDirs, abs)
+	}
+
+	// Default: watch current project's .lingtai/
+	if len(watchDirs) == 0 {
+		cwd, _ := os.Getwd()
+		lingtaiDir := filepath.Join(cwd, ".lingtai")
+		if _, err := os.Stat(lingtaiDir); err == nil {
+			watchDirs = append(watchDirs, lingtaiDir)
+		}
+	}
+
+	if len(watchDirs) == 0 {
+		fmt.Fprintf(os.Stderr, "postman: no .lingtai/ directories to watch\nUsage: lingtai-tui postman [--port N] [dir ...]\n")
+		os.Exit(1)
+	}
+
+	postman.Run(globalDir, port, watchDirs)
 }
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
