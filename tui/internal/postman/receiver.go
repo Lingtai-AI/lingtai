@@ -75,7 +75,9 @@ func HandleDatagram(data []byte) error {
 		if !ok {
 			continue
 		}
-		DeliverLocal(path, msgID, payload)
+		if err := DeliverLocal(path, msgID, payload); err != nil {
+			fmt.Printf("postman: deliver to %s failed: %v\n", path, err)
+		}
 	}
 	return nil
 }
@@ -108,6 +110,10 @@ func ListenUDP(port int, stop <-chan struct{}) error {
 		}
 		datagram := make([]byte, n)
 		copy(datagram, buf[:n])
-		go HandleDatagram(datagram)
+		go func(d []byte) {
+			if err := HandleDatagram(d); err != nil {
+				fmt.Printf("postman: datagram error: %v\n", err)
+			}
+		}(datagram)
 	}
 }

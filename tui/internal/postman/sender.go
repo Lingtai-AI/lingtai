@@ -78,7 +78,7 @@ func ScanOutbox(agentDir string) []OutboxItem {
 		}
 
 		items = append(items, OutboxItem{
-			ID:       msgID,
+			ID:       e.Name(), // use directory name for cleanup, not message ID
 			PeerAddr: peerAddr,
 			Data:     data,
 			AgentDir: agentDir,

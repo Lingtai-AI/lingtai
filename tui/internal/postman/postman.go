@@ -3,6 +3,7 @@ package postman
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -54,22 +55,32 @@ func Run(globalDir string, port int, watchDirs []string) {
 	writePID(globalDir)
 	defer removePID(globalDir)
 
+	// Catch SIGINT/SIGTERM for graceful shutdown (PID cleanup)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
 	stop := make(chan struct{})
 	go func() {
 		if err := ListenUDP(port, stop); err != nil {
 			fmt.Printf("postman: listener error: %v\n", err)
 		}
 	}()
-	defer close(stop)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	fmt.Println("postman: running (ctrl-c to stop)")
 
-	for range ticker.C {
-		for _, dir := range watchDirs {
-			scanAndSend(dir, port)
+	for {
+		select {
+		case <-sigCh:
+			fmt.Println("\npostman: shutting down")
+			close(stop)
+			return
+		case <-ticker.C:
+			for _, dir := range watchDirs {
+				scanAndSend(dir, port)
+			}
 		}
 	}
 }

@@ -149,7 +149,7 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		ID:         id,
 		MailboxID:  id,
 		From:       fromAddr,
-		To:         toAddr,
+		To:         []string{toAddr},
 		CC:         []string{},
 		Subject:    subject,
 		Message:    body,
