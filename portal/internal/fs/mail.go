@@ -163,16 +163,24 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
-	// Write to recipient inbox
-	inboxDir := filepath.Join(recipientDir, "mailbox", "inbox", id)
-	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
-		return fmt.Errorf("create inbox dir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(inboxDir, "message.json"), data, 0o644); err != nil {
-		return fmt.Errorf("write inbox message: %w", err)
+	if IsRemoteAddress(toAddr) {
+		outboxDir := filepath.Join(senderDir, "mailbox", "outbox", id)
+		if err := os.MkdirAll(outboxDir, 0o755); err != nil {
+			return fmt.Errorf("create outbox dir: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outboxDir, "message.json"), data, 0o644); err != nil {
+			return fmt.Errorf("write outbox message: %w", err)
+		}
+	} else {
+		inboxDir := filepath.Join(recipientDir, "mailbox", "inbox", id)
+		if err := os.MkdirAll(inboxDir, 0o755); err != nil {
+			return fmt.Errorf("create inbox dir: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(inboxDir, "message.json"), data, 0o644); err != nil {
+			return fmt.Errorf("write inbox message: %w", err)
+		}
 	}
 
-	// Write copy to sender's sent folder
 	sentDir := filepath.Join(senderDir, "mailbox", "sent", id)
 	if err := os.MkdirAll(sentDir, 0o755); err != nil {
 		return fmt.Errorf("create sent dir: %w", err)
