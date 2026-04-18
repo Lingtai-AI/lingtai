@@ -161,12 +161,32 @@ All types follow the same directory structure and rules.
 
 ## The `.lingtai-recipe/` Convention
 
-Both `/export recipe` and `/export network` produce a `.lingtai-recipe/` directory in the project root. This is the **unified convention** for all shared recipes:
+Both `/export recipe` and `/export network` author the **same** `.lingtai-recipe/` payload. An exported network is literally an exported recipe plus the `.lingtai/` state folder alongside it:
 
-- **Exported recipe** = a repo with `.lingtai-recipe/` and `recipe.json` at root (no `.lingtai/`)
-- **Exported network** = a repo with `.lingtai-recipe/` AND `.lingtai/` (full network state)
+- **Exported recipe** = a repo with `recipe.json` at root and `.lingtai-recipe/` (no `.lingtai/`)
+- **Exported network** = the same, but also with `.lingtai/` (full network state) and any project files
+
+Both exporters run `validate_recipe.py` (see next section) before git-init, so the payload shape is enforced programmatically. If the format ever evolves, the validator is the single source of truth — update it first, then update these skills.
 
 The recipient clones either kind of repo and opens it with `lingtai-tui`. The TUI auto-discovers `.lingtai-recipe/` via `ProjectLocalRecipeDir()` and uses it during setup. No manual path entry needed.
+
+## Validating a Recipe
+
+`tui/internal/preset/skills/lingtai-recipe/scripts/validate_recipe.py` is a sanity-check script that both exporters invoke before `git init`. It verifies:
+
+- `recipe.json` at the repo root with `name` and `description`
+- `.lingtai-recipe/` directory exists
+- `greet.md` and `comment.md` present at `.lingtai-recipe/<lang>/` for at least one lang (or at `.lingtai-recipe/` root)
+- No placeholders in `comment.md`, `covenant.md`, or `procedures.md` (only `greet.md` may use them)
+- Every skill under `skills/<name>/` has `SKILL.md` with valid frontmatter (`name`, `description`, `version`)
+
+Usage (from within a living network, paths resolve via the bundled skill symlink):
+
+```bash
+python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py <repo-root>
+```
+
+Exit code 0 means the payload is structurally valid. Warnings (unknown lang code, stray files at `.lingtai-recipe/` root) are reported but do not block.
 
 ## How to Create a Custom Recipe
 
