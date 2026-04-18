@@ -207,7 +207,44 @@ Show the human the `find` output and read back each file's content via email. It
 
 If the human mentions a multi-language audience, create per-language subdirectories inside `.lingtai-recipe/` (e.g., `.lingtai-recipe/zh/greet.md`). See `lingtai-recipe` for i18n fallback rules.
 
-## Step 5: git init + commit
+## Step 5: Validate the recipe payload
+
+Run:
+
+```bash
+cd <live-project-root>   # the directory containing the .lingtai/ your agent is running in
+python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<name>/"
+```
+
+This is the canonical structural check. It verifies `recipe.json` at the repo root, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
+
+**If the script reports errors:** stop, read the error lines, fix each one in the recipe directory, and re-run. Loop until clean.
+
+**Warnings** (e.g., unknown lang code, stray file at `.lingtai-recipe/` root) are reported but do not block. Show them to the human and let them decide whether to address.
+
+## Step 6: Sensitivity sweep
+
+Before committing and pushing, review every file that will be committed for content the human may not want to publish. This catches leaks that automated scans cannot: real names of private individuals, internal org references, unpublished ideas, embarrassing remarks, pasted third-party content.
+
+**Scope.** All files in `$HOME/lingtai-agora/recipes/<name>/` — `recipe.json`, everything inside `.lingtai-recipe/`, and any optional `README.md`. Recipes do not have a `.gitignore` to consult because the recipe is entirely authored content.
+
+**What to look for:**
+- Real names of private individuals — the human, collaborators, children, coworkers
+- Internal or unreleased org, project, or product names
+- Financial details, salaries, legal matters, health information
+- Unpublished ideas the human has not committed to making public
+- Embarrassing or off-hand remarks preserved in source material you drew from
+- Third-party content — pasted emails, screenshots of private channels
+
+**How to report.** Send one email to the human listing every concern in the form `<file>:<line-or-section> — <concern>` with a recommendation (redact / keep / replace with placeholder). Do not paginate across multiple emails unless the list is very long — one message is easier for the human to scan and reply to.
+
+**Loop.** After the human decides each item, apply redactions (Edit the recipe files in place), then:
+- Re-run `validate_recipe.py` (Step 5) in case a redaction broke the payload shape
+- Re-run this sensitivity sweep if the redactions were substantial enough that more concerns might surface
+
+Only proceed to Step 7 once the human says "ship it."
+
+## Step 7: git init + commit
 
 ```bash
 cd $HOME/lingtai-agora/recipes/<name>/
@@ -218,7 +255,7 @@ git status
 
 Show `git status` to the human. Get confirmation. Then: `git commit -m "Recipe: <name>"`
 
-## Step 6: Push to GitHub (Optional)
+## Step 8: Push to GitHub (Optional)
 
 Check `gh auth status` and follow the three-branch pattern:
 
