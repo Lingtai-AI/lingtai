@@ -200,56 +200,155 @@ For hard matches, the human has two options:
 
 **Do not proceed to step 5 or 6 with unresolved hard matches.** The consequence of shipping a real API key to GitHub is an irreversible privacy incident — there is no cleanup, only key rotation.
 
-## Step 5: Create a launch recipe for recipients
+## Step 5: Author the `.lingtai-recipe/` payload
 
-A **launch recipe** controls what the orchestrator says and how it behaves when someone clones this network and runs it for the first time. It lives at `.lingtai-recipe/` in the project root — a convention the TUI discovers automatically during setup.
+Every exported network must ship with a launch recipe: it controls what the orchestrator says and how it behaves when a recipient clones the network and runs it for the first time. The payload shape is identical to what `/export recipe` produces — an exported network is literally "exported recipe + the `.lingtai/` state folder alongside it." **Read the `lingtai-recipe` skill first** for the authoritative format (directory structure, components, placeholders, i18n rules, `recipe.json` manifest).
 
-**Read the `lingtai-recipe` skill** for the full recipe format — directory structure, components (greet.md, comment.md, covenant.md, procedures.md, skills/), placeholders, and i18n rules. Everything documented there applies here. This step focuses on the export-specific workflow.
-
-**Do not skip this step.** An exported network without a greet is a bad first impression — the recipient sets up the network and gets silence.
+**Do not skip this step.** An exported network without a recipe is a bad first impression — the recipient sets up the network and gets silence.
 
 ### 5a. Discuss the recipe with the human
 
-> "Every exported network needs a welcome message for new users. I'll draft a `greet.md` and optionally a `comment.md`. What is this network for, and what should a new user experience on their first launch?"
+> "Every exported network needs a launch recipe for new users. I'll draft the files. To do that, I need a few things:
+>
+> 1. **Recipe name** — a short name that captures this network's essence
+> 2. **One-line description** — what does a recipient get by opening this network?
+> 3. **Greeting style** — tone for the first-contact message (warm, terse, playful, formal, …)
+> 4. **Any behavioral constraints** — what should carry over from this network's culture?
+>
+> Answer as many as you can in one message and I'll draft everything in one pass."
 
-Use the existing mail archive, agent names, and `.agent.json` blueprints in the staging copy to understand the network's purpose. Then draft the files.
+Use the staging copy's mail archive, agent names, and `.agent.json` blueprints to understand the network's purpose before drafting.
 
-### 5b. Draft greet.md
+### 5b. Pre-flight: create all directories
 
-Write the first-contact message following the rules in `lingtai-recipe`. Key points for network exports:
+Resolve `$HOME` and the staging path first, then:
+
+```bash
+REPO_DIR="$HOME/lingtai-agora/networks/<name>"
+RECIPE_DIR="$REPO_DIR/.lingtai-recipe"
+mkdir -p "$RECIPE_DIR/en"
+```
+
+If the human wants additional language variants, also `mkdir -p "$RECIPE_DIR/zh"` etc.
+
+### 5c. Write `recipe.json` at the repo root
+
+`recipe.json` lives at the **repo root**, not inside `.lingtai-recipe/`. This matches the canonical format and is how the TUI's recipe auto-discovery finds the payload.
+
+```bash
+cat > "$REPO_DIR/recipe.json" <<'JSON'
+{
+  "name": "<Recipe Name>",
+  "description": "<One-line description>"
+}
+JSON
+```
+
+### 5d. Write `greet.md`
+
+Write `$RECIPE_DIR/en/greet.md` following the rules in `lingtai-recipe` (first person, short, use `{{time}}` / `{{location}}` / `{{addr}}` placeholders if natural). Key points for network exports:
 
 - **Always include `/cpr all`** — after rehydration, only the orchestrator is launched; other agents are sleeping
 - Keep it warm but concise — introduce the network, offer guidance, explain how to start
+- Do **not** start with `[system]` — greet.md is the orchestrator's voice, not a system message
 
-### 5c. Draft comment.md (optional)
+### 5e. Write `comment.md`
 
-Write the behavioral playbook following the rules in `lingtai-recipe`. Draw from the living network's actual behavior — delegation patterns, topic ordering, constraints.
+Write `$RECIPE_DIR/en/comment.md` — the behavioral DNA. This is injected every turn, so every token counts. **Draw from the living network.** Look at how the orchestrator actually behaves in the mail archive and distill that into portable instructions.
 
-### 5d. Write the files
+**What to distill.** Walk through each area and extract what's worth keeping:
+
+- **Delegation and avatar rules** — how does the orchestrator decide when to spawn avatars vs handle things itself? What avatar blueprints are used? Naming conventions, specialization patterns, spawn-on-demand rules.
+- **Communication norms** — deposit-before-email (write findings to a file before sending a summary)? Conventions about email length, format, or frequency?
+- **Workflow patterns** — is there a pipeline (research → draft → review → publish)? Quality gates or checkpoints?
+- **Tool usage conventions** — preferred tools, cost-awareness rules.
+- **Tone and style** — formal vs casual? Terse vs detailed?
+- **Guardrails** — what does the orchestrator explicitly avoid?
+- **Skill references** — if the recipe ships skills, how and when should the orchestrator invoke them?
+- **Network topology** — typical network size, hierarchy, rules about structure.
+
+**Where to look:**
+- The current `comment.md` in the staging copy (if any)
+- The orchestrator's recent mail — how it actually delegates and responds
+- Avatar `.agent.json` blueprints — what specialized agents exist and why
+- The covenant and procedures — any custom overrides already in place
+- The human's feedback patterns — what corrections has the human made repeatedly?
+
+**`comment.md` must not contain placeholders.** `{{time}}`, `{{addr}}`, `{{lang}}`, `{{location}}`, `{{soul_delay}}` are only valid in `greet.md`. The validator in Step 6 enforces this.
+
+### 5f. Optional components
+
+Only write these if they meaningfully differ from system defaults:
+
+- `$RECIPE_DIR/covenant.md` — overrides the system-wide covenant for agents in this network
+- `$RECIPE_DIR/procedures.md` — overrides system-wide procedures
+- `$RECIPE_DIR/skills/<skill-name>/SKILL.md` — recipe-shipped skills. Copy custom skills from `.lingtai/.library/custom/` in the staging copy. **Skip intrinsic skills** — they are shipped with the TUI and already available everywhere.
+
+### 5g. Multi-language variants (optional)
+
+For each additional language the recipe should support, create `$RECIPE_DIR/<lang>/` with its own `greet.md` and `comment.md`. Known lang codes: `en`, `zh`, `wen`. See `lingtai-recipe` for i18n fallback rules.
+
+### 5h. Verify all files landed
 
 ```bash
-mkdir -p $HOME/lingtai-agora/networks/<name>/.lingtai-recipe
+find $HOME/lingtai-agora/networks/<name>/ -type f -path "*recipe*" | sort
 ```
 
-Write `greet.md` and `comment.md` using **absolute paths**. Verify:
+Confirm `recipe.json` is at the repo root and `greet.md`/`comment.md` are at `.lingtai-recipe/<lang>/`. If anything is missing, re-create its parent directory with `mkdir -p` and re-write it.
+
+Show both recipe files to the human and iterate until satisfied.
+
+## Step 6: Validate the recipe payload
+
+Run:
 
 ```bash
-find $HOME/lingtai-agora/networks/<name>/.lingtai-recipe/ -type f | sort
+python3 .lingtai/.library/lingtai-recipe/scripts/validate_recipe.py $HOME/lingtai-agora/networks/<name>/
 ```
 
-Show both files to the human and iterate until satisfied.
+This is the canonical structural check. It verifies `recipe.json`, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
 
-### 5e. Multi-language recipes (optional)
+**If the script reports errors:** stop, read the error lines, fix each one in the staging copy, and re-run. Loop until clean.
 
-See `lingtai-recipe` for i18n fallback rules. For most networks, a single root-level pair is sufficient.
+**Warnings** (e.g., unknown lang code, stray file at `.lingtai-recipe/` root) are reported but do not block. Show them to the human and let them decide whether to address.
 
-## Step 6: git init + commit
+## Step 7: Sensitivity sweep
+
+The regex-based `privacy_scan.py` from Step 4 catches secret **shapes** (API keys, private keys). This step catches **content** leaks that regex cannot detect: real names of private individuals, internal org references, unpublished ideas, embarrassing mail fragments, pasted third-party content.
+
+**Scope.** Review every file that will be committed — i.e., every file not matched by `.gitignore`. Enumerate them after `.gitignore` is finalized (Step 3c) but before `git init` (Step 8):
+
+```bash
+cd $HOME/lingtai-agora/networks/<name>/
+git init -b main  # temporary, so .gitignore is consulted
+git ls-files --others --cached --exclude-standard
+```
+
+(The `git init` here is fine — Step 8 below is idempotent and the repo state carries forward.)
+
+**What to look for:**
+- Real names of private individuals — the human, collaborators, children, coworkers
+- Internal or unreleased org, project, or product names
+- Financial details, salaries, legal matters, health information
+- Unpublished ideas the human has not committed to making public
+- Embarrassing or off-hand remarks preserved in archived mail or draft documents
+- Third-party content — pasted emails, screenshots of private channels
+
+**How to report.** Send one email to the human listing every concern in the form `<file>:<line-or-section> — <concern>` with a recommendation (redact / keep / replace with placeholder). Do not paginate across multiple emails unless the list is very long — one message is easier for the human to scan and reply to.
+
+**Loop.** After the human decides each item, apply redactions (Edit the staging files in place), then:
+- Re-run `validate_recipe.py` (Step 6) in case a redaction broke the payload shape
+- Re-run this sensitivity sweep if the redactions were substantial enough that more concerns might surface
+
+Only proceed to Step 8 once the human says "ship it."
+
+## Step 8: git init + commit
 
 Once steps 1–5 are clean:
 
 ```bash
 cd $HOME/lingtai-agora/networks/<name>/
-git init -b main
+git init -b main  # no-op if already initialized during Step 7
 git add .
 git status
 ```
@@ -262,7 +361,7 @@ git commit -m "Initial snapshot: <name>"
 
 Report the staging path. The network is now a clean local git repo, ready for step 7.
 
-## Step 7: Push to GitHub (optional)
+## Step 9: Push to GitHub (optional)
 
 Check whether the `gh` CLI is installed and authenticated:
 
