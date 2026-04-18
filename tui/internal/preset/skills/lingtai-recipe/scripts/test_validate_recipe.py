@@ -53,6 +53,20 @@ def test_recipe_json_invalid_json(tmp_path: Path) -> None:
     assert "invalid JSON" in result.stdout
 
 
+def test_recipe_json_not_an_object(tmp_path: Path) -> None:
+    _make_valid_recipe(tmp_path)
+    (tmp_path / "recipe.json").write_text(
+        json.dumps(["not", "an", "object"]), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(tmp_path)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "recipe.json" in result.stdout
+    assert "JSON object" in result.stdout
+
+
 def test_recipe_json_missing_fields(tmp_path: Path) -> None:
     _make_valid_recipe(tmp_path)
     (tmp_path / "recipe.json").write_text(json.dumps({"name": ""}), encoding="utf-8")
@@ -146,6 +160,7 @@ def test_unknown_lang_is_warning(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout
     assert "WARN" in result.stdout
     assert "fr" in result.stdout
+    assert "unknown lang code" in result.stdout
 
 
 def test_stray_file_is_warning(tmp_path: Path) -> None:
