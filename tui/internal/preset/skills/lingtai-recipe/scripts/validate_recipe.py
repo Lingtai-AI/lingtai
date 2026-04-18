@@ -169,13 +169,13 @@ def _check_greet_system_prefix(recipe_dir: Path, warnings: list[str]) -> None:
 
 
 def _check_stray_files(recipe_dir: Path, warnings: list[str]) -> None:
-    recognized_root_files = {"covenant.md", "procedures.md"}
+    recognized_root_files = {"greet.md", "comment.md", "covenant.md", "procedures.md"}
     recognized_root_dirs = {"skills"} | KNOWN_LANGS
     for entry in recipe_dir.iterdir():
         if entry.is_file() and entry.name not in recognized_root_files:
             warnings.append(
                 f"{entry}: unexpected file at .lingtai-recipe/ root "
-                "(only covenant.md, procedures.md recognized here)"
+                "(only greet.md, comment.md, covenant.md, procedures.md recognized here)"
             )
         elif entry.is_dir() and entry.name not in recognized_root_dirs:
             warnings.append(
@@ -190,10 +190,10 @@ def main() -> int:
 
     errors, warnings = validate(args.repo_root.resolve())
 
-    for w in warnings:
-        print(f"WARN:  {w}")
     for e in errors:
         print(f"ERROR: {e}")
+    for w in warnings:
+        print(f"WARN:  {w}")
 
     print(f"\n{len(errors)} error(s), {len(warnings)} warning(s)")
     if errors:
