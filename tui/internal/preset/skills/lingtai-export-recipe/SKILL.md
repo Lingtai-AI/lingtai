@@ -209,14 +209,16 @@ If the human mentions a multi-language audience, create per-language subdirector
 
 ## Step 5: Validate the recipe payload
 
-Run:
+Your agent is running inside a live project — the directory containing the `.lingtai/` folder where bundled skills were installed. `cd` there first so the relative path to the validator resolves correctly.
 
 ```bash
-cd <live-project-root>   # the directory containing the .lingtai/ your agent is running in
+cd <live-project-root>
 python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<name>/"
 ```
 
 This is the canonical structural check. It verifies `recipe.json` at the repo root, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
+
+The `find` check in Step 2's post-write verification only confirms that files landed on disk; this step enforces that the payload shape is actually valid.
 
 **If the script reports errors:** stop, read the error lines, fix each one in the recipe directory, and re-run. Loop until clean.
 
@@ -226,7 +228,7 @@ This is the canonical structural check. It verifies `recipe.json` at the repo ro
 
 Before committing and pushing, review every file that will be committed for content the human may not want to publish. This catches leaks that automated scans cannot: real names of private individuals, internal org references, unpublished ideas, embarrassing remarks, pasted third-party content.
 
-**Scope.** All files in `$HOME/lingtai-agora/recipes/<name>/` — `recipe.json`, everything inside `.lingtai-recipe/`, and any optional `README.md`. Recipes do not have a `.gitignore` to consult because the recipe is entirely authored content.
+**Scope.** Every file in `$HOME/lingtai-agora/recipes/<name>/` will be committed — recipes do not have a `.gitignore` to filter, so the scope is the whole staging directory. Typical contents: `recipe.json`, everything inside `.lingtai-recipe/`, an optional `README.md`, and any other files you created during authoring. Sweep all of them.
 
 **What to look for:**
 - Real names of private individuals — the human, collaborators, children, coworkers

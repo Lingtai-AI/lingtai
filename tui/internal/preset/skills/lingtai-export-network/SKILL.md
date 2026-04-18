@@ -300,14 +300,16 @@ Show both recipe files to the human and iterate until satisfied.
 
 ## Step 6: Validate the recipe payload
 
-Run:
+Your agent is running inside a live project — the directory containing the `.lingtai/` folder where bundled skills were installed. `cd` there first so the relative path to the validator resolves correctly.
 
 ```bash
-cd <live-project-root>   # the directory containing the .lingtai/ your agent is running in
+cd <live-project-root>
 python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/networks/<name>/"
 ```
 
 This is the canonical structural check. It verifies `recipe.json`, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
+
+The `find` check in Step 5h only confirms that files landed on disk; this step enforces that the payload shape is actually valid.
 
 **If the script reports errors:** stop, read the error lines, fix each one in the staging copy, and re-run. Loop until clean.
 
