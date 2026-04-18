@@ -303,7 +303,7 @@ Show both recipe files to the human and iterate until satisfied.
 Run:
 
 ```bash
-python3 .lingtai/.library/lingtai-recipe/scripts/validate_recipe.py $HOME/lingtai-agora/networks/<name>/
+python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py $HOME/lingtai-agora/networks/<name>/
 ```
 
 This is the canonical structural check. It verifies `recipe.json`, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
