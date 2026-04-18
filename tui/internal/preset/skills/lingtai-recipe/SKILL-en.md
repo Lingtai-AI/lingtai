@@ -147,7 +147,7 @@ All recipe files (greet.md, comment.md, covenant.md, procedures.md, skill direct
 1. Try `<lang>/` — language-specific version
 2. Fall back to root
 
-**Root is mandatory.** Every recipe file that exists must have a root-level version. Language-specific directories are optional enhancements. If only root exists, all languages get the same content.
+**Resolution prefers lang over root.** The TUI's i18n lookup tries `<lang>/<file>` first and falls back to the root-level version. Either layout is valid. The validator (see "Validating a Recipe" below) accepts a file present at the root, under any lang subdirectory, or both — whichever fits the recipe's intent. A single-root-level copy serves all languages; per-lang copies override it.
 
 ## Recipe Types
 

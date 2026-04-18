@@ -324,7 +324,7 @@ The regex-based `privacy_scan.py` from Step 4 catches secret **shapes** (API key
 ```bash
 cd $HOME/lingtai-agora/networks/<name>/
 git init -b main  # temporary, so .gitignore is consulted
-git ls-files --others --exclude-standard
+git ls-files --others --cached --exclude-standard
 ```
 
 (The `git init` here is fine — Step 8 below is idempotent and the repo state carries forward.)
