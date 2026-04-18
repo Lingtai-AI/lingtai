@@ -136,21 +136,41 @@ version: 1.0.0
 
 **根目录是必须的。** 每个配方文件都必须有根目录版本。语言特定目录是可选增强。如果只有根目录，所有语言使用相同内容。
 
+## `.lingtai-recipe/` 同约
+
+`/export recipe` 与 `/export network` 所出 `.lingtai-recipe/` 载，其形一也。所谓导出之网，实即导出之方加 `.lingtai/` 状态目录耳：
+
+- **导出之方** = 仓根藏 `recipe.json` 及 `.lingtai-recipe/`（无 `.lingtai/`）
+- **导出之网** = 上列诸物，复加 `.lingtai/`（网络全状）与项目文件
+
+二流程于 `git init` 前皆运 `validate_recipe.py`（详见下节），故载形由程序实守之。若格式将变，验之于脚本乃独一真原——先更其本，再同步此说。
+
+受者克仓以 `lingtai-tui` 开之。TUI 经 `ProjectLocalRecipeDir()` 自觅 `.lingtai-recipe/` 并于初用之，无须人工指路。
+
+## 验方
+
+`tui/internal/preset/skills/lingtai-recipe/scripts/validate_recipe.py`，二导出流程于 `git init` 前所同调之合规校验脚本也。其所验：
+
+- 仓根有 `recipe.json`，载 `name` 与 `description` 二字
+- `.lingtai-recipe/` 目录具
+- 至少一种语言下（或根下）具 `greet.md` 与 `comment.md`
+- `comment.md`、`covenant.md`、`procedures.md` 中无占位符（惟 `greet.md` 许之）
+- `skills/<name>/` 下每技皆具 `SKILL.md`，其元数据（`name`、`description`、`version`）完备
+
+用法（在网之内，路径由已绑之技能符链解）：
+
+```bash
+python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py <仓根>
+```
+
+退码零即结构合法。警示（未识之语言码、`.lingtai-recipe/` 根下多余之文件）报而不阻。
+
 ## 如何创建自定义配方
 
 1. 按上述结构创建目录
 2. 至少编写一个 `greet.md`（comment.md 和 skills/ 可选）
 3. 在 TUI 中运行 `/setup`，选择「自定义」配方，输入目录路径
 4. 调度器会重启并使用你的配方
-
-## `.lingtai-recipe/` 惯例
-
-`/export recipe` 和 `/export network` 都会在项目根目录生成 `.lingtai-recipe/` 目录。这是所有共享配方的**统一惯例**：
-
-- **导出配方** = 仓库含 `.lingtai-recipe/` 和根目录 `recipe.json`（无 `.lingtai/`）
-- **导出网络** = 仓库含 `.lingtai-recipe/` 和 `.lingtai/`（完整网络状态）
-
-接收者克隆任一类仓库，用 `lingtai-tui` 打开即可。TUI 自动发现 `.lingtai-recipe/` 并在 `/setup` 中使用，无需手动配置路径。
 
 ## 如何发布配方
 
