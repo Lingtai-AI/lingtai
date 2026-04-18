@@ -344,7 +344,7 @@ Only proceed to Step 8 once the human says "ship it."
 
 ## Step 8: git init + commit
 
-Once steps 1–5 are clean:
+Once steps 1–7 are clean:
 
 ```bash
 cd $HOME/lingtai-agora/networks/<name>/
@@ -359,7 +359,7 @@ Show the human `git status` output so they see exactly what will be committed. A
 git commit -m "Initial snapshot: <name>"
 ```
 
-Report the staging path. The network is now a clean local git repo, ready for step 7.
+Report the staging path. The network is now a clean local git repo, ready for step 9.
 
 ## Step 9: Push to GitHub (optional)
 
