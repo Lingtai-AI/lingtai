@@ -291,7 +291,7 @@ For each additional language the recipe should support, create `$RECIPE_DIR/<lan
 ### 5h. Verify all files landed
 
 ```bash
-find $HOME/lingtai-agora/networks/<name>/ -type f -path "*recipe*" | sort
+find "$REPO_DIR" -type f -path "*recipe*" | sort
 ```
 
 Confirm `recipe.json` is at the repo root and `greet.md`/`comment.md` are at `.lingtai-recipe/<lang>/`. If anything is missing, re-create its parent directory with `mkdir -p` and re-write it.
@@ -303,7 +303,8 @@ Show both recipe files to the human and iterate until satisfied.
 Run:
 
 ```bash
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py $HOME/lingtai-agora/networks/<name>/
+cd <live-project-root>   # the directory containing the .lingtai/ your agent is running in
+python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/networks/<name>/"
 ```
 
 This is the canonical structural check. It verifies `recipe.json`, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
@@ -321,7 +322,7 @@ The regex-based `privacy_scan.py` from Step 4 catches secret **shapes** (API key
 ```bash
 cd $HOME/lingtai-agora/networks/<name>/
 git init -b main  # temporary, so .gitignore is consulted
-git ls-files --others --cached --exclude-standard
+git ls-files --others --exclude-standard
 ```
 
 (The `git init` here is fine — Step 8 below is idempotent and the repo state carries forward.)
