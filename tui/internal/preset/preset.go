@@ -203,6 +203,20 @@ func SavedCount(presets []Preset) int {
 
 func e() map[string]interface{} { return map[string]interface{}{} }
 
+// libraryDefault returns the default library capability config — two Tier 1
+// paths: the network-shared library (resolved relative to the agent dir)
+// and the TUI's per-user utilities directory. Users can edit init.json to
+// add or remove paths; init.json is the ground truth and the capability
+// reads it on every setup.
+func libraryDefault() map[string]interface{} {
+	return map[string]interface{}{
+		"paths": []interface{}{
+			"../.library_shared",
+			"~/.lingtai-tui/utilities",
+		},
+	}
+}
+
 func minimaxPreset() Preset {
 	mm := map[string]interface{}{"provider": "minimax", "api_key_env": "MINIMAX_API_KEY"}
 	return Preset{
@@ -218,7 +232,7 @@ func minimaxPreset() Preset {
 				"web_search": mm, "psyche": e(), "codex": e(),
 				"vision": mm, "talk": mm, "draw": mm, "video": mm, "compose": mm,
 				"listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
-				"library": e(),
+				"library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -242,7 +256,7 @@ func zhipuPreset() Preset {
 				"web_search": zp, "psyche": e(), "codex": e(),
 				"vision": zp, "web_read": zp,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "library": e(),
+				"listen": e(), "library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -266,7 +280,7 @@ func codexPreset() Preset {
 				"web_search": cx, "psyche": e(), "codex": e(),
 				"vision": cx, "web_read": cx,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "library": e(),
+				"listen": e(), "library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -287,7 +301,7 @@ func customPreset() Preset {
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": e(), "psyche": e(), "codex": e(),
 				"web_read": e(), "avatar": e(), "daemon": e(),
-				"listen": e(), "library": e(),
+				"listen": e(), "library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 			"streaming": false,

@@ -125,7 +125,15 @@
 
       // --- Audio transcription ---
       // Providers: "whisper" (local, no API key), "gemini".
-      "listen": { "provider": "whisper" }
+      "listen": { "provider": "whisper" },
+
+      // --- Library (skill catalog) ---
+      // Per-agent .library/{intrinsic,custom}/ is managed automatically.
+      // "paths" adds extra directories to the prompt catalog. Defaults:
+      //   ../.library_shared       — network-shared library
+      //   ~/.lingtai-tui/utilities — TUI-shipped utility skills
+      // Edit and call system.refresh to apply. init.json is ground truth.
+      "library": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] }
     },
 
     // -------------------------------------------------------
