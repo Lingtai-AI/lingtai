@@ -431,7 +431,15 @@ func (m PropsModel) renderLeft(maxW int) string {
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("input: %s", formatComma(m.selectedTokens.Input))))
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("output: %s", formatComma(m.selectedTokens.Output))))
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("thinking: %s", formatComma(m.selectedTokens.Thinking))))
-		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s", formatComma(m.selectedTokens.Cached))))
+		// Cache: show absolute cached tokens + hit rate as %. Rate = cached / input
+		// across the ledger's lifetime — sum of cache_read_input_tokens over sum of
+		// total input_tokens (input_tokens here is already the true total: raw +
+		// cache_read + cache_write, normalised in each adapter).
+		cacheRateStr := ""
+		if m.selectedTokens.Input > 0 {
+			cacheRateStr = fmt.Sprintf(" (%.1f%%)", 100.0*float64(m.selectedTokens.Cached)/float64(m.selectedTokens.Input))
+		}
+		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s%s", formatComma(m.selectedTokens.Cached), cacheRateStr)))
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", m.selectedTokens.APICalls)))
 	}
 
@@ -522,7 +530,14 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, "  "+labelStyle.Render("Input:    ")+valueStyle.Render(formatComma(m.tokens.Input)))
 	lines = append(lines, "  "+labelStyle.Render("Output:   ")+valueStyle.Render(formatComma(m.tokens.Output)))
 	lines = append(lines, "  "+labelStyle.Render("Thinking: ")+valueStyle.Render(formatComma(m.tokens.Thinking)))
-	lines = append(lines, "  "+labelStyle.Render("Cached:   ")+valueStyle.Render(formatComma(m.tokens.Cached)))
+	// Cached row shows absolute + cache-hit rate across the whole network
+	// (sum of cache_read / sum of total input, same denominator semantics
+	// as the per-agent ledger view).
+	cachedStr := formatComma(m.tokens.Cached)
+	if m.tokens.Input > 0 {
+		cachedStr = fmt.Sprintf("%s (%.1f%%)", cachedStr, 100.0*float64(m.tokens.Cached)/float64(m.tokens.Input))
+	}
+	lines = append(lines, "  "+labelStyle.Render("Cached:   ")+valueStyle.Render(cachedStr))
 
 	// API Calls
 	lines = append(lines, "")
