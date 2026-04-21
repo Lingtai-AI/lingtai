@@ -167,6 +167,15 @@
     // Safety limit — agent sleeps after this many turns.
     "max_turns": 50,
 
+    // Number of idle flushes between context.md rebuild+nuke pairs.
+    // Each idle always appends new turns to chat_history.jsonl (cheap);
+    // only every Nth idle serializes the full history into context.md and
+    // wipes the live chat. Larger N = wire chat carries the tail across
+    // more idles, keeping the cached Batch 3 of the system prompt byte-
+    // stable longer (higher prompt-cache hit rate) at the cost of a
+    // slightly larger wire chat between rebuilds. Default 3.
+    "context_rebuild_every_n_idles": 3,
+
     // -------------------------------------------------------
     // Admin privileges
     // -------------------------------------------------------
