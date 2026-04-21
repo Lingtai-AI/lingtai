@@ -45,7 +45,7 @@ type App struct {
 	setup       SetupModel
 	settings    SettingsModel
 	props       PropsModel
-	library         MarkdownViewerModel
+	library         LibraryModel
 	projects        ProjectsModel
 	agora           AgoraModel
 	secretaryMail   MailModel
@@ -737,16 +737,17 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		// Network-shared library lives at <project>/.library_shared/
-		// (per-agent .library/ is inside each agent working dir, owned by
-		// the kernel library capability).
-		libraryDir := filepath.Join(a.projectDir, ".library_shared")
+		// Agent-scoped: mirror what the library capability would inject for
+		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
+		// in init.json (manifest.capabilities.library.paths).
+		agentDir := a.orchDir
+		baseDir := a.projectDir
 		if a.inSecretaryView {
-			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library_shared")
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
 		}
-		sk, prob := scanLibrary(libraryDir)
-		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))
-		return a, a.sendSize()
+		a.library = NewLibraryModel(baseDir, agentDir, a.tuiConfig.Language)
+		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "secretary":
 		if a.inSecretaryView {
 			// Toggle back to main agent mail
@@ -1015,16 +1016,17 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		// Network-shared library lives at <project>/.library_shared/
-		// (per-agent .library/ is inside each agent working dir, owned by
-		// the kernel library capability).
-		libraryDir := filepath.Join(a.projectDir, ".library_shared")
+		// Agent-scoped: mirror what the library capability would inject for
+		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
+		// in init.json (manifest.capabilities.library.paths).
+		agentDir := a.orchDir
+		baseDir := a.projectDir
 		if a.inSecretaryView {
-			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library_shared")
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
 		}
-		sk, prob := scanLibrary(libraryDir)
-		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))
-		return a, a.sendSize()
+		a.library = NewLibraryModel(baseDir, agentDir, a.tuiConfig.Language)
+		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "secretary":
 		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)
 		secAgentDir := secretary.AgentDir(a.globalDir)
