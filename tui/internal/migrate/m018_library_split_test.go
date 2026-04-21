@@ -9,11 +9,15 @@ import (
 // TestMigrateLibrarySplit_RenamesWithSymlinks verifies the v18 migration:
 // - real skill folders survive the rename from .library/ to .library_shared/
 // - TUI-managed symlinks inside .library/ are stripped before the rename
+//
+// Fixture matches real layout: <project>/.lingtai/.library/ (see m016).
 func TestMigrateLibrarySplit_RenamesWithSymlinks(t *testing.T) {
-	root := t.TempDir()
-	lingtaiDir := filepath.Join(root, ".lingtai")
-	oldLibrary := filepath.Join(root, ".library")
-	newLibrary := filepath.Join(root, ".library_shared")
+	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
+	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldLibrary := filepath.Join(lingtaiDir, ".library")
+	newLibrary := filepath.Join(lingtaiDir, ".library_shared")
 
 	if err := os.MkdirAll(filepath.Join(oldLibrary, "real-skill"), 0o755); err != nil {
 		t.Fatal(err)
@@ -24,10 +28,6 @@ func TestMigrateLibrarySplit_RenamesWithSymlinks(t *testing.T) {
 	}
 	// A TUI-managed symlink that must be stripped.
 	if err := os.Symlink(filepath.Join(oldLibrary, "real-skill"), filepath.Join(oldLibrary, "alias")); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,14 +51,14 @@ func TestMigrateLibrarySplit_RenamesWithSymlinks(t *testing.T) {
 
 // TestMigrateLibrarySplit_FreshNetwork verifies the migration creates
 // .library_shared/ on a network that never had a .library/.
+//
+// Fixture matches real layout: <project>/.lingtai/.library_shared/.
 func TestMigrateLibrarySplit_FreshNetwork(t *testing.T) {
-	root := t.TempDir()
-	lingtaiDir := filepath.Join(root, ".lingtai")
-	newLibrary := filepath.Join(root, ".library_shared")
-
+	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	newLibrary := filepath.Join(lingtaiDir, ".library_shared")
 
 	if err := migrateLibrarySplit(lingtaiDir); err != nil {
 		t.Fatalf("migrateLibrarySplit failed: %v", err)
@@ -71,11 +71,15 @@ func TestMigrateLibrarySplit_FreshNetwork(t *testing.T) {
 
 // TestMigrateLibrarySplit_BothExist verifies that if .library_shared/ already
 // exists, we only strip symlinks from .library/ and do not clobber the new one.
+//
+// Fixture matches real layout: both dirs under <project>/.lingtai/.
 func TestMigrateLibrarySplit_BothExist(t *testing.T) {
-	root := t.TempDir()
-	lingtaiDir := filepath.Join(root, ".lingtai")
-	oldLibrary := filepath.Join(root, ".library")
-	newLibrary := filepath.Join(root, ".library_shared")
+	lingtaiDir := filepath.Join(t.TempDir(), ".lingtai")
+	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldLibrary := filepath.Join(lingtaiDir, ".library")
+	newLibrary := filepath.Join(lingtaiDir, ".library_shared")
 
 	if err := os.MkdirAll(filepath.Join(oldLibrary, "real-skill"), 0o755); err != nil {
 		t.Fatal(err)
@@ -84,10 +88,6 @@ func TestMigrateLibrarySplit_BothExist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(oldLibrary, "real-skill"), filepath.Join(oldLibrary, "alias")); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 

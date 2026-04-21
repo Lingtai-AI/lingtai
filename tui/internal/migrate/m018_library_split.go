@@ -6,21 +6,26 @@ import (
 	"path/filepath"
 )
 
-// migrateLibrarySplit renames the pre-existing network-level .library/ to
-// .library_shared/ and strips TUI-managed symlinks inside it.
+// migrateLibrarySplit renames the pre-existing network-level
+// <project>/.lingtai/.library/ to <project>/.lingtai/.library_shared/ and
+// strips TUI-managed symlinks inside it.
 //
-// Prior to this migration, the TUI populated <network>/.library/ with a mix
-// of real skill folders and symlinks to recipe/intrinsic skills. The new
+// Prior to this migration, the TUI populated .lingtai/.library/ (see m016
+// for the .skills -> .library rename at this same level) with a mix of
+// real skill folders and symlinks to recipe/intrinsic skills. The new
 // per-agent library capability (kernel-side) owns <agent>/.library/
-// independently, and the network-level directory is renamed to
+// independently, and this network-level directory is renamed to
 // .library_shared/ to serve as the collective knowledge base.
 //
 // Real skill folders survive the rename. Symlinks inside are removed (they
 // were TUI-managed pointers and are no longer needed).
+//
+// The lingtaiDir parameter IS the network root (e.g., <project>/.lingtai).
+// Agents' init.json defaults library.paths to "../.library_shared", which
+// from <project>/.lingtai/<agent>/ resolves to <project>/.lingtai/.library_shared/.
 func migrateLibrarySplit(lingtaiDir string) error {
-	networkRoot := filepath.Dir(lingtaiDir)
-	oldPath := filepath.Join(networkRoot, ".library")
-	newPath := filepath.Join(networkRoot, ".library_shared")
+	oldPath := filepath.Join(lingtaiDir, ".library")
+	newPath := filepath.Join(lingtaiDir, ".library_shared")
 
 	oldInfo, err := os.Lstat(oldPath)
 	if os.IsNotExist(err) {
