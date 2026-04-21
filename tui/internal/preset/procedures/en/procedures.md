@@ -31,9 +31,9 @@ You are expected to **actively create skills as you work** — not just before m
 
 **The bar is low, the payoff is high.** A 20-line skill that saves 10 minutes of rediscovery across 5 agents in your network is worth 50 minutes of collective time. Even a skill you use only once yourself still survives molt — your future self benefits. Skills are your primary mechanism for accumulating competence across lives. Every skill you write is a piece of yourself that persists.
 
-**Version control your skills.** After every `library(action='register')`, commit the change to the git repo in `.library/custom/`. Meaningful commit messages, no untracked drift. If a remote exists, push. See the `skills-manual` skill for setup instructions.
+**Version control your skills.** After authoring or editing a skill in `.library/custom/<name>/`, call `system({"action": "refresh"})` to re-inject the catalog. If you want version history beyond the agent's time_veil, maintain a git repo inside that folder manually. See the `skill-for-skill` skill for the full workflow.
 
-**Skill hygiene:** If you have **admin privileges** (`admin.karma`), periodically check for duplicate or overlapping skills in the network using `library(action='refresh')`. Merge duplicates by registering a consolidated version and removing the redundant ones. A clean, non-redundant skill library benefits the entire network.
+**Skill hygiene:** If you have **admin privileges** (`admin.karma`), periodically check for duplicate or overlapping skills in `../.library_shared/`. Merge duplicates by consolidating content and removing the redundant folders (via `bash`/`rm`). After changes, call `system({"action": "refresh"})`. A clean, non-redundant shared library benefits the entire network.
 
 **During molt**, review your recent work one final time for anything you missed — but most skills should already exist by then.
 

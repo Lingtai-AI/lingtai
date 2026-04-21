@@ -1,16 +1,16 @@
 ---
 name: skills-manual
-description: What skills are, how to write them, where to find them, and when to create one
-version: 1.1.0
+description: How to use, author, and share skills. Full library workflow.
+version: 2.0.0
 ---
 
 # Skills Manual
 
-## What is a Skill?
+## What Is a Skill?
 
-A skill is a **structured instruction bundle** that teaches you how to perform a specialized task. Each skill lives in its own folder with a `SKILL.md` file (this format) and optional supporting files (scripts, templates, data, reference docs).
+A skill is a **structured instruction bundle** — a folder containing a `SKILL.md` file (this format) and optional supporting files (scripts, templates, reference docs). Skills teach you how to perform specialized, repeatable tasks. They are the primary mechanism for accumulating competence across agent lifetimes: knowledge that survives molt.
 
-You already have skills loaded — they appear as `<available_skills>` in your system prompt. When a task matches a skill's description, load the SKILL.md via `read` and follow its instructions.
+Skills appear as `<available_skills>` in your system prompt (XML catalog). When a task matches a skill description, read its `SKILL.md` via `read` and follow its instructions.
 
 ## SKILL.md Format
 
@@ -39,19 +39,15 @@ my-skill/
 
 SKILL.md should reference supporting files by relative path. Offload dense content to subdirectories — keep SKILL.md focused on the procedure.
 
-### Skill Library Layout
+## Library Layout
 
-The skill library at `.lingtai/.library/` is organized into group folders:
+Every agent has its own skill library at `<agent-dir>/.library/`:
 
 ```
 .library/
-  intrinsic/            # Bundled with the TUI — managed automatically
+  intrinsic/            # Hard-shipped by the kernel — do not edit
+    skill-for-skill/
     lingtai-mcp/
-    lingtai-export-recipe/
-    ...
-  <recipe-name>/        # From recipes — managed by the TUI
-    research-skill/
-    writing-skill/
     ...
   custom/               # YOUR skills — create new skills here
     my-workflow/
@@ -60,142 +56,92 @@ The skill library at `.lingtai/.library/` is organized into group folders:
       SKILL.md
 ```
 
-**When creating a new skill, always place it under `.library/custom/`.** Never write directly to `.library/<name>/` — the TUI manages the top-level namespace and will move or remove anything outside `custom/` on the next launch. If you put a skill at the wrong level, it will disappear.
+**Intrinsic skills** are bundled with the kernel and managed automatically. Never write to or delete from `.library/intrinsic/`.
 
-Group folders can nest arbitrarily deep — a folder with `SKILL.md` is a skill; a folder containing only subfolders is a group.
+**Custom skills** belong to you. Always place new skills under `.library/custom/<name>/`.
+
+### Additional Library Paths
+
+Beyond `intrinsic/` and `custom/`, the library loads skill paths listed in `init.json` under `manifest.capabilities.library.paths`. The defaults are:
+
+| Path | Purpose |
+|------|---------|
+| `../.library_shared` | Network-shared skills — all agents in the project share these |
+| `~/.lingtai-tui/utilities` | TUI utility skills installed globally |
+
+Skills from all paths are merged into the catalog that appears in your system prompt. You can add more paths by editing `init.json` and calling `system({"action": "refresh"})`.
+
+## Authoring a Skill
+
+1. Create the folder: `<agent-dir>/.library/custom/<name>/`
+2. Write `SKILL.md` with the frontmatter and instructions.
+3. Add supporting files (`scripts/`, `references/`, `assets/`) as needed.
+4. Call `system({"action": "refresh"})` — the library rescans and the new skill appears in your catalog immediately.
+
+No register step is needed. `system.refresh` is the only action required.
+
+## Loading a Skill Into Working Memory
+
+The XML catalog in your system prompt shows skill names and descriptions but not full content. To use a skill's detailed instructions across multiple turns, load it into your pad:
 
 ```
-custom/
-  research/             # Group — no SKILL.md, just subfolders
-    arxiv/              # Skill — has SKILL.md
-      SKILL.md
-      scripts/
-    scholar/            # Skill — has SKILL.md
-      SKILL.md
-  my-standalone-skill/  # Skill — has SKILL.md
-    SKILL.md
+psyche({"object": "pad", "action": "append", "files": ["<path-to-SKILL.md>"]})
 ```
 
-**Corruption rule:** a folder with no `SKILL.md` that contains loose files (not just subdirectories) is considered corrupted and will be flagged as a problem.
+This pins the skill content into the pad so it persists through context turns.
+
+## Sharing With the Network
+
+To make a skill available to all agents in the project, copy it to the shared library:
+
+```bash
+cp -r .library/custom/<name> ../.library_shared/<name>
+```
+
+Then call `system({"action": "refresh"})` on any agent whose catalog should update. Other agents pick it up on their next refresh or restart.
+
+If you have **admin privileges**, you can curate `.library_shared/` directly — merging duplicates, pruning stale entries, reorganizing. Use `bash`/`rm` for filesystem operations; call `system.refresh` afterward to update the catalog.
+
+## Adding a Library Path
+
+To add a custom skill source (e.g., a shared team directory or a cloned skill repo):
+
+1. Open `init.json`.
+2. Locate `manifest.capabilities.library.paths` (a JSON array of path strings).
+3. Append the new path.
+4. Call `system({"action": "refresh"})`.
+
+Paths can be absolute or relative to the agent's working directory. Tilde expansion (`~`) is supported.
+
+## Library Health Check
+
+Call `library({"action": "info"})` to get:
+- A meta-skill guide (full library documentation)
+- A runtime health snapshot: paths loaded, skill counts, any errors or corrupted folders
+
+Use this whenever you suspect a path is not loading or a skill is missing from the catalog.
 
 ## When to Create a Skill
 
 **Create a skill when:**
-- A task is repeatable with consistent steps (e.g., "run a security audit", "generate a report")
-- The procedure requires domain knowledge you don't reliably have (e.g., a specific API's quirks, company guidelines)
-- A workflow involves multi-step orchestration with decision trees
-- You want to share expertise with other agents in your network
-- You find yourself repeating the same instructions across conversations
+- The task is repeatable with consistent steps
+- The procedure requires domain knowledge not reliably available without notes
+- A workflow involves multi-step orchestration or error handling
+- You want to share expertise with other agents in the network
 
 **Do NOT create a skill when:**
-- You already handle the task reliably without instructions
 - It's a one-off task with no reuse value
-- The task is just "call this API" — use an MCP server instead
-- The instructions are personality/style preferences — use covenant or character instead
+- The task is just "call this one API endpoint"
+- The instructions are personality or style preferences (use covenant or character instead)
 
-## How to Write a Good Skill
+## Writing a Good Skill
 
-1. **Trigger-optimized description** — include what it does AND what it doesn't do. The description is the only thing visible in the catalog.
-2. **Numbered steps in imperative form** — "Extract the text...", "Run the script...", not "You should extract..."
-3. **Concrete templates** in `assets/` rather than prose descriptions of desired output.
-4. **Deterministic scripts** in `scripts/` for fragile/repetitive operations (parsing, generation, validation).
+1. **Trigger-optimized description** — say what it does AND what it doesn't cover. The description is the only thing visible in the catalog without loading the file.
+2. **Numbered steps in imperative form** — "Extract the text...", not "You should extract..."
+3. **Concrete templates** in `assets/` rather than prose descriptions of desired output format.
+4. **Deterministic scripts** in `scripts/` for fragile or repetitive operations.
 5. **Keep SKILL.md under 500 lines** — offload to `references/` and `scripts/`.
-6. **Flat subdirectory structure** — one level deep (`references/schema.md`, not `references/db/v1/schema.md`).
 
-## Where to Find Skills
+## Full Workflow Reference
 
-### Notable Repositories
-
-| Repository | What |
-|---|---|
-| `github.com/anthropics/skills` | Official reference skills + Agent Skills spec |
-| `github.com/VoltAgent/awesome-openclaw-skills` | 5,400+ curated skills |
-| `github.com/VoltAgent/awesome-agent-skills` | 1,000+ cross-platform agent skills |
-| `github.com/hesreallyhim/awesome-claude-code` | Curated skills, hooks, plugins for Claude Code |
-| `github.com/sickn33/antigravity-awesome-skills` | 1,344+ installable SKILL.md files |
-| `github.com/trailofbits/skills` | Security research and audit skills |
-| `github.com/alirezarezvani/claude-skills` | 220+ skills for coding agents |
-
-### Registries
-
-| Registry | URL |
-|---|---|
-| Agent Skills spec | `agentskills.io` |
-| ClawHub (OpenClaw) | `clawhub.ai` |
-| Cursor directory | `cursor.directory` |
-
-### Version-Controlling Your Skills
-
-The `custom/` group should be a **git repository**. This makes your skills durable, shareable, and recoverable — they survive disk loss, can be cloned onto new machines, and provide history of how your skills evolved.
-
-**Initial setup** (do this once when `custom/` first exists):
-
-```bash
-cd <library-dir>/custom
-git init
-git add -A
-git commit -m "init: seed custom skills"
-```
-
-If a remote is available (e.g. a private GitHub/Gitea repo), add it:
-
-```bash
-git remote add origin <url>
-git push -u origin main
-```
-
-**After creating or updating a skill**, commit and push:
-
-```bash
-cd <library-dir>/custom
-git add -A
-git commit -m "<what changed>"
-git push  # if remote exists
-```
-
-Make this a habit — every `library(action='register')` should be followed by a git commit. Treat your skill repo the way a developer treats source code: meaningful commit messages, no untracked drift.
-
-**On a new machine or after a fresh install**, clone your skill repo into the custom group:
-
-```bash
-cd <library-dir>
-git clone <url> custom
-```
-
-Then `library(action='register')` to pick up everything.
-
-### Installing a Skill
-
-Use bash to clone or download into the `custom/` group:
-
-```bash
-# Clone a skill repo as a subfolder inside custom/
-cd <library-dir>/custom
-git clone https://github.com/someone/useful-skill.git
-
-# Or download a single skill folder
-# (copy/extract into <library-dir>/custom/skill-name/)
-```
-
-Then call `library(action='register')` to validate and commit.
-
-To update a skill that's a git repo:
-```bash
-cd <library-dir>/custom/skill-name
-git pull
-```
-Then `library(action='register')` again.
-
-To pick up skills another agent registered: `library(action='refresh')`.
-
-## What to Consolidate into a Skill
-
-When you discover a useful, repeatable procedure — whether from research, experimentation, or instruction — write it as a skill so your network benefits:
-
-- **Research workflows** — how to find, evaluate, and synthesize information on a topic
-- **Code patterns** — project-specific conventions, testing strategies, deployment procedures
-- **Data processing pipelines** — parsing, transformation, validation steps
-- **Communication templates** — report formats, email templates, briefing structures
-- **Domain expertise** — specialized knowledge that requires specific steps (legal review, security audit, scientific analysis)
-
-The test: **if you'd need to re-explain it next time, make it a skill.**
+For the complete end-to-end workflow — authoring, testing, sharing, and versioning — see the `skill-for-skill` intrinsic skill (`.library/intrinsic/skill-for-skill/SKILL.md`).

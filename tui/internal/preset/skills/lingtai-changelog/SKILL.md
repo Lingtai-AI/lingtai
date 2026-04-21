@@ -10,6 +10,21 @@ A living chronicle of system-level changes that affect how you work. When someth
 
 ---
 
+## 2026-04-20 — Library capability redesigned
+
+Breaking changes for agents:
+
+- **Tool actions removed**: `library(action='register')` and `library(action='refresh')` no longer exist.
+- **New tool action**: `library({"action": "info"})` returns the meta-skill guide plus a runtime health snapshot. Call it to understand your library.
+- **Per-agent `.library/`**: every agent now has its own `<agent>/.library/{intrinsic,custom}/`. The network-shared library moved from `.lingtai/.library/` to `.lingtai/.library_shared/` (TUI migration v18).
+- **Author a skill**: write it to `.library/custom/<name>/SKILL.md`, then `system({"action": "refresh"})`. No more register step.
+- **Publish to network**: `cp -r .library/custom/<name> ../.library_shared/<name>`. No more register step.
+- **Loading into working memory**: use `psyche({"object": "pad", "action": "append", "files": ["<location>"]})` to pin a skill into the pad across turns.
+
+See `skill-for-skill` (intrinsic) or `skills-manual` for the full workflow.
+
+---
+
 ## 2026-04-16 — Addon Secrets Move to Admin's `.secrets/`
 
 ### What changed
@@ -107,15 +122,19 @@ codex(view, ids=[...])
 codex(export, ids=[...])
 ```
 
-**Skill library (was skills, now library):**
+**Skill library (was skills, now library — then redesigned 2026-04-20):**
 ```
-# Old:
+# Old (pre-2026-04-13):
 skills(action='register')
 skills(action='refresh')
 
-# New:
+# Intermediate (2026-04-13 rename, removed 2026-04-20):
 library(action='register')
 library(action='refresh')
+
+# Current (2026-04-20+):
+library({"action": "info"})          # health check + guide
+system({"action": "refresh"})        # rescan library paths
 ```
 
 ### Why the rename

@@ -164,7 +164,7 @@ Keyboard shortcuts: explain ctrl+o (three verbose modes: off → verbose → ext
 
 ## Lesson 11: Addons — External Connections
 
-**Discover available addons dynamically** — use `library(action='refresh')` to find all addon setup skills. They follow the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
+**Discover available addons dynamically** — use `library({"action": "info"})` to get a full catalog of available skills, then look for addon setup skills following the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
 
 For each addon the human wants to set up:
 1. Use `library()` to find and read the setup skill's SKILL.md
