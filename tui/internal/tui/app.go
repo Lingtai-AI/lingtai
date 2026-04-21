@@ -736,9 +736,12 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		libraryDir := filepath.Join(a.projectDir, ".library")
+		// Network-shared library lives at <project>/.library_shared/
+		// (per-agent .library/ is inside each agent working dir, owned by
+		// the kernel library capability).
+		libraryDir := filepath.Join(a.projectDir, ".library_shared")
 		if a.inSecretaryView {
-			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library")
+			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library_shared")
 		}
 		sk, prob := scanLibrary(libraryDir)
 		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))
@@ -1011,9 +1014,12 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
 		a.currentView = appViewLibrary
-		libraryDir := filepath.Join(a.projectDir, ".library")
+		// Network-shared library lives at <project>/.library_shared/
+		// (per-agent .library/ is inside each agent working dir, owned by
+		// the kernel library capability).
+		libraryDir := filepath.Join(a.projectDir, ".library_shared")
 		if a.inSecretaryView {
-			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library")
+			libraryDir = filepath.Join(secretary.LingtaiDir(a.globalDir), ".library_shared")
 		}
 		sk, prob := scanLibrary(libraryDir)
 		a.library = NewMarkdownViewer(buildLibraryEntries(libraryDir, a.tuiConfig.Language, sk, prob), i18n.T("library.title"))

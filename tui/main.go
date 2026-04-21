@@ -209,9 +209,8 @@ func main() {
 	if err := config.Register(globalDir, projectDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to register project: %v\n", err)
 	}
-	// Bundled (canonical) skills — written to globalDir/bundled-skills/
-	// and symlinked into .lingtai/.library/intrinsic. Refreshed every
-	// startup so projects pick up new or updated skills after a TUI upgrade.
+	// TUI utility skills — extracted to <globalDir>/utilities/ on every
+	// startup. Agents reach these via the library.paths default in init.json.
 	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
 
 	// First run = no config.json in ~/.lingtai-tui/
@@ -230,15 +229,6 @@ func main() {
 	config.MigrateLegacyLanguage(globalDir)
 	tuiCfg := config.LoadTUIConfig(globalDir)
 	i18n.SetLang(tuiCfg.Language)
-
-	// Recipe library — symlink skills from all known recipes into .lingtai/.library/.
-	// On first run, no custom recipe is set yet, so only bundled recipe skills are
-	// linked. Custom/agora recipe skills are picked up on the next launch.
-	// LoadRecipeState returns zero-value on error, so customDir is "" and bundled +
-	// agora recipe skills are still linked even if .recipe is corrupt.
-	recipeState, _ := preset.LoadRecipeState(lingtaiDir)
-	preset.LinkRecipeLibrary(lingtaiDir, globalDir, tuiCfg.Language, recipeState.Recipe, recipeState.CustomDir)
-	preset.PruneStaleLibrarySymlinks(lingtaiDir)
 
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 

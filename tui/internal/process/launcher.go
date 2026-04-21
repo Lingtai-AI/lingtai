@@ -48,7 +48,8 @@ func InitProject(lingtaiDir, globalDir string) error {
 	if err := os.MkdirAll(tuiAssetDir, 0o755); err != nil {
 		return fmt.Errorf("create .tui-asset: %w", err)
 	}
-	// Bundled skills — symlinked into .lingtai/.library/intrinsic
+	// TUI utility skills — extracted to <globalDir>/utilities/ for agents
+	// to discover via the default library.paths in their init.json.
 	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
 	return nil
 }

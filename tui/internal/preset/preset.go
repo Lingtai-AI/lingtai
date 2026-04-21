@@ -354,28 +354,29 @@ func Bootstrap(globalDir string) error {
 	return EnsureDefault()
 }
 
-// PopulateBundledLibrary writes the bundled (canonical) skills into a
-// global staging directory (globalDir/bundled-skills/) and creates a
-// symlink at .lingtai/.library/intrinsic → that staging directory.
+// PopulateBundledLibrary extracts the TUI's embedded bundled skills into a
+// stable per-user location: <globalDir>/utilities/ (typically
+// ~/.lingtai-tui/utilities/). Agents reach these by default via the
+// library.paths entry in their init.json, which points at the same path.
 //
-// Called on every TUI startup so canonical skills stay in sync with the
-// shipped binary. The staging directory is shared across all projects;
-// per-project symlinks point to it.
+// Called on every TUI startup so utility skills stay in sync with the
+// shipped binary. Directory is rewritten from scratch so a TUI upgrade
+// that renames or removes a utility propagates cleanly.
 //
-// Also cleans up legacy flat bundled skill directories that older TUI
-// versions wrote directly into .library/.
+// The lingtaiDir argument is retained for compatibility with callers
+// (main.go, launcher.go) and is currently unused. Per-agent .library/
+// is now owned by the kernel library capability, not by the TUI.
 func PopulateBundledLibrary(lingtaiDir, globalDir string) {
-	libraryDir := filepath.Join(lingtaiDir, ".library")
-	os.MkdirAll(libraryDir, 0o755)
+	utilitiesDir := filepath.Join(globalDir, "utilities")
+	os.RemoveAll(utilitiesDir)
+	os.MkdirAll(utilitiesDir, 0o755)
 
-	// Write embedded skills to the global staging directory.
-	stagingDir := filepath.Join(globalDir, "bundled-skills")
 	fs.WalkDir(skillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel("skills", path)
-		target := filepath.Join(stagingDir, rel)
+		target := filepath.Join(utilitiesDir, rel)
 		os.MkdirAll(filepath.Dir(target), 0o755)
 		data, err := skillsFS.ReadFile(path)
 		if err == nil {
@@ -383,59 +384,6 @@ func PopulateBundledLibrary(lingtaiDir, globalDir string) {
 		}
 		return nil
 	})
-
-	// Symlink .library/intrinsic → globalDir/bundled-skills/
-	intrinsicLink := filepath.Join(libraryDir, "intrinsic")
-	if existing, err := os.Readlink(intrinsicLink); err == nil {
-		if existing == stagingDir {
-			// Already correct
-		} else {
-			os.Remove(intrinsicLink)
-			os.Symlink(stagingDir, intrinsicLink)
-		}
-	} else {
-		// Not a symlink — remove whatever is there (could be a legacy dir)
-		os.RemoveAll(intrinsicLink)
-		os.Symlink(stagingDir, intrinsicLink)
-	}
-
-	// Clean up legacy flat bundled skill directories written by older TUI
-	// versions directly into .library/. Only non-symlink directories whose
-	// name matches a bundled skill are removed.
-	bundled := BundledSkillNames()
-	entries, _ := os.ReadDir(libraryDir)
-	for _, e := range entries {
-		if e.Name() == "intrinsic" || e.Name() == "custom" {
-			continue
-		}
-		if e.Name()[0] == '.' {
-			continue
-		}
-		if !bundled[e.Name()] {
-			continue // not a bundled name — leave it alone
-		}
-		p := filepath.Join(libraryDir, e.Name())
-		info, err := os.Lstat(p)
-		if err != nil {
-			continue
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			continue // symlink — managed by recipe_library.go, leave it
-		}
-		os.RemoveAll(p)
-	}
-
-	// Also clean up known stale skills that may have been migrated into custom/.
-	staleSkills := []string{
-		"lingtai-agora", // renamed to lingtai-export-network in v0.4.40
-	}
-	customDir := filepath.Join(libraryDir, "custom")
-	for _, name := range staleSkills {
-		p := filepath.Join(customDir, name)
-		if _, err := os.Stat(p); err == nil {
-			os.RemoveAll(p)
-		}
-	}
 }
 
 // BundledSkillNames returns the set of skill directory names that are shipped
