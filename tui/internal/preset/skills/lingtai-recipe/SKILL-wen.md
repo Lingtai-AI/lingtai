@@ -157,10 +157,10 @@ version: 1.0.0
 - `comment.md`、`covenant.md`、`procedures.md` 中无占位符（惟 `greet.md` 许之）
 - `skills/<name>/` 下每技皆具 `SKILL.md`，其元数据（`name`、`description`、`version`）完备
 
-用法（在网之内，路径由已绑之技能符链解）：
+用法（校验之器，由 TUI 安于用户之稳径）：
 
 ```bash
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py <仓根>
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py <仓根>
 ```
 
 退码零即结构合法。警示（未识之语言码、`.lingtai-recipe/` 根下多余之文件）报而不阻。

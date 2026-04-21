@@ -157,10 +157,10 @@ version: 1.0.0
 - `comment.md`、`covenant.md`、`procedures.md` 中不含占位符（占位符只允许出现在 `greet.md`）
 - `skills/<name>/` 下的每个技能都有带完整元数据（`name`、`description`、`version`）的 `SKILL.md`
 
-用法（从运行中的网络内，路径通过已绑定的技能符号链接解析）：
+用法（校验器由 TUI 安装至稳定的用户级路径）：
 
 ```bash
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py <仓库根路径>
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py <仓库根路径>
 ```
 
 退出码 0 表示载荷结构合法。警告（未知语言代码、`.lingtai-recipe/` 根目录下有额外文件）会被报告但不会阻塞。

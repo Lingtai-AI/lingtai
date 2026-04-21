@@ -93,7 +93,7 @@ WeChat sessions can expire. When this happens, the addon pauses and sends the hu
 
 ## Config Reference
 
-See the example config at `.lingtai/.library/lingtai-wechat-setup/assets/config.json` for all available fields.
+See the example config at `~/.lingtai-tui/utilities/lingtai-wechat-setup/assets/config.json` for all available fields.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

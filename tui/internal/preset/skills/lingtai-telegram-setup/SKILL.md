@@ -71,4 +71,4 @@ Once you have the bot token:
 
 ## Config Reference
 
-See the example config at `.lingtai/.library/lingtai-telegram-setup/assets/config.json` for a full reference of all available fields.
+See the example config at `~/.lingtai-tui/utilities/lingtai-telegram-setup/assets/config.json` for a full reference of all available fields.

@@ -103,7 +103,7 @@ Overrides the system-wide procedures (`~/.lingtai-tui/procedures/<lang>/procedur
 
 ### 5. `skills/` — Recipe-Shipped Skills
 
-Optional. Skills that travel with the recipe and are automatically symlinked into `.lingtai/.library/<recipe-name>/` as a group folder when the TUI starts.
+Optional. Skills that travel with the recipe. Currently, recipe skills are NOT auto-injected into agent catalogs — the old symlink-farm mechanism was removed when the library capability moved to a per-agent model. Agents who want recipe skills should add the recipe's `skills/` directory to their `init.json` `manifest.capabilities.library.paths` manually, then call `system({"action": "refresh"})`.
 
 Each skill follows the standard SKILL.md contract:
 
@@ -119,7 +119,7 @@ version: 1.0.0
 
 **i18n:** For multi-language skills, use `SKILL.md` as a frontmatter-only pointer and provide `SKILL-en.md`, `SKILL-zh.md`, etc. for full instructions. The agent reads `SKILL.md`, sees which lang variants are available, and reads the appropriate one. Single-language skills just put everything in `SKILL.md`.
 
-**Grouping:** Recipe skills appear in `.lingtai/.library/<recipe-name>/` — the recipe name is the group header in the `/library` viewer.
+**Grouping:** When an agent adds a recipe's `skills/` path to its `library.paths`, the scanner treats each subdirectory as an independent skill. There is no automatic group header; skills appear flat in the catalog with their own names.
 
 **Scripts and assets:** Place them alongside `SKILL.md` in the skill directory. They are self-contained per skill.
 
@@ -180,10 +180,10 @@ The recipient clones either kind of repo and opens it with `lingtai-tui`. The TU
 - No placeholders in `comment.md`, `covenant.md`, or `procedures.md` (only `greet.md` may use them)
 - Every skill under `skills/<name>/` has `SKILL.md` with valid frontmatter (`name`, `description`, `version`)
 
-Usage (from within a living network, paths resolve via the bundled skill symlink):
+Usage (the validator ships with the TUI at a stable per-user path):
 
 ```bash
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py <repo-root>
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py <repo-root>
 ```
 
 Exit code 0 means the payload is structurally valid. Warnings (unknown lang code, stray files at `.lingtai-recipe/` root) are reported but do not block.

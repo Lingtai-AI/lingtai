@@ -12,7 +12,7 @@ You are about to copy the network you live in to an exportable location. **This 
 
 Walk the human through the steps below carefully. Each step is either *mechanical* (run a script, report the result) or *interactive* (discuss a decision with the human before proceeding). Never skip the interactive steps — the whole point of a skill-driven exporting flow is that a human is in the loop for judgment calls.
 
-All scripts live alongside this SKILL.md under `scripts/`. The canonical `.gitignore` template lives at `assets/gitignore.template`. You run the scripts with `python3 <path-to-script> ...`; resolve the absolute path from this skill's location in `.lingtai/.library/lingtai-export-network/`.
+All scripts live alongside this SKILL.md under `scripts/`. The canonical `.gitignore` template lives at `assets/gitignore.template`. You run the scripts with `python3 <path-to-script> ...`; resolve the absolute path from this skill's location in `~/.lingtai-tui/utilities/lingtai-export-network/`.
 
 ## Critical: Filesystem Rules
 
@@ -93,7 +93,7 @@ It also deletes project-level publisher-specific state under `.lingtai/` itself:
 - `.lingtai/.tui-asset/` (TUI-local cache, regenerated on launch)
 - `.lingtai/.addons/` (publisher's addon config — points at publisher's IMAP accounts, telegram bots, etc. Recipients configure their own addons after cloning)
 
-`.lingtai/.library/` is preserved — it holds canonical skills (bundled + user-added), which are part of the network's identity and belong in the exported copy.
+`.lingtai/.library_shared/` is preserved — it holds the network's shared skills (promoted by agents, curated by admin) and is part of the network's identity. Each agent's own `<agent>/.library/custom/` is also preserved as part of that agent's state. `<agent>/.library/intrinsic/` is kernel-managed and gets re-created on the recipient side, so it can be stripped to save space (optional).
 
 Report the totals to the human. If the script exits nonzero, stop and surface the error — do not proceed.
 
@@ -282,7 +282,7 @@ Only write these if they meaningfully differ from system defaults:
 
 - `$RECIPE_DIR/covenant.md` — overrides the system-wide covenant for agents in this network
 - `$RECIPE_DIR/procedures.md` — overrides system-wide procedures
-- `$RECIPE_DIR/skills/<skill-name>/SKILL.md` — recipe-shipped skills. Copy custom skills from `.lingtai/.library/custom/` in the staging copy. **Skip intrinsic skills** — they are shipped with the TUI and already available everywhere.
+- `$RECIPE_DIR/skills/<skill-name>/SKILL.md` — recipe-shipped skills. Copy custom skills either from a specific agent's `<agent>/.library/custom/` or from the network-shared library at `.lingtai/.library_shared/` in the staging copy. **Skip intrinsic skills** — they ship with the kernel/TUI and are already available everywhere.
 
 ### 5g. Multi-language variants (optional)
 
@@ -300,11 +300,10 @@ Show both recipe files to the human and iterate until satisfied.
 
 ## Step 6: Validate the recipe payload
 
-Your agent is running inside a live project — the directory containing the `.lingtai/` folder where bundled skills were installed. `cd` there first so the relative path to the validator resolves correctly.
+The validator ships with the TUI at a stable per-user path, so you can run it from anywhere.
 
 ```bash
-cd <live-project-root>
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/networks/<name>/"
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/networks/<name>/"
 ```
 
 This is the canonical structural check. It verifies `recipe.json`, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.

@@ -17,7 +17,8 @@
 # .portal/topology.jsonl can grow to hundreds of MB and leaks the timeline.
 # .addons/ holds the publisher's IMAP/telegram/etc config — recipients
 # configure their own after cloning.
-# .lingtai/.library/ is intentionally NOT ignored (canonical config).
+# .lingtai/.library_shared/ and per-agent .library/custom/ are intentionally
+# NOT ignored — they hold network-shared and agent-authored skills.
 .lingtai/.portal/
 .lingtai/.tui-asset/
 .lingtai/.addons/

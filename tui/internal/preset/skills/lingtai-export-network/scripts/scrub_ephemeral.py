@@ -26,7 +26,8 @@ specific state:
                                    configure their own addons after cloning)
 
 Preserved (canonical, durable):
-    .lingtai/.library/             (canonical skills + user-added skills)
+    .lingtai/.library_shared/      (network-shared skills promoted by agents)
+    .lingtai/<agent>/.library/custom/  (each agent's authored skills)
 
 Mail folders (inbox/outbox/sent/) are left alone — archive_mail.py handles
 them in step 2.
@@ -74,9 +75,10 @@ EPHEMERAL_NESTED = [
 # hold publisher-specific state: portal event streams, TUI caches, and
 # addon configs (which point at the publisher's accounts and credential
 # env vars). Recipients set up their own addons after cloning.
-# .lingtai/.library/ is intentionally excluded — it is canonical
-# configuration (bundled + user-added) that belongs in the published
-# network.
+# .lingtai/.library_shared/ is intentionally excluded — it holds the
+# network's shared skills (agent-promoted, admin-curated), part of the
+# network's identity. Each agent's <agent>/.library/custom/ is similarly
+# part of the agent's state (not ephemeral).
 PROJECT_EPHEMERAL_DIRS = [
     ".portal",
     ".tui-asset",

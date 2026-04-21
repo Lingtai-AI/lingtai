@@ -90,7 +90,7 @@ Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **No
 
 1. Read the current recipe state: `cat .lingtai/.tui-asset/.recipe`
 2. Examine the current comment.md (behavioral DNA) — find it via the recipe state
-3. List all installed skills: `ls -la .lingtai/.library/`
+3. List skills in the network-shared library: `ls -la .lingtai/.library_shared/`. List each agent's custom skills: `ls -la .lingtai/*/.library/custom/`.
 4. Scan the network structure: `ls .lingtai/*/` and `cat .lingtai/*/.agent.json`
 5. Skim recent mail for tone and delegation patterns: `ls .lingtai/*/mailbox/archive/ | head -20`
 
@@ -114,7 +114,7 @@ Send the human **one** email introducing the export flow and collecting all key 
 > 6. **Any behavioral constraints** — what should carry over from this network's culture?
 >
 > Here are the installed skills:
-> [list from ls .lingtai/.library/]
+> [list skills from .lingtai/.library_shared/ and each agent's .library/custom/]
 >
 > Answer as many as you can in one message and I'll draft everything in one pass."
 
@@ -177,7 +177,12 @@ For each skill the human wants to include:
 
 ```bash
 mkdir -p $RECIPE_DIR/skills/<skill-name>
-cp -R .lingtai/.library/custom/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
+# Custom skills live per-agent at <agent>/.library/custom/. Pick an agent
+# (usually the admin, or the author) and copy from its working dir.
+cp -R .lingtai/<agent-name>/.library/custom/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
+# Or export from the network-shared library if the skill has already been
+# promoted there:
+# cp -R .lingtai/.library_shared/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
 ```
 
 3. Verify each skill has a valid `SKILL.md` with proper frontmatter
@@ -209,11 +214,10 @@ If the human mentions a multi-language audience, create per-language subdirector
 
 ## Step 5: Validate the recipe payload
 
-Your agent is running inside a live project — the directory containing the `.lingtai/` folder where bundled skills were installed. `cd` there first so the relative path to the validator resolves correctly.
+The validator ships with the TUI at a stable per-user path, so you can run it from anywhere.
 
 ```bash
-cd <live-project-root>
-python3 .lingtai/.library/intrinsic/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<name>/"
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<name>/"
 ```
 
 This is the canonical structural check. It verifies `recipe.json` at the repo root, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
