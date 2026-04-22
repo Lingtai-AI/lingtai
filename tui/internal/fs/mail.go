@@ -71,9 +71,13 @@ func (c MailCache) Refresh() MailCache {
 	sort.Slice(out.Messages, func(i, j int) bool {
 		return out.Messages[i].ReceivedAt < out.Messages[j].ReceivedAt
 	})
-	// Rebuild the UUID→index map after the sort.
+	// Rebuild the UUID→index map after the sort. Keyed by MailboxID, which is
+	// the mailbox directory basename (what scanFolder looks up) — not msg.ID,
+	// which could diverge from the directory name if a future kernel rewrote
+	// the JSON during pickup. MailboxID is set to the directory name at write
+	// time in WriteMail and never mutated.
 	for i, m := range out.Messages {
-		out.seen[m.ID] = i
+		out.seen[m.MailboxID] = i
 	}
 	return out
 }
