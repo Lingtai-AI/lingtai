@@ -789,12 +789,16 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
-			// Short timestamp (HH:MM)
+			// Short timestamp (HH:MM) with optional delivering indicator.
 			ts := ""
 			if msg.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, msg.Timestamp); err == nil {
 					ts = StyleFaint.Render(" " + t.Local().Format("15:04"))
 				}
+			}
+			if msg.IsFromMe && !msg.Delivered {
+				// Quiet indicator: message sent to outbox but recipient hasn't picked up yet.
+				ts += StyleFaint.Render(" ⏳")
 			}
 			// Wrap body to fit terminal width (indent 2 + name + ": ")
 			prefix := fmt.Sprintf("  %s%s: ", name, ts)
