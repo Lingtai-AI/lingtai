@@ -14,64 +14,64 @@ tags: [web, browsing, extraction, tier0, tier1, tier2, tier3]
 
 ---
 
-## 🚀 Tier 0 — 一行上手（PDF直链 / DOI / arXiv ID）
+## Tier 0 — One-liner (PDF direct link / DOI / arXiv ID)
 
-**适用**：PDF 直链、DOI 字符串、arXiv ID
-**工具**：curl + fitz（无需脚本）
+**When it applies:** PDF direct links, DOI strings, arXiv IDs.
+**Tools:** `curl` + `fitz` (no script needed).
 
 ```bash
-# PDF 直链
+# Direct PDF link
 curl -L "https://arxiv.org/pdf/1706.03762.pdf" -o paper.pdf
 
-# arXiv ID → 自动推导 PDF 路径
+# arXiv ID → derive the PDF path
 curl -L "https://arxiv.org/pdf/$(echo "2401.12345" | sed 's/\.//').pdf" -o paper.pdf
 ```
 
-**Python（提取 PDF 文本）**：
+**Python (extract PDF text):**
 ```python
 import fitz  # pip install pymupdf
 doc = fitz.open("paper.pdf")
-print(doc[0].get_text()[:500])  # 首页预览
+print(doc[0].get_text()[:500])  # first-page preview
 ```
 
-**何时用**：URL 含 `.pdf` 或已知 DOI/arXiv ID。
+**Use when:** the URL contains `.pdf`, or you already have a DOI / arXiv ID.
 
 ---
 
-## 🎯 Tier 1 — 快速返回（API 查询 / web_read）
+## Tier 1 — Fast metadata (API query / web_read)
 
-**适用**：arXiv 论文页、已有 DOI/ID 的学术资源
-**工具**：web_read 工具，或 API（无需安装库）
+**When it applies:** arXiv abstract pages, academic resources whose DOI or ID is known.
+**Tools:** the `web_read` tool, or APIs (no extra libraries needed).
 
 ```python
-# 方法A：web_read（零代码，最快）
+# Method A: web_read (zero code, fastest)
 web_read({
     url: "https://arxiv.org/abs/1706.03762",
     output_format: "markdown"
 })
 
-# 方法B：arXiv API（精确元数据）
+# Method B: arXiv API (precise metadata)
 # GET https://export.arxiv.org/api/query?id_list=1706.03762
-# 返回：标题、摘要、作者、分类、PDF链接
+# Returns: title, abstract, authors, categories, PDF link
 
-# 方法C：CrossRef API（任意DOI）
+# Method C: CrossRef API (any DOI)
 # GET https://api.crossref.org/works/10.1038/s41586-023-05995-9
-# 返回：标题、作者、期刊、License、DOI
+# Returns: title, authors, journal, license, DOI
 
-# 方法D：OpenAlex API（最强，任意DOI）
+# Method D: OpenAlex API (most powerful, any DOI)
 # GET https://api.openalex.org/works/https://doi.org/10.1038/s41586-023-05995-9
-# 返回：完整元数据 + 引用数 + 主题分类 + PDF链接
+# Returns: full metadata + citation count + topic classification + PDF link
 ```
 
-**何时用**：已有 DOI/arXiv ID，只想快速拿元数据和摘要。
+**Use when:** you have a DOI or arXiv ID and just want metadata + abstract quickly.
 
 ---
 
-## ⚙️ Tier 2 — 结构化提取（curl + BeautifulSoup）
+## Tier 2 — Structured extraction (curl + BeautifulSoup)
 
-**适用**：Google Scholar 列表页、Nature.com（og meta）、arXiv（结构化元数据）、开放获取文章
-**工具**：需安装 `pip install requests beautifulsoup4 lxml`
-**速度**：~0.15 秒/页
+**When it applies:** Google Scholar list pages, Nature.com (`og:meta`), arXiv (structured metadata), open-access articles.
+**Tools:** requires `pip install requests beautifulsoup4 lxml`.
+**Speed:** ~0.15 s per page.
 
 ```python
 import requests
@@ -79,14 +79,14 @@ from bs4 import BeautifulSoup
 import re
 
 def extract_layer2(url):
-    """Layer 2: curl + BeautifulSoup 结构化提取"""
+    """Tier 2: curl + BeautifulSoup structured extraction."""
     r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
     soup = BeautifulSoup(r.text, "lxml")
 
-    # 通用：标题
+    # Generic: title
     title = soup.find("title").get_text(strip=True) if soup.find("title") else None
 
-    # Google Scholar（搜索结果页）
+    # Google Scholar (search results page)
     if "scholar.google" in url:
         papers = []
         for card in soup.select("div.gs_ri"):
@@ -100,7 +100,7 @@ def extract_layer2(url):
             })
         return {"title": title, "papers": papers}
 
-    # arXiv：PDF链接发现
+    # arXiv: find PDF links
     elif "arxiv.org" in url:
         abstract_el = soup.find("blockquote", class_="abstract")
         pdf_links = re.findall(r'href="(/pdf/[^"]+\.pdf)"', r.text)
@@ -110,7 +110,7 @@ def extract_layer2(url):
             "pdf_links": [urljoin(url, p) for p in pdf_links[:3]],
         }
 
-    # Nature.com：og meta
+    # Nature.com: og meta
     elif "nature.com" in url:
         og_title = soup.find("meta", property="og:title")
         og_desc = soup.find("meta", property="og:description")
@@ -121,48 +121,48 @@ def extract_layer2(url):
             "doi": citation_doi["content"] if citation_doi else None,
         }
 
-    # 默认
+    # Default
     else:
         return {"title": title}
 ```
 
-**关键 CSS 选择器**：
+**Key CSS selectors:**
 
-| 网站 | 选择器 | 提取内容 |
-|------|--------|---------|
-| Google Scholar | `div.gs_ri` | 单条论文卡片 |
-| Google Scholar | `h3.gs_rt` | 论文标题 |
-| Google Scholar | `div.gs_rs` | 摘要/snippet |
-| Google Scholar | `div.gs_fl` | 引用/链接信息 |
-| arXiv | `h1.title` | 标题 |
-| arXiv | `blockquote.abstract` | 摘要 |
-| arXiv | `a[href*="/pdf/"]` | PDF 链接 |
-| Nature.com | `meta[property="og:title"]` | 标题（curl 可拿）|
+| Site | Selector | Extracts |
+|------|----------|----------|
+| Google Scholar | `div.gs_ri` | One paper card |
+| Google Scholar | `h3.gs_rt` | Paper title |
+| Google Scholar | `div.gs_rs` | Abstract / snippet |
+| Google Scholar | `div.gs_fl` | Citation / link metadata |
+| arXiv | `h1.title` | Title |
+| arXiv | `blockquote.abstract` | Abstract |
+| arXiv | `a[href*="/pdf/"]` | PDF link |
+| Nature.com | `meta[property="og:title"]` | Title (curl-reachable) |
 | Nature.com | `meta[name="citation_doi"]` | DOI |
-| Springer | `meta[name="citation_doi"]` | DOI（开放获取）|
+| Springer | `meta[name="citation_doi"]` | DOI (open access) |
 
-**何时用**：静态页面，不需要 JS 渲染，curl 速度快。
+**Use when:** the page is static, no JS rendering required, and curl is fast enough.
 
 ---
 
-## 🔧 Tier 3 — 专家定制（Playwright stealth）
+## Tier 3 — Bespoke (Playwright stealth)
 
-**适用**：Google Scholar 登录态、持续 404 页面（Springer）、需 JS 渲染的完整正文
-**工具**：需安装 `pip install playwright && playwright install chromium && pip install playwright-stealth`
-**注意**：Nature/Springer 用 `domcontentloaded` 而非 `networkidle`
+**When it applies:** Google Scholar logged-in views, persistently-404 pages (Springer), full body text that requires JS rendering.
+**Tools:** requires `pip install playwright && playwright install chromium && pip install playwright-stealth`.
+**Note:** for Nature / Springer use `domcontentloaded`, NOT `networkidle`.
 
 ```python
 from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
 def extract_layer3(url, wait_time=3):
-    """Layer 3: Playwright stealth — JS 渲染 / 登录态页面"""
+    """Tier 3: Playwright stealth — JS-rendered or login-gated pages."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         stealth_sync(page)
 
-        # ⚠️ 关键：不要用 networkidle（Nature/Springer 会无限加载）
+        # CRITICAL: do NOT use networkidle (Nature / Springer hang forever)
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(wait_time * 1000)
 
@@ -174,77 +174,73 @@ def extract_layer3(url, wait_time=3):
         }
 ```
 
-**何时用**：Layer 1/2 失败，或必须 JS 渲染的页面。
+**Use when:** Tier 1 / 2 fail, or the page genuinely requires JS rendering.
 
 ---
 
-## 🧭 tier 自动决策树
+## Auto-tier decision tree
 
 ```python
 def auto_tier(url):
-    """自动选择最优提取层"""
+    """Pick the cheapest viable tier."""
     url_lower = url.lower()
 
-    # Tier 0: PDF 直链
+    # Tier 0: PDF direct link
     if url_lower.endswith(".pdf"):
-        return 0, "PDF直链 → curl -L"
+        return 0, "PDF direct link → curl -L"
 
-    # Tier 1: API / 静态结构页
+    # Tier 1: API / static structured page
     if re.search(r"^(10\.\d{4,}|arXiv:)", url):
-        return 1, "DOI/arXiv ID → API 查询"
+        return 1, "DOI / arXiv ID → API query"
     if "arxiv.org/abs" in url_lower and "scholar" not in url_lower:
-        return 1, "arXiv 论文页 → web_read"
+        return 1, "arXiv abstract page → web_read"
 
-    # Tier 2: curl+BS
+    # Tier 2: curl + BS
     if "scholar.google" in url_lower:
-        return 2, "Scholar 搜索 → curl+BS"
+        return 2, "Scholar search → curl + BS"
     if "nature.com" in url_lower:
-        return 2, "Nature → curl+BS（og meta）"
+        return 2, "Nature → curl + BS (og meta)"
     if "springer.com" in url_lower:
-        return 3, "Springer → Playwright（需session）"
+        return 3, "Springer → Playwright (session needed)"
 
-    # 默认
-    return 2, "通用 → curl+BS，失败则降级Layer 3"
+    # Default
+    return 2, "Generic → curl + BS, fall back to Tier 3 on failure"
 ```
 
 ---
 
-## 📊 各网站 tier 推荐表
+## Per-site tier recommendations
 
-| 网站 | 推荐层 | 成功率 | 备注 |
-|------|--------|--------|------|
-| arXiv 论文页 | Tier 1 | ⭐⭐⭐⭐⭐ | web_read 或 API |
-| arXiv PDF 直链 | Tier 0 | ⭐⭐⭐⭐⭐ | curl -L + fitz |
-| Google Scholar 列表 | Tier 2 | ⭐⭐⭐⭐ | curl+BS，IP需干净 |
-| Google Scholar 详情 | Tier 3 | ⭐⭐ | 需登录态或 stealth |
-| Nature.com | Tier 2/3 | ⭐⭐⭐ | og meta 可拿，需JS拿正文 |
-| Springer 开放获取 | Tier 2 | ⭐⭐⭐ | DOI meta 可用 |
-| Springer 付费 | Tier 3 | ⭐⭐ | 需 cookie/session |
-| OpenAlex API | Tier 1 | ⭐⭐⭐⭐⭐ | 完全免费，最稳 |
-| CrossRef API | Tier 1 | ⭐⭐⭐⭐⭐ | 完全免费，最稳 |
-
----
-
-## 📦 辅助资产
-
-| 文件 | 内容 |
-|------|------|
-| `assets/api-endpoints.json` | 各 API 端点 + 参数 |
-| `assets/site-templates.json` | 已知网站的 CSS 选择器模板 |
-| `assets/css-selectors.json` | 常见场景 CSS 模式库 |
-| `assets/regex-patterns.json` | DOI/arXiv/PMID 正则模板 |
-| `scripts/extract_page.py` | 可执行脚本，支持 `--tier` 参数 |
+| Site | Recommended tier | Success rate | Notes |
+|------|------------------|--------------|-------|
+| arXiv abstract page | Tier 1 | high | web_read or API |
+| arXiv PDF direct link | Tier 0 | high | curl -L + fitz |
+| Google Scholar list | Tier 2 | medium-high | curl + BS, needs a clean IP |
+| Google Scholar detail | Tier 3 | low | needs logged-in session or stealth |
+| Nature.com | Tier 2/3 | medium | og meta is cheap; full body needs JS |
+| Springer open access | Tier 2 | medium | DOI meta is reachable |
+| Springer paywalled | Tier 3 | low | needs cookies / session |
+| OpenAlex API | Tier 1 | high | fully free, most reliable |
+| CrossRef API | Tier 1 | high | fully free, most reliable |
 
 ---
 
-## ⚠️ 已知限制
+## Bundled assets
 
-1. **主流出版商（Wiley/Science/PNAS/Elsevier）**：几乎全部 403，API 是唯一路径
-2. **Nature.com**：Playwright 不要用 `networkidle`，会超时；用 `domcontentloaded`
-3. **Google Scholar**：IP 频繁请求会被临时封禁，建议加 `time.sleep(2)`
-4. **Semantic Scholar API**：需 API Key（免费申请），否则限速严格
-5. **PDF 链接**：arXiv 页内无直接 PDF 链接，需从 ID 推导 `/pdf/{ID}.pdf`
+| File | Contents |
+|------|----------|
+| `assets/api-endpoints.json` | API endpoints + parameters for each provider |
+| `assets/site-templates.json` | CSS-selector templates for known sites |
+| `assets/css-selectors.json` | Common-pattern CSS selector library |
+| `assets/regex-patterns.json` | Regex templates for DOI / arXiv / PMID |
+| `scripts/extract_page.py` | Executable script, accepts `--tier` argument |
 
 ---
 
+## Known limitations
 
+1. **Major publishers (Wiley / Science / PNAS / Elsevier):** almost always return 403; APIs are the only practical route.
+2. **Nature.com:** do NOT use `networkidle` with Playwright — it will time out. Use `domcontentloaded`.
+3. **Google Scholar:** rapid requests from the same IP get temporarily blocked; pace with `time.sleep(2)`.
+4. **Semantic Scholar API:** needs an API key (free) for usable rate limits, otherwise heavily throttled.
+5. **PDF links on arXiv:** the abstract page does NOT contain a direct PDF link in its HTML. Derive the path from the arXiv ID: `/pdf/{ID}.pdf`.
