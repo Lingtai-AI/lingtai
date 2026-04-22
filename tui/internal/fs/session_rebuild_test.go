@@ -89,8 +89,7 @@ func TestIngestMailWatermarkSkipsOldMail(t *testing.T) {
 	sc.lastMailTs = "2026-04-10T00:00:00Z" // simulate post-rebuild watermark
 
 	cache := MailCache{
-		inboxSeen: map[string]struct{}{},
-		sentSeen:  map[string]struct{}{},
+		seen: map[string]int{},
 		Messages: []MailMessage{
 			{From: "human", ReceivedAt: "2026-04-07T00:00:00Z", Message: "old"},   // below watermark — should skip
 			{From: "human", ReceivedAt: "2026-04-11T00:00:00Z", Message: "new"},   // above watermark — should ingest

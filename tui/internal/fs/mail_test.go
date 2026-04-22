@@ -239,6 +239,94 @@ func TestWriteMail_RealAgentSenderUnchanged(t *testing.T) {
 	}
 }
 
+func TestMailCache_ScansOutboxWithUndelivered(t *testing.T) {
+	humanDir := t.TempDir()
+	outboxDir := filepath.Join(humanDir, "mailbox", "outbox", "msg-out-1")
+	os.MkdirAll(outboxDir, 0o755)
+
+	msg := MailMessage{
+		ID: "msg-out-1", MailboxID: "msg-out-1",
+		From: "human", To: []string{"alice"}, Subject: "pending", Message: "hi",
+		Type: "normal", ReceivedAt: "2026-04-21T10:00:00.000Z",
+	}
+	data, _ := json.Marshal(msg)
+	os.WriteFile(filepath.Join(outboxDir, "message.json"), data, 0o644)
+
+	cache := NewMailCache(humanDir).Refresh()
+	if len(cache.Messages) != 1 {
+		t.Fatalf("messages len = %d, want 1 (outbox not scanned?)", len(cache.Messages))
+	}
+	if cache.Messages[0].Delivered {
+		t.Errorf("Delivered = true, want false (message is in outbox, not yet picked up)")
+	}
+}
+
+func TestMailCache_FlipsDeliveredOnOutboxToSentTransition(t *testing.T) {
+	humanDir := t.TempDir()
+	outboxMsgDir := filepath.Join(humanDir, "mailbox", "outbox", "msg-transit-1")
+	os.MkdirAll(outboxMsgDir, 0o755)
+
+	msg := MailMessage{
+		ID: "msg-transit-1", MailboxID: "msg-transit-1",
+		From: "human", To: []string{"alice"}, Subject: "in-transit", Message: "hi",
+		Type: "normal", ReceivedAt: "2026-04-21T10:00:00.000Z",
+	}
+	data, _ := json.Marshal(msg)
+	os.WriteFile(filepath.Join(outboxMsgDir, "message.json"), data, 0o644)
+
+	// First refresh: message is in outbox, Delivered=false.
+	cache := NewMailCache(humanDir).Refresh()
+	if len(cache.Messages) != 1 {
+		t.Fatalf("first refresh: len = %d, want 1", len(cache.Messages))
+	}
+	if cache.Messages[0].Delivered {
+		t.Fatalf("first refresh: Delivered = true, want false")
+	}
+
+	// Simulate recipient pickup: atomic move from outbox to sent.
+	sentMsgDir := filepath.Join(humanDir, "mailbox", "sent", "msg-transit-1")
+	os.MkdirAll(filepath.Join(humanDir, "mailbox", "sent"), 0o755)
+	if err := os.Rename(outboxMsgDir, sentMsgDir); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	// Second refresh: same UUID now in sent, Delivered must flip to true,
+	// and there must NOT be a duplicate entry.
+	cache = cache.Refresh()
+	if len(cache.Messages) != 1 {
+		t.Fatalf("after transition: len = %d, want 1 (no duplicate)", len(cache.Messages))
+	}
+	if !cache.Messages[0].Delivered {
+		t.Errorf("after transition: Delivered = false, want true")
+	}
+}
+
+func TestMailCache_InboxAndSentDeliveredTrue(t *testing.T) {
+	humanDir := t.TempDir()
+
+	inboxDir := filepath.Join(humanDir, "mailbox", "inbox", "in-1")
+	os.MkdirAll(inboxDir, 0o755)
+	inMsg := MailMessage{ID: "in-1", MailboxID: "in-1", From: "alice", To: []string{"human"}, ReceivedAt: "2026-04-21T09:00:00.000Z"}
+	inData, _ := json.Marshal(inMsg)
+	os.WriteFile(filepath.Join(inboxDir, "message.json"), inData, 0o644)
+
+	sentDir := filepath.Join(humanDir, "mailbox", "sent", "sent-1")
+	os.MkdirAll(sentDir, 0o755)
+	sentMsg := MailMessage{ID: "sent-1", MailboxID: "sent-1", From: "human", To: []string{"alice"}, ReceivedAt: "2026-04-21T09:30:00.000Z"}
+	sentData, _ := json.Marshal(sentMsg)
+	os.WriteFile(filepath.Join(sentDir, "message.json"), sentData, 0o644)
+
+	cache := NewMailCache(humanDir).Refresh()
+	if len(cache.Messages) != 2 {
+		t.Fatalf("len = %d, want 2", len(cache.Messages))
+	}
+	for _, m := range cache.Messages {
+		if !m.Delivered {
+			t.Errorf("msg %s: Delivered = false, want true (inbox/sent messages are always delivered)", m.ID)
+		}
+	}
+}
+
 // writeSenderManifest writes .agent.json with the given admin value so
 // WriteMail treats senderDir as a real agent (not pseudo).
 func writeSenderManifest(t *testing.T, dir string, admin interface{}) {

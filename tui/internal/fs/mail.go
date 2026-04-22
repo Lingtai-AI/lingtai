@@ -20,58 +20,70 @@ func ReadSent(dir string) ([]MailMessage, error) {
 }
 
 // MailCache tracks already-loaded messages for incremental refresh.
-// Each Refresh call reads only new messages from disk.
+// Each Refresh call reads new messages from disk. Messages transitioning
+// from outbox/ to sent/ have their Delivered flag flipped in place.
 type MailCache struct {
-	inboxSeen map[string]struct{} // UUID dirs already loaded from inbox
-	sentSeen  map[string]struct{} // UUID dirs already loaded from sent
-	Messages  []MailMessage       // full sorted merged slice (inbox + sent)
+	seen      map[string]int // UUID → index into Messages
+	Messages  []MailMessage  // full sorted merged slice (outbox + inbox + sent)
+	humanDir  string
 	inboxDir  string
 	sentDir   string
+	outboxDir string
 }
 
 // NewMailCache creates an empty cache for the given human directory.
 func NewMailCache(humanDir string) MailCache {
 	return MailCache{
-		inboxSeen: make(map[string]struct{}),
-		sentSeen:  make(map[string]struct{}),
+		seen:      make(map[string]int),
+		humanDir:  humanDir,
 		inboxDir:  filepath.Join(humanDir, "mailbox", "inbox"),
 		sentDir:   filepath.Join(humanDir, "mailbox", "sent"),
+		outboxDir: filepath.Join(humanDir, "mailbox", "outbox"),
 	}
 }
 
-// Refresh scans inbox and sent folders for new messages, returning an updated
-// cache. The receiver is not mutated — safe to call from a goroutine.
+// Refresh scans outbox, inbox, and sent folders for new messages, returning
+// an updated cache. The receiver is not mutated — safe to call from a goroutine.
+// A message that transitions from outbox/ to sent/ between refreshes has its
+// Delivered flag flipped from false to true in place (no duplicate entry).
 func (c MailCache) Refresh() MailCache {
 	out := MailCache{
-		inboxSeen: make(map[string]struct{}, len(c.inboxSeen)+16),
-		sentSeen:  make(map[string]struct{}, len(c.sentSeen)+16),
+		seen:      make(map[string]int, len(c.seen)+16),
 		Messages:  make([]MailMessage, len(c.Messages)),
+		humanDir:  c.humanDir,
 		inboxDir:  c.inboxDir,
 		sentDir:   c.sentDir,
+		outboxDir: c.outboxDir,
 	}
 	copy(out.Messages, c.Messages)
-	for k := range c.inboxSeen {
-		out.inboxSeen[k] = struct{}{}
-	}
-	for k := range c.sentSeen {
-		out.sentSeen[k] = struct{}{}
+	for k, v := range c.seen {
+		out.seen[k] = v
 	}
 
-	// Scan inbox for new entries
-	out.scanFolder(out.inboxDir, out.inboxSeen)
-	// Scan sent for new entries
-	out.scanFolder(out.sentDir, out.sentSeen)
+	// Order matters: scan outbox first so messages appear immediately after send.
+	// Then inbox and sent — for any UUID previously seen in outbox that now appears
+	// in sent, the scan flips Delivered to true in place.
+	out.scanFolder(out.outboxDir, false /* delivered */)
+	out.scanFolder(out.inboxDir, true)
+	out.scanFolder(out.sentDir, true)
 
-	// Sort by ReceivedAt (RFC3339 strings sort lexicographically)
+	// Sort by ReceivedAt (RFC3339 strings sort lexicographically).
 	sort.Slice(out.Messages, func(i, j int) bool {
 		return out.Messages[i].ReceivedAt < out.Messages[j].ReceivedAt
 	})
+	// Rebuild the UUID→index map after the sort.
+	for i, m := range out.Messages {
+		out.seen[m.ID] = i
+	}
 	return out
 }
 
-// scanFolder reads UUID directories not yet in seen, loads their message.json,
-// and appends to Messages.
-func (c *MailCache) scanFolder(folder string, seen map[string]struct{}) {
+// scanFolder reads UUID directories in folder. For UUIDs not yet in seen,
+// loads their message.json, stamps Delivered, and appends to Messages.
+// For UUIDs already in seen: if delivered=true, flips the existing entry's
+// Delivered flag to true (outbox→sent transition). If delivered=false and
+// the UUID is already known, skip — we've already loaded it.
+func (c *MailCache) scanFolder(folder string, delivered bool) {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return
@@ -81,7 +93,12 @@ func (c *MailCache) scanFolder(folder string, seen map[string]struct{}) {
 			continue
 		}
 		name := entry.Name()
-		if _, ok := seen[name]; ok {
+		if idx, ok := c.seen[name]; ok {
+			// Already loaded. If this folder marks the message as delivered
+			// and the current entry isn't, flip in place (outbox→sent).
+			if delivered && !c.Messages[idx].Delivered {
+				c.Messages[idx].Delivered = true
+			}
 			continue
 		}
 		msgPath := filepath.Join(folder, name, "message.json")
@@ -93,7 +110,8 @@ func (c *MailCache) scanFolder(folder string, seen map[string]struct{}) {
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
-		seen[name] = struct{}{}
+		msg.Delivered = delivered
+		c.seen[name] = len(c.Messages)
 		c.Messages = append(c.Messages, msg)
 	}
 }
