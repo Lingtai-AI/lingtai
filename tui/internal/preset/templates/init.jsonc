@@ -191,6 +191,18 @@
     "context_rebuild_every_n_idles": 3,
 
     // -------------------------------------------------------
+    // Pseudo-agent outbox subscriptions
+    // -------------------------------------------------------
+    // Paths (relative to this agent's working directory) of pseudo-agent
+    // folders whose outbox this agent polls. Pseudo-agents are mailbox-only
+    // entities — they have .agent.json but no running process (admin: null),
+    // so mail "from" them is written into their own outbox for subscribed
+    // real agents to pick up. The default polls the human folder so a
+    // human-typed message delivered via the TUI reaches the orchestrator.
+    // Polling is mechanical — the agent's LLM never sees this list.
+    "pseudo_agent_subscriptions": ["../human"],
+
+    // -------------------------------------------------------
     // Admin privileges
     // -------------------------------------------------------
     // karma: allows lull (sleep other), interrupt, suspend actions.
