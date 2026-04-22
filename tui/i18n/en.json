@@ -203,6 +203,7 @@
   "setup.provider": "Provider",
   "setup.provider_minimax": "MiniMax (Recommended)",
   "setup.provider_zhipu": "Zhipu GLM Coding Plan",
+  "setup.provider_openrouter": "OpenRouter (gateway to many models)",
   "setup.provider_codex": "OpenAI Codex (ChatGPT OAuth)",
   "setup.provider_custom": "Custom",
   "codex.press_enter": "Press Enter to open browser login...",

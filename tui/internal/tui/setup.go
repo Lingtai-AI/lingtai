@@ -28,6 +28,7 @@ var providers = []struct {
 }{
 	{"minimax", "setup.provider_minimax"},
 	{"zhipu", "setup.provider_zhipu"},
+	{"openrouter", "setup.provider_openrouter"},
 	{"custom", "setup.provider_custom"},
 }
 

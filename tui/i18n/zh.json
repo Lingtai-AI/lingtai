@@ -198,6 +198,7 @@
   "setup.provider": "Provider",
   "setup.provider_minimax": "MiniMax（推荐）",
   "setup.provider_zhipu": "智谱 GLM 编程套餐",
+  "setup.provider_openrouter": "OpenRouter（多模型聚合网关）",
   "setup.provider_codex": "OpenAI Codex（ChatGPT 账号登录）",
   "setup.provider_custom": "自定义",
   "codex.press_enter": "按 Enter 打开浏览器登录...",

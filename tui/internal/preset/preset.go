@@ -79,8 +79,8 @@ func List() ([]Preset, error) {
 		if bi != bj {
 			return !bi // saved (non-builtin) before builtin
 		}
-		if bi { // both builtin: minimax → zhipu → custom
-			order := map[string]int{"minimax": 0, "zhipu": 1, "codex": 2, "custom": 3}
+		if bi { // both builtin: minimax → zhipu → openrouter → codex → custom
+			order := map[string]int{"minimax": 0, "zhipu": 1, "openrouter": 2, "codex": 3, "custom": 4}
 			return order[presets[i].Name] < order[presets[j].Name]
 		}
 		return presets[i].Name < presets[j].Name
@@ -171,6 +171,7 @@ func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
 		zhipuPreset(),
+		openrouterPreset(),
 		codexPreset(),
 		customPreset(),
 	}
@@ -180,6 +181,7 @@ func BuiltinPresets() []Preset {
 var builtinNames = map[string]bool{
 	"minimax":     true,
 	"zhipu":       true,
+	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
 	"custom":      true,
@@ -257,6 +259,34 @@ func zhipuPreset() Preset {
 				"vision": zp, "web_read": zp,
 				"avatar": e(), "daemon": e(),
 				"listen": e(), "library": libraryDefault(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func openrouterPreset() Preset {
+	return Preset{
+		Name:        "openrouter",
+		Description: "OpenRouter — gateway to DeepSeek, GLM, Qwen, MiniMax, Kimi, Claude, ...",
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "openrouter", "model": "z-ai/glm-5.1",
+				"api_key": nil, "api_key_env": "OPENROUTER_API_KEY",
+				"base_url": nil,
+			},
+			// OpenRouter is a text-only /chat/completions gateway — no TTS,
+			// image gen, video gen, or transcription. Multimodal tools point
+			// to independent providers or local defaults (duckduckgo for
+			// search, whisper for listen, trafilatura for web_read).
+			"capabilities": map[string]interface{}{
+				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"psyche": e(), "codex": e(), "web_read": e(),
+				"avatar": e(), "daemon": e(),
+				"listen":  map[string]interface{}{"provider": "whisper"},
+				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,

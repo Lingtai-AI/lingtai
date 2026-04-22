@@ -148,6 +148,8 @@ func providerToEnvKey(provider string) string {
 		return "MINIMAX_API_KEY"
 	case "zhipu":
 		return "ZHIPU_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
 	case "codex":
 		return "" // OAuth — no env var
 	default:
