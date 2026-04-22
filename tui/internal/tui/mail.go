@@ -287,9 +287,18 @@ func (m MailModel) orchDisplayName() string {
 
 // buildMessages refreshes the session cache from all sources, then builds
 // the display message list filtered by verbose level and insights settings.
+// Delivered flags are overlaid from the live MailCache so outbox→sent
+// transitions update the render without requiring session.jsonl rewrites.
 func (m *MailModel) buildMessages() {
 	// Ingest new entries from all sources into session.jsonl.
 	m.sessionCache.Refresh(m.cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
+
+	// Build a timestamp → Delivered overlay from the live cache. Mail entries
+	// use ReceivedAt as their session Ts, so this matching is stable.
+	deliveredByTs := make(map[string]bool, len(m.cache.Messages))
+	for _, mm := range m.cache.Messages {
+		deliveredByTs[mm.ReceivedAt] = mm.Delivered
+	}
 
 	// Build filtered view from the session cache.
 	allEntries := m.sessionCache.Entries()
@@ -299,7 +308,17 @@ func (m *MailModel) buildMessages() {
 		if !m.shouldShow(e) {
 			continue
 		}
-		chatMsgs = append(chatMsgs, sessionEntryToChatMessage(e, m.humanAddr))
+		cm := sessionEntryToChatMessage(e, m.humanAddr)
+		// Overlay fresh Delivered from the live cache (only for mail entries).
+		if e.Type == "mail" {
+			if d, ok := deliveredByTs[e.Ts]; ok {
+				cm.Delivered = d
+			} else {
+				// Not in cache (e.g. already consumed by secretary dump) — assume delivered.
+				cm.Delivered = true
+			}
+		}
+		chatMsgs = append(chatMsgs, cm)
 	}
 
 	// Restore dismissed state for insights.
