@@ -23,6 +23,10 @@ type SessionEntry struct {
 	Question    string   `json:"question,omitempty"`
 	Attachments []string `json:"attachments,omitempty"`
 	Source      string   `json:"source,omitempty"` // "human", "insight" — for inquiry entries
+
+	// Delivered is a transient field propagated from MailMessage.Delivered.
+	// Only meaningful for Type == "mail". Not persisted to session.jsonl.
+	Delivered bool `json:"-"`
 }
 
 // SessionCache is an append-only cache backed by session.jsonl.
@@ -235,6 +239,7 @@ func (sc *SessionCache) IngestMail(cache MailCache, humanAddr, orchDir, orchName
 			Subject:     msg.Subject,
 			Body:        msg.Message,
 			Attachments: msg.Attachments,
+			Delivered:   msg.Delivered,
 		})
 
 		// Advance watermark. During rebuild we set it in one shot at the end

@@ -34,6 +34,7 @@ type ChatMessage struct {
 	Attachments []string // file paths attached to the message
 	Question    string   // question text (for /btw insight events)
 	Dismissed   bool     // true after user presses Esc; only show in verbose
+	Delivered   bool     // for Type=="mail" && IsFromMe: true if recipient picked up
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -342,6 +343,7 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		Type:        e.Type,
 		Attachments: e.Attachments,
 		Question:    e.Question,
+		Delivered:   e.Delivered,
 	}
 	if e.Type == "mail" {
 		cm.IsFromMe = e.From == "human"
