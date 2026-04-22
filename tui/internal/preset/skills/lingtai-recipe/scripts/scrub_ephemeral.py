@@ -2,7 +2,7 @@
 """
 scrub_ephemeral.py — Delete runtime-regenerated files from a staged network.
 
-This is step 1 of the lingtai-export-network workflow. It operates on the
+This is step 1 of the lingtai-recipe network-export sub-guide. It operates on the
 staging copy (~/lingtai-agora/networks/<name>/), never on the live project.
 
 For each .lingtai/<agent>/ directory, deletes:

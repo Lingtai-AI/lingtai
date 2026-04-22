@@ -46,7 +46,7 @@ Breaking changes for agents:
 - **Publish to network**: `cp -r .library/custom/<name> ../.library_shared/<name>`. No more register step.
 - **Loading into working memory**: use `psyche({"object": "pad", "action": "append", "files": ["<location>"]})` to pin a skill into the pad across turns.
 
-See `skill-for-skill` (intrinsic) or `skills-manual` for the full workflow.
+See the `library-manual` capability manual for the full workflow.
 
 ---
 

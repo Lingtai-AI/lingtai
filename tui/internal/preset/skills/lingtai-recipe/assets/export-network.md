@@ -1,18 +1,14 @@
----
-name: lingtai-export-network
-description: Export the current lingtai network for sharing. Copies the network to $HOME/lingtai-agora/networks/<name>/, scrubs ephemeral runtime state, processes mail with a user-chosen time cutoff, writes a canonical .gitignore, scans for nested git repos and leaked secrets, and initializes a clean git repository ready to push. Use when the human asks you to share, export, package, or back up this network for others.
-version: 2.0.0
----
+# Exporting a Network
 
-# lingtai-export-network: Exporting a Network
+*This is the network-export sub-guide of the `lingtai-recipe` skill. For recipe-only export, read `export-recipe.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read the `lingtai-recipe` skill first — Step 5 of this skill creates a launch recipe for the exported network, and you need to understand recipe structure, components, and placeholders. Also read `lingtai-export-recipe` if the human wants to export a standalone recipe alongside the network.
+**Prerequisites:** Read `../references/recipe-format.md` first — Step 5 below creates a launch recipe for the exported network, and you need to understand recipe structure, components, and placeholders. Also read `export-recipe.md` (next to this file) if the human wants to export a standalone recipe alongside the network.
 
 You are about to copy the network you live in to an exportable location. **This is literal self-copying** — the snapshot will not contain the moment you made it. Everything up to this conversation turn will be in the exported copy; this turn itself will only exist in the original.
 
 Walk the human through the steps below carefully. Each step is either *mechanical* (run a script, report the result) or *interactive* (discuss a decision with the human before proceeding). Never skip the interactive steps — the whole point of a skill-driven exporting flow is that a human is in the loop for judgment calls.
 
-All scripts live alongside this SKILL.md under `scripts/`. The canonical `.gitignore` template lives at `assets/gitignore.template`. You run the scripts with `python3 <path-to-script> ...`; resolve the absolute path from this skill's location in `~/.lingtai-tui/utilities/lingtai-export-network/`.
+Scripts for this skill live at `../scripts/` (relative to this file). The canonical `.gitignore` template is at `./gitignore.template` (i.e., this directory). The skill itself is installed at `~/.lingtai-tui/utilities/lingtai-recipe/` — scripts at `~/.lingtai-tui/utilities/lingtai-recipe/scripts/`.
 
 ## Critical: Filesystem Rules
 
@@ -202,7 +198,7 @@ For hard matches, the human has two options:
 
 ## Step 5: Author the `.lingtai-recipe/` payload
 
-Every exported network must ship with a launch recipe: it controls what the orchestrator says and how it behaves when a recipient clones the network and runs it for the first time. The payload shape is identical to what `/export recipe` produces — an exported network is literally "exported recipe + the `.lingtai/` state folder alongside it." **Read the `lingtai-recipe` skill first** for the authoritative format (directory structure, components, placeholders, i18n rules, `recipe.json` manifest).
+Every exported network must ship with a launch recipe: it controls what the orchestrator says and how it behaves when a recipient clones the network and runs it for the first time. The payload shape is identical to what `/export recipe` produces — an exported network is literally "exported recipe + the `.lingtai/` state folder alongside it." **Read `../references/recipe-format.md` first** for the authoritative format (directory structure, components, placeholders, i18n rules, `recipe.json` manifest).
 
 **Do not skip this step.** An exported network without a recipe is a bad first impression — the recipient sets up the network and gets silence.
 
@@ -246,7 +242,7 @@ JSON
 
 ### 5d. Write `greet.md`
 
-Write `$RECIPE_DIR/en/greet.md` following the rules in `lingtai-recipe` (first person, short, use `{{time}}` / `{{location}}` / `{{addr}}` placeholders if natural). Key points for network exports:
+Write `$RECIPE_DIR/en/greet.md` following the rules in `../references/recipe-format.md` (first person, short, use `{{time}}` / `{{location}}` / `{{addr}}` placeholders if natural). Key points for network exports:
 
 - **Always include `/cpr all`** — after rehydration, only the orchestrator is launched; other agents are sleeping
 - Keep it warm but concise — introduce the network, offer guidance, explain how to start
@@ -286,7 +282,7 @@ Only write these if they meaningfully differ from system defaults:
 
 ### 5g. Multi-language variants (optional)
 
-For each additional language the recipe should support, create `$RECIPE_DIR/<lang>/` with its own `greet.md` and `comment.md`. Known lang codes: `en`, `zh`, `wen`. See `lingtai-recipe` for i18n fallback rules.
+For each additional language the recipe should support, create `$RECIPE_DIR/<lang>/` with its own `greet.md` and `comment.md`. Known lang codes: `en`, `zh`, `wen`. See `../references/recipe-format.md` for i18n fallback rules.
 
 ### 5h. Verify all files landed
 

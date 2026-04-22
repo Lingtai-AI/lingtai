@@ -1,12 +1,8 @@
----
-name: lingtai-export-recipe
-description: Export a recipe — distill the culture, skills, and behavioral patterns of the current network into a portable recipe that others can use to seed new networks. Use when the human asks you to export, share, or package a recipe.
-version: 3.0.0
----
+# Exporting a Recipe
 
-# lingtai-export-recipe: Exporting a Recipe
+*This is the recipe-export sub-guide of the `lingtai-recipe` skill. For full-network export, read `export-network.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read the `lingtai-recipe` skill first — it defines what a recipe is, the directory structure, the five components (greet.md, comment.md, covenant.md, procedures.md, skills/), placeholders, i18n rules, and recipe.json format. This skill assumes you understand all of that.
+**Prerequisites:** Read `../references/recipe-format.md` first — it defines what a recipe is, the directory structure, the five components (greet.md, comment.md, covenant.md, procedures.md, skills/), placeholders, i18n rules, and recipe.json format. This sub-guide assumes you understand all of that.
 
 A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing.
 
@@ -84,7 +80,7 @@ echo $HOME
 
 Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **Note: `lingtai-agora`, NOT `.lingtai-agora` — no leading dot.** The agora directory is a user-visible workspace, not a hidden config directory.
 
-**0b. Read the `lingtai-recipe` skill** to refresh your understanding of recipe structure and components.
+**0b. Read `../references/recipe-format.md`** to refresh your understanding of recipe structure and components.
 
 **0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture:
 
@@ -122,7 +118,7 @@ If `$HOME/lingtai-agora/recipes/<name>/` already exists, ask before overwriting.
 
 ## Step 2: Author the Recipe Files
 
-Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to the `lingtai-recipe` skill for the exact format and rules of each component.
+Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../references/recipe-format.md` for the exact format and rules of each component.
 
 **All recipe components go inside `.lingtai-recipe/`.** The repo root only holds `recipe.json` (metadata) and optionally a `README.md`.
 
@@ -138,15 +134,15 @@ mkdir -p "$RECIPE_DIR/skills/<skill-2>"
 
 ### 2a. recipe.json (at repo root)
 
-Write `$REPO_DIR/recipe.json` with `name` and `description` (see `lingtai-recipe` skill for format). This file lives at the repo root, NOT inside `.lingtai-recipe/`.
+Write `$REPO_DIR/recipe.json` with `name` and `description` (see `../references/recipe-format.md` for format). This file lives at the repo root, NOT inside `.lingtai-recipe/`.
 
 ### 2b. greet.md — First Contact
 
-Write `$RECIPE_DIR/en/greet.md` (and `$RECIPE_DIR/zh/greet.md` if multi-language). Follow the rules and placeholders documented in `lingtai-recipe`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
+Write `$RECIPE_DIR/en/greet.md` (and `$RECIPE_DIR/zh/greet.md` if multi-language). Follow the rules and placeholders documented in `../references/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
 
 ### 2c. comment.md — Behavioral DNA
 
-Write `$RECIPE_DIR/en/comment.md`. This is the heart of the recipe. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `lingtai-recipe` for the format rules (no placeholders, static text, injected every turn).
+Write `$RECIPE_DIR/en/comment.md`. This is the heart of the recipe. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../references/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
 
 **What to distill.** Walk through each of these areas and extract what's worth keeping:
 
@@ -189,7 +185,7 @@ cp -R .lingtai/<agent-name>/.library/custom/<skill-name>/* $RECIPE_DIR/skills/<s
 
 ### 2e–2f. covenant.md / procedures.md (Optional)
 
-Write to `$RECIPE_DIR/covenant.md` and/or `$RECIPE_DIR/procedures.md`. Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `lingtai-recipe` for details.
+Write to `$RECIPE_DIR/covenant.md` and/or `$RECIPE_DIR/procedures.md`. Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../references/recipe-format.md` for details.
 
 ### Post-write verification (MANDATORY)
 
@@ -210,7 +206,7 @@ Show the human the `find` output and read back each file's content via email. It
 
 ## Step 4: Multi-Language Variants (Optional)
 
-If the human mentions a multi-language audience, create per-language subdirectories inside `.lingtai-recipe/` (e.g., `.lingtai-recipe/zh/greet.md`). See `lingtai-recipe` for i18n fallback rules.
+If the human mentions a multi-language audience, create per-language subdirectories inside `.lingtai-recipe/` (e.g., `.lingtai-recipe/zh/greet.md`). See `../references/recipe-format.md` for i18n fallback rules.
 
 ## Step 5: Validate the recipe payload
 

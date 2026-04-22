@@ -1,10 +1,6 @@
----
-name: lingtai-recipe
-description: Guide for creating and understanding launch recipes — the mechanism that shapes how an orchestrator greets users, what behavioral constraints it follows, and what skills it ships. Use when the human asks about recipes, wants to create a custom recipe, or needs to understand how recipes work.
-version: 1.0.0
----
+# Recipe Format Reference
 
-# lingtai-recipe: Creating Launch Recipes
+*This is the authoring reference of the `lingtai-recipe` skill. For overview of all recipe-related flows, read `../SKILL.md`. For the network-export flow, read `../assets/export-network.md`. For the standalone-recipe export flow, read `../assets/export-recipe.md`.*
 
 A **launch recipe** is a named directory that shapes an orchestrator's first-contact behavior, ongoing constraints, and available skills. Every lingtai project uses a recipe — selected during `/setup` or inherited from a published network via `/agora`.
 

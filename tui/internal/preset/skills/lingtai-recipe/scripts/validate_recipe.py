@@ -7,7 +7,7 @@ staging directory before `git init`. Exits 0 if the payload is structurally
 valid (warnings allowed); exits 1 if any error is found.
 
 The canonical recipe format is documented in:
-    tui/internal/preset/skills/lingtai-recipe/SKILL-en.md
+    tui/internal/preset/skills/lingtai-recipe/references/recipe-format.md
 
 Usage:
     validate_recipe.py <repo-root>
