@@ -1,0 +1,92 @@
+{
+  "_comment": "已知网站的 CSS 选择器模板 — 域名识别后自动加载",
+  "arxiv.org": {
+    "name": "arXiv",
+    "tier": 1,
+    "selectors": {
+      "title": "h1.title",
+      "abstract": "blockquote.abstract",
+      "authors": "div.authors a",
+      "subjects": "td.subjects",
+      "pdf_link": "a[href*='/pdf/']",
+      "doi": "meta[name='citation_doi']"
+    },
+    "pdf_path_template": "https://arxiv.org/pdf/{arxiv_id}.pdf",
+    "notes": "HTML页无直接PDF链接，需从ID推导。例：1706.03762 → https://arxiv.org/pdf/1706.03762.pdf"
+  },
+  "scholar.google.com": {
+    "name": "Google Scholar",
+    "tier": 2,
+    "selectors": {
+      "paper_card": "div.gs_ri",
+      "title": "h3.gs_rt",
+      "title_link": "h3.gs_rt a",
+      "abstract": "div.gs_rs",
+      "meta": "div.gs_fl",
+      "pdf_link": "div.gs_or_gtxtr span.gs_ctg",
+      "citation_count": "div.gs_fl a:nth-child(1)"
+    },
+    "notes": "搜索结果页curl+BS可用（IP需干净）。详情页需登录态。避免高频请求。"
+  },
+  "nature.com": {
+    "name": "Nature",
+    "tier": 2,
+    "selectors": {
+      "title_og": "meta[property='og:title']",
+      "description_og": "meta[property='og:description']",
+      "doi": "meta[name='citation_doi']",
+      "authors": "meta[name='citation_author']",
+      "journal": "meta[name='citation_journal_title']",
+      "published_date": "meta[name='citation_publication_date']",
+      "article_body": "article .c-article-body"
+    },
+    "playwright_notes": "Playwright用 domcontentloaded 而非 networkidle（会超时）。正文需JS渲染。",
+    "notes": "og meta可拿DOI和标题，无需JS。"
+  },
+  "link.springer.com": {
+    "name": "Springer Link",
+    "tier": 3,
+    "selectors": {
+      "title": "meta[name='citation_title']",
+      "doi": "meta[name='citation_doi']",
+      "authors": "meta[name='citation_author']",
+      "journal": "meta[name='citation_journal_title']",
+      "published_date": "meta[name='citation_publication_date']"
+    },
+    "pdf_path_template": "https://link.springer.com/content/pdf/{doi}.pdf",
+    "notes": "付费文章全程404。开放获取文章可用。curl持续404时需Playwright+cookie。"
+  },
+  "pubmed.ncbi.nlm.nih.gov": {
+    "name": "PubMed",
+    "tier": 1,
+    "api": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+    "selectors": {
+      "pmid": "meta[name='pubmedid']",
+      "doi": "meta[name='citation_doi']",
+      "title": "meta[name='citation_title']",
+      "abstract": "#abstract > div",
+      "authors": "meta[name='citation_author']"
+    },
+    "notes": "网页版403，需用 PubMed E-utilities API。"
+  },
+  "iopscience.iop.org": {
+    "name": "IOP Science",
+    "tier": 2,
+    "selectors": {
+      "title": "meta[name='citation_title']",
+      "doi": "meta[name='citation_doi']",
+      "authors": "meta[name='citation_author']"
+    },
+    "notes": "IOP出版的部分太阳物理期刊在此。"
+  },
+  "ui.adsabs.harvard.edu": {
+    "name": "NASA ADS",
+    "tier": 1,
+    "selectors": {
+      "title": "meta[name='citation_title']",
+      "bibtex_export": "/abs/{id}/bibtex",
+      "abstract_export": "/abs/{id}/exportcitation"
+    },
+    "notes": "天文必备。curl访问HTML困难，应用API端点如bibtex导出。"
+  }
+}

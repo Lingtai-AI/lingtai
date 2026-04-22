@@ -59,3 +59,7 @@ Treat this as your alarm clock. When a human mentions a deadline, meeting, or an
 ### System Changes and Renames
 
 If you encounter unfamiliar tool names, file paths, or references that don't match your current tools — load the `lingtai-changelog` skill. It is a living chronicle of breaking changes and renames across the LingTai system. Entries are newest-first.
+
+### Browsing the Web
+
+Before you fetch any URL, load the `web-browsing-manual` skill. It is the playbook for reading web content: which tier to use (PDF direct / API / curl + BeautifulSoup / Playwright stealth), site-specific patterns (Google Scholar, Nature, Springer, arXiv, PubMed, NASA ADS), and the non-obvious gotchas (e.g. Nature/Springer need `domcontentloaded` not `networkidle`). The bundled `scripts/extract_page.py` auto-picks a tier from the URL and falls back on failure. Reach for this manual whenever a task involves reading the web — not for the one-off `web_read` of a single page the human handed you, but whenever extraction or traversal across multiple pages is in play.
