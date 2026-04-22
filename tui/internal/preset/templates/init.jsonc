@@ -29,9 +29,11 @@
     // LLM configuration
     // -------------------------------------------------------
     "llm": {
-      // Provider: "minimax", "anthropic", "openai", "gemini",
+      // Provider: "minimax", "anthropic", "openai", "gemini", "openrouter",
       //           "deepseek", "grok", "qwen", "glm", "kimi" (OpenAI-compatible via custom adapter),
       //           or "custom" (generic — set api_compat + base_url for any OpenAI/Anthropic/Gemini-compatible API).
+      // "openrouter" is first-class (base_url fixed to https://openrouter.ai/api/v1,
+      // reasoning text suppressed by default since context.md would strip it anyway).
       "provider": "minimax",
 
       // Model name as recognized by the provider's API.
