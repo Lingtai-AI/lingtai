@@ -83,4 +83,7 @@ type MailMessage struct {
 	SentAt      string                 `json:"sent_at,omitempty"`
 	Attachments []string               `json:"attachments,omitempty"`
 	Identity    map[string]interface{} `json:"identity,omitempty"`
+
+	// Delivered is a transient flag. Not serialized. See TUI mail.go MailCache.
+	Delivered bool `json:"-"`
 }

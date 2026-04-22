@@ -78,4 +78,9 @@ type MailMessage struct {
 	ReceivedAt  string                 `json:"received_at"`
 	Attachments []string               `json:"attachments,omitempty"`
 	Identity    map[string]interface{} `json:"identity,omitempty"`
+
+	// Delivered is a transient flag set by MailCache based on which folder
+	// the message was last seen in. Not serialized to disk.
+	// outbox/ ⇒ false; inbox/ or sent/ ⇒ true.
+	Delivered bool `json:"-"`
 }
