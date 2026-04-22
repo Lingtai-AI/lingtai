@@ -167,12 +167,25 @@
     // Safety limit — agent sleeps after this many turns.
     "max_turns": 50,
 
-    // Number of idle flushes between context.md rebuild+nuke pairs.
-    // Each idle always appends new turns to chat_history.jsonl (cheap);
-    // only every Nth idle serializes the full history into context.md and
-    // wipes the live chat. Larger N = wire chat carries the tail across
-    // more idles, keeping the cached Batch 3 of the system prompt byte-
-    // stable longer (higher prompt-cache hit rate) at the cost of a
+    // Whether to serialize chat history into system/context.md mid-session.
+    // When true, idle flushes rebuild context.md and nuke the live wire
+    // chat (cadence controlled by context_rebuild_every_n_idles).
+    // When false, history stays on the wire until molt — no mid-session
+    // serialization. The default depends on the LLM adapter:
+    //   Anthropic / Gemini / MiniMax-via-Anthropic : true
+    //   OpenAI-compat (DeepSeek, Zhipu, Qwen, MiniMax-via-openai, etc.): false
+    // OpenAI-compat providers emit reasoning as inline <think>...</think>
+    // tags in text content; those tags don't round-trip through context.md
+    // serialization cleanly, so we skip it by default. You can force either
+    // behavior by uncommenting the line below.
+    // "context_serialization_enabled": true,
+
+    // When context_serialization_enabled is true, number of idle flushes
+    // between context.md rebuild+nuke pairs. Each idle always appends new
+    // turns to chat_history.jsonl (cheap); only every Nth idle rebuilds
+    // context.md and wipes the live chat. Larger N = wire chat carries
+    // the tail across more idles, keeping Batch 3 of the system prompt
+    // byte-stable longer (higher prompt-cache hit rate) at the cost of a
     // slightly larger wire chat between rebuilds. Default 3.
     "context_rebuild_every_n_idles": 3,
 
