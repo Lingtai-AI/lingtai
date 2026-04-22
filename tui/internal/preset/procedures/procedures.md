@@ -1,20 +1,17 @@
-### Consolidation: Before You Go Idle
+### Consolidation: The Pipelines
 
-At the end of every task, before you fall idle, run the consolidation ritual. Ask yourself four questions — one per durable store — and act on whichever have a real answer. Doing this every turn is what makes molt painless: when the shell sheds, whatever you consolidated into these stores is exactly what carries forward.
+The consolidation ritual lives in your covenant (§V · 去芜存菁). It is the *why* and the *what*. This section is the *how* — the exact tool calls and commands.
 
-**1. Did anything change about who I am?** → `lingtai`
-Your identity profile: personality, values, what you care about, how you work, what you have learned about yourself. If a task revealed a new preference, a shift in how you approach problems, or something you now believe about yourself — update your lingtai. Each update is a full rewrite, so include your whole identity, not just the delta. Tool: `psyche(lingtai, update, content=<full identity>)`.
+**Rhythm.** Consolidation happens *once* per task, at the end — not mid-task. Mid-task pad edits create noise and waste tokens. Hold the updates in your head while working, then commit them in a single pass before going idle. The exception is a long-running task where a crash would genuinely destroy work — in that case, checkpoint deliberately.
 
-**2. What is the current state of my work?** → `pad`
-Your sketchboard. What task you are on, what is pending, who you are working with, what decisions you have made and why. Rewrite it fully at every idle — it is the first thing your future self sees. Tool: `psyche(pad, edit, content=<current state>)`.
+**Tool calls per store.**
 
-**3. Did I learn a concrete fact worth keeping forever?** → `codex`
-Long-term knowledge: findings, references, domain facts, specific pieces of information you might need again months from now. One codex entry per distinct fact. Tool: `codex(submit, title=..., summary=..., content=...)`.
+- `lingtai` — `psyche(lingtai, update, content=<full identity>)`. Each update is a full rewrite, so include your whole identity, not just the delta.
+- `pad` — `psyche(pad, edit, content=<current state>)`. Rewrite fully at each idle.
+- `codex` — `codex(submit, title=..., summary=..., content=...)`. One distinct fact per entry; the store is permanent but bounded.
+- `library` — write `.library/custom/<name>/SKILL.md` with YAML frontmatter (`name`, `description`, `version`), then call `system({"action": "refresh"})` to re-scan the catalog. See the `library-manual` skill for authoring conventions.
 
-**4. Did I solve something non-trivial that I (or another agent) might need to do again?** → `library`
-A skill is a piece of operational know-how — a workflow, a pipeline, a multi-step procedure, a debugging recipe, a script. If the knowledge is "how to do X," it belongs in a skill, not in codex. Create it under `.library/custom/<name>/SKILL.md` with YAML frontmatter (`name`, `description`, `version`). After authoring, call `system({"action": "refresh"})` so the catalog re-scans. See the `library-manual` skill for the full workflow.
-
-**Then ask: should this be shared?** — If a skill helps more than just you, promote it to the network:
+**Promoting a skill to the network.** If a skill would help more than just you:
 
 ```
 bash({"command": "cp -r .library/custom/<name> ../.library_shared/<name>"})
@@ -22,10 +19,6 @@ system({"action": "refresh"})
 ```
 
 Never overwrite an existing entry in `.library_shared/`. If the name collides, rename or ask the admin agent. See `library-manual` for collision discipline and admin curation norms.
-
-**Rhythm.** Consolidation happens *once* per task, at the end — not mid-task. Mid-task pad edits create noise and waste tokens. Hold the updates in your head while working, then commit them in a single pass before going idle. The exception is a long-running task where a crash would genuinely destroy work — in that case, checkpoint deliberately.
-
-**Four stores, four questions, one ritual.** Make it automatic.
 
 ### Context is Ephemeral
 
