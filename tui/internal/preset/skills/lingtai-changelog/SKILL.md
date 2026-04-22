@@ -10,6 +10,31 @@ A living chronicle of system-level changes that affect how you work. When someth
 
 ---
 
+## 2026-04-21 — Pseudo-agent outbox subscription
+
+### What changed
+
+The human folder (and any other pseudo-agent — a folder with `.agent.json` declaring `admin: null` and no running process) now sends mail via its own outbox instead of having the TUI write directly into the recipient's inbox. Real agents running in the same project subscribe to pseudo-agent outboxes via a new `pseudo_agent_subscriptions` field in `init.jsonc` and poll them on their normal mail-receive loop. Subscription default: `["../human"]`.
+
+### How the pickup works
+
+When your mail-receive loop runs, for each subscribed path:
+1. Scan `<path>/mailbox/outbox/`.
+2. For each UUID folder whose `message.json` has `To:` matching your address, atomically `os.Rename` the folder from `<path>/mailbox/outbox/<uuid>/` to `<path>/mailbox/sent/<uuid>/`.
+3. Ingest the claimed message into your normal inbox pipeline.
+
+If the rename fails (another subscriber won the race), silently skip.
+
+### What you should do
+
+Nothing — this is mechanical runtime behavior; your LLM never sees the subscription list or the polling. But if mail from the human stops arriving, check that your `init.jsonc` has `pseudo_agent_subscriptions: ["../human"]` and that `../human/mailbox/outbox/` is readable.
+
+### Why
+
+Plugins (Claude Code, etc.) that run inside a real agent can now send mail "from the human" by writing into the human's outbox, without reproducing the TUI's delivery logic or knowing recipient filesystem paths. The mechanism is pull-based, so any subscriber — local real agent, or a remote real agent whose kernel polls a mirrored outbox via postman/SSH — picks up mail the same way.
+
+---
+
 ## 2026-04-20 — Library capability redesigned
 
 Breaking changes for agents:
