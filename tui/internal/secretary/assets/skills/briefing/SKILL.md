@@ -145,7 +145,7 @@ Cycle N: read file Z → draft to codex → "Z done" in pad
 Your codex limit is 100 entries (raised from the default 20). You have room for many drafts, but still:
 
 - **Never read more than ONE history file per turn.** Read it, draft to codex, save state, go idle.
-- **Always check file size before reading.** Use `wc -c <file>` — if a file exceeds 150,000 bytes (~40k tokens), skip it and note in pad.
+- **Always check file size before reading.** Use `wc -c <file>` — if a file exceeds 150,000 bytes (~40k tokens), do NOT skip it: chunk it into pieces and process one chunk per turn (see Step 3a below).
 - **Process projects round-robin.** One file per project per cycle if multiple have backlogs.
 - **Consolidate one project at a time.** Load drafts for one project, write its journal, delete its drafts, then move to the next.
 
@@ -194,8 +194,57 @@ Choose the oldest pending file from the project with the most backlog (round-rob
 wc -c ~/.lingtai-tui/brief/projects/<hash>/history/YYYY-MM-DD-HH.md
 ```
 
-- **≤ 150,000 bytes**: proceed.
-- **> 150,000 bytes**: skip it. Record in pad. Advance your timestamp past it.
+- **≤ 150,000 bytes**: proceed to Step 4 as a single read.
+- **> 150,000 bytes**: do NOT skip. Process in chunks — see Step 3a.
+
+### Step 3a: Chunked Processing (only if file > 150,000 bytes)
+
+Use the bundled scripts in `<this-skill-dir>/scripts/` — do not improvise the slicing logic. Resolve the skill path from your library catalog (the `<available_skills>` block in your system prompt has the absolute path).
+
+```bash
+SKILL_DIR=<resolved path to this briefing skill>
+FILE=~/.lingtai-tui/brief/projects/<hash>/history/YYYY-MM-DD-HH.md
+
+# First time touching this file — discover how many chunks
+bash "$SKILL_DIR/scripts/count_chunks.sh" "$FILE"
+# stdout: size=<bytes> chunks=<NCHUNKS>
+```
+
+Then process **one chunk per turn**:
+
+```bash
+N=1   # the chunk number you are processing this turn
+bash "$SKILL_DIR/scripts/chunk_history.sh" "$FILE" $N
+# stdout: chunk content (≤ 140000 bytes, ~37k tokens — safely under 40k headroom)
+# stderr: "chunk N of NCHUNKS, bytes X-Y of TOTAL"
+```
+
+Byte boundaries may cut a single event in half — that's acceptable; you lose at most one event of fidelity per chunk boundary, and consolidation still merges the full picture.
+
+Submit each chunk as its own draft with a chunk-suffixed title:
+
+```
+codex(submit,
+  title="draft:<project-name>:<YYYY-MM-DD-HH>:chunk-<N>-of-<NCHUNKS>",
+  summary="Briefing draft for <project>, hour <YYYY-MM-DD-HH>, chunk <N> of <NCHUNKS>",
+  content="<distilled observations from this chunk — same target, 200–500 words>"
+)
+```
+
+Update pad with chunk progress (Step 6 below covers normal pad state; this is the chunked variant):
+
+```
+psyche(pad, edit, content="
+Briefing state:
+  processing: <hash>/<YYYY-MM-DD-HH>.md (<size>kb, chunked)
+    chunks: <N>/<NCHUNKS> done
+  ...
+")
+```
+
+**Only advance your project's `last` timestamp when ALL chunks are submitted.** Until then, the file stays in-progress and `last` does not move past it.
+
+When all chunks are in, fall through to Step 6 (record state — the normal "advance timestamp, count drafts" pad update) and then Step 7 (continue or consolidate). Consolidation in Step 8 will merge the chunk drafts back together because the `codex(filter, pattern="draft:<project-name>:")` glob already matches the chunk-suffixed titles.
 
 ### Step 4: Read the History File
 
@@ -280,6 +329,8 @@ This loads both into your pad as read-only reference. You can now see the curren
 codex(filter, pattern="draft:<project-name>:")
 codex(view, ids=[<list of draft IDs for this project>])
 ```
+
+The filter glob also catches chunk-suffixed drafts (`draft:<project-name>:<hour>:chunk-N-of-M`). When you see multiple chunks for the same hour, treat them as **one logical hour** — synthesize them together into a single hour's contribution to the journal, not as N separate hours.
 
 **8c.** Write the updated journal — a COMPLETE REWRITE synthesizing all drafts + existing journal into the current state. Do not patch — rewrite the entire file from scratch:
 
