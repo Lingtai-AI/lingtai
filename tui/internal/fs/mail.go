@@ -163,8 +163,21 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
+	// Pseudo-agent branch: if sender's .agent.json has admin: null (or no
+	// manifest), write only to the sender's outbox. Subscribed real agents
+	// poll the outbox and produce the sent entry via atomic rename on pickup.
+	if isPseudoAgent(identity) {
+		outboxDir := filepath.Join(senderDir, "mailbox", "outbox", id)
+		if err := os.MkdirAll(outboxDir, 0o755); err != nil {
+			return fmt.Errorf("create outbox dir: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outboxDir, "message.json"), data, 0o644); err != nil {
+			return fmt.Errorf("write outbox message: %w", err)
+		}
+		return nil
+	}
+
 	if IsRemoteAddress(toAddr) {
-		// Remote: queue in sender's outbox for postman pickup
 		outboxDir := filepath.Join(senderDir, "mailbox", "outbox", id)
 		if err := os.MkdirAll(outboxDir, 0o755); err != nil {
 			return fmt.Errorf("create outbox dir: %w", err)
@@ -173,7 +186,6 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 			return fmt.Errorf("write outbox message: %w", err)
 		}
 	} else {
-		// Local: deliver directly to recipient inbox
 		inboxDir := filepath.Join(recipientDir, "mailbox", "inbox", id)
 		if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 			return fmt.Errorf("create inbox dir: %w", err)
@@ -183,7 +195,6 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		}
 	}
 
-	// Always write copy to sender's sent folder
 	sentDir := filepath.Join(senderDir, "mailbox", "sent", id)
 	if err := os.MkdirAll(sentDir, 0o755); err != nil {
 		return fmt.Errorf("create sent dir: %w", err)
@@ -193,4 +204,19 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 	}
 
 	return nil
+}
+
+// isPseudoAgent returns true if the identity manifest indicates a pseudo-agent
+// (no running agent process). The admin field being nil — including when
+// .agent.json is missing entirely, which readManifestAsIdentity falls back to —
+// is the pseudo-agent signal.
+func isPseudoAgent(identity map[string]interface{}) bool {
+	if identity == nil {
+		return true
+	}
+	admin, present := identity["admin"]
+	if !present {
+		return true
+	}
+	return admin == nil
 }

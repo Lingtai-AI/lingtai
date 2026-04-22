@@ -37,6 +37,7 @@ func TestWriteMail(t *testing.T) {
 	os.MkdirAll(filepath.Join(recipientDir, "mailbox", "inbox"), 0o755)
 	senderDir := t.TempDir()
 	os.MkdirAll(filepath.Join(senderDir, "mailbox", "sent"), 0o755)
+	writeSenderManifest(t, senderDir, map[string]interface{}{"karma": true})
 
 	err := WriteMail(recipientDir, senderDir, "/sender/human", "/recipient/alice", "test subject", "test body")
 	if err != nil {
@@ -81,6 +82,7 @@ func TestWriteMail_LocalDelivery(t *testing.T) {
 	os.MkdirAll(filepath.Join(recipientDir, "mailbox", "inbox"), 0o755)
 	senderDir := t.TempDir()
 	os.MkdirAll(filepath.Join(senderDir, "mailbox", "sent"), 0o755)
+	writeSenderManifest(t, senderDir, map[string]interface{}{"karma": true})
 
 	err := WriteMail(recipientDir, senderDir, "human", "agent_a", "hi", "hello")
 	if err != nil {
@@ -103,6 +105,7 @@ func TestWriteMail_RemoteRoutesToOutbox(t *testing.T) {
 	senderDir := t.TempDir()
 	os.MkdirAll(filepath.Join(senderDir, "mailbox", "sent"), 0o755)
 	os.MkdirAll(filepath.Join(senderDir, "mailbox", "outbox"), 0o755)
+	writeSenderManifest(t, senderDir, map[string]interface{}{"karma": true})
 
 	remoteAddr := "[2001:db8::1]:/home/user/.lingtai/agent_b"
 	err := WriteMail("", senderDir, "human", remoteAddr, "hello", "across the internet")
@@ -156,5 +159,99 @@ func TestReadInbox_Empty(t *testing.T) {
 	}
 	if len(messages) != 0 {
 		t.Errorf("expected empty inbox, got %d", len(messages))
+	}
+}
+
+func TestWriteMail_PseudoAgentSenderWritesOnlyToOutbox(t *testing.T) {
+	senderDir := t.TempDir()
+	recipientDir := t.TempDir()
+
+	// Pseudo-agent sender: .agent.json has admin: null.
+	manifest := map[string]interface{}{
+		"agent_name": "human",
+		"admin":      nil,
+	}
+	manifestBytes, _ := json.Marshal(manifest)
+	os.WriteFile(filepath.Join(senderDir, ".agent.json"), manifestBytes, 0o644)
+
+	err := WriteMail(recipientDir, senderDir, "localhost:"+senderDir, "localhost:"+recipientDir, "hi", "hello")
+	if err != nil {
+		t.Fatalf("WriteMail: %v", err)
+	}
+
+	// Outbox MUST contain the message.
+	outboxEntries, err := os.ReadDir(filepath.Join(senderDir, "mailbox", "outbox"))
+	if err != nil {
+		t.Fatalf("read outbox: %v", err)
+	}
+	if len(outboxEntries) != 1 {
+		t.Fatalf("outbox len = %d, want 1", len(outboxEntries))
+	}
+
+	// Inbox MUST be empty (no direct-delivery).
+	inboxDir := filepath.Join(recipientDir, "mailbox", "inbox")
+	inboxEntries, _ := os.ReadDir(inboxDir)
+	if len(inboxEntries) != 0 {
+		t.Errorf("recipient inbox len = %d, want 0 (pseudo-agent sends skip direct delivery)", len(inboxEntries))
+	}
+
+	// Sent MUST be empty (no sent-at-send-time copy for pseudo-agents).
+	sentDir := filepath.Join(senderDir, "mailbox", "sent")
+	sentEntries, _ := os.ReadDir(sentDir)
+	if len(sentEntries) != 0 {
+		t.Errorf("sender sent len = %d, want 0 (recipient produces sent on pickup)", len(sentEntries))
+	}
+}
+
+func TestWriteMail_RealAgentSenderUnchanged(t *testing.T) {
+	senderDir := t.TempDir()
+	recipientDir := t.TempDir()
+
+	// Real agent sender: admin is a non-nil map.
+	manifest := map[string]interface{}{
+		"agent_name": "alice",
+		"admin":      map[string]interface{}{"karma": true},
+	}
+	manifestBytes, _ := json.Marshal(manifest)
+	os.WriteFile(filepath.Join(senderDir, ".agent.json"), manifestBytes, 0o644)
+
+	err := WriteMail(recipientDir, senderDir, "alice", "bob", "hi", "hello")
+	if err != nil {
+		t.Fatalf("WriteMail: %v", err)
+	}
+
+	// Inbox MUST contain the message (local-delivery path unchanged).
+	inboxEntries, err := os.ReadDir(filepath.Join(recipientDir, "mailbox", "inbox"))
+	if err != nil {
+		t.Fatalf("read inbox: %v", err)
+	}
+	if len(inboxEntries) != 1 {
+		t.Fatalf("inbox len = %d, want 1", len(inboxEntries))
+	}
+
+	// Sent MUST contain the copy (sent-at-send-time behavior unchanged for real agents).
+	sentEntries, err := os.ReadDir(filepath.Join(senderDir, "mailbox", "sent"))
+	if err != nil {
+		t.Fatalf("read sent: %v", err)
+	}
+	if len(sentEntries) != 1 {
+		t.Errorf("sent len = %d, want 1 (real agents still write sent on send)", len(sentEntries))
+	}
+}
+
+// writeSenderManifest writes .agent.json with the given admin value so
+// WriteMail treats senderDir as a real agent (not pseudo).
+func writeSenderManifest(t *testing.T, dir string, admin interface{}) {
+	t.Helper()
+	manifest := map[string]interface{}{
+		"agent_name": "test-sender",
+		"admin":      admin,
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agent.json"), data, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
 }
