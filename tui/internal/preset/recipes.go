@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Recipe names. A recipe is a named pair of {greet.md, comment.md} applied
@@ -41,6 +42,9 @@ func ScanAgoraRecipes(lang string) []AgoraRecipe {
 		if !e.IsDir() || e.Name() == "" || e.Name()[0] == '.' {
 			continue
 		}
+		if !recipeMatchesLang(e.Name(), lang) {
+			continue
+		}
 		dir := filepath.Join(recipesDir, e.Name())
 		info, err := LoadRecipeInfo(dir, lang)
 		if err != nil {
@@ -61,8 +65,14 @@ type DiscoveredRecipe struct {
 // RecipeCategories defines the display order of built-in recipe categories.
 var RecipeCategories = []string{"recommended", "intrinsic", "examples"}
 
-// ScanCategory returns all valid recipes found under <globalDir>/recipes/<category>/.
-// Each subdirectory must contain a valid recipe.json with a non-empty name.
+// ScanCategory returns all valid recipes found under <globalDir>/recipes/<category>/
+// that match the active language. Each subdirectory must contain a valid recipe.json
+// with a non-empty name. Recipes are matched by ID suffix:
+//
+//	lang "zh"  → IDs ending in "-zh"
+//	lang "wen" → IDs ending in "-wen"
+//	lang "en"  → IDs without "-zh" or "-wen" suffix
+//
 // Results are sorted alphabetically by ID (directory name).
 func ScanCategory(globalDir, category, lang string) []DiscoveredRecipe {
 	catDir := filepath.Join(globalDir, "recipes", category)
@@ -73,6 +83,9 @@ func ScanCategory(globalDir, category, lang string) []DiscoveredRecipe {
 	var recipes []DiscoveredRecipe
 	for _, e := range entries {
 		if !e.IsDir() || e.Name() == "" || e.Name()[0] == '.' {
+			continue
+		}
+		if !recipeMatchesLang(e.Name(), lang) {
 			continue
 		}
 		dir := filepath.Join(catDir, e.Name())
@@ -86,6 +99,21 @@ func ScanCategory(globalDir, category, lang string) []DiscoveredRecipe {
 		return recipes[i].ID < recipes[j].ID
 	})
 	return recipes
+}
+
+// recipeMatchesLang reports whether a recipe ID belongs to the given language
+// per the suffix convention. Empty lang is treated as "en" for safety.
+func recipeMatchesLang(id, lang string) bool {
+	hasZH := strings.HasSuffix(id, "-zh")
+	hasWEN := strings.HasSuffix(id, "-wen")
+	switch lang {
+	case "zh":
+		return hasZH
+	case "wen":
+		return hasWEN
+	default: // en or any unknown lang
+		return !hasZH && !hasWEN
+	}
 }
 
 // RecipeInfo holds the metadata from a recipe's recipe.json manifest.

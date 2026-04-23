@@ -3,6 +3,7 @@ package preset
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,39 @@ func TestScanCategory_Intrinsic(t *testing.T) {
 	for _, want := range []string{"adaptive", "plain"} {
 		if !ids[want] {
 			t.Errorf("ScanCategory(intrinsic) missing %q", want)
+		}
+	}
+	// English picker must not see -zh / -wen variants.
+	for unwanted := range ids {
+		if strings.HasSuffix(unwanted, "-zh") || strings.HasSuffix(unwanted, "-wen") {
+			t.Errorf("ScanCategory(intrinsic, en) should not include %q", unwanted)
+		}
+	}
+}
+
+func TestScanCategory_FiltersByLang(t *testing.T) {
+	globalDir := t.TempDir()
+	if err := Bootstrap(globalDir); err != nil {
+		t.Fatalf("Bootstrap err = %v", err)
+	}
+	for _, tc := range []struct {
+		lang   string
+		want   string
+		reject string
+	}{
+		{"zh", "adaptive-zh", "adaptive"},
+		{"wen", "adaptive-wen", "adaptive-zh"},
+	} {
+		recipes := ScanCategory(globalDir, "intrinsic", tc.lang)
+		ids := make(map[string]bool)
+		for _, r := range recipes {
+			ids[r.ID] = true
+		}
+		if !ids[tc.want] {
+			t.Errorf("ScanCategory(intrinsic, %q) missing %q", tc.lang, tc.want)
+		}
+		if ids[tc.reject] {
+			t.Errorf("ScanCategory(intrinsic, %q) should not include %q", tc.lang, tc.reject)
 		}
 	}
 }
