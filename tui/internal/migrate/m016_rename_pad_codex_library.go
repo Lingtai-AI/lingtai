@@ -149,31 +149,42 @@ func rewriteInitJSON(path string) bool {
 		changed = true
 	}
 
-	// Rename capability keys inside manifest.capabilities
+	// Rename capability keys inside manifest.capabilities.
+	//
+	// Guard (mirrors m017): if "codex" is already present, treat this
+	// init.json as post-rename. Post-m016 init.jsons can have BOTH
+	// "codex" (new knowledge archive) AND "library" (new skill library);
+	// the rename below would overwrite the existing codex with the
+	// library value and destroy the skill-library semantics. This matters
+	// when a fresh project's meta.json is missing (e.g. an older TUI
+	// binary ran first and never stamped meta, or the project was copied
+	// without meta.json) and the migration replays from version 0.
 	manifest, _ := init["manifest"].(map[string]interface{})
 	if manifest != nil {
 		caps, _ := manifest["capabilities"].(map[string]interface{})
 		if caps != nil {
-			// "library" (old knowledge archive) → "codex"
-			if v, ok := caps["library"]; ok {
-				caps["codex"] = v
-				delete(caps, "library")
-				changed = true
+			if _, alreadyMigrated := caps["codex"]; !alreadyMigrated {
+				// "library" (old knowledge archive) → "codex"
+				if v, ok := caps["library"]; ok {
+					caps["codex"] = v
+					delete(caps, "library")
+					changed = true
 
-				// Rename library_limit → codex_limit inside the config
-				if cfg, ok := caps["codex"].(map[string]interface{}); ok {
-					if lim, ok := cfg["library_limit"]; ok {
-						cfg["codex_limit"] = lim
-						delete(cfg, "library_limit")
+					// Rename library_limit → codex_limit inside the config
+					if cfg, ok := caps["codex"].(map[string]interface{}); ok {
+						if lim, ok := cfg["library_limit"]; ok {
+							cfg["codex_limit"] = lim
+							delete(cfg, "library_limit")
+						}
 					}
 				}
-			}
 
-			// "skills" (old skill library) → "library"
-			if v, ok := caps["skills"]; ok {
-				caps["library"] = v
-				delete(caps, "skills")
-				changed = true
+				// "skills" (old skill library) → "library"
+				if v, ok := caps["skills"]; ok {
+					caps["library"] = v
+					delete(caps, "skills")
+					changed = true
+				}
 			}
 		}
 	}

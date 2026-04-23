@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 20
+const CurrentVersion = 21
 
 type metaFile struct {
 	Version                       int  `json:"version"`
@@ -44,6 +44,7 @@ var migrations = []Migration{
 	{Version: 18, Name: "library-split", Fn: migrateLibrarySplit},
 	{Version: 19, Name: "procedures-english-only", Fn: migrateProceduresEnglishOnly},
 	{Version: 20, Name: "pseudo-agent-subscriptions", Fn: migratePseudoAgentSubscriptions},
+	{Version: 21, Name: "library-paths", Fn: migrateLibraryPaths},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.
@@ -85,6 +86,24 @@ func Run(lingtaiDir string) error {
 	// Bump version while preserving sibling fields, then write atomically.
 	meta.Version = CurrentVersion
 	return persistMeta(lingtaiDir, &meta)
+}
+
+// StampCurrent writes meta.json at CurrentVersion without running any
+// migrations. Called by InitProject when a fresh .lingtai/ directory is
+// created — a freshly-generated project conforms to the current schema
+// by construction, so running historical migrations against it would
+// corrupt otherwise-valid data (e.g. the pre-m016 "library" key meant
+// "knowledge archive" but post-m016 it means "skill library", and m016
+// unconditionally renames library→codex).
+//
+// No-op if meta.json already exists — upgrade paths stay authoritative
+// for projects created by older TUI binaries.
+func StampCurrent(lingtaiDir string) error {
+	metaPath := filepath.Join(lingtaiDir, "meta.json")
+	if _, err := os.Stat(metaPath); err == nil {
+		return nil
+	}
+	return persistMeta(lingtaiDir, &metaFile{Version: CurrentVersion})
 }
 
 // loadMeta reads meta.json. Returns a zero metaFile if the file is missing.

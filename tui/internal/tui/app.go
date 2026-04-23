@@ -36,6 +36,7 @@ const (
 	appViewLogin
 	appViewCodex
 	appViewMailbox
+	appViewSystem
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -50,7 +51,8 @@ type App struct {
 	agora           AgoraModel
 	secretaryMail   MailModel
 	briefs          MarkdownViewerModel
-	codex           MarkdownViewerModel
+	codex           CodexModel
+	system          SystemModel
 	mailbox         MarkdownViewerModel
 	firstRun        FirstRunModel
 	addon           AddonModel
@@ -222,6 +224,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.codex, cmd = a.codex.Update(msg)
 		case appViewMailbox:
 			a.mailbox, cmd = a.mailbox.Update(msg)
+		case appViewSystem:
+			a.system, cmd = a.system.Update(msg)
 		}
 		return a, cmd
 
@@ -445,7 +449,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewBriefs && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewBriefs && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem {
 				return a, tea.Quit
 			}
 		}
@@ -532,6 +536,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewMailbox:
 		updated, cmd := a.mailbox.Update(msg)
 		a.mailbox = updated
+		return a, cmd
+	case appViewSystem:
+		updated, cmd := a.system.Update(msg)
+		a.system = updated
 		return a, cmd
 	}
 
@@ -808,9 +816,24 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, a.sendSize()
 	case "codex":
 		a.currentView = appViewCodex
-		entries := buildCodexEntries(a.projectDir)
-		a.codex = NewMarkdownViewer(entries, i18n.T("palette.codex"))
-		return a, a.sendSize()
+		agentDir := a.orchDir
+		baseDir := a.projectDir
+		if a.inSecretaryView {
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
+		}
+		a.codex = NewCodexModel(baseDir, agentDir)
+		return a, tea.Batch(a.codex.Init(), a.sendSize())
+	case "system":
+		a.currentView = appViewSystem
+		agentDir := a.orchDir
+		baseDir := a.projectDir
+		if a.inSecretaryView {
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
+		}
+		a.system = NewSystemModel(baseDir, agentDir)
+		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "mailbox":
 		a.currentView = appViewMailbox
 		entries := buildMailboxEntries(a.projectDir)
@@ -1027,6 +1050,26 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		}
 		a.library = NewLibraryModel(baseDir, agentDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
+	case "codex":
+		a.currentView = appViewCodex
+		agentDir := a.orchDir
+		baseDir := a.projectDir
+		if a.inSecretaryView {
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
+		}
+		a.codex = NewCodexModel(baseDir, agentDir)
+		return a, tea.Batch(a.codex.Init(), a.sendSize())
+	case "system":
+		a.currentView = appViewSystem
+		agentDir := a.orchDir
+		baseDir := a.projectDir
+		if a.inSecretaryView {
+			agentDir = secretary.AgentDir(a.globalDir)
+			baseDir = secretary.LingtaiDir(a.globalDir)
+		}
+		a.system = NewSystemModel(baseDir, agentDir)
+		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "secretary":
 		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)
 		secAgentDir := secretary.AgentDir(a.globalDir)
@@ -1099,6 +1142,8 @@ func (a App) View() tea.View {
 		content = a.codex.View()
 	case appViewMailbox:
 		content = a.mailbox.View()
+	case appViewSystem:
+		content = a.system.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

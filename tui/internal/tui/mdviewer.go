@@ -38,6 +38,11 @@ type MarkdownViewerModel struct {
 
 	// focus tracks which panel receives scroll input
 	focus int // 0 = left, 1 = right
+
+	// FooterHint, if non-empty, is appended to the footer as an extra shortcut
+	// hint (e.g., "ctrl+t select agent"). Wrappers set this to advertise keys
+	// they handle at a higher level.
+	FooterHint string
 }
 
 const (
@@ -297,8 +302,12 @@ func (m MarkdownViewerModel) View() string {
 		scrollHint = " " + RuneBullet + " pgup/pgdn scroll"
 	}
 	focusHint := "tab switch"
+	extraHint := ""
+	if m.FooterHint != "" {
+		extraHint = " " + RuneBullet + " " + m.FooterHint
+	}
 	footer := strings.Repeat("\u2500", m.width) + "\n" +
-		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+"  [Esc] "+i18n.T("firstrun.back")+" "+RuneBullet+" "+focusHint+scrollHint)
+		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+"  [Esc] "+i18n.T("firstrun.back")+" "+RuneBullet+" "+focusHint+scrollHint+extraHint)
 
 	if !m.ready {
 		return title + "\n\n  " + i18n.T("app.loading") + "\n\n" + footer

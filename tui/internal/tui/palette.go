@@ -64,6 +64,7 @@ func DefaultCommands() []Command {
 		{Name: "secretary", Description: "palette.secretary", Detail: "cmd.secretary"},
 		{Name: "brief", Description: "palette.brief", Detail: "cmd.brief"},
 		{Name: "codex", Description: "palette.codex", Detail: "cmd.codex"},
+		{Name: "system", Description: "palette.system", Detail: "cmd.system"},
 		{Name: "mailbox", Description: "palette.mailbox", Detail: "cmd.mailbox"},
 		{Name: "molt", Description: "palette.molt", Detail: "cmd.molt"},
 		{Name: "nirvana", Description: "palette.nirvana", Detail: "cmd.nirvana"},

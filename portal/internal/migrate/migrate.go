@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 20
+const CurrentVersion = 21
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -43,6 +43,26 @@ var migrations = []Migration{
 	{Version: 18, Name: "library-split", Fn: func(_ string) error { return nil }},
 	{Version: 19, Name: "procedures-english-only", Fn: func(_ string) error { return nil }},
 	{Version: 20, Name: "pseudo-agent-subscriptions", Fn: func(_ string) error { return nil }},
+	{Version: 21, Name: "library-paths", Fn: func(_ string) error { return nil }},
+}
+
+// StampCurrent writes meta.json at CurrentVersion without running any
+// migrations. Mirror of the TUI helper — kept for parity so both binaries
+// know to skip migrations on fresh projects.
+func StampCurrent(lingtaiDir string) error {
+	metaPath := filepath.Join(lingtaiDir, "meta.json")
+	if _, err := os.Stat(metaPath); err == nil {
+		return nil
+	}
+	data, err := json.Marshal(metaFile{Version: CurrentVersion})
+	if err != nil {
+		return err
+	}
+	tmpPath := metaPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, metaPath)
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.

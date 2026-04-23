@@ -562,6 +562,7 @@ type libraryLoadMsg struct {
 func NewLibraryModel(baseDir, selectedDir, lang string) LibraryModel {
 	entries := buildAgentLibraryCatalog(selectedDir, lang)
 	inner := NewMarkdownViewer(entries, libraryTitleFor(selectedDir))
+	inner.FooterHint = i18n.T("hints.props_select")
 	return LibraryModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
@@ -728,6 +729,7 @@ func (m LibraryModel) updatePicker(msg tea.KeyPressMsg) (LibraryModel, tea.Cmd) 
 				// scrolls back to top.
 				entries := buildAgentLibraryCatalog(m.selectedDir, m.lang)
 				m.inner = NewMarkdownViewer(entries, libraryTitleFor(m.selectedDir))
+				m.inner.FooterHint = i18n.T("hints.props_select")
 				// Propagate size so the new inner viewer is laid out.
 				if m.width > 0 && m.height > 0 {
 					var cmd tea.Cmd
