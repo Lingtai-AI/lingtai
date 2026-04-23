@@ -66,11 +66,6 @@ func CovenantPath(globalDir string) string {
 	return filepath.Join(ProjectDir(globalDir), "recipe", "covenant.md")
 }
 
-// SkillDir returns the path to the briefing skill directory after populating assets.
-func SkillDir(globalDir string) string {
-	return filepath.Join(ProjectDir(globalDir), "recipe", "skills", "briefing")
-}
-
 // populateAssets writes the embedded recipe files to disk so the kernel can
 // read them via file paths. Files are always overwritten to ensure the latest
 // version is on disk after a TUI upgrade.

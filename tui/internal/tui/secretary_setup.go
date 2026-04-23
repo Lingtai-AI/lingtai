@@ -50,7 +50,9 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 		"file": map[string]interface{}{}, "bash": map[string]interface{}{},
 		"email": map[string]interface{}{}, "psyche": map[string]interface{}{},
 		"codex": map[string]interface{}{"codex_limit": 100},
-		"library": map[string]interface{}{},
+		"library": map[string]interface{}{
+			"paths": []string{filepath.Join(recipeDir, "skills")},
+		},
 		"web_search": map[string]interface{}{}, "web_read": map[string]interface{}{},
 		"daemon": map[string]interface{}{},
 	}
@@ -141,20 +143,6 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 	}
 	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), out, 0o644); err != nil {
 		return fmt.Errorf("write secretary init.json: %w", err)
-	}
-
-	// Symlink briefing skill into the network-level .library/ dir
-	// (.lingtai/.library/ — sibling to agent dirs, not inside the agent dir)
-	libraryDir := filepath.Join(lingtaiDir, ".library")
-	if err := os.MkdirAll(libraryDir, 0o755); err != nil {
-		return fmt.Errorf("create secretary library dir: %w", err)
-	}
-	linkName := filepath.Join(libraryDir, "secretary-briefing")
-	// Remove old symlink if exists (idempotent)
-	os.Remove(linkName)
-	skillSrc := secretary.SkillDir(globalDir)
-	if err := os.Symlink(skillSrc, linkName); err != nil {
-		return fmt.Errorf("symlink briefing skill: %w", err)
 	}
 
 	// Write .prompt file (greet content) — this is what the kernel reads as the first message
