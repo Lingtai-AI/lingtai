@@ -227,9 +227,9 @@ type FirstRunModel struct {
 	currentRecipe     string          // loaded from .tui-asset/.recipe in setup mode
 	currentCustomDir  string          // loaded from .tui-asset/.recipe in setup mode
 	preselectedRecipe  string          // set by constructor for post-nirvana fresh start
-	localRecipeDir     string          // non-empty if .lingtai-recipe/ found in project root
-	importedRecipe    *preset.RecipeInfo // non-nil if .lingtai-recipe/ has valid recipe.json
-	importedRecipeDir string             // path to .lingtai-recipe/ (only when importedRecipe != nil)
+	localRecipeDir     string          // non-empty if .recipe/ found in project root
+	importedRecipe    *preset.RecipeInfo // non-nil if .recipe/ has valid recipe.json
+	importedRecipeDir string             // path to .recipe/ (only when importedRecipe != nil)
 	agoraRecipes      []preset.AgoraRecipe // discovered from ~/lingtai-agora/recipes/
 	discoveredRecipes   []preset.DiscoveredRecipe // auto-discovered from recipes/<category>/
 	categoryBoundaries  []int                     // index where each category starts in discoveredRecipes
@@ -328,7 +328,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	rci := textinput.New()
 	rci.CharLimit = 512
 	rci.SetWidth(50)
-	rci.Placeholder = ".lingtai-recipe/ or absolute path"
+	rci.Placeholder = ".recipe/ or absolute path"
 
 	// Load existing keys from Config.Keys
 	cfg, _ := config.LoadConfig(globalDir)
@@ -376,7 +376,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		preselectedRecipe: preselectedRecipe,
 	}
 
-	// Detect project-local .lingtai-recipe/ directory.
+	// Detect project-local .recipe/ directory.
 	// The projectDir is one level up from baseDir (.lingtai/).
 	projectDir := filepath.Dir(baseDir)
 	if local := preset.ProjectLocalRecipeDir(projectDir); local != "" {
@@ -388,7 +388,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 			m.importedRecipe = &info
 			m.importedRecipeDir = local
 		} else {
-			// Has .lingtai-recipe/ but no valid recipe.json — fallback to custom pre-fill
+			// Has .recipe/ but no valid recipe.json — fallback to custom pre-fill
 			m.localRecipeDir = local
 			m.recipeCustomInput.SetValue(local)
 		}

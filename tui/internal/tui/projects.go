@@ -217,7 +217,7 @@ func (m ProjectsModel) Update(msg tea.Msg) (ProjectsModel, tea.Cmd) {
 		case "enter":
 			if m.source == projectSourceAgora && m.cursor < len(m.projects) {
 				proj := m.projects[m.cursor]
-				recipeDir := filepath.Join(proj.Path, ".lingtai-recipe")
+				recipeDir := filepath.Join(proj.Path, ".recipe")
 				return m, func() tea.Msg {
 					return agoraDetailMsg{name: proj.Name, dir: recipeDir}
 				}

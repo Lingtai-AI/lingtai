@@ -393,7 +393,7 @@
   "recipe.preview_empty": "(empty)",
   "recipe.preview": "Recipe Preview",
   "recipe.preview_switch": "switch file",
-  "recipe.local_found": "✓ Found .lingtai-recipe/ — auto-selected Custom",
+  "recipe.local_found": "✓ Found .recipe/ — auto-selected Custom",
   "recipe.imported": "Imported",
   "recipe.agora": "From Agora",
 
