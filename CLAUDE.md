@@ -17,6 +17,17 @@ All Python code (kernel runtime and batteries-included wrapper) now lives in the
 
 Neither binary has a direct Python dependency. Both communicate with Python agents exclusively through the filesystem (`.lingtai/` directory, heartbeat files, signal files). Agents are launched by the TUI via `python -m lingtai run <dir>` as a subprocess.
 
+### Sibling repos (not in this directory)
+
+Other LingTai components live as sibling repos under `~/Documents/GitHub/`:
+
+- **`lingtai-kernel/`** — Python kernel + `lingtai` PyPI package (agent runtime, LLM interface, mailbox core).
+- **`lingtai-claude-code/`** — The Claude Code plugin (`skills/lingtai/SKILL.md` is what Claude loads via the `lingtai:lingtai` skill). Edit here to change how Claude interacts with agent networks. The plugin cache at `~/.claude/plugins/cache/lingtai/` gets overwritten on update — don't edit that.
+- **`lingtai-opencode/`** — OpenCode equivalent of the Claude plugin.
+- **`lingtai-mailbox-skill/`**, **`lingtai-codex/`**, **`lingtai-fangcun/`** — standalone skill/tool components.
+- **`lingtai-agora/`**, **`lingtai-web/`** — distribution and web surfaces.
+- **`lingtai-ad/`** — launch/marketing materials.
+
 ## Build
 
 ```bash
