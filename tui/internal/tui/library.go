@@ -536,6 +536,11 @@ type LibraryModel struct {
 
 	inner MarkdownViewerModel
 
+	// Drill-in viewer — non-nil when the user pressed Enter on a skill
+	// entry and is browsing the files inside that skill's folder. Esc
+	// pops back to the catalog (clears this pointer).
+	drillIn *MarkdownViewerModel
+
 	// Agent picker overlay state
 	pickerOpen bool
 	pickerIdx  int
@@ -562,7 +567,7 @@ type libraryLoadMsg struct {
 func NewLibraryModel(baseDir, selectedDir, lang string) LibraryModel {
 	entries := buildAgentLibraryCatalog(selectedDir, lang)
 	inner := NewMarkdownViewer(entries, libraryTitleFor(selectedDir))
-	inner.FooterHint = i18n.T("hints.props_select")
+	inner.FooterHint = i18n.T("hints.library_catalog")
 	return LibraryModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
@@ -635,7 +640,45 @@ func (m LibraryModel) Update(msg tea.Msg) (LibraryModel, tea.Cmd) {
 		// Forward to inner so it can resize too.
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(msg)
+		// Drill-in also needs to track size so it renders correctly when
+		// the user pops back and then drills in again at a new width.
+		if m.drillIn != nil {
+			inner := *m.drillIn
+			var dcmd tea.Cmd
+			inner, dcmd = inner.Update(msg)
+			m.drillIn = &inner
+			if dcmd != nil {
+				cmd = tea.Batch(cmd, dcmd)
+			}
+		}
 		return m, cmd
+
+	case MarkdownViewerSelectMsg:
+		// Catalog selection: drill in to the skill's folder.
+		if m.drillIn != nil {
+			// Already drilled in — files are leaves, Enter is a no-op.
+			return m, nil
+		}
+		if msg.Entry.Path == "" {
+			// Non-file entry (e.g. a "problems" note) — nothing to drill into.
+			return m, nil
+		}
+		skillDir := filepath.Dir(msg.Entry.Path)
+		files := buildSkillFolderEntries(skillDir)
+		if len(files) == 0 {
+			return m, nil
+		}
+		title := i18n.T("library.title") + " — " + msg.Entry.Label
+		sub := NewMarkdownViewer(files, title)
+		m.drillIn = &sub
+		if m.width > 0 && m.height > 0 {
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.drillIn = &inner
+			return m, cmd
+		}
+		return m, nil
 
 	case libraryLoadMsg:
 		m.agentNodes = msg.agentNodes
@@ -658,6 +701,24 @@ func (m LibraryModel) Update(msg tea.Msg) (LibraryModel, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if m.pickerOpen {
 			return m.updatePicker(msg)
+		}
+		// Drill-in active: keys go to the drill-in viewer instead of the
+		// catalog. Esc/q pops back to the catalog; Ctrl+T is ignored so
+		// the user can discover it via the footer hint (still shown on
+		// the outer view) but must Esc first to swap agents.
+		if m.drillIn != nil {
+			switch msg.String() {
+			case "esc", "q":
+				m.drillIn = nil
+				return m, nil
+			case "ctrl+t":
+				return m, nil
+			}
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(msg)
+			m.drillIn = &inner
+			return m, cmd
 		}
 		switch msg.String() {
 		case "ctrl+t":
@@ -689,12 +750,26 @@ func (m LibraryModel) Update(msg tea.Msg) (LibraryModel, tea.Cmd) {
 			m.pickerVP, cmd = m.pickerVP.Update(msg)
 			return m, cmd
 		}
+		if m.drillIn != nil {
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(msg)
+			m.drillIn = &inner
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(msg)
 		return m, cmd
 	}
 
-	// Default: forward to inner viewer.
+	// Default: forward to whichever viewer is currently visible.
+	if m.drillIn != nil {
+		inner := *m.drillIn
+		var cmd tea.Cmd
+		inner, cmd = inner.Update(msg)
+		m.drillIn = &inner
+		return m, cmd
+	}
 	var cmd tea.Cmd
 	m.inner, cmd = m.inner.Update(msg)
 	return m, cmd
@@ -820,6 +895,9 @@ func (m LibraryModel) View() string {
 			body = m.pickerVP.View()
 		}
 		return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
+	}
+	if m.drillIn != nil {
+		return m.drillIn.View()
 	}
 	// Non-picker: show the inner viewer. We append a Ctrl+T hint to the footer
 	// by letting the inner viewer render normally; the hint is included in

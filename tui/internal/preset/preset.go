@@ -79,8 +79,8 @@ func List() ([]Preset, error) {
 		if bi != bj {
 			return !bi // saved (non-builtin) before builtin
 		}
-		if bi { // both builtin: minimax → zhipu → openrouter → codex → custom
-			order := map[string]int{"minimax": 0, "zhipu": 1, "openrouter": 2, "codex": 3, "custom": 4}
+		if bi { // both builtin: minimax → zhipu → deepseek → openrouter → codex → custom
+			order := map[string]int{"minimax": 0, "zhipu": 1, "deepseek": 2, "openrouter": 3, "codex": 4, "custom": 5}
 			return order[presets[i].Name] < order[presets[j].Name]
 		}
 		return presets[i].Name < presets[j].Name
@@ -166,11 +166,35 @@ func EnsureDefault() error {
 	return nil
 }
 
+// SeedMissingBuiltins writes any built-in preset whose <name>.json file does
+// not yet exist in the presets directory. Unlike EnsureDefault, this runs
+// even when the user already has presets — it's how new built-ins ship to
+// existing installs without clobbering user-saved variants (e.g. zhipu_cn).
+// A user who has explicitly deleted a built-in will see it reappear; if that
+// becomes a concern we can add a "deleted" marker file later.
+func SeedMissingBuiltins() error {
+	dir := PresetsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create presets dir: %w", err)
+	}
+	for _, p := range BuiltinPresets() {
+		path := filepath.Join(dir, p.Name+".json")
+		if _, err := os.Stat(path); err == nil {
+			continue // already exists
+		}
+		if err := Save(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // BuiltinPresets returns the built-in presets.
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
 		zhipuPreset(),
+		deepseekPreset(),
 		openrouterPreset(),
 		codexPreset(),
 		customPreset(),
@@ -181,6 +205,7 @@ func BuiltinPresets() []Preset {
 var builtinNames = map[string]bool{
 	"minimax":     true,
 	"zhipu":       true,
+	"deepseek":    true,
 	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
@@ -259,6 +284,32 @@ func zhipuPreset() Preset {
 				"vision": zp, "web_read": zp,
 				"avatar": e(), "daemon": e(),
 				"listen": e(), "library": libraryDefault(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func deepseekPreset() Preset {
+	return Preset{
+		Name:        "deepseek",
+		Description: "DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls",
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "deepseek", "model": "deepseek-v4-flash",
+				"api_key": nil, "api_key_env": "DEEPSEEK_API_KEY",
+				"base_url": "https://api.deepseek.com", "api_compat": "openai",
+			},
+			// DeepSeek's public API is text-only — no TTS, image gen, video, or
+			// transcription. Multimodal tools fall back to local defaults.
+			"capabilities": map[string]interface{}{
+				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"psyche": e(), "codex": e(), "web_read": e(),
+				"avatar": e(), "daemon": e(),
+				"listen":  map[string]interface{}{"provider": "whisper"},
+				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -395,7 +446,12 @@ func Bootstrap(globalDir string) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to rename recipe_assets to recipes: %v\n", err)
 		}
 	}
-	return EnsureDefault()
+	if err := EnsureDefault(); err != nil {
+		return err
+	}
+	// Also seed any built-ins that were added after the user's first install.
+	// Idempotent: only writes files that don't exist.
+	return SeedMissingBuiltins()
 }
 
 // PopulateBundledLibrary extracts the TUI's embedded bundled skills into a

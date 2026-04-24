@@ -23,6 +23,14 @@ type MarkdownEntry struct {
 // MarkdownViewerCloseMsg is sent when the user exits the viewer.
 type MarkdownViewerCloseMsg struct{}
 
+// MarkdownViewerSelectMsg is sent when the user presses Enter on an entry.
+// Wrappers that want drill-in behavior handle this message; wrappers that
+// don't care can ignore it.
+type MarkdownViewerSelectMsg struct {
+	Index int
+	Entry MarkdownEntry
+}
+
 // MarkdownViewerModel is a two-panel view with independent scrolling:
 // left panel (entry list) and right panel (rendered markdown content).
 type MarkdownViewerModel struct {
@@ -98,6 +106,15 @@ func (m MarkdownViewerModel) Update(msg tea.Msg) (MarkdownViewerModel, tea.Cmd) 
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg { return MarkdownViewerCloseMsg{} }
+		case "enter":
+			if m.cursor < len(m.entries) {
+				idx := m.cursor
+				entry := m.entries[idx]
+				return m, func() tea.Msg {
+					return MarkdownViewerSelectMsg{Index: idx, Entry: entry}
+				}
+			}
+			return m, nil
 		case "tab":
 			m.focus = 1 - m.focus // toggle
 			return m, nil

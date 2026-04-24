@@ -76,6 +76,11 @@ const (
 // zhipuCodingModels lists models available on the Zhipu GLM Coding Plan.
 var zhipuCodingModels = []string{"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"}
 
+// deepseekModels lists the models available on DeepSeek's API. Flash is cheap
+// and fast; Pro is stronger and more expensive. Both support tool calls and
+// share the same 1M context window and OpenAI-compatible endpoint.
+var deepseekModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+
 // codexModels lists models available via Codex OAuth.
 var codexModels = []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"}
 
@@ -188,11 +193,12 @@ type FirstRunModel struct {
 	presetEndpointIn  textinput.Model   // base_url for custom provider
 	presetModelIn     textinput.Model   // model name for custom provider
 	presetNameIn      textinput.Model   // preset name for custom provider (separate from nameInput)
-	presetKeyFieldIdx int               // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region, 1=model, 2=key (minimax/zhipu)
+	presetKeyFieldIdx int               // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region, 1=model, 2=key (minimax/zhipu); 0=model, 1=key (deepseek)
 	minimaxRegion     int               // 0=china, 1=international
 	minimaxModel      int               // 0=highspeed, 1=standard
 	zhipuRegion       int               // 0=china, 1=international
 	zhipuModel        int               // 0=GLM-5.1, 1=GLM-5-Turbo, 2=GLM-4.7, 3=GLM-4.5-Air
+	deepseekModel     int               // 0=deepseek-v4-flash, 1=deepseek-v4-pro
 	codexModel        int               // 0=gpt-5.4, 1=gpt-5.4-mini, 2=gpt-5.3-codex
 	codexEmail        string            // set after successful OAuth login
 	codexLoggingIn    bool              // true while waiting for browser callback
@@ -935,6 +941,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 								}
 							}
 						}
+					} else if provider == "deepseek" {
+						// field 0 = model selector (no text focus)
+						m.presetKeyInput.Blur()
+						m.deepseekModel = 0 // default flash
+						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+							if model, ok := llm["model"].(string); ok && model == "deepseek-v4-pro" {
+								m.deepseekModel = 1
+							}
+						}
 					} else if provider == "codex" {
 						m.presetKeyInput.Blur()
 						m.codexModel = 0
@@ -988,6 +1003,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			isCustom := m.selectedProvider == "custom"
 			isMinimax := m.selectedProvider == "minimax"
 			isZhipu := m.selectedProvider == "zhipu"
+			isDeepseek := m.selectedProvider == "deepseek"
 			isCodex := m.selectedProvider == "codex"
 			fieldCount := 1 // default: key only
 			if isCustom {
@@ -998,6 +1014,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			if isZhipu {
 				fieldCount = 3 // region + model + key
+			}
+			if isDeepseek {
+				fieldCount = 2 // model + key
 			}
 			if isCodex {
 				fieldCount = 1
@@ -1036,9 +1055,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.step = stepPickPreset
 				return m, nil
 			case "up":
-				if isCustom || isMinimax || isZhipu || isCodex {
+				if isCustom || isMinimax || isZhipu || isDeepseek || isCodex {
 					m.presetKeyFieldIdx = (m.presetKeyFieldIdx - 1 + fieldCount) % fieldCount
 					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
+						m.presetKeyInput.Blur()
+						return m, nil
+					}
+					if isDeepseek && m.presetKeyFieldIdx == 0 {
 						m.presetKeyInput.Blur()
 						return m, nil
 					}
@@ -1050,9 +1073,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "down", "tab":
-				if isCustom || isMinimax || isZhipu || isCodex {
+				if isCustom || isMinimax || isZhipu || isDeepseek || isCodex {
 					m.presetKeyFieldIdx = (m.presetKeyFieldIdx + 1) % fieldCount
 					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
+						m.presetKeyInput.Blur()
+						return m, nil
+					}
+					if isDeepseek && m.presetKeyFieldIdx == 0 {
 						m.presetKeyInput.Blur()
 						return m, nil
 					}
@@ -1095,6 +1122,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					} else {
 						m.zhipuModel = (m.zhipuModel + len(zhipuCodingModels) - 1) % len(zhipuCodingModels)
 					}
+					return m, nil
+				}
+				// Toggle model for deepseek (flash ↔ pro)
+				if isDeepseek && m.presetKeyFieldIdx == 0 {
+					m.deepseekModel = 1 - m.deepseekModel
 					return m, nil
 				}
 				// Toggle compat for custom
@@ -1180,6 +1212,29 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					newPresetName = name
 				}
+				if isDeepseek {
+					p := m.presets[m.cursor]
+					model := deepseekModels[m.deepseekModel]
+					// Suffix by model variant so each saves as a distinct non-builtin
+					// preset (mirrors the minimax_cn/zhipu_intl pattern). Saving as
+					// plain "deepseek" would collide with the builtin template name
+					// and hide the configured preset under the Templates section.
+					var name string
+					if m.deepseekModel == 0 {
+						name = "deepseek_flash"
+					} else {
+						name = "deepseek_pro"
+					}
+					clone := preset.Clone(p, name)
+					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
+						llm["model"] = model
+					}
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					newPresetName = name
+				}
 				if isCodex {
 					if m.codexLoggingIn {
 						return m, nil
@@ -1251,7 +1306,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 				} else if (isMinimax || isZhipu) && m.presetKeyFieldIdx == 2 {
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-				} else if !isMinimax && !isZhipu {
+				} else if isDeepseek && m.presetKeyFieldIdx == 1 {
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				} else if !isMinimax && !isZhipu && !isDeepseek {
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 				}
 				return m, cmd
@@ -1995,6 +2052,28 @@ func (m FirstRunModel) View() string {
 			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
 				"  [←→] "+i18n.T("firstrun.toggle_region")+
+				"  [Ctrl+E] editor (allows pasting)"+
+				"  [Enter] "+i18n.T("setup.save")+
+				"  [Esc] "+i18n.T("setup.back")) + "\n")
+		} else if m.selectedProvider == "deepseek" {
+			// Model toggle (flash ↔ pro)
+			var modelLabels []string
+			for i, name := range deepseekModels {
+				if i == m.deepseekModel {
+					modelLabels = append(modelLabels, "● "+name)
+				} else {
+					modelLabels = append(modelLabels, "○ "+name)
+				}
+			}
+			modelStyle := lipgloss.NewStyle()
+			if m.presetKeyFieldIdx == 0 {
+				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
+			}
+			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n")
+			b.WriteString("            " + StyleFaint.Render("api.deepseek.com") + "\n")
+			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
+			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
+				"  [←→] "+i18n.T("codex.toggle_model")+
 				"  [Ctrl+E] editor (allows pasting)"+
 				"  [Enter] "+i18n.T("setup.save")+
 				"  [Esc] "+i18n.T("setup.back")) + "\n")
@@ -2865,7 +2944,13 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 
 	// Numeric defaults
 	m.staminaInput.SetValue("36000")
-	m.ctxLimitInput.SetValue("200000")
+	// Default context window: 200K for most providers; DeepSeek V4 ships with
+	// a 1M window out of the box, so let the agent use it.
+	ctxDefault := "200000"
+	if m.getPresetProvider(p) == "deepseek" {
+		ctxDefault = "1000000"
+	}
+	m.ctxLimitInput.SetValue(ctxDefault)
 	m.soulDelayInput.SetValue("120")
 	m.moltPressInput.SetValue("0.8")
 	m.staminaInput.Blur()
@@ -2894,8 +2979,8 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 // focusedPresetKeyInput returns a pointer to the currently focused text input
 // in the preset key step, or nil if the current field is a selector (no text).
 func (m *FirstRunModel) focusedPresetKeyInput() *textinput.Model {
-	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" || m.selectedProvider == "codex" {
-		// minimax/zhipu key field (idx 2) is a textarea — handled separately; codex has no text fields
+	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" || m.selectedProvider == "deepseek" || m.selectedProvider == "codex" {
+		// minimax/zhipu/deepseek key fields are textareas — handled separately; codex has no text fields
 		return nil
 	}
 	switch m.presetKeyFieldIdx {
@@ -2920,7 +3005,10 @@ func (m *FirstRunModel) focusedPresetKeyTextarea() *textarea.Model {
 	if (m.selectedProvider == "minimax" || m.selectedProvider == "zhipu") && m.presetKeyFieldIdx == 2 {
 		return &m.presetKeyInput
 	}
-	if m.selectedProvider != "minimax" && m.selectedProvider != "zhipu" && m.selectedProvider != "custom" {
+	if m.selectedProvider == "deepseek" && m.presetKeyFieldIdx == 1 {
+		return &m.presetKeyInput
+	}
+	if m.selectedProvider != "minimax" && m.selectedProvider != "zhipu" && m.selectedProvider != "deepseek" && m.selectedProvider != "custom" {
 		return &m.presetKeyInput
 	}
 	if m.selectedProvider == "custom" && m.presetKeyFieldIdx == 3 {
@@ -2939,6 +3027,15 @@ func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
 		case 0, 1:
 			return nil // region/model selector — no text focus
 		case 2:
+			return m.presetKeyInput.Focus()
+		}
+		return nil
+	}
+	if m.selectedProvider == "deepseek" {
+		switch m.presetKeyFieldIdx {
+		case 0:
+			return nil // model selector — no text focus
+		case 1:
 			return m.presetKeyInput.Focus()
 		}
 		return nil
