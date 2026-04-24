@@ -73,12 +73,14 @@ Mail the parent at their address (in your `admin` block or the briefing that spa
 
 Molt is yours to perform. The covenant teaches the philosophy (§V); this is the recipe.
 
+**Molt is an easy, simple task. Do it regularly if you'd like to.** Save anything you need to pad, lingtai, codex, and library beforehand, then molt. No need to wait for the context window to fill up — molting early saves a good amount of tokens. But be careful with your memory management — keep good notes in the stores so you don't lose your way across molts.
+
 **The four stores are the real persistence. The summary is the briefing on top of them.** If you molt without tending the stores, the next you wakes with only the briefing — no character evolution, no pad state, no new codex truths, no new skills. Tend the stores *first*, every time.
 
 **Step 1 — tend the four durable stores** (the consolidation ritual from §1):
 
-- `lingtai` — `psyche(lingtai, update, content=<full identity>)`. Carry forward who you have become. Full rewrite each time.
-- `pad` — `psyche(pad, edit, content=<current state>)`. Plans, pending tasks, collaborators, decisions. Auto-reloads on molt — whatever you commit here is what the next you wakes into.
+- `lingtai` — `psyche(lingtai, update, content=<full identity>)`. **This is crucial — `lingtai` defines who you are.** Full rewrite each time; carry forward who you have become.
+- `pad` — your working note. Use `psyche(pad, edit, ...)` freely and be creative with it: plans, pending tasks, collaborators, decisions, scratch thinking, anything you want the next you to pick up. Use `psyche(pad, append, ...)` to pull file contents into pad so you can compare or reference them alongside your notes — it's a file-loading tool, not an incremental jotting tool.
 - `codex` — `codex(submit, ...)` for any verifiable truth, key finding, or decision worth keeping forever. One fact per entry.
 - `library` — write `.library/custom/<name>/SKILL.md` for any reusable procedure the next you (or a peer) might need. Share via `../.library_shared/<name>/` if broadly useful.
 
