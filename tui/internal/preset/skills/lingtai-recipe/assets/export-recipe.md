@@ -2,49 +2,38 @@
 
 *This is the recipe-export sub-guide of the `lingtai-recipe` skill. For full-network export, read `export-network.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read `../references/recipe-format.md` first — it defines what a recipe is, the directory structure, the five components (greet.md, comment.md, covenant.md, procedures.md, skills/), placeholders, i18n rules, and recipe.json format. This sub-guide assumes you understand all of that.
+**Prerequisites:** Read `../references/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, the `.lingtai/` network snapshot, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
 
-A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing.
+A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing. An exported recipe is a **bundle directory** — a git repo the recipient clones and points `/setup` at.
 
-## What is an exported recipe?
+## What is an exported recipe bundle?
 
-An exported recipe is an **exported network without the network** — same directory structure, same `.lingtai-recipe/` convention, but no `.lingtai/` agents or mailboxes. The recipient clones the repo, opens it with `lingtai-tui`, and the TUI auto-discovers `.lingtai-recipe/` during setup.
+A recipe bundle is the shareable artifact the TUI copies into a project on selection. Minimum shape:
 
 ```
-~/lingtai-agora/recipes/<name>/        ← the repo root (recipient opens this)
-├── .lingtai-recipe/                   ← TUI auto-discovers this
-│   ├── en/
-│   │   ├── greet.md
-│   │   └── comment.md
-│   ├── zh/                            (optional)
-│   │   ├── greet.md
-│   │   └── comment.md
-│   ├── covenant.md                    (optional)
-│   ├── procedures.md                  (optional)
-│   └── skills/                        (optional)
-│       └── <skill-name>/
-│           └── SKILL.md
-├── recipe.json                        ← metadata (name, description)
-└── README.md                          (optional, for GitHub display)
+<bundle-root>/                          # the repo root the recipient clones
+└── .recipe/
+    └── recipe.json                     # manifest (id, name, description, …)
 ```
 
-Compare with an exported network:
+Everything else is optional. Typical bundles add a first-contact message, ongoing behavioral constraints, and sometimes a library of shared skills:
+
 ```
-~/lingtai-agora/networks/<name>/       ← also a repo the recipient opens
-├── .lingtai/                          ← full network state
-│   ├── human/
-│   ├── agent-1/
-│   └── ...
-├── .lingtai-recipe/                   ← same convention
-│   ├── en/
-│   │   ├── greet.md
-│   │   └── comment.md
-│   └── ...
-├── .gitignore
-└── (project files)
+<bundle-root>/
+├── .recipe/                            # LingTai-facing behavioral layer
+│   ├── recipe.json
+│   ├── greet/greet.md                  # (optional) first-contact
+│   ├── greet/zh/greet.md               # (optional) locale variant
+│   ├── comment/comment.md              # (optional) ongoing behavioral constraints
+│   ├── covenant/covenant.md            # (optional) covenant override
+│   └── procedures/procedures.md        # (optional) procedures override
+├── <library_name>/                     # (optional) framework-agnostic skills
+│   ├── <skill-a>/SKILL.md
+│   └── <skill-b>/SKILL.md
+└── README.md                           # (optional) for GitHub display
 ```
 
-The `.lingtai-recipe/` convention is shared. The only difference is whether `.lingtai/` exists.
+There is NO `.lingtai/` in a recipe-only export. That's the difference from a full network export (see `export-network.md`). A recipe is the seed; a network export is the seed plus the living garden.
 
 ## How to talk to the human during this skill
 
@@ -62,17 +51,17 @@ These rules prevent silent failures. Follow them without exception.
    ```
    Use the result (e.g., `/Users/alice`) as the prefix for ALL file paths. Never use `~` in a `write` or `file` tool call.
 
-2. **Always use absolute paths.** Every `write` call must use a full absolute path. The `write` tool resolves relative paths from your working directory, not from the recipe directory.
+2. **Always use absolute paths.** Every `write` call must use a full absolute path.
 
 3. **Always `mkdir -p` before writing.** The `write` tool may silently fail or report false success if the parent directory does not exist.
 
-4. **Verify after writing.** After writing all files in a step, run `find <recipe-dir> -type f | sort` and confirm the output lists every file you intended to create.
+4. **Verify after writing.** After writing all files in a step, run `find <bundle-dir> -type f | sort` and confirm the output lists every file you intended to create.
 
 5. **Never trust a write success message at face value.** Always verify with `find` or `ls`.
 
 ## Step 0: Resolve Paths + Reflect on the Network
 
-**0a. Resolve the recipe base directory.**
+**0a. Resolve the bundle base directory.**
 
 ```bash
 echo $HOME
@@ -80,15 +69,15 @@ echo $HOME
 
 Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **Note: `lingtai-agora`, NOT `.lingtai-agora` — no leading dot.** The agora directory is a user-visible workspace, not a hidden config directory.
 
-**0b. Read `../references/recipe-format.md`** to refresh your understanding of recipe structure and components.
+**0b. Read `../references/recipe-format.md`** to refresh your understanding of the bundle shape.
 
 **0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture:
 
-1. Read the current recipe state: `cat .lingtai/.tui-asset/.recipe`
-2. Examine the current comment.md (behavioral DNA) — find it via the recipe state
-3. List skills in the network-shared library: `ls -la .lingtai/.library_shared/`. List each agent's custom skills: `ls -la .lingtai/*/.library/custom/`.
-4. Scan the network structure: `ls .lingtai/*/` and `cat .lingtai/*/.agent.json`
-5. Skim recent mail for tone and delegation patterns: `ls .lingtai/*/mailbox/archive/ | head -20`
+1. Read the current recipe state: `ls -la .lingtai/.tui-asset/` and look at `.recipe/` (directory — the snapshot of the currently-applied recipe) or `.recipe` (JSON file — UI picker state). The directory snapshot contains the `.recipe/` dotfolder as it was last applied.
+2. Read the orchestrator's comment from `.lingtai/.tui-asset/.recipe/comment/comment.md` (or the locale variant) — that's the behavioral DNA the current network is running under.
+3. List libraries currently registered: `cat .lingtai/<orchestrator>/init.json | python3 -c "import json,sys; m=json.load(sys.stdin); print(m['manifest']['capabilities']['library']['paths'])"`
+4. Scan the network structure: `ls .lingtai/*/.agent.json 2>/dev/null | head` and read a couple to see agent names and roles.
+5. Skim recent mail for tone and delegation patterns: `ls -t .lingtai/<orchestrator>/mailbox/sent/ | head -20`
 
 Build a mental model of: what does this network *do*? How does it *behave*? What *skills* has it grown? What makes it distinctive?
 
@@ -102,61 +91,88 @@ Send the human **one** email introducing the export flow and collecting all key 
 >
 > A recipe distills this into something portable. To get started, I need a few things:
 >
-> 1. **Recipe name** — something that captures its essence (not the project name — the recipe is about culture, not the project)
-> 2. **One-line description** — what does this recipe give someone?
-> 3. **Audience** — who is this recipe for?
-> 4. **Greeting style** — what tone should the first-contact message have?
-> 5. **Skills to include** — which of the installed skills should ship with the recipe?
-> 6. **Any behavioral constraints** — what should carry over from this network's culture?
+> 1. **Recipe id** — a short machine identifier, kebab-case (e.g., `scholar-distiller`, `greeter-for-physics-postdocs`). Stable across locales.
+> 2. **Display name** — human-readable name shown in the TUI picker.
+> 3. **One-line description** — what does this recipe give someone?
+> 4. **Which layers to include?** All four are optional:
+>    - greet.md — first-contact message (leave off for a silent agent)
+>    - comment.md — ongoing behavioral constraints
+>    - covenant.md — override the system covenant (rare; skip unless fundamentally different)
+>    - procedures.md — override lifecycle procedures (very rare)
+> 5. **Library?** If you want to ship skills as a library sibling, give me a `library_name` (kebab-case folder name) and a list of skills to include.
+> 6. **Languages** — just English (en), or also zh/wen?
 >
-> Here are the installed skills:
-> [list skills from .lingtai/.library_shared/ and each agent's .library/custom/]
+> Here are the candidate skills I found:
+> [list skills from <project>/<library_name>/ if the project already uses a library, or recent custom skills across agents]
 >
 > Answer as many as you can in one message and I'll draft everything in one pass."
 
-If `$HOME/lingtai-agora/recipes/<name>/` already exists, ask before overwriting.
+If `$HOME/lingtai-agora/recipes/<id>/` already exists, ask before overwriting.
 
-## Step 2: Author the Recipe Files
+## Step 2: Author the Bundle
 
 Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../references/recipe-format.md` for the exact format and rules of each component.
-
-**All recipe components go inside `.lingtai-recipe/`.** The repo root only holds `recipe.json` (metadata) and optionally a `README.md`.
 
 ### Pre-flight: Create all directories first
 
 ```bash
-REPO_DIR="$HOME/lingtai-agora/recipes/<name>"
-RECIPE_DIR="$REPO_DIR/.lingtai-recipe"
-mkdir -p "$RECIPE_DIR/en"
-mkdir -p "$RECIPE_DIR/skills/<skill-1>"
-mkdir -p "$RECIPE_DIR/skills/<skill-2>"
+BUNDLE="$HOME/lingtai-agora/recipes/<id>"
+mkdir -p "$BUNDLE/.recipe"
+# Only create the layer dirs the human wants — don't make empty dirs,
+# the validator rejects them.
+mkdir -p "$BUNDLE/.recipe/greet"       # if shipping greet
+mkdir -p "$BUNDLE/.recipe/comment"     # if shipping comment
+# Optional locale subdirs, if going multilingual:
+mkdir -p "$BUNDLE/.recipe/greet/zh"
+mkdir -p "$BUNDLE/.recipe/greet/wen"
+# Optional library sibling:
+mkdir -p "$BUNDLE/<library_name>"
 ```
 
-### 2a. recipe.json (at repo root)
+### 2a. `recipe.json` (manifest)
 
-Write `$REPO_DIR/recipe.json` with `name` and `description` (see `../references/recipe-format.md` for format). This file lives at the repo root, NOT inside `.lingtai-recipe/`.
+Write `$BUNDLE/.recipe/recipe.json` with the required fields. Example:
 
-### 2b. greet.md — First Contact
+```json
+{
+  "id": "scholar-distiller",
+  "version": "1.0.0",
+  "name": "Scholar Distiller",
+  "description": "Distills an academic's public work into a queryable persona skill.",
+  "library_name": "scholar-kit"
+}
+```
 
-Write `$RECIPE_DIR/en/greet.md` (and `$RECIPE_DIR/zh/greet.md` if multi-language). Follow the rules and placeholders documented in `../references/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
+- `id` — kebab-case machine identifier (required).
+- `name` — display name, localized per-locale via `.recipe/<lang>/recipe.json` variants (required).
+- `description` — one-line hint, localized (required).
+- `version` — optional, defaults to `"1.0.0"` if absent. Bump on iteration.
+- `library_name` — name of a sibling folder inside the bundle; `null` if the recipe ships no library.
 
-### 2c. comment.md — Behavioral DNA
+If shipping locale variants of the manifest, write `$BUNDLE/.recipe/zh/recipe.json` and/or `$BUNDLE/.recipe/wen/recipe.json`. Locale variants only need `name` and `description`; the rest is inherited from the root manifest.
 
-Write `$RECIPE_DIR/en/comment.md`. This is the heart of the recipe. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../references/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
+### 2b. `greet.md` — First Contact (optional)
+
+Write `$BUNDLE/.recipe/greet/greet.md` (and `$BUNDLE/.recipe/greet/zh/greet.md` if multilingual). Follow the rules and placeholder list in `../references/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
+
+Skip this layer entirely if the recipe wants a silent agent (agent waits for the first human message instead of sending a greeting).
+
+### 2c. `comment.md` — Behavioral DNA (optional)
+
+Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture gets distilled. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../references/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
 
 **What to distill.** Walk through each of these areas and extract what's worth keeping:
 
-- **Delegation and avatar rules** — how does the orchestrator decide when to spawn avatars vs handle things itself? What avatar blueprints does it use? If there are specific naming conventions, specialization patterns, or spawn-on-demand rules, capture them. Reflect on the avatar rules you've set in this network — if they work well, they belong in comment.md.
+- **Delegation and avatar rules** — how does the orchestrator decide when to spawn avatars vs handle things itself? What avatar blueprints does it use? If there are specific naming conventions, specialization patterns, or spawn-on-demand rules, capture them.
 - **Communication norms** — does the network enforce deposit-before-email (write findings to a file before sending a summary)? Are there conventions about email length, format, or frequency between agents?
 - **Workflow patterns** — is there a specific order of operations? Does the orchestrator follow a pipeline (research → draft → review → publish)? Are there quality gates or checkpoints?
-- **Tool usage conventions** — any rules about which tools to prefer, when to use bash vs file tools, when to use web search? Any cost-awareness rules (e.g., avoid redundant API calls)?
+- **Tool usage conventions** — any rules about which tools to prefer, when to use bash vs file tools, when to use web search? Any cost-awareness rules?
 - **Tone and style** — formal vs casual? Terse vs detailed? Does the orchestrator have a persona or voice?
 - **Guardrails** — what does the orchestrator explicitly avoid? Topics it won't engage with? Actions it won't take without human approval?
-- **Skill references** — if the recipe ships skills, how and when should the orchestrator invoke them? What triggers each skill?
-- **Network topology** — how many agents does this network typically grow to? Is there a hierarchy (orchestrator → specialists → workers)? Any rules about network size or structure?
+- **Skill references** — if the recipe ships a library, how and when should the orchestrator invoke which skill?
 
 **Where to look:**
-- The current `comment.md` — what's already codified
+- The currently-applied comment at `.lingtai/.tui-asset/.recipe/comment/comment.md` — what's already codified
 - The orchestrator's recent mail — how it actually delegates and responds
 - Avatar `.agent.json` blueprints — what specialized agents exist and why
 - The covenant and procedures — any custom overrides already in place
@@ -164,39 +180,49 @@ Write `$RECIPE_DIR/en/comment.md`. This is the heart of the recipe. **Draw from 
 
 **Distillation technique:** For each behavioral norm you observe (e.g., "agents always deposit findings before emailing"), write it as an explicit rule (e.g., "Always write your findings to a file before sending an email summary"). Transform living behavior → explicit rule → readable prose.
 
-### 2d. skills/ — Reusable Capabilities (Optional)
+### 2d. Library sibling (optional)
 
-For each skill the human wants to include:
-
-1. Check if it's an intrinsic skill (in `.library/intrinsic/`) — if so, don't copy it; it's already available everywhere
-2. If it's a custom or recipe skill, copy the skill directory:
+If the recipe ships a library, copy the skills you want to include into `$BUNDLE/<library_name>/`:
 
 ```bash
-mkdir -p $RECIPE_DIR/skills/<skill-name>
-# Custom skills live per-agent at <agent>/.library/custom/. Pick an agent
-# (usually the admin, or the author) and copy from its working dir.
-cp -R .lingtai/<agent-name>/.library/custom/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
-# Or export from the network-shared library if the skill has already been
-# promoted there:
-# cp -R .lingtai/.library_shared/<skill-name>/* $RECIPE_DIR/skills/<skill-name>/
+# Copy from the project's own library (if the project already uses one):
+cp -R $PROJECT/<library_name>/<skill-a> $BUNDLE/<library_name>/<skill-a>
+
+# Or from a specific agent's custom library:
+cp -R .lingtai/<agent>/.library/custom/<skill-a> $BUNDLE/<library_name>/<skill-a>
+
+# Or from the network-shared library:
+cp -R .lingtai/.library_shared/<skill-a> $BUNDLE/<library_name>/<skill-a>
 ```
 
-3. Verify each skill has a valid `SKILL.md` with proper frontmatter
+Each skill directory must contain a valid `SKILL.md` (the validator does not walk skills deeply; it just warns if the library contains zero `SKILL.md` files anywhere).
 
-### 2e–2f. covenant.md / procedures.md (Optional)
+**Skills are monolingual.** Libraries do not have `<lang>/SKILL.md` variants — write skills in one language. If you want a bilingual skill, write both languages in the same `SKILL.md`.
 
-Write to `$RECIPE_DIR/covenant.md` and/or `$RECIPE_DIR/procedures.md`. Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../references/recipe-format.md` for details.
+**Skills must be self-contained.** Each skill directory should work independently when dropped into any agent framework. Check that scripts don't reference absolute paths or project-specific resources.
+
+### 2e–2f. `covenant.md` / `procedures.md` (optional, usually skip)
+
+Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../references/recipe-format.md` for details.
+
+```
+$BUNDLE/.recipe/covenant/covenant.md
+$BUNDLE/.recipe/procedures/procedures.md
+```
+
+Locale variants follow the same pattern: `$BUNDLE/.recipe/covenant/<lang>/covenant.md`.
 
 ### Post-write verification (MANDATORY)
 
 ```bash
-find $HOME/lingtai-agora/recipes/<name>/ -type f | sort
+find $HOME/lingtai-agora/recipes/<id>/ -type f | sort
 ```
 
 **Check the output against your intended file list.** Confirm that:
-- `recipe.json` is at the repo root
-- All recipe components are inside `.lingtai-recipe/`
-- No recipe files (greet.md, comment.md, etc.) leaked to the repo root
+- `.recipe/recipe.json` is present at the bundle root
+- Each layer directory you created contains at least one `.md` file (empty layer dirs are a validator error)
+- No stray files at `.recipe/` root (only `recipe.json` is expected there)
+- The library folder (if any) is a sibling of `.recipe/`, not inside it
 
 If any file is missing, re-create its parent directory and re-write it. **Do not proceed until all files are confirmed on disk.**
 
@@ -204,31 +230,25 @@ If any file is missing, re-create its parent directory and re-write it. **Do not
 
 Show the human the `find` output and read back each file's content via email. Iterate until the human approves.
 
-## Step 4: Multi-Language Variants (Optional)
-
-If the human mentions a multi-language audience, create per-language subdirectories inside `.lingtai-recipe/` (e.g., `.lingtai-recipe/zh/greet.md`). See `../references/recipe-format.md` for i18n fallback rules.
-
-## Step 5: Validate the recipe payload
+## Step 4: Validate the bundle
 
 The validator ships with the TUI at a stable per-user path, so you can run it from anywhere.
 
 ```bash
-python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<name>/"
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<id>/"
 ```
 
-This is the canonical structural check. It verifies `recipe.json` at the repo root, the presence of `greet.md`/`comment.md`, absence of forbidden placeholders in `comment.md`/`covenant.md`/`procedures.md`, skill frontmatter, and more. Exit code 0 means the payload is structurally valid.
+This is the canonical structural check. It verifies `.recipe/recipe.json`, the schema, behavioral-layer shape, placeholder discipline, and library sibling existence. Exit code 0 means the bundle is structurally valid.
 
-The `find` check in Step 2's post-write verification only confirms that files landed on disk; this step enforces that the payload shape is actually valid.
+**If the script reports errors:** stop, read the error lines, fix each one in the bundle directory, and re-run. Loop until clean.
 
-**If the script reports errors:** stop, read the error lines, fix each one in the recipe directory, and re-run. Loop until clean.
+**Warnings** (unknown locale code, stray file at `.recipe/` root, empty library) are reported but do not block. Show them to the human and let them decide whether to address.
 
-**Warnings** (e.g., unknown lang code, stray file at `.lingtai-recipe/` root) are reported but do not block. Show them to the human and let them decide whether to address.
+## Step 5: Sensitivity sweep
 
-## Step 6: Sensitivity sweep
+Before committing and pushing, review every file that will be committed for content the human may not want to publish. This catches leaks that automated scans cannot.
 
-Before committing and pushing, review every file that will be committed for content the human may not want to publish. This catches leaks that automated scans cannot: real names of private individuals, internal org references, unpublished ideas, embarrassing remarks, pasted third-party content.
-
-**Scope.** Every file in `$HOME/lingtai-agora/recipes/<name>/` will be committed — recipes do not have a `.gitignore` to filter, so the scope is the whole staging directory. Typical contents: `recipe.json`, everything inside `.lingtai-recipe/`, an optional `README.md`, and any other files you created during authoring. Sweep all of them.
+**Scope.** Every file in `$HOME/lingtai-agora/recipes/<id>/` will be committed — recipes do not have a `.gitignore` to filter, so the scope is the whole staging directory. Typical contents: `.recipe/recipe.json`, everything inside `.recipe/<layer>/`, the library folder if any, an optional `README.md`, and any other files you created during authoring. Sweep all of them.
 
 **What to look for:**
 - Real names of private individuals — the human, collaborators, children, coworkers
@@ -240,24 +260,24 @@ Before committing and pushing, review every file that will be committed for cont
 
 **How to report.** Send one email to the human listing every concern in the form `<file>:<line-or-section> — <concern>` with a recommendation (redact / keep / replace with placeholder). Do not paginate across multiple emails unless the list is very long — one message is easier for the human to scan and reply to.
 
-**Loop.** After the human decides each item, apply redactions (Edit the recipe files in place), then:
-- Re-run `validate_recipe.py` (Step 5) in case a redaction broke the payload shape
+**Loop.** After the human decides each item, apply redactions (edit the bundle files in place), then:
+- Re-run `validate_recipe.py` (Step 4) in case a redaction broke the payload shape
 - Re-run this sensitivity sweep if the redactions were substantial enough that more concerns might surface
 
-Only proceed to Step 7 once the human says "ship it."
+Only proceed to Step 6 once the human says "ship it."
 
-## Step 7: git init + commit
+## Step 6: `git init` + commit
 
 ```bash
-cd $HOME/lingtai-agora/recipes/<name>/
+cd $HOME/lingtai-agora/recipes/<id>/
 git init -b main
 git add .
 git status
 ```
 
-Show `git status` to the human. Get confirmation. Then: `git commit -m "Recipe: <name>"`
+Show `git status` to the human. Get confirmation. Then: `git commit -m "Recipe: <id>"`
 
-## Step 8: Push to GitHub (Optional)
+## Step 7: Push to GitHub (optional)
 
 Check `gh auth status` and follow the three-branch pattern:
 
@@ -267,12 +287,12 @@ Check `gh auth status` and follow the three-branch pattern:
 
 ## Things to Watch Out For
 
-**Don't copy blindly.** The recipe should be authored, not dumped. A raw copy of the current comment.md might reference project-specific agents, paths, or context that won't exist in the recipient's network.
+**Don't copy blindly.** The recipe should be authored, not dumped. A raw copy of the current `comment.md` might reference project-specific agents, paths, or context that won't exist in the recipient's network.
 
-**Skills must be self-contained.** Each skill directory should work independently. Check that scripts don't reference absolute paths or project-specific resources.
+**The bundle IS the project-to-be.** When the recipient runs `/setup` and picks this bundle, the TUI copies the whole bundle into their project root. The bundle's `.recipe/` becomes their `.recipe/`; the library folder becomes a sibling at their project root. So treat the bundle structure as the final on-disk structure — don't assume the recipient will move files around.
 
-**The recipe is a seed, not a clone.** It shapes behavior — it does NOT reproduce the network's state, history, or data. That's what `/export network` is for. An exported recipe is an exported network without the network — same `.lingtai-recipe/` convention, no `.lingtai/`.
+**The recipe is a seed, not a clone.** It shapes behavior — it does NOT reproduce the network's state, history, or data. That's what `/export network` is for. An exported recipe is an exported network without the `.lingtai/` snapshot.
 
-**Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI and already available in every installation.
+**Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI itself and already available in every installation. Only ship custom skills — the ones that grew out of this network.
 
-**The repo IS the project.** The recipient clones this repo and opens it directly with `lingtai-tui`. The TUI auto-discovers `.lingtai-recipe/` and uses it during setup. Do not instruct the recipient to copy files around — the repo structure is the final structure.
+**Libraries are additive on recipe change.** If a recipient already has a recipe applied with `library_name: "old-lib"`, switching to your recipe with `library_name: "new-lib"` will append `"../../new-lib"` to their agents' `library.paths` without removing the old one. Keep this in mind when naming — avoid names that could collide with common libraries the recipient might already have.
