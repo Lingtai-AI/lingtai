@@ -1,0 +1,7 @@
+{
+  "id": "tutorial",
+  "version": "1.0.0",
+  "name": "Tutorial",
+  "description": "12-lesson guided walkthrough. The agent teaches you how lingtai works — architecture, tools, lifecycle, network — with live demos. Best for deep-diving into the system.",
+  "library_name": null
+}

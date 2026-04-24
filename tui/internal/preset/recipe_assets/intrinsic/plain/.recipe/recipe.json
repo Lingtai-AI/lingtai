@@ -1,0 +1,7 @@
+{
+  "id": "plain",
+  "version": "1.0.0",
+  "name": "Plain",
+  "description": "No greeting, no behavioral constraints. The agent starts silent and waits for mail. For developers and power users who know the system.",
+  "library_name": null
+}

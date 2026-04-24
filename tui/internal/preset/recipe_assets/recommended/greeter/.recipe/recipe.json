@@ -1,0 +1,7 @@
+{
+  "id": "greeter",
+  "version": "1.0.0",
+  "name": "Greeter",
+  "description": "Full welcome with all commands listed upfront. Comprehensive but dense — best for returning users who want the complete picture.",
+  "library_name": null
+}

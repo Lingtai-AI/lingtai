@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 21
+const CurrentVersion = 22
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -44,6 +44,7 @@ var migrations = []Migration{
 	{Version: 19, Name: "procedures-english-only", Fn: func(_ string) error { return nil }},
 	{Version: 20, Name: "pseudo-agent-subscriptions", Fn: func(_ string) error { return nil }},
 	{Version: 21, Name: "library-paths", Fn: func(_ string) error { return nil }},
+	{Version: 22, Name: "recipe-lang-suffix", Fn: func(_ string) error { return nil }}, // TUI-only: touches .tui-asset/.recipe
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any
