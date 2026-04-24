@@ -307,6 +307,45 @@ func AppendLibraryPath(initJSONPath, pathEntry string) error {
 	return nil
 }
 
+// AgentsMissingInit returns the names (directory names under .lingtai/)
+// of agents whose dir exists but whose init.json is missing. This is the
+// signature of an imported network — the export flow strips each agent's
+// init.json so the receiving user gets fresh provider/capability config
+// rather than inheriting the exporter's.
+//
+// Skips the human/ pseudo-agent and any dot-prefixed entries. Only
+// returns agents that have a .agent.json blueprint (identity) but no
+// init.json (runtime config).
+func AgentsMissingInit(projectRoot string) []string {
+	if projectRoot == "" {
+		return nil
+	}
+	lingtaiDir := filepath.Join(projectRoot, ".lingtai")
+	entries, err := os.ReadDir(lingtaiDir)
+	if err != nil {
+		return nil
+	}
+	var missing []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || name == "" || name[0] == '.' || name == "human" {
+			continue
+		}
+		agentDir := filepath.Join(lingtaiDir, name)
+		// Must have .agent.json (blueprint) AND be missing init.json to
+		// qualify as an imported agent. A dir with neither is probably
+		// mid-construction cruft and not our problem.
+		if _, err := os.Stat(filepath.Join(agentDir, ".agent.json")); err != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(agentDir, "init.json")); err == nil {
+			continue // init.json exists; nothing to do
+		}
+		missing = append(missing, name)
+	}
+	return missing
+}
+
 // --- internal helpers ---
 
 // copyTree mirrors src to dst, creating dst if necessary. Skips symlinks

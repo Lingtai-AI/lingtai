@@ -389,3 +389,107 @@ func TestApplyRecipe_NoRecipeInProject(t *testing.T) {
 		t.Errorf("ApplyRecipe without .recipe/ should error")
 	}
 }
+
+// --- AgentsMissingInit ---
+
+// writeAgentBlueprint creates an agent directory under proj/.lingtai/name
+// with a minimal .agent.json blueprint and optionally an init.json.
+func writeAgentBlueprint(t *testing.T, projectRoot, name string, withInit bool) {
+	t.Helper()
+	agentDir := filepath.Join(projectRoot, ".lingtai", name)
+	os.MkdirAll(agentDir, 0o755)
+	// .agent.json blueprint — just needs to exist for detection.
+	os.WriteFile(filepath.Join(agentDir, ".agent.json"), []byte(`{"address":"`+name+`"}`), 0o644)
+	if withInit {
+		os.WriteFile(filepath.Join(agentDir, "init.json"), []byte(`{"manifest":{"capabilities":{}}}`), 0o644)
+	}
+}
+
+func TestAgentsMissingInit_AllPresent(t *testing.T) {
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, ".lingtai"), 0o755)
+	writeAgentBlueprint(t, proj, "orch", true)
+	writeAgentBlueprint(t, proj, "specialist", true)
+
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 0 {
+		t.Errorf("AgentsMissingInit with all init.jsons present = %v, want []", missing)
+	}
+}
+
+func TestAgentsMissingInit_ImportScenario(t *testing.T) {
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, ".lingtai"), 0o755)
+	writeAgentBlueprint(t, proj, "orch", false)
+	writeAgentBlueprint(t, proj, "specialist1", false)
+	writeAgentBlueprint(t, proj, "specialist2", false)
+
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 3 {
+		t.Errorf("len = %d, want 3; got %v", len(missing), missing)
+	}
+	set := map[string]bool{}
+	for _, m := range missing {
+		set[m] = true
+	}
+	for _, want := range []string{"orch", "specialist1", "specialist2"} {
+		if !set[want] {
+			t.Errorf("missing[] should contain %q; got %v", want, missing)
+		}
+	}
+}
+
+func TestAgentsMissingInit_SkipsHumanAndDotfiles(t *testing.T) {
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, ".lingtai"), 0o755)
+	writeAgentBlueprint(t, proj, "orch", false)
+	writeAgentBlueprint(t, proj, "human", false)      // should skip
+	os.MkdirAll(filepath.Join(proj, ".lingtai", ".tui-asset"), 0o755) // dotfile
+
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 1 || missing[0] != "orch" {
+		t.Errorf("AgentsMissingInit = %v, want [orch]", missing)
+	}
+}
+
+func TestAgentsMissingInit_SkipsAgentsWithoutBlueprint(t *testing.T) {
+	proj := t.TempDir()
+	lingtai := filepath.Join(proj, ".lingtai")
+	os.MkdirAll(lingtai, 0o755)
+	// Dir with neither .agent.json nor init.json — probably cruft.
+	os.MkdirAll(filepath.Join(lingtai, "cruft"), 0o755)
+	writeAgentBlueprint(t, proj, "real", false)
+
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 1 || missing[0] != "real" {
+		t.Errorf("AgentsMissingInit = %v, want [real] (cruft skipped)", missing)
+	}
+}
+
+func TestAgentsMissingInit_MixedScenario(t *testing.T) {
+	// Some agents have init.json (native), others don't (imported).
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, ".lingtai"), 0o755)
+	writeAgentBlueprint(t, proj, "native", true)
+	writeAgentBlueprint(t, proj, "imported1", false)
+	writeAgentBlueprint(t, proj, "imported2", false)
+
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 2 {
+		t.Errorf("len = %d, want 2; got %v", len(missing), missing)
+	}
+	for _, m := range missing {
+		if m == "native" {
+			t.Errorf("'native' should not be in missing list (has init.json)")
+		}
+	}
+}
+
+func TestAgentsMissingInit_EmptyProject(t *testing.T) {
+	proj := t.TempDir()
+	// No .lingtai/ directory at all.
+	missing := AgentsMissingInit(proj)
+	if len(missing) != 0 {
+		t.Errorf("AgentsMissingInit on project without .lingtai/ = %v, want []", missing)
+	}
+}
