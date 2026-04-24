@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,36 +11,68 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// recipeUsesCustomDir returns true for recipe types that store their directory
-// in customDir rather than under the bundled recipes path.
+// recipeUsesCustomDir returns true for recipe types that carry their own
+// on-disk bundle path rather than being resolved by name under the
+// bundled-presets tree. Retained as a UI-level helper for the recipe
+// picker; the apply flow itself treats all recipes uniformly.
 func recipeUsesCustomDir(name string) bool {
 	return name == preset.RecipeCustom || name == preset.RecipeImported || name == preset.RecipeAgora
 }
 
-// applyRecipe writes .prompt (from recipe's greet file with placeholder
-// substitution) and .tui-asset/.recipe (recipe state tracking). Does NOT
-// modify init.json — the caller sets AgentOpts.CommentFile before calling
-// GenerateInitJSONWithOpts.
+// sourceBundleDir returns the on-disk recipe bundle directory for a given
+// picker selection. For named/bundled recipes (greeter, tutorial, etc.)
+// this resolves via the global preset tree; for custom/imported/agora
+// recipes the caller-provided customDir is authoritative.
+func sourceBundleDir(globalDir, recipeName, customDir string) string {
+	if recipeUsesCustomDir(recipeName) {
+		return customDir
+	}
+	return preset.RecipeDir(globalDir, recipeName)
+}
+
+// applyRecipe copies the selected recipe bundle into the project root
+// (materializing <project>/.recipe/ + optional library sibling + optional
+// .lingtai/ sibling from imported networks), then runs preset.ApplyRecipe
+// to materialize the recipe across every agent under .lingtai/<agent>/.
+// The apply phase writes .prompt (greet + substitutions), appends the
+// library path to each agent's init.json when the recipe declares one,
+// and snapshots the applied recipe to .lingtai/.tui-asset/.recipe/ for
+// future change detection.
+//
+// Callers are responsible for having already written the orchestrator's
+// init.json via GenerateInitJSONWithOpts — applyRecipe does not touch
+// init.json fields that the AgentOpts pipeline owns (CommentFile,
+// CovenantFile, ProceduresFile); it only edits manifest.capabilities.library.paths.
 func applyRecipe(
 	lingtaiDir, orchDir, globalDir, humanDir, humanAddr string,
 	recipeName, customDir, lang, soulDelay string,
 ) error {
-	var recipeDir string
-	if recipeUsesCustomDir(recipeName) {
-		recipeDir = customDir
-	} else {
-		recipeDir = preset.RecipeDir(globalDir, recipeName)
+	_ = orchDir // no longer needed — ApplyRecipe iterates all agents under lingtaiDir itself
+
+	projectRoot := filepath.Dir(lingtaiDir)
+	src := sourceBundleDir(globalDir, recipeName, customDir)
+	if src == "" {
+		return fmt.Errorf("applyRecipe: could not resolve source bundle for %q", recipeName)
 	}
 
-	greetPath := preset.ResolveGreetPath(recipeDir, lang)
-	if greetPath != "" {
-		data, err := os.ReadFile(greetPath)
-		if err == nil {
-			prompt := substituteGreetPlaceholders(string(data), humanAddr, humanDir, lang, soulDelay)
-			fs.WritePrompt(orchDir, prompt)
-		}
+	// 1. Copy the bundle into the project so it becomes self-contained.
+	if err := preset.CopyBundle(src, projectRoot); err != nil {
+		return fmt.Errorf("applyRecipe: copy bundle: %w", err)
 	}
 
+	// 2. Apply (write .prompt, update library.paths, snapshot).
+	greetSubst := func(tmpl string) string {
+		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, soulDelay)
+	}
+	if _, err := preset.ApplyRecipe(projectRoot, lang, greetSubst); err != nil {
+		return fmt.Errorf("applyRecipe: apply: %w", err)
+	}
+
+	// 3. Persist the picker selection (type + custom path) for UI
+	// redisplay on subsequent launches. The authoritative "what's
+	// currently applied" is the .tui-asset/.recipe/ snapshot written by
+	// ApplyRecipe; this JSON file is purely UI state so /setup remembers
+	// where the user last imported from.
 	state := preset.RecipeState{Recipe: recipeName}
 	if recipeUsesCustomDir(recipeName) {
 		state.CustomDir = customDir
@@ -48,42 +80,46 @@ func applyRecipe(
 	return preset.SaveRecipeState(lingtaiDir, state)
 }
 
-// resolveRecipeComment returns the comment.md path for a recipe, for the
-// caller to set on AgentOpts.CommentFile.
+// resolveRecipeComment returns the comment.md path for the recipe
+// currently copied into the project (<projectRoot>/.recipe/). Falls back
+// to resolving from the source bundle if the project hasn't had a recipe
+// copied in yet (e.g. /setup resolving paths before CopyBundle runs).
 func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string {
-	var recipeDir string
-	if recipeUsesCustomDir(recipeName) {
-		recipeDir = customDir
-	} else {
-		recipeDir = preset.RecipeDir(globalDir, recipeName)
+	if p := preset.ResolveCommentPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang); p != "" {
+		return p
 	}
-	return preset.ResolveCommentPath(recipeDir, lang)
+	return ""
 }
 
-// resolveRecipeCovenant returns the covenant.md path for a recipe, if the
-// recipe provides one. Returns empty string if the recipe does not override
-// the system-wide covenant.
+// resolveRecipeCovenant returns the covenant.md path. Returns empty string
+// if the recipe does not override the system-wide covenant.
 func resolveRecipeCovenant(globalDir, recipeName, customDir, lang string) string {
-	var recipeDir string
-	if recipeUsesCustomDir(recipeName) {
-		recipeDir = customDir
-	} else {
-		recipeDir = preset.RecipeDir(globalDir, recipeName)
-	}
-	return preset.ResolveCovenantPath(recipeDir, lang)
+	return preset.ResolveCovenantPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang)
 }
 
-// resolveRecipeProcedures returns the procedures.md path for a recipe, if the
-// recipe provides one. Returns empty string if the recipe does not override
-// the system-wide procedures.
+// resolveRecipeProcedures returns the procedures.md path. Returns empty
+// string if the recipe does not override the system-wide procedures.
 func resolveRecipeProcedures(globalDir, recipeName, customDir, lang string) string {
-	var recipeDir string
-	if recipeUsesCustomDir(recipeName) {
-		recipeDir = customDir
-	} else {
-		recipeDir = preset.RecipeDir(globalDir, recipeName)
-	}
-	return preset.ResolveProceduresPath(recipeDir, lang)
+	return preset.ResolveProceduresPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang)
+}
+
+// customOrProjectBundleDir picks the right bundle directory to resolve
+// behavioral-layer files from. For pre-apply calls (e.g. during /setup
+// before CopyBundle runs) we resolve from the source bundle so the opts
+// struct can be populated in one pass. After apply, the init.json has
+// absolute paths baked in so this function is largely redundant but
+// harmless — repeated resolution returns the source path, which by then
+// is also mirrored in the project copy.
+func customOrProjectBundleDir(globalDir, recipeName, customDir string) string {
+	return sourceBundleDir(globalDir, recipeName, customDir)
+}
+
+// SubstituteGreetPlaceholders is the exported wrapper used by main.go on
+// startup when ReconcileRecipe needs to render a greet template without
+// knowing the TUI's internal helper. Delegates to the internal
+// implementation so both call sites share behavior exactly.
+func SubstituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay string) string {
+	return substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay)
 }
 
 // substituteGreetPlaceholders replaces canonical placeholder tokens in a greet
@@ -149,3 +185,4 @@ func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay 
 
 	return out
 }
+
