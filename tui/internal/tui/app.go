@@ -324,6 +324,32 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.orchName = msg.OrchName
 		// Propagate LLM config to all agents in the network
 		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+
+		// Recipe application: when the project carries a .recipe/ bundle
+		// (set by the first-run wizard or imported from a bundle), make
+		// sure every agent's .prompt + library.paths + .tui-asset/.recipe/
+		// snapshot are in sync before the agent process boots. This
+		// catches the rehydration case: RehydrateNetwork just generated
+		// init.json for each imported agent, but .prompt and library
+		// registration haven't run yet for this launch. The startup
+		// reconciliation in main.go covers subsequent launches, but the
+		// very first launch after rehydration needs this hook too.
+		if preset.RecipeNeedsApply(a.projectDir) {
+			humanDir := filepath.Join(a.projectDir, ".lingtai", "human")
+			haddr := "human"
+			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
+				haddr = humanNode.Address
+			}
+			lang := a.tuiConfig.Language
+			if lang == "" {
+				lang = "en"
+			}
+			subst := func(tmpl string) string {
+				return SubstituteGreetPlaceholders(tmpl, haddr, humanDir, lang, "120")
+			}
+			_, _ = preset.ApplyRecipe(a.projectDir, lang, subst)
+		}
+
 		// Launch the agent
 		var launchErr string
 		if a.lingtaiCmd != "" {

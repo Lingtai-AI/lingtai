@@ -3451,27 +3451,27 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 	p := m.currentPreset()
 	dirName := filepath.Base(m.setupOrchDir)
 
-	// Resolve prompt file paths from current recipe (so init.json stays consistent)
+	// Resolve prompt file paths from the project's staged .recipe/ so
+	// init.json stays consistent with whatever the user picked last. All
+	// four behavioral layers are optional — an empty return means "skip,
+	// kernel defaults take over" (for covenant/procedures) or "no file"
+	// (for comment/greet).
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
 		lang = "en"
 	}
-	state, _ := preset.LoadRecipeState(m.baseDir)
-	if state.Recipe != "" {
-		customDir := state.CustomDir
-		if commentPath := resolveRecipeComment(m.globalDir, state.Recipe, customDir, lang); commentPath != "" {
-			m.pendingAgentOpts.CommentFile = commentPath
-		}
-		if covenantPath := resolveRecipeCovenant(m.globalDir, state.Recipe, customDir, lang); covenantPath != "" {
-			m.pendingAgentOpts.CovenantFile = covenantPath
-		}
-		if proceduresPath := resolveRecipeProcedures(m.globalDir, state.Recipe, customDir, lang); proceduresPath != "" {
-			m.pendingAgentOpts.ProceduresFile = proceduresPath
-		}
+	projectRoot := filepath.Dir(m.baseDir)
+	if commentPath := resolveRecipeComment(projectRoot, lang); commentPath != "" {
+		m.pendingAgentOpts.CommentFile = commentPath
+	}
+	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
+		m.pendingAgentOpts.CovenantFile = covenantPath
+	}
+	if proceduresPath := resolveRecipeProcedures(projectRoot, lang); proceduresPath != "" {
+		m.pendingAgentOpts.ProceduresFile = proceduresPath
 	}
 
-	projectPath := filepath.Dir(m.baseDir)
-	m.pendingAgentOpts.BriefFile = fs.BriefFilePath(m.globalDir, projectPath)
+	m.pendingAgentOpts.BriefFile = fs.BriefFilePath(m.globalDir, projectRoot)
 
 	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, m.pendingAgentOpts); err != nil {
 		m.message = i18n.TF("firstrun.error", err)
@@ -3483,40 +3483,63 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 
 // performRecipeSave executes the full save for the chosen recipe and the
 // previously-stashed AgentOpts/dirName.
+//
+// Order of operations:
+//  1. Stage the selected bundle into the project root so
+//     <project>/.recipe/ becomes the source of truth.
+//  2. Resolve comment/covenant/procedures paths from that staged copy
+//     (all optional — empty means the layer is absent and the kernel's
+//     default applies).
+//  3. Write init.json referencing those project-local paths so the
+//     project is fully self-contained (no dangling references to
+//     ~/.lingtai-tui/ or the user's download folder).
+//  4. Run preset.ApplyRecipe to write .prompt (skipped when greet
+//     absent), append library paths, and snapshot the applied recipe.
 func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
 		lang = "en"
 	}
 
-	// Resolve comment, covenant, and procedures paths from recipe
-	commentPath := resolveRecipeComment(m.globalDir, recipeName, customDir, lang)
-	covenantPath := resolveRecipeCovenant(m.globalDir, recipeName, customDir, lang)
-	proceduresPath := resolveRecipeProcedures(m.globalDir, recipeName, customDir, lang)
+	// 1. Stage the bundle into the project root.
+	projectRoot, err := copyRecipeBundle(m.baseDir, m.globalDir, recipeName, customDir)
+	if err != nil {
+		m.message = i18n.TF("firstrun.error", err)
+		m.step = stepAgentNameDir
+		return m, nil
+	}
+
+	// 2. Resolve behavioral-layer paths from the project copy. All four
+	// layers are optional in a recipe. Empty return = layer is absent:
+	//   - comment empty  → CommentFile stays unset (no comment file)
+	//   - covenant empty → CovenantFile stays unset (kernel default)
+	//   - procedures empty → ProceduresFile stays unset (kernel default)
+	//   - greet empty    → ApplyRecipe skips .prompt entirely
 	opts := m.pendingAgentOpts
-	opts.CommentFile = commentPath
-	if covenantPath != "" {
+	if commentPath := resolveRecipeComment(projectRoot, lang); commentPath != "" {
+		opts.CommentFile = commentPath
+	}
+	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
 		opts.CovenantFile = covenantPath
 	}
-	if proceduresPath != "" {
+	if proceduresPath := resolveRecipeProcedures(projectRoot, lang); proceduresPath != "" {
 		opts.ProceduresFile = proceduresPath
 	}
 
 	// Set brief file path for admin agents — the secretary maintains this file
-	projectPath := filepath.Dir(m.baseDir)
-	opts.BriefFile = fs.BriefFilePath(m.globalDir, projectPath)
+	opts.BriefFile = fs.BriefFilePath(m.globalDir, projectRoot)
 
 	p := m.presets[m.cursor]
 	dirName := m.pendingDirName
 
-	// Write init.json
+	// 3. Write init.json with project-local paths.
 	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, opts); err != nil {
 		m.message = i18n.TF("firstrun.error", err)
 		m.step = stepAgentNameDir
 		return m, nil
 	}
 
-	// Apply recipe: write .prompt + .tui-asset/.recipe
+	// 4. Apply: write .prompt, append library.paths, snapshot.
 	orchDir := filepath.Join(m.baseDir, dirName)
 	humanDir := filepath.Join(m.baseDir, "human")
 	humanAddr := "human"

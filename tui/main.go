@@ -271,6 +271,38 @@ func main() {
 			os.Exit(1)
 		}
 		tui.ExportCommandsJSON(globalDir)
+
+		// Recipe reconciliation: if the project carries a recipe bundle at
+		// its root (.recipe/) and the contents differ from the last-applied
+		// snapshot under .lingtai/.tui-asset/.recipe/, re-apply so each
+		// agent's .prompt, library.paths, and snapshot stay in sync with
+		// the currently-selected recipe. No-op when .recipe/ is absent
+		// (pre-redesign projects, or projects that haven't gone through
+		// /setup yet) or when the snapshot already matches.
+		//
+		// Greet substitution intentionally uses the startup humanDir/addr/
+		// lang/soulDelay defaults; a proper re-apply via /setup gives the
+		// user full control over those fields. This path is just the "you
+		// edited .recipe/<layer>/<layer>.md by hand, we'll redo the
+		// .prompt" convenience.
+		projectRoot := filepath.Dir(lingtaiDir)
+		if preset.RecipeNeedsApply(projectRoot) {
+			humanDir := filepath.Join(lingtaiDir, "human")
+			humanAddr := "human"
+			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
+				humanAddr = humanNode.Address
+			}
+			lang := tuiCfg.Language
+			if lang == "" {
+				lang = "en"
+			}
+			subst := func(tmpl string) string {
+				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, "120")
+			}
+			if _, err := preset.ApplyRecipe(projectRoot, lang, subst); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: recipe reconcile failed: %v\n", err)
+			}
+		}
 		// Resolve human location in background (ipinfo.io, cached 1h)
 		humanDir := filepath.Join(lingtaiDir, "human")
 		go fs.UpdateHumanLocation(humanDir)
