@@ -65,6 +65,18 @@ func CopyBundle(srcBundleRoot, projectRoot string) error {
 		return fmt.Errorf("CopyBundle: source bundle invalid: %w", err)
 	}
 
+	// When the source bundle IS the project root (user ran `lingtai-tui` inside
+	// a cloned recipe repo — common with agora recipes), the bundle is already
+	// in place and there is nothing to copy. Doing a RemoveAll+copyTree here
+	// would wipe the bundle before reading it, nuking the recipe. Detect and
+	// no-op instead. We still want LoadRecipeInfo above to succeed as a sanity
+	// check, so the bundle is validated even when we don't copy.
+	srcAbs, srcErr := filepath.Abs(srcBundleRoot)
+	dstAbs, dstErr := filepath.Abs(projectRoot)
+	if srcErr == nil && dstErr == nil && srcAbs == dstAbs {
+		return nil
+	}
+
 	// 1. .recipe/ — replace wholesale.
 	srcRecipe := filepath.Join(srcBundleRoot, RecipeDotDir)
 	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)

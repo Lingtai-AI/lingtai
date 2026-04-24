@@ -181,16 +181,40 @@ Overrides the system-wide procedures (`~/.lingtai-tui/procedures/<lang>/procedur
 
 When `recipe.json#library_name` is a non-null string, the bundle must contain a sibling folder with that exact name. The library is a framework-agnostic skill bundle — any agent framework that reads `SKILL.md` files (LingTai, Claude Skill, Cursor) can consume it.
 
+**Critical layout rule**: every skill lives in its **own subdirectory** under the library folder, with `SKILL.md` at the subdirectory root. A `SKILL.md` placed directly at the library-folder root is **NOT** registered as a skill — the scanner only sees children that are themselves directories containing `SKILL.md`.
+
 ```
 <bundle>/
 ├── .recipe/recipe.json              # library_name: "velli"
-└── velli/                           # ← sibling library folder
-    ├── SKILL.md                     # optional library-entry skill
-    ├── argument-switchbacks/
+└── velli/                           # ← library folder (NOT itself a skill)
+    ├── argument-switchbacks/        # ← each skill in its own subdir
     │   └── SKILL.md
     ├── profile/
-    │   └── SKILL.md
-    └── velli.bib                    # any non-skill content is fine
+    │   ├── SKILL.md
+    │   └── biography.md             # skill-internal files are fine
+    └── velli.bib                    # non-skill content is fine at root
+```
+
+If your recipe has exactly **one** skill and you're tempted to flatten it ("the library IS the skill"), resist the urge and use the nested layout:
+
+```
+<bundle>/
+├── .recipe/recipe.json              # library_name: "impersonate-meta"
+└── impersonate-meta/                # library folder
+    └── impersonate-meta/            # ← skill folder (same name, one level deeper)
+        ├── SKILL.md
+        ├── primers/
+        └── ...
+```
+
+**Wrong** — scanner will not register this skill and will mark subdirs as corrupted:
+
+```
+<bundle>/
+└── impersonate-meta/                # library folder
+    ├── SKILL.md                     # ← IGNORED (at library root, not in skill subdir)
+    ├── primers/                     # ← reported as "not a skill (no SKILL.md)"
+    └── scripts/                     # ← reported as "not a skill (no SKILL.md)"
 ```
 
 ### How the TUI registers libraries

@@ -32,12 +32,15 @@ def _make_valid_bundle(root: Path, *, library_name: str | None = None) -> None:
         json.dumps(manifest), encoding="utf-8"
     )
     (greet_dir / "greet.md").write_text("Hello from the test recipe.", encoding="utf-8")
-    # Create library sibling when declared.
+    # Create library sibling when declared. Canonical layout places each
+    # skill in its own subdirectory: <library>/<skill>/SKILL.md. A SKILL.md
+    # at the library root is ignored by the runtime scanner.
     if library_name:
         lib = root / library_name
-        lib.mkdir()
-        (lib / "SKILL.md").write_text(
-            "---\nname: lib\ndescription: d\nversion: 1.0.0\n---\n",
+        skill_dir = lib / "sample-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: sample-skill\ndescription: d\nversion: 1.0.0\n---\n",
             encoding="utf-8",
         )
 
@@ -219,8 +222,9 @@ def test_library_sibling_missing_when_declared(tmp_path: Path) -> None:
 
 def test_library_sibling_empty_warns(tmp_path: Path) -> None:
     _make_valid_bundle(tmp_path, library_name="my-lib")
-    # Remove the SKILL.md so the library is empty.
-    (tmp_path / "my-lib" / "SKILL.md").unlink()
+    # Remove the sample skill so the library is empty.
+    import shutil
+    shutil.rmtree(tmp_path / "my-lib" / "sample-skill")
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout  # warnings don't fail
     assert "no SKILL.md" in result.stdout
@@ -348,4 +352,86 @@ def test_network_snapshot_skips_dir_without_blueprint(tmp_path: Path) -> None:
     notagent = tmp_path / ".lingtai" / ".tui-asset"
     notagent.mkdir(parents=True)
     (notagent / "init.json").write_text("{}", encoding="utf-8")
+    _assert_ok(_run(tmp_path))
+
+
+# --- library layout tests --------------------------------------------------
+
+
+def test_flat_library_layout_errors(tmp_path: Path) -> None:
+    """Library with SKILL.md at its root but no skill subdirs is rejected.
+
+    Runtime scanner only registers <library>/<skill>/SKILL.md. A flat
+    layout silently produces zero skills, so the validator must catch it.
+    """
+    recipe_dir = tmp_path / ".recipe"
+    recipe_dir.mkdir()
+    manifest = {
+        "id": "test-recipe",
+        "name": "Test Recipe",
+        "description": "A test recipe",
+        "version": "1.0.0",
+        "library_name": "flat-lib",
+    }
+    (recipe_dir / "recipe.json").write_text(json.dumps(manifest), encoding="utf-8")
+    # Flat layout: SKILL.md at library root, no skill subdirs.
+    lib = tmp_path / "flat-lib"
+    lib.mkdir()
+    (lib / "SKILL.md").write_text(
+        "---\nname: flat-lib\ndescription: d\nversion: 1.0.0\n---\n",
+        encoding="utf-8",
+    )
+    (lib / "extra.md").write_text("stray file", encoding="utf-8")
+    _assert_error(_run(tmp_path), "root", "subdirectories")
+
+
+def test_nested_library_with_root_skill_warns(tmp_path: Path) -> None:
+    """Library with BOTH root SKILL.md AND skill subdirs produces a warning,
+
+    not an error (the subdirs will register; the root SKILL.md won't).
+    """
+    recipe_dir = tmp_path / ".recipe"
+    recipe_dir.mkdir()
+    manifest = {
+        "id": "test-recipe",
+        "name": "Test Recipe",
+        "description": "A test recipe",
+        "version": "1.0.0",
+        "library_name": "mixed-lib",
+    }
+    (recipe_dir / "recipe.json").write_text(json.dumps(manifest), encoding="utf-8")
+    lib = tmp_path / "mixed-lib"
+    (lib / "real-skill").mkdir(parents=True)
+    (lib / "real-skill" / "SKILL.md").write_text(
+        "---\nname: real-skill\ndescription: d\nversion: 1.0.0\n---\n",
+        encoding="utf-8",
+    )
+    # Stray root SKILL.md that would be ignored at runtime.
+    (lib / "SKILL.md").write_text(
+        "---\nname: stray\ndescription: d\nversion: 1.0.0\n---\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ignored by the runtime scanner" in result.stdout
+
+
+def test_single_skill_nested_layout_passes(tmp_path: Path) -> None:
+    """The canonical single-skill nested layout <library>/<library>/SKILL.md passes."""
+    recipe_dir = tmp_path / ".recipe"
+    recipe_dir.mkdir()
+    manifest = {
+        "id": "test-recipe",
+        "name": "Test Recipe",
+        "description": "A test recipe",
+        "version": "1.0.0",
+        "library_name": "my-skill",
+    }
+    (recipe_dir / "recipe.json").write_text(json.dumps(manifest), encoding="utf-8")
+    skill = tmp_path / "my-skill" / "my-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: d\nversion: 1.0.0\n---\n",
+        encoding="utf-8",
+    )
     _assert_ok(_run(tmp_path))

@@ -7,23 +7,31 @@ import (
 	"path/filepath"
 )
 
-// RecipeState is the content of .lingtai/.tui-asset/.recipe — a TUI-only
-// project-level file tracking the currently selected launch recipe.
+// RecipeState is the content of .lingtai/.tui-asset/recipe-state.json — a
+// TUI-only project-level file tracking the currently selected launch recipe.
 // The Python kernel ignores this file.
+//
+// Historically this was stored at .tui-asset/.recipe, but that path collides
+// with the applied-recipe directory snapshot (recipe_apply.go's
+// AppliedRecipeSubpath). Migration m023 moves legacy .recipe files to
+// recipe-state.json so the two no longer share a name. See also:
+// recipe_apply.go.
 type RecipeState struct {
 	Recipe    string `json:"recipe"`               // one of the seven recipe names (adaptive, greeter, plain, tutorial, custom, imported, agora)
 	CustomDir string `json:"custom_dir,omitempty"` // set when Recipe == RecipeCustom, RecipeImported, or RecipeAgora
 }
 
-// recipeStatePath returns the absolute path to .lingtai/.tui-asset/.recipe.
+// recipeStatePath returns the absolute path to .lingtai/.tui-asset/recipe-state.json.
+// The previous name (.tui-asset/.recipe) collided with the applied-recipe
+// directory snapshot under the same path — migration m023 renames it.
 func recipeStatePath(lingtaiDir string) string {
-	return filepath.Join(lingtaiDir, ".tui-asset", ".recipe")
+	return filepath.Join(lingtaiDir, ".tui-asset", "recipe-state.json")
 }
 
-// LoadRecipeState reads .lingtai/.tui-asset/.recipe. Returns a zero-value
-// RecipeState and nil error if the file does not exist — this is the expected
-// state for legacy projects and freshly-cleaned (post-nirvana) projects.
-// Returns an error only on actual I/O or JSON parse failure.
+// LoadRecipeState reads .lingtai/.tui-asset/recipe-state.json. Returns a
+// zero-value RecipeState and nil error if the file does not exist — this is
+// the expected state for legacy projects and freshly-cleaned (post-nirvana)
+// projects. Returns an error only on actual I/O or JSON parse failure.
 func LoadRecipeState(lingtaiDir string) (RecipeState, error) {
 	var state RecipeState
 	data, err := os.ReadFile(recipeStatePath(lingtaiDir))
@@ -39,8 +47,8 @@ func LoadRecipeState(lingtaiDir string) (RecipeState, error) {
 	return state, nil
 }
 
-// SaveRecipeState atomically writes .lingtai/.tui-asset/.recipe. Creates the
-// .tui-asset/ directory if it does not already exist.
+// SaveRecipeState atomically writes .lingtai/.tui-asset/recipe-state.json.
+// Creates the .tui-asset/ directory if it does not already exist.
 func SaveRecipeState(lingtaiDir string, state RecipeState) error {
 	dir := filepath.Join(lingtaiDir, ".tui-asset")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

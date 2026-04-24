@@ -182,7 +182,7 @@ Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture 
 
 ### 2d. Library sibling (optional)
 
-If the recipe ships a library, copy the skills you want to include into `$BUNDLE/<library_name>/`:
+If the recipe ships a library, copy the skills you want to include into `$BUNDLE/<library_name>/`. **Every skill must live in its own subdirectory** — `SKILL.md` at the library-folder root is ignored by the scanner.
 
 ```bash
 # Copy from the project's own library (if the project already uses one):
@@ -196,6 +196,17 @@ cp -R .lingtai/.library_shared/<skill-a> $BUNDLE/<library_name>/<skill-a>
 ```
 
 Each skill directory must contain a valid `SKILL.md` (the validator does not walk skills deeply; it just warns if the library contains zero `SKILL.md` files anywhere).
+
+**Single-skill libraries**: if you're shipping exactly one skill and the library name matches the skill name, still use the nested layout:
+
+```
+$BUNDLE/<library_name>/             # library folder
+└── <library_name>/                 # skill folder (same name — this IS intentional)
+    ├── SKILL.md
+    └── ...
+```
+
+Do NOT flatten this to `$BUNDLE/<library_name>/SKILL.md` — the scanner only registers skills that are direct-child subdirectories of the library folder. A flat layout silently produces zero registered skills. (This mistake was observed on real bundles during export; prefer the nested layout even when it feels redundant.)
 
 **Skills are monolingual.** Libraries do not have `<lang>/SKILL.md` variants — write skills in one language. If you want a bilingual skill, write both languages in the same `SKILL.md`.
 

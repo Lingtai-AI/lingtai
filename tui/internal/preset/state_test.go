@@ -73,9 +73,9 @@ func TestSaveRecipeState_CreatesTuiAssetDir(t *testing.T) {
 	if _, err := os.Stat(tuiAsset); err != nil {
 		t.Errorf(".tui-asset/ not created: %v", err)
 	}
-	// .recipe file inside
-	if _, err := os.Stat(filepath.Join(tuiAsset, ".recipe")); err != nil {
-		t.Errorf(".recipe file not created: %v", err)
+	// recipe-state.json file inside
+	if _, err := os.Stat(filepath.Join(tuiAsset, "recipe-state.json")); err != nil {
+		t.Errorf("recipe-state.json file not created: %v", err)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestLoadRecipeState_MalformedJSON(t *testing.T) {
 	lingtaiDir := t.TempDir()
 	tuiAsset := filepath.Join(lingtaiDir, ".tui-asset")
 	os.MkdirAll(tuiAsset, 0o755)
-	os.WriteFile(filepath.Join(tuiAsset, ".recipe"), []byte("{not json"), 0o644)
+	os.WriteFile(filepath.Join(tuiAsset, "recipe-state.json"), []byte("{not json"), 0o644)
 
 	_, err := LoadRecipeState(lingtaiDir)
 	if err == nil {

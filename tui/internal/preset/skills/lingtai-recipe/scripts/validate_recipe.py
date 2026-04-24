@@ -256,7 +256,15 @@ def _check_library_sibling(
     errors: list[str],
     warnings: list[str],
 ) -> None:
-    """If recipe.json declares library_name, validate the sibling library folder."""
+    """If recipe.json declares library_name, validate the sibling library folder.
+
+    Enforces the canonical layout ``<lib>/<skill>/SKILL.md``. The scanner in
+    ``lingtai.core.library`` only registers direct-child subdirectories of the
+    library folder as skills — a ``SKILL.md`` at the library root is ignored.
+    This validator catches the common mistake of flattening a single-skill
+    library to ``<lib>/SKILL.md`` + sibling content files, which silently
+    results in zero registered skills at runtime.
+    """
     lib_name = manifest.get("library_name")
     if not isinstance(lib_name, str) or not lib_name.strip():
         return  # null or missing — no library, nothing to validate
@@ -267,12 +275,51 @@ def _check_library_sibling(
             f"(recipe.json declares `library_name` = {lib_name!r})"
         )
         return
+
     # Must contain at least one SKILL.md somewhere — empty library is
-    # probably a mistake. The walk is shallow-plus-one-level to catch both
-    # <lib>/SKILL.md and <lib>/<skill>/SKILL.md layouts.
+    # probably a mistake.
     if not any(lib_dir.rglob("SKILL.md")):
         warnings.append(
             f"{lib_dir}: contains no SKILL.md files — is this library populated?"
+        )
+        return
+
+    # Detect the flat-layout mistake: SKILL.md sits at the library root
+    # instead of in a skill subdirectory. Runtime scanner will not register
+    # this as a skill.
+    root_skill = lib_dir / "SKILL.md"
+    has_root_skill = root_skill.is_file()
+
+    # Also collect valid skill subdirs (direct children that contain SKILL.md).
+    skill_subdirs = [
+        child for child in lib_dir.iterdir()
+        if child.is_dir()
+        and not child.name.startswith(".")
+        and (child / "SKILL.md").is_file()
+    ]
+
+    if has_root_skill and not skill_subdirs:
+        errors.append(
+            f"{lib_dir}/SKILL.md: library has SKILL.md at its root but no skill "
+            f"subdirectories. The runtime scanner only registers "
+            f"<library>/<skill>/SKILL.md — a root-level SKILL.md is ignored. "
+            f"Wrap the skill files into a subdirectory: "
+            f"mkdir {lib_dir}/{lib_name} && mv {lib_dir}/* {lib_dir}/{lib_name}/"
+        )
+        return
+
+    if has_root_skill and skill_subdirs:
+        warnings.append(
+            f"{lib_dir}/SKILL.md: root-level SKILL.md will be ignored by the "
+            f"runtime scanner (only subdirectory skills are registered). "
+            f"Consider removing it or moving its content into a skill subdir."
+        )
+
+    if not skill_subdirs:
+        warnings.append(
+            f"{lib_dir}: no skill subdirectories with SKILL.md found. "
+            f"The expected layout is <library>/<skill-name>/SKILL.md; content "
+            f"placed elsewhere will not be registered at runtime."
         )
 
 
