@@ -6,6 +6,8 @@ version: 3.0.0
 
 # lingtai-recipe: Recipes, Exports, and Everything Around Them
 
+> **Bundle root convention**: The bundle root is the directory that **contains** `.recipe/` at its top level (alongside the library folder). When pointing the TUI or any tool at a recipe, pass **this directory**, not `.recipe/` itself and not a parent of it. For recipes published via `lingtai-recipe` skill, this is `$HOME/lingtai-agora/recipes/<id>/`.
+
 A **recipe bundle** is a directory with three possible siblings at its root:
 
 - `.recipe/` (required) — the LingTai-facing behavioral layer: `recipe.json` manifest, optional `greet/`, `comment/`, `covenant/`, `procedures/` layer dirs with locale variants.
