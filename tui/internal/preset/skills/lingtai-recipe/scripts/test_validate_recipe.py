@@ -1,4 +1,4 @@
-"""Tests for validate_recipe.py — the canonical .lingtai-recipe/ validator."""
+"""Tests for validate_recipe.py — the canonical recipe-bundle validator."""
 import json
 import subprocess
 import sys
@@ -9,232 +9,343 @@ import pytest
 SCRIPT = Path(__file__).parent / "validate_recipe.py"
 
 
-def _make_valid_recipe(root: Path) -> None:
-    """Populate `root` with the minimum valid recipe payload."""
-    (root / "recipe.json").write_text(
-        json.dumps({"name": "Test Recipe", "description": "A test recipe"}),
-        encoding="utf-8",
-    )
-    recipe_dir = root / ".lingtai-recipe" / "en"
-    recipe_dir.mkdir(parents=True)
-    (recipe_dir / "greet.md").write_text("Hello from the test recipe.", encoding="utf-8")
-    (recipe_dir / "comment.md").write_text("Be concise.", encoding="utf-8")
+# --- helpers ---------------------------------------------------------------
 
 
-def test_valid_recipe_passes(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
+def _make_valid_bundle(root: Path, *, library_name: str | None = None) -> None:
+    """Populate `root` with the minimum valid bundle payload.
+
+    Minimum = .recipe/recipe.json + .recipe/greet/greet.md. All other
+    behavioral layers are optional.
+    """
+    recipe_dir = root / ".recipe"
+    greet_dir = recipe_dir / "greet"
+    greet_dir.mkdir(parents=True)
+    manifest = {
+        "id": "test-recipe",
+        "name": "Test Recipe",
+        "description": "A test recipe",
+        "version": "1.0.0",
+        "library_name": library_name,
+    }
+    (recipe_dir / "recipe.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
     )
+    (greet_dir / "greet.md").write_text("Hello from the test recipe.", encoding="utf-8")
+    # Create library sibling when declared.
+    if library_name:
+        lib = root / library_name
+        lib.mkdir()
+        (lib / "SKILL.md").write_text(
+            "---\nname: lib\ndescription: d\nversion: 1.0.0\n---\n",
+            encoding="utf-8",
+        )
+
+
+def _run(root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), str(root)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _assert_error(result, *needles: str) -> None:
+    assert result.returncode == 1, result.stdout + result.stderr
+    for n in needles:
+        assert n in result.stdout, f"expected {n!r} in:\n{result.stdout}"
+
+
+def _assert_ok(result) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_missing_recipe_json(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / "recipe.json").unlink()
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
+# --- happy-path tests ------------------------------------------------------
+
+
+def test_minimum_valid_bundle_passes(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    _assert_ok(_run(tmp_path))
+
+
+def test_valid_bundle_with_library_passes(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path, library_name="my-lib")
+    _assert_ok(_run(tmp_path))
+
+
+def test_bundle_without_any_behavioral_layer_passes(tmp_path: Path) -> None:
+    """All four layers are optional — recipe.json alone is enough."""
+    recipe_dir = tmp_path / ".recipe"
+    recipe_dir.mkdir()
+    (recipe_dir / "recipe.json").write_text(
+        json.dumps({"id": "t", "name": "T", "description": "d"}),
+        encoding="utf-8",
     )
-    assert result.returncode == 1
-    assert "recipe.json" in result.stdout
-    assert "missing" in result.stdout
+    _assert_ok(_run(tmp_path))
+
+
+def test_all_four_layers_populated_passes(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    for layer in ("comment", "covenant", "procedures"):
+        (tmp_path / ".recipe" / layer).mkdir()
+        (tmp_path / ".recipe" / layer / f"{layer}.md").write_text(
+            f"static {layer} content", encoding="utf-8"
+        )
+    _assert_ok(_run(tmp_path))
+
+
+def test_locale_variants_pass(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    # locale recipe.json at .recipe/zh/recipe.json
+    (tmp_path / ".recipe" / "zh").mkdir()
+    (tmp_path / ".recipe" / "zh" / "recipe.json").write_text(
+        json.dumps({"name": "测试", "description": "测试配方"}),
+        encoding="utf-8",
+    )
+    # locale greet at .recipe/greet/zh/greet.md
+    (tmp_path / ".recipe" / "greet" / "zh").mkdir()
+    (tmp_path / ".recipe" / "greet" / "zh" / "greet.md").write_text(
+        "你好。", encoding="utf-8"
+    )
+    _assert_ok(_run(tmp_path))
+
+
+# --- recipe.json errors ----------------------------------------------------
+
+
+def test_missing_recipe_dot_dir(tmp_path: Path) -> None:
+    _assert_error(_run(tmp_path), ".recipe", "missing")
+
+
+def test_missing_recipe_json(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").unlink()
+    _assert_error(_run(tmp_path), "recipe.json", "missing")
 
 
 def test_recipe_json_invalid_json(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / "recipe.json").write_text("{not valid", encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text("{not valid", encoding="utf-8")
+    _assert_error(_run(tmp_path), "invalid JSON")
+
+
+def test_recipe_json_not_object(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text("[1,2,3]", encoding="utf-8")
+    _assert_error(_run(tmp_path), "JSON object")
+
+
+def test_recipe_json_missing_id(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps({"name": "N", "description": "D"}), encoding="utf-8"
     )
-    assert result.returncode == 1
-    assert "invalid JSON" in result.stdout
+    _assert_error(_run(tmp_path), "`id`", "non-empty")
 
 
-def test_recipe_json_not_an_object(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / "recipe.json").write_text(
-        json.dumps(["not", "an", "object"]), encoding="utf-8"
+def test_recipe_json_missing_name(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps({"id": "t", "description": "D"}), encoding="utf-8"
     )
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "recipe.json" in result.stdout
-    assert "JSON object" in result.stdout
+    _assert_error(_run(tmp_path), "`name`", "non-empty")
 
 
-def test_recipe_json_missing_fields(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / "recipe.json").write_text(json.dumps({"name": ""}), encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "name" in result.stdout
-    assert "description" in result.stdout
-
-
-def test_missing_recipe_dir(tmp_path: Path) -> None:
-    (tmp_path / "recipe.json").write_text(
-        json.dumps({"name": "X", "description": "Y"}), encoding="utf-8"
-    )
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert ".lingtai-recipe" in result.stdout
-
-
-def test_missing_greet_md(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / ".lingtai-recipe" / "en" / "greet.md").unlink()
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "greet.md" in result.stdout
-
-
-def test_missing_comment_md(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / ".lingtai-recipe" / "en" / "comment.md").unlink()
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "comment.md" in result.stdout
-
-
-def test_root_level_component_accepted(tmp_path: Path) -> None:
-    """greet.md and comment.md at .lingtai-recipe/ root (no lang subdir) is valid.
-
-    Regression guard: this layout must produce neither errors nor warnings.
-    """
-    (tmp_path / "recipe.json").write_text(
-        json.dumps({"name": "X", "description": "Y"}), encoding="utf-8"
-    )
-    recipe_dir = tmp_path / ".lingtai-recipe"
-    recipe_dir.mkdir()
-    (recipe_dir / "greet.md").write_text("hi", encoding="utf-8")
-    (recipe_dir / "comment.md").write_text("be kind", encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stdout
-    assert "WARN" not in result.stdout, result.stdout
-
-
-def test_forbidden_placeholder_in_comment(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / ".lingtai-recipe" / "en" / "comment.md").write_text(
-        "Current time: {{time}}", encoding="utf-8"
-    )
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "{{time}}" in result.stdout
-    assert "comment.md" in result.stdout
-
-
-def test_unknown_lang_is_warning(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    odd = tmp_path / ".lingtai-recipe" / "fr"
-    odd.mkdir()
-    (odd / "greet.md").write_text("bonjour", encoding="utf-8")
-    (odd / "comment.md").write_text("soyez bref", encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stdout
-    assert "WARN" in result.stdout
-    assert "fr" in result.stdout
-    assert "unknown lang code" in result.stdout
-
-
-def test_stray_file_is_warning(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / ".lingtai-recipe" / "random.txt").write_text("x", encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0
-    assert "WARN" in result.stdout
-    assert "random.txt" in result.stdout
-
-
-def test_skill_missing_frontmatter_is_error(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    skill_dir = tmp_path / ".lingtai-recipe" / "skills" / "broken"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "frontmatter" in result.stdout
-
-
-def test_skill_frontmatter_missing_version(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    skill_dir = tmp_path / ".lingtai-recipe" / "skills" / "halfbaked"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: halfbaked\ndescription: missing version field\n---\n\nbody",
+def test_recipe_json_empty_description(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps({"id": "t", "name": "N", "description": "   "}),
         encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "version" in result.stdout
+    _assert_error(_run(tmp_path), "`description`", "non-empty")
 
 
-def test_skill_missing_skill_md(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    skill_dir = tmp_path / ".lingtai-recipe" / "skills" / "empty"
-    skill_dir.mkdir(parents=True)
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
+def test_recipe_json_library_name_with_slash_rejected(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps(
+            {"id": "t", "name": "N", "description": "d", "library_name": "sub/dir"}
+        ),
+        encoding="utf-8",
     )
-    assert result.returncode == 1
-    assert "SKILL.md" in result.stdout
+    _assert_error(_run(tmp_path), "simple folder name, not a path")
 
 
-def test_system_prefix_in_greet_is_warning(tmp_path: Path) -> None:
-    _make_valid_recipe(tmp_path)
-    (tmp_path / ".lingtai-recipe" / "en" / "greet.md").write_text(
-        "[system] do not say this", encoding="utf-8"
+def test_recipe_json_library_name_null_ok(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    # explicit null library_name is fine
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps(
+            {"id": "t", "name": "N", "description": "d", "library_name": None}
+        ),
+        encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path)],
-        capture_output=True, text=True,
+    _assert_ok(_run(tmp_path))
+
+
+def test_recipe_json_version_invalid_rejected(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "recipe.json").write_text(
+        json.dumps(
+            {"id": "t", "name": "N", "description": "d", "version": ""}
+        ),
+        encoding="utf-8",
     )
+    _assert_error(_run(tmp_path), "`version`")
+
+
+# --- library sibling errors ------------------------------------------------
+
+
+def test_library_sibling_missing_when_declared(tmp_path: Path) -> None:
+    """library_name non-null but folder absent → error."""
+    recipe_dir = tmp_path / ".recipe"
+    (recipe_dir / "greet").mkdir(parents=True)
+    (recipe_dir / "recipe.json").write_text(
+        json.dumps(
+            {
+                "id": "t",
+                "name": "N",
+                "description": "d",
+                "library_name": "ghost-lib",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (recipe_dir / "greet" / "greet.md").write_text("hi", encoding="utf-8")
+    # NOTE: tmp_path / "ghost-lib" deliberately not created
+    _assert_error(_run(tmp_path), "ghost-lib", "missing")
+
+
+def test_library_sibling_empty_warns(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path, library_name="my-lib")
+    # Remove the SKILL.md so the library is empty.
+    (tmp_path / "my-lib" / "SKILL.md").unlink()
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout  # warnings don't fail
+    assert "no SKILL.md" in result.stdout
+
+
+# --- behavioral-layer errors -----------------------------------------------
+
+
+def test_empty_layer_dir_errors(tmp_path: Path) -> None:
+    """greet/ dir exists but contains neither greet.md nor any lang variant."""
+    _make_valid_bundle(tmp_path)
+    # blow away greet.md, leaving the dir empty
+    (tmp_path / ".recipe" / "greet" / "greet.md").unlink()
+    _assert_error(_run(tmp_path), "greet.md", "neither")
+
+
+def test_placeholder_in_comment_rejected(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "comment").mkdir()
+    (tmp_path / ".recipe" / "comment" / "comment.md").write_text(
+        "time is {{time}}", encoding="utf-8"
+    )
+    _assert_error(_run(tmp_path), "forbidden placeholder", "{{time}}")
+
+
+def test_placeholder_in_covenant_rejected(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "covenant").mkdir()
+    (tmp_path / ".recipe" / "covenant" / "covenant.md").write_text(
+        "you are {{addr}}", encoding="utf-8"
+    )
+    _assert_error(_run(tmp_path), "forbidden placeholder", "{{addr}}")
+
+
+def test_placeholder_in_greet_ok(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "greet" / "greet.md").write_text(
+        "welcome, it is {{time}} at {{location}}. commands: {{commands}}",
+        encoding="utf-8",
+    )
+    _assert_ok(_run(tmp_path))
+
+
+def test_greet_system_prefix_warns(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "greet" / "greet.md").write_text(
+        "[system] this is a system message",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0  # warnings don't fail
+    assert "[system]" in result.stdout or "system" in result.stdout
+
+
+# --- stray-file warnings ---------------------------------------------------
+
+
+def test_unknown_lang_subdir_warns(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    # stray lang code at .recipe/fr/recipe.json
+    fr = tmp_path / ".recipe" / "fr"
+    fr.mkdir()
+    (fr / "recipe.json").write_text(
+        json.dumps({"name": "Bonjour", "description": "fr"}), encoding="utf-8"
+    )
+    result = _run(tmp_path)
     assert result.returncode == 0
-    assert "WARN" in result.stdout
-    assert "[system]" in result.stdout
+    assert "fr" in result.stdout and "unknown lang" in result.stdout
 
 
-def test_repo_root_not_a_directory(tmp_path: Path) -> None:
-    missing = tmp_path / "does-not-exist"
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(missing)],
-        capture_output=True, text=True,
+def test_unknown_greet_locale_warns(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    fr_greet = tmp_path / ".recipe" / "greet" / "fr"
+    fr_greet.mkdir()
+    (fr_greet / "greet.md").write_text("bonjour", encoding="utf-8")
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert "unknown lang" in result.stdout
+
+
+def test_stray_file_at_recipe_root_warns(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "README.md").write_text("stray", encoding="utf-8")
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert "unexpected file" in result.stdout
+
+
+# --- network snapshot ------------------------------------------------------
+
+
+def test_network_snapshot_with_stripped_init_passes(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    agent = tmp_path / ".lingtai" / "alpha"
+    agent.mkdir(parents=True)
+    (agent / ".agent.json").write_text("{}", encoding="utf-8")
+    # No init.json — correct post-strip shape.
+    _assert_ok(_run(tmp_path))
+
+
+def test_network_snapshot_with_init_present_errors(tmp_path: Path) -> None:
+    _make_valid_bundle(tmp_path)
+    agent = tmp_path / ".lingtai" / "alpha"
+    agent.mkdir(parents=True)
+    (agent / ".agent.json").write_text("{}", encoding="utf-8")
+    # init.json should have been stripped.
+    (agent / "init.json").write_text(
+        json.dumps({"manifest": {}}), encoding="utf-8"
     )
-    assert result.returncode == 1
-    assert "not a directory" in result.stdout
+    _assert_error(_run(tmp_path), "init.json", "stripped")
+
+
+def test_network_snapshot_skips_human_dir(tmp_path: Path) -> None:
+    """human/ pseudo-agent is not checked."""
+    _make_valid_bundle(tmp_path)
+    human = tmp_path / ".lingtai" / "human"
+    human.mkdir(parents=True)
+    (human / "init.json").write_text("{}", encoding="utf-8")
+    _assert_ok(_run(tmp_path))
+
+
+def test_network_snapshot_skips_dir_without_blueprint(tmp_path: Path) -> None:
+    """A dir without .agent.json is not treated as an agent."""
+    _make_valid_bundle(tmp_path)
+    notagent = tmp_path / ".lingtai" / ".tui-asset"
+    notagent.mkdir(parents=True)
+    (notagent / "init.json").write_text("{}", encoding="utf-8")
+    _assert_ok(_run(tmp_path))

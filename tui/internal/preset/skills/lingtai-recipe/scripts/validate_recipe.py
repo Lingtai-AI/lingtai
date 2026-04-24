@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
 """
-validate_recipe.py — Sanity-check a `.lingtai-recipe/` payload.
+validate_recipe.py — Sanity-check a recipe bundle.
 
 Both `/export recipe` and `/export network` invoke this script on their
-staging directory before `git init`. Exits 0 if the payload is structurally
+staging directory before `git init`. Exits 0 if the bundle is structurally
 valid (warnings allowed); exits 1 if any error is found.
 
 The canonical recipe format is documented in:
     tui/internal/preset/skills/lingtai-recipe/references/recipe-format.md
 
-Usage:
-    validate_recipe.py <repo-root>
+A recipe **bundle** is a directory containing:
 
-where <repo-root> contains both `recipe.json` and `.lingtai-recipe/`.
+    <bundle-root>/
+    ├── .recipe/                         (required — behavioral layer)
+    │   ├── recipe.json                  (required manifest)
+    │   ├── {en,zh,wen}/recipe.json      (optional locale variants)
+    │   ├── greet/greet.md               (optional — agent is silent if absent)
+    │   ├── greet/{en,zh,wen}/greet.md   (optional locale variants)
+    │   ├── comment/...                  (optional — no comment if absent)
+    │   ├── covenant/...                 (optional — kernel default if absent)
+    │   └── procedures/...               (optional — kernel default if absent)
+    ├── <library_name>/                  (optional — shared skill library)
+    │   └── (skills with SKILL.md files)
+    └── .lingtai/                        (optional — full network snapshot)
+        ├── <agent>/.agent.json          (identity blueprint)
+        └── <agent>/                     (NO init.json — stripped on export)
+
+Usage:
+    validate_recipe.py <bundle-root>
 """
 
 import argparse
@@ -22,173 +37,283 @@ import sys
 from pathlib import Path
 
 KNOWN_LANGS = {"en", "zh", "wen"}
-FORBIDDEN_PLACEHOLDERS = (
+GREET_PLACEHOLDERS = (
     "{{time}}",
     "{{addr}}",
     "{{lang}}",
     "{{location}}",
     "{{soul_delay}}",
+    "{{commands}}",
 )
-RECIPE_ROOT_DIRNAME = ".lingtai-recipe"
+# greet.md may contain placeholders; other layers must be static.
+FORBIDDEN_LAYER_PLACEHOLDERS = {
+    "comment": GREET_PLACEHOLDERS,
+    "covenant": GREET_PLACEHOLDERS,
+    "procedures": GREET_PLACEHOLDERS,
+}
+RECIPE_DOT_DIR = ".recipe"
+BEHAVIORAL_LAYERS = ("greet", "comment", "covenant", "procedures")
+REQUIRED_RECIPE_JSON_FIELDS = ("id", "name", "description")
 
 
-def validate(repo_root: Path) -> tuple[list[str], list[str]]:
-    """Return (errors, warnings) for the recipe payload at `repo_root`."""
+def validate(bundle_root: Path) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings) for the bundle at `bundle_root`."""
     errors: list[str] = []
     warnings: list[str] = []
 
-    if not repo_root.is_dir():
-        errors.append(f"{repo_root}: not a directory")
+    if not bundle_root.is_dir():
+        errors.append(f"{bundle_root}: not a directory")
         return errors, warnings
 
-    _check_recipe_json(repo_root, errors)
-    recipe_dir = repo_root / RECIPE_ROOT_DIRNAME
+    recipe_dir = bundle_root / RECIPE_DOT_DIR
     if not recipe_dir.is_dir():
-        errors.append(f"{recipe_dir}: directory missing")
+        errors.append(f"{recipe_dir}: directory missing (required at bundle root)")
         return errors, warnings
 
-    _check_required_components(recipe_dir, errors)
-    _check_lang_dirs(recipe_dir, warnings)
-    _check_skills(recipe_dir, errors)
-    _check_forbidden_placeholders(recipe_dir, errors)
+    manifest = _check_recipe_json(recipe_dir, errors, warnings)
+    _check_locale_recipe_jsons(recipe_dir, errors, warnings)
+    _check_behavioral_layers(recipe_dir, errors, warnings)
+    _check_no_placeholders_in_static_layers(recipe_dir, errors)
     _check_greet_system_prefix(recipe_dir, warnings)
     _check_stray_files(recipe_dir, warnings)
+
+    if manifest is not None:
+        _check_library_sibling(bundle_root, manifest, errors, warnings)
+
+    _check_network_snapshot(bundle_root, errors, warnings)
 
     return errors, warnings
 
 
-def _check_recipe_json(repo_root: Path, errors: list[str]) -> None:
-    path = repo_root / "recipe.json"
+def _check_recipe_json(
+    recipe_dir: Path, errors: list[str], warnings: list[str]
+) -> dict | None:
+    """Validate <recipe_dir>/recipe.json and return its parsed content."""
+    path = recipe_dir / "recipe.json"
     if not path.is_file():
-        errors.append(f"{path}: missing (required at repo root)")
-        return
+        errors.append(f"{path}: missing (required at .recipe/ root)")
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         errors.append(f"{path}: invalid JSON ({e})")
-        return
+        return None
     if not isinstance(data, dict):
         errors.append(f"{path}: must be a JSON object")
-        return
-    for field in ("name", "description"):
+        return None
+
+    for field in REQUIRED_RECIPE_JSON_FIELDS:
         value = data.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{path}: `{field}` must be a non-empty string")
 
+    # version is optional; default "1.0.0" applied on load.
+    version = data.get("version")
+    if version is not None and (not isinstance(version, str) or not version.strip()):
+        errors.append(f"{path}: `version` must be a non-empty string if present")
 
-def _has_component(recipe_dir: Path, name: str) -> bool:
-    """True if `name` exists at root or under any lang subdir."""
-    if (recipe_dir / name).is_file():
-        return True
-    for sub in recipe_dir.iterdir():
-        if sub.is_dir() and (sub / name).is_file():
-            return True
-    return False
+    # library_name must be either JSON null or a non-empty string.
+    lib = data.get("library_name", None)
+    if lib is not None and (not isinstance(lib, str) or not lib.strip()):
+        errors.append(
+            f"{path}: `library_name` must be null or a non-empty string"
+        )
+    if isinstance(lib, str) and "/" in lib:
+        errors.append(
+            f"{path}: `library_name` = {lib!r} must be a simple folder name, not a path"
+        )
+
+    return data
 
 
-def _check_required_components(recipe_dir: Path, errors: list[str]) -> None:
-    for name in ("greet.md", "comment.md"):
-        if not _has_component(recipe_dir, name):
-            errors.append(
-                f"{recipe_dir}/{name}: missing (required at root or in a lang subdir)"
-            )
-
-
-def _check_lang_dirs(recipe_dir: Path, warnings: list[str]) -> None:
-    for sub in recipe_dir.iterdir():
+def _check_locale_recipe_jsons(
+    recipe_dir: Path, errors: list[str], warnings: list[str]
+) -> None:
+    """Validate any locale-variant recipe.json at .recipe/<lang>/recipe.json."""
+    for sub in sorted(recipe_dir.iterdir()):
         if not sub.is_dir():
             continue
-        if sub.name == "skills":
+        if sub.name in BEHAVIORAL_LAYERS:
+            continue  # behavioral-layer subdir, not a locale folder
+        # Treat as locale subdir only if it contains recipe.json.
+        loc_json = sub / "recipe.json"
+        if not loc_json.is_file():
             continue
         if sub.name not in KNOWN_LANGS:
             warnings.append(
-                f"{sub}: unknown lang code `{sub.name}` (known: {sorted(KNOWN_LANGS)})"
+                f"{sub}: unknown lang code `{sub.name}` "
+                f"(known: {sorted(KNOWN_LANGS)})"
+            )
+        try:
+            data = json.loads(loc_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            errors.append(f"{loc_json}: invalid JSON ({e})")
+            continue
+        if not isinstance(data, dict):
+            errors.append(f"{loc_json}: must be a JSON object")
+            continue
+        # Locale variants only need name/description; id/version/library_name
+        # are inherited from the root manifest on load.
+        for field in ("name", "description"):
+            value = data.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(
+                    f"{loc_json}: `{field}` must be a non-empty string"
+                )
+
+
+def _check_behavioral_layers(
+    recipe_dir: Path, errors: list[str], warnings: list[str]
+) -> None:
+    """Each present behavioral-layer dir must have the canonical file shape."""
+    for layer in BEHAVIORAL_LAYERS:
+        layer_dir = recipe_dir / layer
+        if not layer_dir.is_dir():
+            continue  # layer absent — OK, all layers are optional
+        filename = f"{layer}.md"
+        root_file = layer_dir / filename
+        has_root = root_file.is_file()
+        has_any_locale = False
+        for sub in layer_dir.iterdir():
+            if not sub.is_dir():
+                continue
+            if sub.name not in KNOWN_LANGS:
+                warnings.append(
+                    f"{sub}: unknown lang code `{sub.name}` "
+                    f"(known: {sorted(KNOWN_LANGS)})"
+                )
+            if (sub / filename).is_file():
+                has_any_locale = True
+        if not has_root and not has_any_locale:
+            errors.append(
+                f"{layer_dir}: contains neither {filename} nor any "
+                f"<lang>/{filename} — remove the empty dir or add content"
             )
 
 
-def _check_skills(recipe_dir: Path, errors: list[str]) -> None:
-    skills_dir = recipe_dir / "skills"
-    if not skills_dir.is_dir():
-        return
-    for skill in skills_dir.iterdir():
-        if not skill.is_dir():
-            continue
-        skill_md = skill / "SKILL.md"
-        if not skill_md.is_file():
-            errors.append(f"{skill}: missing SKILL.md")
-            continue
-        _check_skill_frontmatter(skill_md, errors)
-
-
-def _check_skill_frontmatter(skill_md: Path, errors: list[str]) -> None:
-    text = skill_md.read_text(encoding="utf-8")
-    match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-    if not match:
-        errors.append(f"{skill_md}: missing YAML frontmatter (--- ... ---)")
-        return
-    body = match.group(1)
-    for field in ("name", "description", "version"):
-        if not re.search(rf"^{field}\s*:", body, re.MULTILINE):
-            errors.append(f"{skill_md}: frontmatter missing `{field}`")
-
-
-def _check_forbidden_placeholders(recipe_dir: Path, errors: list[str]) -> None:
-    targets = ["comment.md", "covenant.md", "procedures.md"]
-    for target in targets:
-        for path in _all_component_paths(recipe_dir, target):
+def _check_no_placeholders_in_static_layers(
+    recipe_dir: Path, errors: list[str]
+) -> None:
+    """comment/covenant/procedures are static; no {{placeholders}} allowed."""
+    for layer, placeholders in FORBIDDEN_LAYER_PLACEHOLDERS.items():
+        filename = f"{layer}.md"
+        for path in _all_layer_files(recipe_dir, layer, filename):
             text = path.read_text(encoding="utf-8")
-            for placeholder in FORBIDDEN_PLACEHOLDERS:
+            for placeholder in placeholders:
                 if placeholder in text:
                     errors.append(
-                        f"{path}: contains forbidden placeholder `{placeholder}` "
-                        "(only greet.md may use placeholders)"
+                        f"{path}: contains forbidden placeholder "
+                        f"`{placeholder}` (only greet.md may use placeholders)"
                     )
 
 
-def _all_component_paths(recipe_dir: Path, name: str) -> list[Path]:
+def _all_layer_files(recipe_dir: Path, layer: str, filename: str) -> list[Path]:
+    """Return all existing layer files: root + locale variants."""
+    layer_dir = recipe_dir / layer
+    if not layer_dir.is_dir():
+        return []
     found: list[Path] = []
-    root_file = recipe_dir / name
+    root_file = layer_dir / filename
     if root_file.is_file():
         found.append(root_file)
-    for sub in recipe_dir.iterdir():
-        if sub.is_dir() and sub.name != "skills":
-            candidate = sub / name
-            if candidate.is_file():
-                found.append(candidate)
+    for sub in layer_dir.iterdir():
+        if sub.is_dir() and (sub / filename).is_file():
+            found.append(sub / filename)
     return found
 
 
 def _check_greet_system_prefix(recipe_dir: Path, warnings: list[str]) -> None:
-    for path in _all_component_paths(recipe_dir, "greet.md"):
+    """greet.md starting with [system] is suspicious — it's first-contact prose."""
+    for path in _all_layer_files(recipe_dir, "greet", "greet.md"):
         text = path.read_text(encoding="utf-8").lstrip()
         if text.startswith("[system]"):
             warnings.append(
                 f"{path}: starts with `[system]` prefix — greet.md is the "
-                "orchestrator's voice, not a system message"
+                "orchestrator's voice to the human, not a system message"
             )
 
 
 def _check_stray_files(recipe_dir: Path, warnings: list[str]) -> None:
-    recognized_root_files = {"greet.md", "comment.md", "covenant.md", "procedures.md"}
-    recognized_root_dirs = {"skills"} | KNOWN_LANGS
+    """Warn on anything unrecognized at .recipe/ root."""
+    recognized_files = {"recipe.json"}
+    recognized_dirs = set(BEHAVIORAL_LAYERS) | KNOWN_LANGS
     for entry in recipe_dir.iterdir():
-        if entry.is_file() and entry.name not in recognized_root_files:
+        if entry.is_file() and entry.name not in recognized_files:
             warnings.append(
-                f"{entry}: unexpected file at .lingtai-recipe/ root "
-                "(only greet.md, comment.md, covenant.md, procedures.md recognized here)"
+                f"{entry}: unexpected file at .recipe/ root "
+                f"(only recipe.json recognized here)"
             )
-        elif entry.is_dir() and entry.name not in recognized_root_dirs:
+        elif entry.is_dir() and entry.name not in recognized_dirs:
             warnings.append(
-                f"{entry}: unexpected directory at .lingtai-recipe/ root"
+                f"{entry}: unexpected directory at .recipe/ root "
+                f"(known: {sorted(recognized_dirs)})"
+            )
+
+
+def _check_library_sibling(
+    bundle_root: Path,
+    manifest: dict,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """If recipe.json declares library_name, validate the sibling library folder."""
+    lib_name = manifest.get("library_name")
+    if not isinstance(lib_name, str) or not lib_name.strip():
+        return  # null or missing — no library, nothing to validate
+    lib_dir = bundle_root / lib_name
+    if not lib_dir.is_dir():
+        errors.append(
+            f"{lib_dir}: directory missing "
+            f"(recipe.json declares `library_name` = {lib_name!r})"
+        )
+        return
+    # Must contain at least one SKILL.md somewhere — empty library is
+    # probably a mistake. The walk is shallow-plus-one-level to catch both
+    # <lib>/SKILL.md and <lib>/<skill>/SKILL.md layouts.
+    if not any(lib_dir.rglob("SKILL.md")):
+        warnings.append(
+            f"{lib_dir}: contains no SKILL.md files — is this library populated?"
+        )
+
+
+def _check_network_snapshot(
+    bundle_root: Path, errors: list[str], warnings: list[str]
+) -> None:
+    """For bundles shipping .lingtai/, confirm init.json is stripped per agent."""
+    lingtai = bundle_root / ".lingtai"
+    if not lingtai.is_dir():
+        return  # recipe-only bundle, no network
+    for agent_dir in sorted(lingtai.iterdir()):
+        if not agent_dir.is_dir():
+            continue
+        name = agent_dir.name
+        if not name or name.startswith(".") or name == "human":
+            continue
+        blueprint = agent_dir / ".agent.json"
+        if not blueprint.is_file():
+            continue  # not an agent dir
+        init_json = agent_dir / "init.json"
+        if init_json.is_file():
+            errors.append(
+                f"{init_json}: present in exported network — must be stripped "
+                "so the recipient picks their own LLM provider and capabilities"
             )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("repo_root", type=Path, help="Path to the repo root (contains recipe.json and .lingtai-recipe/)")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "bundle_root",
+        type=Path,
+        help="Path to the bundle root (contains .recipe/ and optionally "
+        "<library_name>/ and .lingtai/)",
+    )
     args = parser.parse_args()
 
-    errors, warnings = validate(args.repo_root.resolve())
+    errors, warnings = validate(args.bundle_root.resolve())
 
     for e in errors:
         print(f"ERROR: {e}")
