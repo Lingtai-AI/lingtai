@@ -30,49 +30,68 @@ func sourceBundleDir(globalDir, recipeName, customDir string) string {
 	return preset.RecipeDir(globalDir, recipeName)
 }
 
-// applyRecipe copies the selected recipe bundle into the project root
-// (materializing <project>/.recipe/ + optional library sibling + optional
-// .lingtai/ sibling from imported networks), then runs preset.ApplyRecipe
-// to materialize the recipe across every agent under .lingtai/<agent>/.
-// The apply phase writes .prompt (greet + substitutions), appends the
-// library path to each agent's init.json when the recipe declares one,
-// and snapshots the applied recipe to .lingtai/.tui-asset/.recipe/ for
-// future change detection.
+// copyRecipeBundle stages the selected recipe bundle into the project
+// root. After this call, <project>/.recipe/ contains the authoritative
+// copy of the recipe and is the source of truth for all subsequent
+// behavioral-layer resolution. Returns the project root so callers can
+// chain path resolution.
+func copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir string) (projectRoot string, err error) {
+	projectRoot = filepath.Dir(lingtaiDir)
+	src := sourceBundleDir(globalDir, recipeName, customDir)
+	if src == "" {
+		return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
+	}
+	if err := preset.CopyBundle(src, projectRoot); err != nil {
+		return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
+	}
+	return projectRoot, nil
+}
+
+// applyRecipe runs the greet/library/snapshot side of recipe application
+// across every agent under .lingtai/<agent>/. Stages the selected bundle
+// into the project root if it isn't already there, then hands off to
+// preset.ApplyRecipe for the per-agent materialization.
+//
+// Idempotent with copyRecipeBundle — calling sequence
+// (copyRecipeBundle → … → applyRecipe) does NOT re-copy the bundle
+// because preset.CopyBundle is a RemoveAll+copy; the second invocation
+// replaces the first copy with an identical one. Callers that want to
+// skip the re-stage can call preset.ApplyRecipe directly.
+//
+// Behavioral layer defaults (all four layers are optional in a recipe):
+//   - greet.md absent: no .prompt file is written (agent starts silently,
+//     waits for mail). ApplyRecipe handles this internally.
+//   - comment.md / covenant.md / procedures.md absent: the resolver
+//     returns "" and the caller leaves those init.json fields empty. The
+//     kernel supplies system defaults at agent launch when those fields
+//     are unset.
 //
 // Callers are responsible for having already written the orchestrator's
-// init.json via GenerateInitJSONWithOpts — applyRecipe does not touch
-// init.json fields that the AgentOpts pipeline owns (CommentFile,
-// CovenantFile, ProceduresFile); it only edits manifest.capabilities.library.paths.
+// init.json via GenerateInitJSONWithOpts. applyRecipe itself only edits
+// manifest.capabilities.library.paths (additive — never removes prior
+// library path entries).
 func applyRecipe(
 	lingtaiDir, orchDir, globalDir, humanDir, humanAddr string,
 	recipeName, customDir, lang, soulDelay string,
 ) error {
-	_ = orchDir // no longer needed — ApplyRecipe iterates all agents under lingtaiDir itself
+	_ = orchDir // ApplyRecipe iterates every agent under lingtaiDir itself
 
-	projectRoot := filepath.Dir(lingtaiDir)
-	src := sourceBundleDir(globalDir, recipeName, customDir)
-	if src == "" {
-		return fmt.Errorf("applyRecipe: could not resolve source bundle for %q", recipeName)
+	projectRoot, err := copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir)
+	if err != nil {
+		return err
 	}
 
-	// 1. Copy the bundle into the project so it becomes self-contained.
-	if err := preset.CopyBundle(src, projectRoot); err != nil {
-		return fmt.Errorf("applyRecipe: copy bundle: %w", err)
-	}
-
-	// 2. Apply (write .prompt, update library.paths, snapshot).
 	greetSubst := func(tmpl string) string {
 		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, soulDelay)
 	}
 	if _, err := preset.ApplyRecipe(projectRoot, lang, greetSubst); err != nil {
-		return fmt.Errorf("applyRecipe: apply: %w", err)
+		return fmt.Errorf("applyRecipe: %w", err)
 	}
 
-	// 3. Persist the picker selection (type + custom path) for UI
-	// redisplay on subsequent launches. The authoritative "what's
-	// currently applied" is the .tui-asset/.recipe/ snapshot written by
-	// ApplyRecipe; this JSON file is purely UI state so /setup remembers
-	// where the user last imported from.
+	// Persist the picker selection (type + custom path) so /setup can
+	// redisplay the last choice. The authoritative "what's applied" is
+	// the directory snapshot at .lingtai/.tui-asset/.recipe/ which
+	// ApplyRecipe already wrote; this JSON file is purely UI state.
 	state := preset.RecipeState{Recipe: recipeName}
 	if recipeUsesCustomDir(recipeName) {
 		state.CustomDir = customDir
@@ -80,38 +99,33 @@ func applyRecipe(
 	return preset.SaveRecipeState(lingtaiDir, state)
 }
 
-// resolveRecipeComment returns the comment.md path for the recipe
-// currently copied into the project (<projectRoot>/.recipe/). Falls back
-// to resolving from the source bundle if the project hasn't had a recipe
-// copied in yet (e.g. /setup resolving paths before CopyBundle runs).
-func resolveRecipeComment(globalDir, recipeName, customDir, lang string) string {
-	if p := preset.ResolveCommentPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang); p != "" {
-		return p
-	}
-	return ""
+// resolveRecipeComment returns the comment.md path inside the project's
+// staged .recipe/ directory, or "" when the recipe does not ship a
+// comment. The caller treats empty as "leave CommentFile unset" so no
+// comment file is referenced in init.json.
+//
+// Requires that the bundle has already been staged via copyRecipeBundle
+// — resolution happens against <projectRoot>/.recipe/ not the original
+// source. This keeps the project self-contained: init.json paths point
+// at project-local files, not at ~/.lingtai-tui/... or the user's
+// download folder.
+func resolveRecipeComment(projectRoot, lang string) string {
+	return preset.ResolveCommentPath(projectRoot, lang)
 }
 
-// resolveRecipeCovenant returns the covenant.md path. Returns empty string
-// if the recipe does not override the system-wide covenant.
-func resolveRecipeCovenant(globalDir, recipeName, customDir, lang string) string {
-	return preset.ResolveCovenantPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang)
+// resolveRecipeCovenant returns the covenant.md path inside the project's
+// staged .recipe/. Empty when the recipe does not override the covenant
+// — the kernel falls back to its system default at agent launch.
+func resolveRecipeCovenant(projectRoot, lang string) string {
+	return preset.ResolveCovenantPath(projectRoot, lang)
 }
 
-// resolveRecipeProcedures returns the procedures.md path. Returns empty
-// string if the recipe does not override the system-wide procedures.
-func resolveRecipeProcedures(globalDir, recipeName, customDir, lang string) string {
-	return preset.ResolveProceduresPath(customOrProjectBundleDir(globalDir, recipeName, customDir), lang)
-}
-
-// customOrProjectBundleDir picks the right bundle directory to resolve
-// behavioral-layer files from. For pre-apply calls (e.g. during /setup
-// before CopyBundle runs) we resolve from the source bundle so the opts
-// struct can be populated in one pass. After apply, the init.json has
-// absolute paths baked in so this function is largely redundant but
-// harmless — repeated resolution returns the source path, which by then
-// is also mirrored in the project copy.
-func customOrProjectBundleDir(globalDir, recipeName, customDir string) string {
-	return sourceBundleDir(globalDir, recipeName, customDir)
+// resolveRecipeProcedures returns the procedures.md path inside the
+// project's staged .recipe/. Empty when the recipe does not override
+// procedures — the kernel falls back to its system default at agent
+// launch.
+func resolveRecipeProcedures(projectRoot, lang string) string {
+	return preset.ResolveProceduresPath(projectRoot, lang)
 }
 
 // SubstituteGreetPlaceholders is the exported wrapper used by main.go on
