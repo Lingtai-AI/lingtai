@@ -47,6 +47,7 @@ node_modules/
 docs/specs/
 docs/superpowers/
 docs/plans/
+docs/zhoubao/
 portal/docs/
 
 # Local scratch and release tarballs
@@ -66,6 +67,7 @@ lingtai-tui
 lingtai-agora
 lingtai-claude-code
 lingtai-mailbox-skill
+lingtai-projects
 
 # Runtime data (agent working dirs, configs)
 .lingtai/
