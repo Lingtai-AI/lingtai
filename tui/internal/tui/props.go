@@ -382,6 +382,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 		{"soul_delay", i18n.T("props.soul_delay")},
 		{"molt_count", i18n.T("props.molt_count")},
 		{"max_turns", i18n.T("props.max_turns")},
+		{"max_rpm", i18n.T("props.max_rpm")},
 	})
 
 	// Context window (from cached .status.json)

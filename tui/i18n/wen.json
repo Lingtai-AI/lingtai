@@ -245,6 +245,7 @@
   "props.context_limit": "识限",
   "props.molt_pressure": "蜕压",
   "props.max_turns": "轮限",
+  "props.max_rpm": "频限",
   "props.streaming": "流",
   "props.no_data": "无",
   "props.section_network": "云",

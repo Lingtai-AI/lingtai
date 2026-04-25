@@ -169,6 +169,14 @@
     // Safety limit — agent sleeps after this many turns.
     "max_turns": 50,
 
+    // Max LLM API requests per minute, gated at the adapter layer.
+    // Shared across all agents in the same TUI process that use the same
+    // (provider, base_url) — so a network of N agents cooperatively shares
+    // this cap instead of each hitting the provider independently. Set to
+    // 0 to disable gating. Default 60 is conservative; bump for paid
+    // high-tier providers, lower for free tiers.
+    "max_rpm": 60,
+
     // Whether to serialize chat history into system/context.md mid-session.
     // When true (default), every Nth idle flush rebuilds context.md and
     // nukes the live wire chat — the serialized replay becomes the agent's

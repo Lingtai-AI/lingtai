@@ -245,6 +245,7 @@
   "props.context_limit": "上下文上限",
   "props.molt_pressure": "凝蜕阈值",
   "props.max_turns": "最大轮次",
+  "props.max_rpm": "每分请求上限",
   "props.streaming": "流式",
   "props.no_data": "无数据",
   "props.section_network": "网络",

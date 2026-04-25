@@ -250,6 +250,7 @@
   "props.context_limit": "Context limit",
   "props.molt_pressure": "Molt pressure",
   "props.max_turns": "Max turns",
+  "props.max_rpm": "Max RPM",
   "props.streaming": "Streaming",
   "props.no_data": "No agent data",
   "props.section_network": "Network",
