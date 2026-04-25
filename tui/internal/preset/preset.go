@@ -548,6 +548,7 @@ type AgentOpts struct {
 	ContextLimit  int      // token budget
 	SoulDelay     float64  // seconds between soul cycles
 	MoltPressure  float64  // 0–1 ratio triggering molt
+	MaxRpm        int      // API requests-per-minute cap (cooperative network gate); 0 disables
 	Karma         bool     // lifecycle control over other agents
 	Nirvana       bool     // permanent agent destruction
 	CovenantFile   string   // path to covenant file
@@ -567,6 +568,7 @@ func DefaultAgentOpts() AgentOpts {
 		ContextLimit: 200000,
 		SoulDelay:    999999,
 		MoltPressure: 0.8,
+		MaxRpm:       60,
 		Karma:        true,
 		Nirvana:      false,
 	}
@@ -613,6 +615,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	manifest["molt_pressure"] = opts.MoltPressure
 	manifest["molt_prompt"] = ""
 	manifest["max_turns"] = 100
+	manifest["max_rpm"] = opts.MaxRpm
 	manifest["streaming"] = false
 
 	// Resolve file paths — use opts if set, fallback to language defaults

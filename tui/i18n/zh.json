@@ -33,6 +33,8 @@
   "firstrun.soul_delay_hint": "空闲多少秒后器灵自主思考。设小值(60-300)使器灵更主动，设大值则近乎静默（应用于所有器灵）",
   "firstrun.molt_pressure": "凝蜕阈值",
   "firstrun.molt_pressure_hint": "触发凝蜕的上下文占比（应用于所有器灵）",
+  "firstrun.max_rpm": "每分请求上限",
+  "firstrun.max_rpm_hint": "API 每分钟请求上限，所有共用同一服务商的器灵合用此额度；0 = 不限",
   "firstrun.karma": "因果",
   "firstrun.karma_hint": "管理其他智能体",
   "firstrun.nirvana": "涅槃",

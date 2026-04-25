@@ -150,6 +150,7 @@ type FirstRunModel struct {
 	ctxLimitInput  textinput.Model
 	soulDelayInput textinput.Model
 	moltPressInput textinput.Model
+	maxRpmInput    textinput.Model
 	// Authority toggles
 	karmaIdx   int // 0=true, 1=false
 	nirvanaIdx int // 0=false, 1=true
@@ -305,6 +306,11 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	mpi.SetWidth(15)
 	mpi.Prompt = ""
 
+	mri := textinput.New()
+	mri.CharLimit = 6
+	mri.SetWidth(15)
+	mri.Prompt = ""
+
 	covi := textinput.New()
 	covi.CharLimit = 256
 	covi.SetWidth(50)
@@ -365,6 +371,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		ctxLimitInput:    ci,
 		soulDelayInput:   sdi,
 		moltPressInput:   mpi,
+		maxRpmInput:      mri,
 		covenantInput:    covi,
 		principleInput:   prini,
 		soulFlowInput:    sfli,
@@ -1488,9 +1495,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx - 1 + len(langs)) % len(langs)
 					m.updatePromptPaths()
-				case 7: // karma
+				case 8: // karma
 					m.karmaIdx = (m.karmaIdx + 1) % 2
-				case 8: // nirvana
+				case 9: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
 				}
 				return m, nil
@@ -1499,9 +1506,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2: // language cycle
 					m.agentLangIdx = (m.agentLangIdx + 1) % len(langs)
 					m.updatePromptPaths()
-				case 7: // karma
+				case 8: // karma
 					m.karmaIdx = (m.karmaIdx + 1) % 2
-				case 8: // nirvana
+				case 9: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
 				}
 				return m, nil
@@ -1525,12 +1532,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					if moltPress <= 0 || moltPress > 1 {
 						moltPress = 0.8
 					}
+					maxRpm, _ := strconv.Atoi(m.maxRpmInput.Value())
+					if maxRpm < 0 {
+						maxRpm = 60
+					}
 					opts := preset.AgentOpts{
 						Language:      langs[m.agentLangIdx],
 						Stamina:       stamina,
 						ContextLimit:  ctxLimit,
 						SoulDelay:     soulDelay,
 						MoltPressure:  moltPress,
+						MaxRpm:        maxRpm,
 						Karma:         m.karmaIdx == 0,
 						Nirvana:       m.nirvanaIdx == 0,
 						CovenantFile:  m.covenantInput.Value(),
@@ -1576,12 +1588,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || moltPress <= 0 || moltPress > 1 {
 					moltPress = 0.8
 				}
+				maxRpm, err := strconv.Atoi(m.maxRpmInput.Value())
+				if err != nil || maxRpm < 0 {
+					maxRpm = 60
+				}
 				opts := preset.AgentOpts{
 					Language:      langs[m.agentLangIdx],
 					Stamina:       stamina,
 					ContextLimit:  ctxLimit,
 					SoulDelay:     soulDelay,
 					MoltPressure:  moltPress,
+					MaxRpm:        maxRpm,
 					Karma:         m.karmaIdx == 0,
 					Nirvana:       m.nirvanaIdx == 0,
 					CovenantFile:  m.covenantInput.Value(),
@@ -1652,16 +1669,18 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
 				case 6:
 					m.moltPressInput, cmd = m.moltPressInput.Update(msg)
-				case 9:
+				case 7:
+					m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
+				case 10:
 					m.covenantInput, cmd = m.covenantInput.Update(msg)
 					m.covenantDirty = true
-				case 10:
+				case 11:
 					m.principleInput, cmd = m.principleInput.Update(msg)
 					m.principleDirty = true
-				case 11:
+				case 12:
 					m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
 					m.soulFlowDirty = true
-				case 12:
+				case 13:
 					m.commentInput, cmd = m.commentInput.Update(msg)
 				}
 				return m, cmd
@@ -1842,13 +1861,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.soulDelayInput, cmd = m.soulDelayInput.Update(msg)
 			case 6:
 				m.moltPressInput, cmd = m.moltPressInput.Update(msg)
-			case 9:
-				m.covenantInput, cmd = m.covenantInput.Update(msg)
+			case 7:
+				m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
 			case 10:
-				m.principleInput, cmd = m.principleInput.Update(msg)
+				m.covenantInput, cmd = m.covenantInput.Update(msg)
 			case 11:
-				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
+				m.principleInput, cmd = m.principleInput.Update(msg)
 			case 12:
+				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
+			case 13:
 				m.commentInput, cmd = m.commentInput.Update(msg)
 			}
 		case stepRecipe:
@@ -2351,6 +2372,7 @@ func (m FirstRunModel) View() string {
 			{4, i18n.T("firstrun.context_limit"), i18n.T("firstrun.context_limit_hint"), m.ctxLimitInput.View()},
 			{5, i18n.T("firstrun.soul_delay"), i18n.T("firstrun.soul_delay_hint"), m.soulDelayInput.View()},
 			{6, i18n.T("firstrun.molt_pressure"), i18n.T("firstrun.molt_pressure_hint"), m.moltPressInput.View()},
+			{7, i18n.T("firstrun.max_rpm"), i18n.T("firstrun.max_rpm_hint"), m.maxRpmInput.View()},
 		}
 		for _, nf := range numFields {
 			hint := StyleFaint.Render(" (" + nf.hint + ")")
@@ -2361,18 +2383,18 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_authority")+" ──") + "\n")
 		karmaVal := boolLabel(m.karmaIdx)
 		karmaHint := StyleFaint.Render(" (" + i18n.T("firstrun.karma_hint") + ")")
-		b.WriteString(cur(7) + i18n.T("firstrun.karma") + ": " + renderToggle(karmaVal, m.fieldIdx == 7) + karmaHint + "\n")
+		b.WriteString(cur(8) + i18n.T("firstrun.karma") + ": " + renderToggle(karmaVal, m.fieldIdx == 8) + karmaHint + "\n")
 		nirvanaVal := boolLabel(m.nirvanaIdx)
 		nirvanaHint := StyleFaint.Render(" (" + i18n.T("firstrun.nirvana_hint") + ")")
-		b.WriteString(cur(8) + i18n.T("firstrun.nirvana") + ": " + renderToggle(nirvanaVal, m.fieldIdx == 8) + nirvanaHint + "\n")
+		b.WriteString(cur(9) + i18n.T("firstrun.nirvana") + ": " + renderToggle(nirvanaVal, m.fieldIdx == 9) + nirvanaHint + "\n")
 
 		// ── Prompts ──
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_prompts")+" ──") + "\n")
-		b.WriteString(cur(9) + i18n.T("firstrun.covenant") + ": " + m.covenantInput.View() + "\n")
-		b.WriteString(cur(10) + i18n.T("firstrun.principle") + ": " + m.principleInput.View() + "\n")
-		b.WriteString(cur(11) + i18n.T("firstrun.soul_flow") + ": " + m.soulFlowInput.View() + "\n")
+		b.WriteString(cur(10) + i18n.T("firstrun.covenant") + ": " + m.covenantInput.View() + "\n")
+		b.WriteString(cur(11) + i18n.T("firstrun.principle") + ": " + m.principleInput.View() + "\n")
+		b.WriteString(cur(12) + i18n.T("firstrun.soul_flow") + ": " + m.soulFlowInput.View() + "\n")
 		commentHint := StyleFaint.Render(" (" + i18n.T("firstrun.comment_hint") + ")")
-		b.WriteString(cur(12) + i18n.T("firstrun.comment") + ": " + m.commentInput.View() + commentHint + "\n")
+		b.WriteString(cur(13) + i18n.T("firstrun.comment") + ": " + m.commentInput.View() + commentHint + "\n")
 
 		if m.message != "" {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
@@ -2541,12 +2563,12 @@ func centerText(s string, width int) string {
 }
 
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir.
-const agentNameDirFieldCount = 13
+const agentNameDirFieldCount = 14
 // Field indices:
 // 0=name, 1=dir, 2=lang,
-// 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure,
-// 7=karma, 8=nirvana,
-// 9=covenant, 10=principle, 11=soul_flow, 12=comment
+// 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure, 7=max_rpm,
+// 8=karma, 9=nirvana,
+// 10=covenant, 11=principle, 12=soul_flow, 13=comment
 
 // runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
 func (m FirstRunModel) runCheckCaps() tea.Cmd {
@@ -2953,10 +2975,12 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.ctxLimitInput.SetValue(ctxDefault)
 	m.soulDelayInput.SetValue("120")
 	m.moltPressInput.SetValue("0.8")
+	m.maxRpmInput.SetValue("60")
 	m.staminaInput.Blur()
 	m.ctxLimitInput.Blur()
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
+	m.maxRpmInput.Blur()
 
 	// Pre-fill prompt paths based on language
 	langs := []string{"en", "zh", "wen"}
@@ -3062,6 +3086,7 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	m.ctxLimitInput.Blur()
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
+	m.maxRpmInput.Blur()
 	m.covenantInput.Blur()
 	m.principleInput.Blur()
 	m.soulFlowInput.Blur()
@@ -3082,15 +3107,17 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 		return m.soulDelayInput.Focus()
 	case 6:
 		return m.moltPressInput.Focus()
-	case 7, 8:
+	case 7:
+		return m.maxRpmInput.Focus()
+	case 8, 9:
 		return nil // karma/nirvana — cycle selectors
-	case 9:
-		return m.covenantInput.Focus()
 	case 10:
-		return m.principleInput.Focus()
+		return m.covenantInput.Focus()
 	case 11:
-		return m.soulFlowInput.Focus()
+		return m.principleInput.Focus()
 	case 12:
+		return m.soulFlowInput.Focus()
+	case 13:
 		return m.commentInput.Focus()
 	}
 	return nil

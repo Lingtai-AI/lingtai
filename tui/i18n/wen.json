@@ -33,6 +33,8 @@
   "firstrun.soul_delay_hint": "闲几息后灵自省。小值(60-300)则灵愈自发，大值则近乎寂然（施于诸灵）",
   "firstrun.molt_pressure": "蜕压",
   "firstrun.molt_pressure_hint": "凝蜕之门槛（施于诸灵）",
+  "firstrun.max_rpm": "频限",
+  "firstrun.max_rpm_hint": "每分钟请求之限，同道诸灵共此额度；零则无限",
   "firstrun.karma": "因果",
   "firstrun.karma_hint": "御他器",
   "firstrun.nirvana": "涅槃",

@@ -33,6 +33,8 @@
   "firstrun.soul_delay_hint": "seconds idle before agent thinks autonomously. Set low (60-300) for proactive agents, high to effectively silence it (applies to all agents)",
   "firstrun.molt_pressure": "Molt pressure",
   "firstrun.molt_pressure_hint": "context % to trigger molt (applies to all agents)",
+  "firstrun.max_rpm": "Max RPM",
+  "firstrun.max_rpm_hint": "API requests/min cap, shared across all agents on the same provider; 0 = no cap",
   "firstrun.karma": "Karma",
   "firstrun.karma_hint": "manage other agents",
   "firstrun.nirvana": "Nirvana",
