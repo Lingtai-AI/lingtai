@@ -216,14 +216,11 @@ def _all_layer_files(recipe_dir: Path, layer: str, filename: str) -> list[Path]:
 
 
 def _check_greet_system_prefix(recipe_dir: Path, warnings: list[str]) -> None:
-    """greet.md starting with [system] is suspicious — it's first-contact prose."""
-    for path in _all_layer_files(recipe_dir, "greet", "greet.md"):
-        text = path.read_text(encoding="utf-8").lstrip()
-        if text.startswith("[system]"):
-            warnings.append(
-                f"{path}: starts with `[system]` prefix — greet.md is the "
-                "orchestrator's voice to the human, not a system message"
-            )
+    """greet.md may use either Pattern A (direct utterance) or Pattern B
+    ([system] directive). Both are valid — see lingtai-recipe spec §1. The
+    bundled `greeter` recipe uses Pattern B. No warning here.
+    """
+    return
 
 
 def _check_stray_files(recipe_dir: Path, warnings: list[str]) -> None:

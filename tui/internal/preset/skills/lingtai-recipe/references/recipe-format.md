@@ -153,13 +153,33 @@ When the network first wakes, the kernel writes `greet.md` into the orchestrator
 
 **When absent:** no `.prompt` file is written. The agent starts silently and waits for the first human message.
 
-**Rules:**
-- Keep it short (5–10 sentences max).
-- Be proactive — introduce yourself, don't wait to be asked.
-- Don't open with `[system]` — that's a system-message marker, and greet.md is the orchestrator's voice. The validator warns if it sees one.
-- Don't write a stage script here. If the agent needs ongoing instructions for a complex task, those go in `comment.md`. `greet.md` is just the hello.
+**Two patterns are supported:**
 
-**Common mistake:** treating `greet.md` as a briefing FOR the agent. It is not. The agent receives it as a prompt and *outputs* its content. If you write "you are X, do Y, then Z" in greet.md, the agent will dutifully repeat that sentence to the human. Briefings belong in `comment.md`.
+**Pattern A — direct utterance.** Write the literal text the agent should send. Short (3–8 sentences). Best when you want exact control of the words.
+
+```
+Welcome! I'm the orchestrator for this network. The {{commands}}
+let you interact with me and my avatars. What would you like to work on?
+```
+
+**Pattern B — `[system]` directive.** Open with the `[system]` marker and write a brief addressed to the agent telling it WHAT to cover in its greeting. The agent then synthesizes the actual audience-facing message in its own voice. Best for long, branchy intros where the right wording depends on context (e.g. multi-section self-introductions, locale-aware tone). The bundled `greeter` recipe uses this pattern.
+
+```
+[system] A human just opened a session. Local time {{time}}, location {{location}}.
+Use the `email` tool to send a warm greeting to {{addr}}. Cover, in your own voice:
+1. Who you are (a digital being with a heartbeat, not a chatbot).
+2. How communication works (filesystem mailbox).
+3. Soul flow ({{soul_delay}}s of idle triggers autonomous action).
+4. List slash commands: {{commands}}
+Keep it concise and natural. Do not recite a checklist — synthesize.
+```
+
+**Rules:**
+- Keep it focused. Pattern A: 3–8 sentences. Pattern B: a single tight directive — the agent's output should also stay concise (~250–400 字 for rich self-intros).
+- Be proactive — introduce yourself, don't wait to be asked.
+- Don't write a long stage script here. If the agent needs ongoing instructions across a multi-turn task, those go in `comment.md`. `greet.md` is the opening only.
+
+**Common mistake:** mixing Patterns A and B — writing what looks like a direct utterance but with embedded "you should..." instructions. The agent then either ignores the instructions or recites them. Pick one pattern. If you find yourself wanting to say both "here's what to say" and "and here are some constraints", use Pattern B and put both inside the `[system]` directive.
 
 **Good greet.md (concrete, audience-facing):**
 ```
