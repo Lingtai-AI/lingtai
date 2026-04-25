@@ -181,7 +181,7 @@ Overrides the system-wide procedures (`~/.lingtai-tui/procedures/<lang>/procedur
 
 When `recipe.json#library_name` is a non-null string, the bundle must contain a sibling folder with that exact name. The library is a framework-agnostic skill bundle — any agent framework that reads `SKILL.md` files (LingTai, Claude Skill, Cursor) can consume it.
 
-**Critical layout rule**: every skill lives in its **own subdirectory** under the library folder, with `SKILL.md` at the subdirectory root. A `SKILL.md` placed directly at the library-folder root is **NOT** registered as a skill — the scanner only sees children that are themselves directories containing `SKILL.md`.
+**Critical layout rule (strict)**: every skill lives in its **own subdirectory** under the library folder, with `SKILL.md` at the subdirectory root. A `SKILL.md` placed directly at the library-folder root is **never permitted** — the runtime scanner ignores it (only `<library>/<skill>/SKILL.md` is registered) and the validator rejects it as an error. This applies even when the library contains exactly one skill: nest it.
 
 ```
 <bundle>/
@@ -195,7 +195,7 @@ When `recipe.json#library_name` is a non-null string, the bundle must contain a 
     └── velli.bib                    # non-skill content is fine at root
 ```
 
-If your recipe has exactly **one** skill and you're tempted to flatten it ("the library IS the skill"), resist the urge and use the nested layout:
+**Single-skill libraries are not an exception.** If your recipe has exactly one skill, nest it the same way every other library does — even if the library name and skill name are identical. The validator will reject the flat layout regardless of skill count.
 
 ```
 <bundle>/

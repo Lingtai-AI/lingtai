@@ -308,18 +308,22 @@ def _check_library_sibling(
         )
         return
 
+    # Strict layout: a root-level SKILL.md is never permitted, even when
+    # valid skill subdirs also exist. The scanner ignores it and its
+    # presence creates ambiguity for human readers.
     if has_root_skill and skill_subdirs:
-        warnings.append(
-            f"{lib_dir}/SKILL.md: root-level SKILL.md will be ignored by the "
-            f"runtime scanner (only subdirectory skills are registered). "
-            f"Consider removing it or moving its content into a skill subdir."
+        errors.append(
+            f"{lib_dir}/SKILL.md: root-level SKILL.md is not permitted. "
+            f"The runtime scanner ignores it (only <library>/<skill>/SKILL.md is "
+            f"registered) and its presence is ambiguous. Remove the root SKILL.md "
+            f"or move its content into a dedicated skill subdirectory."
         )
 
     if not skill_subdirs:
-        warnings.append(
+        errors.append(
             f"{lib_dir}: no skill subdirectories with SKILL.md found. "
-            f"The expected layout is <library>/<skill-name>/SKILL.md; content "
-            f"placed elsewhere will not be registered at runtime."
+            f"The required layout is <library>/<skill-name>/SKILL.md; content "
+            f"placed elsewhere is not registered at runtime."
         )
 
 

@@ -385,10 +385,12 @@ def test_flat_library_layout_errors(tmp_path: Path) -> None:
     _assert_error(_run(tmp_path), "root", "subdirectories")
 
 
-def test_nested_library_with_root_skill_warns(tmp_path: Path) -> None:
-    """Library with BOTH root SKILL.md AND skill subdirs produces a warning,
+def test_nested_library_with_root_skill_errors(tmp_path: Path) -> None:
+    """Library with BOTH root SKILL.md AND skill subdirs is rejected.
 
-    not an error (the subdirs will register; the root SKILL.md won't).
+    Strict layout: a root-level SKILL.md is never permitted. Even though the
+    subdirs would register at runtime, the root SKILL.md creates ambiguity
+    and is silently ignored — the validator surfaces this as an error.
     """
     recipe_dir = tmp_path / ".recipe"
     recipe_dir.mkdir()
@@ -406,14 +408,12 @@ def test_nested_library_with_root_skill_warns(tmp_path: Path) -> None:
         "---\nname: real-skill\ndescription: d\nversion: 1.0.0\n---\n",
         encoding="utf-8",
     )
-    # Stray root SKILL.md that would be ignored at runtime.
+    # Stray root SKILL.md is now an error, not a warning.
     (lib / "SKILL.md").write_text(
         "---\nname: stray\ndescription: d\nversion: 1.0.0\n---\n",
         encoding="utf-8",
     )
-    result = _run(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "ignored by the runtime scanner" in result.stdout
+    _assert_error(_run(tmp_path), "root-level SKILL.md is not permitted")
 
 
 def test_single_skill_nested_layout_passes(tmp_path: Path) -> None:
