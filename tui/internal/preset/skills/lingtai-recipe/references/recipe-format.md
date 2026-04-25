@@ -15,10 +15,10 @@ The bundle is the shareable artifact. When the TUI applies a recipe, it copies t
 ```
 my-recipe-bundle/
 ├── .recipe/                             # required — LingTai behavioral layer
-│   ├── recipe.json                      # required — manifest (id, name, description, …)
-│   ├── en/recipe.json                   # optional — locale variants for name/description
-│   ├── zh/recipe.json
-│   ├── wen/recipe.json
+│   ├── recipe.json                      # required — manifest (id, name, description, library_name, …)
+│   │                                    #   SINGLE CANONICAL FILE. NEVER localized.
+│   │                                    #   Locale variants of recipe.json are FORBIDDEN —
+│   │                                    #   they silently drop critical fields like library_name.
 │   ├── greet/                           # optional — first-contact message
 │   │   ├── greet.md                     #   default version
 │   │   ├── en/greet.md                  #   optional locale variants
@@ -78,23 +78,38 @@ Every bundle must contain `<bundle>/.recipe/recipe.json`:
 | `version` | ❌ | string | Semver-ish (e.g. `"1.0.0"`). Defaults to `"1.0.0"` when absent. Recipe authors bump this when iterating. |
 | `library_name` | ❌ | string \| null | Name of the sibling library folder inside the bundle (e.g. `"velli"`). Must be a simple folder name, no slashes. `null` or absent means the recipe ships no library. When non-null, the TUI registers the library into each agent's `init.json#library.paths` via `"../../<library_name>"`. |
 
-### Locale variants
+### ⚠️ recipe.json is NEVER localized
 
-`name` and `description` are themselves localized. The TUI resolves them via this fallback chain per the active locale:
+**There is exactly one `recipe.json` per bundle, at `.recipe/recipe.json`. No `<lang>/recipe.json` files. Ever.**
 
-1. Try `<bundle>/.recipe/<lang>/recipe.json`
-2. Fall back to `<bundle>/.recipe/recipe.json`
+Why: `recipe.json` carries **machine identity** — `id`, `version`, and especially `library_name`. These are not display strings; they're load-bearing fields the recipe-apply step reads to wire up `init.json#library.paths` and locate the library folder on disk.
 
-Locale-variant `recipe.json` files only need `name` and `description`. `id`, `version`, and `library_name` are inherited from the root manifest.
+Splitting `recipe.json` by locale is a footgun: if the active locale's variant lacks `library_name` (a typical mistake — a translator localizes `name` and `description` but doesn't realize `library_name` must be carried over too), the TUI silently fails to register the library. Recipe-apply runs without error, but the agent boots without the recipe's skills. This is a hard-to-diagnose class of bug — symptom is "library doesn't load" with no log entry.
+
+**The runtime ignores any locale-variant `recipe.json`.** Only `.recipe/recipe.json` is read. The validator (`validate_recipe.py`) errors on any `<lang>/recipe.json` it finds, so they get caught at export time.
+
+**If you want localized display strings:** put them in `greet.md` and/or `comment.md`. Those are the user-facing surfaces; locale variants there are legitimate and supported. `name` and `description` in `recipe.json` are picker hint text — keep them in one canonical language (English or whatever fits your audience), and let the actual greet/comment carry the localized voice.
 
 ```
 .recipe/
-├── recipe.json            # {"id":"greeter","name":"Greeter","description":"...","library_name":null}
-├── zh/recipe.json         # {"name":"问候者","description":"..."}
-└── wen/recipe.json        # {"name":"问候者","description":"..."}
+├── recipe.json            # ✅ THE ONLY recipe.json
+├── greet/
+│   ├── greet.md           # default
+│   ├── zh/greet.md        # ✅ locale variants OK here
+│   └── wen/greet.md       # ✅
+└── comment/
+    ├── comment.md
+    └── wen/comment.md     # ✅
 ```
 
-Extra fields in any `recipe.json` are ignored — forward-compatible.
+```
+.recipe/
+├── recipe.json
+├── zh/recipe.json         # ❌ FORBIDDEN — validator errors
+└── wen/recipe.json        # ❌ FORBIDDEN — validator errors
+```
+
+Extra fields in `recipe.json` are ignored — forward-compatible.
 
 ## The Four Behavioral Layers
 
@@ -118,9 +133,12 @@ The TUI resolves each layer per active locale with the same fallback rule:
 
 ### 1. `greet.md` — First Contact
 
-The first message the orchestrator sends when the human opens the TUI. Written from the orchestrator's perspective (first person) — it's their voice, not a system message.
+**Audience:** the human. **Voice:** the orchestrator (first person).
+**This is what the agent SAYS, not what the agent IS TOLD.**
 
-**Purpose:** Set the tone, introduce the network, tell the user what they can do.
+When the network first wakes, the kernel writes `greet.md` into the orchestrator's `.prompt` file. The agent then reads that prompt and emits its content as its first message to the human's inbox. So whatever you write here ends up displayed to the user as if the agent typed it.
+
+**Purpose:** the agent's opening line(s) to the human. Set tone, identify yourself, tell the user what to do next.
 
 **Placeholders** (only `greet.md` may use them; substituted at recipe-apply time):
 
@@ -139,19 +157,62 @@ The first message the orchestrator sends when the human opens the TUI. Written f
 - Keep it short (5–10 sentences max).
 - Be proactive — introduce yourself, don't wait to be asked.
 - Don't open with `[system]` — that's a system-message marker, and greet.md is the orchestrator's voice. The validator warns if it sees one.
+- Don't write a stage script here. If the agent needs ongoing instructions for a complex task, those go in `comment.md`. `greet.md` is just the hello.
+
+**Common mistake:** treating `greet.md` as a briefing FOR the agent. It is not. The agent receives it as a prompt and *outputs* its content. If you write "you are X, do Y, then Z" in greet.md, the agent will dutifully repeat that sentence to the human. Briefings belong in `comment.md`.
+
+**Good greet.md (concrete, audience-facing):**
+```
+Hi! I'm the orchestrator for this network. The {{commands}}
+slash commands let you interact with me and my avatars.
+What would you like to work on?
+```
+
+**Bad greet.md (instructions to self leaking out):**
+```
+You are the main orchestrator. First, load the demo skill,
+then begin the show. Wait for the human to say "go" before
+proceeding to act 1.
+```
+The bad version belongs in `comment.md`.
 
 ### 2. `comment.md` — Ongoing Behavioral Constraints
 
-Injected into the orchestrator's system prompt on every turn. The persistent playbook.
+**Audience:** the agent (every turn). **Voice:** instructions/briefing addressed to the agent.
+**This is what the agent IS TOLD, not what the agent SAYS.**
 
-**Purpose:** Define what topics to cover, how to delegate, constraints, tone. A recipe-specific extension of the covenant.
+Injected into the orchestrator's system prompt on every turn. The persistent playbook the agent reads silently before deciding what to do.
+
+**Purpose:** define WHO the agent is in this recipe context, WHAT they're supposed to do, HOW to behave. A recipe-specific extension of the covenant.
 
 **When absent:** no comment file is referenced in `init.json`. The agent runs with just its covenant + procedures + recipe greet.
 
 **Rules:**
 - **No placeholders** — this is static text, validated.
 - Keep it focused — every token counts because it's on every turn.
-- Reference skills by name if the recipe ships a library.
+- Reference skills by name if the recipe ships a library, and tell the agent to **invoke** them (e.g. `library invoke <name>`), not just that they exist.
+- Use second-person address ("You are X. You should do Y.") — this is a system-prompt-like instruction, not narration.
+- If the recipe expects the agent to wait for a cue before doing something high-stakes (a live demo, a destructive operation), say so explicitly: "DO NOT begin X until the human says 'go'."
+
+**Common mistake:** writing comment.md as a marketing pitch instead of an instruction. Comment.md is read silently every turn — it should change *how the agent behaves*, not *what the agent feels*.
+
+**Good comment.md (clear instructions):**
+```
+You are the main orchestrator for the PKU demo. Your first
+action when waking is `library invoke lingtai-demo-pku` —
+that loads the full performance script. Do not begin the
+demo proper until the human gives an explicit cue ("开始",
+"go", or similar). Until then, send a brief readiness
+message and wait.
+```
+
+**Bad comment.md (narration, ambiguous):**
+```
+You are about to perform a beautiful demonstration of the
+LingTai system. The audience will be amazed. The hook is
+about token abundance. Three acts. Be theatrical.
+```
+That tells the agent the *vibe*, not the *behavior*. The agent will likely jump straight into performing instead of waiting.
 
 ### 3. `covenant.md` — Covenant Override
 

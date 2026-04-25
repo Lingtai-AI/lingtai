@@ -461,7 +461,12 @@ func TestLoadRecipeInfo_Valid(t *testing.T) {
 	}
 }
 
-func TestLoadRecipeInfo_LangSpecific(t *testing.T) {
+// TestLoadRecipeInfo_RootOnly verifies that recipe.json is read only from
+// the root path, never from a <lang>/ subdirectory. Even when a locale
+// variant exists, the root is authoritative — locale variants of recipe.json
+// are forbidden by the spec and ignored at runtime, because they silently
+// drop critical machine fields like library_name.
+func TestLoadRecipeInfo_RootOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeRecipeJSON(t, dir, "", "Root", "root")
 	writeRecipeJSON(t, dir, "zh", "中文名", "中文描述")
@@ -470,8 +475,8 @@ func TestLoadRecipeInfo_LangSpecific(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRecipeInfo error: %v", err)
 	}
-	if info.Name != "中文名" {
-		t.Errorf("Name = %q, want %q", info.Name, "中文名")
+	if info.Name != "Root" {
+		t.Errorf("Name = %q, want %q (locale variants of recipe.json must be ignored)", info.Name, "Root")
 	}
 }
 

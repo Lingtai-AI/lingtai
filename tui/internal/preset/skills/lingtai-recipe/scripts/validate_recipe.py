@@ -13,8 +13,9 @@ A recipe **bundle** is a directory containing:
 
     <bundle-root>/
     ├── .recipe/                         (required — behavioral layer)
-    │   ├── recipe.json                  (required manifest)
-    │   ├── {en,zh,wen}/recipe.json      (optional locale variants)
+    │   ├── recipe.json                  (required manifest — SINGLE CANONICAL,
+    │   │                                 NEVER localized; carries machine
+    │   │                                 identity: id/version/library_name)
     │   ├── greet/greet.md               (optional — agent is silent if absent)
     │   ├── greet/{en,zh,wen}/greet.md   (optional locale variants)
     │   ├── comment/...                  (optional — no comment if absent)
@@ -129,37 +130,29 @@ def _check_recipe_json(
 def _check_locale_recipe_jsons(
     recipe_dir: Path, errors: list[str], warnings: list[str]
 ) -> None:
-    """Validate any locale-variant recipe.json at .recipe/<lang>/recipe.json."""
+    """Reject any locale-variant recipe.json.
+
+    recipe.json carries machine identity (id, version, library_name) and
+    must be a single canonical file at .recipe/recipe.json — never localized.
+    Locale variants silently drop critical fields like library_name in the
+    non-default locale, breaking recipe-apply with no visible error. If you
+    want localized display strings, put them only in greet.md / comment.md /
+    covenant.md / procedures.md — those are the four behavioral layers that
+    legitimately have locale variants.
+    """
     for sub in sorted(recipe_dir.iterdir()):
         if not sub.is_dir():
             continue
         if sub.name in BEHAVIORAL_LAYERS:
             continue  # behavioral-layer subdir, not a locale folder
-        # Treat as locale subdir only if it contains recipe.json.
         loc_json = sub / "recipe.json"
-        if not loc_json.is_file():
-            continue
-        if sub.name not in KNOWN_LANGS:
-            warnings.append(
-                f"{sub}: unknown lang code `{sub.name}` "
-                f"(known: {sorted(KNOWN_LANGS)})"
+        if loc_json.is_file():
+            errors.append(
+                f"{loc_json}: locale-variant recipe.json is forbidden — "
+                f"recipe.json must be a single canonical file at .recipe/recipe.json. "
+                f"Move localized name/description into greet/comment if needed, "
+                f"and delete this file."
             )
-        try:
-            data = json.loads(loc_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            errors.append(f"{loc_json}: invalid JSON ({e})")
-            continue
-        if not isinstance(data, dict):
-            errors.append(f"{loc_json}: must be a JSON object")
-            continue
-        # Locale variants only need name/description; id/version/library_name
-        # are inherited from the root manifest on load.
-        for field in ("name", "description"):
-            value = data.get(field)
-            if not isinstance(value, str) or not value.strip():
-                errors.append(
-                    f"{loc_json}: `{field}` must be a non-empty string"
-                )
 
 
 def _check_behavioral_layers(

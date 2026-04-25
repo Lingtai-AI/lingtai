@@ -135,17 +135,28 @@ func ScanCategory(globalDir, category, lang string) []DiscoveredRecipe {
 	return recipes
 }
 
-// LoadRecipeInfo reads .recipe/recipe.json from a recipe bundle directory,
-// resolved via the standard i18n fallback (<lang>/recipe.json → recipe.json).
+// LoadRecipeInfo reads .recipe/recipe.json from a recipe bundle directory.
+//
+// The lang parameter is accepted for backward-compatible API shape but is
+// **deliberately ignored**. recipe.json carries machine identity (id,
+// version, library_name) and must be a single canonical file at
+// .recipe/recipe.json — never localized. Locale variants of recipe.json are
+// dangerous: they silently drop critical fields like library_name in the
+// non-default locale, breaking recipe-apply with no error.
+//
+// Only behavioral-layer files (greet.md, comment.md, covenant.md,
+// procedures.md) are localized; recipe.json is not.
+//
 // Returns an error if the file is not found, unparseable, or has an empty name.
 //
 // Defaults applied on load: Version -> "1.0.0" if absent.
 func LoadRecipeInfo(bundleDir, lang string) (RecipeInfo, error) {
+	_ = lang // intentionally unused — see doc comment
 	if bundleDir == "" {
 		return RecipeInfo{}, fmt.Errorf("empty recipe bundle directory")
 	}
-	path := resolveRecipeDotFile(bundleDir, lang, "recipe.json")
-	if path == "" {
+	path := filepath.Join(bundleDir, RecipeDotDir, "recipe.json")
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
 		return RecipeInfo{}, fmt.Errorf(".recipe/recipe.json not found in %s", bundleDir)
 	}
 	data, err := os.ReadFile(path)
