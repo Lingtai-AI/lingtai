@@ -21,6 +21,7 @@
   "firstrun.enter_name_dir": "Name your agent",
   "firstrun.agent_name": "Agent name",
   "firstrun.agent_dir": "Folder name",
+  "firstrun.agent_dir_locked_hint": "(read-only — workdir is the agent's identity)",
   "firstrun.toggle_field": "switch field",
   "firstrun.create_agent": "create",
   "firstrun.back": "back",

@@ -174,6 +174,11 @@ type FirstRunModel struct {
 	// NewSetupModeModel from the existing agent's init.json. Read via currentPreset()
 	// when m.cursor == -1 so downstream handlers never index m.presets[-1].
 	setupKeepPreset preset.Preset
+	// Full saved init.json (top-level, including manifest + addons + covenant_file
+	// etc. as siblings). Populated by NewSetupModeModel; consulted by enterAgentNameDir
+	// in setup mode to pre-fill runtime fields with the user's previously-saved
+	// values instead of the preset's defaults.
+	setupKeepInitJSON map[string]interface{}
 	// Rehydration mode (agora cloned network): runs the normal first-run wizard
 	// but prefills the orchestrator name/dir from .agent.json, locks the dir
 	// (can't be edited), and adds stepPropagate at the end to propagate the
@@ -449,6 +454,13 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	// Also synthesize `setupKeepPreset` from the same init.json — when the user picks
 	// "Keep current preset" (cursor == -1) in the preset picker, downstream code reads
 	// this synthetic preset via currentPreset() instead of indexing m.presets[-1].
+	//
+	// Shape: init.json has the runtime config under a top-level "manifest" key
+	// (with addons sitting alongside at the top level). Preset.Manifest is the
+	// inner shape — every consumer does p.Manifest["language"], ["llm"],
+	// ["capabilities"], etc. — so we extract the inner manifest dict.
+	// Stash the outer dict separately so enterAgentNameDir can read fields
+	// like covenant_file / principle_file / soul_file that live at top level.
 	if orchDir != "" {
 		initPath := filepath.Join(orchDir, "init.json")
 		if data, err := os.ReadFile(initPath); err == nil {
@@ -459,12 +471,18 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 						m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
 					}
 				}
-				// init.json IS the manifest for "keep current" semantics.
+				inner, _ := existing["manifest"].(map[string]interface{})
+				if inner == nil {
+					// Defensive: malformed or pre-wrapper init.json — fall back to
+					// treating the whole file as the inner manifest.
+					inner = existing
+				}
 				m.setupKeepPreset = preset.Preset{
 					Name:        "keep_current",
 					Description: i18n.T("setup.keep_current_preset"),
-					Manifest:    existing,
+					Manifest:    inner,
 				}
+				m.setupKeepInitJSON = existing
 			}
 		}
 	}
@@ -2352,7 +2370,8 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + sectionStyle.Render("── "+i18n.T("firstrun.section_identity")+" ──") + "\n")
 		b.WriteString(cur(0) + i18n.T("firstrun.agent_name") + ": " + m.nameInput.View() + "\n")
 		if m.setupMode {
-			b.WriteString("  " + i18n.T("firstrun.agent_dir") + ": " + StyleFaint.Render(m.setupOrchDir) + "\n")
+			b.WriteString("  " + i18n.T("firstrun.agent_dir") + ": " + StyleFaint.Render(m.setupOrchDir) +
+				"  " + StyleFaint.Render(i18n.T("firstrun.agent_dir_locked_hint")) + "\n")
 		} else {
 			b.WriteString(cur(1) + i18n.T("firstrun.agent_dir") + ": " + m.dirInput.View() + "\n")
 		}
@@ -2790,6 +2809,20 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 		m.addonSelected = map[string]bool{"imap": true, "telegram": true, "feishu": true}
 	}
 
+	// Setup mode: pre-check capabilities the user previously enabled. Without
+	// this, re-running /setup wipes capabilities back to {"skills": true},
+	// which silently drops the user's earlier selections on save. Reads from
+	// the synthetic keep-current preset (populated by NewSetupModeModel from
+	// init.json["manifest"]["capabilities"]). Done after the default reset so
+	// "skills" remains pre-checked even when the saved init.json doesn't list it.
+	if m.setupMode {
+		if caps, ok := m.setupKeepPreset.Manifest["capabilities"].(map[string]interface{}); ok {
+			for name := range caps {
+				m.capSelected[name] = true
+			}
+		}
+	}
+
 	return m.runCheckCaps()
 }
 
@@ -2964,7 +2997,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 		}
 	}
 
-	// Numeric defaults
+	// Numeric defaults — overridden by saved init.json values in setup mode below.
 	m.staminaInput.SetValue("36000")
 	// Default context window: 200K for most providers; DeepSeek V4 ships with
 	// a 1M window out of the box, so let the agent use it.
@@ -2982,7 +3015,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.moltPressInput.Blur()
 	m.maxRpmInput.Blur()
 
-	// Pre-fill prompt paths based on language
+	// Pre-fill prompt paths based on language — also overridden below in setup mode.
 	langs := []string{"en", "zh", "wen"}
 	lang := langs[m.agentLangIdx]
 	m.covenantInput.SetValue(preset.CovenantPath(m.globalDir, lang))
@@ -2995,7 +3028,108 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.karmaIdx = 0  // true
 	m.nirvanaIdx = 1 // false
 
+	// Setup mode: re-running /setup on an existing agent should surface the
+	// agent's actual current values, not the preset's defaults. Pull them
+	// out of the saved init.json (loaded by NewSetupModeModel) and overwrite
+	// the defaults set above. Each pull is best-effort — missing or wrong-
+	// typed fields fall through to the default, so a partially-malformed
+	// init.json still lets the wizard render.
+	if m.setupMode && m.setupKeepInitJSON != nil {
+		manifest, _ := m.setupKeepInitJSON["manifest"].(map[string]interface{})
+		if manifest != nil {
+			if v, ok := numberFromJSON(manifest["stamina"]); ok {
+				m.staminaInput.SetValue(formatNumber(v))
+			}
+			if v, ok := numberFromJSON(manifest["context_limit"]); ok {
+				m.ctxLimitInput.SetValue(formatNumber(v))
+			}
+			if soul, ok := manifest["soul"].(map[string]interface{}); ok {
+				if v, ok := numberFromJSON(soul["delay"]); ok {
+					m.soulDelayInput.SetValue(formatNumber(v))
+				}
+			}
+			if v, ok := numberFromJSON(manifest["molt_pressure"]); ok {
+				m.moltPressInput.SetValue(formatFloat(v))
+			}
+			if v, ok := numberFromJSON(manifest["max_rpm"]); ok {
+				m.maxRpmInput.SetValue(formatNumber(v))
+			}
+			if admin, ok := manifest["admin"].(map[string]interface{}); ok {
+				if karma, ok := admin["karma"].(bool); ok {
+					if karma {
+						m.karmaIdx = 0
+					} else {
+						m.karmaIdx = 1
+					}
+				}
+				if nirvana, ok := admin["nirvana"].(bool); ok {
+					if nirvana {
+						m.nirvanaIdx = 0
+					} else {
+						m.nirvanaIdx = 1
+					}
+				}
+			}
+		}
+		// Behavioral-layer paths live at the top level of init.json, not under manifest.
+		if s, ok := m.setupKeepInitJSON["covenant_file"].(string); ok && s != "" {
+			m.covenantInput.SetValue(s)
+			m.covenantDirty = true
+		}
+		if s, ok := m.setupKeepInitJSON["principle_file"].(string); ok && s != "" {
+			m.principleInput.SetValue(s)
+			m.principleDirty = true
+		}
+		if s, ok := m.setupKeepInitJSON["soul_file"].(string); ok && s != "" {
+			m.soulFlowInput.SetValue(s)
+			m.soulFlowDirty = true
+		}
+		if s, ok := m.setupKeepInitJSON["comment"].(string); ok {
+			m.commentInput.SetValue(s)
+		}
+	}
+
 	m.step = stepAgentNameDir
+}
+
+// numberFromJSON normalizes a JSON-decoded numeric value (which may arrive as
+// float64, json.Number, int, or a string) into a float64. Returns ok=false
+// when the value is missing, nil, or genuinely non-numeric.
+func numberFromJSON(v interface{}) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case string:
+		if x == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(x, 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	}
+	return 0, false
+}
+
+// formatNumber renders an integer-valued float as "N" (no decimal point), for
+// fields like stamina / context_limit / soul.delay / max_rpm that are conceptually
+// integers. Falls back to a compact float representation if the value is fractional.
+func formatNumber(v float64) string {
+	if v == float64(int64(v)) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// formatFloat renders a fractional value (molt_pressure, attention) without
+// trailing zeros — strconv's 'f', -1 form keeps just enough precision to round-trip.
+func formatFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // focusAgentField focuses the input at m.fieldIdx and blurs all others.

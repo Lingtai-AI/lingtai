@@ -21,6 +21,7 @@
   "firstrun.enter_name_dir": "命器灵",
   "firstrun.agent_name": "器灵名",
   "firstrun.agent_dir": "文件夹名",
+  "firstrun.agent_dir_locked_hint": "（不可改 — 此即灵之身）",
   "firstrun.toggle_field": "换栏",
   "firstrun.create_agent": "建",
   "firstrun.back": "返",
