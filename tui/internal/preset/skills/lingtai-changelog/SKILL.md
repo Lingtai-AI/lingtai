@@ -32,6 +32,10 @@ If you cloned a network and notice the EXPORTED SNAPSHOT banner in your brief, y
 
 Driven by feedback from the `quant_company` export on 2026-04-25: the human noticed the cloned orchestrator did not know it was a clone — it had the full chat history and treated the new repo as if it were the original network's working directory. The root cause was that `chat_history.jsonl` was kept by default. Fix: strip the transcript, let `greet.md` serve as the molt-style charge, and stamp the agent's brief so the awareness reaches the very first turn.
 
+### Same-day addendum: scope disambiguation in nested-recipe projects
+
+A second failure mode surfaced from the `impersonate-meta` export: the project itself was *seeded from a recipe* (a methodology recipe with its own `.recipe/` at the project root) and *also contained a network* (the agents living in `.lingtai/`). Both export sub-guides were ambiguous about which artifact to ship — the agent could end up republishing the seeding methodology recipe instead of distilling the actual inner network. Both `assets/export-network.md` and `assets/export-recipe.md` now open with a "First: which 'network' / 'recipe' does the human mean?" disambiguation block, and `export-network.md`'s Step 5 explicitly says the launch recipe is NEW (with replace-vs-relocate options for any pre-existing root `.recipe/`).
+
 ---
 
 ## 2026-04-21 — Pseudo-agent outbox subscription

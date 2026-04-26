@@ -6,6 +6,18 @@
 
 A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing. An exported recipe is a **bundle directory** — a git repo the recipient clones and points `/setup` at.
 
+## First: which "recipe" does the human mean?
+
+A project can hold three recipe-shaped artifacts at once. Confirm scope with the human before authoring anything:
+
+1. **A recipe distilled from the inner network** (default, and what this sub-guide assumes). You look at the agents currently living in `.lingtai/` — orchestrator and avatars, their actual behavior, their accumulated culture — and write a NEW `.recipe/` that captures what makes this network distinctive.
+
+2. **The outer project's own `.recipe/`** at the project root (sibling of `.lingtai/`). If present, this is the recipe that originally *seeded* this project. If the human says "re-export the recipe," they may mean republish this existing bundle, NOT write a new one. Ask. Republishing is mostly a copy job (copy `<project>/.recipe/` and the matching `<project>/<library_name>/` sibling into `$HOME/lingtai-agora/recipes/<id>/`, then jump to Step 4 to validate). Distilling a fresh recipe is what the rest of this sub-guide covers.
+
+3. **The applied-recipe snapshot at `.lingtai/.tui-asset/.recipe/`** is a TUI-managed copy of #2, useful as *evidence* of what behavior is currently in force. It is not a separate artifact to ship — if the human wants what's in there, they almost certainly mean #2.
+
+The most common failure mode in a project that was itself seeded from a recipe (e.g., a methodology recipe applied to produce a domain network): the agent confuses #2 with #1 and ends up republishing the seeding methodology instead of distilling the network's actual culture. If the project has both a `.lingtai/` *and* its own `.recipe/` at the root, ASK the human which scope they want before proceeding.
+
 ## What is an exported recipe bundle?
 
 A recipe bundle is the shareable artifact the TUI copies into a project on selection. Minimum shape:
@@ -71,15 +83,15 @@ Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **No
 
 **0b. Read `../references/recipe-format.md`** to refresh your understanding of the bundle shape.
 
-**0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture:
+**0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture. **You are reflecting on the inner network (the agents in `.lingtai/`), not on whatever recipe was originally applied to seed it.** The applied recipe is one input among several — the network's *current* behavior may have drifted, grown new skills, or specialized in ways the seeding recipe never described. Distill what the network is now, not what it was told to be.
 
-1. Read the current recipe state: `ls -la .lingtai/.tui-asset/` and look at `.recipe/` (directory — the snapshot of the currently-applied recipe) or `.recipe` (JSON file — UI picker state). The directory snapshot contains the `.recipe/` dotfolder as it was last applied.
-2. Read the orchestrator's comment from `.lingtai/.tui-asset/.recipe/comment/comment.md` (or the locale variant) — that's the behavioral DNA the current network is running under.
+1. Read the applied-recipe state for context only: `ls -la .lingtai/.tui-asset/` and look at `.recipe/` (directory — the snapshot of the currently-applied recipe) or `.recipe` (JSON file — UI picker state). The directory snapshot is what the agents were initially shaped by; it tells you the starting point, not the destination. If the project also has its own `.recipe/` at the project root, that's the same content — see "First: which 'recipe' does the human mean?" above.
+2. Read the orchestrator's comment from `.lingtai/.tui-asset/.recipe/comment/comment.md` (or the locale variant) — that's the behavioral DNA the current network is running under. Treat it as a *baseline*; what you ship in Step 2c will refine, extend, or partially replace it based on how the network actually evolved.
 3. List libraries currently registered: `cat .lingtai/<orchestrator>/init.json | python3 -c "import json,sys; m=json.load(sys.stdin); print(m['manifest']['capabilities']['library']['paths'])"`
 4. Scan the network structure: `ls .lingtai/*/.agent.json 2>/dev/null | head` and read a couple to see agent names and roles.
-5. Skim recent mail for tone and delegation patterns: `ls -t .lingtai/<orchestrator>/mailbox/sent/ | head -20`
+5. Skim recent mail for tone and delegation patterns: `ls -t .lingtai/<orchestrator>/mailbox/sent/ | head -20`. The actual delegation, the actual tone, the actual workflow — this trumps anything the seeding recipe says.
 
-Build a mental model of: what does this network *do*? How does it *behave*? What *skills* has it grown? What makes it distinctive?
+Build a mental model of: what does this network *do* now? How does it *behave* now? What *skills* has it grown that the seeding recipe didn't ship? What makes it distinctive *as it stands*, not as it was originally configured?
 
 ## Step 1: Collect Metadata from the Human
 

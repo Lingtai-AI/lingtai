@@ -258,6 +258,13 @@ Every exported network must ship with a recipe: it controls what the orchestrato
 
 **Do not skip this step.** An exported network without a recipe is a bad first impression — the recipient sets up the network and gets silence.
 
+**This is a NEW recipe.** If the staging directory already contains a `.recipe/` at its root (because the original project was seeded from one — see "First: which 'network' and which 'recipe'?" above), DO NOT preserve it as the launch recipe. That older recipe describes the *methodology that produced* this network; the launch recipe must describe *the network itself* — its agents, its purpose, what a recipient steps into when they clone it. Either:
+
+- **Replace it.** Delete the staging dir's existing `.recipe/` (`rm -rf "$BUNDLE/.recipe"`) and author a fresh one in the steps below. This is the default. The original recipe still lives in the human's outer source tree; nothing is lost.
+- **Keep it as a sub-folder.** If the human wants the original recipe to travel with the bundle as documentation (e.g., "ship the methodology recipe inside the network export so recipients can see how it was seeded"), move it to a non-conflicting location like `<bundle>/origin-recipe/` *before* you author the new `.recipe/` at the bundle root. Mention this in the new `comment.md` so the recipient knows it's there.
+
+Confirm with the human which option they want before authoring. The default is replace.
+
 ### 5a. Draft first, ask second
 
 The old version of this skill asked the human six separate questions (id, name, description, layers, library, languages) before writing anything. That turned out to be too much friction up front. The new flow: **you draft first, then ask the human to amend.**
