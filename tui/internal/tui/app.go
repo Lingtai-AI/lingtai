@@ -53,7 +53,7 @@ type App struct {
 	briefs          MarkdownViewerModel
 	codex           CodexModel
 	system          SystemModel
-	mailbox         MarkdownViewerModel
+	mailbox         MailboxModel
 	firstRun        FirstRunModel
 	addon           AddonModel
 	doctor          DoctorModel
@@ -862,9 +862,8 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "mailbox":
 		a.currentView = appViewMailbox
-		entries := buildMailboxEntries(a.projectDir)
-		a.mailbox = NewMarkdownViewer(entries, i18n.T("palette.mailbox"))
-		return a, a.sendSize()
+		a.mailbox = NewMailboxModel(a.projectDir)
+		return a, tea.Batch(a.mailbox.Init(), a.sendSize())
 	case "agora":
 		a.currentView = appViewAgora
 		a.agora = NewAgoraModel(a.globalDir, a.projectDir)

@@ -91,14 +91,15 @@ type parsedMail struct {
 	Source      string // "inbox", "sent", "imap:account"
 }
 
-// buildMailboxEntries scans the human's mailbox and all IMAP mailboxes
-// under lingtaiDir, returning MarkdownEntry items for the viewer.
-func buildMailboxEntries(lingtaiDir string) []MarkdownEntry {
+// buildMailboxEntries scans the inbox of the given agent (or human) directory
+// and returns MarkdownEntry items for the viewer. agentDir must be the full
+// path to a directory containing a mailbox/inbox subdirectory (e.g.
+// .lingtai/human or .lingtai/<agent>).
+func buildMailboxEntries(agentDir string) []MarkdownEntry {
 	var mails []parsedMail
 
-	// 1. Human inbox — messages from agents to human
-	humanInbox := filepath.Join(lingtaiDir, "human", "mailbox", "inbox")
-	mails = append(mails, scanInternalMailbox(humanInbox, "inbox")...)
+	inbox := filepath.Join(agentDir, "mailbox", "inbox")
+	mails = append(mails, scanInternalMailbox(inbox, "inbox")...)
 
 	// Sort by time descending (newest first)
 	sort.Slice(mails, func(i, j int) bool {
