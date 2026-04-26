@@ -10,6 +10,30 @@ A living chronicle of system-level changes that affect how you work. When someth
 
 ---
 
+## 2026-04-26 — Network exports drop chat_history; clones know they are clones
+
+### What changed
+
+`lingtai-recipe` skill bumped to v3.1. The network-export flow (`/export network`) now does three new things to address the "exported network thinks it is the original" problem:
+
+1. **Strips per-agent `history/chat_history.jsonl`, `history/soul_history.jsonl`, and `history/soul_cursor.json`.** Previously these were copied verbatim, so a cloned agent woke up with the original's full LLM transcript and believed it was still in the same conversation. Now they are removed during `scrub_ephemeral.py`, and the recipe's `greet.md` is repositioned as the network's 「前尘往事」 (charge) — a tight retrospective the cloned agent reads on first launch to learn who it was.
+2. **Stamps each agent's `system/brief.md` with an "EXPORTED SNAPSHOT" banner** via the new `scripts/mark_export_source.py`. brief.md sits at the top of the system prompt, so the banner reaches the agent on its first turn after rehydration.
+3. **Writes `.exported-from`** at the bundle root recording bundle name, source URL, and export timestamp. Survives `git add .` — proof of origin for downstream forks and a sanity check for "is this a snapshot?"
+
+Also stripped now: `.lingtai/<agent>/.library/intrinsic/` (kernel-managed, identical across installs — recipient kernel rebuilds it on rehydration; was bloating exports with hundreds of duplicated `SKILL.md` files).
+
+### What you should do
+
+If you are about to export a network, follow `lingtai-recipe`'s `assets/export-network.md` end to end — Step 1c now runs `mark_export_source.py`, Step 5d frames `greet.md` as 「前尘往事」 instead of a generic welcome, and Step 5i drafts `README.md` via `scripts/generate_readme.py`. The privacy scanner (`privacy_scan.py`) also folds `.lingtai/`-runtime absolute-path warnings into a single rolled-up count by default — pass `--no-fold` if you want the full firehose.
+
+If you cloned a network and notice the EXPORTED SNAPSHOT banner in your brief, you are in a clone of `<name>`. The original network you remember continues elsewhere. Read `greet.md` for context on who you used to be.
+
+### Why
+
+Driven by feedback from the `quant_company` export on 2026-04-25: the human noticed the cloned orchestrator did not know it was a clone — it had the full chat history and treated the new repo as if it were the original network's working directory. The root cause was that `chat_history.jsonl` was kept by default. Fix: strip the transcript, let `greet.md` serve as the molt-style charge, and stamp the agent's brief so the awareness reaches the very first turn.
+
+---
+
 ## 2026-04-21 — Pseudo-agent outbox subscription
 
 ### What changed

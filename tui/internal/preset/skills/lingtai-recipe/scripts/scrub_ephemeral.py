@@ -16,6 +16,14 @@ For each .lingtai/<agent>/ directory, deletes:
     logs/                         (event stream, token ledger, agent.log)
     .git/                         (per-agent time machine snapshots)
     mailbox/schedules/            (future-dated, machine-local)
+    history/chat_history.jsonl    (full LLM turn history — would make a clone
+                                   wake up believing it is the original agent
+                                   with all its memories; greet.md should
+                                   instead carry "前尘往事" as a charge)
+    history/soul_history.jsonl    (introspection trace — same reason)
+    history/soul_cursor.json      (soul cursor position — invalid post-clone)
+    .library/intrinsic/           (kernel-managed, identical across installs;
+                                   recipient kernel rebuilds on rehydration)
 
 Also deletes project-level dot-dirs under .lingtai/ that hold publisher-
 specific state:
@@ -59,6 +67,11 @@ EPHEMERAL_FILES = [
     ".interrupt",
     ".cancel",
     "events.json",
+    # Human pseudo-agent: flat history file (no history/ subdir).
+    # Real agents instead have history/{chat,soul}_history.jsonl, handled
+    # via EPHEMERAL_NESTED below. Listing this at file-level is harmless
+    # for real agents (they don't have a flat history.json).
+    "history.json",
 ]
 
 EPHEMERAL_DIRS = [
@@ -67,8 +80,18 @@ EPHEMERAL_DIRS = [
 ]
 
 # Nested paths that aren't direct children of the agent dir.
+# - history/chat_history.jsonl, soul_history.jsonl, soul_cursor.json: full
+#   LLM/introspection trace. Shipping these makes the cloned agent wake up
+#   believing it is the original — same identity, same memories, same
+#   inflight state. Strip and let greet.md serve as "前尘往事" (charge).
+# - .library/intrinsic/: kernel-managed; identical across installs. Recipient
+#   kernel rebuilds it on rehydration, so shipping it is dead weight.
 EPHEMERAL_NESTED = [
     "mailbox/schedules",
+    "history/chat_history.jsonl",
+    "history/soul_history.jsonl",
+    "history/soul_cursor.json",
+    ".library/intrinsic",
 ]
 
 # Project-level dot-dirs under .lingtai/ itself (not per-agent). These

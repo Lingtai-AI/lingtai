@@ -145,6 +145,13 @@ def main() -> int:
         default=5.0,
         help="Skip files larger than N MB (default: 5)",
     )
+    ap.add_argument(
+        "--no-fold",
+        action="store_true",
+        help="Do not fold .lingtai/ runtime breadcrumbs into a rolled-up "
+             "count — show every absolute-path match individually. Useful "
+             "when investigating whether a leak hides among the noise.",
+    )
     args = ap.parse_args()
 
     staging_dir = args.staging_dir.resolve()
@@ -159,6 +166,13 @@ def main() -> int:
     hard_hits: list[tuple[Path, list[tuple[str, int, str]]]] = []
     soft_counts: dict[str, int] = {}
     soft_sample: dict[str, tuple[Path, int, str]] = {}
+    # Counts of soft hits that we down-rank as low-signal: either the file
+    # itself lives under .lingtai/, or the matched text points at a
+    # .lingtai/ path. These are nearly always the publisher's own runtime
+    # breadcrumbs (lock files, log paths, init.json refs) — interesting
+    # for sanity but not a privacy ask the human needs to inspect line by
+    # line. We surface them as a single rolled-up count.
+    folded_counts: dict[str, int] = {}
 
     try:
         for f in iter_text_files(staging_dir, max_bytes):
@@ -166,7 +180,22 @@ def main() -> int:
             hard, soft = scan_file(f)
             if hard:
                 hard_hits.append((f, hard))
+            file_under_lingtai = (
+                ".lingtai" in f.relative_to(staging_dir).parts
+            )
             for name, lineno, text in soft:
+                # Fold known-pattern .lingtai/ noise: if the file lives
+                # under .lingtai/, OR the matched text itself is a path
+                # whose tail falls under a .lingtai/ subtree, it's almost
+                # certainly the publisher's own runtime path leaking into
+                # a generated config. Down-rank it.
+                folded = False
+                if not args.no_fold and name in ("abs_unix_path", "abs_windows_path"):
+                    if file_under_lingtai or "/.lingtai/" in text or "\\.lingtai\\" in text:
+                        folded = True
+                if folded:
+                    folded_counts[name] = folded_counts.get(name, 0) + 1
+                    continue
                 soft_counts[name] = soft_counts.get(name, 0) + 1
                 if name not in soft_sample:
                     soft_sample[name] = (f, lineno, text)
@@ -184,6 +213,16 @@ def main() -> int:
             rel = sample_path.relative_to(staging_dir)
             print(f"  {name}: {count} match(es)")
             print(f"    e.g. {rel}:{lineno}  →  {text}")
+        print()
+
+    # ─── Folded noise (collapsed, not for review) ──────────────────
+    # Reported as a single line per pattern so the human knows the
+    # detector ran but isn't asked to triage hundreds of system breadcrumbs.
+    if folded_counts:
+        print("─── folded (low-signal, .lingtai runtime breadcrumbs) ───")
+        for name, count in sorted(folded_counts.items()):
+            print(f"  {name}: {count} match(es) folded — re-run with "
+                  f"--no-fold to see them")
         print()
 
     # ─── Hard hits (block) ─────────────────────────────────────────

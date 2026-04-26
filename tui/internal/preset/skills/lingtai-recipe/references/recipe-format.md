@@ -43,11 +43,13 @@ my-recipe-bundle/
 └── .lingtai/                            # optional — network snapshot (export-network only)
     ├── <agent>/
     │   ├── .agent.json                  # identity blueprint (KEPT)
-    │   ├── system/*.md                  # KEPT
+    │   ├── system/*.md                  # KEPT (brief.md gets an EXPORTED SNAPSHOT banner)
     │   ├── codex/codex.json             # KEPT
     │   ├── pad.md                       # KEPT
-    │   ├── history/chat_history.jsonl   # KEPT
     │   ├── mailbox/                     # KEPT (sanitized by export)
+    │   ├── (NO history/chat_history.jsonl)  # STRIPPED — see "What's kept vs stripped" below
+    │   ├── (NO history/soul_history.jsonl)  # STRIPPED — same
+    │   ├── (NO .library/intrinsic/)     # STRIPPED — kernel rebuilds on rehydration
     │   └── (NO init.json)               # STRIPPED — recipient picks their own provider
     └── .tui-asset/.recipe/              # snapshot of applied recipe (KEPT)
 ```
@@ -326,14 +328,18 @@ An exported bundle MAY include a full network snapshot — the live state of eve
 | Per-agent file | Kept? | Reason |
 |---|---|---|
 | `.agent.json` | ✅ KEPT | Identity blueprint (agent_name, address) |
-| `system/*.md` | ✅ KEPT | Agent-authored firmware (covenant, principle, procedures, pad) |
+| `system/*.md` | ✅ KEPT | Agent-authored firmware (covenant, principle, procedures, pad). `system/brief.md` gets an "EXPORTED SNAPSHOT" banner prepended at export time. |
 | `codex/codex.json` | ✅ KEPT | Structured memory accumulated by the agent |
 | `pad.md` | ✅ KEPT | Working memory |
-| `history/chat_history.jsonl` | ✅ KEPT | Conversation trace |
 | `mailbox/` | ✅ KEPT | Sanitized mail per export scripts |
 | `delegates/ledger.jsonl` | ✅ KEPT | Avatar spawn record |
-| `logs/*.jsonl` | ✅ KEPT | Event log, token ledger |
+| `<agent>/.library/custom/` | ✅ KEPT | Agent-authored skills |
 | **`init.json`** | ❌ **STRIPPED** | Contains the exporter's install-specific LLM choice, API key env names, admin flags |
+| **`history/chat_history.jsonl`** | ❌ **STRIPPED (v3.1)** | Full LLM turn history. Shipping this would make a clone wake up indistinguishable from the original — same identity, same memories, same in-flight conversation. The recipe's `greet.md` serves as 「前尘往事」 instead. |
+| **`history/soul_history.jsonl`** | ❌ **STRIPPED (v3.1)** | Introspection trace — same reason. |
+| **`history/soul_cursor.json`** | ❌ **STRIPPED (v3.1)** | Cursor position into the (now-removed) soul history. |
+| **`<agent>/.library/intrinsic/`** | ❌ **STRIPPED (v3.1)** | Kernel-managed; identical across LingTai installs. Recipient kernel rebuilds on rehydration. |
+| **`logs/`** | ❌ STRIPPED | Per-launch event stream and per-launch token ledger. |
 
 ### Why `init.json` is stripped
 
@@ -355,13 +361,13 @@ All locale-aware content under `.recipe/` uses the same two-level fallback:
 
 | Content | Lookup order |
 |---|---|
-| `recipe.json` | `.recipe/<lang>/recipe.json` → `.recipe/recipe.json` |
+| `recipe.json` | `.recipe/recipe.json` (single canonical — locale variants forbidden, see ⚠️ above) |
 | `greet.md` | `.recipe/greet/<lang>/greet.md` → `.recipe/greet/greet.md` |
 | `comment.md` | `.recipe/comment/<lang>/comment.md` → `.recipe/comment/comment.md` |
 | `covenant.md` | `.recipe/covenant/<lang>/covenant.md` → `.recipe/covenant/covenant.md` |
 | `procedures.md` | `.recipe/procedures/<lang>/procedures.md` → `.recipe/procedures/procedures.md` |
 
-A single root-level file serves all languages. Per-locale files override it only when present.
+For the four behavioral layers, a single root-level file serves all languages; per-locale files override it only when present. `recipe.json` is the exception — it has no locale fallback and any `.recipe/<lang>/recipe.json` is a validator error.
 
 **Known locale codes:** `en`, `zh`, `wen`. Unknown codes produce warnings from the validator but don't block the bundle.
 

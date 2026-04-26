@@ -97,20 +97,37 @@ def test_all_four_layers_populated_passes(tmp_path: Path) -> None:
     _assert_ok(_run(tmp_path))
 
 
-def test_locale_variants_pass(tmp_path: Path) -> None:
+def test_locale_variants_in_layers_pass(tmp_path: Path) -> None:
+    """Locale variants live inside layer dirs (greet/comment/...), not at .recipe/ root.
+    Locale-variant recipe.json is forbidden — see test_locale_recipe_json_rejected."""
     _make_valid_bundle(tmp_path)
-    # locale recipe.json at .recipe/zh/recipe.json
-    (tmp_path / ".recipe" / "zh").mkdir()
-    (tmp_path / ".recipe" / "zh" / "recipe.json").write_text(
-        json.dumps({"name": "测试", "description": "测试配方"}),
-        encoding="utf-8",
-    )
     # locale greet at .recipe/greet/zh/greet.md
     (tmp_path / ".recipe" / "greet" / "zh").mkdir()
     (tmp_path / ".recipe" / "greet" / "zh" / "greet.md").write_text(
         "你好。", encoding="utf-8"
     )
+    # locale comment at .recipe/comment/wen/comment.md (and its layer root, since
+    # we're adding a new layer to the bundle).
+    (tmp_path / ".recipe" / "comment").mkdir()
+    (tmp_path / ".recipe" / "comment" / "comment.md").write_text(
+        "Be helpful.", encoding="utf-8"
+    )
+    (tmp_path / ".recipe" / "comment" / "wen").mkdir()
+    (tmp_path / ".recipe" / "comment" / "wen" / "comment.md").write_text(
+        "助人为乐。", encoding="utf-8"
+    )
     _assert_ok(_run(tmp_path))
+
+
+def test_locale_recipe_json_rejected(tmp_path: Path) -> None:
+    """recipe.json carries machine identity and must never be localized."""
+    _make_valid_bundle(tmp_path)
+    (tmp_path / ".recipe" / "zh").mkdir()
+    (tmp_path / ".recipe" / "zh" / "recipe.json").write_text(
+        json.dumps({"name": "测试", "description": "测试配方"}),
+        encoding="utf-8",
+    )
+    _assert_error(_run(tmp_path), "locale-variant recipe.json is forbidden")
 
 
 # --- recipe.json errors ----------------------------------------------------
@@ -268,28 +285,31 @@ def test_placeholder_in_greet_ok(tmp_path: Path) -> None:
     _assert_ok(_run(tmp_path))
 
 
-def test_greet_system_prefix_warns(tmp_path: Path) -> None:
+def test_greet_system_prefix_pattern_b_passes(tmp_path: Path) -> None:
+    """[system]-prefixed greet is Pattern B (directive to the agent) — explicitly
+    allowed; the bundled `greeter` recipe uses it. The validator must not warn."""
     _make_valid_bundle(tmp_path)
     (tmp_path / ".recipe" / "greet" / "greet.md").write_text(
-        "[system] this is a system message",
+        "[system] this is a system directive — agent synthesizes its own reply",
         encoding="utf-8",
     )
     result = _run(tmp_path)
-    assert result.returncode == 0  # warnings don't fail
-    assert "[system]" in result.stdout or "system" in result.stdout
+    assert result.returncode == 0
+    # No warning about [system] should fire for Pattern B
+    assert "0 warning(s)" in result.stdout
 
 
 # --- stray-file warnings ---------------------------------------------------
 
 
-def test_unknown_lang_subdir_warns(tmp_path: Path) -> None:
+def test_unknown_lang_subdir_under_layer_warns(tmp_path: Path) -> None:
+    """A `<unknown-lang>/<layer>.md` triggers the 'unknown lang code' warning,
+    not an error. (Locale-variant recipe.json at .recipe/<lang>/recipe.json
+    is a separate, harder rule — see test_locale_recipe_json_rejected.)"""
     _make_valid_bundle(tmp_path)
-    # stray lang code at .recipe/fr/recipe.json
-    fr = tmp_path / ".recipe" / "fr"
-    fr.mkdir()
-    (fr / "recipe.json").write_text(
-        json.dumps({"name": "Bonjour", "description": "fr"}), encoding="utf-8"
-    )
+    fr_greet = tmp_path / ".recipe" / "greet" / "fr"
+    fr_greet.mkdir()
+    (fr_greet / "greet.md").write_text("bonjour", encoding="utf-8")
     result = _run(tmp_path)
     assert result.returncode == 0
     assert "fr" in result.stdout and "unknown lang" in result.stdout

@@ -6,6 +6,16 @@
 
 You are about to copy the network you live in to an exportable location. **This is literal self-copying** — the snapshot will not contain the moment you made it. Everything up to this conversation turn will be in the exported copy; this turn itself will only exist in the original.
 
+## First: which "network" and which "recipe"?
+
+A project can hold three recipe-shaped artifacts at once, and they are NOT the same thing. Confirm scope with the human before doing anything destructive:
+
+- **The network you are exporting** = the agents living in this project's `.lingtai/` (orchestrator + avatars + their mailboxes). This is *you and your siblings*, the thing the recipient should receive.
+- **The outer project's own `.recipe/`** (if present at the project root, sibling of `.lingtai/`) = the recipe that was originally applied to *seed* this project. It describes the methodology / culture that produced this network — NOT the network itself. **Do not ship this as the launch recipe** in Step 5; it would tell new recipients to re-do the seeding workflow instead of stepping into the network you actually built.
+- **The applied-recipe snapshot at `.lingtai/.tui-asset/.recipe/`** = a copy of the outer recipe captured by the TUI. Useful in Step 5 as *evidence* of the behavioral DNA already in force, but it is not what you bundle verbatim. (The scrub in Step 1 deletes this snapshot anyway — read it before you scrub if you want to refer to it.)
+
+If the project root has its own `.recipe/`, it WILL be copied into the staging dir during Step 1a. That is fine for now — treat it as project content to discuss during Step 3 (the human may want to keep it, ignore it, or move it). What matters is that **Step 5 below authors a NEW `.recipe/` describing the *network*, not a copy of the seeding recipe.**
+
 Walk the human through the steps below carefully. Each step is either *mechanical* (run a script, report the result) or *interactive* (discuss a decision with the human before proceeding). Never skip the interactive steps — the whole point of a skill-driven exporting flow is that a human is in the loop for judgment calls.
 
 Scripts for this skill live at `../scripts/` (relative to this file). The canonical `.gitignore` template is at `./gitignore.template` (i.e., this directory). The skill itself is installed at `~/.lingtai-tui/utilities/lingtai-recipe/` — scripts at `~/.lingtai-tui/utilities/lingtai-recipe/scripts/`.
@@ -21,18 +31,27 @@ Same bundle shape as a recipe-only export (see `export-recipe.md` and `../refere
 ├── .lingtai/                           # ← full network snapshot, the thing that makes this a "network" export
 │   ├── <agent>/
 │   │   ├── .agent.json                 # identity blueprint (KEPT)
-│   │   ├── system/*.md                 # KEPT
+│   │   ├── system/*.md                 # KEPT — brief.md gets an "EXPORTED SNAPSHOT" banner prepended
 │   │   ├── codex/codex.json            # KEPT
 │   │   ├── pad.md                      # KEPT
-│   │   ├── history/chat_history.jsonl  # KEPT
+│   │   ├── history/chat_history.jsonl  # STRIPPED — would make a clone wake up believing it is the original
+│   │   ├── history/soul_history.jsonl  # STRIPPED — same reason
 │   │   ├── mailbox/                    # KEPT (sanitized by archive/filter scripts)
-│   │   └── (NO init.json)              # STRIPPED — recipient picks their own LLM
+│   │   ├── (NO init.json)              # STRIPPED — recipient picks their own LLM
+│   │   └── (NO .library/intrinsic/)    # STRIPPED — kernel-managed, rebuilt on rehydration
 │   └── .tui-asset/.recipe/             # snapshot of applied recipe (KEPT)
+├── .exported-from                      # ← origin marker: name, source URL, timestamp
+├── README.md                           # ← drafted by scripts/generate_readme.py
 ├── .gitignore
 └── (any project files the human wants to ship)
 ```
 
-The critical structural rule for network exports: **init.json is stripped from every agent directory**. It encodes the publisher's install-specific LLM provider, API key env names, admin flags — none of which should travel. The recipient regenerates init.json with their own preset during rehydration after cloning.
+Critical structural rules for network exports:
+
+- **`init.json` is stripped from every agent directory.** It encodes the publisher's install-specific LLM provider, API key env names, admin flags — none of which should travel. The recipient regenerates `init.json` with their own preset during rehydration after cloning.
+- **`history/chat_history.jsonl` and `history/soul_history.jsonl` are stripped.** Otherwise a cloned agent wakes up indistinguishable from the original — same memories, same in-flight conversation. Instead, `greet.md` serves as the export's 「前尘往事」 (charge), like a molt: the cloned agent reads greet on launch and learns who it was. The cleaned snapshot keeps `pad.md` and `codex/` (durable knowledge), drops the verbatim transcript.
+- **Each agent's `system/brief.md` is stamped with an "EXPORTED SNAPSHOT" banner.** brief.md is read on every launch and forms the top of the system prompt — the banner makes the agent's first turn aware that it is a clone, not the original.
+- **`.library/intrinsic/` is stripped from every agent.** It's kernel-managed and identical across LingTai installs — shipping it is dead weight. The recipient kernel rebuilds it on rehydration. `<agent>/.library/custom/` and `.lingtai/.library_shared/` are preserved (those are the network's own skills).
 
 ## Critical: Filesystem Rules
 
@@ -89,7 +108,7 @@ Accept the human's override if given. The final path is `$HOME/lingtai-agora/net
 
 Never silently overwrite. If overwriting, `rm -rf` the old staging copy first.
 
-## Step 1: Copy + mechanical scrub
+## Step 1: Copy + mechanical scrub + origin marking
 
 **1a. Copy.** Use `cp -R` (or `rsync -a`) to copy the entire current project folder to `$HOME/lingtai-agora/networks/<name>/`. The source is the directory that contains `.lingtai/` — if you're not sure where that is, the human's current project is your best signal. Confirm with the human if ambiguous.
 
@@ -107,15 +126,33 @@ This deletes, for every agent:
 - `logs/` (entire dir)
 - `.git/` (per-agent time machine — **must** be removed or the outer `git add .` in step 8 will silently skip agent contents)
 - `mailbox/schedules/`
+- **`history/chat_history.jsonl`, `history/soul_history.jsonl`, `history/soul_cursor.json`** — full LLM and introspection trace. Shipping these would clone the agent's identity verbatim; instead the recipe's `greet.md` serves as 「前尘往事」 (Step 5d).
+- **`.library/intrinsic/`** — kernel-managed, identical across installs; recipient kernel rebuilds on rehydration.
+- For the human pseudo-agent: `human/history.json` (the human's chat history mirror).
 
 It also deletes project-level publisher-specific state under `.lingtai/`:
 - `.lingtai/.portal/` (portal event stream + replay cache)
 - `.lingtai/.tui-asset/` (TUI-local cached state, including the applied-recipe snapshot at `.tui-asset/.recipe/`). Deleted because the recipient's TUI regenerates the snapshot on first apply — shipping the publisher's snapshot would just be overwritten, so there's no reason to include it.
 - `.lingtai/.addons/` (publisher's addon config — points at publisher's IMAP accounts, telegram bots, etc. Recipients configure their own addons after cloning)
 
-`.lingtai/.library_shared/` is preserved — it holds the network's shared skills (promoted by agents, curated by admin) and is part of the network's identity. Each agent's own `<agent>/.library/custom/` is also preserved. `<agent>/.library/intrinsic/` is kernel-managed and gets re-created on the recipient side, so it can be stripped to save space (optional).
+`.lingtai/.library_shared/` is preserved — it holds the network's shared skills (promoted by agents, curated by admin) and is part of the network's identity. Each agent's own `<agent>/.library/custom/` is also preserved.
 
 Report the totals to the human. If the script exits nonzero, stop and surface the error — do not proceed.
+
+**1c. Mark the export.** Run:
+
+```bash
+python3 scripts/mark_export_source.py $HOME/lingtai-agora/networks/<name>/ \
+    --name <name> \
+    [--source-url https://github.com/<user>/<repo>]
+```
+
+This does two things:
+
+1. Writes `.exported-from` at the staging root, recording bundle name + timestamp + (optional) source URL. This file survives `git add .` — that's intentional. It's proof of origin for downstream forks, and a sanity check for anyone inspecting the bundle ("is this a snapshot?" → look at `.exported-from`).
+2. Prepends a short bilingual "EXPORTED SNAPSHOT" banner to every agent's `system/brief.md`. brief.md is read on every launch and forms the top of the system prompt, so the very first thing each rehydrated agent sees is "you are a clone of `<name>`, not the original." The banner is idempotent — re-running the script doesn't double-stamp.
+
+If you don't yet know the source URL (you haven't decided on the GitHub repo name in Step 9), call it without `--source-url`. The banner still stamps; you can re-run later with `--source-url` once known and it will refresh the marker file (the brief.md banner stays as-is, which is fine — first-stamp wins, and that's what was true at copy time).
 
 ## Step 2: Process mail
 
@@ -221,24 +258,32 @@ Every exported network must ship with a recipe: it controls what the orchestrato
 
 **Do not skip this step.** An exported network without a recipe is a bad first impression — the recipient sets up the network and gets silence.
 
-### 5a. Discuss the recipe with the human
+### 5a. Draft first, ask second
 
-> "Every exported network needs a launch recipe for new users. I'll draft the files. To do that, I need a few things:
->
-> 1. **Recipe id** — a short kebab-case machine identifier (e.g., `marco-velli-network`). Stable across locales.
-> 2. **Display name** — human-readable name shown in the TUI picker.
-> 3. **One-line description** — what does a recipient get by opening this network?
-> 4. **Which layers to include?** All optional:
->    - `greet.md` — first-contact message (skip for silent agent)
->    - `comment.md` — ongoing behavioral constraints (usually worth including — it's the network's cultural DNA)
->    - `covenant.md` — only if the network's covenant fundamentally differs from the system default
->    - `procedures.md` — only if the lifecycle procedures differ
-> 5. **Library?** If the network uses a library-bearing recipe, the library folder is already at the project root (sibling of `.lingtai/`) and the bundle will ship it. Confirm the `library_name`.
-> 6. **Languages** — just English, or also zh/wen?
->
-> Answer as many as you can in one message and I'll draft everything in one pass."
+The old version of this skill asked the human six separate questions (id, name, description, layers, library, languages) before writing anything. That turned out to be too much friction up front. The new flow: **you draft first, then ask the human to amend.**
 
-Use the staging copy's mail archive, agent names, and `.agent.json` blueprints to understand the network's purpose before drafting.
+**Auto-fill what you can:**
+
+- **`id`** — kebab-case the staging folder name (e.g., `quant_company` → `quant-company`). Lowercase, replace `_` and spaces with `-`, drop leading dots. The human can override if they want.
+- **`name`** — title-case the staging folder name (e.g., `quant_company` → `Quant Company`).
+- **`description`** — read `.lingtai/<orchestrator>/system/brief.md` (skip the EXPORTED SNAPSHOT banner you stamped in Step 1c, look at the actual brief), and synthesize a one-liner about what the network does. If brief.md is unhelpful, fall back to the orchestrator's mail archive — recent threads usually reveal what the network is *for*.
+- **Layers to include** — default to `greet` + `comment`. Skip `covenant` and `procedures` unless the staging copy's `.lingtai/.tui-asset/.recipe/` already has overrides for them (in which case copy through).
+- **Library** — if `recipe.json` from the applied snapshot at `.lingtai/.tui-asset/.recipe/recipe.json` declares a `library_name`, and the corresponding sibling folder is non-empty, ship it. Otherwise leave `library_name: null`.
+- **Languages** — start with whatever language the human has been writing mail in. Add others only on request.
+
+Then write a single email summarizing your decisions:
+
+> "Draft recipe ready. Defaults I picked:
+> - `id`: `quant-company` (from folder name)
+> - `name`: `Quant Company`
+> - `description`: `[one-liner from brief.md]`
+> - Layers: greet + comment (drafting now)
+> - Library: `null` (no library shipped) / `quant-lib` (shipped)
+> - Languages: en + zh
+>
+> Tell me what to change, or say 'go' and I'll write the files."
+
+This collapses six questions into one round-trip, and the human only weighs in where the defaults look wrong.
 
 ### 5b. Pre-flight: create all directories
 
@@ -273,21 +318,24 @@ JSON
 
 If the network ships a library sibling, set `library_name` to the folder name (e.g., `"marco-velli"`). If not, leave it as `null`.
 
-For locale variants, write `$BUNDLE/.recipe/zh/recipe.json` and `$BUNDLE/.recipe/wen/recipe.json` — only `name` and `description` need to differ; the rest inherits from the root manifest.
+**Do NOT write locale-variant `recipe.json` files.** `recipe.json` is a single canonical file at `.recipe/recipe.json` — never localized. The validator (`scripts/validate_recipe.py`) errors on any `.recipe/<lang>/recipe.json` it finds. Locale-variant manifests silently drop critical machine-identity fields like `library_name` in non-default locales, so they were forbidden in v3.0. If you want localized display strings for the human (greeting tone, ongoing tone), put them in `.recipe/greet/<lang>/greet.md` and `.recipe/comment/<lang>/comment.md` — the picker hint text in `recipe.json#name`/`description` stays in one canonical language.
 
-### 5d. Write `greet.md` (optional — usually do it)
+### 5d. Write `greet.md` — your network's 「前尘往事」
 
-Write `$BUNDLE/.recipe/greet/greet.md` following the rules in `../references/recipe-format.md`.
+For network exports, `greet.md` does double duty: it's the first message the orchestrator sends to a new recipient AND it's the cloned agent's only memory of who it used to be. The chat_history strip in Step 1b means the agent wakes up with no conversation trace; the only narrative bridge from "the original network's life" to "this clone's first turn" is what you write here. Treat it like a molt's `charge`: a tight retrospective the future-self can read on launch and orient itself.
 
-Key points for network exports:
+Write `$BUNDLE/.recipe/greet/greet.md` following the format rules in `../references/recipe-format.md`. For network exports specifically, cover:
 
-- **Always include `/cpr all`** — after rehydration, only the orchestrator is launched; other agents are sleeping
-- **Mention `/setup` for preset choice** — rehydration writes fresh `init.json` files from the recipient's chosen preset, so the very first thing the recipient does is pick a preset
-- Keep it warm but concise — introduce the network, offer guidance, explain how to start
-- Use `{{commands}}` if you want the canonical slash-command palette listed inline
-- Do **not** start with `[system]` — greet.md is the orchestrator's voice, not a system message
+1. **Time anchor** — when did this network start, when was it exported.
+2. **Initial mandate** — what the human asked the original orchestrator to do.
+3. **Key milestones** — the actual things the network accomplished (drawn from the staging copy's mail archive — read recent sent mail to find the highlights). Be concrete: numbers, dates, decisions, not vibes.
+4. **Critical realizations** — turning points or contrarian findings. The "we tried X, learned Y" moments. These are the network's *culture*.
+5. **Navigation** — where to look for what (codex entries, pad, mailbox archive, library skills if shipped).
+6. **What to do next** — onboarding instructions for the recipient. **Always include `/cpr all`** (only the orchestrator is launched after rehydration; workers are sleeping). **Mention `/setup`** for picking an LLM preset.
 
-For locale variants, also write `$BUNDLE/.recipe/greet/zh/greet.md` etc.
+Keep it warm and concise. For a 1–2 month network's life, a paragraph each on milestones + realizations is right; for a single-day network, one line each is enough. Use `{{commands}}` if you want the slash-command palette listed inline. Do **not** start with `[system]` — greet.md is the orchestrator's voice, not a system directive.
+
+For locale variants, also write `$BUNDLE/.recipe/greet/zh/greet.md` etc. (Note: do NOT create `$BUNDLE/.recipe/zh/greet.md` — locale variants live one level deeper, inside the layer dir.)
 
 ### 5e. Write `comment.md` (optional — almost always do it for a network)
 
@@ -341,6 +389,16 @@ find "$BUNDLE/.recipe" -type f | sort
 Confirm `.recipe/recipe.json` is present and each behavioral-layer directory contains a `.md` file. If anything is missing, re-create its parent directory with `mkdir -p` and re-write it. Empty layer directories are a validator error.
 
 Show the recipe files to the human via email and iterate until satisfied.
+
+### 5i. Draft README.md
+
+```bash
+python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/generate_readme.py "$BUNDLE"
+```
+
+This synthesizes a structural README from `recipe.json` + `.exported-from` + `.lingtai/<agent>/.agent.json` + library `SKILL.md` files. The output is a *draft* — it captures what the recipient needs (origin, agent roster, library, getting-started steps) but leaves a "why this network exists" hook empty for the human to fill in.
+
+By default `generate_readme.py` refuses to overwrite an existing `README.md`. If the human wants to regenerate after editing, pass `--force`. Read the resulting README aloud to the human and ask whether to edit before committing.
 
 ## Step 6: Validate the bundle
 

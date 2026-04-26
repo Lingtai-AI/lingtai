@@ -13,6 +13,20 @@
 .lingtai/*/logs/
 .lingtai/*/.git/
 
+# Per-agent kernel-managed library — identical across LingTai installs,
+# rebuilt by the recipient's kernel on rehydration. Shipping it just bloats
+# the repo with hundreds of duplicated SKILL.md files. .library/custom/ is
+# intentionally NOT ignored — that holds each agent's authored skills.
+.lingtai/*/.library/intrinsic/
+
+# Snapshot conversation/introspection history — would make a clone wake up
+# believing it is the original agent. greet.md serves as the export's
+# "前尘往事" (charge) instead.
+.lingtai/*/history/chat_history.jsonl
+.lingtai/*/history/soul_history.jsonl
+.lingtai/*/history/soul_cursor.json
+.lingtai/human/history.json
+
 # Project-level publisher-specific state.
 # .portal/topology.jsonl can grow to hundreds of MB and leaks the timeline.
 # .addons/ holds the publisher's IMAP/telegram/etc config — recipients
