@@ -1,0 +1,113 @@
+{
+  "_comment": "常见 CSS 选择器模式库 v3.0 — Tier 1.5+ 使用",
+  "article_body": [
+    "article",
+    "article .c-article-body",
+    "article .article-body",
+    "article main",
+    "main.article-content",
+    "div[itemprop='articleBody']",
+    "div.post-content",
+    "div.entry-content",
+    "div.available-content",
+    "div.article-content",
+    "div[class*='article']",
+    "div[class*='post-body']",
+    "div[class*='story-body']",
+    "[data-component='text-block']",
+    "[data-testid='ArticleBody']",
+    "div.markdown-body"
+  ],
+  "title": [
+    "h1",
+    "h1.title",
+    "h1.post-title",
+    "h1.article__title",
+    "h1.firstHeading",
+    "h1.headline",
+    "article h1",
+    "span.titleline > a",
+    "meta[property='og:title']",
+    "meta[name='citation_title']"
+  ],
+  "abstract": [
+    "blockquote.abstract",
+    "div.abstract",
+    "section.abstract",
+    "meta[name='description']",
+    "meta[property='og:description']"
+  ],
+  "metadata": {
+    "authors": [
+      "meta[name='citation_author']",
+      "meta[name='DC.creator']",
+      "div.authors a",
+      "span.author-name",
+      "a.author",
+      "a.author-name",
+      "[data-component='byline']",
+      "span.byline__name"
+    ],
+    "doi": [
+      "meta[name='citation_doi']",
+      "meta[name='DC.identifier']",
+      "a[href*='doi.org']",
+      "span[class*='doi']"
+    ],
+    "published_date": [
+      "meta[name='citation_publication_date']",
+      "meta[name='citation_date']",
+      "time[datetime]",
+      "time.post-date",
+      "span.date",
+      "time"
+    ],
+    "journal": [
+      "meta[name='citation_journal_title']",
+      "meta[property='og:site_name']"
+    ]
+  },
+  "pdf_link": [
+    "a[href*='.pdf']",
+    "a[href*='/pdf/']",
+    "a[title*='PDF']",
+    "a.download-pdf",
+    "a[href*='download']",
+    "a[class*='pdf']"
+  ],
+  "jsonld": {
+    "selector": "script[type='application/ld+json']",
+    "types": ["Article", "NewsArticle", "ScholarlyArticle", "BlogPosting", "TechArticle", "WebPage"],
+    "notes": "JSON-LD structured data - most modern sites embed this. Returns: headline, author, datePublished, image, etc."
+  },
+  "opengraph": {
+    "title": "meta[property='og:title']",
+    "description": "meta[property='og:description']",
+    "image": "meta[property='og:image']",
+    "url": "meta[property='og:url']",
+    "type": "meta[property='og:type']",
+    "site_name": "meta[property='og:site_name']",
+    "twitter_card": "meta[name='twitter:card']",
+    "twitter_title": "meta[name='twitter:title']",
+    "twitter_description": "meta[name='twitter:description']",
+    "notes": "OG + Twitter Card metadata - available on most pages without JS rendering"
+  },
+  "navigation": [
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "div.sidebar",
+    "div[class*='nav']",
+    "div[class*='menu']"
+  ],
+  "exclude_patterns": [
+    "nav", "header", "footer", "aside", ".sidebar",
+    ".nav", ".menu", ".cookie", ".popup", ".modal",
+    ".ad", ".ads", ".advertisement", ".sponsor",
+    ".social-share", ".share-buttons", ".comments",
+    ".related-posts", ".recommended", ".newsletter",
+    "[class*='paywall']", "[class*='subscribe']",
+    "script", "style", "noscript", "svg"
+  ]
+}

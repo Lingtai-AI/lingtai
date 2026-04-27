@@ -1,0 +1,132 @@
+{
+  "_comment": "完整提取流水线配置 v3.0 — 7层渐进式提取策略",
+  "tiers": {
+    "tier0_pdf": {
+      "name": "PDF Direct Download",
+      "speed": "~1s",
+      "tools": ["curl", "fitz/pymupdf"],
+      "trigger": ["URL ends with .pdf", "Known PDF direct link"],
+      "weight": 1,
+      "fallback_to": "tier1"
+    },
+    "tier1_api": {
+      "name": "API Metadata Queries",
+      "speed": "~0.5s",
+      "tools": ["requests", "web_read"],
+      "trigger": ["arXiv ID", "DOI", "PMID", "PMC ID", "Known API endpoint"],
+      "apis": ["arXiv", "OpenAlex", "CrossRef", "Semantic Scholar", "PubMed E-utilities",
+                "CORE", "Unpaywall", "Europe PMC", "DBLP", "Papers With Code",
+                "DOAJ", "Zenodo", "NASA ADS", "Wikipedia REST"],
+      "weight": 2,
+      "fallback_to": "tier1_5"
+    },
+    "tier1_5_trafilatura": {
+      "name": "Trafilatura Fast Extraction",
+      "speed": "~0.05s",
+      "tools": ["trafilatura (已安装)"],
+      "trigger": ["Static HTML article", "Blog post", "News article", "Documentation page"],
+      "weight": 3,
+      "fallback_to": "tier2",
+      "notes": "10-50x faster than BeautifulSoup, 200x faster than browser. Default for most non-API URLs."
+    },
+    "tier2_bs": {
+      "name": "BeautifulSoup Structured Extraction",
+      "speed": "~0.15s",
+      "tools": ["requests", "beautifulsoup4", "lxml"],
+      "trigger": ["Need structured data (lists, tables)", "Site has known CSS selectors",
+                   "Google Scholar", "Reddit", "GitHub HTML", "News lists"],
+      "weight": 5,
+      "fallback_to": "tier3"
+    },
+    "tier3_playwright": {
+      "name": "Playwright Stealth",
+      "speed": "~3-5s",
+      "tools": ["playwright", "playwright-stealth (已安装)"],
+      "trigger": ["JS-rendered content", "Login-gated pages", "Anti-bot protection",
+                   "403 from simple requests", "Dynamic content loading"],
+      "weight": 10,
+      "fallback_to": "tier4",
+      "critical_notes": [
+        "Use domcontentloaded NOT networkidle for Nature/Springer",
+        "Block images/styles/fonts for speed",
+        "Add init scripts to override fingerprinting",
+        "Smart delay between requests (2s + jitter)"
+      ]
+    },
+    "tier4_api_fallback": {
+      "name": "API Fallback (Jina Reader / Firecrawl)",
+      "speed": "~2-5s",
+      "tools": ["requests (Jina Reader)", "firecrawl-py (Firecrawl)"],
+      "trigger": ["All local methods failed", "403/429/CAPTCHA", "Heavy JS protection"],
+      "services": {
+        "JinaReader": {
+          "url": "https://r.jina.ai/{target_url}",
+          "free": true,
+          "rate_limit": "20 req/min",
+          "returns": "Markdown"
+        },
+        "Firecrawl": {
+          "install": "pip install firecrawl-py",
+          "free_credits": 500/month,
+          "features": ["scrape", "crawl", "search", "extract"]
+        }
+      },
+      "weight": 20,
+      "fallback_to": "tier5"
+    },
+    "tier5_ai_search": {
+      "name": "AI-Native Search (Tavily / Exa / DuckDuckGo)",
+      "speed": "~3-5s",
+      "tools": ["requests", "duckduckgo-search"],
+      "trigger": ["Need to discover content (not extract known URL)",
+                   "Search + extract in one call",
+                   "Semantic/meaning-based search"],
+      "services": {
+        "DuckDuckGo": {"free": true, "no_key": true, "python_lib": "duckduckgo-search"},
+        "Tavily": {"free": "1000/month", "features": "search+answer+content"},
+        "Exa": {"free": "1000/month", "features": "neural search"}
+      },
+      "weight": 30,
+      "fallback_to": null
+    }
+  },
+  "auto_tier_rules": {
+    "pdf_pattern": {"match": [".pdf"], "tier": 0},
+    "arxiv_abs": {"match": ["arxiv.org/abs"], "tier": 1},
+    "arxiv_pdf": {"match": ["arxiv.org/pdf"], "tier": 0},
+    "doi": {"match": ["doi.org/10."], "tier": 1},
+    "openalex": {"match": ["openalex.org"], "tier": 1},
+    "crossref": {"match": ["api.crossref.org"], "tier": 1},
+    "pubmed": {"match": ["pubmed.ncbi"], "tier": 1},
+    "semanticscholar": {"match": ["semanticscholar.org"], "tier": 1},
+    "dblp": {"match": ["dblp.org/search"], "tier": 1},
+    "paperswithcode": {"match": ["paperswithcode.com/api"], "tier": 1},
+    "wikipedia": {"match": ["wikipedia.org/wiki"], "tier": 1},
+    "hackernews": {"match": ["news.ycombinator.com"], "tier": 1},
+    "medium": {"match": ["medium.com"], "tier": 1.5},
+    "substack": {"match": ["substack.com"], "tier": 1.5},
+    "bbc": {"match": ["bbc.com"], "tier": 1.5},
+    "reuters": {"match": ["reuters.com"], "tier": 1.5},
+    "blog": {"match": ["blog.", "/blog/"], "tier": 1.5},
+    "scholar": {"match": ["scholar.google"], "tier": 2},
+    "nature": {"match": ["nature.com"], "tier": 2},
+    "reddit": {"match": ["reddit.com"], "tier": 2},
+    "springer": {"match": ["springer.com"], "tier": 2},
+    "github_html": {"match": ["github.com"], "tier": 2},
+    "twitter": {"match": ["twitter.com", "x.com"], "tier": 3},
+    "linkedin": {"match": ["linkedin.com"], "tier": 3},
+    "facebook": {"match": ["facebook.com"], "tier": 3},
+    "default": {"tier": 1.5, "fallback_chain": [1.5, 2, 3, 4]}
+  },
+  "fallback_chain": {
+    "description": "Default auto-escalation when a tier fails",
+    "steps": [
+      "Try auto_tier → execute recommended tier",
+      "On failure → escalate to next tier",
+      "tier1.5 fails → try tier2 (BS)",
+      "tier2 fails → try tier3 (Playwright)",
+      "tier3 fails → try tier4 (Jina Reader)",
+      "tier4 fails → try tier5 (AI search to find alternative URLs)"
+    ]
+  }
+}

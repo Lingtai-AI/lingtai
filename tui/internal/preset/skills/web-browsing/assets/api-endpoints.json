@@ -1,0 +1,359 @@
+{
+  "_comment": "API 端点汇总 v3.0 — 覆盖学术、搜索、实时数据、提取服务",
+  "academic": {
+    "arXiv": {
+      "base": "https://export.arxiv.org/api/query",
+      "example": "https://export.arxiv.org/api/query?id_list=1706.03762",
+      "params": {
+        "id_list": "arXiv ID 列表，逗号分隔",
+        "search_query": "搜索词 (ti:标题, au:作者, abs:摘要)",
+        "max_results": "最大结果数（默认10）",
+        "start": "起始索引",
+        "sortBy": "relevance | lastUpdatedDate | submittedDate",
+        "sortOrder": "ascending | descending"
+      },
+      "returns": "Atom XML，含标题/摘要/作者/分类/PDF链接",
+      "rate_limit": "无明确限制，建议 <1 req/s",
+      "tier": 1
+    },
+    "OpenAlex": {
+      "base": "https://api.openalex.org",
+      "works_by_doi": "https://api.openalex.org/works/https://doi.org/{DOI}",
+      "works_search": "https://api.openalex.org/works?search={关键词}&per_page=25",
+      "authors_search": "https://api.openalex.org/authors?search={姓名}",
+      "params": {
+        "search": "全文搜索",
+        "filter": "过滤器（author.id, year, topic, is_oa, etc.）",
+        "sort": "排序（cited_by_count:desc, publication_date:desc）",
+        "per_page": "每页数量（最大400）",
+        "select": "返回字段白名单"
+      },
+      "returns": "JSON，含标题/作者/摘要/引用数/主题/PDF链接/期刊",
+      "rate_limit": "无限制（建议加 mailto 参数获取更快响应）",
+      "tier": 1,
+      "notes": "最强学术API，完全免费，数据质量高"
+    },
+    "CrossRef": {
+      "base": "https://api.crossref.org",
+      "works": "https://api.crossref.org/works/{DOI}",
+      "works_search": "https://api.crossref.org/works?query={关键词}&rows=10",
+      "params": {
+        "query": "搜索词",
+        "rows": "结果数（最大100）",
+        "mailto": "联系邮箱（礼貌性，建议填写获得更快速率）",
+        "filter": "过滤器（from-pub-date, type, member, etc.）",
+        "select": "返回字段白名单"
+      },
+      "returns": "JSON，含标题/作者/期刊/DOI/License/发布日期",
+      "rate_limit": "无限制，但建议附上 mailto",
+      "tier": 1,
+      "notes": "元数据权威来源，无全文"
+    },
+    "SemanticScholar": {
+      "base": "https://api.semanticscholar.org/graph/v1",
+      "paper_by_doi": "https://api.semanticscholar.org/graph/v1/paper/{DOI}?fields=title,authors,year,abstract,citationCount,openAccessPdf",
+      "paper_search": "https://api.semanticscholar.org/graph/v1/paper/search?query={关键词}&fields=title,authors,year,abstract,citationCount,openAccessPdf&limit=10",
+      "params": {
+        "fields": "逗号分隔字段列表（title,authors,year,abstract,citationCount,openAccessPdf,references,citations）"
+      },
+      "returns": "JSON，含标题/作者/摘要/引用数/开放获取PDF链接",
+      "rate_limit": "无需Key：100 req/5min；有Key：10000/day",
+      "tier": 1,
+      "notes": "申请Key：https://www.semanticscholar.org/product/api#api-key-form"
+    },
+    "PubMed": {
+      "base": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+      "search": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=10",
+      "fetch": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={PMIDs}&rettype=abstract&retmode=json",
+      "params": {
+        "db": "pubmed | pmc",
+        "term": "搜索词",
+        "retmax": "最大结果数",
+        "rettype": "abstract | full | uilist",
+        "retmode": "json | xml"
+      },
+      "returns": "JSON/XML，含标题/摘要/作者/期刊",
+      "rate_limit": "3 req/s（无key），10 req/s（有key）",
+      "tier": 1,
+      "notes": "网页版403，必须用E-utilities API"
+    },
+    "NASA_ADS": {
+      "base": "https://ui.adsabs.harvard.edu/abs",
+      "export": "https://ui.adsabs.harvard.edu/abs/{arxiv_id}/exportcitation",
+      "bibtex": "https://ui.adsabs.harvard.edu/abs/{arxiv_id}/bibtex",
+      "returns": "BibTeX / ASCII / JSON",
+      "rate_limit": "建议加延迟",
+      "tier": 1,
+      "notes": "天文物理必备，数据权威"
+    },
+    "CORE": {
+      "base": "https://api.core.ac.uk/v3",
+      "search": "https://api.core.ac.uk/v3/search/works?q={query}&limit=10",
+      "work_by_id": "https://api.core.ac.uk/v3/works/{id}",
+      "params": {
+        "q": "搜索词",
+        "limit": "结果数",
+        "offset": "起始索引"
+      },
+      "returns": "JSON，含标题/作者/摘要/fullText/downloadUrl",
+      "rate_limit": "1000/day free (需API key)",
+      "tier": 1,
+      "auth": "Bearer token in Authorization header",
+      "notes": "全球最大开放获取论文集合，30M+ 篇，部分有全文",
+      "key_register": "https://core.ac.uk/services/api"
+    },
+    "Unpaywall": {
+      "base": "https://api.unpaywall.org/v2",
+      "by_doi": "https://api.unpaywall.org/v2/{DOI}?email=lingtai@users.noreply.github.com",
+      "params": {
+        "email": "联系邮箱（必填）"
+      },
+      "returns": "JSON: is_oa, best_oa_location, oa_locations (url, url_for_pdf, host_type, version)",
+      "rate_limit": "100k/day (with email)",
+      "tier": 1,
+      "notes": "为任何论文找免费PDF，补充CrossRef"
+    },
+    "EuropePMC": {
+      "base": "https://www.ebi.ac.uk/europepmc/webservices/rest",
+      "search": "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query={query}&format=json&pageSize=25",
+      "by_doi": "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:{doi}&format=json",
+      "fulltext": "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML",
+      "params": {
+        "query": "搜索词，支持 DOI: PMCID: AUTHOR: 等前缀",
+        "format": "json | xml",
+        "pageSize": "结果数（最大1000）"
+      },
+      "returns": "JSON，含标题/作者/摘要/PMCID/DOI/引用列表",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "notes": "覆盖PubMed + 欧洲生物医学文献，PMC全文可获取"
+    },
+    "DBLP": {
+      "base": "https://dblp.org/search",
+      "publ_search": "https://dblp.org/search/publ/api?q={query}&format=json&h=10",
+      "author_search": "https://dblp.org/search/author/api?q={name}&format=json",
+      "venue_search": "https://dblp.org/search/venue/api?q={venue}&format=json",
+      "params": {
+        "q": "搜索词",
+        "format": "json | xml",
+        "h": "结果数（最大1000）",
+        "f": "偏移量"
+      },
+      "returns": "JSON，含title/authors/venue/year/DOI/URL/ee",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "notes": "计算机科学首选，会议论文最准确"
+    },
+    "PapersWithCode": {
+      "base": "https://paperswithcode.com/api/v1",
+      "search": "https://paperswithcode.com/api/v1/search/?q={query}",
+      "paper": "https://paperswithcode.com/api/v1/papers/{paper_id}",
+      "datasets": "https://paperswithcode.com/api/v1/datasets/",
+      "tasks": "https://paperswithcode.com/api/v1/tasks/",
+      "methods": "https://paperswithcode.com/api/v1/methods/",
+      "params": {
+        "q": "搜索词",
+        "page": "页码",
+        "items_per_page": "每页数量"
+      },
+      "returns": "JSON，含paper title/code_repo/benchmark_results",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "notes": "ML/AI论文+代码仓库+基准排行榜"
+    },
+    "DOAJ": {
+      "base": "https://doaj.org/api/search/articles",
+      "search": "https://doaj.org/api/search/articles/{query}?page=1&pageSize=10",
+      "returns": "JSON，开放获取期刊文章",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "notes": "Directory of Open Access Journals"
+    },
+    "Zenodo": {
+      "base": "https://zenodo.org/api/records",
+      "search": "https://zenodo.org/api/records?q={query}&size=10",
+      "by_id": "https://zenodo.org/api/records/{id}",
+      "returns": "JSON，研究数据/软件/报告",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "notes": "CERN运营的研究数据仓库"
+    }
+  },
+  "search": {
+    "DuckDuckGo": {
+      "method": "Python library (pip install duckduckgo-search)",
+      "usage": "from duckduckgo_search import DDGS; DDGS().text('query', max_results=10)",
+      "also": "ddgs.news(), ddgs.images(), ddgs.videos()",
+      "rate_limit": "无API key，但有限速",
+      "tier": 5,
+      "notes": "免费无key搜索首选",
+      "free": true
+    },
+    "Tavily": {
+      "base": "https://api.tavily.com/search",
+      "method": "POST",
+      "params": {
+        "api_key": "API key",
+        "query": "搜索词",
+        "search_depth": "basic | advanced",
+        "include_answer": "true/false — AI生成答案",
+        "include_raw_content": "true/false — 完整页面内容",
+        "max_results": "结果数量"
+      },
+      "returns": "JSON: answer + results (title, url, content, raw_content, score)",
+      "rate_limit": "1000 req/month free",
+      "tier": 5,
+      "notes": "AI agent搜索首选，搜索+提取+答案一体化",
+      "free_tier": true
+    },
+    "Exa": {
+      "base": "https://api.exa.ai/search",
+      "method": "POST",
+      "headers": {"x-api-key": "API key"},
+      "params": {
+        "query": "搜索词",
+        "type": "neural | keyword | auto",
+        "numResults": "结果数量",
+        "contents": "{\"text\": {\"maxCharacters\": 3000}}",
+        "includeDomains": "限定域名列表",
+        "excludeDomains": "排除域名列表"
+      },
+      "returns": "JSON: results (title, url, text, score)",
+      "rate_limit": "1000 req/month free",
+      "tier": 5,
+      "notes": "语义搜索，按含义而非关键词匹配",
+      "free_tier": true
+    },
+    "Google_Custom_Search": {
+      "base": "https://www.googleapis.com/customsearch/v1",
+      "params": {
+        "key": "API key",
+        "cx": "搜索引擎 ID",
+        "q": "搜索词"
+      },
+      "rate_limit": "100 queries/day free",
+      "tier": 5,
+      "notes": "需要配置: https://programmablesearchengine.google.com/"
+    },
+    "Serper": {
+      "base": "https://google.serper.dev/search",
+      "method": "POST",
+      "headers": {"X-API-KEY": "API key"},
+      "params": {"q": "搜索词", "gl": "国家代码", "hl": "语言"},
+      "rate_limit": "2500 queries one-time free",
+      "tier": 5,
+      "notes": "Google质量搜索结果，简单API"
+    },
+    "Brave": {
+      "base": "https://api.search.brave.com/res/v1/web/search",
+      "headers": {"X-Subscription-Token": "API key"},
+      "params": {"q": "搜索词", "summary": "true — AI摘要"},
+      "rate_limit": "2000 queries/month free",
+      "tier": 5,
+      "notes": "独立搜索索引，非Google/Bing"
+    },
+    "SearXNG": {
+      "base": "http://localhost:8888/search",
+      "params": {"q": "搜索词", "format": "json", "categories": "general|news|science|files"},
+      "rate_limit": "无限制（自托管）",
+      "tier": 5,
+      "notes": "自托管元搜索，聚合Google+Bing+DDG等",
+      "install": "docker run -p 8888:8080 searxng/searxng"
+    }
+  },
+  "extraction": {
+    "JinaReader": {
+      "base": "https://r.jina.ai/{url}",
+      "method": "GET",
+      "headers": {
+        "Accept": "text/markdown | application/json",
+        "X-Return-Format": "markdown | html | text",
+        "X-With-Links": "true | false",
+        "X-With-Images": "true | false"
+      },
+      "returns": "Markdown / HTML / 纯文本",
+      "rate_limit": "20 req/min free, unlimited with key",
+      "tier": 4,
+      "notes": "万能fallback，服务端渲染JS",
+      "free": true,
+      "batch": "https://r.jina.ai/{url1},{url2}"
+    },
+    "Firecrawl": {
+      "sdk": "pip install firecrawl-py",
+      "endpoints": {
+        "scrape": "/scrape — 单页提取",
+        "crawl": "/crawl — 整站爬取",
+        "search": "/search — 搜索+提取一体化",
+        "map": "/map — 获取站点URL结构",
+        "extract": "/extract — LLM结构化提取"
+      },
+      "rate_limit": "500 credits/month free",
+      "tier": 4,
+      "notes": "生产级爬取，反bot+代理处理"
+    }
+  },
+  "realtime": {
+    "GoogleNewsRSS": {
+      "url": "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en",
+      "returns": "RSS XML",
+      "rate_limit": "无",
+      "tier": 2,
+      "free": true
+    },
+    "RedditJSON": {
+      "pattern": "在Reddit URL后加 .json",
+      "example": "https://www.reddit.com/r/programming/hot.json?limit=25",
+      "headers": {"User-Agent": "必须有描述性UA"},
+      "rate_limit": "~60 req/min",
+      "tier": 2,
+      "free": true
+    },
+    "HackerNews": {
+      "base": "https://hacker-news.firebaseio.com/v0",
+      "top": "https://hacker-news.firebaseio.com/v0/topstories.json",
+      "item": "https://hacker-news.firebaseio.com/v0/item/{id}.json",
+      "rate_limit": "无",
+      "tier": 1,
+      "free": true
+    },
+    "GitHub": {
+      "base": "https://api.github.com",
+      "search": "https://api.github.com/search/repositories?q={query}&sort=stars",
+      "rate_limit": "60/hr无token, 5000/hr有token",
+      "tier": 1,
+      "notes": "Header: Authorization: token {github_token}"
+    },
+    "StackExchange": {
+      "base": "https://api.stackexchange.com/2.3",
+      "search": "https://api.stackexchange.com/2.3/search?intitle={query}&site=stackoverflow",
+      "rate_limit": "300/day无key, 10000/day有key",
+      "tier": 1,
+      "notes": "180+ 站点（stackoverflow, serverfault, etc.）"
+    },
+    "Wikipedia": {
+      "base": "https://en.wikipedia.org/api/rest_v1",
+      "summary": "https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
+      "plain": "https://en.wikipedia.org/api/rest_v1/page/plain/{title}",
+      "rate_limit": "合理使用",
+      "tier": 1,
+      "free": true
+    },
+    "WaybackMachine": {
+      "url": "https://archive.org/wayback/available?url={url}",
+      "returns": "JSON: archived_snapshots",
+      "tier": 1,
+      "free": true
+    },
+    "yfinance": {
+      "method": "Python library (pip install yfinance)",
+      "usage": "yf.Ticker('AAPL').history(period='1mo') / .info / .news",
+      "tier": 1,
+      "free": true
+    },
+    "OpenMeteo": {
+      "url": "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true",
+      "tier": 1,
+      "free": true
+    }
+  }
+}

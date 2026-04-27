@@ -1,0 +1,141 @@
+{
+  "_comment": "搜索引擎 API 配置 v3.0 — 搜索策略决策参考",
+  "strategy_decision_tree": {
+    "free_no_setup": "DuckDuckGo (duckduckgo-search Python库)",
+    "ai_agent_workflow": "Tavily (搜索+提取+AI答案 一体化)",
+    "semantic_meaning": "Exa (神经/语义搜索)",
+    "google_quality": "Serper 或 Google Custom Search",
+    "self_hosted_unlimited": "SearXNG (Docker自托管)",
+    "academic": "OpenAlex > Semantic Scholar > DBLP (CS)",
+    "news": "Google News RSS (免费) 或 DuckDuckGo news()"
+  },
+  "providers": {
+    "DuckDuckGo": {
+      "type": "python_library",
+      "install": "pip install duckduckgo-search",
+      "usage": "from duckduckgo_search import DDGS; results = list(DDGS().text('query', max_results=10))",
+      "also_supports": ["text (网页搜索)", "news (新闻)", "images (图片)", "videos (视频)"],
+      "auth": "无需API key",
+      "rate_limit": "有限速但无明确数字",
+      "cost": "完全免费",
+      "best_for": "免费无key搜索首选",
+      "tier": 5
+    },
+    "Tavily": {
+      "type": "rest_api",
+      "endpoint": "https://api.tavily.com/search",
+      "method": "POST",
+      "auth": "api_key in JSON body",
+      "key_params": {
+        "query": "搜索词",
+        "search_depth": "basic (快) | advanced (深)",
+        "include_answer": "true → AI生成答案",
+        "include_raw_content": "true → 完整页面内容",
+        "max_results": "结果数 (默认10)"
+      },
+      "returns": "answer (AI答案) + results[] (title, url, content, raw_content, score)",
+      "rate_limit": "1000 req/month free",
+      "cost": "免费1000次/月",
+      "best_for": "AI agent搜索，搜索+提取+答案一体化",
+      "tier": 5
+    },
+    "Exa": {
+      "type": "rest_api",
+      "endpoint": "https://api.exa.ai/search",
+      "method": "POST",
+      "auth": "x-api-key header",
+      "key_params": {
+        "query": "搜索词",
+        "type": "neural (语义) | keyword (关键词) | auto (自动)",
+        "numResults": "结果数",
+        "contents": "{\"text\": {\"maxCharacters\": 3000}} → 提取内容",
+        "includeDomains": "限定域名",
+        "excludeDomains": "排除域名"
+      },
+      "returns": "results[] (title, url, text, score)",
+      "rate_limit": "1000 req/month free",
+      "cost": "免费1000次/月",
+      "best_for": "语义搜索，按含义匹配",
+      "tier": 5
+    },
+    "Google_Custom_Search": {
+      "type": "rest_api",
+      "endpoint": "https://www.googleapis.com/customsearch/v1",
+      "method": "GET",
+      "auth": "key param + cx param",
+      "key_params": {
+        "key": "API key",
+        "cx": "自定义搜索引擎 ID",
+        "q": "搜索词",
+        "num": "结果数 (最大10)"
+      },
+      "setup": "https://programmablesearchengine.google.com/",
+      "rate_limit": "100 queries/day free",
+      "cost": "免费100次/天",
+      "best_for": "精确Google搜索结果",
+      "tier": 5
+    },
+    "Serper": {
+      "type": "rest_api",
+      "endpoint": "https://google.serper.dev/search",
+      "method": "POST",
+      "auth": "X-API-KEY header",
+      "key_params": {
+        "q": "搜索词",
+        "gl": "国家代码 (us, cn, etc.)",
+        "hl": "语言 (en, zh, etc.)",
+        "num": "结果数"
+      },
+      "returns": "organic[] (title, link, snippet, position) + knowledgeGraph + featuredSnippet",
+      "rate_limit": "2500 queries one-time free",
+      "cost": "一次性2500次免费",
+      "best_for": "Google质量搜索结果，简单API",
+      "tier": 5
+    },
+    "Brave": {
+      "type": "rest_api",
+      "endpoint": "https://api.search.brave.com/res/v1/web/search",
+      "method": "GET",
+      "auth": "X-Subscription-Token header",
+      "key_params": {
+        "q": "搜索词",
+        "count": "结果数",
+        "summary": "true → AI生成摘要"
+      },
+      "returns": "web.results[] (title, url, description)",
+      "rate_limit": "2000 queries/month free",
+      "cost": "免费2000次/月",
+      "best_for": "独立搜索索引（非Google/Bing）",
+      "tier": 5
+    },
+    "SearXNG": {
+      "type": "self_hosted",
+      "endpoint": "http://localhost:8888/search?q={query}&format=json",
+      "install": "docker run -d -p 8888:8080 searxng/searxng",
+      "key_params": {
+        "q": "搜索词",
+        "format": "json (必须)",
+        "categories": "general | news | science | files | images",
+        "engines": "google, bing, duckduckgo, etc.",
+        "pageno": "页码"
+      },
+      "returns": "results[] (title, url, content, engine)",
+      "rate_limit": "无限制（自托管）",
+      "cost": "完全免费（需自托管）",
+      "best_for": "私有无限搜索，聚合多引擎",
+      "tier": 5
+    }
+  },
+  "query_tips": [
+    "site: operator: 'machine learning' site:arxiv.org",
+    "filetype: operator: filetype:pdf",
+    "Exact phrase: \"deep learning\"",
+    "Exclude: -ads -sponsored",
+    "OR operator: \"deep learning\" OR \"neural networks\"",
+    "intitle: for title matches: intitle:transformer",
+    "Date range (Google): after:2024-01-01 before:2025-01-01",
+    "Academic: combine search with DOI extraction and API enrichment",
+    "For DuckDuckGo: same query syntax as Google mostly works",
+    "For Tavily: use search_depth=advanced for complex queries"
+  ]
+}
