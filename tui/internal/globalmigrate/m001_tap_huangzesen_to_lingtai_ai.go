@@ -11,24 +11,33 @@ const (
 	newTap = "lingtai-ai/lingtai"
 )
 
-// migrateTapHuangzesenToLingtaiAI moves users off the legacy huangzesen/lingtai
-// Homebrew tap onto lingtai-ai/lingtai after the GitHub org transfer. The
-// GitHub redirect keeps the legacy tap working, but the canonical tap shows
-// the right org in `brew info` / `brew tap` and protects against the day
-// GitHub eventually drops the redirect.
+// migrateTapHuangzesenToLingtaiAI introduces the canonical lingtai-ai/lingtai
+// Homebrew tap for users who originally installed via huangzesen/lingtai.
 //
-// No-op when:
-//   - brew is not installed (Linux source builds, Windows)
-//   - the legacy tap is not installed (fresh installs)
+// Why not auto-untap: brew refuses to untap the source of an installed
+// formula, and the only way to satisfy that constraint is to uninstall and
+// reinstall the running binary mid-startup — which is unsafe to do for the
+// very binary that's executing the migration. The GitHub redirect on
+// huangzesen/homebrew-lingtai → Lingtai-AI/homebrew-lingtai means the old
+// tap continues to receive formula updates indefinitely, so leaving it
+// installed costs nothing.
 //
-// On a real migration, this taps the new repo first (so the user is never
-// left without a tap providing lingtai-tui), then untaps the old one.
+// Behavior:
+//   - No-op when brew is missing.
+//   - No-op when neither tap is involved (fresh installs that haven't
+//     tapped anything yet).
+//   - When huangzesen/lingtai is installed and lingtai-ai/lingtai is not,
+//     tap the canonical name and print a one-line manual-cleanup suggestion.
+//   - When huangzesen/lingtai is installed and lingtai-ai/lingtai is already
+//     tapped, just print the suggestion (no-op tap).
 func migrateTapHuangzesenToLingtaiAI(globalDir string) error {
 	if _, err := exec.LookPath("brew"); err != nil {
 		return nil
 	}
 
-	if !brewTapInstalled(oldTap) {
+	hasOld := brewTapInstalled(oldTap)
+	if !hasOld {
+		// Fresh install, or user already migrated manually. Nothing to do.
 		return nil
 	}
 
@@ -36,13 +45,16 @@ func migrateTapHuangzesenToLingtaiAI(globalDir string) error {
 		if err := exec.Command("brew", "tap", newTap).Run(); err != nil {
 			return fmt.Errorf("brew tap %s: %w", newTap, err)
 		}
+		fmt.Printf("✓ tapped canonical Homebrew source: %s\n", newTap)
 	}
 
-	if err := exec.Command("brew", "untap", oldTap).Run(); err != nil {
-		return fmt.Errorf("brew untap %s: %w", oldTap, err)
-	}
+	fmt.Printf("\nThe Lingtai project moved to a GitHub org. The old tap (%s)\n", oldTap)
+	fmt.Printf("still works via redirect, so no action is required. To switch fully\n")
+	fmt.Printf("to the canonical tap (%s), run:\n", newTap)
+	fmt.Printf("\n    brew uninstall lingtai-tui && \\\n")
+	fmt.Printf("    brew install %s/lingtai-tui && \\\n", newTap)
+	fmt.Printf("    brew untap %s\n\n", oldTap)
 
-	fmt.Printf("✓ migrated Homebrew tap: %s → %s\n", oldTap, newTap)
 	return nil
 }
 
