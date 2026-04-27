@@ -13,9 +13,9 @@
 
 [English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
 
-[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/huangzesen/homebrew-lingtai)
-[![License](https://img.shields.io/github/license/huangzesen/lingtai?color=%237dab8f)](LICENSE)
-[![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/huangzesen/lingtai-kernel)
+[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
+[![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
+[![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Blog](https://img.shields.io/badge/博客-lingtai.ai-%23d4a853)](https://lingtai.ai)
 
 </div>
@@ -27,7 +27,7 @@ Unix 风格的智能体操作系统。**思考**用任意 LLM。**通信**靠文
 ## 快速开始
 
 ```bash
-brew install huangzesen/lingtai/lingtai-tui
+brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 ```
 
@@ -68,18 +68,18 @@ source ~/.zprofile
 brew update
 ```
 
-之后正常 `brew install huangzesen/lingtai/lingtai-tui` 即可。这一步与下面的 Gitee tap 互相独立：清华镜像解决的是 Homebrew 自身（bottle、core 索引）的国内访问问题；Gitee tap 只在 `brew tap` 拉本项目公式失败时才用得上。
+之后正常 `brew install lingtai-ai/lingtai/lingtai-tui` 即可。这一步与下面的 Gitee tap 互相独立：清华镜像解决的是 Homebrew 自身（bottle、core 索引）的国内访问问题；Gitee tap 只在 `brew tap` 拉本项目公式失败时才用得上。
 
 </details>
 
 <details>
 <summary><b>大陆用户：用 Gitee 镜像</b>（brew 从 GitHub 拉取失败时）</summary>
 
-如果 `brew install huangzesen/lingtai/lingtai-tui` 卡在 `brew tap` 步骤（GnuTLS / TLS 错误），改用 Gitee 镜像的 tap：
+如果 `brew install lingtai-ai/lingtai/lingtai-tui` 卡在 `brew tap` 步骤（GnuTLS / TLS 错误），改用 Gitee 镜像的 tap：
 
 ```bash
-brew tap huangzesen/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install huangzesen/lingtai/lingtai-tui
+brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
+brew install lingtai-ai/lingtai/lingtai-tui
 ```
 
 公式本身与 GitHub 的 tap 一致——自动检测大陆网络，编译时使用 `goproxy.cn` + `registry.npmmirror.com`。Gitee tap 是镜像，公式更新可能比 GitHub 延迟几小时。
@@ -109,7 +109,7 @@ lingtai-tui
 
 也可以从 GitHub 下载源码：
 ```bash
-curl -L "https://github.com/huangzesen/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
+curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
 ```
 
 </details>
@@ -157,7 +157,7 @@ claude plugin add Lingtai-AI/claude-code-plugin
 
 | 包 | 角色 |
 |----|------|
-| **[lingtai-kernel](https://github.com/huangzesen/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 协议、传书、日志。零硬依赖。 |
+| **[lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 协议、传书、日志。零硬依赖。 |
 | **lingtai**（本仓库） | 全功能层——19 种能力、5 种 LLM 适配器、MCP 集成、扩展插件。 |
 
 ```
@@ -284,15 +284,15 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### IMAP 邮件
 
-IMAP 插件支持邮件收发。配置方式见 [内核文档](https://github.com/huangzesen/lingtai-kernel)。
+IMAP 插件支持邮件收发。配置方式见 [内核文档](https://github.com/Lingtai-AI/lingtai-kernel)。
 
 ### Telegram
 
-Telegram 插件支持 Bot API。配置方式见 [内核文档](https://github.com/huangzesen/lingtai-kernel)。
+Telegram 插件支持 Bot API。配置方式见 [内核文档](https://github.com/Lingtai-AI/lingtai-kernel)。
 
 ## 社群
 
-欢迎通过 [GitHub Issues](https://github.com/huangzesen/lingtai/issues) 或 [Discussions](https://github.com/huangzesen/lingtai/discussions) 提问、报 bug、提建议。
+欢迎通过 [GitHub Issues](https://github.com/Lingtai-AI/lingtai/issues) 或 [Discussions](https://github.com/Lingtai-AI/lingtai/discussions) 提问、报 bug、提建议。
 
 **微信交流群**
 
@@ -306,6 +306,6 @@ MIT — [Zesen Huang](https://github.com/huangzesen), 2025–2026
 
 <div align="center">
 
-[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
+[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
 
 </div>

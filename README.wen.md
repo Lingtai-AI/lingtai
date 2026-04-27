@@ -13,9 +13,9 @@
 
 [English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
 
-[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/huangzesen/homebrew-lingtai)
-[![License](https://img.shields.io/github/license/huangzesen/lingtai?color=%237dab8f)](LICENSE)
-[![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/huangzesen/lingtai-kernel)
+[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
+[![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
+[![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Blog](https://img.shields.io/badge/志-lingtai.ai-%23d4a853)](https://lingtai.ai)
 
 </div>
@@ -27,7 +27,7 @@ Unix 之道，器灵之制。**思**以任意 LLM。**通**以文件系统传书
 ## 速启
 
 ```bash
-brew install huangzesen/lingtai/lingtai-tui
+brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 ```
 
@@ -68,18 +68,18 @@ source ~/.zprofile
 brew update
 ```
 
-后如常 `brew install huangzesen/lingtai/lingtai-tui` 可也。此步与下 Gitee tap 不相干涉：清华镜像解 Homebrew 自身（bottle、core 录）之境内取道，Gitee tap 唯 `brew tap` 取本项公式不得时方用。
+后如常 `brew install lingtai-ai/lingtai/lingtai-tui` 可也。此步与下 Gitee tap 不相干涉：清华镜像解 Homebrew 自身（bottle、core 录）之境内取道，Gitee tap 唯 `brew tap` 取本项公式不得时方用。
 
 </details>
 
 <details>
 <summary><b>境内用户：借 Gitee 镜像</b>（brew 自 GitHub 取不得时）</summary>
 
-若 `brew install huangzesen/lingtai/lingtai-tui` 阻于 `brew tap` 一步（GnuTLS / TLS 之误），改用 Gitee 镜像之 tap：
+若 `brew install lingtai-ai/lingtai/lingtai-tui` 阻于 `brew tap` 一步（GnuTLS / TLS 之误），改用 Gitee 镜像之 tap：
 
 ```bash
-brew tap huangzesen/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install huangzesen/lingtai/lingtai-tui
+brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
+brew install lingtai-ai/lingtai/lingtai-tui
 ```
 
 其公式与 GitHub tap 一般无二——自辨境内之网，编译之际以 `goproxy.cn` 与 `registry.npmmirror.com` 为凭。Gitee tap 乃镜像耳，公式之更或迟于 GitHub 数时。
@@ -107,7 +107,7 @@ lingtai-tui
 
 亦可自 GitHub 取之：
 ```bash
-curl -L "https://github.com/huangzesen/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
+curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
 ```
 
 </details>
@@ -145,7 +145,7 @@ curl -L "https://github.com/huangzesen/lingtai/archive/refs/tags/${VERSION}.tar.
 
 | 包 | 职 |
 |----|------|
-| **[lingtai-kernel](https://github.com/huangzesen/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 之约、传书、日志。无硬依赖。 |
+| **[lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 之约、传书、日志。无硬依赖。 |
 | **lingtai**（本仓库） | 全功能层——十九能力、五种 LLM 适配之器、MCP 集成、扩展插件。 |
 
 ```
@@ -263,7 +263,7 @@ CustomAgent(Agent)     — 汝之领域逻辑
 
 ## 同道
 
-诸君若有问、有疑、有议，可于 [GitHub Issues](https://github.com/huangzesen/lingtai/issues) 或 [Discussions](https://github.com/huangzesen/lingtai/discussions) 言之。
+诸君若有问、有疑、有议，可于 [GitHub Issues](https://github.com/Lingtai-AI/lingtai/issues) 或 [Discussions](https://github.com/Lingtai-AI/lingtai/discussions) 言之。
 
 **微信同道群**
 
@@ -277,6 +277,6 @@ MIT — [Zesen Huang](https://github.com/huangzesen), 2025–2026
 
 <div align="center">
 
-[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
+[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
 
 </div>

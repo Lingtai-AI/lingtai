@@ -13,9 +13,9 @@
 
 [English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
 
-[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/huangzesen/homebrew-lingtai)
-[![License](https://img.shields.io/github/license/huangzesen/lingtai?color=%237dab8f)](LICENSE)
-[![Kernel](https://img.shields.io/badge/kernel-lingtai--kernel-%237dab8f)](https://github.com/huangzesen/lingtai-kernel)
+[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
+[![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
+[![Kernel](https://img.shields.io/badge/kernel-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Blog](https://img.shields.io/badge/blog-lingtai.ai-%23d4a853)](https://lingtai.ai)
 
 </div>
@@ -29,7 +29,7 @@
 ## Quick start
 
 ```bash
-brew install huangzesen/lingtai/lingtai-tui
+brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 ```
 
@@ -57,14 +57,14 @@ Then run the `brew install` command above.
 <summary><b>Install from source</b> (latest main, no release needed)</summary>
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/huangzesen/lingtai/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
 ```
 
 Clones, builds, and installs `lingtai-tui` (and `lingtai-portal` if npm is available) to your Homebrew prefix. Use this to get unreleased changes across machines without cutting a release. To revert: `brew reinstall lingtai-tui`.
 
 Install a specific branch or tag:
 ```bash
-curl -sSL https://raw.githubusercontent.com/huangzesen/lingtai/main/install.sh | bash -s -- --ref v0.4.43
+curl -sSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash -s -- --ref v0.4.43
 ```
 
 Requires Go 1.24+ and git. Node.js needed for portal only.
@@ -90,18 +90,18 @@ source ~/.zprofile
 brew update
 ```
 
-Then run the normal `brew install huangzesen/lingtai/lingtai-tui`. This is independent of the Gitee tap below — the Tsinghua mirror accelerates Homebrew's own infrastructure (bottles, core index), while the Gitee tap only helps when the `brew tap` step for *this project's* formula fails.
+Then run the normal `brew install lingtai-ai/lingtai/lingtai-tui`. This is independent of the Gitee tap below — the Tsinghua mirror accelerates Homebrew's own infrastructure (bottles, core index), while the Gitee tap only helps when the `brew tap` step for *this project's* formula fails.
 
 </details>
 
 <details>
 <summary><b>Mainland China: use Gitee tap if GitHub is unreliable</b> (中国大陆)</summary>
 
-If `brew install huangzesen/lingtai/lingtai-tui` fails at the `brew tap` step (e.g., `GnuTLS` / TLS errors cloning from GitHub), use the Gitee-mirrored tap instead:
+If `brew install lingtai-ai/lingtai/lingtai-tui` fails at the `brew tap` step (e.g., `GnuTLS` / TLS errors cloning from GitHub), use the Gitee-mirrored tap instead:
 
 ```bash
-brew tap huangzesen/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install huangzesen/lingtai/lingtai-tui
+brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
+brew install lingtai-ai/lingtai/lingtai-tui
 ```
 
 The formula is identical to the GitHub tap — it auto-detects CN networks and uses `goproxy.cn` + `registry.npmmirror.com` for build dependencies. The Gitee tap is a mirror, so formula updates may lag GitHub by a few hours.
@@ -115,7 +115,7 @@ The formula is identical to the GitHub tap — it auto-detects CN networks and u
 # Replace v0.5.2 with the latest version
 VERSION=v0.5.2
 
-curl -L "https://github.com/huangzesen/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
+curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
 tar xzf lingtai.tar.gz
 cd "lingtai-${VERSION}/tui"
 
@@ -176,7 +176,7 @@ Two packages, one dependency direction:
 
 | Package | Role |
 |---------|------|
-| **[lingtai-kernel](https://github.com/huangzesen/lingtai-kernel)** | Minimal runtime — BaseAgent, intrinsics, LLM protocol, mail, logging. Zero hard dependencies. |
+| **[lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel)** | Minimal runtime — BaseAgent, intrinsics, LLM protocol, mail, logging. Zero hard dependencies. |
 | **lingtai** (this repo) | Batteries-included — Agent with capabilities, LLM adapters, MCP integration, addons. |
 
 ```
@@ -303,17 +303,17 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### IMAP Email
 
-IMAP addon for email. See [kernel docs](https://github.com/huangzesen/lingtai-kernel).
+IMAP addon for email. See [kernel docs](https://github.com/Lingtai-AI/lingtai-kernel).
 
 ### Telegram
 
-Telegram bot addon. See [kernel docs](https://github.com/huangzesen/lingtai-kernel).
+Telegram bot addon. See [kernel docs](https://github.com/Lingtai-AI/lingtai-kernel).
 
 ## Contributing
 
 Contributions are welcome. Check the [LingTai Roadmap](https://github.com/users/huangzesen/projects/1) for planned features and open tasks.
 
-Lingtai has two repos: this one (Go frontends — TUI and Portal) and [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) (Python runtime). A full dev setup has both running from source so changes take effect immediately.
+Lingtai has two repos: this one (Go frontends — TUI and Portal) and [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) (Python runtime). A full dev setup has both running from source so changes take effect immediately.
 
 ### Full dev setup
 
@@ -321,8 +321,8 @@ Lingtai has two repos: this one (Go frontends — TUI and Portal) and [lingtai-k
 
 ```bash
 # 1. Clone both repos
-git clone https://github.com/huangzesen/lingtai.git
-git clone https://github.com/huangzesen/lingtai-kernel.git
+git clone https://github.com/Lingtai-AI/lingtai.git
+git clone https://github.com/Lingtai-AI/lingtai-kernel.git
 
 # 2. Build the TUI and symlink it onto your PATH
 cd lingtai/tui
@@ -376,8 +376,8 @@ lingtai-kernel/                   # Separate repo — Python runtime
 
 | Area | Repo | Language |
 |------|------|----------|
-| New capabilities | [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) | Python |
-| New addons (messaging bridges) | [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) | Python |
+| New capabilities | [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) | Python |
+| New addons (messaging bridges) | [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) | Python |
 | TUI features (slash commands, views) | this repo | Go |
 | Portal features | this repo | Go + TypeScript |
 | Recipes | this repo, `tui/internal/preset/recipe_assets/` | Markdown |
@@ -418,7 +418,7 @@ All user-facing strings live in `tui/i18n/{en,zh,wen}.json`. Always update all t
 
 ## Community
 
-Questions, bug reports, and feature requests are welcome via [GitHub Issues](https://github.com/huangzesen/lingtai/issues) or [Discussions](https://github.com/huangzesen/lingtai/discussions).
+Questions, bug reports, and feature requests are welcome via [GitHub Issues](https://github.com/Lingtai-AI/lingtai/issues) or [Discussions](https://github.com/Lingtai-AI/lingtai/discussions).
 
 **中文用户 · 微信交流群**
 
@@ -432,6 +432,6 @@ MIT — [Zesen Huang](https://github.com/huangzesen), 2025–2026
 
 <div align="center">
 
-[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/huangzesen/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
+[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
 
 </div>

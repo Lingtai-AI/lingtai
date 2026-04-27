@@ -17,7 +17,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          url="https://github.com/huangzesen/lingtai/archive/refs/tags/${TAG}.tar.gz"
+          url="https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
           sha=$(curl -sL "$url" | shasum -a 256 | cut -d' ' -f1)
           echo "source=$sha" >> "$GITHUB_OUTPUT"
           echo "Source tarball SHA256: $sha"
@@ -25,7 +25,7 @@ jobs:
       - name: Checkout Homebrew tap
         uses: actions/checkout@v4
         with:
-          repository: huangzesen/homebrew-lingtai
+          repository: Lingtai-AI/homebrew-lingtai
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
@@ -38,11 +38,11 @@ jobs:
           cat > homebrew-tap/lingtai-tui.rb << FORMULA
           class LingtaiTui < Formula
             desc "Terminal UI for the Lingtai AI agent framework"
-            homepage "https://github.com/huangzesen/lingtai"
+            homepage "https://github.com/Lingtai-AI/lingtai"
             version "${VERSION}"
             license "MIT"
 
-            url "https://github.com/huangzesen/lingtai/archive/refs/tags/${TAG}.tar.gz"
+            url "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
             sha256 "${SHA}"
 
             depends_on "go" => :build

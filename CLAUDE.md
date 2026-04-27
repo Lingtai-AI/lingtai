@@ -67,6 +67,10 @@ Versioned, append-only, forward-only migration system. Each migration is a file 
 
 **IMPORTANT: The TUI and portal share the same `meta.json` version space but have separate migration registries.** When adding migrations to the TUI, you MUST also bump `CurrentVersion` in `portal/internal/migrate/migrate.go` and register no-op stubs for TUI-specific migrations. Otherwise the portal refuses to open any project the TUI has already touched.
 
+### Global migrations (`tui/internal/globalmigrate/`)
+
+Per-machine analogue of `tui/internal/migrate/`. Same conventions (versioned, append-only, forward-only, `m<NNN>_<name>.go` files registered in `globalmigrate.go`), but scoped to global state under `~/.lingtai-tui/`. Version tracked in `~/.lingtai-tui/meta.json`. Use this for cleanup that affects the whole machine rather than a single project — e.g. Homebrew tap rename, `tui_config.json` schema bumps, runtime dir relocation. Failures are best-effort: they go to stderr and don't abort startup. Run from `main.go` via `globalmigrate.Run(globalDir)`.
+
 ### Changelog Skill (`tui/internal/preset/skills/lingtai-changelog/`)
 
 A living chronicle of breaking changes shipped as an intrinsic skill. When making system-level renames or migrations that affect tool names, file paths, or capability names, **prepend** a new dated entry to `SKILL.md` (newest first). Add a one-line reference in procedures (`tui/internal/preset/procedures/`) pointing agents to this skill. This is how agents learn about changes that happened between their molts.

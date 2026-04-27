@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/globalmigrate"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/postman"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -88,7 +89,7 @@ func main() {
 		answer := strings.TrimSpace(strings.ToLower(line))
 		if answer != "n" && answer != "no" {
 			fmt.Println("  Upgrading...")
-			cmd := exec.Command("brew", "upgrade", "huangzesen/lingtai/lingtai-tui")
+			cmd := exec.Command("brew", "upgrade", "lingtai-ai/lingtai/lingtai-tui")
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -100,7 +101,7 @@ func main() {
 				if postUpgrade != "" {
 					// Still outdated — brew formula not updated yet, don't loop
 					fmt.Println("  Brew formula not yet updated. Run manually later:")
-					fmt.Println("    brew update && brew upgrade huangzesen/lingtai/lingtai-tui")
+					fmt.Println("    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
 				} else {
 					fmt.Println("  Upgraded! Restarting...")
 					self, _ := os.Executable()
@@ -126,6 +127,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Global per-machine migrations (versioned in ~/.lingtai-tui/meta.json).
+	// Best-effort housekeeping — failures don't abort startup.
+	globalmigrate.Run(globalDir)
 
 	// First-time welcome — show once, write .firstrun sentinel
 	showWelcome(globalDir)

@@ -3,15 +3,15 @@
 # Builds from main branch and installs to Homebrew's bin directory.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/huangzesen/lingtai/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
 #
 # To install a specific branch/tag:
-#   curl -sSL https://raw.githubusercontent.com/huangzesen/lingtai/main/install.sh | bash -s -- --ref v0.4.43
+#   curl -sSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash -s -- --ref v0.4.43
 #
 set -euo pipefail
 
 REF="main"
-REPO="https://github.com/huangzesen/lingtai.git"
+REPO="https://github.com/Lingtai-AI/lingtai.git"
 TMPDIR="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMPDIR/lingtai-install-$$"
 

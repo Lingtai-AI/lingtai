@@ -246,7 +246,7 @@ func CheckTUIUpgrade(currentVersion string) string {
 	}
 
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/huangzesen/lingtai/releases/latest")
+	resp, err := client.Get("https://api.github.com/repos/Lingtai-AI/lingtai/releases/latest")
 	if err != nil {
 		return ""
 	}

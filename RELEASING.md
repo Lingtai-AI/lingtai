@@ -27,10 +27,10 @@ No binary assets needed — Homebrew builds from source, Linux users build local
 
 ```bash
 # Get the source tarball checksum
-curl -sL "https://github.com/huangzesen/lingtai/archive/refs/tags/v0.X.Y.tar.gz" | shasum -a 256
+curl -sL "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/v0.X.Y.tar.gz" | shasum -a 256
 
 # Edit the formula
-cd $(brew --repository)/Library/Taps/huangzesen/homebrew-lingtai
+cd $(brew --repository)/Library/Taps/lingtai-ai/homebrew-lingtai
 # In lingtai-tui.rb: update the url tag and sha256
 git add lingtai-tui.rb
 git commit -m "bump lingtai-tui to v0.X.Y"
@@ -40,14 +40,14 @@ git push
 ### 5. Verify
 
 ```bash
-brew update && brew upgrade huangzesen/lingtai/lingtai-tui
+brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui
 lingtai-tui version  # should show v0.X.Y
 ```
 
 ## Installing without Homebrew
 
 ```bash
-git clone https://github.com/huangzesen/lingtai.git
+git clone https://github.com/Lingtai-AI/lingtai.git
 cd lingtai/tui && make build
 # Binary at tui/bin/lingtai-tui
 
