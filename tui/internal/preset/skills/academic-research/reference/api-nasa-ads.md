@@ -38,7 +38,7 @@ NASA ADS (Astrophysics Data System) is the primary search engine for astrophysic
 
 ### Export BibTeX
 
-**Endpoint**: `GET https://api.adsabs.harvard.edu/v1/export/bibtex`
+**Endpoint**: `POST https://api.adsabs.harvard.edu/v1/export/bibtex`
 
 Body: `{"bibcode": ["2023ApJ...942...71V"]}`
 

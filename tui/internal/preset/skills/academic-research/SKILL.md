@@ -8,6 +8,8 @@ parent: web-browsing
 
 # Academic Research
 
+> **This is a modular skill** — do NOT load the entire `reference/` directory into your context. Load specific reference files based on need (single API ref ≈ 1.5–3K tokens; single pipeline ≈ 2–3K tokens; full skill ≈ 42K tokens).
+
 > If you navigated here from the web-browsing skill — web-browsing answers "which tier to use," while this skill answers "how to use a specific API."
 
 ## When to Use

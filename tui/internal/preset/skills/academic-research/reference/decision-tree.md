@@ -165,4 +165,6 @@ discovery (find papers)
 obtain-pdf (get full text)
     ↓ PDF files + metadata
 scholar-analysis (analyze trends)  →  citation-tracking (format citations + generate review)
+    ↓ BibTeX entries + formatted references
+latex-writing (compile paper + bibliography + figures + debug)
 ```

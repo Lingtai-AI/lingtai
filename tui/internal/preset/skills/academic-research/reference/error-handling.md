@@ -73,15 +73,20 @@ def api_call_with_backoff(func, max_retries=3):
 3. **DOI/title mismatch**: Verify the DOI or title is correct
 4. **Rate limit disguised**: Some APIs return empty results instead of 429 when throttled
 5. **Encoding issues**: Special characters in queries may need URL encoding
+6. **Abstract appears empty (OpenAlex)**: OpenAlex returns `abstract_inverted_index` (a dict), not a plain string — see [api-openalex.md](api-openalex.md) for the reconstruction function
 
 ---
 
 ## API Fallback Chains
 
-### For Paper Discovery
+### For Paper Discovery (by use case)
 ```
-OpenAlex (fast, broad) → Semantic Scholar (citation networks) → arXiv (preprints) → Google Scholar (last resort, stealth required)
+OpenAlex (general discovery, fast, broad) — start here for most queries
+Semantic Scholar (citation networks, TLDR summaries) — use when you need citation context
+arXiv (physics/CS/math preprints) — use when preprints are preferred
+Google Scholar (broadest coverage) — last resort only (stealth required, IP-block risk)
 ```
+Note: These are **complementary tools**, not a sequential fallback chain. OpenAlex rarely fails; switch based on **what you need** (citations? preprints? broadest coverage?), not because the previous API errored.
 
 ### For Full-Text PDF
 ```
@@ -101,10 +106,12 @@ Semantic Scholar (forward + backward) → OpenAlex (referenced_works) → NASA A
 |-----|-------|------------|-------------|----------|
 | OpenAlex | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | No | General discovery |
 | CrossRef | ⭐⭐⭐ | ⭐⭐⭐⭐ | No (mailto helps) | DOI resolution |
+| DOI Resolver | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | No | DOI → structured citation |
 | arXiv | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | No | Physics/CS/math |
 | Semantic Scholar | ⭐⭐⭐ | ⭐⭐⭐ | Recommended | Citation networks |
 | CORE | ⭐⭐ | ⭐⭐ | Optional (big difference) | OA full text |
-| Europe PMC | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | No | Biomedical |
+| PubMed | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | No | Biomedical literature |
+| Europe PMC | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | No | Biomedical + full text XML |
 | NASA ADS | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Yes (free) | Astrophysics |
 | INSPIRE-HEP | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | No | High-energy physics |
 | Google Scholar | ⭐⭐ | ⭐⭐ | No (stealth needed) | Broadest coverage |

@@ -51,7 +51,9 @@ Returns full article text as structured XML (only for open-access articles with 
 import requests
 
 def search_by_pmid(pmid):
-    """Look up an article by its PubMed ID."""
+    """Look up an article by its PubMed ID.
+    Example: search_by_pmid(23903748) returns Kucsko et al. 2013 Nature paper.
+    """
     url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
     params = {
         "query": f"EXT_ID:{pmid}",
@@ -97,24 +99,24 @@ def search_europepmc(query, page_size=25):
 
 ## Response Format
 
-Search returns:
+Search returns (example: PMID 23903748):
 ```json
 {
-  "hitCount": 42,
+  "hitCount": 1,
   "cursorMark": "*",
   "resultList": {
     "result": [
       {
-        "id": "28980604",
+        "id": "23903748",
         "source": "MED",
-        "pmid": "28980604",
+        "pmid": "23903748",
         "doi": "10.1038/nature12373",
-        "title": "...",
-        "authorString": "Kucsko G, ...",
+        "title": "Nanometre-scale thermometry in a living cell.",
+        "authorString": "Kucsko G, Maurer PC, Yao NY, Kubo M, Noh HJ, Lo PK, Park H, Lukin MD.",
         "journalTitle": "Nature",
         "pubYear": "2013",
         "isOpenAccess": "Y",
-        "pmcid": "PMC..."
+        "pmcid": "PMC4221854"
       }
     ]
   }

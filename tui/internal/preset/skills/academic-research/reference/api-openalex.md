@@ -245,6 +245,39 @@ All endpoints return a uniform JSON structure:
 
 Single-record queries (e.g., `/institutions/I97018004`) return the object directly without the `meta`/`results` wrapper.
 
+### Abstract Format (Inverted Index)
+
+> **Important gotcha**: OpenAlex does **not** return `abstract` as a plain string. For copyright reasons, it returns `abstract_inverted_index` — a dictionary mapping each word to its position(s) in the original text.
+
+```json
+{
+  "abstract_inverted_index": {
+    "Attention": [0],
+    "is": [1],
+    "all": [2],
+    "you": [3],
+    "need": [4]
+  }
+}
+```
+
+If `abstract_inverted_index` is `null`, the paper has no abstract indexed. To reconstruct the plain text:
+
+```python
+def reconstruct_abstract(inverted_index):
+    """Reconstruct plain-text abstract from OpenAlex inverted index."""
+    if not inverted_index:
+        return None
+    word_positions = []
+    for word, positions in inverted_index.items():
+        for pos in positions:
+            word_positions.append((pos, word))
+    word_positions.sort()
+    return " ".join(word for _, word in word_positions)
+```
+
+**Common pitfall**: Seeing an empty/missing `abstract` field and assuming the paper has no abstract — check `abstract_inverted_index` instead.
+
 ---
 
 ## Rate Limits
