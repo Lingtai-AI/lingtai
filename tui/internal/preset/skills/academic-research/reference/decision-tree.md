@@ -24,6 +24,10 @@ What is your input?
 │   └── Need PDF?
 │       └── Direct download  →  https://arxiv.org/pdf/{ID}.pdf
 │
+├── Bibcode (19-char ADS ID, e.g., 2023ApJ...942...71V)
+│   └── NASA ADS API  →  GET /search/query?q=bibcode:{BIBCODE}
+│       (BibTeX export built-in; requires free API key)
+│
 ├── PMID (pure numeric, e.g., 12345678)
 │   └── Europe PMC  →  GET /search?query=EXT_ID:{PMID}
 │
@@ -34,6 +38,10 @@ What is your input?
 │   │   └── arXiv API  →  search_query=all:{q}
 │   ├── Need biomedicine?
 │   │   └── Europe PMC  →  GET /search?query={q}
+│   ├── Need astrophysics/astronomy?
+│   │   └── NASA ADS  →  GET /search/query?q={q} (requires free key)
+│   ├── Need high-energy physics?
+│   │   └── INSPIRE-HEP  →  GET /literature?q={q}
 │   └── Need Google Scholar rankings?
 │       └── curl+BS scrape Scholar (max 1 request per session; fallback to OpenAlex on 429)
 │
@@ -79,15 +87,18 @@ What is your input?
 
 ## API Quick Reference
 
-| API | Free | Key Required | Best For | Rate Limit |
-|-----|------|-------------|----------|------------|
-| OpenAlex | ✅ | No | All-around: search, metadata, citation networks, author analysis | ~10 req/s |
-| CrossRef | ✅ | No | DOI metadata resolution, citation counts | ~1 req/s |
-| arXiv | ✅ | No | Physics/CS/math preprints | Relaxed |
-| Unpaywall | ✅ | email | Check open access status and free PDFs | ~10 req/s |
-| Europe PMC | ✅ | No | Biomedical literature, PubMed | ~5 req/s |
-| Semantic Scholar | ✅ | Recommended to apply | Citation networks (forward + backward) | Strict without key |
-| Google Scholar | — | — | Academic search rankings (requires scraping) | IP-level throttling, prone to 429 |
+| API | Free | Key Required | Best For | Rate Limit | Reference |
+|-----|------|-------------|----------|------------|-----------|
+| OpenAlex | ✅ | No | All-around: search, metadata, citation networks | ~10 req/s | [api-openalex.md](api-openalex.md) |
+| CrossRef | ✅ | No | DOI metadata, citation counts | ~1 req/s | [api-crossref.md](api-crossref.md) |
+| arXiv | ✅ | No | Physics/CS/math preprints | Relaxed | [api-arxiv.md](api-arxiv.md) |
+| Unpaywall | ✅ | email | Open access status and free PDFs | ~10 req/s | [api-unpaywall.md](api-unpaywall.md) |
+| Europe PMC | ✅ | No | Biomedical literature, PMID lookup, full text | ~5 req/s | [api-europe-pmc.md](api-europe-pmc.md) |
+| Semantic Scholar | ✅ | Recommended | Citation networks, TLDR summaries | Strict without key | [api-semantic-scholar.md](api-semantic-scholar.md) |
+| NASA ADS | ✅ | Yes (free) | Astrophysics/astronomy, BibTeX export | Reasonable | [api-nasa-ads.md](api-nasa-ads.md) |
+| INSPIRE-HEP | ✅ | No | High-energy physics, author profiles | Be respectful | [api-inspire-hep.md](api-inspire-hep.md) |
+| CORE | ✅ | Optional | OA full-text downloads | Very strict w/o key | [api-core.md](api-core.md) |
+| Google Scholar | — | — | Broadest coverage (requires scraping) | IP-level throttling | [api-google-scholar.md](api-google-scholar.md) |
 
 ## Scraping Methods Quick Reference
 
@@ -106,11 +117,14 @@ What is your input?
 | Look up detailed info for a DOI | CrossRef → OpenAlex | obtain-pdf |
 | Find a free PDF for a paper | Unpaywall | obtain-pdf |
 | Download an arXiv paper | Direct link `/pdf/{ID}.pdf` | obtain-pdf |
+| Look up an astrophysics paper by bibcode | NASA ADS API | api-nasa-ads |
+| Search high-energy physics literature | INSPIRE-HEP | api-inspire-hep |
+| Look up a biomedical article by PMID | Europe PMC | api-europe-pmc |
 | View yearly trends in a field | OpenAlex year-by-year query | scholar-analysis |
 | Find all papers by an author | OpenAlex `filter=author.id:{id}` | scholar-analysis |
 | Find who cited a paper | OpenAlex `filter=cites:{doi}` | scholar-analysis |
 | Generate APA references | citation-tracking pipeline | citation-tracking |
-| Export BibTeX | citation-tracking pipeline | citation-tracking |
+| Export BibTeX | NASA ADS or INSPIRE-HEP (built-in), or citation-tracking | citation-tracking |
 | Scrape Scholar search results | curl+BS (≤1 request/session) | discovery |
 | Scrape Nature full text | camoufox + domcontentloaded | obtain-pdf |
 

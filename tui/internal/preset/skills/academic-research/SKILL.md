@@ -1,8 +1,8 @@
 ---
 name: academic-research
-description: "Deep-dive academic research skill — 9 API references (arXiv, CrossRef, OpenAlex, Semantic Scholar, CORE, PubMed, Unpaywall, Google Scholar, DOI Resolver) + 5 pipeline workflows (discovery, PDF acquisition, citation tracking, scholar analysis, decision tree). Use this when you need detailed API parameters, code examples, and fallback chains for scholarly search. If you arrived from web-browsing, this is the 'how to use each API' layer below the routing tier."
-version: 1.0.0
-tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, google-scholar, doi, pdf, citation, pipeline]
+description: "Deep-dive academic research skill — 12 API references (arXiv, CrossRef, OpenAlex, Semantic Scholar, CORE, PubMed, Unpaywall, Google Scholar, DOI Resolver, Europe PMC, NASA ADS, INSPIRE-HEP) + 5 pipeline workflows (discovery, PDF acquisition, citation tracking, scholar analysis, decision tree) + error handling patterns. Use this when you need detailed API parameters, code examples, and fallback chains for scholarly search."
+version: 2.0.0
+tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, google-scholar, doi, pdf, citation, pipeline, europe-pmc, nasa-ads, inspire-hep, error-handling]
 parent: web-browsing
 ---
 
@@ -23,7 +23,7 @@ parent: web-browsing
 
 It routes you to the most appropriate API based on your input (DOI? arXiv ID? keywords? discipline?).
 
-## API References (9)
+## API References (12)
 
 Each reference includes: endpoint parameter tables, runnable code, response formats, rate limits, error handling, and cross-references.
 
@@ -38,6 +38,9 @@ Each reference includes: endpoint parameter tables, runnable code, response form
 | PubMed | [api-pubmed.md](reference/api-pubmed.md) | Biomedical literature search, PMC full text | No |
 | Unpaywall | [api-unpaywall.md](reference/api-unpaywall.md) | Find OA versions/PDFs of papers | email parameter (not a placeholder) |
 | Google Scholar | [api-google-scholar.md](reference/api-google-scholar.md) | Broadest discipline coverage, citation counts (requires scraping) | No (requires stealth) |
+| Europe PMC | [api-europe-pmc.md](reference/api-europe-pmc.md) | Biomedical literature, PMID lookup, full-text XML | No |
+| NASA ADS | [api-nasa-ads.md](reference/api-nasa-ads.md) | Astrophysics/astronomy, BibTeX export, citation networks | Yes (free key) |
+| INSPIRE-HEP | [api-inspire-hep.md](reference/api-inspire-hep.md) | High-energy physics, author profiles, BibTeX export | No |
 
 ## Pipeline Workflows (5)
 
@@ -56,11 +59,24 @@ Each pipeline includes: workflow steps, decision trees, code examples, and failu
 ```
 I have a DOI          → api-doi-resolver.md → api-crossref.md → api-unpaywall.md for PDF
 I have an arXiv ID    → api-arxiv.md (direct PDF link)
-I have a PMID         → api-pubmed.md
+I have a PMID         → api-europe-pmc.md
+I have a bibcode      → api-nasa-ads.md (requires free key)
 I only have keywords  → decision-tree.md → pick API by discipline
 I need citation network → api-semantic-scholar.md or api-openalex.md
 I need full-text PDF  → pipeline-obtain-pdf.md (Unpaywall → CORE → Europe PMC chain)
+I need astrophysics   → api-nasa-ads.md
+I need high-energy physics → api-inspire-hep.md
+I need biomedical     → api-europe-pmc.md or api-pubmed.md
+I hit an API error    → error-handling.md (fallback chains, rate limit strategies)
 ```
+
+## Error Handling
+
+Common failure patterns and fallback chains are documented in [error-handling.md](reference/error-handling.md):
+- 429 rate limiting → exponential backoff + API switch
+- 403 publisher blocks → Unpaywall → CORE → Europe PMC chain
+- Timeout patterns → per-API timeout guidance
+- Empty results → query diagnosis checklist
 
 ## Relationship to web-browsing
 
@@ -71,6 +87,8 @@ I need full-text PDF  → pipeline-obtain-pdf.md (Unpaywall → CORE → Europe 
 ## Known Caveats
 
 - Google Scholar requires a stealth browser (camoufox or playwright-stealth v2); do not use the legacy `playwright_stealth` API
-- Unpaywall's email parameter is **required** and **must be a real address** — it serves as the sole "authentication"
+- Unpaywall's email parameter is **required** and **must be a real address** — it serves as the sole "authentication". Placeholder emails (e.g., `test@example.com`) will return 422 errors.
 - arXiv enforces HTTPS; HTTP requests are automatically redirected via 301
-- CORE offers higher quotas with a key, but works without one
+- **CORE without an API key is extremely limited** — aggressive rate limits (429 after just a few requests). Register at https://core.ac.uk/services/api for a free key (increases quota from ~100/day to 10,000/day). See [api-core.md](reference/api-core.md).
+- **Semantic Scholar free tier is very tight** — ~100 requests per 5 minutes without key, 1 req/s with key. Request an API key for any serious use. See [api-semantic-scholar.md](reference/api-semantic-scholar.md).
+- For comprehensive error handling strategies, see [error-handling.md](reference/error-handling.md)
