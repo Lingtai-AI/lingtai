@@ -9,13 +9,16 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// migrateAddActivePreset infers manifest.active_preset for each agent in the
-// project by content-matching its current manifest.llm.{provider, model}
-// against entries in the user's global preset library at ~/.lingtai-tui/presets/.
+// migrateAddActivePreset infers manifest.preset for each agent in the project
+// by content-matching its current manifest.llm.{provider, model} against
+// entries in the user's global preset library at ~/.lingtai-tui/presets/.
+// Writes manifest.preset = {active: <match>, default: <match>} so the kernel
+// can both materialize the preset on boot and auto-fall-back to the default
+// on AED exhaustion.
 //
-// Skips agents that already have active_preset set, and agents whose llm doesn't
-// match any preset (custom configs). Writes init.json atomically only when
-// a unique match is found.
+// Skips agents that already have a manifest.preset block, and agents whose
+// llm doesn't match any preset (custom configs). Writes init.json atomically
+// only when a unique match is found.
 //
 // Multiple matches: pick alphabetically first, warn on stderr.
 func migrateAddActivePreset(lingtaiDir string) error {
