@@ -10,6 +10,76 @@ A living chronicle of system-level changes that affect how you work. When someth
 
 ---
 
+## 2026-04-28 — Pending-notifications meta field on every text input and tool result
+
+### What changed
+
+Every text input and every tool result now carries a `pending_notifications` field whenever your runtime inbox has queued messages that haven't been delivered yet. The field has the shape:
+
+```
+"pending_notifications": {
+  "count": <int>,
+  "previews": [<str>, ...]   // one entry per queued message, each ≤50 chars
+}
+```
+
+Previews are non-destructive snapshots of the queued messages — flattened to a single line and truncated. The full text still arrives at the natural turn boundary (drained by `_concat_queued_messages` when control returns to `_run_loop`).
+
+In your text-input prefix you'll see a second line under the time/context line:
+
+```
+[Current time: ... | context: ...]
+[Pending notifications (3) — full text arrives after the current tool cascade:
+  - [system] New message in mail box. Address: alice. Subject: Quick que...
+  - [soul flow] Maybe pause and consider why...
+  - [system] New message in mail box. Address: bob. Subject: Status update.]
+```
+
+In tool results, the same dict appears as a JSON field alongside `current_time`, `context_usage`, etc.
+
+### What you should do
+
+- When you see `pending_notifications` mid-cascade, you can choose to (a) finish your current task — the full notifications will arrive after the cascade ends, or (b) pivot to handle them now if any look urgent.
+- Don't try to "drain" them yourself with a tool call — there's no such tool. The full messages are queued and will be delivered automatically at the next turn boundary.
+- If the cascade is short and you'd rather see the full content first, just produce a text-only response (no tool_calls) — that ends the cascade and the next turn will receive all queued notifications.
+
+### Why
+
+Previously, runtime notifications (incoming mail, soul whispers, addon notifies) sat silently in the inbox queue during a tool cascade and only became visible to you AFTER the cascade ended and control returned to the outer loop. For long cascades that meant minutes of obliviousness to mail that had already arrived. The new meta field gives you early awareness without breaking the chat-completions invariant (you can't inject `user[message]` between `assistant[tool_calls]` and `tool[results]`, but you CAN ride the snapshot inside the tool result itself).
+
+The full delivery still happens at the same natural boundary as before — this change is purely additive awareness, not a behavioral change to delivery timing.
+
+---
+
+## 2026-04-28 — `mail`/`email` mode renamed: `rel` → `peer`; SSH mode removed
+
+### What changed
+
+The `mode` parameter on `mail` (kernel intrinsic) and `email` (capability) accepted three values: `rel`, `abs`, `ssh`. It now accepts two: **`peer`** and **`abs`**.
+
+- `rel` → renamed to `peer`. Same semantics: resolve the address as a bare working-directory name against your `.lingtai/` network folder. Default mode — you almost never need to set it explicitly.
+- `abs` → unchanged. Treat the address as a literal absolute filesystem path to another agent's working directory. Use this only when the recipient lives in a *different* `.lingtai/` network on the same machine.
+- `ssh` → **deleted**. The `_deliver_ssh()` helper, the `if mode == "ssh"` dispatch branch, and the schema enum value are all gone. SSH-based cross-machine delivery was premature and is being superseded by the planned Postman/IPv6 mesh.
+
+The `email` capability now also exposes `mode` (it previously did not — it was structurally locked to peer-only). The schema field is inherited from kernel `mail.mode_field()` so the two tools cannot drift.
+
+### What you should do
+
+- Just call `mail(action="send", address="本我", message="...")` — you don't need to think about `mode` at all for any agent in your own network. The default is `peer`.
+- If you find yourself wanting to mail across networks (rare — usually a sign you should be coordinating through a shared agent), pass `mode="abs"` with the recipient's full working-directory path.
+- If you have any procedure or skill content that says `mode="rel"`, update it to `mode="peer"` (or just drop the explicit mode — it's the default).
+- If you have any procedure that mentions SSH-based mail delivery, delete that — there's no replacement yet.
+
+### Why
+
+`rel` was a path-resolution term that misled agents into thinking about *path semantics* when the actual concept is *network topology* — "is this person in my network or somewhere else." `peer` matches the mental model agents already use (the `from` field in mail, the network listing in your brief). The SSH path was untested in the wild, hardcoded a transport into the dispatch loop instead of going through `_mail_service` like every other mode, and is being replaced by a properly-designed mesh transport.
+
+### Migration safety
+
+No backward compatibility — `mode="rel"` and `mode="ssh"` are now hard rejected by the validator with a clear error message. Outbox payloads on disk cannot carry `_mode` (it's stripped before persist), so replays default to `peer` cleanly. Self-send still short-circuits before any resolve step and is mode-agnostic.
+
+---
+
 ## 2026-04-26 — Network exports drop chat_history; clones know they are clones
 
 ### What changed
