@@ -1,6 +1,6 @@
 ---
 name: academic-research
-description: "Deep-dive academic research skill — 12 API references (arXiv, CrossRef, OpenAlex, Semantic Scholar, CORE, PubMed, Unpaywall, Google Scholar, DOI Resolver, Europe PMC, NASA ADS, INSPIRE-HEP) + 5 pipeline workflows (discovery, PDF acquisition, citation tracking, scholar analysis, decision tree) + error handling patterns. Use this when you need detailed API parameters, code examples, and fallback chains for scholarly search."
+description: "Deep-dive academic research skill — 12 API references (arXiv, CrossRef, OpenAlex, Semantic Scholar, CORE, PubMed, Unpaywall, Google Scholar, DOI Resolver, Europe PMC, NASA ADS, INSPIRE-HEP) + 6 pipeline workflows (discovery, PDF acquisition, citation tracking, scholar analysis, LaTeX writing, decision tree) + error handling patterns. Use this when you need detailed API parameters, code examples, and fallback chains for scholarly search and paper writing."
 version: 2.0.0
 tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, google-scholar, doi, pdf, citation, pipeline, europe-pmc, nasa-ads, inspire-hep, error-handling]
 parent: web-browsing
@@ -42,7 +42,7 @@ Each reference includes: endpoint parameter tables, runnable code, response form
 | NASA ADS | [api-nasa-ads.md](reference/api-nasa-ads.md) | Astrophysics/astronomy, BibTeX export, citation networks | Yes (free key) |
 | INSPIRE-HEP | [api-inspire-hep.md](reference/api-inspire-hep.md) | High-energy physics, author profiles, BibTeX export | No |
 
-## Pipeline Workflows (5)
+## Pipeline Workflows (6)
 
 Each pipeline includes: workflow steps, decision trees, code examples, and failure fallbacks.
 
@@ -52,6 +52,7 @@ Each pipeline includes: workflow steps, decision trees, code examples, and failu
 | PDF Acquisition | [pipeline-obtain-pdf.md](reference/pipeline-obtain-pdf.md) | From metadata to full-text PDF (with stealth) |
 | Citation Tracking | [pipeline-citation-tracking.md](reference/pipeline-citation-tracking.md) | Forward/backward citation networks |
 | Scholar Analysis | [pipeline-scholar-analysis.md](reference/pipeline-scholar-analysis.md) | Impact, trends, h-index |
+| LaTeX Writing | [pipeline-latex-writing.md](reference/pipeline-latex-writing.md) | Compile, bibliography, figures, debugging |
 | Decision Tree | [decision-tree.md](reference/decision-tree.md) | "I have X — which API should I use?" |
 
 ## Quick Paths
@@ -67,6 +68,7 @@ I need full-text PDF  → pipeline-obtain-pdf.md (Unpaywall → CORE → Europe 
 I need astrophysics   → api-nasa-ads.md
 I need high-energy physics → api-inspire-hep.md
 I need biomedical     → api-europe-pmc.md or api-pubmed.md
+I need to write/compile a paper → pipeline-latex-writing.md (compile + bib + figures + debug)
 I hit an API error    → error-handling.md (fallback chains, rate limit strategies)
 ```
 

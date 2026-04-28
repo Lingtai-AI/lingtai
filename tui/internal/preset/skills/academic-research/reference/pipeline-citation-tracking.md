@@ -218,4 +218,5 @@ def compile_literature_review(papers, topic):
 - [pipeline-discovery.md](pipeline-discovery.md) — Paper discovery (upstream)
 - [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) — Full-text retrieval (upstream)
 - [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md) — Citation network & trend analysis
+- [pipeline-latex-writing.md](pipeline-latex-writing.md) — **BibTeX → `.bib` file integration**: after generating BibTeX entries, append to `references.bib` and compile with `latexmk`. See that pipeline's §3 (Bibliography Management) for the full workflow.
 - [decision-tree.md](decision-tree.md) — Comprehensive decision routing

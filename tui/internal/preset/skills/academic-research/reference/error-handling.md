@@ -116,3 +116,4 @@ Semantic Scholar (forward + backward) → OpenAlex (referenced_works) → NASA A
 - [decision-tree.md](decision-tree.md) — routing: which API for which input
 - [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) — PDF acquisition with fallback chain
 - [pipeline-discovery.md](pipeline-discovery.md) — multi-API discovery workflow
+- [pipeline-latex-writing.md](pipeline-latex-writing.md) — LaTeX compilation errors (undefined citations, missing packages, font issues, CJK) — these are not API errors but common in the academic writing workflow

@@ -81,9 +81,29 @@ What is your input?
     │   └── citation-tracking pipeline → APA / BibTeX / IEEE
     ├── Need trend analysis?
     │   └── scholar-analysis pipeline → trend chart + gap identification
-    └── Need to generate a literature review?
-        └── citation-tracking pipeline → compile_literature_review()
+    ├── Need to generate a literature review?
+    │   └── citation-tracking pipeline → compile_literature_review()
+    └── Writing/compiling a paper?
+        └── latex-writing pipeline → compile + bibliography + figures + debug
 ```
+
+---
+
+## "I Want to Write a Paper" Branch
+
+When the goal is **producing** a paper (not just searching), the full pipeline is:
+
+```
+1. discovery → find papers (OpenAlex, arXiv, etc.)
+2. obtain-pdf → get full text
+3. citation-tracking → generate BibTeX entries
+4. pipeline-latex-writing → compile paper with bibliography
+```
+
+Key integration points:
+- **BibTeX from APIs**: CrossRef `/transform/application/x-bibtex`, NASA ADS `/export/bibtex`, INSPIRE-HEP `?format=bibtex` → append to `references.bib`
+- **Citation style**: biblatex `style=numeric` for sciences, `style=apa` for social science
+- **Engine**: `pdflatex` for English, `xelatex` for CJK/Chinese text
 
 ## API Quick Reference
 
