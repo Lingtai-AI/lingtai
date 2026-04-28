@@ -621,8 +621,13 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// at boot to materialize manifest.llm + manifest.capabilities from the
 	// preset library at ~/.lingtai-tui/presets/. Agent can swap presets at
 	// runtime via system(action='refresh', preset='<name>').
+	// The 'default' field is used by AED auto-fallback to revert to the
+	// original preset when the active one keeps failing.
 	if p.Name != "" {
-		manifest["active_preset"] = p.Name
+		manifest["preset"] = map[string]interface{}{
+			"active":  p.Name,
+			"default": p.Name,
+		}
 	}
 
 	// Resolve file paths — use opts if set, fallback to language defaults

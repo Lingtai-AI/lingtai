@@ -51,13 +51,20 @@ func TestM024AddsActivePresetForKnownLLM(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	// init.json now has active_preset = "minimax"
+	// init.json now has manifest.preset = {active: "minimax", default: "minimax"}
 	updated, _ := os.ReadFile(filepath.Join(agentDir, "init.json"))
 	var got map[string]interface{}
 	json.Unmarshal(updated, &got)
 	manifest := got["manifest"].(map[string]interface{})
-	if manifest["active_preset"] != "minimax" {
-		t.Errorf("active_preset = %v, want 'minimax'", manifest["active_preset"])
+	preset, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest.preset missing")
+	}
+	if preset["active"] != "minimax" {
+		t.Errorf("preset.active = %v, want 'minimax'", preset["active"])
+	}
+	if preset["default"] != "minimax" {
+		t.Errorf("preset.default = %v, want 'minimax'", preset["default"])
 	}
 }
 
@@ -88,8 +95,8 @@ func TestM024LeavesUnknownLLMAlone(t *testing.T) {
 	var got map[string]interface{}
 	json.Unmarshal(updated, &got)
 	manifest := got["manifest"].(map[string]interface{})
-	if _, ok := manifest["active_preset"]; ok {
-		t.Errorf("expected no active_preset, got %v", manifest["active_preset"])
+	if _, ok := manifest["preset"]; ok {
+		t.Errorf("expected no preset block, got %v", manifest["preset"])
 	}
 }
 
@@ -102,8 +109,11 @@ func TestM024SkipsAgentsAlreadyMigrated(t *testing.T) {
 
 	init := map[string]interface{}{
 		"manifest": map[string]interface{}{
-			"agent_name":    "carol",
-			"active_preset": "custom_preset", // already set
+			"agent_name": "carol",
+			"preset": map[string]interface{}{
+				"active":  "custom_preset",
+				"default": "custom_preset",
+			}, // already migrated
 			"llm": map[string]interface{}{
 				"provider": "minimax",
 				"model":    "MiniMax-M2.7-highspeed",
@@ -121,7 +131,11 @@ func TestM024SkipsAgentsAlreadyMigrated(t *testing.T) {
 	var got map[string]interface{}
 	json.Unmarshal(updated, &got)
 	manifest := got["manifest"].(map[string]interface{})
-	if manifest["active_preset"] != "custom_preset" {
-		t.Errorf("active_preset overwritten: %v", manifest["active_preset"])
+	preset, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest.preset missing after skip")
+	}
+	if preset["active"] != "custom_preset" {
+		t.Errorf("preset.active overwritten: %v", preset["active"])
 	}
 }

@@ -58,7 +58,7 @@ func migrateAddActivePreset(lingtaiDir string) error {
 			continue
 		}
 		// Skip if already migrated
-		if _, exists := manifest["active_preset"]; exists {
+		if _, exists := manifest["preset"]; exists {
 			continue
 		}
 		llm, ok := manifest["llm"].(map[string]interface{})
@@ -90,13 +90,19 @@ func migrateAddActivePreset(lingtaiDir string) error {
 			// Custom config — leave alone
 			continue
 		case 1:
-			manifest["active_preset"] = matched[0]
+			manifest["preset"] = map[string]interface{}{
+				"active":  matched[0],
+				"default": matched[0],
+			}
 		default:
 			// Multiple matches — pick the alphabetically first, warn
 			fmt.Fprintf(os.Stderr,
 				"m024: %s matches multiple presets %v — using %s\n",
 				agentDir, matched, matched[0])
-			manifest["active_preset"] = matched[0]
+			manifest["preset"] = map[string]interface{}{
+				"active":  matched[0],
+				"default": matched[0],
+			}
 		}
 
 		// Atomic write

@@ -140,7 +140,7 @@ func TestHasAny(t *testing.T) {
 	})
 }
 
-func TestGenerateInitJSONWritesActivePreset(t *testing.T) {
+func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	tmp := t.TempDir()
 	globalDir := filepath.Join(tmp, "global")
 	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
@@ -162,9 +162,15 @@ func TestGenerateInitJSONWritesActivePreset(t *testing.T) {
 	}
 
 	manifest := init["manifest"].(map[string]interface{})
-	got, ok := manifest["active_preset"].(string)
-	if !ok || got != p.Name {
-		t.Errorf("manifest.active_preset = %v, want %s", manifest["active_preset"], p.Name)
+	preset, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest.preset block missing")
+	}
+	if active, _ := preset["active"].(string); active != p.Name {
+		t.Errorf("manifest.preset.active = %v, want %s", preset["active"], p.Name)
+	}
+	if def, _ := preset["default"].(string); def != p.Name {
+		t.Errorf("manifest.preset.default = %v, want %s", preset["default"], p.Name)
 	}
 }
 
