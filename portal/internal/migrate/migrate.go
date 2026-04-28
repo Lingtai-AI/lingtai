@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 23
+const CurrentVersion = 24
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -46,6 +46,7 @@ var migrations = []Migration{
 	{Version: 21, Name: "library-paths", Fn: func(_ string) error { return nil }},
 	{Version: 22, Name: "recipe-lang-suffix", Fn: func(_ string) error { return nil }}, // TUI-only: touches .tui-asset/.recipe
 	{Version: 23, Name: "recipe-state-rename", Fn: func(_ string) error { return nil }}, // TUI-only: renames .tui-asset/.recipe → recipe-state.json
+	{Version: 24, Name: "add-active-preset", Fn: func(_ string) error { return nil }}, // TUI-only: infers manifest.active_preset from existing init.json
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any
