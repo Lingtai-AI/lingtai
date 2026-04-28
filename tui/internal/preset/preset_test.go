@@ -140,3 +140,31 @@ func TestHasAny(t *testing.T) {
 	})
 }
 
+func TestGenerateInitJSONWritesActivePreset(t *testing.T) {
+	tmp := t.TempDir()
+	globalDir := filepath.Join(tmp, "global")
+	lingtaiDir := filepath.Join(tmp, "project", ".lingtai")
+	os.MkdirAll(lingtaiDir, 0o755)
+
+	p := minimaxPreset()
+	if err := GenerateInitJSON(p, "alice", "alice", lingtaiDir, globalDir); err != nil {
+		t.Fatalf("GenerateInitJSON: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "alice", "init.json"))
+	if err != nil {
+		t.Fatalf("read init.json: %v", err)
+	}
+
+	var init map[string]interface{}
+	if err := json.Unmarshal(data, &init); err != nil {
+		t.Fatalf("parse init.json: %v", err)
+	}
+
+	manifest := init["manifest"].(map[string]interface{})
+	got, ok := manifest["active_preset"].(string)
+	if !ok || got != p.Name {
+		t.Errorf("manifest.active_preset = %v, want %s", manifest["active_preset"], p.Name)
+	}
+}
+

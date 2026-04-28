@@ -617,6 +617,13 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	manifest["max_turns"] = 100
 	manifest["max_rpm"] = opts.MaxRpm
 	manifest["streaming"] = false
+	// Track which preset this agent was created from. The kernel reads this
+	// at boot to materialize manifest.llm + manifest.capabilities from the
+	// preset library at ~/.lingtai-tui/presets/. Agent can swap presets at
+	// runtime via system(action='refresh', preset='<name>').
+	if p.Name != "" {
+		manifest["active_preset"] = p.Name
+	}
 
 	// Resolve file paths — use opts if set, fallback to language defaults
 	covenantFile := opts.CovenantFile
