@@ -68,7 +68,7 @@ def search_by_pmid(pmid):
         return {
             "title": result.get("title"),
             "authors": result.get("authorString"),
-            "journal": result.get("journalTitle"),
+            "journal": result.get("journalInfo", {}).get("journal", {}).get("title"),
             "year": result.get("pubYear"),
             "doi": result.get("doi"),
             "pmcid": result.get("pmcid"),
@@ -113,9 +113,17 @@ Search returns (example: PMID 23903748):
         "doi": "10.1038/nature12373",
         "title": "Nanometre-scale thermometry in a living cell.",
         "authorString": "Kucsko G, Maurer PC, Yao NY, Kubo M, Noh HJ, Lo PK, Park H, Lukin MD.",
-        "journalTitle": "Nature",
+        "journalInfo": {
+          "yearOfPublication": 2013,
+          "volume": "500",
+          "issue": "7460",
+          "journal": {
+            "title": "Nature",
+            "medlineAbbreviation": "Nature"
+          }
+        },
         "pubYear": "2013",
-        "isOpenAccess": "Y",
+        "isOpenAccess": "N",
         "pmcid": "PMC4221854"
       }
     ]
