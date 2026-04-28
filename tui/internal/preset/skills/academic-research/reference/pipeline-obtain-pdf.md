@@ -15,9 +15,10 @@ Given a DOI / arXiv ID / paper URL, retrieve the paper's full text (PDF or plain
 2. **Resolve metadata** — CrossRef (DOI) / OpenAlex / arXiv API.
 3. **Find free PDF** — Unpaywall / arXiv direct link / PMC.
 4. **Download PDF** — Direct download via curl / requests.
-5. **(If web page, not PDF) Extract web page body** — Select BeautifulSoup or Camoufox based on the site.
-6. **Extract text from PDF** — PyMuPDF text extraction.
-7. **Output** — Return `(status, filepath_or_text, metadata)`.
+5. **(If all OA channels fail) LibGen fallback** — See [libgen-fallback.md](libgen-fallback.md) for live mirror discovery and download.
+6. **(If web page, not PDF) Extract web page body** — Select BeautifulSoup or Camoufox based on the site.
+7. **Extract text from PDF** — PyMuPDF text extraction.
+8. **Output** — Return `(status, filepath_or_text, metadata)`.
 
 ---
 
@@ -32,7 +33,7 @@ What is the input?
 │   ├─ CrossRef resolve metadata
 │   ├─ Unpaywall find free PDF
 │   │   ├─ Found → Download PDF → Extract text
-│   │   └─ Not found → Return landing page URL
+│   │   └─ Not found → CORE → Europe PMC → arXiv → LibGen (last resort, see libgen-fallback.md)
 │   └─ OpenAlex supplementary metadata
 │
 ├─ arXiv ID (e.g. 2301.00001)
@@ -276,6 +277,7 @@ print(f"Status: {status}, Path: {path}")
 | Nature/Springer timeout | `networkidle` waits indefinitely | Use `domcontentloaded` event instead (see code comment) |
 | Scholar IP ban | 429 error | ① Wait 60s ② Switch API (OpenAlex) ③ Camoufox + proxy |
 | Major publishers fully block (Wiley/Elsevier) | Cannot download | Only metadata available via API; full text requires institutional access |
+| All OA channels exhausted | Unpaywall + CORE + Europe PMC + arXiv all fail | LibGen fallback — see [libgen-fallback.md](libgen-fallback.md) for live mirror discovery (last resort; legal status varies by jurisdiction) |
 
 ---
 

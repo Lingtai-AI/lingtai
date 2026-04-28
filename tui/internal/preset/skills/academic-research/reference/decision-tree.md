@@ -73,6 +73,8 @@ What is your input?
 │   │   └── camoufox render (domcontentloaded, not networkidle)
 │   ├── Major paid publishers (Wiley/Elsevier/Science)
 │   │   └── API is the only option; do not attempt direct scraping
+│   ├── All OA channels failed (Unpaywall/CORE/Europe PMC/arXiv)
+│   │   └── LibGen fallback → see libgen-fallback.md (last resort)
 │   └── Other URLs
 │       └── web_read → curl+BS → camoufox (escalate by tier)
 │
@@ -147,6 +149,7 @@ Key integration points:
 | Export BibTeX | NASA ADS or INSPIRE-HEP (built-in), or citation-tracking | citation-tracking |
 | Scrape Scholar search results | curl+BS (≤1 request/session) | discovery |
 | Scrape Nature full text | camoufox + domcontentloaded | obtain-pdf |
+| All OA chains failed, need last-resort PDF | LibGen (live mirror discovery) | libgen-fallback |
 
 ## Key Notes
 

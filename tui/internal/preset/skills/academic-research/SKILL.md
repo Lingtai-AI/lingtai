@@ -66,7 +66,8 @@ I have a PMID         → api-europe-pmc.md
 I have a bibcode      → api-nasa-ads.md (requires free key)
 I only have keywords  → decision-tree.md → pick API by discipline
 I need citation network → api-semantic-scholar.md or api-openalex.md
-I need full-text PDF  → pipeline-obtain-pdf.md (Unpaywall → CORE → Europe PMC chain)
+I need full-text PDF  → pipeline-obtain-pdf.md (Unpaywall → CORE → Europe PMC → arXiv chain)
+All OA chains failed  → libgen-fallback.md (last resort, live mirror discovery)
 I need astrophysics   → api-nasa-ads.md
 I need high-energy physics → api-inspire-hep.md
 I need biomedical     → api-europe-pmc.md or api-pubmed.md
@@ -95,4 +96,5 @@ Common failure patterns and fallback chains are documented in [error-handling.md
 - arXiv enforces HTTPS; HTTP requests are automatically redirected via 301
 - **CORE without an API key is extremely limited** — aggressive rate limits (429 after just a few requests). Register at https://core.ac.uk/services/api for a free key (increases quota from ~100/day to 10,000/day). See [api-core.md](reference/api-core.md).
 - **Semantic Scholar free tier is very tight** — ~100 requests per 5 minutes without key, 1 req/s with key. Request an API key for any serious use. See [api-semantic-scholar.md](reference/api-semantic-scholar.md).
+- **Library Genesis (LibGen)** is available as a last-resort fallback when all legitimate OA channels (Unpaywall, CORE, Europe PMC, arXiv) have been exhausted. Legal status varies by jurisdiction — use is solely the user's responsibility. See [libgen-fallback.md](reference/libgen-fallback.md).
 - For comprehensive error handling strategies, see [error-handling.md](reference/error-handling.md)
