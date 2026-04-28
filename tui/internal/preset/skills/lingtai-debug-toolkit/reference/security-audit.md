@@ -1,35 +1,35 @@
 # LingTai Security Audit Reference
 
-> **理解架构需先阅读 `lingtai-anatomy` skill。** 本文档基于灵台架构的文件系统布局、进程模型和通信机制进行安全审计。
+> **Read the `lingtai-anatomy` skill first to understand the architecture.** This document performs security audits based on the Lingtai architecture's file system layout, process model, and communication mechanisms.
 
 ---
 
-## 核心原则
+## Core Principle
 
-本审计框架**严格只读**。扫描、报告、建议——但绝不修改任何文件。任何修复须由具有适当权限者手动执行。
+This audit framework is **strictly read-only**. Scan, report, recommend — but never modify any files. All fixes must be performed manually by authorized personnel with appropriate permissions.
 
 ---
 
-## 审计维度
+## Audit Dimensions
 
-### 1. 泄露密钥模式扫描
+### 1. Secret Leak Pattern Scan
 
-**目标**：检测网络目录中意外泄露的 API 密钥、令牌和凭据。
+**Goal**: Detect accidentally exposed API keys, tokens, and credentials in the network directory.
 
-**症状**：
-- Git 仓库中意外提交了密钥
-- 配置文件中硬编码了 API 密钥
-- 日志文件中包含了认证令牌
+**Symptoms**:
+- Secrets accidentally committed to a Git repository
+- API keys hardcoded in configuration files
+- Authentication tokens present in log files
 
-**原因**：
-- 开发时不小心将 `.env` 文件提交到 git
-- MCP 服务器配置直接写入了 API 密钥而非引用环境变量
-- 调试日志记录了完整的认证头
+**Causes**:
+- `.env` files accidentally committed to git during development
+- MCP server configurations with API keys written directly instead of referencing environment variables
+- Debug logs recording full authentication headers
 
-**解决方案（扫描）**：
+**Resolution (Scan)**:
 
 ```bash
-# 在网络目录中搜索常见密钥模式
+# Search for common secret patterns in the network directory
 scan_dir="<network-dir>"
 
 echo "=== GitHub Tokens ==="
@@ -50,9 +50,9 @@ grep -rn -i "api_key\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" 
 grep -rn -i "secret\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
 ```
 
-**命令示例（更全面的扫描）**：
+**Command Example (Comprehensive Scan)**:
 ```bash
-# 扫描多种密钥类型并输出到报告
+# Scan multiple secret types and output to a report
 scan_dir="<network-dir>"
 report="/tmp/security-scan-$(date +%Y%m%d-%H%M%S).txt"
 
@@ -92,30 +92,30 @@ report="/tmp/security-scan-$(date +%Y%m%d-%H%M%S).txt"
 echo "Report saved to: $report"
 ```
 
-**常见陷阱**：
-- ❌ 模式匹配 100% 准确 → 必有误报，需人工验证
-- ❌ 扫描二进制文件 → 可能产生大量噪音
-- ❌ 在报告中包含实际密钥值 → 报告本身成为泄露源
-- ✅ 报告中只写"发现匹配"，用 `<REDACTED>` 替代实际值
+**Common Pitfalls**:
+- ❌ Pattern matching is not 100% accurate → false positives are expected; manual verification is required
+- ❌ Scanning binary files → may produce excessive noise
+- ❌ Including actual secret values in the report → the report itself becomes a leak source
+- ✅ Report only "match found" and replace actual values with `<REDACTED>`
 
-**相关 reference**：`lingtai-anatomy`（文件系统布局）
+**Related References**: `lingtai-anatomy` (file system layout)
 
 ---
 
-### 2. 文件权限审计
+### 2. File Permission Audit
 
-**目标**：检测过度宽松的文件权限，防止未授权访问。
+**Goal**: Detect overly permissive file permissions to prevent unauthorized access.
 
-**症状**：
-- 敏感文件（密钥、配置）可被任意用户读写
-- agent 工作目录可被其他 agent 修改
+**Symptoms**:
+- Sensitive files (keys, configs) are readable/writable by any user
+- Agent working directories are modifiable by other agents
 
-**原因**：
-- 默认创建权限过于宽松（umask 设置）
-- 手动操作时未注意权限
-- 共享目录配置不当
+**Causes**:
+- Default creation permissions are too loose (umask settings)
+- Permissions not checked during manual operations
+- Shared directory misconfiguration
 
-**解决方案（审计）**：
+**Resolution (Audit)**:
 
 ```bash
 scan_dir="<network-dir>"
@@ -132,16 +132,16 @@ find "$scan_dir" \( \
   -name "servers.json" -o \
   -name "*.pem" -o \
   -name "*.key" \
-\) -ls 2>/dev/null
+) -ls 2>/dev/null
 
 echo ""
 echo "=== Files Not Owned by Current User ==="
 find "$scan_dir" ! -user "$(whoami)" -ls 2>/dev/null | head -20
 ```
 
-**检查特定敏感文件权限**：
+**Checking Specific Sensitive File Permissions**:
 ```bash
-# 检查 .secrets 目录（如果存在）
+# Check .secrets directory (if it exists)
 for f in <network-dir>/.lingtai/*/.secrets/*.json; do
   if [ -f "$f" ]; then
     perms=$(stat -f "%Lp" "$f" 2>/dev/null || stat -c "%a" "$f")
@@ -152,31 +152,31 @@ for f in <network-dir>/.lingtai/*/.secrets/*.json; do
 done
 ```
 
-**常见陷阱**：
-- ❌ 修改文件权限而不理解影响 → 可能破坏 agent 功能
-- ❌ 只检查顶层目录 → 敏感文件可能在深层子目录
-- ✅ 审计只读，修改由授权者执行
-- ✅ 重点关注 `.secrets/`、`mcp/servers.json`、`.env` 文件
+**Common Pitfalls**:
+- ❌ Modifying file permissions without understanding the impact → may break agent functionality
+- ❌ Only checking top-level directories → sensitive files may be in deeply nested subdirectories
+- ✅ Audit is read-only; modifications must be performed by authorized personnel
+- ✅ Focus on `.secrets/`, `mcp/servers.json`, and `.env` files
 
-**相关 reference**：`lingtai-anatomy`（目录结构）
+**Related References**: `lingtai-anatomy` (directory structure)
 
 ---
 
-### 3. MCP 配置审计
+### 3. MCP Configuration Audit
 
-**目标**：检查 MCP 服务器配置中的安全风险。
+**Goal**: Check MCP server configurations for security risks.
 
-**症状**：
-- MCP 配置中明文存储 API 密钥
-- `command` 字段指向不可信的可执行文件
-- 环境变量引用指向不存在的变量
+**Symptoms**:
+- MCP configuration contains plaintext API keys
+- The `command` field points to untrusted executables
+- Environment variable references point to non-existent variables
 
-**原因**：
-- 配置时图省事直接硬编码密钥
-- 使用了绝对路径引用本地脚本
-- 未对 MCP 服务器来源进行验证
+**Causes**:
+- Convenience-driven hardcoded keys during configuration
+- Absolute paths used to reference local scripts
+- MCP server sources not verified
 
-**解决方案（审计）**：
+**Resolution (Audit)**:
 
 ```bash
 scan_dir="<network-dir>"
@@ -201,17 +201,17 @@ find "$scan_dir" -name "servers.json" -path "*/mcp/*" | while read conf; do
 done
 ```
 
-**逐项检查清单**：
+**Itemized Checklist**:
 
-| 检查项 | 安全 | 风险 |
+| Check Item | Safe | Risk |
 |--------|------|------|
-| API 密钥通过 `${ENV_VAR}` 引用 | ✅ | — |
-| API 密钥硬编码在 JSON 中 | — | 🔴 Critical |
-| `command` 指向系统路径（`/usr/bin/`、`npx`） | ✅ | — |
-| `command` 指向项目内脚本 | ⚠️ | 🟡 需验证 |
-| `command` 指向 `/tmp/` 或下载脚本 | — | 🔴 Critical |
+| API key referenced via `${ENV_VAR}` | ✅ | — |
+| API key hardcoded in JSON | — | 🔴 Critical |
+| `command` points to system path (`/usr/bin/`, `npx`) | ✅ | — |
+| `command` points to project-local script | ⚠️ | 🟡 Requires verification |
+| `command` points to `/tmp/` or downloaded script | — | 🔴 Critical |
 
-**命令示例（提取所有 command 字段）**：
+**Command Example (Extract All command Fields)**:
 ```bash
 find "$scan_dir" -name "servers.json" -path "*/mcp/*" | while read conf; do
   echo "=== $conf ==="
@@ -239,34 +239,34 @@ except Exception as e:
 done
 ```
 
-**常见陷阱**：
-- ❌ 硬编码密钥并用 git 管理 → 密钥进入版本历史
-- ❌ 不验证 MCP 服务器来源 → 可能执行恶意代码
-- ✅ 密钥存于 `.secrets/` 目录，MCP 配置引用环境变量
-- ✅ 对第三方 MCP 服务器审查其源码和权限
+**Common Pitfalls**:
+- ❌ Hardcoding keys and tracking with git → secrets enter version history
+- ❌ Not verifying MCP server sources → potential execution of malicious code
+- ✅ Store secrets in the `.secrets/` directory; MCP configurations should reference environment variables
+- ✅ Audit the source code and permissions of third-party MCP servers
 
-**相关 reference**：`lingtai-mcp`（MCP 配置规范）
+**Related References**: `lingtai-mcp` (MCP configuration specification)
 
 ---
 
-### 4. 通信安全审计
+### 4. Communication Security Audit
 
-**目标**：评估灵台飞鸽通信系统的安全状况。
+**Goal**: Evaluate the security posture of the Lingtai pigeon communication system.
 
-**症状**：
-- 敏感信息通过飞鸽传递但无加密
-- 消息可被文件系统访问者读取
-- 无消息完整性验证
+**Symptoms**:
+- Sensitive information transmitted via pigeon without encryption
+- Messages readable by anyone with file system access
+- No message integrity verification
 
-**原因**（架构限制）：
-- 飞鸽以**明文 JSON** 存储于文件系统
-- 无消息加密（at rest 或 in transit）
-- 无消息认证或完整性校验
-- `to` 字段类型不一致（agent 发送 vs kernel 发送）
+**Causes (Architectural Limitations)**:
+- Pigeons are stored as **plaintext JSON** on the file system
+- No message encryption (at rest or in transit)
+- No message authentication or integrity verification
+- Inconsistent `to` field types (agent-sent vs kernel-sent)
 
-**解决方案（审计与记录）**：
+**Resolution (Audit and Document)**:
 
-这些是**架构限制**而非配置问题，无法通过简单配置修复。审计时应记录并报告。
+These are **architectural limitations**, not configuration issues, and cannot be fixed through simple reconfiguration. Auditors should document and report them.
 
 ```bash
 scan_dir="<network-dir>"
@@ -295,39 +295,39 @@ echo "2. No message authentication or integrity verification"
 echo "3. File system permissions are the only access control"
 ```
 
-**风险评估**：
+**Risk Assessment**:
 
-| 风险 | 严重度 | 说明 |
-|------|--------|------|
-| 邮件明文存储 | 🟡 Medium | 有文件系统访问权限者可读所有邮件 |
-| 无消息完整性校验 | 🟡 Medium | 邮件可被篡改而不被发现 |
-| `to` 字段类型不一致 | 🟢 Low | 可能导致路由问题 |
-| 无传输加密 | 🟢 Low | 本地文件系统，无网络传输 |
+| Risk | Severity | Description |
+|------|----------|-------------|
+| Plaintext mail storage | 🟡 Medium | Anyone with file system access can read all mail |
+| No message integrity verification | 🟡 Medium | Messages can be tampered with undetected |
+| Inconsistent `to` field types | 🟢 Low | May cause routing issues |
+| No transport encryption | 🟢 Low | Local file system, no network transmission |
 
-**常见陷阱**：
-- ❌ 尝试在飞鸽中传递真正的密钥 → 应使用环境变量或 .secrets
-- ❌ 认为飞鸽是安全的通信通道 → 任何有文件系统访问者可读
-- ✅ 敏感信息通过环境变量或 `.secrets/` 目录传递，不在邮件中明文传输
+**Common Pitfalls**:
+- ❌ Transmitting actual secrets via pigeon → use environment variables or .secrets instead
+- ❌ Assuming pigeon is a secure communication channel → anyone with file system access can read messages
+- ✅ Pass sensitive information through environment variables or the `.secrets/` directory, never in plaintext mail
 
-**相关 reference**：`email-manual`、`lingtai-anatomy`（通信模型）
+**Related References**: `email-manual`, `lingtai-anatomy` (communication model)
 
 ---
 
-### 5. 数据暴露审计
+### 5. Data Exposure Audit
 
-**目标**：检测网络目录中可能意外暴露的敏感数据。
+**Goal**: Detect sensitive data that may be accidentally exposed in the network directory.
 
-**症状**：
-- 典条目包含不应共享的敏感信息
-- 大型数据转储文件遗留在目录中
-- 导出文件（`codex export`）包含完整内容
+**Symptoms**:
+- Codex entries contain sensitive information that should not be shared
+- Large data dump files left in the directory
+- Export files (`codex export`) containing full content
 
-**原因**：
-- agent 将敏感数据记入典但未标记
-- 临时文件未清理
-- 导出文件遗留在共享路径
+**Causes**:
+- Agent records sensitive data in codex without marking it
+- Temporary files not cleaned up
+- Export files left in shared paths
 
-**解决方案（审计）**：
+**Resolution (Audit)**:
 
 ```bash
 scan_dir="<network-dir>"
@@ -353,7 +353,7 @@ find "$scan_dir" \( \
   -name "*.csv" -o \
   -name "*.xlsx" -o \
   -name "dump.*" \
-\) -ls 2>/dev/null
+) -ls 2>/dev/null
 
 # Check for git-tracked secrets
 echo ""
@@ -370,29 +370,29 @@ if [ -d "$scan_dir/.git" ]; then
 fi
 ```
 
-**常见陷阱**：
-- ❌ 典条目 ID 分享给他人 → ID 是私有的，他人无法访问
-- ❌ 导出文件放在共享路径 → 任何 agent 可读
-- ✅ 分享知识时传递实际内容（通过飞鸽或共享文件），而非 ID
-- ✅ 敏感数据不入典，或明确标记为敏感
+**Common Pitfalls**:
+- ❌ Sharing codex entry IDs with others → IDs are private; others cannot access them
+- ❌ Leaving export files in shared paths → any agent can read them
+- ✅ When sharing knowledge, pass the actual content (via pigeon or shared files), not just IDs
+- ✅ Do not enter sensitive data into codex, or clearly mark it as sensitive
 
-**相关 reference**：`codex-manual`、`lingtai-anatomy`（五层积淀）
+**Related References**: `codex-manual`, `lingtai-anatomy` (five-layer accumulation)
 
 ---
 
-### 6. Agent 权限审计
+### 6. Agent Permission Audit
 
-**目标**：检查 agent 的 init.json 中是否存在过度权限配置。
+**Goal**: Check agent init.json files for overly privileged configurations.
 
-**症状**：
-- 低权限 agent 拥有 admin（karma/nirvana）权限
-- 多个 agent 具有相同的完整权限
+**Symptoms**:
+- Low-privilege agents with admin (karma/nirvana) permissions
+- Multiple agents with identical full permissions
 
-**原因**：
-- 配置时图方便给所有 agent 全部权限
-- 权限需求变化后未回收
+**Causes**:
+- Convenience-driven granting of all permissions to every agent during configuration
+- Permissions not revoked after requirements change
 
-**解决方案（审计）**：
+**Resolution (Audit)**:
 
 ```bash
 scan_dir="<network-dir>"
@@ -429,62 +429,62 @@ except Exception as e:
 done
 ```
 
-**权限最小化原则**：
+**Principle of Least Privilege**:
 
-| 权限 | 适用场景 | 风险 |
+| Permission | Applicable Scenario | Risk |
 |------|----------|------|
-| `karma=True` | 编排器、管理者 | 可 suspend/lull/interrupt 任何 agent |
-| `nirvana=True` | 仅主编排器 | 可永久删除 agent 及其工作目录 |
-| 两者皆 False | 工作化身 | ✅ 最小权限 |
+| `karma=True` | Orchestrators, administrators | Can suspend/lull/interrupt any agent |
+| `nirvana=True` | Primary orchestrator only | Can permanently delete agents and their working directories |
+| Both False | Worker avatars | ✅ Minimal privilege |
 
-**常见陷阱**：
-- ❌ 所有化身都给 karma=True → 任一化身被劫持可影响全网
-- ❌ nirvana=True 配给化身 → 化身可删除父代
-- ✅ 只给编排器 karma/nirvana，化身保持零权限
-- ✅ 化身遇到权限问题应通过飞鸽向父代报告
+**Common Pitfalls**:
+- ❌ Granting karma=True to all avatars → any compromised avatar can affect the entire network
+- ❌ Assigning nirvana=True to avatars → avatars can delete their parent
+- ✅ Only grant karma/nirvana to orchestrators; avatars should have zero admin privileges
+- ✅ Avatars encountering permission issues should report to their parent via pigeon
 
-**相关 reference**：`avatar-manual`（化身权限模型）
+**Related References**: `avatar-manual` (avatar permission model)
 
 ---
 
-## 综合审计流程
+## Comprehensive Audit Workflow
 
-### 执行完整审计的步骤
+### Steps to Execute a Full Audit
 
-1. **密钥扫描**：§1 的扫描脚本
-2. **权限审计**：§2 的 find 命令
-3. **MCP 配置检查**：§3 的检查脚本
-4. **通信安全评估**：§4 的架构限制记录
-5. **数据暴露检查**：§5 的文件扫描
-6. **Agent 权限审查**：§6 的 init.json 审计
+1. **Secret Scan**: Run the scan scripts from §1
+2. **Permission Audit**: Run the find commands from §2
+3. **MCP Configuration Check**: Run the check scripts from §3
+4. **Communication Security Assessment**: Document architectural limitations from §4
+5. **Data Exposure Check**: Run the file scans from §5
+6. **Agent Permission Review**: Run the init.json audit from §6
 
-### 结果分级
+### Severity Classification
 
-| 严重度 | 含义 | 行动 |
+| Severity | Meaning | Action |
 |--------|------|------|
-| 🔴 Critical | 活跃的密钥泄露 | 立即修复：轮换密钥、清理 git 历史 |
-| 🟠 High | 敏感文件暴露 | 审查并限制权限 |
-| 🟡 Medium | 权限或配置风险 | 排期修复 |
-| 🟢 Low | 信息性/架构限制 | 记录备查 |
+| 🔴 Critical | Active secret leak | Fix immediately: rotate keys, clean git history |
+| 🟠 High | Sensitive file exposure | Review and restrict permissions |
+| 🟡 Medium | Permission or configuration risk | Schedule remediation |
+| 🟢 Low | Informational / architectural limitation | Document for review |
 
-### 报告格式
+### Report Format
 
-向上级（父代或人类）报告安全发现时：
+When reporting security findings to upstream (parent or human):
 
-1. **严重度**：Critical / High / Medium / Low
-2. **位置**：精确文件路径
-3. **证据**：匹配的模式（**务必隐去实际密钥值**）
-4. **建议**：具体修复步骤
-5. **绝不**在报告中包含实际密钥值
+1. **Severity**: Critical / High / Medium / Low
+2. **Location**: Exact file path
+3. **Evidence**: Matched pattern (**always redact actual secret values**)
+4. **Recommendation**: Specific remediation steps
+5. **Never** include actual secret values in the report
 
 ---
 
-## 本审计不覆盖的范围
+## Out of Scope
 
-- 网络层安全（TLS、防火墙）
-- Agent 间进程隔离
-- 外部用户认证
-- 运行时内存检查
-- 上述需要系统级访问权限，超出 agent 能力范围
+- Network-layer security (TLS, firewalls)
+- Inter-agent process isolation
+- External user authentication
+- Runtime memory inspection
+- The above require system-level access privileges, which are beyond an agent's capabilities
 
-如需这些方面的审计，请向系统管理员报告。
+For audits in these areas, report to your system administrator.

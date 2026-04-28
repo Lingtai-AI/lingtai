@@ -1,80 +1,80 @@
 # arXiv API Reference
 
-## API 概述
+## API Overview
 
-arXiv 提供 Open Archives Initiative (OAI) 风格的公开搜索 API，用于检索预印本论文的元数据与全文。
+arXiv provides a public search API based on the Open Archives Initiative (OAI) protocol for retrieving preprint metadata and full-text PDFs.
 
-- **端点**: `https://export.arxiv.org/api/query`
-- **认证**: 无需 API Key，完全开放
-- **响应格式**: Atom XML
-- **协议**: 强制 HTTPS（HTTP 自动 301 重定向）
-- **适用场景**: 预印本检索、论文元数据获取、自动化学术文献追踪
+- **Endpoint**: `https://export.arxiv.org/api/query`
+- **Authentication**: No API key required; fully open access
+- **Response format**: Atom XML
+- **Protocol**: HTTPS enforced (HTTP automatically redirects via 301)
+- **Best for**: Preprint retrieval, paper metadata extraction, automated scholarly literature tracking
 
-## 端点与参数
+## Endpoints & Parameters
 
-### 搜索端点
+### Search Endpoint
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `search_query` | 搜索表达式，支持字段前缀与布尔运算符 | `ti:transformer+AND+au:vaswani` |
-| `start` | 结果偏移量（默认 0） | `start=5` |
-| `max_results` | 返回数量上限（默认 25） | `max_results=10` |
-| `sortBy` | 排序字段：`relevance` / `lastUpdatedDate` / `submittedDate` | `sortBy=submittedDate` |
-| `sortOrder` | 排序方向：`descending` / `ascending` | `sortOrder=descending` |
-| `id_list` | 逗号分隔的 arXiv ID，直接获取指定论文 | `id_list=1706.03762,1806.11202` |
+| `search_query` | Search expression; supports field prefixes and Boolean operators | `ti:transformer+AND+au:vaswani` |
+| `start` | Result offset (default 0) | `start=5` |
+| `max_results` | Maximum number of results (default 25) | `max_results=10` |
+| `sortBy` | Sort field: `relevance` / `lastUpdatedDate` / `submittedDate` | `sortBy=submittedDate` |
+| `sortOrder` | Sort direction: `descending` / `ascending` | `sortOrder=descending` |
+| `id_list` | Comma-separated arXiv IDs for direct paper lookup | `id_list=1706.03762,1806.11202` |
 
-### 字段前缀
+### Field Prefixes
 
-| 前缀 | 字段 | 示例 |
+| Prefix | Field | Example |
 |---|---|---|
-| `ti:` | 标题 | `ti:attention` |
-| `au:` | 作者 | `au:vaswani` |
-| `abs:` | 摘要 | `abs:neural machine translation` |
-| `all:` | 全部字段 | `all:transformer architecture` |
-| `cat:` | 分类 | `cat:cs.CL` |
-| `co:` | 注释 | `co:NeurIPS` |
-| `jr:` | 期刊引用 | `jr:JHEP` |
-| `rn:` | 报告编号 | `rn:NSF-1234` |
+| `ti:` | Title | `ti:attention` |
+| `au:` | Author | `au:vaswani` |
+| `abs:` | Abstract | `abs:neural machine translation` |
+| `all:` | All fields | `all:transformer architecture` |
+| `cat:` | Category | `cat:cs.CL` |
+| `co:` | Comment | `co:NeurIPS` |
+| `jr:` | Journal reference | `jr:JHEP` |
+| `rn:` | Report number | `rn:NSF-1234` |
 
-**布尔运算符**（必须大写）：`AND`、`OR`、`ANDNOT`
+**Boolean operators** (must be uppercase): `AND`, `OR`, `ANDNOT`
 
 ```bash
-# 复合查询示例：标题含 transformer 且作者非 Smith
+# Compound query example: title contains "transformer" and author is not "smith"
 curl -s "https://export.arxiv.org/api/query?search_query=ti:transformer+ANDNOT+au:smith&max_results=5"
 ```
 
-### 常用分类代码
+### Common Category Codes
 
-| 代码 | 领域 |
+| Code | Discipline |
 |---|---|
-| `cs.CL` | 计算语言学 |
-| `cs.AI` | 人工智能 |
-| `cs.LG` | 机器学习 |
-| `cs.CV` | 计算机视觉 |
-| `math.CO` | 组合数学 |
-| `physics.hep-th` | 高能物理 - 理论 |
-| `q-bio.NC` | 神经科学与计算 |
-| `stat.ML` | 统计学 - 机器学习 |
+| `cs.CL` | Computation and Language |
+| `cs.AI` | Artificial Intelligence |
+| `cs.LG` | Machine Learning |
+| `cs.CV` | Computer Vision |
+| `math.CO` | Combinatorics |
+| `physics.hep-th` | High Energy Physics — Theory |
+| `q-bio.NC` | Neurons and Cognition |
+| `stat.ML` | Statistics — Machine Learning |
 
-## 代码示例
+## Code Examples
 
-### 基础搜索
+### Basic Search
 
 ```python
 import urllib.request
 import xml.etree.ElementTree as ET
 
 def search_arxiv(query, max_results=10, sort_by="relevance", sort_order="descending"):
-    """搜索 arXiv 论文。
+    """Search arXiv papers.
 
     Args:
-        query: 搜索表达式（支持字段前缀，如 ti:transformer）
-        max_results: 返回数量上限
-        sort_by: 排序字段 (relevance / lastUpdatedDate / submittedDate)
-        sort_order: 排序方向 (descending / ascending)
+        query: Search expression (supports field prefixes, e.g. ti:transformer)
+        max_results: Maximum number of results to return
+        sort_by: Sort field (relevance / lastUpdatedDate / submittedDate)
+        sort_order: Sort direction (descending / ascending)
 
     Returns:
-        list[dict]: 论文列表，每篇含 title, authors, published, abstract, pdf_link, arxiv_id
+        list[dict]: Paper list, each containing title, authors, published, abstract, pdf_link, arxiv_id
     """
     url = (
         f"https://export.arxiv.org/api/query?"
@@ -109,7 +109,7 @@ def search_arxiv(query, max_results=10, sort_by="relevance", sort_order="descend
         })
     return results
 
-# 使用示例
+# Usage example
 papers = search_arxiv("ti:transformer+AND+au:vaswani", max_results=3)
 for p in papers:
     print(f"[{p['published']}] {p['title']}")
@@ -119,26 +119,26 @@ for p in papers:
     print()
 ```
 
-### 分页遍历
+### Paginated Iteration
 
 ```python
 def search_arxiv_all(query, total=100, per_page=50):
-    """分页获取大量结果。arXiv 建议每次不超过 50 条以避免超时。"""
+    """Paginate through large result sets. arXiv recommends no more than 50 results per request to avoid timeouts."""
     all_results = []
     for start in range(0, total, per_page):
         count = min(per_page, total - start)
         batch = search_arxiv(query, max_results=count)
         all_results.extend(batch)
         if len(batch) < count:
-            break  # 无更多结果
+            break  # No more results
     return all_results
 ```
 
-### 通过 arXiv ID 直接获取
+### Direct Lookup by arXiv ID
 
 ```python
 def get_by_arxiv_id(arxiv_id):
-    """通过 arXiv ID 直接获取单篇论文。"""
+    """Fetch a single paper by its arXiv ID."""
     url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
     data = urllib.request.urlopen(url, timeout=15).read().decode("utf-8")
     root = ET.fromstring(data)
@@ -153,9 +153,9 @@ def get_by_arxiv_id(arxiv_id):
     }
 ```
 
-## 返回格式
+## Response Format
 
-响应为 Atom XML，主要结构：
+The response is Atom XML with the following main structure:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -182,54 +182,54 @@ def get_by_arxiv_id(arxiv_id):
 </feed>
 ```
 
-### 关键 XML 路径
+### Key XML Paths
 
-| 路径 | 说明 |
+| Path | Description |
 |---|---|
-| `feed/opensearch:totalResults` | 总匹配数 |
-| `entry/id` | arXiv ID（如 `1706.03762v1`） |
-| `entry/title` | 论文标题 |
-| `entry/summary` | 摘要（可能含 LaTeX） |
-| `entry/published` | 首次提交日期 |
-| `entry/updated` | 最后更新日期 |
-| `entry/author/name` | 作者姓名 |
-| `entry/link[@title='pdf']/@href` | PDF 下载链接 |
-| `entry/link[@rel='alternate']/@href` | HTML 摘要页 |
-| `entry/arxiv:primary_category/@term` | 主分类 |
-| `entry/category/@term` | 所有分类 |
-| `entry/arxiv:comment` | 作者注释 |
+| `feed/opensearch:totalResults` | Total match count |
+| `entry/id` | arXiv ID (e.g. `1706.03762v1`) |
+| `entry/title` | Paper title |
+| `entry/summary` | Abstract (may contain LaTeX) |
+| `entry/published` | Initial submission date |
+| `entry/updated` | Last update date |
+| `entry/author/name` | Author name |
+| `entry/link[@title='pdf']/@href` | PDF download link |
+| `entry/link[@rel='alternate']/@href` | HTML abstract page |
+| `entry/arxiv:primary_category/@term` | Primary category |
+| `entry/category/@term` | All categories |
+| `entry/arxiv:comment` | Author comments |
 
-## 速率限制
+## Rate Limits
 
-| 限制类型 | 值 |
+| Limit Type | Value |
 |---|---|
-| 推荐最大频率 | ~3 请求/秒 |
-| 单次最大结果数 | 无硬上限，但建议 ≤ 50 |
-| 连接超时 | 建议 15 秒 |
-| 高峰期响应时间 | 可能数秒 |
+| Recommended max rate | ~3 requests/second |
+| Max results per request | No hard limit, but ≤ 50 recommended |
+| Connection timeout | 15 seconds recommended |
+| Peak response time | May take several seconds |
 
-**最佳实践**:
-- 请求间加入 0.5–1 秒延迟
-- 分页时每次取 50 条以内
-- 避免短时间大量并发请求
-- 使用 `time.sleep()` 节流
+**Best practices:**
+- Add a 0.5–1 second delay between requests
+- Fetch ≤ 50 results per page during pagination
+- Avoid issuing a large number of concurrent requests in a short window
+- Use `time.sleep()` for throttling
 
-## 失败处理
+## Error Handling
 
-| 场景 | 处理方式 |
+| Scenario | Resolution |
 |---|---|
-| HTTP 301 | 使用 `https://` 直接请求，或在 curl 中加 `-L` 跟随重定向 |
-| 超时 | 增大 timeout 或重试（指数退避） |
-| 空结果 | 检查查询语法，简化搜索词，尝试 `all:` 前缀 |
-| XML 解析错误 | 检查响应是否为 HTML 错误页而非 Atom XML |
-| `entry` 中无 `title` | 跳过该条目（有时 arXiv 迠除条目后 ID 仍出现在索引中） |
+| HTTP 301 | Request `https://` directly, or use `-L` in curl to follow redirects |
+| Timeout | Increase timeout or retry with exponential backoff |
+| Empty results | Verify query syntax, simplify search terms, try the `all:` prefix |
+| XML parse error | Check whether the response is an HTML error page instead of Atom XML |
+| Missing `title` in `entry` | Skip the entry (arXiv may still list removed entries in the index) |
 
 ```python
 import time
 import urllib.error
 
 def search_arxiv_robust(query, max_results=10, retries=3):
-    """带重试的健壮搜索。"""
+    """Robust search with retry logic."""
     for attempt in range(retries):
         try:
             return search_arxiv(query, max_results)
@@ -240,8 +240,8 @@ def search_arxiv_robust(query, max_results=10, retries=3):
                 raise
 ```
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-crossref.md](api-crossref.md) — 通过 DOI 获取已发表论文的元数据
-- → 参见 [api-doi-resolver.md](api-doi-resolver.md) — 将 DOI 解析为完整引用信息
-- arXiv 论文通常无 DOI；若论文已正式发表，可通过标题在 CrossRef 中检索对应 DOI
+- → See [api-crossref.md](api-crossref.md) — Retrieve metadata for published papers via DOI
+- → See [api-doi-resolver.md](api-doi-resolver.md) — Resolve DOIs to complete citation information
+- arXiv papers generally lack DOIs; once formally published, you can search CrossRef by title to find the corresponding DOI

@@ -1,65 +1,65 @@
 # CORE API Reference
 
-CORE 是一个免费的学术资源聚合平台，索引全球 2 亿+ 篇开放获取论文，提供 PDF 直链下载。
+CORE is a free academic resource aggregation platform that indexes over 200 million open-access papers worldwide and provides direct PDF download links.
 
-## API 概述
+## API Overview
 
-| 项目 | 说明 |
+| Item | Description |
 |---|---|
-| 基础 URL | `https://api.core.ac.uk/v3` |
-| 认证 | 无 API Key 可用基本功能；有 Key 可解锁更多 |
-| 速率限制 | ~100 请求/秒 |
-| 响应格式 | JSON |
-| 最佳用途 | 查找免费全文论文、机构库内容、PDF 下载 |
+| Base URL | `https://api.core.ac.uk/v3` |
+| Authentication | Basic functionality available without an API key; a key unlocks additional features |
+| Rate limit | ~100 requests/second |
+| Response format | JSON |
+| Best for | Finding free full-text papers, institutional repository content, PDF downloads |
 
-核心端点：
+Core endpoints:
 
-| 端点 | 用途 |
+| Endpoint | Purpose |
 |---|---|
-| `POST /search/works` | 搜索论文 |
-| `GET /works/{id}` | 获取单篇论文详情（含 PDF 下载 URL） |
+| `POST /search/works` | Search for papers |
+| `GET /works/{id}` | Retrieve detailed information for a single paper (includes PDF download URL) |
 
 ---
 
-## 端点与参数
+## Endpoints & Parameters
 
-### 搜索论文
+### Search Papers
 
-**端点**: `POST https://api.core.ac.uk/v3/search/works`
+**Endpoint**: `POST https://api.core.ac.uk/v3/search/works`
 
-请求体为 JSON：
+The request body is JSON:
 
-| 参数 | 类型 | 说明 | 示例 |
+| Parameter | Type | Description | Example |
 |---|---|---|---|
-| `q` | string | 搜索查询 | `"machine learning"` |
-| `limit` | int | 最大结果数 | `10` |
-| `offset` | int | 分页偏移 | `0` |
+| `q` | string | Search query | `"machine learning"` |
+| `limit` | int | Maximum number of results | `10` |
+| `offset` | int | Pagination offset | `0` |
 
-### 获取论文详情
+### Retrieve Paper Details
 
-**端点**: `GET https://api.core.ac.uk/v3/works/{workId}`
+**Endpoint**: `GET https://api.core.ac.uk/v3/works/{workId}`
 
-返回完整元数据，包括 `downloadUrl`（PDF 直链）。
+Returns complete metadata, including `downloadUrl` (direct PDF link).
 
 ---
 
-## 代码示例
+## Code Examples
 
-### 搜索论文
+### Search Papers
 
 ```python
 import requests
 
 def search_core(query, limit=10, offset=0):
-    """搜索 CORE 学术论文。
+    """Search CORE academic papers.
 
     Args:
-        query: 搜索查询字符串
-        limit: 最大返回结果数（默认 10）
-        offset: 分页偏移（默认 0）
+        query: Search query string
+        limit: Maximum number of results (default 10)
+        offset: Pagination offset (default 0)
 
     Returns:
-        dict: 包含 totalHits 和 results 列表
+        dict: Contains totalHits and a results list
     """
     url = "https://api.core.ac.uk/v3/search/works"
     payload = {"q": query, "limit": limit, "offset": offset}
@@ -67,7 +67,7 @@ def search_core(query, limit=10, offset=0):
     r.raise_for_status()
     return r.json()
 
-# 示例
+# Example
 results = search_core("transformer architecture", limit=5)
 print(f"Total hits: {results['totalHits']}")
 
@@ -80,25 +80,25 @@ for paper in results['results']:
         print(f"PDF: {paper['downloadUrl']}")
 ```
 
-### 获取论文详情并下载 PDF
+### Retrieve Paper Details and Download PDF
 
 ```python
 def get_core_work(work_id):
-    """获取单篇论文完整信息。"""
+    """Retrieve complete information for a single paper."""
     url = f"https://api.core.ac.uk/v3/works/{work_id}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     return r.json()
 
 def download_core_pdf(work_id, output_path):
-    """下载论文 PDF。
+    """Download a paper's PDF.
 
     Args:
-        work_id: CORE 论文 ID
-        output_path: 本地保存路径
+        work_id: CORE paper ID
+        output_path: Local file save path
 
     Returns:
-        str: 保存路径（成功时）；None（无 PDF 时）
+        str: Saved file path on success; None when no PDF is available
     """
     data = get_core_work(work_id)
     if data.get('downloadUrl'):
@@ -109,14 +109,14 @@ def download_core_pdf(work_id, output_path):
     return None
 ```
 
-### 带过滤的搜索
+### Filtered Search
 
 ```python
 def search_core_advanced(query, limit=10, year_from=None, year_to=None):
-    """高级搜索（使用查询语法）。"""
+    """Advanced search using query syntax."""
     q = query
     if year_from or year_to:
-        # CORE 支持在查询中嵌入年份范围
+        # CORE supports embedding year ranges in the query string
         q = f"{query} yearPublished>={year_from or 1900} yearPublished<={year_to or 2100}"
 
     url = "https://api.core.ac.uk/v3/search/works"
@@ -128,9 +128,9 @@ def search_core_advanced(query, limit=10, year_from=None, year_to=None):
 
 ---
 
-## 返回格式
+## Response Format
 
-### 搜索响应
+### Search Response
 
 ```json
 {
@@ -155,42 +155,42 @@ def search_core_advanced(query, limit=10, year_from=None, year_to=None):
 }
 ```
 
-### 关键响应字段
+### Key Response Fields
 
-| 字段 | 说明 |
+| Field | Description |
 |---|---|
-| `totalHits` | 总匹配论文数 |
-| `results[].id` | CORE 论文 ID |
-| `results[].title` | 论文标题 |
-| `results[].authors` | 作者列表（`[{name: "..."}]`） |
-| `results[].yearPublished` | 发表年份 |
+| `totalHits` | Total number of matching papers |
+| `results[].id` | CORE paper ID |
+| `results[].title` | Paper title |
+| `results[].authors` | Author list (`[{name: "..."}]`) |
+| `results[].yearPublished` | Publication year |
 | `results[].doi` | DOI |
-| `results[].downloadUrl` | PDF 直链下载 URL |
-| `results[].abstract` | 摘要 |
-| `results[].publisher` | 出版商 |
-| `results[].citationCount` | 引用数 |
-| `results[].sourceFulltextUrls` | 其他全文 URL（如 arXiv） |
+| `results[].downloadUrl` | Direct PDF download URL |
+| `results[].abstract` | Abstract |
+| `results[].publisher` | Publisher |
+| `results[].citationCount` | Citation count |
+| `results[].sourceFulltextUrls` | Other full-text URLs (e.g. arXiv) |
 
 ---
 
-## 速率限制
+## Rate Limits
 
-| 场景 | 限制 |
+| Scenario | Limit |
 |---|---|
-| 无 API Key | ~100 req/s |
-| 有 API Key | 更高配额 |
+| No API key | ~100 req/s |
+| With API key | Higher quota |
 
-CORE 的速率限制相对宽松，一般无需特殊处理。
+CORE's rate limits are relatively generous; special handling is typically unnecessary.
 
 ---
 
-## 失败处理
+## Error Handling
 
 ```python
 import requests, time
 
 def core_search_safe(query, limit=10, retries=3, delay=2):
-    """带重试的 CORE 搜索。"""
+    """CORE search with retry logic."""
     url = "https://api.core.ac.uk/v3/search/works"
     payload = {"q": query, "limit": limit, "offset": 0}
     for attempt in range(retries):
@@ -209,8 +209,8 @@ def core_search_safe(query, limit=10, retries=3, delay=2):
 
 ---
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-openalex.md](api-openalex.md) — OpenAlex 论文/概念/机构查询（元数据更丰富）
-- → 参见 [api-semantic-scholar.md](api-semantic-scholar.md) — Semantic Scholar 论文/作者查询（引用网络更强）
-- → 参见 [api-crossref.md](api-crossref.md) — CrossRef DOI 元数据查询
+- → See [api-openalex.md](api-openalex.md) — OpenAlex paper/concept/institution queries (richer metadata)
+- → See [api-semantic-scholar.md](api-semantic-scholar.md) — Semantic Scholar paper/author queries (stronger citation networks)
+- → See [api-crossref.md](api-crossref.md) — CrossRef DOI metadata queries

@@ -1,18 +1,18 @@
 # CrossRef API Reference
 
-## API 概述
+## API Overview
 
-CrossRef 是最大的学术 DOI 注册机构，其公开 API 提供论文元数据、基金信息与期刊检索。
+CrossRef is the largest scholarly DOI registration agency. Its public API provides access to paper metadata, funder information, and journal search.
 
-- **基础端点**: `https://api.crossref.org`
-- **认证**: 无需 API Key；附带 `User-Agent` 头可进入 Polite Pool 获得更高速率
-- **响应格式**: JSON
-- **协议**: HTTPS
-- **适用场景**: 论文元数据检索、DOI 查询、基金追踪、出版趋势分析
+- **Base Endpoint**: `https://api.crossref.org`
+- **Authentication**: No API key required; include a `User-Agent` header to join the Polite Pool for higher rate limits
+- **Response Format**: JSON
+- **Protocol**: HTTPS
+- **Use Cases**: Paper metadata retrieval, DOI lookup, funder tracking, publication trend analysis
 
-### Polite Pool 设置
+### Polite Pool Configuration
 
-在请求头中加入联系方式即可进入 Polite Pool（速率从 ~10/s 提升至 ~50/s）：
+Include contact information in the request header to join the Polite Pool (rate limit increases from ~10 req/s to ~50 req/s):
 
 ```python
 HEADERS = {"User-Agent": "MyApp/1.0 (mailto:your@email.com)"}
@@ -20,53 +20,53 @@ HEADERS = {"User-Agent": "MyApp/1.0 (mailto:your@email.com)"}
 
 ---
 
-## 一、基础查询（Works 端点）
+## 1. Basic Queries (Works Endpoint)
 
-### 端点
+### Endpoint
 
 ```
 GET https://api.crossref.org/works
 ```
 
-### 查询参数
+### Query Parameters
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `query` | 全文搜索 | `query=attention is all you need` |
-| `query.title` | 标题搜索 | `query.title=transformer` |
-| `query.author` | 作者搜索 | `query.author=vaswani` |
-| `query.bibliographic` | 书目信息搜索 | `query.bibliographic=deep learning NLP` |
-| `rows` | 返回数量（默认 20，最大 100） | `rows=5` |
-| `offset` | 分页偏移 | `offset=20` |
-| `select` | 返回字段（逗号分隔） | `select=DOI,title,author,published-print` |
-| `sort` | 排序字段 | `sort=published-print` |
-| `order` | 排序方向：`asc` / `desc` | `order=desc` |
-| `filter` | 高级过滤器（逗号分隔多条件） | `filter=from-pub-date:2020-01-01,type:journal-article` |
+| `query` | Full-text search | `query=attention is all you need` |
+| `query.title` | Title search | `query.title=transformer` |
+| `query.author` | Author search | `query.author=vaswani` |
+| `query.bibliographic` | Bibliographic search | `query.bibliographic=deep learning NLP` |
+| `rows` | Number of results (default 20, max 100) | `rows=5` |
+| `offset` | Pagination offset | `offset=20` |
+| `select` | Fields to return (comma-separated) | `select=DOI,title,author,published-print` |
+| `sort` | Sort field | `sort=published-print` |
+| `order` | Sort direction: `asc` / `desc` | `order=desc` |
+| `filter` | Advanced filters (comma-separated for multiple conditions) | `filter=from-pub-date:2020-01-01,type:journal-article` |
 
-### 可选返回字段（select）
+### Selectable Return Fields
 
-常用字段：`DOI`、`title`、`author`、`published-print`、`published-online`、`journal`、`publisher`、`type`、`volume`、`issue`、`page`、`abstract`、`citationCount`、`subject`、`ISSN`、`URL`、`link`、`funder`、`award`
+Commonly used fields: `DOI`, `title`, `author`, `published-print`, `published-online`, `journal`, `publisher`, `type`, `volume`, `issue`, `page`, `abstract`, `citationCount`, `subject`, `ISSN`, `URL`, `link`, `funder`, `award`
 
-### 高级过滤器（filter）
+### Advanced Filters (filter)
 
-| 过滤器 | 说明 | 示例 |
+| Filter | Description | Example |
 |---|---|---|
-| `from-pub-date` | 起始出版日期 | `from-pub-date:2020-01-01` |
-| `until-pub-date` | 截止出版日期 | `until-pub-date:2024-12-31` |
-| `type` | 文献类型 | `type:journal-article` |
-| `issn` | 期刊 ISSN | `issn:0957-4174` |
-| `prefix` | DOI 前缀（出版机构） | `prefix:10.1038` |
-| `container-title` | 期刊名 | `container-title:Nature` |
-| `funder` | 基金机构 DOI | `funder:10.13039/100000001` |
-| `award` | 基金编号 | `award:CBET-1234567` |
-| `has-abstract` | 是否有摘要 | `has-abstract:true` |
-| `has-funder` | 是否有基金信息 | `has-funder:true` |
+| `from-pub-date` | Start publication date | `from-pub-date:2020-01-01` |
+| `until-pub-date` | End publication date | `until-pub-date:2024-12-31` |
+| `type` | Work type | `type:journal-article` |
+| `issn` | Journal ISSN | `issn:0957-4174` |
+| `prefix` | DOI prefix (publisher) | `prefix:10.1038` |
+| `container-title` | Journal name | `container-title:Nature` |
+| `funder` | Funder DOI | `funder:10.13039/100000001` |
+| `award` | Grant number | `award:CBET-1234567` |
+| `has-abstract` | Has abstract | `has-abstract:true` |
+| `has-funder` | Has funder information | `has-funder:true` |
 
-### 文献类型（type）
+### Work Types (type)
 
-常见值：`journal-article`、`book-chapter`、`book`、`proceedings-article`、`dissertation`、`report`、`dataset`、`preprint`
+Common values: `journal-article`, `book-chapter`, `book`, `proceedings-article`, `dissertation`, `report`, `dataset`, `preprint`
 
-### 代码示例
+### Code Example
 
 ```python
 import requests
@@ -75,16 +75,16 @@ HEADERS = {"User-Agent": "MyApp/1.0 (mailto:your@email.com)"}
 BASE = "https://api.crossref.org"
 
 def search_works(query, rows=5, select="DOI,title,author,published-print", **filters):
-    """搜索 CrossRef 论文。
+    """Search CrossRef papers.
 
     Args:
-        query: 搜索词
-        rows: 返回数量 (1-100)
-        select: 返回字段（逗号分隔）
-        **filters: 额外过滤条件，如 type='journal-article', from_pub_date='2020-01-01'
+        query: Search terms
+        rows: Number of results (1-100)
+        select: Fields to return (comma-separated)
+        **filters: Additional filters, e.g. type='journal-article', from_pub_date='2020-01-01'
 
     Returns:
-        list[dict]: 论文列表
+        list[dict]: List of papers
     """
     params = {"query": query, "rows": rows, "select": select}
     if filters:
@@ -98,7 +98,7 @@ def search_works(query, rows=5, select="DOI,title,author,published-print", **fil
     r.raise_for_status()
     return r.json()["message"]["items"]
 
-# 基础搜索
+# Basic search
 papers = search_works("transformer architecture", rows=3)
 for p in papers:
     title = p.get("title", ["N/A"])[0]
@@ -110,7 +110,7 @@ for p in papers:
     print()
 ```
 
-### 返回格式
+### Response Format
 
 ```json
 {
@@ -139,50 +139,50 @@ for p in papers:
 
 ---
 
-## 二、基金查询（Funders 端点）
+## 2. Funder Queries (Funders Endpoint)
 
-### 端点
+### Endpoint
 
 ```
 GET https://api.crossref.org/funders
 ```
 
-### 参数
+### Parameters
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `query` | 搜索基金机构 | `query=NSF` |
-| `rows` | 返回数量 | `rows=5` |
+| `query` | Search for funding agencies | `query=NSF` |
+| `rows` | Number of results | `rows=5` |
 
-### 常见基金机构 DOI
+### Common Funder DOIs
 
-| 基金机构 | DOI 标识 |
+| Funding Agency | DOI Identifier |
 |---|---|
-| NIH (美国国立卫生研究院) | `10.13039/100000002` |
-| NSF (美国国家科学基金会) | `10.13039/100000001` |
-| DOE (美国能源部) | `10.13039/100000015` |
-| EU (欧盟) | `10.13039/501100000780` |
+| NIH (National Institutes of Health) | `10.13039/100000002` |
+| NSF (National Science Foundation) | `10.13039/100000001` |
+| DOE (U.S. Department of Energy) | `10.13039/100000015` |
+| EU (European Union) | `10.13039/501100000780` |
 | Wellcome Trust | `10.13039/100004440` |
-| DFG (德国研究联合会) | `10.13039/501100001659` |
-| JSPS (日本学术振兴会) | `10.13039/501100001691` |
-| NSFC (中国国家自然科学基金) | `10.13039/501100001809` |
+| DFG (German Research Foundation) | `10.13039/501100001659` |
+| JSPS (Japan Society for the Promotion of Science) | `10.13039/501100001691` |
+| NSFC (National Natural Science Foundation of China) | `10.13039/501100001809` |
 
-### 代码示例
+### Code Example
 
 ```python
 def search_funders(query, rows=5):
-    """搜索基金机构。"""
+    """Search for funding agencies."""
     params = {"query": query, "rows": rows}
     r = requests.get(f"{BASE}/funders", params=params, headers=HEADERS, timeout=10)
     r.raise_for_status()
     return r.json()["message"]["items"]
 
 def get_funder_works(funder_doi, rows=5):
-    """获取某基金机构资助的论文。
+    """Retrieve papers funded by a specific agency.
 
     Args:
-        funder_doi: 基金机构 DOI（如 '10.13039/100000001' 为 NSF）
-        rows: 返回数量
+        funder_doi: Funder DOI (e.g. '10.13039/100000001' for NSF)
+        rows: Number of results
     """
     params = {
         "filter": f"funder:{funder_doi}",
@@ -195,13 +195,13 @@ def get_funder_works(funder_doi, rows=5):
     r.raise_for_status()
     return r.json()["message"]["items"]
 
-# 搜索基金机构
+# Search for funding agencies
 funders = search_funders("National Science Foundation")
 for f in funders:
     print(f"{f['name']} (ID: {f['id']})")
     print(f"  Location: {f.get('location', 'N/A')}")
 
-# 获取 NSF 资助的最新论文
+# Get recent papers funded by NSF
 nsf_works = get_funder_works("10.13039/100000001", rows=5)
 for w in nsf_works:
     title = w.get("title", ["N/A"])[0]
@@ -212,7 +212,7 @@ for w in nsf_works:
         print(f"  Award: {', '.join(flat_awards[:3])}")
 ```
 
-### 返回格式（Funders）
+### Response Format (Funders)
 
 ```json
 {
@@ -233,29 +233,29 @@ for w in nsf_works:
 
 ---
 
-## 三、今日新增（日期过滤查询）
+## 3. Recent Publications (Date-filtered Queries)
 
-### 原理
+### How It Works
 
-通过 `from-pub-date` / `until-pub-date` 过滤器结合 `sort=published-print` 和 `order=desc`，实现最新论文追踪。
+Combine the `from-pub-date` / `until-pub-date` filters with `sort=published-print` and `order=desc` to track the latest papers.
 
-### 代码示例
+### Code Example
 
 ```python
 from datetime import date, timedelta
 
 def get_recent_papers(topic=None, days=7, rows=20, funder=None, journal=None):
-    """获取近期论文。
+    """Retrieve recent papers.
 
     Args:
-        topic: 搜索关键词（可选）
-        days: 回溯天数
-        rows: 返回数量
-        funder: 基金机构 DOI（可选）
-        journal: 期刊名（可选）
+        topic: Search keyword (optional)
+        days: Number of days to look back
+        rows: Number of results
+        funder: Funder DOI (optional)
+        journal: Journal name (optional)
 
     Returns:
-        list[dict]: 论文列表，按出版日期降序
+        list[dict]: Papers sorted by publication date in descending order
     """
     today = date.today()
     since = today - timedelta(days=days)
@@ -280,11 +280,11 @@ def get_recent_papers(topic=None, days=7, rows=20, funder=None, journal=None):
     return r.json()["message"]["items"]
 
 def daily_digest(topic, rows=20):
-    """每日摘要：获取今日特定主题的论文。"""
+    """Daily digest: retrieve today's papers on a specific topic."""
     return get_recent_papers(topic=topic, days=1, rows=rows)
 
-# 使用示例
-# 最近 7 天关于 transformer 的论文
+# Usage examples
+# Papers about "transformer" from the last 7 days
 papers = get_recent_papers("transformer", days=7)
 print(f"Found {len(papers)} recent papers on 'transformer'")
 for p in papers[:5]:
@@ -294,53 +294,53 @@ for p in papers[:5]:
     date_str = "-".join(str(x) for x in dp if x is not None)
     print(f"  [{date_str}] {title[:80]}")
 
-# 特定基金 + 特定期刊
+# Specific funder + specific journal
 nsf_nature = get_recent_papers(days=30, funder="10.13039/100000001", journal="Nature")
 
-# 每日摘要
+# Daily digest
 today_papers = daily_digest("large language model", rows=10)
 ```
 
-### 高级过滤组合
+### Advanced Filter Combinations
 
 ```bash
-# 特定日期范围 + 期刊类型
+# Specific date range + journal type
 curl -s "https://api.crossref.org/works?filter=from-pub-date:2026-04-01,until-pub-date:2026-04-22,type:journal-article&rows=5&select=DOI,title,published-print"
 
-# 有摘要的 Nature 论文
+# Nature papers with abstracts
 curl -s "https://api.crossref.org/works?filter=container-title:Nature,has-abstract:true&rows=3&select=DOI,title,abstract"
 ```
 
 ---
 
-## 速率限制
+## Rate Limits
 
-| 池类型 | 速率 | 获取方式 |
+| Pool Type | Rate | How to Access |
 |---|---|---|
-| Public Pool | ~10 请求/秒 | 默认 |
-| Polite Pool | ~50 请求/秒 | 请求头含 `User-Agent: AppName/Version (mailto:email)` |
-| Plus Pool | ~200 请求/秒 | 需付费 CrossRef Plus 会员 |
+| Public Pool | ~10 requests/s | Default |
+| Polite Pool | ~50 requests/s | Include `User-Agent: AppName/Version (mailto:email)` in request header |
+| Plus Pool | ~200 requests/s | Requires paid CrossRef Plus membership |
 
-**最佳实践**:
-- 始终附带 `User-Agent` 头进入 Polite Pool
-- 大量请求间加入 0.05–0.1 秒延迟
-- 使用 `select` 参数只取所需字段，减小响应体积
+**Best Practices**:
+- Always include a `User-Agent` header to join the Polite Pool
+- Add 0.05–0.1 second delays between bulk requests
+- Use the `select` parameter to retrieve only the fields you need, reducing response size
 
-## 失败处理
+## Error Handling
 
-| HTTP 状态码 | 含义 | 处理方式 |
+| HTTP Status | Meaning | Handling |
 |---|---|---|
-| 200 | 成功 | 正常解析 |
-| 400 | 参数错误 | 检查 filter 语法与参数值 |
-| 404 | DOI 不存在 | 确认 DOI 正确性 |
-| 429 | 速率限制 | 退避重试，检查是否进入 Polite Pool |
-| 503 | 服务暂不可用 | 指数退避重试 |
+| 200 | Success | Parse normally |
+| 400 | Bad request | Check filter syntax and parameter values |
+| 404 | DOI not found | Verify the DOI is correct |
+| 429 | Rate limited | Back off and retry; verify you are in the Polite Pool |
+| 503 | Service temporarily unavailable | Retry with exponential backoff |
 
 ```python
 import time
 
 def crossref_get(url, params=None, retries=3):
-    """带重试与退避的 CrossRef 请求。"""
+    """CrossRef request with retry and backoff."""
     for attempt in range(retries):
         r = requests.get(url, params=params, headers=HEADERS, timeout=15)
         if r.status_code == 200:
@@ -356,7 +356,7 @@ def crossref_get(url, params=None, retries=3):
     raise Exception(f"CrossRef request failed after {retries} retries: {url}")
 ```
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-arxiv.md](api-arxiv.md) — 检索预印本论文（arXiv 论文通常先于此处发表）
-- → 参见 [api-doi-resolver.md](api-doi-resolver.md) — 将单个 DOI 解析为完整元数据
+- → See [api-arxiv.md](api-arxiv.md) — Searching preprints (arXiv papers are typically published here first)
+- → See [api-doi-resolver.md](api-doi-resolver.md) — Resolve individual DOIs to full metadata

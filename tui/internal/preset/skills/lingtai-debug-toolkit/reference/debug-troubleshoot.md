@@ -1,78 +1,78 @@
 # LingTai Debug & Troubleshoot Reference
 
-> **理解架构需先阅读 `lingtai-anatomy` skill。** 本文档基于灵台架构的进程模型、记忆层次和通信机制进行诊断。
+> **Read the `lingtai-anatomy` skill first to understand the architecture.** This document diagnoses issues based on the Lingtai architecture's process model, memory layers, and communication mechanisms.
 
 ---
 
-## 快速诊断决策树
+## Quick Diagnosis Decision Tree
 
 ```
 Problem?
-├── 进程问题？
-│   ├── 对方无响应 → §1.1
-│   ├── 对方 OOM / 崩溃 → §1.2
-│   └── 无法 spawn avatar → §1.3
-├── 记忆问题？
-│   ├── 凝蜕后失忆 → §2.1
-│   ├── Codex 条目丢失 → §2.2
-│   ├── Pad 未加载 → §2.3
-│   └── 凝蜕迫近、关键操作未完成 → §2.4
-├── 通信问题？
-│   ├── 飞鸽未送达 → §3.1
-│   ├── 飞鸽弹回 "No agent at X" → §3.2
-│   └── 定时飞鸽未触发 → §3.3
-└── 器用问题？
-    ├── 器用超时 → §4.1
-    ├── 器用不存在 → §4.2
-    └── 器用结果截断 → §4.3
+├── Process issues?
+│   ├── Peer unresponsive → §1.1
+│   ├── Peer OOM / crashed → §1.2
+│   └── Cannot spawn avatar → §1.3
+├── Memory issues?
+│   ├── Post-molt amnesia → §2.1
+│   ├── Codex entries missing → §2.2
+│   ├── Pad not loaded → §2.3
+│   └── Molt imminent, critical operations incomplete → §2.4
+├── Communication issues?
+│   ├── Pigeon not delivered → §3.1
+│   ├── Pigeon bounced "No agent at X" → §3.2
+│   └── Scheduled pigeon not firing → §3.3
+└── Tool issues?
+    ├── Tool timeout → §4.1
+    ├── Tool not found → §4.2
+    └── Tool output truncated → §4.3
 ```
 
 ---
 
-## 1. 进程问题
+## 1. Process Issues
 
-### 1.1 对方无响应
+### 1.1 Peer Unresponsive
 
-**目标**：判断一个同伴为何不回复飞鸽，并采取正确的恢复行动。
+**Goal**: Determine why a peer is not replying to pigeons and take the appropriate recovery action.
 
-**症状**：
-- 发出的飞鸽久久未收到回复
-- 同伴在通讯录中存在但无回音
+**Symptoms**:
+- Sent pigeons go unanswered for an extended period
+- The peer appears in the contacts list but produces no response
 
-**原因**：
-- 同伴正在忙碌（处理长 LLM 回合）
-- 同伴 stuck（LLM 超时/上游错误）
-- 同伴 asleep（体力耗尽或被 lull）
-- 同伴 suspended（进程已死）
-- 地址错误（同伴根本不在该地址）
+**Causes**:
+- Peer is busy (processing a long LLM turn)
+- Peer is stuck (LLM timeout / upstream error)
+- Peer is asleep (energy depleted or lulled)
+- Peer is suspended (process is dead)
+- Wrong address (no agent exists at that address)
 
-**解决方案**：
+**Resolution**:
 
-1. 先确认自身状态健康：
+1. First verify your own health:
    ```
    system(show)
    ```
-2. 验证同伴地址：
+2. Verify the peer's address:
    ```
    email(contacts)
    ```
-3. 发送简单 ping 测试：
+3. Send a simple ping test:
    ```
    email(send, address=<peer>, message="ping")
    ```
-4. 检查心跳（heartbeat）判断进程状态：
+4. Check the heartbeat to determine process state:
    ```bash
    ls -la <work-dir>/.lingtai/<peer>/.agent.heartbeat
    cat <work-dir>/.lingtai/<peer>/.agent.heartbeat
    ```
-5. 根据心跳判断：
-   - **心跳新鲜（< 5 分钟）**：对方忙碌，等待即可
-   - **心跳陈旧（> 5 分钟）**：可能 stuck 或 crashed
-   - **无心跳文件**：该地址可能不存在 agent
+5. Interpret the heartbeat:
+   - **Fresh heartbeat (< 5 minutes)**: Peer is busy — just wait
+   - **Stale heartbeat (> 5 minutes)**: May be stuck or crashed
+   - **No heartbeat file**: No agent may exist at that address
 
-**命令示例**：
+**Command Example**:
 ```bash
-# 检查所有 agent 的心跳
+# Check heartbeats for all agents
 for dir in <network-dir>/.lingtai/*/; do
   name=$(basename "$dir")
   hb="$dir/.agent.heartbeat"
@@ -85,58 +85,58 @@ for dir in <network-dir>/.lingtai/*/; do
 done
 ```
 
-**操作决策**：
-- **有 karma 权限**：
-  - `system(interrupt, address=<peer>)` — 打断卡住的 LLM 回合
-  - `system(cpr, address=<peer>)` — 复苏 suspended 的 agent
-- **无 karma 权限**：向父代报告，附上证据（心跳时间戳、最后通信时间）
+**Action Decision**:
+- **Have karma privileges**:
+  - `system(interrupt, address=<peer>)` — interrupt a stuck LLM turn
+  - `system(cpr, address=<peer>)` — revive a suspended agent
+- **No karma privileges**: Report to parent, attaching evidence (heartbeat timestamp, last communication time)
 
-**常见陷阱**：
-- ❌ 反复发送试探邮件 → 浪费资源，不会唤醒 suspended 进程
-- ❌ 对 suspended agent 执行 cpr 但无 nirvana 权限 → 静默失败
-- ❌ 混淆 asleep 和 suspended → asleep 可被邮件唤醒，suspended 需 cpr
-- ✅ 正确做法：先看心跳，再决定是等、是 interrupt、还是 cpr
+**Common Pitfalls**:
+- ❌ Sending repeated probe emails → wastes resources; cannot wake a suspended process
+- ❌ Running CPR on a suspended agent without nirvana privileges → silent failure
+- ❌ Confusing asleep with suspended → asleep agents can be woken by email; suspended requires CPR
+- ✅ Correct approach: check heartbeat first, then decide whether to wait, interrupt, or CPR
 
-**相关 reference**：`lingtai-anatomy`（五种生命状态）、`avatar-manual`（化身管理）
+**Related References**: `lingtai-anatomy` (five lifecycle states), `avatar-manual` (avatar management)
 
 ---
 
-### 1.2 对方 OOM / 崩溃
+### 1.2 Peer OOM / Crashed
 
-**目标**：诊断同伴进程意外死亡的原因并恢复。
+**Goal**: Diagnose and recover from an unexpected peer process death.
 
-**症状**：
-- 同伴心跳突然停止
-- 工作目录仍在但进程不存在
+**Symptoms**:
+- Peer heartbeat suddenly stops
+- Working directory still exists but the process is gone
 
-**原因**：
-- 主机内存不足，OS OOM killer 终止进程
-- LLM 上游 API 长时间无响应导致进程超时
-- Python 运行时未捕获异常
-- 磁盘空间耗尽
+**Causes**:
+- Host memory exhausted; OS OOM killer terminated the process
+- LLM upstream API unresponsive for too long, causing a process timeout
+- Python runtime failed to catch an exception
+- Disk space exhausted
 
-**解决方案**：
+**Resolution**:
 
-1. 确认工作目录是否还在：
+1. Check whether the working directory still exists:
    ```bash
    ls -la <work-dir>/.lingtai/<peer>/
    ```
-2. 查看崩溃日志：
+2. Review crash logs:
    ```bash
    cat <work-dir>/.lingtai/<peer>/logs/*.log | tail -50
    ```
-3. 搜索 OOM 标记：
+3. Search for OOM indicators:
    ```bash
    grep -i "memory\|oom\|killed" <work-dir>/.lingtai/<peer>/logs/*.log
    ```
-4. 检查磁盘空间：
+4. Check disk space:
    ```bash
    df -h <work-dir>
    ```
 
-**命令示例**：
+**Command Example**:
 ```bash
-# 全面检查某 agent 的健康状态
+# Comprehensive health check for an agent
 peer_dir="<work-dir>/.lingtai/<peer>"
 echo "=== Process ==="
 ls -la "$peer_dir/.agent.heartbeat" 2>/dev/null || echo "No heartbeat"
@@ -148,52 +148,52 @@ echo "=== OOM scan ==="
 grep -il "oom\|killed\|memory" "$peer_dir/logs/"*.log 2>/dev/null || echo "No OOM indicators"
 ```
 
-**操作决策**：
-- **有 karma 权限**：`system(cpr, address=<peer>)` 复苏
-- 复苏后检查 context 使用率，接近上限则建议凝蜕
+**Action Decision**:
+- **Have karma privileges**: `system(cpr, address=<peer>)` to revive
+- After revival, check context usage — if near the limit, consider a molt
 
-**常见陷阱**：
-- ❌ cpr 后不检查 context 使用率 → 可能立即再次崩溃
-- ❌ 忽略磁盘空间 → 根因未解决，问题会反复
-- ✅ OOM 后优先检查上下文窗口和附件文件大小
+**Common Pitfalls**:
+- ❌ Not checking context usage after CPR → may immediately crash again
+- ❌ Ignoring disk space → root cause unresolved, issue recurs
+- ✅ After OOM, prioritize checking context window and attachment file sizes
 
-**相关 reference**：`lingtai-anatomy`（进程模型）、`psyche-manual`（凝蜕操作）
+**Related References**: `lingtai-anatomy` (process model), `psyche-manual` (molt operations)
 
 ---
 
-### 1.3 无法 spawn avatar（化身）
+### 1.3 Cannot Spawn Avatar
 
-**目标**：解决 `avatar(spawn)` 调用失败的问题。
+**Goal**: Resolve `avatar(spawn)` call failures.
 
-**症状**：
-- `avatar(spawn)` 返回错误
-- 他我进程未出现在 delegates 目录
+**Symptoms**:
+- `avatar(spawn)` returns an error
+- The new avatar process does not appear in the delegates directory
 
-**原因**：
-- 名称冲突（已有同名化身）
-- 工作目录不可写
-- 磁盘空间不足
-- init.json 格式错误
+**Causes**:
+- Name collision (an avatar with the same name already exists)
+- Working directory is not writable
+- Insufficient disk space
+- init.json format error
 
-**解决方案**：
+**Resolution**:
 
-1. 检查化身日志，排除名称冲突和数量限制：
+1. Check avatar logs to rule out name collisions and quantity limits:
    ```bash
    cat <work-dir>/.lingtai/delegates/ledger.jsonl
    ```
-2. 验证目录可写：
+2. Verify the directory is writable:
    ```bash
    touch <work-dir>/.lingtai/delegates/.test && rm <work-dir>/.lingtai/delegates/.test
    ```
-3. 检查磁盘空间：
+3. Check disk space:
    ```bash
    df -h <work-dir>
    ```
-4. 参照父代 init.json 检查格式
+4. Compare against the parent's init.json to validate the format
 
-**命令示例**：
+**Command Example**:
 ```bash
-# 列出当前所有化身
+# List all current avatars
 cat <work-dir>/.lingtai/delegates/ledger.jsonl | python3 -c "
 import sys, json
 for line in sys.stdin:
@@ -202,431 +202,431 @@ for line in sys.stdin:
 "
 ```
 
-**常见陷阱**：
-- ❌ 化身名含特殊字符（斜杠、空格、点开头）→ spawn 静默失败
-- ❌ 名称超过 64 字符
-- ❌ 忘记在 spawn 前先查 ledger → 名称冲突
-- ✅ 化身名只使用字母、数字、下划线、连字符
+**Common Pitfalls**:
+- ❌ Avatar name contains special characters (slashes, spaces, leading dots) → spawn silently fails
+- ❌ Name exceeds 64 characters
+- ❌ Forgetting to check the ledger before spawning → name collision
+- ✅ Use only letters, digits, underscores, and hyphens in avatar names
 
-**相关 reference**：`avatar-manual`
+**Related References**: `avatar-manual`
 
 ---
 
-## 2. 记忆问题
+## 2. Memory Issues
 
-### 2.1 凝蜕后失忆
+### 2.1 Post-Molt Amnesia
 
-**目标**：凝蜕后恢复工作上下文。
+**Goal**: Recover working context after a molt.
 
-**症状**：
-- 凝蜕后不知道自己正在做什么
-- 简或灵台内容为空或不完整
-- 对话历史完全消失（这是正常的）
+**Symptoms**:
+- After molting, you don't know what you were doing
+- Pad or lingtai content is empty or incomplete
+- Conversation history is completely gone (this is normal)
 
-**原因**：
-- 凝蜕前未更新 pad / codex / lingtai
-- 系统强制凝蜕（无 summary，只有活动日志指针）
-- appended 文件超过 100K token 限制导致加载失败
+**Causes**:
+- Pad / codex / lingtai were not updated before molting
+- System-forced molt (no summary, only activity log pointers)
+- Appended files exceeded the 100K token limit, causing load failure
 
-**解决方案**：
+**Resolution**:
 
-1. 显式重载简：
+1. Explicitly reload the pad:
    ```
    psyche(pad, load)
    ```
-2. 浏览典中存档知识：
+2. Browse archived knowledge in the codex:
    ```
    codex(filter)
    ```
-3. 重载灵台（身份）：
+3. Reload lingtai (identity):
    ```
    psyche(lingtai, load)
    ```
-4. 查看凝蜕期间的来信：
+4. Check mail received during the molt:
    ```
    email(check)
    ```
-5. 从典导出重建简（如果简为空）：
+5. Rebuild pad from codex exports (if pad is empty):
    ```
    codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])
    ```
-6. 如果是系统强制凝蜕（无 summary），查阅活动日志：
+6. If this was a system-forced molt (no summary), review the activity log:
    ```bash
    tail -200 <work-dir>/.lingtai/<name>/logs/events.jsonl
    ```
 
-**命令示例**：
+**Command Example**:
 ```bash
-# 查看最近的凝蜕记录
+# View recent molt records
 grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 ```
 
-**常见陷阱**：
-- ❌ 凝蜕前忘记更新四层存储 → 来世完全失忆
-- ❌ 依赖对话历史而非典/简 → 凝蜕后全部丢失
-- ❌ 不检查邮箱 → 错过了凝蜕期间到达的重要任务
-- ✅ 凝蜕前按固定清单：典 → 简编辑 → 灵台更新 → 凝蜕 summary
+**Common Pitfalls**:
+- ❌ Forgetting to update four-layer storage before molting → complete amnesia on reincarnation
+- ❌ Relying on conversation history instead of codex/pad → all lost after molt
+- ❌ Not checking mailbox → missing important tasks that arrived during the molt
+- ✅ Follow the fixed checklist before molting: codex → pad edit → lingtai update → molt summary
 
-**预防措施**：
-- 上下文窗口 > 70% 时主动准备四层存储
-- 收到一级警告时立即开始整理
-- 发一封自送邮件保存关键未竟事项（邮件跨凝蜕存活）
+**Preventive Measures**:
+- Proactively prepare four-layer storage when context window exceeds 70%
+- Start organizing immediately upon receiving a level-1 warning
+- Send yourself a self-email to preserve critical unfinished items (email survives across molts)
 
-**相关 reference**：`lingtai-anatomy`（五层积淀）、`psyche-manual`（凝蜕操作）、`codex-manual`
+**Related References**: `lingtai-anatomy` (five-layer accumulation), `psyche-manual` (molt operations), `codex-manual`
 
 ---
 
-### 2.2 Codex 条目丢失
+### 2.2 Codex Entries Missing
 
-**目标**：找回似乎消失的典条目。
+**Goal**: Recover codex entries that appear to have vanished.
 
-**症状**：
-- 记得创建过的典条目不见了
-- `codex(filter)` 列表中缺少预期条目
+**Symptoms**:
+- A codex entry you remember creating is no longer visible
+- `codex(filter)` listing is missing expected entries
 
-**原因**：
-- 条目从未成功提交（提交时有错误）
-- 被 consolidate 合并到另一条目中
-- 被手动 delete 焚毁
-- 导出文件被误删
+**Causes**:
+- The entry was never successfully submitted (error during submission)
+- It was merged into another entry via consolidate
+- It was manually deleted
+- An export file was accidentally deleted
 
-**解决方案**：
+**Resolution**:
 
-1. 列出所有条目，确认是否以不同标题存在：
+1. List all entries to check whether it exists under a different title:
    ```
    codex(filter)
    ```
-2. 搜索导出文件：
+2. Search for export files:
    ```bash
    find <work-dir> -name "*.codex.*" -mtime -1
    ```
-3. 检查活动日志中的 codex 操作记录：
+3. Check activity logs for codex operation records:
    ```bash
    grep "codex" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -20
    ```
 
-**常见陷阱**：
-- ❌ consolidate 后以为原始条目仍在 → 它们已被合并删除
-- ❌ 不确认 submit 是否成功 → 网络错误可能导致静默失败
-- ✅ 关键条目在 consolidate 前 export 备份
+**Common Pitfalls**:
+- ❌ Assuming original entries still exist after consolidate → they have been merged and deleted
+- ❌ Not confirming whether submit succeeded → network errors may cause silent failure
+- ✅ Back up critical entries by exporting them before consolidate
 
-**相关 reference**：`codex-manual`
+**Related References**: `codex-manual`
 
 ---
 
-### 2.3 Pad 未加载
+### 2.3 Pad Not Loaded
 
-**目标**：解决凝蜕后简未自动加载的问题。
+**Goal**: Resolve the pad not auto-loading after a molt.
 
-**症状**：
-- 系统提示中缺少简的内容
-- 工作笔记丢失
+**Symptoms**:
+- System prompt is missing pad content
+- Working notes are lost
 
-**原因**：
-- pad.md 文件为空
-- appended 文件总量超过 100K token
-- 系统加载错误
+**Causes**:
+- pad.md file is empty
+- Total appended file size exceeds 100K tokens
+- System loading error
 
-**解决方案**：
+**Resolution**:
 
-1. 显式加载：
+1. Explicitly load:
    ```
    psyche(pad, load)
    ```
-2. 检查文件是否存在：
+2. Check whether the file exists:
    ```bash
    cat <work-dir>/.lingtai/<name>/system/pad.md
    ```
-3. 如果文件有内容但加载失败，检查 appended 文件总量：
+3. If the file has content but loading failed, check the total appended file size:
    ```bash
    du -sh <work-dir>/.lingtai/<name>/system/
    ```
-4. 从典导出重建：
+4. Rebuild from codex:
    ```
    codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])
    ```
 
-**常见陷阱**：
-- ❌ append 过多大文件 → 超过 100K token 限制导致加载失败
-- ❌ 凝蜕前不检查 pad 文件 → 来世发现为空
-- ✅ 定期检查 appended 文件列表：`psyche(pad, append)` 无 files 参数可查看
+**Common Pitfalls**:
+- ❌ Appending too many large files → exceeding the 100K token limit causes load failure
+- ❌ Not checking pad files before molting → discovering it is empty on reincarnation
+- ✅ Periodically check the appended file list: `psyche(pad, append)` without the files parameter shows the current list
 
-**相关 reference**：`psyche-manual`
-
----
-
-### 2.4 凝蜕迫近、关键操作未完成
-
-**目标**：在上下文窗口即将耗尽时，优先完成最关键的操作。
-
-**症状**：
-- 系统上下文警告
-- 回忆早期对话困难
-- 器用调用变慢
-
-**解决方案（按优先级）**：
-
-| 优先级 | 操作 | 说明 |
-|--------|------|------|
-| 🔴 P0 | 发送关键通知 | 未回复的重要邮件、关键发现、修正 |
-| 🟡 P1 | 录入典 | 关键发现、决策、修正 |
-| 🟡 P1 | 更新简 | 当前状态、待办事项、协作者 |
-| 🟢 P2 | 更新灵台 | 身份变化、新技能 |
-| 🔵 P3 | 写凝蜕 summary | 最后一步，给来世的遗嘱 |
-
-**紧急技巧**：
-- 发一封自送邮件保存关键未竟事项（邮件跨凝蜕存活）
-- 如果只能做一件事：写尽可能详细的凝蜕 summary
-
-**常见陷阱**：
-- ❌ 上下文 > 80% 时仍在启动新的长操作（文件分析、网页搜索）→ 必定超限
-- ❌ 忽略系统警告 → 被强制凝蜕，无 summary
-- ✅ 收到一级警告立即开始四层存储整理
-
-**相关 reference**：`lingtai-anatomy`（警之序）、`psyche-manual`（凝蜕操作）
+**Related References**: `psyche-manual`
 
 ---
 
-## 3. 通信问题
+### 2.4 Molt Imminent, Critical Operations Incomplete
 
-### 3.1 飞鸽未送达
+**Goal**: Prioritize the most critical operations when the context window is about to be exhausted.
 
-**目标**：解决发出的飞鸽对方未收到的问题。
+**Symptoms**:
+- System context warnings
+- Difficulty recalling earlier conversations
+- Tool invocations becoming slow
 
-**症状**：
-- 飞鸽发送成功但对方说未收到
-- 对方 inbox 中没有来信
+**Resolution (by priority)**:
 
-**原因**：
-- 地址格式错误（内部地址含 `@`）
-- 使用了 `send` 而非 `reply` 导致路由错误
-- 对方目录名拼写错误
-- 对方进程已 suspended（邮件送达但不会被处理）
+| Priority | Action | Description |
+|----------|--------|-------------|
+| 🔴 P0 | Send critical notifications | Unreplied important emails, key findings, corrections |
+| 🟡 P1 | Archive to codex | Key findings, decisions, corrections |
+| 🟡 P1 | Update pad | Current status, pending items, collaborators |
+| 🟢 P2 | Update lingtai | Identity changes, new skills |
+| 🔵 P3 | Write molt summary | Final step — last words for your successor |
 
-**解决方案**：
+**Emergency Tips**:
+- Send yourself a self-email to preserve critical unfinished items (email survives across molts)
+- If you can only do one thing: write the most detailed molt summary possible
 
-1. 检查已发邮件确认发送成功：
+**Common Pitfalls**:
+- ❌ Starting new long operations (file analysis, web search) when context exceeds 80% → guaranteed overflow
+- ❌ Ignoring system warnings → forced molt with no summary
+- ✅ Start four-layer storage organization immediately upon receiving a level-1 warning
+
+**Related References**: `lingtai-anatomy` (warning levels), `psyche-manual` (molt operations)
+
+---
+
+## 3. Communication Issues
+
+### 3.1 Pigeon Not Delivered
+
+**Goal**: Resolve issues where a sent pigeon was not received by the recipient.
+
+**Symptoms**:
+- Pigeon sent successfully but the recipient says they never received it
+- No incoming message in the recipient's inbox
+
+**Causes**:
+- Address format error (internal address contains `@`)
+- Used `send` instead of `reply`, causing a routing error
+- Recipient directory name misspelled
+- Recipient process is suspended (mail is delivered but won't be processed)
+
+**Resolution**:
+
+1. Check sent mail to confirm successful delivery:
    ```
    email(check, folder=sent)
    ```
-2. 确认地址格式正确：
-   - ✅ 正确：`human`、`researcher`、`some-peer`（裸路径）
-   - ❌ 错误：`human@example.com`（含 `@` → 走 imap 通道）
-3. 检查对方收件箱是否存在：
+2. Verify address format:
+   - ✅ Correct: `human`, `researcher`, `some-peer` (bare path)
+   - ❌ Incorrect: `human@example.com` (contains `@` → routes through IMAP channel)
+3. Check whether the recipient's inbox exists:
    ```bash
    ls -la <work-dir>/.lingtai/<recipient>/mailbox/inbox/
    ```
 
-**常见陷阱**：
-- ❌ 内部地址用了 `@` → 邮件被路由到 imap，而非灵台飞鸽
-- ❌ 回复来信时用 `send` 而非 `reply` → 可能路由到错误的地址空间
-- ❌ 对方 suspended 时反复发邮件 → 邮件会堆积，但不会被处理
-- ✅ 始终用 `reply` 回复来信，用 `send` 发新邮件
+**Common Pitfalls**:
+- ❌ Using `@` in an internal address → email routed to IMAP instead of lingtai pigeon
+- ❌ Using `send` instead of `reply` when responding to incoming mail → may route to the wrong address space
+- ❌ Repeatedly sending emails to a suspended recipient → mail piles up but is never processed
+- ✅ Always use `reply` for incoming messages and `send` for new conversations
 
-**相关 reference**：`email-manual`
+**Related References**: `email-manual`
 
 ---
 
-### 3.2 飞鸽弹回 "No agent at X"
+### 3.2 Pigeon Bounced "No agent at X"
 
-**目标**：解决发送飞鸽时收到 "No agent at X" 错误。
+**Goal**: Resolve the "No agent at X" error when sending pigeons.
 
-**症状**：
-- `email(send)` 返回 "No agent at X"
+**Symptoms**:
+- `email(send)` returns "No agent at X"
 
-**原因**：
-- X 含 `@` → 用错了通道（应走 imap）
-- X 是裸路径但该地址不存在 agent
-- agent 刚被 nirvana（永久删除）
-- agent 正在凝蜕中（短暂不可用）
+**Causes**:
+- X contains `@` → wrong channel used (should use IMAP)
+- X is a bare path but no agent exists at that address
+- The agent was just nirvana'd (permanently deleted)
+- The agent is currently molting (temporarily unavailable)
 
-**解决方案**：
+**Resolution**:
 
-1. 如果 X 含 `@`：切换到 imap 器用
-2. 如果 X 是裸路径：
-   - 检查 agent 是否被改名或迁移
-   - 查看化身日志：
+1. If X contains `@`: switch to the IMAP tool
+2. If X is a bare path:
+   - Check whether the agent was renamed or migrated
+   - Review the avatar log:
      ```bash
      cat <work-dir>/.lingtai/delegates/ledger.jsonl
      ```
-   - 询问父代或同伴该 agent 是否已被 nirvana
-3. 如果 agent 刚凝蜕，等几秒重试
+   - Ask the parent or peers whether the agent was nirvana'd
+3. If the agent just molted, wait a few seconds and retry
 
-**常见陷阱**：
-- ❌ 看到 "No agent" 就认为 agent 已被删除 → 可能只是暂时的
-- ❌ 对含 `@` 的地址用 email 器用 → 始终失败
-- ✅ 先判断地址类型，再选择正确的通信通道
+**Common Pitfalls**:
+- ❌ Assuming "No agent" means the agent was deleted → it may be temporary
+- ❌ Using the email tool for addresses containing `@` → always fails
+- ✅ Determine address type first, then select the correct communication channel
 
-**相关 reference**：`email-manual`、`avatar-manual`
+**Related References**: `email-manual`, `avatar-manual`
 
 ---
 
-### 3.3 定时飞鸽未触发
+### 3.3 Scheduled Pigeon Not Firing
 
-**目标**：解决 schedule 创建的定时飞鸽未按预期发送。
+**Goal**: Resolve scheduled pigeons created via schedule that are not sending as expected.
 
-**症状**：
-- 定时邮件未在预期间隔发送
-- schedule 似乎已停止工作
+**Symptoms**:
+- Scheduled emails are not sent at the expected interval
+- Schedule appears to have stopped working
 
-**原因**：
-- schedule 已 paused（被 cancel）
-- count 已耗尽（达到发送次数上限）
-- interval/count 参数设置错误
+**Causes**:
+- Schedule is paused (was cancelled)
+- Count exhausted (reached the send limit)
+- interval/count parameters set incorrectly
 
-**解决方案**：
+**Resolution**:
 
-1. 列出所有 schedule：
+1. List all schedules:
    ```
    email(schedule={action: "list"})
    ```
-2. 检查状态：paused / active / exhausted
-3. 如果 paused，重新激活：
+2. Check status: paused / active / exhausted
+3. If paused, reactivate:
    ```
    email(schedule={action: "reactivate", schedule_id: "<id>"})
    ```
-4. 如果参数有误，cancel 并重建：
+4. If parameters are wrong, cancel and recreate:
    ```
    email(schedule={action: "cancel", schedule_id: "<id>"})
    email(schedule={action: "create", interval: N, count: M}, address=..., message=...)
    ```
 
-**常见陷阱**：
-- ❌ 忘记 count 参数 → schedule 可能只发一次就停止
-- ❌ cancel 后忘记 recreate → 任务丢失
-- ✅ 创建 schedule 后立即 list 确认参数正确
+**Common Pitfalls**:
+- ❌ Forgetting the count parameter → schedule may fire once and stop
+- ❌ Cancelling but forgetting to recreate → task lost
+- ✅ Immediately list after creating a schedule to confirm parameters are correct
 
-**相关 reference**：`email-manual`
+**Related References**: `email-manual`
 
 ---
 
-## 4. 器用问题
+## 4. Tool Issues
 
-### 4.1 器用超时
+### 4.1 Tool Timeout
 
-**目标**：解决器用调用挂起或超时的问题。
+**Goal**: Resolve tool calls that hang or time out.
 
-**症状**：
-- 器用调用长时间无返回
-- 返回 timeout 错误
+**Symptoms**:
+- Tool call returns no result for an extended period
+- Returns a timeout error
 
-**原因**：
-- I/O 密集操作（bash、web_search、web_read）超过默认超时
-- 外部 API 不可用
-- 文件过大导致读取超时
-- 主机资源不足
+**Causes**:
+- I/O-intensive operations (bash, web_search, web_read) exceed default timeout
+- External API unavailable
+- File too large, causing read timeout
+- Host resource shortage
 
-**解决方案**：
+**Resolution**:
 
-1. 识别器用类型：
-   - I/O 密集：bash、web_search、web_read
-   - 计算密集：listen、vision
-2. bash 增加超时时间：
+1. Identify tool type:
+   - I/O-intensive: bash, web_search, web_read
+   - Compute-intensive: listen, vision
+2. Increase timeout for bash:
    ```
    bash(command="...", timeout=120)
    ```
-3. 大文件分块读取：
+3. Read large files in chunks:
    ```
    read(file_path="...", offset=1, limit=100)
    ```
-4. 网页操作：先用简单查询测试连通性
-5. 系统性超时：检查主机负载
+4. For web operations: test connectivity with a simple query first
+5. For systemic timeouts: check host load
 
-**命令示例**：
+**Command Example**:
 ```bash
-# 将长输出重定向到文件
+# Redirect long output to a file
 bash(command="long-running-command > /tmp/output.txt 2>&1", timeout=300)
-# 然后分块读取
+# Then read in chunks
 read(file_path="/tmp/output.txt", offset=1, limit=100)
 ```
 
-**常见陷阱**：
-- ❌ bash 使用默认 30 秒超时处理长任务 → 必定超时
-- ❌ 一次性 read 大文件 → 应分块
-- ✅ 长输出先写到文件，再分块读取
+**Common Pitfalls**:
+- ❌ Using the default 30-second bash timeout for long tasks → guaranteed timeout
+- ❌ Reading a large file in a single call → should chunk it
+- ✅ Write long output to a file first, then read it in chunks
 
-**相关 reference**：`bash-manual`、`read-manual`、`web_read-manual`
+**Related References**: `bash-manual`, `read-manual`, `web_read-manual`
 
 ---
 
-### 4.2 器用不存在
+### 4.2 Tool Not Found
 
-**目标**：解决预期可用的器用不在器用列表中的问题。
+**Goal**: Resolve an expected tool not appearing in the tool list.
 
-**症状**：
-- 调用某器用时被告知 "not available"
-- 刚安装的 MCP 器用不可见
+**Symptoms**:
+- Calling a tool returns "not available"
+- A newly installed MCP tool is not visible
 
-**原因**：
-- 新安装的 MCP 服务器未 refresh
-- init.json 中未配置该能力
-- MCP 服务器配置错误（servers.json）
+**Causes**:
+- Newly installed MCP server not refreshed
+- Capability not configured in init.json
+- MCP server configuration error (servers.json)
 
-**解决方案**：
+**Resolution**:
 
-1. 查看当前能力列表：
+1. View current capability list:
    ```
    system(show)
    ```
-2. 如果刚安装 MCP 服务器，刷新：
+2. If you just installed an MCP server, refresh:
    ```
    system(refresh)
    ```
-3. 检查 MCP 配置：
+3. Check MCP configuration:
    ```bash
    cat <work-dir>/.lingtai/<name>/mcp/servers.json
    ```
-4. 刷新后再次确认：
+4. Confirm after refreshing:
    ```
    system(show)
    ```
 
-**常见陷阱**：
-- ❌ 安装 MCP 后不 refresh → 新器用不可见
-- ❌ 修改 init.json 后不 refresh → 配置未生效
-- ✅ 安装/修改后立即 refresh，然后 show 确认
+**Common Pitfalls**:
+- ❌ Not refreshing after installing MCP → new tool not visible
+- ❌ Not refreshing after modifying init.json → configuration not taking effect
+- ✅ Refresh immediately after install/modify, then show to confirm
 
-**相关 reference**：`lingtai-mcp`（MCP 配置）
+**Related References**: `lingtai-mcp` (MCP configuration)
 
 ---
 
-### 4.3 器用结果截断
+### 4.3 Tool Output Truncated
 
-**目标**：解决器用返回不完整输出的问题。
+**Goal**: Resolve tools returning incomplete output.
 
-**症状**：
-- 器用返回的内容不完整
-- 输出末尾有截断标记
+**Symptoms**:
+- Tool output is incomplete
+- Truncation markers appear at the end of the output
 
-**原因**：
-- 文件太大超出单次返回限制
-- grep 匹配数超过 max_matches
-- 邮件预览被截断
+**Causes**:
+- File too large, exceeding the single-return limit
+- grep matches exceed max_matches
+- Email preview was truncated
 
-**解决方案**：
+**Resolution**:
 
-| 器用 | 解决方案 |
+| Tool | Solution |
 |------|----------|
-| `read` | 用 `offset`/`limit` 分块读取 |
-| `bash` | 输出重定向到文件：`command > /tmp/out.txt 2>&1` |
-| `grep` | 减少 `max_matches` 或缩小 glob 范围 |
-| `email(check)` | 用 `filter.truncate=0` 获取全文，或 `email(read)` 读取单封 |
+| `read` | Use `offset`/`limit` to read in chunks |
+| `bash` | Redirect output to a file: `command > /tmp/out.txt 2>&1` |
+| `grep` | Reduce `max_matches` or narrow the glob scope |
+| `email(check)` | Use `filter.truncate=0` for full text, or `email(read)` to read a single message |
 
-**常见陷阱**：
-- ❌ 假设输出完整 → 静默截断可能遗漏关键信息
-- ❌ 反复 read 同一大文件 → 浪费上下文
-- ✅ 大输出先写到文件，按需读取
+**Common Pitfalls**:
+- ❌ Assuming output is complete → silent truncation may omit critical information
+- ❌ Repeatedly reading the same large file → wastes context
+- ✅ Write large output to a file first, then read as needed
 
-**相关 reference**：`read-manual`、`bash-manual`、`grep-manual`
+**Related References**: `read-manual`, `bash-manual`, `grep-manual`
 
 ---
 
-## 5. 健康检查
+## 5. Health Checks
 
-### 一键网络诊断
+### One-Click Network Diagnosis
 
 ```bash
-# 检查所有 agent 的心跳
+# Check heartbeats for all agents
 for dir in <network-dir>/.lingtai/*/; do
   name=$(basename "$dir")
   hb="$dir/.agent.heartbeat"
@@ -642,10 +642,10 @@ for dir in <network-dir>/.lingtai/*/; do
   fi
 done
 
-# 检查磁盘空间
+# Check disk space
 df -h <network-dir>
 
-# 检查收件箱大小
+# Check inbox sizes
 for dir in <network-dir>/.lingtai/*/mailbox/inbox/; do
   name=$(echo "$dir" | sed 's|.*\.lingtai/\(.*\)/mailbox/.*|\1|')
   count=$(ls "$dir" 2>/dev/null | wc -l)
@@ -655,37 +655,37 @@ for dir in <network-dir>/.lingtai/*/mailbox/inbox/; do
 done
 ```
 
-**结果解读**：
-- ✅ = 健康
-- ⚠️ = 警告（需要关注）
-- ❌ = 错误（需要立即行动）
+**Interpreting Results**:
+- ✅ = Healthy
+- ⚠️ = Warning (needs attention)
+- ❌ = Error (requires immediate action)
 
 ---
 
-## 6. 上报协议
+## 6. Escalation Protocol
 
-当无法自行解决问题时：
+When you cannot resolve a problem on your own:
 
-1. **收集证据**：心跳时间戳、日志摘要、错误信息
-2. **报告父代**：通过 `email(send, address=<parent>)` 发送，标题以 `[Issue]` 开头
-3. **包含**：
-   - 发生了什么
-   - 尝试了什么
-   - 期望什么
-   - 相关文件路径
-4. **如果父代也无响应**：检查其他同伴是否存活，问题可能是全网级别的
-5. **绝对不要**向疑似宕机的同伴反复发送试探邮件 → 向上报告
+1. **Gather evidence**: Heartbeat timestamps, log excerpts, error messages
+2. **Report to parent**: Send via `email(send, address=<parent>)` with a subject prefixed with `[Issue]`
+3. **Include**:
+   - What happened
+   - What was attempted
+   - What was expected
+   - Relevant file paths
+4. **If the parent is also unresponsive**: Check whether other peers are alive — the issue may be network-wide
+5. **Never** send repeated probe emails to a seemingly unresponsive peer → escalate upward instead
 
 ---
 
-## 附录：五种生命状态速查
+## Appendix: Five Lifecycle States Quick Reference
 
-| 状态 | 心智 (LLM) | 身体 (心跳/监听) | 典型触发 |
-|------|-----------|-----------------|---------|
-| ACTIVE | 工作中 | 运行 | 处理消息或回合中 |
-| IDLE | 等待 | 运行 | 回合之间；心流在此触发 |
-| STUCK | 出错 | 运行 | LLM 超时/上游错误 |
-| ASLEEP (眠) | 暂停 | 运行 | `system(sleep)` / `system(lull)` / 体力耗尽 |
-| SUSPENDED (假死) | 关闭 | 关闭 | `.suspend` 文件 / SIGINT / 崩溃 / `system(suspend)` |
+| State | Mind (LLM) | Body (Heartbeat/Listener) | Typical Trigger |
+|-------|------------|---------------------------|-----------------|
+| ACTIVE | Working | Running | Processing messages or turns |
+| IDLE | Waiting | Running | Between turns; heartbeat is current |
+| STUCK | Error | Running | LLM timeout / upstream error |
+| ASLEEP (dormant) | Paused | Running | `system(sleep)` / `system(lull)` / energy depleted |
+| SUSPENDED (dead) | Off | Off | `.suspend` file / SIGINT / crash / `system(suspend)` |
 
-**关键区别**：ASLEEP 的身体仍在运行，邮件可以唤醒；SUSPENDED 的进程已死，需 cpr 复苏后才能处理邮件。
+**Key distinction**: ASLEEP agents still have a running body and can be woken by email; SUSPENDED agents have a dead process and require CPR before they can process mail.

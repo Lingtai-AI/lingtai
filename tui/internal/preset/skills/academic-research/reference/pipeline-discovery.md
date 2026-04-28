@@ -1,63 +1,63 @@
-# Pipeline: 学术论文发现（Discovery）
+# Pipeline: Academic Paper Discovery
 
-> 从任意入口发现论文：Google Scholar 页面 → 作者名 → 关键词 → DOI，按需渐进深入。
+> Discover papers from any starting point: Google Scholar page → Author name → Keyword → DOI, progressively deepening as needed.
 
-## 目标
+## Goal
 
-给定一个起始点（关键词 / 作者名 / Scholar 页面 URL / DOI），快速返回一批候选论文的标题、作者、引用数、摘要和原文链接。
-
----
-
-## 工作流步骤
-
-1. **判断输入类型** — 关键词 / 作者名 / Scholar URL / DOI？
-2. **选择最优通道** — 按下方决策树选择 A / B / C / D 方案。
-3. **执行抓取 / API 调用** — 获取候选论文列表。
-4. **标准化输出** — 统一为 `{title, authors, year, citations, doi, url, snippet}` 列表。
-5. **（可选）深入** — 对感兴趣的单篇进入 → 参见 [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md)。
+Given a starting point (keyword / author name / Scholar page URL / DOI), quickly return a batch of candidate papers with their titles, authors, citation counts, abstracts, and source links.
 
 ---
 
-## 决策树
+## Workflow Steps
+
+1. **Identify input type** — Keyword / Author name / Scholar URL / DOI?
+2. **Select the optimal channel** — Choose option A / B / C / D based on the decision tree below.
+3. **Execute scraping / API call** — Retrieve the candidate paper list.
+4. **Standardize output** — Unify into a `{title, authors, year, citations, doi, url, snippet}` list.
+5. **(Optional) Deep dive** — For individual papers of interest → see [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md).
+
+---
+
+## Decision Tree
 
 ```
-输入是什么？
-├─ 关键词 / 短语
-│   ├─ 需要 Scholar 页面级数据（引用数、snippet）？
-│   │   ├─ 是 → 方案 B: curl + BeautifulSoup
-│   │   └─ 否 → 方案 D: OpenAlex API（结构化，最快）
-│   └─ 物理或 CS 领域？
-│       └─ 是 → 方案 D': arXiv API（预印本优先）
+What is the input?
+├── Keyword / phrase
+│   ├── Need Scholar page-level data (citation count, snippet)?
+│   │   ├── Yes → Option B: curl + BeautifulSoup
+│   │   └── No  → Option D: OpenAlex API (structured, fastest)
+│   └── Physics or CS field?
+│       └── Yes → Option D': arXiv API (preprints first)
 │
-├─ Google Scholar URL（citations?user=... 或 scholar?q=...）
-│   ├─ 快速浏览标题 → 方案 A: web_read 工具
-│   └─ 完整数据     → 方案 B: curl + BeautifulSoup
+├── Google Scholar URL (citations?user=... or scholar?q=...)
+│   ├── Quick title browsing → Option A: web_read tool
+│   └── Complete data        → Option B: curl + BeautifulSoup
 │
-├─ 作者名
-│   └─ 方案 D: OpenAlex /author 端点 → 返回作者 profile + 代表作
+├── Author name
+│   └── Option D: OpenAlex /author endpoint → returns author profile + representative works
 │
-├─ DOI
-│   └─ 已有精确目标 → 跳过 discovery，直接 → 参见 [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md)
+├── DOI
+│   └── Already have an exact target → skip discovery, go directly to → see [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md)
 │
-└─ 无法判断 → 默认方案 B: curl + BeautifulSoup（最通用）
+└── Cannot determine → Default Option B: curl + BeautifulSoup (most versatile)
 ```
 
 ---
 
-## 代码示例
+## Code Examples
 
-### 方案 A: web_read 工具（零代码，最快）
+### Option A: web_read Tool (zero code, fastest)
 
-适用：快速浏览标题和类型标识。元数据（作者、引用数、DOI）大量缺失。
+Use when: Quickly browsing titles and type identification. Metadata (authors, citation count, DOI) is largely missing.
 
 ```python
-# 使用 web_read 工具（非 Python，直接调用工具）
+# Using the web_read tool (not Python, call the tool directly)
 # web_read({ url: "https://scholar.google.com/citations?user=XXXXXXX&hl=en", output_format: "text" })
 ```
 
-### 方案 B: curl + BeautifulSoup（推荐！实测可用）
+### Option B: curl + BeautifulSoup (Recommended! Tested and Working)
 
-依赖：`pip install requests beautifulsoup4 lxml`
+Dependency: `pip install requests beautifulsoup4 lxml`
 
 ```python
 import re
@@ -66,7 +66,7 @@ from bs4 import BeautifulSoup
 
 
 def scrape_scholar(query: str, limit: int = 10) -> list[dict]:
-    """用 curl + BeautifulSoup 抓取 Scholar 搜索结果，返回标准化论文列表。"""
+    """Scrape Scholar search results with curl + BeautifulSoup, returning a standardized paper list."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept-Language": "en-US,en;q=0.9",
@@ -79,7 +79,7 @@ def scrape_scholar(query: str, limit: int = 10) -> list[dict]:
     for item in soup.select(".gs_ri")[:limit]:
         title_tag = item.select_one(".gs_rt a")
         raw_title = title_tag.get_text() if title_tag else ""
-        # 关键修复：Scholar HTML 中 <b> 标签分割标题，需补充空格
+        # Key fix: Scholar HTML splits titles with <b> tags, spaces need to be restored
         title = re.sub(r"([a-z])([A-Z])", r"\1 \2", raw_title).strip()
 
         meta = item.select_one(".gs_a")
@@ -103,23 +103,23 @@ def scrape_scholar(query: str, limit: int = 10) -> list[dict]:
     return papers
 
 
-# 使用
+# Usage
 for p in scrape_scholar("transformer attention is all you need"):
     print(f"[{p['citations']} cites] {p['title'][:60]}")
 ```
 
-### 方案 C: Camoufox（当 B 失败 / 被封时）
+### Option C: Camoufox (When B Fails / Is Blocked)
 
-> ⚠️ 已从 `playwright_stealth` 旧 API 迁移到 Camoufox。
+> ⚠️ Migrated from the old `playwright_stealth` API to Camoufox.
 
-依赖：`pip install camoufox && python -m camoufox fetch`
+Dependency: `pip install camoufox && python -m camoufox fetch`
 
 ```python
 from camoufox.sync_api import Camoufox
 
 
 def scrape_scholar_camoufox(url: str) -> list[dict]:
-    """使用 Camoufox 浏览器绕过反爬，抓取 Scholar 页面。"""
+    """Use Camoufox browser to bypass anti-scraping and fetch Scholar pages."""
     with Camoufox(headless=True) as browser:
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -139,16 +139,16 @@ def scrape_scholar_camoufox(url: str) -> list[dict]:
         return papers
 ```
 
-**速率限制**：每分钟不超过 10–20 次，避免触发 429。
+**Rate limit**: No more than 10–20 requests per minute to avoid triggering 429.
 
-### 方案 D: OpenAlex API（结构化数据，最快）
+### Option D: OpenAlex API (Structured Data, Fastest)
 
 ```python
 import requests
 
 
 def search_openalex(query: str, limit: int = 10) -> list[dict]:
-    """用 OpenAlex API 搜索论文，返回结构化数据。"""
+    """Search papers with the OpenAlex API, returning structured data."""
     r = requests.get(
         "https://api.openalex.org/works",
         params={
@@ -171,9 +171,9 @@ def search_openalex(query: str, limit: int = 10) -> list[dict]:
     ]
 
 
-# arXiv 专用
+# arXiv-specific
 def search_arxiv(query: str, limit: int = 10) -> list[str]:
-    """arXiv API 搜索，返回标题列表。"""
+    """Search via arXiv API, returning a list of titles."""
     r = requests.get(
         "https://export.arxiv.org/api/query",
         params={
@@ -190,21 +190,21 @@ def search_arxiv(query: str, limit: int = 10) -> list[str]:
 
 ---
 
-## 失败回退
+## Failure Fallbacks
 
-| 场景 | 表现 | 回退策略 |
-|------|------|---------|
-| Scholar 返回 429 | curl 被封 | ① 等待 60s 重试 ② 切换到 OpenAlex API ③ 使用 Camoufox + 代理 |
-| BeautifulSoup 选择器失效 | 返回空列表 | Scholar 可能改了 HTML 结构，检查 `.gs_ri` / `.gs_rt` 是否仍存在 |
-| OpenAlex 返回空 | 0 results | 检查查询语法，或降级到 Scholar 抓取 |
-| Camoufox 超时 | timeout error | 增大 `timeout`，检查网络连通性，或回到方案 B |
-| 英文 Scholar 页元数据缺失 | 作者/引用数为空 | 改用中文 Scholar 页面（`hl=zh-CN`），或转 API |
+| Scenario | Symptom | Fallback Strategy |
+|----------|---------|-------------------|
+| Scholar returns 429 | curl is blocked | ① Wait 60s and retry ② Switch to OpenAlex API ③ Use Camoufox + proxy |
+| BeautifulSoup selectors fail | Returns empty list | Scholar may have changed HTML structure; check if `.gs_ri` / `.gs_rt` still exist |
+| OpenAlex returns empty | 0 results | Check query syntax, or fall back to Scholar scraping |
+| Camoufox timeout | timeout error | Increase `timeout`, check network connectivity, or revert to Option B |
+| English Scholar page metadata missing | Authors/citations are empty | Try the Chinese Scholar page (`hl=zh-CN`), or switch to API |
 
 ---
 
-## 相关 pipeline
+## Related Pipelines
 
-- 获取论文全文 → 参见 [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md)
-- 分析引用网络与趋势 → 参见 [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md)
-- 格式化参考文献 → 参见 [pipeline-citation-tracking.md](pipeline-citation-tracking.md)
-- 综合入口：我有什么信息，该去哪个 API？ → 参见 [decision-tree.md](decision-tree.md)
+- Get paper full text → see [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md)
+- Analyze citation networks and trends → see [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md)
+- Format references → see [pipeline-citation-tracking.md](pipeline-citation-tracking.md)
+- Comprehensive entry: What information do I have, and which API should I use? → see [decision-tree.md](decision-tree.md)

@@ -1,42 +1,42 @@
-# Pipeline: 参考文献管理与格式化（Citation Tracking）
+# Pipeline: Reference Management & Formatting (Citation Tracking)
 
-## 目标
+## Objective
 
-将发现的论文元数据格式化为标准引用格式（APA、BibTeX 等），批量构建参考文献库，生成结构化文献综述文档。
+Format discovered paper metadata into standard citation styles (APA, BibTeX, etc.), batch-build reference libraries, and generate structured literature review documents.
 
-## 工作流步骤
+## Workflow Steps
 
-1. **收集元数据**：从 discovery/obtain pipeline 获取论文列表，或通过 OpenAlex 批量查询
-2. **字段标准化**：将 CrossRef / OpenAlex / 手动输入的字段统一为内部格式 `{title, authors, year, journal, volume, issue, pages, doi}`
-3. **格式化引用**：按目标格式（APA / BibTeX / IEEE）生成引用字符串
-4. **批量处理**：一次性处理数十篇论文，输出为 Markdown 或 .bib 文件
-5. **生成综述文档**：自动生成含高影响力论文排行、时间趋势、完整参考文献的综述
+1. **Collect metadata**: Retrieve paper lists from the discovery/obtain pipeline, or batch-query via OpenAlex
+2. **Standardize fields**: Unify fields from CrossRef / OpenAlex / manual input into an internal format `{title, authors, year, journal, volume, issue, pages, doi}`
+3. **Format citations**: Generate citation strings in the target style (APA / BibTeX / IEEE)
+4. **Batch processing**: Process dozens of papers at once, outputting as Markdown or .bib files
+5. **Generate review documents**: Automatically produce literature reviews with high-impact paper rankings, temporal trends, and complete references
 
-## 决策树
+## Decision Tree
 
 ```
-需要什么？
-├── 单篇引用格式化
+What do you need?
+├── Single-paper citation formatting
 │   ├── APA 7 → format_apa(paper)
 │   ├── BibTeX → to_bibtex(paper)
-│   └── 其他格式 → 基于 APA 模板微调
+│   └── Other formats → adjust based on APA template
 │
-├── 批量构建参考文献库
-│   ├── 已有论文列表 → 批量格式化 → 输出文件
-│   └── 只有查询词 → OpenAlex 搜索 → 格式化 → 输出文件
+├── Batch-build reference library
+│   ├── Existing paper list → batch formatting → output file
+│   └── Only search terms → OpenAlex search → formatting → output file
 │
-└── 生成文献综述文档
-    ├── 已有论文列表 → compile_literature_review(papers, topic)
-    └── 需先搜索 → discovery pipeline → 格式化 → 综述
+└── Generate literature review document
+    ├── Existing paper list → compile_literature_review(papers, topic)
+    └── Need to search first → discovery pipeline → formatting → review
 ```
 
-## 代码示例
+## Code Examples
 
-### APA 7 格式化
+### APA 7 Formatting
 
 ```python
 def format_apa(paper):
-    """APA 7 格式"""
+    """APA 7 format"""
     authors = paper.get("authors", [])
     year = paper.get("year", "n.d.")
     title = paper.get("title", "")
@@ -74,11 +74,11 @@ def format_apa(paper):
     return " ".join(parts)
 ```
 
-### BibTeX 导出
+### BibTeX Export
 
 ```python
 def to_bibtex(paper):
-    """导出为 BibTeX"""
+    """Export to BibTeX"""
     key_parts = []
     if paper.get("authors"):
         key_parts.append(paper["authors"][0].get("family", "unknown"))
@@ -103,18 +103,18 @@ def to_bibtex(paper):
     return f"@article{{{key},\n" + ",\n".join(entries) + "\n}"
 ```
 
-### 批量构建参考文献库
+### Batch-Build Reference Library
 
 ```python
 import requests
 
 def build_reference_library(query, limit=50, style="apa"):
     """
-    从搜索构建参考文库：
-    1. OpenAlex 搜索论文
-    2. 标准化字段
-    3. 格式化引用
-    4. 输出为文件
+    Build a reference library from a search:
+    1. Search papers via OpenAlex
+    2. Standardize fields
+    3. Format citations
+    4. Output to file
     """
     r = requests.get(
         "https://api.openalex.org/works",
@@ -154,27 +154,27 @@ def build_reference_library(query, limit=50, style="apa"):
     return "/tmp/references.md", len(papers)
 ```
 
-### 生成文献综述文档
+### Generate Literature Review Document
 
 ```python
 def compile_literature_review(papers, topic):
-    """从论文列表生成结构化综述"""
+    """Generate a structured review from a paper list"""
     from collections import Counter
 
     by_year = Counter(p.get("year") for p in papers if p.get("year"))
     by_citations = sorted(papers, key=lambda x: x.get("citations", 0), reverse=True)
     top_papers = by_citations[:10]
 
-    doc = f"""# 文献综述：{topic}
+    doc = f"""# Literature Review: {topic}
 
-## 概述
-- **论文总数**：{len(papers)} 篇
-- **发表年份**：{min(by_year)} – {max(by_year)}
-- **年均发表**：{len(papers) / max(len(by_year), 1):.1f} 篇
+## Overview
+- **Total papers**: {len(papers)}
+- **Publication years**: {min(by_year)} – {max(by_year)}
+- **Average per year**: {len(papers) / max(len(by_year), 1):.1f} papers
 
-## 高影响力论文（Top 10）
+## High-Impact Papers (Top 10)
 
-| # | 标题 | 年份 | 引用数 |
+| # | Title | Year | Citations |
 |---|------|------|--------|
 """
     for i, p in enumerate(top_papers, 1):
@@ -183,12 +183,12 @@ def compile_literature_review(papers, topic):
         cites = p.get("citations", 0)
         doc += f"| {i} | {title} | {year} | {cites} |\n"
 
-    doc += "\n## 时间趋势\n\n"
+    doc += "\n## Temporal Trends\n\n"
     for year in sorted(by_year):
         bar = "▓" * by_year[year]
-        doc += f"- **{year}**: {bar} {by_year[year]} 篇\n"
+        doc += f"- **{year}**: {bar} {by_year[year]} papers\n"
 
-    doc += "\n## 参考文献\n\n"
+    doc += "\n## References\n\n"
     doc += "\n\n".join(format_apa(p) for p in by_citations)
 
     with open("/tmp/literature_review.md", "w") as f:
@@ -196,26 +196,26 @@ def compile_literature_review(papers, topic):
     return "/tmp/literature_review.md"
 ```
 
-## 失败回退
+## Failure Fallbacks
 
-| 失败场景 | 回退策略 |
-|---------|---------|
-| OpenAlex 无结果 | 换用更宽泛关键词，或从 discovery pipeline 获取 |
-| 作者名解析异常 | 用全名作为 family name，given 留空 |
-| BibTeX key 冲突 | 追加 `_2`, `_3` 后缀 |
-| 字段不完整（缺卷/期/页） | 跳过缺失字段，生成不完整但有效的引用 |
-| 跨学科引用格式差异 | 默认 APA，如需特定期刊格式需人工调整 |
+| Failure Scenario | Fallback Strategy |
+|------------------|-------------------|
+| OpenAlex returns no results | Use broader keywords, or retrieve from the discovery pipeline |
+| Author name parsing error | Use full name as family name, leave given empty |
+| BibTeX key collision | Append `_2`, `_3` suffixes |
+| Incomplete fields (missing volume/issue/pages) | Skip missing fields, generate an incomplete but valid citation |
+| Cross-discipline citation style differences | Default to APA; specific journal formats require manual adjustment |
 
-## 注意事项
+## Notes
 
-- 不同期刊的引用格式有细微差异，务必确认目标期刊的格式要求
-- BibTeX key 需唯一，自动生成时可能与已有文献冲突
-- CrossRef 和 OpenAlex 的字段名不同，统一化处理后再格式化
-- OpenAlex 的 `host_venue` 字段名可能更新为 `primary_location`
+- Citation formats vary slightly across journals — always confirm the target journal's formatting requirements
+- BibTeX keys must be unique; auto-generated keys may conflict with existing entries
+- CrossRef and OpenAlex use different field names — standardize before formatting
+- The `host_venue` field in OpenAlex may be updated to `primary_location`
 
-## 相关 Pipeline
+## Related Pipelines
 
-- [pipeline-discovery.md](pipeline-discovery.md) — 发现论文（上游）
-- [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) — 获取全文（上游）
-- [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md) — 分析引用网络与趋势
-- [decision-tree.md](decision-tree.md) — 综合决策路由
+- [pipeline-discovery.md](pipeline-discovery.md) — Paper discovery (upstream)
+- [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) — Full-text retrieval (upstream)
+- [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md) — Citation network & trend analysis
+- [decision-tree.md](decision-tree.md) — Comprehensive decision routing

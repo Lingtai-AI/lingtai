@@ -1,42 +1,42 @@
 # DOI Resolver API Reference
 
-## API 概述
+## API Overview
 
-通过 CrossRef 的 Works 端点，将 DOI（Digital Object Identifier）解析为完整的论文元数据。这是从 DOI 获取引用信息最直接的方式。
+Resolves a DOI (Digital Object Identifier) to complete paper metadata via the CrossRef Works endpoint. This is the most direct way to retrieve citation information from a DOI.
 
-- **端点**: `https://api.crossref.org/works/{DOI}`
-- **重定向端点**: `https://doi.org/{DOI}` → 出版商页面
-- **认证**: 无需 API Key；Polite Pool 同样适用
-- **响应格式**: JSON
-- **典型响应时间**: < 200ms
-- **适用场景**: DOI → 引用信息、批量解析 DOI 列表、获取论文全文链接
+- **Endpoint**: `https://api.crossref.org/works/{DOI}`
+- **Redirect Endpoint**: `https://doi.org/{DOI}` → publisher landing page
+- **Authentication**: No API key required; Polite Pool rules apply
+- **Response Format**: JSON
+- **Typical Response Time**: < 200ms
+- **Use Cases**: DOI → citation information, batch DOI resolution, retrieving paper full-text links
 
-## 端点与参数
+## Endpoint and Parameters
 
-### 单篇 DOI 解析
+### Single DOI Resolution
 
-| 项目 | 说明 |
+| Item | Description |
 |---|---|
-| 端点 | `GET https://api.crossref.org/works/{DOI}` |
-| 路径参数 | `DOI` — DOI 字符串，如 `10.1038/nature12373` |
-| 请求头 | 推荐 `User-Agent: AppName/Version (mailto:email)` |
-| 响应 | JSON，`message` 字段含完整元数据 |
+| Endpoint | `GET https://api.crossref.org/works/{DOI}` |
+| Path Parameter | `DOI` — DOI string, e.g. `10.1038/nature12373` |
+| Request Header | Recommended `User-Agent: AppName/Version (mailto:email)` |
+| Response | JSON; `message` field contains the full metadata |
 
-### DOI URL 重定向
+### DOI URL Redirect
 
-| 项目 | 说明 |
+| Item | Description |
 |---|---|
-| 端点 | `https://doi.org/{DOI}` |
-| 用途 | 跟随重定向获取出版商页面 URL |
-| 方法 | `HEAD` 请求 + `allow_redirects=True` |
+| Endpoint | `https://doi.org/{DOI}` |
+| Purpose | Follow redirect to obtain the publisher page URL |
+| Method | `HEAD` request + `allow_redirects=True` |
 
-### select 参数
+### The `select` Parameter
 
-解析单篇 DOI 时也可使用 `select` 参数限制返回字段（但通常直接取全部字段即可）。
+When resolving a single DOI, you can use the `select` parameter to limit returned fields (though typically you can just retrieve all fields directly).
 
-## 代码示例
+## Code Examples
 
-### 基础解析
+### Basic Resolution
 
 ```python
 import requests
@@ -44,20 +44,20 @@ import requests
 HEADERS = {"User-Agent": "MyApp/1.0 (mailto:your@email.com)"}
 
 def resolve_doi(doi):
-    """将 DOI 解析为完整论文元数据。
+    """Resolve a DOI to complete paper metadata.
 
     Args:
-        doi: DOI 字符串，如 '10.1038/nature12373'
+        doi: DOI string, e.g. '10.1038/nature12373'
 
     Returns:
-        dict: 包含 title, authors, journal, publisher 等字段的元数据字典
+        dict: Metadata dictionary containing title, authors, journal, publisher, etc.
     """
     url = f"https://api.crossref.org/works/{doi}"
     r = requests.get(url, headers=HEADERS, timeout=15)
     r.raise_for_status()
     return r.json()["message"]
 
-# 使用示例
+# Usage example
 paper = resolve_doi("10.1038/nature12373")
 print(f"Title: {paper.get('title', ['N/A'])[0]}")
 print(f"Journal: {paper.get('container-title', ['N/A'])[0]}")
@@ -73,40 +73,40 @@ author_names = [f"{a.get('given', '')} {a.get('family', '')}" for a in authors]
 print(f"Authors: {', '.join(author_names[:5])}" + (" et al." if len(authors) > 5 else ""))
 ```
 
-### 获取出版商 URL
+### Retrieving the Publisher URL
 
 ```python
 def get_publisher_url(doi):
-    """跟随 DOI 重定向获取出版商页面 URL。
+    """Follow DOI redirect to obtain the publisher page URL.
 
     Args:
-        doi: DOI 字符串
+        doi: DOI string
 
     Returns:
-        str: 出版商页面 URL
+        str: Publisher page URL
     """
     r = requests.head(f"https://doi.org/{doi}", allow_redirects=True, timeout=10)
     return r.url
 
-# 使用示例
+# Usage example
 url = get_publisher_url("10.1038/nature12373")
 print(f"Publisher URL: {url}")
 ```
 
-### 批量解析 DOI
+### Batch DOI Resolution
 
 ```python
 import time
 
 def resolve_dois(doi_list, delay=0.1):
-    """批量解析 DOI 列表。
+    """Batch resolve a list of DOIs.
 
     Args:
-        doi_list: DOI 字符串列表
-        delay: 请求间隔（秒），避免触发速率限制
+        doi_list: List of DOI strings
+        delay: Delay between requests (seconds) to avoid rate limiting
 
     Returns:
-        list[dict]: 每个元素为 {'doi': ..., 'metadata': ...} 或 {'doi': ..., 'error': ...}
+        list[dict]: Each element is {'doi': ..., 'metadata': ...} or {'doi': ..., 'error': ...}
     """
     results = []
     for doi in doi_list:
@@ -118,7 +118,7 @@ def resolve_dois(doi_list, delay=0.1):
         time.sleep(delay)
     return results
 
-# 使用示例
+# Usage example
 dois = [
     "10.1038/nature12373",
     "10.1126/science.1248506",
@@ -133,18 +133,18 @@ for item in resolved:
         print(f"✗ {item['doi']}: {item['error']}")
 ```
 
-### 提取结构化引用
+### Extracting Structured Citations
 
 ```python
 def format_citation(doi, style="apa"):
-    """从 DOI 元数据生成结构化引用字符串。
+    """Generate a structured citation string from DOI metadata.
 
     Args:
-        doi: DOI 字符串
-        style: 引用格式 ('apa', 'mla', 'brief')
+        doi: DOI string
+        style: Citation format ('apa', 'mla', 'brief')
 
     Returns:
-        str: 格式化引用字符串
+        str: Formatted citation string
     """
     paper = resolve_doi(doi)
     title = paper.get("title", ["N/A"])[0]
@@ -171,17 +171,17 @@ def format_citation(doi, style="apa"):
 
     return f"{title} ({year}). {journal}. DOI: {doi}"
 
-# 使用示例
+# Usage examples
 print(format_citation("10.1038/nature12373", style="apa"))
-# Vaswani, A., ... (2017). Attention Is All You Need. Nature, 498(7453), 376-379.
+# Kucsko, G., ... et al. (2013). Nanometre-scale thermometry in a living cell. Nature, 500(7460), 54-58.
 
 print(format_citation("10.1038/nature12373", style="brief"))
-# Vaswani et al. (2017). Attention Is All You Need. Nature.
+# Kucsko et al. (2013). Nanometre-scale thermometry in a living cell. Nature.
 ```
 
-## 返回格式
+## Response Format
 
-### 完整响应结构
+### Full Response Structure
 
 ```json
 {
@@ -189,14 +189,14 @@ print(format_citation("10.1038/nature12373", style="brief"))
   "message-type": "work",
   "message": {
     "DOI": "10.1038/nature12373",
-    "title": ["Attention Is All You Need"],
+    "title": ["Nanometre-scale thermometry in a living cell"],
     "author": [
-      {"given": "Ashish", "family": "Vaswani", "sequence": "first", "affiliation": []}
+      {"given": "G.", "family": "Kucsko", "sequence": "first", "affiliation": []}
     ],
-    "published-print": {"date-parts": [[2017, 12, 6]]},
-    "published-online": {"date-parts": [[2017, 6, 12]]},
+    "published-print": {"date-parts": [[2013, 7, 31]]},
+    "published-online": {"date-parts": [[2013, 6, 12]]},
     "container-title": ["Nature"],
-    "publisher": "Springer Nature",
+    "publisher": "Springer Science and Business Media LLC",
     "type": "journal-article",
     "volume": "576",
     "issue": "7467",
@@ -222,59 +222,59 @@ print(format_citation("10.1038/nature12373", style="brief"))
 }
 ```
 
-### 关键元数据字段
+### Key Metadata Fields
 
-| 字段 | 类型 | 说明 |
+| Field | Type | Description |
 |---|---|---|
-| `title[0]` | string | 论文标题 |
-| `container-title[0]` | string | 期刊/书籍名称 |
-| `author[].given` | string | 作者名 |
-| `author[].family` | string | 作者姓 |
-| `author[].sequence` | string | 作者排序：`first` / `additional` |
-| `published-print.date-parts` | array | 纸质出版日期 [[年, 月, 日]] |
-| `published-online.date-parts` | array | 在线出版日期 [[年, 月, 日]] |
-| `publisher` | string | 出版机构 |
-| `type` | string | 文献类型（journal-article 等） |
-| `volume` | string | 卷号 |
-| `issue` | string | 期号 |
-| `page` | string | 页码范围 |
-| `DOI` | string | DOI 标识 |
-| `abstract` | string | 摘要（部分论文可能缺失） |
-| `reference-count` | number | 参考文献数量 |
-| `is-referenced-by-count` | number | 被引用次数（CrossRef 索引内） |
-| `subject` | array[string] | 学科分类 |
-| `ISSN` | array[string] | 期刊 ISSN |
-| `URL` | string | CrossRef 页面链接 |
-| `link[]` | array | 全文链接列表 |
-| `license[]` | array | 许可证信息 |
-| `funder[]` | array | 基金信息，含 `DOI`、`name`、`award` |
+| `title[0]` | string | Paper title |
+| `container-title[0]` | string | Journal or book name |
+| `author[].given` | string | Author first name |
+| `author[].family` | string | Author last name |
+| `author[].sequence` | string | Author order: `first` / `additional` |
+| `published-print.date-parts` | array | Print publication date [[year, month, day]] |
+| `published-online.date-parts` | array | Online publication date [[year, month, day]] |
+| `publisher` | string | Publisher |
+| `type` | string | Work type (e.g. journal-article) |
+| `volume` | string | Volume number |
+| `issue` | string | Issue number |
+| `page` | string | Page range |
+| `DOI` | string | DOI identifier |
+| `abstract` | string | Abstract (may be missing for some papers) |
+| `reference-count` | number | Number of references |
+| `is-referenced-by-count` | number | Citation count (within CrossRef index) |
+| `subject` | array[string] | Subject categories |
+| `ISSN` | array[string] | Journal ISSN |
+| `URL` | string | CrossRef page link |
+| `link[]` | array | Full-text link list |
+| `license[]` | array | License information |
+| `funder[]` | array | Funder information, containing `DOI`, `name`, `award` |
 
-## 速率限制
+## Rate Limits
 
-| 池类型 | 速率 | 获取方式 |
+| Pool Type | Rate | How to Access |
 |---|---|---|
-| Public Pool | ~10 请求/秒 | 默认 |
-| Polite Pool | ~50 请求/秒 | 请求头含 `User-Agent` |
+| Public Pool | ~10 requests/s | Default |
+| Polite Pool | ~50 requests/s | Include `User-Agent` in request header |
 
-**批量解析最佳实践**:
-- 请求间隔 ≥ 0.1 秒（Polite Pool）或 ≥ 0.2 秒（Public Pool）
-- 使用 `try/except` 捕获单条失败，不中断整体批处理
-- 大批量（>100 DOI）考虑分批，每批之间加入更长间隔
+**Best Practices for Batch Resolution**:
+- Maintain a request interval ≥ 0.1 seconds (Polite Pool) or ≥ 0.2 seconds (Public Pool)
+- Use `try/except` to catch individual failures without interrupting the overall batch
+- For large batches (>100 DOIs), consider splitting into sub-batches with longer pauses between them
 
-## 失败处理
+## Error Handling
 
-| 场景 | HTTP 状态码 | 处理方式 |
+| Scenario | HTTP Status | Handling |
 |---|---|---|
-| DOI 不存在 | 404 | 确认 DOI 拼写；部分旧 DOI 可能未在 CrossRef 注册 |
-| 速率限制 | 429 | 退避重试；检查 User-Agent 头 |
-| 服务暂不可用 | 503 | 指数退避重试 |
-| DOI 格式错误 | 400 | 检查 DOI 格式（应为 `10.xxxx/yyyy`） |
-| 出版商无响应 | 超时 | 增大 timeout 至 15-30 秒 |
-| 元数据不完整 | 200 但字段缺失 | 使用 `.get()` 防御性访问，部分字段非必有 |
+| DOI not found | 404 | Verify DOI spelling; some older DOIs may not be registered in CrossRef |
+| Rate limited | 429 | Back off and retry; check User-Agent header |
+| Service unavailable | 503 | Retry with exponential backoff |
+| Malformed DOI | 400 | Check DOI format (should be `10.xxxx/yyyy`) |
+| Publisher unresponsive | Timeout | Increase timeout to 15–30 seconds |
+| Incomplete metadata | 200 but missing fields | Use `.get()` for defensive access; some fields are optional |
 
 ```python
 def resolve_doi_safe(doi):
-    """安全解析 DOI，返回统一结构。"""
+    """Safely resolve a DOI, returning a uniform structure."""
     try:
         paper = resolve_doi(doi)
         return {
@@ -293,8 +293,8 @@ def resolve_doi_safe(doi):
         return {"doi": doi, "error": str(e), "success": False}
 ```
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-crossref.md](api-crossref.md) — 搜索论文、基金查询、日期过滤（Works 端点的完整用法）
-- → 参见 [api-arxiv.md](api-arxiv.md) — 检索预印本论文（arXiv 论文通常无 DOI）
-- DOI 解析是 CrossRef Works 端点的单篇特化；批量搜索需求应使用 Works 搜索端点
+- → See [api-crossref.md](api-crossref.md) — Paper search, funder queries, date filtering (full usage of the Works endpoint)
+- → See [api-arxiv.md](api-arxiv.md) — Searching preprints (arXiv papers typically have no DOI)
+- DOI resolution is a single-item specialization of the CrossRef Works endpoint; for bulk search needs, use the Works search endpoint

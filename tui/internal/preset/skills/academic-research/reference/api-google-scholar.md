@@ -1,63 +1,63 @@
 # Google Scholar Reference
 
-## API 概述
+## API Overview
 
-Google Scholar 没有官方公开 API。本参考文档提供两种互补方式获取 Scholar 数据：
+Google Scholar does not offer an official public API. This reference document provides two complementary approaches for accessing Scholar data:
 
-1. **页面抓取（Scraping）**——通过 `web_read` 工具或 curl 获取 Scholar 页面原始内容
-2. **HTML 解析（Parsing）**——用 BeautifulSoup 从原始 HTML 中提取结构化文献元数据
+1. **Scraping** — Use the `web_read` tool or curl to fetch the raw content of Scholar pages
+2. **HTML Parsing** — Use BeautifulSoup to extract structured bibliographic metadata from the raw HTML
 
-两种方式各有适用场景：抓取解决"获取数据"，解析解决"理解数据"。
+Each approach serves a different purpose: scraping solves the "get data" problem, while parsing solves the "understand data" problem.
 
-| 属性 | 说明 |
-|------|------|
-| 基础 URL | `https://scholar.google.com/` |
-| 认证 | 无需 API key |
-| 反爬机制 | Google 有较强的反爬策略，高频请求会触发 CAPTCHA |
-| 适用场景 | 引用数据、作者 profile、跨学科搜索 |
-| 替代方案 | 大规模需求建议用 Semantic Scholar 或 OpenAlex → 参见 [api-pubmed.md](api-pubmed.md) |
+| Attribute | Description |
+|-----------|-------------|
+| Base URL | `https://scholar.google.com/` |
+| Authentication | No API key required |
+| Anti-scraping | Google employs strong anti-bot policies; high-frequency requests will trigger CAPTCHA |
+| Use cases | Citation data, author profiles, cross-disciplinary search |
+| Alternatives | For large-scale needs, consider Semantic Scholar or OpenAlex → see [api-pubmed.md](api-pubmed.md) |
 
 ---
 
-## 第一部分：页面抓取（Scraping）
+## Part 1: Scraping
 
-### Profile 页面
+### Profile Pages
 
-获取指定学者的论文列表、引用数、发表年份。
+Retrieve a scholar's publication list, citation counts, and publication years.
 
-**URL 格式**：
+**URL formats:**
 
-| 用途 | URL |
-|------|-----|
-| 学者主页 | `https://scholar.google.com/citations?user={USER_ID}&hl=en` |
-| 按发表日期排序 | `https://scholar.google.com/citations?hl=en&user={USER_ID}&view_op=list_works&sortby=pubdate` |
-| 按引用数排序（默认） | `https://scholar.google.com/citations?hl=en&user={USER_ID}&view_op=list_works&sortby=citationcount` |
+| Purpose | URL |
+|---------|-----|
+| Scholar homepage | `https://scholar.google.com/citations?user={USER_ID}&hl=en` |
+| Sorted by publication date | `https://scholar.google.com/citations?hl=en&user={USER_ID}&view_op=list_works&sortby=pubdate` |
+| Sorted by citation count (default) | `https://scholar.google.com/citations?hl=en&user={USER_ID}&view_op=list_works&sortby=citationcount` |
 
-`{USER_ID}` 是 Google Scholar 用户 ID（如 `rcQwoOoAAAAJ`）。
+`{USER_ID}` is the Google Scholar user ID (e.g., `rcQwoOoAAAAJ`).
 
-### 搜索结果页面
+### Search Result Pages
 
-通过关键词搜索学术论文。
+Search for academic papers by keyword.
 
 ```
-https://scholar.google.com/scholar?q={关键词}&hl=en
+https://scholar.google.com/scholar?q={keywords}&hl=en
 ```
 
-### 抓取方法一：web_read 工具（推荐）
+### Scraping Method 1: web_read Tool (Recommended)
 
 ```python
-# 在 lingtai 环境中使用 web_read 工具
+# Use the web_read tool in the lingtai environment
 from lingtai import web_read
 
-# 获取学者论文列表（按日期排序）
+# Fetch a scholar's publication list (sorted by date)
 url = "https://scholar.google.com/citations?hl=en&user=rcQwoOoAAAAJ&view_op=list_works&sortby=pubdate"
 content = web_read(url=url)
 print(content[:2000])
 ```
 
-**优点**：`web_read` 内置反爬处理，自动处理 User-Agent 和页面渲染。
+**Advantages**: `web_read` has built-in anti-scraping handling and automatically manages User-Agent and page rendering.
 
-### 抓取方法二：curl
+### Scraping Method 2: curl
 
 ```bash
 curl -s "https://scholar.google.com/citations?user=rcQwoOoAAAAJ&hl=en" \
@@ -68,11 +68,11 @@ curl -s "https://scholar.google.com/citations?user=rcQwoOoAAAAJ&hl=en" \
   -o /tmp/scholar.html
 ```
 
-**用于后续 BeautifulSoup 解析的场景**——先 curl 保存 HTML，再 Python 解析。
+**Use when you need BeautifulSoup parsing** — first save the HTML with curl, then parse it with Python.
 
-### Profile 页面数据格式
+### Profile Page Data Format
 
-`web_read` 返回的文本是 tab 分隔格式：
+The text returned by `web_read` uses a tab-separated format:
 
 ```
 The Evolution of the 1/f Range within a Single Fast-solar-wind Stream...
@@ -80,9 +80,9 @@ N Davis, BDG Chandran, TA Bowen...
 The Astrophysical Journal 950 (2), 154, 2023 | 38 | 2023
 ```
 
-每条记录通常跨 2-3 行：标题行、作者/期刊行、引用/年份行（含 `|` 分隔符）。
+Each record typically spans 2–3 lines: a title line, an author/journal line, and a citation/year line (separated by `|`).
 
-### 简单解析（web_read 场景）
+### Simple Parsing (web_read Scenario)
 
 ```python
 import lingtai
@@ -110,32 +110,32 @@ while i < len(lines):
             papers.append(paper)
     i += 1
 
-print(f"找到 {len(papers)} 篇论文")
+print(f"Found {len(papers)} papers")
 for p in papers[:3]:
-    print(f"标题: {p['title']}")
-    print(f"年份: {p['year']}, 引用: {p['citations']}")
+    print(f"Title: {p['title']}")
+    print(f"Year: {p['year']}, Citations: {p['citations']}")
     print("---")
 ```
 
 ---
 
-## 第二部分：HTML 解析（Parsing）
+## Part 2: HTML Parsing
 
-当 curl 获取了 Google Scholar 搜索结果的原始 HTML 后，使用 BeautifulSoup 提取结构化元数据。
+After curl fetches the raw HTML of Google Scholar search results, use BeautifulSoup to extract structured metadata.
 
-### CSS 选择器参考
+### CSS Selector Reference
 
-| 元素 | 选择器 | 提取内容 |
-|------|--------|----------|
-| 文献条目 | `.gs_ri` | 整条文献的容器 |
-| 标题+链接 | `.gs_rt a` | 论文标题和跳转链接 |
-| 作者/期刊/年份 | `.gs_a` | 作者、发表期刊、年份（绿色行） |
-| 摘要 | `.gs_rs` | 搜索结果中显示的摘要片段 |
-| 引用/相关链接 | `.gs_fl` | 底部链接区（Cited by N、Related articles） |
-| 相关文献链接 | `.gs_fl a[href*="related:"]` | "Related articles" 链接 |
-| 所有版本链接 | `.gs_fl a[href*="cluster="]` | "All N versions" 链接 |
+| Element | Selector | Extracted Content |
+|---------|----------|-------------------|
+| Bibliographic entry | `.gs_ri` | Container for the entire bibliographic record |
+| Title + link | `.gs_rt a` | Paper title and navigation link |
+| Authors / journal / year | `.gs_a` | Authors, publication journal, year (green line) |
+| Abstract | `.gs_rs` | Abstract snippet displayed in search results |
+| Citation / related links | `.gs_fl` | Bottom link area (Cited by N, Related articles) |
+| Related articles link | `.gs_fl a[href*="related:"]` | "Related articles" link |
+| All versions link | `.gs_fl a[href*="cluster="]` | "All N versions" link |
 
-### 完整解析脚本
+### Complete Parsing Script
 
 ```python
 from bs4 import BeautifulSoup
@@ -143,22 +143,22 @@ import re
 import json
 
 def parse_scholar_html(html_path):
-    """解析 Google Scholar 搜索结果 HTML，提取文献元数据。
+    """Parse Google Scholar search result HTML and extract bibliographic metadata.
 
     Args:
-        html_path: 保存的 HTML 文件路径
+        html_path: Path to the saved HTML file
 
     Returns:
-        list[dict]: 解析后的文献列表，每条包含：
-            - title (str): 标题
-            - link (str): 论文链接
-            - authors (list[str]): 作者列表
-            - meta (str): 作者+期刊+年份原始文本
-            - year (str|None): 发表年份
-            - abstract (str): 摘要片段
-            - citations (int): 引用数
-            - related_link (str): 相关文献链接
-            - versions_link (str): 所有版本链接
+        list[dict]: Parsed bibliographic list, each entry containing:
+            - title (str): Title
+            - link (str): Paper link
+            - authors (list[str]): Author list
+            - meta (str): Raw author + journal + year text
+            - year (str|None): Publication year
+            - abstract (str): Abstract snippet
+            - citations (int): Citation count
+            - related_link (str): Related articles link
+            - versions_link (str): All versions link
     """
     with open(html_path, 'r', encoding='utf-8') as f:
         html = f.read()
@@ -170,14 +170,14 @@ def parse_scholar_html(html_path):
     for art in articles:
         result = {}
 
-        # 标题与链接
+        # Title and link
         title_tag = art.select_one('.gs_rt a')
         raw_title = title_tag.get_text() if title_tag else ''
-        # 修复被 <b> 标签分割的词：如 "Trans former" → "Transformer"
+        # Fix words split by <b> tags: e.g., "Trans former" → "Transformer"
         result['title'] = re.sub(r'([a-z])([A-Z])', r'\1 \2', raw_title)
         result['link'] = title_tag.get('href', '') if title_tag else ''
 
-        # 作者、期刊、年份
+        # Authors, journal, year
         gs_a = art.select_one('.gs_a')
         if gs_a:
             authors = [a.get_text(strip=True) for a in gs_a.select('a')]
@@ -191,16 +191,16 @@ def parse_scholar_html(html_path):
             result['meta'] = ''
             result['year'] = None
 
-        # 摘要
+        # Abstract
         snippet_tag = art.select_one('.gs_rs')
         raw_snippet = snippet_tag.get_text() if snippet_tag else ''
         result['abstract'] = re.sub(r'([a-z])([A-Z])', r'\1 \2', raw_snippet)
 
-        # 引用数
+        # Citation count
         cit_match = re.search(r'Cited by (\d+)', art.get_text())
         result['citations'] = int(cit_match.group(1)) if cit_match else 0
 
-        # 关联链接
+        # Associated links
         result['related_link'] = ''
         result['versions_link'] = ''
         for link in art.select('.gs_fl a'):
@@ -214,21 +214,21 @@ def parse_scholar_html(html_path):
 
     return results
 
-# 使用示例
+# Usage example
 papers = parse_scholar_html('/tmp/scholar.html')
 print(json.dumps(papers, ensure_ascii=False, indent=2))
 
-# 提取特定字段
+# Extract specific fields
 for p in papers[:5]:
-    print(f"标题: {p['title']}")
-    print(f"作者: {', '.join(p['authors'])}")
-    print(f"年份: {p['year']}")
-    print(f"引用: {p['citations']}")
-    print(f"摘要: {p['abstract'][:100]}...")
+    print(f"Title: {p['title']}")
+    print(f"Authors: {', '.join(p['authors'])}")
+    print(f"Year: {p['year']}")
+    print(f"Citations: {p['citations']}")
+    print(f"Abstract: {p['abstract'][:100]}...")
     print("---")
 ```
 
-### 依赖安装
+### Dependency Installation
 
 ```bash
 pip install beautifulsoup4 requests
@@ -236,31 +236,31 @@ pip install beautifulsoup4 requests
 
 ---
 
-## arXiv 论文的 PDF 下载
+## PDF Download for arXiv Papers
 
-Google Scholar 搜索结果中的 arXiv 论文有直接 PDF 链接。
+arXiv papers found via Google Scholar search have direct PDF links.
 
-### URL 格式
+### URL Format
 
 ```
 https://arxiv.org/pdf/{arXiv_ID}.pdf
 ```
 
-### 下载示例
+### Download Example
 
 ```bash
-# 直接下载
+# Direct download
 curl -s "https://arxiv.org/pdf/2512.12585" -o paper.pdf
 ```
 
-### 通过标题查找 arXiv ID
+### Finding the arXiv ID by Title
 
 ```python
 import requests
 import xml.etree.ElementTree as ET
 
 def find_arxiv_pdf_url(title_keywords):
-    """通过 arXiv API 搜索论文标题，返回 PDF URL。"""
+    """Search for a paper title via the arXiv API and return the PDF URL."""
     url = "https://export.arxiv.org/api/query"
     params = {
         "search_query": f"ti:{title_keywords}",
@@ -278,24 +278,24 @@ def find_arxiv_pdf_url(title_keywords):
 
 ---
 
-## 速率限制与反爬策略
+## Rate Limits and Anti-Scraping Strategies
 
-| 策略 | 说明 |
-|------|------|
-| 请求间隔 | 每次请求间隔至少 2-3 秒 |
-| User-Agent | 使用真实浏览器 User-Agent（curl 场景） |
-| CAPTCHA | 高频请求会触发验证码，需要降低频率或更换 IP |
-| `web_read` 优先 | lingtai 的 `web_read` 内置反爬处理，优先使用 |
-| 大规模需求 | 使用 Semantic Scholar API 或 OpenAlex API 替代 |
+| Strategy | Description |
+|----------|-------------|
+| Request interval | Wait at least 2–3 seconds between requests |
+| User-Agent | Use a real browser User-Agent (for curl scenarios) |
+| CAPTCHA | High-frequency requests will trigger CAPTCHA; reduce frequency or rotate IPs |
+| Prefer `web_read` | lingtai's `web_read` has built-in anti-scraping handling; use it first |
+| Large-scale needs | Use Semantic Scholar API or OpenAlex API as alternatives |
 
-### 避免被封的最佳实践
+### Best Practices to Avoid Being Blocked
 
 ```python
 import time
 import random
 
 def polite_fetch(url, method="web_read"):
-    """礼貌抓取：随机延迟 + User-Agent。"""
+    """Polite fetching: random delay + User-Agent."""
     delay = random.uniform(2, 5)
     time.sleep(delay)
 
@@ -314,27 +314,27 @@ def polite_fetch(url, method="web_read"):
         return r.text
 ```
 
-## 失败处理
+## Error Handling
 
-| 场景 | 处理方式 |
-|------|----------|
-| CAPTCHA 页面 | 停止抓取，等待 10-30 分钟后重试，或使用 `web_read` |
-| 空结果 | 检查 USER_ID 是否正确，或尝试不同的搜索关键词 |
-| 解析结果为空 | Google 可能更新了 HTML 结构，检查 CSS 选择器是否仍然有效 |
-| 标题词间有空格异常 | `<b>` 标签分割导致，使用 `re.sub(r'([a-z])([A-Z])', r'\1 \2', title)` 修复 |
-| PDF 链接 403 | 某些 PDF 需要机构访问权限，尝试通过 Unpaywall 查找免费版本 |
-| 超时 | 设置 `timeout=15`，重试最多 3 次 |
+| Scenario | Handling |
+|----------|----------|
+| CAPTCHA page | Stop scraping, wait 10–30 minutes before retrying, or use `web_read` |
+| Empty results | Verify the USER_ID is correct, or try different search keywords |
+| Parsing results are empty | Google may have updated the HTML structure; check if CSS selectors are still valid |
+| Abnormal spaces in title | Caused by `<b>` tag splitting; fix with `re.sub(r'([a-z])([A-Z])', r'\1 \2', title)` |
+| PDF link returns 403 | Some PDFs require institutional access; try finding a free version via Unpaywall |
+| Timeout | Set `timeout=15`, retry up to 3 times |
 
-## 已知限制
+## Known Limitations
 
-1. **标题空格问题**：HTML 中文本被 `<b>` 标签分割，需用正则后处理
-2. **反爬限制**：大量请求可能触发验证码，建议加延时
-3. **登录用户**：登录后的 HTML 结构可能不同
-4. **无官方 API**：结构可能随时变化，解析脚本需维护
+1. **Title spacing issues**: Text in HTML may be split by `<b>` tags and requires regex post-processing
+2. **Anti-scraping limits**: Large volumes of requests may trigger CAPTCHA; adding delays is recommended
+3. **Logged-in users**: The HTML structure may differ when logged in
+4. **No official API**: The structure may change at any time; parsing scripts require maintenance
 
-## 相关 API
+## Related APIs
 
-- **Unpaywall**：Scholar 找到论文后，用 DOI 查找免费 PDF → 参见 [api-unpaywall.md](api-unpaywall.md)
-- **PubMed**：生物医学领域的官方文献 API，更稳定 → 参见 [api-pubmed.md](api-pubmed.md)
-- **arXiv API**：`https://export.arxiv.org/api/query` — arXiv 论文的官方搜索接口
-- **替代方案**：大规模需求推荐 Semantic Scholar (`https://api.semanticscholar.org/graph/v1/paper/search`) 或 OpenAlex (`https://api.openalex.org/works`)
+- **Unpaywall**: After finding a paper on Scholar, use the DOI to find a free PDF → see [api-unpaywall.md](api-unpaywall.md)
+- **PubMed**: Official bibliographic API for biomedicine, more stable → see [api-pubmed.md](api-pubmed.md)
+- **arXiv API**: `https://export.arxiv.org/api/query` — official search interface for arXiv papers
+- **Alternatives**: For large-scale needs, Semantic Scholar (`https://api.semanticscholar.org/graph/v1/paper/search`) or OpenAlex (`https://api.openalex.org/works`) are recommended

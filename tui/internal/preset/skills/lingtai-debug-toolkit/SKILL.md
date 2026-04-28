@@ -8,46 +8,46 @@ companion: lingtai-anatomy
 
 # Lingtai Debug Toolkit
 
-> **先读 lingtai-anatomy** 理解架构，遇到问题时回来查操作手册。
-> anatomy = "how things work"（描述性），debug-toolkit = "what to do when broken"（操作性）。
+> **Read lingtai-anatomy first** to understand the architecture; return here for operational procedures when something goes wrong.
+> anatomy = "how things work" (descriptive), debug-toolkit = "what to do when broken" (operational).
 
-## 何时使用
+## When to Use
 
-- Agent 不响应、卡死、或行为异常
-- 需要审计网络安全性
-- 准备凝蜕（molt）需要检查清单和模板
-- 管理化身网络的生命周期
+- Agent is unresponsive, stuck, or behaving abnormally
+- Network security audit is needed
+- Preparing for a molt and need the checklist/template
+- Managing the lifecycle of an avatar network
 
-## Reference 文件
+## Reference Files
 
-| Reference | 文件 | 覆盖范围 |
+| Reference | File | Coverage |
 |-----------|------|----------|
-| 故障排查 | [debug-troubleshoot.md](reference/debug-troubleshoot.md) | 进程、记忆、通信、器用、健康检查、上报协议 |
-| 安全审计 | [security-audit.md](reference/security-audit.md) | 密钥扫描、文件权限、MCP 配置、通信安全、数据暴露、Agent 权限 |
-| 凝蜕模板 | [molt-template.md](reference/molt-template.md) | 四层存储准备、summary 模板、验证清单 |
-| 网络治理 | [network-governance.md](reference/network-governance.md) | 化身生命周期、权限管理、健康监测、CPR 协议 |
+| Troubleshooting | [debug-troubleshoot.md](reference/debug-troubleshoot.md) | Process, memory, communication, tools, health checks, escalation protocol |
+| Security Audit | [security-audit.md](reference/security-audit.md) | Secret scanning, file permissions, MCP config, communication security, data exposure, agent permissions |
+| Molt Template | [molt-template.md](reference/molt-template.md) | Four-layer storage prep, summary template, verification checklist |
+| Network Governance | [network-governance.md](reference/network-governance.md) | Avatar lifecycle, permission management, health monitoring, CPR protocol |
 
-## 快速诊断
+## Quick Diagnosis
 
 ```
-Agent 无响应？     → debug-troubleshoot.md → 进程诊断 → 五种生命状态速查
-Molt 后丢失记忆？  → molt-template.md → 四层存储检查清单
-发现密钥暴露？     → security-audit.md → 密钥扫描脚本
-化身网络不稳定？   → network-governance.md → 健康监测 + CPR 协议
+Agent unresponsive?     → debug-troubleshoot.md → Process diagnosis → Five lifecycle states lookup
+Lost memory after molt? → molt-template.md → Four-layer storage checklist
+Found exposed secrets?  → security-audit.md → Secret scanning scripts
+Avatar network unstable?→ network-governance.md → Health monitoring + CPR protocol
 ```
 
-## 与 lingtai-anatomy 的关系
+## Relationship to lingtai-anatomy
 
-- **lingtai-anatomy**：描述性文档——五层存储、文件系统布局、运行时状态机、邮件协议
-- **lingtai-debug-toolkit**：操作性文档——故障定位、安全扫描、凝蜕操作、网络治理
-- 推荐阅读顺序：anatomy → debug-toolkit
+- **lingtai-anatomy**: Descriptive documentation — five-layer storage, filesystem layout, runtime state machine, email protocol
+- **lingtai-debug-toolkit**: Operational documentation — fault diagnosis, security scanning, molt procedures, network governance
+- Recommended reading order: anatomy → debug-toolkit
 
-## 安全审计原则
+## Security Audit Principles
 
-1. **严格只读**：审计脚本不修改任何文件
-2. **结果分级**：Critical / High / Medium / Low
-3. **已知架构限制**：飞鸽明文存储等——标注为"架构限制"而非"配置问题"
+1. **Strictly read-only**: Audit scripts must not modify any files
+2. **Severity ratings**: Critical / High / Medium / Low
+3. **Known architectural limitations**: Plaintext storage, etc. — flag these as "architectural constraints," not "configuration issues"
 
-## 未纳入的内容
+## Out of Scope
 
-- **lingtai-agora**（网络发布/打包工具）——定位是"发布"而非"调试"，保留在原项目中。如需发布网络，直接使用 lingtai-agora skill。
+- **lingtai-agora** (network publishing/packaging tool) — its purpose is "publishing," not "debugging," and it remains in the original project. To publish a network, use the lingtai-agora skill directly.

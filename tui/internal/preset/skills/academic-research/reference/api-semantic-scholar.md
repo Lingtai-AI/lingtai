@@ -1,109 +1,109 @@
 # Semantic Scholar API Reference
 
-Semantic Scholar Graph API 提供学术论文搜索、引用网络、作者画像等功能。免费层可用，API Key 可大幅提升配额。
+The Semantic Scholar Graph API provides academic paper search, citation network analysis, author profiles, and more. The free tier is available without an API key; adding an API key significantly increases your quota.
 
-## API 概述
+## API Overview
 
-| 项目 | 说明 |
+| Property | Description |
 |---|---|
-| 基础 URL | `https://api.semanticscholar.org/graph/v1` |
-| 认证 | 无 Key 可用（100 req/day/IP）；加 API Key → 1000 req/day（免费） |
-| 速率限制 | 无 Key: ~5 成功请求/分钟/IP；有 Key: 显著放宽 |
-| 响应格式 | JSON |
+| Base URL | `https://api.semanticscholar.org/graph/v1` |
+| Authentication | Usable without a key (100 req/day/IP); with API Key → 1000 req/day (free) |
+| Rate Limit | Without key: ~5 successful requests/minute/IP; with key: significantly higher |
+| Response Format | JSON |
 | Python SDK | `pip install semanticscholar` |
-| 最佳用途 | 引用网络分析、作者画像、论文元数据检索 |
+| Best Use Cases | Citation network analysis, author profiling, paper metadata retrieval |
 
-核心端点：
+Core endpoints:
 
-| 端点 | 用途 |
+| Endpoint | Purpose |
 |---|---|
-| `GET /paper/search` | 论文搜索 |
-| `GET /paper/{paperId}` | 论文详情 |
-| `GET /paper/{paperId}/citations` | 获取引用该论文的论文 |
-| `GET /paper/{paperId}/references` | 获取该论文引用的论文 |
-| `GET /author/search` | 搜索作者 |
-| `GET /author/{authorId}` | 作者详情 + 论文列表 |
+| `GET /paper/search` | Paper search |
+| `GET /paper/{paperId}` | Paper details |
+| `GET /paper/{paperId}/citations` | Get papers citing this paper |
+| `GET /paper/{paperId}/references` | Get papers referenced by this paper |
+| `GET /author/search` | Search authors |
+| `GET /author/{authorId}` | Author details + paper list |
 
 ---
 
-## 端点与参数
+## Endpoints and Parameters
 
-### 论文查询
+### Paper Queries
 
-#### 搜索论文
+#### Search Papers
 
-**端点**: `GET /paper/search`
+**Endpoint**: `GET /paper/search`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `query` | 搜索查询字符串 | `query=attention is all you need` |
-| `limit` | 最大结果数（默认 100） | `limit=10` |
-| `offset` | 分页偏移 | `offset=10` |
-| `fields` | 返回字段（逗号分隔） | `fields=title,authors,year` |
-| `year` | 年份筛选 | `year=2020` 或 `year=2018-2022` |
-| `publicationTypes` | 发表类型 | `publicationTypes=JournalArticle` |
-| `openAccessPdf` | 仅返回有 OA PDF 的 | `openAccessPdf=true` |
-| `venue` | 发表场所 | `venue=NeurIPS` |
-| `fieldsOfStudy` | 研究领域 | `fieldsOfStudy=Computer Science` |
-| `minCitationCount` | 最低引用数 | `minCitationCount=100` |
-| `sort` | 排序 | `sort=citationCount:desc` |
+| `query` | Search query string | `query=attention is all you need` |
+| `limit` | Maximum number of results (default 100) | `limit=10` |
+| `offset` | Pagination offset | `offset=10` |
+| `fields` | Returned fields (comma-separated) | `fields=title,authors,year` |
+| `year` | Year filter | `year=2020` or `year=2018-2022` |
+| `publicationTypes` | Publication type | `publicationTypes=JournalArticle` |
+| `openAccessPdf` | Only return papers with OA PDFs | `openAccessPdf=true` |
+| `venue` | Publication venue | `venue=NeurIPS` |
+| `fieldsOfStudy` | Research field | `fieldsOfStudy=Computer Science` |
+| `minCitationCount` | Minimum citation count | `minCitationCount=100` |
+| `sort` | Sort order | `sort=citationCount:desc` |
 
-**常用 fields 值**: `title`, `authors`, `year`, `abstract`, `venue`, `citationCount`, `referenceCount`, `url`, `paperId`, `externalIds`, `openAccessPdf`, `fieldsOfStudy`, `publicationTypes`, `journal`
+**Common `fields` values**: `title`, `authors`, `year`, `abstract`, `venue`, `citationCount`, `referenceCount`, `url`, `paperId`, `externalIds`, `openAccessPdf`, `fieldsOfStudy`, `publicationTypes`, `journal`
 
-嵌套字段: `authors.authorId`, `authors.name`, `authors.url`
+Nested fields: `authors.authorId`, `authors.name`, `authors.url`
 
-#### 论文详情
+#### Paper Details
 
-**端点**: `GET /paper/{paperId}`
+**Endpoint**: `GET /paper/{paperId}`
 
-`paperId` 可以是：
-- Semantic Scholar ID（40 字符 hash）
+`paperId` can be:
+- Semantic Scholar ID (40-character hash)
 - DOI: `DOI:10.1234/...`
 - ArXiv: `ArXiv:2106.15928`
-- PMID, ACL, URL 等
+- PMID, ACL, URL, etc.
 
-#### 引用与参考文献
+#### Citations and References
 
-| 端点 | 说明 |
+| Endpoint | Description |
 |---|---|
-| `GET /paper/{paperId}/citations` | 获取引用了此论文的论文列表 |
-| `GET /paper/{paperId}/references` | 获取此论文引用的论文列表 |
+| `GET /paper/{paperId}/citations` | Get papers that have cited this paper |
+| `GET /paper/{paperId}/references` | Get papers referenced by this paper |
 
-两者均支持 `limit`, `offset`, `fields` 参数。返回格式中论文嵌套在 `citingPaper` 或 `citedPaper` 键下。
+Both support `limit`, `offset`, and `fields` parameters. In the response, paper data is nested under the `citingPaper` or `citedPaper` key.
 
-### 作者查询
+### Author Queries
 
-#### 搜索作者
+#### Search Authors
 
-**端点**: `GET /author/search`
+**Endpoint**: `GET /author/search`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `query` | 作者姓名 | `query=yoshua bengio` |
-| `limit` | 最大结果数 | `limit=5` |
-| `fields` | 返回字段 | `fields=name,hIndex,citationCount` |
+| `query` | Author name | `query=yoshua bengio` |
+| `limit` | Maximum number of results | `limit=5` |
+| `fields` | Returned fields | `fields=name,hIndex,citationCount` |
 
-#### 作者详情与论文
+#### Author Details and Papers
 
-**端点**: `GET /author/{authorId}`
+**Endpoint**: `GET /author/{authorId}`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `fields` | 返回字段 | `fields=name,hIndex,citationCount,papers` |
+| `fields` | Returned fields | `fields=name,hIndex,citationCount,papers` |
 
-返回 `papers` 数组包含该作者的论文列表（每条含 `paperId`, `title` 等）。
+The returned `papers` array contains the author's paper list (each entry includes `paperId`, `title`, etc.).
 
 ---
 
-## 代码示例
+## Code Examples
 
-### 论文搜索（直接 HTTP）
+### Paper Search (Direct HTTP)
 
 ```python
 import requests, time
 
 def search_papers(query, limit=10, fields=None):
-    """搜索 Semantic Scholar 论文。"""
+    """Search Semantic Scholar papers."""
     url = "https://api.semanticscholar.org/graph/v1/paper/search"
     params = {"query": query, "limit": limit}
     if fields:
@@ -120,14 +120,14 @@ for p in results.get("data", []):
     print("---")
 ```
 
-### 论文搜索（Python SDK）
+### Paper Search (Python SDK)
 
 ```python
 from semanticscholar import SemanticScholar
 
-# 无 key = 有限配额
+# No key = limited quota
 ss = SemanticScholar()
-# 有 key:
+# With key:
 # ss = SemanticScholar(api_key='your-key')
 
 results = ss.search_paper(
@@ -143,12 +143,12 @@ for paper in results[:5]:
     print("---")
 ```
 
-SDK `search_paper` 完整签名：
+SDK `search_paper` full signature:
 
 ```python
 search_paper(
     query: str,
-    year: str = None,                # '2020' 或 '2018-2022'
+    year: str = None,                # '2020' or '2018-2022'
     publication_types: list = None,
     open_access_pdf: bool = None,
     venue: list = None,
@@ -163,11 +163,11 @@ search_paper(
 )
 ```
 
-### 获取引用与参考文献
+### Get Citations and References
 
 ```python
 def get_citations(paper_id, limit=5, fields=None):
-    """获取引用了指定论文的论文。"""
+    """Get papers that have cited the specified paper."""
     url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"
     params = {"limit": limit}
     if fields:
@@ -177,7 +177,7 @@ def get_citations(paper_id, limit=5, fields=None):
     return r.json()
 
 def get_references(paper_id, limit=5, fields=None):
-    """获取指定论文引用的参考文献。"""
+    """Get references cited by the specified paper."""
     url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references"
     params = {"limit": limit}
     if fields:
@@ -187,11 +187,11 @@ def get_references(paper_id, limit=5, fields=None):
     return r.json()
 ```
 
-### 作者搜索与画像
+### Author Search and Profiles
 
 ```python
 def search_authors(query, limit=5):
-    """搜索作者。"""
+    """Search for authors."""
     url = "https://api.semanticscholar.org/graph/v1/author/search"
     params = {"query": query, "limit": limit, "fields": "name,hIndex,citationCount"}
     r = requests.get(url, params=params, timeout=10)
@@ -199,14 +199,14 @@ def search_authors(query, limit=5):
     return r.json()["data"]
 
 def get_author_profile(author_id):
-    """获取作者详情及论文列表。"""
+    """Get author details and paper list."""
     url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
     params = {"fields": "name,hIndex,citationCount,papers"}
     r = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
     return r.json()
 
-# 示例
+# Example
 authors = search_authors("yoshua bengio")
 for a in authors:
     print(f"{a['name']} — h-index: {a.get('hIndex', 'N/A')}, citations: {a.get('citationCount', 'N/A')}")
@@ -220,9 +220,9 @@ if authors:
 
 ---
 
-## 返回格式
+## Response Formats
 
-### 论文搜索响应
+### Paper Search Response
 
 ```json
 {
@@ -244,7 +244,7 @@ if authors:
 }
 ```
 
-### 引用响应
+### Citations Response
 
 ```json
 {
@@ -261,7 +261,7 @@ if authors:
 }
 ```
 
-### 作者搜索响应
+### Author Search Response
 
 ```json
 {
@@ -280,27 +280,27 @@ if authors:
 
 ---
 
-## 速率限制
+## Rate Limits
 
-| 场景 | 配额 | 说明 |
+| Scenario | Quota | Notes |
 |---|---|---|
-| 无 API Key | ~100 req/day/IP | 实际约 5 成功请求/分钟 |
-| 有免费 API Key | 1000 req/day | 更稳定的速率 |
-| 付费层级 | 更高 | 按需购买 |
+| No API Key | ~100 req/day/IP | Approximately 5 successful requests/minute in practice |
+| Free API Key | 1000 req/day | More stable rate |
+| Paid Tier | Higher | Purchase as needed |
 
-**超限响应**: HTTP 429 Too Many Requests
+**Rate-limited response**: HTTP 429 Too Many Requests
 
-**最佳实践**: 请求间至少等待 12 秒（无 key）；有 key 可连续请求。
+**Best practice**: Wait at least 12 seconds between requests (without key); with a key, consecutive requests are acceptable.
 
 ---
 
-## 失败处理
+## Error Handling
 
 ```python
 import requests, time
 
 def safe_semantic_scholar_get(url, params, retries=3, delay=12):
-    """带重试的 Semantic Scholar 请求（无 key 模式）。"""
+    """Semantic Scholar request with retry logic (no-key mode)."""
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, timeout=15)
@@ -320,8 +320,8 @@ def safe_semantic_scholar_get(url, params, retries=3, delay=12):
 
 ---
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-openalex.md](api-openalex.md) — OpenAlex 论文/概念/机构查询（无 key 限制更宽）
-- → 参见 [api-core.md](api-core.md) — CORE 开放获取论文全文下载
-- → 参见 [api-crossref.md](api-crossref.md) — CrossRef DOI 元数据查询
+- → See [api-openalex.md](api-openalex.md) — OpenAlex paper/concept/institution queries (more generous limits without a key)
+- → See [api-core.md](api-core.md) — CORE open-access paper full-text download
+- → See [api-crossref.md](api-crossref.md) — CrossRef DOI metadata queries

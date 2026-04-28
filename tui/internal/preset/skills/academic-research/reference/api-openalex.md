@@ -1,109 +1,109 @@
 # OpenAlex API Reference
 
-OpenAlex 是微软学术图谱（MAG）的继任者，提供学术论文、概念分类和研究机构的全面元数据。完全免费，无需 API Key。
+OpenAlex is the successor to Microsoft Academic Graph (MAG), providing comprehensive metadata for academic papers, concept classifications, and research institutions. It is completely free and requires no API key.
 
-## API 概述
+## API Overview
 
-| 项目 | 说明 |
+| Item | Description |
 |---|---|
-| 基础 URL | `https://api.openalex.org` |
-| 认证 | 无需 API Key（可选 `mailto` 参数提高速率） |
-| 速率限制 | ~10 请求/秒，1000 请求/天（无 key）；加 `mailto=you@example.com` 可放宽 |
-| 响应格式 | JSON |
-| 最佳用途 | 大规模论文发现、机构分析、主题建模、研究趋势映射 |
+| Base URL | `https://api.openalex.org` |
+| Authentication | No API key required (optional `mailto` parameter for higher rate limits) |
+| Rate Limits | ~10 requests/sec, 1000 requests/day (without key); adding `mailto=you@example.com` increases limits |
+| Response Format | JSON |
+| Best Use Cases | Large-scale paper discovery, institutional analysis, topic modeling, research trend mapping |
 
-三个核心端点：
+Three core endpoints:
 
-| 端点 | 用途 |
+| Endpoint | Purpose |
 |---|---|
-| `/works` | 论文搜索与元数据 |
-| `/concepts` | 研究概念/主题分类 |
-| `/institutions` | 研究机构查询 |
+| `/works` | Paper search and metadata |
+| `/concepts` | Research concept/topic classification |
+| `/institutions` | Research institution lookup |
 
 ---
 
-## 端点与参数
+## Endpoints & Parameters
 
-### 基础查询 — Works（论文搜索）
+### Basic Query — Works (Paper Search)
 
-**端点**: `GET https://api.openalex.org/works`
+**Endpoint**: `GET https://api.openalex.org/works`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `search` | 全文搜索 | `search=transformer architecture` |
-| `search.title` | 仅搜索标题 | `search.title=attention` |
-| `search.author` | 按作者名搜索 | `search.author=vaswani` |
-| `filter` | 结构化过滤 | `filter=publication_year:2020` |
-| `per-page` | 每页结果数（最大 200） | `per-page=10` |
-| `page` | 页码 | `page=2` |
-| `select` | 返回字段 | `select=title,authorships,publication_year` |
-| `sort` | 排序字段 | `sort=cited_by_count:desc` |
+| `search` | Full-text search | `search=transformer architecture` |
+| `search.title` | Search titles only | `search.title=attention` |
+| `search.author` | Search by author name | `search.author=vaswani` |
+| `filter` | Structured filtering | `filter=publication_year:2020` |
+| `per-page` | Results per page (max 200) | `per-page=10` |
+| `page` | Page number | `page=2` |
+| `select` | Fields to return | `select=title,authorships,publication_year` |
+| `sort` | Sort field | `sort=cited_by_count:desc` |
 
-**常用 filter 值**:
+**Common filter values**:
 
 ```
-publication_year:2020                # 单年
-publication_year:2017-2020           # 年份范围
-authorships.author.id:A5101082644    # 按作者 ID
-authorships.institutions.id:I145311948  # 按机构 ID
-primary_location.source.id:S2764280280 # 按期刊
-topics.id:T10038                     # 按主题
-concepts.id:C119857082               # 按概念
-is_oa:true                           # 仅开放获取
-cited_by_count:1000+                 # 引用数筛选
+publication_year:2020                # Single year
+publication_year:2017-2020           # Year range
+authorships.author.id:A5101082644    # By author ID
+authorships.institutions.id:I145311948  # By institution ID
+primary_location.source.id:S2764280280 # By journal
+topics.id:T10038                     # By topic
+concepts.id:C119857082               # By concept
+is_oa:true                           # Open access only
+cited_by_count:>1000                 # Citation count filter (use > prefix, not + suffix)
 ```
 
-**可选返回字段**: `id`, `title`, `display_name`, `authorships`, `publication_year`, `publication_date`, `type`, `open_access`, `cited_by_count`, `doi`, `primary_location`, `source`, `topics`, `classifications`, `keywords`, `funding`, `institutions`, `related_works`
+**Available return fields**: `id`, `title`, `display_name`, `authorships`, `publication_year`, `publication_date`, `type`, `open_access`, `cited_by_count`, `doi`, `primary_location`, `source`, `topics`, `classifications`, `keywords`, `funding`, `institutions`, `related_works`
 
-### 概念分类 — Concepts（主题分类）
+### Concept Classification — Concepts (Topic Taxonomy)
 
-**端点**: `GET https://api.openalex.org/concepts`
+**Endpoint**: `GET https://api.openalex.org/concepts`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `search` | 搜索概念 | `search=machine learning` |
-| `per-page` | 每页结果数 | `per-page=5` |
-| `filter` | 结构化过滤 | `filter=level:1` |
-| `select` | 返回字段 | `select=display_name,level,works_count` |
+| `search` | Search concepts | `search=machine learning` |
+| `per-page` | Results per page | `per-page=5` |
+| `filter` | Structured filtering | `filter=level:1` |
+| `select` | Fields to return | `select=display_name,level,works_count` |
 
-**概念层级**（5 级分类体系）:
+**Concept levels** (5-level hierarchy):
 
-| 层级 | 含义 | 示例 |
+| Level | Meaning | Example |
 |---|---|---|
-| Level 0 | 大领域 | Computer Science |
-| Level 1 | 子领域 | Machine learning |
-| Level 2 | 更细子领域 | — |
-| Level 3 | 具体主题 | — |
-| Level 4 | 极具体主题 | — |
+| Level 0 | Broad domain | Computer Science |
+| Level 1 | Sub-domain | Machine learning |
+| Level 2 | Narrower sub-domain | — |
+| Level 3 | Specific topic | — |
+| Level 4 | Very specific topic | — |
 
-每个概念返回：`id`, `display_name`, `level`, `works_count`, `cited_by_count`, `description`, `ancestors`（上级概念链）
+Each concept returns: `id`, `display_name`, `level`, `works_count`, `cited_by_count`, `description`, `ancestors` (parent concept chain)
 
-### 机构查询 — Institutions（研究机构）
+### Institution Lookup — Institutions (Research Institutions)
 
-**端点**: `GET https://api.openalex.org/institutions`
+**Endpoint**: `GET https://api.openalex.org/institutions`
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 |---|---|---|
-| `search` | 搜索机构 | `search=Stanford` |
-| `per-page` | 每页结果数 | `per-page=5` |
-| `filter` | 结构化过滤 | `filter=country_code:US` |
-| `select` | 返回字段 | `select=display_name,country_code,works_count` |
+| `search` | Search institutions | `search=Stanford` |
+| `per-page` | Results per page | `per-page=5` |
+| `filter` | Structured filtering | `filter=country_code:US` |
+| `select` | Fields to return | `select=display_name,country_code,works_count` |
 
-**机构返回字段**: `id`, `display_name`, `country_code`, `type`, `works_count`, `cited_by_count`, `summary_stats`（含 `h_index`, `2yr_mean_citedness`）
+**Institution return fields**: `id`, `display_name`, `country_code`, `type`, `works_count`, `cited_by_count`, `summary_stats` (includes `h_index`, `2yr_mean_citedness`)
 
-**按国家筛选机构**: `filter=country_code:US`
+**Filter institutions by country**: `filter=country_code:US`
 
 ---
 
-## 代码示例
+## Code Examples
 
-### 论文搜索
+### Paper Search
 
 ```python
 import requests
 
 def search_openalex(query, per_page=10, select='title,authorships,publication_year,cited_by_count'):
-    """搜索 OpenAlex 论文。"""
+    """Search OpenAlex papers."""
     url = "https://api.openalex.org/works"
     params = {"search": query, "per-page": per_page, "select": select}
     r = requests.get(url, params=params, timeout=10)
@@ -120,11 +120,11 @@ for p in papers:
     print("---")
 ```
 
-### 按作者/机构筛选论文
+### Filter Papers by Author/Institution
 
 ```python
 def get_works_by_author(author_id, per_page=10):
-    """按 OpenAlex 作者 ID 获取论文列表。"""
+    """Retrieve paper list by OpenAlex author ID."""
     url = "https://api.openalex.org/works"
     params = {
         "filter": f"authorships.author.id:{author_id}",
@@ -136,7 +136,7 @@ def get_works_by_author(author_id, per_page=10):
     return r.json()["results"]
 
 def get_works_by_institution(inst_id, per_page=10):
-    """按机构 ID 获取该机构的高引论文。"""
+    """Retrieve highly cited papers from a given institution."""
     url = "https://api.openalex.org/works"
     params = {
         "filter": f"authorships.institutions.id:{inst_id}",
@@ -149,11 +149,11 @@ def get_works_by_institution(inst_id, per_page=10):
     return r.json()["results"]
 ```
 
-### 概念搜索与论文关联
+### Concept Search and Paper Association
 
 ```python
 def search_concepts(query, per_page=5):
-    """搜索研究概念/主题。"""
+    """Search research concepts/topics."""
     url = "https://api.openalex.org/concepts"
     params = {"search": query, "per-page": per_page}
     r = requests.get(url, params=params, timeout=10)
@@ -161,7 +161,7 @@ def search_concepts(query, per_page=5):
     return r.json()["results"]
 
 def get_concept_works(concept_id, per_page=10):
-    """获取某个概念下的高引论文。"""
+    """Retrieve highly cited papers under a given concept."""
     url = "https://api.openalex.org/works"
     params = {
         "filter": f"concepts.id:{concept_id}",
@@ -173,7 +173,7 @@ def get_concept_works(concept_id, per_page=10):
     r.raise_for_status()
     return r.json()["results"]
 
-# 示例：搜索概念 → 获取其下论文
+# Example: search concept → retrieve its papers
 concepts = search_concepts("transformer architecture")
 for c in concepts:
     print(f"[Level {c['level']}] {c['display_name']} — {c['works_count']:,} papers")
@@ -184,11 +184,11 @@ for p in papers[:5]:
     print(f"{p['title'][:60]}... ({p['publication_year']})")
 ```
 
-### 机构搜索与统计
+### Institution Search and Statistics
 
 ```python
 def search_institutions(query, per_page=5):
-    """搜索研究机构。"""
+    """Search research institutions."""
     url = "https://api.openalex.org/institutions"
     params = {"search": query, "per-page": per_page}
     r = requests.get(url, params=params, timeout=10)
@@ -196,13 +196,13 @@ def search_institutions(query, per_page=5):
     return r.json()["results"]
 
 def get_institution_detail(inst_id):
-    """获取机构详细信息。"""
+    """Retrieve institution details."""
     url = f"https://api.openalex.org/institutions/{inst_id}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     return r.json()
 
-# 示例
+# Example
 insts = search_institutions("Stanford University", per_page=3)
 for i in insts:
     print(f"{i['display_name']} ({i['country_code']})")
@@ -213,9 +213,9 @@ for i in insts:
 
 ---
 
-## 返回格式
+## Response Format
 
-所有端点返回统一的 JSON 结构：
+All endpoints return a uniform JSON structure:
 
 ```json
 {
@@ -243,29 +243,29 @@ for i in insts:
 }
 ```
 
-单条记录查询（如 `/institutions/I97018004`）直接返回对象，无 `meta`/`results` 包装。
+Single-record queries (e.g., `/institutions/I97018004`) return the object directly without the `meta`/`results` wrapper.
 
 ---
 
-## 速率限制
+## Rate Limits
 
-| 场景 | 限制 |
+| Scenario | Limit |
 |---|---|
-| 无参数 | ~10 req/s, 1000 req/day |
-| 加 `mailto=you@example.com` | 更宽的速率（推荐） |
-| 返回状态码 | HTTP 429 = 超限 |
+| No parameters | ~10 req/s, 1000 req/day |
+| With `mailto=you@example.com` | Higher rate limits (recommended) |
+| Response status code | HTTP 429 = rate limit exceeded |
 
-建议在请求参数中加 `mailto`：`?search=...&mailto=you@example.com`
+It is recommended to include `mailto` in your request parameters: `?search=...&mailto=you@example.com`
 
 ---
 
-## 失败处理
+## Error Handling
 
 ```python
 import requests, time
 
 def openalex_get(url, params, retries=3, delay=2):
-    """带重试的 OpenAlex 请求。"""
+    """OpenAlex request with retry logic."""
     for attempt in range(retries):
         r = requests.get(url, params=params, timeout=15)
         if r.status_code == 200:
@@ -281,8 +281,8 @@ def openalex_get(url, params, retries=3, delay=2):
 
 ---
 
-## 相关 API
+## Related APIs
 
-- → 参见 [api-semantic-scholar.md](api-semantic-scholar.md) — Semantic Scholar 论文/作者查询（引用网络更强）
-- → 参见 [api-core.md](api-core.md) — CORE 开放获取论文全文下载
-- → 参见 [api-crossref.md](api-crossref.md) — CrossRef DOI 元数据查询
+- → See [api-semantic-scholar.md](api-semantic-scholar.md) — Semantic Scholar paper/author lookup (stronger citation network)
+- → See [api-core.md](api-core.md) — CORE open access paper full-text download
+- → See [api-crossref.md](api-crossref.md) — CrossRef DOI metadata lookup
