@@ -83,37 +83,35 @@ type capInfo struct {
 	Default   *string  `json:"default"`
 }
 
-// stepProgress returns the 1-based index and total for progress display
+// stepProgress returns the 1-based index and total for progress display.
+// stepCapabilities was removed from the flow in the 2026-04 redesign —
+// capabilities live in the preset (edited via the preset editor) and
+// addons default to all-on.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
 	if setupMode {
-		total = 4 // preset → capabilities → details → recipe
+		total = 3 // preset → details → recipe
 	} else if hasPresets {
-		total = 4 // preset → capabilities → details → recipe
+		total = 3 // preset → details → recipe
 	} else {
-		total = 5 // api key → preset → capabilities → details → recipe
+		total = 4 // api key → preset → details → recipe
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
 		return 1, total
-	case !hasPresets && (step == stepPickPreset || step == stepEditPreset):
+	case !hasPresets && (step == stepPickPreset || step == stepEditPreset || step == stepPresetKey):
 		return 2, total
 	case step == stepPickPreset || step == stepEditPreset || step == stepPresetKey:
 		return 1, total
-	case step == stepCapabilities:
+	case step == stepAgentNameDir:
 		if setupMode || hasPresets {
 			return 2, total
 		}
 		return 3, total
-	case step == stepAgentNameDir:
+	case step == stepRecipe || step == stepRecipeSwapConfirm:
 		if setupMode || hasPresets {
 			return 3, total
 		}
 		return 4, total
-	case step == stepRecipe || step == stepRecipeSwapConfirm:
-		if setupMode || hasPresets {
-			return 4, total
-		}
-		return 5, total
 	case step == stepLaunching:
 		return total, total
 	}
@@ -611,30 +609,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		return m, nil
 
 	case PresetEditorCommitMsg:
-		// Persist the edited preset, refresh the in-memory list so
-		// downstream steps read the saved version, then advance to
-		// stepPresetKey with provider-specific prefill.
+		// Persist the edited preset, refresh the in-memory list, then
+		// return to the pick-list with the cursor on the saved preset.
+		// The user advances explicitly with Enter when they're ready —
+		// editing is no longer an implicit advance.
 		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
 		if err := preset.Save(toSave); err != nil {
-			// Save failed: stay in editor and surface the error so the
-			// user can retry. The editor's saveErr channel is the right
-			// home for this; for now we drop back to the picker with a
-			// log-level message — pre-Save validation already gates the
-			// usual failure modes.
 			m.message = "save preset: " + err.Error()
 			m.step = stepPickPreset
 			return m, nil
 		}
 		m.presets, _ = preset.List()
-		// Re-find the saved preset in the refreshed list.
 		for i, p := range m.presets {
 			if p.Name == toSave.Name {
 				m.cursor = i
 				break
 			}
 		}
-		updated, cmd := m.enterPresetKeyFor(toSave)
-		return updated, cmd
+		m.step = stepPickPreset
+		return m, nil
 
 	case PresetEditorCancelMsg:
 		m.step = stepPickPreset
@@ -879,34 +872,43 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < len(m.presets)-1 {
 					m.cursor++
 				}
-			case "u":
-				// Fast-path "use as-is" — skip the editor and jump straight
-				// to the existing provider-specific stepPresetKey screen.
-				// Kept so muscle memory from the old wizard still works.
+			case " ", "space", "ctrl+e":
+				// Open the dedicated preset editor. On commit we return
+				// to this pick-list (cursor restored). On cancel we
+				// also return here. The user explicitly advances with
+				// Enter when they're done editing.
 				if m.setupMode && m.cursor == -1 {
-					return m, m.enterCapabilities()
+					return m, nil // can't edit the synthetic "keep current" entry
 				}
-				if m.cursor < len(m.presets) {
-					return m.enterPresetKeyFor(m.presets[m.cursor])
+				if m.cursor < 0 || m.cursor >= len(m.presets) {
+					return m, nil
 				}
-				return m, nil
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
+				m.step = stepEditPreset
+				return m, tea.Batch(
+					m.presetEditor.Init(),
+					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+				)
 			case "enter":
+				// Select the highlighted preset as the agent's default
+				// and advance. If the preset's api_key_env is unset in
+				// .env, route through stepPresetKey to collect the key
+				// value first; otherwise jump straight to the agent
+				// runtime page (stepAgentNameDir).
 				if m.setupMode && m.cursor == -1 {
-					// Skip — keep existing preset, jump to capabilities
+					// "Keep current" — no preset change.
 					return m, m.enterCapabilities()
 				}
-				if m.cursor < len(m.presets) {
-					// Open the dedicated preset editor. On commit we save to
-					// disk and replay the legacy per-provider prefill via
-					// enterPresetKeyFor; on cancel we return to the picker.
-					m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
-					m.step = stepEditPreset
-					return m, tea.Batch(
-						m.presetEditor.Init(),
-						func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
-					)
+				if m.cursor < 0 || m.cursor >= len(m.presets) {
+					return m, nil
 				}
-				return m, nil
+				p := m.presets[m.cursor]
+				if m.presetNeedsKey(p) {
+					return m.enterPresetKeyFor(p)
+				}
+				// Key already configured (or codex OAuth) — skip the
+				// paste step entirely and advance to runtime defaults.
+				return m, m.enterCapabilities()
 			case "backspace", "delete":
 				// Delete a saved (non-builtin) preset
 				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
@@ -1380,7 +1382,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "esc":
-				m.step = stepCapabilities
+				// stepCapabilities was removed from the flow — Esc from
+				// the agent-name page returns to the preset picker.
+				m.step = stepPickPreset
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -2493,46 +2497,62 @@ func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Pre
 }
 
 // enterCapabilities transitions to stepCapabilities.
+// enterCapabilities used to drop into the cap+addon grid. With the
+// 2026-04 redesign, capabilities live in the preset (edited via the
+// preset editor) and addons default to all-on — so this function is
+// now a thin "skip-and-advance" stub that jumps straight to the
+// agent runtime page.
+//
+// What it sets up:
+//   - addonSelected: every addon from AllAddons defaulted to true,
+//     unless setup mode has explicit prior selections to preserve.
+//   - capSelected/capProviders: derived from the chosen preset's
+//     manifest.capabilities, so applyCapSelections at save time
+//     writes the editor's choices back unchanged.
+//
+// Returns the same tea.Cmd the runtime page expects (textinput.Blink
+// since that page focuses an input on entry).
 func (m *FirstRunModel) enterCapabilities() tea.Cmd {
-	m.step = stepCapabilities
-	m.capLoading = true
-	m.capAtKeep = false
-	m.capErr = ""
-	m.capCursor = 0
-	m.capOrder = AllCapabilities
-	m.capSelected = map[string]bool{"skills": true}
-	m.capProviders = nil
-	m.capInfos = nil
+	// Default-on every known addon. Setup mode preserves the user's
+	// previously-saved addons, since /setup is a re-edit, not a fresh
+	// build.
 	m.addonOrder = AllAddons
-	m.addonCursor = 0
-	m.inAddonZone = false
-
-	// In setup mode, preserve the addons already configured in the existing init.json.
-	// Otherwise (fresh first-run), default to all available addons selected.
 	if len(m.setupLoadedAddonNames) > 0 {
 		m.addonSelected = map[string]bool{}
 		for _, name := range m.setupLoadedAddonNames {
 			m.addonSelected[name] = true
 		}
 	} else {
-		m.addonSelected = map[string]bool{"imap": true, "telegram": true, "feishu": true}
+		m.addonSelected = map[string]bool{}
+		for _, name := range AllAddons {
+			m.addonSelected[name] = true
+		}
 	}
 
-	// Setup mode: pre-check capabilities the user previously enabled. Without
-	// this, re-running /setup wipes capabilities back to {"skills": true},
-	// which silently drops the user's earlier selections on save. Reads from
-	// the synthetic keep-current preset (populated by NewSetupModeModel from
-	// init.json["manifest"]["capabilities"]). Done after the default reset so
-	// "skills" remains pre-checked even when the saved init.json doesn't list it.
-	if m.setupMode {
-		if caps, ok := m.setupKeepPreset.Manifest["capabilities"].(map[string]interface{}); ok {
-			for name := range caps {
-				m.capSelected[name] = true
+	// Mirror the chosen preset's capabilities into capSelected so the
+	// init.json write at save time emits exactly what the editor saved
+	// — applyCapSelections walks capSelected, not the preset directly.
+	m.capOrder = AllCapabilities
+	m.capSelected = map[string]bool{}
+	m.capProviders = map[string]string{}
+	p := m.currentPreset()
+	if caps, ok := p.Manifest["capabilities"].(map[string]interface{}); ok {
+		for capName, cfg := range caps {
+			m.capSelected[capName] = true
+			if cfgMap, ok := cfg.(map[string]interface{}); ok {
+				if prov, ok := cfgMap["provider"].(string); ok && prov != "" {
+					m.capProviders[capName] = prov
+				}
 			}
 		}
 	}
 
-	return m.runCheckCaps()
+	// Jump straight to the runtime page. enterAgentNameDir focuses
+	// the name textinput and returns no cmd; we add Blink for
+	// consistency with the textinput's normal cursor behavior.
+	m.enterAgentNameDir(p)
+	m.step = stepAgentNameDir
+	return textinput.Blink
 }
 
 // isCapCompatible checks if a capability works with the given provider.

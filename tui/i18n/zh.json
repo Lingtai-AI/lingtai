@@ -17,7 +17,7 @@
   "firstrun.launching": "正在启动 Agent...",
   "firstrun.no_presets": "未找到预设，请先配置。",
   "firstrun.pick_preset": "为本我选择预设：",
-  "firstrun.select_hint": "↑↓ 选择  [enter] 编辑  [u] 直接使用",
+  "firstrun.select_hint": "↑↓ 浏览  [enter] 使用此预设  [space] 编辑",
   "firstrun.enter_name_dir": "命名 Agent",
   "firstrun.agent_name": "Agent 名称",
   "firstrun.agent_dir": "文件夹名",

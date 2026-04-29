@@ -17,7 +17,7 @@
   "firstrun.launching": "启灵中...",
   "firstrun.no_presets": "无预设，请先配置。",
   "firstrun.pick_preset": "为本我择预设：",
-  "firstrun.select_hint": "↑↓ 择  [enter] 修  [u] 径用",
+  "firstrun.select_hint": "↑↓ 行  [enter] 用此预  [space] 修",
   "firstrun.enter_name_dir": "命器灵",
   "firstrun.agent_name": "器灵名",
   "firstrun.agent_dir": "文件夹名",

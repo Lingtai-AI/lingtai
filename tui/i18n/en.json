@@ -17,7 +17,7 @@
   "firstrun.launching": "Launching agent...",
   "firstrun.no_presets": "No presets found. Let's set up.",
   "firstrun.pick_preset": "Pick a preset for your orchestrator:",
-  "firstrun.select_hint": "↑↓ select  [enter] edit  [u] use as-is",
+  "firstrun.select_hint": "↑↓ navigate  [enter] use this preset  [space] edit",
   "firstrun.enter_name_dir": "Name your agent",
   "firstrun.agent_name": "Agent name",
   "firstrun.agent_dir": "Folder name",
