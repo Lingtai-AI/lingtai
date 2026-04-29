@@ -1,12 +1,82 @@
----
-name: lingtai-changelog
-description: Chronicle of breaking changes, renames, and migrations in the LingTai system. Load this when you encounter unfamiliar names, deprecated references, or confusion about what things are called and where they live. Entries are prepended — newest first.
-version: 1.0.0
+# Changelog — LingTai Anatomy Reference
+
+> **Scope:** Living chronicle of system-level breaking changes, renames, and
+> migrations. When tool names, file paths, or behaviour don't match what you
+> remember, check here first.
+>
+> **History:** Originally a standalone `lingtai-changelog` skill (v1.0.0,
+> 2026-04). Absorbed into `lingtai-anatomy` as a sub-reference v2.1.0
+> (2026-04-29) so the canonical architecture doc is also the canonical change
+> log. Entries newest-first.
+
 ---
 
-# LingTai Changelog
+## 2026-04-29 — Addons demolished; MCP-first architecture; LICC v1 ships
 
-A living chronicle of system-level changes that affect how you work. When something doesn't match what you remember, check here first.
+### What changed
+
+The kernel's in-process `addons/` tree (~3000 LOC: imap / telegram / feishu / wechat managers + accounts + services) was removed entirely. All four addons now ship as **separate sibling repositories**:
+
+- [Lingtai-AI/lingtai-imap](https://github.com/Lingtai-AI/lingtai-imap)
+- [Lingtai-AI/lingtai-telegram](https://github.com/Lingtai-AI/lingtai-telegram)
+- [Lingtai-AI/lingtai-feishu](https://github.com/Lingtai-AI/lingtai-feishu)
+- [Lingtai-AI/lingtai-wechat](https://github.com/Lingtai-AI/lingtai-wechat)
+
+Each runs as an MCP subprocess (no in-process integration anywhere in the kernel).
+
+`init.json` `addons` field semantics changed from a dict-of-kwargs to a list-of-names:
+
+```jsonc
+// Before (legacy, dict shape)
+{ "addons": { "imap": { "config": ".secrets/imap.json" } } }
+
+// After (list-of-names; the kernel mcp catalog handles decompression)
+{
+  "addons": ["imap"],
+  "mcp": {
+    "imap": {
+      "type": "stdio",
+      "command": "/path/to/python",
+      "args": ["-m", "lingtai_imap"],
+      "env": { "LINGTAI_IMAP_CONFIG": ".secrets/imap.json" }
+    }
+  }
+}
+```
+
+A new **MCP capability** (kernel-shipped, ~400 LOC) implements three layers:
+
+1. **Catalog** (`lingtai/mcp_catalog.json`) — kernel-shipped editorial registry of curated MCPs.
+2. **Registry** (`<agent>/mcp_registry.jsonl`) — per-agent JSONL of officially-registered MCPs. The `addons:` list is decompressed into this on boot.
+3. **Activation** (`init.json.mcp`) — per-agent subprocess specs, gated by registry membership.
+
+A new **LICC v1 (LingTai Inbox Callback Contract)** lets out-of-process MCPs push events back into the host agent's inbox via filesystem (`<agent>/.mcp_inbox/<mcp_name>/<event_id>.json`). The kernel injects two env vars (`LINGTAI_AGENT_DIR`, `LINGTAI_MCP_NAME`) into every MCP subprocess so the MCP can find the inbox path without IPC.
+
+### Migration
+
+TUI/portal **migration m028** rewrites legacy init.json files automatically:
+- Converts `addons:` from dict to list shape.
+- Adds matching `mcp:` activation entries.
+- Resolves `*_env` indirection inside addon config files (the new MCPs require plaintext config; the kernel's `_resolve_addons` helper is gone).
+
+If your migration version is < 28 (check `.lingtai/meta.json`), upgrade your TUI/portal binary to apply m028. Until then, the new kernel will reject dict-shape `addons:` with a clear `addons must be list` error.
+
+### What you should do
+
+- **End users:** upgrade TUI/portal to v0.7.3+ once. Migration is automatic, idempotent, atomic per-file.
+- **Agents:** the omnibus tool names (`imap`, `telegram`, `feishu`, `wechat`) are unchanged. The `action` enums are unchanged. Behaviour is identical to legacy.
+- **MCP authors:** see [`mcp-protocol.md`](mcp-protocol.md) for the canonical spec. The `licc.py` reference client (vendored in each first-party MCP repo) is ~80 lines; the contract is purely filesystem-based and language-agnostic.
+
+### Why
+
+The legacy in-process design coupled kernel evolution to addon evolution: every addon protocol change required a kernel release, and every kernel change risked breaking addons. Pulling addons into separate repos with a clean MCP boundary lets each component evolve on its own cadence. LICC closes the loop so listener-style addons (real IMAP IDLE, Telegram getUpdates, etc.) still wake the agent on inbound events without sharing the kernel's process space.
+
+### Reference
+
+- Catalog → registry → activation chain: [`mcp-protocol.md`](mcp-protocol.md) §1
+- LICC v1 spec: [`mcp-protocol.md`](mcp-protocol.md) §4
+- File formats (`mcp_registry.jsonl`, LICC events): [`file-formats.md`](file-formats.md) §6.5–6.6
+- Per-agent layout: [`filesystem-layout.md`](filesystem-layout.md)
 
 ---
 
@@ -176,6 +246,8 @@ See the `library-manual` capability manual for the full workflow.
 
 ## 2026-04-16 — Addon Secrets Move to Admin's `.secrets/`
 
+> **Superseded 2026-04-29:** addons are now MCP subprocesses; the `.secrets/<addon>.json` convention this entry introduced is still the canonical config path under the new MCP architecture. See the 2026-04-29 entry above for the full picture.
+
 ### What changed
 
 Addon configs (IMAP, Feishu, Telegram, WeChat) can now live inside the orchestrator agent's own working directory at `.secrets/<addon>.json`, in plaintext JSON without `*_env` indirection. The old project-shared path keeps working — nothing is forced to move.
@@ -204,8 +276,8 @@ Addons are an admin-only responsibility — avatars must not configure them. Kee
 
 ### What you should do
 
-- **New setups:** use the new path. See `lingtai-imap-setup`, `lingtai-feishu-setup`, `lingtai-telegram-setup`, or `lingtai-wechat-setup` skills for full instructions.
-- **Existing setups:** leave them alone unless the human asks to migrate. Only the `lingtai-imap-setup` skill ships migration instructions; for other addons, the human should migrate manually.
+- **New setups:** use the new path. See the per-MCP repo READMEs (e.g., `lingtai-imap` README) for full instructions.
+- **Existing setups:** leave them alone unless the human asks to migrate. Migration m028 (2026-04-29) rewrites init.json shape automatically; sidecar config files are untouched.
 - **Avatars:** you should never be configuring addons. If an addon tool is missing from your tool list, that is by design — ask your orchestrator.
 
 ---

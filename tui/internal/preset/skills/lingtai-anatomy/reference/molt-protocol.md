@@ -160,7 +160,10 @@ _handle_request(msg):
 | Mail | `mailbox/` | Inbox, sent, archive, contacts |
 | Library | `.library/` | Skills and catalog |
 | Delegates | `delegates/ledger.jsonl` | Avatar spawn log |
-| MCP config | `mcp/servers.json` | External tool configs |
+| MCP registry | `mcp_registry.jsonl` | Per-agent registered MCP records (append-only across molts; see [`mcp-protocol.md`](mcp-protocol.md)) |
+| MCP activations | `init.json.mcp` | Subprocess specs (re-spawned on refresh; survive molts) |
+| MCP legacy mounts | `mcp/servers.json` | Pre-v0.7.3 direct mounts (still supported, ungated) |
+| MCP inbox events | `.mcp_inbox/<name>/` | LICC v1 inbound events; transient, polled at 0.5s, drained then deleted |
 
 ---
 

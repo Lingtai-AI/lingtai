@@ -37,9 +37,6 @@
 │   ├── intrinsic/               # 内建技能（符号链接，TUI 管理）
 │   ├── <recipe-name>/           # 配方技能（TUI 管理）
 │   └── custom/                  # agent 自建技能
-├── .addons/                     # 共享 addon 配置（跨 agent）
-│   └── <addon-name>/
-│       └── config.json
 ├── .tui-asset/                  # TUI 专属元数据（非 agent 状态）
 ├── .portal/                     # Portal 专属数据
 │   ├── topology.jsonl           # 网络快照（JSONL，每 3 秒）
@@ -52,6 +49,8 @@
 ```
 
 **`.library/` 三源扫描**：library intrinsic 扫描三个来源——`.library/intrinsic/`（内核/TUI 内建，每次 init 重写）、`.library/custom/`（agent 自建，主要编辑位置）、以及 `init.json` 中 `manifest.capabilities.library.paths` 声明的额外路径（支持 `~`、绝对路径、相对于工作目录的路径）。
+
+> **v0.7.3 起，`.lingtai/.addons/` 共享 addon 配置目录已废弃**。Addon 现在以 MCP 子进程形式运行，每个 addon 的 secrets/config 由对应 agent 自管（典型路径 `<agent>/.secrets/<addon>.json`），`mcp_inbox/` 等 LICC 路径详见 [`mcp-protocol.md`](mcp-protocol.md)。在 v0.7.3 之前生成的项目中，`.lingtai/.addons/` 可能仍存在；TUI 迁移 m028 不会删除这些目录（保留作为 audit），但运行时不再读取。
 
 ---
 
@@ -112,8 +111,17 @@
 ├── delegates/
 │   └── ledger.jsonl             # 化身委派日志
 │
-├── mcp/
-│   └── servers.json             # MCP 服务器配置（stdio / http）
+├── mcp_registry.jsonl           # MCP 注册表（每行一条已注册 MCP；门控激活）
+├── .mcp_inbox/                  # LICC v1：MCP 子进程推送的事件
+│   └── <mcp-name>/
+│       ├── <event-id>.json      # 待 kernel 投递（轮询 0.5s）
+│       └── .dead/               # 验证失败的事件（不自动清理，供调试）
+│
+├── mcp/                         # Legacy 直接挂载路径（v0.7.3 前的方式）
+│   └── servers.json             # 仍受支持，但优先用 init.json.mcp（见 init.json §2.7）
+│
+├── .secrets/                    # Agent-owned 凭据（典型 .secrets/<addon>.json）
+│
 │
 └── 信号文件（瞬态）：
     ├── .sleep                   # 立即消费。agent 进入 ASLEEP
