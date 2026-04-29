@@ -31,7 +31,8 @@ type PresetEditorCancelMsg struct{}
 type editorField int
 
 const (
-	feSummary editorField = iota
+	feName editorField = iota
+	feSummary
 	feTier
 	feGains
 	feLoses
@@ -49,7 +50,7 @@ const (
 // editorFieldOrder is the rendering order of fields. The cursor walks
 // this slice; section headers render between transitions.
 var editorFieldOrder = []editorField{
-	feSummary, feTier, feGains, feLoses,
+	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feAPICompat, feBaseURL, feAPIKeyEnv, feContextLimit,
 	feCapabilities,
 	feStreaming, feKarma,
@@ -89,6 +90,32 @@ var providerModels = map[string][]string{
 	"zhipu":    {"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
 	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
 	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+}
+
+// modelHasVision reports whether a given model accepts image input.
+// Used to auto-strip the vision capability from the manifest when the
+// user picks a text-only sibling — keeps the materialized init.json
+// coherent without making the user remember to toggle vision off.
+//
+// Only includes models from providerModels above. Free-text providers
+// (openrouter/custom/codex/etc.) get no auto-strip — the user is
+// responsible for matching capabilities to their chosen model id.
+var modelHasVision = map[string]bool{
+	// MiniMax: both M2.7 sizes accept images.
+	"MiniMax-M2.7-highspeed": true,
+	"MiniMax-M2.7":           true,
+	// Zhipu coding-plan models — current generation supports vision.
+	"GLM-5.1":      true,
+	"GLM-5-Turbo":  true,
+	"GLM-4.7":      true,
+	"GLM-4.5-Air":  true,
+	// Mimo: among the picker's models, only mimo-v2.5 accepts images.
+	"mimo-v2.5":     true,
+	"mimo-v2.5-pro": false,
+	"mimo-v2-flash": false,
+	// DeepSeek: text-only across the board.
+	"deepseek-v4-flash": false,
+	"deepseek-v4-pro":   false,
 }
 
 // editorCapabilities is the canonical capability list shown in the
@@ -285,7 +312,7 @@ func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel,
 func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
-	case feSummary, feGains, feLoses, feBaseURL, feAPIKeyEnv, feContextLimit:
+	case feName, feSummary, feGains, feLoses, feBaseURL, feAPIKeyEnv, feContextLimit:
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
 		m.input.Focus()
@@ -500,6 +527,13 @@ func (m *PresetEditorModel) applyInline(val string) {
 	f := editorFieldOrder[m.cursor]
 	llm := m.llmMap()
 	switch f {
+	case feName:
+		// Empty name is silently ignored — name is required to save and
+		// the validator will catch a bad write later. Spaces collapse to
+		// underscores so the on-disk filename is shell-safe.
+		if val != "" {
+			m.working.Name = strings.ReplaceAll(val, " ", "_")
+		}
 	case feSummary:
 		m.working.Description.Summary = val
 	case feGains:
@@ -508,6 +542,7 @@ func (m *PresetEditorModel) applyInline(val string) {
 		m.setExtra("loses", val)
 	case feModel:
 		llm["model"] = val
+		m.syncCapsToModel(val)
 	case feBaseURL:
 		if val == "" {
 			llm["base_url"] = nil
@@ -544,6 +579,26 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 	m.working.Description.Extra[key] = val
 }
 
+// syncCapsToModel removes the vision capability when switching to a
+// model that the editor knows is text-only. Never auto-adds vision —
+// re-enabling is the user's call (via the capability modal). Models
+// outside the modelHasVision table are left alone, since the editor
+// doesn't know whether they support images.
+func (m *PresetEditorModel) syncCapsToModel(modelID string) {
+	supports, known := modelHasVision[modelID]
+	if !known {
+		return
+	}
+	if supports {
+		return
+	}
+	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
+	if caps == nil {
+		return
+	}
+	delete(caps, "vision")
+}
+
 // cycleFocused rotates enum fields by `dir` (+1 or -1).
 func (m *PresetEditorModel) cycleFocused(dir int) {
 	f := editorFieldOrder[m.cursor]
@@ -561,14 +616,15 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		if models, ok := providerModels[newProvider]; ok && len(models) > 0 {
 			currentModel := asString(m.llmMap()["model"])
 			modelStillValid := false
-			for _, m := range models {
-				if m == currentModel {
+			for _, mdl := range models {
+				if mdl == currentModel {
 					modelStillValid = true
 					break
 				}
 			}
 			if !modelStillValid {
 				m.llmMap()["model"] = models[0]
+				m.syncCapsToModel(models[0])
 			}
 		}
 	case feModel:
@@ -577,7 +633,9 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// openrouter, codex) opens inline edit instead via openInline.
 		provider := asString(m.llmMap()["provider"])
 		if models, ok := providerModels[provider]; ok && len(models) > 0 {
-			m.llmMap()["model"] = cycleString(models, m.fieldString(f), dir)
+			next := cycleString(models, m.fieldString(f), dir)
+			m.llmMap()["model"] = next
+			m.syncCapsToModel(next)
 		}
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
@@ -695,6 +753,8 @@ func (m PresetEditorModel) llmMap() map[string]interface{} {
 func (m PresetEditorModel) fieldString(f editorField) string {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	switch f {
+	case feName:
+		return m.working.Name
 	case feSummary:
 		return m.working.Description.Summary
 	case feTier:
@@ -801,6 +861,9 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 
 	var rows []string
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_identity")))
+	// Name row renders the on-disk preset stem. Editable for non-builtins;
+	// for builtins, the clone-first overlay still gates renames on save.
+	rows = append(rows, m.row(feName, lbl("name"), m.working.Name, width-4))
 	rows = append(rows, m.row(feSummary, lbl("summary"), m.working.Description.Summary, width-4))
 	rows = append(rows, m.row(feTier, lbl("tier"), m.tierDisplay(), width-4))
 	rows = append(rows, m.row(feGains, lbl("gains"), asExtra(m.working.Description.Extra, "gains"), width-4))

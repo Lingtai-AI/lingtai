@@ -353,6 +353,7 @@
   "preset_editor.hint_browse": "↑↓ field  enter edit  ←→ cycle  space toggle  c capabilities  ctrl+d json  ctrl+s save  esc cancel",
   "preset_editor.hint_inline": "type to edit  enter commit  esc abandon",
   "preset_editor.hint_dirty": "unsaved changes — discard? [y/N]",
+  "preset_editor.field_name": "name",
   "preset_editor.field_summary": "summary",
   "preset_editor.field_tier": "tier",
   "preset_editor.field_gains": "gains",
