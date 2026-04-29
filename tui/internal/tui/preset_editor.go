@@ -832,9 +832,9 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 
 // row renders a single field row with focus styling. When the row is
 // in inline-edit mode (cursor here AND mode == emInline) the textinput
-// renders in place of the value. When the focused row is cyclable
-// (provider/model-with-picker/api_compat/tier), wrap the value in
-// "‹ value ›" arrows to advertise the ←/→ affordance.
+// renders in place of the value. The model row gets a special radio-
+// strip render when the provider has a known model list, so all
+// options are visible at once and ←/→ visibly moves the dot.
 func (m PresetEditorModel) row(f editorField, key, value string, width int) string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(15)
 	marker := "  "
@@ -847,20 +847,42 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	if m.mode == emInline && focused {
 		return marker + keyStyle.Render(key) + m.input.View()
 	}
-	if focused && m.isCyclable(f) {
-		// Show ‹ value › to advertise that ←/→ change this field.
-		// Subtle foreground so the brackets don't compete with the value.
-		arrow := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		shown := value
-		if shown == "" {
-			shown = "—"
+	if f == feModel {
+		if strip := m.modelRadioStrip(focused, valStyle); strip != "" {
+			return marker + keyStyle.Render(key) + strip
 		}
-		return marker + keyStyle.Render(key) + arrow.Render("‹ ") + valStyle.Render(shown) + arrow.Render(" ›")
 	}
 	if value == "" {
 		value = "—"
 	}
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
+}
+
+// modelRadioStrip renders the model field as a horizontal radio strip
+// (● selected ○ unselected) when the current provider has a known
+// model lineup in providerModels. Returns "" when there's no picker —
+// caller falls back to the standard single-value render.
+func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	provider := asString(m.llmMap()["provider"])
+	models, ok := providerModels[provider]
+	if !ok || len(models) == 0 {
+		return ""
+	}
+	current := asString(m.llmMap()["model"])
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	parts := make([]string, 0, len(models))
+	for _, mdl := range models {
+		if mdl == current {
+			if focused {
+				parts = append(parts, valStyle.Render("● "+mdl))
+			} else {
+				parts = append(parts, "● "+mdl)
+			}
+		} else {
+			parts = append(parts, subtle.Render("○ "+mdl))
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 // isCyclable reports whether a field accepts ←/→ to step through enum
