@@ -42,17 +42,48 @@ const (
 	feBaseURL
 	feAPIKeyEnv
 	feContextLimit
-	feCapabilities
+	feCapFile
+	feCapEmail
+	feCapBash
+	feCapWebSearch
+	feCapPsyche
+	feCapCodex
+	feCapAvatar
+	feCapDaemon
+	feCapLibrary
+	feCapVision
 	feStreaming
 	feKarma
 )
 
+// capFieldNames maps each capability field to its underlying capability
+// key. Order matches editorCapabilities and editorFieldOrder so the
+// vision row stays last visually and feCapVision is the only model-
+// conditional row.
+var capFieldNames = map[editorField]string{
+	feCapFile:      "file",
+	feCapEmail:     "email",
+	feCapBash:      "bash",
+	feCapWebSearch: "web_search",
+	feCapPsyche:    "psyche",
+	feCapCodex:     "codex",
+	feCapAvatar:    "avatar",
+	feCapDaemon:    "daemon",
+	feCapLibrary:   "library",
+	feCapVision:    "vision",
+}
+
 // editorFieldOrder is the rendering order of fields. The cursor walks
-// this slice; section headers render between transitions.
+// this slice; section headers render between transitions. Capability
+// rows split into core (file/email/bash/psyche/codex/avatar/daemon/
+// library) and extras (web_search/vision) — see coreCapabilities and
+// extraCapabilities for rationale.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feAPICompat, feBaseURL, feAPIKeyEnv, feContextLimit,
-	feCapabilities,
+	feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
+	feCapAvatar, feCapDaemon, feCapLibrary,
+	feCapWebSearch, feCapVision,
 	feStreaming, feKarma,
 }
 
@@ -93,22 +124,22 @@ var providerModels = map[string][]string{
 }
 
 // modelHasVision reports whether a given model accepts image input.
-// Used to auto-strip the vision capability from the manifest when the
-// user picks a text-only sibling — keeps the materialized init.json
-// coherent without making the user remember to toggle vision off.
+// Drives both the disabled-row rendering and the model-switch default
+// set: text-only models lose vision; vision-capable models gain it.
 //
 // Only includes models from providerModels above. Free-text providers
-// (openrouter/custom/codex/etc.) get no auto-strip — the user is
-// responsible for matching capabilities to their chosen model id.
+// (openrouter/custom/codex/etc.) are assumed vision-capable here so
+// the user isn't blocked from enabling it on a model the editor
+// doesn't catalog.
 var modelHasVision = map[string]bool{
 	// MiniMax: both M2.7 sizes accept images.
 	"MiniMax-M2.7-highspeed": true,
 	"MiniMax-M2.7":           true,
 	// Zhipu coding-plan models — current generation supports vision.
-	"GLM-5.1":      true,
-	"GLM-5-Turbo":  true,
-	"GLM-4.7":      true,
-	"GLM-4.5-Air":  true,
+	"GLM-5.1":     true,
+	"GLM-5-Turbo": true,
+	"GLM-4.7":     true,
+	"GLM-4.5-Air": true,
 	// Mimo: among the picker's models, only mimo-v2.5 accepts images.
 	"mimo-v2.5":     true,
 	"mimo-v2.5-pro": false,
@@ -118,13 +149,66 @@ var modelHasVision = map[string]bool{
 	"deepseek-v4-pro":   false,
 }
 
-// editorCapabilities is the canonical capability list shown in the
-// sub-modal. Mirrors AllCapabilities from presets.go but kept local so
-// the editor doesn't quietly absorb additions to AllCapabilities that
-// haven't been thought about for the per-preset baseline view.
-var editorCapabilities = []string{
-	"file", "email", "bash", "web_search", "psyche", "codex",
-	"vision", "avatar", "daemon", "library",
+// coreCapabilities are the always-on building blocks every agent
+// shares — filesystem, shell, mailbox, knowledge, parallelism. No
+// provider knobs, not model-conditional.
+var coreCapabilities = []string{
+	"file", "email", "bash", "psyche", "codex",
+	"avatar", "daemon", "library",
+}
+
+// extraCapabilities are provider/model-conditional. web_search picks
+// a search backend (duckduckgo / minimax / zhipu / mimo / codex /
+// inherit) via ←/→. vision is greyed out for text-only models.
+var extraCapabilities = []string{
+	"web_search", "vision",
+}
+
+// editorCapabilities is the full ordered list — cursor walks this
+// in editorFieldOrder. Core first, extras last.
+var editorCapabilities = append(append([]string{}, coreCapabilities...), extraCapabilities...)
+
+// defaultCaps returns the canonical capability set the editor applies
+// when the user switches to this model. The principle: every model
+// gets the same baseline, plus or minus the model-conditional bits
+// (today: vision). User customizations to other capabilities (e.g.
+// disabling email) are NOT preserved across model switches — by
+// design, since the user explicitly opted into the new model's
+// defaults by switching.
+func defaultCapsFor(modelID string) map[string]interface{} {
+	caps := map[string]interface{}{
+		"file":       map[string]interface{}{},
+		"email":      map[string]interface{}{},
+		"bash":       map[string]interface{}{"yolo": true},
+		"web_search": map[string]interface{}{"provider": "duckduckgo"},
+		"psyche":     map[string]interface{}{},
+		"codex":      map[string]interface{}{},
+		"avatar":     map[string]interface{}{},
+		"daemon":     map[string]interface{}{},
+		"library": map[string]interface{}{
+			"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
+		},
+	}
+	if modelHasVision[modelID] {
+		caps["vision"] = map[string]interface{}{"provider": "inherit"}
+	}
+	return caps
+}
+
+// modelSupportsCap reports whether a given capability is allowed for
+// the current model. Today the only model-conditional cap is vision;
+// everything else is universally allowed. Returns true for unknown
+// models so we don't accidentally lock out a user-typed model id from
+// the free-text providers.
+func modelSupportsCap(modelID, cap string) bool {
+	if cap != "vision" {
+		return true
+	}
+	supports, known := modelHasVision[modelID]
+	if !known {
+		return true
+	}
+	return supports
 }
 
 // PresetEditorModel is a single-page preset editor. Hosted by the
@@ -257,10 +341,6 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 	case " ":
 		m.toggleFocused()
 		return m, nil
-	case "c":
-		// Fast path to capability modal regardless of cursor position.
-		m.openCapabilities()
-		return m, nil
 	case "enter":
 		return m.openInline()
 	case "ctrl+s":
@@ -334,8 +414,11 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feCapabilities:
-		m.openCapabilities()
+	case feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
+		feCapAvatar, feCapDaemon, feCapLibrary, feCapWebSearch, feCapVision:
+		// Capability rows: Enter toggles, same as Space. Disabled rows
+		// (e.g. vision on text-only models) are gated inside toggleFocused.
+		m.toggleFocused()
 	case feProvider, feAPICompat:
 		// Enums — Enter cycles forward (same as Right). Lets the user
 		// stay on the keyboard's "advance" key.
@@ -579,24 +662,17 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 	m.working.Description.Extra[key] = val
 }
 
-// syncCapsToModel removes the vision capability when switching to a
-// model that the editor knows is text-only. Never auto-adds vision —
-// re-enabling is the user's call (via the capability modal). Models
-// outside the modelHasVision table are left alone, since the editor
-// doesn't know whether they support images.
+// syncCapsToModel resets the manifest's capabilities to the default
+// set for the new model. User customizations to capability config
+// (e.g. disabling email) are dropped — switching models is an explicit
+// "give me this model's defaults" action. For free-text models not in
+// the providerModels catalog, leave caps alone; we don't know what
+// counts as "default" for an arbitrary openrouter/custom model id.
 func (m *PresetEditorModel) syncCapsToModel(modelID string) {
-	supports, known := modelHasVision[modelID]
-	if !known {
+	if _, known := modelHasVision[modelID]; !known {
 		return
 	}
-	if supports {
-		return
-	}
-	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
-	if caps == nil {
-		return
-	}
-	delete(caps, "vision")
+	m.working.Manifest["capabilities"] = defaultCapsFor(modelID)
 }
 
 // cycleFocused rotates enum fields by `dir` (+1 or -1).
@@ -647,9 +723,20 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"", "1", "2", "3", "4", "5"}
 		m.working.Description.Tier = cycleString(opts, m.working.Description.Tier, dir)
 	}
+	// Capability rows: ←/→ cycles the provider for caps that have one
+	// (web_search, vision). Disabled rows stay disabled.
+	if capName, ok := capFieldNames[f]; ok {
+		currentModel := asString(m.llmMap()["model"])
+		if !modelSupportsCap(currentModel, capName) {
+			return
+		}
+		m.cycleCapProvider(capName, dir)
+	}
 }
 
-// toggleFocused flips bool fields.
+// toggleFocused flips bool fields, and toggles capability rows.
+// Capability toggles are gated by modelSupportsCap so the user
+// cannot enable vision on a text-only model.
 func (m *PresetEditorModel) toggleFocused() {
 	f := editorFieldOrder[m.cursor]
 	switch f {
@@ -662,6 +749,13 @@ func (m *PresetEditorModel) toggleFocused() {
 			m.working.Manifest["admin"] = admin
 		}
 		admin["karma"] = !asBool(admin["karma"])
+	}
+	if capName, ok := capFieldNames[f]; ok {
+		currentModel := asString(m.llmMap()["model"])
+		if !modelSupportsCap(currentModel, capName) {
+			return
+		}
+		m.toggleCapability(capName)
 	}
 }
 
@@ -878,8 +972,15 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	rows = append(rows, m.row(feAPIKeyEnv, lbl("api_key_env"), asString(llm["api_key_env"]), width-4))
 	rows = append(rows, m.row(feContextLimit, lbl("context_limit"), m.fieldString(feContextLimit), width-4))
 	rows = append(rows, "")
+	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_core")))
+	for _, capName := range coreCapabilities {
+		rows = append(rows, m.capRow(capFieldFor(capName), capName, width-4))
+	}
+	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_capabilities")))
-	rows = append(rows, m.row(feCapabilities, lbl("edit"), m.capabilitiesSummary(), width-4))
+	for _, capName := range extraCapabilities {
+		rows = append(rows, m.capRow(capFieldFor(capName), capName, width-4))
+	}
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_runtime")))
 	streaming := asBool(m.working.Manifest["streaming"])
@@ -919,6 +1020,117 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 		value = "—"
 	}
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
+}
+
+// capFieldFor returns the editorField id corresponding to a capability
+// name. Used by the form renderer to look up the cursor-target field
+// for a given capability slot.
+func capFieldFor(name string) editorField {
+	for f, n := range capFieldNames {
+		if n == name {
+			return f
+		}
+	}
+	return feCapFile // unreachable for caps in editorCapabilities
+}
+
+// capEnabled reports whether the given capability is currently
+// configured in the working manifest. An entry with an empty config
+// map still counts as enabled — the kernel reads existence, not
+// shape.
+func (m PresetEditorModel) capEnabled(name string) bool {
+	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
+	_, ok := caps[name]
+	return ok
+}
+
+// capRow renders one capability with checkbox + name + description.
+// Greys out and disables rows the current model doesn't support
+// (today: vision on text-only models). web_search additionally shows
+// an inline ● ○ provider strip on the same line.
+func (m PresetEditorModel) capRow(f editorField, name string, width int) string {
+	focused := editorFieldOrder[m.cursor] == f
+	currentModel := asString(m.llmMap()["model"])
+	allowed := modelSupportsCap(currentModel, name)
+
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	disabled := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	nameStyle := lipgloss.NewStyle()
+	marker := "  "
+	if focused {
+		marker = "▸ "
+		if allowed {
+			nameStyle = nameStyle.Bold(true).Foreground(ColorAccent)
+		} else {
+			nameStyle = nameStyle.Bold(true).Foreground(lipgloss.Color("240"))
+		}
+	}
+
+	enabled := m.capEnabled(name)
+	check := "[ ]"
+	if enabled {
+		check = "[✓]"
+	}
+	if !allowed {
+		check = disabled.Render(check)
+	}
+
+	keyCol := lipgloss.NewStyle().Width(15).Render(name)
+	if !allowed {
+		keyCol = disabled.Render(lipgloss.NewStyle().Width(15).Render(name))
+	} else if focused {
+		keyCol = nameStyle.Width(15).Render(name)
+	} else {
+		keyCol = nameStyle.Width(15).Render(name)
+	}
+
+	// Inline provider strip for web_search.
+	var detail string
+	if name == "web_search" && enabled && allowed {
+		detail = m.capProviderStrip(name, focused)
+	} else {
+		desc := i18n.T("firstrun.cap_desc." + name)
+		// Collapse the multiline description to a single line for the
+		// inline view; full text is still in i18n if we want a help
+		// overlay later.
+		desc = strings.ReplaceAll(desc, "\n", "  ")
+		if !allowed {
+			desc = i18n.T("preset_editor.cap_disabled_hint")
+			detail = disabled.Render(desc)
+		} else {
+			detail = subtle.Render(desc)
+		}
+	}
+
+	return marker + check + " " + keyCol + detail
+}
+
+// capProviderStrip renders the multi-provider radio strip for
+// capabilities that have a provider knob (web_search, vision).
+// Highlights the current provider in the focused row's accent color.
+func (m PresetEditorModel) capProviderStrip(capName string, focused bool) string {
+	opts, ok := capabilityProviderOptions[capName]
+	if !ok {
+		return ""
+	}
+	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
+	cfg, _ := caps[capName].(map[string]interface{})
+	current, _ := cfg["provider"].(string)
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	accent := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+	parts := make([]string, 0, len(opts))
+	for _, p := range opts {
+		if p == current {
+			if focused {
+				parts = append(parts, accent.Render("● "+p))
+			} else {
+				parts = append(parts, "● "+p)
+			}
+		} else {
+			parts = append(parts, subtle.Render("○ "+p))
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 // modelRadioStrip renders the model field as a horizontal radio strip
