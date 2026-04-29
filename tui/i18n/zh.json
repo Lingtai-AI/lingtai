@@ -154,6 +154,7 @@
   "preset.delete": "删除已保存的预设",
   "preset.saved": "已保存预设",
   "preset.templates": "新建预设",
+  "preset.vision_chip": "视觉",
   "presets.endpoint": "API 接口",
   "presets.enter_name": "输入预设名称：",
   "presets.model": "模型",

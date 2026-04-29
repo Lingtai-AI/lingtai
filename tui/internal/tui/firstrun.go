@@ -1674,11 +1674,16 @@ func (m FirstRunModel) View() string {
 				displayDesc = p.Description.Summary
 			}
 			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
-			// Tier chip renders between name and summary when set so users
-			// can pick on the quality/cost ladder at a glance.
+			// Tier + vision chips render between name and summary. Tier
+			// only when set; vision only for presets with the capability.
+			// Capabilities are otherwise uniform across builtins, so
+			// surfacing vision is the one distinction worth highlighting.
 			var meta string
 			if label := tierLabel(p.Description.Tier, i18n.Lang()); label != "" {
 				meta += "  " + tierChipStyle(p.Description.Tier).Render(label)
+			}
+			if presetHasVision(p) {
+				meta += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(i18n.T("preset.vision_chip"))
 			}
 			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + meta + desc + "\n")
@@ -2837,6 +2842,24 @@ func (m *FirstRunModel) updatePromptPaths() {
 }
 
 // getPresetProvider extracts provider name from a preset
+// presetHasVision reports whether the preset's capabilities include a
+// non-empty vision block. Used by the pick-list to surface the one
+// capability distinction that meaningfully varies across presets.
+func presetHasVision(p preset.Preset) bool {
+	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
+	if caps == nil {
+		return false
+	}
+	v, ok := caps["vision"]
+	if !ok || v == nil {
+		return false
+	}
+	if cfg, ok := v.(map[string]interface{}); ok && len(cfg) == 0 {
+		return false
+	}
+	return true
+}
+
 func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 		if provider, ok := llm["provider"].(string); ok {

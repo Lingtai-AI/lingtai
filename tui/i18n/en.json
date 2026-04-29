@@ -159,6 +159,7 @@
   "preset.delete": "Delete saved preset",
   "preset.saved": "Saved Presets",
   "preset.templates": "New Preset",
+  "preset.vision_chip": "vision",
   "presets.endpoint": "Endpoint",
   "presets.enter_name": "Enter preset name:",
   "presets.model": "Model",

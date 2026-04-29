@@ -154,6 +154,7 @@
   "preset.delete": "删已存预设",
   "preset.saved": "已存预设",
   "preset.templates": "新建预设",
+  "preset.vision_chip": "目",
   "presets.endpoint": "端",
   "presets.enter_name": "入预设名：",
   "presets.model": "模型",
