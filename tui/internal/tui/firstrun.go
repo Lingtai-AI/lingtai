@@ -1674,15 +1674,11 @@ func (m FirstRunModel) View() string {
 				displayDesc = p.Description.Summary
 			}
 			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
-			// Tier chip + capability icons render between name and summary so
-			// users can pick on quality/cost ladder + capability surface at a
-			// glance rather than discovering them three steps later.
+			// Tier chip renders between name and summary when set so users
+			// can pick on the quality/cost ladder at a glance.
 			var meta string
 			if label := tierLabel(p.Description.Tier, i18n.Lang()); label != "" {
 				meta += "  " + tierChipStyle(p.Description.Tier).Render(label)
-			}
-			if icons := p.CapabilityIcons(); icons != "" {
-				meta += "  " + icons
 			}
 			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + meta + desc + "\n")
