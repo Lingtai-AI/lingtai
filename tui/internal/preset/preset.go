@@ -40,9 +40,16 @@ var recipeAssetsFS embed.FS
 var skillsFS embed.FS
 
 // Preset is a reusable agent template stored at ~/.lingtai-tui/presets/.
+//
+// Tags are namespaced strings like "tier:opus" or "specialty:code". The
+// first namespace shipped is `tier:`, a five-rung cost/quality ladder
+// (mythos > opus > sonnet > haiku > freebie) used by agents to pick
+// presets for daemons/avatars and by the TUI to render visual chips
+// in the library view.
 type Preset struct {
 	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
+	Description string                 `json:"description,omitempty"`
+	Tags        []string               `json:"tags,omitempty"`
 	Manifest    map[string]interface{} `json:"manifest"`
 }
 
@@ -65,6 +72,11 @@ func List() ([]Preset, error) {
 	var presets []Preset
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		// Skip the kernel-side migration meta file — it sits in the same
+		// directory as preset files but is not itself a preset.
+		if e.Name() == "_kernel_meta.json" {
 			continue
 		}
 		p, err := Load(e.Name()[:len(e.Name())-5]) // strip .json

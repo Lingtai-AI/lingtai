@@ -333,6 +333,14 @@
   "palette.codex": "Browse agent codex",
   "palette.system": "Browse agent system files",
   "palette.mailbox": "Browse all mailbox messages and attachments",
+  "palette.presets": "Manage preset library — view, tag, browse",
+  "preset_library.title": "Preset Library",
+  "preset_library.list_header": "%d preset(s)",
+  "preset_library.no_selection": "(no preset selected)",
+  "preset_library.hint": "↑↓ navigate  t edit tier tag  r reload  esc back",
+  "preset_library.tag_hint": "↑↓ pick tier  enter save  esc cancel",
+  "preset_library.tag_picker_title": "Tag tier — %s",
+  "preset_library.tag_clear": "(clear tier tag)",
   "library.title": "Library",
   "library.intrinsic": "Intrinsic",
   "library.created": "Created",
@@ -422,6 +430,7 @@
   "cmd.codex": "Browse an agent's codex — accumulated research and findings. Ctrl+T switches between agents",
   "cmd.system": "Browse an agent's system files (system.md, covenant, principle, procedures, pad, llm). Ctrl+T switches between agents",
   "cmd.mailbox": "Browse all mailbox messages (inbox, sent, IMAP) with full message body and inline attachment rendering",
+  "cmd.presets": "Open the preset library: view available presets, see their LLM and capabilities, and tag them with a 1–5 star cost/quality tier (higher is better). Tags propagate to agents via system(action='presets'); used for daemon/avatar selection. Read-only inspection plus tag editing — full preset creation still happens in /setup.",
   "cmd.molt": "Force the agent to molt immediately — saves context and resets the conversation window",
   "cmd.nirvana": "Wipe everything and start completely fresh — deletes .lingtai/ and all agent data. Irreversible",
   "cmd.export": "Export a network or recipe for sharing (/export network exports the full agent network, /export recipe exports a reusable recipe)",
@@ -433,5 +442,9 @@
   "login.reauth": "re-authenticate",
   "login.cancel": "cancel",
   "login.enter_key": "Enter new API key for %s:",
-  "login.no_credentials": "No saved credentials. Use /setup to configure a provider."
+  "login.no_credentials": "No saved credentials. Use /setup to configure a provider.",
+  "mdviewer.export_hint": "ctrl+e export",
+  "mdviewer.export_saved": "Exported to",
+  "mdviewer.export_failed": "Export failed",
+  "mdviewer.export_empty": "Nothing to export"
 }

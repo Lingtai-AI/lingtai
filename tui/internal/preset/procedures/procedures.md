@@ -157,6 +157,24 @@ Addons (`imap`, `feishu`, `telegram`, `wechat`) are the orchestrator's responsib
 
 Addon credentials live in the orchestrator's own working directory at `.secrets/<addon>.json` (plaintext JSON). The path is self-contained — the orchestrator does not cross into another agent's directory to read them.
 
+### Choosing a Preset Tier
+
+When you swap presets (`system(action='refresh', preset=...)`) or spawn a daemon/avatar with an explicit preset, look at each candidate's `tags` field — surfaced by `system(action='presets')`. The `tier:*` tag is a five-star cost-and-quality rating where higher is better:
+
+- `tier:5` (★★★★★) — the strongest models in existence; reserve for irreplaceable reasoning
+- `tier:4` (★★★★) — premium frontier-class; primary cognition for important work
+- `tier:3` (★★★) — strong and value-priced; good default for substantive tasks
+- `tier:2` (★★) — fast and cheap; everyday throughput
+- `tier:1` (★) — zero-cost, rate-limited; opportunistic use
+
+Rules of thumb:
+- **Daemon (神識) work** is ephemeral and parallel. Prefer `tier:1` or `tier:2` — daemons burn through many short turns, so cheap-and-fast wins. Reserve `tier:3`/`tier:4` daemons for genuinely hard sub-tasks (deep code review, math, long-context summarization).
+- **Avatar (分身) spawn** inherits your default preset unless you specify one. If the avatar's mission is exploratory or bulk, downshift to `tier:3` or below.
+- **Your own primary thought** stays on whatever preset suits the moment — if reasoning quality matters, reach for `tier:4` or `tier:5`; if you're doing volume and the task is well-scoped, `tier:3` or `tier:2` is fine.
+- **`tier:1` carries reliability risk**: rate limits, occasional 429s, sometimes degraded model quality. If a `tier:1` preset's `connectivity` field reports unreachable, fall back to a `tier:2` paid alternative rather than retrying.
+
+Untagged presets carry no tier signal — treat them as "trust the user's choice; don't downshift unless asked."
+
 ### System Changes and Renames
 
 If you encounter unfamiliar tool names, file paths, or references that don't match your current tools — load the `lingtai-changelog` skill. It is a living chronicle of breaking changes and renames across the LingTai system. Entries are newest-first.

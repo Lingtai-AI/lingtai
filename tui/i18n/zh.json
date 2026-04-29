@@ -328,6 +328,14 @@
   "palette.codex": "浏览器灵典集",
   "palette.system": "浏览器灵系统文件",
   "palette.mailbox": "浏览所有邮件和附件",
+  "palette.presets": "管理预设库 — 查看、打标签",
+  "preset_library.title": "预设库",
+  "preset_library.list_header": "%d 个预设",
+  "preset_library.no_selection": "（未选择预设）",
+  "preset_library.hint": "↑↓ 浏览  t 修改等级标签  r 重载  esc 返回",
+  "preset_library.tag_hint": "↑↓ 选等级  enter 保存  esc 取消",
+  "preset_library.tag_picker_title": "标记等级 — %s",
+  "preset_library.tag_clear": "（清除等级标签）",
   "library.title": "藏经阁",
   "library.intrinsic": "内置",
   "library.created": "自创",
@@ -422,6 +430,7 @@
   "cmd.codex": "浏览器灵的典集——积累的调研与发现。Ctrl+T 切换器灵",
   "cmd.system": "浏览器灵的系统文件（system.md、信约、宗旨、流程、便笺、llm）。Ctrl+T 切换器灵",
   "cmd.mailbox": "浏览所有邮件（收件箱、已发送、IMAP）——完整消息内容及内联附件",
+  "cmd.presets": "打开预设库：查看可用预设，了解其 LLM 与能力，并为其打上 1–5 星等级标签（拉完了 / NPC / 顶级 / 人上人 / 夯，星数越高越强）。标签会通过 system(action='presets') 传递给器灵，用于 daemon/avatar 选型。仅查看与改标签——完整新建仍走 /setup。",
   "cmd.molt": "立即强制凝蜕——保存上下文后重置对话窗口",
   "cmd.nirvana": "清除一切从头开始——删除 .lingtai/ 及所有器灵数据。不可逆",
   "cmd.export": "导出网络或配方以供分享（/export network 导出完整器灵网络，/export recipe 导出可复用的配方）",
@@ -433,5 +442,9 @@
   "login.reauth": "重新认证",
   "login.cancel": "取消",
   "login.enter_key": "输入 %s 的新 API 密钥：",
-  "login.no_credentials": "没有已保存的凭证。使用 /setup 配置 Provider。"
+  "login.no_credentials": "没有已保存的凭证。使用 /setup 配置 Provider。",
+  "mdviewer.export_hint": "ctrl+e 导出",
+  "mdviewer.export_saved": "已导出至",
+  "mdviewer.export_failed": "导出失败",
+  "mdviewer.export_empty": "无内容可导出"
 }

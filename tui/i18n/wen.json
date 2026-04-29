@@ -328,6 +328,14 @@
   "palette.codex": "览诸灵之典",
   "palette.system": "览器灵之系枢",
   "palette.mailbox": "览诸书与附件",
+  "palette.presets": "理预设之囊 — 阅、标等",
+  "preset_library.title": "预设囊",
+  "preset_library.list_header": "%d 预设",
+  "preset_library.no_selection": "（未选）",
+  "preset_library.hint": "↑↓ 行  t 标等  r 重读  esc 退",
+  "preset_library.tag_hint": "↑↓ 择等  enter 存  esc 退",
+  "preset_library.tag_picker_title": "标等 — %s",
+  "preset_library.tag_clear": "（除等之标）",
   "library.title": "藏经阁",
   "library.intrinsic": "固有",
   "library.created": "自创",
@@ -422,6 +430,7 @@
   "cmd.codex": "览器灵之典——所积之知与所得之悟。Ctrl+T 择器灵",
   "cmd.system": "览器灵之系枢（system.md、信约、宗旨、流程、便笺、llm）。Ctrl+T 择器灵",
   "cmd.mailbox": "览诸书（来书、遣书、外书）——全文与附件俱呈",
+  "cmd.presets": "启预设之囊：览所列预设，知其 LLM 与诸能，复以等级之标记之（一至五星，星愈众则愈强：拉完了、NPC、顶级、人上人、夯）。标记由 system(action='presets') 传至器灵，以为 daemon、avatar 之择。仅可阅视与改标——新建仍循 /setup。",
   "cmd.molt": "即令转世——存上下文后重置对话之窗",
   "cmd.nirvana": "尽除一切从头再来——删 .lingtai/ 及诸灵之数据。不可逆",
   "cmd.export": "导出相阵或功法以分享（/export network 导出全阵，/export recipe 导出可复用之法）",
@@ -433,5 +442,9 @@
   "login.reauth": "重登",
   "login.cancel": "罢",
   "login.enter_key": "入 %s 新密钥：",
-  "login.no_credentials": "无凭证。/setup 以设 Provider。"
+  "login.no_credentials": "无凭证。/setup 以设 Provider。",
+  "mdviewer.export_hint": "ctrl+e 颁",
+  "mdviewer.export_saved": "颁于",
+  "mdviewer.export_failed": "颁不行",
+  "mdviewer.export_empty": "无可颁"
 }
