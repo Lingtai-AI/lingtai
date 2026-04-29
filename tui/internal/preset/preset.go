@@ -338,8 +338,7 @@ func minimaxPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": mm, "psyche": e(), "codex": e(),
-				"vision": mm, "talk": mm, "draw": mm, "video": mm, "compose": mm,
-				"listen": e(), "web_read": e(), "avatar": e(), "daemon": e(),
+				"vision": mm, "web_read": e(), "avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
@@ -364,7 +363,7 @@ func zhipuPreset() Preset {
 				"web_search": zp, "psyche": e(), "codex": e(),
 				"vision": zp, "web_read": zp,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "library": libraryDefault(),
+				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -382,14 +381,15 @@ func deepseekPreset() Preset {
 				"api_key": nil, "api_key_env": "DEEPSEEK_API_KEY",
 				"base_url": "https://api.deepseek.com", "api_compat": "openai",
 			},
-			// DeepSeek's public API is text-only — no TTS, image gen, video, or
-			// transcription. Multimodal tools fall back to local defaults.
+			// DeepSeek's public API is text-only — no media generation. For
+			// audio analysis (transcription, music critique), use the `listen`
+			// skill; for media creation, register the MiniMax-Media MCP server
+			// via the `lingtai-mcp` skill.
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
 				"psyche": e(), "codex": e(), "web_read": e(),
 				"avatar": e(), "daemon": e(),
-				"listen":  map[string]interface{}{"provider": "whisper"},
 				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
@@ -408,16 +408,14 @@ func openrouterPreset() Preset {
 				"api_key": nil, "api_key_env": "OPENROUTER_API_KEY",
 				"base_url": nil,
 			},
-			// OpenRouter is a text-only /chat/completions gateway — no TTS,
-			// image gen, video gen, or transcription. Multimodal tools point
-			// to independent providers or local defaults (duckduckgo for
-			// search, whisper for listen, trafilatura for web_read).
+			// OpenRouter is a text-only /chat/completions gateway — no media
+			// generation. For audio analysis use the `listen` skill; for
+			// media creation register a provider's MCP server via `lingtai-mcp`.
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
 				"psyche": e(), "codex": e(), "web_read": e(),
 				"avatar": e(), "daemon": e(),
-				"listen":  map[string]interface{}{"provider": "whisper"},
 				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
@@ -442,7 +440,7 @@ func codexPreset() Preset {
 				"web_search": cx, "psyche": e(), "codex": e(),
 				"vision": cx, "web_read": cx,
 				"avatar": e(), "daemon": e(),
-				"listen": e(), "library": libraryDefault(),
+				"library": libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -463,7 +461,7 @@ func customPreset() Preset {
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": e(), "psyche": e(), "codex": e(),
 				"web_read": e(), "avatar": e(), "daemon": e(),
-				"listen": e(), "library": libraryDefault(),
+				"library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -868,11 +866,6 @@ func (p Preset) CapabilityIcons() string {
 		"codex":      "📚",
 		"library":    "📜",
 		"vision":     "👁️",
-		"talk":       "🔊",
-		"draw":       "🎨",
-		"compose":    "🎵",
-		"video":      "🎬",
-		"listen":     "👂",
 		"web_read":   "📖",
 		"avatar":     "👤",
 		"daemon":     "⚡",

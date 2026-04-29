@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 26
+const CurrentVersion = 27
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -49,6 +49,7 @@ var migrations = []Migration{
 	{Version: 24, Name: "add-active-preset", Fn: func(_ string) error { return nil }}, // TUI-only: infers manifest.active_preset from existing init.json
 	{Version: 25, Name: "preset-description-object", Fn: func(_ string) error { return nil }}, // TUI-only: promotes description to {summary, tier?} object on global preset library files
 	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm}, // shared: rewrites stem-form preset refs in init.json
+	{Version: 27, Name: "strip-media-capabilities", Fn: migrateStripMediaCapabilities}, // shared: drops compose/video/draw/talk/listen from init.json
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any

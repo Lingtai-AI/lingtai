@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 26
+const CurrentVersion = 27
 
 type metaFile struct {
 	Version                       int  `json:"version"`
@@ -50,6 +50,7 @@ var migrations = []Migration{
 	{Version: 24, Name: "add-active-preset", Fn: migrateAddActivePreset},
 	{Version: 25, Name: "preset-description-object", Fn: migratePresetDescriptionObject},
 	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm},
+	{Version: 27, Name: "strip-media-capabilities", Fn: migrateStripMediaCapabilities},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.

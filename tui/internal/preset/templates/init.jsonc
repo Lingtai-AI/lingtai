@@ -113,21 +113,15 @@
       // Fetches and extracts readable content from URLs using trafilatura (local, no API key).
       "web_read": {},
 
-      // --- Text-to-speech ---
-      // Providers: "minimax", "gemini".
-      "talk": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
+      // --- Media creation (compose / video / draw / talk) ---
+      // Removed from in-tree capabilities. Use the `media-creation` skill
+      // and register a provider's MCP server (see `lingtai-mcp` skill).
+      // Removed: "compose", "video", "draw", "talk".
 
-      // --- Music generation ---
-      // Providers: "minimax".
-      "compose": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
-
-      // --- Image generation ---
-      // Providers: "minimax", "gemini".
-      "draw": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
-
-      // --- Audio transcription ---
-      // Providers: "whisper" (local, no API key), "gemini".
-      "listen": { "provider": "whisper" },
+      // --- Audio analysis (transcribe / appreciate) ---
+      // Removed. Use the `listen` skill — bundled scripts run faster-whisper
+      // and librosa locally; no provider or API key needed.
+      // Removed: "listen".
 
       // --- Library (skill catalog) ---
       // Per-agent .library/{intrinsic,custom}/ is managed automatically.
