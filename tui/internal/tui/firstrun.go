@@ -479,7 +479,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 				}
 				m.setupKeepPreset = preset.Preset{
 					Name:        "keep_current",
-					Description: i18n.T("setup.keep_current_preset"),
+					Description: preset.PresetDescription{Summary: i18n.T("setup.keep_current_preset")},
 					Manifest:    inner,
 				}
 				m.setupKeepInitJSON = existing
@@ -1965,7 +1965,7 @@ func (m FirstRunModel) View() string {
 			}
 			displayDesc := i18n.T("preset.desc_" + p.Name)
 			if displayDesc == "preset.desc_"+p.Name {
-				displayDesc = p.Description
+				displayDesc = p.Description.Summary
 			}
 			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
 			desc := StyleSubtle.Render("  " + displayDesc)

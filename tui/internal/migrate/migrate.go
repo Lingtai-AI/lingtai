@@ -48,7 +48,7 @@ var migrations = []Migration{
 	{Version: 22, Name: "recipe-lang-suffix", Fn: migrateRecipeLangSuffix},
 	{Version: 23, Name: "recipe-state-rename", Fn: migrateRecipeStateRename},
 	{Version: 24, Name: "add-active-preset", Fn: migrateAddActivePreset},
-	{Version: 25, Name: "preset-tags-field", Fn: migratePresetTagsField},
+	{Version: 25, Name: "preset-description-object", Fn: migratePresetDescriptionObject},
 	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm},
 }
 

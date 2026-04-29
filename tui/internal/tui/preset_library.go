@@ -12,13 +12,11 @@ import (
 )
 
 // Tier vocabulary mirrors the kernel-side TIER_VALUES in lingtai/presets.py.
-// Stored on disk as plain numeric strings ("tier:1" through "tier:5"). The
-// TUI renders these to a locale-appropriate label: stars (★..★★★★★) for
-// English; the playful Chinese set (拉完了 / NPC / 顶级 / 人上人 / 夯) for
-// zh and wen. The on-disk canonical form never changes — only the visual.
+// Stored on disk as `description.tier` ("1" through "5"). The TUI renders
+// it locale-appropriately: stars (★..★★★★★) for English; the playful
+// Chinese set (拉完了 / NPC / 顶级 / 人上人 / 夯) for zh and wen. The
+// on-disk canonical form never changes — only the visual.
 var tierValues = []string{"5", "4", "3", "2", "1"} // descending in the picker (best first)
-
-const tierTagPrefix = "tier:"
 
 // tierLabel renders a tier value as a locale-appropriate display string.
 // Returns "" for unknown values so callers can guard with `if label != ""`.
@@ -60,31 +58,9 @@ func tierLabel(tier, lang string) string {
 	return ""
 }
 
-// presetTier returns the value of the first tier:* tag in the preset's
-// Tags slice, or "" when no tier tag is present.
+// presetTier returns the preset's tier value, or "" when unset.
 func presetTier(p preset.Preset) string {
-	for _, t := range p.Tags {
-		if strings.HasPrefix(t, tierTagPrefix) {
-			return strings.TrimPrefix(t, tierTagPrefix)
-		}
-	}
-	return ""
-}
-
-// withTier returns a copy of tags with the existing tier:* tag (if any)
-// replaced by the supplied value. Passing an empty value strips any
-// existing tier tag without adding a new one.
-func withTier(tags []string, value string) []string {
-	out := make([]string, 0, len(tags)+1)
-	for _, t := range tags {
-		if !strings.HasPrefix(t, tierTagPrefix) {
-			out = append(out, t)
-		}
-	}
-	if value != "" {
-		out = append(out, tierTagPrefix+value)
-	}
-	return out
+	return p.Description.Tier
 }
 
 // tierChipStyle returns the lipgloss style used for a tier chip in the list.
@@ -183,7 +159,7 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 				if m.tierIdx < len(tierValues) {
 					newTier = tierValues[m.tierIdx]
 				} // else: "untag" — newTier stays ""
-				p.Tags = withTier(p.Tags, newTier)
+				p.Description.Tier = newTier
 				if err := preset.Save(p); err != nil {
 					m.saveErr = fmt.Sprintf("save failed: %v", err)
 					return m, nil
@@ -396,9 +372,9 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 	}
 	b.WriteString("\n\n")
 
-	// Description
-	if p.Description != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(p.Description))
+	// Description summary
+	if p.Description.Summary != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(p.Description.Summary))
 		b.WriteString("\n\n")
 	}
 
@@ -437,13 +413,6 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 		b.WriteString("\n\n")
 	}
 
-	// Tags
-	if len(p.Tags) > 0 {
-		b.WriteString(sectionHead("Tags"))
-		b.WriteString(strings.Join(p.Tags, ", "))
-		b.WriteString("\n")
-	}
-
 	return box.Render(b.String())
 }
 
@@ -471,7 +440,7 @@ func (m PresetLibraryModel) renderWithTagPicker(base string) string {
 		label := tierLabel(v, m.lang)
 		chip := tierChipStyle(v).Render(label)
 		// Format: "▸  ★★★★    tier:4"  or  "▸  人上人    tier:4"
-		row := rowStyle.Render(marker + chip + "  " + style.Render(tierTagPrefix+v))
+		row := rowStyle.Render(marker + chip + "  " + style.Render("tier:"+v))
 		rows = append(rows, row)
 	}
 	// Bottom slot: "untag" / 清除

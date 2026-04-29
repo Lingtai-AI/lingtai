@@ -41,8 +41,9 @@ func TestSaveAndLoad_Roundtrip(t *testing.T) {
 		if loaded.Name != p.Name {
 			t.Errorf("name = %q, want %q", loaded.Name, p.Name)
 		}
-		if loaded.Description != p.Description {
-			t.Errorf("description = %q, want %q", loaded.Description, p.Description)
+		if loaded.Description.Summary != p.Description.Summary {
+			t.Errorf("description.summary = %q, want %q",
+				loaded.Description.Summary, p.Description.Summary)
 		}
 	})
 }

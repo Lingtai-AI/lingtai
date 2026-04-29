@@ -37,12 +37,11 @@ func readPresetRaw(t *testing.T, presetsDir, name string) map[string]interface{}
 	return raw
 }
 
-func TestM025BackfillsTagsOnLegacyPreset(t *testing.T) {
+func TestM025WrapsStringDescription(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
 
-	// Legacy preset with no `tags` field at all.
 	writePresetRaw(t, presetsDir, "openrouter", map[string]interface{}{
 		"name":        "openrouter",
 		"description": "OpenAI-compatible API — full capabilities",
@@ -54,28 +53,25 @@ func TestM025BackfillsTagsOnLegacyPreset(t *testing.T) {
 		},
 	})
 
-	// Run the migration. lingtaiDir is unused by m025, but the signature
-	// requires it — match the convention of other migrations.
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
 	got := readPresetRaw(t, presetsDir, "openrouter")
-	tags, ok := got["tags"].([]interface{})
+	desc, ok := got["description"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected `tags` to be a list, got %T (%v)", got["tags"], got["tags"])
+		t.Fatalf("expected description to be an object, got %T", got["description"])
 	}
-	if len(tags) != 0 {
-		t.Errorf("expected empty tags list, got %v", tags)
+	if desc["summary"] != "OpenAI-compatible API — full capabilities" {
+		t.Errorf("summary = %v, want the original string", desc["summary"])
 	}
 }
 
-func TestM025LeavesPresetsWithExistingTagsAlone(t *testing.T) {
+func TestM025FoldsTierTagIntoDescription(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
 
-	// Preset that already declares tags — even non-empty — should be untouched.
 	writePresetRaw(t, presetsDir, "deepseek_pro", map[string]interface{}{
 		"name":        "deepseek_pro",
 		"description": "DeepSeek V4 Pro",
@@ -88,30 +84,60 @@ func TestM025LeavesPresetsWithExistingTagsAlone(t *testing.T) {
 		},
 	})
 
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
 	got := readPresetRaw(t, presetsDir, "deepseek_pro")
-	tags, ok := got["tags"].([]interface{})
-	if !ok {
-		t.Fatalf("tags missing or wrong type: %v", got["tags"])
+	desc := got["description"].(map[string]interface{})
+	if desc["summary"] != "DeepSeek V4 Pro" {
+		t.Errorf("summary = %v, want preserved", desc["summary"])
 	}
-	if len(tags) != 2 || tags[0] != "tier:4" || tags[1] != "specialty:code" {
-		t.Errorf("tags were modified: %v", tags)
+	if desc["tier"] != "4" {
+		t.Errorf("tier = %v, want '4' folded from tags", desc["tier"])
+	}
+	if _, ok := got["tags"]; ok {
+		t.Errorf("tags key should have been deleted, got %v", got["tags"])
 	}
 }
 
-func TestM025LeavesEmptyExistingTagsAlone(t *testing.T) {
-	// Same as above but with explicitly-empty existing tags. Migration must
-	// not rewrite the file (idempotent).
+func TestM025SynthesizesEmptySummaryWhenMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
+
+	// No description at all.
+	writePresetRaw(t, presetsDir, "nodesc", map[string]interface{}{
+		"name": "nodesc",
+		"manifest": map[string]interface{}{
+			"llm":          map[string]interface{}{"provider": "p", "model": "m"},
+			"capabilities": map[string]interface{}{},
+		},
+	})
+
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	got := readPresetRaw(t, presetsDir, "nodesc")
+	desc, ok := got["description"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected description object, got %T", got["description"])
+	}
+	if s, _ := desc["summary"].(string); s != "" {
+		t.Errorf("summary = %q, want empty (operator must fill in)", s)
+	}
+}
+
+func TestM025LeavesAlreadyMigratedAlone(t *testing.T) {
+	// Already in the new shape — no rewrite.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
 
 	writePresetRaw(t, presetsDir, "blank", map[string]interface{}{
-		"name": "blank",
-		"tags": []interface{}{},
+		"name":        "blank",
+		"description": map[string]interface{}{"summary": "ok", "tier": "3"},
 		"manifest": map[string]interface{}{
 			"llm":          map[string]interface{}{"provider": "p", "model": "m"},
 			"capabilities": map[string]interface{}{},
@@ -120,13 +146,13 @@ func TestM025LeavesEmptyExistingTagsAlone(t *testing.T) {
 	pre, _ := os.Stat(filepath.Join(presetsDir, "blank.json"))
 	preMtime := pre.ModTime()
 
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
 	post, _ := os.Stat(filepath.Join(presetsDir, "blank.json"))
 	if !post.ModTime().Equal(preMtime) {
-		t.Errorf("file was rewritten despite already having tags: pre=%v post=%v",
+		t.Errorf("file was rewritten despite already migrated: pre=%v post=%v",
 			preMtime, post.ModTime())
 	}
 }
@@ -137,19 +163,19 @@ func TestM025IsIdempotent(t *testing.T) {
 	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
 
 	writePresetRaw(t, presetsDir, "p1", map[string]interface{}{
-		"name":     "p1",
-		"manifest": map[string]interface{}{"llm": map[string]interface{}{"provider": "x", "model": "y"}, "capabilities": map[string]interface{}{}},
+		"name":        "p1",
+		"description": "stringy",
+		"tags":        []interface{}{"tier:2"},
+		"manifest":    map[string]interface{}{"llm": map[string]interface{}{"provider": "x", "model": "y"}, "capabilities": map[string]interface{}{}},
 	})
 
-	// First run backfills.
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("first migrate: %v", err)
 	}
 	post1, _ := os.Stat(filepath.Join(presetsDir, "p1.json"))
 	mtime1 := post1.ModTime()
 
-	// Second run must be a no-op (file unchanged).
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 	post2, _ := os.Stat(filepath.Join(presetsDir, "p1.json"))
@@ -166,14 +192,13 @@ func TestM025SkipsKernelMetaFile(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// _kernel_meta.json sits in the same dir but is not a preset.
 	metaPath := filepath.Join(presetsDir, "_kernel_meta.json")
 	metaContent := `{"version":1}`
 	if err := os.WriteFile(metaPath, []byte(metaContent), 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
 
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -189,8 +214,7 @@ func TestM025SkipsKernelMetaFile(t *testing.T) {
 func TestM025NoLibraryDirIsNoOp(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	// No ~/.lingtai-tui/presets/ directory at all — fresh install.
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate should not error on missing library: %v", err)
 	}
 }
@@ -202,25 +226,28 @@ func TestM025SkipsUnparseablePreset(t *testing.T) {
 	if err := os.MkdirAll(presetsDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// Plant a corrupt file alongside a valid one.
 	os.WriteFile(filepath.Join(presetsDir, "broken.json"), []byte("{ not json"), 0o644)
 	writePresetRaw(t, presetsDir, "good", map[string]interface{}{
-		"name":     "good",
-		"manifest": map[string]interface{}{"llm": map[string]interface{}{"provider": "x", "model": "y"}, "capabilities": map[string]interface{}{}},
+		"name":        "good",
+		"description": "fine",
+		"manifest":    map[string]interface{}{"llm": map[string]interface{}{"provider": "x", "model": "y"}, "capabilities": map[string]interface{}{}},
 	})
 
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	// The good preset still gets backfilled.
 	got := readPresetRaw(t, presetsDir, "good")
-	if _, ok := got["tags"]; !ok {
-		t.Errorf("good preset missing tags field after migration")
+	desc, ok := got["description"].(map[string]interface{})
+	if !ok {
+		t.Errorf("good preset description not promoted: %T", got["description"])
+	}
+	if desc["summary"] != "fine" {
+		t.Errorf("summary not preserved: %v", desc["summary"])
 	}
 }
 
-func TestM025BackfillsJsoncPresets(t *testing.T) {
+func TestM025RewritesJsoncPresets(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
@@ -228,11 +255,9 @@ func TestM025BackfillsJsoncPresets(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// JSONC preset (no comments here — we use plain JSON content but
-	// with the .jsonc extension, since json.Unmarshal in m025 is strict).
-	// The point of this test is to prove m025 doesn't filter on extension.
 	body := map[string]interface{}{
-		"name": "jc",
+		"name":        "jc",
+		"description": "jsonc preset",
 		"manifest": map[string]interface{}{
 			"llm":          map[string]interface{}{"provider": "x", "model": "y"},
 			"capabilities": map[string]interface{}{},
@@ -244,7 +269,7 @@ func TestM025BackfillsJsoncPresets(t *testing.T) {
 		t.Fatalf("write jsonc: %v", err)
 	}
 
-	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+	if err := migratePresetDescriptionObject(filepath.Join(tmp, ".lingtai")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -256,7 +281,11 @@ func TestM025BackfillsJsoncPresets(t *testing.T) {
 	if err := json.Unmarshal(got, &raw); err != nil {
 		t.Fatalf("re-parse jsonc: %v", err)
 	}
-	if _, ok := raw["tags"]; !ok {
-		t.Errorf(".jsonc preset missing tags field after migration: %v", raw)
+	desc, ok := raw["description"].(map[string]interface{})
+	if !ok {
+		t.Errorf(".jsonc preset description not promoted: %T", raw["description"])
+	}
+	if desc["summary"] != "jsonc preset" {
+		t.Errorf("jsonc summary not preserved: %v", desc["summary"])
 	}
 }

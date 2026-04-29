@@ -41,16 +41,78 @@ var skillsFS embed.FS
 
 // Preset is a reusable agent template stored at ~/.lingtai-tui/presets/.
 //
-// Tags are namespaced strings like "tier:opus" or "specialty:code". The
-// first namespace shipped is `tier:`, a five-rung cost/quality ladder
-// (mythos > opus > sonnet > haiku > freebie) used by agents to pick
-// presets for daemons/avatars and by the TUI to render visual chips
-// in the library view.
+// Description is a structured object with a required `summary` and an
+// optional `tier` (cost/quality ladder, "1".."5"). Authors may add
+// arbitrary extra keys (gains/loses/recommended_for/...); they round-trip
+// through `Description.Extra`.
 type Preset struct {
 	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
+	Description PresetDescription      `json:"description"`
 	Manifest    map[string]interface{} `json:"manifest"`
+}
+
+// PresetDescription is the structured commentary block on a preset. The
+// kernel requires a non-empty summary; tier is optional but when present
+// must be one of "1".."5".
+//
+// Extra holds any author-authored keys beyond summary/tier that the
+// kernel surfaces verbatim to the agent. They round-trip through marshal
+// so editing a preset in the TUI doesn't drop extra prose.
+type PresetDescription struct {
+	Summary string
+	Tier    string
+	Extra   map[string]interface{}
+}
+
+// MarshalJSON flattens Summary, Tier, and Extra into a single JSON object.
+// Summary is always emitted (even when empty) because the kernel requires
+// the key. Tier is omitted when empty. Extra keys are emitted last; they
+// don't override Summary or Tier.
+func (d PresetDescription) MarshalJSON() ([]byte, error) {
+	out := make(map[string]interface{}, 2+len(d.Extra))
+	for k, v := range d.Extra {
+		if k == "summary" || k == "tier" {
+			continue
+		}
+		out[k] = v
+	}
+	out["summary"] = d.Summary
+	if d.Tier != "" {
+		out["tier"] = d.Tier
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON accepts the structured object form. A bare-string
+// description (legacy on-disk shape) is wrapped as {summary: "<str>"}
+// so older files load without forcing a migration pass on every read.
+func (d *PresetDescription) UnmarshalJSON(data []byte) error {
+	// String form: {"description": "..."} — wrap it.
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		d.Summary = asString
+		d.Tier = ""
+		d.Extra = nil
+		return nil
+	}
+	var asMap map[string]interface{}
+	if err := json.Unmarshal(data, &asMap); err != nil {
+		return err
+	}
+	if v, ok := asMap["summary"].(string); ok {
+		d.Summary = v
+	}
+	if v, ok := asMap["tier"].(string); ok {
+		d.Tier = v
+	}
+	delete(asMap, "summary")
+	delete(asMap, "tier")
+	if len(asMap) > 0 {
+		d.Extra = asMap
+	} else {
+		d.Extra = nil
+	}
+	return nil
 }
 
 // PresetsDir returns ~/.lingtai-tui/presets/.
@@ -151,9 +213,16 @@ func Clone(src Preset, newName string) Preset {
 	if data, err := json.Marshal(src.Manifest); err == nil {
 		json.Unmarshal(data, &manifest)
 	}
+	desc := src.Description
+	if src.Description.Extra != nil {
+		desc.Extra = make(map[string]interface{}, len(src.Description.Extra))
+		for k, v := range src.Description.Extra {
+			desc.Extra[k] = v
+		}
+	}
 	return Preset{
 		Name:        newName,
-		Description: src.Description,
+		Description: desc,
 		Manifest:    manifest,
 	}
 }
@@ -260,7 +329,7 @@ func minimaxPreset() Preset {
 	mm := map[string]interface{}{"provider": "minimax", "api_key_env": "MINIMAX_API_KEY"}
 	return Preset{
 		Name:        "minimax",
-		Description: "MiniMax M2.7 — full multimodal capabilities",
+		Description: PresetDescription{Summary: "MiniMax M2.7 — full multimodal capabilities"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "minimax", "model": "MiniMax-M2.7-highspeed",
@@ -283,7 +352,7 @@ func zhipuPreset() Preset {
 	zp := map[string]interface{}{"provider": "zhipu", "api_key_env": "ZHIPU_API_KEY"}
 	return Preset{
 		Name:        "zhipu",
-		Description: "Zhipu GLM Coding Plan — OpenAI-compatible",
+		Description: PresetDescription{Summary: "Zhipu GLM Coding Plan — OpenAI-compatible"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "zhipu", "model": "GLM-5.1",
@@ -306,7 +375,7 @@ func zhipuPreset() Preset {
 func deepseekPreset() Preset {
 	return Preset{
 		Name:        "deepseek",
-		Description: "DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls",
+		Description: PresetDescription{Summary: "DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "deepseek", "model": "deepseek-v4-flash",
@@ -332,7 +401,7 @@ func deepseekPreset() Preset {
 func openrouterPreset() Preset {
 	return Preset{
 		Name:        "openrouter",
-		Description: "OpenRouter — gateway to DeepSeek, GLM, Qwen, MiniMax, Kimi, Claude, ...",
+		Description: PresetDescription{Summary: "OpenRouter — gateway to DeepSeek, GLM, Qwen, MiniMax, Kimi, Claude, ..."},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "openrouter", "model": "z-ai/glm-5.1",
@@ -361,7 +430,7 @@ func codexPreset() Preset {
 	cx := map[string]interface{}{"provider": "codex", "api_key_env": ""}
 	return Preset{
 		Name:        "codex",
-		Description: "ChatGPT account — vision + web search + tools",
+		Description: PresetDescription{Summary: "ChatGPT account — vision + web search + tools"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "codex", "model": "gpt-5.4",
@@ -384,7 +453,7 @@ func codexPreset() Preset {
 func customPreset() Preset {
 	return Preset{
 		Name:        "custom",
-		Description: "OpenAI-compatible API — full capabilities",
+		Description: PresetDescription{Summary: "OpenAI-compatible API — full capabilities"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "custom", "model": "",

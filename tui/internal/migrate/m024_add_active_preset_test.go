@@ -23,7 +23,7 @@ func TestM024AddsActivePresetForKnownLLM(t *testing.T) {
 	os.MkdirAll(globalPresetsDir, 0o755)
 	if err := preset.Save(preset.Preset{
 		Name:        "minimax",
-		Description: "MiniMax M2.7",
+		Description: preset.PresetDescription{Summary: "MiniMax M2.7"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "minimax", "model": "MiniMax-M2.7-highspeed",

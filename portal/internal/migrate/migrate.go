@@ -47,7 +47,7 @@ var migrations = []Migration{
 	{Version: 22, Name: "recipe-lang-suffix", Fn: func(_ string) error { return nil }}, // TUI-only: touches .tui-asset/.recipe
 	{Version: 23, Name: "recipe-state-rename", Fn: func(_ string) error { return nil }}, // TUI-only: renames .tui-asset/.recipe → recipe-state.json
 	{Version: 24, Name: "add-active-preset", Fn: func(_ string) error { return nil }}, // TUI-only: infers manifest.active_preset from existing init.json
-	{Version: 25, Name: "preset-tags-field", Fn: func(_ string) error { return nil }}, // TUI-only: backfills tags: [] on global preset library files
+	{Version: 25, Name: "preset-description-object", Fn: func(_ string) error { return nil }}, // TUI-only: promotes description to {summary, tier?} object on global preset library files
 	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm}, // shared: rewrites stem-form preset refs in init.json
 }
 
