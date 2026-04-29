@@ -142,12 +142,23 @@ func WriteEnvFile(globalDir string, cfg Config) error {
 }
 
 // providerToEnvKey maps provider name to environment variable name.
+//
+// IMPORTANT: when adding a new built-in preset (preset.go BuiltinPresets),
+// add a corresponding case here. The default branch writes the key under
+// LLM_API_KEY, which then doesn't match the preset's api_key_env field
+// in init.json — agent boots, OpenAI SDK refuses to construct without
+// api_key, agent crashes with no user-friendly error in the TUI.
+//
+// The two parallel sources of truth (this switch + each preset's
+// api_key_env field) are a footgun; future refactor should consolidate.
 func providerToEnvKey(provider string) string {
 	switch provider {
 	case "minimax":
 		return "MINIMAX_API_KEY"
 	case "zhipu":
 		return "ZHIPU_API_KEY"
+	case "mimo":
+		return "MIMO_API_KEY"
 	case "deepseek":
 		return "DEEPSEEK_API_KEY"
 	case "openrouter":
