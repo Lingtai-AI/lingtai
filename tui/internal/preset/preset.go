@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
@@ -964,45 +963,3 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	return nil
 }
 
-// CapabilityIcons returns emoji icons for enabled capabilities in a preset.
-func (p Preset) CapabilityIcons() string {
-	var icons []string
-	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-
-	iconMap := map[string]string{
-		"file":       "📄",
-		"email":      "📧",
-		"bash":       "💻",
-		"web_search": "🔍",
-		"psyche":     "🧠",
-		"codex":      "📚",
-		"library":    "📜",
-		"vision":     "👁️",
-		"avatar":     "👤",
-		"daemon":     "⚡",
-	}
-
-	for key, val := range caps {
-		if val == nil {
-			continue
-		}
-		if m, ok := val.(map[string]interface{}); ok && len(m) == 0 {
-			continue
-		}
-		if icon, ok := iconMap[key]; ok {
-			icons = append(icons, icon)
-		}
-	}
-
-	var b strings.Builder
-	for i, icon := range icons {
-		if i > 0 {
-			b.WriteString(" ")
-		}
-		b.WriteString(icon)
-	}
-	return b.String()
-}

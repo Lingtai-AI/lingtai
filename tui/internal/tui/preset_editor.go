@@ -58,13 +58,12 @@ var editorFieldOrder = []editorField{
 type editorMode int
 
 const (
-	emBrowse editorMode = iota // navigating field list
-	emInline                   // textinput active for the focused field
-	emTier                     // tier picker overlay
-	emCapabilities             // capability-edit modal
-	emCapInline                // inline edit of a capability subfield (e.g. yolo, paths)
-	emClonePrompt              // built-in: prompt for new name on semantic edit
-	emDirtyPrompt              // "discard changes? y/N"
+	emBrowse       editorMode = iota // navigating field list
+	emInline                         // textinput active for the focused field
+	emCapabilities                   // capability-edit modal
+	emCapInline                      // inline edit of a capability subfield (e.g. yolo, paths)
+	emClonePrompt                    // built-in: prompt for new name on semantic edit
+	emDirtyPrompt                    // "discard changes? y/N"
 )
 
 // capabilityProviderOptions enumerates the multi-provider capabilities
@@ -105,9 +104,6 @@ type PresetEditorModel struct {
 	// cloneNameInput captures the new preset name during the clone-first
 	// prompt overlay.
 	cloneNameInput textinput.Model
-
-	// Tier picker state (mirrors preset_library.go's pattern).
-	tierIdx int
 
 	// Capability sub-modal state. capCursor is the row index in the
 	// capability list. capSubField is "yolo" or "paths" while inline-
@@ -166,8 +162,6 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 		switch m.mode {
 		case emInline:
 			return m.updateInline(msg)
-		case emTier:
-			return m.updateTier(msg)
 		case emCapabilities:
 			return m.updateCapabilities(msg)
 		case emCapInline:
@@ -215,10 +209,6 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 	case " ":
 		m.toggleFocused()
 		return m, nil
-	case "t":
-		// Fast path to tier picker regardless of cursor position.
-		m.openTierPicker()
-		return m, nil
 	case "c":
 		// Fast path to capability modal regardless of cursor position.
 		m.openCapabilities()
@@ -250,33 +240,6 @@ func (m PresetEditorModel) updateInline(msg tea.KeyMsg) (PresetEditorModel, tea.
 	return m, cmd
 }
 
-func (m PresetEditorModel) updateTier(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = emBrowse
-		return m, nil
-	case "up", "k":
-		if m.tierIdx > 0 {
-			m.tierIdx--
-		}
-		return m, nil
-	case "down", "j":
-		if m.tierIdx < len(tierValues) { // last slot = "untag"
-			m.tierIdx++
-		}
-		return m, nil
-	case "enter":
-		var newTier string
-		if m.tierIdx < len(tierValues) {
-			newTier = tierValues[m.tierIdx]
-		}
-		m.working.Description.Tier = newTier
-		m.mode = emBrowse
-		return m, nil
-	}
-	return m, nil
-}
-
 func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
@@ -301,7 +264,8 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feTier:
-		m.openTierPicker()
+		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
+		m.cycleFocused(+1)
 	case feCapabilities:
 		m.openCapabilities()
 	case feProvider, feAPICompat:
@@ -312,17 +276,6 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.toggleFocused()
 	}
 	return *m, nil
-}
-
-func (m *PresetEditorModel) openTierPicker() {
-	m.tierIdx = len(tierValues) // default = untag
-	for i, v := range tierValues {
-		if v == m.working.Description.Tier {
-			m.tierIdx = i
-			break
-		}
-	}
-	m.mode = emTier
 }
 
 func (m *PresetEditorModel) openCapabilities() {
@@ -563,7 +516,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"", "openai", "anthropic"}
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
 	case feTier:
-		opts := append([]string{""}, tierValues...) // ""→1→2→3→4→5→""
+		// Cycle ""→1→2→3→4→5→"" with → and reverse with ←. tierValues
+		// is ordered best-first ([5..1]) for the library's picker, so
+		// reverse it here for the natural ascending sweep.
+		opts := []string{"", "1", "2", "3", "4", "5"}
 		m.working.Description.Tier = cycleString(opts, m.working.Description.Tier, dir)
 	}
 }
@@ -754,8 +710,6 @@ func (m PresetEditorModel) View() string {
 	full := lipgloss.JoinVertical(lipgloss.Left, title, body, footer)
 
 	switch m.mode {
-	case emTier:
-		full = m.renderTierOverlay(full)
 	case emCapabilities, emCapInline:
 		full = m.renderCapOverlay(full)
 	case emClonePrompt:
@@ -774,33 +728,35 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 		Height(height).
 		Padding(0, 1)
 
+	lbl := func(key string) string { return i18n.T("preset_editor.field_" + key) }
+
 	var rows []string
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_identity")))
-	rows = append(rows, m.row(feSummary, "summary", m.working.Description.Summary, width-4))
-	rows = append(rows, m.row(feTier, "tier", m.tierDisplay(), width-4))
-	rows = append(rows, m.row(feGains, "gains", asExtra(m.working.Description.Extra, "gains"), width-4))
-	rows = append(rows, m.row(feLoses, "loses", asExtra(m.working.Description.Extra, "loses"), width-4))
+	rows = append(rows, m.row(feSummary, lbl("summary"), m.working.Description.Summary, width-4))
+	rows = append(rows, m.row(feTier, lbl("tier"), m.tierDisplay(), width-4))
+	rows = append(rows, m.row(feGains, lbl("gains"), asExtra(m.working.Description.Extra, "gains"), width-4))
+	rows = append(rows, m.row(feLoses, lbl("loses"), asExtra(m.working.Description.Extra, "loses"), width-4))
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_llm")))
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
-	rows = append(rows, m.row(feProvider, "provider", asString(llm["provider"]), width-4))
-	rows = append(rows, m.row(feModel, "model", asString(llm["model"]), width-4))
-	rows = append(rows, m.row(feAPICompat, "api_compat", asString(llm["api_compat"]), width-4))
-	rows = append(rows, m.row(feBaseURL, "base_url", asString(llm["base_url"]), width-4))
-	rows = append(rows, m.row(feAPIKeyEnv, "api_key_env", asString(llm["api_key_env"]), width-4))
-	rows = append(rows, m.row(feContextLimit, "context_limit", m.fieldString(feContextLimit), width-4))
+	rows = append(rows, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4))
+	rows = append(rows, m.row(feModel, lbl("model"), asString(llm["model"]), width-4))
+	rows = append(rows, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4))
+	rows = append(rows, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4))
+	rows = append(rows, m.row(feAPIKeyEnv, lbl("api_key_env"), asString(llm["api_key_env"]), width-4))
+	rows = append(rows, m.row(feContextLimit, lbl("context_limit"), m.fieldString(feContextLimit), width-4))
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_capabilities")))
-	rows = append(rows, m.row(feCapabilities, "edit", m.capabilitiesSummary(), width-4))
+	rows = append(rows, m.row(feCapabilities, lbl("edit"), m.capabilitiesSummary(), width-4))
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_runtime")))
 	streaming := asBool(m.working.Manifest["streaming"])
-	rows = append(rows, m.row(feStreaming, "streaming", boolLabel(streaming), width-4))
+	rows = append(rows, m.row(feStreaming, lbl("streaming"), boolLabel(streaming), width-4))
 	karma := false
 	if admin, ok := m.working.Manifest["admin"].(map[string]interface{}); ok {
 		karma = asBool(admin["karma"])
 	}
-	rows = append(rows, m.row(feKarma, "karma", boolLabel(karma), width-4))
+	rows = append(rows, m.row(feKarma, lbl("karma"), boolLabel(karma), width-4))
 
 	return box.Render(strings.Join(rows, "\n"))
 }
@@ -836,22 +792,21 @@ func (m PresetEditorModel) tierDisplay() string {
 	return tierChipStyle(m.working.Description.Tier).Render(tierLabel(m.working.Description.Tier, m.lang))
 }
 
-// capabilitiesSummary renders the capability set as the icon strip + the
-// total count. The first cut shows this read-only — full capability
-// editing lands in the next iteration.
+// capabilitiesSummary renders the capability set as a count plus the
+// sorted name list. Press Enter on this row to open the capability
+// modal for full editing.
 func (m PresetEditorModel) capabilitiesSummary() string {
 	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
 	if len(caps) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("(none)")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(i18n.T("preset_editor.caps_none"))
 	}
-	icons := m.working.CapabilityIcons()
 	names := make([]string, 0, len(caps))
 	for k := range caps {
 		names = append(names, k)
 	}
 	sort.Strings(names)
-	count := fmt.Sprintf("(%d)", len(caps))
-	return icons + "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(count+"  "+strings.Join(names, ", "))
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	return subtle.Render(fmt.Sprintf("(%d)  %s", len(caps), strings.Join(names, ", ")))
 }
 
 // renderPreview is the right-hand pane: live JSON + validation status.
@@ -903,47 +858,10 @@ func (m PresetEditorModel) renderFooter() string {
 	switch m.mode {
 	case emInline:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
-	case emTier:
-		return hintStyle.Render("  " + i18n.T("preset_editor.hint_tier"))
 	case emDirtyPrompt:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_dirty"))
 	}
 	return hintStyle.Render("  " + i18n.T("preset_editor.hint_browse"))
-}
-
-func (m PresetEditorModel) renderTierOverlay(_ string) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	rowStyle := lipgloss.NewStyle().Width(28)
-	cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-
-	var rows []string
-	rows = append(rows, titleStyle.Render(i18n.T("preset_editor.tier_picker_title")))
-	rows = append(rows, "")
-	for i, v := range tierValues {
-		marker := "  "
-		style := lipgloss.NewStyle()
-		if i == m.tierIdx {
-			marker = "▸ "
-			style = cursorStyle
-		}
-		chip := tierChipStyle(v).Render(tierLabel(v, m.lang))
-		rows = append(rows, rowStyle.Render(marker+chip+"  "+style.Render("tier:"+v)))
-	}
-	{
-		marker := "  "
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		if m.tierIdx == len(tierValues) {
-			marker = "▸ "
-			style = cursorStyle
-		}
-		rows = append(rows, rowStyle.Render(marker+style.Render(i18n.T("preset_editor.tier_clear"))))
-	}
-	box := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(ColorAccent).
-		Padding(1, 2).
-		Render(strings.Join(rows, "\n"))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m PresetEditorModel) renderCapOverlay(_ string) string {
@@ -1078,9 +996,9 @@ func asBool(v interface{}) bool {
 
 func boolLabel(b bool) string {
 	if b {
-		return "on"
+		return i18n.T("preset_editor.bool_on")
 	}
-	return "off"
+	return i18n.T("preset_editor.bool_off")
 }
 
 func asExtra(extra map[string]interface{}, key string) string {
