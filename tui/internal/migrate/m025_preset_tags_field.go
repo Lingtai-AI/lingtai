@@ -44,7 +44,13 @@ func migratePresetTagsField(lingtaiDir string) error {
 	}
 
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(e.Name())
+		// The kernel treats both .json and .jsonc as preset files; mirror
+		// that here so JSONC presets get backfilled too.
+		if ext != ".json" && ext != ".jsonc" {
 			continue
 		}
 		// Skip the kernel's migration meta file — it sits in the same dir

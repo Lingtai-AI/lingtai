@@ -219,3 +219,44 @@ func TestM025SkipsUnparseablePreset(t *testing.T) {
 		t.Errorf("good preset missing tags field after migration")
 	}
 }
+
+func TestM025BackfillsJsoncPresets(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	presetsDir := filepath.Join(tmp, ".lingtai-tui", "presets")
+	if err := os.MkdirAll(presetsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// JSONC preset (no comments here — we use plain JSON content but
+	// with the .jsonc extension, since json.Unmarshal in m025 is strict).
+	// The point of this test is to prove m025 doesn't filter on extension.
+	body := map[string]interface{}{
+		"name": "jc",
+		"manifest": map[string]interface{}{
+			"llm":          map[string]interface{}{"provider": "x", "model": "y"},
+			"capabilities": map[string]interface{}{},
+		},
+	}
+	data, _ := json.MarshalIndent(body, "", "  ")
+	jcPath := filepath.Join(presetsDir, "jc.jsonc")
+	if err := os.WriteFile(jcPath, data, 0o644); err != nil {
+		t.Fatalf("write jsonc: %v", err)
+	}
+
+	if err := migratePresetTagsField(filepath.Join(tmp, ".lingtai")); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	got, err := os.ReadFile(jcPath)
+	if err != nil {
+		t.Fatalf("re-read jsonc: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(got, &raw); err != nil {
+		t.Fatalf("re-parse jsonc: %v", err)
+	}
+	if _, ok := raw["tags"]; !ok {
+		t.Errorf(".jsonc preset missing tags field after migration: %v", raw)
+	}
+}
