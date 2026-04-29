@@ -345,7 +345,7 @@
   "preset_editor.section_runtime": "运行时",
   "preset_editor.validation": "校验",
   "preset_editor.valid": "通过内核校验",
-  "preset_editor.hint_browse": "↑↓ 字段  enter 编辑  ←→ 切换  space 开关  c 能力  ctrl+s 保存  esc 取消",
+  "preset_editor.hint_browse": "↑↓ 字段  enter 编辑  ←→ 切换  space 开关  c 能力  ctrl+d JSON  ctrl+s 保存  esc 取消",
   "preset_editor.hint_inline": "输入修改  enter 确认  esc 放弃",
   "preset_editor.hint_dirty": "未保存改动——是否放弃？[y/N]",
   "preset_editor.field_summary": "概述",

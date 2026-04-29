@@ -75,6 +75,22 @@ var capabilityProviderOptions = map[string][]string{
 	"vision":     {"inherit", "minimax", "zhipu", "mimo", "codex"},
 }
 
+// providerModels maps a provider name to the canonical model lineup the
+// editor cycles through with ←/→ on the model row. Providers absent from
+// this map fall back to free-text inline edit on Enter — this lets
+// openrouter/custom/codex users type any model id, while built-in
+// providers with a known catalog get a guided picker.
+//
+// Keep this in sync with each provider's official model list. When a
+// new flagship ships, add it (and remove deprecated entries — agents
+// will hit 4xx if they pick a retired model).
+var providerModels = map[string][]string{
+	"minimax":  {"MiniMax-M2.7-highspeed", "MiniMax-M2.7"},
+	"zhipu":    {"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
+	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
+	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+}
+
 // editorCapabilities is the canonical capability list shown in the
 // sub-modal. Mirrors AllCapabilities from presets.go but kept local so
 // the editor doesn't quietly absorb additions to AllCapabilities that
@@ -114,6 +130,11 @@ type PresetEditorModel struct {
 	// Display
 	width, height int
 	lang          string // "en"/"zh"/"wen" — drives tier label rendering
+
+	// showJSON controls whether the right-hand JSON preview pane renders.
+	// Hidden by default — the form is the source of truth and the JSON
+	// dump usually just adds noise. Toggle with Ctrl+D for raw inspection.
+	showJSON bool
 
 	// Status
 	saveErr string
@@ -217,6 +238,12 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 		return m.openInline()
 	case "ctrl+s":
 		return m.commit()
+	case "ctrl+d":
+		// Toggle the JSON preview pane. Raw inspection for power users
+		// who want to see the on-disk shape; hidden by default to keep
+		// the form uncluttered.
+		m.showJSON = !m.showJSON
+		return m, nil
 	}
 	return m, nil
 }
@@ -258,11 +285,25 @@ func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel,
 func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
-	case feSummary, feGains, feLoses, feModel, feBaseURL, feAPIKeyEnv, feContextLimit:
+	case feSummary, feGains, feLoses, feBaseURL, feAPIKeyEnv, feContextLimit:
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
 		m.input.Focus()
 		m.mode = emInline
+	case feModel:
+		// Built-in providers with a known model lineup get the picker
+		// (Enter cycles, like for feProvider/feAPICompat). Free-text
+		// providers (custom, openrouter, codex) fall through to inline
+		// edit so the user can type any model id.
+		provider := asString(m.llmMap()["provider"])
+		if _, hasPicker := providerModels[provider]; hasPicker {
+			m.cycleFocused(+1)
+		} else {
+			m.input.SetValue(m.fieldString(f))
+			m.input.CursorEnd()
+			m.input.Focus()
+			m.mode = emInline
+		}
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
@@ -511,7 +552,33 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// Order matches the builtin presets (preset.go BuiltinPresets).
 		// Keep this in sync when adding a new provider/builtin.
 		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "openrouter", "codex", "custom"}
-		m.llmMap()["provider"] = cycleString(opts, m.fieldString(f), dir)
+		newProvider := cycleString(opts, m.fieldString(f), dir)
+		m.llmMap()["provider"] = newProvider
+		// Reset model to the new provider's first canonical entry when the
+		// current model isn't valid for the new provider. Without this, a
+		// minimax→zhipu switch leaves "MiniMax-M2.7-highspeed" in model
+		// and validation passes silently while the kernel later 4xxs.
+		if models, ok := providerModels[newProvider]; ok && len(models) > 0 {
+			currentModel := asString(m.llmMap()["model"])
+			modelStillValid := false
+			for _, m := range models {
+				if m == currentModel {
+					modelStillValid = true
+					break
+				}
+			}
+			if !modelStillValid {
+				m.llmMap()["model"] = models[0]
+			}
+		}
+	case feModel:
+		// If the current provider has a known model lineup, cycle through
+		// it. Otherwise no-op — Enter on free-text providers (custom,
+		// openrouter, codex) opens inline edit instead via openInline.
+		provider := asString(m.llmMap()["provider"])
+		if models, ok := providerModels[provider]; ok && len(models) > 0 {
+			m.llmMap()["model"] = cycleString(models, m.fieldString(f), dir)
+		}
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
@@ -692,9 +759,11 @@ func (m PresetEditorModel) View() string {
 		title += "  " + tierChipStyle(m.working.Description.Tier).Render(label)
 	}
 
-	// Two-column body when wide enough; single column otherwise.
+	// JSON preview is opt-in via Ctrl+D. When off (default), the form
+	// claims the full width — clean & focused. When on AND wide enough,
+	// split horizontally. Narrow terminals always show form-only.
 	var body string
-	if m.width >= 100 {
+	if m.showJSON && m.width >= 100 {
 		formW := m.width / 2
 		previewW := m.width - formW - 1
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
@@ -763,22 +832,51 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 
 // row renders a single field row with focus styling. When the row is
 // in inline-edit mode (cursor here AND mode == emInline) the textinput
-// renders in place of the value.
+// renders in place of the value. When the focused row is cyclable
+// (provider/model-with-picker/api_compat/tier), wrap the value in
+// "‹ value ›" arrows to advertise the ←/→ affordance.
 func (m PresetEditorModel) row(f editorField, key, value string, width int) string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(15)
 	marker := "  "
 	valStyle := lipgloss.NewStyle()
-	if editorFieldOrder[m.cursor] == f {
+	focused := editorFieldOrder[m.cursor] == f
+	if focused {
 		marker = "▸ "
 		valStyle = valStyle.Bold(true).Foreground(ColorAccent)
 	}
-	if m.mode == emInline && editorFieldOrder[m.cursor] == f {
+	if m.mode == emInline && focused {
 		return marker + keyStyle.Render(key) + m.input.View()
+	}
+	if focused && m.isCyclable(f) {
+		// Show ‹ value › to advertise that ←/→ change this field.
+		// Subtle foreground so the brackets don't compete with the value.
+		arrow := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+		shown := value
+		if shown == "" {
+			shown = "—"
+		}
+		return marker + keyStyle.Render(key) + arrow.Render("‹ ") + valStyle.Render(shown) + arrow.Render(" ›")
 	}
 	if value == "" {
 		value = "—"
 	}
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
+}
+
+// isCyclable reports whether a field accepts ←/→ to step through enum
+// values. The model row is conditional — only when the current provider
+// has a known model lineup. Free-text providers leave the model row as
+// inline-edit-only and we shouldn't suggest cycling.
+func (m PresetEditorModel) isCyclable(f editorField) bool {
+	switch f {
+	case feProvider, feAPICompat, feTier:
+		return true
+	case feModel:
+		provider := asString(m.llmMap()["provider"])
+		_, hasPicker := providerModels[provider]
+		return hasPicker
+	}
+	return false
 }
 
 func (m PresetEditorModel) sectionHeader(label string) string {
