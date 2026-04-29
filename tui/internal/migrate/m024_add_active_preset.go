@@ -93,18 +93,20 @@ func migrateAddActivePreset(lingtaiDir string) error {
 			// Custom config — leave alone
 			continue
 		case 1:
+			ref := "~/.lingtai-tui/presets/" + matched[0] + ".json"
 			manifest["preset"] = map[string]interface{}{
-				"active":  matched[0],
-				"default": matched[0],
+				"active":  ref,
+				"default": ref,
 			}
 		default:
 			// Multiple matches — pick the alphabetically first, warn
 			fmt.Fprintf(os.Stderr,
 				"m024: %s matches multiple presets %v — using %s\n",
 				agentDir, matched, matched[0])
+			ref := "~/.lingtai-tui/presets/" + matched[0] + ".json"
 			manifest["preset"] = map[string]interface{}{
-				"active":  matched[0],
-				"default": matched[0],
+				"active":  ref,
+				"default": ref,
 			}
 		}
 

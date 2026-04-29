@@ -631,14 +631,17 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	manifest["streaming"] = false
 	// Track which preset this agent was created from. The kernel reads this
 	// at boot to materialize manifest.llm + manifest.capabilities from the
-	// preset library at ~/.lingtai-tui/presets/. Agent can swap presets at
-	// runtime via system(action='refresh', preset='<name>').
+	// referenced preset file. As of the path-as-name redesign, the value is
+	// the preset's full path (in ~/... shorthand for portability across
+	// machines), not its filename stem. The agent passes this same string
+	// to system(action='refresh', preset='<path>') to swap.
 	// The 'default' field is used by AED auto-fallback to revert to the
 	// original preset when the active one keeps failing.
 	if p.Name != "" {
+		presetRef := "~/.lingtai-tui/presets/" + p.Name + ".json"
 		manifest["preset"] = map[string]interface{}{
-			"active":  p.Name,
-			"default": p.Name,
+			"active":  presetRef,
+			"default": presetRef,
 		}
 	}
 

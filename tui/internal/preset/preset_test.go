@@ -166,11 +166,12 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("manifest.preset block missing")
 	}
-	if active, _ := preset["active"].(string); active != p.Name {
-		t.Errorf("manifest.preset.active = %v, want %s", preset["active"], p.Name)
+	wantRef := "~/.lingtai-tui/presets/" + p.Name + ".json"
+	if active, _ := preset["active"].(string); active != wantRef {
+		t.Errorf("manifest.preset.active = %v, want %s", preset["active"], wantRef)
 	}
-	if def, _ := preset["default"].(string); def != p.Name {
-		t.Errorf("manifest.preset.default = %v, want %s", preset["default"], p.Name)
+	if def, _ := preset["default"].(string); def != wantRef {
+		t.Errorf("manifest.preset.default = %v, want %s", preset["default"], wantRef)
 	}
 }
 

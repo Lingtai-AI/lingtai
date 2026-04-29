@@ -10,6 +10,32 @@ A living chronicle of system-level changes that affect how you work. When someth
 
 ---
 
+## 2026-04-28 — Preset name is now a path, not a stem
+
+### What changed
+
+The kernel previously identified presets by their filename stem (`"minimax"` resolved against `manifest.preset.path` to find `minimax.json`). It now identifies them by **full path**:
+
+- `"~/.lingtai-tui/presets/minimax.json"` (home-relative — the canonical form)
+- `"./presets/foo.json"` (working-dir-relative)
+- `"/abs/path/foo.json"` (absolute)
+
+Both `manifest.preset.active` and `manifest.preset.default` now hold path strings. The same string is what you pass to `system(action='refresh', preset=...)` and what `system(action='presets')` returns in the listing's `name` field.
+
+### What you should do
+
+- When picking a preset from a `system(action='presets')` listing, copy the `name` field verbatim — it's already in the form the kernel accepts.
+- For `daemon(action='emanate', tasks=[{preset: ...}])`, pass the path in the same forms above. Bare stems no longer resolve.
+- If you've cached preset names from a previous molt's procedures or pad notes, refresh them — old stem names will fail with `preset name 'foo': must end in .json or .jsonc`.
+
+### Why
+
+`manifest.preset.path` accepts a list of library directories. With the stem-as-name design, two libraries each containing `cheap.json` would silently shadow each other (first-path-wins, with only a log warning). Path-as-name eliminates collisions structurally — every preset has a unique identity that round-trips cleanly through listings, swaps, and stores.
+
+The TUI's m026 migration rewrites legacy stem-form references in existing `init.json` files automatically; you don't need to edit anything by hand.
+
+---
+
 ## 2026-04-28 — Pending-notifications meta field on every text input and tool result
 
 ### What changed

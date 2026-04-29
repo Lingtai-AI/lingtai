@@ -60,11 +60,12 @@ func TestM024AddsActivePresetForKnownLLM(t *testing.T) {
 	if !ok {
 		t.Fatalf("manifest.preset missing")
 	}
-	if preset["active"] != "minimax" {
-		t.Errorf("preset.active = %v, want 'minimax'", preset["active"])
+	wantRef := "~/.lingtai-tui/presets/minimax.json"
+	if preset["active"] != wantRef {
+		t.Errorf("preset.active = %v, want %q", preset["active"], wantRef)
 	}
-	if preset["default"] != "minimax" {
-		t.Errorf("preset.default = %v, want 'minimax'", preset["default"])
+	if preset["default"] != wantRef {
+		t.Errorf("preset.default = %v, want %q", preset["default"], wantRef)
 	}
 }
 
