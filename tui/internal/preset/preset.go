@@ -427,16 +427,13 @@ func zhipuPreset() Preset {
 func mimoPreset() Preset {
 	// mimo-v2.5 is the sweet spot: 1M context, vision-capable, supports tool
 	// calls and thinking mode. Cheaper-but-text-only siblings (mimo-v2.5-pro,
-	// mimo-v2-flash) and the 256K omni-modal mimo-v2-omni are documented in
-	// the xiaomi-mimo skill — users clone this preset to switch.
-	// Vision routes through OpenAI's vision service (which is just chat
-	// completions with image_url content) pointed at MiMo's endpoint. Only
-	// mimo-v2.5 and mimo-v2-omni accept image input — keep the model in
-	// sync with manifest.llm.model when cloning.
+	// mimo-v2-flash) are documented in the xiaomi-mimo skill — users clone
+	// this preset to switch. Among the models the TUI exposes (v2.5, v2.5-pro,
+	// v2-flash), only v2.5 supports vision; pro/flash will 400 on image input.
+	// Vision uses the first-class MiMoVisionService (kernel: services/vision/mimo.py).
 	mp := map[string]interface{}{
-		"provider":    "openai",
-		"api_key_env": "MIMO_API_KEY",
-		"base_url":    "https://api.xiaomimimo.com/v1",
+		"provider":    "mimo",
+		"api_key_env": "XIAOMI_API_KEY",
 		"model":       "mimo-v2.5",
 	}
 	return Preset{
@@ -445,7 +442,7 @@ func mimoPreset() Preset {
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
 				"provider": "mimo", "model": "mimo-v2.5",
-				"api_key": nil, "api_key_env": "MIMO_API_KEY",
+				"api_key": nil, "api_key_env": "XIAOMI_API_KEY",
 				"base_url": "https://api.xiaomimimo.com/v1", "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
