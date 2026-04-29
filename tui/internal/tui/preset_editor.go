@@ -54,6 +54,7 @@ const (
 	feCapVision
 	feStreaming
 	feKarma
+	feNirvana
 )
 
 // capFieldNames maps each capability field to its underlying capability
@@ -84,7 +85,7 @@ var editorFieldOrder = []editorField{
 	feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
 	feCapAvatar, feCapDaemon, feCapLibrary,
 	feCapWebSearch, feCapVision,
-	feStreaming, feKarma,
+	feStreaming, feKarma, feNirvana,
 }
 
 type editorMode int
@@ -423,7 +424,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		// Enums — Enter cycles forward (same as Right). Lets the user
 		// stay on the keyboard's "advance" key.
 		m.cycleFocused(+1)
-	case feStreaming, feKarma:
+	case feStreaming, feKarma, feNirvana:
 		m.toggleFocused()
 	}
 	return *m, nil
@@ -749,6 +750,13 @@ func (m *PresetEditorModel) toggleFocused() {
 			m.working.Manifest["admin"] = admin
 		}
 		admin["karma"] = !asBool(admin["karma"])
+	case feNirvana:
+		admin, _ := m.working.Manifest["admin"].(map[string]interface{})
+		if admin == nil {
+			admin = map[string]interface{}{}
+			m.working.Manifest["admin"] = admin
+		}
+		admin["nirvana"] = !asBool(admin["nirvana"])
 	}
 	if capName, ok := capFieldNames[f]; ok {
 		currentModel := asString(m.llmMap()["model"])
@@ -985,11 +993,13 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_runtime")))
 	streaming := asBool(m.working.Manifest["streaming"])
 	rows = append(rows, m.row(feStreaming, lbl("streaming"), boolLabel(streaming), width-4))
-	karma := false
+	karma, nirvana := false, false
 	if admin, ok := m.working.Manifest["admin"].(map[string]interface{}); ok {
 		karma = asBool(admin["karma"])
+		nirvana = asBool(admin["nirvana"])
 	}
 	rows = append(rows, m.row(feKarma, lbl("karma"), boolLabel(karma), width-4))
+	rows = append(rows, m.row(feNirvana, lbl("nirvana"), boolLabel(nirvana), width-4))
 
 	return box.Render(strings.Join(rows, "\n"))
 }

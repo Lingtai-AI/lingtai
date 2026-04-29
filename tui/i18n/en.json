@@ -369,6 +369,7 @@
   "preset_editor.field_edit": "edit",
   "preset_editor.field_streaming": "streaming",
   "preset_editor.field_karma": "karma",
+  "preset_editor.field_nirvana": "nirvana",
   "preset_editor.bool_on": "on",
   "preset_editor.bool_off": "off",
   "preset_editor.caps_none": "(none)",
