@@ -703,6 +703,32 @@ func AddonSecretsPathFromAgent(addon string) string {
 	return filepath.Join(".secrets", addon+".json")
 }
 
+// defaultMCPSpec returns the canonical wiring for one of the four curated
+// addons (imap / telegram / feishu / wechat) — the Python module to invoke,
+// the env-var name the MCP reads its config path from, and the config path
+// (relative to the agent working dir) to point that env var at by default.
+//
+// Used by GenerateInitJSONWithOpts to seed init.json's mcp.<name> activation
+// entries when the wizard selects an addon. supported=false for unknown
+// names so the caller skips them silently rather than emitting a spec the
+// kernel would reject.
+//
+// Note: this is the writer-side mirror of the migration's addonSpec table
+// (m028). When you add a new curated addon, update both.
+func defaultMCPSpec(name string) (module, envVar, configRel string, supported bool) {
+	switch name {
+	case "imap":
+		return "lingtai_imap", "LINGTAI_IMAP_CONFIG", filepath.Join(".secrets", "imap.json"), true
+	case "telegram":
+		return "lingtai_telegram", "LINGTAI_TELEGRAM_CONFIG", filepath.Join(".secrets", "telegram.json"), true
+	case "feishu":
+		return "lingtai_feishu", "LINGTAI_FEISHU_CONFIG", filepath.Join(".secrets", "feishu.json"), true
+	case "wechat":
+		return "lingtai_wechat", "LINGTAI_WECHAT_CONFIG", filepath.Join(".secrets", "wechat", "config.json"), true
+	}
+	return "", "", "", false
+}
+
 // DefaultPreset returns the first built-in preset (minimax).
 func DefaultPreset() Preset {
 	return minimaxPreset()
@@ -928,17 +954,33 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		soulFile = SoulFlowPath(globalDir, lang)
 	}
 
-	// Load existing init.json addons field so we preserve it across regens.
-	// This is critical for /setup: when the user changes non-addon settings,
-	// the existing addon configuration must not be dropped. User edits
-	// always win over opts.Addons — opts only seeds the field on first creation.
-	var existingAddons map[string]interface{}
+	// Load existing init.json addons + mcp fields so we preserve them across
+	// regens. Critical for /setup: when the user changes non-addon settings,
+	// existing addon registrations and MCP activations must not be dropped.
+	// User edits always win over opts.Addons — opts only seeds the fields
+	// on first creation.
+	//
+	// Reads both shapes for back-compat with init.json files written by older
+	// TUIs (pre-v0.7.3 wrote a dict; new TUIs write a list). Both shapes get
+	// converted to the new list-of-names form before re-writing, so the on-
+	// disk file is normalized on the next refresh.
+	var existingAddonsList []interface{}
+	var existingMCP map[string]interface{}
 	existingInitPath := filepath.Join(agentDir, "init.json")
 	if existingData, err := os.ReadFile(existingInitPath); err == nil {
 		var existing map[string]interface{}
 		if json.Unmarshal(existingData, &existing) == nil {
-			if addons, ok := existing["addons"].(map[string]interface{}); ok && len(addons) > 0 {
-				existingAddons = addons
+			switch v := existing["addons"].(type) {
+			case []interface{}:
+				existingAddonsList = v
+			case map[string]interface{}:
+				// Legacy dict shape — extract just the names.
+				for name := range v {
+					existingAddonsList = append(existingAddonsList, name)
+				}
+			}
+			if mcp, ok := existing["mcp"].(map[string]interface{}); ok && len(mcp) > 0 {
+				existingMCP = mcp
 			}
 		}
 	}
@@ -954,49 +996,64 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"pad":            "",
 		"prompt":         "",
 	}
-	if existingAddons != nil {
-		// Preserve user-edited addon config (takes precedence over opts.Addons)
-		initJSON["addons"] = existingAddons
-	} else if len(opts.Addons) > 0 {
-		// First-creation: seed init.json.addons from opts, pointing each declared
-		// addon to its fixed-by-convention config path. The path is relative to
-		// the agent's working_dir (<project>/.lingtai/<agent>/), so "../" escapes
-		// the agent dir and "/.addons/<name>/config.json" reaches the project-level
-		// shared addon config directory at <project>/.lingtai/.addons/.
-		//
-		// Filter: only wire an addon if its config.json already exists on disk.
-		// If a user selects an addon in the wizard but hasn't created the config
-		// file yet (via a setup skill, manual edit, or recipient-side setup
-		// after cloning), we "let it be" — the wizard selection is a no-op
-		// rather than producing a stale entry that makes the kernel emit
-		// "failed to load" system messages on every launch. Once the user
-		// creates the config later, they can re-run /setup to wire it up.
-		addonsField := make(map[string]interface{})
+
+	// Decide which addons to wire.
+	//
+	// Precedence:
+	//   1. Pre-existing addons:[...] in init.json (preserved verbatim — user
+	//      edits win).
+	//   2. Otherwise, opts.Addons from the caller (the wizard's selection).
+	//
+	// The list is normalized to the new shape (list of curated MCP names).
+	// The kernel's `mcp` capability decompresses each name from the catalog
+	// into the per-agent mcp_registry.jsonl on boot.
+	var addonsList []interface{}
+	if existingAddonsList != nil {
+		addonsList = existingAddonsList
+	} else {
 		for _, name := range opts.Addons {
-			// Prefer the new admin-local .secrets/<name>.json path (2026-04-16
-			// convention) when it exists inside this agent's working directory.
-			newAbsPath := filepath.Join(agentDir, ".secrets", name+".json")
-			if _, err := os.Stat(newAbsPath); err == nil {
-				addonsField[name] = map[string]interface{}{
-					"config": AddonSecretsPathFromAgent(name),
-				}
+			addonsList = append(addonsList, name)
+		}
+	}
+	if addonsList != nil {
+		initJSON["addons"] = addonsList
+	}
+
+	// Build the mcp activation map for any addon name in the list. Each entry
+	// points at the local venv python (where `pip install lingtai` placed the
+	// MCP packages) running `python -m lingtai_<name>` with the canonical
+	// LINGTAI_<NAME>_CONFIG env var set to the .secrets/<name>.json convention.
+	//
+	// Pre-existing mcp.<name> entries take precedence — humans who customized
+	// the spec (e.g., switched to a different Python or added env vars) keep
+	// their settings.
+	if len(addonsList) > 0 {
+		venvPython := config.VenvPython(filepath.Join(globalDir, "runtime", "venv"))
+		mcpField := make(map[string]interface{})
+		for k, v := range existingMCP {
+			mcpField[k] = v
+		}
+		for _, raw := range addonsList {
+			name, ok := raw.(string)
+			if !ok || name == "" {
 				continue
 			}
-			// Fall back to the legacy project-shared path on disk:
-			// <lingtaiDir>/.addons/<name>/config.json. (lingtaiDir is already
-			// the .lingtai/ directory, so no leading ".lingtai/" — that's
-			// only in AddonConfigRelPath which is relative to the project
-			// root.)
-			absPath := filepath.Join(lingtaiDir, ".addons", name, "config.json")
-			if _, err := os.Stat(absPath); err != nil {
-				continue // config missing on both paths — skip silently
+			if _, exists := mcpField[name]; exists {
+				continue // user-set entry wins
 			}
-			addonsField[name] = map[string]interface{}{
-				"config": AddonConfigPathFromAgent(name),
+			module, envVar, configRel, supported := defaultMCPSpec(name)
+			if !supported {
+				continue // unknown name — let the kernel surface the warning
+			}
+			mcpField[name] = map[string]interface{}{
+				"type":    "stdio",
+				"command": venvPython,
+				"args":    []interface{}{"-m", module},
+				"env":     map[string]interface{}{envVar: configRel},
 			}
 		}
-		if len(addonsField) > 0 {
-			initJSON["addons"] = addonsField
+		if len(mcpField) > 0 {
+			initJSON["mcp"] = mcpField
 		}
 	}
 

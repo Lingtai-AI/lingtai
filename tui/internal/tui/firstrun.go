@@ -434,8 +434,17 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 		if data, err := os.ReadFile(initPath); err == nil {
 			var existing map[string]interface{}
 			if json.Unmarshal(data, &existing) == nil {
-				if addons, ok := existing["addons"].(map[string]interface{}); ok && addons != nil {
-					for name := range addons {
+				// addons may be either the new list shape (post-v0.7.3) or the
+				// legacy dict shape (pre-v0.7.3, pre-m028 migration). Read both.
+				switch v := existing["addons"].(type) {
+				case []interface{}:
+					for _, item := range v {
+						if name, ok := item.(string); ok && name != "" {
+							m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
+						}
+					}
+				case map[string]interface{}:
+					for name := range v {
 						m.setupLoadedAddonNames = append(m.setupLoadedAddonNames, name)
 					}
 				}

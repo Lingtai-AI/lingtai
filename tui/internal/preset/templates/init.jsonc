@@ -218,32 +218,42 @@
   },
 
   // =============================================================
-  // Addons — external service integrations
+  // Addons — curated MCP server integrations
   // =============================================================
-  // Addons connect the agent to external services (IMAP email, Telegram, Feishu).
-  // Each addon requires an explicit declaration pointing to a config file.
-  // The config file holds connection details and references secrets via
-  // *_env fields. Actual secrets live in the .env file (see env_file above).
+  // As of v0.7.3, addons are MCP servers that ship as separate PyPI
+  // packages (lingtai-imap, lingtai-telegram, lingtai-feishu, lingtai-wechat),
+  // installed alongside the kernel by `pip install lingtai`. The TUI
+  // wires them up in two halves:
   //
-  // Config files live at a fixed, project-shared location:
+  // 1. The `addons:` list below — names of curated MCPs the agent
+  //    should "register" on boot. The kernel's `mcp` capability looks
+  //    each name up in its catalog and decompresses the record into
+  //    <agent>/mcp_registry.jsonl (idempotent, append-only).
   //
-  //   <project>/.lingtai/.addons/<addon>/config.json
+  // 2. The `mcp:` activation map below — for each registered MCP,
+  //    the subprocess spec (which Python interpreter, which module,
+  //    which env vars). Activation is gated by registry membership,
+  //    so a name in `mcp:` without a matching `addons:` entry would
+  //    be skipped with a warning.
   //
-  // In this init.json file (which sits at <project>/.lingtai/<agent>/init.json),
-  // the path is expressed relative to the agent's working directory with "../":
+  // Default for new agents (auto-populated by the TUI wizard):
   //
-  //   "addons": {
-  //     "imap":     { "config": "../.addons/imap/config.json" },
-  //     "telegram": { "config": "../.addons/telegram/config.json" },
-  //     "feishu":   { "config": "../.addons/feishu/config.json" }
+  //   "addons": ["imap", "telegram", "feishu", "wechat"],
+  //   "mcp": {
+  //     "imap":     { "type": "stdio", "command": "<venv>/bin/python",
+  //                   "args": ["-m", "lingtai_imap"],
+  //                   "env": { "LINGTAI_IMAP_CONFIG": ".secrets/imap.json" } },
+  //     "telegram": { ... }, "feishu": { ... }, "wechat": { ... }
   //   }
   //
-  // This path is FIXED BY CONVENTION — the TUI auto-populates it when you
-  // select addons during agent creation. Do not change it. For multi-account
-  // addons (IMAP), use the "accounts" array inside the single config.json.
+  // The `command` always points at the local venv Python where pip
+  // installed the MCP packages — no remote fetch at runtime.
   //
-  // Setup guides are available as skills — use the agent's skills() tool to find them.
-  // Example configs are at: skills/lingtai-{imap,telegram,feishu}-setup/assets/config.json
+  // Per-MCP secrets live in <agent>/.secrets/<name>.json — plaintext JSON
+  // (no *_env indirection in the new MCP shape). Each MCP's README
+  // documents the schema; setup skills are available via the agent's
+  // library tool. Canonical contract spec: lingtai-anatomy skill,
+  // reference/mcp-protocol.md.
 
   // =============================================================
   // Agent personality & initial state
