@@ -9,9 +9,14 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// migrateStripMediaCapabilities removes the five capability entries that
-// were promoted out of lingtai-kernel into the `media-creation` and
-// `listen` skills: `compose`, `video`, `draw`, `talk`, `listen`.
+// migrateStripMediaCapabilities removes capability entries that were
+// promoted out of lingtai-kernel into TUI-side skills:
+//   - compose / video / draw / talk → minimax-token-plan skill
+//   - listen → listen skill
+//   - web_read → web-browsing skill (its trafilatura logic moved into
+//     the skill's scripts/extract.py path; the LLM still gets ranked
+//     search via the web_search tool, which now points at web-browsing
+//     for URL fetching).
 //
 // Background: the four media-generation modalities were thin wrappers
 // around the MiniMax-Media MCP server, and `listen` was a thin wrapper
@@ -53,7 +58,7 @@ func stripMediaCapsFromAgentInits(lingtaiDir string) error {
 		return fmt.Errorf("read .lingtai dir: %w", err)
 	}
 
-	removed := []string{"compose", "video", "draw", "talk", "listen"}
+	removed := []string{"compose", "video", "draw", "talk", "listen", "web_read"}
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -80,7 +85,7 @@ func stripMediaCapsFromGlobalPresets() error {
 		return fmt.Errorf("read presets dir: %w", err)
 	}
 
-	removed := []string{"compose", "video", "draw", "talk", "listen"}
+	removed := []string{"compose", "video", "draw", "talk", "listen", "web_read"}
 
 	for _, e := range entries {
 		if e.IsDir() {

@@ -1,5 +1,5 @@
 ---
-name: minimax-media
+name: minimax-token-plan
 description: >
   Use the MiniMax coding-plan subscription as a unified multimedia backend —
   vision, music, video, image, and speech generation. One `sk-cp-…` key
@@ -10,7 +10,7 @@ description: >
 version: 1.0.0
 ---
 
-# minimax-media
+# minimax-token-plan
 
 > Thin pointer. Live docs are the source of truth — `curl` them when you need depth.
 

@@ -191,6 +191,57 @@ func Load(name string) (Preset, error) {
 	return p, nil
 }
 
+// validTiers mirrors the kernel-side TIER_VALUES in lingtai/presets.py.
+var validTiers = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5": true}
+
+// Validate returns the list of rule violations for this preset. Mirrors the
+// kernel's load_preset validation gauntlet so the editor refuses to save
+// anything the kernel will refuse to load. Empty slice = passes.
+func (p Preset) Validate() []error {
+	var errs []error
+	if p.Description.Summary == "" {
+		errs = append(errs, fmt.Errorf("description.summary must be non-empty"))
+	}
+	if p.Description.Tier != "" && !validTiers[p.Description.Tier] {
+		errs = append(errs, fmt.Errorf("description.tier must be one of 1..5 (got %q)", p.Description.Tier))
+	}
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		errs = append(errs, fmt.Errorf("manifest.llm must be an object"))
+	} else {
+		if s, _ := llm["provider"].(string); s == "" {
+			errs = append(errs, fmt.Errorf("manifest.llm.provider must be non-empty"))
+		}
+		if s, _ := llm["model"].(string); s == "" {
+			errs = append(errs, fmt.Errorf("manifest.llm.model must be non-empty"))
+		}
+		if v, ok := llm["context_limit"]; ok && v != nil {
+			// JSON unmarshals numbers as float64; accept int-valued floats.
+			switch n := v.(type) {
+			case float64:
+				if n != float64(int(n)) || n <= 0 {
+					errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
+				}
+			case int:
+				if n <= 0 {
+					errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
+				}
+			default:
+				errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
+			}
+		}
+	}
+	if _, hasRootCtx := p.Manifest["context_limit"]; hasRootCtx {
+		errs = append(errs, fmt.Errorf("context_limit must live inside manifest.llm, not at manifest root"))
+	}
+	if caps, ok := p.Manifest["capabilities"]; ok {
+		if _, isMap := caps.(map[string]interface{}); !isMap {
+			errs = append(errs, fmt.Errorf("manifest.capabilities must be an object"))
+		}
+	}
+	return errs
+}
+
 // Save writes a preset to the presets directory.
 func Save(p Preset) error {
 	dir := PresetsDir()
@@ -338,7 +389,7 @@ func minimaxPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": mm, "psyche": e(), "codex": e(),
-				"vision": mm, "web_read": e(), "avatar": e(), "daemon": e(),
+				"vision": mm, "avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
@@ -361,7 +412,7 @@ func zhipuPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": zp, "psyche": e(), "codex": e(),
-				"vision": zp, "web_read": zp,
+				"vision": zp,
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -388,7 +439,7 @@ func deepseekPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"psyche": e(), "codex": e(), "web_read": e(),
+				"psyche": e(), "codex": e(),
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -414,7 +465,7 @@ func openrouterPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"psyche": e(), "codex": e(), "web_read": e(),
+				"psyche": e(), "codex": e(),
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -438,7 +489,7 @@ func codexPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": cx, "psyche": e(), "codex": e(),
-				"vision": cx, "web_read": cx,
+				"vision": cx,
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -460,7 +511,7 @@ func customPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": e(), "psyche": e(), "codex": e(),
-				"web_read": e(), "avatar": e(), "daemon": e(),
+				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
 			"admin": map[string]interface{}{"karma": true},
@@ -866,7 +917,6 @@ func (p Preset) CapabilityIcons() string {
 		"codex":      "📚",
 		"library":    "📜",
 		"vision":     "👁️",
-		"web_read":   "📖",
 		"avatar":     "👤",
 		"daemon":     "⚡",
 	}

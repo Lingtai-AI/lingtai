@@ -12,7 +12,7 @@
     "tier1_api": {
       "name": "API Metadata Queries",
       "speed": "~0.5s",
-      "tools": ["requests", "web_read"],
+      "tools": ["requests"],
       "trigger": ["arXiv ID", "DOI", "PMID", "PMC ID", "Known API endpoint"],
       "apis": ["arXiv", "OpenAlex", "CrossRef", "Semantic Scholar", "PubMed E-utilities",
                 "CORE", "Unpaywall", "Europe PMC", "DBLP", "Papers With Code",

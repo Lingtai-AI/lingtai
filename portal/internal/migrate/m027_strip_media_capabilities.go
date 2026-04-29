@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 )
 
-// migrateStripMediaCapabilities removes the five capability entries that
-// were promoted out of lingtai-kernel into TUI-side skills (`media-creation`
-// + `listen`): `compose`, `video`, `draw`, `talk`, `listen`.
+// migrateStripMediaCapabilities removes capability entries promoted out of
+// lingtai-kernel into TUI-side skills: `compose`, `video`, `draw`, `talk`,
+// `listen`, `web_read` (the last folded into the `web-browsing` skill).
 //
 // Strip-only: no MCP server registration is added. Agents that need media
 // generation can register the MiniMax-Media MCP server manually via the
@@ -30,7 +30,7 @@ func migrateStripMediaCapabilities(lingtaiDir string) error {
 		return fmt.Errorf("read .lingtai dir: %w", err)
 	}
 
-	removed := []string{"compose", "video", "draw", "talk", "listen"}
+	removed := []string{"compose", "video", "draw", "talk", "listen", "web_read"}
 
 	for _, entry := range entries {
 		if !entry.IsDir() {

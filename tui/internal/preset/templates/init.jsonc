@@ -110,8 +110,9 @@
       "web_search": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
 
       // --- Web page reader ---
-      // Fetches and extracts readable content from URLs using trafilatura (local, no API key).
-      "web_read": {},
+      // Removed. URL fetching is folded into the `web-browsing` skill —
+      // its scripts/extract_page.py wraps trafilatura plus six other
+      // tiers (PDF, BeautifulSoup, Playwright, Jina, etc.). Removed: "web_read".
 
       // --- Media creation (compose / video / draw / talk) ---
       // Removed from in-tree capabilities. Use the `media-creation` skill

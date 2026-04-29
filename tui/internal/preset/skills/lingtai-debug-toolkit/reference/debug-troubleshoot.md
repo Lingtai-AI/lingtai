@@ -511,7 +511,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - Returns a timeout error
 
 **Causes**:
-- I/O-intensive operations (bash, web_search, web_read) exceed default timeout
+- I/O-intensive operations (bash, web_search) exceed default timeout
 - External API unavailable
 - File too large, causing read timeout
 - Host resource shortage
@@ -519,8 +519,8 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 **Resolution**:
 
 1. Identify tool type:
-   - I/O-intensive: bash, web_search, web_read
-   - Compute-intensive: listen, vision
+   - I/O-intensive: bash, web_search
+   - Compute-intensive: vision
 2. Increase timeout for bash:
    ```
    bash(command="...", timeout=120)
@@ -545,7 +545,7 @@ read(file_path="/tmp/output.txt", offset=1, limit=100)
 - ❌ Reading a large file in a single call → should chunk it
 - ✅ Write long output to a file first, then read it in chunks
 
-**Related References**: `bash-manual`, `read-manual`, `web_read-manual`
+**Related References**: `bash-manual`, `read-manual`, `web-browsing` skill
 
 ---
 

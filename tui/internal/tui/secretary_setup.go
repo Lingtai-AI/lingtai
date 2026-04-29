@@ -53,7 +53,7 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 		"library": map[string]interface{}{
 			"paths": []string{filepath.Join(recipeDir, "skills")},
 		},
-		"web_search": map[string]interface{}{}, "web_read": map[string]interface{}{},
+		"web_search": map[string]interface{}{},
 		"daemon": map[string]interface{}{},
 	}
 	// Inherit per-capability config from orchestrator where applicable

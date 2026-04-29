@@ -1,5 +1,12 @@
 # Google Scholar Reference
 
+> **Note:** This file mentions `web_read` as a tool — that tool was removed.
+> URL fetching now lives in the `web-browsing` skill. Wherever you see
+> `web_read(url=...)` below, substitute either `curl` (then parse with
+> BeautifulSoup — see `web-browsing/reference/tier-2-beautifulsoup.md`) or
+> `playwright` for JS-rendered / bot-protected pages
+> (`web-browsing/reference/tier-3-playwright.md`).
+
 ## API Overview
 
 Google Scholar does not offer an official public API. This reference document provides two complementary approaches for accessing Scholar data:
@@ -294,24 +301,21 @@ def find_arxiv_pdf_url(title_keywords):
 import time
 import random
 
-def polite_fetch(url, method="web_read"):
-    """Polite fetching: random delay + User-Agent."""
+def polite_fetch(url):
+    """Polite fetching: random delay + User-Agent. See web-browsing skill
+    for richer tiers (trafilatura, Playwright stealth, Jina/Firecrawl)."""
     delay = random.uniform(2, 5)
     time.sleep(delay)
 
-    if method == "web_read":
-        from lingtai import web_read
-        return web_read(url=url)
-    else:
-        import requests
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.5",
-        }
-        r = requests.get(url, headers=headers, timeout=15)
-        r.raise_for_status()
-        return r.text
+    import requests
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.text
 ```
 
 ## Error Handling

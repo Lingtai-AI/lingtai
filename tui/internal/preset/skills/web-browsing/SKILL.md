@@ -45,7 +45,7 @@ URL arrives → Is it a PDF? → Tier 0 (curl + fitz)
 | Tier | Method | Speed | Tools | Reference |
 |------|--------|-------|-------|-----------|
 | **0** | PDF Direct Download | ~1s | `curl` + `fitz` | [tier-0-pdf.md](reference/tier-0-pdf.md) |
-| **1** | API Metadata Queries | ~0.5s | `requests` / `web_read` | [tier-1-apis.md](reference/tier-1-apis.md) |
+| **1** | API Metadata Queries | ~0.5s | `requests` | [tier-1-apis.md](reference/tier-1-apis.md) |
 | **1.5** | Trafilatura Fast Extraction | ~2s | `trafilatura` | [tier-1-5-trafilatura.md](reference/tier-1-5-trafilatura.md) |
 | **2** | BeautifulSoup Structured Extraction | ~5s | `requests` + `BS4` | [tier-2-beautifulsoup.md](reference/tier-2-beautifulsoup.md) |
 | **3** | Playwright Stealth | ~15s | `playwright` + stealth | [tier-3-playwright.md](reference/tier-3-playwright.md) |
@@ -249,7 +249,7 @@ The bundled `extract_page.py` script auto-selects the cheapest viable tier.完�
 
 | Site | Recommended tier | Success rate | Notes |
 |------|------------------|--------------|-------|
-| arXiv abstract | Tier 1 | high | API or web_read |
+| arXiv abstract | Tier 1 | high | API call via `requests` |
 | arXiv PDF | Tier 0 | high | curl -L + fitz |
 | OpenAlex / CrossRef | Tier 1 | high | Fully free, most reliable |
 | Unpaywall | Tier 1 | high | Finds OA PDF for any DOI |

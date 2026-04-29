@@ -3,7 +3,7 @@
 > Part of the [web-browsing](../SKILL.md) skill.
 
 **When it applies:** Known academic IDs (DOI, arXiv, PMID, PMC), or sites with free APIs.
-**Tools:** `requests` or built-in `web_read` tool.
+**Tools:** `requests` (HTTP) — call APIs directly from Python.
 **Speed:** ~0.5s.
 
 ### Academic APIs

@@ -13,7 +13,7 @@ fetches model weights from Hugging Face Hub (2-15 GB depending on model);
 subsequent calls reuse the cache.
 
 For MiniMax-MCP-based image understanding, use the `understand_image` MCP
-tool directly (see the `minimax-media` skill). This script exists for the
+tool directly (see the `minimax-token-plan` skill). This script exists for the
 case where neither a vision-capable LLM nor a MiniMax key is available.
 
 Emits a JSON document on stdout. Errors → stderr, exit non-zero.
