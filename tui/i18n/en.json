@@ -1,6 +1,7 @@
 {
   "app.brand": "Lingtai Agent",
   "app.brand_secretary": "Lingtai Secretary",
+  "app.brand_dj": "Lingtai DJ",
   "app.loading": "Loading...",
   "app.title": "灵台",
   "error.agent_timeout": "Agent failed to start. Check logs at %s",
@@ -332,6 +333,7 @@
   "palette.library": "Browse skill library",
   "palette.insights": "Request an insight from the agent now",
   "palette.secretary": "Chat with the secretary (toggle)",
+  "palette.dj": "Chat with the DJ (toggle)",
   "palette.brief": "View secretary briefing files",
   "palette.codex": "Browse agent codex",
   "palette.system": "Browse agent system files",
@@ -472,6 +474,7 @@
   "cmd.library": "Browse the skill library — reusable procedures the agent can invoke on demand",
   "cmd.insights": "Request an insight from the agent now — the agent observes the current task and produces 2-3 concrete observations",
   "cmd.secretary": "Toggle between main agent chat and secretary chat. The secretary manages briefings and cross-project summaries",
+  "cmd.dj": "Toggle between main agent chat and DJ chat. The DJ composes one music track per journal entry on demand, using whichever media-creation provider in its library matches your saved presets (MiniMax, etc.). If no usable provider is configured, the DJ tells you what's needed",
   "cmd.brief": "View secretary briefing files (profile + journal) and trigger a new briefing cycle if the secretary is alive",
   "cmd.codex": "Browse an agent's codex — accumulated research and findings. Ctrl+T switches between agents",
   "cmd.system": "Browse an agent's system files (system.md, covenant, principle, procedures, pad, llm). Ctrl+T switches between agents",

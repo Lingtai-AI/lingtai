@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/dj"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/secretary"
 	tea "charm.land/bubbletea/v2"
@@ -51,6 +52,7 @@ type App struct {
 	projects        ProjectsModel
 	agora           AgoraModel
 	secretaryMail   MailModel
+	djMail          MailModel
 	briefs          MarkdownViewerModel
 	codex           CodexModel
 	system          SystemModel
@@ -63,6 +65,7 @@ type App struct {
 	login           LoginModel
 
 	inSecretaryView bool      // true when viewing secretary mail (within appViewMail)
+	inDJView        bool      // true when viewing DJ mail (within appViewMail). Mutually exclusive with inSecretaryView.
 	lastEscTime     time.Time // for double-esc detection
 
 	globalDir       string
@@ -195,6 +198,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case appViewMail:
 			if a.inSecretaryView {
 				a.secretaryMail, cmd = a.secretaryMail.Update(msg)
+			} else if a.inDJView {
+				a.djMail, cmd = a.djMail.Update(msg)
 			} else {
 				a.mail, cmd = a.mail.Update(msg)
 			}
@@ -249,6 +254,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.inSecretaryView {
 			return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
 		}
+		if a.inDJView {
+			return a, tea.Batch(a.djMail.refreshMail, tickEvery(a.djMail.pollRate), pulseTick(), a.sendSize())
+		}
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 
 	case doctorResultMsg:
@@ -280,6 +288,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, a.secretaryMail.refreshMail
 		}
+		if a.inDJView {
+			if msg.err != nil {
+				a.djMail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
+			} else {
+				a.djMail.AddSystemMessage(i18n.T("mail.refreshed"))
+			}
+			return a, a.djMail.refreshMail
+		}
 		if msg.err != nil {
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
 		} else {
@@ -295,6 +311,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.secretaryMail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
 			}
 			return a, a.secretaryMail.refreshMail
+		}
+		if a.inDJView {
+			if len(msg.failures) > 0 {
+				a.djMail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
+			} else {
+				a.djMail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
+			}
+			return a, a.djMail.refreshMail
 		}
 		if len(msg.failures) > 0 {
 			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
@@ -366,6 +390,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			secDir := secretary.AgentDir(a.globalDir)
 			if _, err := process.LaunchAgent(a.lingtaiCmd, secDir); err != nil {
 				launchErr += "\nSecretary launch failed: " + err.Error()
+			}
+		}
+		// Launch DJ if a MiniMax preset is in use. The DJ stays silent
+		// after boot — it reads its covenant/comment and idles until the
+		// human messages it via /dj.
+		if msg.LaunchDJ && a.lingtaiCmd != "" {
+			djDir := dj.AgentDir(a.globalDir)
+			if _, err := process.LaunchAgent(a.lingtaiCmd, djDir); err != nil {
+				launchErr += "\nDJ launch failed: " + err.Error()
 			}
 		}
 		// Initialize mail view
@@ -485,13 +518,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// === Double-esc: toggle back from secretary view ===
-	if a.inSecretaryView && a.currentView == appViewMail {
+	// === Double-esc: toggle back from secretary or DJ sub-view ===
+	if (a.inSecretaryView || a.inDJView) && a.currentView == appViewMail {
 		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 			now := time.Now()
 			if now.Sub(a.lastEscTime) < 500*time.Millisecond {
 				// Double-esc detected — toggle back to main mail
 				a.inSecretaryView = false
+				a.inDJView = false
 				a.lastEscTime = time.Time{}
 				return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 			}
@@ -510,6 +544,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.inSecretaryView {
 			updated, cmd := a.secretaryMail.Update(msg)
 			a.secretaryMail = updated
+			return a, cmd
+		}
+		if a.inDJView {
+			updated, cmd := a.djMail.Update(msg)
+			a.djMail = updated
 			return a, cmd
 		}
 		updated, cmd := a.mail.Update(msg)
@@ -585,17 +624,22 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	addMsg := func(text string) {
 		if a.inSecretaryView {
 			a.secretaryMail.AddSystemMessage(text)
+		} else if a.inDJView {
+			a.djMail.AddSystemMessage(text)
 		} else {
 			a.mail.AddSystemMessage(text)
 		}
 	}
 	// targetDir/targetName: the agent that single-target commands operate on.
-	// In secretary view, target the secretary; otherwise the project orchestrator.
+	// In a sub-view, target that sub-agent; otherwise the project orchestrator.
 	targetDir := a.orchDir
 	targetName := a.orchName
 	if a.inSecretaryView {
 		targetDir = secretary.AgentDir(a.globalDir)
 		targetName = "secretary"
+	} else if a.inDJView {
+		targetDir = dj.AgentDir(a.globalDir)
+		targetName = "dj"
 	}
 	switch command {
 	case "sleep":
@@ -831,6 +875,45 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		// Re-entry — reuse existing state, just restart ticks
 		return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
+	case "dj":
+		if a.inDJView {
+			a.inDJView = false
+			a.currentView = appViewMail
+			return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
+		}
+		djAgentDir := dj.AgentDir(a.globalDir)
+		// Auto-setup if the agent dir doesn't exist yet. Pre-firstrun-of-DJ
+		// projects (created before /dj existed) hit this path the first
+		// time the human invokes /dj.
+		if _, err := os.Stat(filepath.Join(djAgentDir, "init.json")); err != nil && a.lingtaiCmd != "" {
+			orchDirName := filepath.Base(a.orchDir)
+			if err := setupDJ(a.projectDir, a.globalDir, orchDirName); err != nil {
+				addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
+				return a, nil
+			}
+		}
+		if a.inSecretaryView {
+			a.inSecretaryView = false
+		}
+		// Auto-revive
+		if a.lingtaiCmd != "" && !fs.IsAlive(djAgentDir, 3.0) {
+			if _, err := process.LaunchAgent(a.lingtaiCmd, djAgentDir); err != nil {
+				addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
+			} else {
+				fs.WritePrompt(djAgentDir, dj.GreetContent())
+			}
+		}
+		a.inDJView = true
+		a.currentView = appViewMail
+		if a.djMail.humanDir == "" {
+			djLingtaiDir := dj.LingtaiDir(a.globalDir)
+			djHumanDir := filepath.Join(djLingtaiDir, "human")
+			a.djMail = NewMailModel(djHumanDir, "human", djLingtaiDir, djAgentDir, "dj", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			a.djMail.brandOverride = i18n.T("app.brand_dj")
+			a.djMail.palette.ExcludeCommands("viz", "addon", "setup", "agora", "export", "nirvana", "brief", "secretary")
+			return a, tea.Batch(a.djMail.Init(), a.sendSize())
+		}
+		return a, tea.Batch(a.djMail.refreshMail, tickEvery(a.djMail.pollRate), pulseTick(), a.sendSize())
 	case "projects":
 		a.currentView = appViewProjects
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
@@ -1049,6 +1132,12 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			a.secretaryMail.input.ApplyTheme()
 			return a, tea.Batch(a.secretaryMail.refreshMail, tickEvery(a.secretaryMail.pollRate), pulseTick(), a.sendSize())
 		}
+		if a.inDJView {
+			a.djMail.pageSize = ps
+			a.djMail.insightsEnabled = a.tuiConfig.Insights
+			a.djMail.input.ApplyTheme()
+			return a, tea.Batch(a.djMail.refreshMail, tickEvery(a.djMail.pollRate), pulseTick(), a.sendSize())
+		}
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
 		// Re-apply theme to textarea (settings may have changed it)
@@ -1120,8 +1209,20 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.secretaryMail.brandOverride = i18n.T("app.brand_secretary")
 		a.secretaryMail.palette.ExcludeCommands("viz", "addon", "setup", "agora", "export", "nirvana")
 		a.inSecretaryView = true
+		a.inDJView = false
 		a.currentView = appViewMail
 		return a, tea.Batch(a.secretaryMail.Init(), a.sendSize())
+	case "dj":
+		djAgentDir := dj.AgentDir(a.globalDir)
+		djLingtaiDir := dj.LingtaiDir(a.globalDir)
+		djHumanDir := filepath.Join(djLingtaiDir, "human")
+		a.djMail = NewMailModel(djHumanDir, "human", djLingtaiDir, djAgentDir, "dj", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+		a.djMail.brandOverride = i18n.T("app.brand_dj")
+		a.djMail.palette.ExcludeCommands("viz", "addon", "setup", "agora", "export", "nirvana", "brief", "secretary")
+		a.inDJView = true
+		a.inSecretaryView = false
+		a.currentView = appViewMail
+		return a, tea.Batch(a.djMail.Init(), a.sendSize())
 	case "projects":
 		a.currentView = appViewProjects
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
@@ -1154,6 +1255,8 @@ func (a App) View() tea.View {
 	case appViewMail:
 		if a.inSecretaryView {
 			content = a.secretaryMail.View()
+		} else if a.inDJView {
+			content = a.djMail.View()
 		} else {
 			content = a.mail.View()
 		}

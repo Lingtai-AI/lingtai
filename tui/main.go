@@ -163,6 +163,19 @@ func main() {
 		}
 	}
 
+	// And in the DJ's network.
+	djProjectDir := filepath.Join(globalDir, "dj")
+	if _, err := os.Stat(filepath.Join(djProjectDir, ".lingtai")); err == nil {
+		self, _ := os.Executable()
+		out, _ := exec.Command(self, "list", djProjectDir).Output()
+		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
+			fmt.Println("DJ has phantom processes:")
+			fmt.Print(string(out))
+			fmt.Printf("Run: lingtai-tui purge %s\n", djProjectDir)
+			os.Exit(1)
+		}
+	}
+
 	// Rehydration state: set below if the network needs rehydration (cloned
 	// agora network with no init.json files but an intact .agent.json blueprint).
 	var needsRehydration bool

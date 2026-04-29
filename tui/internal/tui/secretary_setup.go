@@ -38,6 +38,15 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 		return fmt.Errorf("orchestrator init.json has no manifest")
 	}
 
+	// Substitute the orchestrator's DEFAULT preset's llm + capabilities in
+	// place of whatever the orch currently has materialized — same rule
+	// avatars use, so the secretary's notion of 'home' stays stable as the
+	// orchestrator gets reconfigured. Falls back silently to the orch's
+	// materialized values if no preset umbrella is set.
+	if err := substituteDefaultPreset(manifest); err != nil {
+		return fmt.Errorf("load default preset for secretary: %w", err)
+	}
+
 	manifest["agent_name"] = "secretary"
 	manifest["soul"] = map[string]interface{}{"delay": 9999999}
 	manifest["admin"] = map[string]interface{}{"karma": false, "nirvana": false}
@@ -69,6 +78,13 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 		}
 	}
 	manifest["capabilities"] = secretaryCaps
+
+	// Strip preset umbrella — the secretary runs on materialized values
+	// (substituted above from the orch's default preset). Leaving the
+	// umbrella in place would cause the kernel's _read_init to re-substitute
+	// the preset's full capability set on every boot, clobbering the
+	// trimmed-down secretary-specific capabilities we just wrote.
+	delete(manifest, "preset")
 
 	// Set secretary recipe files (no procedures override — inherits system-wide)
 	initJSON["covenant_file"] = filepath.Join(recipeDir, "covenant.md")

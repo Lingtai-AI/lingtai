@@ -1,13 +1,15 @@
 ---
 name: minimax-token-plan
 description: >
-  Use the MiniMax coding-plan subscription as a unified multimedia backend —
-  vision, music, video, image, and speech generation. One `sk-cp-…` key
-  unlocks all five modalities. This skill is a thin pointer: it tells you
-  how to source the key, pick the region, and where the live docs are.
-  For tool-call details (model names, parameters, quotas), fetch the docs
-  yourself. MCP server registration is owned by the `lingtai-mcp` skill.
-version: 1.0.0
+  media-creation provider. Use the MiniMax coding-plan subscription as a
+  unified multimedia backend — vision, music, video, image, and speech
+  generation. One `sk-cp-…` key unlocks all five modalities. This skill
+  is a thin pointer: it tells you how to source the key, pick the region,
+  and where the live docs are. For tool-call details (model names,
+  parameters, quotas), fetch the docs yourself. MCP server registration
+  is owned by the `lingtai-mcp` skill.
+version: 1.1.0
+tags: [media-creation, minimax, music, video, image, speech, vision, multimedia]
 ---
 
 # minimax-token-plan
