@@ -92,6 +92,7 @@ type presetLibraryFocus int
 const (
 	presetLibFocusList presetLibraryFocus = iota
 	presetLibFocusTagPicker
+	presetLibFocusEditor
 )
 
 // PresetLibraryModel is the dedicated screen for browsing and tagging the
@@ -104,6 +105,7 @@ type PresetLibraryModel struct {
 	focus    presetLibraryFocus
 	tierIdx  int    // selection within the tag picker (0..len(tierValues), last = "untag")
 	saveErr  string // short error from the last save attempt
+	editor   PresetEditorModel // active when focus == presetLibFocusEditor
 
 	width  int
 	height int
@@ -125,6 +127,35 @@ func NewPresetLibraryModel(lang string) PresetLibraryModel {
 func (m PresetLibraryModel) Init() tea.Cmd { return nil }
 
 func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
+	// Editor focus consumes ALL non-resize messages until it commits or
+	// cancels. The two messages it emits are intercepted below.
+	if m.focus == presetLibFocusEditor {
+		switch typed := msg.(type) {
+		case PresetEditorCommitMsg:
+			if err := preset.Save(typed.Preset); err != nil {
+				m.saveErr = fmt.Sprintf("save failed: %v", err)
+				return m, nil
+			}
+			m.presets, _ = preset.List()
+			for i, q := range m.presets {
+				if q.Name == typed.Preset.Name {
+					m.cursor = i
+					break
+				}
+			}
+			m.focus = presetLibFocusList
+			m.saveErr = ""
+			return m, nil
+		case PresetEditorCancelMsg:
+			m.focus = presetLibFocusList
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.editor, cmd = m.editor.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -214,6 +245,18 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			m.focus = presetLibFocusTagPicker
 			m.saveErr = ""
 			return m, nil
+		case "enter":
+			// Open the dedicated editor on the focused preset.
+			if m.cursor < 0 || m.cursor >= len(m.presets) {
+				return m, nil
+			}
+			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang)
+			// Forward the current size so the editor renders immediately.
+			updated, _ := m.editor.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.editor = updated
+			m.focus = presetLibFocusEditor
+			m.saveErr = ""
+			return m, m.editor.Init()
 		case "r":
 			// Reload from disk.
 			m.presets, _ = preset.List()
@@ -236,6 +279,11 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 func (m PresetLibraryModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+
+	// Editor takes over the screen when active.
+	if m.focus == presetLibFocusEditor {
+		return m.editor.View()
 	}
 
 	// Layout: title bar (1) + body (flexible) + footer hint (1).

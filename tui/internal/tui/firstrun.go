@@ -64,6 +64,7 @@ const (
 	stepWelcome firstRunStep = iota
 	stepAPIKey
 	stepPickPreset
+	stepEditPreset
 	stepPresetKey
 	stepCapabilities
 	stepAgentNameDir
@@ -72,14 +73,6 @@ const (
 	stepPropagate         // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
-
-// zhipuCodingModels lists models available on the Zhipu GLM Coding Plan.
-var zhipuCodingModels = []string{"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"}
-
-// deepseekModels lists the models available on DeepSeek's API. Flash is cheap
-// and fast; Pro is stronger and more expensive. Both support tool calls and
-// share the same 1M context window and OpenAI-compatible endpoint.
-var deepseekModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 
 // codexModels lists models available via Codex OAuth.
 var codexModels = []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"}
@@ -102,9 +95,9 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 	switch {
 	case !hasPresets && step == stepAPIKey:
 		return 1, total
-	case !hasPresets && step == stepPickPreset:
+	case !hasPresets && (step == stepPickPreset || step == stepEditPreset):
 		return 2, total
-	case step == stepPickPreset || step == stepPresetKey:
+	case step == stepPickPreset || step == stepEditPreset || step == stepPresetKey:
 		return 1, total
 	case step == stepCapabilities:
 		if setupMode || hasPresets {
@@ -196,20 +189,14 @@ type FirstRunModel struct {
 	progressCh   chan string // channel for progress updates
 	// Embedded key input for preset's provider
 	presetKeyInput    textarea.Model
-	presetEndpointIn  textinput.Model   // base_url for custom provider
-	presetModelIn     textinput.Model   // model name for custom provider
-	presetNameIn      textinput.Model   // preset name for custom provider (separate from nameInput)
-	presetKeyFieldIdx int               // 0=compat, 1=endpoint, 2=model, 3=key, 4=name (custom); 0=region, 1=model, 2=key (minimax/zhipu); 0=model, 1=key (deepseek)
-	minimaxRegion     int               // 0=china, 1=international
-	minimaxModel      int               // 0=highspeed, 1=standard
-	zhipuRegion       int               // 0=china, 1=international
-	zhipuModel        int               // 0=GLM-5.1, 1=GLM-5-Turbo, 2=GLM-4.7, 3=GLM-4.5-Air
-	deepseekModel     int               // 0=deepseek-v4-flash, 1=deepseek-v4-pro
 	codexModel        int               // 0=gpt-5.4, 1=gpt-5.4-mini, 2=gpt-5.3-codex
 	codexEmail        string            // set after successful OAuth login
 	codexLoggingIn    bool              // true while waiting for browser callback
-	customCompat      int               // 0=openai, 1=anthropic
 	selectedProvider  string            // provider of currently selected preset
+	// presetEditor holds the dedicated preset-editor sub-model when the
+	// wizard is on stepEditPreset. The wizard delegates Update/View to
+	// this model and reacts to PresetEditorCommitMsg / CancelMsg.
+	presetEditor PresetEditorModel
 	existingKeys      map[string]string // loaded from Config.Keys
 	// Capability selection state (stepCapabilities)
 	capInfos     map[string]capInfo // from check-caps CLI output
@@ -275,21 +262,6 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	pki.Prompt = ""
 	pki.KeyMap.InsertNewline.SetKeys() // no newlines — single line
 	pki.SetStyles(themedTextareaStyles())
-
-	pei := textinput.New() // endpoint input for custom provider
-	pei.CharLimit = 256
-	pei.SetWidth(50)
-	pei.Placeholder = "https://openrouter.ai/api/v1"
-
-	pmi := textinput.New() // model input for custom provider
-	pmi.CharLimit = 64
-	pmi.SetWidth(50)
-	pmi.Placeholder = "model-name"
-
-	pni := textinput.New() // preset name input for custom provider
-	pni.CharLimit = 64
-	pni.SetWidth(50)
-	pni.Placeholder = "openrouter"
 
 	si := textinput.New()
 	si.CharLimit = 10
@@ -368,9 +340,6 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		hasPresets:       hasPresets,
 		langCursor:       langCursor,
 		presetKeyInput:   pki,
-		presetEndpointIn: pei,
-		presetModelIn:    pmi,
-		presetNameIn:     pni,
 		existingKeys:     existingKeys,
 		staminaInput:     si,
 		ctxLimitInput:    ci,
@@ -623,6 +592,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Forward resize to embedded preset editor when active.
+		if m.step == stepEditPreset {
+			updated, _ := m.presetEditor.Update(msg)
+			m.presetEditor = updated
+		}
 		// Resize text inputs to use available terminal width
 		inputWidth := msg.Width - 20
 		if inputWidth < 40 {
@@ -634,6 +608,35 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.principleInput.SetWidth(inputWidth)
 		m.soulFlowInput.SetWidth(inputWidth)
 		m.commentInput.SetWidth(inputWidth)
+		return m, nil
+
+	case PresetEditorCommitMsg:
+		// Persist the edited preset, refresh the in-memory list so
+		// downstream steps read the saved version, then advance to
+		// stepPresetKey with provider-specific prefill.
+		if err := preset.Save(msg.Preset); err != nil {
+			// Save failed: stay in editor and surface the error so the
+			// user can retry. The editor's saveErr channel is the right
+			// home for this; for now we drop back to the picker with a
+			// log-level message — pre-Save validation already gates the
+			// usual failure modes.
+			m.message = "save preset: " + err.Error()
+			m.step = stepPickPreset
+			return m, nil
+		}
+		m.presets, _ = preset.List()
+		// Re-find the saved preset in the refreshed list.
+		for i, p := range m.presets {
+			if p.Name == msg.Preset.Name {
+				m.cursor = i
+				break
+			}
+		}
+		updated, cmd := m.enterPresetKeyFor(msg.Preset)
+		return updated, cmd
+
+	case PresetEditorCancelMsg:
+		m.step = stepPickPreset
 		return m, nil
 
 	case bootstrapProgressMsg:
@@ -769,11 +772,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 	case PresetKeyEditorDoneMsg:
 		if msg.Text != "" {
-			if focused := m.focusedPresetKeyInput(); focused != nil {
-				focused.SetValue(msg.Text)
-			} else if ta := m.focusedPresetKeyTextarea(); ta != nil {
-				ta.SetValue(msg.Text)
-			}
+			m.presetKeyInput.SetValue(msg.Text)
 		}
 		return m, textinput.Blink
 
@@ -879,119 +878,34 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < len(m.presets)-1 {
 					m.cursor++
 				}
+			case "u":
+				// Fast-path "use as-is" — skip the editor and jump straight
+				// to the existing provider-specific stepPresetKey screen.
+				// Kept so muscle memory from the old wizard still works.
+				if m.setupMode && m.cursor == -1 {
+					return m, m.enterCapabilities()
+				}
+				if m.cursor < len(m.presets) {
+					return m.enterPresetKeyFor(m.presets[m.cursor])
+				}
+				return m, nil
 			case "enter":
 				if m.setupMode && m.cursor == -1 {
 					// Skip — keep existing preset, jump to capabilities
 					return m, m.enterCapabilities()
 				}
 				if m.cursor < len(m.presets) {
-					p := m.presets[m.cursor]
-					provider := m.getPresetProvider(p)
-					m.selectedProvider = provider
-					// Always go to key page — prefill if key exists
-					m.step = stepPresetKey
-					m.presetKeyInput.Reset()
-					m.presetEndpointIn.Reset()
-					m.presetModelIn.Reset()
-					m.presetNameIn.Reset()
-					m.presetKeyFieldIdx = 0
-					if provider == "custom" {
-						// field 0 = compat selector (no text focus)
-						m.customCompat = 0
-						// Prefill from saved preset manifest if available
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if baseURL, ok := llm["base_url"].(string); ok && baseURL != "" {
-								m.presetEndpointIn.SetValue(baseURL)
-							} else {
-								m.presetEndpointIn.SetValue("https://openrouter.ai/api/v1")
-							}
-							if model, ok := llm["model"].(string); ok && model != "" {
-								m.presetModelIn.SetValue(model)
-							}
-							if compat, ok := llm["api_compat"].(string); ok && compat == "anthropic" {
-								m.customCompat = 1
-							}
-						} else {
-							m.presetEndpointIn.SetValue("https://openrouter.ai/api/v1")
-						}
-						if p.Name != "" && !preset.IsBuiltin(p.Name) {
-							m.presetNameIn.SetValue(p.Name)
-						} else {
-							m.presetNameIn.SetValue("openrouter")
-						}
-					} else if provider == "minimax" {
-						// field 0 = region selector (no text focus)
-						m.presetKeyInput.Blur()
-						// Prefill region from saved preset's base_url
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if baseURL, ok := llm["base_url"].(string); ok && strings.Contains(baseURL, "minimaxi.com") {
-								m.minimaxRegion = 0 // China
-							} else {
-								m.minimaxRegion = 1 // International
-							}
-						}
-						// Prefill model from saved preset
-						m.minimaxModel = 0 // default highspeed
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if model, ok := llm["model"].(string); ok && model == "MiniMax-M2.7" {
-								m.minimaxModel = 1 // standard
-							}
-						}
-					} else if provider == "zhipu" {
-						// field 0 = region selector (no text focus)
-						m.presetKeyInput.Blur()
-						// Prefill region from saved preset's base_url
-						m.zhipuRegion = 0 // default China
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if baseURL, ok := llm["base_url"].(string); ok && strings.Contains(baseURL, "api.z.ai") {
-								m.zhipuRegion = 1 // International
-							}
-						}
-						// Prefill model from saved preset
-						m.zhipuModel = 0 // default GLM-5.1
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if model, ok := llm["model"].(string); ok {
-								switch model {
-								case "GLM-5-Turbo":
-									m.zhipuModel = 1
-								case "GLM-4.7":
-									m.zhipuModel = 2
-								case "GLM-4.5-Air":
-									m.zhipuModel = 3
-								}
-							}
-						}
-					} else if provider == "deepseek" {
-						// field 0 = model selector (no text focus)
-						m.presetKeyInput.Blur()
-						m.deepseekModel = 0 // default flash
-						if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-							if model, ok := llm["model"].(string); ok && model == "deepseek-v4-pro" {
-								m.deepseekModel = 1
-							}
-						}
-					} else if provider == "codex" {
-						m.presetKeyInput.Blur()
-						m.codexModel = 0
-						m.codexEmail = ""
-						m.codexLoggingIn = false
-						// Check for existing login
-						authPath := filepath.Join(m.globalDir, "codex-auth.json")
-						if data, err := os.ReadFile(authPath); err == nil {
-							var tokens CodexTokens
-							if json.Unmarshal(data, &tokens) == nil && tokens.Email != "" && tokens.RefreshToken != "" {
-								m.codexEmail = tokens.Email
-							}
-						}
-					} else {
-						m.presetKeyInput.Focus()
-					}
-					// Prefill with existing key
-					if existing := m.existingKeys[provider]; existing != "" {
-						m.presetKeyInput.SetValue(existing)
-					}
-					return m, textinput.Blink
+					// Open the dedicated preset editor. On commit we save to
+					// disk and replay the legacy per-provider prefill via
+					// enterPresetKeyFor; on cancel we return to the picker.
+					m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
+					m.step = stepEditPreset
+					return m, tea.Batch(
+						m.presetEditor.Init(),
+						func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+					)
 				}
+				return m, nil
 			case "backspace", "delete":
 				// Delete a saved (non-builtin) preset
 				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
@@ -1019,39 +933,27 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			return m, nil
 
+		case stepEditPreset:
+			var cmd tea.Cmd
+			m.presetEditor, cmd = m.presetEditor.Update(msg)
+			return m, cmd
+
 		case stepPresetKey:
-			isCustom := m.selectedProvider == "custom"
-			isMinimax := m.selectedProvider == "minimax"
-			isZhipu := m.selectedProvider == "zhipu"
-			isDeepseek := m.selectedProvider == "deepseek"
+			// Per the 2026-04-29 editor refactor, stepPresetKey does
+			// only one thing: collect the API key value to write to
+			// ~/.lingtai-tui/.env. Provider-specific edits to the
+			// preset (model, base_url, api_compat, region, etc.) now
+			// happen in the dedicated PresetEditorModel before this
+			// step. Codex is the one exception — it uses an OAuth
+			// flow that isn't a paste-key form.
 			isCodex := m.selectedProvider == "codex"
-			fieldCount := 1 // default: key only
-			if isCustom {
-				fieldCount = 5 // compat + endpoint + model + key + name
-			}
-			if isMinimax {
-				fieldCount = 3 // region + model + key
-			}
-			if isZhipu {
-				fieldCount = 3 // region + model + key
-			}
-			if isDeepseek {
-				fieldCount = 2 // model + key
-			}
-			if isCodex {
-				fieldCount = 1
-			}
 			switch msg.String() {
 			case "ctrl+e":
-				// Open external editor for the currently focused text field
-				var currentVal string
-				if focused := m.focusedPresetKeyInput(); focused != nil {
-					currentVal = focused.Value()
-				} else if ta := m.focusedPresetKeyTextarea(); ta != nil {
-					currentVal = ta.Value()
-				} else {
+				// Open external editor for paste-friendly key entry.
+				if isCodex {
 					return m, nil
 				}
+				currentVal := m.presetKeyInput.Value()
 				tmpFile, err := os.CreateTemp("", "lingtai-field-*.txt")
 				if err != nil {
 					return m, nil
@@ -1074,187 +976,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "esc":
 				m.step = stepPickPreset
 				return m, nil
-			case "up":
-				if isCustom || isMinimax || isZhipu || isDeepseek || isCodex {
-					m.presetKeyFieldIdx = (m.presetKeyFieldIdx - 1 + fieldCount) % fieldCount
-					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					if isDeepseek && m.presetKeyFieldIdx == 0 {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					if isCodex {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					return m, m.focusPresetKeyField()
-				}
-				return m, nil
-			case "down", "tab":
-				if isCustom || isMinimax || isZhipu || isDeepseek || isCodex {
-					m.presetKeyFieldIdx = (m.presetKeyFieldIdx + 1) % fieldCount
-					if (isMinimax || isZhipu) && m.presetKeyFieldIdx < 2 {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					if isDeepseek && m.presetKeyFieldIdx == 0 {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					if isCodex {
-						m.presetKeyInput.Blur()
-						return m, nil
-					}
-					return m, m.focusPresetKeyField()
-				}
-				return m, nil
 			case "left", "right":
-				// Cycle model for codex
-				if isCodex && m.presetKeyFieldIdx == 0 {
+				if isCodex {
 					if msg.String() == "right" {
 						m.codexModel = (m.codexModel + 1) % len(codexModels)
 					} else {
 						m.codexModel = (m.codexModel + len(codexModels) - 1) % len(codexModels)
 					}
-					return m, nil
 				}
-				// Toggle region for minimax
-				if isMinimax && m.presetKeyFieldIdx == 0 {
-					m.minimaxRegion = 1 - m.minimaxRegion
-					return m, nil
-				}
-				// Toggle model for minimax
-				if isMinimax && m.presetKeyFieldIdx == 1 {
-					m.minimaxModel = 1 - m.minimaxModel
-					return m, nil
-				}
-				// Toggle region for zhipu
-				if isZhipu && m.presetKeyFieldIdx == 0 {
-					m.zhipuRegion = 1 - m.zhipuRegion
-					return m, nil
-				}
-				// Cycle model for zhipu (4 options): right=forward, left=backward
-				if isZhipu && m.presetKeyFieldIdx == 1 {
-					if msg.String() == "right" {
-						m.zhipuModel = (m.zhipuModel + 1) % len(zhipuCodingModels)
-					} else {
-						m.zhipuModel = (m.zhipuModel + len(zhipuCodingModels) - 1) % len(zhipuCodingModels)
-					}
-					return m, nil
-				}
-				// Toggle model for deepseek (flash ↔ pro)
-				if isDeepseek && m.presetKeyFieldIdx == 0 {
-					m.deepseekModel = 1 - m.deepseekModel
-					return m, nil
-				}
-				// Toggle compat for custom
-				if isCustom && m.presetKeyFieldIdx == 0 {
-					m.customCompat = 1 - m.customCompat
-					return m, nil
-				}
+				return m, nil
 			case "enter":
-				key := strings.TrimSpace(m.presetKeyInput.Value())
-				var newPresetName string
-				if isCustom {
-					endpoint := m.presetEndpointIn.Value()
-					model := m.presetModelIn.Value()
-					name := m.presetNameIn.Value()
-					if endpoint == "" || model == "" || key == "" || name == "" {
-						return m, nil // require all fields
-					}
-					compat := "openai"
-					if m.customCompat == 1 {
-						compat = "anthropic"
-					}
-					// Clone the template — don't mutate the original
-					clone := preset.Clone(m.presets[m.cursor], name)
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["base_url"] = endpoint
-						llm["model"] = model
-						llm["api_compat"] = compat
-					}
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					newPresetName = name
-				}
-				if isMinimax {
-					// Clone the template with auto-name based on region
-					p := m.presets[m.cursor]
-					var name, baseURL, model string
-					if m.minimaxRegion == 0 {
-						name = "minimax_cn"
-						baseURL = "https://api.minimaxi.com/anthropic"
-					} else {
-						name = "minimax_intl"
-						baseURL = "https://api.minimax.io/anthropic"
-					}
-					if m.minimaxModel == 0 {
-						model = "MiniMax-M2.7-highspeed"
-					} else {
-						model = "MiniMax-M2.7"
-					}
-					clone := preset.Clone(p, name)
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["base_url"] = baseURL
-						llm["model"] = model
-					}
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					newPresetName = name
-				}
-				if isZhipu {
-					// Clone the template with auto-name based on region
-					p := m.presets[m.cursor]
-					var name, baseURL string
-					if m.zhipuRegion == 0 {
-						name = "zhipu_cn"
-						baseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
-					} else {
-						name = "zhipu_intl"
-						baseURL = "https://api.z.ai/api/coding/paas/v4"
-					}
-					model := zhipuCodingModels[m.zhipuModel]
-					clone := preset.Clone(p, name)
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["base_url"] = baseURL
-						llm["model"] = model
-						llm["api_compat"] = "openai"
-					}
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					newPresetName = name
-				}
-				if isDeepseek {
-					p := m.presets[m.cursor]
-					model := deepseekModels[m.deepseekModel]
-					// Suffix by model variant so each saves as a distinct non-builtin
-					// preset (mirrors the minimax_cn/zhipu_intl pattern). Saving as
-					// plain "deepseek" would collide with the builtin template name
-					// and hide the configured preset under the Templates section.
-					var name string
-					if m.deepseekModel == 0 {
-						name = "deepseek_flash"
-					} else {
-						name = "deepseek_pro"
-					}
-					clone := preset.Clone(p, name)
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["model"] = model
-					}
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					newPresetName = name
-				}
 				if isCodex {
 					if m.codexLoggingIn {
 						return m, nil
@@ -1267,6 +998,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 							return result
 						}
 					}
+					// Codex OAuth complete — clone the template under
+					// "codex_oauth" with the chosen model and advance.
 					p := m.presets[m.cursor]
 					model := codexModels[m.codexModel]
 					clone := preset.Clone(p, "codex_oauth")
@@ -1277,60 +1010,36 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.message = i18n.TF("firstrun.error", err)
 						return m, nil
 					}
-					newPresetName = "codex_oauth"
-				}
-				if !isCodex {
-					if key != "" {
-						m.existingKeys[m.selectedProvider] = key
-						cfg, _ := config.LoadConfig(m.globalDir)
-						cfg.Keys = m.existingKeys
-						config.SaveConfig(m.globalDir, cfg)
-					} else if m.existingKeys[m.selectedProvider] == "" {
-						return m, nil
-					}
-				}
-				// Reload presets and find the newly created one
-				m.presets, _ = preset.List()
-				if len(m.presets) == 0 {
-					m.message = i18n.T("firstrun.no_presets")
-					return m, nil
-				}
-				if newPresetName != "" {
-					for i, p := range m.presets {
-						if p.Name == newPresetName {
+					m.presets, _ = preset.List()
+					for i, q := range m.presets {
+						if q.Name == "codex_oauth" {
 							m.cursor = i
 							break
 						}
 					}
+					return m, m.enterCapabilities()
 				}
-				if m.cursor >= len(m.presets) {
-					m.cursor = 0
+				// Paste-key flow: persist the key and advance. Empty
+				// keys are accepted only when a value already exists in
+				// ~/.lingtai-tui/.env (kept-key path).
+				key := strings.TrimSpace(m.presetKeyInput.Value())
+				if key != "" {
+					m.existingKeys[m.selectedProvider] = key
+					cfg, _ := config.LoadConfig(m.globalDir)
+					cfg.Keys = m.existingKeys
+					config.SaveConfig(m.globalDir, cfg)
+				} else if m.existingKeys[m.selectedProvider] == "" {
+					return m, nil
 				}
 				return m, m.enterCapabilities()
 			case "ctrl+c":
 				return m, tea.Quit
 			default:
-				var cmd tea.Cmd
-				if isCustom {
-					switch m.presetKeyFieldIdx {
-					case 0:
-						// compat selector — no text input
-					case 1:
-						m.presetEndpointIn, cmd = m.presetEndpointIn.Update(msg)
-					case 2:
-						m.presetModelIn, cmd = m.presetModelIn.Update(msg)
-					case 3:
-						m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-					case 4:
-						m.presetNameIn, cmd = m.presetNameIn.Update(msg)
-					}
-				} else if (isMinimax || isZhipu) && m.presetKeyFieldIdx == 2 {
-					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-				} else if isDeepseek && m.presetKeyFieldIdx == 1 {
-					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-				} else if !isMinimax && !isZhipu && !isDeepseek {
-					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				if isCodex {
+					return m, nil
 				}
+				var cmd tea.Cmd
+				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 				return m, cmd
 			}
 
@@ -1855,10 +1564,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		var cmd tea.Cmd
 		switch m.step {
 		case stepPresetKey:
-			if focused := m.focusedPresetKeyInput(); focused != nil {
-				*focused, cmd = focused.Update(msg)
-			} else if ta := m.focusedPresetKeyTextarea(); ta != nil {
-				*ta, cmd = ta.Update(msg)
+			if m.selectedProvider != "codex" {
+				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 			}
 		case stepAgentNameDir:
 			switch m.fieldIdx {
@@ -1921,7 +1628,11 @@ func (m FirstRunModel) View() string {
 
 	case stepPickPreset:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
-		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.pick_preset"), stepNum, total)) + "\n\n")
+		header := i18n.T("firstrun.pick_preset")
+		if m.setupMode {
+			header = i18n.T("setup.pick_default_preset")
+		}
+		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
 		if m.setupMode {
 			cursor := "  "
 			style := lipgloss.NewStyle()
@@ -1963,8 +1674,18 @@ func (m FirstRunModel) View() string {
 				displayDesc = p.Description.Summary
 			}
 			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
+			// Tier chip + capability icons render between name and summary so
+			// users can pick on quality/cost ladder + capability surface at a
+			// glance rather than discovering them three steps later.
+			var meta string
+			if label := tierLabel(p.Description.Tier, i18n.Lang()); label != "" {
+				meta += "  " + tierChipStyle(p.Description.Tier).Render(label)
+			}
+			if icons := p.CapabilityIcons(); icons != "" {
+				meta += "  " + icons
+			}
 			desc := StyleSubtle.Render("  " + displayDesc)
-			b.WriteString(cursor + name + desc + "\n")
+			b.WriteString(cursor + name + meta + desc + "\n")
 		}
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
 		// Show delete hint when cursor is on a saved (non-builtin) preset
@@ -1973,145 +1694,38 @@ func (m FirstRunModel) View() string {
 		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
+	case stepEditPreset:
+		// Delegate the entire screen to the embedded editor.
+		return m.presetEditor.View()
+
 	case stepPresetKey:
 		providerName := i18n.T("setup.provider_" + m.selectedProvider)
 		if providerName == "setup.provider_"+m.selectedProvider {
 			providerName = m.selectedProvider
 		}
 		b.WriteString("  " + i18n.TF("firstrun.enter_provider_key", providerName) + "\n\n")
-		if m.selectedProvider == "custom" {
-			warnStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
-			b.WriteString("  " + warnStyle.Render(i18n.T("firstrun.custom_cost_warn")) + "\n\n")
-			// Compat selector
-			openaiLabel := "OpenAI"
-			anthropicLabel := "Anthropic"
-			if m.customCompat == 0 {
-				openaiLabel = "● " + openaiLabel
-				anthropicLabel = "○ " + anthropicLabel
-			} else {
-				openaiLabel = "○ " + openaiLabel
-				anthropicLabel = "● " + anthropicLabel
-			}
-			compatStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 0 {
-				compatStyle = compatStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("firstrun.api_compat") + ":  " + compatStyle.Render(openaiLabel+"  "+anthropicLabel) + "\n")
-			b.WriteString("  " + i18n.T("presets.endpoint") + ":    " + m.presetEndpointIn.View() + "\n")
-			b.WriteString("  " + i18n.T("presets.model") + ":       " + m.presetModelIn.View() + "\n")
-			b.WriteString("  " + i18n.T("setup.api_key_label") + "     " + m.presetKeyInput.View() + "\n")
-			b.WriteString("  " + i18n.T("presets.enter_name") + " " + m.presetNameIn.View() + "\n\n")
-			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
-				"  [←→] "+i18n.T("firstrun.toggle_region")+
-				"  [Ctrl+E] editor (allows pasting)"+
-				"  [Enter] "+i18n.T("setup.save")+
-				"  [Esc] "+i18n.T("setup.back")) + "\n")
-		} else if m.selectedProvider == "minimax" {
-			// Region toggle
-			intlLabel := i18n.T("firstrun.region_intl")
-			chinaLabel := i18n.T("firstrun.region_china")
-			if m.minimaxRegion == 0 {
-				chinaLabel = "● " + chinaLabel
-				intlLabel = "○ " + intlLabel
-			} else {
-				chinaLabel = "○ " + chinaLabel
-				intlLabel = "● " + intlLabel
-			}
-			regionStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 0 {
-				regionStyle = regionStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("firstrun.region") + ":  " + regionStyle.Render(chinaLabel+"  "+intlLabel) + "\n")
-			endpointURL := "api.minimaxi.com/anthropic"
-			if m.minimaxRegion == 1 {
-				endpointURL = "api.minimax.io/anthropic"
-			}
-			b.WriteString("            " + StyleFaint.Render(endpointURL) + "\n")
-			// Model toggle
-			hsLabel := "M2.7-highspeed"
-			stdLabel := "M2.7"
-			if m.minimaxModel == 0 {
-				hsLabel = "● " + hsLabel
-				stdLabel = "○ " + stdLabel
-			} else {
-				hsLabel = "○ " + hsLabel
-				stdLabel = "● " + stdLabel
-			}
-			modelStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 1 {
-				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(hsLabel+"  "+stdLabel) + "\n")
-			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
-			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
-				"  [←→] "+i18n.T("firstrun.toggle_region")+
-				"  [Ctrl+E] editor (allows pasting)"+
-				"  [Enter] "+i18n.T("setup.save")+
-				"  [Esc] "+i18n.T("setup.back")) + "\n")
-		} else if m.selectedProvider == "zhipu" {
-			// Region toggle
-			intlLabel := i18n.T("firstrun.region_intl")
-			chinaLabel := i18n.T("firstrun.region_china")
-			if m.zhipuRegion == 0 {
-				chinaLabel = "● " + chinaLabel
-				intlLabel = "○ " + intlLabel
-			} else {
-				chinaLabel = "○ " + chinaLabel
-				intlLabel = "● " + intlLabel
-			}
-			regionStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 0 {
-				regionStyle = regionStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("firstrun.region") + ":  " + regionStyle.Render(chinaLabel+"  "+intlLabel) + "\n")
-			endpointURL := "open.bigmodel.cn/api/coding/paas/v4"
-			if m.zhipuRegion == 1 {
-				endpointURL = "api.z.ai/api/coding/paas/v4"
-			}
-			b.WriteString("            " + StyleFaint.Render(endpointURL) + "\n")
-			// Model cycle (4 options)
-			var modelLabels []string
-			for i, name := range zhipuCodingModels {
-				if i == m.zhipuModel {
-					modelLabels = append(modelLabels, "● "+name)
-				} else {
-					modelLabels = append(modelLabels, "○ "+name)
+
+		// Render a small read-only summary of the preset's LLM block so
+		// the user knows what they're entering a key for. The editor
+		// owns model/base_url/region; this screen owns the key value.
+		if m.cursor >= 0 && m.cursor < len(m.presets) {
+			p := m.presets[m.cursor]
+			if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+				if model, _ := llm["model"].(string); model != "" {
+					b.WriteString("  " + StyleFaint.Render(i18n.T("presets.model")+":  ") + model + "\n")
+				}
+				if baseURL, _ := llm["base_url"].(string); baseURL != "" {
+					b.WriteString("  " + StyleFaint.Render(i18n.T("presets.endpoint")+":  ") + baseURL + "\n")
+				}
+				if envName, _ := llm["api_key_env"].(string); envName != "" {
+					b.WriteString("  " + StyleFaint.Render("env:    ") + envName + "\n")
 				}
 			}
-			modelStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 1 {
-				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n")
-			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
-			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
-				"  [←→] "+i18n.T("firstrun.toggle_region")+
-				"  [Ctrl+E] editor (allows pasting)"+
-				"  [Enter] "+i18n.T("setup.save")+
-				"  [Esc] "+i18n.T("setup.back")) + "\n")
-		} else if m.selectedProvider == "deepseek" {
-			// Model toggle (flash ↔ pro)
-			var modelLabels []string
-			for i, name := range deepseekModels {
-				if i == m.deepseekModel {
-					modelLabels = append(modelLabels, "● "+name)
-				} else {
-					modelLabels = append(modelLabels, "○ "+name)
-				}
-			}
-			modelStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 0 {
-				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
-			}
-			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n")
-			b.WriteString("            " + StyleFaint.Render("api.deepseek.com") + "\n")
-			b.WriteString("  " + i18n.T("setup.api_key_label") + "  " + m.presetKeyInput.View() + "\n\n")
-			b.WriteString(StyleFaint.Render("  [↑↓] "+i18n.T("firstrun.toggle_field")+
-				"  [←→] "+i18n.T("codex.toggle_model")+
-				"  [Ctrl+E] editor (allows pasting)"+
-				"  [Enter] "+i18n.T("setup.save")+
-				"  [Esc] "+i18n.T("setup.back")) + "\n")
-		} else if m.selectedProvider == "codex" {
+			b.WriteString("\n")
+		}
+
+		if m.selectedProvider == "codex" {
+			// Codex uses OAuth, not paste-key.
 			var modelLabels []string
 			for i, name := range codexModels {
 				if i == m.codexModel {
@@ -2120,12 +1734,8 @@ func (m FirstRunModel) View() string {
 					modelLabels = append(modelLabels, "○ "+name)
 				}
 			}
-			modelStyle := lipgloss.NewStyle()
-			if m.presetKeyFieldIdx == 0 {
-				modelStyle = modelStyle.Bold(true).Foreground(ColorAccent)
-			}
+			modelStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n\n")
-
 			if m.codexLoggingIn {
 				b.WriteString("  " + StyleSubtle.Render(i18n.T("codex.logging_in")) + "\n")
 			} else if m.codexEmail != "" {
@@ -2141,6 +1751,7 @@ func (m FirstRunModel) View() string {
 					"  [Esc] "+i18n.T("setup.back")) + "\n")
 			}
 		} else {
+			// Single textinput. The editor configured everything else.
 			b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
 			b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
 				"  [Ctrl+E] editor (allows pasting)"+
@@ -2778,6 +2389,48 @@ func (m *FirstRunModel) initCapProviders() {
 	}
 }
 
+// enterPresetKeyFor advances to stepPresetKey with provider-specific
+// state prefilled from `p`. Now that the dedicated PresetEditorModel
+// owns model/base_url/region/api_compat editing, this helper just sets
+// up the API-key textinput and the codex-OAuth model selector.
+func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.Cmd) {
+	provider := m.getPresetProvider(p)
+	m.selectedProvider = provider
+	m.step = stepPresetKey
+	m.presetKeyInput.Reset()
+	if provider == "codex" {
+		m.presetKeyInput.Blur()
+		m.codexModel = 0
+		// Map the saved model back onto codexModel index so the picker's
+		// preselection matches what the preset already configured.
+		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+			if model, ok := llm["model"].(string); ok {
+				for i, name := range codexModels {
+					if name == model {
+						m.codexModel = i
+						break
+					}
+				}
+			}
+		}
+		m.codexEmail = ""
+		m.codexLoggingIn = false
+		authPath := filepath.Join(m.globalDir, "codex-auth.json")
+		if data, err := os.ReadFile(authPath); err == nil {
+			var tokens CodexTokens
+			if json.Unmarshal(data, &tokens) == nil && tokens.Email != "" && tokens.RefreshToken != "" {
+				m.codexEmail = tokens.Email
+			}
+		}
+		return *m, nil
+	}
+	m.presetKeyInput.Focus()
+	if existing := m.existingKeys[provider]; existing != "" {
+		m.presetKeyInput.SetValue(existing)
+	}
+	return *m, textinput.Blink
+}
+
 // enterCapabilities transitions to stepCapabilities.
 func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.step = stepCapabilities
@@ -3125,87 +2778,6 @@ func formatNumber(v float64) string {
 // trailing zeros — strconv's 'f', -1 form keeps just enough precision to round-trip.
 func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
-}
-
-// focusAgentField focuses the input at m.fieldIdx and blurs all others.
-// Returns the blink command for the newly focused input.
-// focusedPresetKeyInput returns a pointer to the currently focused text input
-// in the preset key step, or nil if the current field is a selector (no text).
-func (m *FirstRunModel) focusedPresetKeyInput() *textinput.Model {
-	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" || m.selectedProvider == "deepseek" || m.selectedProvider == "codex" {
-		// minimax/zhipu/deepseek key fields are textareas — handled separately; codex has no text fields
-		return nil
-	}
-	switch m.presetKeyFieldIdx {
-	case 1:
-		return &m.presetEndpointIn
-	case 2:
-		return &m.presetModelIn
-	case 3:
-		// key field is a textarea — handled separately
-		return nil
-	case 4:
-		return &m.presetNameIn
-	}
-	return nil
-}
-
-// focusedPresetKeyTextarea returns a pointer to presetKeyInput if it's focused.
-func (m *FirstRunModel) focusedPresetKeyTextarea() *textarea.Model {
-	if m.selectedProvider == "codex" {
-		return nil
-	}
-	if (m.selectedProvider == "minimax" || m.selectedProvider == "zhipu") && m.presetKeyFieldIdx == 2 {
-		return &m.presetKeyInput
-	}
-	if m.selectedProvider == "deepseek" && m.presetKeyFieldIdx == 1 {
-		return &m.presetKeyInput
-	}
-	if m.selectedProvider != "minimax" && m.selectedProvider != "zhipu" && m.selectedProvider != "deepseek" && m.selectedProvider != "custom" {
-		return &m.presetKeyInput
-	}
-	if m.selectedProvider == "custom" && m.presetKeyFieldIdx == 3 {
-		return &m.presetKeyInput
-	}
-	return nil
-}
-
-func (m *FirstRunModel) focusPresetKeyField() tea.Cmd {
-	m.presetEndpointIn.Blur()
-	m.presetModelIn.Blur()
-	m.presetKeyInput.Blur()
-	m.presetNameIn.Blur()
-	if m.selectedProvider == "minimax" || m.selectedProvider == "zhipu" {
-		switch m.presetKeyFieldIdx {
-		case 0, 1:
-			return nil // region/model selector — no text focus
-		case 2:
-			return m.presetKeyInput.Focus()
-		}
-		return nil
-	}
-	if m.selectedProvider == "deepseek" {
-		switch m.presetKeyFieldIdx {
-		case 0:
-			return nil // model selector — no text focus
-		case 1:
-			return m.presetKeyInput.Focus()
-		}
-		return nil
-	}
-	switch m.presetKeyFieldIdx {
-	case 0:
-		return nil // compat selector — no text focus
-	case 1:
-		return m.presetEndpointIn.Focus()
-	case 2:
-		return m.presetModelIn.Focus()
-	case 3:
-		return m.presetKeyInput.Focus()
-	case 4:
-		return m.presetNameIn.Focus()
-	}
-	return nil
 }
 
 func (m *FirstRunModel) focusAgentField() tea.Cmd {
@@ -3628,6 +3200,9 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 	}
 
 	m.pendingAgentOpts.BriefFile = fs.BriefFilePath(m.globalDir, projectRoot)
+	// /setup updates the default preset only — running agents keep their
+	// active preset until the next AED fallback or revert_preset call.
+	m.pendingAgentOpts.PreserveActivePreset = m.setupMode
 
 	if err := preset.GenerateInitJSONWithOpts(p, m.agentName, dirName, m.baseDir, m.globalDir, m.pendingAgentOpts); err != nil {
 		m.message = i18n.TF("firstrun.error", err)
@@ -3684,6 +3259,8 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 
 	// Set brief file path for admin agents — the secretary maintains this file
 	opts.BriefFile = fs.BriefFilePath(m.globalDir, projectRoot)
+	// /setup: update default preset only, leave the running agent's active alone.
+	opts.PreserveActivePreset = m.setupMode
 
 	p := m.presets[m.cursor]
 	dirName := m.pendingDirName

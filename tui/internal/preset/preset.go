@@ -153,8 +153,8 @@ func List() ([]Preset, error) {
 		if bi != bj {
 			return !bi // saved (non-builtin) before builtin
 		}
-		if bi { // both builtin: minimax → zhipu → deepseek → openrouter → codex → custom
-			order := map[string]int{"minimax": 0, "zhipu": 1, "deepseek": 2, "openrouter": 3, "codex": 4, "custom": 5}
+		if bi { // both builtin: minimax → zhipu → mimo → deepseek → openrouter → codex → custom
+			order := map[string]int{"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3, "openrouter": 4, "codex": 5, "custom": 6}
 			return order[presets[i].Name] < order[presets[j].Name]
 		}
 		return presets[i].Name < presets[j].Name
@@ -326,6 +326,7 @@ func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
 		zhipuPreset(),
+		mimoPreset(),
 		deepseekPreset(),
 		openrouterPreset(),
 		codexPreset(),
@@ -337,6 +338,7 @@ func BuiltinPresets() []Preset {
 var builtinNames = map[string]bool{
 	"minimax":     true,
 	"zhipu":       true,
+	"mimo":        true,
 	"deepseek":    true,
 	"openrouter":  true,
 	"codex":       true,
@@ -415,6 +417,44 @@ func zhipuPreset() Preset {
 				"vision": zp,
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func mimoPreset() Preset {
+	// mimo-v2.5 is the sweet spot: 1M context, vision-capable, supports tool
+	// calls and thinking mode. Cheaper-but-text-only siblings (mimo-v2.5-pro,
+	// mimo-v2-flash) and the 256K omni-modal mimo-v2-omni are documented in
+	// the xiaomi-mimo skill — users clone this preset to switch.
+	// Vision routes through OpenAI's vision service (which is just chat
+	// completions with image_url content) pointed at MiMo's endpoint. Only
+	// mimo-v2.5 and mimo-v2-omni accept image input — keep the model in
+	// sync with manifest.llm.model when cloning.
+	mp := map[string]interface{}{
+		"provider":    "openai",
+		"api_key_env": "MIMO_API_KEY",
+		"base_url":    "https://api.xiaomimimo.com/v1",
+		"model":       "mimo-v2.5",
+	}
+	return Preset{
+		Name:        "mimo",
+		Description: PresetDescription{Summary: "Xiaomi MiMo V2.5 — OpenAI-compatible, 1M context, vision + tools"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "mimo", "model": "mimo-v2.5",
+				"api_key": nil, "api_key_env": "MIMO_API_KEY",
+				"base_url": "https://api.xiaomimimo.com/v1", "api_compat": "openai",
+			},
+			"capabilities": map[string]interface{}{
+				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"psyche":     e(), "codex": e(),
+				"vision":     mp,
+				"avatar":     e(), "daemon": e(),
+				"library":    libraryDefault(),
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
@@ -688,6 +728,12 @@ type AgentOpts struct {
 	SoulFile       string   // path to soul flow file
 	CommentFile   string   // path to comment file (optional)
 	Addons        []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
+	// PreserveActivePreset, when true, leaves manifest.preset.active alone
+	// and only updates manifest.preset.default to the chosen preset. Used
+	// by /setup so a running agent doesn't get yanked mid-conversation —
+	// the new choice takes effect on the next AED fallback or explicit
+	// revert_preset call.
+	PreserveActivePreset bool
 }
 
 // DefaultAgentOpts returns sensible defaults for agent creation.
@@ -757,8 +803,29 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// original preset when the active one keeps failing.
 	if p.Name != "" {
 		presetRef := "~/.lingtai-tui/presets/" + p.Name + ".json"
+		// Default behavior: both active and default point at the new
+		// preset (the agent runs on the chosen preset immediately).
+		// /setup mode (PreserveActivePreset=true) only updates default,
+		// so the running agent keeps its current preset until an AED
+		// fallback or explicit revert_preset takes effect.
+		activeRef := presetRef
+		if opts.PreserveActivePreset {
+			existingInitPath := filepath.Join(agentDir, "init.json")
+			if data, err := os.ReadFile(existingInitPath); err == nil {
+				var existing map[string]interface{}
+				if json.Unmarshal(data, &existing) == nil {
+					if mn, ok := existing["manifest"].(map[string]interface{}); ok {
+						if pre, ok := mn["preset"].(map[string]interface{}); ok {
+							if cur, ok := pre["active"].(string); ok && cur != "" {
+								activeRef = cur
+							}
+						}
+					}
+				}
+			}
+		}
 		manifest["preset"] = map[string]interface{}{
-			"active":  presetRef,
+			"active":  activeRef,
 			"default": presetRef,
 		}
 	}
