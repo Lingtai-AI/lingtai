@@ -55,6 +55,7 @@ const (
 	feStreaming
 	feKarma
 	feNirvana
+	feSave
 )
 
 // capFieldNames maps each capability field to its underlying capability
@@ -86,6 +87,7 @@ var editorFieldOrder = []editorField{
 	feCapAvatar, feCapDaemon, feCapLibrary,
 	feCapWebSearch, feCapVision,
 	feStreaming, feKarma, feNirvana,
+	feSave,
 }
 
 type editorMode int
@@ -96,7 +98,8 @@ const (
 	emCapabilities                   // capability-edit modal
 	emCapInline                      // inline edit of a capability subfield (e.g. yolo, paths)
 	emClonePrompt                    // built-in: prompt for new name on semantic edit
-	emDirtyPrompt                    // "discard changes? y/N"
+	emDirtyPrompt                    // legacy "discard? y/N" — kept for compat
+	emExitPrompt                     // three-way exit on Esc: save / discard / cancel
 )
 
 // capabilityProviderOptions enumerates the multi-provider capabilities
@@ -303,6 +306,8 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 			return m.updateClonePrompt(msg)
 		case emDirtyPrompt:
 			return m.updateDirtyPrompt(msg)
+		case emExitPrompt:
+			return m.updateExitPrompt(msg)
 		default:
 			return m.updateBrowse(msg)
 		}
@@ -317,11 +322,11 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.isDirty() {
-			m.mode = emDirtyPrompt
-			return m, nil
-		}
-		return m, func() tea.Msg { return PresetEditorCancelMsg{} }
+		// Always show the three-way exit prompt — even if not dirty,
+		// users hitting Esc deserve a confirmation rather than dropping
+		// out of a screen they'd been editing.
+		m.mode = emExitPrompt
+		return m, nil
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -386,6 +391,25 @@ func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel,
 	}
 }
 
+// updateExitPrompt is the three-way "save / discard / cancel" overlay
+// triggered by Esc. s saves (commit path, may surface validation
+// errors); d discards changes and exits; any other key (including
+// Esc) cancels back to browse.
+func (m PresetEditorModel) updateExitPrompt(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
+	switch msg.String() {
+	case "s", "S":
+		m.mode = emBrowse
+		updated, cmd := m.commit()
+		return updated, cmd
+	case "d", "D":
+		return m, func() tea.Msg { return PresetEditorCancelMsg{} }
+	default:
+		// esc/c/n/anything else → return to browse, no exit.
+		m.mode = emBrowse
+		return m, nil
+	}
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Field-level mutation
 // ───────────────────────────────────────────────────────────────────────────
@@ -426,6 +450,9 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.cycleFocused(+1)
 	case feStreaming, feKarma, feNirvana:
 		m.toggleFocused()
+	case feSave:
+		updated, cmd := m.commit()
+		return updated, cmd
 	}
 	return *m, nil
 }
@@ -947,6 +974,8 @@ func (m PresetEditorModel) View() string {
 		full = m.renderCloneOverlay(full)
 	case emDirtyPrompt:
 		full = m.renderDirtyOverlay(full)
+	case emExitPrompt:
+		full = m.renderExitOverlay(full)
 	}
 	return full
 }
@@ -1000,6 +1029,8 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	}
 	rows = append(rows, m.row(feKarma, lbl("karma"), boolLabel(karma), width-4))
 	rows = append(rows, m.row(feNirvana, lbl("nirvana"), boolLabel(nirvana), width-4))
+	rows = append(rows, "")
+	rows = append(rows, m.renderSaveButton())
 
 	return box.Render(strings.Join(rows, "\n"))
 }
@@ -1265,6 +1296,8 @@ func (m PresetEditorModel) renderFooter() string {
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
 	case emDirtyPrompt:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_dirty"))
+	case emExitPrompt:
+		return hintStyle.Render("  " + i18n.T("preset_editor.hint_exit"))
 	}
 	return hintStyle.Render("  " + i18n.T("preset_editor.hint_browse"))
 }
@@ -1373,6 +1406,43 @@ func (m PresetEditorModel) renderDirtyOverlay(_ string) string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[y] "+i18n.T("preset_editor.discard")+
 				"   [n/Esc] "+i18n.T("preset_editor.cancel_discard")))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, style)
+}
+
+func (m PresetEditorModel) renderExitOverlay(_ string) string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	body := titleStyle.Render(i18n.T("preset_editor.exit_title")) + "\n\n" +
+		subtle.Render(i18n.T("preset_editor.exit_hint"))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("214")).
+		Padding(1, 2).
+		Render(body)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderSaveButton emits the save row at the bottom of the form. When
+// the cursor is on it, the row pops in accent color; Enter triggers
+// commit. Acts like a button users can find by tabbing down.
+func (m PresetEditorModel) renderSaveButton() string {
+	focused := editorFieldOrder[m.cursor] == feSave
+	label := i18n.T("preset_editor.save_button")
+	if focused {
+		btn := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("0")).
+			Background(ColorAccent).
+			Padding(0, 2).
+			Render(" " + label + " ")
+		return "▸ " + btn
+	}
+	btn := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("245")).
+		Padding(0, 2).
+		Render(label)
+	return "  " + btn
 }
 
 // ───────────────────────────────────────────────────────────────────────────

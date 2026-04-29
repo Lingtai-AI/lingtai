@@ -1761,7 +1761,7 @@ func (m FirstRunModel) View() string {
 
 	case stepCapabilities:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
-		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_caps")) + "\n\n")
+		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_addons")) + "\n\n")
 
 		if m.setupMode {
 			cursor := "  "
