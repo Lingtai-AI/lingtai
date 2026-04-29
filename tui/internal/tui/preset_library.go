@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -132,13 +133,19 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 	if m.focus == presetLibFocusEditor {
 		switch typed := msg.(type) {
 		case PresetEditorCommitMsg:
-			if err := preset.Save(typed.Preset); err != nil {
+			toSave := typed.Preset
+			if globalDir, err := config.GlobalDir(); err == nil {
+				if cfg, err := config.LoadConfig(globalDir); err == nil {
+					toSave = stampAutoEnvVar(toSave, cfg.Keys)
+				}
+			}
+			if err := preset.Save(toSave); err != nil {
 				m.saveErr = fmt.Sprintf("save failed: %v", err)
 				return m, nil
 			}
 			m.presets, _ = preset.List()
 			for i, q := range m.presets {
-				if q.Name == typed.Preset.Name {
+				if q.Name == toSave.Name {
 					m.cursor = i
 					break
 				}

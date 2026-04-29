@@ -176,3 +176,94 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	}
 }
 
+
+func TestAutoEnvVarName(t *testing.T) {
+	pp := func(provider, baseURL string) Preset {
+		return Preset{Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": provider,
+				"base_url": baseURL,
+			},
+		}}
+	}
+
+	cases := []struct {
+		name     string
+		preset   Preset
+		existing map[string]string
+		want     string
+	}{
+		{
+			name:   "minimax CN, no existing → _1_",
+			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
+			want:   "MINIMAX_CN_1_API_KEY",
+		},
+		{
+			name:   "minimax INTL, no existing",
+			preset: pp("minimax", "https://api.minimax.io/anthropic"),
+			want:   "MINIMAX_INTL_1_API_KEY",
+		},
+		{
+			name:     "minimax CN with _1_ taken → gap-fill _2_",
+			preset:   pp("minimax", "https://api.minimaxi.com/anthropic"),
+			existing: map[string]string{"MINIMAX_CN_1_API_KEY": "k"},
+			want:     "MINIMAX_CN_2_API_KEY",
+		},
+		{
+			name:   "minimax CN with _1_ and _2_ taken, _3_ free",
+			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
+			existing: map[string]string{
+				"MINIMAX_CN_1_API_KEY": "k",
+				"MINIMAX_CN_2_API_KEY": "k",
+			},
+			want: "MINIMAX_CN_3_API_KEY",
+		},
+		{
+			name:   "gap fill: _1_ taken, _2_ free, _3_ taken → returns _2_",
+			preset: pp("minimax", "https://api.minimaxi.com/anthropic"),
+			existing: map[string]string{
+				"MINIMAX_CN_1_API_KEY": "k",
+				"MINIMAX_CN_3_API_KEY": "k",
+			},
+			want: "MINIMAX_CN_2_API_KEY",
+		},
+		{
+			name:   "deepseek has no region",
+			preset: pp("deepseek", "https://api.deepseek.com"),
+			want:   "DEEPSEEK_1_API_KEY",
+		},
+		{
+			name:   "non-numeric existing entries (e.g. legacy) ignored",
+			preset: pp("deepseek", "https://api.deepseek.com"),
+			existing: map[string]string{
+				"DEEPSEEK_API_KEY":      "legacy",
+				"DEEPSEEK_PROD_API_KEY": "legacy",
+			},
+			want: "DEEPSEEK_1_API_KEY",
+		},
+		{
+			name:   "zhipu CN default",
+			preset: pp("zhipu", "https://open.bigmodel.cn/api/coding/paas/v4"),
+			want:   "ZHIPU_CN_1_API_KEY",
+		},
+		{
+			name:   "zhipu INTL via api.z.ai",
+			preset: pp("zhipu", "https://api.z.ai/api/coding/paas/v4"),
+			want:   "ZHIPU_INTL_1_API_KEY",
+		},
+		{
+			name:   "no provider → empty",
+			preset: Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{}}},
+			want:   "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AutoEnvVarName(c.preset, c.existing)
+			if got != c.want {
+				t.Errorf("AutoEnvVarName: got %q, want %q", got, c.want)
+			}
+		})
+	}
+}

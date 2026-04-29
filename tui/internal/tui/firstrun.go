@@ -614,7 +614,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// Persist the edited preset, refresh the in-memory list so
 		// downstream steps read the saved version, then advance to
 		// stepPresetKey with provider-specific prefill.
-		if err := preset.Save(msg.Preset); err != nil {
+		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
+		if err := preset.Save(toSave); err != nil {
 			// Save failed: stay in editor and surface the error so the
 			// user can retry. The editor's saveErr channel is the right
 			// home for this; for now we drop back to the picker with a
@@ -627,12 +628,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.presets, _ = preset.List()
 		// Re-find the saved preset in the refreshed list.
 		for i, p := range m.presets {
-			if p.Name == msg.Preset.Name {
+			if p.Name == toSave.Name {
 				m.cursor = i
 				break
 			}
 		}
-		updated, cmd := m.enterPresetKeyFor(msg.Preset)
+		updated, cmd := m.enterPresetKeyFor(toSave)
 		return updated, cmd
 
 	case PresetEditorCancelMsg:
@@ -2467,6 +2468,28 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 	}
 	val, ok := llm[key].(string)
 	return val, ok
+}
+
+// stampAutoEnvVar returns a copy of p with manifest.llm.api_key_env
+// populated when it's empty. Uses preset.AutoEnvVarName to pick a
+// gap-filling slot in existingKeys (PROVIDER[_REGION]_N_API_KEY).
+// When the preset already has an api_key_env (built-ins ship with
+// MINIMAX_API_KEY etc.), the existing value is left untouched —
+// we never auto-rewrite to avoid breaking established setups.
+func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Preset {
+	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
+		return p
+	}
+	auto := preset.AutoEnvVarName(p, existingKeys)
+	if auto == "" {
+		return p
+	}
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return p
+	}
+	llm["api_key_env"] = auto
+	return p
 }
 
 // enterCapabilities transitions to stepCapabilities.

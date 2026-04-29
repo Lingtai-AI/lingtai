@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
@@ -705,6 +706,89 @@ func AddonSecretsPathFromAgent(addon string) string {
 // DefaultPreset returns the first built-in preset (minimax).
 func DefaultPreset() Preset {
 	return minimaxPreset()
+}
+
+// AutoEnvVarName builds a deterministic api_key_env slot name for a
+// preset, with a number suffix that gap-fills the lowest unused index.
+//
+// Shape: <PROVIDER>[_<REGION>]_<N>_API_KEY
+//   - PROVIDER:   uppercased manifest.llm.provider
+//   - REGION:     "CN" or "INTL" for minimax/zhipu (read from base_url);
+//                 omitted for other providers
+//   - N:          the lowest positive integer not already present in
+//                 existingKeys (1-based). Reuses freed slots since the
+//                 user said API keys rapidly rotate anyway.
+//
+// existingKeys is the env-var-keyed map from Config.Keys — caller
+// passes it in so this stays a pure function (no I/O).
+//
+// Returns "" when the preset has no provider — caller falls back to
+// whatever api_key_env the preset already declared.
+func AutoEnvVarName(p Preset, existingKeys map[string]string) string {
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	provider, _ := llm["provider"].(string)
+	if provider == "" {
+		return ""
+	}
+	prefix := strings.ToUpper(provider)
+	if region := regionSuffix(provider, llmString(llm, "base_url")); region != "" {
+		prefix += "_" + region
+	}
+	// Find the lowest unused N. We scan existingKeys for entries that
+	// match `<prefix>_<int>_API_KEY` and collect the integers.
+	used := map[int]bool{}
+	wantPrefix := prefix + "_"
+	for name := range existingKeys {
+		if !strings.HasPrefix(name, wantPrefix) || !strings.HasSuffix(name, "_API_KEY") {
+			continue
+		}
+		mid := strings.TrimSuffix(strings.TrimPrefix(name, wantPrefix), "_API_KEY")
+		// Only consider pure-integer suffixes — skip things like
+		// MINIMAX_PERSONAL_API_KEY (no number) or MINIMAX_PROD_v2_API_KEY.
+		n := 0
+		for _, c := range mid {
+			if c < '0' || c > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 0 {
+			used[n] = true
+		}
+	}
+	for n := 1; ; n++ {
+		if !used[n] {
+			return fmt.Sprintf("%s_%d_API_KEY", prefix, n)
+		}
+	}
+}
+
+// regionSuffix returns "CN" / "INTL" for providers with regional
+// splits, "" for everything else. Mirrors the wizard's existing
+// region-detection logic so a preset that says "minimaxi.com" gets
+// the same CN suffix the wizard would have applied.
+func regionSuffix(provider, baseURL string) string {
+	switch provider {
+	case "minimax":
+		if strings.Contains(baseURL, "minimaxi.com") {
+			return "CN"
+		}
+		return "INTL"
+	case "zhipu":
+		if strings.Contains(baseURL, "api.z.ai") {
+			return "INTL"
+		}
+		return "CN"
+	}
+	return ""
+}
+
+// llmString is a tiny accessor that returns a string field from an
+// llm map without panicking on missing keys or wrong types.
+func llmString(llm map[string]interface{}, key string) string {
+	v, _ := llm[key].(string)
+	return v
 }
 
 // AgentOpts holds per-agent configuration values set at creation time.
