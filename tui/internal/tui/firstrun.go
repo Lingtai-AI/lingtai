@@ -1019,16 +1019,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					return m, m.enterCapabilities()
 				}
-				// Paste-key flow: persist the key and advance. Empty
-				// keys are accepted only when a value already exists in
+				// Paste-key flow: persist the key under the preset's
+				// declared api_key_env name, advance. Empty keys are
+				// accepted only when a value already exists in
 				// ~/.lingtai-tui/.env (kept-key path).
+				envName := m.currentPresetKeyEnv()
+				if envName == "" {
+					// No api_key_env declared (codex OAuth, locally-hosted
+					// custom). Skip the persist step entirely.
+					return m, m.enterCapabilities()
+				}
 				key := strings.TrimSpace(m.presetKeyInput.Value())
 				if key != "" {
-					m.existingKeys[m.selectedProvider] = key
+					m.existingKeys[envName] = key
 					cfg, _ := config.LoadConfig(m.globalDir)
 					cfg.Keys = m.existingKeys
 					config.SaveConfig(m.globalDir, cfg)
-				} else if m.existingKeys[m.selectedProvider] == "" {
+				} else if m.existingKeys[envName] == "" {
 					return m, nil
 				}
 				return m, m.enterCapabilities()
@@ -2426,10 +2433,40 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 		return *m, nil
 	}
 	m.presetKeyInput.Focus()
-	if existing := m.existingKeys[provider]; existing != "" {
-		m.presetKeyInput.SetValue(existing)
+	// Prefill from the preset's declared api_key_env name. Provider
+	// alone is not the right key — a single provider can have multiple
+	// presets, each with its own env var (e.g. MINIMAX_PERSONAL_KEY vs
+	// MINIMAX_WORK_KEY).
+	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
+		if existing := m.existingKeys[envName]; existing != "" {
+			m.presetKeyInput.SetValue(existing)
+		}
 	}
 	return *m, textinput.Blink
+}
+
+// currentPresetKeyEnv returns the focused preset's manifest.llm.
+// api_key_env, or "" when none is set (codex OAuth, locally hosted,
+// or a malformed preset). Used by the paste-key flow as the env var
+// name to write under in ~/.lingtai-tui/.env.
+func (m FirstRunModel) currentPresetKeyEnv() string {
+	if m.cursor < 0 || m.cursor >= len(m.presets) {
+		return ""
+	}
+	envName, _ := llmStringField(m.presets[m.cursor], "api_key_env")
+	return envName
+}
+
+// llmStringField returns a string-typed field from a preset's
+// manifest.llm map. Generic helper so callers don't repeat the
+// nested type-assertion dance.
+func llmStringField(p preset.Preset, key string) (string, bool) {
+	llm, ok := p.Manifest["llm"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	val, ok := llm[key].(string)
+	return val, ok
 }
 
 // enterCapabilities transitions to stepCapabilities.
@@ -2869,16 +2906,21 @@ func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 	return "minimax" // default
 }
 
-// needsKey returns true if the provider's key is not configured
-func (m FirstRunModel) needsKey(provider string) bool {
-	_, hasKey := m.existingKeys[provider]
-	return !hasKey
-}
-
-// presetNeedsKey returns true if the preset's provider key is missing (for warning display)
+// needsKey returns true if the env var holding this preset's API key
+// has no value in ~/.lingtai-tui/.env. Each preset declares its own
+// api_key_env name so two presets sharing a provider can have
+// distinct keys (e.g. MINIMAX_PERSONAL_KEY vs MINIMAX_WORK_KEY).
+//
+// A preset with no api_key_env (codex OAuth, locally-hosted custom)
+// is treated as not needing a key — the OAuth or local flow handles
+// authentication separately.
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
-	provider := m.getPresetProvider(p)
-	return m.needsKey(provider)
+	envName, ok := llmStringField(p, "api_key_env")
+	if !ok || envName == "" {
+		return false
+	}
+	val, hasKey := m.existingKeys[envName]
+	return !hasKey || val == ""
 }
 
 func (m FirstRunModel) hasImportedRecipe() bool {

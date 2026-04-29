@@ -21,16 +21,21 @@ const (
 	stepEnterKey
 )
 
-// Supported providers — display names resolved via i18n at render time.
+// Supported providers in the legacy first-time-setup screen. Each has
+// a canonical env var name used for the .env write — for the dedicated
+// per-preset env var flow (multiple keys per provider), use the
+// preset editor instead. The "custom" entry routes to LLM_API_KEY as
+// a defensible default since no preset has been picked yet.
 var providers = []struct {
 	id      string
 	nameKey string // i18n key for display name
+	envVar  string // canonical env var to write under
 }{
-	{"minimax", "setup.provider_minimax"},
-	{"zhipu", "setup.provider_zhipu"},
-	{"deepseek", "setup.provider_deepseek"},
-	{"openrouter", "setup.provider_openrouter"},
-	{"custom", "setup.provider_custom"},
+	{"minimax", "setup.provider_minimax", "MINIMAX_API_KEY"},
+	{"zhipu", "setup.provider_zhipu", "ZHIPU_API_KEY"},
+	{"deepseek", "setup.provider_deepseek", "DEEPSEEK_API_KEY"},
+	{"openrouter", "setup.provider_openrouter", "OPENROUTER_API_KEY"},
+	{"custom", "setup.provider_custom", "LLM_API_KEY"},
 }
 
 // SetupModel handles API key configuration (provider-agnostic).
@@ -121,7 +126,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 }
 
 func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
-	provider := providers[m.providerIdx].id
+	envVar := providers[m.providerIdx].envVar
 
 	if m.step == stepSelectProvider {
 		// Always go to key input step — user can change or keep existing key
@@ -133,7 +138,7 @@ func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
 
 	// stepEnterKey
 	key := m.input.Value()
-	if key == "" && m.existingKeys[provider] == "" {
+	if key == "" && m.existingKeys[envVar] == "" {
 		return m, nil // require key
 	}
 	if key == "" {
@@ -148,8 +153,8 @@ func (m SetupModel) handleEnter() (SetupModel, tea.Cmd) {
 		return m, func() tea.Msg { return SetupDoneMsg{} }
 	}
 
-	// Save new key
-	m.existingKeys[provider] = key
+	// Save new key under the provider's canonical env var name.
+	m.existingKeys[envVar] = key
 	cfg, _ := config.LoadConfig(m.globalDir)
 	cfg.Keys = m.existingKeys
 	if err := config.SaveConfig(m.globalDir, cfg); err != nil {
@@ -194,7 +199,7 @@ func (m SetupModel) viewProviderSelection(b *strings.Builder) {
 			prefix = "  ● "
 		}
 		name := i18n.T(p.nameKey)
-		masked := maskKey(m.existingKeys[p.id])
+		masked := maskKey(m.existingKeys[p.envVar])
 		if masked != "" {
 			b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, name, masked))
 		} else {
@@ -217,7 +222,7 @@ func (m SetupModel) viewKeyInput(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("  %s: %s\n\n", i18n.T("setup.provider"), providerName))
 
 	// Show existing key if any
-	existingKey := maskKey(m.existingKeys[providers[m.providerIdx].id])
+	existingKey := maskKey(m.existingKeys[providers[m.providerIdx].envVar])
 	if existingKey != "" {
 		b.WriteString(fmt.Sprintf("  %s: %s\n", i18n.T("setup.current_key"), existingKey))
 		b.WriteString("  " + i18n.T("setup.enter_new_or_empty") + "\n\n")

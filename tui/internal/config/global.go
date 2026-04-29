@@ -28,8 +28,50 @@ func MigrateLegacyLanguage(globalDir string) {
 const GlobalDirName = ".lingtai-tui"
 
 type Config struct {
-	Keys     map[string]string `json:"keys,omitempty"`     // provider → key, e.g. {"minimax": "xxx"}
+	// Keys maps **env-var name** → key value, e.g. {"MINIMAX_API_KEY": "xxx"}.
+	// Each preset declares which env var holds its key via
+	// manifest.llm.api_key_env, and the TUI writes that exact name into
+	// ~/.lingtai-tui/.env. This lets one provider serve multiple presets
+	// with different keys (e.g. a personal vs work minimax account
+	// stored under MINIMAX_API_KEY and MINIMAX_WORK_KEY).
+	//
+	// Legacy entries keyed by provider name (lowercase) get translated
+	// to the canonical env var name on read via migrateLegacyProviderKeys.
+	Keys     map[string]string `json:"keys,omitempty"`
 	Language string            `json:"language,omitempty"` // deprecated: use TUIConfig.Language
+}
+
+// legacyProviderEnvVars is the *one-shot migration* lookup that
+// translates pre-2026-04 Config.Keys entries (keyed by provider name)
+// to canonical env var names. New writes always go directly to the
+// env var name from the preset's api_key_env field — never through
+// this map. Do not extend; new providers should not appear here.
+var legacyProviderEnvVars = map[string]string{
+	"minimax":    "MINIMAX_API_KEY",
+	"zhipu":      "ZHIPU_API_KEY",
+	"mimo":       "MIMO_API_KEY",
+	"deepseek":   "DEEPSEEK_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
+}
+
+// migrateLegacyProviderKeys rewrites entries keyed by lowercase
+// provider names (the pre-refactor shape) to their canonical env var
+// name. Called from LoadConfig so callers always see the new shape.
+func migrateLegacyProviderKeys(cfg *Config) {
+	if cfg.Keys == nil {
+		return
+	}
+	for provider, envKey := range legacyProviderEnvVars {
+		val, hasLegacy := cfg.Keys[provider]
+		if !hasLegacy {
+			continue
+		}
+		// Don't clobber an explicit env-var-keyed entry that already exists.
+		if _, hasNew := cfg.Keys[envKey]; !hasNew {
+			cfg.Keys[envKey] = val
+		}
+		delete(cfg.Keys, provider)
+	}
 }
 
 // TUIConfig holds global TUI preferences at ~/.lingtai-tui/tui_config.json.
@@ -103,6 +145,7 @@ func LoadConfig(dir string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
+	migrateLegacyProviderKeys(&cfg)
 	return cfg, nil
 }
 
@@ -124,50 +167,24 @@ func EnvFilePath(globalDir string) string {
 }
 
 // WriteEnvFile writes API keys from config to ~/.lingtai-tui/.env.
+// Each Config.Keys entry maps directly to a `<env-var-name>=<value>`
+// line — the env var name comes from each preset's manifest.llm.
+// api_key_env field, written by the TUI's key-paste flow. No
+// provider-to-env-var translation: that misled the architecture
+// because a single provider can serve multiple presets with distinct
+// keys.
+//
 // This file is loaded by agents at boot via env_file in init.json.
 func WriteEnvFile(globalDir string, cfg Config) error {
 	var lines []string
-	for provider, key := range cfg.Keys {
-		if key == "" {
+	for envName, val := range cfg.Keys {
+		if envName == "" || val == "" {
 			continue
 		}
-		envKey := providerToEnvKey(provider)
-		if envKey == "" {
-			continue // OAuth providers don't use .env
-		}
-		lines = append(lines, envKey+"="+key)
+		lines = append(lines, envName+"="+val)
 	}
 	path := EnvFilePath(globalDir)
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
-}
-
-// providerToEnvKey maps provider name to environment variable name.
-//
-// IMPORTANT: when adding a new built-in preset (preset.go BuiltinPresets),
-// add a corresponding case here. The default branch writes the key under
-// LLM_API_KEY, which then doesn't match the preset's api_key_env field
-// in init.json — agent boots, OpenAI SDK refuses to construct without
-// api_key, agent crashes with no user-friendly error in the TUI.
-//
-// The two parallel sources of truth (this switch + each preset's
-// api_key_env field) are a footgun; future refactor should consolidate.
-func providerToEnvKey(provider string) string {
-	switch provider {
-	case "minimax":
-		return "MINIMAX_API_KEY"
-	case "zhipu":
-		return "ZHIPU_API_KEY"
-	case "mimo":
-		return "MIMO_API_KEY"
-	case "deepseek":
-		return "DEEPSEEK_API_KEY"
-	case "openrouter":
-		return "OPENROUTER_API_KEY"
-	case "codex":
-		return "" // OAuth — no env var
-	default:
-		return "LLM_API_KEY"
-	}
 }
 
 
