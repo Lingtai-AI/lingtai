@@ -22,9 +22,10 @@ Neither binary has a direct Python dependency. Both communicate with Python agen
 Other LingTai components live as sibling repos under `~/Documents/GitHub/`:
 
 - **`lingtai-kernel/`** — Python kernel + `lingtai` PyPI package (agent runtime, LLM interface, mailbox core).
-- **`lingtai-claude-code/`** — The Claude Code plugin (`skills/lingtai/SKILL.md` is what Claude loads via the `lingtai:lingtai` skill). Edit here to change how Claude interacts with agent networks. The plugin cache at `~/.claude/plugins/cache/lingtai/` gets overwritten on update — don't edit that.
-- **`lingtai-opencode/`** — OpenCode equivalent of the Claude plugin.
-- **`lingtai-mailbox-skill/`**, **`lingtai-codex/`**, **`lingtai-fangcun/`** — standalone skill/tool components.
+- **`lingtai-skill/`** — Canonical mailbox-protocol skill. Single source of truth for `skills/lingtai/SKILL.md`. The Claude and Codex plugin repos vendor this file via `scripts/sync-from-canonical.sh` — edit here, sync there.
+- **`lingtai-claude-code/`** — Claude Code plugin (`claude plugin add Lingtai-AI/claude-code-plugin`). Owns the SessionStart hook and the Claude marketplace manifest. The plugin cache at `~/.claude/plugins/cache/lingtai/` gets overwritten on update — don't edit that.
+- **`codex-plugin/`** — OpenAI Codex CLI plugin (`./install.sh` copies into `~/.codex/skills/lingtai/` and `~/.codex/hooks.json`).
+- **`lingtai-fangcun/`** — standalone skill/tool component.
 - **`lingtai-agora/`**, **`lingtai-web/`** — distribution and web surfaces.
 - **`lingtai-ad/`** — launch/marketing materials.
 

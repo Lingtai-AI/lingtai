@@ -124,7 +124,13 @@ curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.
 claude plugin add Lingtai-AI/claude-code-plugin
 ```
 
-**Codex CLI / OpenCode / OpenClaw / Hermes** — 安装 [lingtai-mailbox-skill](https://github.com/Lingtai-AI/lingtai-mailbox-skill)。
+**Codex CLI** — 安装 [Codex 版 lingtai 插件](https://github.com/Lingtai-AI/codex-plugin)：
+
+```bash
+git clone https://github.com/Lingtai-AI/codex-plugin.git && cd codex-plugin && ./install.sh
+```
+
+**其他编程智能体**（OpenCode、OpenClaw、Hermes 等）—— 克隆 [lingtai-skill](https://github.com/Lingtai-AI/lingtai-skill) 这个权威协议仓库，把其中的 `skills/lingtai/` 复制到你工具的技能目录下即可。
 
 连接后，编程智能体共享 `.lingtai/human/` 邮箱——可以阅读器灵邮件、发送指令、检查存活状态、管理网络。协议完全基于文件系统：无 SDK、无 API、无依赖。
 
