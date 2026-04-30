@@ -219,13 +219,20 @@ type FirstRunModel struct {
 	capErr       string             // error message if check-caps fails
 	// Agent preset config state (stepAgentPresets)
 	//
-	// presetAllowed[i] is true when the i-th preset in m.presets is in
-	// the agent's authorized swap set (manifest.preset.allowed). Exactly
-	// one preset must be the default; presetDefaultIdx is its index. The
-	// default is always also allowed — the page invariants enforce this.
+	// The page lists *saved* presets only — built-in templates are not
+	// "endorsed" until the user has edited one (which materializes a
+	// saved preset under ~/.lingtai-tui/presets/). savedPresetIdx[r] is
+	// the index in m.presets of the r-th row on this page.
+	//
+	// presetAllowed[r] is true when the r-th saved preset is in the
+	// agent's authorized swap set (manifest.preset.allowed). Exactly
+	// one preset must be the default; presetDefaultIdx is its row index
+	// on this page (NOT the m.presets index). The default is always
+	// also allowed — the page invariants enforce this.
+	savedPresetIdx    []int
 	presetAllowed     []bool
 	presetDefaultIdx  int
-	presetCfgCursor   int    // cursor on the agent-preset-config page
+	presetCfgCursor   int    // cursor on the agent-preset-config page (row index)
 	presetCfgMessage  string // transient validation flash (e.g. "default cannot be unallowed")
 	// Addon selection state (shown below capabilities)
 	addonSelected map[string]bool // "imap", "telegram"
@@ -960,20 +967,21 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 
 		case stepAgentPresets:
 			m.presetCfgMessage = ""
+			rowCount := len(m.savedPresetIdx)
 			switch msg.String() {
 			case "up":
 				if m.presetCfgCursor > 0 {
 					m.presetCfgCursor--
 				}
 			case "down":
-				if m.presetCfgCursor < len(m.presets)-1 {
+				if m.presetCfgCursor < rowCount-1 {
 					m.presetCfgCursor++
 				}
 			case " ", "space":
 				// Toggle allowed for the current row. Refuse to
 				// un-allow the default — the default must always be
 				// in the allowed set.
-				if m.presetCfgCursor < 0 || m.presetCfgCursor >= len(m.presets) {
+				if m.presetCfgCursor < 0 || m.presetCfgCursor >= rowCount {
 					return m, nil
 				}
 				if m.presetAllowed[m.presetCfgCursor] && m.presetCfgCursor == m.presetDefaultIdx {
@@ -984,24 +992,31 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "d", "D":
 				// Set the current row as default. Default is always
 				// also allowed — auto-mark.
-				if m.presetCfgCursor < 0 || m.presetCfgCursor >= len(m.presets) {
+				if m.presetCfgCursor < 0 || m.presetCfgCursor >= rowCount {
 					return m, nil
 				}
 				m.presetDefaultIdx = m.presetCfgCursor
 				m.presetAllowed[m.presetCfgCursor] = true
 			case "right", "enter":
+				// Empty page — bounce back to library so the user can
+				// create a saved preset.
+				if rowCount == 0 {
+					m.step = stepPickPreset
+					m.message = i18n.T("firstrun.preset_cfg.no_saved_yet")
+					return m, nil
+				}
 				// Continue to the runtime page. Validate first: the
 				// default's API key must be available (or the preset
 				// must be a key-less provider like codex OAuth). If
 				// not, route through stepPresetKey first.
-				if m.presetDefaultIdx < 0 || m.presetDefaultIdx >= len(m.presets) {
+				if m.presetDefaultIdx < 0 || m.presetDefaultIdx >= rowCount {
 					return m, nil
 				}
 				// Snap m.cursor to the selected default so downstream
 				// helpers (currentPreset, enterCapabilities) operate
 				// on the right preset.
-				m.cursor = m.presetDefaultIdx
-				p := m.presets[m.presetDefaultIdx]
+				m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
+				p := m.presets[m.cursor]
 				if m.presetNeedsKey(p) {
 					return m.enterPresetKeyFor(p)
 				}
@@ -1792,17 +1807,25 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
 		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.help")) + "\n\n")
 
-		for i, p := range m.presets {
+		if len(m.savedPresetIdx) == 0 {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.empty")) + "\n\n")
+			b.WriteString(StyleFaint.Render("  "+i18n.T("firstrun.preset_cfg.hint_empty")) + "\n")
+			b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
+			break
+		}
+
+		for r, idx := range m.savedPresetIdx {
+			p := m.presets[idx]
 			cursor := "  "
-			if i == m.presetCfgCursor {
+			if r == m.presetCfgCursor {
 				cursor = "> "
 			}
 			// State indicator: [*] default (also allowed), [x] allowed, [ ] not.
 			var marker string
 			switch {
-			case i == m.presetDefaultIdx:
+			case r == m.presetDefaultIdx:
 				marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[*]")
-			case m.presetAllowed[i]:
+			case m.presetAllowed[r]:
 				marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[x]")
 			default:
 				marker = StyleFaint.Render("[ ]")
@@ -1817,7 +1840,7 @@ func (m FirstRunModel) View() string {
 				displayDesc = p.Description.Summary
 			}
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-			if i != m.presetDefaultIdx && !m.presetAllowed[i] {
+			if r != m.presetDefaultIdx && !m.presetAllowed[r] {
 				nameStyle = nameStyle.Foreground(lipgloss.Color("245"))
 			}
 			b.WriteString(cursor + marker + " " + nameStyle.Render(displayName) +
@@ -2676,29 +2699,48 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 }
 
 // enterAgentPresets transitions the wizard from the library pick-list to
-// the agent preset config page. Initializes presetAllowed and
-// presetDefaultIdx — defaulting to "everything allowed, the cursor's row
-// is the default". In setup mode pre-populates from the existing
+// the agent preset config page. The page only lists *saved* presets —
+// built-in templates aren't "endorsed" until the user has edited one
+// (which materializes a saved preset under ~/.lingtai-tui/presets/).
+//
+// Initializes presetAllowed and presetDefaultIdx — defaulting to
+// "everything allowed, the row corresponding to the user's library
+// cursor is the default". In setup mode pre-populates from the existing
 // init.json's manifest.preset.{default, allowed} so the user sees their
 // existing config and only changes what they want.
 func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	m.step = stepAgentPresets
 	m.presetCfgMessage = ""
-	m.presetAllowed = make([]bool, len(m.presets))
 
-	// Default to: everything allowed, cursor's row is the default.
-	for i := range m.presets {
-		m.presetAllowed[i] = true
+	// Build the row list: indices of saved presets within m.presets.
+	m.savedPresetIdx = m.savedPresetIdx[:0]
+	for i, p := range m.presets {
+		if !preset.IsBuiltin(p.Name) {
+			m.savedPresetIdx = append(m.savedPresetIdx, i)
+		}
 	}
+	m.presetAllowed = make([]bool, len(m.savedPresetIdx))
+
+	// Default to: everything allowed, default row = the row whose
+	// underlying preset matches m.cursor (if any), otherwise the first.
+	for r := range m.presetAllowed {
+		m.presetAllowed[r] = true
+	}
+	m.presetDefaultIdx = 0
 	if m.cursor >= 0 && m.cursor < len(m.presets) {
-		m.presetDefaultIdx = m.cursor
-	} else {
-		m.presetDefaultIdx = 0
+		for r, idx := range m.savedPresetIdx {
+			if idx == m.cursor {
+				m.presetDefaultIdx = r
+				break
+			}
+		}
 	}
 	m.presetCfgCursor = m.presetDefaultIdx
 
 	// Setup mode: hydrate from existing init.json so re-running /setup
 	// doesn't silently widen or narrow the user's configured surface.
+	// Path matching is normalized so absolute and ~/-prefixed forms of
+	// the same path compare equal.
 	if m.setupMode && m.setupKeepInitJSON != nil {
 		if manifest, ok := m.setupKeepInitJSON["manifest"].(map[string]interface{}); ok {
 			if pre, ok := manifest["preset"].(map[string]interface{}); ok {
@@ -2712,34 +2754,27 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 					}
 				}
 				if len(existingAllowed) > 0 {
-					// Reset everything, then mark only the rows whose
-					// canonical preset path matches an entry in
-					// existingAllowed.
-					for i := range m.presetAllowed {
-						m.presetAllowed[i] = false
+					for r := range m.presetAllowed {
+						m.presetAllowed[r] = false
 					}
-					for i, p := range m.presets {
-						refs := presetCandidateRefs(p)
-						for _, ref := range refs {
-							for _, allowed := range existingAllowed {
-								if ref == allowed {
-									m.presetAllowed[i] = true
-									break
-								}
+					for r, idx := range m.savedPresetIdx {
+						p := m.presets[idx]
+						for _, allowed := range existingAllowed {
+							if presetRefMatches(presetCanonicalRef(p), allowed) {
+								m.presetAllowed[r] = true
+								break
 							}
 						}
 					}
 				}
 				if existingDefault != "" {
-					for i, p := range m.presets {
-						refs := presetCandidateRefs(p)
-						for _, ref := range refs {
-							if ref == existingDefault {
-								m.presetDefaultIdx = i
-								m.presetAllowed[i] = true
-								m.presetCfgCursor = i
-								break
-							}
+					for r, idx := range m.savedPresetIdx {
+						p := m.presets[idx]
+						if presetRefMatches(presetCanonicalRef(p), existingDefault) {
+							m.presetDefaultIdx = r
+							m.presetAllowed[r] = true
+							m.presetCfgCursor = r
+							break
 						}
 					}
 				}
@@ -2750,41 +2785,60 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	return nil
 }
 
-// presetCandidateRefs returns the path strings that refer to the given
-// preset, in the forms an agent's manifest.preset.allowed entry might
-// take. Used to match wizard rows against the existing init.json's
-// allowed list during setup mode.
-func presetCandidateRefs(p preset.Preset) []string {
+// presetCanonicalRef returns the path string this TUI writes into
+// manifest.preset.allowed for the given preset (the ~/-prefixed form).
+func presetCanonicalRef(p preset.Preset) string {
 	if p.Name == "" {
-		return nil
+		return ""
 	}
-	return []string{
-		"~/.lingtai-tui/presets/" + p.Name + ".json",
-		"~/.lingtai-tui/presets/" + p.Name + ".jsonc",
+	return "~/.lingtai-tui/presets/" + p.Name + ".json"
+}
+
+// presetRefMatches reports whether two preset path strings refer to the
+// same on-disk file, normalizing for `~/...` ↔ absolute differences.
+// Falls back to plain string equality on any error so missing $HOME
+// doesn't silently match unrelated paths.
+func presetRefMatches(a, b string) bool {
+	if a == b {
+		return true
 	}
+	if a == "" || b == "" {
+		return false
+	}
+	expand := func(s string) string {
+		if !strings.HasPrefix(s, "~/") && s != "~" {
+			return s
+		}
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return s
+		}
+		if s == "~" {
+			return home
+		}
+		return filepath.Join(home, s[2:])
+	}
+	return expand(a) == expand(b)
 }
 
 // allowedPresetRefs returns the list of preset path strings the user has
 // authorized on the agent-preset-config page, ready to be written into
-// manifest.preset.allowed. The order follows m.presets, with the default
-// preset first so the rendered list reads naturally. Returns nil when
-// the wizard has not visited stepAgentPresets (e.g. legacy code paths
-// that still build opts inline) — the writer falls back to a single-
-// preset allowed list in that case.
+// manifest.preset.allowed. Order: default first, then the rest in row
+// order. Returns nil when the wizard has not visited stepAgentPresets —
+// the writer falls back to a single-preset allowed list in that case.
 func (m FirstRunModel) allowedPresetRefs() []string {
-	if len(m.presetAllowed) == 0 || len(m.presetAllowed) != len(m.presets) {
+	if len(m.presetAllowed) == 0 || len(m.presetAllowed) != len(m.savedPresetIdx) {
 		return nil
 	}
 	var out []string
-	// Default first (manifest readability — humans skim the first entry).
-	if m.presetDefaultIdx >= 0 && m.presetDefaultIdx < len(m.presets) {
-		out = append(out, "~/.lingtai-tui/presets/"+m.presets[m.presetDefaultIdx].Name+".json")
+	if m.presetDefaultIdx >= 0 && m.presetDefaultIdx < len(m.savedPresetIdx) {
+		out = append(out, presetCanonicalRef(m.presets[m.savedPresetIdx[m.presetDefaultIdx]]))
 	}
-	for i, p := range m.presets {
-		if !m.presetAllowed[i] || i == m.presetDefaultIdx {
+	for r, idx := range m.savedPresetIdx {
+		if !m.presetAllowed[r] || r == m.presetDefaultIdx {
 			continue
 		}
-		out = append(out, "~/.lingtai-tui/presets/"+p.Name+".json")
+		out = append(out, presetCanonicalRef(m.presets[idx]))
 	}
 	return out
 }
