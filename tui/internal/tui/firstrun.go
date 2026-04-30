@@ -202,6 +202,12 @@ type FirstRunModel struct {
 	codexModel        int               // 0=gpt-5.4, 1=gpt-5.4-mini, 2=gpt-5.3-codex
 	codexEmail        string            // set after successful OAuth login
 	codexLoggingIn    bool              // true while waiting for browser callback
+	// keyFieldIdx tracks the cursor position on stepPresetKey:
+	//   0 = textarea (focused, user typing/pasting)
+	//   1 = Back button
+	//   2 = Next button
+	// ↑↓ moves between positions; the textarea is focused only at 0.
+	keyFieldIdx       int
 	selectedProvider  string            // provider of currently selected preset
 	// presetEditor holds the dedicated preset-editor sub-model when the
 	// wizard is on stepEditPreset. The wizard delegates Update/View to
@@ -901,22 +907,33 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			if m.setupMode {
 				presetMinIdx = -1 // allow "keep current" at index -1
 			}
+			// Cursor space: rows [presetMinIdx..len(m.presets)-1],
+			// Back = len(m.presets), Next = len(m.presets)+1.
+			pickBackIdx := len(m.presets)
+			pickNextIdx := len(m.presets) + 1
+			pickLastIdx := pickNextIdx
 			switch msg.String() {
 			case "up":
 				if m.cursor > presetMinIdx {
 					m.cursor--
 				}
 			case "down":
-				if m.cursor < len(m.presets)-1 {
+				if m.cursor < pickLastIdx {
 					m.cursor++
 				}
-			case "enter", " ", "space", "ctrl+e":
-				// Library page: every row is a *template* the user
-				// previews/edits before committing. Enter opens the
-				// editor — there is no implicit "use this preset"
-				// verb on row activation. Use → to advance to the
-				// agent preset config page where defaults and
-				// allowed-set are committed.
+			case "enter":
+				// Button activation
+				if m.cursor == pickBackIdx {
+					if m.setupMode {
+						return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+					}
+					m.step = stepWelcome
+					return m, nil
+				}
+				if m.cursor == pickNextIdx {
+					return m, m.enterAgentPresets()
+				}
+				// Row: open the editor on the highlighted preset.
 				if m.setupMode && m.cursor == -1 {
 					return m, nil // can't edit the synthetic "keep current" entry
 				}
@@ -929,10 +946,20 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.presetEditor.Init(),
 					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 				)
-			case "right":
-				// Continue to the agent preset config page. There the
-				// user picks the default + the allowed-swap set.
-				return m, m.enterAgentPresets()
+			case " ", "space", "ctrl+e":
+				// Row-only verb: open the editor (kept for muscle memory).
+				if m.setupMode && m.cursor == -1 {
+					return m, nil
+				}
+				if m.cursor < 0 || m.cursor >= len(m.presets) {
+					return m, nil
+				}
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
+				m.step = stepEditPreset
+				return m, tea.Batch(
+					m.presetEditor.Init(),
+					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+				)
 			case "backspace", "delete":
 				// Delete a saved (non-builtin) preset
 				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
@@ -968,19 +995,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		case stepAgentPresets:
 			m.presetCfgMessage = ""
 			rowCount := len(m.savedPresetIdx)
+			// Cursor space: rows [0..rowCount-1], Back = rowCount,
+			// Next = rowCount+1. The empty-page case still has the
+			// two button positions so the user can navigate out.
+			backIdx := rowCount
+			nextIdx := rowCount + 1
+			lastIdx := nextIdx
 			switch msg.String() {
 			case "up":
 				if m.presetCfgCursor > 0 {
 					m.presetCfgCursor--
 				}
 			case "down":
-				if m.presetCfgCursor < rowCount-1 {
+				if m.presetCfgCursor < lastIdx {
 					m.presetCfgCursor++
 				}
 			case " ", "space":
-				// Toggle allowed for the current row. Refuse to
-				// un-allow the default — the default must always be
-				// in the allowed set.
+				// Row-only verb: toggle allowed for the current row.
+				// Refuse to un-allow the default — default must always
+				// remain in the allowed set.
 				if m.presetCfgCursor < 0 || m.presetCfgCursor >= rowCount {
 					return m, nil
 				}
@@ -989,39 +1022,41 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil
 				}
 				m.presetAllowed[m.presetCfgCursor] = !m.presetAllowed[m.presetCfgCursor]
-			case "d", "D":
-				// Set the current row as default. Default is always
-				// also allowed — auto-mark.
-				if m.presetCfgCursor < 0 || m.presetCfgCursor >= rowCount {
+			case "enter":
+				// On a row: set default (default is also auto-allowed).
+				if m.presetCfgCursor >= 0 && m.presetCfgCursor < rowCount {
+					m.presetDefaultIdx = m.presetCfgCursor
+					m.presetAllowed[m.presetCfgCursor] = true
 					return m, nil
 				}
-				m.presetDefaultIdx = m.presetCfgCursor
-				m.presetAllowed[m.presetCfgCursor] = true
-			case "right", "enter":
-				// Empty page — bounce back to library so the user can
-				// create a saved preset.
-				if rowCount == 0 {
+				// On Back button: return to library.
+				if m.presetCfgCursor == backIdx {
 					m.step = stepPickPreset
-					m.message = i18n.T("firstrun.preset_cfg.no_saved_yet")
 					return m, nil
 				}
-				// Continue to the runtime page. Validate first: the
-				// default's API key must be available (or the preset
-				// must be a key-less provider like codex OAuth). If
-				// not, route through stepPresetKey first.
-				if m.presetDefaultIdx < 0 || m.presetDefaultIdx >= rowCount {
-					return m, nil
+				// On Next button: validate and advance.
+				if m.presetCfgCursor == nextIdx {
+					if rowCount == 0 {
+						// No saved presets — bounce back to the
+						// library so the user can create one.
+						m.step = stepPickPreset
+						m.message = i18n.T("firstrun.preset_cfg.no_saved_yet")
+						return m, nil
+					}
+					if m.presetDefaultIdx < 0 || m.presetDefaultIdx >= rowCount {
+						return m, nil
+					}
+					// Snap m.cursor to the selected default so downstream
+					// helpers (currentPreset, enterCapabilities) operate
+					// on the right preset.
+					m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
+					p := m.presets[m.cursor]
+					if m.presetNeedsKey(p) {
+						return m.enterPresetKeyFor(p)
+					}
+					return m, m.enterCapabilities()
 				}
-				// Snap m.cursor to the selected default so downstream
-				// helpers (currentPreset, enterCapabilities) operate
-				// on the right preset.
-				m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
-				p := m.presets[m.cursor]
-				if m.presetNeedsKey(p) {
-					return m.enterPresetKeyFor(p)
-				}
-				return m, m.enterCapabilities()
-			case "left", "esc":
+			case "esc":
 				m.step = stepPickPreset
 				return m, nil
 			case "ctrl+c":
@@ -1037,7 +1072,65 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// happen in the dedicated PresetEditorModel before this
 			// step. Codex is the one exception — it uses an OAuth
 			// flow that isn't a paste-key form.
+			//
+			// Cursor space: 0 = textarea (focused), 1 = Back, 2 = Next.
+			// Tab cycles forward, Shift+Tab cycles backward. ↑↓ go to
+			// the textarea when keyFieldIdx == 0 (its own line nav);
+			// when on a button, ↑↓ moves between buttons and back to
+			// the textarea. Enter on a button activates it; inside the
+			// textarea, Enter inserts a newline (textarea's own
+			// behavior).
 			isCodex := m.selectedProvider == "codex"
+			// keyDoNext encapsulates the "save key + advance" logic
+			// triggered by the Next button.
+			keyDoNext := func() (FirstRunModel, tea.Cmd) {
+				if isCodex {
+					if m.codexLoggingIn {
+						return m, nil
+					}
+					if m.codexEmail == "" {
+						m.codexLoggingIn = true
+						oauthCh := startOAuthFlow()
+						return m, func() tea.Msg {
+							result := <-oauthCh
+							return result
+						}
+					}
+					p := m.presets[m.cursor]
+					model := codexModels[m.codexModel]
+					clone := preset.Clone(p, "codex_oauth")
+					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
+						llm["model"] = model
+					}
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					m.presets, _ = preset.List()
+					for i, q := range m.presets {
+						if q.Name == "codex_oauth" {
+							m.cursor = i
+							break
+						}
+					}
+					return m, m.enterCapabilities()
+				}
+				envName := m.currentPresetKeyEnv()
+				if envName == "" {
+					return m, m.enterCapabilities()
+				}
+				key := strings.TrimSpace(m.presetKeyInput.Value())
+				if key != "" {
+					m.existingKeys[envName] = key
+					cfg, _ := config.LoadConfig(m.globalDir)
+					cfg.Keys = m.existingKeys
+					config.SaveConfig(m.globalDir, cfg)
+				} else if m.existingKeys[envName] == "" {
+					return m, nil
+				}
+				return m, m.enterCapabilities()
+			}
+
 			switch msg.String() {
 			case "ctrl+e":
 				// Open external editor for paste-friendly key entry.
@@ -1067,74 +1160,101 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "esc":
 				m.step = stepPickPreset
 				return m, nil
+			case "tab":
+				// Cycle textarea → Back → Next → textarea.
+				m.keyFieldIdx = (m.keyFieldIdx + 1) % 3
+				if m.keyFieldIdx == 0 && !isCodex {
+					m.presetKeyInput.Focus()
+				} else {
+					m.presetKeyInput.Blur()
+				}
+				return m, nil
+			case "shift+tab":
+				m.keyFieldIdx = (m.keyFieldIdx + 2) % 3 // -1 mod 3
+				if m.keyFieldIdx == 0 && !isCodex {
+					m.presetKeyInput.Focus()
+				} else {
+					m.presetKeyInput.Blur()
+				}
+				return m, nil
+			case "up":
+				// On a button: move to the previous button, or back into
+				// the textarea from Back. Inside textarea: pass through.
+				if m.keyFieldIdx == 2 {
+					m.keyFieldIdx = 1
+					return m, nil
+				}
+				if m.keyFieldIdx == 1 {
+					m.keyFieldIdx = 0
+					if !isCodex {
+						m.presetKeyInput.Focus()
+					}
+					return m, nil
+				}
+				// In textarea — let it handle the key.
+				if !isCodex {
+					var cmd tea.Cmd
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+					return m, cmd
+				}
+				return m, nil
+			case "down":
+				// In textarea: pass through (line-down). On Back: go to Next.
+				if m.keyFieldIdx == 1 {
+					m.keyFieldIdx = 2
+					return m, nil
+				}
+				if m.keyFieldIdx == 2 {
+					return m, nil
+				}
+				if !isCodex {
+					var cmd tea.Cmd
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+					return m, cmd
+				}
+				return m, nil
 			case "left", "right":
+				// Codex model picker uses ←/→ when textarea is unfocused.
 				if isCodex {
 					if msg.String() == "right" {
 						m.codexModel = (m.codexModel + 1) % len(codexModels)
 					} else {
 						m.codexModel = (m.codexModel + len(codexModels) - 1) % len(codexModels)
 					}
+					return m, nil
+				}
+				// Inside textarea — pass cursor movement through.
+				if m.keyFieldIdx == 0 {
+					var cmd tea.Cmd
+					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+					return m, cmd
 				}
 				return m, nil
 			case "enter":
-				if isCodex {
-					if m.codexLoggingIn {
-						return m, nil
-					}
-					if m.codexEmail == "" {
-						m.codexLoggingIn = true
-						oauthCh := startOAuthFlow()
-						return m, func() tea.Msg {
-							result := <-oauthCh
-							return result
-						}
-					}
-					// Codex OAuth complete — clone the template under
-					// "codex_oauth" with the chosen model and advance.
-					p := m.presets[m.cursor]
-					model := codexModels[m.codexModel]
-					clone := preset.Clone(p, "codex_oauth")
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["model"] = model
-					}
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					m.presets, _ = preset.List()
-					for i, q := range m.presets {
-						if q.Name == "codex_oauth" {
-							m.cursor = i
-							break
-						}
-					}
-					return m, m.enterCapabilities()
-				}
-				// Paste-key flow: persist the key under the preset's
-				// declared api_key_env name, advance. Empty keys are
-				// accepted only when a value already exists in
-				// ~/.lingtai-tui/.env (kept-key path).
-				envName := m.currentPresetKeyEnv()
-				if envName == "" {
-					// No api_key_env declared (codex OAuth, locally-hosted
-					// custom). Skip the persist step entirely.
-					return m, m.enterCapabilities()
-				}
-				key := strings.TrimSpace(m.presetKeyInput.Value())
-				if key != "" {
-					m.existingKeys[envName] = key
-					cfg, _ := config.LoadConfig(m.globalDir)
-					cfg.Keys = m.existingKeys
-					config.SaveConfig(m.globalDir, cfg)
-				} else if m.existingKeys[envName] == "" {
+				// Button activation
+				if m.keyFieldIdx == 1 {
+					m.step = stepPickPreset
 					return m, nil
 				}
-				return m, m.enterCapabilities()
+				if m.keyFieldIdx == 2 {
+					return keyDoNext()
+				}
+				// Inside the textarea, Enter for codex confirms login;
+				// otherwise it's a newline (default textarea behavior).
+				if isCodex {
+					return keyDoNext()
+				}
+				var cmd tea.Cmd
+				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				return m, cmd
 			case "ctrl+c":
 				return m, tea.Quit
 			default:
 				if isCodex {
 					return m, nil
+				}
+				if m.keyFieldIdx != 0 {
+					return m, nil // ignore typing while focused on a button
 				}
 				var cmd tea.Cmd
 				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
@@ -1333,6 +1453,28 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "enter":
+				// Footer button activation: Back returns to preset
+				// config; everything else routes through the existing
+				// "save and advance" path used by Next.
+				if m.fieldIdx == agentNameDirBackIdx {
+					m.step = stepAgentPresets
+					m.message = ""
+					return m, nil
+				}
+				// Enter on a regular input field: advance to the next
+				// field rather than submitting. The user must explicitly
+				// move to the Next button to submit. This avoids
+				// accidental submits while typing in numeric fields.
+				if m.fieldIdx >= 0 && m.fieldIdx < agentNameDirBackIdx {
+					m.fieldIdx = (m.fieldIdx + 1) % agentNameDirFieldCount
+					if (m.setupMode || m.rehydrateMode) && m.fieldIdx == 1 {
+						m.fieldIdx = 2
+					}
+					return m, m.focusAgentField()
+				}
+				// fieldIdx == agentNameDirNextIdx (or -1 in setup-mode
+				// "keep current" branch) — fall through to the
+				// save-and-advance logic below.
 				if m.fieldIdx == -1 && m.setupMode {
 					// Skip — keep existing agent settings, jump to recipe.
 					// Stash current values for stepRecipe.
@@ -1517,13 +1659,53 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				minIdx = -1 // allow "keep current" at index -1
 			}
 			secretaryIdx := m.recipeMaxIdx() + 1
+			recipeBackIdx := secretaryIdx + 1
+			recipeNextIdx := secretaryIdx + 2
+			recipeLastIdx := recipeNextIdx
+			// recipeDoNext encapsulates the save-and-advance logic
+			// triggered by activating the Next button.
+			recipeDoNext := func() (FirstRunModel, tea.Cmd) {
+				if m.recipeIdx == -1 {
+					return m.performSetupSaveOnly()
+				}
+				if m.recipeIdx == secretaryIdx {
+					// Cursor is on the secretary toggle row — Next
+					// advances using whatever recipe was previously
+					// highlighted; if none was, refuse politely.
+					m.message = i18n.T("firstrun.recipe.pick_one")
+					return m, nil
+				}
+				recipeName := m.recipeIdxToName(m.recipeIdx)
+				customDir := ""
+				if recipeName == preset.RecipeImported {
+					customDir = m.importedRecipeDir
+				} else if recipeName == preset.RecipeAgora {
+					if ar := m.agoraRecipeAt(m.recipeIdx); ar != nil {
+						customDir = ar.Dir
+					}
+				} else if recipeName == preset.RecipeCustom {
+					customDir = m.recipeCustomInput.Value()
+					if err := preset.ValidateCustomDir(customDir); err != nil {
+						m.recipeCustomErr = err.Error()
+						return m, nil
+					}
+				}
+				if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
+					m.pendingRecipeName = recipeName
+					m.pendingCustomDir = customDir
+					m.step = stepRecipeSwapConfirm
+					m.swapConfirmIdx = 0
+					return m, nil
+				}
+				return m.performRecipeSave(recipeName, customDir)
+			}
+
 			switch msg.String() {
 			case "up":
 				if m.recipeIdx > minIdx {
 					m.recipeIdx--
 					m.recipeCustomErr = ""
 				}
-				// Focus/blur the custom input based on selection
 				if m.recipeIdx == m.recipeMaxIdx() {
 					m.recipeCustomInput.Focus()
 				} else {
@@ -1531,7 +1713,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "down":
-				if m.recipeIdx < secretaryIdx {
+				if m.recipeIdx < recipeLastIdx {
 					m.recipeIdx++
 					m.recipeCustomErr = ""
 				}
@@ -1542,8 +1724,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "ctrl+o":
-				if m.recipeIdx == secretaryIdx || m.recipeIdx == -1 {
-					return m, nil // no preview for secretary toggle or keep-current
+				if m.recipeIdx == secretaryIdx || m.recipeIdx == -1 ||
+					m.recipeIdx == recipeBackIdx || m.recipeIdx == recipeNextIdx {
+					return m, nil
 				}
 				recipeDir := m.resolveCurrentRecipeDir()
 				if recipeDir == "" {
@@ -1562,45 +1745,30 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
-			case "enter", " ":
-				// "Keep current" — save init.json only, skip recipe/prompt rewrite
-				if m.recipeIdx == -1 {
-					return m.performSetupSaveOnly()
+			case "enter":
+				// Footer button activation
+				if m.recipeIdx == recipeBackIdx {
+					m.step = stepAgentNameDir
+					m.message = ""
+					return m, nil
 				}
-
-				// Secretary toggle: enter/space toggles the checkbox
+				if m.recipeIdx == recipeNextIdx {
+					return recipeDoNext()
+				}
+				// Row: secretary toggle (space-style) or pick-and-save.
 				if m.recipeIdx == secretaryIdx {
 					m.secretaryEnabled = !m.secretaryEnabled
 					return m, nil
 				}
-
-				recipeName := m.recipeIdxToName(m.recipeIdx)
-				customDir := ""
-				if recipeName == preset.RecipeImported {
-					customDir = m.importedRecipeDir
-				} else if recipeName == preset.RecipeAgora {
-					if ar := m.agoraRecipeAt(m.recipeIdx); ar != nil {
-						customDir = ar.Dir
-					}
-				} else if recipeName == preset.RecipeCustom {
-					customDir = m.recipeCustomInput.Value()
-					if err := preset.ValidateCustomDir(customDir); err != nil {
-						m.recipeCustomErr = err.Error()
-						return m, nil
-					}
+				return recipeDoNext()
+			case " ":
+				// Space toggles the secretary checkbox; on a recipe row
+				// it's a no-op (Enter is the activation key now).
+				if m.recipeIdx == secretaryIdx {
+					m.secretaryEnabled = !m.secretaryEnabled
 				}
+				return m, nil
 
-				// Mid-life recipe change detection -> route to swap confirm (Task 9)
-				if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
-					m.pendingRecipeName = recipeName
-					m.pendingCustomDir = customDir
-					m.step = stepRecipeSwapConfirm
-					m.swapConfirmIdx = 0
-					return m, nil
-				}
-
-				// First-run or unchanged recipe: save directly
-				return m.performRecipeSave(recipeName, customDir)
 			default:
 				if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom { // custom selected -- forward to input
 					var cmd tea.Cmd
@@ -1790,6 +1958,17 @@ func (m FirstRunModel) View() string {
 			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + meta + desc + "\n")
 		}
+
+		// Footer buttons (Back/Next) — positions in the same cursor space.
+		var pickFocused wizardFooterButton
+		switch m.cursor {
+		case len(m.presets):
+			pickFocused = wizardFooterBack
+		case len(m.presets) + 1:
+			pickFocused = wizardFooterNext
+		}
+		b.WriteString(renderWizardFooter(pickFocused, true))
+
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
 		// Show delete hint when cursor is on a saved (non-builtin) preset
 		if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
@@ -1807,45 +1986,56 @@ func (m FirstRunModel) View() string {
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
 		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.help")) + "\n\n")
 
-		if len(m.savedPresetIdx) == 0 {
-			b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.empty")) + "\n\n")
-			b.WriteString(StyleFaint.Render("  "+i18n.T("firstrun.preset_cfg.hint_empty")) + "\n")
-			b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
-			break
+		rowCount := len(m.savedPresetIdx)
+		backIdx := rowCount
+		nextIdx := rowCount + 1
+
+		if rowCount == 0 {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.empty")) + "\n")
+		} else {
+			for r, idx := range m.savedPresetIdx {
+				p := m.presets[idx]
+				cursor := "  "
+				if r == m.presetCfgCursor {
+					cursor = "> "
+				}
+				// State indicator: [*] default (also allowed), [x] allowed, [ ] not.
+				var marker string
+				switch {
+				case r == m.presetDefaultIdx:
+					marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[*]")
+				case m.presetAllowed[r]:
+					marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[x]")
+				default:
+					marker = StyleFaint.Render("[ ]")
+				}
+
+				displayName := i18n.T("preset.name_" + p.Name)
+				if displayName == "preset.name_"+p.Name {
+					displayName = p.Name
+				}
+				displayDesc := i18n.T("preset.desc_" + p.Name)
+				if displayDesc == "preset.desc_"+p.Name {
+					displayDesc = p.Description.Summary
+				}
+				nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+				if r != m.presetDefaultIdx && !m.presetAllowed[r] {
+					nameStyle = nameStyle.Foreground(lipgloss.Color("245"))
+				}
+				b.WriteString(cursor + marker + " " + nameStyle.Render(displayName) +
+					StyleSubtle.Render("  "+displayDesc) + "\n")
+			}
 		}
 
-		for r, idx := range m.savedPresetIdx {
-			p := m.presets[idx]
-			cursor := "  "
-			if r == m.presetCfgCursor {
-				cursor = "> "
-			}
-			// State indicator: [*] default (also allowed), [x] allowed, [ ] not.
-			var marker string
-			switch {
-			case r == m.presetDefaultIdx:
-				marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[*]")
-			case m.presetAllowed[r]:
-				marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[x]")
-			default:
-				marker = StyleFaint.Render("[ ]")
-			}
-
-			displayName := i18n.T("preset.name_" + p.Name)
-			if displayName == "preset.name_"+p.Name {
-				displayName = p.Name
-			}
-			displayDesc := i18n.T("preset.desc_" + p.Name)
-			if displayDesc == "preset.desc_"+p.Name {
-				displayDesc = p.Description.Summary
-			}
-			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-			if r != m.presetDefaultIdx && !m.presetAllowed[r] {
-				nameStyle = nameStyle.Foreground(lipgloss.Color("245"))
-			}
-			b.WriteString(cursor + marker + " " + nameStyle.Render(displayName) +
-				StyleSubtle.Render("  "+displayDesc) + "\n")
+		// Footer buttons (Back/Next) are positions in the same cursor space.
+		var focused wizardFooterButton
+		switch m.presetCfgCursor {
+		case backIdx:
+			focused = wizardFooterBack
+		case nextIdx:
+			focused = wizardFooterNext
 		}
+		b.WriteString(renderWizardFooter(focused, true))
 
 		if m.presetCfgMessage != "" {
 			b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.presetCfgMessage) + "\n")
@@ -1897,22 +2087,26 @@ func (m FirstRunModel) View() string {
 			} else if m.codexEmail != "" {
 				okStyle := lipgloss.NewStyle().Foreground(ColorActive)
 				b.WriteString("  " + okStyle.Render("✓ "+i18n.TF("codex.logged_in", m.codexEmail)) + "\n\n")
-				b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
-					"  [←→] "+i18n.T("codex.toggle_model")+
-					"  [Esc] "+i18n.T("setup.back")) + "\n")
 			} else {
 				b.WriteString("  " + i18n.T("codex.press_enter") + "\n\n")
-				b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("codex.open_browser")+
-					"  [←→] "+i18n.T("codex.toggle_model")+
-					"  [Esc] "+i18n.T("setup.back")) + "\n")
 			}
 		} else {
 			// Single textinput. The editor configured everything else.
 			b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
-			b.WriteString(StyleFaint.Render("  [Enter] "+i18n.T("setup.save")+
-				"  [Ctrl+E] editor (allows pasting)"+
-				"  [Esc] "+i18n.T("setup.back")) + "\n")
 		}
+
+		// Footer buttons: 0 = textarea, 1 = Back, 2 = Next.
+		var keyFocused wizardFooterButton
+		switch m.keyFieldIdx {
+		case 1:
+			keyFocused = wizardFooterBack
+		case 2:
+			keyFocused = wizardFooterNext
+		}
+		b.WriteString(renderWizardFooter(keyFocused, true))
+
+		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.preset_key.hint")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
 	case stepCapabilities:
 		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
@@ -2181,14 +2375,22 @@ func (m FirstRunModel) View() string {
 			errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
 			b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
 		}
-		enterLabel := i18n.T("firstrun.create_agent")
-		if m.setupMode {
-			enterLabel = i18n.T("setup.save")
+
+		// Footer buttons: idx 14 = Back, idx 15 = Next.
+		var nameDirFocused wizardFooterButton
+		switch m.fieldIdx {
+		case agentNameDirBackIdx:
+			nameDirFocused = wizardFooterBack
+		case agentNameDirNextIdx:
+			nameDirFocused = wizardFooterNext
 		}
+		b.WriteString(renderWizardFooter(nameDirFocused, true))
+
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("firstrun.toggle_field")+
 			"  ←→ "+i18n.T("firstrun.toggle_region")+
-			"  [Enter] "+enterLabel+
-			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+			"  [tab] "+i18n.T("firstrun.next_field")+
+			"  [enter] "+i18n.T("firstrun.activate_button")+
+			"  [esc] "+i18n.T("firstrun.back")) + "\n")
 
 	case stepRecipe:
 		if m.recipeViewer != nil {
@@ -2343,13 +2545,17 @@ func centerText(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-// agentNameDirFieldCount is the number of fields in stepAgentNameDir.
-const agentNameDirFieldCount = 14
+// agentNameDirFieldCount is the number of fields in stepAgentNameDir,
+// including the Back/Next button slots at the end.
+const agentNameDirFieldCount = 16
 // Field indices:
 // 0=name, 1=dir, 2=lang,
 // 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure, 7=max_rpm,
 // 8=karma, 9=nirvana,
 // 10=covenant, 11=principle, 12=soul_flow, 13=comment
+// 14=Back, 15=Next  (footer buttons; no input is focused here)
+const agentNameDirBackIdx = 14
+const agentNameDirNextIdx = 15
 
 // runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
 func (m FirstRunModel) runCheckCaps() tea.Cmd {
@@ -2553,6 +2759,7 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 	provider := m.getPresetProvider(p)
 	m.selectedProvider = provider
 	m.step = stepPresetKey
+	m.keyFieldIdx = 0 // textarea focused on entry
 	m.presetKeyInput.Reset()
 	if provider == "codex" {
 		m.presetKeyInput.Blur()
@@ -3530,6 +3737,23 @@ func (m FirstRunModel) viewRecipe() string {
 	}
 
 	b.WriteString(leftBlock.String())
+
+	// Footer buttons: Back at secretaryIdx+1, Next at secretaryIdx+2.
+	recipeBackIdx := secretaryIdx + 1
+	recipeNextIdx := secretaryIdx + 2
+	var recipeFocused wizardFooterButton
+	switch m.recipeIdx {
+	case recipeBackIdx:
+		recipeFocused = wizardFooterBack
+	case recipeNextIdx:
+		recipeFocused = wizardFooterNext
+	}
+	b.WriteString(renderWizardFooter(recipeFocused, true))
+
+	if m.message != "" {
+		errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
+		b.WriteString("\n  " + errStyle.Render(m.message) + "\n")
+	}
 
 	b.WriteString("\n" + StyleFaint.Render(
 		"  ↑↓ "+i18n.T("welcome.select_lang")+
