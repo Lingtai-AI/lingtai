@@ -309,7 +309,7 @@ echo "3. File system permissions are the only access control"
 - ❌ Assuming pigeon is a secure communication channel → anyone with file system access can read messages
 - ✅ Pass sensitive information through environment variables or the `.secrets/` directory, never in plaintext mail
 
-**Related References**: `email-manual`, `lingtai-anatomy` (communication model)
+**Related References**: `lingtai-anatomy` (mail protocol; communication model)
 
 ---
 
@@ -376,7 +376,7 @@ fi
 - ✅ When sharing knowledge, pass the actual content (via pigeon or shared files), not just IDs
 - ✅ Do not enter sensitive data into codex, or clearly mark it as sensitive
 
-**Related References**: `codex-manual`, `lingtai-anatomy` (five-layer accumulation)
+**Related References**: `lingtai-anatomy` (codex; five-layer accumulation)
 
 ---
 
@@ -443,7 +443,7 @@ done
 - ✅ Only grant karma/nirvana to orchestrators; avatars should have zero admin privileges
 - ✅ Avatars encountering permission issues should report to their parent via pigeon
 
-**Related References**: `avatar-manual` (avatar permission model)
+**Related References**: `lingtai-anatomy` (avatar permission model / network topology)
 
 ---
 

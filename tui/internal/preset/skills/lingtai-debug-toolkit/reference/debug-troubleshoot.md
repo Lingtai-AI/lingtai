@@ -97,7 +97,7 @@ done
 - ❌ Confusing asleep with suspended → asleep agents can be woken by email; suspended requires CPR
 - ✅ Correct approach: check heartbeat first, then decide whether to wait, interrupt, or CPR
 
-**Related References**: `lingtai-anatomy` (five lifecycle states), `avatar-manual` (avatar management)
+**Related References**: `lingtai-anatomy` (five lifecycle states; avatar management)
 
 ---
 
@@ -157,7 +157,7 @@ grep -il "oom\|killed\|memory" "$peer_dir/logs/"*.log 2>/dev/null || echo "No OO
 - ❌ Ignoring disk space → root cause unresolved, issue recurs
 - ✅ After OOM, prioritize checking context window and attachment file sizes
 
-**Related References**: `lingtai-anatomy` (process model), `psyche-manual` (molt operations)
+**Related References**: `lingtai-anatomy` (process model; molt operations)
 
 ---
 
@@ -208,7 +208,7 @@ for line in sys.stdin:
 - ❌ Forgetting to check the ledger before spawning → name collision
 - ✅ Use only letters, digits, underscores, and hyphens in avatar names
 
-**Related References**: `avatar-manual`
+**Related References**: `lingtai-anatomy` (avatar/network topology)
 
 ---
 
@@ -272,7 +272,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - Start organizing immediately upon receiving a level-1 warning
 - Send yourself a self-email to preserve critical unfinished items (email survives across molts)
 
-**Related References**: `lingtai-anatomy` (five-layer accumulation), `psyche-manual` (molt operations), `codex-manual`
+**Related References**: `lingtai-anatomy` (five-layer accumulation; molt operations; codex)
 
 ---
 
@@ -310,7 +310,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Not confirming whether submit succeeded → network errors may cause silent failure
 - ✅ Back up critical entries by exporting them before consolidate
 
-**Related References**: `codex-manual`
+**Related References**: `lingtai-anatomy` (codex / memory system)
 
 ---
 
@@ -351,7 +351,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Not checking pad files before molting → discovering it is empty on reincarnation
 - ✅ Periodically check the appended file list: `psyche(pad, append)` without the files parameter shows the current list
 
-**Related References**: `psyche-manual`
+**Related References**: `lingtai-anatomy` (psyche / molt protocol)
 
 ---
 
@@ -383,7 +383,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Ignoring system warnings → forced molt with no summary
 - ✅ Start four-layer storage organization immediately upon receiving a level-1 warning
 
-**Related References**: `lingtai-anatomy` (warning levels), `psyche-manual` (molt operations)
+**Related References**: `lingtai-anatomy` (warning levels; molt operations)
 
 ---
 
@@ -423,7 +423,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Repeatedly sending emails to a suspended recipient → mail piles up but is never processed
 - ✅ Always use `reply` for incoming messages and `send` for new conversations
 
-**Related References**: `email-manual`
+**Related References**: `lingtai-anatomy` (mail protocol)
 
 ---
 
@@ -457,7 +457,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Using the email tool for addresses containing `@` → always fails
 - ✅ Determine address type first, then select the correct communication channel
 
-**Related References**: `email-manual`, `avatar-manual`
+**Related References**: `lingtai-anatomy` (mail protocol; network topology)
 
 ---
 
@@ -496,7 +496,7 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 - ❌ Cancelling but forgetting to recreate → task lost
 - ✅ Immediately list after creating a schedule to confirm parameters are correct
 
-**Related References**: `email-manual`
+**Related References**: `lingtai-anatomy` (mail protocol)
 
 ---
 
@@ -545,7 +545,7 @@ read(file_path="/tmp/output.txt", offset=1, limit=100)
 - ❌ Reading a large file in a single call → should chunk it
 - ✅ Write long output to a file first, then read it in chunks
 
-**Related References**: `bash-manual`, `read-manual`, `web-browsing` skill
+**Related References**: `lingtai-anatomy` (bash/read tools); `web-browsing` skill
 
 ---
 
@@ -617,7 +617,7 @@ read(file_path="/tmp/output.txt", offset=1, limit=100)
 - ❌ Repeatedly reading the same large file → wastes context
 - ✅ Write large output to a file first, then read as needed
 
-**Related References**: `read-manual`, `bash-manual`, `grep-manual`
+**Related References**: `lingtai-anatomy` (read/bash/grep tools)
 
 ---
 
