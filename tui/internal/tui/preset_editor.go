@@ -304,12 +304,18 @@ func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]
 func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, isBuiltin bool) PresetEditorModel {
 	// Inline editor uses textarea — paste from the system clipboard
 	// works reliably (textinput drops chars on multi-byte pastes).
-	// We render only one row; the page-level updateInline intercepts
-	// Enter, so multi-line semantics never reach the user.
+	// We render only one row; updateInline intercepts Enter and the
+	// keymap's InsertNewline binding is cleared, so multi-line
+	// semantics never surface. Styles match the rest of the TUI
+	// (themedTextareaStyles); the default textarea ships with dark
+	// focus colors that clash with the lipgloss palette.
 	ta := textarea.New()
 	ta.SetWidth(40)
 	ta.SetHeight(1)
 	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.KeyMap.InsertNewline.SetKeys() // no newlines — single line
+	ta.SetStyles(themedTextareaStyles())
 	cn := textinput.New()
 	cn.CharLimit = 64
 	cn.SetWidth(30)
