@@ -1,7 +1,34 @@
 ---
 name: lingtai-recipe
-description: Everything about recipes — their bundle format, how to author and validate them, and how to export either a standalone recipe or the current network (recipe + live .lingtai/ state, with per-agent init.json stripped) as a shareable git repository. A recipe is the named payload that shapes an orchestrator's greeting, ongoing behavior, and shipped library; every lingtai project uses one. Use when the human asks about recipes, wants to create or customize one, wants to share or back up this network, or wants to export a recipe for others to seed new networks. This skill is a menu — pick the sub-guide that matches the task.
-version: 3.1.0
+description: >
+  Menu manual (not a tool) for everything recipe-related in LingTai. A
+  **recipe** is the named payload that shapes an orchestrator's
+  greeting, ongoing behaviour, and shipped library; every LingTai
+  project uses one (selected at `/setup` time, inherited from a clone,
+  or auto-discovered when a project already has `.recipe/` at its
+  root). The skill body fans out into three substantive sub-guides
+  (~1300 lines total) so you load only what the task needs:
+  `references/recipe-format.md` for the bundle format + `recipe.json`
+  schema + library sibling rules + validator contract (read first when
+  authoring or customising); `assets/export-network.md` for shipping
+  the *current* multi-agent network as a shareable git repo (live
+  `.lingtai/` state + freshly-distilled `.recipe/`, per-agent
+  `init.json` stripped so the recipient picks their own LLM); and
+  `assets/export-recipe.md` for shipping just the methodology /
+  culture as a bundle others can use to seed *new* networks (no
+  agents, no mailboxes). Body also catalogues the 8 helper scripts
+  the export flows invoke (validate, archive_mail, privacy_scan,
+  scrub_ephemeral, etc.) and warns about the three different
+  recipe-shaped artifacts that can co-exist in one project (inner
+  network, outer applied recipe, captured applied snapshot — easy to
+  conflate). Read this skill when the human mentions recipes, wants
+  to author / customise one, wants to share or back up this network,
+  or wants to publish a recipe for seeding new networks. Do NOT use
+  for one-off exports of a single agent (that's just `cp -r`), or
+  for in-network behaviour edits to the live system (those go through
+  the kernel's writes to the agent's working directory, not through a
+  recipe round-trip).
+version: 3.1.1
 ---
 
 # lingtai-recipe: Recipes, Exports, and Everything Around Them
