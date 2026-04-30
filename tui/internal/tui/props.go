@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -45,6 +46,15 @@ type PropsModel struct {
 	// Agent picker overlay
 	pickerOpen bool
 	pickerIdx  int
+
+	// Detail view: full-screen single-column breakdown of token usage
+	// by provider, recent activity, MCP servers, daemon count. Toggled
+	// with Ctrl+D. Esc closes detail and returns to the summary.
+	detailOpen           bool
+	detailByProvider     map[string]fs.TokenTotals
+	detailRecent         []fs.LedgerEntry
+	detailDaemonCount    int
+	detailMCPNames       []string
 }
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
@@ -155,6 +165,13 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "esc", "q":
+			// Detail view first, then exit.
+			if m.detailOpen {
+				m.detailOpen = false
+				m.viewport.GotoTop()
+				m.syncViewportContent()
+				return m, nil
+			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "ctrl+t":
 			m.pickerOpen = true
@@ -163,6 +180,17 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 					m.pickerIdx = i
 					break
 				}
+			}
+			m.syncViewportContent()
+			return m, nil
+		case "ctrl+d":
+			// Toggle detail view. Reload the per-provider breakdown
+			// from disk on every open so the data is fresh — these
+			// reads are cheap (single jsonl + one init.json).
+			m.detailOpen = !m.detailOpen
+			if m.detailOpen {
+				m.loadDetail()
+				m.viewport.GotoTop()
 			}
 			m.syncViewportContent()
 			return m, nil
@@ -175,14 +203,46 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 	return m, nil
 }
 
+// loadDetail populates the detail-view caches from disk for the
+// currently-selected agent. Called every time the detail view is
+// opened so the user sees fresh numbers.
+func (m *PropsModel) loadDetail() {
+	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
+	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, 20)
+
+	// MCP names from init.json's mcp block.
+	m.detailMCPNames = nil
+	if initRaw, err := fs.ReadInitManifest(m.selectedDir); err == nil {
+		if mcp, ok := initRaw["mcp"].(map[string]interface{}); ok {
+			for name := range mcp {
+				m.detailMCPNames = append(m.detailMCPNames, name)
+			}
+			sort.Strings(m.detailMCPNames)
+		}
+	}
+
+	// Daemon spawn count from delegates/ledger.jsonl.
+	m.detailDaemonCount = 0
+	if data, err := os.ReadFile(filepath.Join(m.selectedDir, "delegates", "ledger.jsonl")); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				m.detailDaemonCount++
+			}
+		}
+	}
+}
+
 // syncViewportContent re-renders left+right panels into the viewport.
 func (m *PropsModel) syncViewportContent() {
 	if !m.ready {
 		return
 	}
-	if m.pickerOpen {
+	switch {
+	case m.pickerOpen:
 		m.viewport.SetContent(m.renderPicker())
-	} else {
+	case m.detailOpen:
+		m.viewport.SetContent(m.renderDetail())
+	default:
 		m.viewport.SetContent(m.renderBody())
 	}
 }
@@ -286,14 +346,27 @@ func (m PropsModel) renderBody() string {
 }
 
 func (m PropsModel) View() string {
-	header := StyleTitle.Render("  "+i18n.T("props.title")) + "\n" + strings.Repeat("\u2500", m.width)
+	title := i18n.T("props.title")
+	if m.detailOpen {
+		title = i18n.T("props.detail_title")
+	}
+	header := StyleTitle.Render("  "+title) + "\n" + strings.Repeat("\u2500", m.width)
 
 	scrollHint := ""
 	if m.ready && !m.viewport.AtBottom() {
 		scrollHint = " " + RuneBullet + " ↑↓ scroll"
 	}
-	footer := strings.Repeat("\u2500", m.width) + "\n" +
-		StyleFaint.Render("  "+i18n.T("hints.props_off")+" "+RuneBullet+" esc "+i18n.T("manage.back")+" "+RuneBullet+" "+i18n.T("hints.props_select")+scrollHint)
+
+	var footerLine string
+	if m.detailOpen {
+		footerLine = "  esc " + i18n.T("props.detail_back_to_summary") + scrollHint
+	} else {
+		footerLine = "  " + i18n.T("hints.props_off") + " " + RuneBullet +
+			" esc " + i18n.T("manage.back") + " " + RuneBullet +
+			" " + i18n.T("hints.props_select") + " " + RuneBullet +
+			" ctrl+d " + i18n.T("props.detail_open") + scrollHint
+	}
+	footer := strings.Repeat("\u2500", m.width) + "\n" + StyleFaint.Render(footerLine)
 
 	return header + "\n" + PaintViewportBG(m.viewport.View(), m.width) + "\n" + footer
 }
@@ -626,6 +699,179 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, m.renderTree(maxW)...)
 
 	return strings.Join(lines, "\n")
+}
+
+// renderDetail renders the full-screen detail view: token usage broken
+// down by provider, recent activity, MCP servers, and a daemon spawn
+// count. Toggled with Ctrl+D from the kanban summary.
+func (m PropsModel) renderDetail() string {
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_tokens_by_provider")))
+	lines = append(lines, "")
+
+	// Compute total tokens (input+output+thinking) across providers so
+	// each provider's bar shows its share. Cached are excluded from the
+	// share denominator — they're a discount, not consumption.
+	var grandSpend int64
+	for _, t := range m.detailByProvider {
+		grandSpend += t.Input + t.Output + t.Thinking
+	}
+
+	// Stable order: highest spend first.
+	type provLine struct {
+		name  string
+		t     fs.TokenTotals
+		spend int64
+	}
+	var rows []provLine
+	for name, t := range m.detailByProvider {
+		rows = append(rows, provLine{name, t, t.Input + t.Output + t.Thinking})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].spend != rows[j].spend {
+			return rows[i].spend > rows[j].spend
+		}
+		return rows[i].name < rows[j].name
+	})
+
+	if len(rows) == 0 {
+		lines = append(lines, "  "+subtleStyle.Render(i18n.T("props.detail_no_tokens")))
+	}
+	for _, r := range rows {
+		pct := 0.0
+		if grandSpend > 0 {
+			pct = 100.0 * float64(r.spend) / float64(grandSpend)
+		}
+		bar := renderShareBar(pct, 20)
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+		header := fmt.Sprintf("  %-14s %s %5.1f%%",
+			nameStyle.Render(r.name), bar, pct)
+		lines = append(lines, header)
+		lines = append(lines, "    "+labelStyle.Render("input:    ")+valueStyle.Render(formatComma(r.t.Input))+
+			labelStyle.Render("    output:    ")+valueStyle.Render(formatComma(r.t.Output)))
+		lines = append(lines, "    "+labelStyle.Render("thinking: ")+valueStyle.Render(formatComma(r.t.Thinking))+
+			labelStyle.Render("    cached:    ")+valueStyle.Render(formatComma(r.t.Cached)))
+		hitStr := ""
+		if r.t.Input > 0 {
+			hitStr = fmt.Sprintf("    cache hit: %.1f%%", 100.0*float64(r.t.Cached)/float64(r.t.Input))
+		}
+		lines = append(lines, "    "+labelStyle.Render("api_calls: ")+valueStyle.Render(fmt.Sprintf("%d", r.t.APICalls))+
+			labelStyle.Render(hitStr))
+		lines = append(lines, "")
+	}
+
+	// Totals.
+	if len(rows) > 0 {
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_totals")))
+		lines = append(lines, "")
+		var tot fs.TokenTotals
+		for _, r := range rows {
+			tot.Input += r.t.Input
+			tot.Output += r.t.Output
+			tot.Thinking += r.t.Thinking
+			tot.Cached += r.t.Cached
+			tot.APICalls += r.t.APICalls
+		}
+		lines = append(lines, "    "+labelStyle.Render("input + output + thinking: ")+
+			valueStyle.Render(formatComma(tot.Input+tot.Output+tot.Thinking)))
+		lines = append(lines, "    "+labelStyle.Render("cached:                    ")+
+			valueStyle.Render(formatComma(tot.Cached)))
+		lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
+			valueStyle.Render(fmt.Sprintf("%d", tot.APICalls)))
+		if tot.Input > 0 {
+			lines = append(lines, "    "+labelStyle.Render("cache hit rate:            ")+
+				valueStyle.Render(fmt.Sprintf("%.1f%%", 100.0*float64(tot.Cached)/float64(tot.Input))))
+		}
+		lines = append(lines, "")
+	}
+
+	// Recent activity — last 20 ledger entries, newest first.
+	if len(m.detailRecent) > 0 {
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_recent_activity")))
+		lines = append(lines, "")
+		for _, e := range m.detailRecent {
+			provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
+			model := e.Model
+			if model == "" {
+				model = "—"
+			}
+			ts := e.TS
+			if len(ts) > 16 {
+				ts = ts[:16] // 2026-04-30T03:14
+			}
+			line := fmt.Sprintf("  %s  %-10s  %-30s  in:%s  out:%s  cached:%s",
+				subtleStyle.Render(ts),
+				labelStyle.Render(provider),
+				valueStyle.Render(truncate(model, 30)),
+				formatComma(e.Input),
+				formatComma(e.Output),
+				formatComma(e.Cached),
+			)
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+	}
+
+	// MCP servers.
+	if len(m.detailMCPNames) > 0 {
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_mcp")))
+		lines = append(lines, "")
+		for _, name := range m.detailMCPNames {
+			lines = append(lines, "    "+valueStyle.Render(name))
+		}
+		lines = append(lines, "")
+	}
+
+	// Daemon spawn count.
+	if m.detailDaemonCount > 0 {
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
+		lines = append(lines, "")
+		lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
+			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCount)))
+		lines = append(lines, "")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderShareBar returns a small unicode bar (filled + empty cells)
+// proportional to pct (0..100). width is the total cell count.
+func renderShareBar(pct float64, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	filled := int((pct / 100.0) * float64(width))
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	full := lipgloss.NewStyle().Foreground(ColorAccent).Render(strings.Repeat("█", filled))
+	empty := lipgloss.NewStyle().Foreground(ColorTextFaint).Render(strings.Repeat("░", width-filled))
+	return full + empty
+}
+
+// truncate trims s to n runes, appending "…" when shortened. Used to
+// keep the recent-activity model column from overflowing.
+func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func (m PropsModel) renderPicker() string {

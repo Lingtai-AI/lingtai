@@ -254,3 +254,129 @@ func SumTokenLedger(path string) TokenTotals {
 	}
 	return t
 }
+
+// LedgerEntry is a single per-call line from logs/token_ledger.jsonl
+// surfaced to UI consumers (the kanban detail view, primarily). Older
+// entries written before kernel v0.7.x have no Model/Endpoint — those
+// fields are simply empty.
+type LedgerEntry struct {
+	TS       string `json:"ts"`
+	Input    int64  `json:"input"`
+	Output   int64  `json:"output"`
+	Thinking int64  `json:"thinking"`
+	Cached   int64  `json:"cached"`
+	Model    string `json:"model,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+// SumTokenLedgerByProvider reads a token_ledger.jsonl, groups entries
+// by derived provider name, and returns the totals plus the most-recent
+// `recentN` raw entries (newest first). Provider attribution comes from
+// the entry's `endpoint` host when present; falls back to a `model`
+// prefix match; otherwise "unknown".
+//
+// Missing/unreadable file returns empty maps and nil entries — caller
+// renders an empty state rather than erroring.
+func SumTokenLedgerByProvider(path string, recentN int) (
+	byProvider map[string]TokenTotals, recent []LedgerEntry,
+) {
+	byProvider = map[string]TokenTotals{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return byProvider, nil
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry LedgerEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		provider := DeriveLedgerProvider(entry.Endpoint, entry.Model)
+		t := byProvider[provider]
+		t.Input += entry.Input
+		t.Output += entry.Output
+		t.Thinking += entry.Thinking
+		t.Cached += entry.Cached
+		t.APICalls++
+		byProvider[provider] = t
+		recent = append(recent, entry)
+	}
+	// Trim to the last recentN entries, newest last in file → newest at
+	// the end of `recent`. Reverse so callers can iterate "newest first".
+	if recentN > 0 && len(recent) > recentN {
+		recent = recent[len(recent)-recentN:]
+	}
+	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
+		recent[i], recent[j] = recent[j], recent[i]
+	}
+	return byProvider, recent
+}
+
+// DeriveLedgerProvider maps a ledger entry's endpoint host (or model
+// prefix as a fallback) to a canonical provider name. Returns "unknown"
+// when neither signal narrows things down — older ledger entries that
+// predate the kernel's model/endpoint attribution land here, as do
+// custom user-hosted endpoints we don't recognize.
+//
+// Endpoint matching uses substring on the URL because base_url shapes
+// vary ("https://api.minimaxi.com/v1", "api.minimax.chat", etc.).
+func DeriveLedgerProvider(endpoint, model string) string {
+	ep := strings.ToLower(endpoint)
+	switch {
+	case ep == "":
+		// fall through to model
+	case strings.Contains(ep, "minimaxi.com"), strings.Contains(ep, "minimax.chat"):
+		return "minimax"
+	case strings.Contains(ep, "deepseek.com"):
+		return "deepseek"
+	case strings.Contains(ep, "z.ai"), strings.Contains(ep, "bigmodel.cn"):
+		return "zhipu"
+	case strings.Contains(ep, "xiaomimimo.com"):
+		return "mimo"
+	case strings.Contains(ep, "openai.com"):
+		return "openai"
+	case strings.Contains(ep, "anthropic.com"):
+		return "anthropic"
+	case strings.Contains(ep, "googleapis.com"), strings.Contains(ep, "generativelanguage"):
+		return "gemini"
+	case strings.Contains(ep, "openrouter.ai"):
+		return "openrouter"
+	case ep != "":
+		// Recognized URL but not in our table — surface the host so the
+		// user can still see the breakdown without a code change.
+		host := ep
+		if i := strings.Index(host, "://"); i >= 0 {
+			host = host[i+3:]
+		}
+		if i := strings.Index(host, "/"); i >= 0 {
+			host = host[:i]
+		}
+		host = strings.TrimPrefix(host, "www.")
+		if host != "" {
+			return host
+		}
+	}
+	// Fallback to model prefix.
+	mp := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(mp, "minimax-"):
+		return "minimax"
+	case strings.HasPrefix(mp, "deepseek-"):
+		return "deepseek"
+	case strings.HasPrefix(mp, "glm-"):
+		return "zhipu"
+	case strings.HasPrefix(mp, "mimo-"):
+		return "mimo"
+	case strings.HasPrefix(mp, "gpt-"), strings.HasPrefix(mp, "o1-"), strings.HasPrefix(mp, "o3-"):
+		return "openai"
+	case strings.HasPrefix(mp, "claude-"):
+		return "anthropic"
+	case strings.HasPrefix(mp, "gemini-"):
+		return "gemini"
+	}
+	return "unknown"
+}
