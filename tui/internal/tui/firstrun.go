@@ -921,6 +921,22 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < pickLastIdx {
 					m.cursor++
 				}
+			case "tab":
+				if m.cursor == pickNextIdx {
+					m.cursor = pickBackIdx
+				} else {
+					m.cursor = pickNextIdx
+				}
+			case "shift+tab":
+				m.cursor = pickBackIdx
+			case "left":
+				if m.cursor == pickNextIdx {
+					m.cursor = pickBackIdx
+				}
+			case "right":
+				if m.cursor == pickBackIdx {
+					m.cursor = pickNextIdx
+				}
 			case "enter":
 				// Button activation
 				if m.cursor == pickBackIdx {
@@ -1009,6 +1025,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "down":
 				if m.presetCfgCursor < lastIdx {
 					m.presetCfgCursor++
+				}
+			case "tab":
+				// Jump to Next; if already on Next, jump to Back.
+				if m.presetCfgCursor == nextIdx {
+					m.presetCfgCursor = backIdx
+				} else {
+					m.presetCfgCursor = nextIdx
+				}
+			case "shift+tab":
+				m.presetCfgCursor = backIdx
+			case "left":
+				// On Next button: move to Back. Otherwise no-op.
+				if m.presetCfgCursor == nextIdx {
+					m.presetCfgCursor = backIdx
+				}
+			case "right":
+				// On Back button: move to Next. Otherwise no-op.
+				if m.presetCfgCursor == backIdx {
+					m.presetCfgCursor = nextIdx
 				}
 			case " ", "space":
 				// Row-only verb: toggle allowed for the current row.
@@ -1161,8 +1196,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.step = stepPickPreset
 				return m, nil
 			case "tab":
-				// Cycle textarea → Back → Next → textarea.
-				m.keyFieldIdx = (m.keyFieldIdx + 1) % 3
+				// From textarea, Tab jumps straight to Next (the
+				// common case — paste key, hit Tab + Enter).
+				// On a button, Tab toggles between Back and Next.
+				switch m.keyFieldIdx {
+				case 0:
+					m.keyFieldIdx = 2 // Next
+				case 1:
+					m.keyFieldIdx = 2 // Back → Next
+				case 2:
+					m.keyFieldIdx = 1 // Next → Back
+				}
 				if m.keyFieldIdx == 0 && !isCodex {
 					m.presetKeyInput.Focus()
 				} else {
@@ -1170,7 +1214,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "shift+tab":
-				m.keyFieldIdx = (m.keyFieldIdx + 2) % 3 // -1 mod 3
+				// Symmetric: from textarea jump to Back.
+				switch m.keyFieldIdx {
+				case 0:
+					m.keyFieldIdx = 1
+				case 1:
+					m.keyFieldIdx = 0
+				case 2:
+					m.keyFieldIdx = 1
+				}
 				if m.keyFieldIdx == 0 && !isCodex {
 					m.presetKeyInput.Focus()
 				} else {
@@ -1214,8 +1266,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "left", "right":
-				// Codex model picker uses ←/→ when textarea is unfocused.
-				if isCodex {
+				// Codex model picker uses ←/→ when on the textarea
+				// position (where it would otherwise be a no-op for
+				// codex since the textarea is blurred).
+				if isCodex && m.keyFieldIdx == 0 {
 					if msg.String() == "right" {
 						m.codexModel = (m.codexModel + 1) % len(codexModels)
 					} else {
@@ -1223,8 +1277,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					return m, nil
 				}
-				// Inside textarea — pass cursor movement through.
-				if m.keyFieldIdx == 0 {
+				// On Back: → moves to Next. On Next: ← moves to Back.
+				if m.keyFieldIdx == 1 && msg.String() == "right" {
+					m.keyFieldIdx = 2
+					return m, nil
+				}
+				if m.keyFieldIdx == 2 && msg.String() == "left" {
+					m.keyFieldIdx = 1
+					return m, nil
+				}
+				// Inside textarea (non-codex) — pass cursor movement through.
+				if m.keyFieldIdx == 0 && !isCodex {
 					var cmd tea.Cmd
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 					return m, cmd
@@ -1407,7 +1470,20 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		case stepAgentNameDir:
 			langs := []string{"en", "zh", "wen"}
 			switch msg.String() {
-			case "tab", "down":
+			case "tab":
+				// Tab jumps directly to Next (the common case — fill
+				// out fields, hit Tab + Enter to advance). When already
+				// on Next, Tab toggles to Back.
+				if m.fieldIdx == agentNameDirNextIdx {
+					m.fieldIdx = agentNameDirBackIdx
+				} else {
+					m.fieldIdx = agentNameDirNextIdx
+				}
+				return m, m.focusAgentField()
+			case "shift+tab":
+				m.fieldIdx = agentNameDirBackIdx
+				return m, m.focusAgentField()
+			case "down":
 				if m.fieldIdx == -1 {
 					m.fieldIdx = 0
 					if (m.setupMode || m.rehydrateMode) {
@@ -1439,6 +1515,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.karmaIdx = (m.karmaIdx + 1) % 2
 				case 9: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
+				case agentNameDirNextIdx: // Next button → Back
+					m.fieldIdx = agentNameDirBackIdx
 				}
 				return m, nil
 			case "right":
@@ -1450,6 +1528,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.karmaIdx = (m.karmaIdx + 1) % 2
 				case 9: // nirvana
 					m.nirvanaIdx = (m.nirvanaIdx + 1) % 2
+				case agentNameDirBackIdx: // Back button → Next
+					m.fieldIdx = agentNameDirNextIdx
 				}
 				return m, nil
 			case "enter":
@@ -1721,6 +1801,28 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.recipeCustomInput.Focus()
 				} else {
 					m.recipeCustomInput.Blur()
+				}
+				return m, nil
+			case "tab":
+				if m.recipeIdx == recipeNextIdx {
+					m.recipeIdx = recipeBackIdx
+				} else {
+					m.recipeIdx = recipeNextIdx
+				}
+				m.recipeCustomInput.Blur()
+				return m, nil
+			case "shift+tab":
+				m.recipeIdx = recipeBackIdx
+				m.recipeCustomInput.Blur()
+				return m, nil
+			case "left":
+				if m.recipeIdx == recipeNextIdx {
+					m.recipeIdx = recipeBackIdx
+				}
+				return m, nil
+			case "right":
+				if m.recipeIdx == recipeBackIdx {
+					m.recipeIdx = recipeNextIdx
 				}
 				return m, nil
 			case "ctrl+o":
