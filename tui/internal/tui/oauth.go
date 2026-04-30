@@ -22,7 +22,13 @@ const (
 	codexAuthURL    = "https://auth.openai.com/oauth/authorize"
 	codexTokenURL   = "https://auth.openai.com/oauth/token"
 	codexScope      = "openid profile email offline_access"
-	codexOriginator = "lingtai"
+	// codexOriginator must match a value OpenAI's auth server accepts for
+	// this client_id. The shared public client_id (used by Codex CLI,
+	// Hermes, OpenClaw) is tied to an originator allowlist on the server
+	// side; sending an unrecognized originator (e.g. "lingtai") causes the
+	// authorize page to reject the request immediately. Use the official
+	// Codex CLI's originator string.
+	codexOriginator = "codex_cli_rs"
 	callbackPath    = "/auth/callback"
 	defaultPort     = 1455
 	oauthTimeout    = 5 * time.Minute
