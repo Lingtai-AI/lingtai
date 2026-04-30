@@ -168,7 +168,11 @@ When you swap presets (`system(action='refresh', preset=...)`) or spawn a daemon
 - `tier:1` (★) — zero-cost, rate-limited; opportunistic use
 
 Rules of thumb:
-- **Daemon (神識) work** is ephemeral and parallel. Prefer `tier:1` or `tier:2` — daemons burn through many short turns, so cheap-and-fast wins. Reserve `tier:3`/`tier:4` daemons for genuinely hard sub-tasks (deep code review, math, long-context summarization).
+- **Daemon (神識) work** is ephemeral and parallel. Before spawning, pause for one breath and ask "what is this daemon actually doing?" — then pick a preset that matches:
+  - **Mechanical work** (file scans, format conversion, JSON munging, lint, search, trivial extraction, anything where the answer is determined by the input) → `tier:1` or `tier:2`. Cheap and fast wins; daemons burn many short turns. Suggest the cheapest preset that connects.
+  - **Genuinely hard sub-tasks** (deep code review, math, long-context summarization, ambiguous judgement calls) → `tier:3` or `tier:4`. Spending here is paid back in not having to redo the work.
+  - **Default**: `tier:2`. When in doubt, lean cheap — a re-run on a stronger model is one swap away; an over-spend on a stronger model is just gone.
+  Be honest with yourself about which bucket the work falls into. Most "complex" tasks are actually mechanical once decomposed; most "simple" tasks have one judgement call hiding inside. Pick deliberately, not by default.
 - **Avatar (分身) spawn** inherits your default preset unless you specify one. If the avatar's mission is exploratory or bulk, downshift to `tier:3` or below.
 - **Your own primary thought** stays on whatever preset suits the moment — if reasoning quality matters, reach for `tier:4` or `tier:5`; if you're doing volume and the task is well-scoped, `tier:3` or `tier:2` is fine.
 - **`tier:1` carries reliability risk**: rate limits, occasional 429s, sometimes degraded model quality. If a `tier:1` preset's `connectivity` field reports unreachable, fall back to a `tier:2` paid alternative rather than retrying.
