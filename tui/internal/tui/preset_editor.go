@@ -371,6 +371,20 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 			return m.updateBrowse(msg)
 		}
 	}
+	// Forward non-KeyMsg events (notably tea.PasteMsg from bracketed-paste
+	// mode) to the active text widget. Without this, pasting into the
+	// inline editor or the clone-name overlay silently drops the blob —
+	// bubbletea v2 delivers paste as a separate msg type, not a KeyMsg.
+	switch m.mode {
+	case emInline, emCapInline:
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	case emClonePrompt:
+		var cmd tea.Cmd
+		m.cloneNameInput, cmd = m.cloneNameInput.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
