@@ -1,17 +1,28 @@
 ---
 name: xiaomi-mimo
 description: >
-  Use Xiaomi MiMo (小米MiMo) — an OpenAI-/Anthropic-compatible LLM provider
-  with a flagship 1M-context model line and an omni-modal variant
-  (`mimo-v2-omni`) that accepts image, audio, AND video input via plain
-  chat-completion calls. This skill is a thin pointer: it tells you how
-  to source the key, pick a regional cluster, choose between pay-as-you-go
-  and Token Plan, and how to craft multimodal requests for audio/video
-  (which the kernel's vision capability does not expose — those go through
-  bash/curl). Image input IS exposed through the `vision` capability via
-  the kernel's first-class `MiMoVisionService`. Unlike the MiniMax / Zhipu
-  coding plans, MiMo currently ships **no MCP servers**.
-version: 1.0.0
+  Manual for Xiaomi MiMo (小米MiMo) — an OpenAI-/Anthropic-compatible LLM
+  provider with a flagship 1M-context line (`mimo-v2.5-pro`, text-only)
+  and an omni-modal variant (`mimo-v2.5` / `mimo-v2-omni`) that accepts
+  image, audio, AND video input via plain chat-completion calls. This
+  skill does NOT expose tools; it tells the agent how to (1) source the
+  key by scanning presets for the right `manifest.llm.api_key_env` slot,
+  (2) pick a regional cluster (CN / Singapore / Amsterdam for Token Plan,
+  single global host for pay-as-you-go), and (3) craft direct
+  chat-completions requests for audio or video input. Body covers the
+  models matrix, key sourcing, cluster selection, model switching,
+  failure modes, and a self-healing protocol for when MiMo's docs drift.
+  Two `reference/` files cover the modalities the kernel doesn't wrap:
+  audio-input.md (transcription, diarization, audio QA) and
+  video-input.md (scene description, action recognition, joint A/V).
+  Read this skill when the human asks to use MiMo as their LLM, work
+  with audio/video input, or debug a MiMo connection. Do NOT use for
+  image input (the agent's `vision` tool already wires through to MiMo
+  via the kernel's `MiMoVisionService` when the active model supports
+  it), web search (use `web-browsing`), or media generation (use
+  `minimax-cli` — MiMo doesn't generate media). MiMo currently ships
+  **no MCP servers**, so everything is HTTPS / chat-completions.
+version: 1.1.0
 ---
 
 # xiaomi-mimo
@@ -65,7 +76,8 @@ contract like DeepSeek's.
 
 ## Sourcing The API Key
 
-**Never hardcode the key into `mcp/servers.json` or any committed file.**
+**Never hardcode the key in any committed file.** The TUI stores keys in `~/.lingtai-tui/.env` and tells each preset which slot to read via `manifest.llm.api_key_env`. Slots are per-preset, so a user with both pay-as-you-go and a Token Plan account has two distinct env vars.
+
 The MiMo platform issues two key formats — they are not interchangeable:
 
 | Format | What it is | Base URL family |
@@ -73,21 +85,44 @@ The MiMo platform issues two key formats — they are not interchangeable:
 | `sk-xxxxx` | Pay-as-you-go (per-token billing) | `api.xiaomimimo.com` |
 | `tp-xxxxx` | Token Plan subscription (fixed monthly credits) | `token-plan-{cn,sgp,ams}.xiaomimimo.com` |
 
-Resolution order:
-
-1. **`~/.lingtai-tui/.env`** — `MIMO_API_KEY=…`. The TUI populates this on firstrun (firstrun stores whatever the user pasted; both `sk-` and `tp-` keys go in the same env var).
-2. **Process environment** — if already exported, the kernel inherits it.
-3. **Ask the user** — if neither path resolves.
+**Resolution: scan presets, find MiMo ones, read their declared slot.**
 
 ```bash
-grep -E '^MIMO_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f2- | tr -d ' '
+# Walk every preset; for each one whose provider is mimo, print
+# (slot-name, base_url) so you can pick the right account/region.
+python3 - <<'PY'
+import json, os, glob
+for path in glob.glob(os.path.expanduser("~/.lingtai-tui/presets/*.json")):
+    try:
+        with open(path) as f:
+            doc = json.load(f)
+    except Exception:
+        continue
+    llm = doc.get("manifest", {}).get("llm", {}) or {}
+    if llm.get("provider") != "mimo":
+        continue
+    slot = llm.get("api_key_env") or "MIMO_API_KEY"  # built-ins may leave empty → legacy default
+    base = llm.get("base_url") or ""
+    print(f"{os.path.basename(path):30s}  slot={slot:30s}  base_url={base}")
+PY
 ```
 
-Inspect the prefix to know which base URL family to pair it with:
+Slot naming (per `tui/internal/preset/preset.go::AutoEnvVarName`):
+- New user-saved presets: `MIMO_<N>_API_KEY` (no region suffix — MiMo doesn't split CN/INTL the way MiniMax does; `N` is a counter).
+- Built-in / legacy presets: `MIMO_API_KEY` for back-compat.
+
+Once you've picked the right slot, export it for the bash recipes in `reference/`:
 
 ```bash
-key=$(grep -E '^MIMO_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f2- | tr -d ' ')
-case "$key" in
+SLOT=MIMO_1_API_KEY    # whichever slot the preset scan returned
+export MIMO_API_KEY=$(grep -E "^${SLOT}=" ~/.lingtai-tui/.env | cut -d= -f2- | tr -d ' ')
+export MIMO_BASE_URL=$(...)  # see "Picking The Cluster" below for the right value
+```
+
+If multiple MiMo presets exist and you can't infer which the human means, **ask** — don't guess. Inspect the key prefix to confirm which base URL family it pairs with:
+
+```bash
+case "$MIMO_API_KEY" in
   sk-*) echo "pay-as-you-go — use api.xiaomimimo.com" ;;
   tp-*) echo "Token Plan — use token-plan-{cn,sgp,ams}.xiaomimimo.com (pick by latency)" ;;
   *)    echo "unknown prefix — verify with the user" ;;
@@ -115,143 +150,20 @@ The default preset ships with `https://api.xiaomimimo.com/v1` (pay-as-you-go). I
 | Run an agent on a Xiaomi MiMo model | This skill (use the `mimo` preset) |
 | Use long context (1M) on a Chinese-friendly LLM | `mimo-v2.5` or `mimo-v2.5-pro` (this skill) |
 | **Image** input | The agent's `vision` tool — wired to MiMo via the kernel's `MiMoVisionService` (model `mimo-v2.5`). No bash needed. |
-| **Audio** input (transcribe, describe a sound) | This skill — craft a curl POST against `mimo-v2-omni` (see "Audio Input" below) |
-| **Video** input (describe a clip, summarize frames) | This skill — craft a curl POST against `mimo-v2-omni` (see "Video Input" below) |
+| **Audio** input (transcribe, describe a sound) | This skill — see [`reference/audio-input.md`](reference/audio-input.md) for the chat-completions request shape and a working bash recipe |
+| **Video** input (describe a clip, summarize frames) | This skill — see [`reference/video-input.md`](reference/video-input.md) for schema, fps semantics, and the bash recipe by analogy from audio |
 | TTS / ASR locally | `listen` skill if local; otherwise the MiMo TTS models via the standard chat-completions endpoint (no MCP wrapper) |
 | Web search / web reading | `web-browsing` skill — MiMo has no MCP search tool |
 | Image / video / music *generation* | `minimax-cli` skill — MiMo doesn't generate media |
 
-## Audio Input
+## Multimodal Input (audio + video)
 
-> Live doc: [Audio Understanding](https://platform.xiaomimimo.com/static/docs/usage-guide/multimodal-understanding/audio-understanding.md)
-> — `curl` it for the latest format support, sample-rate limits, and any
-> new modalities (URL list shifts; verify before claiming a feature).
+The kernel's vision capability handles **image** input automatically when the active model supports it (`mimo-v2.5`, `mimo-v2-omni` — see Models table). For **audio** and **video** input there's no in-process wrapper; the agent crafts a direct chat-completions call. Two reference files cover the request shape, working bash recipes, capabilities, and cost notes:
 
-Audio understanding is **not** wired into the kernel's vision capability —
-it lives here. Agents craft a direct chat-completions call when they need
-to work with audio. **Both `mimo-v2.5` and `mimo-v2-omni` accept audio
-input**, so if the agent is already running on `mimo-v2.5` (the default
-preset), they hit their own LLM endpoint with audio content — no separate
-model, no extra round-trip.
+- **Audio** — transcription, diarization, audio QA, audio-visual joint reasoning. See [`reference/audio-input.md`](reference/audio-input.md).
+- **Video** — scene description, action recognition, joint A/V perception (v2-omni). See [`reference/video-input.md`](reference/video-input.md).
 
-### Capabilities (per the audio-understanding guide + v2-omni release notes)
-
-| Task | How to phrase the prompt |
-|---|---|
-| **Verbatim transcription** | "Transcribe this audio. Quote each speaker's words exactly." |
-| **Multilingual transcription** | "Transcribe in the original language of the audio." |
-| **Translation** | "Transcribe and translate to English." |
-| **Speaker diarization / multi-speaker separation** | "Identify each distinct speaker and label their turns as Speaker A, Speaker B, etc." |
-| **Environmental sound classification** | "What environmental sounds do you hear? Identify each one." |
-| **Audio-visual joint reasoning** | Pass an `input_audio` AND an `image_url` content part in the same message — useful for e.g. "Does the person in the image match the voice in the audio?" |
-| **Long-form comprehension (≤10h)** | "Summarize this audio. Identify key topics and roughly when each is discussed." (Costs scale with `audio_tokens` — verify with a small clip first.) |
-| **Question-answering over audio** | "Listen to this lecture and answer: [question]" |
-
-These are MiMo's own claims from the v2-omni release notes; the live audio
-guide is authoritative if anything contradicts.
-
-### Request schema
-
-Per `docs/usage-guide/multimodal-understanding/audio-understanding.md`:
-
-```json
-{
-  "model": "mimo-v2.5",
-  "messages": [{
-    "role": "user",
-    "content": [
-      {"type": "input_audio", "input_audio": {"data": "data:audio/mp3;base64,<BASE64>"}},
-      {"type": "text", "text": "What does the speaker say? Quote verbatim."}
-    ]
-  }],
-  "max_completion_tokens": 800
-}
-```
-
-The `data` field accepts **either** a base64 data URL (shown above) **or**
-a plain HTTPS URL to an audio file. Supported formats per docs: MP3, WAV,
-M4A, AIFF. Live-tested working: MP3 base64.
-
-### Working bash recipe — transcription
-
-```bash
-B64=$(base64 < recording.mp3 | tr -d '\n')
-curl -s https://api.xiaomimimo.com/v1/chat/completions \
-  -H "Authorization: Bearer $XIAOMI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n --arg b "$B64" '{
-    model: "mimo-v2.5",
-    messages: [{
-      role: "user",
-      content: [
-        {type: "input_audio", input_audio: {data: ("data:audio/mp3;base64," + $b)}},
-        {type: "text", text: "Transcribe this audio verbatim."}
-      ]
-    }],
-    max_completion_tokens: 800
-  }')" | jq -r '.choices[0].message.content'
-```
-
-Swap `mp3`/`audio/mp3` for `wav`/`audio/wav` etc. as needed. For HTTPS-hosted
-audio (no base64), pass `data: "https://example.com/clip.mp3"` directly.
-
-### Cost
-
-Audio is metered separately: `usage.prompt_tokens_details.audio_tokens`
-in the response. A 4-second MP3 ≈ 24 audio tokens. The text prompt and
-reasoning typically dominate total cost; expect ~500 total tokens for a
-short "transcribe this" call.
-
-Add `/no_think` to the prompt to suppress the reasoning chain and cut
-output cost on simple transcription tasks (verify against live behavior —
-prompt-side toggle conventions evolve).
-
-## Video Input
-
-> Live doc: [Video Understanding](https://platform.xiaomimimo.com/static/docs/usage-guide/multimodal-understanding/video-understanding.md)
-> — `curl` it for the latest format/size limits and `fps` semantics.
-
-Same shape as audio — different content type and an optional `fps` field.
-**Both `mimo-v2.5` and `mimo-v2-omni` accept video input.** Note that
-v2-omni supports *native audio-video joint input* (synchronized perception
-of soundtrack + frames per the v2-omni release notes); v2.5 handles
-silent video frames the same way either model handles a sequence of images.
-
-Use cases (from the v2-omni release notes — verify against live docs):
-- Scene description / per-frame analysis
-- Action recognition and event detection
-- Situational awareness ("what is about to happen next?")
-- Joint audio-video Q&A (e.g. "Does the speaker's gesture match what they
-  say?") — only useful with v2-omni for true sync
-
-**Schema:**
-
-```json
-{
-  "model": "mimo-v2.5",
-  "messages": [{
-    "role": "user",
-    "content": [
-      {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,<BASE64>"}, "fps": 1},
-      {"type": "text", "text": "Describe what happens in this video."}
-    ]
-  }],
-  "max_completion_tokens": 800
-}
-```
-
-The `url` field accepts base64 data URLs or plain HTTPS URLs. Supported
-formats: MP4, MOV, M4V. The `fps` parameter is optional — it tells MiMo
-how many frames per second to actually examine. For a 3-second clip with
-3 distinct scenes, `fps: 1` is enough; bump it up for fast-motion content.
-
-Practical limits (verify against live docs — they shift):
-- File size: keep under ~8 MB inline as base64; use HTTPS URLs for larger
-- Duration: short clips (≤60s) work reliably. Long-form videos may hit
-  context limits via `video_tokens` (a 3s clip ≈ 240 video tokens at fps:1)
-
-Same bash recipe as audio, swapping `input_audio` → `video_url` and
-`audio/mp3` → `video/mp4` in the data URL.
+Both reference files use `MIMO_API_KEY` and `MIMO_BASE_URL` env vars (sourced per the section above), so the bash recipes work as-is once those are exported.
 
 ## Switching Models
 
