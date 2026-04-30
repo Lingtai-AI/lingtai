@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -96,6 +97,11 @@ var editorFieldOrder = []editorField{
 	feStreaming, feKarma, feNirvana,
 	feSave,
 }
+
+// saveFieldIndex is the cursor position of the [Save] button row. Tab
+// jumps here from anywhere in the form so paste-and-save is two
+// keystrokes away regardless of which field the user is editing.
+var saveFieldIndex = len(editorFieldOrder) - 1
 
 type editorMode int
 
@@ -236,8 +242,12 @@ type PresetEditorModel struct {
 	cursor int // index into editorFieldOrder
 	mode   editorMode
 
-	// Inline textinput, reused for whichever field is being edited.
-	input textinput.Model
+	// Inline textarea, reused for whichever field is being edited.
+	// Textarea (not textinput) so paste from the system clipboard works
+	// reliably — Bubble Tea's textinput drops characters on multi-byte
+	// pastes. The editor intercepts Enter at the page level (see
+	// updateInline) so multi-line behavior never surfaces.
+	input textarea.Model
 
 	// cloneNameInput captures the new preset name during the clone-first
 	// prompt overlay.
@@ -257,6 +267,11 @@ type PresetEditorModel struct {
 	// Hidden by default — the form is the source of truth and the JSON
 	// dump usually just adds noise. Toggle with Ctrl+D for raw inspection.
 	showJSON bool
+
+	// savedCursor remembers where Tab jumped from so Shift+Tab can
+	// return there. -1 when Tab hasn't been used (Shift+Tab is then a
+	// no-op).
+	savedCursor int
 
 	// API key state. existingKeys is the host's Config.Keys snapshot
 	// (env-var-name → value), used to prefill the api_key field when a
@@ -287,9 +302,14 @@ func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]
 // callers that want to override built-in protection (e.g. tests, or
 // a future "fork built-in" flow that has already cloned upstream).
 func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, isBuiltin bool) PresetEditorModel {
-	ti := textinput.New()
-	ti.CharLimit = 256
-	ti.SetWidth(40)
+	// Inline editor uses textarea — paste from the system clipboard
+	// works reliably (textinput drops chars on multi-byte pastes).
+	// We render only one row; the page-level updateInline intercepts
+	// Enter, so multi-line semantics never reach the user.
+	ta := textarea.New()
+	ta.SetWidth(40)
+	ta.SetHeight(1)
+	ta.ShowLineNumbers = false
 	cn := textinput.New()
 	cn.CharLimit = 64
 	cn.SetWidth(30)
@@ -308,8 +328,9 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		working:        clonePresetForEditor(p),
 		isBuiltin:      isBuiltin,
 		cursor:         0,
+		savedCursor:    -1,
 		mode:           emBrowse,
-		input:          ti,
+		input:          ta,
 		cloneNameInput: cn,
 		lang:           lang,
 		existingKeys:   existingKeys,
@@ -373,8 +394,22 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 		// Cycle backwards on enum fields.
 		m.cycleFocused(-1)
 		return m, nil
-	case "right", "l", "tab":
+	case "right", "l":
 		m.cycleFocused(+1)
+		return m, nil
+	case "tab":
+		// Jump straight to the Save button. Press Enter there to
+		// commit (or Tab again to cycle back to the previous field).
+		// Shift+Tab returns to the previously-focused field.
+		m.savedCursor = m.cursor
+		m.cursor = saveFieldIndex
+		return m, nil
+	case "shift+tab":
+		// Restore the cursor to wherever Tab jumped from. If we
+		// haven't tabbed-to-save yet, no-op.
+		if m.cursor == saveFieldIndex && m.savedCursor >= 0 && m.savedCursor < len(editorFieldOrder) {
+			m.cursor = m.savedCursor
+		}
 		return m, nil
 	case " ":
 		m.toggleFocused()
