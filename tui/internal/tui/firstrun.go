@@ -3077,11 +3077,11 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	}
 	m.presetAllowed = make([]bool, len(m.savedPresetIdx))
 
-	// Default to: everything allowed, default row = the row whose
-	// underlying preset matches m.cursor (if any), otherwise the first.
-	for r := range m.presetAllowed {
-		m.presetAllowed[r] = true
-	}
+	// Default to: nothing allowed except the default row (which the
+	// schema requires to be allowed). The user opts each extra preset
+	// into the swap surface explicitly with [space] or [ctrl+a]. This
+	// matches the principle of least authority — runtime swap is a
+	// power, not a default-on convenience.
 	m.presetDefaultIdx = 0
 	if m.cursor >= 0 && m.cursor < len(m.presets) {
 		for r, idx := range m.savedPresetIdx {
@@ -3090,6 +3090,9 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 				break
 			}
 		}
+	}
+	if m.presetDefaultIdx >= 0 && m.presetDefaultIdx < len(m.presetAllowed) {
+		m.presetAllowed[m.presetDefaultIdx] = true
 	}
 	m.presetCfgCursor = m.presetDefaultIdx
 
