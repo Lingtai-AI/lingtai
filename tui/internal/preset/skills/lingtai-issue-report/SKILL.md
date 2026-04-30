@@ -1,7 +1,7 @@
 ---
 name: lingtai-issue-report
-description: Protocol for reporting bugs, stale info, missing capabilities, or design issues you spot in any LingTai skill, capability, preset, or system behavior. You don't open GitHub issues yourself — you assemble a structured report, ask the human for permission, and guide them to file it.
-version: 1.0.0
+description: Protocol for reporting bugs, stale info, missing capabilities, or design issues you spot in any LingTai skill, capability, preset, or system behavior. You assemble a structured report, ask the human for permission, then either file it directly via the `gh` CLI (if `gh auth` is present and the human consents) or hand them a formatted title + body to paste into the issue tracker.
+version: 1.1.0
 ---
 
 # Reporting LingTai Issues
@@ -28,14 +28,15 @@ You should **not** invoke this skill for:
 - Complaints about a model's quality on hard tasks (that's the model, not LingTai)
 - Feature requests for things the system was never designed to do
 
-## The Boundary — You Do Not File
+## The Boundary — Permission Required, Always
 
-**You never open GitHub issues yourself.** You don't have the credentials, and even if you did, the human is the accountable owner of what gets filed under their name. Your role is to:
+**You never open a GitHub issue without an explicit "yes" from the human.** The human is the accountable owner of what gets filed under their name. Even if `gh` is authenticated and you have a shell, the per-issue consent is non-negotiable. Your role is to:
 
 1. Assemble a structured report
 2. Send the report via `mail` to your **parent avatar** (if you're an avatar) AND to the **human**
-3. Ask the human's permission before suggesting they file it
-4. If the human consents, give them the formatted issue title and body and the URL to paste into
+3. Check whether `gh` is available and authenticated (see "Filing Path" below)
+4. Ask the human's permission, naming the path you'd take (direct `gh` filing vs. paste-into-browser)
+5. Only then act — file it via `gh` if they say yes, or hand them the title/body if they prefer to file manually
 
 If the human declines, drop it. Don't nag, don't auto-retry on the next turn. Their call.
 
@@ -81,13 +82,50 @@ mail(action="send", address=<parent_or_human_address>, subject="[Issue Report] .
 
 If you have multiple addressees (parent + human), send the same content twice — `mail` doesn't multicast.
 
-## Asking The Human For Permission
+## Filing Path — Detect `gh` First
 
-After you've sent the report, follow up with a short turn that asks the human:
+Before you ask the human for permission, run a quick read-only probe to see whether the GitHub CLI is installed AND authenticated. This determines which path you offer:
+
+```bash
+gh auth status 2>&1
+```
+
+Interpret the result:
+
+- **Exit 0 and output mentions a logged-in account** → `gh` is ready. Path A is available.
+- **Exit non-zero, or "not logged in", or "command not found"** → `gh` is not usable. Fall through to Path B.
+
+Do **not** run `gh issue create` during the probe. The probe is read-only. The actual filing happens only after the human says yes.
+
+### Path A — Direct filing via `gh` (preferred when available)
+
+If `gh auth status` succeeded, your permission ask becomes:
+
+> "I noticed [one-sentence summary]. I sent a structured report to your inbox. Your `gh` CLI is authenticated — with your OK, I can file this directly to `Lingtai-AI/lingtai` as a GitHub issue. Want me to file it, or would you rather paste it yourself?"
+
+If they say **file it** (or equivalent — "yes", "go ahead", "do it"):
+
+```bash
+gh issue create \
+  --repo Lingtai-AI/lingtai \
+  --title "<your Subject line, minus the [Issue Report] prefix>" \
+  --body-file <path-to-a-tempfile-with-the-rendered-body>
+```
+
+Notes on the `gh` invocation:
+- Write the body to a tempfile (e.g. `/tmp/lingtai-issue-<timestamp>.md`) and pass `--body-file`. Avoid `--body "<long string>"` — shell quoting eats backticks, code fences, and newlines.
+- Preserve the report's section headers verbatim; GFM renders them cleanly.
+- The `--repo` value defaults to `Lingtai-AI/lingtai`. If the human asked for the kernel tracker (see "Which Repo" below) or names another repo, use what they said — do not silently override.
+- After `gh issue create` returns, it prints the issue URL on stdout. Quote that URL back to the human so they can verify.
+- If the command errors (network blip, repo permission, rate limit), tell the human exactly what `gh` said and offer Path B as fallback. Do not retry silently.
+
+If they say **paste it myself**, use Path B even though `gh` is available.
+
+### Path B — Hand off title + body for manual filing (always works)
+
+When `gh` is unusable, or when the human prefers manual filing, the ask is:
 
 > "I noticed [one-sentence summary]. I sent a structured report to your inbox. If you'd like to file this as a GitHub issue, I can format it for you. The tracker is `https://github.com/Lingtai-AI/lingtai/issues`. Should I prep the title + body?"
-
-Keep this short. The human reads the report you already sent if they want detail; the ask itself just confirms whether they want to escalate.
 
 If they say **yes**:
 - Format the report into a GitHub-flavored markdown issue body (preserve the section headers above; they render cleanly)
