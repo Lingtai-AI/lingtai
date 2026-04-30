@@ -21,7 +21,7 @@
   "firstrun.select_hint": "↑↓ 浏览  [enter] 编辑（条目）/ 激活按钮  [space] 编辑",
   "firstrun.preset_cfg.title": "配置本我的预设组",
   "firstrun.preset_cfg.help": "选择默认预设（启动时使用），并勾选运行时可切换的其他预设。",
-  "firstrun.preset_cfg.hint": "↑↓ 浏览  [tab] 跳转到下一步  [←→] 切换按钮  [enter] 设为默认 / 激活  [space] 切换可用  [esc] 返回",
+  "firstrun.preset_cfg.hint": "↑↓ 浏览  [tab] 跳转到下一步  [←→] 切换按钮  [enter] 设为默认 / 激活  [space] 切换  [ctrl+a] 全选/反选  [esc] 返回",
   "firstrun.preset_cfg.cannot_unallow_default": "默认预设必须保留在允许列表中",
   "firstrun.preset_cfg.empty": "暂无已保存的预设——返回上一页，从模板中编辑一个出来。",
   "firstrun.preset_cfg.hint_empty": "[esc] 返回预设库",

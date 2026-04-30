@@ -1077,6 +1077,29 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil
 				}
 				m.presetAllowed[m.presetCfgCursor] = !m.presetAllowed[m.presetCfgCursor]
+			case "ctrl+a":
+				// Select-all / deselect-all toggle. The default preset
+				// is always pinned to allowed (schema invariant), so
+				// "deselect all" really means "deselect every non-
+				// default row" — pressing ctrl+a a second time on a
+				// fully-cleared list re-enables everything.
+				if rowCount == 0 {
+					return m, nil
+				}
+				allOn := true
+				for r := 0; r < rowCount; r++ {
+					if !m.presetAllowed[r] {
+						allOn = false
+						break
+					}
+				}
+				for r := 0; r < rowCount; r++ {
+					if r == m.presetDefaultIdx {
+						m.presetAllowed[r] = true
+						continue
+					}
+					m.presetAllowed[r] = !allOn
+				}
 			case "enter":
 				// On a row: set default (default is also auto-allowed).
 				if m.presetCfgCursor >= 0 && m.presetCfgCursor < rowCount {

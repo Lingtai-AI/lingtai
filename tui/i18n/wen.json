@@ -21,7 +21,7 @@
   "firstrun.select_hint": "↑↓ 行  [enter] 修/启钮  [space] 修",
   "firstrun.preset_cfg.title": "配本我之预",
   "firstrun.preset_cfg.help": "择默之预（启之所用），勾运时可换之他预。",
-  "firstrun.preset_cfg.hint": "↑↓ 行  [tab] 跳继钮  [←→] 切钮  [enter] 设默/启  [space] 切允  [esc] 返",
+  "firstrun.preset_cfg.hint": "↑↓ 行  [tab] 跳继钮  [←→] 切钮  [enter] 设默/启  [space] 切  [ctrl+a] 全切  [esc] 返",
   "firstrun.preset_cfg.cannot_unallow_default": "默之预须留于允中",
   "firstrun.preset_cfg.empty": "未有所存之预——返典中，自模化一。",
   "firstrun.preset_cfg.hint_empty": "[esc] 返典",

@@ -21,7 +21,7 @@
   "firstrun.select_hint": "↑↓ navigate  [enter] edit (on row) / activate button  [space] edit",
   "firstrun.preset_cfg.title": "Configure agent presets",
   "firstrun.preset_cfg.help": "Pick the default preset (the agent boots on this) and toggle which others it may swap to at runtime.",
-  "firstrun.preset_cfg.hint": "↑↓ navigate  [tab] jump to Next  [←→] switch buttons  [enter] set default / activate  [space] toggle allowed  [esc] back",
+  "firstrun.preset_cfg.hint": "↑↓ navigate  [tab] jump to Next  [←→] switch buttons  [enter] set default / activate  [space] toggle  [ctrl+a] toggle all  [esc] back",
   "firstrun.preset_cfg.cannot_unallow_default": "default preset must remain in the allowed list",
   "firstrun.preset_cfg.empty": "No saved presets yet — go back to the library and edit a template to create one.",
   "firstrun.preset_cfg.hint_empty": "[esc] back to library",
