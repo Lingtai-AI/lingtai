@@ -1,13 +1,13 @@
 // Package dj provides the embedded recipe and launch logic for the DJ
 // agent — an on-demand musician that composes one track per journal entry
-// using the MiniMax token-plan music API. It is dormant by default and
-// only acts when the human messages it.
+// using the MiniMax music API. It is dormant by default and only acts
+// when the human messages it.
 //
 // The DJ agent is gated on the orchestrator using a MiniMax preset:
 // setupDJ refuses to write the agent's init.json if the orchestrator's
-// llm.provider is not "minimax". The agent uses bash + curl (per the
-// `minimax-token-plan` skill) to call the music API — no MCP server
-// registration is required.
+// llm.provider is not "minimax". The agent uses the `mmx` CLI (per the
+// `minimax-cli` skill) to generate music — no MCP server registration
+// is required.
 package dj
 
 import (

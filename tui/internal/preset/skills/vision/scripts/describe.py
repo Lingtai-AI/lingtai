@@ -12,9 +12,10 @@ Local-only. No API key, no network after weights are downloaded. First call
 fetches model weights from Hugging Face Hub (2-15 GB depending on model);
 subsequent calls reuse the cache.
 
-For MiniMax-MCP-based image understanding, use the `understand_image` MCP
-tool directly (see the `minimax-token-plan` skill). This script exists for the
-case where neither a vision-capable LLM nor a MiniMax key is available.
+For MiniMax-backed image understanding, use the `mmx vision` CLI or the
+`understand_image` MCP tool (see the `minimax-cli` skill). This script
+exists for the case where neither a vision-capable LLM nor a MiniMax key is
+available.
 
 Emits a JSON document on stdout. Errors → stderr, exit non-zero.
 """

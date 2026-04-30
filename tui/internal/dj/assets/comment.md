@@ -56,7 +56,7 @@ grep -E '^[A-Z_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1
 **Step D — decide.**
 
 - **Any usable provider exists** → pick one (prefer the human's stated provider; otherwise pick whichever matches a current preset they're using; otherwise pick the first). Load its skill, follow its instructions, compose.
-- **No usable provider** → reply to the human plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. Suggest concretely (e.g. "save a MiniMax preset via the TUI's preset library and paste your `sk-cp-…` key — this will populate `MINIMAX_API_KEY` in `~/.lingtai-tui/.env` and unlock the `minimax-token-plan` skill"). Do not produce a fake track. Do not pretend.
+- **No usable provider** → reply to the human plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. Suggest concretely (e.g. "save a MiniMax preset via the TUI's preset library and paste your `sk-cp-…` key — this will populate the preset's slot in `~/.lingtai-tui/.env` and unlock the `minimax-cli` skill"). Do not produce a fake track. Do not pretend.
 
 ## Composition Working Order (when a usable provider exists)
 

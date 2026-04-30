@@ -119,7 +119,7 @@ The default preset ships with `https://api.xiaomimimo.com/v1` (pay-as-you-go). I
 | **Video** input (describe a clip, summarize frames) | This skill — craft a curl POST against `mimo-v2-omni` (see "Video Input" below) |
 | TTS / ASR locally | `listen` skill if local; otherwise the MiMo TTS models via the standard chat-completions endpoint (no MCP wrapper) |
 | Web search / web reading | `web-browsing` skill — MiMo has no MCP search tool |
-| Image / video / music *generation* | `minimax-token-plan` skill — MiMo doesn't generate media |
+| Image / video / music *generation* | `minimax-cli` skill — MiMo doesn't generate media |
 
 ## Audio Input
 

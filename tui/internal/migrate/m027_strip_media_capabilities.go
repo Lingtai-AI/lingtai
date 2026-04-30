@@ -11,7 +11,7 @@ import (
 
 // migrateStripMediaCapabilities removes capability entries that were
 // promoted out of lingtai-kernel into TUI-side skills:
-//   - compose / video / draw / talk → minimax-token-plan skill
+//   - compose / video / draw / talk → minimax-cli skill
 //   - listen → listen skill
 //   - web_read → web-browsing skill (its trafilatura logic moved into
 //     the skill's scripts/extract.py path; the LLM still gets ranked

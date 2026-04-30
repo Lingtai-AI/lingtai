@@ -3,7 +3,7 @@ name: vision
 description: >
   Decision-tree skill for image understanding. Routes between three paths
   depending on what the agent has access to: (1) the built-in `vision` tool
-  if the LLM provider supports image input, (2) the `minimax-token-plan` skill
+  if the LLM provider supports image input, (2) the `minimax-cli` skill
   if a MiniMax coding-plan key is available, or (3) a local Hugging Face
   VLM via the bundled `scripts/describe.py` if neither — offline, free,
   slow. Read this when you need to describe, OCR, or critique an image
@@ -22,7 +22,7 @@ Is `vision` tool in your tool list?
 ├── YES → use it directly, done.
 └── NO  → does the user have a MiniMax coding-plan key?
          (check ~/.lingtai-tui/.env for MINIMAX_API_KEY)
-         ├── YES → see `minimax-token-plan` skill (use `understand_image` MCP tool)
+         ├── YES → see `minimax-cli` skill (`mmx vision …` from the shell, or the `understand_image` MCP tool if registered)
          └── NO  → fall back to local VLM:
                   bash python <skill-path>/scripts/describe.py <image>
                   See reference/local-models.md.
@@ -34,11 +34,14 @@ If your LLM provider supports image input (MiniMax, Gemini, Anthropic, OpenAI, Z
 
 `vision` not in your tool list? Your LLM provider doesn't support image input — fall through to Path 2 or 3.
 
-## Path 2 — MiniMax via `minimax-token-plan` Skill
+## Path 2 — MiniMax via `minimax-cli` Skill
 
-For text-only LLMs (DeepSeek, OpenRouter text-only, Codex) **with** a MiniMax coding-plan key. The MiniMax `understand_image` MCP tool gives you Claude-3-Haiku-class vision for ~$0.001/image.
+For text-only LLMs (DeepSeek, OpenRouter text-only, Codex) **with** a MiniMax coding-plan key. Two routes, same backend:
 
-Read the **`minimax-token-plan`** skill — it covers credential sourcing, region selection, and points at the live docs for tool parameters. MCP server registration itself is owned by `lingtai-mcp`.
+- **Shell** — `mmx vision …` via the official CLI. No MCP registration needed; just install + key. Best for ad-hoc one-shots in bash.
+- **In-tool** — the `understand_image` MCP tool exposed by `minimax-coding-plan-mcp`. Best when the agent needs vision as a tool call inside a longer reasoning loop. MCP server registration is owned by `lingtai-mcp`.
+
+Read the **`minimax-cli`** skill — it covers install, credential sourcing, region selection, and pointers to live docs.
 
 ## Path 3 — Local VLM (offline, unlimited)
 
@@ -59,5 +62,5 @@ See [reference/local-models.md](reference/local-models.md) for model selection, 
 ## When NOT to use this skill
 
 - Your LLM already has `vision` in its tool list — Path 1, no decision needed.
-- You need to *generate* an image — use `minimax-token-plan` (`text_to_image`).
+- You need to *generate* an image — use `minimax-cli` (`mmx image …`).
 - You need to *describe video frames* — extract frames with `ffmpeg` first, then loop this skill over them.
