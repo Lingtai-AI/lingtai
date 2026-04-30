@@ -174,6 +174,16 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	if def, _ := preset["default"].(string); def != wantRef {
 		t.Errorf("manifest.preset.default = %v, want %s", preset["default"], wantRef)
 	}
+	allowed, ok := preset["allowed"].([]interface{})
+	if !ok {
+		t.Fatalf("manifest.preset.allowed missing or wrong type: %T", preset["allowed"])
+	}
+	if len(allowed) != 1 {
+		t.Errorf("manifest.preset.allowed len=%d, want 1; got %v", len(allowed), allowed)
+	}
+	if first, _ := allowed[0].(string); first != wantRef {
+		t.Errorf("manifest.preset.allowed[0] = %v, want %s", allowed[0], wantRef)
+	}
 }
 
 

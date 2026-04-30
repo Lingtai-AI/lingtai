@@ -68,6 +68,7 @@ const (
 	stepEditPreset
 	stepPresetKey
 	stepCapabilities
+	stepAgentPresets // pick default + multi-toggle allowed
 	stepAgentNameDir
 	stepRecipe            // picks one of 5 recipes (greeter, plain, adaptive, tutorial, custom)
 	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
@@ -88,13 +89,18 @@ type capInfo struct {
 // stepCapabilities was removed from the flow in the 2026-04 redesign —
 // capabilities live in the preset (edited via the preset editor) and
 // addons default to all-on.
+//
+// The 2026-04-30 redesign added stepAgentPresets between the library
+// pick-list and the runtime page: the pick-list is now a pure library
+// manager (edit / new / continue) and stepAgentPresets is where the user
+// commits to a default + the set of presets the agent may swap to.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
 	if setupMode {
-		total = 3 // preset → details → recipe
+		total = 4 // library → presets-config → details → recipe
 	} else if hasPresets {
-		total = 3 // preset → details → recipe
+		total = 4 // library → presets-config → details → recipe
 	} else {
-		total = 4 // api key → preset → details → recipe
+		total = 5 // api key → library → presets-config → details → recipe
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -103,16 +109,21 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 		return 2, total
 	case step == stepPickPreset || step == stepEditPreset || step == stepPresetKey:
 		return 1, total
-	case step == stepAgentNameDir:
+	case step == stepAgentPresets:
 		if setupMode || hasPresets {
 			return 2, total
 		}
 		return 3, total
-	case step == stepRecipe || step == stepRecipeSwapConfirm:
+	case step == stepAgentNameDir:
 		if setupMode || hasPresets {
 			return 3, total
 		}
 		return 4, total
+	case step == stepRecipe || step == stepRecipeSwapConfirm:
+		if setupMode || hasPresets {
+			return 4, total
+		}
+		return 5, total
 	case step == stepLaunching:
 		return total, total
 	}
@@ -206,6 +217,16 @@ type FirstRunModel struct {
 	capAtKeep    bool               // true when "Keep current" is focused (setup mode only)
 	capLoading   bool               // true while check-caps is running
 	capErr       string             // error message if check-caps fails
+	// Agent preset config state (stepAgentPresets)
+	//
+	// presetAllowed[i] is true when the i-th preset in m.presets is in
+	// the agent's authorized swap set (manifest.preset.allowed). Exactly
+	// one preset must be the default; presetDefaultIdx is its index. The
+	// default is always also allowed — the page invariants enforce this.
+	presetAllowed     []bool
+	presetDefaultIdx  int
+	presetCfgCursor   int    // cursor on the agent-preset-config page
+	presetCfgMessage  string // transient validation flash (e.g. "default cannot be unallowed")
 	// Addon selection state (shown below capabilities)
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
@@ -882,11 +903,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < len(m.presets)-1 {
 					m.cursor++
 				}
-			case " ", "space", "ctrl+e":
-				// Open the dedicated preset editor. On commit we return
-				// to this pick-list (cursor restored). On cancel we
-				// also return here. The user explicitly advances with
-				// Enter when they're done editing.
+			case "enter", " ", "space", "ctrl+e":
+				// Library page: every row is a *template* the user
+				// previews/edits before committing. Enter opens the
+				// editor — there is no implicit "use this preset"
+				// verb on row activation. Use → to advance to the
+				// agent preset config page where defaults and
+				// allowed-set are committed.
 				if m.setupMode && m.cursor == -1 {
 					return m, nil // can't edit the synthetic "keep current" entry
 				}
@@ -899,26 +922,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.presetEditor.Init(),
 					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 				)
-			case "enter":
-				// Select the highlighted preset as the agent's default
-				// and advance. If the preset's api_key_env is unset in
-				// .env, route through stepPresetKey to collect the key
-				// value first; otherwise jump straight to the agent
-				// runtime page (stepAgentNameDir).
-				if m.setupMode && m.cursor == -1 {
-					// "Keep current" — no preset change.
-					return m, m.enterCapabilities()
-				}
-				if m.cursor < 0 || m.cursor >= len(m.presets) {
-					return m, nil
-				}
-				p := m.presets[m.cursor]
-				if m.presetNeedsKey(p) {
-					return m.enterPresetKeyFor(p)
-				}
-				// Key already configured (or codex OAuth) — skip the
-				// paste step entirely and advance to runtime defaults.
-				return m, m.enterCapabilities()
+			case "right":
+				// Continue to the agent preset config page. There the
+				// user picks the default + the allowed-swap set.
+				return m, m.enterAgentPresets()
 			case "backspace", "delete":
 				// Delete a saved (non-builtin) preset
 				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
@@ -950,6 +957,62 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			var cmd tea.Cmd
 			m.presetEditor, cmd = m.presetEditor.Update(msg)
 			return m, cmd
+
+		case stepAgentPresets:
+			m.presetCfgMessage = ""
+			switch msg.String() {
+			case "up":
+				if m.presetCfgCursor > 0 {
+					m.presetCfgCursor--
+				}
+			case "down":
+				if m.presetCfgCursor < len(m.presets)-1 {
+					m.presetCfgCursor++
+				}
+			case " ", "space":
+				// Toggle allowed for the current row. Refuse to
+				// un-allow the default — the default must always be
+				// in the allowed set.
+				if m.presetCfgCursor < 0 || m.presetCfgCursor >= len(m.presets) {
+					return m, nil
+				}
+				if m.presetAllowed[m.presetCfgCursor] && m.presetCfgCursor == m.presetDefaultIdx {
+					m.presetCfgMessage = i18n.T("firstrun.preset_cfg.cannot_unallow_default")
+					return m, nil
+				}
+				m.presetAllowed[m.presetCfgCursor] = !m.presetAllowed[m.presetCfgCursor]
+			case "d", "D":
+				// Set the current row as default. Default is always
+				// also allowed — auto-mark.
+				if m.presetCfgCursor < 0 || m.presetCfgCursor >= len(m.presets) {
+					return m, nil
+				}
+				m.presetDefaultIdx = m.presetCfgCursor
+				m.presetAllowed[m.presetCfgCursor] = true
+			case "right", "enter":
+				// Continue to the runtime page. Validate first: the
+				// default's API key must be available (or the preset
+				// must be a key-less provider like codex OAuth). If
+				// not, route through stepPresetKey first.
+				if m.presetDefaultIdx < 0 || m.presetDefaultIdx >= len(m.presets) {
+					return m, nil
+				}
+				// Snap m.cursor to the selected default so downstream
+				// helpers (currentPreset, enterCapabilities) operate
+				// on the right preset.
+				m.cursor = m.presetDefaultIdx
+				p := m.presets[m.presetDefaultIdx]
+				if m.presetNeedsKey(p) {
+					return m.enterPresetKeyFor(p)
+				}
+				return m, m.enterCapabilities()
+			case "left", "esc":
+				m.step = stepPickPreset
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
 
 		case stepPresetKey:
 			// Per the 2026-04-29 editor refactor, stepPresetKey does
@@ -1279,17 +1342,18 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						maxRpm = 60
 					}
 					opts := preset.AgentOpts{
-						Language:      langs[m.agentLangIdx],
-						Stamina:       stamina,
-						ContextLimit:  ctxLimit,
-						SoulDelay:     soulDelay,
-						MoltPressure:  moltPress,
-						MaxRpm:        maxRpm,
-						Karma:         m.karmaIdx == 0,
-						Nirvana:       m.nirvanaIdx == 0,
-						CovenantFile:  m.covenantInput.Value(),
-						PrincipleFile: m.principleInput.Value(),
-						SoulFile:      m.soulFlowInput.Value(),
+						Language:       langs[m.agentLangIdx],
+						Stamina:        stamina,
+						ContextLimit:   ctxLimit,
+						SoulDelay:      soulDelay,
+						MoltPressure:   moltPress,
+						MaxRpm:         maxRpm,
+						Karma:          m.karmaIdx == 0,
+						Nirvana:        m.nirvanaIdx == 0,
+						CovenantFile:   m.covenantInput.Value(),
+						PrincipleFile:  m.principleInput.Value(),
+						SoulFile:       m.soulFlowInput.Value(),
+						AllowedPresets: m.allowedPresetRefs(),
 					}
 					var selectedAddons []string
 					for _, addonName := range m.addonOrder {
@@ -1335,17 +1399,18 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					maxRpm = 60
 				}
 				opts := preset.AgentOpts{
-					Language:      langs[m.agentLangIdx],
-					Stamina:       stamina,
-					ContextLimit:  ctxLimit,
-					SoulDelay:     soulDelay,
-					MoltPressure:  moltPress,
-					MaxRpm:        maxRpm,
-					Karma:         m.karmaIdx == 0,
-					Nirvana:       m.nirvanaIdx == 0,
-					CovenantFile:  m.covenantInput.Value(),
-					PrincipleFile: m.principleInput.Value(),
-					SoulFile:      m.soulFlowInput.Value(),
+					Language:       langs[m.agentLangIdx],
+					Stamina:        stamina,
+					ContextLimit:   ctxLimit,
+					SoulDelay:      soulDelay,
+					MoltPressure:   moltPress,
+					MaxRpm:         maxRpm,
+					Karma:          m.karmaIdx == 0,
+					Nirvana:        m.nirvanaIdx == 0,
+					CovenantFile:   m.covenantInput.Value(),
+					PrincipleFile:  m.principleInput.Value(),
+					SoulFile:       m.soulFlowInput.Value(),
+					AllowedPresets: m.allowedPresetRefs(),
 					// CommentFile is set by stepRecipe from the chosen recipe
 				}
 				var selectedAddons []string
@@ -1720,6 +1785,51 @@ func (m FirstRunModel) View() string {
 	case stepEditPreset:
 		// Delegate the entire screen to the embedded editor.
 		return m.presetEditor.View()
+
+	case stepAgentPresets:
+		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		header := i18n.T("firstrun.preset_cfg.title")
+		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
+		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.help")) + "\n\n")
+
+		for i, p := range m.presets {
+			cursor := "  "
+			if i == m.presetCfgCursor {
+				cursor = "> "
+			}
+			// State indicator: [*] default (also allowed), [x] allowed, [ ] not.
+			var marker string
+			switch {
+			case i == m.presetDefaultIdx:
+				marker = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("[*]")
+			case m.presetAllowed[i]:
+				marker = lipgloss.NewStyle().Foreground(ColorAgent).Render("[x]")
+			default:
+				marker = StyleFaint.Render("[ ]")
+			}
+
+			displayName := i18n.T("preset.name_" + p.Name)
+			if displayName == "preset.name_"+p.Name {
+				displayName = p.Name
+			}
+			displayDesc := i18n.T("preset.desc_" + p.Name)
+			if displayDesc == "preset.desc_"+p.Name {
+				displayDesc = p.Description.Summary
+			}
+			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+			if i != m.presetDefaultIdx && !m.presetAllowed[i] {
+				nameStyle = nameStyle.Foreground(lipgloss.Color("245"))
+			}
+			b.WriteString(cursor + marker + " " + nameStyle.Render(displayName) +
+				StyleSubtle.Render("  "+displayDesc) + "\n")
+		}
+
+		if m.presetCfgMessage != "" {
+			b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.presetCfgMessage) + "\n")
+		}
+
+		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.preset_cfg.hint")) + "\n")
+		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
 	case stepPresetKey:
 		providerName := i18n.T("setup.provider_" + m.selectedProvider)
@@ -2563,6 +2673,120 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 	m.enterAgentNameDir(p)
 	m.step = stepAgentNameDir
 	return textinput.Blink
+}
+
+// enterAgentPresets transitions the wizard from the library pick-list to
+// the agent preset config page. Initializes presetAllowed and
+// presetDefaultIdx — defaulting to "everything allowed, the cursor's row
+// is the default". In setup mode pre-populates from the existing
+// init.json's manifest.preset.{default, allowed} so the user sees their
+// existing config and only changes what they want.
+func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
+	m.step = stepAgentPresets
+	m.presetCfgMessage = ""
+	m.presetAllowed = make([]bool, len(m.presets))
+
+	// Default to: everything allowed, cursor's row is the default.
+	for i := range m.presets {
+		m.presetAllowed[i] = true
+	}
+	if m.cursor >= 0 && m.cursor < len(m.presets) {
+		m.presetDefaultIdx = m.cursor
+	} else {
+		m.presetDefaultIdx = 0
+	}
+	m.presetCfgCursor = m.presetDefaultIdx
+
+	// Setup mode: hydrate from existing init.json so re-running /setup
+	// doesn't silently widen or narrow the user's configured surface.
+	if m.setupMode && m.setupKeepInitJSON != nil {
+		if manifest, ok := m.setupKeepInitJSON["manifest"].(map[string]interface{}); ok {
+			if pre, ok := manifest["preset"].(map[string]interface{}); ok {
+				existingDefault, _ := pre["default"].(string)
+				var existingAllowed []string
+				if al, ok := pre["allowed"].([]interface{}); ok {
+					for _, e := range al {
+						if s, ok := e.(string); ok && s != "" {
+							existingAllowed = append(existingAllowed, s)
+						}
+					}
+				}
+				if len(existingAllowed) > 0 {
+					// Reset everything, then mark only the rows whose
+					// canonical preset path matches an entry in
+					// existingAllowed.
+					for i := range m.presetAllowed {
+						m.presetAllowed[i] = false
+					}
+					for i, p := range m.presets {
+						refs := presetCandidateRefs(p)
+						for _, ref := range refs {
+							for _, allowed := range existingAllowed {
+								if ref == allowed {
+									m.presetAllowed[i] = true
+									break
+								}
+							}
+						}
+					}
+				}
+				if existingDefault != "" {
+					for i, p := range m.presets {
+						refs := presetCandidateRefs(p)
+						for _, ref := range refs {
+							if ref == existingDefault {
+								m.presetDefaultIdx = i
+								m.presetAllowed[i] = true
+								m.presetCfgCursor = i
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// presetCandidateRefs returns the path strings that refer to the given
+// preset, in the forms an agent's manifest.preset.allowed entry might
+// take. Used to match wizard rows against the existing init.json's
+// allowed list during setup mode.
+func presetCandidateRefs(p preset.Preset) []string {
+	if p.Name == "" {
+		return nil
+	}
+	return []string{
+		"~/.lingtai-tui/presets/" + p.Name + ".json",
+		"~/.lingtai-tui/presets/" + p.Name + ".jsonc",
+	}
+}
+
+// allowedPresetRefs returns the list of preset path strings the user has
+// authorized on the agent-preset-config page, ready to be written into
+// manifest.preset.allowed. The order follows m.presets, with the default
+// preset first so the rendered list reads naturally. Returns nil when
+// the wizard has not visited stepAgentPresets (e.g. legacy code paths
+// that still build opts inline) — the writer falls back to a single-
+// preset allowed list in that case.
+func (m FirstRunModel) allowedPresetRefs() []string {
+	if len(m.presetAllowed) == 0 || len(m.presetAllowed) != len(m.presets) {
+		return nil
+	}
+	var out []string
+	// Default first (manifest readability — humans skim the first entry).
+	if m.presetDefaultIdx >= 0 && m.presetDefaultIdx < len(m.presets) {
+		out = append(out, "~/.lingtai-tui/presets/"+m.presets[m.presetDefaultIdx].Name+".json")
+	}
+	for i, p := range m.presets {
+		if !m.presetAllowed[i] || i == m.presetDefaultIdx {
+			continue
+		}
+		out = append(out, "~/.lingtai-tui/presets/"+p.Name+".json")
+	}
+	return out
 }
 
 // isCapCompatible checks if a capability works with the given provider.

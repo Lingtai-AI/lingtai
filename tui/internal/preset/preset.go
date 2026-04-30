@@ -841,6 +841,11 @@ type AgentOpts struct {
 	SoulFile       string   // path to soul flow file
 	CommentFile   string   // path to comment file (optional)
 	Addons        []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
+	// AllowedPresets lists the absolute (or ~-prefixed) paths of every
+	// preset this agent is authorized to swap to at runtime. The default
+	// preset is automatically included if missing. When empty, falls back
+	// to a single-element list containing just the default preset.
+	AllowedPresets []string
 	// PreserveActivePreset, when true, leaves manifest.preset.active alone
 	// and only updates manifest.preset.default to the chosen preset. Used
 	// by /setup so a running agent doesn't get yanked mid-conversation —
@@ -922,6 +927,9 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		// so the running agent keeps its current preset until an AED
 		// fallback or explicit revert_preset takes effect.
 		activeRef := presetRef
+		// /setup mode also preserves the existing `allowed` list so
+		// re-running the wizard never silently widens the authorized set.
+		var existingAllowed []string
 		if opts.PreserveActivePreset {
 			existingInitPath := filepath.Join(agentDir, "init.json")
 			if data, err := os.ReadFile(existingInitPath); err == nil {
@@ -932,14 +940,53 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 							if cur, ok := pre["active"].(string); ok && cur != "" {
 								activeRef = cur
 							}
+							if al, ok := pre["allowed"].([]interface{}); ok {
+								for _, e := range al {
+									if s, ok := e.(string); ok && s != "" {
+										existingAllowed = append(existingAllowed, s)
+									}
+								}
+							}
 						}
 					}
 				}
 			}
 		}
+
+		// Build the allowed list. Caller-supplied AllowedPresets wins;
+		// otherwise we keep the existing list (during /setup) or fall
+		// back to the single-preset default. The default preset is always
+		// present; the active preset is appended if missing.
+		allowedSet := map[string]struct{}{}
+		var allowed []string
+		appendUnique := func(s string) {
+			if s == "" {
+				return
+			}
+			if _, exists := allowedSet[s]; exists {
+				return
+			}
+			allowedSet[s] = struct{}{}
+			allowed = append(allowed, s)
+		}
+
+		var seed []string
+		switch {
+		case len(opts.AllowedPresets) > 0:
+			seed = opts.AllowedPresets
+		case len(existingAllowed) > 0:
+			seed = existingAllowed
+		}
+		for _, s := range seed {
+			appendUnique(s)
+		}
+		appendUnique(presetRef) // default must always be in allowed
+		appendUnique(activeRef) // active must always be in allowed
+
 		manifest["preset"] = map[string]interface{}{
 			"active":  activeRef,
 			"default": presetRef,
+			"allowed": allowed,
 		}
 	}
 
