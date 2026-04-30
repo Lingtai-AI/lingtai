@@ -19,7 +19,7 @@ You should reach for this skill whenever you spot any of:
 - **Missing capability** — you genuinely need a tool that doesn't exist (this is rarer than the others; check carefully that you haven't missed an existing one)
 - **Procedure contradiction** — two skills or sections of `procedures.md` give incompatible guidance for the same situation
 - **Reproducibly wrong output** — a model/tool returns clearly wrong answers in a way that isn't just a one-off hallucination (e.g. a vision model claims it can't see an image when image_url content is present)
-- **Migration / rename gaps** — you encounter old names that `lingtai-anatomy`'s `reference/changelog.md` doesn't document
+- **Migration / rename gaps** — you encounter old names that `lingtai-kernel-anatomy`'s `reference/changelog.md` doesn't document
 
 You should **not** invoke this skill for:
 

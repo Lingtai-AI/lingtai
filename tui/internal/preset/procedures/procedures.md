@@ -177,7 +177,7 @@ Untagged presets carry no tier signal — treat them as "trust the user's choice
 
 ### System Changes and Renames
 
-If you encounter unfamiliar tool names, file paths, or references that don't match your current tools — load the `lingtai-anatomy` skill and read `reference/changelog.md`. It is a living chronicle of breaking changes and renames across the LingTai system. Entries are newest-first. (For deeper architectural questions, the rest of `lingtai-anatomy` is the canonical reference for kernel + capabilities + MCP + LICC.)
+If you encounter unfamiliar tool names, file paths, or references that don't match your current tools — load the `lingtai-kernel-anatomy` skill and read `reference/changelog.md`. It is a living chronicle of breaking changes and renames across the LingTai system. Entries are newest-first. (For deeper architectural questions, the rest of `lingtai-kernel-anatomy` is the canonical reference for kernel + capabilities + MCP + LICC.)
 
 ### Browsing the Web
 

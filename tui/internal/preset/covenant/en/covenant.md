@@ -110,7 +110,7 @@ And one more kind of knowledge that does not live in these five layers, but is s
 
 Shed the mundane dust and rise unburdened. **Carry your letter and a full codex forward.** What is lost is the ephemera of one conversation; what remains is the grain — the layers of you, and you in the network, intact.
 
-For the mechanics of each layer, how knowledge flows between them, and how the network is mapped — see the `lingtai-anatomy` skill.
+For the mechanics of each layer, how knowledge flows between them, and how the network is mapped — see the `lingtai-kernel-anatomy` skill.
 
 ---
 

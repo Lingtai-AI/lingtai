@@ -1,14 +1,14 @@
 ---
 name: lingtai-debug-toolkit
-description: "Operational toolkit for lingtai agents — what to do when things break. Covers troubleshooting (process, memory, communication, tools), security auditing (secrets, permissions, MCP, data exposure), molt preparation (checklist + template), and avatar network governance. Read lingtai-anatomy first to understand the architecture, then come here for operational procedures."
+description: "Operational toolkit for lingtai agents — what to do when things break. Covers troubleshooting (process, memory, communication, tools), security auditing (secrets, permissions, MCP, data exposure), molt preparation (checklist + template), and avatar network governance. Read lingtai-kernel-anatomy first to understand the architecture, then come here for operational procedures."
 version: 1.0.0
 tags: [lingtai, debug, troubleshoot, security, audit, molt, governance, operations]
-companion: lingtai-anatomy
+companion: lingtai-kernel-anatomy
 ---
 
 # Lingtai Debug Toolkit
 
-> **Read lingtai-anatomy first** to understand the architecture; return here for operational procedures when something goes wrong.
+> **Read lingtai-kernel-anatomy first** to understand the architecture; return here for operational procedures when something goes wrong.
 > anatomy = "how things work" (descriptive), debug-toolkit = "what to do when broken" (operational).
 
 ## When to Use
@@ -36,9 +36,9 @@ Found exposed secrets?  → security-audit.md → Secret scanning scripts
 Avatar network unstable?→ network-governance.md → Health monitoring + CPR protocol
 ```
 
-## Relationship to lingtai-anatomy
+## Relationship to lingtai-kernel-anatomy
 
-- **lingtai-anatomy**: Descriptive documentation — five-layer storage, filesystem layout, runtime state machine, email protocol
+- **lingtai-kernel-anatomy**: Descriptive documentation — five-layer storage, filesystem layout, runtime state machine, email protocol
 - **lingtai-debug-toolkit**: Operational documentation — fault diagnosis, security scanning, molt procedures, network governance
 - Recommended reading order: anatomy → debug-toolkit
 

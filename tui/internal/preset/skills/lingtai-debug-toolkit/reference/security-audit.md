@@ -1,6 +1,6 @@
 # LingTai Security Audit Reference
 
-> **Read the `lingtai-anatomy` skill first to understand the architecture.** This document performs security audits based on the Lingtai architecture's file system layout, process model, and communication mechanisms.
+> **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document performs security audits based on the Lingtai architecture's file system layout, process model, and communication mechanisms.
 
 ---
 
@@ -98,7 +98,7 @@ echo "Report saved to: $report"
 - ❌ Including actual secret values in the report → the report itself becomes a leak source
 - ✅ Report only "match found" and replace actual values with `<REDACTED>`
 
-**Related References**: `lingtai-anatomy` (file system layout)
+**Related References**: `lingtai-kernel-anatomy` (file system layout)
 
 ---
 
@@ -158,7 +158,7 @@ done
 - ✅ Audit is read-only; modifications must be performed by authorized personnel
 - ✅ Focus on `.secrets/`, `mcp/servers.json`, and `.env` files
 
-**Related References**: `lingtai-anatomy` (directory structure)
+**Related References**: `lingtai-kernel-anatomy` (directory structure)
 
 ---
 
@@ -309,7 +309,7 @@ echo "3. File system permissions are the only access control"
 - ❌ Assuming pigeon is a secure communication channel → anyone with file system access can read messages
 - ✅ Pass sensitive information through environment variables or the `.secrets/` directory, never in plaintext mail
 
-**Related References**: `lingtai-anatomy` (mail protocol; communication model)
+**Related References**: `lingtai-kernel-anatomy` (mail protocol; communication model)
 
 ---
 
@@ -376,7 +376,7 @@ fi
 - ✅ When sharing knowledge, pass the actual content (via pigeon or shared files), not just IDs
 - ✅ Do not enter sensitive data into codex, or clearly mark it as sensitive
 
-**Related References**: `lingtai-anatomy` (codex; five-layer accumulation)
+**Related References**: `lingtai-kernel-anatomy` (codex; five-layer accumulation)
 
 ---
 
@@ -443,7 +443,7 @@ done
 - ✅ Only grant karma/nirvana to orchestrators; avatars should have zero admin privileges
 - ✅ Avatars encountering permission issues should report to their parent via pigeon
 
-**Related References**: `lingtai-anatomy` (avatar permission model / network topology)
+**Related References**: `lingtai-kernel-anatomy` (avatar permission model / network topology)
 
 ---
 

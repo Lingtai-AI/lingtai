@@ -252,7 +252,7 @@
   // Per-MCP secrets live in <agent>/.secrets/<name>.json — plaintext JSON
   // (no *_env indirection in the new MCP shape). Each MCP's README
   // documents the schema; setup skills are available via the agent's
-  // library tool. Canonical contract spec: lingtai-anatomy skill,
+  // library tool. Canonical contract spec: lingtai-kernel-anatomy skill,
   // reference/mcp-protocol.md.
 
   // =============================================================
