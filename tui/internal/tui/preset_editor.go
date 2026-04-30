@@ -396,9 +396,14 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		// Always show the three-way exit prompt — even if not dirty,
-		// users hitting Esc deserve a confirmation rather than dropping
-		// out of a screen they'd been editing.
+		// Clean editor (no edits made) → close immediately. Confirming
+		// an exit when there's nothing to lose is the source of the
+		// "I just glanced at this and Esc trapped me" complaint.
+		// Dirty editor → show the three-way prompt so the user picks
+		// save / discard / cancel intentionally.
+		if !m.hasSemanticEdits() && !m.apiKeySet {
+			return m, func() tea.Msg { return PresetEditorCancelMsg{} }
+		}
 		m.mode = emExitPrompt
 		return m, nil
 	case "up", "k":
@@ -480,12 +485,16 @@ func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel,
 }
 
 // updateExitPrompt is the three-way "save / discard / cancel" overlay
-// triggered by Esc. s saves (commit path, may surface validation
-// errors); d discards changes and exits; any other key (including
-// Esc) cancels back to browse.
+// triggered by Esc when the editor has unsaved changes. Enter (the
+// visible default) and `s` save and exit. `d` discards changes and
+// exits. Esc and `c` cancel back to browse.
+//
+// The mapping deliberately makes Esc safe: a user who hit Esc by
+// mistake and double-presses won't accidentally discard their edits.
+// The destructive choice (discard) requires the explicit `d` key.
 func (m PresetEditorModel) updateExitPrompt(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
 	switch msg.String() {
-	case "s", "S":
+	case "enter", "s", "S":
 		m.mode = emBrowse
 		updated, cmd := m.commit()
 		return updated, cmd
