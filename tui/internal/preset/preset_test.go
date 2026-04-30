@@ -48,10 +48,10 @@ func TestSaveAndLoad_Roundtrip(t *testing.T) {
 	})
 }
 
-func TestEnsureDefault_CreatesBuiltinPresets(t *testing.T) {
+func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 	withTempPresets(t, func() {
-		if err := EnsureDefault(); err != nil {
-			t.Fatalf("EnsureDefault() error: %v", err)
+		if err := RefreshTemplates(); err != nil {
+			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
 		if len(presets) != 7 {
@@ -60,6 +60,9 @@ func TestEnsureDefault_CreatesBuiltinPresets(t *testing.T) {
 		names := map[string]bool{}
 		for _, p := range presets {
 			names[p.Name] = true
+			if p.Source != SourceTemplate {
+				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
+			}
 		}
 		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "openrouter", "codex", "custom"} {
 			if !names[want] {
@@ -167,7 +170,9 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("manifest.preset block missing")
 	}
-	wantRef := "~/.lingtai-tui/presets/" + p.Name + ".json"
+	// Templates resolve to presets/templates/<name>.json; minimaxPreset()
+	// is a template per IsBuiltin, even without Source set.
+	wantRef := "~/.lingtai-tui/presets/templates/" + p.Name + ".json"
 	if active, _ := preset["active"].(string); active != wantRef {
 		t.Errorf("manifest.preset.active = %v, want %s", preset["active"], wantRef)
 	}

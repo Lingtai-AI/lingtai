@@ -46,7 +46,12 @@ var recipeAssetsFS embed.FS
 //go:embed skills
 var skillsFS embed.FS
 
-// Preset is a reusable agent template stored at ~/.lingtai-tui/presets/.
+// Preset is a reusable agent bundle. Templates ship with the TUI and
+// live under ~/.lingtai-tui/presets/templates/ (regenerated on every
+// launch, never user-edited). User-saved variants live under
+// ~/.lingtai-tui/presets/saved/. The two directories are the only
+// thing distinguishing a template from a user preset — there is no
+// in-band marker.
 //
 // Description is a structured object with a required `summary` and an
 // optional `tier` (cost/quality ladder, "1".."5"). Authors may add
@@ -56,7 +61,32 @@ type Preset struct {
 	Name        string                 `json:"name"`
 	Description PresetDescription      `json:"description"`
 	Manifest    map[string]interface{} `json:"manifest"`
+
+	// Source is set by List/Load to record where the preset was read
+	// from on disk. Runtime-only — never marshaled. Callers use this
+	// instead of name-matching to ask "is this a template?".
+	Source PresetSource `json:"-"`
 }
+
+// PresetSource records which directory a preset was read from. The
+// directory IS the answer to "is this a template?" — no in-band marker,
+// no name list to maintain.
+type PresetSource int
+
+const (
+	// SourceUnknown is the zero value; in-memory presets that were never
+	// loaded from disk have this. Treat as "saved" for safety so a
+	// hand-built preset can't accidentally claim template status.
+	SourceUnknown PresetSource = iota
+	// SourceTemplate means the preset lives under presets/templates/.
+	// Read-only from the TUI's perspective: the user edits a template
+	// to materialize a saved variant; the template itself is rewritten
+	// from embedded data on every launch.
+	SourceTemplate
+	// SourceSaved means the preset lives under presets/saved/. User-
+	// owned; never touched by Bootstrap/SeedMissingBuiltins.
+	SourceSaved
+)
 
 // PresetDescription is the structured commentary block on a preset. The
 // kernel requires a non-empty summary; tier is optional but when present
@@ -122,51 +152,76 @@ func (d *PresetDescription) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PresetsDir returns ~/.lingtai-tui/presets/.
+// PresetsDir returns the parent directory ~/.lingtai-tui/presets/.
+// The TUI only writes to its templates/ and saved/ subdirectories;
+// PresetsDir itself stays around for the kernel-side migration meta
+// file (kept at the parent to survive template re-extraction).
 func PresetsDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, config.GlobalDirName, "presets")
 }
 
-// List returns all presets from the presets directory.
-func List() ([]Preset, error) {
-	dir := PresetsDir()
+// TemplatesDir returns ~/.lingtai-tui/presets/templates/. The TUI
+// regenerates these wholesale on every launch from embedded data —
+// users should never edit files here directly.
+func TemplatesDir() string {
+	return filepath.Join(PresetsDir(), "templates")
+}
+
+// SavedDir returns ~/.lingtai-tui/presets/saved/. User territory:
+// every Save() lands here, Bootstrap/Seed never touch it.
+func SavedDir() string {
+	return filepath.Join(PresetsDir(), "saved")
+}
+
+// listFromDir reads every *.json file from a single preset directory
+// and stamps each result with the given source. Internal helper for
+// List(); centralizes the parse-and-skip-malformed logic so the two
+// directory walks can't drift.
+func listFromDir(dir string, src PresetSource) []Preset {
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
 	if err != nil {
-		return nil, fmt.Errorf("read presets dir: %w", err)
+		return nil
 	}
-	var presets []Preset
+	var out []Preset
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		// Skip the kernel-side migration meta file — it sits in the same
-		// directory as preset files but is not itself a preset.
 		if e.Name() == "_kernel_meta.json" {
 			continue
 		}
-		p, err := Load(e.Name()[:len(e.Name())-5]) // strip .json
+		path := filepath.Join(dir, e.Name())
+		p, err := loadFromPath(path)
 		if err != nil {
 			continue
 		}
-		presets = append(presets, p)
+		p.Source = src
+		out = append(out, p)
 	}
-	// Saved presets first (alphabetically), then builtins (minimax first)
-	sort.Slice(presets, func(i, j int) bool {
-		bi, bj := IsBuiltin(presets[i].Name), IsBuiltin(presets[j].Name)
-		if bi != bj {
-			return !bi // saved (non-builtin) before builtin
-		}
-		if bi { // both builtin: minimax → zhipu → mimo → deepseek → openrouter → codex → custom
-			order := map[string]int{"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3, "openrouter": 4, "codex": 5, "custom": 6}
-			return order[presets[i].Name] < order[presets[j].Name]
-		}
-		return presets[i].Name < presets[j].Name
+	return out
+}
+
+// List returns saved presets first (alphabetical), then templates in
+// the canonical product order. Each preset carries a Source field
+// recording which directory it came from — callers should prefer
+// p.Source over name-matching when asking "is this a template?".
+func List() ([]Preset, error) {
+	saved := listFromDir(SavedDir(), SourceSaved)
+	templates := listFromDir(TemplatesDir(), SourceTemplate)
+
+	sort.Slice(saved, func(i, j int) bool {
+		return saved[i].Name < saved[j].Name
 	})
-	return presets, nil
+	templateOrder := map[string]int{
+		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
+		"openrouter": 4, "codex": 5, "custom": 6,
+	}
+	sort.Slice(templates, func(i, j int) bool {
+		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
+	})
+
+	return append(saved, templates...), nil
 }
 
 // HasAny returns true if at least one preset exists.
@@ -184,16 +239,36 @@ func First() Preset {
 	return Preset{Manifest: map[string]interface{}{}}
 }
 
-// Load reads a single preset by name.
+// Load reads a single preset by name. Looks in saved/ first, then
+// templates/ — a saved preset with the same name as a template wins
+// (the user's variant overrides). Returns the loaded preset with
+// Source populated.
 func Load(name string) (Preset, error) {
-	path := filepath.Join(PresetsDir(), name+".json")
+	for _, attempt := range []struct {
+		dir string
+		src PresetSource
+	}{
+		{SavedDir(), SourceSaved},
+		{TemplatesDir(), SourceTemplate},
+	} {
+		path := filepath.Join(attempt.dir, name+".json")
+		if p, err := loadFromPath(path); err == nil {
+			p.Source = attempt.src
+			return p, nil
+		}
+	}
+	return Preset{}, fmt.Errorf("preset not found: %s", name)
+}
+
+// loadFromPath reads + parses a preset file. Internal helper.
+func loadFromPath(path string) (Preset, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Preset{}, fmt.Errorf("read preset %s: %w", name, err)
+		return Preset{}, fmt.Errorf("read preset %s: %w", path, err)
 	}
 	var p Preset
 	if err := json.Unmarshal(data, &p); err != nil {
-		return Preset{}, fmt.Errorf("parse preset %s: %w", name, err)
+		return Preset{}, fmt.Errorf("parse preset %s: %w", path, err)
 	}
 	return p, nil
 }
@@ -249,11 +324,13 @@ func (p Preset) Validate() []error {
 	return errs
 }
 
-// Save writes a preset to the presets directory.
+// Save writes a preset to the saved/ directory. Save NEVER writes to
+// templates/ — that's owned by Bootstrap. Callers that want to seed
+// a template must use writeTemplate (preset package internal).
 func Save(p Preset) error {
-	dir := PresetsDir()
+	dir := SavedDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create presets dir: %w", err)
+		return fmt.Errorf("create saved presets dir: %w", err)
 	}
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -285,44 +362,60 @@ func Clone(src Preset, newName string) Preset {
 	}
 }
 
-// Delete removes a preset file.
+// Delete removes a saved preset. Templates are immutable from the
+// user's perspective; deleting them via the TUI is a no-op (the next
+// Bootstrap re-extracts the file anyway). Returns an error only when
+// a saved file existed and the unlink failed.
 func Delete(name string) error {
-	path := filepath.Join(PresetsDir(), name+".json")
-	return os.Remove(path)
-}
-
-// EnsureDefaults creates all built-in presets if no presets exist.
-func EnsureDefault() error {
-	presets, _ := List()
-	if len(presets) > 0 {
+	path := filepath.Join(SavedDir(), name+".json")
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
 		return nil
 	}
-	for _, p := range BuiltinPresets() {
-		if err := Save(p); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
-// SeedMissingBuiltins writes any built-in preset whose <name>.json file does
-// not yet exist in the presets directory. Unlike EnsureDefault, this runs
-// even when the user already has presets — it's how new built-ins ship to
-// existing installs without clobbering user-saved variants (e.g. zhipu_cn).
-// A user who has explicitly deleted a built-in will see it reappear; if that
-// becomes a concern we can add a "deleted" marker file later.
-func SeedMissingBuiltins() error {
-	dir := PresetsDir()
+// EnsureDefault is now a no-op kept for callers that haven't been
+// updated. Templates are unconditionally rewritten by RefreshTemplates
+// on every Bootstrap, and saved presets are user territory — there is
+// nothing to "ensure default" anymore.
+func EnsureDefault() error { return nil }
+
+// SeedMissingBuiltins is replaced by RefreshTemplates. Kept as a thin
+// alias so old callers (lingtai-claude-code, codex-plugin) that import
+// the preset package don't break on upgrade.
+func SeedMissingBuiltins() error { return RefreshTemplates() }
+
+// RefreshTemplates rewrites templates/ from BuiltinPresets() wholesale.
+// Called from Bootstrap on every TUI launch. Deletes any *.json file
+// in templates/ that's no longer in BuiltinPresets() so a TUI upgrade
+// that retires a template (e.g. an obsolete provider) propagates
+// cleanly. Saved presets in saved/ are never touched.
+func RefreshTemplates() error {
+	dir := TemplatesDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create presets dir: %w", err)
+		return fmt.Errorf("create templates dir: %w", err)
 	}
+	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
-		path := filepath.Join(dir, p.Name+".json")
-		if _, err := os.Stat(path); err == nil {
-			continue // already exists
+		want[p.Name+".json"] = true
+		data, err := json.MarshalIndent(p, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal template %s: %w", p.Name, err)
 		}
-		if err := Save(p); err != nil {
-			return err
+		if err := os.WriteFile(filepath.Join(dir, p.Name+".json"), data, 0o644); err != nil {
+			return fmt.Errorf("write template %s: %w", p.Name, err)
+		}
+	}
+	// Prune retired templates.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+				continue
+			}
+			if !want[e.Name()] {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+			}
 		}
 	}
 	return nil
@@ -341,7 +434,10 @@ func BuiltinPresets() []Preset {
 	}
 }
 
-// builtinNames is the set of built-in preset names.
+// builtinNames is the set of built-in template names. Used by m030 to
+// classify legacy files in presets/ during the directory split, and by
+// IsBuiltin (which exists for callers that only have a Name, not a
+// loaded Preset).
 var builtinNames = map[string]bool{
 	"minimax":     true,
 	"zhipu":       true,
@@ -353,9 +449,43 @@ var builtinNames = map[string]bool{
 	"custom":      true,
 }
 
-// IsBuiltin returns true if name matches a built-in preset template.
+// IsBuiltin reports whether `name` matches a TUI-shipped template.
+// Prefer IsTemplate(p) when you have a loaded Preset — that uses the
+// directory-of-origin and is robust against a user saving a preset
+// under a name that happens to match a template.
 func IsBuiltin(name string) bool {
 	return builtinNames[name]
+}
+
+// IsTemplate reports whether the given preset was loaded from the
+// templates/ directory. Use this in preference to IsBuiltin(p.Name)
+// for any loaded preset — it's the canonical "is this read-only?"
+// answer.
+func IsTemplate(p Preset) bool {
+	return p.Source == SourceTemplate
+}
+
+// RefFor returns the home-shortened on-disk path string this preset
+// gets recorded as in init.json's manifest.preset.{default,active,
+// allowed}. Templates resolve under presets/templates/, saved under
+// presets/saved/. Presets without a Source (in-memory only, e.g.
+// tests) fall back to the IsBuiltin name list.
+func RefFor(p Preset) string {
+	if p.Name == "" {
+		return ""
+	}
+	subdir := "saved"
+	switch p.Source {
+	case SourceTemplate:
+		subdir = "templates"
+	case SourceSaved:
+		subdir = "saved"
+	default:
+		if IsBuiltin(p.Name) {
+			subdir = "templates"
+		}
+	}
+	return "~/.lingtai-tui/presets/" + subdir + "/" + p.Name + ".json"
 }
 
 // AutoSavedName picks a fresh saved-preset name derived from a template,
@@ -397,12 +527,19 @@ func AutoSavedName(template string, existing []string) string {
 	}
 }
 
-// SavedCount returns the number of non-builtin (saved) presets in the list.
+// SavedCount returns the number of saved presets (Source == SourceSaved)
+// in the list. Falls back to the legacy IsBuiltin check for any preset
+// whose Source wasn't populated (e.g. hand-built test fixtures).
 func SavedCount(presets []Preset) int {
 	n := 0
 	for _, p := range presets {
-		if !IsBuiltin(p.Name) {
+		switch p.Source {
+		case SourceSaved:
 			n++
+		case SourceUnknown:
+			if !IsBuiltin(p.Name) {
+				n++
+			}
 		}
 	}
 	return n
@@ -659,12 +796,10 @@ func Bootstrap(globalDir string) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to rename recipe_assets to recipes: %v\n", err)
 		}
 	}
-	if err := EnsureDefault(); err != nil {
-		return err
-	}
-	// Also seed any built-ins that were added after the user's first install.
-	// Idempotent: only writes files that don't exist.
-	return SeedMissingBuiltins()
+	// Templates are TUI-managed: rewritten wholesale on every launch
+	// from embedded data, retired entries pruned. Saved presets in
+	// presets/saved/ are user territory and never touched here.
+	return RefreshTemplates()
 }
 
 // PopulateBundledLibrary extracts the TUI's embedded bundled skills into a
@@ -959,7 +1094,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// The 'default' field is used by AED auto-fallback to revert to the
 	// original preset when the active one keeps failing.
 	if p.Name != "" {
-		presetRef := "~/.lingtai-tui/presets/" + p.Name + ".json"
+		presetRef := RefFor(p)
 		// Default behavior: both active and default point at the new
 		// preset (the agent runs on the chosen preset immediately).
 		// /setup mode (PreserveActivePreset=true) only updates default,

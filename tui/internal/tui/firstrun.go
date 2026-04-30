@@ -3120,11 +3120,10 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 
 // presetCanonicalRef returns the path string this TUI writes into
 // manifest.preset.allowed for the given preset (the ~/-prefixed form).
+// Wraps preset.RefFor so the firstrun page picks the right subdirectory
+// (templates/ vs saved/) based on the preset's Source.
 func presetCanonicalRef(p preset.Preset) string {
-	if p.Name == "" {
-		return ""
-	}
-	return "~/.lingtai-tui/presets/" + p.Name + ".json"
+	return preset.RefFor(p)
 }
 
 // presetRefMatches reports whether two preset path strings refer to the

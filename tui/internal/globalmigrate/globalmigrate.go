@@ -15,7 +15,7 @@ import (
 )
 
 // CurrentVersion is the latest global-migration version compiled into this binary.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -31,6 +31,7 @@ type Migration struct {
 // migrations is the ordered list of all global migrations. Append-only.
 var migrations = []Migration{
 	{Version: 1, Name: "tap-huangzesen-to-lingtai-ai", Fn: migrateTapHuangzesenToLingtaiAI},
+	{Version: 2, Name: "split-presets-dir", Fn: migrateSplitPresetsDir},
 }
 
 // Run executes all pending global migrations against the given ~/.lingtai-tui/
