@@ -901,19 +901,35 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		m.saveErr = errs[0].Error()
 		return m, nil
 	}
-	// Built-in protection: if the user changed any semantic field
-	// (llm.*, capabilities.*, or name) on a built-in preset, gate the
-	// save behind a clone-first prompt. Editorial-only edits (summary,
-	// tier, gains, loses) save in place — they're user annotations
-	// that should outlive a TUI upgrade.
-	if m.isBuiltin && m.hasSemanticEdits() {
-		m.cloneNameInput.SetValue(m.working.Name + "_custom")
-		m.cloneNameInput.CursorEnd()
-		m.cloneNameInput.Focus()
-		m.mode = emClonePrompt
-		return m, nil
-	}
+	// Templates (built-ins) are starting points: the user picks one,
+	// edits it, and saves. The save always materializes a *new* file
+	// under an auto-generated name like `mimo-1` so the template stays
+	// pristine and the user gets a saved preset they own.
+	//
+	// If the user explicitly renamed the preset in the editor (Name
+	// differs from the template's name), respect that name. Otherwise
+	// gap-fill the next "<template>-N" slot.
 	committed := clonePresetForEditor(m.working)
+	if m.isBuiltin && (m.hasSemanticEdits() || m.apiKeySet) {
+		if committed.Name == m.original.Name {
+			existing, _ := preset.List()
+			names := make([]string, 0, len(existing))
+			for _, p := range existing {
+				names = append(names, p.Name)
+			}
+			if auto := preset.AutoSavedName(m.original.Name, names); auto != "" {
+				committed.Name = auto
+			}
+		}
+		// Clear the inherited api_key_env so the host's stampAutoEnvVar
+		// allocates a fresh slot (PROVIDER_N_API_KEY) under the new name.
+		// Without this, the user's pasted key would overwrite the
+		// template's shared slot (e.g. MIMO_API_KEY), polluting any
+		// other preset that references it.
+		if llm, ok := committed.Manifest["llm"].(map[string]interface{}); ok {
+			delete(llm, "api_key_env")
+		}
+	}
 	return m, func() tea.Msg {
 		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}

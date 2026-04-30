@@ -358,6 +358,45 @@ func IsBuiltin(name string) bool {
 	return builtinNames[name]
 }
 
+// AutoSavedName picks a fresh saved-preset name derived from a template,
+// using the same gap-fill counter as AutoEnvVarName. Pattern is
+// "<template>-<N>" where N is the lowest positive integer that doesn't
+// collide with anything in `existing`. Used when the user saves an
+// edited template preset — we never overwrite the template, we always
+// branch off a saved copy.
+//
+// existing is the set of preset names currently on disk (from List()).
+// Returns "" when template is empty.
+func AutoSavedName(template string, existing []string) string {
+	if template == "" {
+		return ""
+	}
+	used := map[int]bool{}
+	wantPrefix := template + "-"
+	for _, name := range existing {
+		if !strings.HasPrefix(name, wantPrefix) {
+			continue
+		}
+		mid := strings.TrimPrefix(name, wantPrefix)
+		n := 0
+		for _, c := range mid {
+			if c < '0' || c > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 0 {
+			used[n] = true
+		}
+	}
+	for n := 1; ; n++ {
+		if !used[n] {
+			return fmt.Sprintf("%s-%d", template, n)
+		}
+	}
+}
+
 // SavedCount returns the number of non-builtin (saved) presets in the list.
 func SavedCount(presets []Preset) int {
 	n := 0
