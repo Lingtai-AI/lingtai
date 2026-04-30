@@ -1955,6 +1955,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// Forward unhandled messages (e.g. tea.PasteMsg) to the focused textinput
 		var cmd tea.Cmd
 		switch m.step {
+		case stepEditPreset:
+			// Editor owns its inline textarea; forward paste so the
+			// user can paste into name/summary/api_key/etc. fields.
+			m.presetEditor, cmd = m.presetEditor.Update(msg)
 		case stepPresetKey:
 			if m.selectedProvider != "codex" {
 				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)

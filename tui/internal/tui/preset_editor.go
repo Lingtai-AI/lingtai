@@ -310,7 +310,8 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 	// (themedTextareaStyles); the default textarea ships with dark
 	// focus colors that clash with the lipgloss palette.
 	ta := textarea.New()
-	ta.SetWidth(40)
+	ta.CharLimit = 512
+	ta.SetWidth(50)
 	ta.SetHeight(1)
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
