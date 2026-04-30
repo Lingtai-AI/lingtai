@@ -8,7 +8,7 @@ description: >
   or auto-discovered when a project already has `.recipe/` at its
   root). The skill body fans out into three substantive sub-guides
   (~1300 lines total) so you load only what the task needs:
-  `references/recipe-format.md` for the bundle format + `recipe.json`
+  `reference/recipe-format.md` for the bundle format + `recipe.json`
   schema + library sibling rules + validator contract (read first when
   authoring or customising); `assets/export-network.md` for shipping
   the *current* multi-agent network as a shareable git repo (live
@@ -49,7 +49,7 @@ This skill is the one place to look for anything recipe-related. Pick the sub-fi
 
 - **Understanding / authoring a recipe** — format reference: bundle directory structure, `recipe.json` schema (`id`, `name`, `description`, `version`, `library_name`), the four optional behavioral layers, locale fallback rules, library sibling mechanics, network snapshot rules, validator contract, how to create and test a custom recipe.
 
-  → Read `references/recipe-format.md`.
+  → Read `reference/recipe-format.md`.
 
 - **Exporting the full network** — copying the live `.lingtai/` (agents, mailboxes, history, etc.) plus a generated `.recipe/` bundle into a shareable git repo, with per-agent `init.json` stripped. Use this when the human wants to share, back up, or republish *this specific network*, including its inhabitants.
 
@@ -78,7 +78,7 @@ If you find a `.recipe/` at the project root and you're exporting the *network*,
 ```
 lingtai-recipe/
 ├── SKILL.md                         ← this menu
-├── references/
+├── reference/
 │   └── recipe-format.md             ← authoritative recipe format reference
 ├── assets/
 │   ├── export-network.md            ← full network-export procedure

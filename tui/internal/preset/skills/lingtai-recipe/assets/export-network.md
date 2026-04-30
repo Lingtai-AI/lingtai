@@ -2,7 +2,7 @@
 
 *This is the network-export sub-guide of the `lingtai-recipe` skill. For recipe-only export, read `export-recipe.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read `../references/recipe-format.md` first — Step 5 below creates a `.recipe/` dotfolder inside the exported bundle, and you need to understand the bundle shape, the four behavioral layers (all optional), the `recipe.json` schema, placeholders, and i18n rules. Also read `export-recipe.md` (next to this file) if the human wants to export a standalone recipe alongside the network.
+**Prerequisites:** Read `../reference/recipe-format.md` first — Step 5 below creates a `.recipe/` dotfolder inside the exported bundle, and you need to understand the bundle shape, the four behavioral layers (all optional), the `recipe.json` schema, placeholders, and i18n rules. Also read `export-recipe.md` (next to this file) if the human wants to export a standalone recipe alongside the network.
 
 You are about to copy the network you live in to an exportable location. **This is literal self-copying** — the snapshot will not contain the moment you made it. Everything up to this conversation turn will be in the exported copy; this turn itself will only exist in the original.
 
@@ -22,7 +22,7 @@ Scripts for this skill live at `../scripts/` (relative to this file). The canoni
 
 ## What is an exported network bundle?
 
-Same bundle shape as a recipe-only export (see `export-recipe.md` and `../references/recipe-format.md`) but with one extra sibling folder: `.lingtai/`, containing a full snapshot of every agent's accumulated state.
+Same bundle shape as a recipe-only export (see `export-recipe.md` and `../reference/recipe-format.md`) but with one extra sibling folder: `.lingtai/`, containing a full snapshot of every agent's accumulated state.
 
 ```
 <bundle-root>/
@@ -254,7 +254,7 @@ For hard matches, the human has two options:
 
 ## Step 5: Author the `.recipe/` bundle
 
-Every exported network must ship with a recipe: it controls what the orchestrator says and how it behaves when a recipient clones the network and runs it for the first time. The bundle's `.recipe/` is identical in shape to what `/export recipe` produces — an exported network is literally "exported recipe + the `.lingtai/` snapshot alongside." **Read `../references/recipe-format.md` first** for the authoritative format (directory structure, `recipe.json` schema, the four optional behavioral layers, placeholders, i18n rules).
+Every exported network must ship with a recipe: it controls what the orchestrator says and how it behaves when a recipient clones the network and runs it for the first time. The bundle's `.recipe/` is identical in shape to what `/export recipe` produces — an exported network is literally "exported recipe + the `.lingtai/` snapshot alongside." **Read `../reference/recipe-format.md` first** for the authoritative format (directory structure, `recipe.json` schema, the four optional behavioral layers, placeholders, i18n rules).
 
 **Do not skip this step.** An exported network without a recipe is a bad first impression — the recipient sets up the network and gets silence.
 
@@ -309,7 +309,7 @@ mkdir -p "$BUNDLE/.recipe/comment/zh"
 
 ### 5c. Write `recipe.json`
 
-`recipe.json` lives at `<bundle>/.recipe/recipe.json`. Schema per `../references/recipe-format.md`:
+`recipe.json` lives at `<bundle>/.recipe/recipe.json`. Schema per `../reference/recipe-format.md`:
 
 ```bash
 cat > "$BUNDLE/.recipe/recipe.json" <<'JSON'
@@ -331,7 +331,7 @@ If the network ships a library sibling, set `library_name` to the folder name (e
 
 For network exports, `greet.md` does double duty: it's the first message the orchestrator sends to a new recipient AND it's the cloned agent's only memory of who it used to be. The chat_history strip in Step 1b means the agent wakes up with no conversation trace; the only narrative bridge from "the original network's life" to "this clone's first turn" is what you write here. Treat it like a molt's `charge`: a tight retrospective the future-self can read on launch and orient itself.
 
-Write `$BUNDLE/.recipe/greet/greet.md` following the format rules in `../references/recipe-format.md`. For network exports specifically, cover:
+Write `$BUNDLE/.recipe/greet/greet.md` following the format rules in `../reference/recipe-format.md`. For network exports specifically, cover:
 
 1. **Time anchor** — when did this network start, when was it exported.
 2. **Initial mandate** — what the human asked the original orchestrator to do.

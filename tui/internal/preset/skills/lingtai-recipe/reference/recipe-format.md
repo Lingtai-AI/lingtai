@@ -39,7 +39,7 @@ my-recipe-bundle/
 │   └── <skill-b>/
 │       ├── SKILL.md
 │       ├── scripts/
-│       └── references/
+│       └── reference/
 └── .lingtai/                            # optional — network snapshot (export-network only)
     ├── <agent>/
     │   ├── .agent.json                  # identity blueprint (KEPT)

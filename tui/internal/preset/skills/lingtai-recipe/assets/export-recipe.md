@@ -2,7 +2,7 @@
 
 *This is the recipe-export sub-guide of the `lingtai-recipe` skill. For full-network export, read `export-network.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read `../references/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, the `.lingtai/` network snapshot, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
+**Prerequisites:** Read `../reference/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, the `.lingtai/` network snapshot, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
 
 A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing. An exported recipe is a **bundle directory** — a git repo the recipient clones and points `/setup` at.
 
@@ -81,7 +81,7 @@ echo $HOME
 
 Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **Note: `lingtai-agora`, NOT `.lingtai-agora` — no leading dot.** The agora directory is a user-visible workspace, not a hidden config directory.
 
-**0b. Read `../references/recipe-format.md`** to refresh your understanding of the bundle shape.
+**0b. Read `../reference/recipe-format.md`** to refresh your understanding of the bundle shape.
 
 **0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture. **You are reflecting on the inner network (the agents in `.lingtai/`), not on whatever recipe was originally applied to seed it.** The applied recipe is one input among several — the network's *current* behavior may have drifted, grown new skills, or specialized in ways the seeding recipe never described. Distill what the network is now, not what it was told to be.
 
@@ -123,7 +123,7 @@ If `$HOME/lingtai-agora/recipes/<id>/` already exists, ask before overwriting.
 
 ## Step 2: Author the Bundle
 
-Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../references/recipe-format.md` for the exact format and rules of each component.
+Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../reference/recipe-format.md` for the exact format and rules of each component.
 
 ### Pre-flight: Create all directories first
 
@@ -165,13 +165,13 @@ If shipping locale variants of the manifest, write `$BUNDLE/.recipe/zh/recipe.js
 
 ### 2b. `greet.md` — First Contact (optional)
 
-Write `$BUNDLE/.recipe/greet/greet.md` (and `$BUNDLE/.recipe/greet/zh/greet.md` if multilingual). Follow the rules and placeholder list in `../references/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
+Write `$BUNDLE/.recipe/greet/greet.md` (and `$BUNDLE/.recipe/greet/zh/greet.md` if multilingual). Follow the rules and placeholder list in `../reference/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
 
 Skip this layer entirely if the recipe wants a silent agent (agent waits for the first human message instead of sending a greeting).
 
 ### 2c. `comment.md` — Behavioral DNA (optional)
 
-Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture gets distilled. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../references/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
+Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture gets distilled. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../reference/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
 
 **What to distill.** Walk through each of these areas and extract what's worth keeping:
 
@@ -226,7 +226,7 @@ Do NOT flatten this to `$BUNDLE/<library_name>/SKILL.md` — the scanner only re
 
 ### 2e–2f. `covenant.md` / `procedures.md` (optional, usually skip)
 
-Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../references/recipe-format.md` for details.
+Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../reference/recipe-format.md` for details.
 
 ```
 $BUNDLE/.recipe/covenant/covenant.md

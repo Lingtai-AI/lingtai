@@ -7,7 +7,7 @@ staging directory before `git init`. Exits 0 if the bundle is structurally
 valid (warnings allowed); exits 1 if any error is found.
 
 The canonical recipe format is documented in:
-    tui/internal/preset/skills/lingtai-recipe/references/recipe-format.md
+    tui/internal/preset/skills/lingtai-recipe/reference/recipe-format.md
 
 A recipe **bundle** is a directory containing:
 

@@ -9,7 +9,7 @@ import (
 
 // TestBuildSkillFolderEntries_RecipeSkill verifies the drill-in catalog
 // against the real lingtai-recipe skill folder, which has SKILL.md at root
-// plus references/, scripts/, and assets/ subdirectories.
+// plus reference/, scripts/, and assets/ subdirectories.
 func TestBuildSkillFolderEntries_RecipeSkill(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "lingtai-recipe")
@@ -31,7 +31,7 @@ func TestBuildSkillFolderEntries_RecipeSkill(t *testing.T) {
 			groups[e.Group]++
 		}
 	}
-	for _, want := range []string{"references", "scripts", "assets"} {
+	for _, want := range []string{"reference", "scripts", "assets"} {
 		if groups[want] == 0 {
 			t.Errorf("expected non-empty group %q, groups=%v", want, groups)
 		}

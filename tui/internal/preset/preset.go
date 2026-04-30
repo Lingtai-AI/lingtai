@@ -36,7 +36,14 @@ var soulFS embed.FS
 //go:embed all:recipe_assets
 var recipeAssetsFS embed.FS
 
-//go:embed all:skills
+// Note: no `all:` prefix — Go's default embed semantics exclude leading-dot
+// and leading-underscore files/dirs, which keeps `.pytest_cache/` and
+// `__pycache__/` out of the binary even when they exist on disk at build
+// time. Skills MUST NOT ship legitimately-dot-prefixed content; if they
+// need to, switch back to `all:skills` and add a runtime filter (or use a
+// distinct subdir name).
+//
+//go:embed skills
 var skillsFS embed.FS
 
 // Preset is a reusable agent template stored at ~/.lingtai-tui/presets/.

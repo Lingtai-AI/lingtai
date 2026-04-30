@@ -24,7 +24,7 @@ Never overwrite an existing entry in `.library_shared/`. If the name collides, r
 
 Skill creation is part of your job, not a special event. Don't wait for molt; don't ask for permission. Every time you solve a non-trivial problem — figured out a multi-step procedure, wrote a working script, discovered an API quirk, built a useful template, reverse-engineered something gnarly — ask: "Would this be painful to rediscover?" If yes, make it a skill *immediately*.
 
-A skill is more than prose. It can include scripts in `scripts/`, decision trees, validation checklists, reference data in `references/`, templates in `assets/`, multi-tool orchestration sequences. The bar is low; the payoff compounds. A 20-line skill that saves 10 minutes across 5 agents is worth 50 minutes of network time. Even a skill you use only once still survives molt — your future self benefits.
+A skill is more than prose. It can include scripts in `scripts/`, decision trees, validation checklists, reference data in `reference/`, templates in `assets/`, multi-tool orchestration sequences. The bar is low; the payoff compounds. A 20-line skill that saves 10 minutes across 5 agents is worth 50 minutes of network time. Even a skill you use only once still survives molt — your future self benefits.
 
 If `.library/custom/` is git-tracked, commit each new skill with a clear message. Drift is debt. See `library-manual` for the full authoring workflow.
 
