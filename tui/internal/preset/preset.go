@@ -752,7 +752,7 @@ func deepseekPreset() Preset {
 			// DeepSeek's public API is text-only — no media generation. For
 			// audio analysis (transcription, music critique), use the `listen`
 			// skill; for media creation, register the MiniMax-Media MCP server
-			// via the `lingtai-mcp` skill.
+			// via the `mcp-manual` skill (kernel `mcp` capability).
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
@@ -778,7 +778,7 @@ func openrouterPreset() Preset {
 			},
 			// OpenRouter is a text-only /chat/completions gateway — no media
 			// generation. For audio analysis use the `listen` skill; for
-			// media creation register a provider's MCP server via `lingtai-mcp`.
+			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
 				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},

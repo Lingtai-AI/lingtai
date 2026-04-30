@@ -586,7 +586,7 @@ read(file_path="/tmp/output.txt", offset=1, limit=100)
 - ❌ Not refreshing after modifying init.json → configuration not taking effect
 - ✅ Refresh immediately after install/modify, then show to confirm
 
-**Related References**: `lingtai-mcp` (MCP configuration)
+**Related References**: `mcp-manual` (MCP configuration — kernel `mcp` capability)
 
 ---
 

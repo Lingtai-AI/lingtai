@@ -116,7 +116,7 @@
 
       // --- Media creation (compose / video / draw / talk) ---
       // Removed from in-tree capabilities. Use the `media-creation` skill
-      // and register a provider's MCP server (see `lingtai-mcp` skill).
+      // and register a provider's MCP server (see `mcp-manual` skill).
       // Removed: "compose", "video", "draw", "talk".
 
       // --- Audio analysis (transcribe / appreciate) ---

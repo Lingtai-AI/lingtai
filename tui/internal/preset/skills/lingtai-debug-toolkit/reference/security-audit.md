@@ -245,7 +245,7 @@ done
 - ✅ Store secrets in the `.secrets/` directory; MCP configurations should reference environment variables
 - ✅ Audit the source code and permissions of third-party MCP servers
 
-**Related References**: `lingtai-mcp` (MCP configuration specification)
+**Related References**: `mcp-manual` (MCP configuration specification — kernel `mcp` capability)
 
 ---
 

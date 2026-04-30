@@ -28,7 +28,7 @@ import (
 //
 // Strip-only: no MCP server registration is added. Agents that need media
 // generation can register the MiniMax-Media MCP server manually via the
-// `lingtai-mcp` skill (or an equivalent for another provider).
+// `mcp-manual` skill (or an equivalent for another provider).
 //
 // Two scopes are touched:
 //   1. Per-agent init.json under lingtaiDir (each agent dir's manifest)

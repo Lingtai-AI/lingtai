@@ -39,7 +39,7 @@ If your LLM provider supports image input (MiniMax, Gemini, Anthropic, OpenAI, Z
 For text-only LLMs (DeepSeek, OpenRouter text-only, Codex) **with** a MiniMax coding-plan key. Two routes, same backend:
 
 - **Shell** — `mmx vision …` via the official CLI. No MCP registration needed; just install + key. Best for ad-hoc one-shots in bash.
-- **In-tool** — the `understand_image` MCP tool exposed by `minimax-coding-plan-mcp`. Best when the agent needs vision as a tool call inside a longer reasoning loop. MCP server registration is owned by `lingtai-mcp`.
+- **In-tool** — the `understand_image` MCP tool exposed by `minimax-coding-plan-mcp`. Best when the agent needs vision as a tool call inside a longer reasoning loop. MCP server registration is owned by `mcp-manual` (kernel `mcp` capability).
 
 Read the **`minimax-cli`** skill — it covers install, credential sourcing, region selection, and pointers to live docs.
 

@@ -7,7 +7,7 @@ description: >
   key unlocks all four MCP servers. This skill is a thin pointer: it
   tells you how to source the key, pick the region (Z.AI international
   vs BigModel mainland), and where the live docs are. MCP server
-  registration is owned by the `lingtai-mcp` skill.
+  registration is owned by the `mcp-manual` skill (kernel capability).
 version: 1.0.0
 ---
 
@@ -56,7 +56,7 @@ Quotas are *cumulative-total*, not daily — once exhausted, you're done until t
 
 **Mainland (BigModel) HTTP MCP host** is `https://open.bigmodel.cn/api/mcp/...` — substitute that origin for `https://api.z.ai` in the URLs above. (`api.bigmodel.cn` 301-redirects to `open.bigmodel.cn`.) Verified live 2026-04-29.
 
-**MCP server registration is owned by the `lingtai-mcp` skill** — read it for the actual JSON to drop into `mcp/servers.json`. This skill assumes the tools are already in your tool list. If the tool you need is *not* in your list, that's the signal to register the server first.
+**MCP server registration is owned by the `mcp-manual` skill** (kernel `mcp` capability) — read it for how to register, activate, and troubleshoot MCP servers (registry route or legacy `mcp/servers.json`). This skill assumes the tools are already in your tool list. If the tool you need is *not* in your list, that's the signal to register the server first.
 
 ## Sourcing The API Key
 
@@ -142,7 +142,7 @@ Using the right specialized tool gives noticeably better output than `image_anal
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Tool not in your list | MCP server not registered | Use `lingtai-mcp` skill |
+| Tool not in your list | MCP server not registered | Use `mcp-manual` skill |
 | `401 Unauthorized` / `Invalid API key` | Region mismatch, or stale key | Verify host matches account region; refresh `~/.lingtai-tui/.env` |
 | `429 Rate limited` or quota error | Plan total exhausted | Live docs — check current quota; the cumulative-total clock resets per plan period |
 | Vision MCP times out on video | File >8 MB or wrong format | Compress with ffmpeg or use a different format (MP4/MOV/M4V only) |
