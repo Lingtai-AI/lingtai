@@ -137,6 +137,25 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			if globalDir, err := config.GlobalDir(); err == nil {
 				if cfg, err := config.LoadConfig(globalDir); err == nil {
 					toSave = stampAutoEnvVar(toSave, cfg.Keys)
+					// Persist a new key value if the user typed one in
+					// the editor. Look up the env-var name *after*
+					// stampAutoEnvVar so newly-assigned slots get the
+					// right value.
+					if typed.APIKeySet {
+						if llm, ok := toSave.Manifest["llm"].(map[string]interface{}); ok {
+							if envName, _ := llm["api_key_env"].(string); envName != "" {
+								if cfg.Keys == nil {
+									cfg.Keys = map[string]string{}
+								}
+								if typed.APIKey == "" {
+									delete(cfg.Keys, envName)
+								} else {
+									cfg.Keys[envName] = typed.APIKey
+								}
+								_ = config.SaveConfig(globalDir, cfg)
+							}
+						}
+					}
 				}
 			}
 			if err := preset.Save(toSave); err != nil {
@@ -257,7 +276,14 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			if m.cursor < 0 || m.cursor >= len(m.presets) {
 				return m, nil
 			}
-			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang)
+			// Load existing keys so the editor can prefill api_key.
+			var keys map[string]string
+			if globalDir, err := config.GlobalDir(); err == nil {
+				if cfg, err := config.LoadConfig(globalDir); err == nil {
+					keys = cfg.Keys
+				}
+			}
+			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang, keys)
 			// Forward the current size so the editor renders immediately.
 			updated, _ := m.editor.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 			m.editor = updated

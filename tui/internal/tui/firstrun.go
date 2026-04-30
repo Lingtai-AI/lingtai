@@ -658,6 +658,26 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// The user advances explicitly with Enter when they're ready —
 		// editing is no longer an implicit advance.
 		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
+		// If the user typed a new key in the editor, persist it under
+		// the (possibly newly-assigned) api_key_env slot.
+		if msg.APIKeySet {
+			if llm, ok := toSave.Manifest["llm"].(map[string]interface{}); ok {
+				if envName, _ := llm["api_key_env"].(string); envName != "" {
+					if m.existingKeys == nil {
+						m.existingKeys = map[string]string{}
+					}
+					if msg.APIKey == "" {
+						delete(m.existingKeys, envName)
+					} else {
+						m.existingKeys[envName] = msg.APIKey
+					}
+					if cfg, err := config.LoadConfig(m.globalDir); err == nil {
+						cfg.Keys = m.existingKeys
+						_ = config.SaveConfig(m.globalDir, cfg)
+					}
+				}
+			}
+		}
 		if err := preset.Save(toSave); err != nil {
 			m.message = "save preset: " + err.Error()
 			m.step = stepPickPreset
@@ -956,7 +976,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),
@@ -970,7 +990,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang())
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),

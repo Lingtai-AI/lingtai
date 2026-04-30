@@ -385,6 +385,8 @@
   "preset_editor.field_api_compat": "api_compat",
   "preset_editor.field_base_url": "base_url",
   "preset_editor.field_api_key_env": "api_key_env",
+  "preset_editor.field_api_key": "API key",
+  "preset_editor.api_key_unset": "(not set — paste here)",
   "preset_editor.field_context_limit": "context_limit",
   "preset_editor.field_edit": "edit",
   "preset_editor.field_streaming": "streaming",

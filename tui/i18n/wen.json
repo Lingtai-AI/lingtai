@@ -380,6 +380,8 @@
   "preset_editor.field_api_compat": "API 兼容",
   "preset_editor.field_base_url": "端点",
   "preset_editor.field_api_key_env": "密钥环境变量",
+  "preset_editor.field_api_key": "API 钥",
+  "preset_editor.api_key_unset": "（未设——粘于此）",
   "preset_editor.field_context_limit": "上下文上限",
   "preset_editor.field_edit": "编辑",
   "preset_editor.field_streaming": "流式输出",

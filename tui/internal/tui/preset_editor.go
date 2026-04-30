@@ -19,8 +19,15 @@ import (
 // validation and the user pressed Ctrl+S. Hosts (firstrun, /setup,
 // library) decide what to do next — typically: persist via preset.Save,
 // then advance their own state. The editor itself does NOT save to disk.
+//
+// APIKey carries the new key value the user typed in the editor, when
+// they actually changed it. Empty means "unchanged — keep whatever's
+// already in ~/.lingtai-tui/.env". The host writes this into Config.Keys
+// using the preset's api_key_env name as the key.
 type PresetEditorCommitMsg struct {
-	Preset preset.Preset
+	Preset    preset.Preset
+	APIKey    string
+	APIKeySet bool // true when the user typed/changed a value in this session
 }
 
 // PresetEditorCancelMsg fires on Esc (and after the dirty-prompt
@@ -40,7 +47,7 @@ const (
 	feModel
 	feAPICompat
 	feBaseURL
-	feAPIKeyEnv
+	feAPIKey
 	feContextLimit
 	feCapFile
 	feCapEmail
@@ -82,7 +89,7 @@ var capFieldNames = map[editorField]string{
 // extraCapabilities for rationale.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feAPICompat, feBaseURL, feAPIKeyEnv, feContextLimit,
+	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey, feContextLimit,
 	feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
 	feCapAvatar, feCapDaemon, feCapLibrary,
 	feCapWebSearch, feCapVision,
@@ -251,6 +258,15 @@ type PresetEditorModel struct {
 	// dump usually just adds noise. Toggle with Ctrl+D for raw inspection.
 	showJSON bool
 
+	// API key state. existingKeys is the host's Config.Keys snapshot
+	// (env-var-name → value), used to prefill the api_key field when a
+	// matching env var is already populated. apiKey is the live edit
+	// buffer; apiKeySet flips true when the user types into it (so we
+	// know to emit it on commit even if the new value is empty/cleared).
+	existingKeys map[string]string
+	apiKey       string
+	apiKeySet    bool
+
 	// Status
 	saveErr string
 }
@@ -259,20 +275,34 @@ type PresetEditorModel struct {
 // The model never mutates `p`; the host receives the modified version
 // via PresetEditorCommitMsg. isBuiltin gates the clone-first prompt on
 // semantic edits — pass preset.IsBuiltin(p.Name).
-func NewPresetEditorModel(p preset.Preset, lang string) PresetEditorModel {
-	return NewPresetEditorModelWithBuiltinFlag(p, lang, preset.IsBuiltin(p.Name))
+//
+// existingKeys is Config.Keys (env-var-name → value) so the editor can
+// prefill the api_key row when a key is already saved for this preset's
+// api_key_env. Pass nil when no key store is available (e.g. tests).
+func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string) PresetEditorModel {
+	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, preset.IsBuiltin(p.Name))
 }
 
 // NewPresetEditorModelWithBuiltinFlag is the explicit-flag variant for
 // callers that want to override built-in protection (e.g. tests, or
 // a future "fork built-in" flow that has already cloned upstream).
-func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, isBuiltin bool) PresetEditorModel {
+func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, isBuiltin bool) PresetEditorModel {
 	ti := textinput.New()
 	ti.CharLimit = 256
 	ti.SetWidth(40)
 	cn := textinput.New()
 	cn.CharLimit = 64
 	cn.SetWidth(30)
+	// Prefill the api_key buffer if the preset's declared env slot
+	// already holds a value. The buffer is the source of truth for the
+	// row's display; apiKeySet stays false so we don't emit on commit
+	// unless the user actually changed it.
+	apiKey := ""
+	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+		if envName, _ := llm["api_key_env"].(string); envName != "" {
+			apiKey = existingKeys[envName]
+		}
+	}
 	return PresetEditorModel{
 		original:       clonePresetForEditor(p),
 		working:        clonePresetForEditor(p),
@@ -282,6 +312,8 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, isBuiltin
 		input:          ti,
 		cloneNameInput: cn,
 		lang:           lang,
+		existingKeys:   existingKeys,
+		apiKey:         apiKey,
 	}
 }
 
@@ -417,8 +449,17 @@ func (m PresetEditorModel) updateExitPrompt(msg tea.KeyMsg) (PresetEditorModel, 
 func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
-	case feName, feSummary, feGains, feLoses, feBaseURL, feAPIKeyEnv, feContextLimit:
+	case feName, feSummary, feGains, feLoses, feBaseURL, feContextLimit:
 		m.input.SetValue(m.fieldString(f))
+		m.input.CursorEnd()
+		m.input.Focus()
+		m.mode = emInline
+	case feAPIKey:
+		// Edit the live key buffer, not the env-var-name. We start
+		// blank rather than prefilling the existing value so the user
+		// can paste a new key without first deleting the masked
+		// placeholder. apiKeySet flips on commit if they typed anything.
+		m.input.SetValue("")
 		m.input.CursorEnd()
 		m.input.Focus()
 		m.mode = emInline
@@ -660,8 +701,13 @@ func (m *PresetEditorModel) applyInline(val string) {
 		} else {
 			llm["base_url"] = val
 		}
-	case feAPIKeyEnv:
-		llm["api_key_env"] = val
+	case feAPIKey:
+		// Store the raw key in the editor's buffer; the manifest
+		// itself only holds api_key_env (the slot name), assigned at
+		// commit time by the host's stampAutoEnvVar helper. Empty
+		// commit deletes any saved key (treated as "clear it").
+		m.apiKey = val
+		m.apiKeySet = true
 	case feContextLimit:
 		if val == "" {
 			delete(llm, "context_limit")
@@ -812,7 +858,9 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		return m, nil
 	}
 	committed := clonePresetForEditor(m.working)
-	return m, func() tea.Msg { return PresetEditorCommitMsg{Preset: committed} }
+	return m, func() tea.Msg {
+		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+	}
 }
 
 // hasSemanticEdits reports whether the user changed any field whose
@@ -843,7 +891,9 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
-		return m, func() tea.Msg { return PresetEditorCommitMsg{Preset: committed} }
+		return m, func() tea.Msg {
+		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+	}
 	case "enter":
 		newName := strings.TrimSpace(m.cloneNameInput.Value())
 		if newName == "" {
@@ -858,7 +908,9 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
-		return m, func() tea.Msg { return PresetEditorCommitMsg{Preset: committed} }
+		return m, func() tea.Msg {
+		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+	}
 	}
 	var cmd tea.Cmd
 	m.cloneNameInput, cmd = m.cloneNameInput.Update(msg)
@@ -906,9 +958,10 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 	case feBaseURL:
 		s, _ := llm["base_url"].(string)
 		return s
-	case feAPIKeyEnv:
-		s, _ := llm["api_key_env"].(string)
-		return s
+	case feAPIKey:
+		// Display the key (masked). The env-var name is an internal
+		// detail; the user only needs to see whether a key is set.
+		return maskAPIKey(m.apiKey)
 	case feContextLimit:
 		switch v := llm["context_limit"].(type) {
 		case float64:
@@ -1006,7 +1059,7 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	rows = append(rows, m.row(feModel, lbl("model"), asString(llm["model"]), width-4))
 	rows = append(rows, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4))
 	rows = append(rows, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4))
-	rows = append(rows, m.row(feAPIKeyEnv, lbl("api_key_env"), asString(llm["api_key_env"]), width-4))
+	rows = append(rows, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4))
 	rows = append(rows, m.row(feContextLimit, lbl("context_limit"), m.fieldString(feContextLimit), width-4))
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_core")))
@@ -1482,6 +1535,20 @@ func asExtra(extra map[string]interface{}, key string) string {
 	}
 	s, _ := extra[key].(string)
 	return s
+}
+
+// maskAPIKey returns a display form for an API key — the last 4 chars
+// preceded by ••• padding, or the i18n placeholder when empty. We never
+// show the full key on screen; pasting a new value triggers a fresh
+// edit which then masks again on commit.
+func maskAPIKey(key string) string {
+	if key == "" {
+		return i18n.T("preset_editor.api_key_unset")
+	}
+	if len(key) <= 4 {
+		return strings.Repeat("•", len(key))
+	}
+	return "••••••••" + key[len(key)-4:]
 }
 
 // cycleString rotates `cur` through `opts` by `dir` steps. Unknown
