@@ -488,6 +488,103 @@ func RefFor(p Preset) string {
 	return "~/.lingtai-tui/presets/" + subdir + "/" + p.Name + ".json"
 }
 
+// ResolvedRef is a single entry in ResolveRefs's output. It captures
+// everything a UI surface (the kanban Presets section in particular)
+// needs to render an at-a-glance health check for a preset path
+// recorded in manifest.preset.{default,active,allowed}.
+type ResolvedRef struct {
+	// Ref is the original input string (e.g. "~/.lingtai-tui/presets/templates/mimo.json").
+	Ref string
+	// Name is the preset's filename stem (e.g. "mimo"). Empty when Ref
+	// is malformed.
+	Name string
+	// Source is SourceTemplate when the resolved path lives under a
+	// /templates/ segment, SourceSaved when it lives under /saved/,
+	// SourceUnknown otherwise (legacy flat layout, custom user path).
+	Source PresetSource
+	// Exists reports whether the file is readable on disk right now.
+	Exists bool
+	// HasKey reports whether the preset's api_key_env (if any) is
+	// populated in the passed existingKeys map. True when the preset
+	// declares no api_key_env (codex OAuth, locally-hosted custom).
+	// Only meaningful when Exists is true.
+	HasKey bool
+}
+
+// ResolveRefs expands and inspects a list of preset path strings. For
+// each ref, returns the directory-of-origin (templates/saved), whether
+// the file exists, and whether its declared api_key_env has a value in
+// existingKeys. Used by the kanban's Presets section to render an
+// at-a-glance health check for an agent's preset surface.
+//
+// Ref strings are accepted in the same forms the kernel accepts:
+// absolute, ~/-prefixed, or relative to the caller's working dir
+// (relative paths are resolved against $PWD — pass absolute or
+// home-relative for predictable behavior).
+//
+// existingKeys is the env-var-name → value map (typically
+// Config.Keys). Pass nil when no key store is available; HasKey will
+// be false for any preset that declares an api_key_env.
+func ResolveRefs(refs []string, existingKeys map[string]string) []ResolvedRef {
+	out := make([]ResolvedRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, resolveOneRef(ref, existingKeys))
+	}
+	return out
+}
+
+func resolveOneRef(ref string, existingKeys map[string]string) ResolvedRef {
+	r := ResolvedRef{Ref: ref}
+	if ref == "" {
+		return r
+	}
+	abs := expandUserPath(ref)
+	r.Name = strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+	switch {
+	case strings.Contains(abs, string(filepath.Separator)+"templates"+string(filepath.Separator)):
+		r.Source = SourceTemplate
+	case strings.Contains(abs, string(filepath.Separator)+"saved"+string(filepath.Separator)):
+		r.Source = SourceSaved
+	default:
+		r.Source = SourceUnknown
+	}
+	if _, err := os.Stat(abs); err == nil {
+		r.Exists = true
+	}
+	if !r.Exists {
+		return r
+	}
+	if p, err := loadFromPath(abs); err == nil {
+		envName := ""
+		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+			envName, _ = llm["api_key_env"].(string)
+		}
+		if envName == "" {
+			r.HasKey = true // OAuth flow / locally-hosted: no key needed
+		} else if v, ok := existingKeys[envName]; ok && v != "" {
+			r.HasKey = true
+		}
+	}
+	return r
+}
+
+// expandUserPath returns abs(`~/foo` → `$HOME/foo`), passing other forms
+// through unchanged. Internal helper for ResolveRefs.
+func expandUserPath(p string) string {
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return p
+	}
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
+}
+
 // AutoSavedName picks a fresh saved-preset name derived from a template,
 // using the same gap-fill counter as AutoEnvVarName. Pattern is
 // "<template>-<N>" where N is the lowest positive integer that doesn't

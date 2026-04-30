@@ -816,9 +816,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		if a.inSecretaryView {
 			secLingtaiDir := secretary.LingtaiDir(a.globalDir)
 			secAgentDir := secretary.AgentDir(a.globalDir)
-			a.props = NewPropsModel(secLingtaiDir, secAgentDir)
+			a.props = NewPropsModel(secLingtaiDir, secAgentDir, a.globalDir)
 		} else {
-			a.props = NewPropsModel(a.projectDir, a.orchDir)
+			a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":
@@ -1158,9 +1158,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		if a.inSecretaryView {
 			secLingtaiDir := secretary.LingtaiDir(a.globalDir)
 			secAgentDir := secretary.AgentDir(a.globalDir)
-			a.props = NewPropsModel(secLingtaiDir, secAgentDir)
+			a.props = NewPropsModel(secLingtaiDir, secAgentDir, a.globalDir)
 		} else {
-			a.props = NewPropsModel(a.projectDir, a.orchDir)
+			a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "library":

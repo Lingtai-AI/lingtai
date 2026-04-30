@@ -13,15 +13,18 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 // PropsModel is a full-screen view showing agent properties (left) and network dashboard (right).
 type PropsModel struct {
-	baseDir string // .lingtai/ directory (for agent discovery)
-	orchDir string // admin agent's working dir (default selected)
-	width   int
-	height  int
+	baseDir   string // .lingtai/ directory (for agent discovery)
+	orchDir   string // admin agent's working dir (default selected)
+	globalDir string // ~/.lingtai-tui/ (for resolving Config.Keys for preset health checks)
+	width     int
+	height    int
 
 	// Left panel: selected agent
 	selectedDir     string         // working dir of the agent shown on left (defaults to orchDir)
@@ -44,10 +47,11 @@ type PropsModel struct {
 	pickerIdx  int
 }
 
-func NewPropsModel(baseDir, orchDir string) PropsModel {
+func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 	return PropsModel{
 		baseDir:     baseDir,
 		orchDir:     orchDir,
+		globalDir:   globalDir,
 		selectedDir: orchDir,
 	}
 }
@@ -404,6 +408,69 @@ func (m PropsModel) renderLeft(maxW int) string {
 		lines = append(lines, "  "+labelStyle.Render("history: ")+valueStyle.Render(formatComma(int64(ctx.HistoryTokens))))
 	}
 
+	// Presets — surfaces manifest.preset.{default, active, allowed}
+	// with a key-presence and existence check per allowed entry. Keeps
+	// answers to "what can this agent run, and is anything broken?"
+	// one screen away from the agent's other vitals.
+	if presetBlock, ok := raw["preset"].(map[string]interface{}); ok {
+		defaultRef, _ := presetBlock["default"].(string)
+		activeRef, _ := presetBlock["active"].(string)
+		var allowedRefs []string
+		if al, ok := presetBlock["allowed"].([]interface{}); ok {
+			for _, e := range al {
+				if s, ok := e.(string); ok && s != "" {
+					allowedRefs = append(allowedRefs, s)
+				}
+			}
+		}
+		if defaultRef != "" || activeRef != "" || len(allowedRefs) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_presets")))
+			lines = append(lines, "")
+
+			// Single line when active and default match (the common case);
+			// otherwise show both. We render the home-shortened name
+			// rather than the full ref string — the allowed list below
+			// shows full names so the active line is just a label.
+			defaultName := refDisplayName(defaultRef)
+			activeName := refDisplayName(activeRef)
+			if activeRef == defaultRef && activeRef != "" {
+				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_active")+": ")+valueStyle.Render(activeName))
+			} else {
+				if activeName != "" {
+					lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_active")+": ")+valueStyle.Render(activeName))
+				}
+				if defaultName != "" {
+					lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_default")+": ")+valueStyle.Render(defaultName))
+				}
+			}
+
+			if len(allowedRefs) > 0 {
+				cfg, _ := config.LoadConfig(m.globalDir)
+				resolved := preset.ResolveRefs(allowedRefs, cfg.Keys)
+				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
+				for _, rr := range resolved {
+					marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")
+					if !rr.Exists || !rr.HasKey {
+						marker = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("✗")
+					}
+					tag := ""
+					switch rr.Source {
+					case preset.SourceTemplate:
+						tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_template")+")")
+					case preset.SourceSaved:
+						tag = " " + labelStyle.Render("("+i18n.T("props.preset_source_saved")+")")
+					}
+					name := rr.Name
+					if name == "" {
+						name = rr.Ref
+					}
+					lines = append(lines, "    "+marker+" "+valueStyle.Render(name)+tag)
+				}
+			}
+		}
+	}
+
 	// Capabilities
 	if caps, ok := raw["capabilities"]; ok && caps != nil {
 		lines = append(lines, "")
@@ -725,4 +792,22 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+// refDisplayName extracts the filename stem from a preset path string
+// for compact display. "~/.lingtai-tui/presets/saved/mimo-1.json"
+// → "mimo-1". Empty input → empty output.
+func refDisplayName(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	// Strip directory prefix.
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		ref = ref[i+1:]
+	}
+	// Strip extension.
+	if i := strings.LastIndex(ref, "."); i >= 0 {
+		ref = ref[:i]
+	}
+	return ref
 }
