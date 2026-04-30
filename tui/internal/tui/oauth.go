@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -18,10 +17,13 @@ import (
 )
 
 const (
-	codexClientID   = "app_EMoamEEZ73f0CkXaXp7hrann"
-	codexAuthURL    = "https://auth.openai.com/oauth/authorize"
-	codexTokenURL   = "https://auth.openai.com/oauth/token"
-	codexScope      = "openid profile email offline_access"
+	codexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	codexAuthURL  = "https://auth.openai.com/oauth/authorize"
+	codexTokenURL = "https://auth.openai.com/oauth/token"
+	// codexScope must include the connector scopes — without them the
+	// authorize page rejects the request immediately. Matches the official
+	// Codex CLI scope string.
+	codexScope = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 	// codexOriginator must match a value OpenAI's auth server accepts for
 	// this client_id. The shared public client_id (used by Codex CLI,
 	// Hermes, OpenClaw) is tied to an originator allowlist on the server
@@ -30,8 +32,13 @@ const (
 	// Codex CLI's originator string.
 	codexOriginator = "codex_cli_rs"
 	callbackPath    = "/auth/callback"
-	defaultPort     = 1455
-	oauthTimeout    = 5 * time.Minute
+	// OpenAI's allowlist registers exactly these two redirect URIs for
+	// app_EMoamEEZ73f0CkXaXp7hrann: http://localhost:1455/auth/callback
+	// and http://localhost:1457/auth/callback. Random ephemeral ports
+	// would not match the allowlist and the flow fails immediately.
+	defaultPort  = 1455
+	fallbackPort = 1457
+	oauthTimeout = 5 * time.Minute
 )
 
 // CodexTokens holds the token bundle written to disk.
@@ -63,13 +70,14 @@ func generatePKCE() (verifier, challenge string) {
 	return verifier, challenge
 }
 
-// generateState creates a 64-character hex string from 32 random bytes.
+// generateState creates a 43-character base64url string from 32 random bytes.
+// Matches the official Codex CLI's state format (base64url, no padding).
 func generateState() string {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		panic("crypto/rand failed: " + err.Error())
 	}
-	return hex.EncodeToString(buf)
+	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 // startOAuthFlow initiates the Codex OAuth PKCE flow.
@@ -84,18 +92,22 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 		verifier, challenge := generatePKCE()
 		state := generateState()
 
-		// Try default port first, fall back to ephemeral.
+		// Try default port (1455), then fallback (1457). Both are on
+		// OpenAI's redirect_uri allowlist for this client_id; random
+		// ports would be rejected.
 		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
 		if err != nil {
-			listener, err = net.Listen("tcp", "127.0.0.1:0")
+			listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", fallbackPort))
 			if err != nil {
-				ch <- CodexOAuthDoneMsg{Err: fmt.Errorf("listen: %w", err)}
+				ch <- CodexOAuthDoneMsg{Err: fmt.Errorf("listen on :%d or :%d: %w", defaultPort, fallbackPort, err)}
 				return
 			}
 		}
 
 		port := listener.Addr().(*net.TCPAddr).Port
-		redirectURI := fmt.Sprintf("http://127.0.0.1:%d%s", port, callbackPath)
+		// Bind is on 127.0.0.1 but the redirect_uri must be "localhost"
+		// — that's the exact string OpenAI's allowlist matches against.
+		redirectURI := fmt.Sprintf("http://localhost:%d%s", port, callbackPath)
 
 		// Channel for the authorization code from the callback handler.
 		codeCh := make(chan string, 1)
@@ -156,18 +168,7 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 			_ = server.Shutdown(ctx)
 		}()
 
-		// Build authorization URL.
-		params := url.Values{
-			"response_type":         {"code"},
-			"client_id":             {codexClientID},
-			"redirect_uri":          {redirectURI},
-			"scope":                 {codexScope},
-			"code_challenge":        {challenge},
-			"code_challenge_method": {"S256"},
-			"state":                 {state},
-			"originator":            {codexOriginator},
-		}
-		authURL := codexAuthURL + "?" + params.Encode()
+		authURL := buildAuthorizeURL(redirectURI, challenge, state)
 
 		openBrowser(authURL)
 
@@ -198,6 +199,25 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 	}()
 
 	return ch
+}
+
+// buildAuthorizeURL assembles the OAuth authorize URL with the parameter
+// set OpenAI's allowlist requires for the shared Codex client_id. Every
+// param here is load-bearing — see oauth_test.go for the rationale.
+func buildAuthorizeURL(redirectURI, challenge, state string) string {
+	params := url.Values{
+		"response_type":              {"code"},
+		"client_id":                  {codexClientID},
+		"redirect_uri":               {redirectURI},
+		"scope":                      {codexScope},
+		"code_challenge":             {challenge},
+		"code_challenge_method":      {"S256"},
+		"id_token_add_organizations": {"true"},
+		"codex_cli_simplified_flow":  {"true"},
+		"state":                      {state},
+		"originator":                 {codexOriginator},
+	}
+	return codexAuthURL + "?" + params.Encode()
 }
 
 // exchangeCodeForTokens POSTs to the token endpoint and returns parsed tokens.

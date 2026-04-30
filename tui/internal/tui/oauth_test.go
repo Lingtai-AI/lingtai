@@ -3,11 +3,11 @@ package tui
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -38,19 +38,75 @@ func TestGeneratePKCE(t *testing.T) {
 func TestGenerateState(t *testing.T) {
 	state := generateState()
 
-	if len(state) != 64 {
-		t.Fatalf("state length = %d, want 64", len(state))
+	// Base64url-encoded 32 bytes = 43 chars (no padding).
+	// Matches the official Codex CLI's state format.
+	if len(state) != 43 {
+		t.Fatalf("state length = %d, want 43", len(state))
 	}
 
-	// Must be valid hex.
-	if _, err := hex.DecodeString(state); err != nil {
-		t.Fatalf("state is not valid hex: %v", err)
+	// Must be valid base64url (no padding).
+	decoded, err := base64.RawURLEncoding.DecodeString(state)
+	if err != nil {
+		t.Fatalf("state is not valid base64url: %v", err)
+	}
+	if len(decoded) != 32 {
+		t.Fatalf("decoded state length = %d, want 32", len(decoded))
 	}
 
 	// Two calls should differ.
 	s2 := generateState()
 	if state == s2 {
 		t.Fatal("two calls returned the same state — randomness failure")
+	}
+}
+
+// TestBuildAuthorizeURL pins every parameter OpenAI's auth-server allowlist
+// validates against for the shared Codex client_id. Drift on any of these
+// breaks login with a cryptic "Authentication Error" page — verified in the
+// wild, see commit history. Bump these values in lockstep with the official
+// openai/codex CLI; do not relax the test by switching to substring checks.
+func TestBuildAuthorizeURL(t *testing.T) {
+	const (
+		redirect  = "http://localhost:1455/auth/callback"
+		challenge = "test-challenge"
+		state     = "test-state"
+	)
+
+	got := buildAuthorizeURL(redirect, challenge, state)
+
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	if u.Scheme+"://"+u.Host+u.Path != "https://auth.openai.com/oauth/authorize" {
+		t.Fatalf("base URL = %q, want https://auth.openai.com/oauth/authorize", u.Scheme+"://"+u.Host+u.Path)
+	}
+
+	q := u.Query()
+	want := map[string]string{
+		"response_type":              "code",
+		"client_id":                  "app_EMoamEEZ73f0CkXaXp7hrann",
+		"redirect_uri":               redirect,
+		"scope":                      "openid profile email offline_access api.connectors.read api.connectors.invoke",
+		"code_challenge":             challenge,
+		"code_challenge_method":      "S256",
+		"id_token_add_organizations": "true",
+		"codex_cli_simplified_flow":  "true",
+		"state":                      state,
+		"originator":                 "codex_cli_rs",
+	}
+	for k, v := range want {
+		if got := q.Get(k); got != v {
+			t.Errorf("query param %q = %q, want %q", k, got, v)
+		}
+	}
+
+	// No extra params we don't recognize — extras might be silently
+	// rejected or cause future drift.
+	for k := range q {
+		if _, ok := want[k]; !ok {
+			t.Errorf("unexpected query param %q (= %q)", k, q.Get(k))
+		}
 	}
 }
 
@@ -82,7 +138,7 @@ func TestExchangeCodeForTokens(t *testing.T) {
 			"client_id":     codexClientID,
 			"code":          "test-auth-code",
 			"code_verifier": "test-verifier",
-			"redirect_uri":  "http://127.0.0.1:1455/auth/callback",
+			"redirect_uri":  "http://localhost:1455/auth/callback",
 		}
 		for k, want := range checks {
 			got := r.FormValue(k)
@@ -106,7 +162,7 @@ func TestExchangeCodeForTokens(t *testing.T) {
 		server.URL,
 		"test-auth-code",
 		"test-verifier",
-		"http://127.0.0.1:1455/auth/callback",
+		"http://localhost:1455/auth/callback",
 	)
 	if err != nil {
 		t.Fatalf("exchangeCodeForTokens failed: %v", err)
