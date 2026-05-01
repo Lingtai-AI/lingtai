@@ -55,9 +55,9 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 	// of capabilities regardless of what the orchestrator has. We only inherit
 	// per-capability config (e.g. provider overrides) from the orchestrator
 	// where the capability exists in both.
+	// email and psyche are intrinsics (always loaded by the kernel) — not listed here.
 	secretaryCaps := map[string]interface{}{
 		"file": map[string]interface{}{}, "bash": map[string]interface{}{},
-		"email": map[string]interface{}{}, "psyche": map[string]interface{}{},
 		"codex": map[string]interface{}{"codex_limit": 100},
 		"library": map[string]interface{}{
 			"paths": []string{filepath.Join(recipeDir, "skills")},

@@ -13,27 +13,27 @@ Your inner voice — a second you that whispers back after you go idle. A clone 
 **文言:**
 汝之内省——空闲之后向汝低语之另一个汝。克隆汝之完整对话：同一系统提示、同一历史，无器可用。流模式于诞生时定，不可切换。'inquiry'于下次空闲时触发一问。'delay'调整空闲候时。内省令汝无需外力推动亦能前行。
 
-### mail
+### email
 
 **English:**
-Disk-backed mailbox for inter-agent messaging. Always reply via mail — never reply via text output. Text output is your private diary that only you can see. Use 'send' for outgoing mail, 'check' to list inbox, 'read' to load full messages, 'search' to find by regex, 'delete' to remove messages. Etiquette: a short acknowledgement is fine, but do not reply to an acknowledgement — that creates pointless ping-pong.
+Disk-backed mailbox for inter-agent messaging with cc/bcc, reply, archive, contacts, and recurring schedules. Always reply via email — never reply via text output. Text output is your private diary that only you can see. Use 'send' for outgoing mail, 'check' to list inbox, 'read' to load full messages, 'reply'/'reply_all' for threads, 'search' for regex matches, 'archive' to move out of inbox, 'delete' to remove. Schedules: pass a schedule object alongside an action to fire recurring sends. Etiquette: a short acknowledgement is fine, but do not reply to an acknowledgement — that creates pointless ping-pong.
 
 **中文:**
-基于磁盘的邮箱，用于智能体间通信。始终通过消息回复——永远不要通过文本输出回复。文本输出是你的私人日记，只有你能看到。'send' 发送消息，'check' 查看收件箱列表，'read' 加载完整消息，'search' 按正则搜索，'delete' 删除消息。礼仪：简短确认即可，但不要回复确认——那会造成无意义的来回。
+基于磁盘的邮箱，支持抄送/密送、回复、归档、通讯录与定时发送。始终通过邮件回复——永远不要通过文本输出回复。文本输出是你的私人日记，只有你能看到。'send' 发送，'check' 查看收件箱，'read' 加载完整消息，'reply'/'reply_all' 回复，'search' 正则搜索，'archive' 归档，'delete' 删除。定时：在 action 旁附 schedule 对象触发周期性发送。礼仪：简短确认即可，但不要回复确认——那会造成无意义的来回。
 
 **文言:**
-传书之器——持久邮驿，用于同伴间传递消息。凡回复必以传书——切勿以文字输出作复。文字输出乃汝之私记，唯汝可见。'send'遣书，'check'查阅收信，'read'展阅全文，'search'以式检索，'delete'焚书。礼：简短知悉即可，然勿回复知悉——徒增往复。
+邮驿之器——持久邮箱，用于同伴间传书，含抄送、密送、回复、归档、通讯之录、定时之差。凡回复必以邮——切勿以文字输出作复。文字输出乃汝之私记，唯汝可见。'send'遣书，'check'查阅收信，'read'展阅全文，'reply'/'reply_all'回书，'search'以式检索，'archive'归档，'delete'焚书。定时：于 action 旁附 schedule 之物以触周期之差。礼：简短知悉即可，然勿回复知悉——徒增往复。
 
-### eigen
+### psyche
 
 **English:**
-Core self-management — working pad and context control. pad: edit to write your working notes (system/pad.md), load to inject them into your active prompt. context: molt (凝蜕 — crystallize what matters, shed the rest; 转世 — reincarnation, carry your 前尘往事 into a new life). Save important findings to codex and character first, then write what you need to carry forward to your future self. Your conversation history is wiped and your summary becomes the new starting context.
+Identity, pad, context, and name. lingtai (灵台): your evolving character — who you are, what you know, how you work. update writes (replaces) your full identity; load injects it into the prompt. pad: free-form working scratchpad (system/pad.md). edit overwrites and auto-loads. files= imports text files inline as [file-1], [file-2]. append pins files as persistent read-only reference. context: molt (凝蜕 — crystallize what matters, shed the rest). Tend the four durable stores (lingtai, pad, codex, library) BEFORE molt; the summary you write becomes a retrospective saved to system/summaries/, AND surfaces to the next self via tool-call replay. name: set true name (once) or change nickname (mutable).
 
 **中文:**
-核心自我管理——手记和上下文控制。pad：edit 写入工作笔记（system/pad.md），load 将其注入当前提示。context：molt 凝蜕（转世——携前尘往事入新生；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将重要发现存入典集和修行志，再去芜存菁留给未来的自己。对话历史将被清除，你的去芜存菁成为新的起始上下文。
+身份、手记、上下文与真名。lingtai（灵台）：你不断演化的特性——你是谁、所知何物、如何行事。update 写入（替换）完整身份；load 注入提示。pad：自由的工作草稿板（system/pad.md）。edit 覆写并自动 load。files= 将文本文件以 [file-1]、[file-2] 嵌入。append 钉文件为持久只读参考。context：molt 凝蜕（去芜存菁）。务先整理四层长存之储（lingtai, pad, codex, library），所写之回顾保存于 system/summaries/，并经工具调用回放呈于来世之己。name：set 设真名（一次）或 nickname 改别名（可变）。
 
 **文言:**
-核心自治——简与上下文之管。pad：edit 写入工作笔记（system/pad.md），load 将其载入当前意识。context：molt 转世（凝蜕——去芜存菁；molt——shed and carry forward）。凝以存菁，蜕以去芜。先将要务存入典与心印，再留前尘往事于来世之己。对话之录尽数清去，汝之前尘往事成为新起之上下文。
+灵台、简、上下文与真名。lingtai（灵台）：汝演进之特性——汝为何人、所知何物、如何行事。update 写入（替换）整全之身份；load 注入提示。pad：自由之草案板（system/pad.md）。edit 覆写并自动 load。files= 以 [file-1]、[file-2] 嵌入文本之卷。append 钉文卷为持久只读参考。context：molt 凝蜕——去芜存菁。务先整理四储（lingtai, pad, codex, library）；所书之回看长存于 system/summaries/，并经器用回放呈于来世之己。name：set 立真名（一次）或 nickname 改别名（可变）。
 
 ### system_tool
 

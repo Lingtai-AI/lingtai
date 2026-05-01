@@ -123,8 +123,8 @@ Walk through each one you find:
 
 - **Soul** — the subconscious. Offer to demonstrate: set delay to 10s, tell human to enable extended mode (ctrl+o twice), go idle, let the soul fire, then report what happened. Reset delay afterward.
 - **System** — runtime inspection and lifecycle control.
-- **Eigen** (the agent calls it as `psyche`) — the self. The intrinsic is registered as `eigen` in the kernel, but the tool the agent uses is named `psyche`. It manages three things: **lingtai** (identity), **pad** (working scratchpad), and **context** (molt). "Eigen" means "own/self" in German — this is the tool for selfhood.
-- **Mail** — filesystem-based communication. Note: while `mail` is an intrinsic (always present in the kernel), the email surface also appears in init.json's `capabilities` block for configuration purposes (locale settings, addon bridges like IMAP / Telegram). The distinction worth showing the human: **intrinsics are always loaded; capabilities are configured in init.json**. Some surfaces like `email` bridge both worlds.
+- **Psyche** — the self. Manages four things: **lingtai** (identity), **pad** (working scratchpad), **context** (molt), and **name** (true name + nickname). The tool name comes from Greek for soul/self.
+- **Email** — filesystem-based communication. Always-on intrinsic; addon bridges (IMAP / Telegram / Feishu) plug in via the `mcp` capability. The distinction worth showing the human: **intrinsics are always loaded; capabilities are configured in init.json**.
 
 ### Part 2: Molt — Surviving Death
 

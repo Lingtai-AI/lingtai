@@ -51,10 +51,8 @@ const (
 	feAPIKey
 	feContextLimit
 	feCapFile
-	feCapEmail
 	feCapBash
 	feCapWebSearch
-	feCapPsyche
 	feCapCodex
 	feCapAvatar
 	feCapDaemon
@@ -72,10 +70,8 @@ const (
 // conditional row.
 var capFieldNames = map[editorField]string{
 	feCapFile:      "file",
-	feCapEmail:     "email",
 	feCapBash:      "bash",
 	feCapWebSearch: "web_search",
-	feCapPsyche:    "psyche",
 	feCapCodex:     "codex",
 	feCapAvatar:    "avatar",
 	feCapDaemon:    "daemon",
@@ -85,13 +81,13 @@ var capFieldNames = map[editorField]string{
 
 // editorFieldOrder is the rendering order of fields. The cursor walks
 // this slice; section headers render between transitions. Capability
-// rows split into core (file/email/bash/psyche/codex/avatar/daemon/
-// library) and extras (web_search/vision) — see coreCapabilities and
-// extraCapabilities for rationale.
+// rows split into core (file/bash/codex/avatar/daemon/library) and
+// extras (web_search/vision) — email and psyche are intrinsics, always
+// present, so they don't appear here.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey, feContextLimit,
-	feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
+	feCapFile, feCapBash, feCapCodex,
 	feCapAvatar, feCapDaemon, feCapLibrary,
 	feCapWebSearch, feCapVision,
 	feStreaming, feKarma, feNirvana,
@@ -170,7 +166,7 @@ var modelHasVision = map[string]bool{
 // shares — filesystem, shell, mailbox, knowledge, parallelism. No
 // provider knobs, not model-conditional.
 var coreCapabilities = []string{
-	"file", "email", "bash", "psyche", "codex",
+	"file", "bash", "codex",
 	"avatar", "daemon", "library",
 }
 
@@ -186,19 +182,18 @@ var extraCapabilities = []string{
 var editorCapabilities = append(append([]string{}, coreCapabilities...), extraCapabilities...)
 
 // defaultCaps returns the canonical capability set the editor applies
-// when the user switches to this model. The principle: every model
-// gets the same baseline, plus or minus the model-conditional bits
-// (today: vision). User customizations to other capabilities (e.g.
-// disabling email) are NOT preserved across model switches — by
+// when the user switches to this model. Every model gets the same
+// baseline, plus or minus the model-conditional bits (today: vision).
+// email and psyche are intrinsics (always loaded by the kernel) and do
+// not appear here. User customizations to other capabilities (e.g.
+// disabling daemon) are NOT preserved across model switches — by
 // design, since the user explicitly opted into the new model's
 // defaults by switching.
 func defaultCapsFor(modelID string) map[string]interface{} {
 	caps := map[string]interface{}{
 		"file":       map[string]interface{}{},
-		"email":      map[string]interface{}{},
 		"bash":       map[string]interface{}{"yolo": true},
 		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-		"psyche":     map[string]interface{}{},
 		"codex":      map[string]interface{}{},
 		"avatar":     map[string]interface{}{},
 		"daemon":     map[string]interface{}{},
@@ -545,7 +540,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feCapFile, feCapEmail, feCapBash, feCapPsyche, feCapCodex,
+	case feCapFile, feCapBash, feCapCodex,
 		feCapAvatar, feCapDaemon, feCapLibrary, feCapWebSearch, feCapVision:
 		// Capability rows: Enter toggles, same as Space. Disabled rows
 		// (e.g. vision on text-only models) are gated inside toggleFocused.

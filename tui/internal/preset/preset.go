@@ -669,8 +669,8 @@ func minimaxPreset() Preset {
 				"api_key": nil, "api_key_env": "MINIMAX_API_KEY", "base_url": nil,
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": mm, "psyche": e(), "codex": e(),
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": mm, "codex": e(),
 				"vision": mm, "avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -692,8 +692,8 @@ func zhipuPreset() Preset {
 				"base_url": nil, "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": zp, "psyche": e(), "codex": e(),
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": zp, "codex": e(),
 				"vision": zp,
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
@@ -726,9 +726,9 @@ func mimoPreset() Preset {
 				"base_url": "https://api.xiaomimimo.com/v1", "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"psyche":     e(), "codex": e(),
+				"codex": e(),
 				"vision":     mp,
 				"avatar":     e(), "daemon": e(),
 				"library":    libraryDefault(),
@@ -754,9 +754,9 @@ func deepseekPreset() Preset {
 			// skill; for media creation, register the MiniMax-Media MCP server
 			// via the `mcp-manual` skill (kernel `mcp` capability).
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"psyche": e(), "codex": e(),
+				"codex": e(),
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -780,9 +780,9 @@ func openrouterPreset() Preset {
 			// generation. For audio analysis use the `listen` skill; for
 			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"psyche": e(), "codex": e(),
+				"codex": e(),
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},
@@ -804,8 +804,8 @@ func codexPreset() Preset {
 				"base_url": "https://chatgpt.com/backend-api",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": cx, "psyche": e(), "codex": e(),
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": cx, "codex": e(),
 				"vision": cx,
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
@@ -826,8 +826,8 @@ func customPreset() Preset {
 				"api_key": nil, "api_key_env": "LLM_API_KEY", "base_url": nil,
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "email": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": e(), "psyche": e(), "codex": e(),
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": e(), "codex": e(),
 				"avatar": e(), "daemon": e(),
 				"library": libraryDefault(),
 			},

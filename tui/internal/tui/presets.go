@@ -6,8 +6,9 @@ type UsePresetMsg struct {
 }
 
 // AllCapabilities is the list of all available capability names.
+// email and psyche are kernel intrinsics (always loaded), not capabilities.
 var AllCapabilities = []string{
-	"file", "email", "bash", "web_search", "psyche", "codex",
+	"file", "bash", "web_search", "codex",
 	"vision",
 	"avatar", "daemon", "library",
 }
