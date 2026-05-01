@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 30
+const CurrentVersion = 31
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -53,6 +53,7 @@ var migrations = []Migration{
 	{Version: 28, Name: "addons-to-mcp", Fn: migrateAddonsToMCP},                       // shared: rewrites legacy addons:{name:cfg} dict into addons:[name] + mcp.{name} activation entries
 	{Version: 29, Name: "preset-allowed-list", Fn: migratePresetAllowedList},           // shared: rewrites manifest.preset to {default, active, allowed:[paths]} schema
 	{Version: 30, Name: "preset-dir-split", Fn: migratePresetDirSplit},                 // shared: rewrites flat presets/ paths to templates/ or saved/ subdirs
+	{Version: 31, Name: "drop-legacy-intrinsic-capabilities", Fn: migrateDropLegacyIntrinsicCapabilities}, // shared: drops psyche/email from init.json (now intrinsics)
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any
