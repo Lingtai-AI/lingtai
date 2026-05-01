@@ -1783,10 +1783,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			secretaryIdx := m.recipeMaxIdx() + 1
 			recipeBackIdx := secretaryIdx + 1
-			recipeNextIdx := secretaryIdx + 2
-			recipeLastIdx := recipeNextIdx
+			recipeLastIdx := recipeBackIdx
 			// recipeDoNext encapsulates the save-and-advance logic
-			// triggered by activating the Next button.
+			// triggered by Enter on a recipe row.
 			recipeDoNext := func() (FirstRunModel, tea.Cmd) {
 				if m.recipeIdx == -1 {
 					return m.performSetupSaveOnly()
@@ -1846,31 +1845,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.recipeCustomInput.Blur()
 				}
 				return m, nil
-			case "tab":
-				if m.recipeIdx == recipeNextIdx {
-					m.recipeIdx = recipeBackIdx
-				} else {
-					m.recipeIdx = recipeNextIdx
-				}
-				m.recipeCustomInput.Blur()
-				return m, nil
-			case "shift+tab":
+			case "tab", "shift+tab":
 				m.recipeIdx = recipeBackIdx
 				m.recipeCustomInput.Blur()
 				return m, nil
-			case "left":
-				if m.recipeIdx == recipeNextIdx {
-					m.recipeIdx = recipeBackIdx
-				}
-				return m, nil
-			case "right":
-				if m.recipeIdx == recipeBackIdx {
-					m.recipeIdx = recipeNextIdx
-				}
-				return m, nil
 			case "ctrl+o":
 				if m.recipeIdx == secretaryIdx || m.recipeIdx == -1 ||
-					m.recipeIdx == recipeBackIdx || m.recipeIdx == recipeNextIdx {
+					m.recipeIdx == recipeBackIdx {
 					return m, nil
 				}
 				recipeDir := m.resolveCurrentRecipeDir()
@@ -1896,9 +1877,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.step = stepAgentNameDir
 					m.message = ""
 					return m, nil
-				}
-				if m.recipeIdx == recipeNextIdx {
-					return recipeDoNext()
 				}
 				// Row: secretary toggle (space-style) or pick-and-save.
 				if m.recipeIdx == secretaryIdx {
@@ -2116,7 +2094,7 @@ func (m FirstRunModel) View() string {
 		case len(m.presets) + 1:
 			pickFocused = wizardFooterNext
 		}
-		b.WriteString(renderWizardFooter(pickFocused, true))
+		b.WriteString(renderWizardFooter(pickFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
 		// Show delete hint when cursor is on a saved (non-builtin) preset
@@ -2184,7 +2162,7 @@ func (m FirstRunModel) View() string {
 		case nextIdx:
 			focused = wizardFooterNext
 		}
-		b.WriteString(renderWizardFooter(focused, true))
+		b.WriteString(renderWizardFooter(focused, true, true))
 
 		if m.presetCfgMessage != "" {
 			b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.presetCfgMessage) + "\n")
@@ -2252,7 +2230,7 @@ func (m FirstRunModel) View() string {
 		case 2:
 			keyFocused = wizardFooterNext
 		}
-		b.WriteString(renderWizardFooter(keyFocused, true))
+		b.WriteString(renderWizardFooter(keyFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.preset_key.hint")) + "\n")
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
@@ -2533,7 +2511,7 @@ func (m FirstRunModel) View() string {
 		case agentNameDirNextIdx:
 			nameDirFocused = wizardFooterNext
 		}
-		b.WriteString(renderWizardFooter(nameDirFocused, true))
+		b.WriteString(renderWizardFooter(nameDirFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  ↑↓ "+i18n.T("firstrun.toggle_field")+
 			"  ←→ "+i18n.T("firstrun.toggle_region")+
@@ -3889,17 +3867,14 @@ func (m FirstRunModel) viewRecipe() string {
 
 	b.WriteString(leftBlock.String())
 
-	// Footer buttons: Back at secretaryIdx+1, Next at secretaryIdx+2.
+	// Footer button: Back at secretaryIdx+1. There is no Next — Enter on
+	// a recipe row already saves and finishes.
 	recipeBackIdx := secretaryIdx + 1
-	recipeNextIdx := secretaryIdx + 2
 	var recipeFocused wizardFooterButton
-	switch m.recipeIdx {
-	case recipeBackIdx:
+	if m.recipeIdx == recipeBackIdx {
 		recipeFocused = wizardFooterBack
-	case recipeNextIdx:
-		recipeFocused = wizardFooterNext
 	}
-	b.WriteString(renderWizardFooter(recipeFocused, true))
+	b.WriteString(renderWizardFooter(recipeFocused, true, false))
 
 	if m.message != "" {
 		errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)

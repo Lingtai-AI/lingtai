@@ -27,7 +27,9 @@ const (
 //
 // `showBack` controls whether the Back button is rendered at all
 // (e.g. the first wizard page has nothing to go back to).
-func renderWizardFooter(focused wizardFooterButton, showBack bool) string {
+// `showNext` controls whether the Next button is rendered (terminal
+// pages like the recipe picker have no next page).
+func renderWizardFooter(focused wizardFooterButton, showBack, showNext bool) string {
 	backLabel := i18n.T("firstrun.button.back")
 	nextLabel := i18n.T("firstrun.button.next")
 
@@ -47,9 +49,13 @@ func renderWizardFooter(focused wizardFooterButton, showBack bool) string {
 	b.WriteString("\n  ")
 	if showBack {
 		b.WriteString(render(backLabel, focused == wizardFooterBack))
-		b.WriteString("   ")
+		if showNext {
+			b.WriteString("   ")
+		}
 	}
-	b.WriteString(render(nextLabel, focused == wizardFooterNext))
+	if showNext {
+		b.WriteString(render(nextLabel, focused == wizardFooterNext))
+	}
 	b.WriteString("\n")
 	return b.String()
 }
