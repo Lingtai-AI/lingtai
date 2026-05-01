@@ -96,10 +96,9 @@
 
       // --- Daemon (神識) ---
       // Ephemeral sub-agent sessions running in parallel threads.
-      // max_emanations: max concurrent workers (default 4).
-      // max_turns: max LLM turns per worker (default 30).
-      // timeout: seconds before worker is killed (default 300).
-      "daemon": { "max_emanations": 4, "max_turns": 30, "timeout": 300 },
+      // Override kernel defaults by passing keys, e.g.
+      //   {"max_emanations": N, "max_turns": N, "timeout": N}.
+      "daemon": {},
 
       // --- Vision (image understanding) ---
       // Providers: "minimax", "anthropic", "openai", "gemini", "local" (no API key).
