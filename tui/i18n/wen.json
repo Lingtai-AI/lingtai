@@ -1,7 +1,6 @@
 {
   "app.brand": "灵台器灵",
   "app.brand_secretary": "灵台道童",
-  "app.brand_dj": "灵台乐师",
   "app.loading": "载入中...",
   "app.title": "灵台",
   "error.agent_timeout": "启灵失败，检日志：%s",
@@ -357,7 +356,6 @@
   "palette.library": "览技艺之藏经阁",
   "palette.insights": "即求灵之省",
   "palette.secretary": "与秘书语（切换）",
-  "palette.dj": "与乐师语（切换）",
   "palette.brief": "览秘书简报",
   "palette.codex": "览诸灵之典",
   "palette.system": "览器灵之系枢",
@@ -505,7 +503,6 @@
   "cmd.library": "览技艺之藏经阁——器灵可按需施行之可复用流程",
   "cmd.insights": "即请器灵省察——器灵观当前事而出二三具体之得",
   "cmd.secretary": "切主灵聊天与道童聊天。道童掌简报与跨项目之汇总",
-  "cmd.dj": "切主灵聊天与乐师聊天。乐师据日志谱曲，每志一阙，呼则应、不呼则寝，循藏经阁中合于既存预设之 media-creation 技（MiniMax 之属）而成。无可用之道，则乐师陈所阙",
   "cmd.brief": "览道童简报之文（档案与日志），道童在线则触新一轮简报",
   "cmd.codex": "览器灵之典——所积之知与所得之悟。Ctrl+T 择器灵",
   "cmd.system": "览器灵之系枢（system.md、信约、宗旨、流程、便笺、llm）。Ctrl+T 择器灵",

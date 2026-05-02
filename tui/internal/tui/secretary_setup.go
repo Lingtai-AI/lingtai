@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/secretary"
 )
 
@@ -167,4 +169,56 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 	}
 
 	return nil
+}
+
+// substituteDefaultPreset rewrites the manifest's `llm` and `capabilities`
+// blocks in place using the orchestrator's *default* preset (from
+// manifest.preset.default), instead of whatever the orchestrator currently
+// has materialized. Same rule avatars use, so a sub-agent's notion of
+// "home" stays stable as the orchestrator gets reconfigured. Falls back
+// silently to the orch's materialized values if no preset umbrella is set
+// or the named preset can't be loaded.
+func substituteDefaultPreset(manifest map[string]interface{}) error {
+	preBlock, _ := manifest["preset"].(map[string]interface{})
+	if preBlock == nil {
+		return nil // older agent, no preset umbrella — keep existing llm/caps
+	}
+	defaultRef, _ := preBlock["default"].(string)
+	if defaultRef == "" {
+		return nil
+	}
+	stem := presetStemFromRef(defaultRef)
+	if stem == "" {
+		return nil
+	}
+	p, err := preset.Load(stem)
+	if err != nil {
+		// Don't hard-fail — the preset file may have been deleted by hand.
+		// Falling back to the orch's materialized values is safer than
+		// refusing to spawn.
+		return nil
+	}
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	caps, _ := p.Manifest["capabilities"].(map[string]interface{})
+	if llm != nil {
+		manifest["llm"] = llm
+	}
+	if caps != nil {
+		manifest["capabilities"] = caps
+	}
+	return nil
+}
+
+// presetStemFromRef converts a stored preset reference (e.g.
+// "~/.lingtai-tui/presets/foo.json", "/abs/path/foo.json", or a bare stem
+// "foo") into the stem name expected by preset.Load. Returns "" if the
+// reference doesn't look like a preset path.
+func presetStemFromRef(ref string) string {
+	base := filepath.Base(ref)
+	base = strings.TrimSuffix(base, ".jsonc")
+	base = strings.TrimSuffix(base, ".json")
+	if base == "" || base == "." || base == "/" {
+		return ""
+	}
+	return base
 }

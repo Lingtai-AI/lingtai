@@ -22,10 +22,9 @@ import (
 
 // FirstRunDoneMsg is emitted when first-run flow completes.
 type FirstRunDoneMsg struct {
-	OrchDir            string // full path to orchestrator directory
-	OrchName           string // agent name
-	LaunchSecretary    bool   // true if secretary agent should be launched
-	LaunchDJ           bool   // true if DJ agent should be launched (only when MiniMax preset is in use)
+	OrchDir         string // full path to orchestrator directory
+	OrchName        string // agent name
+	LaunchSecretary bool   // true if secretary agent should be launched
 }
 
 // SetupSavedMsg is emitted when /setup rewrites the current agent's init.json.
@@ -4052,23 +4051,12 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 	} else {
 		m.message = i18n.TF("firstrun.created", m.agentName)
 	}
-	// Setup DJ unconditionally — the agent itself decides at runtime
-	// whether it can compose music for a given request, by scanning its
-	// library for media-creation skills and cross-checking against the
-	// user's saved presets. The TUI just spawns it.
-	launchDJ := false
-	if err := setupDJ(m.baseDir, m.globalDir, dirName); err == nil {
-		launchDJ = true
-	} else {
-		m.message += fmt.Sprintf("\n  DJ setup failed: %v", err)
-	}
 	m.step = stepLaunching
 	return m, func() tea.Msg {
 		return FirstRunDoneMsg{
 			OrchDir:         orchDir,
 			OrchName:        m.agentName,
 			LaunchSecretary: launchSecretary && m.secretarySetupDone,
-			LaunchDJ:        launchDJ,
 		}
 	}
 }
