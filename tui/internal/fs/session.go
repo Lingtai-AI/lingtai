@@ -24,6 +24,7 @@ type SessionEntry struct {
 	Question    string   `json:"question,omitempty"`
 	Attachments []string `json:"attachments,omitempty"`
 	Source      string   `json:"source,omitempty"` // "human", "insight" — for inquiry entries
+	FireID      string   `json:"fire_id,omitempty"` // soul_flow fires — used to look up voices in soul_flow.jsonl
 
 	// Delivered is a transient field propagated from MailMessage.Delivered.
 	// Only meaningful for Type == "mail". Not persisted to session.jsonl.
@@ -38,10 +39,25 @@ type SessionCache struct {
 	lastMailTs  string          // highest mail ReceivedAt ingested (watermark for live-session dedup)
 	eventsOff   int64           // byte offset in events.jsonl
 	inquiryOff  int64           // byte offset in soul_inquiry.jsonl
+	soulFlowOff int64           // byte offset in soul_flow.jsonl (voice index source)
 	projectPath string          // absolute path of the project directory (parent of .lingtai/)
 	lastHour    time.Time       // hour (truncated) of the most recent entry
 	briefBase   string          // base dir for brief output (default: ~/.lingtai-tui)
 	rebuilding  bool            // true during RebuildFromSources — suppress file writes
+
+	// soulVoices indexes voices by fire_id, populated by tailing
+	// soul_flow.jsonl. Used to inflate soul_flow SessionEntry bodies that
+	// couldn't be rendered from events.jsonl alone — older fires (logged
+	// before the inline-voices change in kernel commit 549c78d) only have
+	// fire_id+sources in events.jsonl; the actual voice text lives here.
+	soulVoices map[string][]soulVoiceRecord
+}
+
+// soulVoiceRecord is one parsed voice entry from soul_flow.jsonl,
+// indexed by fire_id for body inflation.
+type soulVoiceRecord struct {
+	Source string
+	Voice  string
 }
 
 // NewSessionCache opens (or creates) session.jsonl. Call RebuildFromSources
@@ -56,6 +72,7 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 		path:        path,
 		projectPath: projectPath,
 		briefBase:   filepath.Join(home, ".lingtai-tui"),
+		soulVoices:  make(map[string][]soulVoiceRecord),
 	}
 	return sc
 }
@@ -70,6 +87,8 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	sc.entries = nil
 	sc.eventsOff = 0
 	sc.inquiryOff = 0
+	sc.soulFlowOff = 0
+	sc.soulVoices = make(map[string][]soulVoiceRecord)
 	sc.rebuilding = true
 
 	// Ingest everything from offset 0.
@@ -91,6 +110,7 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	if orchDir != "" {
 		sc.eventsOff = fileSize(filepath.Join(orchDir, "logs", "events.jsonl"))
 		sc.inquiryOff = fileSize(filepath.Join(orchDir, "logs", "soul_inquiry.jsonl"))
+		sc.soulFlowOff = fileSize(filepath.Join(orchDir, "logs", "soul_flow.jsonl"))
 	}
 
 	// Regenerate history markdown files for the secretary.
@@ -290,14 +310,132 @@ func splitLast(s, sep string) string {
 // IngestEvents tails the orchestrator's events.jsonl from the last-read offset,
 // converting new entries to SessionEntry. ALL event types are ingested — verbose
 // filtering happens at render time.
+//
+// Also refreshes the soul_flow voice index BEFORE parsing events so
+// fresh consultation_fire entries can be inflated with voice text on
+// the same poll. Inflates the bodies of any soul_flow entries (new or
+// already-cached) that came back as the fallback summary.
 func (sc *SessionCache) IngestEvents(orchDir string) {
 	if orchDir == "" {
 		return
 	}
+	sc.ingestSoulFlowVoices(orchDir)
 	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
 	newEntries, newOff := sc.tailJSONL(eventsPath, sc.eventsOff, parseEvent)
 	sc.eventsOff = newOff
+	for i := range newEntries {
+		sc.maybeInflateSoulFlow(&newEntries[i])
+	}
+	// Inflate any pre-existing entries (those parsed in earlier polls
+	// before their voices landed in soul_flow.jsonl, e.g. on initial
+	// rebuild from sources or a later kernel write).
+	for i := range sc.entries {
+		sc.maybeInflateSoulFlow(&sc.entries[i])
+	}
 	sc.append(newEntries...)
+}
+
+// ingestSoulFlowVoices tails soul_flow.jsonl from the last-read offset
+// and updates sc.soulVoices, the fire_id→[]voice map. Idempotent.
+func (sc *SessionCache) ingestSoulFlowVoices(orchDir string) {
+	path := filepath.Join(orchDir, "logs", "soul_flow.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return
+	}
+	if info.Size() < sc.soulFlowOff {
+		// File truncated (e.g. agent reset) — restart from the beginning
+		// and clear the index so we don't carry stale voices.
+		sc.soulFlowOff = 0
+		sc.soulVoices = make(map[string][]soulVoiceRecord)
+	}
+	if info.Size() == sc.soulFlowOff {
+		return
+	}
+	if _, err := f.Seek(sc.soulFlowOff, io.SeekStart); err != nil {
+		return
+	}
+
+	buf, err := io.ReadAll(f)
+	if err != nil {
+		return
+	}
+	// Only consume up to the last newline — trailing partial lines are
+	// re-read on the next poll.
+	last := bytes.LastIndexByte(buf, '\n')
+	if last < 0 {
+		return
+	}
+	consumed := buf[:last+1]
+	for _, line := range bytes.Split(consumed, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var rec map[string]interface{}
+		if err := json.Unmarshal(line, &rec); err != nil {
+			continue
+		}
+		if k, _ := rec["kind"].(string); k != "voice" {
+			continue
+		}
+		fireID, _ := rec["fire_id"].(string)
+		if fireID == "" {
+			continue
+		}
+		src, _ := rec["source"].(string)
+		voice, _ := rec["voice"].(string)
+		if voice == "" {
+			continue
+		}
+		sc.soulVoices[fireID] = append(sc.soulVoices[fireID], soulVoiceRecord{
+			Source: src,
+			Voice:  voice,
+		})
+	}
+	sc.soulFlowOff += int64(len(consumed))
+}
+
+// maybeInflateSoulFlow rewrites a soul_flow entry's body to include the
+// actual voice text if the entry currently shows the fallback summary
+// and the voice index has data for its fire_id. No-op for non-soul_flow
+// entries or entries that already render with voices inline.
+func (sc *SessionCache) maybeInflateSoulFlow(e *SessionEntry) {
+	if e.Type != "soul_flow" {
+		return
+	}
+	if e.FireID == "" {
+		return
+	}
+	voices, ok := sc.soulVoices[e.FireID]
+	if !ok || len(voices) == 0 {
+		return
+	}
+	// Only overwrite if body is the fallback shape — preserve any body
+	// already produced from inline voices in events.jsonl.
+	if !strings.HasPrefix(e.Body, "(soul flow fired") {
+		return
+	}
+	var lines []string
+	for _, v := range voices {
+		label := v.Source
+		switch {
+		case v.Source == "insights":
+			label = "insights"
+		case strings.HasPrefix(v.Source, "snapshot:"):
+			label = "past self"
+		}
+		lines = append(lines, fmt.Sprintf("[%s] %s", label, v.Voice))
+	}
+	if len(lines) > 0 {
+		e.Body = strings.Join(lines, "\n")
+	}
 }
 
 // tailJSONL reads a JSONL file from the given byte offset, calls parseFn on each
@@ -402,6 +540,13 @@ func parseEvent(line []byte) *SessionEntry {
 	if eventType == "insight" {
 		if q, ok := raw["question"].(string); ok {
 			e.Question = q
+		}
+	}
+	if eventType == "soul_flow" {
+		// Carry fire_id so the post-ingest inflater can look up voices
+		// in soul_flow.jsonl when events.jsonl lacks the inline payload.
+		if fid, ok := raw["fire_id"].(string); ok {
+			e.FireID = fid
 		}
 	}
 
