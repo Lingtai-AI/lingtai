@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -366,8 +367,17 @@ func parseEvent(line []byte) *SessionEntry {
 	}
 	eventType, _ := raw["type"].(string)
 
+	// Promote consultation_fire from a raw event to a first-class
+	// "soul_flow" entry — the TUI gates this at verboseThinking (level 1)
+	// so users see the agent's autonomous reflection at the same Ctrl+O
+	// depth as diary/thinking, without needing the extended verbose level
+	// that exposes every tool call.
+	if eventType == "consultation_fire" {
+		eventType = "soul_flow"
+	}
+
 	switch eventType {
-	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "insight":
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "insight", "soul_flow":
 		// ok
 	default:
 		return nil
@@ -403,6 +413,38 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 	case "thinking", "diary", "text_output", "text_input", "insight":
 		text, _ := entry["text"].(string)
 		return text
+	case "soul_flow":
+		// Render each voice with a short attribution. A "snapshot:..." source
+		// is rendered as "past self"; "insights" stays as-is. Empty voice
+		// strings are dropped (the kernel side already filters them).
+		voices, _ := entry["voices"].([]interface{})
+		var lines []string
+		for _, v := range voices {
+			vm, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			src, _ := vm["source"].(string)
+			text, _ := vm["voice"].(string)
+			if text == "" {
+				continue
+			}
+			label := src
+			switch {
+			case src == "insights":
+				label = "insights"
+			case len(src) > len("snapshot:") && src[:len("snapshot:")] == "snapshot:":
+				label = "past self"
+			}
+			lines = append(lines, fmt.Sprintf("[%s] %s", label, text))
+		}
+		if len(lines) == 0 {
+			// Fall back to a one-line summary if voices payload is missing
+			// (older event records, persistence error, or empty fire).
+			count, _ := entry["count"].(float64)
+			return fmt.Sprintf("(soul flow fired — %d voice(s))", int(count))
+		}
+		return strings.Join(lines, "\n")
 	case "tool_call":
 		name, _ := entry["tool_name"].(string)
 		args, _ := entry["tool_args"].(string)

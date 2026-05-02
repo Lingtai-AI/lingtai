@@ -336,7 +336,7 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 	switch e.Type {
 	case "mail":
 		return true
-	case "thinking", "diary", "text_input", "text_output":
+	case "thinking", "diary", "text_input", "text_output", "soul_flow":
 		return m.verbose >= verboseThinking
 	case "tool_call", "tool_result":
 		return m.verbose >= verboseExtended
@@ -722,6 +722,27 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render("[" + msg.Type + "] " + msg.Body)
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
+			}
+
+		case "soul_flow":
+			// Each voice in msg.Body is its own line ("[insights] ..." or
+			// "[past self] ..."); render with the agent accent color so it
+			// reads as the agent's own reflection rather than tool noise.
+			wrapWidth := m.width - 6
+			if wrapWidth < 20 {
+				wrapWidth = 20
+			}
+			soulStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
+			labelStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+			b.WriteString(labelStyle.Render("  ☵ soul flow") + "\n")
+			for _, voiceLine := range strings.Split(msg.Body, "\n") {
+				if voiceLine == "" {
+					continue
+				}
+				wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(voiceLine)
+				for _, line := range strings.Split(wrapped, "\n") {
+					b.WriteString(soulStyle.Render("    "+line) + "\n")
+				}
 			}
 
 		case "insight":
