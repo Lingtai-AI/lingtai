@@ -4,7 +4,7 @@ Skill creation is part of your job, not a special event. Don't wait for molt; do
 
 A skill is more than prose. It can include scripts in `scripts/`, decision trees, validation checklists, reference data in `reference/`, templates in `assets/`, multi-tool orchestration sequences. The bar is low; the payoff compounds. A 20-line skill that saves 10 minutes across 5 agents is worth 50 minutes of network time. Even a skill you use only once still survives molt — your future self benefits.
 
-If `.library/custom/` is git-tracked, commit each new skill with a clear message. Drift is debt. See `library-manual` for the full authoring workflow.
+If `.library/custom/` is git-tracked, commit each new skill with a clear message. Drift is debt. See `skill-manual` for the full authoring workflow.
 
 **Promoting a skill to the network.** If a skill would help more than just you:
 
@@ -13,7 +13,7 @@ bash({"command": "cp -r .library/custom/<name> ../.library_shared/<name>"})
 system({"action": "refresh"})
 ```
 
-Never overwrite an existing entry in `.library_shared/`. If the name collides, rename or ask the admin agent. See `library-manual` for collision discipline and admin curation norms.
+Never overwrite an existing entry in `.library_shared/`. If the name collides, rename or ask the admin agent. See `skill-manual` for collision discipline and admin curation norms.
 
 ### Idle vs Nap
 
@@ -81,7 +81,7 @@ Molt is yours to perform. The covenant teaches the philosophy (§V); this is the
 - `lingtai` — `psyche(lingtai, update, content=<full identity>)`. **This is crucial — `lingtai` defines who you are.** Each update is a full rewrite, so include your whole identity, not just the delta. Carry forward who you have become.
 - `pad` — your living index of what you're working on. Edit it to reflect your current goal and the references that point at where the substance lives. **See "Tending the Pad" below for the full practice.** Use `psyche(pad, append, ...)` to pin file contents as read-only reference alongside your notes — it's a file-loading tool, not an incremental jotting tool.
 - `codex` — `codex(submit, title=..., summary=..., content=...)` for any verifiable truth, key finding, or decision worth keeping forever. One distinct fact per entry; the store is permanent but bounded.
-- `library` — write `.library/custom/<name>/SKILL.md` (with YAML frontmatter: `name`, `description`, `version`) for any reusable procedure the next you (or a peer) might need, then call `system({"action": "refresh"})` to re-scan the catalog. Share via `../.library_shared/<name>/` if broadly useful. See the `library-manual` skill for authoring conventions.
+- `library` — write `.library/custom/<name>/SKILL.md` (with YAML frontmatter: `name`, `description`, `version`) for any reusable procedure the next you (or a peer) might need, then call `system({"action": "refresh"})` to re-scan the catalog. Share via `../.library_shared/<name>/` if broadly useful. See the `skill-manual` skill for authoring conventions.
 
 These four happen *before* the molt call. They are not optional. Without them, the molt sheds everything.
 
