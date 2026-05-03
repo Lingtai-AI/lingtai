@@ -200,7 +200,10 @@ type FirstRunModel struct {
 	progressCh   chan string // channel for progress updates
 	// Embedded key input for preset's provider
 	presetKeyInput    textarea.Model
-	codexEmail        string            // set after successful OAuth login
+	codexAuth         struct {
+		valid bool
+		email string // "" if JWT didn't carry one but tokens are valid
+	}
 	codexLoggingIn    bool              // true while waiting for browser callback
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
@@ -412,6 +415,9 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	// because preset.Bootstrap hasn't populated globalDir/recipes/ yet; the
 	// bootstrapDoneMsg handler re-runs discoverRecipes once bootstrap finishes.
 	m.discoverRecipes()
+
+	// Load Codex OAuth auth status from disk
+	m.refreshCodexAuth()
 
 	// Default to imported recipe if detected and no explicit preselection
 	if m.importedRecipe != nil && preselectedRecipe == "" {
@@ -658,6 +664,26 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// The user advances explicitly with Enter when they're ready —
 		// editing is no longer an implicit advance.
 		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
+		// One-codex enforcement: refuse if a saved codex preset already exists
+		if llm, ok := toSave.Manifest["llm"].(map[string]interface{}); ok {
+			if prov, _ := llm["provider"].(string); prov == "codex" {
+				if preset.CountSavedByProvider(m.presets, "codex") >= 1 {
+					// Allow re-saving the same preset (editing existing)
+					existing := false
+					for _, p := range m.presets {
+						if p.Name == toSave.Name && p.Source == preset.SourceSaved {
+							existing = true
+							break
+						}
+					}
+					if !existing {
+						m.message = i18n.T("preset_editor.codex_already_exists")
+						m.step = stepPickPreset
+						return m, nil
+					}
+				}
+			}
+		}
 		// If the user typed a new key in the editor, persist it under
 		// the (possibly newly-assigned) api_key_env slot.
 		if msg.APIKeySet {
@@ -731,16 +757,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		return m, nil
 
 	case CodexOAuthDoneMsg:
-		// When the embedded editor is the active surface, forward — the
-		// editor has its own CodexOAuthDoneMsg handler that updates its
-		// api_key row display. Intercepting here would write tokens to
-		// disk but leave the editor's UI stuck on the "press Enter to
-		// login" placeholder.
-		if m.step == stepEditPreset {
-			updated, cmd := m.presetEditor.Update(msg)
-			m.presetEditor = updated
-			return m, cmd
-		}
 		m.codexLoggingIn = false
 		if msg.Err != nil {
 			m.message = fmt.Sprintf("Login failed: %v", msg.Err)
@@ -756,37 +772,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
 			return m, nil
 		}
-		// Email is display-only; the JWT's profile claim is sometimes
-		// missing even on a successful login. RefreshToken is the
-		// canonical "session is usable" signal — already enforced by
-		// the OAuth flow returning Tokens at all. Use a fallback label
-		// so codexEmail != "" still means "authenticated" downstream.
-		if msg.Tokens.Email != "" {
-			m.codexEmail = msg.Tokens.Email
-		} else {
-			m.codexEmail = "(logged in)"
-		}
-		// Auto-advance: from stepPresetKey, the user has nothing more
-		// to do here — clone the codex_oauth preset and continue to
-		// capabilities. Mirrors the second-press branch of keyDoNext at
-		// the stepPresetKey Enter handler. The model comes from the
-		// preset's llm.model (set in the editor); we don't override it.
-		if m.step == stepPresetKey && m.cursor >= 0 && m.cursor < len(m.presets) {
-			p := m.presets[m.cursor]
-			clone := preset.Clone(p, "codex_oauth")
-			if err := preset.Save(clone); err != nil {
-				m.message = i18n.TF("firstrun.error", err)
-				return m, nil
-			}
-			m.presets, _ = preset.List()
-			for i, q := range m.presets {
-				if q.Name == "codex_oauth" {
-					m.cursor = i
-					break
-				}
-			}
-			return m, m.enterCapabilities()
-		}
+		m.refreshCodexAuth()
 		return m, nil
 
 	case rehydrateDoneMsg:
@@ -997,6 +983,21 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor == pickBackIdx {
 					m.cursor = pickNextIdx
 				}
+			case "c":
+				// Codex OAuth login
+				if !m.codexAuth.valid && !m.codexLoggingIn {
+					m.codexLoggingIn = true
+					oauthCh := startOAuthFlow()
+					return m, func() tea.Msg { return <-oauthCh }
+				}
+			case "r":
+				// Codex OAuth logout
+				if m.codexAuth.valid {
+					authPath := filepath.Join(m.globalDir, "codex-auth.json")
+					os.Remove(authPath)
+					m.codexAuth.valid = false
+					m.codexAuth.email = ""
+				}
 			case "enter":
 				// Button activation
 				if m.cursor == pickBackIdx {
@@ -1016,7 +1017,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
+				// Gate: codex presets require OAuth auth
+				p := m.presets[m.cursor]
+				if m.getPresetProvider(p) == "codex" && !m.codexAuth.valid {
+					m.message = i18n.T("firstrun.preset_pick.codex_locked_hint")
+					return m, nil
+				}
+				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),
@@ -1028,6 +1035,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil
 				}
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
+					return m, nil
+				}
+				// Gate: codex presets require OAuth auth
+				if m.getPresetProvider(m.presets[m.cursor]) == "codex" && !m.codexAuth.valid {
+					m.message = i18n.T("firstrun.preset_pick.codex_locked_hint")
 					return m, nil
 				}
 				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
@@ -1201,40 +1213,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// the textarea. Enter on a button activates it; inside the
 			// textarea, Enter inserts a newline (textarea's own
 			// behavior).
-			isCodex := m.selectedProvider == "codex"
 			// keyDoNext encapsulates the "save key + advance" logic
 			// triggered by the Next button.
 			keyDoNext := func() (FirstRunModel, tea.Cmd) {
-				if isCodex {
-					if m.codexLoggingIn {
-						return m, nil
-					}
-					if m.codexEmail == "" {
-						m.codexLoggingIn = true
-						oauthCh := startOAuthFlow()
-						return m, func() tea.Msg {
-							result := <-oauthCh
-							return result
-						}
-					}
-					p := m.presets[m.cursor]
-					// Model comes from p.Manifest.llm.model — set by the
-					// preset editor on the model row, not here. The codex
-					// stepPresetKey is now pure OAuth; the picker moved.
-					clone := preset.Clone(p, "codex_oauth")
-					if err := preset.Save(clone); err != nil {
-						m.message = i18n.TF("firstrun.error", err)
-						return m, nil
-					}
-					m.presets, _ = preset.List()
-					for i, q := range m.presets {
-						if q.Name == "codex_oauth" {
-							m.cursor = i
-							break
-						}
-					}
-					return m, m.enterCapabilities()
-				}
 				envName := m.currentPresetKeyEnv()
 				if envName == "" {
 					return m, m.enterCapabilities()
@@ -1254,9 +1235,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+e":
 				// Open external editor for paste-friendly key entry.
-				if isCodex {
-					return m, nil
-				}
 				currentVal := m.presetKeyInput.Value()
 				tmpFile, err := os.CreateTemp("", "lingtai-field-*.txt")
 				if err != nil {
@@ -1292,7 +1270,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2:
 					m.keyFieldIdx = 1 // Next → Back
 				}
-				if m.keyFieldIdx == 0 && !isCodex {
+				if m.keyFieldIdx == 0 {
 					m.presetKeyInput.Focus()
 				} else {
 					m.presetKeyInput.Blur()
@@ -1308,7 +1286,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				case 2:
 					m.keyFieldIdx = 1
 				}
-				if m.keyFieldIdx == 0 && !isCodex {
+				if m.keyFieldIdx == 0 {
 					m.presetKeyInput.Focus()
 				} else {
 					m.presetKeyInput.Blur()
@@ -1323,18 +1301,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				if m.keyFieldIdx == 1 {
 					m.keyFieldIdx = 0
-					if !isCodex {
-						m.presetKeyInput.Focus()
-					}
+					m.presetKeyInput.Focus()
 					return m, nil
 				}
 				// In textarea — let it handle the key.
-				if !isCodex {
-					var cmd tea.Cmd
-					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-					return m, cmd
-				}
-				return m, nil
+				var cmd tea.Cmd
+				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				return m, cmd
 			case "down":
 				// In textarea: pass through (line-down). On Back: go to Next.
 				if m.keyFieldIdx == 1 {
@@ -1344,12 +1317,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.keyFieldIdx == 2 {
 					return m, nil
 				}
-				if !isCodex {
-					var cmd tea.Cmd
-					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
-					return m, cmd
-				}
-				return m, nil
+				var cmd tea.Cmd
+				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
+				return m, cmd
 			case "left", "right":
 				// On Back: → moves to Next. On Next: ← moves to Back.
 				if m.keyFieldIdx == 1 && msg.String() == "right" {
@@ -1360,8 +1330,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.keyFieldIdx = 1
 					return m, nil
 				}
-				// Inside textarea (non-codex) — pass cursor movement through.
-				if m.keyFieldIdx == 0 && !isCodex {
+				// Inside textarea — pass cursor movement through.
+				if m.keyFieldIdx == 0 {
 					var cmd tea.Cmd
 					m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 					return m, cmd
@@ -1376,20 +1346,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.keyFieldIdx == 2 {
 					return keyDoNext()
 				}
-				// Inside the textarea, Enter for codex confirms login;
-				// otherwise it's a newline (default textarea behavior).
-				if isCodex {
-					return keyDoNext()
-				}
+				// Inside textarea — Enter is a newline (default textarea behavior).
 				var cmd tea.Cmd
 				m.presetKeyInput, cmd = m.presetKeyInput.Update(msg)
 				return m, cmd
 			case "ctrl+c":
 				return m, tea.Quit
 			default:
-				if isCodex {
-					return m, nil
-				}
 				if m.keyFieldIdx != 0 {
 					return m, nil // ignore typing while focused on a button
 				}
@@ -2076,6 +2039,28 @@ func (m FirstRunModel) View() string {
 			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
 			b.WriteString("\n  " + StyleFaint.Render("────") + "\n")
 		}
+		// OAuth status row
+		{
+			label := i18n.T("codex.oauth_status_label")
+			var status string
+			var hint string
+			if m.codexAuth.valid {
+				if m.codexAuth.email != "" {
+					status = i18n.TF("codex.oauth_logged_in", m.codexAuth.email)
+				} else {
+					status = i18n.T("codex.oauth_logged_in_no_email")
+				}
+				hint = "  " + StyleFaint.Render(i18n.T("codex.oauth_logout_hint"))
+			} else {
+				status = i18n.T("codex.oauth_not_logged_in")
+				hint = "  " + StyleFaint.Render(i18n.T("codex.oauth_login_hint"))
+			}
+			statusStyle := lipgloss.NewStyle().Foreground(ColorAgent)
+			if !m.codexAuth.valid {
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			}
+			b.WriteString("  " + StyleFaint.Render(label) + " " + statusStyle.Render(status) + hint + "\n\n")
+		}
 		savedCount := preset.SavedCount(m.presets)
 		for i, p := range m.presets {
 			// Section headers between saved and template presets
@@ -2101,7 +2086,16 @@ func (m FirstRunModel) View() string {
 			if displayDesc == "preset.desc_"+p.Name {
 				displayDesc = p.Description.Summary
 			}
-			name := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(displayName)
+			isCodex := m.getPresetProvider(p) == "codex"
+			codexLocked := isCodex && !m.codexAuth.valid
+			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+			if codexLocked {
+				nameStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245"))
+			}
+			name := nameStyle.Render(displayName)
+			if codexLocked {
+				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_locked"))
+			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
 			// Capabilities are otherwise uniform across builtins, so
@@ -2236,22 +2230,8 @@ func (m FirstRunModel) View() string {
 			b.WriteString("\n")
 		}
 
-		if m.selectedProvider == "codex" {
-			// Codex uses OAuth, not paste-key. Model is shown in the
-			// read-only summary above (rendered from p.Manifest.llm.model);
-			// the editor's model row is the place to change it.
-			if m.codexLoggingIn {
-				b.WriteString("  " + StyleSubtle.Render(i18n.T("codex.logging_in")) + "\n")
-			} else if m.codexEmail != "" {
-				okStyle := lipgloss.NewStyle().Foreground(ColorActive)
-				b.WriteString("  " + okStyle.Render("✓ "+i18n.TF("codex.logged_in", m.codexEmail)) + "\n\n")
-			} else {
-				b.WriteString("  " + i18n.T("codex.press_enter") + "\n\n")
-			}
-		} else {
-			// Single textinput. The editor configured everything else.
-			b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
-		}
+		// Single textinput. The editor configured everything else.
+		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
 
 		// Footer buttons: 0 = textarea, 1 = Back, 2 = Next.
 		var keyFocused wizardFooterButton
@@ -2912,38 +2892,13 @@ func (m *FirstRunModel) initCapProviders() {
 // enterPresetKeyFor advances to stepPresetKey with provider-specific
 // state prefilled from `p`. Now that the dedicated PresetEditorModel
 // owns model/base_url/region/api_compat editing, this helper only sets
-// up the API-key textinput (or, for codex, the OAuth status read).
+// up the API-key textinput.
 func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.Cmd) {
 	provider := m.getPresetProvider(p)
 	m.selectedProvider = provider
 	m.step = stepPresetKey
 	m.keyFieldIdx = 0 // textarea focused on entry
 	m.presetKeyInput.Reset()
-	if provider == "codex" {
-		m.presetKeyInput.Blur()
-		m.codexEmail = ""
-		m.codexLoggingIn = false
-		authPath := filepath.Join(m.globalDir, "codex-auth.json")
-		if data, err := os.ReadFile(authPath); err == nil {
-			var tokens CodexTokens
-			// RefreshToken is the canonical "session is usable" signal —
-			// the kernel's CodexTokenManager only needs it to mint fresh
-			// access tokens. Email is display-only and OpenAI's JWT
-			// sometimes omits the profile claim, leaving tokens.Email
-			// empty even on a valid login. Don't gate on email.
-			if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
-				if tokens.Email != "" {
-					m.codexEmail = tokens.Email
-				} else {
-					// Marker so other code paths still see "authenticated"
-					// (m.codexEmail != "") without claiming an email we
-					// don't actually have.
-					m.codexEmail = "(logged in)"
-				}
-			}
-		}
-		return *m, nil
-	}
 	m.presetKeyInput.Focus()
 	// Prefill from the preset's declared api_key_env name. Provider
 	// alone is not the right key — a single provider can have multiple
@@ -3611,6 +3566,30 @@ func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 		}
 	}
 	return "minimax" // default
+}
+
+// refreshCodexAuth reads codex-auth.json from globalDir and sets
+// m.codexAuth.valid / m.codexAuth.email. Safe to call repeatedly.
+func (m *FirstRunModel) refreshCodexAuth() {
+	authPath := filepath.Join(m.globalDir, "codex-auth.json")
+	raw, err := os.ReadFile(authPath)
+	if err != nil {
+		m.codexAuth.valid = false
+		m.codexAuth.email = ""
+		return
+	}
+	var tokens CodexTokens
+	if err := json.Unmarshal(raw, &tokens); err != nil || tokens.RefreshToken == "" {
+		m.codexAuth.valid = false
+		m.codexAuth.email = ""
+		return
+	}
+	m.codexAuth.valid = true
+	if tokens.Email != "" {
+		m.codexAuth.email = tokens.Email
+	} else {
+		m.codexAuth.email = ""
+	}
 }
 
 // needsKey returns true if the env var holding this preset's API key

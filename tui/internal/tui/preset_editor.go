@@ -375,33 +375,6 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case CodexOAuthDoneMsg:
-		if msg.Err != nil {
-			m.saveErr = "OAuth error: " + msg.Err.Error()
-			return m, nil
-		}
-		if msg.Tokens == nil {
-			m.saveErr = "OAuth returned no tokens"
-			return m, nil
-		}
-		// Persist tokens to ~/.lingtai-tui/codex-auth.json — same path
-		// CodexTokenManager (kernel) reads from. Identical to login.go.
-		data, err := json.MarshalIndent(msg.Tokens, "", "  ")
-		if err != nil {
-			m.saveErr = "failed to marshal tokens: " + err.Error()
-			return m, nil
-		}
-		authPath := filepath.Join(m.globalDir, "codex-auth.json")
-		if err := os.WriteFile(authPath, data, 0o600); err != nil {
-			m.saveErr = "failed to save codex-auth.json: " + err.Error()
-			return m, nil
-		}
-		// Display masked token in the row. apiKeySet stays false —
-		// the host's commit path doesn't need to write this token to
-		// .env (it lives in codex-auth.json instead).
-		m.apiKey = msg.Tokens.AccessToken
-		return m, nil
-
 	case tea.KeyMsg:
 		switch m.mode {
 		case emInline:
@@ -568,13 +541,11 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feAPIKey:
-		// Codex preset → OAuth flow, not text entry. The kernel's _codex
-		// adapter factory ignores api_key entirely and reads tokens from
-		// ~/.lingtai-tui/codex-auth.json via CodexTokenManager. Typing a
-		// string here would be silently discarded.
+		// Codex preset — OAuth credential is managed on the preset picker
+		// page. API key field is read-only; no-op here.
 		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
-			ch := startOAuthFlow()
-			return *m, func() tea.Msg { return <-ch }
+			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
+			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
 		// blank rather than prefilling the existing value so the user
@@ -1096,14 +1067,22 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		s, _ := llm["base_url"].(string)
 		return s
 	case feAPIKey:
-		// Codex doesn't use API keys — Enter on this row triggers OAuth.
-		// Show a hint that matches the action; otherwise users see the
-		// generic "paste here" copy and don't expect the browser to open.
+		// Codex uses OAuth credential, not an API key.
+		// Show read-only status from codex-auth.json.
 		if asString(llm["provider"]) == "codex" {
-			if m.apiKey == "" {
-				return i18n.T("preset_editor.api_key_codex_oauth_prompt")
+			if m.globalDir != "" {
+				authPath := filepath.Join(m.globalDir, "codex-auth.json")
+				if data, err := os.ReadFile(authPath); err == nil {
+					var tokens CodexTokens
+					if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
+						if tokens.Email != "" {
+							return "✓ " + tokens.Email
+						}
+						return "✓ " + i18n.T("codex.logged_in")
+					}
+				}
 			}
-			return "OAuth — " + maskAPIKey(m.apiKey)
+			return i18n.T("codex.oauth_not_logged_in")
 		}
 		// Display the key (masked). The env-var name is an internal
 		// detail; the user only needs to see whether a key is set.

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/secretary"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type appView int
@@ -76,6 +78,7 @@ type App struct {
 	pendingRecipe   string
 	pendingCustomDir string
 	recoveryMode    bool // global config lost, agents intact — setup then propagate
+	startupBanner   string // non-empty warning shown on first render
 }
 
 func humanAddr(projectDir string) string {
@@ -168,6 +171,11 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
 		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights)
+
+		// Validate codex-auth.json if any agent uses a codex preset.
+		if warn := validateCodexAuthForAgents(globalDir, projectDir); warn != "" {
+			app.startupBanner = warn
+		}
 
 	}
 
@@ -1155,7 +1163,11 @@ func (a App) View() tea.View {
 		if a.inSecretaryView {
 			content = a.secretaryMail.View()
 		} else {
-			content = a.mail.View()
+			banner := ""
+			if a.startupBanner != "" {
+				banner = "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner) + "\n"
+			}
+			content = banner + a.mail.View()
 		}
 	case appViewSetup:
 		content = a.setup.View()
@@ -1276,4 +1288,57 @@ func openBrowser(url string) {
 	if cmd != "" {
 		exec.Command(cmd, args...).Start()
 	}
+}
+
+// validateCodexAuthForAgents scans all agent directories under projectDir
+// for init.json files whose active/default preset is codex. If any exist
+// but ~/.lingtai-tui/codex-auth.json is missing or invalid, returns a
+// warning string. Otherwise returns "".
+func validateCodexAuthForAgents(globalDir, projectDir string) string {
+	// Quick check: is codex-auth.json valid?
+	authPath := filepath.Join(globalDir, "codex-auth.json")
+	authOK := false
+	if data, err := os.ReadFile(authPath); err == nil {
+		var tokens CodexTokens
+		if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
+			authOK = true
+		}
+	}
+	if authOK {
+		return ""
+	}
+
+	// Check if any agent uses a codex preset
+	entries, _ := os.ReadDir(projectDir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		initPath := filepath.Join(projectDir, e.Name(), "init.json")
+		raw, err := os.ReadFile(initPath)
+		if err != nil {
+			continue
+		}
+		var init map[string]interface{}
+		if json.Unmarshal(raw, &init) != nil {
+			continue
+		}
+		manifest, _ := init["manifest"].(map[string]interface{})
+		if manifest == nil {
+			continue
+		}
+		presetBlock, _ := manifest["preset"].(map[string]interface{})
+		if presetBlock == nil {
+			continue
+		}
+		// Check default and active
+		for _, key := range []string{"default", "active"} {
+			if path, _ := presetBlock[key].(string); path != "" {
+				if strings.Contains(path, "codex") {
+					return fmt.Sprintf("⚠ Codex OAuth 未验证 — agent %q 使用 codex 预设", e.Name())
+				}
+			}
+		}
+	}
+	return ""
 }

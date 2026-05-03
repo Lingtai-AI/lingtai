@@ -642,6 +642,24 @@ func SavedCount(presets []Preset) int {
 	return n
 }
 
+// CountSavedByProvider returns the number of saved presets whose provider matches.
+func CountSavedByProvider(presets []Preset, provider string) int {
+	n := 0
+	for _, p := range presets {
+		if p.Source != SourceSaved {
+			continue
+		}
+		llm, ok := p.Manifest["llm"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if prov, _ := llm["provider"].(string); prov == provider {
+			n++
+		}
+	}
+	return n
+}
+
 func e() map[string]interface{} { return map[string]interface{}{} }
 
 // libraryDefault returns the default library capability config — two Tier 1
