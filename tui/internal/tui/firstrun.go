@@ -75,8 +75,10 @@ const (
 	stepLaunching
 )
 
-// codexModels lists models available via Codex OAuth.
-var codexModels = []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"}
+// (codexModels was removed in 2026-05 — the codex preset now declares
+// its own model in llm.model like every other provider, picked via the
+// preset editor's model row. See preset_editor.go's providerModels map
+// and the SKILL.md next to it for the maintained model list.)
 
 // capInfo holds provider metadata for a single capability (from check-caps).
 type capInfo struct {
@@ -198,7 +200,6 @@ type FirstRunModel struct {
 	progressCh   chan string // channel for progress updates
 	// Embedded key input for preset's provider
 	presetKeyInput    textarea.Model
-	codexModel        int               // 0=gpt-5.4, 1=gpt-5.4-mini, 2=gpt-5.3-codex
 	codexEmail        string            // set after successful OAuth login
 	codexLoggingIn    bool              // true while waiting for browser callback
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
@@ -758,14 +759,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// Auto-advance: from stepPresetKey, the user has nothing more
 		// to do here — clone the codex_oauth preset and continue to
 		// capabilities. Mirrors the second-press branch of keyDoNext at
-		// the stepPresetKey Enter handler.
+		// the stepPresetKey Enter handler. The model comes from the
+		// preset's llm.model (set in the editor); we don't override it.
 		if m.step == stepPresetKey && m.cursor >= 0 && m.cursor < len(m.presets) {
 			p := m.presets[m.cursor]
-			model := codexModels[m.codexModel]
 			clone := preset.Clone(p, "codex_oauth")
-			if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-				llm["model"] = model
-			}
 			if err := preset.Save(clone); err != nil {
 				m.message = i18n.TF("firstrun.error", err)
 				return m, nil
@@ -1210,11 +1208,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						}
 					}
 					p := m.presets[m.cursor]
-					model := codexModels[m.codexModel]
+					// Model comes from p.Manifest.llm.model — set by the
+					// preset editor on the model row, not here. The codex
+					// stepPresetKey is now pure OAuth; the picker moved.
 					clone := preset.Clone(p, "codex_oauth")
-					if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
-						llm["model"] = model
-					}
 					if err := preset.Save(clone); err != nil {
 						m.message = i18n.TF("firstrun.error", err)
 						return m, nil
@@ -1344,17 +1341,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "left", "right":
-				// Codex model picker uses ←/→ when on the textarea
-				// position (where it would otherwise be a no-op for
-				// codex since the textarea is blurred).
-				if isCodex && m.keyFieldIdx == 0 {
-					if msg.String() == "right" {
-						m.codexModel = (m.codexModel + 1) % len(codexModels)
-					} else {
-						m.codexModel = (m.codexModel + len(codexModels) - 1) % len(codexModels)
-					}
-					return m, nil
-				}
 				// On Back: → moves to Next. On Next: ← moves to Back.
 				if m.keyFieldIdx == 1 && msg.String() == "right" {
 					m.keyFieldIdx = 2
@@ -2241,17 +2227,9 @@ func (m FirstRunModel) View() string {
 		}
 
 		if m.selectedProvider == "codex" {
-			// Codex uses OAuth, not paste-key.
-			var modelLabels []string
-			for i, name := range codexModels {
-				if i == m.codexModel {
-					modelLabels = append(modelLabels, "● "+name)
-				} else {
-					modelLabels = append(modelLabels, "○ "+name)
-				}
-			}
-			modelStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			b.WriteString("  " + i18n.T("presets.model") + ":   " + modelStyle.Render(strings.Join(modelLabels, "  ")) + "\n\n")
+			// Codex uses OAuth, not paste-key. Model is shown in the
+			// read-only summary above (rendered from p.Manifest.llm.model);
+			// the editor's model row is the place to change it.
 			if m.codexLoggingIn {
 				b.WriteString("  " + StyleSubtle.Render(i18n.T("codex.logging_in")) + "\n")
 			} else if m.codexEmail != "" {
@@ -2923,8 +2901,8 @@ func (m *FirstRunModel) initCapProviders() {
 
 // enterPresetKeyFor advances to stepPresetKey with provider-specific
 // state prefilled from `p`. Now that the dedicated PresetEditorModel
-// owns model/base_url/region/api_compat editing, this helper just sets
-// up the API-key textinput and the codex-OAuth model selector.
+// owns model/base_url/region/api_compat editing, this helper only sets
+// up the API-key textinput (or, for codex, the OAuth status read).
 func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.Cmd) {
 	provider := m.getPresetProvider(p)
 	m.selectedProvider = provider
@@ -2933,19 +2911,6 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 	m.presetKeyInput.Reset()
 	if provider == "codex" {
 		m.presetKeyInput.Blur()
-		m.codexModel = 0
-		// Map the saved model back onto codexModel index so the picker's
-		// preselection matches what the preset already configured.
-		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-			if model, ok := llm["model"].(string); ok {
-				for i, name := range codexModels {
-					if name == model {
-						m.codexModel = i
-						break
-					}
-				}
-			}
-		}
 		m.codexEmail = ""
 		m.codexLoggingIn = false
 		authPath := filepath.Join(m.globalDir, "codex-auth.json")

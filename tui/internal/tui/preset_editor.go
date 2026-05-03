@@ -136,6 +136,12 @@ var providerModels = map[string][]string{
 	"zhipu":    {"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
 	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
 	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
+	// gpt-5.5 is OAuth-exclusive (not available via API key); see SKILL.md
+	// next to this file for the canonical source list and why each one is
+	// included or excluded (e.g. gpt-5.5-pro is ChatGPT-Pro-only and not
+	// served on the codex endpoint, so we omit it to avoid 4xx breakage).
+	"codex": {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
 }
 
 // modelHasVision reports whether a given model accepts image input.
@@ -162,6 +168,14 @@ var modelHasVision = map[string]bool{
 	// DeepSeek: text-only across the board.
 	"deepseek-v4-flash": false,
 	"deepseek-v4-pro":   false,
+	// Codex (ChatGPT OAuth): all GPT-5.x family currently accepts images,
+	// including the *-codex tunes. Verify on each model's docs page when
+	// adding new entries; see SKILL.md.
+	"gpt-5.5":       true,
+	"gpt-5.4":       true,
+	"gpt-5.4-mini":  true,
+	"gpt-5.3-codex": true,
+	"gpt-5.2":       true,
 }
 
 // coreCapabilities are the always-on building blocks every agent

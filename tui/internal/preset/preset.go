@@ -799,9 +799,14 @@ func codexPreset() Preset {
 		Description: PresetDescription{Summary: "ChatGPT account — vision + web search + tools"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider": "codex", "model": "gpt-5.4",
+				// Default to the latest frontier (gpt-5.5). It's only
+				// available via ChatGPT-OAuth — exactly the auth path
+				// codex uses — so it's the right "what do paid ChatGPT
+				// users actually want" pick. Model list is curated in
+				// preset_editor.go's providerModels; see SKILL.md there.
+				"provider": "codex", "model": "gpt-5.5",
 				"api_key": nil, "api_key_env": "",
-				"base_url": "https://chatgpt.com/backend-api",
+				"base_url": "https://chatgpt.com/backend-api/codex",
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
