@@ -205,6 +205,13 @@ type FirstRunModel struct {
 		email string // "" if JWT didn't carry one but tokens are valid
 	}
 	codexLoggingIn    bool              // true while waiting for browser callback
+	// Codex preset creation: when the user presses Enter on the
+	// authenticated Codex 凭据 row, we overlay a name-input prompt so
+	// they can pick whatever name they want (codex-5.5, codex-5.4, etc.).
+	// On submit, we clone the codex template, save under the chosen name,
+	// and open the editor on the new saved preset.
+	codexNameMode  bool
+	codexNameInput textinput.Model
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
@@ -349,6 +356,14 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	rci.SetWidth(50)
 	rci.Placeholder = ".recipe/ or absolute path"
 
+	// Codex preset name input — overlay on Step 1 when authed user
+	// presses Enter on the Codex 凭据 row to create a new codex preset.
+	cni := textinput.New()
+	cni.CharLimit = 64
+	cni.SetWidth(40)
+	cni.Prompt = ""
+	cni.Placeholder = "codex-5.5"
+
 	// Load existing keys from Config.Keys
 	cfg, _ := config.LoadConfig(globalDir)
 	existingKeys := cfg.Keys
@@ -391,6 +406,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		progressCh:        make(chan string, 4),
 		recipeCustomInput: rci,
 		preselectedRecipe: preselectedRecipe,
+		codexNameInput:    cni,
 	}
 
 	// Detect project-local .recipe/ directory.
@@ -664,26 +680,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// The user advances explicitly with Enter when they're ready —
 		// editing is no longer an implicit advance.
 		toSave := stampAutoEnvVar(msg.Preset, m.existingKeys)
-		// One-codex enforcement: refuse if a saved codex preset already exists
-		if llm, ok := toSave.Manifest["llm"].(map[string]interface{}); ok {
-			if prov, _ := llm["provider"].(string); prov == "codex" {
-				if preset.CountSavedByProvider(m.presets, "codex") >= 1 {
-					// Allow re-saving the same preset (editing existing)
-					existing := false
-					for _, p := range m.presets {
-						if p.Name == toSave.Name && p.Source == preset.SourceSaved {
-							existing = true
-							break
-						}
-					}
-					if !existing {
-						m.message = i18n.T("preset_editor.codex_already_exists")
-						m.step = stepPickPreset
-						return m, nil
-					}
-				}
-			}
-		}
+		// (No "one-codex" enforcement — multiple codex presets are
+		// allowed by design, each pinning a different model. The
+		// credential is shared via codex-auth.json.)
 		// If the user typed a new key in the editor, persist it under
 		// the (possibly newly-assigned) api_key_env slot.
 		if msg.APIKeySet {
@@ -949,14 +948,85 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, cmd
 
 		case stepPickPreset:
+			// Codex name-input overlay: when active, all keystrokes go to
+			// the input until the user submits or cancels. Mirrors the
+			// editor's emClonePrompt mode.
+			if m.codexNameMode {
+				switch msg.String() {
+				case "esc":
+					m.codexNameMode = false
+					m.codexNameInput.Blur()
+					m.codexNameInput.Reset()
+					return m, nil
+				case "enter":
+					name := strings.TrimSpace(m.codexNameInput.Value())
+					if name == "" {
+						return m, nil
+					}
+					// Refuse names that collide with an existing preset
+					// (saved or template). Show the message and stay in
+					// the prompt so the user can edit and retry.
+					for _, q := range m.presets {
+						if q.Name == name {
+							m.message = i18n.TF("firstrun.preset_pick.codex_name_taken", name)
+							return m, nil
+						}
+					}
+					var tpl preset.Preset
+					for _, q := range m.presets {
+						if q.Name == "codex" && preset.IsTemplate(q) {
+							tpl = q
+							break
+						}
+					}
+					if tpl.Name == "" {
+						m.message = "codex template not found"
+						return m, nil
+					}
+					clone := preset.Clone(tpl, name)
+					if err := preset.Save(clone); err != nil {
+						m.message = i18n.TF("firstrun.error", err)
+						return m, nil
+					}
+					m.presets, _ = preset.List()
+					for i, q := range m.presets {
+						if q.Name == name {
+							m.cursor = i
+							break
+						}
+					}
+					m.codexNameMode = false
+					m.codexNameInput.Blur()
+					m.codexNameInput.Reset()
+					m.message = ""
+					m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
+					m.step = stepEditPreset
+					return m, tea.Batch(
+						m.presetEditor.Init(),
+						func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+					)
+				}
+				var cmd tea.Cmd
+				m.codexNameInput, cmd = m.codexNameInput.Update(msg)
+				return m, cmd
+			}
+
 			presetMinIdx := 0
 			if m.setupMode {
 				presetMinIdx = -1 // allow "keep current" at index -1
 			}
-			// Cursor space: rows [presetMinIdx..len(m.presets)-1],
-			// Back = len(m.presets), Next = len(m.presets)+1.
-			pickBackIdx := len(m.presets)
-			pickNextIdx := len(m.presets) + 1
+			// Cursor space:
+			//   rows [presetMinIdx..visibleCount-1] — visible presets
+			//   pickCodexAuthIdx = visibleCount       — Codex 凭据 row
+			//   Back = visibleCount + 1
+			//   Next = visibleCount + 2
+			// Codex template is hidden from the preset list (its row is
+			// replaced by the Codex 凭据 section row); saved codex
+			// presets render normally in 已存预设.
+			visibleCount := m.visiblePresetCount()
+			pickCodexAuthIdx := visibleCount
+			pickBackIdx := visibleCount + 1
+			pickNextIdx := visibleCount + 2
 			pickLastIdx := pickNextIdx
 			switch msg.String() {
 			case "up":
@@ -995,24 +1065,34 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor == pickNextIdx {
 					return m, m.enterAgentPresets()
 				}
+				// Codex 凭据 row: gate is auth status.
+				//   not authed → start OAuth
+				//   authed     → name-input overlay → create new codex preset
+				if m.cursor == pickCodexAuthIdx {
+					if !m.codexAuth.valid {
+						if !m.codexLoggingIn {
+							m.codexLoggingIn = true
+							oauthCh := startOAuthFlow()
+							return m, func() tea.Msg { return <-oauthCh }
+						}
+						return m, nil
+					}
+					m.codexNameMode = true
+					m.codexNameInput.Reset()
+					m.codexNameInput.Focus()
+					return m, textinput.Blink
+				}
 				// Row: open the editor on the highlighted preset.
 				if m.setupMode && m.cursor == -1 {
 					return m, nil // can't edit the synthetic "keep current" entry
 				}
-				if m.cursor < 0 || m.cursor >= len(m.presets) {
+				p, ok := m.presetAtVisibleIdx(m.cursor)
+				if !ok {
 					return m, nil
 				}
-				// Codex row, not yet authed: Enter triggers OAuth instead
-				// of opening the editor. Once OAuth completes the user can
-				// press Enter again to enter the editor, where the model
-				// picker and other settings live.
-				p := m.presets[m.cursor]
+				// Saved codex preset without valid auth → require login first.
 				if m.getPresetProvider(p) == "codex" && !m.codexAuth.valid {
-					if !m.codexLoggingIn {
-						m.codexLoggingIn = true
-						oauthCh := startOAuthFlow()
-						return m, func() tea.Msg { return <-oauthCh }
-					}
+					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
 				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
@@ -1026,18 +1106,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.setupMode && m.cursor == -1 {
 					return m, nil
 				}
-				if m.cursor < 0 || m.cursor >= len(m.presets) {
+				if m.cursor == pickCodexAuthIdx {
+					return m, nil // Codex 凭据 row only responds to Enter.
+				}
+				p, ok := m.presetAtVisibleIdx(m.cursor)
+				if !ok {
 					return m, nil
 				}
-				// Same codex gate as Enter — start OAuth instead of opening
-				// the editor when not yet authed.
-				p := m.presets[m.cursor]
 				if m.getPresetProvider(p) == "codex" && !m.codexAuth.valid {
-					if !m.codexLoggingIn {
-						m.codexLoggingIn = true
-						oauthCh := startOAuthFlow()
-						return m, func() tea.Msg { return <-oauthCh }
-					}
+					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
 				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
@@ -1051,13 +1128,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// — robust against a saved preset whose name happens to
 				// match a template (e.g. saved/codex.json shadowing
 				// templates/codex.json).
-				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsTemplate(m.presets[m.cursor]) {
-					name := m.presets[m.cursor].Name
-					if err := preset.Delete(name); err == nil {
-						// Refresh the list
+				if p, ok := m.presetAtVisibleIdx(m.cursor); ok && !preset.IsTemplate(p) {
+					if err := preset.Delete(p.Name); err == nil {
+						// Refresh the list; clamp visible cursor.
 						m.presets, _ = preset.List()
-						if m.cursor >= len(m.presets) {
-							m.cursor = len(m.presets) - 1
+						maxIdx := m.visiblePresetCount() - 1
+						if m.cursor > maxIdx {
+							m.cursor = maxIdx
 						}
 						if m.cursor < 0 {
 							m.cursor = 0
@@ -2037,20 +2114,33 @@ func (m FirstRunModel) View() string {
 			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
 			b.WriteString("\n  " + StyleFaint.Render("────") + "\n")
 		}
-		savedCount := preset.SavedCount(m.presets)
-		for i, p := range m.presets {
-			// Section headers between saved and template presets
-			if savedCount > 0 && i == 0 {
-				b.WriteString("  " + StyleFaint.Render(i18n.T("preset.saved")) + "\n")
+		// Visible-index render. Codex template is hidden from this list
+		// — its slot is served by the dedicated Codex 凭据 section
+		// rendered after the templates loop. Cursor is in visible-index
+		// space; underlying m.presets index is irrelevant here.
+		visIdx := 0
+		savedHeaderRendered := false
+		templatesHeaderRendered := false
+		for _, p := range m.presets {
+			// Hide codex template — credential management lives in its
+			// own section below.
+			if preset.IsTemplate(p) && p.Name == "codex" {
+				continue
 			}
-			if i == savedCount {
-				if savedCount > 0 {
+			// Section headers
+			if !preset.IsTemplate(p) && !savedHeaderRendered {
+				b.WriteString("  " + StyleFaint.Render(i18n.T("preset.saved")) + "\n")
+				savedHeaderRendered = true
+			}
+			if preset.IsTemplate(p) && !templatesHeaderRendered {
+				if savedHeaderRendered {
 					b.WriteString("\n")
 				}
 				b.WriteString("  " + StyleFaint.Render(i18n.T("preset.templates")) + "\n")
+				templatesHeaderRendered = true
 			}
 			cursor := "  "
-			if i == m.cursor {
+			if visIdx == m.cursor {
 				cursor = "> "
 			}
 			// i18n: try preset.name_<id> and preset.desc_<id>, fall back to raw fields
@@ -2062,20 +2152,12 @@ func (m FirstRunModel) View() string {
 			if displayDesc == "preset.desc_"+p.Name {
 				displayDesc = p.Description.Summary
 			}
-			// Codex rows show their auth status inline as a row hint —
-			// rendered with [Enter] semantics instead of a separate
-			// keybind: not authed → Enter starts OAuth; authed → Enter
-			// opens the editor (same as any other preset).
 			isCodex := m.getPresetProvider(p) == "codex"
 			needsOAuth := isCodex && !m.codexAuth.valid
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			name := nameStyle.Render(displayName)
 			if needsOAuth {
-				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth"))
-			} else if isCodex && m.codexAuth.valid {
-				if m.codexAuth.email != "" {
-					name += " " + StyleFaint.Render("(" + m.codexAuth.email + ")")
-				}
+				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
 			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
@@ -2090,23 +2172,51 @@ func (m FirstRunModel) View() string {
 			}
 			desc := StyleSubtle.Render("  " + displayDesc)
 			b.WriteString(cursor + name + meta + desc + "\n")
+			visIdx++
 		}
 
-		// Footer buttons (Back/Next) — positions in the same cursor space.
+		// Section 3: Codex 凭据 (credential row).
+		visibleCount := visIdx
+		b.WriteString("\n  " + StyleFaint.Render(i18n.T("preset.codex_credential_section")) + "\n")
+		{
+			cursor := "  "
+			if m.cursor == visibleCount {
+				cursor = "> "
+			}
+			label := i18n.T("preset.codex_credential_row_label")
+			labelStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+			row := cursor + labelStyle.Render(label)
+			if m.codexAuth.valid {
+				if m.codexAuth.email != "" {
+					row += "  " + StyleFaint.Render("(" + m.codexAuth.email + ")")
+				}
+				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_authed_hint"))
+			} else if m.codexLoggingIn {
+				row += "  " + StyleFaint.Render(i18n.T("codex.logging_in"))
+			} else {
+				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_unauthed_hint"))
+			}
+			b.WriteString(row + "\n")
+		}
+
+		// Name-input overlay (when active, render under the row).
+		if m.codexNameMode {
+			b.WriteString("\n  " + StyleFaint.Render(i18n.T("preset.codex_name_prompt")) + "  " + m.codexNameInput.View() + "\n")
+		}
+
+		// Footer buttons (Back/Next) — at visibleCount+1 and +2.
 		var pickFocused wizardFooterButton
 		switch m.cursor {
-		case len(m.presets):
+		case visibleCount + 1:
 			pickFocused = wizardFooterBack
-		case len(m.presets) + 1:
+		case visibleCount + 2:
 			pickFocused = wizardFooterNext
 		}
 		b.WriteString(renderWizardFooter(pickFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
 		// Show delete hint when cursor is on a saved (non-template) preset.
-		// Use IsTemplate(p) — name-based check would falsely flag a saved
-		// preset whose name matches a template.
-		if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsTemplate(m.presets[m.cursor]) {
+		if cur, ok := m.presetAtVisibleIdx(m.cursor); ok && !preset.IsTemplate(cur) {
 			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("preset.delete")) + "\n")
 		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
@@ -3560,6 +3670,54 @@ func (m FirstRunModel) getPresetProvider(p preset.Preset) string {
 
 // refreshCodexAuth reads codex-auth.json from globalDir and sets
 // m.codexAuth.valid / m.codexAuth.email. Safe to call repeatedly.
+// visiblePresetCount returns the number of presets that should appear in
+// Step 1's preset list. The codex template is hidden — its slot is
+// served by the dedicated Codex 凭据 row (so credential management has
+// its own section instead of sitting in 新建预设 alongside paste-key
+// templates).
+func (m FirstRunModel) visiblePresetCount() int {
+	n := 0
+	for _, p := range m.presets {
+		if preset.IsTemplate(p) && p.Name == "codex" {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// presetAtVisibleIdx returns the preset at the i-th visible row,
+// skipping the hidden codex template. Returns false when the index is
+// out of range or points at the codex template's hidden slot.
+func (m FirstRunModel) presetAtVisibleIdx(i int) (preset.Preset, bool) {
+	if i < 0 {
+		return preset.Preset{}, false
+	}
+	v := 0
+	for _, p := range m.presets {
+		if preset.IsTemplate(p) && p.Name == "codex" {
+			continue
+		}
+		if v == i {
+			return p, true
+		}
+		v++
+	}
+	return preset.Preset{}, false
+}
+
+// presetIdxByName finds a preset's index in m.presets by Name. Used to
+// map a visible-index pick back onto the underlying slice for code that
+// indexes into m.presets directly. Returns -1 if not found.
+func (m FirstRunModel) presetIdxByName(name string) int {
+	for i, p := range m.presets {
+		if p.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m *FirstRunModel) refreshCodexAuth() {
 	authPath := filepath.Join(m.globalDir, "codex-auth.json")
 	raw, err := os.ReadFile(authPath)
