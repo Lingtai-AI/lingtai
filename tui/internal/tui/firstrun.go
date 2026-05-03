@@ -731,6 +731,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		return m, nil
 
 	case CodexOAuthDoneMsg:
+		// When the embedded editor is the active surface, forward — the
+		// editor has its own CodexOAuthDoneMsg handler that updates its
+		// api_key row display. Intercepting here would write tokens to
+		// disk but leave the editor's UI stuck on the "press Enter to
+		// login" placeholder.
+		if m.step == stepEditPreset {
+			updated, cmd := m.presetEditor.Update(msg)
+			m.presetEditor = updated
+			return m, cmd
+		}
 		m.codexLoggingIn = false
 		if msg.Err != nil {
 			m.message = fmt.Sprintf("Login failed: %v", msg.Err)
