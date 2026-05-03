@@ -745,7 +745,40 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
 			return m, nil
 		}
-		m.codexEmail = msg.Tokens.Email
+		// Email is display-only; the JWT's profile claim is sometimes
+		// missing even on a successful login. RefreshToken is the
+		// canonical "session is usable" signal — already enforced by
+		// the OAuth flow returning Tokens at all. Use a fallback label
+		// so codexEmail != "" still means "authenticated" downstream.
+		if msg.Tokens.Email != "" {
+			m.codexEmail = msg.Tokens.Email
+		} else {
+			m.codexEmail = "(logged in)"
+		}
+		// Auto-advance: from stepPresetKey, the user has nothing more
+		// to do here — clone the codex_oauth preset and continue to
+		// capabilities. Mirrors the second-press branch of keyDoNext at
+		// the stepPresetKey Enter handler.
+		if m.step == stepPresetKey && m.cursor >= 0 && m.cursor < len(m.presets) {
+			p := m.presets[m.cursor]
+			model := codexModels[m.codexModel]
+			clone := preset.Clone(p, "codex_oauth")
+			if llm, ok := clone.Manifest["llm"].(map[string]interface{}); ok {
+				llm["model"] = model
+			}
+			if err := preset.Save(clone); err != nil {
+				m.message = i18n.TF("firstrun.error", err)
+				return m, nil
+			}
+			m.presets, _ = preset.List()
+			for i, q := range m.presets {
+				if q.Name == "codex_oauth" {
+					m.cursor = i
+					break
+				}
+			}
+			return m, m.enterCapabilities()
+		}
 		return m, nil
 
 	case rehydrateDoneMsg:
@@ -2918,8 +2951,20 @@ func (m *FirstRunModel) enterPresetKeyFor(p preset.Preset) (FirstRunModel, tea.C
 		authPath := filepath.Join(m.globalDir, "codex-auth.json")
 		if data, err := os.ReadFile(authPath); err == nil {
 			var tokens CodexTokens
-			if json.Unmarshal(data, &tokens) == nil && tokens.Email != "" && tokens.RefreshToken != "" {
-				m.codexEmail = tokens.Email
+			// RefreshToken is the canonical "session is usable" signal —
+			// the kernel's CodexTokenManager only needs it to mint fresh
+			// access tokens. Email is display-only and OpenAI's JWT
+			// sometimes omits the profile claim, leaving tokens.Email
+			// empty even on a valid login. Don't gate on email.
+			if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
+				if tokens.Email != "" {
+					m.codexEmail = tokens.Email
+				} else {
+					// Marker so other code paths still see "authenticated"
+					// (m.codexEmail != "") without claiming an email we
+					// don't actually have.
+					m.codexEmail = "(logged in)"
+				}
 			}
 		}
 		return *m, nil
