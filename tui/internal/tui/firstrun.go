@@ -996,8 +996,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 				)
 			case "backspace", "delete":
-				// Delete a saved (non-builtin) preset
-				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
+				// Delete a saved (non-template) preset. Use IsTemplate(p)
+				// — robust against a saved preset whose name happens to
+				// match a template (e.g. saved/codex.json shadowing
+				// templates/codex.json).
+				if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsTemplate(m.presets[m.cursor]) {
 					name := m.presets[m.cursor].Name
 					if err := preset.Delete(name); err == nil {
 						// Refresh the list
@@ -2096,8 +2099,10 @@ func (m FirstRunModel) View() string {
 		b.WriteString(renderWizardFooter(pickFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
-		// Show delete hint when cursor is on a saved (non-builtin) preset
-		if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsBuiltin(m.presets[m.cursor].Name) {
+		// Show delete hint when cursor is on a saved (non-template) preset.
+		// Use IsTemplate(p) — name-based check would falsely flag a saved
+		// preset whose name matches a template.
+		if m.cursor >= 0 && m.cursor < len(m.presets) && !preset.IsTemplate(m.presets[m.cursor]) {
 			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("preset.delete")) + "\n")
 		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
@@ -2140,9 +2145,10 @@ func (m FirstRunModel) View() string {
 				if displayName == "preset.name_"+p.Name {
 					displayName = p.Name
 				}
-				// Mark built-in rows so the user knows this is a template, not a
-				// user-saved preset.
-				if preset.IsBuiltin(p.Name) {
+				// Mark template rows so the user knows this is a template,
+				// not a user-saved preset. IsTemplate uses Source — robust
+				// against saved/<name>.json shadowing templates/<name>.json.
+				if preset.IsTemplate(p) {
 					displayName += " " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.builtin_marker"))
 				}
 				displayDesc := i18n.T("preset.desc_" + p.Name)
@@ -3050,19 +3056,20 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	m.step = stepAgentPresets
 	m.presetCfgMessage = ""
 
-	// Build the row list: indices of saved presets within m.presets.
-	// Built-in templates are normally hidden — Step 2 is for the
-	// "saved-only" curation surface. The exception: if the user chose a
-	// built-in as their default in Step 1, we MUST include it, otherwise
-	// Step 2 would render with the chosen default missing and the kernel
-	// would reject the resulting init.json (default must be in allowed).
+	// Build the row list: indices of saved (non-template) presets within
+	// m.presets. Templates are hidden — Step 2 is for the "saved-only"
+	// curation surface. We use IsTemplate(p), which checks Source rather
+	// than the name, so saved/<name>.json that happens to share a
+	// filename with a template (e.g. saved/codex.json) appears here as
+	// the saved preset it actually is.
+	//
+	// If the user picked a template as default in Step 1, the schema
+	// invariant (default ∈ allowed) is preserved by the editor's
+	// clone-first flow — selecting a template forces a save under
+	// saved/, which then surfaces here on the next step.
 	m.savedPresetIdx = m.savedPresetIdx[:0]
 	for i, p := range m.presets {
-		if !preset.IsBuiltin(p.Name) {
-			m.savedPresetIdx = append(m.savedPresetIdx, i)
-		} else if i == m.cursor {
-			// The built-in chosen as default in Step 1 — surface it so
-			// the user can see it and the schema invariant holds.
+		if !preset.IsTemplate(p) {
 			m.savedPresetIdx = append(m.savedPresetIdx, i)
 		}
 	}

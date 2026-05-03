@@ -293,13 +293,15 @@ type PresetEditorModel struct {
 // NewPresetEditorModel builds an editor against a working copy of `p`.
 // The model never mutates `p`; the host receives the modified version
 // via PresetEditorCommitMsg. isBuiltin gates the clone-first prompt on
-// semantic edits — pass preset.IsBuiltin(p.Name).
+// semantic edits — derived from IsTemplate(p), which uses the preset's
+// on-disk Source rather than its name (so a user-saved preset whose
+// name happens to match a template is correctly treated as editable).
 //
 // existingKeys is Config.Keys (env-var-name → value) so the editor can
 // prefill the api_key row when a key is already saved for this preset's
 // api_key_env. Pass nil when no key store is available (e.g. tests).
 func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string, globalDir string) PresetEditorModel {
-	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, globalDir, preset.IsBuiltin(p.Name))
+	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, globalDir, preset.IsTemplate(p))
 }
 
 // NewPresetEditorModelWithBuiltinFlag is the explicit-flag variant for
