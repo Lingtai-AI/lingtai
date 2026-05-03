@@ -1080,6 +1080,15 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		s, _ := llm["base_url"].(string)
 		return s
 	case feAPIKey:
+		// Codex doesn't use API keys — Enter on this row triggers OAuth.
+		// Show a hint that matches the action; otherwise users see the
+		// generic "paste here" copy and don't expect the browser to open.
+		if asString(llm["provider"]) == "codex" {
+			if m.apiKey == "" {
+				return i18n.T("preset_editor.api_key_codex_oauth_prompt")
+			}
+			return "OAuth — " + maskAPIKey(m.apiKey)
+		}
 		// Display the key (masked). The env-var name is an internal
 		// detail; the user only needs to see whether a key is set.
 		return maskAPIKey(m.apiKey)
