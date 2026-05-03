@@ -8,7 +8,8 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 32
+// IMPORTANT: when bumping, also bump portal/internal/migrate/migrate.go (see CLAUDE.md).
+const CurrentVersion = 33
 
 type metaFile struct {
 	Version                       int  `json:"version"`
@@ -56,6 +57,7 @@ var migrations = []Migration{
 	{Version: 30, Name: "preset-dir-split", Fn: migratePresetDirSplit},
 	{Version: 31, Name: "drop-legacy-intrinsic-capabilities", Fn: migrateDropLegacyIntrinsicCapabilities},
 	{Version: 32, Name: "cleanup-codex-oauth", Fn: migrateCleanupCodexOAuth},
+	{Version: 33, Name: "strip-codex-api-key-env", Fn: migrateStripCodexAPIKeyEnv},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.

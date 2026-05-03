@@ -2942,7 +2942,16 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 // When the preset already has an api_key_env (built-ins ship with
 // MINIMAX_API_KEY etc.), the existing value is left untouched —
 // we never auto-rewrite to avoid breaking established setups.
+//
+// Codex is excluded — it uses ChatGPT OAuth (codex-auth.json), not
+// an env-var API key. Stamping a CODEX_1_API_KEY slot would mislead
+// presetNeedsKey into routing through stepPresetKey, which is wrong
+// for codex; cleaner to leave api_key_env empty for the kernel's
+// _codex factory to ignore.
 func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Preset {
+	if provider, _ := llmStringField(p, "provider"); provider == "codex" {
+		return p
+	}
 	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
 		return p
 	}
@@ -3599,8 +3608,13 @@ func (m *FirstRunModel) refreshCodexAuth() {
 //
 // A preset with no api_key_env (codex OAuth, locally-hosted custom)
 // is treated as not needing a key — the OAuth or local flow handles
-// authentication separately.
+// authentication separately. Codex specifically is hard-gated: it
+// uses ChatGPT-OAuth, never paste-key, regardless of api_key_env
+// (a stale/auto-stamped value must not route the user to stepPresetKey).
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
+	if m.getPresetProvider(p) == "codex" {
+		return false
+	}
 	envName, ok := llmStringField(p, "api_key_env")
 	if !ok || envName == "" {
 		return false
