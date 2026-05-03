@@ -2187,8 +2187,15 @@ func (m FirstRunModel) View() string {
 			labelStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			row := cursor + labelStyle.Render(label)
 			if m.codexAuth.valid {
+				// Always show an authed badge so the user can tell at a
+				// glance. The OAuth JWT sometimes ships without an email
+				// claim — in that case fall back to a generic "已登"
+				// marker rather than rendering nothing.
+				okStyle := lipgloss.NewStyle().Foreground(ColorActive)
 				if m.codexAuth.email != "" {
-					row += "  " + StyleFaint.Render("(" + m.codexAuth.email + ")")
+					row += "  " + okStyle.Render("✓ "+m.codexAuth.email)
+				} else {
+					row += "  " + okStyle.Render("✓ "+i18n.T("preset.codex_credential_authed_badge"))
 				}
 				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_authed_hint"))
 			} else if m.codexLoggingIn {

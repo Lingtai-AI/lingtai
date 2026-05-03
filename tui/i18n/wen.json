@@ -242,6 +242,7 @@
   "preset.codex_credential_section": "Codex 凭据",
   "preset.codex_credential_row_label": "Codex OAuth",
   "preset.codex_credential_authed_hint": "[回车] 新 codex 预",
+  "preset.codex_credential_authed_badge": "已登",
   "preset.codex_credential_unauthed_hint": "[回车] 登",
   "preset.codex_name_prompt": "名：",
   "preset_editor.codex_already_exists": "只许一 codex 预设。请先删之。",

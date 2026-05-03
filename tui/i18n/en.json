@@ -247,6 +247,7 @@
   "preset.codex_credential_section": "Codex 凭据",
   "preset.codex_credential_row_label": "Codex OAuth",
   "preset.codex_credential_authed_hint": "[Enter] new codex preset",
+  "preset.codex_credential_authed_badge": "logged in",
   "preset.codex_credential_unauthed_hint": "[Enter] login",
   "preset.codex_name_prompt": "name:",
   "preset_editor.codex_already_exists": "Only one codex preset allowed. Delete the existing one first.",
