@@ -2140,6 +2140,11 @@ func (m FirstRunModel) View() string {
 				if displayName == "preset.name_"+p.Name {
 					displayName = p.Name
 				}
+				// Mark built-in rows so the user knows this is a template, not a
+				// user-saved preset.
+				if preset.IsBuiltin(p.Name) {
+					displayName += " " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.builtin_marker"))
+				}
 				displayDesc := i18n.T("preset.desc_" + p.Name)
 				if displayDesc == "preset.desc_"+p.Name {
 					displayDesc = p.Description.Summary
@@ -3046,9 +3051,18 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	m.presetCfgMessage = ""
 
 	// Build the row list: indices of saved presets within m.presets.
+	// Built-in templates are normally hidden — Step 2 is for the
+	// "saved-only" curation surface. The exception: if the user chose a
+	// built-in as their default in Step 1, we MUST include it, otherwise
+	// Step 2 would render with the chosen default missing and the kernel
+	// would reject the resulting init.json (default must be in allowed).
 	m.savedPresetIdx = m.savedPresetIdx[:0]
 	for i, p := range m.presets {
 		if !preset.IsBuiltin(p.Name) {
+			m.savedPresetIdx = append(m.savedPresetIdx, i)
+		} else if i == m.cursor {
+			// The built-in chosen as default in Step 1 — surface it so
+			// the user can see it and the schema invariant holds.
 			m.savedPresetIdx = append(m.savedPresetIdx, i)
 		}
 	}
