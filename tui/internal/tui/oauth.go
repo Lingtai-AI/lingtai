@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -15,6 +16,12 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrCodexAuthRevoked is returned by refreshCodexTokens when OpenAI's
+// token endpoint rejects the stored refresh token (401/403). The user
+// must re-OAuth via the wizard. Distinct from transient errors (network,
+// 5xx, timeout) which leave the local tokens untouched.
+var ErrCodexAuthRevoked = errors.New("codex refresh token rejected — re-authenticate")
 
 const (
 	codexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -306,3 +313,58 @@ func extractEmailFromJWT(jwt string) string {
 }
 
 // openBrowser is defined in app.go — reused here for the OAuth flow.
+
+// refreshCodexTokens exchanges a refresh_token for a fresh access token
+// against auth.openai.com. Returns the merged token bundle (preserving
+// fields like email that the refresh response doesn't include — caller
+// supplies them via existing). Returns ErrCodexAuthRevoked on 401/403
+// (grant invalidated server-side; user must re-OAuth). Other errors are
+// transient (network/5xx/timeout) — caller should leave local tokens
+// untouched.
+func refreshCodexTokens(refreshToken string, existing CodexTokens) (*CodexTokens, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {codexClientID},
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.PostForm(codexTokenURL, form)
+	if err != nil {
+		return nil, fmt.Errorf("POST token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, ErrCodexAuthRevoked
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("parse token response: %w", err)
+	}
+
+	merged := existing
+	merged.AccessToken = raw.AccessToken
+	if raw.RefreshToken != "" {
+		merged.RefreshToken = raw.RefreshToken
+	}
+	merged.ExpiresAt = time.Now().Unix() + raw.ExpiresIn
+	if email := extractEmailFromJWT(raw.IDToken); email != "" {
+		merged.Email = email
+	}
+	return &merged, nil
+}

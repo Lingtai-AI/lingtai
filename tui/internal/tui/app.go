@@ -1290,6 +1290,66 @@ func openBrowser(url string) {
 	}
 }
 
+// ValidateCodexAuthOnStartup performs a real validity check on the
+// stored Codex OAuth tokens at TUI launch. The local file is treated as
+// a structural prerequisite (missing → no-op, no banner); when it is
+// present we round-trip the refresh token through OpenAI's token
+// endpoint to confirm the grant has not been revoked server-side.
+//
+// Behavior matrix:
+//
+//   - file missing                                → return "" (user has no codex login, nothing to test)
+//   - file malformed / no refresh_token           → file is junk; return banner pointing at re-login
+//   - access token still valid (>5 min until exp) → trust local data, no network call
+//   - access token expired/expiring               → refresh against auth.openai.com
+//       * 200 OK         → atomic write back, return ""
+//       * 401/403        → grant revoked, return banner pointing at re-login
+//       * transient err  → return "" (do not penalize the user for being offline)
+//
+// On success the file is updated atomically (.json.tmp → rename) so any
+// later code paths in this launch (firstrun's refreshCodexAuth, the
+// agent-launch validateCodexAuthForAgents, the kernel's CodexTokenManager
+// inside the agent process) all see the freshest tokens.
+func ValidateCodexAuthOnStartup(globalDir string) string {
+	authPath := filepath.Join(globalDir, "codex-auth.json")
+	raw, err := os.ReadFile(authPath)
+	if err != nil {
+		return ""
+	}
+
+	var tokens CodexTokens
+	if err := json.Unmarshal(raw, &tokens); err != nil || tokens.RefreshToken == "" {
+		return "⚠ Codex OAuth: codex-auth.json malformed — re-login via /setup"
+	}
+
+	const refreshBufferSeconds = 300
+	if tokens.ExpiresAt > time.Now().Unix()+refreshBufferSeconds {
+		return ""
+	}
+
+	fresh, err := refreshCodexTokens(tokens.RefreshToken, tokens)
+	if err != nil {
+		if err == ErrCodexAuthRevoked {
+			return "⚠ Codex OAuth session expired — re-login via /setup → Codex 凭据"
+		}
+		return ""
+	}
+
+	out, err := json.MarshalIndent(fresh, "", "  ")
+	if err != nil {
+		return ""
+	}
+	tmpPath := authPath + ".tmp"
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return ""
+	}
+	if err := os.Rename(tmpPath, authPath); err != nil {
+		os.Remove(tmpPath)
+		return ""
+	}
+	return ""
+}
+
 // validateCodexAuthForAgents scans all agent directories under projectDir
 // for init.json files whose active/default preset is codex. If any exist
 // but ~/.lingtai-tui/codex-auth.json is missing or invalid, returns a
