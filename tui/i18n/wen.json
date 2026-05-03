@@ -235,6 +235,7 @@
   "codex.oauth_logout_confirm": "注销 Codex 否？[y/N]",
   "firstrun.preset_pick.codex_locked": "（须先登）",
   "firstrun.preset_pick.codex_locked_hint": "请按 [c] 先登入 Codex。",
+  "firstrun.preset_pick.codex_needs_oauth": "（按回车登）",
   "preset_editor.codex_already_exists": "只许一 codex 预设。请先删之。",
   "setup.save": "存",
   "setup.select_provider": "選 Provider",

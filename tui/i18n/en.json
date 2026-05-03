@@ -240,6 +240,7 @@
   "codex.oauth_logout_confirm": "Log out of Codex? [y/N]",
   "firstrun.preset_pick.codex_locked": "(login required)",
   "firstrun.preset_pick.codex_locked_hint": "Press [c] above to log in to Codex first.",
+  "firstrun.preset_pick.codex_needs_oauth": "(press Enter to login)",
   "preset_editor.codex_already_exists": "Only one codex preset allowed. Delete the existing one first.",
   "setup.save": "Save",
   "setup.select_provider": "Select Provider",

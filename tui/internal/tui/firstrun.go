@@ -983,21 +983,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor == pickBackIdx {
 					m.cursor = pickNextIdx
 				}
-			case "c":
-				// Codex OAuth login
-				if !m.codexAuth.valid && !m.codexLoggingIn {
-					m.codexLoggingIn = true
-					oauthCh := startOAuthFlow()
-					return m, func() tea.Msg { return <-oauthCh }
-				}
-			case "r":
-				// Codex OAuth logout
-				if m.codexAuth.valid {
-					authPath := filepath.Join(m.globalDir, "codex-auth.json")
-					os.Remove(authPath)
-					m.codexAuth.valid = false
-					m.codexAuth.email = ""
-				}
 			case "enter":
 				// Button activation
 				if m.cursor == pickBackIdx {
@@ -1017,10 +1002,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				// Gate: codex presets require OAuth auth
+				// Codex row, not yet authed: Enter triggers OAuth instead
+				// of opening the editor. Once OAuth completes the user can
+				// press Enter again to enter the editor, where the model
+				// picker and other settings live.
 				p := m.presets[m.cursor]
 				if m.getPresetProvider(p) == "codex" && !m.codexAuth.valid {
-					m.message = i18n.T("firstrun.preset_pick.codex_locked_hint")
+					if !m.codexLoggingIn {
+						m.codexLoggingIn = true
+						oauthCh := startOAuthFlow()
+						return m, func() tea.Msg { return <-oauthCh }
+					}
 					return m, nil
 				}
 				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
@@ -1037,12 +1029,18 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				// Gate: codex presets require OAuth auth
-				if m.getPresetProvider(m.presets[m.cursor]) == "codex" && !m.codexAuth.valid {
-					m.message = i18n.T("firstrun.preset_pick.codex_locked_hint")
+				// Same codex gate as Enter — start OAuth instead of opening
+				// the editor when not yet authed.
+				p := m.presets[m.cursor]
+				if m.getPresetProvider(p) == "codex" && !m.codexAuth.valid {
+					if !m.codexLoggingIn {
+						m.codexLoggingIn = true
+						oauthCh := startOAuthFlow()
+						return m, func() tea.Msg { return <-oauthCh }
+					}
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
+				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),
@@ -2039,28 +2037,6 @@ func (m FirstRunModel) View() string {
 			b.WriteString("    " + StyleFaint.Render(keepDesc) + "\n")
 			b.WriteString("\n  " + StyleFaint.Render("────") + "\n")
 		}
-		// OAuth status row
-		{
-			label := i18n.T("codex.oauth_status_label")
-			var status string
-			var hint string
-			if m.codexAuth.valid {
-				if m.codexAuth.email != "" {
-					status = i18n.TF("codex.oauth_logged_in", m.codexAuth.email)
-				} else {
-					status = i18n.T("codex.oauth_logged_in_no_email")
-				}
-				hint = "  " + StyleFaint.Render(i18n.T("codex.oauth_logout_hint"))
-			} else {
-				status = i18n.T("codex.oauth_not_logged_in")
-				hint = "  " + StyleFaint.Render(i18n.T("codex.oauth_login_hint"))
-			}
-			statusStyle := lipgloss.NewStyle().Foreground(ColorAgent)
-			if !m.codexAuth.valid {
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-			}
-			b.WriteString("  " + StyleFaint.Render(label) + " " + statusStyle.Render(status) + hint + "\n\n")
-		}
 		savedCount := preset.SavedCount(m.presets)
 		for i, p := range m.presets {
 			// Section headers between saved and template presets
@@ -2086,15 +2062,20 @@ func (m FirstRunModel) View() string {
 			if displayDesc == "preset.desc_"+p.Name {
 				displayDesc = p.Description.Summary
 			}
+			// Codex rows show their auth status inline as a row hint —
+			// rendered with [Enter] semantics instead of a separate
+			// keybind: not authed → Enter starts OAuth; authed → Enter
+			// opens the editor (same as any other preset).
 			isCodex := m.getPresetProvider(p) == "codex"
-			codexLocked := isCodex && !m.codexAuth.valid
+			needsOAuth := isCodex && !m.codexAuth.valid
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-			if codexLocked {
-				nameStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245"))
-			}
 			name := nameStyle.Render(displayName)
-			if codexLocked {
-				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_locked"))
+			if needsOAuth {
+				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth"))
+			} else if isCodex && m.codexAuth.valid {
+				if m.codexAuth.email != "" {
+					name += " " + StyleFaint.Render("(" + m.codexAuth.email + ")")
+				}
 			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
