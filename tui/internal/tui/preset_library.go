@@ -102,6 +102,7 @@ type PresetLibraryModel struct {
 	presets []preset.Preset
 	cursor  int
 	lang    string // "en", "zh", or "wen" — drives tier label rendering
+	globalDir string // ~/.lingtai-tui — plumbed through to PresetEditorModel
 
 	focus    presetLibraryFocus
 	tierIdx  int    // selection within the tag picker (0..len(tierValues), last = "untag")
@@ -116,12 +117,13 @@ type PresetLibraryModel struct {
 // `lang` is the user's TUI language (en/zh/wen) and selects the tier
 // label vocabulary — stars for English, 夯/人上人/顶级/NPC/拉完了 for
 // Chinese-family locales.
-func NewPresetLibraryModel(lang string) PresetLibraryModel {
+func NewPresetLibraryModel(lang string, globalDir string) PresetLibraryModel {
 	presets, _ := preset.List()
 	return PresetLibraryModel{
-		presets: presets,
-		cursor:  0,
-		lang:    lang,
+		presets:   presets,
+		cursor:    0,
+		lang:      lang,
+		globalDir: globalDir,
 	}
 }
 
@@ -283,7 +285,7 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 					keys = cfg.Keys
 				}
 			}
-			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang, keys)
+			m.editor = NewPresetEditorModel(m.presets[m.cursor], m.lang, keys, m.globalDir)
 			// Forward the current size so the editor renders immediately.
 			updated, _ := m.editor.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 			m.editor = updated

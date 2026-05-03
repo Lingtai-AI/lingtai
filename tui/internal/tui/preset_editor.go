@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -268,6 +270,13 @@ type PresetEditorModel struct {
 	// no-op).
 	savedCursor int
 
+	// globalDir is ~/.lingtai-tui — the directory codex-auth.json lives
+	// in. Passed by hosts so the editor can write the OAuth token bundle
+	// when the user authenticates a codex preset's API-key row. May be
+	// empty when no global dir is available (tests); in that case the
+	// codex-OAuth branch falls back to inline edit.
+	globalDir string
+
 	// API key state. existingKeys is the host's Config.Keys snapshot
 	// (env-var-name → value), used to prefill the api_key field when a
 	// matching env var is already populated. apiKey is the live edit
@@ -289,14 +298,14 @@ type PresetEditorModel struct {
 // existingKeys is Config.Keys (env-var-name → value) so the editor can
 // prefill the api_key row when a key is already saved for this preset's
 // api_key_env. Pass nil when no key store is available (e.g. tests).
-func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string) PresetEditorModel {
-	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, preset.IsBuiltin(p.Name))
+func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string, globalDir string) PresetEditorModel {
+	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, globalDir, preset.IsBuiltin(p.Name))
 }
 
 // NewPresetEditorModelWithBuiltinFlag is the explicit-flag variant for
 // callers that want to override built-in protection (e.g. tests, or
 // a future "fork built-in" flow that has already cloned upstream).
-func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, isBuiltin bool) PresetEditorModel {
+func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, globalDir string, isBuiltin bool) PresetEditorModel {
 	// Inline editor uses textarea — paste from the system clipboard
 	// works reliably (textinput drops chars on multi-byte pastes).
 	// We render only one row; updateInline intercepts Enter and the
@@ -336,6 +345,7 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		cloneNameInput: cn,
 		lang:           lang,
 		existingKeys:   existingKeys,
+		globalDir:      globalDir,
 		apiKey:         apiKey,
 	}
 }
@@ -347,6 +357,33 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case CodexOAuthDoneMsg:
+		if msg.Err != nil {
+			m.saveErr = "OAuth error: " + msg.Err.Error()
+			return m, nil
+		}
+		if msg.Tokens == nil {
+			m.saveErr = "OAuth returned no tokens"
+			return m, nil
+		}
+		// Persist tokens to ~/.lingtai-tui/codex-auth.json — same path
+		// CodexTokenManager (kernel) reads from. Identical to login.go.
+		data, err := json.MarshalIndent(msg.Tokens, "", "  ")
+		if err != nil {
+			m.saveErr = "failed to marshal tokens: " + err.Error()
+			return m, nil
+		}
+		authPath := filepath.Join(m.globalDir, "codex-auth.json")
+		if err := os.WriteFile(authPath, data, 0o600); err != nil {
+			m.saveErr = "failed to save codex-auth.json: " + err.Error()
+			return m, nil
+		}
+		// Display masked token in the row. apiKeySet stays false —
+		// the host's commit path doesn't need to write this token to
+		// .env (it lives in codex-auth.json instead).
+		m.apiKey = msg.Tokens.AccessToken
 		return m, nil
 
 	case tea.KeyMsg:
@@ -515,6 +552,14 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feAPIKey:
+		// Codex preset → OAuth flow, not text entry. The kernel's _codex
+		// adapter factory ignores api_key entirely and reads tokens from
+		// ~/.lingtai-tui/codex-auth.json via CodexTokenManager. Typing a
+		// string here would be silently discarded.
+		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
+			ch := startOAuthFlow()
+			return *m, func() tea.Msg { return <-ch }
+		}
 		// Edit the live key buffer, not the env-var-name. We start
 		// blank rather than prefilling the existing value so the user
 		// can paste a new key without first deleting the masked

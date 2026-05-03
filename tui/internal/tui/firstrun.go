@@ -975,7 +975,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys)
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),
@@ -989,7 +989,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor < 0 || m.cursor >= len(m.presets) {
 					return m, nil
 				}
-				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys)
+				m.presetEditor = NewPresetEditorModel(m.presets[m.cursor], i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
 					m.presetEditor.Init(),

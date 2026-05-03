@@ -874,7 +874,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.mailbox.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language)
+		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "agora":
 		a.currentView = appViewAgora
@@ -1109,7 +1109,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language)
+		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "secretary":
 		// switchToView always goes to secretary mail (no toggle — toggle is in handlePaletteCommand)
