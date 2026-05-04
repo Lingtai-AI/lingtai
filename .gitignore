@@ -75,3 +75,7 @@ lingtai-projects
 _telegram_agent/
 
 .worktrees
+
+# Local-only files: codex CLI agent guidance, ccusage screenshots
+AGENTS.md
+ccusage-daily*.png
