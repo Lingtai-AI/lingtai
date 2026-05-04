@@ -165,7 +165,7 @@
   "palette.login": "Check & manage credentials",
   "palette.quit": "Quit lingtai-tui",
   "palette.clear": "Clear agent context window and restart",
-  "palette.refresh": "Hard restart agent (/refresh all for all)",
+  "palette.refresh": "Hard restart agent and revert to default preset (/refresh all for all)",
   "palette.settings": "TUI preferences",
   "palette.setup": "Agent setup (provider, model, capabilities)",
   "palette.sleep": "Put agent to sleep (/sleep all for all)",

@@ -3186,6 +3186,22 @@ func (m FirstRunModel) allowedPresetRefs() []string {
 	return out
 }
 
+// propagatePresetPolicyToNetwork applies the wizard's chosen
+// {default, allowed} surface to every other agent in the project. /setup
+// is treated as a network-wide preset policy reset: the wizard's choices
+// are not just for the agent being edited, they're for the whole project.
+//
+// skipDir is the agent the wizard's primary save already handled (so we
+// don't double-write it). Best-effort: errors are logged through the
+// preset package's return but not surfaced as a user-visible failure
+// because the primary save already succeeded.
+func propagatePresetPolicyToNetwork(lingtaiDir, skipDir, defaultRef string, allowed []string) {
+	if defaultRef == "" || len(allowed) == 0 {
+		return // nothing the wizard configured to propagate
+	}
+	preset.PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef, allowed)
+}
+
 // isCapCompatible checks if a capability works with the given provider.
 func (m FirstRunModel) isCapCompatible(info capInfo, provider string) bool {
 	if len(info.Providers) == 0 {
@@ -4007,6 +4023,9 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 		m.step = stepAgentNameDir
 		return m, nil
 	}
+	if m.setupMode {
+		propagatePresetPolicyToNetwork(m.baseDir, dirName, presetCanonicalRef(p), m.pendingAgentOpts.AllowedPresets)
+	}
 	return m, func() tea.Msg { return SetupSavedMsg{} }
 }
 
@@ -4068,6 +4087,9 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		m.message = i18n.TF("firstrun.error", err)
 		m.step = stepAgentNameDir
 		return m, nil
+	}
+	if m.setupMode {
+		propagatePresetPolicyToNetwork(m.baseDir, dirName, presetCanonicalRef(p), opts.AllowedPresets)
 	}
 
 	// 4. Apply: write .prompt, append library.paths, snapshot.

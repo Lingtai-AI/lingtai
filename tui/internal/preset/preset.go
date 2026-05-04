@@ -1250,7 +1250,14 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		// Build the allowed list. Caller-supplied AllowedPresets wins;
 		// otherwise we keep the existing list (during /setup) or fall
 		// back to the single-preset default. The default preset is always
-		// present; the active preset is appended if missing.
+		// present.
+		//
+		// `active` must also end up in `allowed` (the kernel's validate_init
+		// enforces this). But when the caller passed an explicit
+		// AllowedPresets list and the current `active` was deselected from
+		// it, force-adding active back would silently re-authorize a preset
+		// the user just chose to revoke. In that case we snap active to the
+		// new default instead, which is always in allowed by construction.
 		allowedSet := map[string]struct{}{}
 		var allowed []string
 		appendUnique := func(s string) {
@@ -1265,8 +1272,9 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		}
 
 		var seed []string
+		userSuppliedAllowed := len(opts.AllowedPresets) > 0
 		switch {
-		case len(opts.AllowedPresets) > 0:
+		case userSuppliedAllowed:
 			seed = opts.AllowedPresets
 		case len(existingAllowed) > 0:
 			seed = existingAllowed
@@ -1275,7 +1283,27 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 			appendUnique(s)
 		}
 		appendUnique(presetRef) // default must always be in allowed
-		appendUnique(activeRef) // active must always be in allowed
+
+		// Reconcile active against the authoritative allowed list. When
+		// the caller has explicitly listed allowed presets and the current
+		// active is no longer one of them, demote active to the default
+		// (which is always allowed). When the caller didn't supply an
+		// allowed list, we silently include active to preserve the prior
+		// behavior of "I didn't touch the surface, don't change it".
+		activeAllowed := false
+		for _, s := range allowed {
+			if s == activeRef {
+				activeAllowed = true
+				break
+			}
+		}
+		if !activeAllowed {
+			if userSuppliedAllowed {
+				activeRef = presetRef
+			} else {
+				appendUnique(activeRef)
+			}
+		}
 
 		manifest["preset"] = map[string]interface{}{
 			"active":  activeRef,
@@ -1426,11 +1454,17 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		return fmt.Errorf("write init.json: %w", err)
 	}
 
-	// Also create .agent.json manifest for the agent
+	// Build the wizard-controlled subset of .agent.json. Other fields the
+	// kernel populates at runtime (agent_id, created_at, molt_count,
+	// stamina, language, soul_delay, soul_voice, started_at, capabilities,
+	// nickname, etc) must NOT be touched here — re-running /setup against
+	// an existing agent should preserve the agent's identity and history,
+	// not reset it. Without this preservation, molt_count drops to 0 on
+	// every /setup, which makes psyche overwrite earlier snapshots and
+	// breaks soul-flow's "past self" continuity.
 	agentManifest := map[string]interface{}{
 		"agent_name": agentName,
 		"address":    filepath.Base(agentDir),
-		"state":      "",
 		"admin": map[string]interface{}{
 			"karma":   opts.Karma,
 			"nirvana": opts.Nirvana,
@@ -1446,9 +1480,130 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		os.MkdirAll(filepath.Join(agentDir, sub), 0o755)
 	}
 
-	mdata, _ := json.MarshalIndent(agentManifest, "", "  ")
-	os.WriteFile(filepath.Join(agentDir, ".agent.json"), mdata, 0o644)
+	// Merge with any existing .agent.json so kernel-owned identity fields
+	// (molt_count etc.) survive a /setup-driven regen. The wizard owns the
+	// keys it explicitly sets above; everything else is preserved verbatim.
+	agentJSONPath := filepath.Join(agentDir, ".agent.json")
+	merged := agentManifest
+	if existing, err := os.ReadFile(agentJSONPath); err == nil {
+		var prev map[string]interface{}
+		if json.Unmarshal(existing, &prev) == nil {
+			// Start from prev, then overwrite the wizard-controlled keys.
+			merged = prev
+			for k, v := range agentManifest {
+				merged[k] = v
+			}
+		}
+	} else {
+		// Fresh agent — initialize state to "" so the kernel sees a blank.
+		merged["state"] = ""
+	}
 
+	mdata, _ := json.MarshalIndent(merged, "", "  ")
+	os.WriteFile(agentJSONPath, mdata, 0o644)
+
+	return nil
+}
+
+// PropagatePresetPolicy rewrites manifest.preset.{default,allowed} on every
+// agent under lingtaiDir (skipping the human pseudo-agent and the agent
+// passed via skipDir, which the wizard's own save already handled).
+//
+// The intent: /setup is a network-wide preset-policy reset. Whatever the
+// wizard's allowed list is becomes the authoritative allowed surface for
+// all agents in the project; whatever the wizard's default is becomes
+// every agent's default. Per-agent active is preserved when still in the
+// new allowed list, otherwise demoted to the new default (which is always
+// in allowed by construction).
+//
+// Best-effort per agent: malformed init.json or missing preset block is
+// silently skipped so one bad agent doesn't block the propagation. Returns
+// the count of agents successfully updated and the first error encountered
+// (for surfacing to the user) — the walk doesn't abort on errors.
+func PropagatePresetPolicy(lingtaiDir, skipDir, defaultRef string, allowed []string) (int, error) {
+	entries, err := os.ReadDir(lingtaiDir)
+	if err != nil {
+		return 0, fmt.Errorf("read lingtai dir: %w", err)
+	}
+
+	allowedSet := map[string]struct{}{}
+	for _, s := range allowed {
+		allowedSet[s] = struct{}{}
+	}
+
+	var firstErr error
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "human" || name == skipDir {
+			continue
+		}
+		agentDir := filepath.Join(lingtaiDir, name)
+		// Skip non-agent dirs (no init.json).
+		initPath := filepath.Join(agentDir, "init.json")
+		if _, err := os.Stat(initPath); err != nil {
+			continue
+		}
+		if err := rewritePresetBlock(initPath, defaultRef, allowed, allowedSet); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
+		count++
+	}
+	return count, firstErr
+}
+
+// rewritePresetBlock updates one agent's init.json preset block in place.
+// Sets default and allowed to the network policy; preserves active if
+// still in allowed, otherwise demotes to default. Silently no-ops when
+// the agent has no preset block (older shape) — the kernel's regen on
+// next boot will populate it.
+func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSet map[string]struct{}) error {
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return nil // no manifest, nothing to propagate
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return nil // older shape — kernel handles regen
+	}
+
+	currentActive, _ := pre["active"].(string)
+	newActive := currentActive
+	if _, stillAllowed := allowedSet[currentActive]; !stillAllowed {
+		newActive = defaultRef
+	}
+
+	// Materialize allowed as []interface{} so JSON round-trips cleanly.
+	allowedJSON := make([]interface{}, len(allowed))
+	for i, s := range allowed {
+		allowedJSON[i] = s
+	}
+
+	pre["active"] = newActive
+	pre["default"] = defaultRef
+	pre["allowed"] = allowedJSON
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	if err := os.WriteFile(initPath, out, 0o644); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
 	return nil
 }
 

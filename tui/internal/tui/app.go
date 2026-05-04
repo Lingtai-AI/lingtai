@@ -970,12 +970,73 @@ func (a *App) hardRefresh() error {
 // Returns the error from process.LaunchAgent if the relaunch fails. The
 // suspend/wait/unsuspend dance always runs to completion regardless of the
 // final launch outcome — only the launch error itself is propagated.
+//
+// /refresh also rewrites manifest.preset.active back to manifest.preset.default
+// so the agent comes back up on its declared default preset rather than
+// whatever it had swapped to at runtime. This is the documented escape hatch
+// when the active preset is misbehaving (rate-limited, broken adapter, etc.).
 func hardRefreshDir(lingtaiCmd, dir string) error {
 	suspendFile := filepath.Join(dir, ".suspend")
 	os.WriteFile(suspendFile, []byte(""), 0o644)
-	err := reviveDir(lingtaiCmd, dir)
+	waitForLockClear(dir)
+	resetActivePresetToDefault(dir)
+	_, err := process.LaunchAgent(lingtaiCmd, dir)
 	os.Remove(suspendFile)
 	return err
+}
+
+// waitForLockClear polls for .agent.lock to free (force-removing it after
+// 60s if the holder is gone). Used by hardRefreshDir between suspend and
+// relaunch so we don't stomp a still-running agent's init.json.
+func waitForLockClear(dir string) {
+	lockFile := filepath.Join(dir, ".agent.lock")
+	for i := 0; i < 120; i++ { // 120 × 500ms = 60s max
+		if tryLock(lockFile) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	// Process likely died without releasing lock — clean up
+	os.Remove(lockFile)
+}
+
+// resetActivePresetToDefault rewrites manifest.preset.active to match
+// manifest.preset.default in the agent's init.json. Best-effort: any error
+// (missing file, malformed JSON, missing preset block) is silently ignored
+// so a /refresh still relaunches even if the preset block is in a weird
+// state. Both `default` and `active` are guaranteed by validate_init to be
+// in `allowed`, so writing active = default is always authorized.
+func resetActivePresetToDefault(dir string) {
+	initPath := filepath.Join(dir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	def, ok := pre["default"].(string)
+	if !ok || def == "" {
+		return
+	}
+	if cur, ok := pre["active"].(string); ok && cur == def {
+		return // already on default, nothing to write
+	}
+	pre["active"] = def
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(initPath, out, 0o644)
 }
 
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
