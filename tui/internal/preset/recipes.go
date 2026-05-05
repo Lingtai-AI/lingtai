@@ -20,6 +20,13 @@ const (
 	RecipeAgora    = "agora" // from ~/lingtai-agora/recipes/
 )
 
+// DefaultRecipe is the recipe ID picked when the first-run wizard has no
+// explicit preselection (and no imported recipe is detected). Must match a
+// bundle directory name under recipe_assets/<category>/. If the named
+// recipe isn't found at scan time, recipeNameToIdx falls back to the first
+// discovered entry.
+const DefaultRecipe = "adaptive"
+
 // RecipeDotDir is the dotfolder name inside a recipe bundle that holds the
 // LingTai-facing behavioral layer (recipe.json, greet/, comment/, covenant/,
 // procedures/). Its presence is how the TUI recognizes a bundle as a recipe.

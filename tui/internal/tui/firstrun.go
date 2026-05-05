@@ -3695,6 +3695,15 @@ func (m FirstRunModel) recipeNameToIdx(name string) int {
 	if name == preset.RecipeCustom {
 		return afterDiscovered + len(m.agoraRecipes)
 	}
+	// No match. If caller asked for "default" (empty name), try to land on
+	// DefaultRecipe by ID before falling back to whatever's first.
+	if name == "" {
+		for i, r := range m.discoveredRecipes {
+			if r.ID == preset.DefaultRecipe {
+				return i + offset
+			}
+		}
+	}
 	return offset // default to first
 }
 
