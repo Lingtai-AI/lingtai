@@ -1,10 +1,10 @@
 # lingtai
 
-> **Maintenance:** see the `lingtai-kernel-anatomy` skill for the cross-repo convention. **Coding agents** update this file in the same commit as code changes. **LingTai agents** report drift as issues (mail or `discussions/<name>-patch.md`); do not silently fix.
+> **Maintenance:** see the `lingtai-tui-anatomy` skill (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`, ships to `~/.lingtai-tui/utilities/lingtai-tui-anatomy/`). **Coding agents** update this file in the same commit as code changes. **LingTai agents** report drift as issues (mail or `discussions/<name>-patch.md`); do not silently fix.
 
 This repo is the Go-side of the LingTai project: two binary targets (`lingtai-tui` and `lingtai-portal`) plus the canonical install pipeline. All Python code (kernel runtime + `lingtai` PyPI package) lives in the sibling repo `lingtai-kernel`. The TUI launches Python agents as subprocesses and observes them via the filesystem; neither binary has a runtime Python dependency.
 
-> **What is an `ANATOMY.md`?** See the canonical convention at `lingtai-kernel/src/lingtai/intrinsic_skills/lingtai-kernel-anatomy/SKILL.md`. This file follows the same 6-section template as every other anatomy in the LingTai source tree.
+> **What is an `ANATOMY.md`?** See the canonical convention at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md` for this Go monorepo, or `lingtai-kernel/src/lingtai/intrinsic_skills/lingtai-kernel-anatomy/SKILL.md` for the Python kernel. Both follow the same 6-section template; the TUI skill covers the two-binary-symmetry contract that the kernel skill doesn't have.
 
 ## Components
 
