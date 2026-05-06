@@ -28,6 +28,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 - **Called from:** the shell (`lingtai-tui`), Homebrew tap (`lingtai-ai/lingtai/lingtai-tui`), `install.sh`.
 - **Calls out:** `tui/internal/tui` (Bubble Tea app), `tui/internal/migrate` (per-project migrations), `tui/internal/globalmigrate` (per-machine migrations), `tui/internal/preset` (bootstrap + library population), `tui/internal/process` (agent launch), `tui/internal/config` (global config, venv, upgrade checks), `tui/internal/postman` (mail relay daemon), `tui/internal/timemachine` (git history daemon).
+- **Bootstrap sequence** (`main.go:273-291`): on every launch, the TUI runs `config.MigrateLegacyLanguage` → `config.NeedsVenv` → `config.EnsureVenv` (if needed) or `config.CheckUpgrade` (if venv exists) → `config.EnsureAddons` → `preset.Bootstrap` → `tui.ExportCommandsJSON`. `CheckUpgrade` auto-upgrades the `lingtai` meta-package from PyPI, which bundles `lingtai-kernel` + all addon MCPs. See `tui/internal/config/ANATOMY.md`.
 - **Version flow:** `Makefile:4` injects `git describe` into `main.go:29`. On startup, `main.go:118` calls `tui.SetTUIVersion(version)`, which stores it for `/doctor` drift detection.
 - **Upgrade self-restart:** `main.go:108` calls `syscallExec` (from platform-specific `exec_*.go`) to replace the running binary after a successful `brew upgrade`.
 - **i18n loading:** `i18n/i18n.go` embeds the three locale JSONs; `main.go:249` sets the active locale from `tuiCfg.Language`.
@@ -41,7 +42,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
   - `tui/internal/migrate/` — per-project migrations (shared version space with portal)
   - `tui/internal/globalmigrate/` — per-machine migrations (`~/.lingtai-tui/`)
   - `tui/internal/fs/` — filesystem readers for agent state
-  - `tui/internal/config/` — global TUI config, venv, registry
+  - `tui/internal/config/` — bootstrap, venv, global config (`tui/internal/config/ANATOMY.md`)
   - `tui/internal/process/` — subprocess launcher
   - `tui/internal/postman/` — UDP cross-internet mail relay
   - `tui/internal/timemachine/` — git-backed history daemon
@@ -65,3 +66,4 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **Platform shims follow the `//go:build !windows` pattern.** Unix is the primary target; Windows files mirror the same function signatures. Every subcommand (`purge`, `list`, `suspend`) plus `countRunningAgents` and `syscallExec` have paired platform files.
 - **The 7-file platform split** covers: `purge`, `list`, `suspend`, `agent_count`, `exec`. The `timemachine` and `postman` subcommands live in `internal/` and share no platform-specific `main.go` surface.
 - **Version stamping:** `Makefile:4` uses `git describe --tags --always`. Dev builds get `-X main.version=dev`. The upgrade check in `main.go:79-82` skips dev builds (those containing `-` in the version string).
+- **MCP packages are dependencies of `lingtai`.** The `lingtai` PyPI package bundles `lingtai-kernel` + all addon MCPs. `config.CheckUpgrade` on every launch upgrades everything. Users never install MCP packages individually.
