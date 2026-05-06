@@ -162,3 +162,22 @@ The TUI binary is `lingtai-tui`, **never** `lingtai`. `lingtai` is the Python ag
 ### Agent venv
 
 Agents run inside the TUI's runtime venv at `~/.lingtai-tui/runtime/venv/`. When making kernel changes (`lingtai-kernel/src/lingtai/...`), the editable install in this venv picks them up automatically — no reinstall needed. To verify, `~/.lingtai-tui/runtime/venv/bin/python -c "import lingtai; print(lingtai.__file__)"` should resolve to the kernel source tree, not site-packages.
+
+**Auto-upgrader can clobber the editable install.** `tui/main.go:283` calls `config.CheckUpgrade` on every TUI launch, which compares `lingtai.__version__` to PyPI's latest (`tui/internal/config/venv.go:319-377`). If the local source's `pyproject.toml` version is *lower* than PyPI's, the upgrader replaces the editable install with the PyPI wheel — silently undoing dev mode. Symptom in the launch banner:
+
+```
+Upgrading lingtai 0.8.0 → 0.8.2...
+ - lingtai==0.8.0 (from file:///.../lingtai-kernel)   ← editable, gone
+ + lingtai==0.8.2                                      ← PyPI wheel
+```
+
+To get back to dev mode after a clobber:
+
+```bash
+~/.local/bin/uv pip install -e ~/Documents/GitHub/lingtai-kernel \
+    -p ~/.lingtai-tui/runtime/venv
+```
+
+(use `uv`, not `pip` — the venv is uv-managed and has no `pip` symlink, only `pip3`). Verify with the import-path check above.
+
+To prevent re-clobber, ensure `lingtai-kernel/pyproject.toml` `version` is `>=` PyPI's latest. Right after a release bump (e.g. `0.8.0 → 0.8.2` shipped to PyPI), pull the kernel repo so your local source matches; the editable install stays untouched on subsequent launches because the upgrader sees equal versions.
