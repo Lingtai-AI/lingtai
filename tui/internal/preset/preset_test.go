@@ -54,8 +54,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 7 {
-			t.Fatalf("expected 7 presets, got %d", len(presets))
+		if len(presets) != 8 {
+			t.Fatalf("expected 8 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -64,7 +64,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "openrouter", "codex", "custom"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "kimi", "openrouter", "codex", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}

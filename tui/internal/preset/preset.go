@@ -215,7 +215,7 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"openrouter": 4, "codex": 5, "custom": 6,
+		"kimi": 4, "openrouter": 5, "codex": 6, "custom": 7,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -428,6 +428,7 @@ func BuiltinPresets() []Preset {
 		zhipuPreset(),
 		mimoPreset(),
 		deepseekPreset(),
+		kimiPreset(),
 		openrouterPreset(),
 		codexPreset(),
 		customPreset(),
@@ -443,6 +444,7 @@ var builtinNames = map[string]bool{
 	"zhipu":       true,
 	"mimo":        true,
 	"deepseek":    true,
+	"kimi":        true,
 	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
@@ -771,6 +773,37 @@ func deepseekPreset() Preset {
 			// audio analysis (transcription, music critique), use the `listen`
 			// skill; for media creation, register the MiniMax-Media MCP server
 			// via the `mcp-manual` skill (kernel `mcp` capability).
+			"capabilities": map[string]interface{}{
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"codex": e(),
+				"avatar": e(), "daemon": e(),
+				"library": libraryDefault(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": false,
+		},
+	}
+}
+
+func kimiPreset() Preset {
+	// Kimi Code (Moonshot 月之暗面) — OpenAI-compatible coding API.
+	// Subscription-based (no per-token billing); model `kimi-for-coding`.
+	// Tool calling supported. The kernel auto-sets User-Agent
+	// "LingTai-Agent/1.0" for the `kimi` provider per Kimi's ToS — UA
+	// spoofing risks account suspension.
+	return Preset{
+		Name:        "kimi",
+		Description: PresetDescription{Summary: "Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling", Tier: "3"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "kimi", "model": "kimi-for-coding",
+				"api_key": nil, "api_key_env": "KIMI_CODE_API_KEY",
+				"base_url": "https://api.kimi.com/coding/v1", "api_compat": "openai",
+			},
+			// Kimi Code is text-only — no media generation. For audio
+			// analysis use the `listen` skill; for media creation register
+			// the MiniMax-Media MCP server via the `mcp-manual` skill.
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
