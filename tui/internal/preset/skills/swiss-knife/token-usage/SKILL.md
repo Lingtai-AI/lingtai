@@ -79,7 +79,11 @@ Each agent's `logs/token_ledger.jsonl` has one JSON object per LLM call:
 
 ## Dependencies
 
-- `litellm` — installed in the TUI venv (`pip install litellm`)
+- `litellm` — required. Check with `python3 -c "import litellm"`. If missing, ask the human before installing:
+
+  > token-usage needs `litellm` (~5MB) for model pricing. Install it? (`pip install litellm`)
+
+  Install only after they say yes.
 - Python 3.9+
 
 ## Tips
