@@ -136,6 +136,7 @@ Pad is your **living index** of what you're working on right now. It is not a sk
 
 - **The active goal** — what you're working on, in your own words. One paragraph or a short list. Not a project plan, not a transcript — the *shape* of the thing.
 - **Where you are in it** — the next concrete step, the current blocker, the open question.
+- **Timestamps** — always include when each entry was last updated (e.g., `2026-05-07T13:41 PDT`). After a refresh or molt, timestamps prevent old information from being mistaken for new. Without them, you cannot distinguish "information from the previous session" from "information from this session."
 - **Self-references — pointers to where the substance lives.** This is the heart of progressive disclosure. Don't inline content; *point at it*:
   - **codex IDs** you've consulted or submitted (`codex_a3f1...`)
   - **library SKILL.md paths** you've loaded (`.library/intrinsic/lingtai-anatomy/SKILL.md`)
