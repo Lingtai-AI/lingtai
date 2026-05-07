@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -51,7 +50,6 @@ const (
 	feAPICompat
 	feBaseURL
 	feAPIKey
-	feContextLimit
 	feCapFile
 	feCapBash
 	feCapWebSearch
@@ -88,7 +86,7 @@ var capFieldNames = map[editorField]string{
 // present, so they don't appear here.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey, feContextLimit,
+	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey,
 	feCapFile, feCapBash, feCapCodex,
 	feCapAvatar, feCapDaemon, feCapLibrary,
 	feCapWebSearch, feCapVision,
@@ -535,7 +533,7 @@ func (m PresetEditorModel) updateExitPrompt(msg tea.KeyMsg) (PresetEditorModel, 
 func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	f := editorFieldOrder[m.cursor]
 	switch f {
-	case feName, feSummary, feGains, feLoses, feBaseURL, feContextLimit:
+	case feName, feSummary, feGains, feLoses, feBaseURL:
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
 		m.input.Focus()
@@ -800,15 +798,6 @@ func (m *PresetEditorModel) applyInline(val string) {
 		// commit deletes any saved key (treated as "clear it").
 		m.apiKey = val
 		m.apiKeySet = true
-	case feContextLimit:
-		if val == "" {
-			delete(llm, "context_limit")
-		} else if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			llm["context_limit"] = n
-		}
-		// Invalid input: silently keep the previous value. The
-		// validation footer will already complain if the existing
-		// value is wrong; we don't want a typo to clobber a good one.
 	}
 }
 
@@ -1087,14 +1076,6 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		// Display the key (masked). The env-var name is an internal
 		// detail; the user only needs to see whether a key is set.
 		return maskAPIKey(m.apiKey)
-	case feContextLimit:
-		switch v := llm["context_limit"].(type) {
-		case float64:
-			return strconv.Itoa(int(v))
-		case int:
-			return strconv.Itoa(v)
-		}
-		return ""
 	}
 	return ""
 }
@@ -1185,7 +1166,6 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	rows = append(rows, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4))
 	rows = append(rows, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4))
 	rows = append(rows, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4))
-	rows = append(rows, m.row(feContextLimit, lbl("context_limit"), m.fieldString(feContextLimit), width-4))
 	rows = append(rows, "")
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_core")))
 	for _, capName := range coreCapabilities {
