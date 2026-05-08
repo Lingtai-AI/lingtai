@@ -54,8 +54,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 8 {
-			t.Fatalf("expected 8 presets, got %d", len(presets))
+		if len(presets) != 9 {
+			t.Fatalf("expected 9 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {

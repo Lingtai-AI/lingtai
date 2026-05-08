@@ -428,6 +428,7 @@ func BuiltinPresets() []Preset {
 		zhipuPreset(),
 		mimoPreset(),
 		deepseekPreset(),
+		geminiPreset(),
 		kimiPreset(),
 		openrouterPreset(),
 		codexPreset(),
@@ -444,6 +445,7 @@ var builtinNames = map[string]bool{
 	"zhipu":       true,
 	"mimo":        true,
 	"deepseek":    true,
+	"gemini":      true,
 	"kimi":        true,
 	"openrouter":  true,
 	"codex":       true,
@@ -782,6 +784,35 @@ func deepseekPreset() Preset {
 			},
 			"admin":     map[string]interface{}{"karma": true},
 			"streaming": false,
+		},
+	}
+}
+
+func geminiPreset() Preset {
+	// Gemini 3 Flash (Google) — multimodal model with native vision,
+	// tool calling, and streaming. Uses Google's own Gemini adapter in
+	// the kernel (not OpenAI-compat), so no base_url or api_compat.
+	return Preset{
+		Name:        "gemini",
+		Description: PresetDescription{Summary: "Gemini 3 Flash — Google's multimodal model, tool calls, vision", Tier: "3"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "gemini", "model": "gemini-3-flash-preview",
+				"api_key": nil, "api_key_env": "GEMINI_API_KEY",
+			},
+			// Gemini is multimodal/vision-capable — image inputs are
+			// handled natively by the model. For audio analysis use the
+			// `listen` skill; for media creation register a provider's
+			// MCP server via `mcp-manual`.
+			"capabilities": map[string]interface{}{
+				"file": e(), "bash": map[string]interface{}{"yolo": true},
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"codex": e(),
+				"avatar": e(), "daemon": e(),
+				"library": libraryDefault(),
+			},
+			"admin":     map[string]interface{}{"karma": true},
+			"streaming": true,
 		},
 	}
 }
