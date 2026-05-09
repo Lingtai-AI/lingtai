@@ -2,6 +2,7 @@ package process
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,11 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
+
+// ErrAgentAlreadyRunning is returned by LaunchAgent when a `lingtai run`
+// process is already alive in the target workdir. Callers should surface this
+// to the user rather than re-attempting the launch.
+var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in this workdir")
 
 func InitProject(lingtaiDir, globalDir string) error {
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
@@ -94,7 +100,17 @@ func resolvePython(agentDir, fallbackCmd string) string {
 
 // LaunchAgent starts an agent process. lingtaiCmd is the global fallback Python;
 // the agent's init.json venv_path is tried first.
+//
+// Refuses to launch if another `lingtai run <agentDir>` process is already
+// alive on this machine — this prevents the suspend→relaunch race where the
+// previous interpreter is still tearing down. Returns ErrAgentAlreadyRunning
+// in that case. The kernel's flock guarantees correctness of on-disk state,
+// but a duplicate Python process still shows up in `ps`/`lingtai-tui list`
+// and can mislead users; this guard keeps the process accounting honest.
 func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
+	if IsAgentRunning(agentDir) {
+		return nil, ErrAgentAlreadyRunning
+	}
 	fs.CleanSignals(agentDir)
 	python := resolvePython(agentDir, lingtaiCmd)
 
