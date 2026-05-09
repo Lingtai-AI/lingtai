@@ -70,8 +70,8 @@ func main() {
 			postmanMain()
 			return
 		}
-		if arg == "refresh-skills" {
-			refreshSkillsMain()
+		if arg == "bootstrap" {
+			bootstrapMain()
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
@@ -655,7 +655,7 @@ func printHelp() {
 	fmt.Println("       lingtai-tui suspend [dir]")
 	fmt.Println("       lingtai-tui clean")
 	fmt.Println("       lingtai-tui postman [--port N] [dir ...]")
-	fmt.Println("       lingtai-tui refresh-skills")
+	fmt.Println("       lingtai-tui bootstrap")
 	fmt.Println()
 	fmt.Println("  (no args)    Launch TUI in current directory")
 	fmt.Println("  purge        Kill all lingtai agent processes on this machine.")
@@ -665,7 +665,7 @@ func printHelp() {
 	fmt.Println("  suspend      Gracefully suspend agents via signal files (all, or those in <dir>)")
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 	fmt.Println("  postman      Start the mail relay daemon (UDP, port 7777 by default)")
-	fmt.Println("  refresh-skills  Re-extract embedded skills to ~/.lingtai-tui/utilities/")
+	fmt.Println("  bootstrap       Re-extract embedded skills to ~/.lingtai-tui/utilities/")
 	fmt.Println()
 	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
 	fmt.Println("  They are the bodies of your agents — files, pad, mail, identity.")
@@ -892,14 +892,14 @@ func postmanMain() {
 	postman.Run(globalDir, port, watchDirs)
 }
 
-func refreshSkillsMain() {
+func bootstrapMain() {
 	globalDir, err := config.GlobalDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 	preset.PopulateBundledLibrary("", globalDir)
-	fmt.Printf("Skills refreshed in %s/utilities/\n", globalDir)
+	fmt.Printf("Bootstrapped skills to %s/utilities/\n", globalDir)
 }
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
