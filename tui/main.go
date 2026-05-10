@@ -17,6 +17,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/globalmigrate"
+	"github.com/anthropics/lingtai-tui/internal/headless"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/postman"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -72,6 +73,14 @@ func main() {
 		}
 		if arg == "bootstrap" {
 			bootstrapMain()
+			return
+		}
+		if arg == "presets" {
+			presetsMain()
+			return
+		}
+		if arg == "spawn" {
+			spawnMain()
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
@@ -656,6 +665,8 @@ func printHelp() {
 	fmt.Println("       lingtai-tui clean")
 	fmt.Println("       lingtai-tui postman [--port N] [dir ...]")
 	fmt.Println("       lingtai-tui bootstrap")
+	fmt.Println("       lingtai-tui presets [--saved-only] [--templates-only]")
+	fmt.Println("       lingtai-tui spawn <dir> --preset <name> [--agent-name <name>] [--language <code>]")
 	fmt.Println()
 	fmt.Println("  (no args)    Launch TUI in current directory")
 	fmt.Println("  purge        Kill all lingtai agent processes on this machine.")
@@ -666,6 +677,8 @@ func printHelp() {
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 	fmt.Println("  postman      Start the mail relay daemon (UDP, port 7777 by default)")
 	fmt.Println("  bootstrap       Re-extract embedded skills to ~/.lingtai-tui/utilities/")
+	fmt.Println("  presets      List available presets as JSON (for agent consumption)")
+	fmt.Println("  spawn        Create a new project and launch an agent headlessly (JSON output)")
 	fmt.Println()
 	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
 	fmt.Println("  They are the bodies of your agents — files, pad, mail, identity.")
@@ -900,6 +913,77 @@ func bootstrapMain() {
 	}
 	preset.PopulateBundledLibrary("", globalDir)
 	fmt.Printf("Bootstrapped skills to %s/utilities/\n", globalDir)
+}
+
+func presetsMain() {
+	globalDir, err := config.GlobalDir()
+	if err != nil {
+		headless.ExitError("cannot resolve global dir: "+err.Error(), "init_failed")
+	}
+	if err := preset.Bootstrap(globalDir); err != nil {
+		headless.ExitError("bootstrap failed: "+err.Error(), "bootstrap_failed")
+	}
+
+	savedOnly := false
+	templatesOnly := false
+	for _, a := range os.Args[2:] {
+		switch a {
+		case "--saved-only":
+			savedOnly = true
+		case "--templates-only":
+			templatesOnly = true
+		default:
+			headless.ExitError("unknown flag: "+a, "invalid_args")
+		}
+	}
+	headless.RunPresets(os.Stdout, savedOnly, templatesOnly)
+}
+
+func spawnMain() {
+	if len(os.Args) < 3 {
+		headless.ExitError(
+			"usage: lingtai-tui spawn <directory> --preset <name> [--agent-name <name>] [--language <en|zh|wen>]",
+			"invalid_args")
+	}
+
+	dir, _ := filepath.Abs(os.Args[2])
+	opts := headless.SpawnOpts{Dir: dir, Language: "en"}
+
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--preset":
+			if i+1 >= len(os.Args) {
+				headless.ExitError("--preset requires a value", "invalid_args")
+			}
+			i++
+			opts.Preset = os.Args[i]
+		case "--agent-name":
+			if i+1 >= len(os.Args) {
+				headless.ExitError("--agent-name requires a value", "invalid_args")
+			}
+			i++
+			opts.AgentName = os.Args[i]
+		case "--language":
+			if i+1 >= len(os.Args) {
+				headless.ExitError("--language requires a value", "invalid_args")
+			}
+			i++
+			lang := os.Args[i]
+			if lang != "en" && lang != "zh" && lang != "wen" {
+				headless.ExitError("--language must be en, zh, or wen", "invalid_args")
+			}
+			opts.Language = lang
+		default:
+			headless.ExitError("unknown flag: "+os.Args[i], "invalid_args")
+		}
+	}
+
+	if opts.Preset == "" {
+		headless.ExitError("--preset is required", "invalid_args")
+	}
+
+	code := headless.RunSpawn(os.Stdout, os.Stderr, opts)
+	os.Exit(code)
 }
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
