@@ -1431,11 +1431,6 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	if proceduresFile == "" {
 		proceduresFile = ProceduresPath(globalDir, lang)
 	}
-	soulFile := opts.SoulFile
-	if soulFile == "" {
-		soulFile = SoulFlowPath(globalDir, lang)
-	}
-
 	// Load existing init.json addons + mcp fields so we preserve them across
 	// regens. Critical for /setup: when the user changes non-addon settings,
 	// existing addon registrations and MCP activations must not be dropped.
@@ -1472,7 +1467,6 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"covenant_file":    covenantFile,
 		"principle_file":   principleFile,
 		"procedures_file":  proceduresFile,
-		"soul_file":        soulFile,
 		"env_file":       config.EnvFilePath(globalDir),
 		"venv_path":      filepath.Join(globalDir, "runtime", "venv"),
 		"pad":            "",

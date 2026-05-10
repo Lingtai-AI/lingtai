@@ -468,7 +468,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	// inner shape — every consumer does p.Manifest["language"], ["llm"],
 	// ["capabilities"], etc. — so we extract the inner manifest dict.
 	// Stash the outer dict separately so enterAgentNameDir can read fields
-	// like covenant_file / principle_file / soul_file that live at top level.
+	// like covenant_file / principle_file that live at top level.
 	if orchDir != "" {
 		initPath := filepath.Join(orchDir, "init.json")
 		if data, err := os.ReadFile(initPath); err == nil {
