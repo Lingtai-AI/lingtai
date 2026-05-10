@@ -20,11 +20,12 @@ type PresetsOutput struct {
 	Presets []PresetEntry `json:"presets"`
 }
 
-// RunPresets lists available presets as JSON to w.
-func RunPresets(w io.Writer, savedOnly, templatesOnly bool) {
+// RunPresets lists available presets as JSON to stdout.
+// Errors are written as JSON to stderr.
+func RunPresets(stdout, stderr io.Writer, savedOnly, templatesOnly bool) {
 	all, err := preset.List()
 	if err != nil {
-		WriteError(w, "failed to list presets: "+err.Error(), "list_failed")
+		WriteError(stderr, "failed to list presets: "+err.Error(), "list_failed")
 		return
 	}
 
@@ -52,5 +53,5 @@ func RunPresets(w io.Writer, savedOnly, templatesOnly bool) {
 	if entries == nil {
 		entries = []PresetEntry{}
 	}
-	WriteJSON(w, PresetsOutput{Presets: entries})
+	WriteJSON(stdout, PresetsOutput{Presets: entries})
 }

@@ -936,7 +936,7 @@ func presetsMain() {
 			headless.ExitError("unknown flag: "+a, "invalid_args")
 		}
 	}
-	headless.RunPresets(os.Stdout, savedOnly, templatesOnly)
+	headless.RunPresets(os.Stdout, os.Stderr, savedOnly, templatesOnly)
 }
 
 func spawnMain() {
@@ -946,8 +946,7 @@ func spawnMain() {
 			"invalid_args")
 	}
 
-	dir, _ := filepath.Abs(os.Args[2])
-	opts := headless.SpawnOpts{Dir: dir, Language: "en"}
+	opts := headless.SpawnOpts{Dir: os.Args[2], Language: "en"}
 
 	for i := 3; i < len(os.Args); i++ {
 		switch os.Args[i] {

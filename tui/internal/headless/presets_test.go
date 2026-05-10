@@ -22,7 +22,7 @@ func withTempHome(t *testing.T) {
 func TestRunPresets_EmptyDir_ReturnsEmptyList(t *testing.T) {
 	withTempHome(t)
 	var buf bytes.Buffer
-	RunPresets(&buf, false, false)
+	RunPresets(&buf, &bytes.Buffer{}, false, false)
 	var result PresetsOutput
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -38,7 +38,7 @@ func TestRunPresets_WithTemplates_ListsAll(t *testing.T) {
 		t.Fatalf("RefreshTemplates: %v", err)
 	}
 	var buf bytes.Buffer
-	RunPresets(&buf, false, false)
+	RunPresets(&buf, &bytes.Buffer{}, false, false)
 	var result PresetsOutput
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -59,7 +59,7 @@ func TestRunPresets_SavedOnly_ExcludesTemplates(t *testing.T) {
 		t.Fatalf("RefreshTemplates: %v", err)
 	}
 	var buf bytes.Buffer
-	RunPresets(&buf, true, false)
+	RunPresets(&buf, &bytes.Buffer{}, true, false)
 	var result PresetsOutput
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -83,7 +83,7 @@ func TestRunPresets_TemplatesOnly_ExcludesSaved(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 	var buf bytes.Buffer
-	RunPresets(&buf, false, true)
+	RunPresets(&buf, &bytes.Buffer{}, false, true)
 	var result PresetsOutput
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -101,7 +101,7 @@ func TestRunPresets_HasRequiredFields(t *testing.T) {
 		t.Fatalf("RefreshTemplates: %v", err)
 	}
 	var buf bytes.Buffer
-	RunPresets(&buf, false, false)
+	RunPresets(&buf, &bytes.Buffer{}, false, false)
 	var result PresetsOutput
 	json.Unmarshal(buf.Bytes(), &result)
 	if len(result.Presets) == 0 {

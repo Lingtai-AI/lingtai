@@ -7,15 +7,15 @@ import (
 )
 
 // WriteJSON marshals data as indented JSON to w, followed by a newline.
-func WriteJSON(w io.Writer, data interface{}) {
+func WriteJSON(w io.Writer, data interface{}) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(data)
+	return enc.Encode(data)
 }
 
 // WriteError writes a JSON error object to w.
-func WriteError(w io.Writer, message, code string) {
-	WriteJSON(w, map[string]string{
+func WriteError(w io.Writer, message, code string) error {
+	return WriteJSON(w, map[string]string{
 		"error": message,
 		"code":  code,
 	})
