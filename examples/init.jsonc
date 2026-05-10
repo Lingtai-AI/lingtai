@@ -219,11 +219,6 @@
   "pad": "",
   // Or use a file: "pad_file": "pad.md"
 
-  // Soul flow — the agent's subconscious inner monologue prompt.
-  // Shapes the periodic self-reflection triggered by soul.delay.
-  "soul": "",
-  // Or use a file: "soul_file": "soul-flow.md"
-
   // First message — what the agent sees when it wakes up.
   // This is the initial user prompt that starts the conversation.
   "prompt": "Hello! How can I help you today?"
