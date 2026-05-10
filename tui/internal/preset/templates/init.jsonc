@@ -137,7 +137,7 @@
     // -------------------------------------------------------
     // delay: seconds between soul ticks (subconscious reflection).
     // Higher = less frequent self-reflection, lower resource usage.
-    "soul": { "delay": 120 },
+    "soul": { "delay": 7200 },
 
     // -------------------------------------------------------
     // Lifecycle limits

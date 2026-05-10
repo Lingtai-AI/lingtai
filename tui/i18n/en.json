@@ -45,7 +45,7 @@
   "firstrun.context_limit": "Context limit",
   "firstrun.context_limit_hint": "max context window (applies to all agents)",
   "firstrun.soul_delay": "Soul delay",
-  "firstrun.soul_delay_hint": "seconds idle before agent thinks autonomously. Set low (60-300) for proactive agents, high to effectively silence it (applies to all agents)",
+  "firstrun.soul_delay_hint": "seconds idle before agent thinks autonomously (default: 7200 = 2h). Soul flow is the agent's subconscious — it reflects on recent work, consults past selves, and surfaces insights. Set low (60-300) for proactive agents, high (7200+) for batch/workhorse agents, very high to silence it (applies to all agents)",
   "firstrun.molt_pressure": "Molt pressure",
   "firstrun.molt_pressure_hint": "context % to trigger molt (applies to all agents)",
   "firstrun.max_rpm": "Max RPM",
