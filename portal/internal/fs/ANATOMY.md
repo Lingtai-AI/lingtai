@@ -32,11 +32,13 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `IsAliveHuman()` (`heartbeat.go:24-26`) — always true.
 
 ### Mail (`mail.go`)
-- `ReadInbox(dir)`, `ReadArchive(dir)` (`mail.go:14-20`) — full-folder reads.
-- `MailCache` struct + `NewMailCache(humanDir)` (`mail.go:24-40`) — incremental mailbox cache tracking inbox+seen UUID directories.
-- `MailCache.Refresh()` (`mail.go:43-70`) — immutable refresh: scans for new messages, merges, sorts by `ReceivedAt`. Safe for goroutine use.
-- `WriteMail(recipientDir, senderDir, ...)` (`mail.go:141-207`) — writes message to inbox (local) or outbox (pseudo-agent/remote), plus sent copy. Respects the pseudo-agent contract: if sender has `admin: null`, writes to outbox only.
-- `isPseudoAgent(identity)` (`mail.go:209-222`) — `admin` nil or absent → true.
+- `newMailboxID()` (`mail.go:32`) — builds `YYYYMMDDTHHMMSS-xxxx` short id matching the kernel's `_new_mailbox_id`.
+- `ReadInbox(dir)`, `ReadArchive(dir)` (`mail.go:36-40`) — full-folder reads.
+- `MailCache` struct + `NewMailCache(humanDir)` (`mail.go:46-55`) — incremental mailbox cache tracking inbox+seen mailbox-id directories.
+- `MailCache.Refresh()` (`mail.go:66-91`) — immutable refresh: scans for new messages, merges, sorts by `ReceivedAt`. Safe for goroutine use.
+- `prepareMailDirs(primaryParent, sentParent)` (`mail.go:176`) — allocates a short id and creates every mailbox leaf the send will write, retrying on collisions in any target folder.
+- `WriteMail(recipientDir, senderDir, ...)` (`mail.go:214`) — writes message to inbox (local) or outbox (pseudo-agent/remote), plus sent copy. Allocates id via `prepareMailDirs`. Respects the pseudo-agent contract: if sender has `admin: null`, writes to outbox only.
+- `isPseudoAgent(identity)` (`mail.go:279`) — `admin` nil or absent → true.
 
 ### Ledger (`ledger.go`)
 - `ReadLedger(dir)` (`ledger.go:17-47`) — scans `delegates/ledger.jsonl` for `event: "avatar"` records, returns `AvatarEdge` pairs and resolved child directories.
@@ -92,7 +94,8 @@ All state is read from the project's `.lingtai/` directory. The portal only writ
 ## Notes
 
 - **`reconstruct.go` is the portal-specific addition.** The TUI shows live topology; the portal reconstructs historical topology tapes from `events.jsonl` + mailbox data. The reconstruction replays agent states chronologically at 3-second intervals, with agents appearing when their first event fires and mail accumulating cumulatively. This is the data source for the `/replay` endpoint.
-- **`MailCache`** tracks already-loaded messages via UUID directory names, enabling incremental refreshes without re-reading the entire mailbox. It is immutable by convention — `Refresh()` returns a new cache rather than mutating the receiver, so it's safe to call from a goroutine.
+- **Mailbox id shape.** `WriteMail` allocates short, human-scannable ids of the form `YYYYMMDDTHHMMSS-xxxx` (20 chars, UTC, 4 hex chars of UUID4 entropy) via `newMailboxID`. This matches the kernel's `_new_mailbox_id` in `lingtai-kernel/src/lingtai_kernel/intrinsics/email/primitives.py` and the TUI's mirror in `tui/internal/fs/mail.go`, so directory names, `id`, and `_mailbox_id` look identical regardless of which side wrote the message. `prepareMailDirs` uses `os.Mkdir` (not `MkdirAll`) on each leaf so same-second collisions in any target folder surface as `fs.ErrExist` and trigger up to 8 regenerations without overwriting existing mail.
+- **`MailCache`** tracks already-loaded messages via mailbox-id directory names, enabling incremental refreshes without re-reading the entire mailbox. It is immutable by convention — `Refresh()` returns a new cache rather than mutating the receiver, so it's safe to call from a goroutine.
 - **`IsAlive`** uses a 2-second threshold. A stale heartbeat forces state to `SUSPENDED` in `BuildNetwork`.
 - **Atomic writes** (location, signals) use temp-file + rename, matching the kernel's filesystem contract.
 - **Capability parsing** handles both `[]string` (from TUI-generated presets) and tuple format (from live agents), so the portal works with projects the TUI hasn't touched.

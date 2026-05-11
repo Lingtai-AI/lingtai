@@ -2,7 +2,9 @@ package fs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +12,78 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// newMailboxID builds a sortable, human-scannable mailbox id. The format
+// (`YYYYMMDDTHHMMSS-xxxx`, 20 chars, UTC) matches the kernel helper
+// `_new_mailbox_id` in `lingtai_kernel/intrinsics/email/primitives.py` and
+// the portal's mirror in `portal/internal/fs/mail.go` so mail written by
+// any of the three sides is indistinguishable in `email(check)` output.
+// The 4-hex suffix is drawn from `uuid.New` (a v4 UUID); 16 bits of
+// entropy per second is enough for human-paced sends and the WriteMail
+// collision-retry loop covers the rare burst case.
+var mailboxIDSource = func() string {
+	ts := time.Now().UTC().Format("20060102T150405")
+	// `uuid.New().String()` returns `xxxxxxxx-xxxx-...` — the first 4 hex
+	// chars come before any dash, so this mirrors the kernel's
+	// `uuid.uuid4().hex[:4]` slicing.
+	suffix := uuid.New().String()[:4]
+	return ts + "-" + suffix
+}
+
+func newMailboxID() string {
+	return mailboxIDSource()
+}
+
+// mailboxIDCollisionRetries is the per-folder attempt budget for
+// `prepareMailDirs`. The short ID has 16 bits of entropy in the
+// suffix, so a same-second send has a 1/65536 chance of colliding;
+// 8 retries reduces the practical failure probability to negligible while
+// still terminating quickly when the filesystem is genuinely failing.
+const mailboxIDCollisionRetries = 8
+
+// prepareMailDirs allocates an id and creates every mailbox leaf that will
+// receive this message. Non-pseudo sends write both the primary folder and the
+// sender's sent/ folder, so the id must be free in both places; otherwise a
+// same-second suffix collision in sent/ could overwrite an existing sent
+// record. On a collision in any target folder the partial leaves from that
+// attempt are removed and a fresh id is generated.
+func prepareMailDirs(primaryParent string, sentParent string) (string, string, string, error) {
+	if err := os.MkdirAll(primaryParent, 0o755); err != nil {
+		return "", "", "", fmt.Errorf("create primary mailbox parent: %w", err)
+	}
+	if sentParent != "" {
+		if err := os.MkdirAll(sentParent, 0o755); err != nil {
+			return "", "", "", fmt.Errorf("create sent mailbox parent: %w", err)
+		}
+	}
+	var lastErr error
+	for i := 0; i < mailboxIDCollisionRetries; i++ {
+		id := newMailboxID()
+		primaryDir := filepath.Join(primaryParent, id)
+		if err := os.Mkdir(primaryDir, 0o755); err != nil {
+			if !errors.Is(err, iofs.ErrExist) {
+				return "", "", "", fmt.Errorf("create primary mailbox leaf: %w", err)
+			}
+			lastErr = err
+			continue
+		}
+		if sentParent == "" {
+			return id, primaryDir, "", nil
+		}
+		sentDir := filepath.Join(sentParent, id)
+		if err := os.Mkdir(sentDir, 0o755); err != nil {
+			_ = os.Remove(primaryDir)
+			if !errors.Is(err, iofs.ErrExist) {
+				return "", "", "", fmt.Errorf("create sent mailbox leaf: %w", err)
+			}
+			lastErr = err
+			continue
+		}
+		return id, primaryDir, sentDir, nil
+	}
+	return "", "", "", fmt.Errorf("create mailbox leaves: exhausted %d retries: %w",
+		mailboxIDCollisionRetries, lastErr)
+}
 
 func ReadInbox(dir string) ([]MailMessage, error) {
 	return readMailFolder(filepath.Join(dir, "mailbox", "inbox"))
@@ -23,7 +97,7 @@ func ReadSent(dir string) ([]MailMessage, error) {
 // Each Refresh call reads new messages from disk. Messages transitioning
 // from outbox/ to sent/ have their Delivered flag flipped in place.
 type MailCache struct {
-	seen      map[string]int // UUID → index into Messages
+	seen      map[string]int // mailbox id → index into Messages
 	Messages  []MailMessage  // full sorted merged slice (outbox + inbox + sent)
 	humanDir  string
 	inboxDir  string
@@ -61,8 +135,8 @@ func (c MailCache) Refresh() MailCache {
 	}
 
 	// Order matters: scan outbox first so messages appear immediately after send.
-	// Then inbox and sent — for any UUID previously seen in outbox that now appears
-	// in sent, the scan flips Delivered to true in place.
+	// Then inbox and sent — for any mailbox id previously seen in outbox that now
+	// appears in sent, the scan flips Delivered to true in place.
 	out.scanFolder(out.outboxDir, false /* delivered */)
 	out.scanFolder(out.inboxDir, true)
 	out.scanFolder(out.sentDir, true)
@@ -71,7 +145,7 @@ func (c MailCache) Refresh() MailCache {
 	sort.Slice(out.Messages, func(i, j int) bool {
 		return out.Messages[i].ReceivedAt < out.Messages[j].ReceivedAt
 	})
-	// Rebuild the UUID→index map after the sort. Keyed by MailboxID, which is
+	// Rebuild the mailbox-id→index map after the sort. Keyed by MailboxID, which is
 	// the mailbox directory basename (what scanFolder looks up) — not msg.ID,
 	// which could diverge from the directory name if a future kernel rewrote
 	// the JSON during pickup. MailboxID is set to the directory name at write
@@ -82,11 +156,11 @@ func (c MailCache) Refresh() MailCache {
 	return out
 }
 
-// scanFolder reads UUID directories in folder. For UUIDs not yet in seen,
+// scanFolder reads mailbox-id directories in folder. For mailbox ids not yet in seen,
 // loads their message.json, stamps Delivered, and appends to Messages.
-// For UUIDs already in seen: if delivered=true, flips the existing entry's
+// For mailbox ids already in seen: if delivered=true, flips the existing entry's
 // Delivered flag to true (outbox→sent transition). If delivered=false and
-// the UUID is already known, skip — we've already loaded it.
+// the mailbox id is already known, skip — we've already loaded it.
 func (c *MailCache) scanFolder(folder string, delivered bool) {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
@@ -161,12 +235,31 @@ func readManifestAsIdentity(dir string) map[string]interface{} {
 }
 
 func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) error {
-	id := uuid.New().String()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-
 	// Read sender's manifest as identity card (same as Python agents do)
 	identity := readManifestAsIdentity(senderDir)
 
+	// Allocate every mailbox directory before writing JSON so the chosen id is
+	// unique across all folders this send will touch. Pseudo-agent sends write
+	// only outbox; non-pseudo sends also write sender sent/ with the same id.
+	var primaryParent string
+	pseudo := isPseudoAgent(identity)
+	switch {
+	case pseudo, IsRemoteAddress(toAddr):
+		primaryParent = filepath.Join(senderDir, "mailbox", "outbox")
+	default:
+		primaryParent = filepath.Join(recipientDir, "mailbox", "inbox")
+	}
+	sentParent := ""
+	if !pseudo {
+		sentParent = filepath.Join(senderDir, "mailbox", "sent")
+	}
+
+	id, primaryDir, sentDir, err := prepareMailDirs(primaryParent, sentParent)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	msg := MailMessage{
 		ID:         id,
 		MailboxID:  id,
@@ -185,42 +278,16 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
-	// Pseudo-agent branch: if sender's .agent.json has admin: null (or no
-	// manifest), write only to the sender's outbox. Subscribed real agents
-	// poll the outbox and produce the sent entry via atomic rename on pickup.
-	if isPseudoAgent(identity) {
-		outboxDir := filepath.Join(senderDir, "mailbox", "outbox", id)
-		if err := os.MkdirAll(outboxDir, 0o755); err != nil {
-			return fmt.Errorf("create outbox dir: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(outboxDir, "message.json"), data, 0o644); err != nil {
-			return fmt.Errorf("write outbox message: %w", err)
-		}
+	if err := os.WriteFile(filepath.Join(primaryDir, "message.json"), data, 0o644); err != nil {
+		return fmt.Errorf("write primary message: %w", err)
+	}
+
+	// Pseudo-agent branch: no sent/ copy at send time. The subscribed real
+	// agent's pickup will produce the sent entry via atomic rename.
+	if pseudo {
 		return nil
 	}
 
-	if IsRemoteAddress(toAddr) {
-		outboxDir := filepath.Join(senderDir, "mailbox", "outbox", id)
-		if err := os.MkdirAll(outboxDir, 0o755); err != nil {
-			return fmt.Errorf("create outbox dir: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(outboxDir, "message.json"), data, 0o644); err != nil {
-			return fmt.Errorf("write outbox message: %w", err)
-		}
-	} else {
-		inboxDir := filepath.Join(recipientDir, "mailbox", "inbox", id)
-		if err := os.MkdirAll(inboxDir, 0o755); err != nil {
-			return fmt.Errorf("create inbox dir: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(inboxDir, "message.json"), data, 0o644); err != nil {
-			return fmt.Errorf("write inbox message: %w", err)
-		}
-	}
-
-	sentDir := filepath.Join(senderDir, "mailbox", "sent", id)
-	if err := os.MkdirAll(sentDir, 0o755); err != nil {
-		return fmt.Errorf("create sent dir: %w", err)
-	}
 	if err := os.WriteFile(filepath.Join(sentDir, "message.json"), data, 0o644); err != nil {
 		return fmt.Errorf("write sent message: %w", err)
 	}

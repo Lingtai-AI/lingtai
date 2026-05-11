@@ -26,11 +26,13 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `IsAlive(dir, thresholdSec)` | `tui/internal/fs/heartbeat.go:11` | reads `.agent.heartbeat` unix timestamp, returns `age < threshold` |
 | `IsAliveHuman()` | `tui/internal/fs/heartbeat.go:24` | always `true` |
 | **mail.go** | | |
-| `ReadInbox(dir)` | `tui/internal/fs/mail.go:14` | reads `mailbox/inbox/` → `[]MailMessage` |
-| `ReadSent(dir)` | `tui/internal/fs/mail.go:18` | reads `mailbox/sent/` → `[]MailMessage` |
-| `MailCache` | `tui/internal/fs/mail.go:25` | incremental refresh cache: outbox + inbox + sent merged |
-| `NewMailCache(humanDir)` | `tui/internal/fs/mail.go:35` | creates cache; `Refresh()` returns updated copy (receiver not mutated) |
-| `WriteMail` | `tui/internal/fs/mail.go:163` | writes to recipient inbox + sender sent (or human outbox for pseudo-agent) |
+| `newMailboxID()` | `tui/internal/fs/mail.go:33` | builds `YYYYMMDDTHHMMSS-xxxx` short id matching the kernel's `_new_mailbox_id` |
+| `prepareMailDirs` | `tui/internal/fs/mail.go:50` | allocates a short id and creates every mailbox leaf the send will write, retrying on collisions in any target folder |
+| `ReadInbox(dir)` | `tui/internal/fs/mail.go:88` | reads `mailbox/inbox/` → `[]MailMessage` |
+| `ReadSent(dir)` | `tui/internal/fs/mail.go:92` | reads `mailbox/sent/` → `[]MailMessage` |
+| `MailCache` | `tui/internal/fs/mail.go:99` | incremental refresh cache: outbox + inbox + sent merged |
+| `NewMailCache(humanDir)` | `tui/internal/fs/mail.go:109` | creates cache; `Refresh()` returns updated copy (receiver not mutated) |
+| `WriteMail` | `tui/internal/fs/mail.go:237` | writes to recipient inbox + sender sent (or human outbox for pseudo-agent); allocates id via `prepareMailDirs` |
 | **ledger.go** | | |
 | `ReadLedger(dir)` | `tui/internal/fs/ledger.go:17` | reads `delegates/ledger.jsonl` → `[]AvatarEdge` + child dirs |
 | **location.go** | | |
@@ -71,7 +73,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 - **Called by `tui/internal/tui/`** — every Bubble Tea screen reads agent state through this package (network home, agent detail, mail viewer, kanban, session log).
 - **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
-- **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<uuid>/`.
+- **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<mailbox-id>/`.
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
 
 ## Composition
@@ -89,6 +91,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 ## Notes
 
 - **Read-only for agent state.** This package is the TUI's window — it never writes agent-owned files except signal files. The kernel owns `.agent.json`, heartbeats, mailboxes, ledgers, logs. Do not add write paths for kernel-owned state.
+- **Mailbox id shape.** `WriteMail` allocates short, human-scannable ids of the form `YYYYMMDDTHHMMSS-xxxx` (20 chars, UTC, 4 hex chars of UUID4 entropy) via `newMailboxID`. This matches the kernel's `_new_mailbox_id` in `lingtai-kernel/src/lingtai_kernel/intrinsics/email/primitives.py` and the portal's mirror in `portal/internal/fs/mail.go`, so directory names, `id`, and `_mailbox_id` look identical regardless of which side wrote the message. The directory name IS the id — `prepareMailDirs` uses `os.Mkdir` (not `MkdirAll`) on each leaf so collisions in any target folder surface as `fs.ErrExist` and trigger up to 8 regenerations without overwriting existing mail.
 - **`Delivered` is transient.** `MailMessage.Delivered` is `json:"-"` — set by `MailCache.Refresh()` based on which folder the message was found in. Outbox → false; inbox/sent → true.
 - **`MailCache` is copy-on-refresh.** `Refresh()` returns a new `MailCache`; the receiver is not mutated. Safe for goroutine use.
 - **Session cache reconstruction.** `RebuildFromSources` is idempotent — it re-ingests all mail + events + inquiries from offset 0, sorts by timestamp, and rewrites `session.jsonl`. Incremental `Refresh` tails from EOF offsets.
