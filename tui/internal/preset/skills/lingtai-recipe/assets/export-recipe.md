@@ -318,4 +318,4 @@ Check `gh auth status` and follow the three-branch pattern:
 
 **Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI itself and already available in every installation. Only ship custom skills — the ones that grew out of this network.
 
-**Libraries are additive on recipe change.** If a recipient already has a recipe applied with `library_name: "old-lib"`, switching to your recipe with `library_name: "new-lib"` will append `"../../new-lib"` to their agents' `library.paths` without removing the old one. Keep this in mind when naming — avoid names that could collide with common libraries the recipient might already have.
+**Libraries are additive on recipe change.** If a recipient already has a recipe applied with `library_name: "old-lib"`, switching to your recipe with `library_name: "new-lib"` will append `"../../new-lib"` to their agents' `skills.paths` without removing the old one. Keep this in mind when naming — avoid names that could collide with common libraries the recipient might already have.

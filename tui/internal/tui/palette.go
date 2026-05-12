@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anthropics/lingtai-tui/i18n"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/anthropics/lingtai-tui/i18n"
 )
 
 // PaletteSelectMsg is sent when the user selects a command from the palette.
@@ -59,11 +59,11 @@ func DefaultCommands() []Command {
 		{Name: "projects", Description: "palette.projects", Detail: "cmd.projects"},
 		{Name: "agora", Description: "palette.agora", Detail: "cmd.agora"},
 		{Name: "export", Description: "palette.export", Detail: "cmd.export"},
-		{Name: "library", Description: "palette.library", Detail: "cmd.library"},
+		{Name: "skills", Description: "palette.skills", Detail: "cmd.skills"},
 		{Name: "insights", Description: "palette.insights", Detail: "cmd.insights"},
 		{Name: "secretary", Description: "palette.secretary", Detail: "cmd.secretary"},
 		{Name: "brief", Description: "palette.brief", Detail: "cmd.brief"},
-		{Name: "codex", Description: "palette.codex", Detail: "cmd.codex"},
+		{Name: "library", Description: "palette.library", Detail: "cmd.library"},
 		{Name: "system", Description: "palette.system", Detail: "cmd.system"},
 		{Name: "mailbox", Description: "palette.mailbox", Detail: "cmd.mailbox"},
 		{Name: "presets", Description: "palette.presets", Detail: "cmd.presets"},

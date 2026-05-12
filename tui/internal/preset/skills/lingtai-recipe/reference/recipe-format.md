@@ -78,13 +78,13 @@ Every bundle must contain `<bundle>/.recipe/recipe.json`:
 | `name` | ✅ | string | Display name. Shown in the TUI recipe picker. |
 | `description` | ✅ | string | One-line description. Shown as hint text in the picker. |
 | `version` | ❌ | string | Semver-ish (e.g. `"1.0.0"`). Defaults to `"1.0.0"` when absent. Recipe authors bump this when iterating. |
-| `library_name` | ❌ | string \| null | Name of the sibling library folder inside the bundle (e.g. `"velli"`). Must be a simple folder name, no slashes. `null` or absent means the recipe ships no library. When non-null, the TUI registers the library into each agent's `init.json#library.paths` via `"../../<library_name>"`. |
+| `library_name` | ❌ | string \| null | Name of the sibling library folder inside the bundle (e.g. `"velli"`). Must be a simple folder name, no slashes. `null` or absent means the recipe ships no library. When non-null, the TUI registers the library into each agent's `init.json#skills.paths` via `"../../<library_name>"`. |
 
 ### ⚠️ recipe.json is NEVER localized
 
 **There is exactly one `recipe.json` per bundle, at `.recipe/recipe.json`. No `<lang>/recipe.json` files. Ever.**
 
-Why: `recipe.json` carries **machine identity** — `id`, `version`, and especially `library_name`. These are not display strings; they're load-bearing fields the recipe-apply step reads to wire up `init.json#library.paths` and locate the library folder on disk.
+Why: `recipe.json` carries **machine identity** — `id`, `version`, and especially `library_name`. These are not display strings; they're load-bearing fields the recipe-apply step reads to wire up `init.json#skills.paths` and locate the library folder on disk.
 
 Splitting `recipe.json` by locale is a footgun: if the active locale's variant lacks `library_name` (a typical mistake — a translator localizes `name` and `description` but doesn't realize `library_name` must be carried over too), the TUI silently fails to register the library. Recipe-apply runs without error, but the agent boots without the recipe's skills. This is a hard-to-diagnose class of bug — symptom is "library doesn't load" with no log entry.
 
@@ -305,15 +305,15 @@ When `recipe.json#library_name` is a non-null string, the bundle must contain a 
 When a recipe with `library_name: "velli"` is applied, the TUI:
 
 1. Copies the library folder from the bundle into the project root: `<bundle>/velli/` → `<project>/velli/`.
-2. For each agent under `<project>/.lingtai/<agent>/`, appends `"../../velli"` to that agent's `manifest.capabilities.library.paths`.
+2. For each agent under `<project>/.lingtai/<agent>/`, appends `"../../velli"` to that agent's `manifest.capabilities.skills.paths`.
 
 The `../../` climbs out of `<project>/.lingtai/<agent>/` to the project root, where the library sits. The path is always relative — bundles are in-project artifacts by convention, so the relative path is stable regardless of where the project is on disk.
 
 ### Library path is additive across recipe changes
 
-Switching from a recipe with `library_name: "old-lib"` to one with `library_name: "new-lib"` **adds** `"../../new-lib"` to each agent's `library.paths` without removing `"../../old-lib"`. The old library folder at `<project>/old-lib/` is also not deleted. Rationale: agents may have come to rely on previously-available skills; auto-removal is the kind of silent change that breaks things. Cleanup is the user's responsibility.
+Switching from a recipe with `library_name: "old-lib"` to one with `library_name: "new-lib"` **adds** `"../../new-lib"` to each agent's `skills.paths` without removing `"../../old-lib"`. The old library folder at `<project>/old-lib/` is also not deleted. Rationale: agents may have come to rely on previously-available skills; auto-removal is the kind of silent change that breaks things. Cleanup is the user's responsibility.
 
-The behavioral layer (greet/comment/covenant/procedures) is different — it IS fully replaced on recipe change. Only `library.paths` accumulates.
+The behavioral layer (greet/comment/covenant/procedures) is different — it IS fully replaced on recipe change. Only `skills.paths` accumulates.
 
 ### Library content is monolingual
 
@@ -350,7 +350,7 @@ An exported bundle MAY include a full network snapshot — the live state of eve
 - The recipient has their own MCP tools configured.
 - API key env variable conventions may differ between installations.
 
-On import, the recipient's TUI detects missing `init.json` files under `.lingtai/<agent>/`, prompts the recipient to pick an LLM preset once, and runs `preset.RehydrateNetwork` to generate a fresh `init.json` for each agent using the recipient's chosen preset. The standard recipe-apply flow then follows, writing `.prompt` files and registering library paths.
+On import, the recipient's TUI detects missing `init.json` files under `.lingtai/<agent>/`, prompts the recipient to pick an LLM preset once, and runs `preset.RehydrateNetwork` to generate a fresh `init.json` for each agent using the recipient's chosen preset. The standard recipe-apply flow then follows, writing `.prompt` files and registering skills paths.
 
 ## i18n Fallback Rules
 

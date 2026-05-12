@@ -10,9 +10,9 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 33) |
+| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 34) |
 | `Migration` struct | `tui/internal/migrate/migrate.go:20` | `{Version int, Name string, Fn func(string) error}` |
-| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m033, append-only |
+| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m034, append-only |
 | `Run(lingtaiDir)` | `tui/internal/migrate/migrate.go:68` | reads `meta.json` → runs pending migrations → persists atomically |
 | `StampCurrent(lingtaiDir)` | `tui/internal/migrate/migrate.go:114` | stamps `CurrentVersion` without running migrations (fresh projects) |
 | `metaFile` struct | `tui/internal/migrate/migrate.go:14` | `{Version int, AddonCommentCleanupNotified bool}` |
@@ -23,6 +23,7 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 | m029 | `tui/internal/migrate/m029_preset_allowed_list.go:32` | legacy `path` → declarative `allowed` list |
 | m030 | `tui/internal/migrate/m030_preset_dir_split.go` | split flat `presets/` → `templates/` + `saved/` |
 | m033 | `tui/internal/migrate/m033_strip_codex_api_key_env.go:21` | strip bogus `api_key_env` from saved codex presets |
+| m034 | `tui/internal/migrate/m034_library_skills_caps.go:17` | rename capability keys `codex`→`library` and `library`→`skills` |
 
 Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002 is a no-op `func(_ string) error { return nil }` — it preserves the version slot.
 
@@ -42,7 +43,7 @@ Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002
 ## State
 
 - **`<project>/.lingtai/meta.json`** — `{"version": <N>, "addon_comment_cleanup_notified": <bool>}`. Written atomically (temp+rename) on every migration run.
-- **Per-agent `init.json`** — mutated by several migrations (m017 rename caps, m024 add active preset, m026 path form, m027 strip media, m028 addons→MCP, m029 allowed list).
+- **Per-agent `init.json`** — mutated by several migrations (m017 rename caps, m024 add active preset, m026 path form, m027 strip media, m028 addons→MCP, m029 allowed list, m034 library/skills capability keys).
 
 ## Notes
 

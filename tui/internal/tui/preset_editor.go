@@ -65,7 +65,7 @@ const (
 // capFieldNames maps each capability field to its underlying capability
 // key. Order matches editorCapabilities and editorFieldOrder so the
 // vision row stays last visually and feCapVision is the only model-
-// conditional row. codex and library are mandatory — always present,
+// conditional row. library and skills are mandatory — always present,
 // not shown as toggleable options.
 var capFieldNames = map[editorField]string{
 	feCapFile:      "file",
@@ -79,7 +79,7 @@ var capFieldNames = map[editorField]string{
 // editorFieldOrder is the rendering order of fields. The cursor walks
 // this slice; section headers render between transitions. Capability
 // rows split into core (file/bash/avatar/daemon) and extras
-// (web_search/vision) — email, psyche, codex, and library are always
+// (web_search/vision) — email, psyche, library, and skills are always
 // present (intrinsics or mandatory), so they don't appear here.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
@@ -173,7 +173,7 @@ var modelHasVision = map[string]bool{
 }
 
 // coreCapabilities are the toggleable building blocks shown as checkboxes
-// in the editor. codex and library are mandatory (always injected at save),
+// in the editor. library and skills are mandatory (always injected at save),
 // so they do not appear here. No provider knobs, not model-conditional.
 var coreCapabilities = []string{
 	"file", "bash",
@@ -204,10 +204,10 @@ func defaultCapsFor(modelID string) map[string]interface{} {
 		"file":       map[string]interface{}{},
 		"bash":       map[string]interface{}{"yolo": true},
 		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-		"codex":      map[string]interface{}{},
+		"library":    map[string]interface{}{"library_limit": 50},
 		"avatar":     map[string]interface{}{},
 		"daemon":     map[string]interface{}{},
-		"library": map[string]interface{}{
+		"skills": map[string]interface{}{
 			"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
 		},
 	}
@@ -625,7 +625,7 @@ func (m PresetEditorModel) updateCapabilities(msg tea.KeyMsg) (PresetEditorModel
 		m.cycleCapProvider(editorCapabilities[m.capCursor], -1)
 		return m, nil
 	case "enter":
-		// On rows that have a nested config (bash.yolo, library.paths),
+		// On rows that have a nested config (bash.yolo, skills.paths),
 		// drop into a single-line inline edit. Other rows: enter is a
 		// no-op (use space to toggle, tab to cycle providers).
 		name := editorCapabilities[m.capCursor]
@@ -636,10 +636,10 @@ func (m PresetEditorModel) updateCapabilities(msg tea.KeyMsg) (PresetEditorModel
 			cfg := capCfgMap(caps, "bash")
 			cfg["yolo"] = !asBool(cfg["yolo"])
 			caps["bash"] = cfg
-		case "library":
+		case "skills":
 			// Open inline editor with comma-joined paths.
 			caps := m.capsMap()
-			cfg := capCfgMap(caps, "library")
+			cfg := capCfgMap(caps, "skills")
 			paths := pathsFromConfig(cfg)
 			m.input.SetValue(strings.Join(paths, ","))
 			m.input.CursorEnd()
@@ -653,7 +653,7 @@ func (m PresetEditorModel) updateCapabilities(msg tea.KeyMsg) (PresetEditorModel
 }
 
 // updateCapInline handles the inline edit of a capability sub-field
-// (currently only library.paths). Enter commits, esc abandons.
+// (currently only skills.paths). Enter commits, esc abandons.
 func (m PresetEditorModel) updateCapInline(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -665,7 +665,7 @@ func (m PresetEditorModel) updateCapInline(msg tea.KeyMsg) (PresetEditorModel, t
 		switch m.capSubField {
 		case "paths":
 			caps := m.capsMap()
-			cfg := capCfgMap(caps, "library")
+			cfg := capCfgMap(caps, "skills")
 			parts := strings.Split(m.input.Value(), ",")
 			cleaned := make([]interface{}, 0, len(parts))
 			for _, p := range parts {
@@ -675,7 +675,7 @@ func (m PresetEditorModel) updateCapInline(msg tea.KeyMsg) (PresetEditorModel, t
 				}
 			}
 			cfg["paths"] = cleaned
-			caps["library"] = cfg
+			caps["skills"] = cfg
 		}
 		m.mode = emCapabilities
 		m.capSubField = ""
@@ -702,7 +702,7 @@ func (m *PresetEditorModel) toggleCapability(name string) {
 	switch name {
 	case "bash":
 		cfg["yolo"] = false
-	case "library":
+	case "skills":
 		cfg["paths"] = []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
 	case "web_search":
 		cfg["provider"] = "duckduckgo"
@@ -936,14 +936,14 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	// differs from the template's name), respect that name. Otherwise
 	// gap-fill the next "<template>-N" slot.
 	committed := clonePresetForEditor(m.working)
-	// Ensure codex and library are always present — they are mandatory
+	// Ensure library and skills are always present — they are mandatory
 	// capabilities not exposed as toggles in the editor UI.
 	if caps, ok := committed.Manifest["capabilities"].(map[string]interface{}); ok {
-		if _, has := caps["codex"]; !has {
-			caps["codex"] = map[string]interface{}{}
-		}
 		if _, has := caps["library"]; !has {
-			caps["library"] = map[string]interface{}{
+			caps["library"] = map[string]interface{}{"library_limit": 50}
+		}
+		if _, has := caps["skills"]; !has {
+			caps["skills"] = map[string]interface{}{
 				"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
 			}
 		}
@@ -1002,8 +1002,8 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
 		return m, func() tea.Msg {
-		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
-	}
+			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+		}
 	case "enter":
 		newName := strings.TrimSpace(m.cloneNameInput.Value())
 		if newName == "" {
@@ -1019,8 +1019,8 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
 		return m, func() tea.Msg {
-		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
-	}
+			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+		}
 	}
 	var cmd tea.Cmd
 	m.cloneNameInput, cmd = m.cloneNameInput.Update(msg)
@@ -1182,7 +1182,7 @@ func (m PresetEditorModel) renderForm(width, height int) string {
 	rows = append(rows, "")
 	// Mandatory capabilities — always included, not toggleable.
 	rows = append(rows, m.sectionHeader(i18n.T("preset_editor.section_mandatory")))
-	mandatoryCaps := []string{"email", "psyche", "soul", "system", "codex", "library"}
+	mandatoryCaps := []string{"email", "psyche", "soul", "system", "library", "skills"}
 	for _, capName := range mandatoryCaps {
 		rows = append(rows, m.mandatoryCapRow(capName, width-4))
 	}
@@ -1551,7 +1551,7 @@ func (m PresetEditorModel) renderCapOverlay(_ string) string {
 					meta = "  yolo:off"
 				}
 			}
-		case "library":
+		case "skills":
 			if on {
 				ps := pathsFromConfig(cfg)
 				if len(ps) == 0 {
@@ -1573,7 +1573,7 @@ func (m PresetEditorModel) renderCapOverlay(_ string) string {
 		rows = append(rows, row)
 	}
 
-	// Inline edit field for library.paths
+	// Inline edit field for skills.paths
 	if m.mode == emCapInline && m.capSubField == "paths" {
 		rows = append(rows, "")
 		rows = append(rows, subtle.Render("paths (comma-separated):"))

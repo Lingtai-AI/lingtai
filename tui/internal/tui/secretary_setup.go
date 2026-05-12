@@ -60,12 +60,12 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 	// email and psyche are intrinsics (always loaded by the kernel) — not listed here.
 	secretaryCaps := map[string]interface{}{
 		"file": map[string]interface{}{}, "bash": map[string]interface{}{},
-		"codex": map[string]interface{}{"codex_limit": 100},
-		"library": map[string]interface{}{
+		"library": map[string]interface{}{"library_limit": 100},
+		"skills": map[string]interface{}{
 			"paths": []string{filepath.Join(recipeDir, "skills")},
 		},
 		"web_search": map[string]interface{}{},
-		"daemon": map[string]interface{}{},
+		"daemon":     map[string]interface{}{},
 	}
 	// Inherit per-capability config from orchestrator where applicable
 	if orchCaps, ok := manifest["capabilities"].(map[string]interface{}); ok {
@@ -74,9 +74,9 @@ func setupSecretary(baseDir, globalDir, orchDirName string) error {
 				secretaryCaps[name] = cfg
 			}
 		}
-		// Ensure codex_limit is always raised for secretary
-		if lib, ok := secretaryCaps["codex"].(map[string]interface{}); ok {
-			lib["codex_limit"] = 100
+		// Ensure library_limit is always raised for secretary
+		if lib, ok := secretaryCaps["library"].(map[string]interface{}); ok {
+			lib["library_limit"] = 100
 		}
 	}
 	manifest["capabilities"] = secretaryCaps

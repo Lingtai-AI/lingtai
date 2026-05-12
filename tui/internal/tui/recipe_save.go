@@ -68,7 +68,7 @@ func copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir string) (proj
 //
 // Callers are responsible for having already written the orchestrator's
 // init.json via GenerateInitJSONWithOpts. applyRecipe itself only edits
-// manifest.capabilities.library.paths (additive — never removes prior
+// manifest.capabilities.skills.paths (additive — never removes prior
 // library path entries).
 func applyRecipe(
 	lingtaiDir, orchDir, globalDir, humanDir, humanAddr string,

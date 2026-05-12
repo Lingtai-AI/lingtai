@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -224,10 +224,10 @@ func scanGroupFlat(dir, group string, skills *[]skillEntry, problems *[]skillPro
 
 // ── init.json reader + path resolution (mirrors kernel library cap) ─────────
 
-// readLibraryPaths returns the Tier 1 library paths from an agent's init.json.
-// Looks at manifest.capabilities.library.paths. Returns an empty slice if:
+// readLibraryPaths returns the Tier 1 skills paths from an agent's init.json.
+// Looks at manifest.capabilities.skills.paths. Returns an empty slice if:
 //   - init.json is missing or unreadable
-//   - library capability is not declared
+//   - skills capability is not declared
 //   - paths field is absent or not a list of strings
 func readLibraryPaths(agentDir string) []string {
 	initPath := filepath.Join(agentDir, "init.json")
@@ -243,7 +243,7 @@ func readLibraryPaths(agentDir string) []string {
 	if err := json.Unmarshal(data, &initFile); err != nil {
 		return nil
 	}
-	libRaw, ok := initFile.Manifest.Capabilities["library"]
+	libRaw, ok := initFile.Manifest.Capabilities["skills"]
 	if !ok {
 		return nil
 	}
@@ -299,15 +299,15 @@ func libraryPathGroup(raw string) string {
 	return base
 }
 
-// buildAgentLibraryCatalog mirrors what the kernel library capability would
+// buildAgentLibraryCatalog mirrors what the kernel skills capability would
 // inject for this agent: scans <agent>/.library/intrinsic/{capabilities,addons}
 // and <agent>/.library/custom, plus every Tier-1 path declared in init.json
-// (manifest.capabilities.library.paths). Each skill is labelled with its source
+// (manifest.capabilities.skills.paths). Each skill is labelled with its source
 // group so the viewer can visually distinguish capabilities vs. addons vs.
 // custom vs. shared vs. user-added corpora.
 //
 // Returns entries ready for MarkdownViewerModel. Problems (broken skills) are
-// appended as a final group using the "library.problems" i18n label.
+// appended as a final group using the "skills.problems" i18n label.
 func buildAgentLibraryCatalog(agentDir string, lang string) []MarkdownEntry {
 	if agentDir == "" {
 		return nil
@@ -394,7 +394,7 @@ func buildAgentLibraryCatalog(agentDir string, lang string) []MarkdownEntry {
 	}
 
 	if len(allProblems) > 0 {
-		problemsGroup := i18n.T("library.problems")
+		problemsGroup := i18n.T("skills.problems")
 		for _, p := range allProblems {
 			entries = append(entries, MarkdownEntry{
 				Label:   p.Folder,
@@ -482,7 +482,7 @@ func buildLibraryEntries(libraryDir, lang string, skills []skillEntry, problems 
 		for _, p := range problems {
 			entries = append(entries, MarkdownEntry{
 				Label:   p.Folder,
-				Group:   i18n.T("library.problems"),
+				Group:   i18n.T("skills.problems"),
 				Content: p.Reason,
 			})
 		}
@@ -560,14 +560,14 @@ type libraryLoadMsg struct {
 	agentNodes []fs.AgentNode
 }
 
-// NewLibraryModel constructs the /library view rooted at baseDir (the .lingtai/
+// NewLibraryModel constructs the /skills view rooted at baseDir (the .lingtai/
 // directory) with the given agent pre-selected. The catalog is built eagerly so
 // the first frame has content; the agent list for Ctrl+T is loaded async on
 // Init.
 func NewLibraryModel(baseDir, selectedDir, lang string) LibraryModel {
 	entries := buildAgentLibraryCatalog(selectedDir, lang)
 	inner := NewMarkdownViewer(entries, libraryTitleFor(selectedDir))
-	inner.FooterHint = i18n.T("hints.library_catalog")
+	inner.FooterHint = i18n.T("hints.skills_catalog")
 	return LibraryModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
@@ -579,7 +579,7 @@ func NewLibraryModel(baseDir, selectedDir, lang string) LibraryModel {
 // libraryTitleFor returns the viewer title annotated with the current agent's
 // display name so the user always knows whose catalog they're looking at.
 func libraryTitleFor(agentDir string) string {
-	base := i18n.T("library.title")
+	base := i18n.T("skills.title")
 	if agentDir == "" {
 		return base
 	}
@@ -668,7 +668,7 @@ func (m LibraryModel) Update(msg tea.Msg) (LibraryModel, tea.Cmd) {
 		if len(files) == 0 {
 			return m, nil
 		}
-		title := i18n.T("library.title") + " — " + msg.Entry.Label
+		title := i18n.T("skills.title") + " — " + msg.Entry.Label
 		sub := NewMarkdownViewer(files, title)
 		m.drillIn = &sub
 		if m.width > 0 && m.height > 0 {

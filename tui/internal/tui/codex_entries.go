@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// codexFile matches the JSON schema of codex/codex.json written by agents.
+// codexFile matches the compatibility storage schema at codex/codex.json written by agents.
 type codexFile struct {
 	Version int          `json:"version"`
 	Entries []codexEntry `json:"entries"`
@@ -25,10 +25,10 @@ type codexEntry struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// buildAgentCodexEntries returns the codex entries for a single agent,
+// buildAgentCodexEntries returns the library entries for a single agent,
 // sorted newest-first, flat (no group header). Each entry becomes one
 // sidebar item whose content is the entry's markdown content with a
-// metadata header. Returns an empty slice if the agent has no codex
+// metadata header. Returns an empty slice if the agent has no library
 // archive or it is empty.
 func buildAgentCodexEntries(agentDir string) []MarkdownEntry {
 	if agentDir == "" {

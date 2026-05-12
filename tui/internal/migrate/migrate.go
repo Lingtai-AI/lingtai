@@ -9,11 +9,11 @@ import (
 
 // CurrentVersion is the latest migration version compiled into this binary.
 // IMPORTANT: when bumping, also bump portal/internal/migrate/migrate.go (see CLAUDE.md).
-const CurrentVersion = 33
+const CurrentVersion = 34
 
 type metaFile struct {
-	Version                       int  `json:"version"`
-	AddonCommentCleanupNotified  bool `json:"addon_comment_cleanup_notified,omitempty"`
+	Version                     int  `json:"version"`
+	AddonCommentCleanupNotified bool `json:"addon_comment_cleanup_notified,omitempty"`
 }
 
 // Migration represents a single versioned migration step.
@@ -58,6 +58,7 @@ var migrations = []Migration{
 	{Version: 31, Name: "drop-legacy-intrinsic-capabilities", Fn: migrateDropLegacyIntrinsicCapabilities},
 	{Version: 32, Name: "cleanup-codex-oauth", Fn: migrateCleanupCodexOAuth},
 	{Version: 33, Name: "strip-codex-api-key-env", Fn: migrateStripCodexAPIKeyEnv},
+	{Version: 34, Name: "library-skills-caps", Fn: migrateLibrarySkillsCaps},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.

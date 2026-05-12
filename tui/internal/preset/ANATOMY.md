@@ -25,8 +25,8 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
 | `CopyBundle` | `tui/internal/preset/recipe_apply.go:59` | copies `.recipe/` (replace) + library (merge) + `.lingtai/` (merge) into project |
 | `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
-| `ApplyRecipe` | `tui/internal/preset/recipe_apply.go:179` | writes `.prompt` + patches `library.paths` per agent; snapshots `.recipe/` |
-| `AppendLibraryPath` | `tui/internal/preset/recipe_apply.go:268` | idempotent append to `manifest.capabilities.library.paths` |
+| `ApplyRecipe` | `tui/internal/preset/recipe_apply.go:179` | writes `.prompt` + patches `skills.paths` per agent; snapshots `.recipe/` |
+| `AppendSkillsPath` | `tui/internal/preset/recipe_apply.go:268` | idempotent append to `manifest.capabilities.skills.paths` |
 | `AgentsMissingInit` | `tui/internal/preset/recipe_apply.go:331` | imported-network agents with `.agent.json` but no `init.json` |
 | `RecipeState` | `tui/internal/preset/state.go:19` | `{Recipe, CustomDir}` — TUI-only, in `recipe-state.json` |
 | `LoadRecipeState` / `SaveRecipeState` | `tui/internal/preset/state.go:35,52` | atomic read/write of `.lingtai/.tui-asset/recipe-state.json` |

@@ -53,7 +53,7 @@ func makeBundleRoot(t *testing.T, id string, libraryName *string) string {
 
 // makeProjectWithAgents builds a fresh project root with a .lingtai/ dir
 // containing the named agents, each with a minimal init.json that
-// exercises the library.paths slot.
+// exercises the skills.paths slot.
 func makeProjectWithAgents(t *testing.T, agentNames ...string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -65,7 +65,7 @@ func makeProjectWithAgents(t *testing.T, agentNames ...string) string {
 		init := map[string]interface{}{
 			"manifest": map[string]interface{}{
 				"capabilities": map[string]interface{}{
-					"library": map[string]interface{}{
+					"skills": map[string]interface{}{
 						"paths": []interface{}{"../.library_shared"},
 					},
 				},
@@ -77,7 +77,7 @@ func makeProjectWithAgents(t *testing.T, agentNames ...string) string {
 	return root
 }
 
-func libraryPaths(t *testing.T, initJSONPath string) []string {
+func skillsPaths(t *testing.T, initJSONPath string) []string {
 	t.Helper()
 	data, err := os.ReadFile(initJSONPath)
 	if err != nil {
@@ -89,7 +89,7 @@ func libraryPaths(t *testing.T, initJSONPath string) []string {
 	}
 	m := root["manifest"].(map[string]interface{})
 	c := m["capabilities"].(map[string]interface{})
-	l := c["library"].(map[string]interface{})
+	l := c["skills"].(map[string]interface{})
 	var out []string
 	if raw, ok := l["paths"].([]interface{}); ok {
 		for _, p := range raw {
@@ -165,27 +165,27 @@ func TestCopyBundle_InvalidSource(t *testing.T) {
 	}
 }
 
-// --- AppendLibraryPath ---
+// --- AppendSkillsPath ---
 
-func TestAppendLibraryPath_NewEntry(t *testing.T) {
+func TestAppendSkillsPath_NewEntry(t *testing.T) {
 	proj := makeProjectWithAgents(t, "orch")
 	initPath := filepath.Join(proj, ".lingtai", "orch", "init.json")
-	if err := AppendLibraryPath(initPath, "../../velli"); err != nil {
-		t.Fatalf("AppendLibraryPath: %v", err)
+	if err := AppendSkillsPath(initPath, "../../velli"); err != nil {
+		t.Fatalf("AppendSkillsPath: %v", err)
 	}
-	paths := libraryPaths(t, initPath)
+	paths := skillsPaths(t, initPath)
 	if len(paths) != 2 || paths[0] != "../.library_shared" || paths[1] != "../../velli" {
 		t.Errorf("paths = %v, want [.library_shared, ../../velli]", paths)
 	}
 }
 
-func TestAppendLibraryPath_Idempotent(t *testing.T) {
+func TestAppendSkillsPath_Idempotent(t *testing.T) {
 	proj := makeProjectWithAgents(t, "orch")
 	initPath := filepath.Join(proj, ".lingtai", "orch", "init.json")
-	AppendLibraryPath(initPath, "../../velli")
-	AppendLibraryPath(initPath, "../../velli") // again
-	AppendLibraryPath(initPath, "../../velli") // again
-	paths := libraryPaths(t, initPath)
+	AppendSkillsPath(initPath, "../../velli")
+	AppendSkillsPath(initPath, "../../velli") // again
+	AppendSkillsPath(initPath, "../../velli") // again
+	paths := skillsPaths(t, initPath)
 	// Count "../../velli" occurrences
 	count := 0
 	for _, p := range paths {
@@ -198,20 +198,20 @@ func TestAppendLibraryPath_Idempotent(t *testing.T) {
 	}
 }
 
-func TestAppendLibraryPath_MissingFile(t *testing.T) {
+func TestAppendSkillsPath_MissingFile(t *testing.T) {
 	// Missing init.json should not error.
-	if err := AppendLibraryPath(filepath.Join(t.TempDir(), "nope.json"), "x"); err != nil {
-		t.Errorf("AppendLibraryPath missing file = %v, want nil", err)
+	if err := AppendSkillsPath(filepath.Join(t.TempDir(), "nope.json"), "x"); err != nil {
+		t.Errorf("AppendSkillsPath missing file = %v, want nil", err)
 	}
 }
 
-func TestAppendLibraryPath_NoLibraryCap(t *testing.T) {
+func TestAppendSkillsPath_NoSkillsCap(t *testing.T) {
 	// Agent missing library capability in manifest — no-op, no error.
 	proj := t.TempDir()
 	initPath := filepath.Join(proj, "init.json")
 	os.WriteFile(initPath, []byte(`{"manifest":{"capabilities":{}}}`), 0o644)
-	if err := AppendLibraryPath(initPath, "../../velli"); err != nil {
-		t.Errorf("AppendLibraryPath without library cap = %v, want nil (no-op)", err)
+	if err := AppendSkillsPath(initPath, "../../velli"); err != nil {
+		t.Errorf("AppendSkillsPath without skills cap = %v, want nil (no-op)", err)
 	}
 }
 
@@ -306,7 +306,7 @@ func TestApplyRecipe_WritesPromptAndSnapshots(t *testing.T) {
 	}
 }
 
-func TestApplyRecipe_AppendsLibraryPath(t *testing.T) {
+func TestApplyRecipe_AppendsSkillsPath(t *testing.T) {
 	libName := "velli"
 	src := makeBundleRoot(t, "test", &libName)
 	proj := makeProjectWithAgents(t, "alpha", "beta")
@@ -317,7 +317,7 @@ func TestApplyRecipe_AppendsLibraryPath(t *testing.T) {
 		t.Fatalf("ApplyRecipe: %v", err)
 	}
 	for _, name := range []string{"alpha", "beta"} {
-		paths := libraryPaths(t, filepath.Join(proj, ".lingtai", name, "init.json"))
+		paths := skillsPaths(t, filepath.Join(proj, ".lingtai", name, "init.json"))
 		found := false
 		for _, p := range paths {
 			if p == filepath.Join("..", "..", "velli") {
@@ -326,12 +326,12 @@ func TestApplyRecipe_AppendsLibraryPath(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("agent %s: library.paths missing ../../velli, got %v", name, paths)
+			t.Errorf("agent %s: skills.paths missing ../../velli, got %v", name, paths)
 		}
 	}
 }
 
-func TestApplyRecipe_LibraryPathAdditive_AcrossChanges(t *testing.T) {
+func TestApplyRecipe_SkillsPathAdditive_AcrossChanges(t *testing.T) {
 	// First recipe has library "old-lib"; apply → agent paths include ../../old-lib.
 	oldLib := "old-lib"
 	src1 := makeBundleRoot(t, "r1", &oldLib)
@@ -345,7 +345,7 @@ func TestApplyRecipe_LibraryPathAdditive_AcrossChanges(t *testing.T) {
 	CopyBundle(src2, proj)
 	ApplyRecipe(proj, "", nil)
 
-	paths := libraryPaths(t, filepath.Join(proj, ".lingtai", "orch", "init.json"))
+	paths := skillsPaths(t, filepath.Join(proj, ".lingtai", "orch", "init.json"))
 	var seenOld, seenNew bool
 	for _, p := range paths {
 		if p == filepath.Join("..", "..", "old-lib") {
@@ -356,10 +356,10 @@ func TestApplyRecipe_LibraryPathAdditive_AcrossChanges(t *testing.T) {
 		}
 	}
 	if !seenOld {
-		t.Errorf("old library path should be retained across recipe change; got %v", paths)
+		t.Errorf("old skills path should be retained across recipe change; got %v", paths)
 	}
 	if !seenNew {
-		t.Errorf("new library path should be added; got %v", paths)
+		t.Errorf("new skills path should be added; got %v", paths)
 	}
 }
 
@@ -443,7 +443,7 @@ func TestAgentsMissingInit_SkipsHumanAndDotfiles(t *testing.T) {
 	proj := t.TempDir()
 	os.MkdirAll(filepath.Join(proj, ".lingtai"), 0o755)
 	writeAgentBlueprint(t, proj, "orch", false)
-	writeAgentBlueprint(t, proj, "human", false)      // should skip
+	writeAgentBlueprint(t, proj, "human", false)                      // should skip
 	os.MkdirAll(filepath.Join(proj, ".lingtai", ".tui-asset"), 0o755) // dotfile
 
 	missing := AgentsMissingInit(proj)

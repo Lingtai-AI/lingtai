@@ -45,7 +45,7 @@ const RecipeDotDir = ".recipe"
 //     with this recipe (relative to the bundle root — same level as the
 //     .recipe/ dotfolder). The TUI registers this library into every
 //     agent's init.json at recipe-apply time by writing the relative path
-//     "../../<library_name>" into init.json#library.paths (the ../../
+//     "../../<library_name>" into init.json#skills.paths (the ../../
 //     climbs out of .lingtai/<agent>/ to the project root). Nil means the
 //     recipe has no library sibling.
 //
@@ -267,7 +267,7 @@ func ResolveLibraryDir(bundleDir, lang string) string {
 }
 
 // LibraryPathForInitJSON returns the relative path string that should be
-// appended to an agent's init.json#library.paths to register this recipe's
+// appended to an agent's init.json#skills.paths to register this recipe's
 // library. Returns empty string if the recipe has no library.
 //
 // The path is "../../<library_name>" — the agent's init.json lives at

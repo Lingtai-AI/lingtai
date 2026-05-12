@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/secretary"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 type appView int
@@ -44,47 +44,46 @@ const (
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
 type App struct {
-	currentView appView
-	mail        MailModel
-	setup       SetupModel
-	settings    SettingsModel
-	props       PropsModel
-	library         LibraryModel
-	projects        ProjectsModel
-	agora           AgoraModel
-	secretaryMail   MailModel
-	briefs          MarkdownViewerModel
-	codex           CodexModel
-	system          SystemModel
-	mailbox         MailboxModel
-	presetLibrary   PresetLibraryModel
-	firstRun        FirstRunModel
-	addon           AddonModel
-	doctor          DoctorModel
-	nirvana         NirvanaModel
-	login           LoginModel
+	currentView   appView
+	mail          MailModel
+	setup         SetupModel
+	settings      SettingsModel
+	props         PropsModel
+	library       LibraryModel
+	projects      ProjectsModel
+	agora         AgoraModel
+	secretaryMail MailModel
+	briefs        MarkdownViewerModel
+	codex         CodexModel
+	system        SystemModel
+	mailbox       MailboxModel
+	presetLibrary PresetLibraryModel
+	firstRun      FirstRunModel
+	addon         AddonModel
+	doctor        DoctorModel
+	nirvana       NirvanaModel
+	login         LoginModel
 
 	inSecretaryView bool      // true when viewing secretary mail (within appViewMail)
 	lastEscTime     time.Time // for double-esc detection
 
-	globalDir       string
-	projectDir      string // .lingtai/ directory
-	orchDir         string // full path to orchestrator dir
-	orchName        string
-	lingtaiCmd      string
-	width           int
-	height          int
-	tuiConfig       config.TUIConfig
-	pendingRecipe   string
+	globalDir        string
+	projectDir       string // .lingtai/ directory
+	orchDir          string // full path to orchestrator dir
+	orchName         string
+	lingtaiCmd       string
+	width            int
+	height           int
+	tuiConfig        config.TUIConfig
+	pendingRecipe    string
 	pendingCustomDir string
-	recoveryMode    bool // global config lost, agents intact — setup then propagate
-	startupBanner   string // non-empty warning shown on first render
+	recoveryMode     bool   // global config lost, agents intact — setup then propagate
+	startupBanner    string // non-empty warning shown on first render
 }
 
 func humanAddr(projectDir string) string {
 	return "human"
 }
-
 
 // NewApp creates the root app model.
 // NewApp constructs the top-level TUI app.
@@ -339,7 +338,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Recipe application: when the project carries a .recipe/ bundle
 		// (set by the first-run wizard or imported from a bundle), make
-		// sure every agent's .prompt + library.paths + .tui-asset/.recipe/
+		// sure every agent's .prompt + skills.paths + .tui-asset/.recipe/
 		// snapshot are in sync before the agent process boots. This
 		// catches the rehydration case: RehydrateNetwork just generated
 		// init.json for each imported agent, but .prompt and library
@@ -785,11 +784,11 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
-	case "library":
+	case "skills":
 		a.currentView = appViewLibrary
-		// Agent-scoped: mirror what the library capability would inject for
+		// Agent-scoped: mirror what the skills capability would inject for
 		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
-		// in init.json (manifest.capabilities.library.paths).
+		// in init.json (manifest.capabilities.skills.paths).
 		agentDir := a.orchDir
 		baseDir := a.projectDir
 		if a.inSecretaryView {
@@ -856,7 +855,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			fs.WritePrompt(secAgentDir, prompt)
 		}
 		return a, a.sendSize()
-	case "codex":
+	case "library", "codex":
 		a.currentView = appViewCodex
 		agentDir := a.orchDir
 		baseDir := a.projectDir
@@ -1143,11 +1142,11 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		}
 		return a, tea.Batch(a.props.Init(), a.sendSize())
-	case "library":
+	case "skills":
 		a.currentView = appViewLibrary
-		// Agent-scoped: mirror what the library capability would inject for
+		// Agent-scoped: mirror what the skills capability would inject for
 		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
-		// in init.json (manifest.capabilities.library.paths).
+		// in init.json (manifest.capabilities.skills.paths).
 		agentDir := a.orchDir
 		baseDir := a.projectDir
 		if a.inSecretaryView {
@@ -1156,7 +1155,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		}
 		a.library = NewLibraryModel(baseDir, agentDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
-	case "codex":
+	case "library", "codex":
 		a.currentView = appViewCodex
 		agentDir := a.orchDir
 		baseDir := a.projectDir
@@ -1363,9 +1362,9 @@ func openBrowser(url string) {
 //   - file malformed / no refresh_token           → file is junk; return banner pointing at re-login
 //   - access token still valid (>5 min until exp) → trust local data, no network call
 //   - access token expired/expiring               → refresh against auth.openai.com
-//       * 200 OK         → atomic write back, return ""
-//       * 401/403        → grant revoked, return banner pointing at re-login
-//       * transient err  → return "" (do not penalize the user for being offline)
+//   - 200 OK         → atomic write back, return ""
+//   - 401/403        → grant revoked, return banner pointing at re-login
+//   - transient err  → return "" (do not penalize the user for being offline)
 //
 // On success the file is updated atomically (.json.tmp → rename) so any
 // later code paths in this launch (firstrun's refreshCodexAuth, the

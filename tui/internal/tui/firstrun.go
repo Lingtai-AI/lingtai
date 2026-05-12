@@ -168,11 +168,11 @@ type FirstRunModel struct {
 	principleDirty bool
 	soulFlowDirty  bool
 	// Welcome page language selector
-	langCursor  int
-	welcomeOnly bool // true when opened from /settings (return to mail after language pick)
-	setupMode   bool // true when opened from /setup (skip welcome/bootstrap/tutorial, esc→mail)
-	setupOrchDir  string // current agent dir (setup mode only — overwrites init.json here)
-	setupOrchName string // current agent name (setup mode only — prefills name input)
+	langCursor            int
+	welcomeOnly           bool     // true when opened from /settings (return to mail after language pick)
+	setupMode             bool     // true when opened from /setup (skip welcome/bootstrap/tutorial, esc→mail)
+	setupOrchDir          string   // current agent dir (setup mode only — overwrites init.json here)
+	setupOrchName         string   // current agent name (setup mode only — prefills name input)
 	setupLoadedAddonNames []string // addon names loaded from existing init.json (setup mode)
 	// Synthetic preset representing "Keep current preset" in setup mode. Populated by
 	// NewSetupModeModel from the existing agent's init.json. Read via currentPreset()
@@ -193,30 +193,30 @@ type FirstRunModel struct {
 	rehydrateWorkers  int    // count of workers propagated (set at stepPropagate completion)
 	rehydrateErr      string // non-empty if RehydrateNetwork failed
 	// Bootstrap state (venv + assets install)
-	setupDone    bool        // true when bootstrap goroutine finishes
-	setupErr     string      // non-empty if bootstrap failed
-	setupStatus  string      // current progress i18n key (active step)
-	setupSteps   []string    // completed step i18n keys (shown with checkmarks)
-	progressCh   chan string // channel for progress updates
+	setupDone   bool        // true when bootstrap goroutine finishes
+	setupErr    string      // non-empty if bootstrap failed
+	setupStatus string      // current progress i18n key (active step)
+	setupSteps  []string    // completed step i18n keys (shown with checkmarks)
+	progressCh  chan string // channel for progress updates
 	// Embedded key input for preset's provider
-	presetKeyInput    textarea.Model
-	codexAuth         struct {
+	presetKeyInput textarea.Model
+	codexAuth      struct {
 		valid bool
 		email string // "" if JWT didn't carry one but tokens are valid
 	}
-	codexLoggingIn    bool              // true while waiting for browser callback
+	codexLoggingIn bool // true while waiting for browser callback
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
 	//   2 = Next button
 	// ↑↓ moves between positions; the textarea is focused only at 0.
-	keyFieldIdx       int
-	selectedProvider  string            // provider of currently selected preset
+	keyFieldIdx      int
+	selectedProvider string // provider of currently selected preset
 	// presetEditor holds the dedicated preset-editor sub-model when the
 	// wizard is on stepEditPreset. The wizard delegates Update/View to
 	// this model and reacts to PresetEditorCommitMsg / CancelMsg.
 	presetEditor PresetEditorModel
-	existingKeys      map[string]string // loaded from Config.Keys
+	existingKeys map[string]string // loaded from Config.Keys
 	// Capability selection state (stepCapabilities)
 	capInfos     map[string]capInfo // from check-caps CLI output
 	capSelected  map[string]bool    // user toggle state
@@ -238,11 +238,11 @@ type FirstRunModel struct {
 	// one preset must be the default; presetDefaultIdx is its row index
 	// on this page (NOT the m.presets index). The default is always
 	// also allowed — the page invariants enforce this.
-	savedPresetIdx    []int
-	presetAllowed     []bool
-	presetDefaultIdx  int
-	presetCfgCursor   int    // cursor on the agent-preset-config page (row index)
-	presetCfgMessage  string // transient validation flash (e.g. "default cannot be unallowed")
+	savedPresetIdx   []int
+	presetAllowed    []bool
+	presetDefaultIdx int
+	presetCfgCursor  int    // cursor on the agent-preset-config page (row index)
+	presetCfgMessage string // transient validation flash (e.g. "default cannot be unallowed")
 	// Addon selection state (shown below capabilities)
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
@@ -250,18 +250,18 @@ type FirstRunModel struct {
 	inAddonZone   bool            // true when cursor is in addon section
 
 	// Recipe picker state (stepRecipe)
-	recipeIdx         int             // cursor in recipe list (0..4 or 0..5 if imported)
-	recipeCustomInput textinput.Model // folder path input for custom recipe
-	recipeCustomErr   string          // validation error message
-	currentRecipe     string          // loaded from .tui-asset/.recipe in setup mode
-	currentCustomDir  string          // loaded from .tui-asset/.recipe in setup mode
-	preselectedRecipe  string          // set by constructor for post-nirvana fresh start
-	localRecipeDir     string          // non-empty if .recipe/ found in project root
-	importedRecipe    *preset.RecipeInfo // non-nil if .recipe/ has valid recipe.json
-	importedRecipeDir string             // path to .recipe/ (only when importedRecipe != nil)
-	agoraRecipes      []preset.AgoraRecipe // discovered from ~/lingtai-agora/recipes/
-	discoveredRecipes   []preset.DiscoveredRecipe // auto-discovered from recipes/<category>/
-	categoryBoundaries  []int                     // index where each category starts in discoveredRecipes
+	recipeIdx          int                       // cursor in recipe list (0..4 or 0..5 if imported)
+	recipeCustomInput  textinput.Model           // folder path input for custom recipe
+	recipeCustomErr    string                    // validation error message
+	currentRecipe      string                    // loaded from .tui-asset/.recipe in setup mode
+	currentCustomDir   string                    // loaded from .tui-asset/.recipe in setup mode
+	preselectedRecipe  string                    // set by constructor for post-nirvana fresh start
+	localRecipeDir     string                    // non-empty if .recipe/ found in project root
+	importedRecipe     *preset.RecipeInfo        // non-nil if .recipe/ has valid recipe.json
+	importedRecipeDir  string                    // path to .recipe/ (only when importedRecipe != nil)
+	agoraRecipes       []preset.AgoraRecipe      // discovered from ~/lingtai-agora/recipes/
+	discoveredRecipes  []preset.DiscoveredRecipe // auto-discovered from recipes/<category>/
+	categoryBoundaries []int                     // index where each category starts in discoveredRecipes
 
 	// Recipe viewer (Ctrl+O from recipe picker)
 	recipeViewer *MarkdownViewerModel
@@ -368,25 +368,25 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	}
 
 	m := FirstRunModel{
-		step:             stepWelcome,
-		baseDir:          baseDir,
-		globalDir:        globalDir,
-		nameInput:        ti,
-		dirInput:         di,
-		hasPresets:       hasPresets,
-		langCursor:       langCursor,
-		presetKeyInput:   pki,
-		existingKeys:     existingKeys,
-		staminaInput:     si,
-		ctxLimitInput:    ci,
-		soulDelayInput:   sdi,
-		moltPressInput:   mpi,
-		maxRpmInput:      mri,
-		covenantInput:    covi,
-		principleInput:   prini,
-		soulFlowInput:    sfli,
+		step:              stepWelcome,
+		baseDir:           baseDir,
+		globalDir:         globalDir,
+		nameInput:         ti,
+		dirInput:          di,
+		hasPresets:        hasPresets,
+		langCursor:        langCursor,
+		presetKeyInput:    pki,
+		existingKeys:      existingKeys,
+		staminaInput:      si,
+		ctxLimitInput:     ci,
+		soulDelayInput:    sdi,
+		moltPressInput:    mpi,
+		maxRpmInput:       mri,
+		covenantInput:     covi,
+		principleInput:    prini,
+		soulFlowInput:     sfli,
 		commentInput:      comi,
-		nirvanaIdx:        1, // default false (1=false)
+		nirvanaIdx:        1,    // default false (1=false)
 		secretaryEnabled:  true, // default: launch secretary
 		progressCh:        make(chan string, 4),
 		recipeCustomInput: rci,
@@ -1516,7 +1516,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			case "down":
 				if m.fieldIdx == -1 {
 					m.fieldIdx = 0
-					if (m.setupMode || m.rehydrateMode) {
+					if m.setupMode || m.rehydrateMode {
 						m.fieldIdx = 0 // name field (dir is skipped)
 					}
 					return m, m.focusAgentField()
@@ -1761,7 +1761,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, cmd
 			}
-
 
 		case stepRecipe:
 			minIdx := 0
@@ -2291,7 +2290,7 @@ func (m FirstRunModel) View() string {
 
 		// Mandatory capabilities — always included, not toggleable.
 		leftBlock.WriteString("  " + StyleAccent.Render(i18n.T("firstrun.mandatory_caps")) + "\n\n")
-		mandatoryCaps := []string{"email", "psyche", "codex", "library"}
+		mandatoryCaps := []string{"email", "psyche", "library", "skills"}
 		mandatoryLine := "  "
 		for _, name := range mandatoryCaps {
 			cell := "  [✓] " + name
@@ -2707,6 +2706,7 @@ func centerText(s string, width int) string {
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir,
 // including the Back/Next button slots at the end.
 const agentNameDirFieldCount = 16
+
 // Field indices:
 // 0=name, 1=dir, 2=lang,
 // 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure, 7=max_rpm,
@@ -3351,12 +3351,12 @@ func (m *FirstRunModel) applyCapSelections() {
 			delete(caps, name)
 		}
 	}
-	// Codex and library are mandatory — always present regardless of user toggles.
-	if _, exists := caps["codex"]; !exists {
-		caps["codex"] = map[string]interface{}{}
-	}
+	// Library and skills are mandatory — always present regardless of user toggles.
 	if _, exists := caps["library"]; !exists {
-		caps["library"] = map[string]interface{}{
+		caps["library"] = map[string]interface{}{"library_limit": 50}
+	}
+	if _, exists := caps["skills"]; !exists {
+		caps["skills"] = map[string]interface{}{
 			"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
 		}
 	}
@@ -3422,7 +3422,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.covenantDirty = false
 	m.principleDirty = false
 	m.soulFlowDirty = false
-	m.karmaIdx = 0  // true
+	m.karmaIdx = 0   // true
 	m.nirvanaIdx = 1 // false
 
 	// Setup mode: re-running /setup on an existing agent should surface the
@@ -4072,7 +4072,7 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 //     project is fully self-contained (no dangling references to
 //     ~/.lingtai-tui/ or the user's download folder).
 //  4. Run preset.ApplyRecipe to write .prompt (skipped when greet
-//     absent), append library paths, and snapshot the applied recipe.
+//     absent), append skills paths, and snapshot the applied recipe.
 func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
@@ -4122,7 +4122,7 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 		propagatePresetPolicyToNetwork(m.baseDir, dirName, presetCanonicalRef(p), opts.AllowedPresets)
 	}
 
-	// 4. Apply: write .prompt, append library.paths, snapshot.
+	// 4. Apply: write .prompt, append skills.paths, snapshot.
 	orchDir := filepath.Join(m.baseDir, dirName)
 	humanDir := filepath.Join(m.baseDir, "human")
 	humanAddr := "human"

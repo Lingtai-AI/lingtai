@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -36,7 +36,7 @@ type codexLoadMsg struct {
 	agentNodes []fs.AgentNode
 }
 
-// NewCodexModel constructs the /codex view rooted at baseDir with the given
+// NewCodexModel constructs the /library view rooted at baseDir with the given
 // agent pre-selected.
 func NewCodexModel(baseDir, selectedDir string) CodexModel {
 	entries := buildAgentCodexEntries(selectedDir)
@@ -50,7 +50,7 @@ func NewCodexModel(baseDir, selectedDir string) CodexModel {
 }
 
 func codexTitleFor(agentDir string) string {
-	base := i18n.T("palette.codex")
+	base := i18n.T("palette.library")
 	if agentDir == "" {
 		return base
 	}

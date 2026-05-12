@@ -77,10 +77,10 @@
       // pad.edit with file imports. Includes molt (context compaction).
       "psyche": {},
 
-      // --- Knowledge codex ---
+      // --- Durable knowledge library ---
       // Persistent knowledge store. Works with psyche for
-      // importing codex entries into working pad.
-      "codex": {},
+      // importing library entries into working pad.
+      "library": { "library_limit": 50 },
 
       // --- Email (upgrades mail intrinsic) ---
       // Filesystem-based mailbox with reply, CC/BCC, contacts,
@@ -123,13 +123,13 @@
       // and librosa locally; no provider or API key needed.
       // Removed: "listen".
 
-      // --- Library (skill catalog) ---
+      // --- Skills (skill catalog) ---
       // Per-agent .library/{intrinsic,custom}/ is managed automatically.
       // "paths" adds extra directories to the prompt catalog. Defaults:
-      //   ../.library_shared       — network-shared library
+      //   ../.library_shared       — network-shared skill shelf
       //   ~/.lingtai-tui/utilities — TUI-shipped utility skills
       // Edit and call system.refresh to apply. init.json is ground truth.
-      "library": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] }
+      "skills": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] }
     },
 
     // -------------------------------------------------------

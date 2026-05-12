@@ -687,12 +687,19 @@ func CountSavedByProvider(presets []Preset, provider string) int {
 
 func e() map[string]interface{} { return map[string]interface{}{} }
 
-// libraryDefault returns the default library capability config — two Tier 1
-// paths: the network-shared library (resolved relative to the agent dir)
+// libraryKnowledgeDefault returns the default durable library capability config.
+func libraryKnowledgeDefault() map[string]interface{} {
+	return map[string]interface{}{
+		"library_limit": 50,
+	}
+}
+
+// skillsDefault returns the default skills capability config — two Tier 1
+// paths: the network-shared skills shelf (resolved relative to the agent dir)
 // and the TUI's per-user utilities directory. Users can edit init.json to
 // add or remove paths; init.json is the ground truth and the capability
 // reads it on every setup.
-func libraryDefault() map[string]interface{} {
+func skillsDefault() map[string]interface{} {
 	return map[string]interface{}{
 		"paths": []interface{}{
 			"../.library_shared",
@@ -714,9 +721,9 @@ func minimaxPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": mm, "codex": e(),
+				"web_search": mm, "library": libraryKnowledgeDefault(),
 				"vision": mm, "avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -735,10 +742,10 @@ func zhipuPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": zp, "codex": e(),
+				"web_search": zp, "library": libraryKnowledgeDefault(),
 				"vision": zp,
 				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -767,10 +774,10 @@ func mimoPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"codex": e(),
+				"library":    libraryKnowledgeDefault(),
 				"vision":     mp,
 				"avatar":     e(), "daemon": e(),
-				"library":    libraryDefault(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -793,9 +800,9 @@ func deepseekPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"codex": e(),
-				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"library":    libraryKnowledgeDefault(),
+				"avatar":     e(), "daemon": e(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -820,9 +827,9 @@ func geminiPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"codex": e(),
-				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"library":    libraryKnowledgeDefault(),
+				"avatar":     e(), "daemon": e(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -849,9 +856,9 @@ func kimiPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"codex": e(),
-				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"library":    libraryKnowledgeDefault(),
+				"avatar":     e(), "daemon": e(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -873,9 +880,9 @@ func openrouterPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"codex": e(),
-				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"library":    libraryKnowledgeDefault(),
+				"avatar":     e(), "daemon": e(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -899,10 +906,10 @@ func codexPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": cx, "codex": e(),
+				"web_search": cx, "library": libraryKnowledgeDefault(),
 				"vision": cx,
 				"avatar": e(), "daemon": e(),
-				"library": libraryDefault(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -919,16 +926,16 @@ func customPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": e(), "codex": e(),
+				"web_search": e(), "library": libraryKnowledgeDefault(),
 				// Inherit vision through the LLM's own endpoint. When the
 				// relay is OpenAI-compatible and the underlying model
 				// supports vision (gpt-4o/4.x, gpt-5.5, etc.), the kernel
 				// routes through OpenAIVisionService with the LLM's
 				// base_url. If the relay or model can't do vision the
 				// call fails at runtime — no special handling.
-				"vision":  map[string]interface{}{"provider": "inherit"},
-				"avatar":  e(), "daemon": e(),
-				"library": libraryDefault(),
+				"vision": map[string]interface{}{"provider": "inherit"},
+				"avatar": e(), "daemon": e(),
+				"skills": skillsDefault(),
 			},
 		},
 	}
@@ -966,8 +973,6 @@ func populate(globalDir string, fsys embed.FS, root string) {
 	})
 }
 
-
-
 // Bootstrap populates all embedded assets and default presets at ~/.lingtai-tui/.
 func Bootstrap(globalDir string) error {
 	populate(globalDir, covenantFS, "covenant")
@@ -999,7 +1004,7 @@ func Bootstrap(globalDir string) error {
 // PopulateBundledLibrary extracts the TUI's embedded bundled skills into a
 // stable per-user location: <globalDir>/utilities/ (typically
 // ~/.lingtai-tui/utilities/). Agents reach these by default via the
-// library.paths entry in their init.json, which points at the same path.
+// skills.paths entry in their init.json, which points at the same path.
 //
 // Called on every TUI startup so utility skills stay in sync with the
 // shipped binary. Directory is rewritten from scratch so a TUI upgrade
@@ -1115,10 +1120,10 @@ func DefaultPreset() Preset {
 // Shape: <PROVIDER>[_<REGION>]_<N>_API_KEY
 //   - PROVIDER:   uppercased manifest.llm.provider
 //   - REGION:     "CN" or "INTL" for minimax/zhipu (read from base_url);
-//                 omitted for other providers
+//     omitted for other providers
 //   - N:          the lowest positive integer not already present in
-//                 existingKeys (1-based). Reuses freed slots since the
-//                 user said API keys rapidly rotate anyway.
+//     existingKeys (1-based). Reuses freed slots since the
+//     user said API keys rapidly rotate anyway.
 //
 // existingKeys is the env-var-keyed map from Config.Keys — caller
 // passes it in so this stays a pure function (no I/O).
@@ -1194,21 +1199,21 @@ func llmString(llm map[string]interface{}, key string) string {
 
 // AgentOpts holds per-agent configuration values set at creation time.
 type AgentOpts struct {
-	Language      string   // "en", "zh", or "wen"
-	Stamina       float64  // max uptime in seconds
-	ContextLimit  int      // token budget
-	SoulDelay     float64  // seconds between soul cycles
-	MoltPressure  float64  // 0–1 ratio triggering molt
-	MaxRpm        int      // API requests-per-minute cap (cooperative network gate); 0 disables
-	Karma         bool     // lifecycle control over other agents
-	Nirvana       bool     // permanent agent destruction
+	Language       string   // "en", "zh", or "wen"
+	Stamina        float64  // max uptime in seconds
+	ContextLimit   int      // token budget
+	SoulDelay      float64  // seconds between soul cycles
+	MoltPressure   float64  // 0–1 ratio triggering molt
+	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
+	Karma          bool     // lifecycle control over other agents
+	Nirvana        bool     // permanent agent destruction
 	CovenantFile   string   // path to covenant file
 	PrincipleFile  string   // path to principle file
 	ProceduresFile string   // path to procedures file
 	BriefFile      string   // path to brief file (externally maintained by secretary)
 	SoulFile       string   // path to soul flow file
-	CommentFile   string   // path to comment file (optional)
-	Addons        []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
+	CommentFile    string   // path to comment file (optional)
+	Addons         []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
 	// AllowedPresets lists the absolute (or ~-prefixed) paths of every
 	// preset this agent is authorized to swap to at runtime. The default
 	// preset is automatically included if missing. When empty, falls back
@@ -1470,14 +1475,14 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	}
 
 	initJSON := map[string]interface{}{
-		"manifest":         manifest,
-		"covenant_file":    covenantFile,
-		"principle_file":   principleFile,
-		"procedures_file":  proceduresFile,
-		"env_file":       config.EnvFilePath(globalDir),
-		"venv_path":      filepath.Join(globalDir, "runtime", "venv"),
-		"pad":            "",
-		"prompt":         "",
+		"manifest":        manifest,
+		"covenant_file":   covenantFile,
+		"principle_file":  principleFile,
+		"procedures_file": proceduresFile,
+		"env_file":        config.EnvFilePath(globalDir),
+		"venv_path":       filepath.Join(globalDir, "runtime", "venv"),
+		"pad":             "",
+		"prompt":          "",
 	}
 
 	// Decide which addons to wire.
@@ -1713,4 +1718,3 @@ func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSe
 	}
 	return nil
 }
-

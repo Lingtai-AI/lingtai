@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 33
+const CurrentVersion = 34
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -44,18 +44,19 @@ var migrations = []Migration{
 	{Version: 19, Name: "procedures-english-only", Fn: func(_ string) error { return nil }},
 	{Version: 20, Name: "pseudo-agent-subscriptions", Fn: func(_ string) error { return nil }},
 	{Version: 21, Name: "library-paths", Fn: func(_ string) error { return nil }},
-	{Version: 22, Name: "recipe-lang-suffix", Fn: func(_ string) error { return nil }}, // TUI-only: touches .tui-asset/.recipe
-	{Version: 23, Name: "recipe-state-rename", Fn: func(_ string) error { return nil }}, // TUI-only: renames .tui-asset/.recipe → recipe-state.json
-	{Version: 24, Name: "add-active-preset", Fn: func(_ string) error { return nil }}, // TUI-only: infers manifest.active_preset from existing init.json
-	{Version: 25, Name: "preset-description-object", Fn: func(_ string) error { return nil }}, // TUI-only: promotes description to {summary, tier?} object on global preset library files
-	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm}, // shared: rewrites stem-form preset refs in init.json
-	{Version: 27, Name: "strip-media-capabilities", Fn: migrateStripMediaCapabilities}, // shared: drops compose/video/draw/talk/listen from init.json
-	{Version: 28, Name: "addons-to-mcp", Fn: migrateAddonsToMCP},                       // shared: rewrites legacy addons:{name:cfg} dict into addons:[name] + mcp.{name} activation entries
-	{Version: 29, Name: "preset-allowed-list", Fn: migratePresetAllowedList},           // shared: rewrites manifest.preset to {default, active, allowed:[paths]} schema
-	{Version: 30, Name: "preset-dir-split", Fn: migratePresetDirSplit},                 // shared: rewrites flat presets/ paths to templates/ or saved/ subdirs
+	{Version: 22, Name: "recipe-lang-suffix", Fn: func(_ string) error { return nil }},                    // TUI-only: touches .tui-asset/.recipe
+	{Version: 23, Name: "recipe-state-rename", Fn: func(_ string) error { return nil }},                   // TUI-only: renames .tui-asset/.recipe → recipe-state.json
+	{Version: 24, Name: "add-active-preset", Fn: func(_ string) error { return nil }},                     // TUI-only: infers manifest.active_preset from existing init.json
+	{Version: 25, Name: "preset-description-object", Fn: func(_ string) error { return nil }},             // TUI-only: promotes description to {summary, tier?} object on global preset library files
+	{Version: 26, Name: "preset-path-form", Fn: migratePresetPathForm},                                    // shared: rewrites stem-form preset refs in init.json
+	{Version: 27, Name: "strip-media-capabilities", Fn: migrateStripMediaCapabilities},                    // shared: drops compose/video/draw/talk/listen from init.json
+	{Version: 28, Name: "addons-to-mcp", Fn: migrateAddonsToMCP},                                          // shared: rewrites legacy addons:{name:cfg} dict into addons:[name] + mcp.{name} activation entries
+	{Version: 29, Name: "preset-allowed-list", Fn: migratePresetAllowedList},                              // shared: rewrites manifest.preset to {default, active, allowed:[paths]} schema
+	{Version: 30, Name: "preset-dir-split", Fn: migratePresetDirSplit},                                    // shared: rewrites flat presets/ paths to templates/ or saved/ subdirs
 	{Version: 31, Name: "drop-legacy-intrinsic-capabilities", Fn: migrateDropLegacyIntrinsicCapabilities}, // shared: drops psyche/email from init.json (now intrinsics)
-	{Version: 32, Name: "cleanup-codex-oauth", Fn: func(_ string) error { return nil }},                  // TUI-only: renames saved/codex_oauth.json to codex.json
-	{Version: 33, Name: "strip-codex-api-key-env", Fn: func(_ string) error { return nil }},              // TUI-only: strips auto-stamped CODEX_N_API_KEY from saved codex presets
+	{Version: 32, Name: "cleanup-codex-oauth", Fn: func(_ string) error { return nil }},                   // TUI-only: renames saved/codex_oauth.json to codex.json
+	{Version: 33, Name: "strip-codex-api-key-env", Fn: func(_ string) error { return nil }},               // TUI-only: strips auto-stamped CODEX_N_API_KEY from saved codex presets
+	{Version: 34, Name: "library-skills-caps", Fn: func(_ string) error { return nil }},                   // TUI-only: rewrites codex/library capability keys to library/skills
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any

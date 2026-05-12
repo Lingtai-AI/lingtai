@@ -156,14 +156,14 @@ func RecipeNeedsApply(projectRoot string) bool {
 //     caller via the greetSubstitutor callback so this package stays free
 //     of TUI-only helpers.
 //   - Updates init.json:
-//     * comment_file / covenant_file / procedures_file fields in
-//       manifest.capabilities.{psyche, ...} (TODO: caller-specified
-//       structure — for v1 this function only handles library.paths and
-//       .prompt; comment/covenant/procedures rewiring happens in the TUI
-//       layer that also owns init.json generation)
-//     * manifest.capabilities.library.paths gets "../../<library_name>"
-//       appended when the recipe declares a library (additive — existing
-//       entries are preserved, never removed)
+//   - comment_file / covenant_file / procedures_file fields in
+//     manifest.capabilities.{psyche, ...} (TODO: caller-specified
+//     structure — for v1 this function only handles skills.paths and
+//     .prompt; comment/covenant/procedures rewiring happens in the TUI
+//     layer that also owns init.json generation)
+//   - manifest.capabilities.skills.paths gets "../../<library_name>"
+//     appended when the recipe declares a library (additive — existing
+//     entries are preserved, never removed)
 //   - Snapshots the applied recipe to .lingtai/.tui-asset/.recipe/ so a
 //     future RecipeNeedsApply call can detect future changes.
 //
@@ -171,9 +171,9 @@ func RecipeNeedsApply(projectRoot string) bool {
 // the first error encountered. Partial success is possible — the caller
 // may want to re-invoke after remediating any per-agent errors.
 //
-// This function is additive for library paths by design: on recipe
-// change, we DO NOT remove prior recipes' library entries. The user may
-// have come to rely on that library, and auto-removal is the sort of
+// This function is additive for skill-catalog paths by design: on recipe
+// change, we DO NOT remove prior recipes' skill-library entries. The user may
+// have come to rely on that skill library, and auto-removal is the sort of
 // thing that silently breaks agents. Manual cleanup is the user's
 // responsibility.
 func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string) string) (applied int, err error) {
@@ -230,11 +230,11 @@ func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string
 			}
 		}
 
-		// Patch library.paths (additive) when recipe declares a library.
+		// Patch skills.paths (additive) when recipe declares a skill library.
 		if libPathEntry != "" {
 			initPath := filepath.Join(agentDir, "init.json")
-			if werr := AppendLibraryPath(initPath, libPathEntry); werr != nil && firstErr == nil {
-				firstErr = fmt.Errorf("ApplyRecipe: update library.paths for %s: %w", name, werr)
+			if werr := AppendSkillsPath(initPath, libPathEntry); werr != nil && firstErr == nil {
+				firstErr = fmt.Errorf("ApplyRecipe: update skills.paths for %s: %w", name, werr)
 				continue
 			}
 		}
@@ -252,20 +252,19 @@ func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string
 	return applied, firstErr
 }
 
-// AppendLibraryPath ensures the given path string appears in the
-// manifest.capabilities.library.paths list of the agent's init.json.
+// AppendSkillsPath ensures the given path string appears in the
+// manifest.capabilities.skills.paths list of the agent's init.json.
 // Idempotent: no-op if the path is already present. Preserves all other
-// fields in init.json including existing library.paths entries.
+// fields in init.json including existing skills.paths entries.
 //
-// The library capability object must already exist in the manifest (via
-// libraryDefault() or equivalent). If it's absent, this function is a
+// The skills capability object must already exist in the manifest (via
+// skillsDefault() or equivalent). If it's absent, this function is a
 // no-op — creating it would be an architectural choice best left to
-// preset generation. This mirrors the behavior of migrateLibraryPaths
-// (m021).
+// preset generation.
 //
 // Writes atomically via temp+rename on change. Returns nil on successful
 // no-op or successful write; returns error only on I/O or parse failure.
-func AppendLibraryPath(initJSONPath, pathEntry string) error {
+func AppendSkillsPath(initJSONPath, pathEntry string) error {
 	if initJSONPath == "" || pathEntry == "" {
 		return nil
 	}
@@ -288,13 +287,13 @@ func AppendLibraryPath(initJSONPath, pathEntry string) error {
 	if !ok {
 		return nil
 	}
-	lib, ok := caps["library"].(map[string]interface{})
+	skills, ok := caps["skills"].(map[string]interface{})
 	if !ok {
 		return nil
 	}
 
 	var existing []interface{}
-	if raw, ok := lib["paths"].([]interface{}); ok {
+	if raw, ok := skills["paths"].([]interface{}); ok {
 		existing = raw
 	}
 	for _, p := range existing {
@@ -302,7 +301,7 @@ func AppendLibraryPath(initJSONPath, pathEntry string) error {
 			return nil // already present
 		}
 	}
-	lib["paths"] = append(existing, pathEntry)
+	skills["paths"] = append(existing, pathEntry)
 
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -477,4 +476,3 @@ func listFiles(root string) (map[string]struct{}, error) {
 	})
 	return out, err
 }
-

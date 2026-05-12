@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 
@@ -239,7 +239,7 @@ func (m MarkdownViewerModel) renderLeft(maxW int) string {
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5c07b"))
 
-	problemsGroup := i18n.T("library.problems")
+	problemsGroup := i18n.T("skills.problems")
 
 	var lines []string
 	lastGroup := ""
