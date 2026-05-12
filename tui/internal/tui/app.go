@@ -715,7 +715,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProjects
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.projects.Init(), a.sendSize())
-	case "library", "codex":
+	case "knowledge", "library", "codex":
 		a.currentView = appViewCodex
 		a.codex = NewCodexModel(a.projectDir, a.orchDir)
 		return a, tea.Batch(a.codex.Init(), a.sendSize())
@@ -984,7 +984,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		// in init.json (manifest.capabilities.skills.paths).
 		a.library = NewLibraryModel(a.projectDir, a.orchDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
-	case "library", "codex":
+	case "knowledge", "library", "codex":
 		a.currentView = appViewCodex
 		a.codex = NewCodexModel(a.projectDir, a.orchDir)
 		return a, tea.Batch(a.codex.Init(), a.sendSize())

@@ -60,6 +60,7 @@ func DefaultCommands() []Command {
 		{Name: "agora", Description: "palette.agora", Detail: "cmd.agora"},
 		{Name: "export", Description: "palette.export", Detail: "cmd.export"},
 		{Name: "skills", Description: "palette.skills", Detail: "cmd.skills"},
+		{Name: "knowledge", Description: "palette.knowledge", Detail: "cmd.knowledge"},
 		{Name: "insights", Description: "palette.insights", Detail: "cmd.insights"},
 		{Name: "library", Description: "palette.library", Detail: "cmd.library"},
 		{Name: "system", Description: "palette.system", Detail: "cmd.system"},

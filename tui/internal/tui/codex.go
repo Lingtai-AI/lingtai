@@ -13,8 +13,8 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// CodexModel is the top-level /codex view. Mirrors LibraryModel: shows one
-// agent's codex at a time and swaps agents via Ctrl+T.
+// CodexModel is the top-level /knowledge view. Mirrors LibraryModel: shows one
+// agent's private knowledge at a time and swaps agents via Ctrl+T.
 type CodexModel struct {
 	baseDir     string // .lingtai/ directory (for agent discovery)
 	selectedDir string // working dir of the currently-displayed agent
@@ -36,7 +36,7 @@ type codexLoadMsg struct {
 	agentNodes []fs.AgentNode
 }
 
-// NewCodexModel constructs the /library view rooted at baseDir with the given
+// NewCodexModel constructs the /knowledge view rooted at baseDir with the given
 // agent pre-selected.
 func NewCodexModel(baseDir, selectedDir string) CodexModel {
 	entries := buildAgentCodexEntries(selectedDir)
@@ -50,7 +50,7 @@ func NewCodexModel(baseDir, selectedDir string) CodexModel {
 }
 
 func codexTitleFor(agentDir string) string {
-	base := i18n.T("palette.library")
+	base := i18n.T("palette.knowledge")
 	if agentDir == "" {
 		return base
 	}

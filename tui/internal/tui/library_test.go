@@ -46,3 +46,13 @@ func TestScanLibrary_SkipsBrokenSymlinks(t *testing.T) {
 		t.Errorf("expected 0 problems, got %d", len(problems))
 	}
 }
+
+func TestParseFrontmatter_FoldedDescription(t *testing.T) {
+	fm := parseFrontmatter("---\nname: knowledge-manual\ndescription: >\n  Concise guide to the knowledge capability\n  and nested folders.\nversion: 1.0.0\n---\n# Body\n")
+	if fm == nil {
+		t.Fatal("parseFrontmatter returned nil")
+	}
+	if got := fm["description"]; got != "Concise guide to the knowledge capability and nested folders." {
+		t.Errorf("description = %q", got)
+	}
+}

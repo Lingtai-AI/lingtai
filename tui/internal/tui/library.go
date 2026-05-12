@@ -35,10 +35,7 @@ type skillProblem struct {
 
 // ── Frontmatter parser ──────────────────────────────────────────────
 
-var (
-	fmRe = regexp.MustCompile(`(?s)\A---\s*\n(.*?\n)---\s*\n`)
-	kvRe = regexp.MustCompile(`(?m)^(\w[\w-]*)\s*:\s*(.+)$`)
-)
+var fmRe = regexp.MustCompile(`(?s)\A---\s*\n(.*?\n)---\s*\n`)
 
 func parseFrontmatter(text string) map[string]string {
 	m := fmRe.FindStringSubmatch(text)
@@ -46,8 +43,40 @@ func parseFrontmatter(text string) map[string]string {
 		return nil
 	}
 	result := make(map[string]string)
-	for _, kv := range kvRe.FindAllStringSubmatch(m[1], -1) {
-		result[kv[1]] = strings.TrimSpace(kv[2])
+	lines := strings.Split(m[1], "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		for _, r := range key {
+			if !(r == '-' || r == '_' || (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+				key = ""
+				break
+			}
+		}
+		if key == "" {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		if value == ">" || value == "|-" || value == "|" || value == ">-" {
+			var block []string
+			for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], " ") || strings.HasPrefix(lines[i+1], "\t") || strings.TrimSpace(lines[i+1]) == "") {
+				i++
+				block = append(block, strings.TrimSpace(lines[i]))
+			}
+			value = strings.Join(block, " ")
+		}
+		result[key] = strings.TrimSpace(value)
 	}
 	return result
 }
