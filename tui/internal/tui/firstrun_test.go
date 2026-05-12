@@ -3,6 +3,8 @@ package tui
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -130,5 +132,27 @@ func TestPresetNeedsKey_distinctEnvVars(t *testing.T) {
 	}
 	if !m.presetNeedsKey(work) {
 		t.Error("work preset uses a distinct env var that's unset, should need")
+	}
+}
+
+func TestSetupModeEnterOnKeepCurrentAdvancesToAgentPresets(t *testing.T) {
+	m := FirstRunModel{
+		setupMode: true,
+		step:      stepPickPreset,
+		cursor:    -1,
+		presets: []preset.Preset{
+			{
+				Name:   "saved-one",
+				Source: preset.SourceSaved,
+				Manifest: map[string]interface{}{
+					"llm": map[string]interface{}{"provider": "minimax"},
+				},
+			},
+		},
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.step != stepAgentPresets {
+		t.Fatalf("Enter on setup keep-current row should advance to agent presets; got step %v", m.step)
 	}
 }

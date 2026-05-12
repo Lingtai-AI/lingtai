@@ -994,9 +994,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					oauthCh := startOAuthFlow()
 					return m, func() tea.Msg { return <-oauthCh }
 				}
-				// Row: open the editor on the highlighted preset.
+				// Setup mode's synthetic "keep current" row is already the
+				// chosen default preset; Enter should advance just like the
+				// Next footer button. Editing remains disabled on this row
+				// (see Space/Ctrl+E below) because it has no preset file.
 				if m.setupMode && m.cursor == -1 {
-					return m, nil // can't edit the synthetic "keep current" entry
+					return m, m.enterAgentPresets()
 				}
 				p, ok := m.presetAtVisibleIdx(m.cursor)
 				if !ok {
