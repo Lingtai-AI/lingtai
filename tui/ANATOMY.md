@@ -2,12 +2,12 @@
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`).
 
-This folder is the self-contained Go module for the `lingtai-tui` terminal UI binary. It ships as a single executable built from `main.go` (~889 lines) with platform-specific companions, embedding the i18n tables. All substantive logic lives under `internal/`. The binary has two faces: a subcommand surface (`purge`, `list`, `clean`, `suspend`, `timemachine`, `postman`) and an interactive Bubble Tea v2 UI that launches Python agents as subprocesses and observes them via the filesystem.
+This folder is the self-contained Go module for the `lingtai-tui` terminal UI binary. It ships as a single executable built from `main.go` with platform-specific companions, embedding the i18n tables. All substantive logic lives under `internal/`. The binary has two faces: a subcommand surface (`purge`, `list`, `clean`, `suspend`, `timemachine`, `postman`, `bootstrap`, `presets`, `spawn`, `doctor`) and an interactive Bubble Tea v2 UI that launches Python agents as subprocesses and observes them via the filesystem.
 
 ## Components
 
-- **`main.go:28-889`** — single-file `package main`. The version stamp (`main.go:29`, set via `-ldflags`), welcome/help text, and interactive entry (`main.go:31-360`). After parsing subcommands, it runs global migrations, checks invariants (init.json all-or-nothing, exactly-one-orchestrator), handles upgrade prompts and first-run wizard routing, then launches Bubble Tea.
-- **`main.go:31-75`** — subcommand dispatch. Each subcommand returns early; the fallthrough path at line 75 starts the interactive TUI.
+- **`main.go:28-975`** — single-file `package main`. The version stamp (`main.go:29`, set via `-ldflags`), welcome/help text, and interactive entry (`main.go:31-360`). After parsing subcommands, it runs global migrations, checks invariants (init.json all-or-nothing, exactly-one-orchestrator), handles upgrade prompts and first-run wizard routing, then launches Bubble Tea.
+- **`main.go:31-91`** — subcommand dispatch. Each subcommand returns early; the fallthrough path starts the interactive TUI.
 - **`main.go:763-837`** — `cleanMain`: suspend agents in `.lingtai/` (10s timeout), then `os.RemoveAll`.
 - **`main.go:839-887`** — `postmanMain`: parse `--port`, collect watch directories, call `postman.Run`.
 - **`purge_unix.go:17-122`** — `purgeMain` (unix): `ps aux | grep "lingtai run"`, SIGTERM → SIGKILL survivors. Build tag `!windows`.
@@ -29,8 +29,9 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 - **Called from:** the shell (`lingtai-tui`), Homebrew tap (`lingtai-ai/lingtai/lingtai-tui`), `install.sh`.
 - **Calls out:** `tui/internal/tui` (Bubble Tea app), `tui/internal/migrate` (per-project migrations), `tui/internal/globalmigrate` (per-machine migrations), `tui/internal/preset` (bootstrap + library population), `tui/internal/process` (agent launch), `tui/internal/config` (global config, venv, upgrade checks), `tui/internal/postman` (mail relay daemon), `tui/internal/timemachine` (git history daemon).
-- **Bootstrap sequence** (`main.go:273-291`): on every launch, the TUI runs `config.MigrateLegacyLanguage` → `config.NeedsVenv` → `config.EnsureVenv` (if needed) or `config.CheckUpgrade` (if venv exists) → `config.EnsureAddons` → `preset.Bootstrap` → `tui.ExportCommandsJSON`. `CheckUpgrade` auto-upgrades the `lingtai` meta-package from PyPI, which bundles `lingtai-kernel` + all addon MCPs. See `tui/internal/config/ANATOMY.md`.
-- **Version flow:** `Makefile:4` injects `git describe` into `main.go:29`. On startup, `main.go:118` calls `tui.SetTUIVersion(version)`, which stores it for `/doctor` drift detection.
+- **Bootstrap sequence** (`main.go:277-295`): on every launch, the TUI runs `config.MigrateLegacyLanguage` → `config.NeedsVenv` (for setup banner) → `config.EnsureRuntime` (create/repair venv if needed, then always run the non-blocking `CheckUpgrade`) → `config.EnsureAddons` → `preset.Bootstrap` → `tui.ExportCommandsJSON`. `CheckUpgrade` auto-upgrades the `lingtai` meta-package from PyPI, which bundles `lingtai-kernel` + all addon MCPs. See `tui/internal/config/ANATOMY.md`.
+- **`lingtai-tui doctor` subcommand** (`main.go:911-964`): runs `config.RunDoctorUpdate` with both `ForceTUI=true` and `ForcePython=true`, then refreshes presets, utility skills, and `commands.json`. Designed to be usable when the TUI cannot start (broken venv, missing migrations) — it never touches `.lingtai/`. Exit nonzero only on unrecoverable failures.
+- **Version flow:** `Makefile:4` injects `git describe` into `main.go:29`. On startup, `main.go:131` calls `tui.SetTUIVersion(version)`, which stores it for `/doctor` drift detection.
 - **Upgrade self-restart:** `main.go:108` calls `syscallExec` (from platform-specific `exec_*.go`) to replace the running binary after a successful `brew upgrade`.
 - **i18n loading:** `i18n/i18n.go` embeds the three locale JSONs; `main.go:249` sets the active locale from `tuiCfg.Language`.
 

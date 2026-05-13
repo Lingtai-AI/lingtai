@@ -74,14 +74,12 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	// Run global migrations (best-effort, same as main TUI path)
 	globalmigrate.Run(globalDir)
 
-	// Ensure venv exists
-	if config.NeedsVenv(globalDir) {
-		if err := config.EnsureVenv(globalDir); err != nil {
-			WriteError(stderr, "venv setup failed: "+err.Error(), "bootstrap_failed")
-			return 1
-		}
-	} else {
-		config.CheckUpgrade(globalDir)
+	// Ensure venv exists, then always run the non-blocking upgrade check so
+	// newly-created/repaired runtimes do not stay on a stale lingtai wheel until
+	// the next launch.
+	if _, err := config.EnsureRuntime(globalDir); err != nil {
+		WriteError(stderr, "venv setup failed: "+err.Error(), "bootstrap_failed")
+		return 1
 	}
 
 	// Bootstrap presets + assets

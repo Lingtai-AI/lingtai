@@ -83,6 +83,10 @@ func main() {
 			spawnMain()
 			return
 		}
+		if arg == "doctor" {
+			doctorMain()
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
 		os.Exit(1)
 	}
@@ -271,18 +275,18 @@ func main() {
 	}
 
 	if !needsFirstRun {
-		// Returning user — ensure runtime + assets (fast no-ops if already exist)
+		// Returning user — ensure runtime + assets (fast no-ops if already exist).
+		// EnsureRuntime always runs the non-blocking upgrade check after a
+		// successful ensure so repaired/recreated venvs do not wait until the
+		// next launch to pick up a newer lingtai CLI.
 		if config.NeedsVenv(globalDir) {
 			fmt.Println("Setting up Python environment...")
-			if err := config.EnsureVenv(globalDir); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			// Venv exists — check for lingtai upgrades
-			if config.CheckUpgrade(globalDir) {
-				fmt.Println("Upgraded lingtai to latest version.")
-			}
+		}
+		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		} else if upgraded {
+			fmt.Println("Upgraded lingtai to latest version.")
 		}
 		if err := preset.Bootstrap(globalDir); err != nil {
 			fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
@@ -654,6 +658,7 @@ func printHelp() {
 	fmt.Println("       lingtai-tui bootstrap")
 	fmt.Println("       lingtai-tui presets [--saved-only] [--templates-only]")
 	fmt.Println("       lingtai-tui spawn <dir> --preset <name> [--agent-name <name>] [--language <code>]")
+	fmt.Println("       lingtai-tui doctor")
 	fmt.Println()
 	fmt.Println("  (no args)    Launch TUI in current directory")
 	fmt.Println("  purge        Kill all lingtai agent processes on this machine.")
@@ -666,6 +671,7 @@ func printHelp() {
 	fmt.Println("  bootstrap       Re-extract embedded skills to ~/.lingtai-tui/utilities/")
 	fmt.Println("  presets      List available presets as JSON (for agent consumption)")
 	fmt.Println("  spawn        Create a new project and launch an agent headlessly (JSON output)")
+	fmt.Println("  doctor       Force-check + update TUI/kernel/venv. Use when the TUI cannot start.")
 	fmt.Println()
 	fmt.Println("  You are responsible for all .lingtai/ folders on this machine.")
 	fmt.Println("  They are the bodies of your agents — files, pad, mail, identity.")
@@ -900,6 +906,61 @@ func bootstrapMain() {
 	}
 	preset.PopulateBundledLibrary("", globalDir)
 	fmt.Printf("Bootstrapped skills to %s/utilities/\n", globalDir)
+}
+
+func doctorMain() {
+	globalDir, err := config.GlobalDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	globalmigrate.Run(globalDir)
+
+	fmt.Println("LingTai doctor: forced update + bootstrap check")
+	fmt.Printf("Global config: %s\n", globalDir)
+	fmt.Println()
+
+	report := config.RunDoctorUpdate(globalDir, config.DoctorOptions{
+		CurrentTUIVersion: version,
+		ForceTUI:          true,
+		ForcePython:       true,
+	})
+	for _, line := range report.Lines {
+		fmt.Printf("%s %s\n", doctorCLIIndicator(line.Severity), line.Text)
+	}
+
+	if err := preset.Bootstrap(globalDir); err != nil {
+		report.Healthy = false
+		fmt.Printf("✗ Bootstrap assets refresh failed: %v\n", err)
+	} else {
+		fmt.Println("✓ Bootstrap assets refreshed")
+	}
+	preset.PopulateBundledLibrary("", globalDir)
+	fmt.Println("✓ Utility skills refreshed")
+	tui.ExportCommandsJSON(globalDir)
+	fmt.Println("✓ commands.json refreshed")
+
+	if report.Healthy {
+		fmt.Println()
+		fmt.Println("Doctor completed: no unrecoverable update/bootstrap failures detected.")
+		return
+	}
+	fmt.Println()
+	fmt.Println("Doctor completed with failures. Review the lines above; if the TUI binary was upgraded, restart lingtai-tui and run doctor again.")
+	os.Exit(1)
+}
+
+func doctorCLIIndicator(sev config.DoctorSeverity) string {
+	switch sev {
+	case config.DoctorOK:
+		return "✓"
+	case config.DoctorFail:
+		return "✗"
+	case config.DoctorWarn:
+		return "!"
+	default:
+		return "•"
+	}
 }
 
 func presetsMain() {

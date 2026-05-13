@@ -119,7 +119,7 @@ func (m DoctorModel) View() string {
 	}
 
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render("  [esc] " + i18n.T("manage.back")) + "\n")
+	b.WriteString(StyleFaint.Render("  [esc] "+i18n.T("manage.back")) + "\n")
 
 	return b.String()
 }
@@ -129,6 +129,31 @@ func (m DoctorModel) View() string {
 // runDoctor performs the /doctor diagnostic and returns a doctorResultMsg.
 func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	var lines []doctorLine
+
+	// Phase -1: forced bootstrap/runtime update. Keep this first so /doctor can
+	// repair stale binaries or Python packages before running the traditional
+	// health checks below. Failures are surfaced but do not short-circuit the
+	// rest of the diagnostic.
+	updateReport := config.RunDoctorUpdate(globalDir, config.DoctorOptions{
+		CurrentTUIVersion: tuiVersion,
+		ForceTUI:          true,
+		ForcePython:       true,
+		QuietEnsureVenv:   true,
+	})
+	for _, line := range updateReport.Lines {
+		lines = append(lines, doctorLineFromConfig(line))
+	}
+	if err := preset.Bootstrap(globalDir); err != nil {
+		lines = append(lines, doctorLine{
+			Text: fmt.Sprintf("✗ Bootstrap assets refresh failed: %v", err),
+		})
+	} else {
+		preset.PopulateBundledLibrary("", globalDir)
+		ExportCommandsJSON(globalDir)
+		lines = append(lines, doctorLine{
+			Text: "✓ Bootstrap assets, utility skills, and commands.json refreshed", OK: true,
+		})
+	}
 
 	// Phase 0: check lingtai-portal on PATH
 	if _, err := exec.LookPath("lingtai-portal"); err == nil {
@@ -245,6 +270,26 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	return doctorResultMsg{Lines: lines}
+}
+
+func doctorLineFromConfig(line config.DoctorLine) doctorLine {
+	prefix := "•"
+	converted := doctorLine{Warn: true}
+	switch line.Severity {
+	case config.DoctorOK:
+		prefix = "✓"
+		converted.OK = true
+		converted.Warn = false
+	case config.DoctorFail:
+		prefix = "✗"
+		converted.Warn = false
+	case config.DoctorWarn:
+		prefix = "!"
+	case config.DoctorInfo:
+		prefix = "•"
+	}
+	converted.Text = prefix + " " + line.Text
+	return converted
 }
 
 // --- Event log scanning ---

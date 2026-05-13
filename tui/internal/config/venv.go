@@ -1,9 +1,10 @@
 package config
 
 import (
-	"encoding/json"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -241,31 +242,15 @@ func findPython() string {
 // Returns the latest version string if an upgrade is available, or "" if up-to-date.
 // Non-blocking: silently returns "" on any error (offline, timeout, etc.).
 func CheckTUIUpgrade(currentVersion string) string {
-	if currentVersion == "" || currentVersion == "dev" {
+	if currentVersion == "" || currentVersion == "dev" || strings.Contains(currentVersion, "-") {
 		return ""
 	}
-
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/Lingtai-AI/lingtai/releases/latest")
+	release, err := fetchLatestGitHubRelease(client)
 	if err != nil {
 		return ""
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return ""
-	}
-
-	var release struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return ""
-	}
-
-	latest := strings.TrimPrefix(release.TagName, "v")
-	current := strings.TrimPrefix(currentVersion, "v")
-
-	if latest != current {
+	if releaseNewer(currentVersion, release.TagName) {
 		return release.TagName
 	}
 	return ""
@@ -317,61 +302,465 @@ func EnsureAddons(python, agentDir string) error {
 // Returns true if an upgrade was performed.
 // Non-blocking: silently returns false on any error (offline, timeout, etc.).
 func CheckUpgrade(globalDir string) bool {
-	python := VenvPython(RuntimeVenvDir(globalDir))
-	if _, err := os.Stat(python); err != nil {
-		return false // no venv yet
+	result := UpgradePythonRuntime(globalDir, false, &UpgradeRuntimeOptions{
+		HTTPClient: &http.Client{Timeout: 3 * time.Second},
+	})
+	return result.Updated
+}
+
+// RuntimeEnsureOptions injects side effects for startup runtime tests.
+type RuntimeEnsureOptions struct {
+	NeedsVenvFunc    func(string) bool
+	EnsureVenvFunc   func(string) error
+	CheckUpgradeFunc func(string) bool
+}
+
+// EnsureRuntime ensures the managed Python runtime is usable, then always runs
+// the non-blocking lingtai upgrade check. This is intentionally not an
+// if/else: a venv that was just created or repaired may still have been
+// installed from a stale wheel/cache, so startup should check PyPI in the same
+// launch instead of waiting for the next launch.
+func EnsureRuntime(globalDir string) (bool, error) {
+	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{})
+}
+
+// EnsureRuntimeQuiet is the alt-screen-safe variant used by first-run setup.
+func EnsureRuntimeQuiet(globalDir string, progress ProgressFunc) (bool, error) {
+	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{
+		EnsureVenvFunc: func(dir string) error { return EnsureVenvQuiet(dir, progress) },
+	})
+}
+
+func ensureRuntimeWithOptions(globalDir string, opts RuntimeEnsureOptions) (bool, error) {
+	if opts.NeedsVenvFunc == nil {
+		opts.NeedsVenvFunc = NeedsVenv
+	}
+	if opts.EnsureVenvFunc == nil {
+		opts.EnsureVenvFunc = EnsureVenv
+	}
+	if opts.CheckUpgradeFunc == nil {
+		opts.CheckUpgradeFunc = CheckUpgrade
+	}
+	if opts.NeedsVenvFunc(globalDir) {
+		if err := opts.EnsureVenvFunc(globalDir); err != nil {
+			return false, err
+		}
+	}
+	return opts.CheckUpgradeFunc(globalDir), nil
+}
+
+// DoctorSeverity classifies lines emitted by the forced doctor/update routine.
+type DoctorSeverity string
+
+const (
+	DoctorInfo DoctorSeverity = "info"
+	DoctorOK   DoctorSeverity = "ok"
+	DoctorWarn DoctorSeverity = "warn"
+	DoctorFail DoctorSeverity = "fail"
+)
+
+// DoctorLine is one human-readable diagnostic/update line.
+type DoctorLine struct {
+	Severity DoctorSeverity
+	Text     string
+}
+
+// DoctorReport is returned by RunDoctorUpdate. Healthy is false only when a
+// forced repair that should have succeeded failed (for example brew/pip failed,
+// venv creation failed, or post-upgrade verification still reports the old
+// version). Non-critical conditions such as "GitHub unreachable" are warnings
+// because /doctor should still continue with local diagnostics.
+type DoctorReport struct {
+	Lines   []DoctorLine
+	Healthy bool
+}
+
+func (r *DoctorReport) add(sev DoctorSeverity, format string, args ...interface{}) {
+	r.Lines = append(r.Lines, DoctorLine{Severity: sev, Text: fmt.Sprintf(format, args...)})
+	if sev == DoctorFail {
+		r.Healthy = false
+	}
+}
+
+// DoctorOptions controls RunDoctorUpdate.
+type DoctorOptions struct {
+	CurrentTUIVersion string
+	ForceTUI          bool
+	ForcePython       bool
+	QuietEnsureVenv   bool
+
+	// Test hooks. Production callers leave these nil.
+	HTTPClient     *http.Client
+	Runner         CommandRunner
+	LookPath       func(string) (string, error)
+	Executable     func() (string, error)
+	Readlink       func(string) (string, error)
+	Stat           func(string) (os.FileInfo, error)
+	EnsureVenvFunc func(string) error
+}
+
+// CommandRunner is the minimal exec abstraction used by forced update code.
+type CommandRunner interface {
+	Run(name string, args ...string) CommandResult
+}
+
+type CommandResult struct {
+	Stdout string
+	Stderr string
+	Err    error
+}
+
+type execCommandRunner struct{}
+
+func (execCommandRunner) Run(name string, args ...string) CommandResult {
+	cmd := exec.Command(name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	return CommandResult{Stdout: stdout.String(), Stderr: stderr.String(), Err: cmd.Run()}
+}
+
+// RunDoctorUpdate force-checks and repairs the two shipped update surfaces:
+// the Homebrew-installed TUI binary and the managed Python `lingtai` runtime.
+// It never mutates symlinks directly; TUI upgrades are delegated to brew, and
+// Python runtime upgrades are delegated to uv/pip, then verified afterwards.
+func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
+	report := DoctorReport{Healthy: true}
+	if opts.Runner == nil {
+		opts.Runner = execCommandRunner{}
+	}
+	if opts.LookPath == nil {
+		opts.LookPath = exec.LookPath
+	}
+	if opts.Executable == nil {
+		opts.Executable = os.Executable
+	}
+	if opts.Readlink == nil {
+		opts.Readlink = os.Readlink
+	}
+	if opts.Stat == nil {
+		opts.Stat = os.Stat
+	}
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: 5 * time.Second}
+	}
+	if opts.EnsureVenvFunc == nil {
+		opts.EnsureVenvFunc = EnsureVenv
+		if opts.QuietEnsureVenv {
+			opts.EnsureVenvFunc = func(dir string) error { return EnsureVenvQuiet(dir, nil) }
+		}
 	}
 
-	// Get installed version
-	out, err := exec.Command(python, "-c",
-		"import lingtai; print(lingtai.__version__)").Output()
-	if err != nil {
-		return false
-	}
-	installed := strings.TrimSpace(string(out))
+	report.checkTUI(opts)
+	report.checkPythonRuntime(globalDir, opts)
+	return report
+}
 
-	// Get latest from PyPI (3s timeout)
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("https://pypi.org/pypi/lingtai/json")
+func (r *DoctorReport) checkTUI(opts DoctorOptions) {
+	current := opts.CurrentTUIVersion
+	if current == "" {
+		current = "dev"
+	}
+	exe, err := opts.Executable()
+	if err != nil || exe == "" {
+		r.add(DoctorWarn, "TUI executable: unknown (%v)", err)
+	} else {
+		r.add(DoctorInfo, "TUI executable: %s", exe)
+		if target, linkErr := opts.Readlink(exe); linkErr == nil && target != "" {
+			r.add(DoctorWarn, "TUI executable is a symlink to %s; brew may update the Cellar copy without changing this dev/manual link", target)
+		}
+	}
+	r.add(DoctorInfo, "TUI version: %s", current)
+
+	if current == "dev" || strings.Contains(current, "-") {
+		r.add(DoctorWarn, "Skipping TUI release upgrade for dev build %q", current)
+		return
+	}
+	release, err := fetchLatestGitHubRelease(opts.HTTPClient)
 	if err != nil {
-		return false
+		r.add(DoctorWarn, "Could not check latest TUI release on GitHub: %v", err)
+		return
+	}
+	r.add(DoctorInfo, "Latest TUI release: %s", release.TagName)
+	if !releaseNewer(current, release.TagName) {
+		r.add(DoctorOK, "TUI is up to date")
+		return
+	}
+	r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
+	if !opts.ForceTUI {
+		return
+	}
+	brew, err := opts.LookPath("brew")
+	if err != nil || brew == "" {
+		r.add(DoctorFail, "Homebrew not found; install/update manually from https://github.com/Lingtai-AI/lingtai/releases/tag/%s", release.TagName)
+		return
+	}
+	for _, cmdArgs := range [][]string{{"update"}, {"upgrade", "lingtai-ai/lingtai/lingtai-tui"}} {
+		r.add(DoctorInfo, "Running: %s %s", brew, strings.Join(cmdArgs, " "))
+		res := opts.Runner.Run(brew, cmdArgs...)
+		appendCommandOutput(r, res)
+		if res.Err != nil {
+			r.add(DoctorFail, "Command failed: %v", res.Err)
+			return
+		}
+	}
+	r.add(DoctorWarn, "Brew upgrade finished. Restart lingtai-tui and run `lingtai-tui version` to verify the active binary changed.")
+}
+
+func (r *DoctorReport) checkPythonRuntime(globalDir string, opts DoctorOptions) {
+	venvPath := RuntimeVenvDir(globalDir)
+	python := VenvPython(venvPath)
+	needsEnsure := false
+	if _, err := opts.Stat(python); err != nil {
+		r.add(DoctorWarn, "Python runtime venv missing or incomplete at %s", venvPath)
+		needsEnsure = true
+	} else if _, err := pythonLingtaiVersion(opts.Runner, python); err != nil {
+		r.add(DoctorWarn, "Python runtime venv exists but cannot import lingtai: %v", err)
+		needsEnsure = true
+	}
+	if needsEnsure {
+		r.add(DoctorInfo, "Creating Python runtime venv...")
+		if err := opts.EnsureVenvFunc(globalDir); err != nil {
+			r.add(DoctorFail, "Failed to create Python runtime venv: %v", err)
+			return
+		}
+		if _, err := opts.Stat(python); err != nil {
+			r.add(DoctorFail, "Python runtime venv was created, but %s is still missing: %v", python, err)
+			return
+		}
+		r.add(DoctorOK, "Python runtime venv created")
+	}
+	upgrade := UpgradePythonRuntime(globalDir, opts.ForcePython, &UpgradeRuntimeOptions{
+		HTTPClient: opts.HTTPClient,
+		Runner:     opts.Runner,
+		LookPath:   opts.LookPath,
+		Stat:       opts.Stat,
+	})
+	for _, line := range upgrade.Lines {
+		r.add(line.Severity, "%s", line.Text)
+	}
+	if !upgrade.Healthy {
+		r.Healthy = false
+	}
+}
+
+type latestRelease struct {
+	TagName string `json:"tag_name"`
+}
+
+func fetchLatestGitHubRelease(client *http.Client) (latestRelease, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Second}
+	}
+	resp, err := client.Get("https://api.github.com/repos/Lingtai-AI/lingtai/releases/latest")
+	if err != nil {
+		return latestRelease{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return latestRelease{}, fmt.Errorf("GitHub returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var release latestRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return latestRelease{}, err
+	}
+	if release.TagName == "" {
+		return latestRelease{}, fmt.Errorf("GitHub latest release had no tag_name")
+	}
+	return release, nil
+}
+
+func releaseNewer(currentVersion, latestTag string) bool {
+	if currentVersion == "" || currentVersion == "dev" || strings.Contains(currentVersion, "-") || latestTag == "" {
 		return false
 	}
+	latest := strings.TrimPrefix(latestTag, "v")
+	current := strings.TrimPrefix(currentVersion, "v")
+	return latest != current
+}
 
+// UpgradeRuntimeOptions injects side effects for tests.
+type UpgradeRuntimeOptions struct {
+	HTTPClient *http.Client
+	Runner     CommandRunner
+	LookPath   func(string) (string, error)
+	Stat       func(string) (os.FileInfo, error)
+}
+
+type UpgradeRuntimeResult struct {
+	Lines   []DoctorLine
+	Updated bool
+	Healthy bool
+}
+
+func (r *UpgradeRuntimeResult) add(sev DoctorSeverity, format string, args ...interface{}) {
+	r.Lines = append(r.Lines, DoctorLine{Severity: sev, Text: fmt.Sprintf(format, args...)})
+	if sev == DoctorFail {
+		r.Healthy = false
+	}
+}
+
+// UpgradePythonRuntime compares installed lingtai to PyPI and runs a forced
+// `pip install --upgrade lingtai` when force=true, even if versions already
+// match. All command failures and post-install verification failures are
+// reported in the returned lines.
+func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOptions) UpgradeRuntimeResult {
+	if opts == nil {
+		opts = &UpgradeRuntimeOptions{}
+	}
+	if opts.Runner == nil {
+		opts.Runner = execCommandRunner{}
+	}
+	if opts.LookPath == nil {
+		opts.LookPath = exec.LookPath
+	}
+	if opts.Stat == nil {
+		opts.Stat = os.Stat
+	}
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: 5 * time.Second}
+	}
+	result := UpgradeRuntimeResult{Healthy: true}
+	python := VenvPython(RuntimeVenvDir(globalDir))
+	if _, err := opts.Stat(python); err != nil {
+		result.add(DoctorWarn, "Python runtime venv not found at %s", python)
+		return result
+	}
+	installed, err := pythonLingtaiVersion(opts.Runner, python)
+	if err != nil {
+		result.add(DoctorFail, "Could not import lingtai from %s: %v", python, err)
+		return result
+	}
+	result.add(DoctorInfo, "Installed Python lingtai: %s", installed)
+
+	latest, err := fetchLatestPyPIVersion(opts.HTTPClient)
+	if err != nil {
+		result.add(DoctorWarn, "Could not check latest Python lingtai on PyPI: %v", err)
+		if !force {
+			return result
+		}
+	} else {
+		result.add(DoctorInfo, "Latest Python lingtai on PyPI: %s", latest)
+		if !force && installed == latest {
+			result.add(DoctorOK, "Python lingtai runtime is up to date")
+			return result
+		}
+	}
+
+	argsName, args := runtimeUpgradeCommand(globalDir, python, opts.LookPath)
+	result.add(DoctorInfo, "Running: %s %s", argsName, strings.Join(args, " "))
+	cmdResult := opts.Runner.Run(argsName, args...)
+	appendCommandOutputToRuntime(&result, cmdResult)
+	if cmdResult.Err != nil {
+		result.add(DoctorFail, "Python lingtai upgrade command failed: %v", cmdResult.Err)
+		return result
+	}
+
+	post, err := pythonLingtaiVersion(opts.Runner, python)
+	if err != nil {
+		result.add(DoctorFail, "Python lingtai import failed after upgrade: %v", err)
+		return result
+	}
+	result.add(DoctorInfo, "Python lingtai after upgrade: %s", post)
+	if latest != "" && post != latest {
+		result.add(DoctorFail, "Python lingtai is still %s after upgrade; expected %s", post, latest)
+		return result
+	}
+	result.Updated = true
+	result.add(DoctorOK, "Python lingtai runtime verified after upgrade")
+	return result
+}
+
+func fetchLatestPyPIVersion(client *http.Client) (string, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Second}
+	}
+	resp, err := client.Get("https://pypi.org/pypi/lingtai/json")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("PyPI returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
 	var pypi struct {
 		Info struct {
 			Version string `json:"version"`
 		} `json:"info"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pypi); err != nil {
-		return false
+		return "", err
 	}
-
-	if installed == pypi.Info.Version {
-		return false
+	if pypi.Info.Version == "" {
+		return "", fmt.Errorf("PyPI response had no info.version")
 	}
+	return pypi.Info.Version, nil
+}
 
-	// Upgrade
-	var pipCmd string
+func pythonLingtaiVersion(runner CommandRunner, python string) (string, error) {
+	res := runner.Run(python, "-c", "import lingtai; print(lingtai.__version__)")
+	if res.Err != nil {
+		detail := strings.TrimSpace(res.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(res.Stdout)
+		}
+		if detail == "" {
+			detail = res.Err.Error()
+		}
+		return "", fmt.Errorf("%s", lastNonEmptyLine(detail))
+	}
+	return strings.TrimSpace(res.Stdout), nil
+}
+
+func runtimeUpgradeCommand(globalDir, python string, lookPath func(string) (string, error)) (string, []string) {
+	if uv, err := lookPath("uv"); err == nil && uv != "" {
+		return uv, []string{"pip", "install", "--upgrade", "lingtai", "-p", RuntimeVenvDir(globalDir)}
+	}
+	pipCmd := filepath.Join(filepath.Dir(python), "pip")
 	if runtime.GOOS == "windows" {
 		pipCmd = filepath.Join(filepath.Dir(python), "pip.exe")
-	} else {
-		pipCmd = filepath.Join(filepath.Dir(python), "pip")
 	}
-	fmt.Printf("Upgrading lingtai %s → %s...\n", installed, pypi.Info.Version)
-	uvCmd := findUV()
-	var cmd *exec.Cmd
-	if uvCmd != "" {
-		cmd = exec.Command(uvCmd, "pip", "install", "--upgrade", "lingtai",
-			"-p", RuntimeVenvDir(globalDir))
-	} else {
-		cmd = exec.Command(pipCmd, "install", "--upgrade", "lingtai")
+	return pipCmd, []string{"install", "--upgrade", "lingtai"}
+}
+
+func appendCommandOutput(r *DoctorReport, res CommandResult) {
+	for _, line := range interestingCommandLines(res.Stdout, res.Stderr) {
+		r.add(DoctorInfo, "  %s", line)
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run()
-	return true
+}
+
+func appendCommandOutputToRuntime(r *UpgradeRuntimeResult, res CommandResult) {
+	for _, line := range interestingCommandLines(res.Stdout, res.Stderr) {
+		r.add(DoctorInfo, "  %s", line)
+	}
+}
+
+// interestingCommandLines flattens captured command stdout and stderr into a
+// slice of non-empty trimmed lines. Output is never truncated: doctor users
+// rely on seeing the full pip/brew failure to know what actually went wrong,
+// and silently dropping the middle of a stack trace turns a 30-second debug
+// into a re-run.
+func interestingCommandLines(outputs ...string) []string {
+	var lines []string
+	for _, out := range outputs {
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return lines
+}
+
+func lastNonEmptyLine(s string) string {
+	parts := strings.Split(s, "\n")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if trimmed := strings.TrimSpace(parts[i]); trimmed != "" {
+			return trimmed
+		}
+	}
+	return strings.TrimSpace(s)
 }

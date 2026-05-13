@@ -595,7 +595,10 @@ func (m FirstRunModel) runBootstrap(ch chan<- string) tea.Cmd {
 			ch <- key
 		}
 		// Venv (slow — creates venv + pip install). Quiet mode: no stdout/stderr leak.
-		if err := config.EnsureVenvQuiet(m.globalDir, progress); err != nil {
+		// EnsureRuntimeQuiet also runs the non-blocking upgrade check after setup
+		// so first-run users do not keep a stale cached lingtai wheel until their
+		// second launch.
+		if _, err := config.EnsureRuntimeQuiet(m.globalDir, progress); err != nil {
 			close(ch)
 			return bootstrapErrMsg{err: err.Error()}
 		}
