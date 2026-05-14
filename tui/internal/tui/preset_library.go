@@ -103,6 +103,12 @@ type PresetLibraryModel struct {
 	cursor  int
 	lang    string // "en", "zh", or "wen" — drives tier label rendering
 	globalDir string // ~/.lingtai-tui — plumbed through to PresetEditorModel
+	// activeRef is the home-shortened path of the currently-active
+	// preset for the agent this view is scoped to (manifest.preset.
+	// active). Empty when in global-library mode. Used to render the
+	// "●" marker that distinguishes the current preset from the rest of
+	// the agent's allow-list. Compared against preset.RefFor(p).
+	activeRef string
 
 	focus    presetLibraryFocus
 	tierIdx  int    // selection within the tag picker (0..len(tierValues), last = "untag")
@@ -129,33 +135,46 @@ func NewPresetLibraryModel(lang string, globalDir string) PresetLibraryModel {
 
 // NewPresetLibraryModelForAgent constructs the screen scoped to a
 // specific agent's manifest.preset.allowed list. Only presets whose
-// canonical path (preset.RefFor) appears in `allowed` are shown. Pass
-// nil/empty `allowed` to fall back to the full global library (same
-// behavior as NewPresetLibraryModel).
+// canonical path (preset.RefFor) appears in `allowed` are shown.
 //
-// This is the constructor used by `/presets` when an agent is active;
-// `/presets all` (the documented escape hatch) routes to
-// NewPresetLibraryModel directly to see the full global registry.
-func NewPresetLibraryModelForAgent(lang, globalDir string, allowed []string) PresetLibraryModel {
+// `active` is the agent's manifest.preset.active path (the preset
+// currently in force); it's used to render an "●" marker next to that
+// row so the user can tell at a glance which preset is live vs. which
+// are merely available. Pass "" if no active is known.
+//
+// Pass nil/empty `allowed` to fall back to the full global library
+// (same behavior as NewPresetLibraryModel) — used as a defensive
+// fallback when no orchestrator is current.
+func NewPresetLibraryModelForAgent(lang, globalDir string, allowed []string, active string) PresetLibraryModel {
 	all, _ := preset.List()
 	if len(allowed) == 0 {
-		return PresetLibraryModel{presets: all, lang: lang, globalDir: globalDir}
+		return PresetLibraryModel{
+			presets:   all,
+			lang:      lang,
+			globalDir: globalDir,
+			activeRef: active,
+		}
 	}
 	allowSet := make(map[string]struct{}, len(allowed))
 	for _, ref := range allowed {
 		allowSet[ref] = struct{}{}
 	}
 	filtered := make([]preset.Preset, 0, len(allowed))
+	cursor := 0
 	for _, p := range all {
 		if _, ok := allowSet[preset.RefFor(p)]; ok {
+			if preset.RefFor(p) == active {
+				cursor = len(filtered) // land on the active preset
+			}
 			filtered = append(filtered, p)
 		}
 	}
 	return PresetLibraryModel{
 		presets:   filtered,
-		cursor:    0,
+		cursor:    cursor,
 		lang:      lang,
 		globalDir: globalDir,
+		activeRef: active,
 	}
 }
 
@@ -430,6 +449,13 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 		end = len(m.presets)
 	}
 
+	// Style for the "●" marker on the active preset row. Uses the warm
+	// LingTai accent so it reads as "this one is currently live" without
+	// fighting the cursor highlight.
+	activeMarkerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")). // warm amber, matches theme
+		Bold(true)
+
 	for i := start; i < end; i++ {
 		p := m.presets[i]
 		marker := "  "
@@ -438,7 +464,13 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 			marker = "▸ "
 			nameStyle = cursorStyle
 		}
-		// Render: "▸ name              [★★★]" (or 顶级 etc. in zh/wen)
+		// Active-preset marker is independent of the cursor — both can
+		// coexist (▸ ● name when the cursor is on the live preset).
+		activeMarker := "  "
+		if m.activeRef != "" && preset.RefFor(p) == m.activeRef {
+			activeMarker = activeMarkerStyle.Render("● ")
+		}
+		// Render: "▸ ● name              [★★★]" (or 顶级 etc. in zh/wen)
 		tier := presetTier(p)
 		chip := ""
 		if label := tierLabel(tier, m.lang); label != "" {
@@ -446,13 +478,14 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 		}
 		nameField := nameStyle.Render(p.Name)
 		// Crude right-alignment of the chip via padding.
-		// Available room for (marker + name + chip) = width.
-		used := lipgloss.Width(marker) + lipgloss.Width(nameField) + lipgloss.Width(chip)
+		// Available room for (marker + activeMarker + name + chip) = width.
+		used := lipgloss.Width(marker) + lipgloss.Width(activeMarker) +
+			lipgloss.Width(nameField) + lipgloss.Width(chip)
 		pad := width - used
 		if pad < 1 {
 			pad = 1
 		}
-		row := marker + nameField + strings.Repeat(" ", pad) + chip
+		row := marker + activeMarker + nameField + strings.Repeat(" ", pad) + chip
 		rows = append(rows, rowStyle.Render(row))
 	}
 

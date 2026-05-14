@@ -747,18 +747,21 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.mailbox.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		// Default: agent-scoped (only the presets in this agent's
-		// manifest.preset.allowed list). `/presets all` bypasses the
-		// filter and shows the full global registry — useful for
-		// inspecting / tagging presets that haven't been added to the
-		// current agent's allow-list yet.
-		if args == "all" || targetDir == "" {
-			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
-		} else {
+		// Agent-scoped: shows only the presets in this agent's
+		// manifest.preset.allowed list — these are exactly the ones
+		// `/refresh <name>` can switch to. The currently-active preset
+		// is highlighted in the view. Falls back to the full global
+		// registry only when no orchestrator agent is current (e.g.
+		// before /setup completes), since there's no allow-list to
+		// scope by yet.
+		if targetDir != "" {
 			allowed := readAllowedPresets(targetDir)
+			active := readActivePreset(targetDir)
 			a.presetLibrary = NewPresetLibraryModelForAgent(
-				a.tuiConfig.Language, a.globalDir, allowed,
+				a.tuiConfig.Language, a.globalDir, allowed, active,
 			)
+		} else {
+			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
 		}
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "agora":
@@ -981,6 +984,32 @@ func readAllowedPresets(dir string) []string {
 	return out
 }
 
+// readActivePreset returns manifest.preset.active from the agent's
+// init.json — the preset currently in force. Returns "" on any failure
+// or when the field is missing. Used by /presets to highlight the
+// active entry in the agent-scoped view.
+func readActivePreset(dir string) string {
+	initPath := filepath.Join(dir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	active, _ := pre["active"].(string)
+	return active
+}
+
 // resolvePresetInAllowed matches a user-provided query (`/refresh <query>`)
 // against the agent's manifest.preset.allowed list. The query may be:
 //   - a bare preset name / basename stem ("mimo", "glm-5.1-pro")
@@ -1201,15 +1230,15 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		// Agent-scoped when an orchestrator is current; falls back to
-		// the global registry otherwise. `/presets all` (slash-command
-		// path) bypasses the filter; this keybinding-driven path
-		// always uses the agent-scoped default — that's the "show me
-		// presets I can /refresh to" view.
+		// Agent-scoped: same view as `/presets`. Shows only the
+		// presets in this agent's manifest.preset.allowed list, with
+		// the currently-active one highlighted. Falls back to the
+		// global registry when no orchestrator is current.
 		if a.orchDir != "" {
 			allowed := readAllowedPresets(a.orchDir)
+			active := readActivePreset(a.orchDir)
 			a.presetLibrary = NewPresetLibraryModelForAgent(
-				a.tuiConfig.Language, a.globalDir, allowed,
+				a.tuiConfig.Language, a.globalDir, allowed, active,
 			)
 		} else {
 			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)

@@ -301,6 +301,41 @@ func TestSetActivePreset_RewritesActive(t *testing.T) {
 	}
 }
 
+// TestReadActivePreset_HappyPath verifies the helper extracts the
+// active preset path from a well-formed init.json.
+func TestReadActivePreset_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	want := "~/.lingtai-tui/presets/saved/zhipu-1.json"
+	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"preset": map[string]interface{}{
+				"active":  want,
+				"default": "~/.lingtai-tui/presets/templates/minimax.json",
+				"allowed": []interface{}{want},
+			},
+		},
+	})
+
+	if got := readActivePreset(dir); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestReadActivePreset_Missing returns "" for missing files / blocks
+// rather than panicking.
+func TestReadActivePreset_Missing(t *testing.T) {
+	dir := t.TempDir()
+	if got := readActivePreset(dir); got != "" {
+		t.Errorf("missing init.json → got %q, want \"\"", got)
+	}
+	writeJSON(t, filepath.Join(dir, "init.json"), map[string]interface{}{
+		"manifest": map[string]interface{}{"agent_name": "test"},
+	})
+	if got := readActivePreset(dir); got != "" {
+		t.Errorf("missing preset block → got %q, want \"\"", got)
+	}
+}
+
 func writeJSON(t *testing.T, path string, v interface{}) {
 	t.Helper()
 	data, err := json.MarshalIndent(v, "", "  ")
