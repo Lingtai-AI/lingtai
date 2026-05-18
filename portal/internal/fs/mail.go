@@ -160,6 +160,18 @@ func readManifestAsIdentity(dir string) map[string]interface{} {
 	return manifest
 }
 
+func writeJSONAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // mailboxIDCollisionRetries is the per-folder attempt budget for
 // `prepareMailDirs`. The short ID has 16 bits of entropy in the
 // suffix, so a same-second send has a 1/65536 chance of colliding;
@@ -255,7 +267,7 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(primaryDir, "message.json"), data, 0o644); err != nil {
+	if err := writeJSONAtomic(filepath.Join(primaryDir, "message.json"), data); err != nil {
 		return fmt.Errorf("write primary message: %w", err)
 	}
 
@@ -265,7 +277,7 @@ func WriteMail(recipientDir, senderDir, fromAddr, toAddr, subject, body string) 
 		return nil
 	}
 
-	if err := os.WriteFile(filepath.Join(sentDir, "message.json"), data, 0o644); err != nil {
+	if err := writeJSONAtomic(filepath.Join(sentDir, "message.json"), data); err != nil {
 		return fmt.Errorf("write sent message: %w", err)
 	}
 

@@ -80,6 +80,9 @@ func TestWriteMail_ProducesShortMailboxID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read message.json: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(recipientDir, "mailbox", "inbox", name, "message.json.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temporary primary message file leaked: %v", err)
+	}
 	var msg MailMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -98,6 +101,9 @@ func TestWriteMail_ProducesShortMailboxID(t *testing.T) {
 	}
 	if len(sentEntries) != 1 || sentEntries[0].Name() != name {
 		t.Errorf("sent entries = %v, want [%q]", dirNames(sentEntries), name)
+	}
+	if _, err := os.Stat(filepath.Join(senderDir, "mailbox", "sent", name, "message.json.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temporary sent message file leaked: %v", err)
 	}
 }
 
