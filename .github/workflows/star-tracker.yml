@@ -1,0 +1,44 @@
+name: Star tracker
+
+on:
+  schedule:
+    # 00:10 UTC daily — just after the day rolls over
+    - cron: '10 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install matplotlib
+        run: pip install matplotlib
+
+      - name: Record today's star count
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/star_tracker.py
+
+      - name: Render trend
+        run: python docs/stars/render_trend.py | tee docs/stars/README.md
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -z "$(git status --porcelain docs/stars scripts)" ]]; then
+            echo "no changes"
+            exit 0
+          fi
+          git add docs/stars
+          git commit -m "chore(stars): update daily star count"
+          git push

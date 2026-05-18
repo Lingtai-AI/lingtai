@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Always work in a worktree, never directly in the main checkout
+
+For any non-trivial change (anything beyond a single-line typo fix), create a git worktree first and do the work there. Both this TUI repo and its sibling kernel repo see concurrent branches and stashed WIPs; editing the main checkout has repeatedly led to branch switches reverting in-flight edits, mixed-author dirty trees getting committed together, and lost work from parallel-session resets.
+
+Convention: `.worktrees/<slug>/` on a fresh branch off `origin/main`.
+
+```bash
+cd ~/Documents/GitHub/lingtai
+git fetch origin main
+git worktree add -b <branch-slug> .worktrees/<slug> origin/main
+cd .worktrees/<slug>
+# ... edit, build, commit, push ...
+```
+
+Cleanup when done:
+
+```bash
+git worktree remove .worktrees/<slug>
+git branch -d <branch-slug>
+```
+
+**Hard rule:** if a change touches more than ~10 lines or spans more than one file, move it to a worktree before editing. Single-line fixes and doc tweaks can stay in the main checkout. The 30 seconds to spin up a worktree are recouped the first time a parallel session resets the branch out from under you.
+
 ## What is 灵台
 
 灵台 (Língtái) is a generic agent framework — an "agent operating system" providing the minimal kernel for AI agents: thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Domain tools, coordination, and orchestration are plugged in from outside via MCP-compatible interfaces.

@@ -431,6 +431,10 @@ Questions, bug reports, and feature requests are welcome via [GitHub Issues](htt
 
 <img src="docs/assets/wechat.png" alt="WeChat QR — 扫码加入 lingtai 测试群" width="200">
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Lingtai-AI/lingtai&type=Date)](https://www.star-history.com/#Lingtai-AI/lingtai&Date)
+
 ## License
 
 MIT — [Zesen Huang](https://github.com/huangzesen), 2025–2026

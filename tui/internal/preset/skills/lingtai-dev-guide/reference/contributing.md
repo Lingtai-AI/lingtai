@@ -9,6 +9,61 @@ This guide covers how to make changes to each component of the LingTai project.
 3. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations render as the raw key on screen — they don't fall back.
 4. **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv.
 
+## Orchestrator + daemons (how the work happens)
+
+This is the operating discipline for *any* non-trivial LingTai contribution — TUI, portal, kernel, addons, or skills. Read this before you start writing code.
+
+### 1. Clarify and restate the contract
+
+Before dispatching work, restate the task in your own words: what changes, what does not, what "done" looks like, and what is explicitly out of scope. If the request is ambiguous, ask before dispatching. A daemon that runs against a fuzzy brief will deliver a fuzzy diff — and you will pay for it in review time.
+
+### 2. Issue → worktree/branch → PR → merge
+
+Non-trivial work flows through this loop. No exceptions for "small" fixes that turn out to be non-small:
+
+1. **Issue.** Open or pick a GitHub issue that names the problem. If one does not exist, write one — it is the durable record of the contract.
+2. **Worktree + branch.** Create an isolated `git worktree` off `origin/main` on a topic branch (`fix/...`, `feat/...`, `docs/...`, `chore/...`). Never edit the main checkout, and never share a worktree across two parallel daemons.
+3. **PR.** Push the branch and open a PR against `Lingtai-AI/<repo>`. The PR body cites the issue, summarizes the change, and lists validation steps.
+4. **Merge.** After review, merge via the GitHub UI (or `gh pr merge`). Delete the branch and clean up the worktree.
+
+### 3. Decompose into daemon-sized tasks
+
+Orchestrators *plan, dispatch, and review*; they do not hand-code. The right tools for code reading, modification, testing, refactoring, PR preparation, batch scanning, and mechanical validation are the daemon backends:
+
+- **Claude Code daemons** — best for exploratory code reading, multi-file edits, skill/doc work, and PR composition.
+- **Codex daemons** — best for tightly-scoped diffs, deterministic refactors, and mechanical validation passes.
+
+Each dispatched daemon must receive:
+
+- **A scoped brief.** What to change, what to leave alone, what "done" looks like, where the source-of-truth files live (absolute paths).
+- **Its own worktree and branch.** Daemons do not share a working tree. Parallelism is safe only when worktrees are disjoint.
+- **Tests or validation steps.** Whatever check confirms the change works — `go test ./...`, `python -m pytest`, frontmatter parse, `git diff --check`, a grep for the new headings. If no test is applicable, say so explicitly.
+- **A do-not-touch list.** Files, directories, or branches the daemon must not modify (e.g., unrelated untracked files in the main checkout, sibling worktrees, the main branch).
+
+Use as much **safe parallelism** as the decomposition allows. Independent daemons run concurrently; dependent steps run sequentially. The orchestrator's leverage comes from running many disjoint daemons in parallel, not from doing more of the work itself.
+
+### 4. Orchestrator reviews diffs and tests; does not hand-code
+
+When a daemon reports back, the orchestrator's job is to:
+
+1. Read the diff (not the daemon's summary — diffs are the ground truth).
+2. Run or inspect the validation output.
+3. Check imports, cross-file consistency, and adherence to the brief.
+4. Either merge/forward, or send the daemon back with a tightened brief.
+
+The orchestrator hand-codes only in narrow cases: emergency hotfixes when daemon dispatch overhead is unjustified, throwaway scratch work, or steering the daemon out of a stuck state. Default to dispatch.
+
+### 5. Routine portfolio sweep before broad planning
+
+Before planning any broad LingTai dev work, run — or dispatch — an org-wide **portfolio sweep**:
+
+- Use the `lingtai-repo-watch` skill, or a read-only `gh` org sweep across `Lingtai-AI/*`, to enumerate open issues and PRs.
+- Summarize: stale items, unreviewed PRs, items relevant to the planned work, and items that conflict with what you are about to do.
+- Let the current PR/issue surface guide which pieces to pick up, defer, or coordinate around.
+- Keep the sweep **read-only**. It informs planning; it does not file new issues or comment on PRs as a side effect.
+
+Skipping the sweep is how you end up duplicating in-flight work, stomping on someone else's branch, or shipping a fix that conflicts with a pending refactor.
+
 ## Changing the TUI (`tui/`)
 
 ### Where to look

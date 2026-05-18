@@ -21,6 +21,11 @@ type CodexModel struct {
 
 	inner MarkdownViewerModel
 
+	// Drill-in viewer — non-nil when the user pressed Enter on a knowledge
+	// entry and is browsing files inside that knowledge folder. Esc pops
+	// back to the catalog (clears this pointer).
+	drillIn *MarkdownViewerModel
+
 	pickerOpen bool
 	pickerIdx  int
 	agentNodes []fs.AgentNode
@@ -107,6 +112,15 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 		m.syncPicker()
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(msg)
+		if m.drillIn != nil {
+			inner := *m.drillIn
+			var dcmd tea.Cmd
+			inner, dcmd = inner.Update(msg)
+			m.drillIn = &inner
+			if dcmd != nil {
+				cmd = tea.Batch(cmd, dcmd)
+			}
+		}
 		return m, cmd
 
 	case codexLoadMsg:
@@ -123,9 +137,52 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case MarkdownViewerSelectMsg:
+		// Drill in to the knowledge entry's folder.
+		if m.drillIn != nil {
+			// Already drilled in — files are leaves, Enter is a no-op.
+			return m, nil
+		}
+		if msg.Entry.Path == "" {
+			return m, nil
+		}
+		knowledgeDir := filepath.Dir(msg.Entry.Path)
+		files := buildKnowledgeFolderEntries(knowledgeDir)
+		if len(files) == 0 {
+			return m, nil
+		}
+		title := i18n.T("palette.knowledge") + " \u2014 " + msg.Entry.Label
+		sub := NewMarkdownViewer(files, title)
+		m.drillIn = &sub
+		if m.width > 0 && m.height > 0 {
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.drillIn = &inner
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if m.pickerOpen {
 			return m.updatePicker(msg)
+		}
+		// Drill-in active: keys go to the drill-in viewer instead of
+		// the catalog. Esc/q pops back to the catalog; Ctrl+T is
+		// ignored so the user must Esc first to swap agents.
+		if m.drillIn != nil {
+			switch msg.String() {
+			case "esc", "q":
+				m.drillIn = nil
+				return m, nil
+			case "ctrl+t":
+				return m, nil
+			}
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(msg)
+			m.drillIn = &inner
+			return m, cmd
 		}
 		switch msg.String() {
 		case "ctrl+t":
@@ -153,11 +210,26 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 			m.pickerVP, cmd = m.pickerVP.Update(msg)
 			return m, cmd
 		}
+		if m.drillIn != nil {
+			inner := *m.drillIn
+			var cmd tea.Cmd
+			inner, cmd = inner.Update(msg)
+			m.drillIn = &inner
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(msg)
 		return m, cmd
 	}
 
+	// Default: forward to whichever viewer is currently visible.
+	if m.drillIn != nil {
+		inner := *m.drillIn
+		var cmd tea.Cmd
+		inner, cmd = inner.Update(msg)
+		m.drillIn = &inner
+		return m, cmd
+	}
 	var cmd tea.Cmd
 	m.inner, cmd = m.inner.Update(msg)
 	return m, cmd
@@ -278,6 +350,9 @@ func (m CodexModel) View() string {
 			body = m.pickerVP.View()
 		}
 		return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
+	}
+	if m.drillIn != nil {
+		return m.drillIn.View()
 	}
 	return m.inner.View()
 }

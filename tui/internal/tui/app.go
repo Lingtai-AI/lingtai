@@ -652,6 +652,24 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				}
 				return refreshAllDoneMsg{count: count, failures: failures}
 			}
+		} else if args != "" && targetDir != "" && a.lingtaiCmd != "" {
+			// `/refresh <preset>` — switch to a named preset and
+			// relaunch. Resolve the name against the agent's
+			// manifest.preset.allowed list before doing any
+			// destructive work; surface a clear error message in
+			// the status bar if it doesn't match.
+			resolved, err := resolvePresetInAllowed(targetDir, args)
+			if err != nil {
+				addMsg(firstLine(err))
+				return a, nil
+			}
+			addMsg(fmt.Sprintf(i18n.T("mail.refreshing_to_preset"),
+				strings.TrimSuffix(filepath.Base(resolved), ".json")))
+			lingtaiCmd := a.lingtaiCmd
+			dir := targetDir
+			return a, func() tea.Msg {
+				return refreshDoneMsg{err: hardRefreshDirWithPreset(lingtaiCmd, dir, resolved)}
+			}
 		} else if targetDir != "" && a.lingtaiCmd != "" {
 			addMsg(i18n.T("mail.refreshing"))
 			lingtaiCmd := a.lingtaiCmd
@@ -729,7 +747,22 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.mailbox.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
+		// Agent-scoped: shows only the presets in this agent's
+		// manifest.preset.allowed list — these are exactly the ones
+		// `/refresh <name>` can switch to. The currently-active preset
+		// is highlighted in the view. Falls back to the full global
+		// registry only when no orchestrator agent is current (e.g.
+		// before /setup completes), since there's no allow-list to
+		// scope by yet.
+		if targetDir != "" {
+			allowed := readAllowedPresets(targetDir)
+			active := readActivePreset(targetDir)
+			a.presetLibrary = NewPresetLibraryModelForAgent(
+				a.tuiConfig.Language, a.globalDir, allowed, active,
+			)
+		} else {
+			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
+		}
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "agora":
 		a.currentView = appViewAgora
@@ -914,6 +947,181 @@ func resetActivePresetToDefault(dir string) {
 	os.WriteFile(initPath, out, 0o644)
 }
 
+// readAllowedPresets returns the contents of manifest.preset.allowed from
+// the agent's init.json — the per-agent allow-list that the kernel
+// enforces on runtime preset swaps. Returns nil on any failure (missing
+// file, malformed JSON, missing/empty block); callers should treat nil
+// as "no allow-list available" and fall back to the global preset
+// library rather than fail.
+func readAllowedPresets(dir string) []string {
+	initPath := filepath.Join(dir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	allowed, ok := pre["allowed"].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(allowed))
+	for _, v := range allowed {
+		if s, ok := v.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// readActivePreset returns manifest.preset.active from the agent's
+// init.json — the preset currently in force. Returns "" on any failure
+// or when the field is missing. Used by /presets to highlight the
+// active entry in the agent-scoped view.
+func readActivePreset(dir string) string {
+	initPath := filepath.Join(dir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	active, _ := pre["active"].(string)
+	return active
+}
+
+// resolvePresetInAllowed matches a user-provided query (`/refresh <query>`)
+// against the agent's manifest.preset.allowed list. The query may be:
+//   - a bare preset name / basename stem ("mimo", "glm-5.1-pro")
+//   - a full home-shortened ref ("~/.lingtai-tui/presets/templates/mimo.json")
+//   - any path string that exactly matches an entry in allowed (less
+//     common, but supports recipe-style paths).
+//
+// Returns the canonical allowed[] entry on a unique match. Returns an
+// error string if no match, multiple matches, or the agent has no
+// allowed list. The returned path is what should be written to
+// manifest.preset.active; the kernel's _refresh allowed-gate will
+// validate it again with `_preset_ref_in` so home-shortened and
+// absolute forms compare equal.
+func resolvePresetInAllowed(dir, query string) (string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("preset name is empty")
+	}
+	allowed := readAllowedPresets(dir)
+	if len(allowed) == 0 {
+		return "", fmt.Errorf("agent has no manifest.preset.allowed list — cannot switch")
+	}
+	// Exact-path match first.
+	for _, ref := range allowed {
+		if ref == query {
+			return ref, nil
+		}
+	}
+	// Basename-stem match (drop directory prefix and .json suffix).
+	var matches []string
+	for _, ref := range allowed {
+		stem := strings.TrimSuffix(filepath.Base(ref), ".json")
+		if stem == query {
+			matches = append(matches, ref)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		// Two presets in the allow-list with the same basename (e.g.
+		// a template "mimo.json" and a saved "mimo.json"). Disambiguate.
+		return "", fmt.Errorf("preset %q is ambiguous (matches %d entries) — pass the full path",
+			query, len(matches))
+	}
+	// No match. Build a helpful error listing what's actually allowed
+	// (basenames only — full paths are noisy in the status bar).
+	stems := make([]string, 0, len(allowed))
+	for _, ref := range allowed {
+		stems = append(stems, strings.TrimSuffix(filepath.Base(ref), ".json"))
+	}
+	return "", fmt.Errorf("preset %q is not in this agent's allowed list (available: %s)",
+		query, strings.Join(stems, ", "))
+}
+
+// setActivePreset rewrites manifest.preset.active to the given path.
+// Caller is responsible for ensuring the path is in manifest.preset.allowed
+// (use resolvePresetInAllowed) — this function is the dumb writer.
+// Returns the error from json or filesystem failures; the kernel will
+// reject a non-allowed path on relaunch with its own validation error.
+func setActivePreset(dir, presetPath string) error {
+	initPath := filepath.Join(dir, "init.json")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return err
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("init.json missing 'manifest' object")
+	}
+	pre, ok := manifest["preset"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("init.json missing 'manifest.preset' object")
+	}
+	pre["active"] = presetPath
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(initPath, out, 0o644)
+}
+
+// hardRefreshDirWithPreset is the `/refresh <preset>` cousin of
+// hardRefreshDir. Sequence is identical (suspend → lock-clear → kill →
+// signal sweep → relaunch) except that step 5 writes
+// manifest.preset.active = presetPath instead of resetting to default.
+// The caller is expected to have already validated presetPath via
+// resolvePresetInAllowed.
+func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
+	suspendFile := filepath.Join(dir, ".suspend")
+	os.WriteFile(suspendFile, []byte(""), 0o644)
+	waitForLockClear(dir)
+	if process.IsAgentRunning(dir) {
+		_ = process.TerminateAgentProcesses(dir)
+	}
+	os.Remove(filepath.Join(dir, ".agent.lock"))
+	os.Remove(filepath.Join(dir, ".refresh"))
+	os.Remove(filepath.Join(dir, ".refresh.taken"))
+	os.Remove(suspendFile)
+	if err := setActivePreset(dir, presetPath); err != nil {
+		// Don't refuse the relaunch — the user asked to refresh.
+		// Falling back to whatever active currently is.
+	}
+	_, err := process.ForceLaunchAgent(lingtaiCmd, dir)
+	os.Remove(suspendFile)
+	return err
+}
+
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
 // is gone), then relaunches the agent. Used by /cpr (dead agent, no prior
 // suspend) and as the tail of hardRefreshDir (after writing .suspend).
@@ -1022,7 +1230,19 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "presets":
 		a.currentView = appViewPresets
-		a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
+		// Agent-scoped: same view as `/presets`. Shows only the
+		// presets in this agent's manifest.preset.allowed list, with
+		// the currently-active one highlighted. Falls back to the
+		// global registry when no orchestrator is current.
+		if a.orchDir != "" {
+			allowed := readAllowedPresets(a.orchDir)
+			active := readActivePreset(a.orchDir)
+			a.presetLibrary = NewPresetLibraryModelForAgent(
+				a.tuiConfig.Language, a.globalDir, allowed, active,
+			)
+		} else {
+			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
+		}
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "projects":
 		a.currentView = appViewProjects
