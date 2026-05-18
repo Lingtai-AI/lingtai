@@ -56,80 +56,47 @@
     // -------------------------------------------------------
     // Capabilities — the agent's tool surface
     // -------------------------------------------------------
-    // Each key is a capability name. Value is {} for defaults
-    // or a dict of kwargs passed to the capability's setup().
+    // The kernel boots the `lingtai.core.*` floor by default on every
+    // agent: knowledge, skills, bash, avatar, daemon, mcp, read, write,
+    // edit, glob, grep — plus the always-on intrinsics psyche and email.
+    // You do NOT need to list those here unless you want to OVERRIDE
+    // their default kwargs (e.g. give `bash` a deny-list policy file
+    // instead of the default yolo mode).
     //
-    // "file" is a group shorthand that expands to:
-    //   read, write, edit, glob, grep
+    // Top-level "disable" (sibling of "capabilities") opts a capability
+    // out entirely: e.g. "disable": ["avatar"].
+    //
+    // Entries below are either:
+    //   1. Overrides for default-on capabilities (bash, skills here).
+    //   2. Opt-in capabilities not in the default set (vision, web_search).
     // -------------------------------------------------------
     "capabilities": {
-      // --- File I/O (read, write, edit, glob, grep) ---
-      // Lets the agent read/write/edit files and search by pattern.
-      "file": {},
-
-      // --- Shell access ---
-      // policy_file: path to JSON deny-list (see bash_policy.json).
-      // Alternative: { "yolo": true } to allow ALL commands (dangerous!).
+      // --- Shell access (override) ---
+      // Kernel default is { "yolo": true } (no deny-list). The TUI ships
+      // a deny-list at bash_policy.json so agents started via lingtai-tui
+      // get the sandboxed surface by default.
       "bash": { "policy_file": "bash_policy.json" },
 
-      // --- Identity & pad (upgrades eigen intrinsic) ---
-      // Evolving character, knowledge codex integration,
-      // pad.edit with file imports. Includes molt (context compaction).
-      "psyche": {},
-
-      // --- Durable knowledge library ---
-      // Persistent knowledge store. Works with psyche for
-      // importing library entries into working pad.
-      "library": { "library_limit": 50 },
-
-      // --- Email (upgrades mail intrinsic) ---
-      // Filesystem-based mailbox with reply, CC/BCC, contacts,
-      // archive, delayed send, scheduled recurring sends.
-      // Used for inter-agent communication.
-      "email": {},
-
-      // --- Avatar (分身) ---
-      // Spawn independent child agents as separate processes.
-      // Each avatar gets its own working directory and LLM session.
-      // Survives parent death.
-      "avatar": {},
-
-      // --- Daemon (神識) ---
-      // Ephemeral sub-agent sessions running in parallel threads.
-      // Override kernel defaults by passing keys, e.g.
-      //   {"max_emanations": N, "max_turns": N, "timeout": N}.
-      "daemon": {},
-
-      // --- Vision (image understanding) ---
-      // Providers: "minimax", "anthropic", "openai", "gemini", "local" (no API key).
-      "vision": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
-
-      // --- Web search ---
-      // Providers: "minimax", "anthropic", "openai", "gemini", "duckduckgo" (no API key).
-      "web_search": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
-
-      // --- Web page reader ---
-      // Removed. URL fetching is folded into the `web-browsing` skill —
-      // its scripts/extract_page.py wraps trafilatura plus six other
-      // tiers (PDF, BeautifulSoup, Playwright, Jina, etc.). Removed: "web_read".
-
-      // --- Media creation (compose / video / draw / talk) ---
-      // Removed from in-tree capabilities. Use the `media-creation` skill
-      // and register a provider's MCP server (see `mcp-manual` skill).
-      // Removed: "compose", "video", "draw", "talk".
-
-      // --- Audio analysis (transcribe / appreciate) ---
-      // Removed. Use the `listen` skill — bundled scripts run faster-whisper
-      // and librosa locally; no provider or API key needed.
-      // Removed: "listen".
-
-      // --- Skills (skill catalog) ---
-      // Per-agent .library/{intrinsic,custom}/ is managed automatically.
-      // "paths" adds extra directories to the prompt catalog. Defaults:
+      // --- Skills catalog (override) ---
+      // `skills` is default-on; this entry adds extra search paths to the
+      // prompt catalog. Defaults overlaid:
       //   ../.library_shared       — network-shared skill shelf
       //   ~/.lingtai-tui/utilities — TUI-shipped utility skills
       // Edit and call system.refresh to apply. init.json is ground truth.
-      "skills": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] }
+      "skills": { "paths": ["../.library_shared", "~/.lingtai-tui/utilities"] },
+
+      // --- Vision (opt-in) ---
+      // Providers: "minimax", "anthropic", "openai", "gemini", "local" (no API key).
+      "vision": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" },
+
+      // --- Web search (opt-in) ---
+      // Providers: "minimax", "anthropic", "openai", "gemini", "duckduckgo" (no API key).
+      "web_search": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" }
+
+      // --- Removed capabilities (for reference) ---
+      // "web_read"        — folded into the `web-browsing` skill.
+      // "compose"/"video"/"draw"/"talk" — use the `media-creation` skill + an MCP server.
+      // "listen"          — use the `listen` skill (faster-whisper + librosa).
     },
 
     // -------------------------------------------------------

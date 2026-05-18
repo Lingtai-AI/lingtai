@@ -687,18 +687,14 @@ func CountSavedByProvider(presets []Preset, provider string) int {
 
 func e() map[string]interface{} { return map[string]interface{}{} }
 
-// libraryKnowledgeDefault returns the default durable library capability config.
-func libraryKnowledgeDefault() map[string]interface{} {
-	return map[string]interface{}{
-		"library_limit": 50,
-	}
-}
-
 // skillsDefault returns the default skills capability config — two Tier 1
 // paths: the network-shared skills shelf (resolved relative to the agent dir)
 // and the TUI's per-user utilities directory. Users can edit init.json to
 // add or remove paths; init.json is the ground truth and the capability
 // reads it on every setup.
+//
+// `skills` itself is default-on in the kernel; this entry exists only to
+// override the default kwargs (which carry no extra paths).
 func skillsDefault() map[string]interface{} {
 	return map[string]interface{}{
 		"paths": []interface{}{
@@ -707,6 +703,7 @@ func skillsDefault() map[string]interface{} {
 		},
 	}
 }
+
 
 func minimaxPreset() Preset {
 	mm := map[string]interface{}{"provider": "minimax"}
@@ -719,11 +716,14 @@ func minimaxPreset() Preset {
 				"api_key": nil, "api_key_env": "MINIMAX_API_KEY",
 				"base_url": ProviderRegionURLs["minimax"][0].URL,
 			},
+			// Core caps (knowledge, skills, bash, avatar, daemon, mcp,
+			// read/write/edit/glob/grep + psyche/email intrinsics) are
+			// default-on in the kernel — only overrides and opt-in caps
+			// belong here. See lingtai-kernel capabilities.CORE_DEFAULTS.
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": mm, "library": libraryKnowledgeDefault(),
-				"vision": mm, "avatar": e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"web_search": mm,
+				"vision":     mm,
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -741,11 +741,9 @@ func zhipuPreset() Preset {
 				"base_url": ProviderRegionURLs["zhipu"][0].URL, "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": zp, "library": libraryKnowledgeDefault(),
-				"vision": zp,
-				"avatar": e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"web_search": zp,
+				"vision":     zp,
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -772,12 +770,9 @@ func mimoPreset() Preset {
 				"base_url": "https://api.xiaomimimo.com/v1", "api_compat": "openai",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"library":    libraryKnowledgeDefault(),
 				"vision":     mp,
-				"avatar":     e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -798,11 +793,8 @@ func deepseekPreset() Preset {
 			// skill; for media creation, register the MiniMax-Media MCP server
 			// via the `mcp-manual` skill (kernel `mcp` capability).
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"library":    libraryKnowledgeDefault(),
-				"avatar":     e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -825,11 +817,8 @@ func geminiPreset() Preset {
 			// `listen` skill; for media creation register a provider's
 			// MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"library":    libraryKnowledgeDefault(),
-				"avatar":     e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -854,11 +843,8 @@ func kimiPreset() Preset {
 			// analysis use the `listen` skill; for media creation register
 			// the MiniMax-Media MCP server via the `mcp-manual` skill.
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"library":    libraryKnowledgeDefault(),
-				"avatar":     e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -878,11 +864,8 @@ func openrouterPreset() Preset {
 			// generation. For audio analysis use the `listen` skill; for
 			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"library":    libraryKnowledgeDefault(),
-				"avatar":     e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -905,11 +888,9 @@ func codexPreset() Preset {
 				"base_url": "https://chatgpt.com/backend-api/codex",
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": cx, "library": libraryKnowledgeDefault(),
-				"vision": cx,
-				"avatar": e(), "daemon": e(),
-				"skills": skillsDefault(),
+				"web_search": cx,
+				"vision":     cx,
+				"skills":     skillsDefault(),
 			},
 		},
 	}
@@ -925,8 +906,7 @@ func customPreset() Preset {
 				"api_key": nil, "api_key_env": "LLM_API_KEY", "base_url": nil,
 			},
 			"capabilities": map[string]interface{}{
-				"file": e(), "bash": map[string]interface{}{"yolo": true},
-				"web_search": e(), "library": libraryKnowledgeDefault(),
+				"web_search": e(),
 				// Inherit vision through the LLM's own endpoint. When the
 				// relay is OpenAI-compatible and the underlying model
 				// supports vision (gpt-4o/4.x, gpt-5.5, etc.), the kernel
@@ -934,7 +914,6 @@ func customPreset() Preset {
 				// base_url. If the relay or model can't do vision the
 				// call fails at runtime — no special handling.
 				"vision": map[string]interface{}{"provider": "inherit"},
-				"avatar": e(), "daemon": e(),
 				"skills": skillsDefault(),
 			},
 		},
