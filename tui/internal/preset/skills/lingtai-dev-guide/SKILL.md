@@ -10,7 +10,7 @@ description: >
   the pieces fit together, or develop a new MCP addon. Do NOT use for
   operational agent tasks (use lingtai-kernel-anatomy or lingtai-tui-anatomy
   instead) or for using LingTai as an end user (use the tutorial-guide skill).
-version: 1.1.0
+version: 1.2.0
 tags: [python, golang, typescript, agent, architecture, contributing, reference, mcp]
 ---
 
@@ -143,13 +143,15 @@ The 4 first-party MCP addons are:
 
 ## Contributing workflow
 
-1. **Fork → branch → PR.** All changes go through GitHub PRs.
-2. **Anatomy updates are mandatory.** If your change moves, renames, splits, merges, or deletes a file/function/class cited by an `ANATOMY.md`, update the anatomy in the **same commit**. See `lingtai-kernel-anatomy` (Python) or `lingtai-tui-anatomy` (Go) for the full convention.
-3. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`.
-4. **Filesystem-only IPC.** Any new cross-process communication must follow the file-based pattern.
-5. **Skill authoring for reusable procedures.** If your change creates a reusable workflow, write it as a skill.
+1. **Orchestrator + daemons, not hand-coding.** For any non-trivial coding, research, or change task, the orchestrator's job is to *plan, dispatch, and review* — not to hand-code. Decompose the work into daemon-sized tasks and dispatch them to Claude Code / Codex daemon backends, which are the right tools for code reading, modification, testing, refactoring, PR preparation, batch scanning, and mechanical validation. Use as much safe parallelism as the decomposition allows: independent daemons run concurrently in their own worktrees/branches, each with a scoped brief and a do-not-touch list.
+2. **Portfolio sweep before broad planning.** Before planning any broad LingTai dev work, run (or dispatch) a read-only org-wide issues/PRs scan via the `lingtai-repo-watch` skill or a `gh` org sweep, and let the current PR/issue surface guide what to pick up. Summarize stale, unreviewed, and relevant items.
+3. **Issue → worktree/branch → PR → merge.** Non-trivial changes are tracked end-to-end: open or pick an issue, work in an isolated worktree on a topic branch, push, open a PR, review, merge. No long-lived ad-hoc branches; no edits in the main checkout.
+4. **Anatomy updates are mandatory.** If your change moves, renames, splits, merges, or deletes a file/function/class cited by an `ANATOMY.md`, update the anatomy in the **same commit**. See `lingtai-kernel-anatomy` (Python) or `lingtai-tui-anatomy` (Go) for the full convention.
+5. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`.
+6. **Filesystem-only IPC.** Any new cross-process communication must follow the file-based pattern.
+7. **Skill authoring for reusable procedures.** If your change creates a reusable workflow, write it as a skill.
 
-For the full contributing guide (build commands, gotchas, anatomy maintenance, migration contract): read `reference/contributing.md`.
+For the full contributing guide (orchestrator/daemon discipline, portfolio sweep, build commands, gotchas, anatomy maintenance, migration contract): read `reference/contributing.md`.
 
 ## Reference files
 
