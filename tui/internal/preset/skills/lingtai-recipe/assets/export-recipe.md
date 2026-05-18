@@ -1,8 +1,8 @@
 # Exporting a Recipe
 
-*This is the recipe-export sub-guide of the `lingtai-recipe` skill. For full-network export, read `export-network.md` alongside this file. For an overview of all recipe-related flows, read `../SKILL.md`.*
+*This is the recipe-export sub-guide of the `lingtai-recipe` skill. For an overview of all recipe-related flows, read `../SKILL.md`.*
 
-**Prerequisites:** Read `../reference/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, the `.lingtai/` network snapshot, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
+**Prerequisites:** Read `../reference/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
 
 A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing. An exported recipe is a **bundle directory** — a git repo the recipient clones and points `/setup` at.
 
@@ -45,7 +45,7 @@ Everything else is optional. Typical bundles add a first-contact message, ongoin
 └── README.md                           # (optional) for GitHub display
 ```
 
-There is NO `.lingtai/` in a recipe-only export. That's the difference from a full network export (see `export-network.md`). A recipe is the seed; a network export is the seed plus the living garden.
+A recipe ships no `.lingtai/` snapshot — just the seed. The garden grows fresh in each new project that applies the recipe.
 
 ## How to talk to the human during this skill
 
@@ -314,7 +314,7 @@ Check `gh auth status` and follow the three-branch pattern:
 
 **The bundle IS the project-to-be.** When the recipient runs `/setup` and picks this bundle, the TUI copies the whole bundle into their project root. The bundle's `.recipe/` becomes their `.recipe/`; the library folder becomes a sibling at their project root. So treat the bundle structure as the final on-disk structure — don't assume the recipient will move files around.
 
-**The recipe is a seed, not a clone.** It shapes behavior — it does NOT reproduce the network's state, history, or data. That's what `/export network` is for. An exported recipe is an exported network without the `.lingtai/` snapshot.
+**The recipe is a seed, not a clone.** It shapes behavior — it does NOT reproduce the network's state, history, or data. Recipients grow their own network from the seed; their agents are born fresh, shaped by your recipe but living their own life.
 
 **Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI itself and already available in every installation. Only ship custom skills — the ones that grew out of this network.
 

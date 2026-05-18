@@ -2,9 +2,9 @@
 """
 validate_recipe.py — Sanity-check a recipe bundle.
 
-Both `/export recipe` and `/export network` invoke this script on their
-staging directory before `git init`. Exits 0 if the bundle is structurally
-valid (warnings allowed); exits 1 if any error is found.
+`/export` invokes this script on its staging directory before `git init`.
+Exits 0 if the bundle is structurally valid (warnings allowed); exits 1
+if any error is found.
 
 The canonical recipe format is documented in:
     tui/internal/preset/skills/lingtai-recipe/reference/recipe-format.md
@@ -21,11 +21,8 @@ A recipe **bundle** is a directory containing:
     │   ├── comment/...                  (optional — no comment if absent)
     │   ├── covenant/...                 (optional — kernel default if absent)
     │   └── procedures/...               (optional — kernel default if absent)
-    ├── <library_name>/                  (optional — shared skill library)
-    │   └── (skills with SKILL.md files)
-    └── .lingtai/                        (optional — full network snapshot)
-        ├── <agent>/.agent.json          (identity blueprint)
-        └── <agent>/                     (NO init.json — stripped on export)
+    └── <library_name>/                  (optional — shared skill library)
+        └── (skills with SKILL.md files)
 
 Usage:
     validate_recipe.py <bundle-root>
@@ -80,8 +77,6 @@ def validate(bundle_root: Path) -> tuple[list[str], list[str]]:
 
     if manifest is not None:
         _check_library_sibling(bundle_root, manifest, errors, warnings)
-
-    _check_network_snapshot(bundle_root, errors, warnings)
 
     return errors, warnings
 
@@ -317,30 +312,6 @@ def _check_library_sibling(
         )
 
 
-def _check_network_snapshot(
-    bundle_root: Path, errors: list[str], warnings: list[str]
-) -> None:
-    """For bundles shipping .lingtai/, confirm init.json is stripped per agent."""
-    lingtai = bundle_root / ".lingtai"
-    if not lingtai.is_dir():
-        return  # recipe-only bundle, no network
-    for agent_dir in sorted(lingtai.iterdir()):
-        if not agent_dir.is_dir():
-            continue
-        name = agent_dir.name
-        if not name or name.startswith(".") or name == "human":
-            continue
-        blueprint = agent_dir / ".agent.json"
-        if not blueprint.is_file():
-            continue  # not an agent dir
-        init_json = agent_dir / "init.json"
-        if init_json.is_file():
-            errors.append(
-                f"{init_json}: present in exported network — must be stripped "
-                "so the recipient picks their own LLM provider and capabilities"
-            )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -350,7 +321,7 @@ def main() -> int:
         "bundle_root",
         type=Path,
         help="Path to the bundle root (contains .recipe/ and optionally "
-        "<library_name>/ and .lingtai/)",
+        "<library_name>/)",
     )
     args = parser.parse_args()
 

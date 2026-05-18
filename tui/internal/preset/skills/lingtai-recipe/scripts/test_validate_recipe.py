@@ -333,48 +333,6 @@ def test_stray_file_at_recipe_root_warns(tmp_path: Path) -> None:
     assert "unexpected file" in result.stdout
 
 
-# --- network snapshot ------------------------------------------------------
-
-
-def test_network_snapshot_with_stripped_init_passes(tmp_path: Path) -> None:
-    _make_valid_bundle(tmp_path)
-    agent = tmp_path / ".lingtai" / "alpha"
-    agent.mkdir(parents=True)
-    (agent / ".agent.json").write_text("{}", encoding="utf-8")
-    # No init.json — correct post-strip shape.
-    _assert_ok(_run(tmp_path))
-
-
-def test_network_snapshot_with_init_present_errors(tmp_path: Path) -> None:
-    _make_valid_bundle(tmp_path)
-    agent = tmp_path / ".lingtai" / "alpha"
-    agent.mkdir(parents=True)
-    (agent / ".agent.json").write_text("{}", encoding="utf-8")
-    # init.json should have been stripped.
-    (agent / "init.json").write_text(
-        json.dumps({"manifest": {}}), encoding="utf-8"
-    )
-    _assert_error(_run(tmp_path), "init.json", "stripped")
-
-
-def test_network_snapshot_skips_human_dir(tmp_path: Path) -> None:
-    """human/ pseudo-agent is not checked."""
-    _make_valid_bundle(tmp_path)
-    human = tmp_path / ".lingtai" / "human"
-    human.mkdir(parents=True)
-    (human / "init.json").write_text("{}", encoding="utf-8")
-    _assert_ok(_run(tmp_path))
-
-
-def test_network_snapshot_skips_dir_without_blueprint(tmp_path: Path) -> None:
-    """A dir without .agent.json is not treated as an agent."""
-    _make_valid_bundle(tmp_path)
-    notagent = tmp_path / ".lingtai" / ".tui-asset"
-    notagent.mkdir(parents=True)
-    (notagent / "init.json").write_text("{}", encoding="utf-8")
-    _assert_ok(_run(tmp_path))
-
-
 # --- library layout tests --------------------------------------------------
 
 

@@ -1,12 +1,11 @@
 # Recipe Format Reference
 
-*This is the authoring reference of the `lingtai-recipe` skill. For overview of all recipe-related flows, read `../SKILL.md`. For the network-export flow, read `../assets/export-network.md`. For the standalone-recipe export flow, read `../assets/export-recipe.md`.*
+*This is the authoring reference of the `lingtai-recipe` skill. For overview of all recipe-related flows, read `../SKILL.md`. For the recipe export flow, read `../assets/export-recipe.md`.*
 
-A **recipe bundle** is a directory that ships three kinds of content, side-by-side:
+A **recipe bundle** is a directory that ships two kinds of content, side-by-side:
 
 1. A `.recipe/` dotfolder containing the LingTai-facing behavioral layer (greet, comment, covenant, procedures) and the manifest (`recipe.json`).
 2. An optional library folder (named by `recipe.json#library_name`) containing framework-agnostic skills — drop-in for any agent framework, not just LingTai.
-3. An optional `.lingtai/` folder containing a full multi-agent network snapshot (only present when exporting an entire network, not just a recipe).
 
 The bundle is the shareable artifact. When the TUI applies a recipe, it copies the bundle into the project root; the project then becomes self-contained — every path reference in `init.json` resolves within the project directory.
 
@@ -33,25 +32,13 @@ my-recipe-bundle/
 │   └── procedures/                      # optional — procedures override
 │       ├── procedures.md
 │       └── <lang>/procedures.md
-├── <library_name>/                      # optional — framework-agnostic skills
-│   ├── <skill-a>/
-│   │   └── SKILL.md
-│   └── <skill-b>/
-│       ├── SKILL.md
-│       ├── scripts/
-│       └── reference/
-└── .lingtai/                            # optional — network snapshot (export-network only)
-    ├── <agent>/
-    │   ├── .agent.json                  # identity blueprint (KEPT)
-    │   ├── system/*.md                  # KEPT (brief.md gets an EXPORTED SNAPSHOT banner)
-    │   ├── codex/codex.json             # KEPT
-    │   ├── pad.md                       # KEPT
-    │   ├── mailbox/                     # KEPT (sanitized by export)
-    │   ├── (NO history/chat_history.jsonl)  # STRIPPED — see "What's kept vs stripped" below
-    │   ├── (NO history/soul_history.jsonl)  # STRIPPED — same
-    │   ├── (NO .library/intrinsic/)     # STRIPPED — kernel rebuilds on rehydration
-    │   └── (NO init.json)               # STRIPPED — recipient picks their own provider
-    └── .tui-asset/.recipe/              # snapshot of applied recipe (KEPT)
+└── <library_name>/                      # optional — framework-agnostic skills
+    ├── <skill-a>/
+    │   └── SKILL.md
+    └── <skill-b>/
+        ├── SKILL.md
+        ├── scripts/
+        └── reference/
 ```
 
 Only `.recipe/recipe.json` is strictly required. Everything else is optional.
@@ -319,39 +306,6 @@ The behavioral layer (greet/comment/covenant/procedures) is different — it IS 
 
 Libraries don't have the `<lang>/` fallback the behavioral layer uses. Each skill ships a single `SKILL.md` in whatever language the author writes in. That's because libraries are meant to be drop-in for non-LingTai frameworks, most of which have no i18n convention for skills. If you want a bilingual skill, write it bilingually in one file.
 
-## The Network Snapshot (`.lingtai/`)
-
-An exported bundle MAY include a full network snapshot — the live state of every agent in a running LingTai project. The network export flow produces this when the author wants to share not just the recipe but the agents themselves (their memories, personalities, accumulated codex entries).
-
-### What's kept vs stripped
-
-| Per-agent file | Kept? | Reason |
-|---|---|---|
-| `.agent.json` | ✅ KEPT | Identity blueprint (agent_name, address) |
-| `system/*.md` | ✅ KEPT | Agent-authored firmware (covenant, principle, procedures, pad). `system/brief.md` gets an "EXPORTED SNAPSHOT" banner prepended at export time. |
-| `codex/codex.json` | ✅ KEPT | Structured memory accumulated by the agent |
-| `pad.md` | ✅ KEPT | Working memory |
-| `mailbox/` | ✅ KEPT | Sanitized mail per export scripts |
-| `delegates/ledger.jsonl` | ✅ KEPT | Avatar spawn record |
-| `<agent>/.library/custom/` | ✅ KEPT | Agent-authored skills |
-| **`init.json`** | ❌ **STRIPPED** | Contains the exporter's install-specific LLM choice, API key env names, admin flags |
-| **`history/chat_history.jsonl`** | ❌ **STRIPPED (v3.1)** | Full LLM turn history. Shipping this would make a clone wake up indistinguishable from the original — same identity, same memories, same in-flight conversation. The recipe's `greet.md` serves as 「前尘往事」 instead. |
-| **`history/soul_history.jsonl`** | ❌ **STRIPPED (v3.1)** | Introspection trace — same reason. |
-| **`history/soul_cursor.json`** | ❌ **STRIPPED (v3.1)** | Cursor position into the (now-removed) soul history. |
-| **`<agent>/.library/intrinsic/`** | ❌ **STRIPPED (v3.1)** | Kernel-managed; identical across LingTai installs. Recipient kernel rebuilds on rehydration. |
-| **`logs/`** | ❌ STRIPPED | Per-launch event stream and per-launch token ledger. |
-
-### Why `init.json` is stripped
-
-`init.json` encodes install-specific, per-user infrastructure: LLM provider, model name, API key env variable name, capability selection, admin flags (karma/nirvana). None of this should travel with the network:
-
-- The recipient may not have access to the same LLM provider.
-- The recipient may have different security preferences for `bash: yolo`.
-- The recipient has their own MCP tools configured.
-- API key env variable conventions may differ between installations.
-
-On import, the recipient's TUI detects missing `init.json` files under `.lingtai/<agent>/`, prompts the recipient to pick an LLM preset once, and runs `preset.RehydrateNetwork` to generate a fresh `init.json` for each agent using the recipient's chosen preset. The standard recipe-apply flow then follows, writing `.prompt` files and registering skills paths.
-
 ## i18n Fallback Rules
 
 All locale-aware content under `.recipe/` uses the same two-level fallback:
@@ -389,7 +343,6 @@ Exit code 0 means the bundle is structurally valid. Warnings are reported but do
 - `comment.md`, `covenant.md`, `procedures.md` contain no placeholders (only `greet.md` may use them).
 - `greet.md` doesn't start with `[system]` (warning only).
 - When `recipe.json#library_name` is non-null, the named sibling folder exists and contains at least one `SKILL.md` (missing folder = error, no SKILL.md = warning).
-- When `.lingtai/` is present (network snapshot), no agent has an `init.json` (must be stripped per export rules).
 - Unknown locale codes, stray files at `.recipe/` root: warnings.
 
 The validator is the single source of truth. If this reference and the validator disagree, the validator wins — and this doc should be updated to match.
@@ -431,16 +384,13 @@ Add layers as needed:
 1. Author the bundle at some path (e.g., `~/work/my-recipe/`).
 2. Run `validate_recipe.py <bundle-root>` — should exit 0.
 3. In an existing LingTai project, run `/setup` and pick "Custom recipe" — point at the bundle root.
-4. The TUI copies the bundle into the project (`.recipe/` + library + optional `.lingtai/`) and applies it.
+4. The TUI copies the bundle into the project (`.recipe/` + library) and applies it.
 5. The orchestrator relaunches with your recipe: new `.prompt`, updated `init.json` fields, library path registered.
 
 Iterate: edit the bundle in place, then run `/setup` again to re-apply. The TUI re-copies the bundle into the project and re-applies — behavioral layer fully replaced, library path additive.
 
 ## Publishing a Recipe
 
-Use one of the two export flows:
-
-- **Recipe-only publish**: `assets/export-recipe.md` walks you through authoring a recipe bundle (no network state) and turning it into a shareable git repo. Recipients clone the repo and point `/setup` at it.
-- **Full network publish**: `assets/export-network.md` copies the live `.lingtai/`, strips per-agent `init.json` files, writes a fresh `.recipe/`, runs privacy + sensitivity scans, and produces a shareable git repo. Recipients clone, open with `lingtai-tui`, rehydrate per-agent `init.json` with their own preset, and get the whole network materialized.
+Read `assets/export-recipe.md` for the full publish flow. It walks you through authoring (or distilling from a running network) a recipe bundle and turning it into a shareable git repo. Recipients clone the repo and point `/setup` at it.
 
 Both flows invoke the same validator before `git init`. If the validator errors, the export stops.

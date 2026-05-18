@@ -769,7 +769,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.agora.Init(), a.sendSize())
 	case "export":
-		if args != "network" && args != "recipe" {
+		if args != "" && args != "recipe" {
 			addMsg(i18n.T("export.help"))
 			return a, nil
 		}
@@ -781,13 +781,8 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
-		if args == "network" {
-			fs.WritePrompt(a.orchDir, i18n.T("export.network_prompt"))
-			addMsg(i18n.T("export.network_sent"))
-		} else {
-			fs.WritePrompt(a.orchDir, i18n.T("export.recipe_prompt"))
-			addMsg(i18n.T("export.recipe_sent"))
-		}
+		fs.WritePrompt(a.orchDir, i18n.T("export.recipe_prompt"))
+		addMsg(i18n.T("export.recipe_sent"))
 		return a, nil
 	case "molt":
 		if targetDir == "" {
