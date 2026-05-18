@@ -8,6 +8,7 @@ This guide covers how to make changes to each component of the LingTai project.
 2. **Anatomy updates are part of the code change.** If your change moves, renames, splits, merges, or deletes a file/function/class cited by an `ANATOMY.md`, update the anatomy in the **same commit**. See the `lingtai-kernel-anatomy` and `lingtai-tui-anatomy` skills for the full convention.
 3. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations render as the raw key on screen — they don't fall back.
 4. **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv.
+5. **Human-facing summaries default to self-contained HTML.** When you report a non-trivial dev/research result to a human (design proposal, multi-PR roll-up, investigation write-up, postmortem, PR summary attachment), the deliverable is a single `.html` file with inline CSS, no remote assets, no build step — open it via `file://`. Plain text/Markdown stays for short summaries that *link to* the HTML. The required structure (TL;DR, baseline, what-was-done with diff snippets, validation, risks/decisions, next steps, source index) and hard rules (self-contained, inline assets, dark-theme default) live in the parent `SKILL.md` under "Human-facing reports default to self-contained HTML". Reference implementation: `reports/im-optimization-summary-2026-05-18.html` in the codex-gpt5.5 workspace.
 
 ## Changing the TUI (`tui/`)
 
