@@ -45,6 +45,44 @@ This skill is the single entry point for anyone developing on or contributing to
 | Author or publish a skill | `library-manual` skill |
 | Understand recipes and export networks | `lingtai-recipe` skill |
 
+## Human-facing reports default to self-contained HTML
+
+When you finish a non-trivial piece of development or research work and want to hand the result to a human (PR summary attachment, design review, investigation write-up, postmortem, multi-PR status roll-up), **default to producing a self-contained HTML artifact**. Plain text / Markdown is reserved for the *short summary* that points at the HTML (e.g. one paragraph in an email or chat message with the file path).
+
+**Why this is the default:**
+
+1. Humans read HTML in a browser without a build step. No `pandoc`, no markdown viewer, no IDE-required.
+2. A single `.html` file with inline CSS is the most archivable, offline-friendly format we have — it survives being moved, emailed, dropped into a worktree, or opened years later.
+3. Information density is higher: tables, status pills, diff blocks, ASCII diagrams, side-by-side cards. The same content as Markdown is harder to scan.
+4. It enforces a discipline: if you can't fit the work in a polished HTML, it probably isn't ready to hand off.
+
+**Hard rules — the artifact must be:**
+
+- **Self-contained.** All CSS in a single `<style>` block. No `<script src=...>`, no `<link rel="stylesheet">`, no remote fonts/images. No CDN, no network fetches at render time.
+- **Offline-readable.** Open it from `file://` and it must look right. No build step, no server.
+- **Inline assets only.** If you must embed an image, base64 it. Prefer ASCII/Unicode diagrams inside `<pre>` — they diff well and never break.
+- **Readable in a real browser.** Use a saturated dark theme by default (we live in dark terminals) but keep contrast high. Responsive via `@media (max-width: ...)`.
+- **Language: Chinese primary for LingTai project reports** (matches the workspace convention); technical identifiers and code stay in English.
+
+**What every human-facing report HTML should include:**
+
+| Section | Purpose |
+|---|---|
+| Header + meta pills | Date, author, PR numbers + status, scope |
+| TL;DR / 一页结论 | Cards or stats so the reader can stop after 30 seconds and still know what happened |
+| Context / baseline | What the system looks like *before* this work — diagrams welcome |
+| What was done | Concrete diff-style snippets, file paths, PR + commit links |
+| Validation | Test commands run + output; `git diff --check`; smoke imports |
+| Risks / decisions / rejected paths | Why this shape and not the obvious alternative |
+| Next steps | Follow-up PRs / phases / owners |
+| Source index | Links to underlying reports, PRs, commits, source file:line anchors |
+
+**Where to put the file:** under the agent's working directory, in a `reports/` subdirectory, named `<topic>-<date>.html`. For LingTai dev workspaces this is typically `<workdir>/reports/`. Reference it by absolute path in the short text summary you send to the human.
+
+**When to drop down to plain text:** one-liner status, command outputs the user explicitly asked to see verbatim, short Q&A. Anything multi-section or that you'd otherwise reach for Markdown headings for → HTML.
+
+**Reference implementation:** `reports/im-optimization-summary-2026-05-18.html` in the codex-gpt5.5 workspace is a canonical example (executive summary, baseline diagram, PR deep-dive, comparison matrix, risk table, acceptance checklist, source index — all in one self-contained file). Use it as a template.
+
 ## Quick orientation
 
 LingTai is an **agent operating system** — a minimal kernel that gives AI agents thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Everything else is plugged in from outside via MCP-compatible interfaces.
