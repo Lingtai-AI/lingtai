@@ -704,9 +704,11 @@ func skillsDefault() map[string]interface{} {
 	}
 }
 
-
 func minimaxPreset() Preset {
-	mm := map[string]interface{}{"provider": "minimax"}
+	mm := map[string]interface{}{
+		"provider":    "minimax",
+		"api_key_env": "MINIMAX_API_KEY",
+	}
 	return Preset{
 		Name:        "minimax",
 		Description: PresetDescription{Summary: "MiniMax M2.7 — full multimodal capabilities"},

@@ -191,7 +191,6 @@ func TestGenerateInitJSONWritesPresetBlock(t *testing.T) {
 	}
 }
 
-
 func TestAutoEnvVarName(t *testing.T) {
 	pp := func(provider, baseURL string) Preset {
 		return Preset{Manifest: map[string]interface{}{
@@ -280,5 +279,26 @@ func TestAutoEnvVarName(t *testing.T) {
 				t.Errorf("AutoEnvVarName: got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestMiniMaxPresetCapabilitiesUseApiKeyEnv(t *testing.T) {
+	p := minimaxPreset()
+	manifest := p.Manifest
+	caps, ok := manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest.capabilities missing or wrong type: %T", manifest["capabilities"])
+	}
+	for _, name := range []string{"web_search", "vision"} {
+		capCfg, ok := caps[name].(map[string]interface{})
+		if !ok {
+			t.Fatalf("capability %s missing or wrong type: %T", name, caps[name])
+		}
+		if provider, _ := capCfg["provider"].(string); provider != "minimax" {
+			t.Errorf("%s.provider = %v, want minimax", name, capCfg["provider"])
+		}
+		if env, _ := capCfg["api_key_env"].(string); env != "MINIMAX_API_KEY" {
+			t.Errorf("%s.api_key_env = %v, want MINIMAX_API_KEY", name, capCfg["api_key_env"])
+		}
 	}
 }
