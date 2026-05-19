@@ -337,6 +337,8 @@
   "doctor.llm_no_base_url": "✗ %s 未设端",
   "doctor.suggest_base_url": "→ 开预设编器选区域 (CN / INTL)，后 /refresh。",
   "doctor.llm_unknown": "✗ 天误：%s",
+  "doctor.llm_empty_response": "✗ 天应而无文：%s",
+  "doctor.suggest_proxy_check": "→ 端纳其请而不达上。察代之录（譬 JoyCode），验模名与凭无误，后 /refresh。",
   "doctor.portal_ok": "✓ lingtai-portal 在途",
   "doctor.portal_missing": "✗ lingtai-portal 不在途",
   "doctor.suggest_portal": "→ 行：brew link --overwrite lingtai-tui",

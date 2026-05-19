@@ -337,6 +337,8 @@
   "doctor.llm_no_base_url": "✗ 未设置 %s 的 API 端点 (base_url)",
   "doctor.suggest_base_url": "→ 打开预设编辑器选择区域 (CN / INTL)，然后 /refresh。",
   "doctor.llm_unknown": "✗ LLM 错误：%s",
+  "doctor.llm_empty_response": "✗ LLM 响应包络为空：%s",
+  "doctor.suggest_proxy_check": "→ 端点接受了请求但未转发上游。检查代理/网关的日志（如 JoyCode），确认模型名和凭证正确转发，然后 /refresh。",
   "doctor.portal_ok": "✓ lingtai-portal 在 PATH 中",
   "doctor.portal_missing": "✗ lingtai-portal 不在 PATH 中",
   "doctor.suggest_portal": "→ 运行：brew link --overwrite lingtai-tui",

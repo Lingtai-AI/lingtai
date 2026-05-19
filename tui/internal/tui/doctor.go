@@ -185,7 +185,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 2: read init.json to get LLM config
-	provider, model, apiKey, baseURL, err := readLLMConfig(orchDir)
+	provider, model, apiKey, baseURL, apiCompat, err := readLLMConfig(orchDir)
 	if err != nil {
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.config_error", err),
@@ -209,7 +209,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 3: live API check
-	status, detail := probeLLM(provider, model, apiKey, baseURL)
+	status, detail := probeLLM(provider, model, apiKey, baseURL, apiCompat)
 
 	switch status {
 	case probeOK:
@@ -259,6 +259,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		})
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_setup"), Hint: true,
+		})
+	case probeEmptyResponse:
+		lines = append(lines, doctorLine{
+			Text: i18n.TF("doctor.llm_empty_response", detail),
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.suggest_proxy_check"), Hint: true,
 		})
 	default:
 		lines = append(lines, doctorLine{
@@ -330,32 +337,41 @@ func findLastAPIError(orchDir string) string {
 
 // --- Init.json / env resolution ---
 
-func readLLMConfig(orchDir string) (provider, model, apiKey, baseURL string, err error) {
+// readLLMConfig pulls the agent's LLM configuration from init.json. The
+// apiCompat return value carries manifest.llm.api_compat ("", "openai",
+// or "anthropic") — required by probeLLM to pick the right auth scheme
+// when provider="custom" points at a third-party gateway. Without this,
+// any anthropic-compatible custom endpoint (e.g. JoyCode's local proxy
+// on 127.0.0.1:34891) gets probed with `Authorization: Bearer <key>`,
+// silently falls into the 404 path that's mapped to probeOK, and masks
+// the real connectivity state.
+func readLLMConfig(orchDir string) (provider, model, apiKey, baseURL, apiCompat string, err error) {
 	initPath := filepath.Join(orchDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("cannot read init.json")
+		return "", "", "", "", "", fmt.Errorf("cannot read init.json")
 	}
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", "", "", "", fmt.Errorf("invalid init.json")
+		return "", "", "", "", "", fmt.Errorf("invalid init.json")
 	}
 
 	manifest, _ := raw["manifest"].(map[string]interface{})
 	if manifest == nil {
-		return "", "", "", "", fmt.Errorf("no manifest in init.json")
+		return "", "", "", "", "", fmt.Errorf("no manifest in init.json")
 	}
 
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
-		return "", "", "", "", fmt.Errorf("no manifest.llm in init.json")
+		return "", "", "", "", "", fmt.Errorf("no manifest.llm in init.json")
 	}
 
 	provider, _ = llm["provider"].(string)
 	model, _ = llm["model"].(string)
 	apiKey, _ = llm["api_key"].(string)
 	baseURL, _ = llm["base_url"].(string)
+	apiCompat, _ = llm["api_compat"].(string)
 
 	if apiKey == "" {
 		apiKeyEnv, _ := llm["api_key_env"].(string)
@@ -365,7 +381,7 @@ func readLLMConfig(orchDir string) (provider, model, apiKey, baseURL string, err
 		}
 	}
 
-	return provider, model, apiKey, baseURL, nil
+	return provider, model, apiKey, baseURL, apiCompat, nil
 }
 
 // lookupEnvKey resolves an environment variable name, checking os.Environ first,
@@ -419,14 +435,25 @@ const (
 	probeNetworkError
 	probeNoKey
 	probeUnknown
+	// probeEmptyResponse: the endpoint accepted a real POST /v1/messages
+	// (HTTP 200) but returned an empty content array and zero-token usage.
+	// This is the canonical failure signature of an anthropic-compatible
+	// reverse proxy (JoyCode's local 127.0.0.1:34891 proxy is the example
+	// motivating this status) that received the request, didn't actually
+	// forward to its upstream model, and replied with a structurally-valid
+	// but empty Message envelope. GET /v1/models cannot detect this — the
+	// proxy may not implement /v1/models at all (404 → existing probeOK
+	// charity branch), or may return a benign 200 — so we run a real
+	// minimal messages call as a second-stage probe.
+	probeEmptyResponse
 )
 
-func probeLLM(provider, model, apiKey, baseURL string) (probeStatus, string) {
+func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, string) {
 	if apiKey == "" {
 		return probeNoKey, ""
 	}
 
-	url, headers := providerProbeConfig(provider, apiKey, baseURL)
+	url, headers := providerProbeConfig(provider, apiKey, baseURL, apiCompat)
 	if url == "" {
 		return probeUnknown, "unknown provider: " + provider
 	}
@@ -452,12 +479,14 @@ func probeLLM(provider, model, apiKey, baseURL string) (probeStatus, string) {
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	body := string(bodyBytes)
 
+	var gotStatus probeStatus
+	var gotDetail string
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		return probeOK, ""
+		gotStatus, gotDetail = probeOK, ""
 	case resp.StatusCode == 404 || resp.StatusCode == 405:
 		// /v1/models not supported but server responded — connectivity and auth OK
-		return probeOK, ""
+		gotStatus, gotDetail = probeOK, ""
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	case resp.StatusCode == 429:
@@ -467,9 +496,312 @@ func probeLLM(provider, model, apiKey, baseURL string) (probeStatus, string) {
 	default:
 		return probeUnknown, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	}
+
+	// Stage 2: real-call second-stage probe. The /v1/models check above
+	// tells us only that the host is reachable and credentials were not
+	// rejected outright. It cannot tell us whether the actual generation
+	// path (POST /v1/messages or POST /v1/chat/completions) forwards
+	// requests to a working upstream model — and that is exactly what
+	// fails for reverse-proxy gateways (e.g. JoyCode at 127.0.0.1:34891,
+	// or acui.shop / opencode.ai zen routes) when they reply HTTP 200
+	// with an empty envelope. So when the wire protocol is identifiable
+	// we send one max_tokens=1 generation and inspect the envelope. Cost
+	// is negligible (<$0.0001 on every commercial provider) and the
+	// diagnostic value is high — without this the doctor's first-stage
+	// probeOK silently masks the very failure mode the user is here to
+	// debug.
+	if gotStatus == probeOK {
+		switch classifyWire(provider, apiCompat) {
+		case wireAnthropic:
+			if msgStatus, msgDetail := probeAnthropicMessages(model, apiKey, baseURL); msgStatus != probeOK {
+				return msgStatus, msgDetail
+			}
+		case wireOpenAI:
+			if msgStatus, msgDetail := probeOpenAICompletions(model, apiKey, baseURL); msgStatus != probeOK {
+				return msgStatus, msgDetail
+			}
+		}
+	}
+	return gotStatus, gotDetail
 }
 
-func providerProbeConfig(provider, apiKey, baseURL string) (string, map[string]string) {
+// wireProtocol classifies a provider/api_compat pair into the wire
+// protocol used for the actual generation call. The classification is
+// what determines which second-stage envelope-inspection probe runs.
+type wireProtocol int
+
+const (
+	wireUnknown wireProtocol = iota
+	wireAnthropic
+	wireOpenAI
+)
+
+func classifyWire(provider, apiCompat string) wireProtocol {
+	switch provider {
+	case "anthropic", "minimax":
+		return wireAnthropic
+	case "openai", "openrouter", "deepseek", "kimi", "mimo", "zhipu", "codex":
+		return wireOpenAI
+	case "custom":
+		switch apiCompat {
+		case "anthropic":
+			return wireAnthropic
+		case "openai":
+			return wireOpenAI
+		default:
+			return wireUnknown
+		}
+	default:
+		switch apiCompat {
+		case "anthropic":
+			return wireAnthropic
+		case "openai":
+			return wireOpenAI
+		default:
+			return wireUnknown
+		}
+	}
+}
+
+// probeAnthropicMessages issues a single max_tokens=1 POST /v1/messages
+// and verifies the response envelope is non-empty. Returns probeOK when
+// the server returns a real Message with at least one content block (or
+// non-zero output_tokens); returns probeEmptyResponse when HTTP 200 is
+// paired with content:[] and zero-token usage — the canonical failure
+// signature of a reverse-proxy gateway that received the call but did
+// not actually forward it (JoyCode's local proxy is the motivating case).
+// Any non-200 / network failure is mapped to the same status taxonomy as
+// probeLLM's first-stage check so the doctor UI stays consistent.
+func probeAnthropicMessages(model, apiKey, baseURL string) (probeStatus, string) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://api.anthropic.com"
+	}
+	url := base + "/v1/messages"
+
+	probeModel := model
+	if probeModel == "" {
+		// Best-effort default; the gateway will surface a 400 if it dislikes
+		// the model name, which is itself a useful diagnostic outcome.
+		probeModel = "claude-3-5-haiku-20241022"
+	}
+
+	payload := map[string]interface{}{
+		"model":      probeModel,
+		"max_tokens": 1,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": "hi"},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return probeUnknown, err.Error()
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return probeNetworkError, err.Error()
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	// Some gateways (notably proxies fronting Bearer-style upstreams) will
+	// also accept Authorization; sending both is harmless and improves
+	// compatibility with reverse proxies that forward only one.
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, apiKey) {
+			errMsg = "connection failed"
+		}
+		return probeNetworkError, errMsg
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	respBody := string(respBytes)
+
+	switch {
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		return probeAuthError, fmt.Sprintf("messages %d %s", resp.StatusCode, extractErrorMessage(respBody))
+	case resp.StatusCode == 429:
+		return probeRateLimit, "messages 429 rate limited"
+	case resp.StatusCode == 529 || resp.StatusCode == 503:
+		return probeOverloaded, fmt.Sprintf("messages %d overloaded", resp.StatusCode)
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		// Continue to envelope inspection below.
+	default:
+		return probeUnknown, fmt.Sprintf("messages %d %s", resp.StatusCode, extractErrorMessage(respBody))
+	}
+
+	var env struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+		StopReason string `json:"stop_reason"`
+	}
+	if err := json.Unmarshal(respBytes, &env); err != nil {
+		preview := respBody
+		if len(preview) > 100 {
+			preview = preview[:100] + "..."
+		}
+		return probeUnknown, "messages 200 but response not anthropic-shape: " + preview
+	}
+
+	hasContent := false
+	for _, c := range env.Content {
+		if strings.TrimSpace(c.Text) != "" || c.Type != "" {
+			hasContent = true
+			break
+		}
+	}
+	usageZero := env.Usage.InputTokens == 0 && env.Usage.OutputTokens == 0
+
+	if !hasContent && usageZero {
+		// JoyCode-style failure: gateway accepted the call, replied 200,
+		// but the envelope shows nothing was actually forwarded upstream.
+		return probeEmptyResponse, fmt.Sprintf(
+			"HTTP 200, content=[], usage 0/0 (model=%s); proxy/gateway likely did not forward to upstream",
+			probeModel,
+		)
+	}
+	return probeOK, ""
+}
+
+// probeOpenAICompletions is the OpenAI-protocol counterpart of
+// probeAnthropicMessages. It POSTs a single max_tokens=1 chat completion
+// to base_url + /v1/chat/completions (or just /chat/completions when the
+// base_url already ends in /v1) and inspects choices[].message.content
+// plus usage.completion_tokens. Returns probeEmptyResponse when the
+// response is HTTP 200 but the envelope is empty — the canonical failure
+// signature of OpenAI-compatible reverse proxies (acui.shop and the
+// opencode.ai zen routes are the motivating cases) that 200-but-nop the
+// generation. See probeAnthropicMessages for the broader rationale.
+func probeOpenAICompletions(model, apiKey, baseURL string) (probeStatus, string) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com/v1"
+	}
+	// Smart endpoint join: many OpenAI-compatible base_urls already end in
+	// /v1, others don't. Don't double-stack.
+	url := base + "/chat/completions"
+	if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
+		url = base + "/v1/chat/completions"
+	}
+
+	probeModel := model
+	if probeModel == "" {
+		probeModel = "gpt-4o-mini"
+	}
+
+	payload := map[string]interface{}{
+		"model": probeModel,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": "hi"},
+		},
+		"max_tokens": 1,
+		"stream":     false,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return probeUnknown, err.Error()
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return probeNetworkError, err.Error()
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, apiKey) {
+			errMsg = "connection failed"
+		}
+		return probeNetworkError, errMsg
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	respBody := string(respBytes)
+
+	switch {
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		return probeAuthError, fmt.Sprintf("chat/completions %d %s", resp.StatusCode, extractErrorMessage(respBody))
+	case resp.StatusCode == 429:
+		return probeRateLimit, "chat/completions 429 rate limited"
+	case resp.StatusCode == 529 || resp.StatusCode == 503:
+		return probeOverloaded, fmt.Sprintf("chat/completions %d overloaded", resp.StatusCode)
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		// Continue to envelope inspection below.
+	default:
+		return probeUnknown, fmt.Sprintf("chat/completions %d %s", resp.StatusCode, extractErrorMessage(respBody))
+	}
+
+	var env struct {
+		Choices []struct {
+			Message struct {
+				Content   string        `json:"content"`
+				ToolCalls []interface{} `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(respBytes, &env); err != nil {
+		preview := respBody
+		if len(preview) > 100 {
+			preview = preview[:100] + "..."
+		}
+		return probeUnknown, "chat/completions 200 but response not openai-shape: " + preview
+	}
+
+	hasContent := false
+	for _, c := range env.Choices {
+		if strings.TrimSpace(c.Message.Content) != "" || len(c.Message.ToolCalls) > 0 {
+			hasContent = true
+			break
+		}
+	}
+	usageZero := env.Usage.PromptTokens == 0 && env.Usage.CompletionTokens == 0
+
+	if !hasContent && usageZero {
+		// acui.shop / opencode.ai-style failure: proxy returned 200 but
+		// nothing was actually generated upstream.
+		return probeEmptyResponse, fmt.Sprintf(
+			"HTTP 200, choices=[] (no content / no tool_calls), usage 0/0 (model=%s); proxy/gateway likely did not forward to upstream",
+			probeModel,
+		)
+	}
+	return probeOK, ""
+}
+
+// providerProbeConfig returns the URL and headers for a GET /v1/models
+// (or provider-equivalent) probe. apiCompat carries manifest.llm.api_compat
+// and is consulted whenever a provider entry is itself protocol-agnostic
+// (i.e. "custom" or unknown providers backed by a user-supplied baseURL):
+// the auth scheme then follows the wire protocol the user declared, not
+// a hardcoded default.
+//
+// Without this, anthropic-compatible third-party gateways — JoyCode's
+// local proxy at 127.0.0.1:34891 being a representative case — get hit
+// with `Authorization: Bearer <key>`, fall through to a 404 on /v1/models
+// (which the probe charitably maps to OK), and the user sees a green
+// /doctor while the actual agent fails to talk to the gateway.
+func providerProbeConfig(provider, apiKey, baseURL, apiCompat string) (string, map[string]string) {
 	switch provider {
 	case "anthropic":
 		base := "https://api.anthropic.com"
@@ -514,12 +846,24 @@ func providerProbeConfig(provider, apiKey, baseURL string) (string, map[string]s
 			return "", nil
 		}
 		base := strings.TrimRight(baseURL, "/")
+		if apiCompat == "anthropic" {
+			return base + "/v1/models", map[string]string{
+				"x-api-key":         apiKey,
+				"anthropic-version": "2023-06-01",
+			}
+		}
 		return base + "/v1/models", map[string]string{
 			"Authorization": "Bearer " + apiKey,
 		}
 	default:
 		if baseURL != "" {
 			base := strings.TrimRight(baseURL, "/")
+			if apiCompat == "anthropic" {
+				return base + "/v1/models", map[string]string{
+					"x-api-key":         apiKey,
+					"anthropic-version": "2023-06-01",
+				}
+			}
 			return base + "/v1/models", map[string]string{
 				"Authorization": "Bearer " + apiKey,
 			}
