@@ -260,6 +260,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_setup"), Hint: true,
 		})
+	case probeOAuth:
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.llm_oauth"), Warn: true,
+		})
+		lines = append(lines, doctorLine{
+			Text: i18n.T("doctor.suggest_oauth"), Hint: true,
+		})
 	case probeEmptyResponse:
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.llm_empty_response", detail),
@@ -446,9 +453,27 @@ const (
 	// charity branch), or may return a benign 200 — so we run a real
 	// minimal messages call as a second-stage probe.
 	probeEmptyResponse
+	// probeOAuth: provider uses OAuth/session-based auth (e.g. codex /
+	// codex_oauth via ChatGPT subscription), not an API key. The doctor
+	// cannot probe these from this process — the CLI subprocess owns the
+	// credential. Surface as a Warn-level note rather than the bogus
+	// "API key not set" alarm that probeNoKey would produce.
+	probeOAuth
 )
 
+// oauthProviders enumerates LLM providers whose credentials live outside
+// the LingTai config (no api_key / api_key_env). The doctor cannot probe
+// these directly; the spawned CLI handles its own auth (e.g. `codex`
+// reads ~/.codex/auth.json from a prior `codex login`).
+var oauthProviders = map[string]bool{
+	"codex":       true,
+	"codex_oauth": true,
+}
+
 func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, string) {
+	if oauthProviders[provider] {
+		return probeOAuth, ""
+	}
 	if apiKey == "" {
 		return probeNoKey, ""
 	}
