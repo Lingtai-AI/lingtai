@@ -204,6 +204,12 @@ type FirstRunModel struct {
 		email string // "" if JWT didn't carry one but tokens are valid
 	}
 	codexLoggingIn bool // true while waiting for browser callback
+	// codexReloginArmed: true after the first Enter on an already-authed
+	// Codex 凭据 row. A second Enter starts the OAuth flow (overwriting
+	// the stored tokens); any cursor movement disarms. This two-step
+	// gate avoids accidentally launching a browser just because the user
+	// pressed Enter while parked on the credential row.
+	codexReloginArmed bool
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
@@ -953,6 +959,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			pickBackIdx := visibleCount + 1
 			pickNextIdx := visibleCount + 2
 			pickLastIdx := pickNextIdx
+			// Any non-Enter key on the preset-pick step disarms a pending
+			// codex re-login confirmation (e.g. user pressed Enter once,
+			// then arrowed away or hit Esc). The arm only lives for the
+			// immediately-following Enter press.
+			if m.codexReloginArmed && msg.String() != "enter" && msg.String() != "return" {
+				m.codexReloginArmed = false
+				m.message = ""
+			}
 			switch msg.String() {
 			case "up":
 				if m.cursor > presetMinIdx {
@@ -991,14 +1005,22 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, m.enterAgentPresets()
 				}
 				// Codex 凭据 row: single-purpose OAuth login.
-				//   not authed → start OAuth
-				//   authed     → no-op (creation happens via the codex
-				//                template row in 新建预设)
+				//   not authed         → start OAuth
+				//   authed, unarmed    → arm relogin; show confirm hint
+				//   authed, armed      → start OAuth (overwrites tokens)
+				//   logging in         → no-op
 				if m.cursor == pickCodexAuthIdx {
-					if m.codexAuth.valid || m.codexLoggingIn {
+					if m.codexLoggingIn {
 						return m, nil
 					}
+					if m.codexAuth.valid && !m.codexReloginArmed {
+						m.codexReloginArmed = true
+						m.message = i18n.T("firstrun.preset_pick.codex_relogin_confirm")
+						return m, nil
+					}
+					m.codexReloginArmed = false
 					m.codexLoggingIn = true
+					m.message = ""
 					oauthCh := startOAuthFlow()
 					return m, func() tea.Msg { return <-oauthCh }
 				}
@@ -2092,6 +2114,11 @@ func (m FirstRunModel) View() string {
 					row += "  " + okStyle.Render("✓ "+m.codexAuth.email)
 				} else {
 					row += "  " + okStyle.Render("✓ "+i18n.T("preset.codex_credential_authed_badge"))
+				}
+				// When the cursor parks on this row, surface the relogin
+				// affordance — quiet otherwise.
+				if m.cursor == visibleCount {
+					row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_relogin_hint"))
 				}
 			} else if m.codexLoggingIn {
 				row += "  " + StyleFaint.Render(i18n.T("codex.logging_in"))
