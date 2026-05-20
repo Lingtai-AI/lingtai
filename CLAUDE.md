@@ -9,7 +9,7 @@ When a human gives conceptual, corrective, or ambiguous feedback — especially 
 1. **Pause coding.** Restate the intended contract and wait for confirmation when scope is ambiguous.
 2. **Classify findings.** Label each concern: confirmed defect, edge risk, future refactor, or documentation/process issue. Do not treat all concerns as immediate code changes.
 3. **Name the smallest change.** Identify the minimal fix. Do not expand into a broader refactor because nearby code is related.
-4. **No direct edits for self-initiated improvements.** All changes go through issue → branch → PR → merge. Direct edits are for explicitly requested emergency fixes only.
+4. **No direct edits for self-initiated improvements.** Self-initiated code changes go through issue → branch → PR → merge. Direct edits are for explicitly requested emergency fixes only. (The "Always work in a worktree" section below carves out single-line fixes and doc tweaks — those exceptions still apply.)
 5. **Stop after stop.** When a human says to stop coding, stop immediately. Switch to clarification or reporting only.
 
 ## Always work in a worktree, never directly in the main checkout
