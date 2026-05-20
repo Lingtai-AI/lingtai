@@ -339,6 +339,8 @@
   "doctor.llm_overloaded": "✗ LLM provider overloaded: %s",
   "doctor.llm_network": "✗ LLM unreachable: %s",
   "doctor.llm_no_key": "✗ API key not set",
+  "doctor.llm_oauth": "⚠ OAuth provider — credentials managed by the CLI, not probed here",
+  "doctor.suggest_oauth": "→ Verify login externally (e.g. `codex login`); if the CLI works, ignore this notice.",
   "doctor.llm_no_base_url": "✗ No API endpoint (base_url) set for %s",
   "doctor.suggest_base_url": "→ Open preset editor and select a region (CN / INTL), then /refresh.",
   "doctor.llm_unknown": "✗ LLM error: %s",
