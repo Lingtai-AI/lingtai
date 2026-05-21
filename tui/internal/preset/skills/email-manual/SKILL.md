@@ -30,6 +30,19 @@ The `email` tool moves messages as files between agents that share a `.lingtai/`
 
 There is no concept of an SMTP server, an MX record, or an external address. **If a request involves `@gmail.com`, `@outlook.com`, IMAP folders, or anything that needs to leave the machine, the right tool is the `lingtai-imap` MCP addon — see the `mcp-manual` skill, not this one.**
 
+## Internal Email vs IMAP
+
+| Feature         | Internal Email (this skill)                                  | IMAP (see `mcp-manual`)                                         |
+|-----------------|--------------------------------------------------------------|-----------------------------------------------------------------|
+| What            | Filesystem-based mail within `.lingtai/` network             | Real email via IMAP/SMTP (Gmail, Outlook, etc.)                 |
+| Address format  | Bare path (e.g. `human`, `mimo-1`)                           | `@` address (e.g. `alice@gmail.com`)                            |
+| Tool            | `email` (intrinsic)                                          | `imap` (MCP server, `lingtai-imap` addon)                       |
+| Reply policy    | Always reply on the same channel                             | Requires confirmation for unknown senders                       |
+| Persistence     | Survives molt, lives in working directory                    | External mailbox, managed by IMAP server                        |
+| Use case        | Agent-to-agent communication, self-send, time capsules       | Real-world email integration                                    |
+
+This skill covers INTERNAL email only. For IMAP/SMTP email, see the `mcp-manual` skill.
+
 ## 2. Addressing
 
 Addresses are **bare directory names** inside `.lingtai/`. No `@`, no domains, no slashes.
