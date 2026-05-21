@@ -15,6 +15,71 @@ version: 1.0.0
 > **OpenAI's coding agent — run locally from your terminal.**
 > Built in Rust for speed. Open source. ~4 million weekly active users (as of April 2026).
 
+## CLI vs Daemon — Which to Use
+
+LingTai exposes Codex in two forms. They are **not interchangeable** — pick the one whose shape matches the work.
+
+### CLI (`codex exec ...` via bash)
+
+A single synchronous subprocess. You wait for it to finish, you get one transcript back, the conversation ends when the bash call returns.
+
+**Use the CLI when:**
+- The task is **one-off** and you want the result inline — a tightly-scoped edit, a single deterministic refactor, a quick mechanical pass
+- You want the output **threaded back into your current reasoning** (you'll read it and decide next steps yourself)
+- The task is **quick** and well-bounded
+- You only need **one** of these running at a time
+
+**Examples:**
+```bash
+# Rename a symbol across a small file
+codex exec "rename the function foo() to fooBar() in utils/helpers.py"
+
+# Mechanical lint-style pass
+codex exec --model gpt-5.5 "remove unused imports from src/main.py"
+
+# Quick scoped fix
+codex exec --dir /path/to/project "fix the off-by-one in parse_range()"
+```
+
+### Daemon (LingTai `daemon` capability with `backend="codex"`)
+
+A persistent agent spawned by the LingTai kernel. Runs in its **own worktree**, with its **own context window**, on its **own branch**. You dispatch it, it works asynchronously, you come back and review the diff.
+
+**Use the daemon when:**
+- You need to run **multiple tasks in parallel** — several disjoint deterministic refactors at once, a batch validation sweep
+- The task is **complex or multi-step** enough to deserve a fresh context window dedicated to it (not competing with your conversation history)
+- You need **context isolation** — the daemon shouldn't see (and shouldn't pollute) your current session's context
+- The work runs **long enough** that a synchronous bash call would be awkward — wide mechanical refactors, multi-file deterministic diffs, validation passes that touch the whole tree
+- You're acting as an **orchestrator** — planning and reviewing, not hand-coding (see the LingTai contributing guide's orchestrator-and-daemons discipline)
+
+Per the LingTai dev guide, Codex daemons are particularly good for **tightly-scoped diffs, deterministic refactors, and mechanical validation passes** — they're more conservative than Claude Code daemons and are the right choice when the change is well-specified and the scope is clear.
+
+**Examples of daemon-shaped work:**
+- "Apply this codemod across `src/**/*.ts` and open a PR" — wide, mechanical, deserves its own worktree
+- Three parallel deterministic refactors that don't share files — dispatch three daemons, review three diffs
+- A validation sweep over the repo that produces a report and (optionally) fixes
+- A "fire-and-check-back-later" task
+
+### Quick decision rule
+
+| Signal | Pick |
+|--------|------|
+| "I want the answer in this conversation, now" | **CLI** |
+| "I want to do three of these at once" | **Daemon** (one per task) |
+| "I'll review a diff afterward, not the transcript" | **Daemon** |
+| "The output is a small string/snippet I'll paste somewhere" | **CLI** |
+| "This will take 15+ minutes and produce a branch" | **Daemon** |
+| "I'm the orchestrator; the daemon is the worker" | **Daemon** |
+
+### Codex vs Claude Code (same axis)
+
+Both backends are available as CLI and daemon. The CLI-vs-daemon choice is about **shape of work** (one-shot vs parallel/long/isolated). The Codex-vs-Claude-Code choice is about **style of work**:
+
+- **Codex daemons** — tightly-scoped diffs, deterministic refactors, mechanical validation
+- **Claude Code daemons** — exploratory code reading, multi-file edits, skill/doc work, PR composition
+
+When in doubt for non-trivial work: daemon. See `utilities/lingtai-dev-guide/reference/contributing.md` for the full orchestrator/daemon convention.
+
 ## Installation
 
 ```bash

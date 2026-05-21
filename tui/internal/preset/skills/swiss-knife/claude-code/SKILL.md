@@ -29,6 +29,62 @@ claude -p "your prompt here" --dangerously-skip-permissions
 
 This runs Claude Code in non-interactive mode (`-p` = print and exit), skipping permission checks for automation.
 
+## CLI vs Daemon — Which to Use
+
+LingTai exposes Claude Code in two forms. They are **not interchangeable** — pick the one whose shape matches the work.
+
+### CLI (`claude -p ...` via bash)
+
+A single synchronous subprocess. You wait for it to finish, you get one transcript, the conversation ends when the bash call returns.
+
+**Use the CLI when:**
+- The task is **one-off** and you want the result inline — a typo fix, a single-file refactor, generating a snippet
+- You want the output **threaded back into your current reasoning** (you'll read the diff and decide next steps yourself)
+- The task is **quick** (under a few minutes) and budget-bounded
+- You only need **one** of these running at a time
+
+**Examples:**
+```bash
+# Fix a typo
+claude -p "fix the typo in line 42 of README.md" --dangerously-skip-permissions
+
+# Generate a small patch you'll review immediately
+claude -p "add a --verbose flag to scripts/build.sh" --dangerously-skip-permissions
+
+# Quick documentation pass on one file
+claude -p "add docstrings to utils/parser.py" --dangerously-skip-permissions
+```
+
+### Daemon (LingTai `daemon` capability with `backend="claude-code"`)
+
+A persistent agent spawned by the LingTai kernel. Runs in its **own worktree**, with its **own context window**, on its **own branch**. You dispatch it, it works asynchronously, you come back and review the diff.
+
+**Use the daemon when:**
+- You need to run **multiple tasks in parallel** — three disjoint refactors at once, batch validation across N files
+- The task is **complex or multi-step** — designing then implementing, exploring then refactoring — and you want a fresh context window dedicated to it (not competing with your conversation history)
+- You need **context isolation** — the daemon shouldn't see (and shouldn't pollute) your current session's context
+- The work runs **long enough** that a synchronous bash call would be awkward — large refactors, multi-file feature implementations, PR composition
+- You're acting as an **orchestrator** — planning and reviewing, not hand-coding (see the LingTai contributing guide's orchestrator-and-daemons discipline)
+
+**Examples of daemon-shaped work:**
+- "Implement the caching layer in `feat/cache` branch, with tests, and open a PR" — long, multi-step, deserves its own worktree
+- Three parallel skill rewrites that don't share files — dispatch three daemons, review three diffs
+- An exploratory refactor where you don't want intermediate steps cluttering your conversation
+- A "fire-and-check-back-later" task
+
+### Quick decision rule
+
+| Signal | Pick |
+|--------|------|
+| "I want the answer in this conversation, now" | **CLI** |
+| "I want to do three of these at once" | **Daemon** (one per task) |
+| "I'll review a diff afterward, not the transcript" | **Daemon** |
+| "The output is a small string/snippet I'll paste somewhere" | **CLI** |
+| "This will take 15+ minutes and produce a branch" | **Daemon** |
+| "I'm the orchestrator; the daemon is the worker" | **Daemon** |
+
+When in doubt for non-trivial work: daemon. The orchestrator/daemon split is the project's default discipline — see `utilities/lingtai-dev-guide/reference/contributing.md` for the full convention.
+
 ## Key Flags
 
 | Flag | Purpose |
