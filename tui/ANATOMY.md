@@ -8,6 +8,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 - **`main.go:28-975`** — single-file `package main`. The version stamp (`main.go:29`, set via `-ldflags`), welcome/help text, and interactive entry (`main.go:31-360`). After parsing subcommands, it runs global migrations, checks invariants (init.json all-or-nothing, exactly-one-orchestrator), handles upgrade prompts and first-run wizard routing, then launches Bubble Tea.
 - **`main.go:31-91`** — subcommand dispatch. Each subcommand returns early; the fallthrough path starts the interactive TUI.
+- **`upgrade.go`** — startup TUI binary upgrade flow: detects newer Homebrew releases, asks about other running TUI windows, puts affected agents to sleep, stops old TUI processes, runs `brew upgrade`, and asks the user to relaunch.
 - **`main.go:763-837`** — `cleanMain`: suspend agents in `.lingtai/` (10s timeout), then `os.RemoveAll`.
 - **`main.go:839-887`** — `postmanMain`: parse `--port`, collect watch directories, call `postman.Run`.
 - **`purge_unix.go:17-122`** — `purgeMain` (unix): `ps aux | grep "lingtai run"`, SIGTERM → SIGKILL survivors. Build tag `!windows`.
@@ -18,8 +19,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **`suspend_windows.go`** — `suspendMain` (windows): equivalent.
 - **`agent_count_unix.go:16-38`** — `countRunningAgents` (unix): lightweight `ps aux` scan used by `maybeShowAgentCount`. Build tag `!windows`.
 - **`agent_count_windows.go`** — `countRunningAgents` (windows): equivalent.
-- **`exec_unix.go:8-9`** — `syscallExec` (unix): wraps `syscall.Exec` for the self-restart-after-upgrade path. Build tag `!windows`.
-- **`exec_windows.go`** — `syscallExec` (windows): equivalent (process replacement differs on Windows).
+- **`tui_process_unix.go` / `tui_process_windows.go`** — platform helpers for detecting and stopping other running `lingtai-tui` binaries before an in-app Homebrew upgrade.
 - **`Makefile:1-23`** — build, dev (fast local), cross-compile (darwin/linux × arm64/amd64), clean. Version stamp via `-ldflags "-X main.version=$(VERSION)"` where `VERSION` is `git describe --tags --always`.
 - **`i18n/i18n.go:10`** — `//go:embed en.json zh.json wen.json`. The only embed target in the root `tui/` package; all other embeds are in `internal/preset/`.
 - **`tui/internal/`** — all substantive packages (tui screens, preset engine, migration system, filesystem readers, process launcher, headless JSON CLI surface, postman, timemachine, lock shims).
@@ -32,7 +32,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **Bootstrap sequence** (`main.go:277-295`): on every launch, the TUI runs `config.MigrateLegacyLanguage` → `config.NeedsVenv` (for setup banner) → `config.EnsureRuntime` (create/repair venv if needed, then always run the non-blocking `CheckUpgrade`) → `config.EnsureAddons` → `preset.Bootstrap` → `tui.ExportCommandsJSON`. `CheckUpgrade` auto-upgrades the `lingtai` meta-package from PyPI, which bundles `lingtai-kernel` + all addon MCPs. See `tui/internal/config/ANATOMY.md`.
 - **`lingtai-tui doctor` subcommand** (`main.go:911-964`): runs `config.RunDoctorUpdate` with both `ForceTUI=true` and `ForcePython=true`, then refreshes presets, utility skills, and `commands.json`. Designed to be usable when the TUI cannot start (broken venv, missing migrations) — it never touches `.lingtai/`. Exit nonzero only on unrecoverable failures.
 - **Version flow:** `Makefile:4` injects `git describe` into `main.go:29`. On startup, `main.go:131` calls `tui.SetTUIVersion(version)`, which stores it for `/doctor` drift detection.
-- **Upgrade self-restart:** `main.go:108` calls `syscallExec` (from platform-specific `exec_*.go`) to replace the running binary after a successful `brew upgrade`.
+- **TUI binary upgrade:** `main.go:100-107` delegates newer-release handling to `upgrade.go`, which detects other running TUI binaries before running Homebrew; with confirmation, it puts agents in their projects to sleep, stops those TUI processes, upgrades, then asks the user to relaunch.
 - **i18n loading:** `i18n/i18n.go` embeds the three locale JSONs; `main.go:249` sets the active locale from `tuiCfg.Language`.
 
 ## Composition
@@ -65,7 +65,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 - **Binary naming is `lingtai-tui`, never `lingtai`.** `lingtai` is the Python agent CLI inside the runtime venv.
 - **`main.go` is intentionally flat** — every subcommand's `*Main()` function is defined inline in `main.go` or platform-specific `*_unix.go`/`*_windows.go` files. Don't refactor subcommands into `internal/` packages; the flat `main.go` is the contract.
-- **Platform shims follow the `//go:build !windows` pattern.** Unix is the primary target; Windows files mirror the same function signatures. Every subcommand (`purge`, `list`, `suspend`) plus `countRunningAgents` and `syscallExec` have paired platform files.
-- **The 7-file platform split** covers: `purge`, `list`, `suspend`, `agent_count`, `exec`. The `timemachine` and `postman` subcommands live in `internal/` and share no platform-specific `main.go` surface.
+- **Platform shims follow the `//go:build !windows` pattern.** Unix is the primary target; Windows files mirror the same function signatures. Every subcommand (`purge`, `list`, `suspend`) plus `countRunningAgents` and TUI-process upgrade helpers have paired platform files.
+- **The platform split** covers: `purge`, `list`, `suspend`, `agent_count`, and `tui_process`. The `timemachine` and `postman` subcommands live in `internal/` and share no platform-specific `main.go` surface.
 - **Version stamping:** `Makefile:4` uses `git describe --tags --always`. Dev builds get `-X main.version=dev`. The upgrade check in `main.go:79-82` skips dev builds (those containing `-` in the version string).
 - **MCP packages are dependencies of `lingtai`.** The `lingtai` PyPI package bundles `lingtai-kernel` + all addon MCPs. `config.CheckUpgrade` on every launch upgrades everything. Users never install MCP packages individually.

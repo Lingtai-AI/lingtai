@@ -99,32 +99,8 @@ func main() {
 		latestVersion = config.CheckTUIUpgrade(version)
 	}
 	if latestVersion != "" {
-		fmt.Printf("lingtai-tui %s (latest: %s)\n", version, latestVersion)
-		fmt.Printf("  Upgrade now? [Y/n] ")
-		reader := bufio.NewReader(os.Stdin)
-		line, _ := reader.ReadString('\n')
-		answer := strings.TrimSpace(strings.ToLower(line))
-		if answer != "n" && answer != "no" {
-			fmt.Println("  Upgrading...")
-			cmd := exec.Command("brew", "upgrade", "lingtai-ai/lingtai/lingtai-tui")
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "  Upgrade failed: %v\n", err)
-			} else {
-				// Verify the upgrade actually changed the binary by re-checking
-				// the version. Brew returns exit 0 even for "already installed".
-				postUpgrade := config.CheckTUIUpgrade(version)
-				if postUpgrade != "" {
-					// Still outdated — brew formula not updated yet, don't loop
-					fmt.Println("  Brew formula not yet updated. Run manually later:")
-					fmt.Println("    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
-				} else {
-					fmt.Println("  Upgraded! Restarting...")
-					self, _ := os.Executable()
-					syscallExec(self, os.Args, os.Environ())
-				}
-			}
+		if handleTUIUpgrade(version, latestVersion) {
+			return
 		}
 	} else {
 		fmt.Println("lingtai-tui " + version)
