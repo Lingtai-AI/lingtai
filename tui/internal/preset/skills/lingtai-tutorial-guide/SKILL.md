@@ -224,3 +224,6 @@ Key concepts to teach:
 - Adapt to the human's pace.
 - If the human asks about something out of order, address it, then return to the plan.
 - **Never invite the human to manually edit files inside ~/.lingtai-tui/** except addon configs. All configuration changes go through the TUI.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

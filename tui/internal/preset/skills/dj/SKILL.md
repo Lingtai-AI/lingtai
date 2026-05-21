@@ -110,3 +110,6 @@ The user may request anything outside this palette — Ravel, Coltrane, City Pop
 - **No journal mutation.** You read journals; you do not edit them.
 - **No retries on long-running media calls.** Provider music endpoints can take 1–10 minutes — wait it out, do not retry.
 - **No fake tracks.** If no usable provider is configured, say so plainly. Silence beats deception.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

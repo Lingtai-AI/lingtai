@@ -94,3 +94,6 @@ If you have memory of an older version of this skill, these are the things that 
 - **Network exports are gone (v3.2).** Earlier versions of this skill described an `export-network` flow that shipped the live `.lingtai/` snapshot alongside the recipe. That flow has been retired — `/export` now means recipe-only. Recipes are the seed; the garden is grown fresh in each new project.
 
 Now go read the relevant sub-file.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

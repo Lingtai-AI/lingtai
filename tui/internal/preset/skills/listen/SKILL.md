@@ -118,3 +118,6 @@ You can write your own scripts using the same dependencies — `librosa` and `fa
 - Human asked you to *create* audio (music, speech, sound effect) — use `media-creation`.
 - Human asked you to *describe* a video or image — use `vision`.
 - You only need to play audio for the human — use `media-creation/talk` or the OS-native player.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

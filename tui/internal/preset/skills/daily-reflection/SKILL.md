@@ -512,3 +512,6 @@ Agents can customize this skill by adjusting thresholds:
 - **Issue filing:** Can be disabled entirely by skipping Step 7.
 - **Report location:** Default `reflections/`. Can be changed to any directory.
 - **Pad update:** Can be disabled if the agent manages its pad differently.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

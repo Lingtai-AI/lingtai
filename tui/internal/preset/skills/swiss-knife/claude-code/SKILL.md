@@ -183,3 +183,6 @@ claude -p "generate a patch for issue #42" \
 | Permission errors | Always include `--dangerously-skip-permissions` |
 | Output truncated | Check if Claude hit the budget limit |
 | Rate limited | Wait and retry; Max tier has generous limits |
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

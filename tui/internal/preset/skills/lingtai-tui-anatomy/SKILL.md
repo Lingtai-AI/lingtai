@@ -195,3 +195,6 @@ The TUI's `tui/internal/tui/` (~22k LOC, every Bubble Tea screen) is a known cas
 - **`lingtai-tui-anatomy` (this skill)** — the convention for the lingtai Go monorepo's anatomy tree. If your question is "what is the TUI doing, where does it live in the Go code, how does the portal share state with it," read this once to know the convention, then descend the lingtai repo's anatomy tree.
 
 The three skills are layered. The umbrella anatomy tells you about the world the user lives in. The kernel anatomy tells the agent about itself. This skill tells coding agents about the binary that wraps the agent.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

@@ -64,3 +64,6 @@ See [reference/local-models.md](reference/local-models.md) for model selection, 
 - Your LLM already has `vision` in its tool list — Path 1, no decision needed.
 - You need to *generate* an image — use `minimax-cli` (`mmx image …`).
 - You need to *describe video frames* — extract frames with `ffmpeg` first, then loop this skill over them.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

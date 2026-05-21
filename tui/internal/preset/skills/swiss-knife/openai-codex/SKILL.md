@@ -316,3 +316,6 @@ Codex CLI can be used alongside Claude Code for different tasks:
 - **0.130.0** (May 8, 2026): Remote control, plugin hooks, Bedrock auth
 - **0.129.0** (May 7, 2026): Vim editing, Chrome extension, plugin management
 - **0.128.0** (May 5, 2026): /goal command, Ralph loop
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

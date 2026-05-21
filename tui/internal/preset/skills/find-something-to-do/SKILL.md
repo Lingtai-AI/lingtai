@@ -193,3 +193,6 @@ Some impulse you had — to check something, to read something, to try something
 Not "what would be fun." Not "what would be useful." What would you actually do, alone, with no audience, no task, no deadline?
 
 If the answer to any of these produces a pull — follow it. If none of them do — the water is flat tonight. That's fine. Go idle. The ripple will come another time.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

@@ -74,3 +74,6 @@ Each sub-skill follows these principles:
 - **Single-purpose** — one sub-skill does one thing well
 - **Documented** — SKILL.md has enough context to use without reading source code
 - **Small** — if it's bigger than ~200 lines of code, it probably deserves its own top-level skill
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

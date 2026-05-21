@@ -141,3 +141,6 @@ Each card includes endpoint parameters, runnable code, response shape, rate limi
 - **arXiv enforces HTTPS** — HTTP requests are 301-redirected automatically.
 - **Library Genesis legality varies by jurisdiction** — use is the user's responsibility. Pass `--no-libgen` to opt out.
 - **Publisher-page extraction (Tier 5)** uses Playwright + pandoc; first invocation installs `zhiping0913/Download_paper` from git. Requires Chromium (`playwright install chromium`) and pandoc on `$PATH`. See [reference/publisher-page-extraction.md](reference/publisher-page-extraction.md).
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

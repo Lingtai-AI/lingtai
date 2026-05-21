@@ -171,3 +171,6 @@ For the full contributing guide (orchestrator/daemon discipline, portfolio sweep
 - **`mcp-manual`** — how MCP servers are registered and activated. Read this when working on addons.
 - **`lingtai-recipe`** — recipe authoring and network export. Read this when packaging or sharing methodologies.
 - **`tutorial-guide`** — the 12-lesson curriculum for end users. Not for developers.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

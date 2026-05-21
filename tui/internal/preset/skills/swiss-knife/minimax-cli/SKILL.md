@@ -125,3 +125,6 @@ Live docs (when `--help` isn't enough):
 | Anything else | `mmx doctor`, then the live docs |
 
 The MCP-server route (`minimax-mcp`, `minimax-coding-plan-mcp`) still exists and is owned by the `mcp-manual` skill (kernel `mcp` capability). Prefer the CLI here — it's first-party, simpler, and one binary covers everything.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

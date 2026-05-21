@@ -107,3 +107,6 @@ cp ~/.lingtai-tui/utilities/swiss-knife/html-report/assets/template.html \
 ```
 
 Then fill in the `<!-- TODO -->` markers and remove sections you do not need.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

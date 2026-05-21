@@ -163,3 +163,6 @@ This skill ages. The live docs are authoritative; if you find a discrepancy — 
 | `429 Rate limited` | Hit RPM/TPM limit | Live docs — current per-model RPM/TPM caps live in `static/docs/pricing.md` |
 | Vision tool 400s after model swap | Switched to a text-only model but kept `vision` capability | Remove `vision` from manifest, or switch model back to a multimodal-input one |
 | Anything else weird | The skill is stale, the docs moved, or MiMo changed behaviour | Fetch `llms.txt`, follow the trail; if the trail itself is broken, file via `lingtai-issue-report` |
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

@@ -151,3 +151,6 @@ Using the right specialized tool gives noticeably better output than `image_anal
 ## Self-Healing
 
 If the live docs contradict this skill, trust the docs and (if the human consents) update this file. The four MCP server URLs and the package name (`@z_ai/mcp-server`) are the highest-churn items — verify them against `docs.z.ai/llms.txt` first.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

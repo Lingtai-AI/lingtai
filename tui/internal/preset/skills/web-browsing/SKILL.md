@@ -467,3 +467,6 @@ For more than quick-reference snippets, load the appropriate reference file:
 ```
 
 The compact decision tree near the top is the rule list; this flowchart shows the order of decisions and what each "no" branch does. Read `scripts/extract_page.py::auto_tier()` for the same logic in code (source of truth when this manual drifts).
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

@@ -51,3 +51,6 @@ Avatar network unstable?→ network-governance.md → Health monitoring + CPR pr
 ## Out of Scope
 
 - **lingtai-agora** (network publishing/packaging tool) — its purpose is "publishing," not "debugging," and it remains in the original project. To publish a network, use the lingtai-agora skill directly.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

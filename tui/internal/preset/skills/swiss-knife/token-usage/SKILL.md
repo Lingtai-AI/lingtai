@@ -92,3 +92,6 @@ Each agent's `logs/token_ledger.jsonl` has one JSON object per LLM call:
 - Cache hit rate is the key efficiency metric — aim for >90%
 - Daemon tokens are tracked in `daemons/<run_id>/logs/token_ledger.jsonl`
 - For per-session breakdown, use `--since` to filter by date
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

@@ -123,3 +123,6 @@ Note: if an agent has a state in `.agent.json` but its heartbeat is stale (> 3s 
 ## Recording
 
 The portal starts recording immediately on launch. A background goroutine calls `BuildNetwork()` every 3 seconds and appends the result as a JSONL line to `topology.jsonl`. This tape grows indefinitely. On startup, if the tape needs reconstruction (missing, empty, or old format), the portal rebuilds it from replay chunks.
+
+---
+> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.
