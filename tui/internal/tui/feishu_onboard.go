@@ -34,6 +34,8 @@ const (
 	requestTimeout     = 10 * time.Second
 )
 
+var httpClient = &http.Client{Timeout: requestTimeout}
+
 func accountsHost(domain string) string {
 	if domain == "lark" {
 		return larkAccountsHost
