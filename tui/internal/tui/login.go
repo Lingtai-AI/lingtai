@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,6 +63,16 @@ type LoginModel struct {
 	reenteringKey bool
 	keyInput      textarea.Model
 	codexLogging  bool
+	// codexCancel cancels an in-flight startOAuthFlow goroutine. Set
+	// when codexLogging flips to true on Enter; cleared in
+	// CodexOAuthDoneMsg or by an explicit Del cancel.
+	codexCancel context.CancelFunc
+	// codexLoginEpoch / deleteArmedIdx: same mechanics as in
+	// FirstRunModel — epoch drops stale OAuth callbacks after cancel,
+	// and the armed-index gates two-press Del so a stray keypress
+	// can't wipe a credential. deleteArmedIdx == -1 means no arm.
+	codexLoginEpoch uint64
+	deleteArmedIdx  int
 }
 
 // ---------------------------------------------------------------------------
@@ -87,8 +99,9 @@ func providerBaseURL(provider string) string {
 // and globally saved credentials.
 func NewLoginModel(orchDir, globalDir string) LoginModel {
 	m := LoginModel{
-		orchDir:   orchDir,
-		globalDir: globalDir,
+		orchDir:        orchDir,
+		globalDir:      globalDir,
+		deleteArmedIdx: -1,
 	}
 
 	// 1. Read orchestrator's active provider/model.
@@ -219,9 +232,18 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 
 	case CodexOAuthDoneMsg:
+		// Drop late callbacks from a cancelled session.
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
 		m.codexLogging = false
+		m.codexCancel = nil
 		if msg.Err != nil {
-			m.message = "OAuth error: " + msg.Err.Error()
+			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+				m.message = i18n.T("login.codex_cancelled")
+			} else {
+				m.message = "OAuth error: " + msg.Err.Error()
+			}
 			return m, nil
 		}
 		if msg.Tokens == nil {
@@ -295,8 +317,26 @@ func (m *LoginModel) entryByProvider(provider string) *loginEntry {
 }
 
 func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
-	switch msg.String() {
+	// Any key other than a second Del disarms the two-press logout
+	// confirm. Backspace and "delete" both arm/confirm; everything else
+	// clears the arm. Up/Down still need to clear so cursor movement
+	// invalidates a stale arm.
+	key := msg.String()
+	if m.deleteArmedIdx != -1 && key != "delete" && key != "backspace" {
+		m.deleteArmedIdx = -1
+		m.message = ""
+	}
+
+	switch key {
 	case "esc":
+		// Leaving /login mid-OAuth would otherwise leave the goroutine
+		// running and the local listener bound; cancel cleanly.
+		if m.codexLogging && m.codexCancel != nil {
+			m.codexCancel()
+			m.codexCancel = nil
+			m.codexLoginEpoch++
+			m.codexLogging = false
+		}
 		return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 	case "up", "k":
 		if m.cursor > 0 {
@@ -311,7 +351,11 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			entry := m.entries[m.cursor]
 			if entry.IsOAuth {
 				m.codexLogging = true
-				ch := startOAuthFlow()
+				m.codexLoginEpoch++
+				epoch := m.codexLoginEpoch
+				ctx, cancel := context.WithCancel(context.Background())
+				m.codexCancel = cancel
+				ch := startOAuthFlow(ctx, epoch)
 				return m, func() tea.Msg {
 					return <-ch
 				}
@@ -322,6 +366,61 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.keyInput.Focus()
 			return m, nil
 		}
+	case "delete", "backspace", "r":
+		// Remove credential. For an in-flight OAuth, Del cancels the
+		// flow (matching the firstrun behavior). For a stored entry,
+		// two presses are required to confirm. `r` is also bound here
+		// so the long-standing codex.oauth_logout_hint ("[r] logout")
+		// i18n string is no longer vestigial.
+		if m.codexLogging && m.codexCancel != nil {
+			m.codexCancel()
+			m.codexCancel = nil
+			m.codexLoginEpoch++
+			m.codexLogging = false
+			m.message = i18n.T("login.codex_cancelled")
+			return m, nil
+		}
+		if m.cursor < 0 || m.cursor >= len(m.entries) {
+			return m, nil
+		}
+		if m.deleteArmedIdx != m.cursor {
+			m.deleteArmedIdx = m.cursor
+			m.message = i18n.T("login.delete_confirm")
+			return m, nil
+		}
+		// Second press — actually delete.
+		m.deleteArmedIdx = -1
+		entry := m.entries[m.cursor]
+		if entry.IsOAuth {
+			authPath := filepath.Join(m.globalDir, "codex-auth.json")
+			if err := os.Remove(authPath); err != nil && !os.IsNotExist(err) {
+				m.message = "failed to remove credential: " + err.Error()
+				return m, nil
+			}
+		} else {
+			cfg, err := config.LoadConfig(m.globalDir)
+			if err != nil {
+				m.message = "failed to load config: " + err.Error()
+				return m, nil
+			}
+			if cfg.Keys != nil {
+				delete(cfg.Keys, entry.Provider)
+			}
+			if err := config.SaveConfig(m.globalDir, cfg); err != nil {
+				m.message = "failed to save config: " + err.Error()
+				return m, nil
+			}
+		}
+		// Remove from the in-memory slice and clamp cursor.
+		m.entries = append(m.entries[:m.cursor], m.entries[m.cursor+1:]...)
+		if m.cursor >= len(m.entries) {
+			m.cursor = len(m.entries) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.message = i18n.T("login.deleted")
+		return m, nil
 	}
 	return m, nil
 }
@@ -469,7 +568,7 @@ func (m LoginModel) View() string {
 
 	// Bottom hints.
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render("  [Enter] re-authenticate  [Esc] back") + "\n")
+	b.WriteString(StyleFaint.Render("  [Enter] re-authenticate  [Del] "+i18n.T("login.remove_hint")+"  [Esc] back") + "\n")
 
 	return b.String()
 }

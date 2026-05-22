@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -210,6 +212,24 @@ type FirstRunModel struct {
 	// gate avoids accidentally launching a browser just because the user
 	// pressed Enter while parked on the credential row.
 	codexReloginArmed bool
+	// codexLogoutArmed: true after the first Del/Backspace on an
+	// already-authed Codex 凭据 row. A second Del deletes
+	// codex-auth.json; any other key disarms. Mirrors the
+	// codexReloginArmed pattern so an accidental Del can't nuke the
+	// stored credential.
+	codexLogoutArmed bool
+	// codexCancel cancels an in-flight startOAuthFlow goroutine. Set
+	// when codexLoggingIn flips to true; cleared in the
+	// CodexOAuthDoneMsg handler. Press Del/Backspace while
+	// codexLoggingIn to invoke it (the goroutine then returns with
+	// ErrCodexAuthCancelled within ~100ms).
+	codexCancel context.CancelFunc
+	// codexLoginEpoch increments every time a fresh OAuth attempt
+	// begins. The goroutine echoes this epoch on its CodexOAuthDoneMsg;
+	// the handler drops messages whose epoch is stale (i.e. a late
+	// callback from a previous, cancelled flow). Closes the
+	// token-write race noted in G-7 of the review.
+	codexLoginEpoch uint64
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
@@ -745,9 +765,24 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		return m, nil
 
 	case CodexOAuthDoneMsg:
+		// Drop late callbacks from a cancelled session: codexLoginEpoch
+		// is bumped on each start AND on cancel, so a stale Epoch means
+		// the user has already moved on. Writing those tokens would
+		// overwrite codex-auth.json behind the user's back (G-7).
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
 		m.codexLoggingIn = false
+		m.codexCancel = nil
 		if msg.Err != nil {
-			m.message = fmt.Sprintf("Login failed: %v", msg.Err)
+			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+				m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
+			} else {
+				m.message = fmt.Sprintf("Login failed: %v", msg.Err)
+			}
+			return m, nil
+		}
+		if msg.Tokens == nil {
 			return m, nil
 		}
 		authPath := filepath.Join(m.globalDir, "codex-auth.json")
@@ -967,6 +1002,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.codexReloginArmed = false
 				m.message = ""
 			}
+			// Same arm/disarm rule for the Del-logout two-press gate.
+			// The disarmer below ignores delete/backspace (the second
+			// press is what actually triggers logout) and ignores
+			// "enter" too so the re-login confirm message doesn't
+			// clobber the logout one — the two arms are mutually
+			// exclusive because one requires codexAuth.valid and the
+			// other requires codexLoggingIn or codexAuth.valid; they
+			// never share Enter-vs-Del action.
+			if m.codexLogoutArmed {
+				switch msg.String() {
+				case "delete", "backspace":
+					// keep armed; second press will logout
+				default:
+					m.codexLogoutArmed = false
+					m.message = ""
+				}
+			}
 			switch msg.String() {
 			case "up":
 				if m.cursor > presetMinIdx {
@@ -1019,9 +1071,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						return m, nil
 					}
 					m.codexReloginArmed = false
+					m.codexLogoutArmed = false
 					m.codexLoggingIn = true
 					m.message = ""
-					oauthCh := startOAuthFlow()
+					m.codexLoginEpoch++
+					epoch := m.codexLoginEpoch
+					ctx, cancel := context.WithCancel(context.Background())
+					m.codexCancel = cancel
+					oauthCh := startOAuthFlow(ctx, epoch)
 					return m, func() tea.Msg { return <-oauthCh }
 				}
 				// Setup mode's synthetic "keep current" row is already the
@@ -1069,6 +1126,42 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 				)
 			case "backspace", "delete":
+				// Codex 凭据 row: Del cancels an in-flight login or
+				// (two-press) deletes the stored credential. Saved
+				// preset rows continue to use Del-to-delete with no
+				// confirmation gate (matches the existing behavior for
+				// non-codex presets).
+				if m.cursor == pickCodexAuthIdx {
+					switch {
+					case m.codexLoggingIn:
+						// Cancel the OAuth goroutine. The handler bumps
+						// the epoch so any late callback (e.g. browser
+						// already returned a code) is dropped.
+						if m.codexCancel != nil {
+							m.codexCancel()
+							m.codexCancel = nil
+						}
+						m.codexLoginEpoch++
+						m.codexLoggingIn = false
+						m.codexLogoutArmed = false
+						m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
+						return m, nil
+					case m.codexAuth.valid && !m.codexLogoutArmed:
+						m.codexLogoutArmed = true
+						m.codexReloginArmed = false
+						m.message = i18n.T("firstrun.preset_pick.codex_logout_confirm")
+						return m, nil
+					case m.codexAuth.valid && m.codexLogoutArmed:
+						m.codexLogoutArmed = false
+						authPath := filepath.Join(m.globalDir, "codex-auth.json")
+						_ = os.Remove(authPath)
+						m.refreshCodexAuth()
+						m.message = i18n.T("firstrun.preset_pick.codex_logged_out")
+						return m, nil
+					}
+					// Not authed and not logging in — nothing to do.
+					return m, nil
+				}
 				// Delete a saved (non-template) preset. Use IsTemplate(p)
 				// — robust against a saved preset whose name happens to
 				// match a template (e.g. saved/codex.json shadowing
@@ -1088,6 +1181,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				return m, nil
 			case "esc":
+				// Leaving the picker mid-OAuth would otherwise leave
+				// the goroutine running with the listener bound; cancel
+				// it so the port releases and the late callback is
+				// dropped (epoch bump).
+				if m.codexLoggingIn && m.codexCancel != nil {
+					m.codexCancel()
+					m.codexCancel = nil
+					m.codexLoginEpoch++
+					m.codexLoggingIn = false
+				}
 				if m.setupMode {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 				}
@@ -2139,9 +2242,17 @@ func (m FirstRunModel) View() string {
 		b.WriteString(renderWizardFooter(pickFocused, true, true))
 
 		b.WriteString("\n" + StyleFaint.Render("  "+i18n.T("firstrun.select_hint")) + "\n")
-		// Show delete hint when cursor is on a saved (non-template) preset.
-		if cur, ok := m.presetAtVisibleIdx(m.cursor); ok && !preset.IsTemplate(cur) {
-			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("preset.delete")) + "\n")
+		// Codex 凭据 row exposes context-specific Del verbs; saved
+		// (non-template) presets keep the original "delete preset" hint.
+		switch {
+		case m.cursor == visibleCount && m.codexLoggingIn:
+			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("firstrun.preset_pick.codex_cancel_login")) + "\n")
+		case m.cursor == visibleCount && m.codexAuth.valid:
+			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("firstrun.preset_pick.codex_logout")) + "\n")
+		default:
+			if cur, ok := m.presetAtVisibleIdx(m.cursor); ok && !preset.IsTemplate(cur) {
+				b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("preset.delete")) + "\n")
+			}
 		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 

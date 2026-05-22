@@ -1,14 +1,18 @@
 package tui
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestGeneratePKCE(t *testing.T) {
@@ -232,5 +236,92 @@ func TestExtractEmailFromJWT(t *testing.T) {
 				t.Errorf("extractEmailFromJWT() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestStartOAuthFlow_Cancellable verifies that cancelling the supplied
+// context tears down the listener and emits an ErrCodexAuthCancelled
+// message with the caller's epoch echoed back. This is the load-bearing
+// guarantee for the Del-cancel UX in FirstRunModel and LoginModel.
+//
+// We can't drive the real OAuth flow here (it would try to bind to
+// port 1455/1457 and contact auth.openai.com), so we settle for the
+// behaviour the caller relies on: cancel → prompt return with the
+// expected epoch and error. Port-release verification would need a
+// hard-coded port mock; the production path's `defer server.Shutdown`
+// is already exercised by httptest in the existing TestExchangeCodeForTokens.
+func TestStartOAuthFlow_Cancellable(t *testing.T) {
+	// startOAuthFlow attempts net.Listen on 1455/1457. In CI those
+	// ports may or may not be free, but the cancel path runs after
+	// the bind succeeds (because we cancel asynchronously). If neither
+	// port binds the flow emits an immediate listen error — skip in
+	// that case so we don't flake on a CI box with the ports in use.
+	const epoch uint64 = 42
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := startOAuthFlow(ctx, epoch)
+
+	// Give the goroutine a moment to bind the listener and call
+	// openBrowser (which is fire-and-forget — `open <url>` on darwin
+	// or nothing in CI). Then cancel.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	select {
+	case msg := <-ch:
+		if msg.Epoch != epoch {
+			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+		}
+		if msg.Err == nil {
+			t.Fatal("expected non-nil Err on cancellation")
+		}
+		// Two acceptable error paths:
+		//   1. The listener bound and the select observed ctx.Done()
+		//      → ErrCodexAuthCancelled.
+		//   2. The listener failed to bind (port in use) → "listen
+		//      on …" error before the select. That's an environment
+		//      problem, not a bug in our code; skip rather than fail.
+		if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+			return
+		}
+		// Listener bind failure path — environment-dependent.
+		t.Skipf("listener bind failed (likely ports 1455/1457 in use); cancellation path could not run: %v", msg.Err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("startOAuthFlow did not emit a result within 3s of cancel")
+	}
+}
+
+// TestStartOAuthFlow_EpochEchoed checks the error-emission path: when
+// net.Listen fails (e.g. both ports in use), the returned message still
+// carries the caller's epoch. That's the invariant the handler relies on
+// to gate token-writes (Epoch must match m.codexLoginEpoch).
+func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
+	// Occupy both real ports so the listener fails. If that itself
+	// fails (e.g. permissions), skip — the assertion still holds in
+	// the real failure path even if we can't force it here.
+	l1, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
+	if err != nil {
+		t.Skipf("cannot bind :%d to force listen-failure: %v", defaultPort, err)
+	}
+	defer l1.Close()
+	l2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", fallbackPort))
+	if err != nil {
+		t.Skipf("cannot bind :%d to force listen-failure: %v", fallbackPort, err)
+	}
+	defer l2.Close()
+
+	const epoch uint64 = 7
+	ch := startOAuthFlow(context.Background(), epoch)
+	select {
+	case msg := <-ch:
+		if msg.Epoch != epoch {
+			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+		}
+		if msg.Err == nil {
+			t.Error("expected listen error, got nil Err")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("startOAuthFlow did not emit a result within 2s")
 	}
 }

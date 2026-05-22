@@ -23,6 +23,12 @@ import (
 // 5xx, timeout) which leave the local tokens untouched.
 var ErrCodexAuthRevoked = errors.New("codex refresh token rejected — re-authenticate")
 
+// ErrCodexAuthCancelled is delivered in CodexOAuthDoneMsg.Err when the
+// caller cancels the OAuth flow via the supplied context (user pressed
+// Del/Backspace on the Codex 凭据 row, or navigated away). Handlers use
+// this to distinguish a user-initiated abort from a real failure.
+var ErrCodexAuthCancelled = errors.New("codex oauth cancelled")
+
 const (
 	codexClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	codexAuthURL  = "https://auth.openai.com/oauth/authorize"
@@ -57,9 +63,14 @@ type CodexTokens struct {
 }
 
 // CodexOAuthDoneMsg is the Bubble Tea message emitted when OAuth completes.
+// Epoch carries the caller-assigned session id passed to startOAuthFlow so
+// handlers can drop late callbacks from a cancelled flow (the model bumps
+// its epoch on cancel; tokens from a stale epoch must not overwrite
+// codex-auth.json).
 type CodexOAuthDoneMsg struct {
 	Tokens *CodexTokens
 	Err    error
+	Epoch  uint64
 }
 
 // generatePKCE creates a PKCE verifier and challenge pair.
@@ -90,11 +101,25 @@ func generateState() string {
 // startOAuthFlow initiates the Codex OAuth PKCE flow.
 // It starts a local HTTP server, opens the browser, waits for the callback,
 // exchanges the code for tokens, and returns the result on the channel.
-func startOAuthFlow() <-chan CodexOAuthDoneMsg {
+//
+// The flow honours ctx — cancellation tears down the listener and emits
+// CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled, Epoch: epoch} promptly so
+// the caller can stop showing the "logging in" state. epoch is echoed
+// back on the message so a handler can ignore late callbacks from a
+// cancelled session (see FirstRunModel.codexLoginEpoch).
+func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg {
 	ch := make(chan CodexOAuthDoneMsg, 1)
 
 	go func() {
 		defer close(ch)
+
+		// emit sends a result tagged with this session's epoch. The
+		// outer channel has capacity 1; emit is only called once per
+		// goroutine, on each return path.
+		emit := func(msg CodexOAuthDoneMsg) {
+			msg.Epoch = epoch
+			ch <- msg
+		}
 
 		verifier, challenge := generatePKCE()
 		state := generateState()
@@ -106,7 +131,7 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 		if err != nil {
 			listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", fallbackPort))
 			if err != nil {
-				ch <- CodexOAuthDoneMsg{Err: fmt.Errorf("listen on :%d or :%d: %w", defaultPort, fallbackPort, err)}
+				emit(CodexOAuthDoneMsg{Err: fmt.Errorf("listen on :%d or :%d: %w", defaultPort, fallbackPort, err)})
 				return
 			}
 		}
@@ -168,18 +193,20 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 			}
 		}()
 
-		// Always shut down the server when done.
+		// Always shut down the server when done. The 2s grace lets any
+		// in-flight callback finish its response; on cancel the parent
+		// ctx is already Done, so we use a fresh background ctx here.
 		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			_ = server.Shutdown(ctx)
+			_ = server.Shutdown(shutdownCtx)
 		}()
 
 		authURL := buildAuthorizeURL(redirectURI, challenge, state)
 
 		openBrowser(authURL)
 
-		// Wait for code, error, or timeout.
+		// Wait for code, error, timeout, or cancellation.
 		timer := time.NewTimer(oauthTimeout)
 		defer timer.Stop()
 
@@ -188,21 +215,32 @@ func startOAuthFlow() <-chan CodexOAuthDoneMsg {
 		case code = <-codeCh:
 			// got authorization code
 		case e := <-errCh:
-			ch <- CodexOAuthDoneMsg{Err: e}
+			emit(CodexOAuthDoneMsg{Err: e})
 			return
 		case <-timer.C:
-			ch <- CodexOAuthDoneMsg{Err: fmt.Errorf("oauth timed out after %s", oauthTimeout)}
+			emit(CodexOAuthDoneMsg{Err: fmt.Errorf("oauth timed out after %s", oauthTimeout)})
+			return
+		case <-ctx.Done():
+			emit(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
 			return
 		}
 
-		// Exchange code for tokens.
+		// Exchange code for tokens. Also honour cancellation here —
+		// the user may Del between the browser callback and the token
+		// POST (network slow, user changed their mind).
+		select {
+		case <-ctx.Done():
+			emit(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
+			return
+		default:
+		}
 		tokens, err := exchangeCodeForTokens(codexTokenURL, code, verifier, redirectURI)
 		if err != nil {
-			ch <- CodexOAuthDoneMsg{Err: fmt.Errorf("token exchange: %w", err)}
+			emit(CodexOAuthDoneMsg{Err: fmt.Errorf("token exchange: %w", err)})
 			return
 		}
 
-		ch <- CodexOAuthDoneMsg{Tokens: tokens}
+		emit(CodexOAuthDoneMsg{Tokens: tokens})
 	}()
 
 	return ch
