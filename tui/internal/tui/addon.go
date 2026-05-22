@@ -15,13 +15,15 @@ import (
 // AddonSavedMsg is sent when addon view is dismissed.
 type AddonSavedMsg struct{}
 
-// AddonModel is the /addon view — read-only display of configured addons.
+// AddonModel is the /addon view — displays configured addons and allows
+// interactive setup for unconfigured addons that support onboarding flows.
 // Reads from {lingtaiDir}/.addons/{addon}/config.json, a project-level
 // shared location (one config file per addon, multi-account via accounts array).
 type AddonModel struct {
 	lingtaiDir string // <project>/.lingtai/ directory
 	width      int
 	height     int
+	cursor     int // currently selected addon index
 	// addonConfigs maps addon name → JSON file content (or "" if missing/unreadable)
 	addonConfigs map[string]string
 	// addonErrors maps addon name → error message (e.g. "not found", "parse error")
@@ -49,8 +51,35 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case FeishuOnboardDoneMsg:
+		// Refresh configs after onboarding completes
+		configs, errs := readAddonConfigs(m.lingtaiDir)
+		m.addonConfigs = configs
+		m.addonErrors = errs
+		return m, nil
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "down":
+			if m.cursor < len(AllAddons)-1 {
+				m.cursor++
+			}
+			return m, nil
+		case "enter":
+			// Only feishu supports onboard for now; only fire if unconfigured.
+			name := AllAddons[m.cursor]
+			if name == "feishu" {
+				_, configured := m.addonConfigs[name]
+				if !configured {
+					return m, func() tea.Msg { return ViewChangeMsg{View: "feishu_onboard"} }
+				}
+			}
+			return m, nil
 		case "esc":
 			return m, func() tea.Msg { return AddonSavedMsg{} }
 		}
@@ -77,10 +106,18 @@ func (m AddonModel) View() string {
 	b.WriteString(StyleSubtle.Render("  "+i18n.T("addon.readonly_desc")) + "\n\n")
 
 	// Addon list
-	for _, name := range AllAddons {
+	for i, name := range AllAddons {
 		label := strings.ToUpper(name[:1]) + name[1:]
 		configPath := addonConfigRelPath(name)
-		b.WriteString("  " + StyleTitle.Render(label) + StyleFaint.Render("  "+configPath) + "\n")
+
+		// Cursor highlight
+		cursor := "  "
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+		if i == m.cursor {
+			cursor = "> "
+			nameStyle = nameStyle.Foreground(ColorAccent)
+		}
+		b.WriteString(cursor + nameStyle.Render(label) + StyleFaint.Render("  "+configPath) + "\n")
 
 		if errMsg, bad := m.addonErrors[name]; bad {
 			b.WriteString("    " + StyleFaint.Render(errMsg) + "\n\n")
@@ -89,7 +126,11 @@ func (m AddonModel) View() string {
 
 		content, ok := m.addonConfigs[name]
 		if !ok || content == "" {
-			b.WriteString("    " + StyleFaint.Render(i18n.T("addon.not_configured")) + "\n\n")
+			hint := i18n.T("addon.not_configured")
+			if name == "feishu" && i == m.cursor {
+				hint += "  — " + i18n.T("addon.configure_hint")
+			}
+			b.WriteString("    " + StyleFaint.Render(hint) + "\n")
 			continue
 		}
 
