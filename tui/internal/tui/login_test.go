@@ -65,6 +65,38 @@ func TestLoginModel_DelTwoPressDeletesCodex(t *testing.T) {
 	}
 }
 
+// TestLoginModel_RTwoPressDeletesCodex verifies the legacy [r] logout
+// shortcut follows the same two-press confirmation path as Del/Backspace.
+func TestLoginModel_RTwoPressDeletesCodex(t *testing.T) {
+	dir := t.TempDir()
+	authPath := seedLoginCodexAuth(t, dir)
+
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 1 || m.entries[0].Provider != "codex" {
+		t.Fatalf("expected single codex entry; got %#v", m.entries)
+	}
+
+	r := tea.KeyPressMsg{Text: "r", Code: 'r'}
+	m, _ = m.Update(r)
+	if m.deleteArmedIdx != 0 {
+		t.Errorf("first r should arm deleteArmedIdx=0; got %d", m.deleteArmedIdx)
+	}
+	if _, err := os.Stat(authPath); err != nil {
+		t.Errorf("first r must not delete the file: %v", err)
+	}
+
+	m, _ = m.Update(r)
+	if m.deleteArmedIdx != -1 {
+		t.Errorf("deleteArmedIdx should reset to -1 after delete; got %d", m.deleteArmedIdx)
+	}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Errorf("codex-auth.json should be removed by r shortcut; stat err: %v", err)
+	}
+	if len(m.entries) != 0 {
+		t.Errorf("entry should be dropped; entries=%#v", m.entries)
+	}
+}
+
 // TestLoginModel_DelDisarmedByMovement: pressing arrow keys after a
 // first Del must disarm the confirmation so a later Del on a different
 // row doesn't accidentally fire the previous arm.

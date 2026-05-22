@@ -35,7 +35,7 @@ const (
 
 type loginEntry struct {
 	Provider string
-	Display  string      // masked key or "OAuth — email"
+	Display  string // masked key or "OAuth — email"
 	Status   loginStatus
 	Detail   string // error detail
 	IsOAuth  bool
@@ -317,12 +317,12 @@ func (m *LoginModel) entryByProvider(provider string) *loginEntry {
 }
 
 func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
-	// Any key other than a second Del disarms the two-press logout
-	// confirm. Backspace and "delete" both arm/confirm; everything else
-	// clears the arm. Up/Down still need to clear so cursor movement
-	// invalidates a stale arm.
+	// Any key other than a second logout/delete trigger disarms the
+	// two-press confirmation. Backspace, "delete", and "r" all
+	// arm/confirm; everything else clears the arm. Up/Down still need
+	// to clear so cursor movement invalidates a stale arm.
 	key := msg.String()
-	if m.deleteArmedIdx != -1 && key != "delete" && key != "backspace" {
+	if m.deleteArmedIdx != -1 && key != "delete" && key != "backspace" && key != "r" {
 		m.deleteArmedIdx = -1
 		m.message = ""
 	}
