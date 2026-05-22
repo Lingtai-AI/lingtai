@@ -140,7 +140,7 @@ func TestSaveConfig(t *testing.T) {
 // postJSON and getJSON directly, then test the call* functions by
 // verifying they parse responses correctly from a known byte stream.
 
-func TestPostRegistrationJSON(t *testing.T) {
+func TestPostJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s", r.Method)

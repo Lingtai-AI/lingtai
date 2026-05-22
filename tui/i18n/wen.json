@@ -6,7 +6,7 @@
   "feishu.onboard.connecting": "欲通飛書/Lark...",
   "feishu.onboard.connected_as": "通矣 — %s",
   "feishu.onboard.connected_as_refresh": "通矣 — %s，/refresh 以行之",
-  "feishu.onboard.config_saved": "冊已存 — /refresh 以行之"
+  "feishu.onboard.config_saved": "冊已存 — /refresh 以行之",
   "feishu.onboard.done_hint": "行 /refresh 或啟器靈使之生效",
   "feishu.onboard.retry_hint": "[enter] 復試",
   "feishu.onboard.remaining_m": "(餘 %dm %ds)",

@@ -127,7 +127,8 @@ type FeishuOnboardModel struct {
 	appSecret      string
 	botName       string
 	pollDeadline  time.Time
-	cancelFunc context.CancelFunc
+	ctx         context.Context
+	cancelFunc  context.CancelFunc
 
 	lingtaiDir string // <project>/.lingtai/
 	width      int
@@ -190,9 +191,9 @@ func (m FeishuOnboardModel) runPoll() tea.Cmd {
 	expireIn := m.expireIn
 	domain := m.domain
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelFunc = cancel
-		defer cancel()
+		if m.ctx == nil {
+			return feishuPollDoneMsg{Err: fmt.Errorf("feishu: no poll context")}
+		}
 		if interval <= 0 {
 			interval = 5
 		}
@@ -205,7 +206,7 @@ func (m FeishuOnboardModel) runPoll() tea.Cmd {
 
 		for time.Now().Before(deadline) {
 			select {
-			case <-ctx.Done():
+			case <-m.ctx.Done():
 				return feishuPollDoneMsg{Err: fmt.Errorf("feishu: onboarding cancelled")}
 			default:
 			}
@@ -482,6 +483,7 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 		return m, nil
 
 	case feishuQRReadyMsg:
+		m.ctx, m.cancelFunc = context.WithCancel(context.Background())
 		m.url = msg.URL
 		m.deviceCode = msg.DeviceCode
 		m.interval = msg.Interval
