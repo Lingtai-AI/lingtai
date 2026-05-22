@@ -78,6 +78,9 @@ const (
 	feishuStepError                            // error state
 )
 
+// feishuRemainingTickMsg triggers a View refresh so the countdown updates.
+type feishuRemainingTickMsg struct{}
+
 // FeishuOnboardDoneMsg is emitted when the onboard flow completes (success or error).
 // Handled by App.Update and forwarded to AddonModel for state refresh.
 type FeishuOnboardDoneMsg struct {
@@ -118,9 +121,10 @@ type FeishuOnboardModel struct {
 	expireIn   int
 	domain     string // "feishu" or "lark"
 	message    string // status / error text
-	appID      string
-	appSecret   string
-	botName    string
+	appID         string
+	appSecret      string
+	botName       string
+	pollDeadline  time.Time
 
 	lingtaiDir string // <project>/.lingtai/
 	width      int
@@ -479,9 +483,23 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 		}
 		m.domain = msg.Domain
 		m.qrData = renderQR(msg.URL)
-		m.step = feishuStepQR
+		m.step = feishuStepPolling
+		m.pollDeadline = time.Now().Add(time.Duration(m.expireIn) * time.Second)
 		m.message = ""
-		return m, m.runPoll()
+		return m, tea.Batch(
+			m.runPoll(),
+			tea.Tick(time.Second, func(t time.Time) tea.Msg {
+				return feishuRemainingTickMsg{}
+			}),
+		)
+
+	case feishuRemainingTickMsg:
+		if m.step != feishuStepPolling {
+			return m, nil
+		}
+		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return feishuRemainingTickMsg{}
+		})
 
 	case feishuPollDoneMsg:
 		if msg.Err != nil {
@@ -558,6 +576,19 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 	return m, nil
 }
 
+
+// fmtDuration formats a time.Duration as a human-readable countdown.
+func fmtDuration(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	if m > 0 {
+		return fmt.Sprintf("(%dm %ds remaining)", m, s)
+	}
+	return fmt.Sprintf("(%ds remaining)", s)
+}
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -598,8 +629,15 @@ func (m FeishuOnboardModel) View() string {
 		urlStyle := lipgloss.NewStyle().Foreground(ColorAccent).Underline(true)
 		b.WriteString(urlStyle.Render("  " + m.url) + "\n\n")
 
-		// Status
-		b.WriteString("  " + StyleSubtle.Render(i18n.T("feishu.onboard.scanning")) + "\n")
+		// Status with countdown
+		scanning := i18n.T("feishu.onboard.scanning")
+		if !m.pollDeadline.IsZero() {
+			remaining := time.Until(m.pollDeadline)
+			if remaining > 0 {
+				scanning += "  " + fmtDuration(remaining)
+			}
+		}
+		b.WriteString("  " + StyleSubtle.Render(scanning) + "\n")
 
 	case feishuStepDone:
 		b.WriteString("  " + StyleAccent.Render(m.message) + "\n")
