@@ -567,8 +567,8 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
-			if m.step == feishuStepDone || m.step == feishuStepError {
-				return m, func() tea.Msg { return ViewChangeMsg{View: "addon"} }
+			if m.cancelFunc != nil {
+				m.cancelFunc()
 			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "addon"} }
 		case "enter":
