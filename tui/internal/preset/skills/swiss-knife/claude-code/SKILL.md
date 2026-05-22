@@ -24,10 +24,18 @@ Delegate code work to [Claude Code](https://docs.anthropic.com/en/docs/claude-co
 ## Quick Usage
 
 ```bash
-claude -p "your prompt here" --dangerously-skip-permissions
+env \
+  -u ANTHROPIC_API_KEY \
+  -u ANTHROPIC_AUTH_TOKEN \
+  -u ANTHROPIC_BASE_URL \
+  -u ANTHROPIC_MODEL \
+  -u ANTHROPIC_SMALL_FAST_MODEL \
+  claude -p "your prompt here" --dangerously-skip-permissions
 ```
 
 This runs Claude Code in non-interactive mode (`-p` = print and exit), skipping permission checks for automation.
+
+> **Why the `env -u …` prefix?** If `ANTHROPIC_API_KEY` (or related `ANTHROPIC_*` variables) is set in the agent environment, the `claude` CLI **prefers the API-key billing path over the Claude Max subscription/OAuth token** — even when `CLAUDE_CODE_OAUTH_TOKEN` is also present. That path can fail with `Credit balance is too low` and bills the API key instead of using the subscription. Unsetting the variables for the child process forces Claude Code onto the OAuth/subscription path. If you've confirmed your environment has no `ANTHROPIC_*` overrides, you can drop the `env -u …` prefix; when in doubt, keep it. **Never echo the variable values while diagnosing — they are secrets.**
 
 ## CLI vs Daemon — Which to Use
 
@@ -183,6 +191,7 @@ claude -p "generate a patch for issue #42" \
 | Permission errors | Always include `--dangerously-skip-permissions` |
 | Output truncated | Check if Claude hit the budget limit |
 | Rate limited | Wait and retry; Max tier has generous limits |
+| `Credit balance is too low` despite Claude Code subscription/OAuth being authenticated | `ANTHROPIC_API_KEY` (or another `ANTHROPIC_*` variable) is set and is overriding the OAuth/subscription path. Wrap the call with `env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL claude …` so the child process uses the OAuth/subscription path. Do **not** print the variable values while diagnosing — only their presence/length. |
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.
