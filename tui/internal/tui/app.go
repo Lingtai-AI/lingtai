@@ -59,8 +59,8 @@ type App struct {
 	addon         AddonModel
 	doctor        DoctorModel
 	nirvana       NirvanaModel
-	login          LoginModel
-	feishuOnboard  FeishuOnboardModel
+	login         LoginModel
+	feishuOnboard FeishuOnboardModel
 
 	globalDir        string
 	projectDir       string // .lingtai/ directory
@@ -226,8 +226,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.system, cmd = a.system.Update(msg)
 		case appViewPresets:
 			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
-			case appViewFeishuOnboard:
-				a.feishuOnboard, cmd = a.feishuOnboard.Update(msg)
+		case appViewFeishuOnboard:
+			a.feishuOnboard, cmd = a.feishuOnboard.Update(msg)
 		}
 		return a, cmd
 
@@ -523,10 +523,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.presetLibrary.Update(msg)
 		a.presetLibrary = updated
 		return a, cmd
-		case appViewFeishuOnboard:
-			updated, cmd := a.feishuOnboard.Update(msg)
-			a.feishuOnboard = updated
-			return a, cmd
+	case appViewFeishuOnboard:
+		updated, cmd := a.feishuOnboard.Update(msg)
+		a.feishuOnboard = updated
+		return a, cmd
 	}
 
 	return a, nil
@@ -1267,10 +1267,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true, "")
 		a.firstRun.welcomeOnly = true
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
-		case "feishu_onboard":
-			a.currentView = appViewFeishuOnboard
-			a.feishuOnboard = NewFeishuOnboardModel(a.projectDir)
-			return a, tea.Batch(a.feishuOnboard.Init(), a.sendSize())
+	case "feishu_onboard":
+		a.currentView = appViewFeishuOnboard
+		a.feishuOnboard = NewFeishuOnboardModel(a.projectDir)
+		return a, tea.Batch(a.feishuOnboard.Init(), a.sendSize())
 	}
 	return a, nil
 }
@@ -1314,8 +1314,8 @@ func (a App) View() tea.View {
 		content = a.system.View()
 	case appViewPresets:
 		content = a.presetLibrary.View()
-		case appViewFeishuOnboard:
-			content = a.feishuOnboard.View()
+	case appViewFeishuOnboard:
+		content = a.feishuOnboard.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

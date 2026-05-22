@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	qrcode "github.com/skip2/go-qrcode"
@@ -125,6 +127,7 @@ type FeishuOnboardModel struct {
 	appSecret      string
 	botName       string
 	pollDeadline  time.Time
+	cancelFunc context.CancelFunc
 
 	lingtaiDir string // <project>/.lingtai/
 	width      int
@@ -187,6 +190,9 @@ func (m FeishuOnboardModel) runPoll() tea.Cmd {
 	expireIn := m.expireIn
 	domain := m.domain
 	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelFunc = cancel
+		defer cancel()
 		if interval <= 0 {
 			interval = 5
 		}
@@ -198,6 +204,11 @@ func (m FeishuOnboardModel) runPoll() tea.Cmd {
 		switched := false
 
 		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return feishuPollDoneMsg{Err: fmt.Errorf("feishu: onboarding cancelled")}
+			default:
+			}
 			poll, err := callPoll(deviceCode, currentDomain)
 			if err != nil {
 				time.Sleep(time.Duration(interval) * time.Second)
@@ -509,7 +520,7 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 				m.step = feishuStepDone
 				m.message = i18n.T("feishu.onboard.success")
 				if m.botName != "" {
-					m.message = fmt.Sprintf("Connected as %s", m.botName)
+					m.message = i18n.TF("feishu.onboard.connected_as", m.botName)
 				}
 				return m, nil
 			}
@@ -532,7 +543,7 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 			if msg.BotName != "" {
 				m.botName = msg.BotName
 				m.step = feishuStepDone
-				m.message = fmt.Sprintf("Connected as %s — /refresh to apply", m.botName)
+				m.message = i18n.TF("feishu.onboard.connected_as_refresh", m.botName)
 				return m, func() tea.Msg { return FeishuOnboardDoneMsg{AppID: m.appID, AppSecret: m.appSecret, Domain: m.domain, BotName: m.botName} }
 			}
 			// Probe bot for display name
@@ -543,9 +554,9 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 		m.botName = msg.BotName
 		m.step = feishuStepDone
 		if msg.Err != nil {
-			m.message = "Config saved — /refresh to apply"
+			m.message = i18n.T("feishu.onboard.config_saved")
 		} else {
-			m.message = fmt.Sprintf("Connected as %s — /refresh to apply", m.botName)
+			m.message = i18n.TF("feishu.onboard.connected_as_refresh", m.botName)
 		}
 		return m, func() tea.Msg {
 			return FeishuOnboardDoneMsg{AppID: m.appID, AppSecret: m.appSecret, Domain: m.domain, BotName: m.botName}

@@ -4,6 +4,9 @@
   "app.title": "灵台",
   "error.agent_timeout": "Agent启动失败，请检查日志：%s",
   "feishu.onboard.connecting": "正在连接飞书/Lark...",
+  "feishu.onboard.connected_as": "已连接为 %s",
+  "feishu.onboard.connected_as_refresh": "已连接为 %s — /refresh 生效",
+  "feishu.onboard.config_saved": "配置已保存 — /refresh 生效",
   "feishu.onboard.done_hint": "运行 /refresh 或重启 agent 生效",
   "feishu.onboard.retry_hint": "[enter] 重试",
   "feishu.onboard.remaining_m": "(剩余 %dm %ds)",
@@ -524,6 +527,7 @@
   "addon.not_configured": "未配置 —— 让器灵帮你设置（它有对应的 skill）",
   "addon.parse_error": "配置文件存在，但 JSON 格式无效：%s",
   "addon.footer_hint": "编辑配置文件后输入 /refresh 以生效",
+  "addon.back": "返回",
   "addon.configure_hint": "[Enter] 一键配置",
 
   "cmd.btw": "向器灵旁问（以洞察问询的形式送达——器灵会反思并回应，不打断当前工作）",

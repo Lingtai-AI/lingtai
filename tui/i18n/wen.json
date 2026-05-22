@@ -4,6 +4,9 @@
   "app.title": "灵台",
   "error.agent_timeout": "启灵失败，检日志：%s",
   "feishu.onboard.connecting": "欲通飛書/Lark...",
+  "feishu.onboard.connected_as": "通矣 — %s",
+  "feishu.onboard.connected_as_refresh": "通矣 — %s，/refresh 以行之",
+  "feishu.onboard.config_saved": "冊已存 — /refresh 以行之"
   "feishu.onboard.done_hint": "行 /refresh 或啟器靈使之生效",
   "feishu.onboard.retry_hint": "[enter] 復試",
   "feishu.onboard.remaining_m": "(餘 %dm %ds)",
@@ -524,6 +527,7 @@
   "addon.not_configured": "未立 —— 请器灵相助（其有术可循）",
   "addon.parse_error": "簿在而 JSON 不工：%s",
   "addon.footer_hint": "改其文而 /refresh 以行之",
+  "addon.back": "返",
   "addon.configure_hint": "[Enter] 一鍵設之",
 
   "cmd.btw": "旁问器灵（以省问之式送达——器灵沉思而答，不扰当前之务）",
