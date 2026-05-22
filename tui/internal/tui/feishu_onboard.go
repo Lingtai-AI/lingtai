@@ -577,17 +577,17 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 }
 
 
-// fmtDuration formats a time.Duration as a human-readable countdown.
-func fmtDuration(d time.Duration) string {
+// fmtRemaining formats a time.Duration as an i18n countdown string like "(9m 58s remaining)".
+func fmtRemaining(d time.Duration) string {
 	if d <= 0 {
 		return ""
 	}
 	m := int(d.Minutes())
 	s := int(d.Seconds()) % 60
 	if m > 0 {
-		return fmt.Sprintf("(%dm %ds remaining)", m, s)
+		return i18n.TF("feishu.onboard.remaining_m", m, s)
 	}
-	return fmt.Sprintf("(%ds remaining)", s)
+	return i18n.TF("feishu.onboard.remaining_s", s)
 }
 // ---------------------------------------------------------------------------
 // View
@@ -614,31 +614,28 @@ func (m FeishuOnboardModel) View() string {
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("feishu.onboard.connecting")) + "\n")
 
 	case feishuStepQR, feishuStepPolling:
-		// QR code
-		if m.qrData != "" {
-			qrStyle := lipgloss.NewStyle().Foreground(ColorAgent).Align(lipgloss.Center)
-			// Indent each line of the QR
-			for _, line := range strings.Split(m.qrData, "\n") {
-				b.WriteString(qrStyle.Render("  " + line) + "\n")
-			}
-			b.WriteString("\n")
-		}
-
 		// URL (Ctrl+clickable in most terminals)
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("feishu.onboard.url_hint")) + "\n")
 		urlStyle := lipgloss.NewStyle().Foreground(ColorAccent).Underline(true)
 		b.WriteString(urlStyle.Render("  " + m.url) + "\n\n")
 
-		// Status with countdown
-		scanning := i18n.T("feishu.onboard.scanning")
+		// Scan hint with countdown
+		scanHint := i18n.T("feishu.onboard.scan_hint")
 		if !m.pollDeadline.IsZero() {
 			remaining := time.Until(m.pollDeadline)
 			if remaining > 0 {
-				scanning += "  " + fmtDuration(remaining)
+				scanHint += " " + fmtRemaining(remaining)
 			}
 		}
-		b.WriteString("  " + StyleSubtle.Render(scanning) + "\n")
+		b.WriteString("  " + StyleSubtle.Render(scanHint) + "\n\n")
 
+		// QR code
+		if m.qrData != "" {
+			for _, line := range strings.Split(m.qrData, "\n") {
+				b.WriteString("  " + line + "\n")
+			}
+			b.WriteString("\n")
+		}
 	case feishuStepDone:
 		b.WriteString("  " + StyleAccent.Render(m.message) + "\n")
 		b.WriteString("\n  " + StyleSubtle.Render(i18n.T("feishu.onboard.done_hint")) + "\n")
