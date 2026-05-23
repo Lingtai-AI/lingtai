@@ -30,6 +30,12 @@ type AddonModel struct {
 	addonErrors map[string]string
 }
 
+type addonState struct {
+	content    string
+	configured bool
+	errMsg     string
+}
+
 // NewAddonModel constructs the /addon view. lingtaiDir is the project's .lingtai/
 // directory (parent of all agent dirs). Addon configs live at
 // lingtaiDir/.addons/<addon>/config.json.
@@ -80,13 +86,13 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 			name := AllAddons[m.cursor]
 			if name == "feishu" {
 				_, configured := m.addonConfigs[name]
-				if !configured {
+				if !configured && m.addonErrors[name] == "" {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "feishu_onboard"} }
 				}
 			}
 			if name == "wechat" {
 				_, configured := m.addonConfigs[name]
-				if !configured {
+				if !configured && m.addonErrors[name] == "" {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "wechat_onboard"} }
 				}
 			}
@@ -120,6 +126,7 @@ func (m AddonModel) View() string {
 	for i, name := range AllAddons {
 		label := strings.ToUpper(name[:1]) + name[1:]
 		configPath := addonConfigRelPath(name)
+		state := addonStateFor(name, m.addonConfigs, m.addonErrors)
 
 		// Cursor highlight
 		cursor := "  "
@@ -130,15 +137,14 @@ func (m AddonModel) View() string {
 		}
 		b.WriteString(cursor + nameStyle.Render(label) + StyleFaint.Render("  "+configPath) + "\n")
 
-		if errMsg, bad := m.addonErrors[name]; bad {
-			b.WriteString("    " + StyleFaint.Render(errMsg) + "\n\n")
+		if state.errMsg != "" {
+			b.WriteString("    " + StyleFaint.Render(state.errMsg) + "\n\n")
 			continue
 		}
 
-		content, ok := m.addonConfigs[name]
-		if !ok || content == "" {
+		if !state.configured || state.content == "" {
 			hint := i18n.T("addon.not_configured")
-			if name == "feishu" && i == m.cursor {
+			if (name == "feishu" || name == "wechat") && i == m.cursor {
 				hint += "  — " + i18n.T("addon.configure_hint")
 			}
 			b.WriteString("    " + StyleFaint.Render(hint) + "\n")
@@ -146,7 +152,7 @@ func (m AddonModel) View() string {
 		}
 
 		// Pretty-print the JSON
-		pretty := prettyJSON(content)
+		pretty := prettyJSON(state.content)
 		for _, line := range strings.Split(strings.TrimRight(pretty, "\n"), "\n") {
 			b.WriteString("    " + line + "\n")
 		}
@@ -185,6 +191,17 @@ func readAddonConfigs(lingtaiDir string) (map[string]string, map[string]string) 
 	}
 
 	for _, addon := range AllAddons {
+		if addon == "wechat" {
+			state := readWechatAddonState(lingtaiDir)
+			if state.configured {
+				configs[addon] = state.content
+			}
+			if state.errMsg != "" {
+				errs[addon] = state.errMsg
+			}
+			continue
+		}
+
 		configPath := AddonConfigPath(lingtaiDir, addon)
 		data, err := os.ReadFile(configPath)
 		if err != nil {
@@ -200,6 +217,66 @@ func readAddonConfigs(lingtaiDir string) (map[string]string, map[string]string) 
 		configs[addon] = string(data)
 	}
 	return configs, errs
+}
+
+func addonStateFor(name string, configs, errs map[string]string) addonState {
+	state := addonState{}
+	if content, ok := configs[name]; ok {
+		state.content = content
+		state.configured = content != ""
+	}
+	if errMsg, ok := errs[name]; ok {
+		state.errMsg = errMsg
+		state.configured = false
+	}
+	return state
+}
+
+func readWechatAddonState(lingtaiDir string) addonState {
+	state := addonState{}
+	configPath := AddonConfigPath(lingtaiDir, "wechat")
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		return state
+	}
+
+	var probe any
+	if jerr := json.Unmarshal(configData, &probe); jerr != nil {
+		state.errMsg = i18n.TF("addon.parse_error", jerr.Error())
+		return state
+	}
+
+	credentialsPath := filepath.Join(filepath.Dir(configPath), "credentials.json")
+	credentialsData, err := os.ReadFile(credentialsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			state.content = string(configData)
+			return state
+		}
+		state.errMsg = i18n.TF("addon.parse_error", err.Error())
+		return state
+	}
+	if len(strings.TrimSpace(string(credentialsData))) == 0 {
+		state.content = string(configData)
+		return state
+	}
+
+	var creds struct {
+		BotToken string `json:"bot_token"`
+		UserID   string `json:"user_id"`
+	}
+	if jerr := json.Unmarshal(credentialsData, &creds); jerr != nil {
+		state.errMsg = i18n.TF("addon.parse_error", jerr.Error())
+		return state
+	}
+	if strings.TrimSpace(creds.BotToken) == "" || strings.TrimSpace(creds.UserID) == "" {
+		state.content = string(configData)
+		return state
+	}
+
+	state.content = string(configData)
+	state.configured = true
+	return state
 }
 
 // prettyJSON returns a formatted (indented) JSON string, or the original on error.

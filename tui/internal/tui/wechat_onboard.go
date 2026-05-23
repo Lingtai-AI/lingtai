@@ -34,13 +34,12 @@ const (
 	wechatBotType             = "3"
 	wechatAppID               = "bot"
 	wechatClientVersion       = "131331"
-	wechatRequestTimeout      = 15 * time.Second
+	wechatQRFetchTimeout      = 15 * time.Second
+	wechatPollTimeout         = 60 * time.Second
 	wechatDefaultPollInterval = 1
 	wechatDefaultQRExpireIn   = 480
 	wechatDefaultConfigJSON   = "{\n  \"base_url\": \"https://ilinkai.weixin.qq.com\",\n  \"cdn_base_url\": \"https://novac2c.cdn.weixin.qq.com/c2c\",\n  \"poll_interval\": 1.0,\n  \"allowed_users\": []\n}\n"
 )
-
-var wechatHTTPClient = &http.Client{Timeout: wechatRequestTimeout}
 
 func normalizeWechatBaseURL(raw string) string {
 	raw = strings.TrimSpace(raw)
@@ -165,6 +164,9 @@ type WechatOnboardModel struct {
 	lingtaiDir string
 	width      int
 	height     int
+
+	qrClient   *http.Client
+	pollClient *http.Client
 }
 
 // NewWechatOnboardModel creates a new WeChat onboard model and starts the
@@ -174,6 +176,8 @@ func NewWechatOnboardModel(lingtaiDir string) WechatOnboardModel {
 		step:       wechatStepInit,
 		lingtaiDir: lingtaiDir,
 		baseURL:    wechatBaseURL,
+		qrClient:   &http.Client{Timeout: wechatQRFetchTimeout},
+		pollClient: &http.Client{Timeout: wechatPollTimeout},
 	}
 }
 
@@ -187,8 +191,9 @@ func (m WechatOnboardModel) Init() tea.Cmd {
 
 func (m WechatOnboardModel) runFetchQR() tea.Cmd {
 	baseURL := effectiveWechatBaseURL(m.baseURL, wechatBaseURL)
+	client := m.httpClientForQR()
 	return func() tea.Msg {
-		qr, err := callWechatQR(baseURL)
+		qr, err := callWechatQR(client, baseURL)
 		if err != nil {
 			return wechatPollDoneMsg{Err: err}
 		}
@@ -208,6 +213,7 @@ func (m WechatOnboardModel) runPoll() tea.Cmd {
 	interval := m.interval
 	expireIn := m.expireIn
 	baseURL := effectiveWechatBaseURL(m.baseURL, wechatBaseURL)
+	client := m.httpClientForPoll()
 	return func() tea.Msg {
 		if m.ctx == nil {
 			return wechatPollDoneMsg{Err: fmt.Errorf("wechat: no poll context")}
@@ -229,7 +235,7 @@ func (m WechatOnboardModel) runPoll() tea.Cmd {
 			default:
 			}
 
-			poll, err := callWechatPoll(qrCode, currentBaseURL)
+			poll, err := callWechatPoll(m.ctx, client, qrCode, currentBaseURL)
 			if err != nil {
 				time.Sleep(time.Duration(interval) * time.Second)
 				continue
@@ -272,11 +278,25 @@ func (m WechatOnboardModel) runPoll() tea.Cmd {
 	}
 }
 
+func (m WechatOnboardModel) httpClientForQR() *http.Client {
+	if m.qrClient != nil {
+		return m.qrClient
+	}
+	return &http.Client{Timeout: wechatQRFetchTimeout}
+}
+
+func (m WechatOnboardModel) httpClientForPoll() *http.Client {
+	if m.pollClient != nil {
+		return m.pollClient
+	}
+	return &http.Client{Timeout: wechatPollTimeout}
+}
+
 // ---------------------------------------------------------------------------
 // WeChat API HTTP calls (stdlib net/http)
 // ---------------------------------------------------------------------------
 
-func callWechatQR(baseURL string) (*wechatQRResp, error) {
+func callWechatQR(client *http.Client, baseURL string) (*wechatQRResp, error) {
 	u, err := url.Parse(normalizeWechatBaseURL(baseURL) + wechatGetBotQRCodePath)
 	if err != nil {
 		return nil, fmt.Errorf("parse QR URL: %w", err)
@@ -286,7 +306,7 @@ func callWechatQR(baseURL string) (*wechatQRResp, error) {
 	query.Set("bot_type", wechatBotType)
 	u.RawQuery = query.Encode()
 
-	respJSON, err := wechatGetJSON(u.String())
+	respJSON, err := wechatGetJSON(context.Background(), client, u.String())
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +321,7 @@ func callWechatQR(baseURL string) (*wechatQRResp, error) {
 	return &qr, nil
 }
 
-func callWechatPoll(qrCode, baseURL string) (*wechatPollResp, error) {
+func callWechatPoll(ctx context.Context, client *http.Client, qrCode, baseURL string) (*wechatPollResp, error) {
 	u, err := url.Parse(normalizeWechatBaseURL(baseURL) + wechatGetQRCodeStatusPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse poll URL: %w", err)
@@ -311,7 +331,7 @@ func callWechatPoll(qrCode, baseURL string) (*wechatPollResp, error) {
 	query.Set("qrcode", qrCode)
 	u.RawQuery = query.Encode()
 
-	respJSON, err := wechatGetJSON(u.String())
+	respJSON, err := wechatGetJSON(ctx, client, u.String())
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +343,15 @@ func callWechatPoll(qrCode, baseURL string) (*wechatPollResp, error) {
 	return &poll, nil
 }
 
-func wechatGetJSON(rawURL string) ([]byte, error) {
-	httpReq, err := http.NewRequest(http.MethodGet, rawURL, nil)
+func wechatGetJSON(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+	if client == nil {
+		client = &http.Client{}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -335,13 +362,31 @@ func wechatGetJSON(rawURL string) ([]byte, error) {
 	}
 	httpReq.Header = headers
 
-	resp, err := wechatHTTPClient.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyPrefix, readErr := io.ReadAll(io.LimitReader(resp.Body, 200))
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, fmt.Errorf(
+			"wechat: GET %s returned HTTP %d: %s",
+			rawURL,
+			resp.StatusCode,
+			strings.TrimSpace(string(bodyPrefix)),
+		)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -362,8 +407,13 @@ func (m WechatOnboardModel) saveConfig() error {
 	}
 
 	configPath := filepath.Join(addonDir, "config.json")
-	if err := os.WriteFile(configPath, []byte(wechatDefaultConfigJSON), 0o600); err != nil {
-		return err
+	if _, err := os.Stat(configPath); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.WriteFile(configPath, []byte(wechatDefaultConfigJSON), 0o600); err != nil {
+			return err
+		}
 	}
 
 	credentialsPath := filepath.Join(addonDir, "credentials.json")

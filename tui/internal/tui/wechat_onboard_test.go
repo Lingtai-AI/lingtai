@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-func TestNormalizeWechatBaseURL(t *testing.T) {
+func TestWechatNormalizeBaseURL(t *testing.T) {
 	tests := []struct {
 		in   string
 		want string
@@ -32,7 +35,7 @@ func TestNormalizeWechatBaseURL(t *testing.T) {
 	}
 }
 
-func TestRandomWechatUIN(t *testing.T) {
+func TestWechatRandomUIN(t *testing.T) {
 	got, err := randomWechatUIN()
 	if err != nil {
 		t.Fatalf("randomWechatUIN() error = %v", err)
@@ -107,32 +110,29 @@ func TestWechatFmtOnboardRemaining(t *testing.T) {
 	}
 }
 
-func TestCallWechatQRUsesHeadersAndParsesResponse(t *testing.T) {
-	oldTransport := wechatHTTPClient.Transport
-	t.Cleanup(func() {
-		wechatHTTPClient.Transport = oldTransport
-	})
+func TestWechatCallQRUsesHeadersAndParsesResponse(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("method = %s, want GET", r.Method)
+			}
+			if got := r.URL.String(); got != wechatBaseURL+wechatGetBotQRCodePath+"?bot_type=3" {
+				t.Fatalf("URL = %q", got)
+			}
+			if r.Header.Get("iLink-App-Id") != wechatAppID {
+				t.Fatalf("iLink-App-Id = %q", r.Header.Get("iLink-App-Id"))
+			}
+			if r.Header.Get("iLink-App-ClientVersion") != wechatClientVersion {
+				t.Fatalf("iLink-App-ClientVersion = %q", r.Header.Get("iLink-App-ClientVersion"))
+			}
+			if r.Header.Get("X-WECHAT-UIN") == "" {
+				t.Fatal("X-WECHAT-UIN missing")
+			}
+			return jsonHTTPResponse(`{"qrcode":"token-1","qrcode_img_content":"https://qr.example/scan"}`), nil
+		}),
+	}
 
-	wechatHTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodGet {
-			t.Fatalf("method = %s, want GET", r.Method)
-		}
-		if got := r.URL.String(); got != wechatBaseURL+wechatGetBotQRCodePath+"?bot_type=3" {
-			t.Fatalf("URL = %q", got)
-		}
-		if r.Header.Get("iLink-App-Id") != wechatAppID {
-			t.Fatalf("iLink-App-Id = %q", r.Header.Get("iLink-App-Id"))
-		}
-		if r.Header.Get("iLink-App-ClientVersion") != wechatClientVersion {
-			t.Fatalf("iLink-App-ClientVersion = %q", r.Header.Get("iLink-App-ClientVersion"))
-		}
-		if r.Header.Get("X-WECHAT-UIN") == "" {
-			t.Fatal("X-WECHAT-UIN missing")
-		}
-		return jsonHTTPResponse(`{"qrcode":"token-1","qrcode_img_content":"https://qr.example/scan"}`), nil
-	})
-
-	resp, err := callWechatQR(wechatBaseURL)
+	resp, err := callWechatQR(client, wechatBaseURL)
 	if err != nil {
 		t.Fatalf("callWechatQR() error = %v", err)
 	}
@@ -144,20 +144,17 @@ func TestCallWechatQRUsesHeadersAndParsesResponse(t *testing.T) {
 	}
 }
 
-func TestCallWechatPollParsesResponse(t *testing.T) {
-	oldTransport := wechatHTTPClient.Transport
-	t.Cleanup(func() {
-		wechatHTTPClient.Transport = oldTransport
-	})
+func TestWechatCallPollParsesResponse(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if got := r.URL.String(); got != wechatBaseURL+wechatGetQRCodeStatusPath+"?qrcode=token-1" {
+				t.Fatalf("URL = %q", got)
+			}
+			return jsonHTTPResponse(`{"status":"confirmed","bot_token":"bot-123","ilink_user_id":"wxid_1","baseurl":"https://redir.weixin.qq.com"}`), nil
+		}),
+	}
 
-	wechatHTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if got := r.URL.String(); got != wechatBaseURL+wechatGetQRCodeStatusPath+"?qrcode=token-1" {
-			t.Fatalf("URL = %q", got)
-		}
-		return jsonHTTPResponse(`{"status":"confirmed","bot_token":"bot-123","ilink_user_id":"wxid_1","baseurl":"https://redir.weixin.qq.com"}`), nil
-	})
-
-	resp, err := callWechatPoll("token-1", wechatBaseURL)
+	resp, err := callWechatPoll(context.Background(), client, "token-1", wechatBaseURL)
 	if err != nil {
 		t.Fatalf("callWechatPoll() error = %v", err)
 	}
@@ -166,41 +163,62 @@ func TestCallWechatPollParsesResponse(t *testing.T) {
 	}
 }
 
-func TestWechatRunPollRedirectAndConfirm(t *testing.T) {
-	oldTransport := wechatHTTPClient.Transport
-	t.Cleanup(func() {
-		wechatHTTPClient.Transport = oldTransport
-	})
+func TestWechatCallPollReturnsHTTPStatusError(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("gateway exploded and returned too much detail")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
 
+	_, err := callWechatPoll(context.Background(), client, "token-1", wechatBaseURL)
+	if err == nil {
+		t.Fatal("callWechatPoll() error = nil, want HTTP status error")
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("error = %v, want status code", err)
+	}
+	if !strings.Contains(err.Error(), "gateway exploded") {
+		t.Fatalf("error = %v, want body prefix", err)
+	}
+}
+
+func TestWechatRunPollRedirectAndConfirm(t *testing.T) {
 	callCount := 0
-	wechatHTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		callCount++
-		switch callCount {
-		case 1:
-			if r.URL.Host != "ilinkai.weixin.qq.com" {
-				t.Fatalf("first host = %q, want ilinkai.weixin.qq.com", r.URL.Host)
+	pollClient := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				if r.URL.Host != "ilinkai.weixin.qq.com" {
+					t.Fatalf("first host = %q, want ilinkai.weixin.qq.com", r.URL.Host)
+				}
+				return jsonHTTPResponse(`{"status":"scaned_but_redirect","redirect_host":"redirect.weixin.qq.com"}`), nil
+			case 2:
+				if r.URL.Host != "redirect.weixin.qq.com" {
+					t.Fatalf("second host = %q, want redirect.weixin.qq.com", r.URL.Host)
+				}
+				return jsonHTTPResponse(`{"status":"confirmed","bot_token":"bot-123","ilink_user_id":"wxid_1","baseurl":"https://redirect.weixin.qq.com"}`), nil
+			default:
+				t.Fatalf("unexpected call count %d", callCount)
+				return nil, nil
 			}
-			return jsonHTTPResponse(`{"status":"scaned_but_redirect","redirect_host":"redirect.weixin.qq.com"}`), nil
-		case 2:
-			if r.URL.Host != "redirect.weixin.qq.com" {
-				t.Fatalf("second host = %q, want redirect.weixin.qq.com", r.URL.Host)
-			}
-			return jsonHTTPResponse(`{"status":"confirmed","bot_token":"bot-123","ilink_user_id":"wxid_1","baseurl":"https://redirect.weixin.qq.com"}`), nil
-		default:
-			t.Fatalf("unexpected call count %d", callCount)
-			return nil, nil
-		}
-	})
+		}),
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	m := WechatOnboardModel{
-		ctx:      ctx,
-		qrCode:   "token-1",
-		interval: 0,
-		expireIn: 5,
-		baseURL:  wechatBaseURL,
+		ctx:        ctx,
+		qrCode:     "token-1",
+		interval:   0,
+		expireIn:   5,
+		baseURL:    wechatBaseURL,
+		pollClient: pollClient,
 	}
 
 	msg := m.runPoll()()
@@ -217,24 +235,22 @@ func TestWechatRunPollRedirectAndConfirm(t *testing.T) {
 }
 
 func TestWechatRunPollExpired(t *testing.T) {
-	oldTransport := wechatHTTPClient.Transport
-	t.Cleanup(func() {
-		wechatHTTPClient.Transport = oldTransport
-	})
-
-	wechatHTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return jsonHTTPResponse(`{"status":"expired"}`), nil
-	})
+	pollClient := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return jsonHTTPResponse(`{"status":"expired"}`), nil
+		}),
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	m := WechatOnboardModel{
-		ctx:      ctx,
-		qrCode:   "token-1",
-		interval: 0,
-		expireIn: 5,
-		baseURL:  wechatBaseURL,
+		ctx:        ctx,
+		qrCode:     "token-1",
+		interval:   0,
+		expireIn:   5,
+		baseURL:    wechatBaseURL,
+		pollClient: pollClient,
 	}
 
 	msg := m.runPoll()()
@@ -247,7 +263,82 @@ func TestWechatRunPollExpired(t *testing.T) {
 	}
 }
 
-func TestWechatSaveConfig(t *testing.T) {
+func TestWechatRunPollUsesInjectedPollClient(t *testing.T) {
+	qrCalls := 0
+	pollCalls := 0
+
+	qrClient := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			qrCalls++
+			return jsonHTTPResponse(`{"qrcode":"token-1","qrcode_img_content":"https://qr.example/scan"}`), nil
+		}),
+	}
+	pollClient := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			pollCalls++
+			return jsonHTTPResponse(`{"status":"confirmed","bot_token":"bot-123","ilink_user_id":"wxid_1","baseurl":"https://redirect.weixin.qq.com"}`), nil
+		}),
+	}
+
+	m := WechatOnboardModel{
+		baseURL:    wechatBaseURL,
+		qrClient:   qrClient,
+		pollClient: pollClient,
+	}
+
+	qrMsg := m.runFetchQR()()
+	ready, ok := qrMsg.(wechatQRReadyMsg)
+	if !ok {
+		t.Fatalf("runFetchQR() = %T, want wechatQRReadyMsg", qrMsg)
+	}
+	if qrCalls != 1 {
+		t.Fatalf("qrCalls = %d, want 1", qrCalls)
+	}
+	if pollCalls != 0 {
+		t.Fatalf("pollCalls after runFetchQR = %d, want 0", pollCalls)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.ctx = ctx
+	m.qrCode = ready.QRCode
+	m.interval = ready.Interval
+	m.expireIn = ready.ExpireIn
+
+	pollMsg := m.runPoll()()
+	done, ok := pollMsg.(wechatPollDoneMsg)
+	if !ok {
+		t.Fatalf("runPoll() = %T, want wechatPollDoneMsg", pollMsg)
+	}
+	if done.Err != nil {
+		t.Fatalf("runPoll() err = %v", done.Err)
+	}
+	if qrCalls != 1 {
+		t.Fatalf("qrCalls after runPoll = %d, want 1", qrCalls)
+	}
+	if pollCalls != 1 {
+		t.Fatalf("pollCalls = %d, want 1", pollCalls)
+	}
+}
+
+func TestNewWechatOnboardModelUsesDistinctTimeouts(t *testing.T) {
+	m := NewWechatOnboardModel(t.TempDir())
+	if m.qrClient == nil || m.pollClient == nil {
+		t.Fatal("expected both QR and poll clients to be initialized")
+	}
+	if m.qrClient == m.pollClient {
+		t.Fatal("expected distinct HTTP clients for QR and poll")
+	}
+	if m.qrClient.Timeout != wechatQRFetchTimeout {
+		t.Fatalf("qr timeout = %v, want %v", m.qrClient.Timeout, wechatQRFetchTimeout)
+	}
+	if m.pollClient.Timeout != wechatPollTimeout {
+		t.Fatalf("poll timeout = %v, want %v", m.pollClient.Timeout, wechatPollTimeout)
+	}
+}
+
+func TestWechatSaveConfigCreatesDefaultAndCredentials(t *testing.T) {
 	tmpDir := t.TempDir()
 	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
 
@@ -272,29 +363,43 @@ func TestWechatSaveConfig(t *testing.T) {
 	}
 
 	credentialsPath := filepath.Join(lingtaiDir, ".addons", "wechat", "credentials.json")
-	credentialsData, err := os.ReadFile(credentialsPath)
-	if err != nil {
-		t.Fatalf("ReadFile(credentials.json) error = %v", err)
+	assertWechatCredentials(t, credentialsPath, "bot-123", "wxid_1", "https://redirect.weixin.qq.com")
+}
+
+func TestWechatSaveConfigPreservesExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+	addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+	if err := os.MkdirAll(addonDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
-	var creds wechatCredentials
-	if err := json.Unmarshal(credentialsData, &creds); err != nil {
-		t.Fatalf("credentials.json unmarshal error = %v", err)
-	}
-	if creds.BotToken != "bot-123" || creds.UserID != "wxid_1" || creds.BaseURL != "https://redirect.weixin.qq.com" {
-		t.Fatalf("credentials = %+v", creds)
-	}
-	if creds.SavedAt == "" {
-		t.Fatal("SavedAt is empty")
+	configPath := filepath.Join(addonDir, "config.json")
+	originalConfig := "{\n  \"base_url\": \"https://custom.example\",\n  \"allowed_users\": [\"wxid_keep\"]\n}\n"
+	if err := os.WriteFile(configPath, []byte(originalConfig), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
 	}
 
-	info, err := os.Stat(credentialsPath)
+	m := WechatOnboardModel{
+		lingtaiDir: lingtaiDir,
+		botToken:   "bot-456",
+		userID:     "wxid_2",
+		baseURL:    "https://redirect.weixin.qq.com",
+	}
+	if err := m.saveConfig(); err != nil {
+		t.Fatalf("saveConfig() error = %v", err)
+	}
+
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatalf("Stat(credentials.json) error = %v", err)
+		t.Fatalf("ReadFile(config.json) error = %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("credentials mode = %#o, want 0600", info.Mode().Perm())
+	if string(configData) != originalConfig {
+		t.Fatalf("config.json = %q, want preserved content %q", string(configData), originalConfig)
 	}
+
+	credentialsPath := filepath.Join(addonDir, "credentials.json")
+	assertWechatCredentials(t, credentialsPath, "bot-456", "wxid_2", "https://redirect.weixin.qq.com")
 }
 
 func TestWechatUpdateEmitsDoneMsgAfterSave(t *testing.T) {
@@ -328,7 +433,7 @@ func TestWechatUpdateEmitsDoneMsgAfterSave(t *testing.T) {
 	}
 }
 
-func TestAddonUpdateRefreshesOnWechatDone(t *testing.T) {
+func TestWechatAddonUpdateRefreshesOnDone(t *testing.T) {
 	tmpDir := t.TempDir()
 	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
 	m := NewAddonModel(lingtaiDir)
@@ -359,7 +464,92 @@ func TestAddonUpdateRefreshesOnWechatDone(t *testing.T) {
 	}
 }
 
-func TestAppUpdateForwardsWechatOnboardDoneMsg(t *testing.T) {
+func TestWechatAddonModelTreatsMissingCredentialsAsUnconfigured(t *testing.T) {
+	tmpDir := t.TempDir()
+	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+	addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+	if err := os.MkdirAll(addonDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(addonDir, "config.json"), []byte(wechatDefaultConfigJSON), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	m := NewAddonModel(lingtaiDir)
+	if _, ok := m.addonConfigs["wechat"]; ok {
+		t.Fatal("expected wechat to remain unconfigured without credentials.json")
+	}
+	if errMsg := m.addonErrors["wechat"]; errMsg != "" {
+		t.Fatalf("unexpected wechat error = %q", errMsg)
+	}
+
+	m.cursor = indexOfAddon("wechat")
+	if AllAddons[m.cursor] != "wechat" {
+		t.Fatalf("cursor addon = %q, want wechat", AllAddons[m.cursor])
+	}
+
+	updated, cmd := m.Update(teaKey("enter"))
+	if cmd == nil {
+		t.Fatal("enter cmd = nil, want onboarding view change")
+	}
+	msg := cmd()
+	change, ok := msg.(ViewChangeMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want ViewChangeMsg", msg)
+	}
+	if change.View != "wechat_onboard" {
+		t.Fatalf("change.View = %q, want wechat_onboard", change.View)
+	}
+	if updated.cursor != m.cursor {
+		t.Fatalf("cursor changed = %d, want %d", updated.cursor, m.cursor)
+	}
+}
+
+func TestWechatAddonModelBlocksOnboardingWhenConfigHasError(t *testing.T) {
+	tmpDir := t.TempDir()
+	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+	addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+	if err := os.MkdirAll(addonDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(addonDir, "config.json"), []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	m := NewAddonModel(lingtaiDir)
+	if _, ok := m.addonErrors["wechat"]; !ok {
+		t.Fatal("expected wechat parse error")
+	}
+
+	m.cursor = indexOfAddon("wechat")
+	if AllAddons[m.cursor] != "wechat" {
+		t.Fatalf("cursor addon = %q, want wechat", AllAddons[m.cursor])
+	}
+
+	updated, cmd := m.Update(teaKey("enter"))
+	if cmd != nil {
+		t.Fatalf("enter cmd = %v, want nil when addon has error", cmd)
+	}
+	if updated.cursor != m.cursor {
+		t.Fatalf("cursor changed = %d, want %d", updated.cursor, m.cursor)
+	}
+}
+
+func TestWechatAddonViewShowsConfigureHint(t *testing.T) {
+	m := AddonModel{
+		width:        120,
+		cursor:       indexOfAddon("wechat"),
+		addonConfigs: map[string]string{},
+		addonErrors:  map[string]string{},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, i18n.T("addon.configure_hint")) {
+		t.Fatalf("view missing configure hint: %q", view)
+	}
+}
+
+func TestWechatAppUpdateForwardsOnboardDoneMsg(t *testing.T) {
 	tmpDir := t.TempDir()
 	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
 	app := App{
@@ -412,4 +602,60 @@ func TestWechatViewIncludesAdminWarningAndCountdown(t *testing.T) {
 	if !strings.Contains(view, i18n.T("wechat.onboard.scan_hint")) {
 		t.Fatalf("view missing scan hint: %q", view)
 	}
+}
+
+func assertWechatCredentials(t *testing.T, credentialsPath, wantToken, wantUserID, wantBaseURL string) {
+	t.Helper()
+
+	credentialsData, err := os.ReadFile(credentialsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(credentials.json) error = %v", err)
+	}
+
+	var creds wechatCredentials
+	if err := json.Unmarshal(credentialsData, &creds); err != nil {
+		t.Fatalf("credentials.json unmarshal error = %v", err)
+	}
+	if creds.BotToken != wantToken || creds.UserID != wantUserID || creds.BaseURL != wantBaseURL {
+		t.Fatalf("credentials = %+v", creds)
+	}
+	if creds.SavedAt == "" {
+		t.Fatal("SavedAt is empty")
+	}
+
+	info, err := os.Stat(credentialsPath)
+	if err != nil {
+		t.Fatalf("Stat(credentials.json) error = %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials mode = %#o, want 0600", info.Mode().Perm())
+	}
+}
+
+func teaKey(key string) tea.KeyPressMsg {
+	switch key {
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	default:
+		r := []rune(key)
+		if len(r) == 0 {
+			return tea.KeyPressMsg{}
+		}
+		return tea.KeyPressMsg{Code: r[0], Text: key}
+	}
+}
+
+func indexOfAddon(name string) int {
+	for i, addon := range AllAddons {
+		if addon == name {
+			return i
+		}
+	}
+	return 0
 }
