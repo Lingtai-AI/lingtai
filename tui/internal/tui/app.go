@@ -39,6 +39,7 @@ const (
 	appViewSystem
 	appViewPresets
 	appViewFeishuOnboard
+	appViewWechatOnboard
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -61,6 +62,7 @@ type App struct {
 	nirvana       NirvanaModel
 	login         LoginModel
 	feishuOnboard FeishuOnboardModel
+	wechatOnboard WechatOnboardModel
 
 	globalDir        string
 	projectDir       string // .lingtai/ directory
@@ -228,6 +230,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
 		case appViewFeishuOnboard:
 			a.feishuOnboard, cmd = a.feishuOnboard.Update(msg)
+		case appViewWechatOnboard:
+			a.wechatOnboard, cmd = a.wechatOnboard.Update(msg)
 		}
 		return a, cmd
 
@@ -261,6 +265,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FeishuOnboardDoneMsg:
 		// Refresh the addon model while the onboarding view is still active,
 		// instead of relying on /addon view re-initialization to reread disk.
+		if a.addon.lingtaiDir == "" {
+			a.addon.lingtaiDir = a.projectDir
+		}
+		updated, _ := a.addon.Update(msg)
+		a.addon = updated
+		return a, nil
+
+	case WechatOnboardDoneMsg:
 		if a.addon.lingtaiDir == "" {
 			a.addon.lingtaiDir = a.projectDir
 		}
@@ -536,6 +548,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewFeishuOnboard:
 		updated, cmd := a.feishuOnboard.Update(msg)
 		a.feishuOnboard = updated
+		return a, cmd
+	case appViewWechatOnboard:
+		updated, cmd := a.wechatOnboard.Update(msg)
+		a.wechatOnboard = updated
 		return a, cmd
 	}
 
@@ -1281,6 +1297,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewFeishuOnboard
 		a.feishuOnboard = NewFeishuOnboardModel(a.projectDir)
 		return a, tea.Batch(a.feishuOnboard.Init(), a.sendSize())
+	case "wechat_onboard":
+		a.currentView = appViewWechatOnboard
+		a.wechatOnboard = NewWechatOnboardModel(a.projectDir)
+		return a, tea.Batch(a.wechatOnboard.Init(), a.sendSize())
 	}
 	return a, nil
 }
@@ -1326,6 +1346,8 @@ func (a App) View() tea.View {
 		content = a.presetLibrary.View()
 	case appViewFeishuOnboard:
 		content = a.feishuOnboard.View()
+	case appViewWechatOnboard:
+		content = a.wechatOnboard.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

@@ -58,6 +58,12 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 		m.addonErrors = errs
 		return m, nil
 
+	case WechatOnboardDoneMsg:
+		configs, errs := readAddonConfigs(m.lingtaiDir)
+		m.addonConfigs = configs
+		m.addonErrors = errs
+		return m, nil
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "up":
@@ -71,12 +77,17 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			// Only feishu supports onboard for now; only fire if unconfigured.
 			name := AllAddons[m.cursor]
 			if name == "feishu" {
 				_, configured := m.addonConfigs[name]
 				if !configured {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "feishu_onboard"} }
+				}
+			}
+			if name == "wechat" {
+				_, configured := m.addonConfigs[name]
+				if !configured {
+					return m, func() tea.Msg { return ViewChangeMsg{View: "wechat_onboard"} }
 				}
 			}
 			return m, nil

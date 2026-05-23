@@ -602,17 +602,22 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 	return m, nil
 }
 
-// fmtRemaining formats a time.Duration as an i18n countdown string like "(9m 58s remaining)".
-func fmtRemaining(d time.Duration) string {
+// fmtOnboardRemaining formats a time.Duration using the given i18n prefix.
+func fmtOnboardRemaining(prefix string, d time.Duration) string {
 	if d <= 0 {
 		return ""
 	}
 	m := int(d.Minutes())
 	s := int(d.Seconds()) % 60
 	if m > 0 {
-		return i18n.TF("feishu.onboard.remaining_m", m, s)
+		return i18n.TF(prefix+".remaining_m", m, s)
 	}
-	return i18n.TF("feishu.onboard.remaining_s", s)
+	return i18n.TF(prefix+".remaining_s", s)
+}
+
+// fmtRemaining formats a time.Duration as an i18n countdown string like "(9m 58s remaining)".
+func fmtRemaining(d time.Duration) string {
+	return fmtOnboardRemaining("feishu.onboard", d)
 }
 
 // ---------------------------------------------------------------------------
