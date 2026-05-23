@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +72,9 @@ func TestFmtRemaining(t *testing.T) {
 		if got == "" {
 			t.Errorf("fmtRemaining(%v) = empty, expected time string", tc.d)
 		}
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("fmtRemaining(%v) = %q, want substring %q", tc.d, got, tc.want)
+		}
 	}
 }
 
@@ -95,10 +99,10 @@ func TestSaveConfig(t *testing.T) {
 
 	m := FeishuOnboardModel{
 		lingtaiDir: lingtaiDir,
-		appID:     "cli_xxxxxxxxxxxxx",
-		appSecret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-		domain:    "feishu",
-		botName:   "TestBot",
+		appID:      "cli_xxxxxxxxxxxxx",
+		appSecret:  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		domain:     "feishu",
+		botName:    "TestBot",
 	}
 
 	if err := m.saveConfig(); err != nil {
@@ -132,8 +136,6 @@ func TestSaveConfig(t *testing.T) {
 // ---------------------------------------------------------------------------
 // HTTP call tests (httptest)
 // ---------------------------------------------------------------------------
-
-
 
 // Since postRegistrationJSON and friends build "https://<host>/..." URLs,
 // and httptest uses HTTP, we test the underlying HTTP layer by calling
@@ -225,11 +227,10 @@ func TestCallBeginResponseParsing(t *testing.T) {
 // TestCallPollResponseParsing tests various poll response scenarios.
 func TestCallPollResponseParsing(t *testing.T) {
 	tests := []struct {
-		name     string
-		json     string
-		wantID   string
-		wantErr  string
-		wantCode int
+		name    string
+		json    string
+		wantID  string
+		wantErr string
 	}{
 		{
 			name:   "success",
@@ -301,34 +302,108 @@ func TestCallProbeBotResponseParsing(t *testing.T) {
 }
 
 func TestCallProbeBotTokenCodeError(t *testing.T) {
-	// Simulate Feishu returning code != 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		// Return non-zero code and no token
-		fmt.Fprint(w, `{"code": 999, "msg": "invalid app"}`)
-	}))
-	defer srv.Close()
+	oldTransport := httpClient.Transport
+	t.Cleanup(func() {
+		httpClient.Transport = oldTransport
+	})
+	httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/open-apis/auth/v3/tenant_access_token/internal" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+		return jsonHTTPResponse(`{"code": 999, "msg": "invalid app"}`), nil
+	})
 
-	// Call the underlying HTTP directly
-	body, _ := json.Marshal(map[string]string{"app_id": "bad_id", "app_secret": "bad_secret"})
-	resp, err := postJSON(srv.URL+"/auth/v3/tenant_access_token/internal", body)
-	if err != nil {
-		t.Fatalf("postJSON error: %v", err)
+	got, err := callProbeBot("bad_id", "bad_secret", "feishu")
+	if err == nil {
+		t.Fatal("callProbeBot() error = nil, want non-nil")
+	}
+	if got != "" {
+		t.Errorf("callProbeBot() name = %q, want empty", got)
+	}
+	if !strings.Contains(err.Error(), "tenant token returned code 999: invalid app") {
+		t.Fatalf("callProbeBot() error = %q, want informative token code error", err)
+	}
+}
+
+func TestFeishuOnboardProbeErrorStillEmitsDoneMsg(t *testing.T) {
+	m := FeishuOnboardModel{
+		appID:     "cli_saved",
+		appSecret: "secret_saved",
+		domain:    "feishu",
 	}
 
-	var tokenData struct {
-		Code              int    `json:"code"`
-		TenantAccessToken string `json:"tenant_access_token"`
+	updated, cmd := m.Update(feishuPollDoneMsg{Err: fmt.Errorf("probe failed")})
+	if updated.step != feishuStepDone {
+		t.Fatalf("step = %v, want %v", updated.step, feishuStepDone)
 	}
-	if err := json.Unmarshal(resp, &tokenData); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if cmd == nil {
+		t.Fatal("cmd = nil, want FeishuOnboardDoneMsg emitter")
 	}
-	if tokenData.Code == 0 {
-		t.Error("expected non-zero code for invalid app")
+
+	msg := cmd()
+	done, ok := msg.(FeishuOnboardDoneMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want FeishuOnboardDoneMsg", msg)
 	}
-	if tokenData.TenantAccessToken != "" {
-		t.Errorf("expected empty token, got %s", tokenData.TenantAccessToken)
+	if done.AppID != "cli_saved" || done.AppSecret != "secret_saved" || done.Domain != "feishu" {
+		t.Fatalf("done msg = %+v, want saved credentials", done)
+	}
+	if done.Err == nil || done.Err.Error() != "probe failed" {
+		t.Fatalf("done msg err = %v, want probe failed", done.Err)
+	}
+}
+
+func TestAppUpdateForwardsFeishuOnboardDoneMsg(t *testing.T) {
+	tmpDir := t.TempDir()
+	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+	app := App{
+		projectDir:    lingtaiDir,
+		currentView:   appViewFeishuOnboard,
+		addon:         NewAddonModel(lingtaiDir),
+		feishuOnboard: NewFeishuOnboardModel(lingtaiDir),
+	}
+
+	if _, ok := app.addon.addonConfigs["feishu"]; ok {
+		t.Fatal("expected feishu config to be absent before refresh")
+	}
+
+	if err := (FeishuOnboardModel{
+		lingtaiDir: lingtaiDir,
+		appID:      "cli_saved",
+		appSecret:  "secret_saved",
+	}).saveConfig(); err != nil {
+		t.Fatalf("saveConfig() error: %v", err)
+	}
+
+	model, cmd := app.Update(FeishuOnboardDoneMsg{AppID: "cli_saved", AppSecret: "secret_saved"})
+	if cmd != nil {
+		t.Fatalf("Update() cmd = %v, want nil", cmd)
+	}
+
+	updated, ok := model.(App)
+	if !ok {
+		t.Fatalf("Update() model = %T, want App", model)
+	}
+	got, ok := updated.addon.addonConfigs["feishu"]
+	if !ok {
+		t.Fatal("expected addon config to be refreshed after FeishuOnboardDoneMsg")
+	}
+	if !strings.Contains(got, `"app_id": "cli_saved"`) {
+		t.Fatalf("addon config = %q, want saved app_id", got)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonHTTPResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 

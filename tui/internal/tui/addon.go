@@ -24,7 +24,7 @@ type AddonModel struct {
 	width      int
 	height     int
 	cursor     int // currently selected addon index
-	// addonConfigs maps addon name → JSON file content (or "" if missing/unreadable)
+	// addonConfigs maps addon name → JSON file content for successfully read configs.
 	addonConfigs map[string]string
 	// addonErrors maps addon name → error message (e.g. "not found", "parse error")
 	addonErrors map[string]string

@@ -117,20 +117,20 @@ type feishuPollDoneMsg struct {
 
 // FeishuOnboardModel drives the feishu / lark scan-to-create QR flow.
 type FeishuOnboardModel struct {
-	step       feishuOnboardStep
-	qrData     string // ASCII QR code text
-	url        string // launcher URL (terminals with link detection make this Ctrl+clickable)
-	deviceCode string
-	interval   int
-	expireIn   int
-	domain     string // "feishu" or "lark"
-	message    string // status / error text
-	appID         string
-	appSecret      string
-	botName       string
-	pollDeadline  time.Time
-	ctx         context.Context
-	cancelFunc  context.CancelFunc
+	step         feishuOnboardStep
+	qrData       string // ASCII QR code text
+	url          string // launcher URL (terminals with link detection make this Ctrl+clickable)
+	deviceCode   string
+	interval     int
+	expireIn     int
+	domain       string // "feishu" or "lark"
+	message      string // status / error text
+	appID        string
+	appSecret    string
+	botName      string
+	pollDeadline time.Time
+	ctx          context.Context
+	cancelFunc   context.CancelFunc
 
 	lingtaiDir string // <project>/.lingtai/
 	width      int
@@ -272,10 +272,10 @@ func callInit(domain string) error {
 
 func callBegin(domain string) (*beginOnboardResp, error) {
 	body := url.Values{
-		"action":             {"begin"},
-		"archetype":          {"PersonalAgent"},
-		"auth_method":        {"client_secret"},
-		"request_user_info":  {"open_id"},
+		"action":            {"begin"},
+		"archetype":         {"PersonalAgent"},
+		"auth_method":       {"client_secret"},
+		"request_user_info": {"open_id"},
 	}.Encode()
 
 	resp, err := postRegistrationJSON(domain, body)
@@ -314,10 +314,13 @@ func callPoll(deviceCode, domain string) (*pollOnboardResp, error) {
 
 func callProbeBot(appID, appSecret, domain string) (string, error) {
 	// Get tenant access token
-	tokenBody, _ := json.Marshal(map[string]string{
+	tokenBody, err := json.Marshal(map[string]string{
 		"app_id":     appID,
 		"app_secret": appSecret,
 	})
+	if err != nil {
+		return "", fmt.Errorf("marshal token request: %w", err)
+	}
 
 	tokenResp, err := postJSON(
 		fmt.Sprintf("https://%s/open-apis/auth/v3/tenant_access_token/internal", openHost(domain)),
@@ -328,11 +331,18 @@ func callProbeBot(appID, appSecret, domain string) (string, error) {
 	}
 
 	var tokenData struct {
-		Code            int    `json:"code"`
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
 		TenantAccessToken string `json:"tenant_access_token"`
 	}
 	if err := json.Unmarshal(tokenResp, &tokenData); err != nil {
 		return "", fmt.Errorf("parse token response: %w", err)
+	}
+	if tokenData.Code != 0 {
+		if tokenData.Msg != "" {
+			return "", fmt.Errorf("tenant token returned code %d: %s", tokenData.Code, tokenData.Msg)
+		}
+		return "", fmt.Errorf("tenant token returned code %d", tokenData.Code)
 	}
 	if tokenData.TenantAccessToken == "" {
 		return "", fmt.Errorf("no tenant_access_token")
@@ -379,8 +389,7 @@ func postRegistrationJSON(domain, formBody string) ([]byte, error) {
 	}
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -397,8 +406,7 @@ func postJSON(url string, body []byte) ([]byte, error) {
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -415,8 +423,7 @@ func getJSON(url, token string) ([]byte, error) {
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -435,8 +442,8 @@ type feishuConfig struct {
 }
 
 type feishuAccount struct {
-	Alias    string `json:"alias"`
-	AppID    string `json:"app_id"`
+	Alias     string `json:"alias"`
+	AppID     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
 }
 
@@ -444,8 +451,8 @@ func (m FeishuOnboardModel) saveConfig() error {
 	cfg := feishuConfig{
 		Accounts: []feishuAccount{
 			{
-				Alias:    "default",
-				AppID:    m.appID,
+				Alias:     "default",
+				AppID:     m.appID,
 				AppSecret: m.appSecret,
 			},
 		},
@@ -526,7 +533,9 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 				if m.botName != "" {
 					m.message = i18n.TF("feishu.onboard.connected_as", m.botName)
 				}
-				return m, nil
+				return m, func() tea.Msg {
+					return FeishuOnboardDoneMsg{AppID: m.appID, AppSecret: m.appSecret, Domain: m.domain, BotName: m.botName, Err: msg.Err}
+				}
 			}
 			m.step = feishuStepError
 			m.message = msg.Err.Error()
@@ -548,7 +557,9 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 				m.botName = msg.BotName
 				m.step = feishuStepDone
 				m.message = i18n.TF("feishu.onboard.connected_as_refresh", m.botName)
-				return m, func() tea.Msg { return FeishuOnboardDoneMsg{AppID: m.appID, AppSecret: m.appSecret, Domain: m.domain, BotName: m.botName} }
+				return m, func() tea.Msg {
+					return FeishuOnboardDoneMsg{AppID: m.appID, AppSecret: m.appSecret, Domain: m.domain, BotName: m.botName}
+				}
 			}
 			// Probe bot for display name
 			return m, m.runProbeBot()
@@ -591,7 +602,6 @@ func (m FeishuOnboardModel) Update(msg tea.Msg) (FeishuOnboardModel, tea.Cmd) {
 	return m, nil
 }
 
-
 // fmtRemaining formats a time.Duration as an i18n countdown string like "(9m 58s remaining)".
 func fmtRemaining(d time.Duration) string {
 	if d <= 0 {
@@ -604,6 +614,7 @@ func fmtRemaining(d time.Duration) string {
 	}
 	return i18n.TF("feishu.onboard.remaining_s", s)
 }
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -632,7 +643,7 @@ func (m FeishuOnboardModel) View() string {
 		// URL (Ctrl+clickable in most terminals)
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("feishu.onboard.url_hint")) + "\n")
 		urlStyle := lipgloss.NewStyle().Foreground(ColorAccent).Underline(true)
-		b.WriteString(urlStyle.Render("  " + m.url) + "\n\n")
+		b.WriteString(urlStyle.Render("  "+m.url) + "\n\n")
 
 		// Scan hint with countdown
 		scanHint := i18n.T("feishu.onboard.scan_hint")

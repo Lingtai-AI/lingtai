@@ -258,6 +258,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case FeishuOnboardDoneMsg:
+		// Refresh the addon model while the onboarding view is still active,
+		// instead of relying on /addon view re-initialization to reread disk.
+		if a.addon.lingtaiDir == "" {
+			a.addon.lingtaiDir = a.projectDir
+		}
+		updated, _ := a.addon.Update(msg)
+		a.addon = updated
+		return a, nil
+
 	case CodexOAuthDoneMsg:
 		if a.currentView == appViewLogin {
 			a.login, _ = a.login.Update(msg)
