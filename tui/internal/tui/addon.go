@@ -266,7 +266,7 @@ func readWechatAddonState(lingtaiDir string) addonState {
 		UserID   string `json:"user_id"`
 	}
 	if jerr := json.Unmarshal(credentialsData, &creds); jerr != nil {
-		state.errMsg = i18n.TF("addon.parse_error", jerr.Error())
+		state.errMsg = i18n.TF("addon.credential_error", jerr.Error())
 		return state
 	}
 	if strings.TrimSpace(creds.BotToken) == "" || strings.TrimSpace(creds.UserID) == "" {

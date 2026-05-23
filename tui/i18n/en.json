@@ -187,6 +187,7 @@
   "addon.readonly_desc": "Addon configs live at .lingtai/.addons/<addon>/config.json — shared across all agents in this project. Edit the file directly, then /refresh.",
   "addon.not_configured": "Not configured — ask the agent to help set it up (it has a skill for this)",
   "addon.parse_error": "Config file exists but is not valid JSON: %s",
+  "addon.credential_error": "Credentials file error: %s",
   "addon.footer_hint": "Edit config files, then /refresh to apply changes",
   "addon.back": "back",
   "addon.navigate": "navigate",

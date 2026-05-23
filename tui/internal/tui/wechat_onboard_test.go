@@ -651,6 +651,101 @@ func teaKey(key string) tea.KeyPressMsg {
 	}
 }
 
+func TestWechatAddonModelReportsMalformedCredentials(t *testing.T) {
+	t.Run("invalid JSON in credentials.json", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+		addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+		if err := os.MkdirAll(addonDir, 0o700); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "config.json"), []byte(wechatDefaultConfigJSON), 0o600); err != nil {
+			t.Fatalf("WriteFile(config.json) error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "credentials.json"), []byte("{not-json"), 0o600); err != nil {
+			t.Fatalf("WriteFile(credentials.json) error = %v", err)
+		}
+
+		m := NewAddonModel(lingtaiDir)
+
+		// config.json is valid, so it should be in addonConfigs
+		if _, ok := m.addonConfigs["wechat"]; ok {
+			t.Fatal("expected wechat NOT to be configured with malformed credentials")
+		}
+
+		// Should report an error for malformed credentials
+		errMsg, hasErr := m.addonErrors["wechat"]
+		if !hasErr {
+			t.Fatal("expected credential error for malformed credentials.json")
+		}
+		if !strings.Contains(errMsg, "invalid character") && !strings.Contains(errMsg, "credentials") {
+			t.Fatalf("credential error = %q, want error message about credentials.json parse failure", errMsg)
+		}
+
+		// [Enter] should NOT open onboarding when credentials has error
+		m.cursor = indexOfAddon("wechat")
+		_, cmd := m.Update(teaKey("enter"))
+		if cmd != nil {
+			t.Fatalf("enter cmd = %v, want nil when credentials have error", cmd)
+		}
+	})
+
+	t.Run("empty credentials.json", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+		addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+		if err := os.MkdirAll(addonDir, 0o700); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "config.json"), []byte(wechatDefaultConfigJSON), 0o600); err != nil {
+			t.Fatalf("WriteFile(config.json) error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "credentials.json"), []byte("{}"), 0o600); err != nil {
+			t.Fatalf("WriteFile(credentials.json) error = %v", err)
+		}
+
+		m := NewAddonModel(lingtaiDir)
+
+		// Empty credentials object (no bot_token/user_id) should be treated as unconfigured
+		if _, ok := m.addonConfigs["wechat"]; ok {
+			t.Fatal("expected wechat NOT to be configured with empty credentials")
+		}
+		if errMsg := m.addonErrors["wechat"]; errMsg != "" {
+			t.Fatalf("unexpected error for empty credentials = %q", errMsg)
+		}
+
+		// Should still be able to open onboarding
+		m.cursor = indexOfAddon("wechat")
+		_, cmd := m.Update(teaKey("enter"))
+		if cmd == nil {
+			t.Fatal("enter cmd = nil, want onboarding view change when credentials are empty")
+		}
+	})
+
+	t.Run("missing bot_token and user_id", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+		addonDir := filepath.Join(lingtaiDir, ".addons", "wechat")
+		if err := os.MkdirAll(addonDir, 0o700); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "config.json"), []byte(wechatDefaultConfigJSON), 0o600); err != nil {
+			t.Fatalf("WriteFile(config.json) error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(addonDir, "credentials.json"), []byte(`{"bot_token":"","user_id":""}`), 0o600); err != nil {
+			t.Fatalf("WriteFile(credentials.json) error = %v", err)
+		}
+
+		m := NewAddonModel(lingtaiDir)
+		if _, ok := m.addonConfigs["wechat"]; ok {
+			t.Fatal("expected wechat NOT to be configured with empty bot_token/user_id")
+		}
+		if errMsg := m.addonErrors["wechat"]; errMsg != "" {
+			t.Fatalf("unexpected error for empty bot_token/user_id = %q", errMsg)
+		}
+	})
+}
+
 func indexOfAddon(name string) int {
 	for i, addon := range AllAddons {
 		if addon == name {

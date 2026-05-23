@@ -109,7 +109,6 @@ type wechatOnboardStep int
 
 const (
 	wechatStepInit wechatOnboardStep = iota
-	wechatStepQR
 	wechatStepPolling
 	wechatStepDone
 	wechatStepError
@@ -237,6 +236,10 @@ func (m WechatOnboardModel) runPoll() tea.Cmd {
 
 			poll, err := callWechatPoll(m.ctx, client, qrCode, currentBaseURL)
 			if err != nil {
+				// Permanent parse errors shouldn't be silently retried
+				if strings.Contains(err.Error(), "parse poll response") {
+					return wechatPollDoneMsg{Err: fmt.Errorf("wechat: poll permanent error: %w", err)}
+				}
 				time.Sleep(time.Duration(interval) * time.Second)
 				continue
 			}
@@ -371,11 +374,21 @@ func wechatGetJSON(ctx context.Context, client *http.Client, rawURL string) ([]b
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyPrefix, readErr := io.ReadAll(io.LimitReader(resp.Body, 200))
 		if readErr != nil {
-			return nil, readErr
+			return nil, fmt.Errorf(
+				"wechat: GET returned HTTP %d: body read error: %w",
+				resp.StatusCode,
+				readErr,
+			)
+		}
+		// Redact query string to avoid leaking sensitive tokens in error logs
+		safeURL := rawURL
+		if u, err := url.Parse(rawURL); err == nil {
+			u.RawQuery = ""
+			safeURL = u.String()
 		}
 		return nil, fmt.Errorf(
 			"wechat: GET %s returned HTTP %d: %s",
-			rawURL,
+			safeURL,
 			resp.StatusCode,
 			strings.TrimSpace(string(bodyPrefix)),
 		)
@@ -557,7 +570,7 @@ func (m WechatOnboardModel) View() string {
 	case wechatStepInit:
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("wechat.onboard.connecting")) + "\n")
 
-	case wechatStepQR, wechatStepPolling:
+	case wechatStepPolling:
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("wechat.onboard.admin_warning")) + "\n\n")
 		b.WriteString("  " + StyleSubtle.Render(i18n.T("wechat.onboard.url_hint")) + "\n")
 		urlStyle := lipgloss.NewStyle().Foreground(ColorAccent).Underline(true)
@@ -592,7 +605,7 @@ func (m WechatOnboardModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", m.width) + "\n")
 	switch m.step {
-	case wechatStepQR, wechatStepPolling:
+	case wechatStepPolling:
 		b.WriteString(StyleFaint.Render("  [esc] "+i18n.T("common.cancel")) + "\n")
 	case wechatStepError:
 		b.WriteString(StyleFaint.Render("  [enter] "+i18n.T("common.retry")+"    [esc] "+i18n.T("common.back")) + "\n")

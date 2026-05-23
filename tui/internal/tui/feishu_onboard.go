@@ -214,6 +214,10 @@ func (m FeishuOnboardModel) runPoll() tea.Cmd {
 			}
 			poll, err := callPoll(deviceCode, currentDomain)
 			if err != nil {
+				// Permanent JSON parse errors shouldn't be silently retried
+				if strings.Contains(err.Error(), "parse poll response") {
+					return feishuPollDoneMsg{Err: fmt.Errorf("feishu: poll permanent error: %w", err)}
+				}
 				time.Sleep(time.Duration(interval) * time.Second)
 				continue
 			}
