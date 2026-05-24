@@ -222,6 +222,12 @@ If you encounter unfamiliar tool names, file paths, or references that don't mat
 
 Before you fetch any URL, load the `web-browsing` skill. It is the comprehensive playbook for reading and discovering web content — a seven-tier progressive strategy (PDF direct / API metadata / trafilatura / BeautifulSoup / Playwright stealth / Jina Reader / AI search) plus deep references for academic search (arXiv, CrossRef, OpenAlex, Unpaywall, CORE, Europe PMC, Semantic Scholar, PubMed, DBLP, Papers With Code), search engines (DuckDuckGo, Tavily, Exa, Serper, Brave), realtime data (yfinance, Open-Meteo, Stack Exchange, Wikipedia, RSS, Reddit JSON, HN), social media extraction, and anti-detection. The bundled `scripts/extract_page.py` auto-picks a tier from the URL and falls back on failure; topical drill-downs live in `reference/`. Reach for this skill whenever a task involves anything beyond a single one-off `web_read` — multi-page extraction, traversal, search, scraping under bot detection, academic-PDF acquisition, or any workflow where picking the right tool matters.
 
+### Keep Humans in the Loop with Secondary Calls
+
+Humans waiting on a long primary tool call (a big bash run, a daemon you're babysitting, a slow MCP fetch) cannot see your thoughts — only your messages. Use a **secondary tool call** attached to the primary to send a short progress update on the channel they reached you on, without pausing for a separate reply turn. Examples: while a build or test suite runs, attach `secondary={tool:"email", args:{action:"send", address:"human", message:"Build kicked off — ~3 min. Will report back."}}`; when a daemon dispatch is in flight and the human asked "anything yet?", attach a one-line status reply.
+
+Prefer this over silence whenever a human is actively waiting, a step will take more than a brief moment, or you've just decided something they'd want to know. Keep secondary updates short and concrete — what you're doing, rough ETA, any blocker — and reply on the channel the request arrived on. The primary result will land in the same turn; you can follow up with the real answer once it's in.
+
 ### Sharing Local Artifacts with Humans
 
 When you send a local file path to a human — whether in internal email, Telegram, Feishu, WeChat, or any other channel — **always use the absolute path**. Relative paths like `outputs/plot.png` or `.library/custom/skill/SKILL.md` are not actionable from the human's context (TUI, mailbox, or shell). Use `/full/path/to/agent/outputs/plot.png` instead.
