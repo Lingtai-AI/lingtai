@@ -153,6 +153,53 @@ func TestEnsureConfigPersisted_PreservesExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureConfigPersisted_DoesNotOverwriteMalformed(t *testing.T) {
+	// If config.json exists in a malformed/unreadable state (user-
+	// edited, corrupted, half-written), EnsureConfigPersisted must
+	// leave it alone — we only care that the file exists as a setup
+	// sentinel, never about its content.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	malformed := []byte("{this is not valid JSON")
+	if err := os.WriteFile(configPath, malformed, 0o644); err != nil {
+		t.Fatalf("seed malformed: %v", err)
+	}
+
+	EnsureConfigPersisted(dir)
+
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read after ensure: %v", err)
+	}
+	if string(got) != string(malformed) {
+		t.Errorf("config.json content was modified — want %q, got %q (must not overwrite existing)",
+			string(malformed), string(got))
+	}
+}
+
+func TestEnsureConfigPersisted_DoesNotTouchEnvFile(t *testing.T) {
+	// SaveConfig also rewrites .env. EnsureConfigPersisted must not
+	// go through SaveConfig, because a user may have populated .env
+	// manually (proxy vars, custom env, etc.) that would be wiped.
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	userEnvContent := []byte("HTTPS_PROXY=http://example:8080\nCUSTOM_VAR=manual\n")
+	if err := os.WriteFile(envPath, userEnvContent, 0o600); err != nil {
+		t.Fatalf("seed .env: %v", err)
+	}
+
+	EnsureConfigPersisted(dir)
+
+	got, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read .env after ensure: %v", err)
+	}
+	if string(got) != string(userEnvContent) {
+		t.Errorf(".env was modified — want %q, got %q (must not touch user-edited .env)",
+			string(userEnvContent), string(got))
+	}
+}
+
 func TestDefaultTUIConfig_DisablesInsights(t *testing.T) {
 	cfg := DefaultTUIConfig()
 	if cfg.Insights {

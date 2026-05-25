@@ -187,24 +187,33 @@ func WriteEnvFile(globalDir string, cfg Config) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
-// EnsureConfigPersisted writes config.json to disk if it doesn't
-// already exist, using whatever LoadConfig currently returns (an
-// empty Config{} on a fresh install). This is needed so main.go's
-// first-run heuristic (config.json existence) does not re-trigger
-// the recovery wizard after a successful first-run that completed
-// without ever calling SaveConfig — the case for OAuth / no-key
-// presets like codex which skip stepPresetKey (and thus keyDoNext's
-// SaveConfig) entirely.
+// EnsureConfigPersisted creates a minimal empty config.json if and
+// only if the file does not already exist. This is purely a setup-
+// complete sentinel for main.go's first-run heuristic (which checks
+// config.json existence), needed because OAuth / no-key presets like
+// codex skip stepPresetKey entirely — so keyDoNext's SaveConfig is
+// never called and config.json is never created, causing the
+// recovery wizard to re-trigger on every launch.
 //
-// For flows that already called SaveConfig (any API-key preset),
-// this is a no-op rewrite of the same content.
+// Implementation deliberately avoids SaveConfig because SaveConfig
+// also rewrites .env, which a user may have populated manually with
+// values that should not be clobbered. We also don't read the file
+// first — if it exists (in any state, including malformed or user-
+// edited), we leave it alone. We have no business modifying its
+// content; we only need the file to exist as a marker.
 //
-// Errors are intentionally swallowed: callers invoke this purely as
-// a sentinel side-effect after successful wizard completion, where
-// a config-persistence error should not block the launch path.
+// Errors are intentionally swallowed: this runs as a side-effect
+// after successful wizard completion, where a sentinel-write error
+// should not block the launch path.
 func EnsureConfigPersisted(globalDir string) {
-	cfg, _ := LoadConfig(globalDir)
-	_ = SaveConfig(globalDir, cfg)
+	configPath := filepath.Join(globalDir, "config.json")
+	if _, err := os.Stat(configPath); err == nil {
+		return // file already exists in some form — don't touch it
+	}
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(configPath, []byte("{}\n"), 0o644)
 }
 
 
