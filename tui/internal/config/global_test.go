@@ -107,6 +107,52 @@ func TestLoadConfig_LegacyMigrationPreservesNewEntry(t *testing.T) {
 	}
 }
 
+func TestEnsureConfigPersisted_CreatesIfMissing(t *testing.T) {
+	// Regression test for issue #181: OAuth / no-key presets (codex)
+	// skipped stepPresetKey entirely, so config.SaveConfig was never
+	// called during first-run wizard completion. main.go uses
+	// config.json existence as the first-run heuristic, so the next
+	// launch re-triggered the recovery wizard every time.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("precondition: expected config.json absent in TempDir, got err=%v", err)
+	}
+
+	EnsureConfigPersisted(dir)
+
+	if _, err := os.Stat(configPath); err != nil {
+		t.Errorf("config.json not created after EnsureConfigPersisted: %v", err)
+	}
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("load after ensure: %v", err)
+	}
+	if len(cfg.Keys) > 0 {
+		t.Errorf("expected empty keys after ensure on fresh dir, got %v", cfg.Keys)
+	}
+}
+
+func TestEnsureConfigPersisted_PreservesExisting(t *testing.T) {
+	// When called on a dir that already has a populated config.json,
+	// EnsureConfigPersisted must not clobber existing keys.
+	dir := t.TempDir()
+	seed := Config{Keys: map[string]string{"FOO_API_KEY": "bar"}}
+	if err := SaveConfig(dir, seed); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	EnsureConfigPersisted(dir)
+
+	loaded, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := loaded.Keys["FOO_API_KEY"]; got != "bar" {
+		t.Errorf("Keys[FOO_API_KEY] = %q, want %q (EnsureConfigPersisted clobbered existing)", got, "bar")
+	}
+}
+
 func TestDefaultTUIConfig_DisablesInsights(t *testing.T) {
 	cfg := DefaultTUIConfig()
 	if cfg.Insights {

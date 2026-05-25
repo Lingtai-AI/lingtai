@@ -187,4 +187,24 @@ func WriteEnvFile(globalDir string, cfg Config) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
+// EnsureConfigPersisted writes config.json to disk if it doesn't
+// already exist, using whatever LoadConfig currently returns (an
+// empty Config{} on a fresh install). This is needed so main.go's
+// first-run heuristic (config.json existence) does not re-trigger
+// the recovery wizard after a successful first-run that completed
+// without ever calling SaveConfig — the case for OAuth / no-key
+// presets like codex which skip stepPresetKey (and thus keyDoNext's
+// SaveConfig) entirely.
+//
+// For flows that already called SaveConfig (any API-key preset),
+// this is a no-op rewrite of the same content.
+//
+// Errors are intentionally swallowed: callers invoke this purely as
+// a sentinel side-effect after successful wizard completion, where
+// a config-persistence error should not block the launch path.
+func EnsureConfigPersisted(globalDir string) {
+	cfg, _ := LoadConfig(globalDir)
+	_ = SaveConfig(globalDir, cfg)
+}
+
 

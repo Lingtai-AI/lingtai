@@ -288,6 +288,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a.tuiConfig was captured at NewApp time and is otherwise stale
 		// after the wizard's SaveTUIConfig calls.
 		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
+		// Persist config.json so main.go's first-run heuristic does
+		// not re-trigger the recovery wizard for OAuth / no-key presets
+		// (codex etc.) whose wizard skipped the SaveConfig path. For
+		// API-key flows this is a no-op rewrite. See issue #181.
+		config.EnsureConfigPersisted(a.globalDir)
 		// Ensure human folder exists before launching — InitProject is
 		// idempotent and prevents the race where the agent tries to
 		// send mail before the human mailbox is ready.
@@ -384,6 +389,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the mail view, and launch the orchestrator.
 			a.recoveryMode = false
 			a.tuiConfig = config.LoadTUIConfig(a.globalDir)
+			// Persist config.json so the recovery wizard does not
+			// re-trigger on next launch for OAuth / no-key presets
+			// (codex etc.). Without this, recovery would loop forever
+			// because config.json was never created. See issue #181.
+			config.EnsureConfigPersisted(a.globalDir)
 			PropagateOrchestratorConfig(a.projectDir, a.orchDir)
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
