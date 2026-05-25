@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -18,9 +18,9 @@ import (
 // projectEntry holds a registered project and its loaded details.
 type projectEntry struct {
 	Path    string
-	Name    string         // basename of the project directory
-	Network fs.Network     // loaded on select
-	Current bool           // true if this is the TUI's current project
+	Name    string     // basename of the project directory
+	Network fs.Network // loaded on select
+	Current bool       // true if this is the TUI's current project
 }
 
 // projectSource determines where the projects list comes from.
@@ -417,6 +417,10 @@ func (m ProjectsModel) renderRight(maxW int) string {
 		lines = append(lines, "  "+strings.Join(stateParts, "  "))
 	} else {
 		lines = append(lines, "  "+StyleFaint.Render("──"))
+	}
+	if net.Activity.Status != "" {
+		c := lipgloss.NewStyle().Foreground(NetworkActivityColor(net.Activity.Status))
+		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(net.Activity.Status)))
 	}
 
 	// Mail count

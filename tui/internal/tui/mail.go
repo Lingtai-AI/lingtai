@@ -55,6 +55,7 @@ type mailRefreshMsg struct {
 	cache        fs.MailCache // incrementally updated cache
 	alive        bool
 	state        string // active, idle, stuck, asleep, suspended, or ""
+	activity     fs.NetworkActivity
 	orchName     string // agent name from .agent.json (may change at runtime)
 	orchNickname string // nickname from .agent.json
 }
@@ -104,45 +105,46 @@ var thinkingQuotesMap = map[string][]string{
 }
 
 type MailModel struct {
-	humanDir         string
-	humanAddr        string
-	orchestrator     string // 本我 directory path (full path under .lingtai/)
-	orchAddr         string // 本我 address (from .agent.json)
-	orchName         string // 本我 agent name (true name)
-	orchNickname     string // 本我 nickname (display name override)
-	baseDir          string // .lingtai/ directory
-	verbose          verboseLevel
-	messages         []ChatMessage // derived from cache on each refresh
-	cache            fs.MailCache  // incremental mail cache
-	pageSize         int           // max messages shown (from settings)
-	loadedExtra      int           // additional older messages loaded via ctrl+u
-	viewport         viewport.Model
-	input            InputModel
-	palette          PaletteModel
-	width            int
-	height           int
-	ready            bool
-	pollRate         time.Duration // refresh interval
-	orchAlive        bool
-	orchState        string    // agent state from .agent.json
-	statusFlash      string    // transient status message shown in status bar
-	statusExpiry     time.Time // when to clear the flash
-	lastInputLines   int
-	lastPaletteLines int
-	lastBannerLines  int
-	pendingMessage   string // full text from editor, sent on Enter
-	globalDir      string // ~/.lingtai-tui/
-	wasActive      bool   // true if previous refresh was ACTIVE
-	quoteIdx       int    // which quote to show (advances on each ACTIVE transition)
-	pulseTick      int    // pulse animation counter while ACTIVE
-	inquiryState   string    // "", "sent", "taken" — tracks /btw lifecycle
-	insightPending bool      // true when waiting for 5s insight delay
-	insightAt      time.Time // when to fire the auto-insight
-	dismissedInsights map[string]bool // dismissed insight timestamps
-	showEditorWarn  bool   // one-time vim warning overlay
-	editorWarnText  string // text to pass to editor after warning
-	insightsEnabled bool   // from settings — show insight events
-	sessionCache   *fs.SessionCache // append-only session log
+	humanDir          string
+	humanAddr         string
+	orchestrator      string // 本我 directory path (full path under .lingtai/)
+	orchAddr          string // 本我 address (from .agent.json)
+	orchName          string // 本我 agent name (true name)
+	orchNickname      string // 本我 nickname (display name override)
+	baseDir           string // .lingtai/ directory
+	verbose           verboseLevel
+	messages          []ChatMessage // derived from cache on each refresh
+	cache             fs.MailCache  // incremental mail cache
+	pageSize          int           // max messages shown (from settings)
+	loadedExtra       int           // additional older messages loaded via ctrl+u
+	viewport          viewport.Model
+	input             InputModel
+	palette           PaletteModel
+	width             int
+	height            int
+	ready             bool
+	pollRate          time.Duration // refresh interval
+	orchAlive         bool
+	orchState         string // agent state from .agent.json
+	networkActivity   fs.NetworkActivity
+	statusFlash       string    // transient status message shown in status bar
+	statusExpiry      time.Time // when to clear the flash
+	lastInputLines    int
+	lastPaletteLines  int
+	lastBannerLines   int
+	pendingMessage    string           // full text from editor, sent on Enter
+	globalDir         string           // ~/.lingtai-tui/
+	wasActive         bool             // true if previous refresh was ACTIVE
+	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
+	pulseTick         int              // pulse animation counter while ACTIVE
+	inquiryState      string           // "", "sent", "taken" — tracks /btw lifecycle
+	insightPending    bool             // true when waiting for 5s insight delay
+	insightAt         time.Time        // when to fire the auto-insight
+	dismissedInsights map[string]bool  // dismissed insight timestamps
+	showEditorWarn    bool             // one-time vim warning overlay
+	editorWarnText    string           // text to pass to editor after warning
+	insightsEnabled   bool             // from settings — show insight events
+	sessionCache      *fs.SessionCache // append-only session log
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool) MailModel {
@@ -160,20 +162,20 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		pageSize = unlimitedPageSize
 	}
 	m := MailModel{
-		humanDir:     humanDir,
-		humanAddr:    humanAddr,
-		baseDir:      baseDir,
-		orchestrator: orchDir,
-		orchAddr:     orchAddr,
-		orchName:     orchName,
-		input:        input,
-		palette:      palette,
-		pollRate:     1 * time.Second,
-		cache:        fs.NewMailCache(humanDir),
-		pageSize:     pageSize,
-		globalDir:      globalDir,
+		humanDir:          humanDir,
+		humanAddr:         humanAddr,
+		baseDir:           baseDir,
+		orchestrator:      orchDir,
+		orchAddr:          orchAddr,
+		orchName:          orchName,
+		input:             input,
+		palette:           palette,
+		pollRate:          1 * time.Second,
+		cache:             fs.NewMailCache(humanDir),
+		pageSize:          pageSize,
+		globalDir:         globalDir,
 		quoteIdx:          -1,
-		insightsEnabled:    insights,
+		insightsEnabled:   insights,
 		dismissedInsights: make(map[string]bool),
 		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
 	}
@@ -257,6 +259,12 @@ func (m MailModel) refreshMail() tea.Msg {
 	cache := m.cache.Refresh()
 
 	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
+	var activity fs.NetworkActivity
+	if m.baseDir != "" {
+		if a, err := fs.ComputeNetworkActivity(m.baseDir); err == nil {
+			activity = a
+		}
+	}
 	state := ""
 	orchName := m.orchName
 	orchNickname := ""
@@ -276,7 +284,7 @@ func (m MailModel) refreshMail() tea.Msg {
 			state = "suspended"
 		}
 	}
-	return mailRefreshMsg{cache: cache, alive: alive, state: state, orchName: orchName, orchNickname: orchNickname}
+	return mailRefreshMsg{cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
 }
 
 // orchDisplayName returns the nickname if set, otherwise the agent name.
@@ -488,6 +496,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.cache = msg.cache
 		m.orchAlive = msg.alive
 		m.orchState = msg.state
+		m.networkActivity = msg.activity
 		if msg.orchName != "" {
 			m.orchName = msg.orchName
 		}
@@ -994,6 +1003,14 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
+func (m MailModel) networkActivityBadge() string {
+	if m.networkActivity.Status == "" {
+		return ""
+	}
+	style := lipgloss.NewStyle().Foreground(NetworkActivityColor(m.networkActivity.Status))
+	return StyleFaint.Render(" · "+networkActivityShortLabel()+": ") + style.Render(networkActivityStatusLabel(m.networkActivity.Status))
+}
+
 // AddSystemMessage shows a transient status message in the status bar.
 // It auto-expires after 5 seconds.
 func (m *MailModel) AddSystemMessage(body string) {
@@ -1075,7 +1092,7 @@ func (m MailModel) View() string {
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	titleRight := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render("◉ "+stateLabel)
+	titleRightBase := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render("◉ "+stateLabel)
 
 	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
 	titleCenter := ""
@@ -1090,6 +1107,14 @@ func (m MailModel) View() string {
 		shade := lipgloss.Color(shades[m.pulseTick%len(shades)])
 		style := lipgloss.NewStyle().Foreground(shade)
 		titleCenter = style.Render(spinner + " " + quote + " " + spinner)
+	}
+
+	titleRight := titleRightBase
+	if badge := m.networkActivityBadge(); badge != "" {
+		needWidth := lipgloss.Width(titleLeft) + lipgloss.Width(titleCenter) + lipgloss.Width(titleRightBase) + lipgloss.Width(badge) + 4
+		if needWidth <= m.width {
+			titleRight += badge
+		}
 	}
 
 	leftW := lipgloss.Width(titleLeft)

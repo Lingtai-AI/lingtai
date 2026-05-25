@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -28,11 +28,11 @@ type PropsModel struct {
 	height    int
 
 	// Left panel: selected agent
-	selectedDir     string         // working dir of the agent shown on left (defaults to orchDir)
-	selectedTokens  fs.TokenTotals // cached token ledger for selected agent
-	selectedStatus fs.AgentStatus  // cached .status.json for selected agent
-	agentDirs       []string       // all discovered agent dirs (for picker)
-	agentNodes      []fs.AgentNode // discovered agents (for picker display)
+	selectedDir    string         // working dir of the agent shown on left (defaults to orchDir)
+	selectedTokens fs.TokenTotals // cached token ledger for selected agent
+	selectedStatus fs.AgentStatus // cached .status.json for selected agent
+	agentDirs      []string       // all discovered agent dirs (for picker)
+	agentNodes     []fs.AgentNode // discovered agents (for picker display)
 
 	// Right panel: dashboard snapshot
 	network    fs.Network
@@ -50,11 +50,11 @@ type PropsModel struct {
 	// Detail view: full-screen single-column breakdown of token usage
 	// by provider, recent activity, MCP servers, daemon count. Toggled
 	// with Ctrl+D. Esc closes detail and returns to the summary.
-	detailOpen           bool
-	detailByProvider     map[string]fs.TokenTotals
-	detailRecent         []fs.LedgerEntry
-	detailDaemonCount    int
-	detailMCPNames       []string
+	detailOpen        bool
+	detailByProvider  map[string]fs.TokenTotals
+	detailRecent      []fs.LedgerEntry
+	detailDaemonCount int
+	detailMCPNames    []string
 }
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
@@ -67,13 +67,13 @@ func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 }
 
 type propsLoadMsg struct {
-	network         fs.Network
-	tokens          fs.TokenTotals
-	selectedTokens  fs.TokenTotals
+	network        fs.Network
+	tokens         fs.TokenTotals
+	selectedTokens fs.TokenTotals
 	selectedStatus fs.AgentStatus
-	adminStart      string
-	agentDirs       []string
-	agentNodes      []fs.AgentNode
+	adminStart     string
+	agentDirs      []string
+	agentNodes     []fs.AgentNode
 }
 
 func (m PropsModel) loadData() tea.Msg {
@@ -104,13 +104,13 @@ func (m PropsModel) loadData() tea.Msg {
 	}
 
 	return propsLoadMsg{
-		network:         net,
-		tokens:          totals,
-		selectedTokens:  selectedTokens,
+		network:        net,
+		tokens:         totals,
+		selectedTokens: selectedTokens,
 		selectedStatus: selectedStatus,
-		adminStart:      adminStart,
-		agentDirs:       allDirs,
-		agentNodes:      net.Nodes,
+		adminStart:     adminStart,
+		agentDirs:      allDirs,
+		agentNodes:     net.Nodes,
 	}
 }
 
@@ -662,6 +662,10 @@ func (m PropsModel) renderRight(maxW int) string {
 	}
 	if len(stateParts) > 0 {
 		lines = append(lines, "  "+strings.Join(stateParts, "  "))
+	}
+	if m.network.Activity.Status != "" {
+		c := lipgloss.NewStyle().Foreground(NetworkActivityColor(m.network.Activity.Status))
+		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(m.network.Activity.Status)))
 	}
 
 	// Tokens

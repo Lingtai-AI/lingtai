@@ -179,7 +179,6 @@ func SetThemeByName(name string) {
 	SetTheme(ThemeByName(name))
 }
 
-
 // ActiveTheme returns the current theme (read-only copy).
 func ActiveTheme() Theme { return activeTheme }
 
@@ -323,7 +322,7 @@ func paintLineBG(line string, width int, bgEsc string) string {
 		if b[j] == 0x1b && j+1 < n && b[j+1] == '[' {
 			// Find end of CSI sequence
 			k := j + 2
-			for k < n && !((b[k] >= 0x40 && b[k] <= 0x7E)) {
+			for k < n && !(b[k] >= 0x40 && b[k] <= 0x7E) {
 				k++
 			}
 			if k < n {
@@ -468,4 +467,20 @@ func StateColor(state string) color.Color {
 	}
 }
 
-
+// NetworkActivityColor returns the color for an aggregate network activity state.
+func NetworkActivityColor(status string) color.Color {
+	switch strings.ToLower(status) {
+	case "active":
+		return ColorActive
+	case "daemon-active":
+		return ColorTool
+	case "idle":
+		return ColorIdle
+	case "asleep":
+		return ColorAsleep
+	case "suspend":
+		return ColorSuspended
+	default:
+		return ColorTextDim
+	}
+}

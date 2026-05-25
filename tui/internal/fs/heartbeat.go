@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const AgentAliveThresholdSec = 2.0
+
 func IsAlive(dir string, thresholdSec float64) bool {
 	data, err := os.ReadFile(filepath.Join(dir, ".agent.heartbeat"))
 	if err != nil {

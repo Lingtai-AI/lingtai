@@ -88,6 +88,9 @@ func TestBuildNetwork(t *testing.T) {
 	if net.Stats.Idle != 1 {
 		t.Errorf("idle = %d, want 1", net.Stats.Idle)
 	}
+	if net.Activity.Status != NetworkStatusActive {
+		t.Errorf("activity status = %q, want %q", net.Activity.Status, NetworkStatusActive)
+	}
 }
 
 func TestBuildNetwork_AllAddressesRelative(t *testing.T) {

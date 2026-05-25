@@ -41,6 +41,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `UpdateHumanLocation(humanDir)` | `tui/internal/fs/location.go:65` | reads human `.agent.json`, resolves if stale, writes atomically |
 | **network.go** | | |
 | `BuildNetwork(baseDir)` | `tui/internal/fs/network.go:8` | full topology: nodes, avatar edges, contact edges, mail edges, stats |
+| **activity.go** | | |
+| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:25` | lightweight non-human project activity badge: active, daemon-active, idle, asleep, suspend |
 | **resolve.go** | | |
 | `ParseAddress(addr)` | `tui/internal/fs/resolve.go:16` | `"localhost:/path"` or `"[ipv6]:/path"` → `(host, path, ok)` |
 | `IsRemoteAddress(addr)` | `tui/internal/fs/resolve.go:62` | true if non-localhost host prefix |
@@ -70,7 +72,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 ## Connections
 
 - **Called by `tui/internal/tui/`** — every Bubble Tea screen reads agent state through this package (network home, agent detail, mail viewer, kanban, session log).
-- **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`.
+- **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
 - **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<mailbox-id>/`.
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
@@ -83,7 +85,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 
 ## State
 
-- **Reads (never writes)**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`.
+- **Reads (never writes)**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`.
 - **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field.
 
 ## Notes

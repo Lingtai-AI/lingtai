@@ -11,17 +11,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
 	}
 
-	for i := range nodes {
-		if nodes[i].IsHuman {
-			nodes[i].Alive = true
-		} else {
-			nodes[i].Alive = IsAlive(nodes[i].WorkingDir, 2.0)
-			// Heartbeat is ground truth — no heartbeat means SUSPENDED
-			if !nodes[i].Alive && nodes[i].State != "" {
-				nodes[i].State = "SUSPENDED"
-			}
-		}
-	}
+	normalizeAgentLiveness(nodes)
 
 	nodeIndex := make(map[string]bool)
 	for _, n := range nodes {
@@ -53,6 +43,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 	// Count from inbox only — sent would double-count
 	mailEdges := buildMailEdges(nodes, baseDir)
 	stats := computeStats(nodes, mailEdges)
+	activity := computeNetworkActivity(nodes)
 
 	// Relativize all edge addresses so they match AgentNode.Address format
 	for i := range avatarEdges {
@@ -70,6 +61,7 @@ func BuildNetwork(baseDir string) (Network, error) {
 		ContactEdges: contactEdges,
 		MailEdges:    mailEdges,
 		Stats:        stats,
+		Activity:     activity,
 	}, nil
 }
 

@@ -13,15 +13,15 @@ type Location struct {
 
 // AgentNode represents a discovered agent in the network.
 type AgentNode struct {
-	Address      string   `json:"address"`
-	AgentName    string   `json:"agent_name"`
-	Nickname     string   `json:"nickname"`
-	State        string   `json:"state"`
-	Alive        bool     `json:"alive"`
-	IsHuman      bool     `json:"is_human"`
-	Capabilities []string `json:"capabilities"`
+	Address      string    `json:"address"`
+	AgentName    string    `json:"agent_name"`
+	Nickname     string    `json:"nickname"`
+	State        string    `json:"state"`
+	Alive        bool      `json:"alive"`
+	IsHuman      bool      `json:"is_human"`
+	Capabilities []string  `json:"capabilities"`
 	Location     *Location `json:"location,omitempty"`
-	WorkingDir   string   `json:"-"` // not serialized to API
+	WorkingDir   string    `json:"-"` // not serialized to API
 }
 
 // AvatarEdge is a parent → child spawning relationship.
@@ -57,23 +57,24 @@ type NetworkStats struct {
 
 // Network is the full topology payload returned by the API.
 type Network struct {
-	Nodes        []AgentNode   `json:"nodes"`
-	AvatarEdges  []AvatarEdge  `json:"avatar_edges"`
-	ContactEdges []ContactEdge `json:"contact_edges"`
-	MailEdges    []MailEdge    `json:"mail_edges"`
-	Stats        NetworkStats  `json:"stats"`
-	Lang         string        `json:"lang"`
+	Nodes        []AgentNode     `json:"nodes"`
+	AvatarEdges  []AvatarEdge    `json:"avatar_edges"`
+	ContactEdges []ContactEdge   `json:"contact_edges"`
+	MailEdges    []MailEdge      `json:"mail_edges"`
+	Stats        NetworkStats    `json:"stats"`
+	Activity     NetworkActivity `json:"activity"`
+	Lang         string          `json:"lang"`
 }
 
 // MailMessage is the schema for messages written to mailbox/inbox/{uuid}/message.json.
 type MailMessage struct {
-	ID         string                 `json:"id"`
-	MailboxID  string                 `json:"_mailbox_id"`
-	From       string                 `json:"from"`
-	To         interface{}            `json:"to"` // string or []string
-	CC         []string               `json:"cc"`
-	Subject    string                 `json:"subject"`
-	Message    string                 `json:"message"`
+	ID          string                 `json:"id"`
+	MailboxID   string                 `json:"_mailbox_id"`
+	From        string                 `json:"from"`
+	To          interface{}            `json:"to"` // string or []string
+	CC          []string               `json:"cc"`
+	Subject     string                 `json:"subject"`
+	Message     string                 `json:"message"`
 	Type        string                 `json:"type"`
 	ReceivedAt  string                 `json:"received_at"`
 	Attachments []string               `json:"attachments,omitempty"`
