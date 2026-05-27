@@ -65,6 +65,10 @@ Before planning any broad LingTai dev work, run — or dispatch — an org-wide 
 
 Skipping the sweep is how you end up duplicating in-flight work, stomping on someone else's branch, or shipping a fix that conflicts with a pending refactor.
 
+### 6. Self-operate GitHub via `GH_TOKEN` when the human provides one
+
+For any of the `gh` invocations above — issue triage, PR creation, the portfolio sweep — if the human pastes a GitHub token into the session and you have bash, use it directly: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste and don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then ask explicit per-action consent before any mutation (issue creation, PR open/merge, comments). Never echo, log, or persist the token; let it live only in the env of the single command. The full protocol lives in `procedures.md` under "Self-Operating GitHub via GH_TOKEN".
+
 ## Changing the TUI (`tui/`)
 
 ### Where to look

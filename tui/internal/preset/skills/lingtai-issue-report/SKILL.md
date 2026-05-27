@@ -1,7 +1,7 @@
 ---
 name: lingtai-issue-report
-description: Protocol for reporting bugs, stale info, missing capabilities, or design issues you spot in any LingTai skill, capability, preset, or system behavior. You assemble a structured report, ask the human for permission, then either file it directly via the `gh` CLI (if `gh auth` is present and the human consents) or hand them a formatted title + body to paste into the issue tracker.
-version: 1.2.0
+description: Protocol for reporting bugs, stale info, missing capabilities, or design issues you spot in any LingTai skill, capability, preset, or system behavior. You assemble a structured report, ask the human for permission, then either file it directly via the `gh` CLI (if `gh auth` is present OR the human provided a `GH_TOKEN`, and the human consents) or hand them a formatted title + body to paste into the issue tracker.
+version: 1.3.0
 ---
 
 # Reporting LingTai Issues
@@ -84,29 +84,49 @@ If you have multiple addressees (parent + human), send the same content twice �
 
 ## Filing Path — Detect `gh` First
 
-Before you ask the human for permission, run a quick read-only probe to see whether the GitHub CLI is installed AND authenticated. This determines which path you offer:
+Before you ask the human for permission, run a quick read-only probe to see whether the GitHub CLI is installed AND there's a way to authenticate. There are two acceptable auth sources — either is enough to make Path A available:
+
+1. **Existing `gh auth`** — the host already has a logged-in account.
+2. **A `GH_TOKEN` the human provided this session** — they pasted a personal access token into chat (or it's already in your shell env). `gh` reads `GH_TOKEN` from the environment per-invocation, so no `gh auth login` is needed.
+
+Probe:
 
 ```bash
+# Is gh installed?
+command -v gh
+
+# Is gh already authenticated?
 gh auth status 2>&1
 ```
 
 Interpret the result:
 
-- **Exit 0 and output mentions a logged-in account** → `gh` is ready. Path A is available.
-- **Exit non-zero, or "not logged in", or "command not found"** → `gh` is not usable. Fall through to Path B.
+- **`gh` is installed AND (`gh auth status` exits 0 with a logged-in account, OR the human has handed you a `GH_TOKEN` this session)** → Path A is available.
+- **`gh` is missing, or neither auth source is present** → Path A is not available. Fall through to Path B.
 
-Do **not** run `gh issue create` during the probe. The probe is read-only. The actual filing happens only after the human says yes.
+Do **not** run `gh issue create` during the probe. Do **not** echo, log, or commit the token. The probe is read-only; the actual filing happens only after the human says yes.
 
 ### Path A — Direct filing via `gh` (preferred when available)
 
-If `gh auth status` succeeded, your permission ask becomes:
+If the probe succeeded, your permission ask becomes one of:
 
 > "I noticed [one-sentence summary]. I sent a structured report to your inbox. Your `gh` CLI is authenticated — with your OK, I can file this directly to `Lingtai-AI/lingtai` as a GitHub issue. Want me to file it, or would you rather paste it yourself?"
+
+…or, when you're using the token they handed you:
+
+> "I noticed [one-sentence summary]. I sent a structured report to your inbox. I can file this directly to `Lingtai-AI/lingtai` using the `GH_TOKEN` you provided — the token stays in the env of this one command, never logged. Want me to file it, or would you rather paste it yourself?"
 
 If they say **file it** (or equivalent — "yes", "go ahead", "do it"):
 
 ```bash
+# When relying on existing gh auth:
 gh issue create \
+  --repo Lingtai-AI/lingtai \
+  --title "<your Subject line, minus the [Issue Report] prefix>" \
+  --body-file <path-to-a-tempfile-with-the-rendered-body>
+
+# When using a human-provided token (inline env, single command):
+GH_TOKEN=$TOKEN gh issue create \
   --repo Lingtai-AI/lingtai \
   --title "<your Subject line, minus the [Issue Report] prefix>" \
   --body-file <path-to-a-tempfile-with-the-rendered-body>
@@ -117,7 +137,8 @@ Notes on the `gh` invocation:
 - Preserve the report's section headers verbatim; GFM renders them cleanly.
 - The `--repo` value defaults to `Lingtai-AI/lingtai`. If the human asked for the kernel tracker (see "Which Repo" below) or names another repo, use what they said — do not silently override.
 - After `gh issue create` returns, it prints the issue URL on stdout. Quote that URL back to the human so they can verify.
-- If the command errors (network blip, repo permission, rate limit), tell the human exactly what `gh` said and offer Path B as fallback. Do not retry silently.
+- If the command errors (network blip, repo permission, rate limit, 401), tell the human exactly what `gh` said and offer Path B as fallback. Do not retry silently. On 401, the token may be expired — don't keep retrying with it.
+- **Token hygiene** (Path A with `GH_TOKEN`): keep the token in the env of the single `gh` command, never echo it back in chat or logs, never write it to a file, never include it in the issue body or commit message. Delete the body tempfile after filing.
 
 If they say **paste it myself**, use Path B even though `gh` is available.
 
