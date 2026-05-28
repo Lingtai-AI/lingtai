@@ -63,30 +63,20 @@ const (
 	feSave
 )
 
-// capFieldNames maps each capability field to its underlying capability
-// key. Order matches editorCapabilities and editorFieldOrder so the
-// vision row stays last visually and feCapVision is the only model-
-// conditional row. library and skills are mandatory — always present,
-// not shown as toggleable options.
+// capFieldNames maps editable capability fields to their underlying capability
+// key. Kernel core capabilities are always included by the runtime floor and
+// are shown as informational rows, not as preset opt-in checkboxes.
 var capFieldNames = map[editorField]string{
-	feCapFile:      "file",
-	feCapBash:      "bash",
 	feCapWebSearch: "web_search",
-	feCapAvatar:    "avatar",
-	feCapDaemon:    "daemon",
 	feCapVision:    "vision",
 }
 
 // editorFieldOrder is the rendering order of fields. The cursor walks
-// this slice; section headers render between transitions. Capability
-// rows split into core (file/bash/avatar/daemon) and extras
-// (web_search/vision) — email, psyche, library, and skills are always
-// present (intrinsics or mandatory), so they don't appear here.
+// this slice; section headers render between transitions. Only truly
+// optional/provider-conditional capabilities appear as editable rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey,
-	feCapFile, feCapBash,
-	feCapAvatar, feCapDaemon,
 	feCapWebSearch, feCapVision,
 	feSave,
 }
@@ -173,44 +163,32 @@ var modelHasVision = map[string]bool{
 	"gpt-5.2":       true,
 }
 
-// coreCapabilities are the toggleable building blocks shown as checkboxes
-// in the editor. library and skills are mandatory (always injected at save),
-// so they do not appear here. No provider knobs, not model-conditional.
-var coreCapabilities = []string{
-	"file", "bash",
-	"avatar", "daemon",
+// alwaysIncludedCapabilities are the kernel core floor. The runtime injects
+// these via CORE_DEFAULTS on boot/refresh unless the user opts out through the
+// explicit disable/null channel. The preset editor shows them for awareness but
+// does not serialize ordinary checkbox state for them.
+var alwaysIncludedCapabilities = []string{
+	"knowledge", "skills", "bash",
+	"avatar", "daemon", "mcp", "file",
 }
 
-// extraCapabilities are provider/model-conditional. web_search picks
+// optionalCapabilities are provider/model-conditional. web_search picks
 // a search backend (duckduckgo / minimax / zhipu / mimo / codex /
 // inherit) via ←/→. vision is greyed out for text-only models.
-var extraCapabilities = []string{
+var optionalCapabilities = []string{
 	"web_search", "vision",
 }
 
-// editorCapabilities is the full ordered list — cursor walks this
-// in editorFieldOrder. Core first, extras last.
-var editorCapabilities = append(append([]string{}, coreCapabilities...), extraCapabilities...)
+// editorCapabilities is the full ordered list of editable capabilities.
+var editorCapabilities = append([]string{}, optionalCapabilities...)
 
-// defaultCaps returns the canonical capability set the editor applies
-// when the user switches to this model. Every model gets the same
-// baseline, plus or minus the model-conditional bits (today: vision).
-// email and psyche are intrinsics (always loaded by the kernel) and do
-// not appear here. User customizations to other capabilities (e.g.
-// disabling daemon) are NOT preserved across model switches — by
-// design, since the user explicitly opted into the new model's
-// defaults by switching.
+// defaultCaps returns the canonical optional capability set the editor applies
+// when the user switches to this model. Kernel core capabilities are not listed
+// here because apply_core_defaults injects them at runtime; adding them to the
+// preset would make the UI imply they are ordinary opt-ins.
 func defaultCapsFor(modelID string) map[string]interface{} {
 	caps := map[string]interface{}{
-		"file":       map[string]interface{}{},
-		"bash":       map[string]interface{}{"yolo": true},
 		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-		"library":    map[string]interface{}{"library_limit": 50},
-		"avatar":     map[string]interface{}{},
-		"daemon":     map[string]interface{}{},
-		"skills": map[string]interface{}{
-			"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
-		},
 	}
 	if modelHasVision[modelID] {
 		caps["vision"] = map[string]interface{}{"provider": "inherit"}
@@ -623,8 +601,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feCapFile, feCapBash,
-		feCapAvatar, feCapDaemon, feCapWebSearch, feCapVision:
+	case feCapWebSearch, feCapVision:
 		// Capability rows: Enter toggles, same as Space. Disabled rows
 		// (e.g. vision on text-only models) are gated inside toggleFocused.
 		m.toggleFocused()
@@ -982,18 +959,11 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	// differs from the template's name), respect that name. Otherwise
 	// gap-fill the next "<template>-N" slot.
 	committed := clonePresetForEditor(m.working)
-	// Ensure library and skills are always present — they are mandatory
-	// capabilities not exposed as toggles in the editor UI.
-	if caps, ok := committed.Manifest["capabilities"].(map[string]interface{}); ok {
-		if _, has := caps["library"]; !has {
-			caps["library"] = map[string]interface{}{"library_limit": 50}
-		}
-		if _, has := caps["skills"]; !has {
-			caps["skills"] = map[string]interface{}{
-				"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
-			}
-		}
-	}
+	// Kernel core capabilities (knowledge, skills, bash, avatar, daemon,
+	// mcp, file group) are floor-injected by apply_core_defaults at
+	// runtime, so we deliberately do NOT stamp them into the saved
+	// manifest. That keeps preset JSON minimal and avoids implying these
+	// are ordinary opt-ins.
 	if m.isBuiltin && (m.hasSemanticEdits() || m.apiKeySet) {
 		if committed.Name == m.original.Name {
 			existing, _ := preset.List()
@@ -1278,21 +1248,22 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
-	// Mandatory capabilities — always included, not toggleable.
+	// Always-included capabilities — kernel intrinsics plus the core
+	// floor injected by apply_core_defaults at runtime. The editor lists
+	// them for awareness; users cannot toggle them off via the preset
+	// manifest (the kernel's explicit-disable channel is the only way).
 	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_mandatory"))))
-	mandatoryCaps := []string{"email", "psyche", "soul", "system", "library", "skills"}
-	for _, capName := range mandatoryCaps {
+	alwaysIncludedRows := []string{
+		"email", "psyche", "soul", "system",
+		"knowledge", "skills", "bash",
+		"avatar", "daemon", "mcp", "file",
+	}
+	for _, capName := range alwaysIncludedRows {
 		rows = append(rows, plain(m.mandatoryCapRow(capName, width-4)))
 	}
 	rows = append(rows, plain(""))
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_core"))))
-	for _, capName := range coreCapabilities {
-		f := capFieldFor(capName)
-		rows = append(rows, row(f, m.capRow(f, capName, width-4)))
-	}
-	rows = append(rows, plain(""))
 	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
-	for _, capName := range extraCapabilities {
+	for _, capName := range optionalCapabilities {
 		f := capFieldFor(capName)
 		rows = append(rows, row(f, m.capRow(f, capName, width-4)))
 	}
@@ -1346,7 +1317,7 @@ func capFieldFor(name string) editorField {
 			return f
 		}
 	}
-	return feCapFile // unreachable for caps in editorCapabilities
+	return feSave // unreachable for caps in editorCapabilities
 }
 
 // capEnabled reports whether the given capability is currently

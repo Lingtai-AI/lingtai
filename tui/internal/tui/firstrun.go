@@ -2410,9 +2410,10 @@ func (m FirstRunModel) View() string {
 		// that in wide mode we can join it horizontally with a side pane.
 		var leftBlock strings.Builder
 
-		// Mandatory capabilities — always included, not toggleable.
+		// Always-included capabilities (kernel intrinsics + core floor)
+		// — surfaced for awareness, not toggleable in the preset manifest.
 		leftBlock.WriteString("  " + StyleAccent.Render(i18n.T("firstrun.mandatory_caps")) + "\n\n")
-		mandatoryCaps := []string{"email", "psyche", "library", "skills"}
+		mandatoryCaps := []string{"email", "psyche", "knowledge", "skills", "bash", "avatar", "daemon", "mcp", "file"}
 		mandatoryLine := "  "
 		for _, name := range mandatoryCaps {
 			cell := "  [✓] " + name
@@ -3439,23 +3440,6 @@ func (m *FirstRunModel) applyCapSelections() {
 	}
 
 	for _, name := range m.capOrder {
-		if name == "file" {
-			delete(caps, "file") // remove group key; individual keys below
-			fileKeys := []string{"read", "write", "edit", "glob", "grep"}
-			if m.capSelected[name] {
-				for _, fk := range fileKeys {
-					if _, exists := caps[fk]; !exists {
-						caps[fk] = map[string]interface{}{}
-					}
-				}
-			} else {
-				for _, fk := range fileKeys {
-					delete(caps, fk)
-				}
-			}
-			continue
-		}
-
 		if m.capSelected[name] {
 			capCfg := map[string]interface{}{}
 			// Preserve existing config fields (e.g. api_key_env) if the preset
@@ -3473,15 +3457,9 @@ func (m *FirstRunModel) applyCapSelections() {
 			delete(caps, name)
 		}
 	}
-	// Library and skills are mandatory — always present regardless of user toggles.
-	if _, exists := caps["library"]; !exists {
-		caps["library"] = map[string]interface{}{"library_limit": 50}
-	}
-	if _, exists := caps["skills"]; !exists {
-		caps["skills"] = map[string]interface{}{
-			"paths": []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"},
-		}
-	}
+	// Kernel core capabilities (knowledge, skills, bash, avatar, daemon,
+	// mcp, file group) are injected at runtime by apply_core_defaults, so
+	// we don't stamp them into the saved manifest here.
 }
 
 // enterAgentNameDir initialises all fields and transitions to stepAgentNameDir.

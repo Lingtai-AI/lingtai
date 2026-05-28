@@ -162,6 +162,95 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 	}
 }
 
+func TestPresetEditorCapabilitiesAreOptionalOnly(t *testing.T) {
+	wantCaps := []string{"web_search", "vision"}
+	if strings.Join(editorCapabilities, ",") != strings.Join(wantCaps, ",") {
+		t.Fatalf("editorCapabilities = %#v, want %#v", editorCapabilities, wantCaps)
+	}
+
+	for _, field := range []editorField{feCapFile, feCapBash, feCapAvatar, feCapDaemon} {
+		for _, got := range editorFieldOrder {
+			if got == field {
+				t.Fatalf("core capability field %v should not be in editorFieldOrder %#v", field, editorFieldOrder)
+			}
+		}
+	}
+}
+
+func TestDefaultCapsForDoesNotSerializeCoreFloor(t *testing.T) {
+	tests := []struct {
+		model      string
+		wantVision bool
+	}{
+		{model: "mimo-v2.5", wantVision: true},
+		{model: "mimo-v2.5-pro", wantVision: false},
+	}
+	coreCaps := []string{"file", "bash", "avatar", "daemon", "knowledge", "library", "skills", "mcp"}
+
+	for _, tt := range tests {
+		caps := defaultCapsFor(tt.model)
+		if _, ok := caps["web_search"]; !ok {
+			t.Fatalf("defaultCapsFor(%q) missing web_search: %#v", tt.model, caps)
+		}
+		_, hasVision := caps["vision"]
+		if hasVision != tt.wantVision {
+			t.Fatalf("defaultCapsFor(%q) vision presence = %v, want %v; caps=%#v", tt.model, hasVision, tt.wantVision, caps)
+		}
+		for _, capName := range coreCaps {
+			if _, ok := caps[capName]; ok {
+				t.Fatalf("defaultCapsFor(%q) serialized core capability %q: %#v", tt.model, capName, caps)
+			}
+		}
+	}
+}
+
+func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
+	p := testPresetEditorPreset()
+	p.Manifest["capabilities"] = map[string]interface{}{
+		"web_search": map[string]interface{}{"provider": "duckduckgo"},
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatalf("commit returned nil cmd")
+	}
+	msg := cmd()
+	commit, ok := msg.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg", msg)
+	}
+	caps, ok := commit.Preset.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("committed capabilities missing/wrong type: %T", commit.Preset.Manifest["capabilities"])
+	}
+	for _, capName := range []string{"library", "skills", "file", "bash", "avatar", "daemon"} {
+		if _, ok := caps[capName]; ok {
+			t.Fatalf("commit injected core/legacy capability %q: %#v", capName, caps)
+		}
+	}
+	if _, ok := caps["web_search"]; !ok {
+		t.Fatalf("commit lost optional web_search capability: %#v", caps)
+	}
+}
+
+func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	view := m.View()
+
+	for _, capName := range []string{"knowledge", "skills", "bash", "avatar", "daemon", "mcp", "file"} {
+		if !strings.Contains(view, capName) {
+			t.Fatalf("view missing always-included capability %q; view:\n%s", capName, view)
+		}
+	}
+	for _, capName := range []string{"web_search", "vision"} {
+		if !strings.Contains(view, capName) {
+			t.Fatalf("view missing optional capability %q; view:\n%s", capName, view)
+		}
+	}
+}
+
 func renderedLineCount(s string) int {
 	if s == "" {
 		return 0

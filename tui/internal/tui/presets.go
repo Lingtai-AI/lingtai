@@ -5,13 +5,11 @@ type UsePresetMsg struct {
 	Name string
 }
 
-// AllCapabilities is the list of all available capability names.
-// email and psyche are kernel intrinsics (always loaded), not capabilities.
-// codex and library are mandatory — always injected at save time, not shown as toggleable.
+// AllCapabilities is the list of capabilities the TUI still allows users to
+// configure from setup flows. Kernel core capabilities are always included by
+// the runtime floor and are not ordinary preset opt-in toggles.
 var AllCapabilities = []string{
-	"file", "bash", "web_search",
-	"vision",
-	"avatar", "daemon",
+	"web_search", "vision",
 }
 
 // AllAddons is the list of available addon names.
