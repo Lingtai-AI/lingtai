@@ -7,7 +7,7 @@ description: >
   quality/effort/budget controls. Use this when you need to write code, generate
   patches, refactor files, create documentation, or do any multi-file code work
   that would be faster delegated than done manually.
-version: 1.0.0
+version: 1.0.1
 tags: [cli, code, delegation, claude, implementation]
 ---
 
@@ -48,6 +48,29 @@ env -u CLAUDE_CODE_OAUTH_TOKEN claude -p 'Reply exactly OK' --allowedTools Read 
 If this succeeds while plain `claude -p ...` fails, use the sanitized `env -u ...` wrapper above (and prefer the daemon `claude-code` backend, which strips the override automatically).
 
 > **Why the `env -u …` prefix?** If `ANTHROPIC_API_KEY` (or related `ANTHROPIC_*` variables) is set in the agent environment, the `claude` CLI **prefers the API-key billing path over the Claude Max subscription/OAuth token**. That path can fail with `Credit balance is too low` and bills the API key instead of using the subscription. Separately, a stale inherited `CLAUDE_CODE_OAUTH_TOKEN` can override a refreshed `~/.claude/.credentials.json` and make Claude Code falsely report `You've hit your weekly limit`. Unsetting these variables for the child process forces Claude Code onto the current first-party OAuth/subscription credentials. If you've confirmed your environment has no auth overrides, you can drop the `env -u …` prefix; when in doubt, keep it. **Never echo the variable values while diagnosing — they are secrets.**
+
+### Find and remove the stale-token source
+
+The smoke test above proves a child process can work when the bad override is removed. To make the fix durable, find where the variable is being exported and remove or comment out that source. Common places are shell startup files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, `~/.bash_profile`) or launch-service environment configuration.
+
+Safe diagnostic commands:
+
+```bash
+# 1. Check whether macOS launchd is injecting it. Do not print token values.
+if launchctl getenv CLAUDE_CODE_OAUTH_TOKEN >/dev/null 2>&1; then
+  echo "launchctl may define CLAUDE_CODE_OAUTH_TOKEN"
+fi
+
+# 2. Search shell startup files for the variable name, not the value.
+grep -n 'CLAUDE_CODE_OAUTH_TOKEN\|ANTHROPIC_API_KEY\|ANTHROPIC_AUTH_TOKEN' \
+  ~/.zshenv ~/.zprofile ~/.zshrc ~/.bash_profile ~/.bashrc ~/.profile 2>/dev/null
+
+# 3. Verify a clean future shell does not recreate the variable.
+env -u CLAUDE_CODE_OAUTH_TOKEN /bin/zsh -lc \
+  'test -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && echo NOT_SET || echo STILL_SET'
+```
+
+If the variable is hard-coded in a shell startup file, comment out only that export line and keep a backup. A plain `claude` process can then use Claude Code's own refreshed local OAuth credentials instead of a stale environment override. Already-running LingTai agents may still have inherited the old environment until they are refreshed or restarted; for those current processes, keep using the `env -u ...` child-process wrapper.
 
 ## CLI vs Daemon — Which to Use
 
