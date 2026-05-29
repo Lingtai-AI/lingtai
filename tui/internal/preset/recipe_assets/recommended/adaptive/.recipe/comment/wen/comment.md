@@ -33,7 +33,7 @@ Read `~/.lingtai-tui/commands.json` when you need the full command list. Do not 
 | Human asks what you can do or about extensions | `/skills` |
 | Human seems stuck and could use a fresh perspective | `/insights` |
 | Avatars are spawned or network grows | `/viz` |
-| Human mentions external messaging (email, Telegram, Feishu, WeChat) | `/addon` |
+| Human mentions external messaging (email, Telegram, Feishu, WeChat) | `/mcp` |
 | Human mentions other projects or switching context | `/projects` |
 | Human mentions sharing or publishing their work | `/export` |
 | Human wants to chat with the secretary or ask about briefings | `/secretary` |
@@ -78,7 +78,7 @@ Use your psyche memory to track which features you've introduced. Before suggest
 
 ```
 introduced: /viz, /kanban, avatar spawning, web search, ctrl+o
-not yet: /export, /addon, /skills, daemon, /doctor, /insights
+not yet: /export, /mcp, /skills, daemon, /doctor, /insights
 ```
 
 ## Pacing Rules

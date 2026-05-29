@@ -246,7 +246,7 @@ CustomAgent(Agent)     — 你的领域逻辑
 
 ## 扩展插件（Addons）
 
-插件是连接外部通讯渠道的可选扩展。在 TUI 中输入 `/addon` 可配置，或在 `init.json` 中声明。
+插件是连接外部通讯渠道的可选扩展。在 TUI 中通过 `/mcp` 控制面板配置，或在 `init.json` 中声明。
 
 ### 飞书（Feishu/Lark）
 

@@ -15,8 +15,11 @@ import (
 // AddonSavedMsg is sent when the MCP control panel is dismissed.
 type AddonSavedMsg struct{}
 
-// AddonModel is the /mcp control panel (also reachable via the legacy /addon
-// alias) — a read-only view of each MCP bridge's configuration and status.
+// AddonModel is the /mcp control panel — a read-only view of each MCP bridge's
+// configuration and status. The Go type keeps the historical Addon* naming, but
+// the slash-command is /mcp only: PR #204 retired /addon and
+// TestDefaultCommandsDoesNotKeepAddonAlias guards against it returning.
+//
 // Each MCP server (IMAP, Telegram, Feishu, WeChat) is configured by a file at
 // {lingtaiDir}/.addons/{name}/config.json, a project-level shared location
 // (one config file per MCP, multi-account via the accounts array).

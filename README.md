@@ -260,7 +260,7 @@ Why use both? Coding agents are precise, inspectable hands. LingTai agents are l
 
 ## External channels are just more doors into the same mind.
 
-Configure addons with `/addon` in the TUI, or declare them in `init.json`.
+Configure addons via the `/mcp` control panel in the TUI, or declare them in `init.json`.
 
 ### Feishu / Lark
 
@@ -303,7 +303,7 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ### IMAP, Telegram, WeChat
 
-IMAP email, Telegram bot, and WeChat addons follow the same pattern: configure credentials, bind the addon, then let messages wake the agent. See the addon docs and the TUI `/addon` flow for guided setup.
+IMAP email, Telegram bot, and WeChat addons follow the same pattern: configure credentials, bind the addon, then let messages wake the agent. See the addon docs and the TUI `/mcp` control panel for guided setup.
 
 ## Architecture: two packages, one direction.
 

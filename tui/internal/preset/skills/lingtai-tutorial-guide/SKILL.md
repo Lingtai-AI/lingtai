@@ -205,14 +205,14 @@ Key concepts to teach:
 - Secrets go in `.env`, not config files (config uses `*_env` references)
 - Config lives at `.lingtai/.addons/<addon>/config.json` (project-level, shared by all agents)
 - Avatars do NOT inherit addons
-- `/addon` TUI command shows current configs
+- `/mcp` TUI command opens the MCP control panel and shows current configs
 - `/refresh` to apply changes
 
 ## Lesson 12: Graduation
 
 - Congratulate the human.
 - Next step: run `lingtai-tui` in a new project to create their own agent.
-- Remind them about addon setup via `/addon` or editing configs directly.
+- Remind them about addon setup via the `/mcp` control panel or editing configs directly.
 - To resume tutorial: rerun `lingtai-tui` in the same folder. To restart: `/nirvana` then `/setup` with Tutorial recipe.
 - The network grows with every avatar spawned.
 

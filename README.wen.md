@@ -228,7 +228,7 @@ CustomAgent(Agent)     — 汝之领域逻辑
 
 ## 外接诸器
 
-外接插件者，接通外部通讯之道也。可于 TUI 中以 `/addon` 配置，亦可于 `init.json` 中明示。
+外接插件者，接通外部通讯之道也。可于 TUI 中以 `/mcp` 控制面板配置，亦可于 `init.json` 中明示。
 
 ### 飞书（Feishu/Lark）
 
