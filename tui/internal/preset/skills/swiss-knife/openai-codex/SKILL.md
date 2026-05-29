@@ -7,7 +7,7 @@ description: >
   browser integration. Read this when the human asks to use OpenAI Codex CLI,
   wants to compare it with Claude Code, or needs help with installation and
   configuration.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # OpenAI Codex CLI
@@ -23,11 +23,21 @@ LingTai exposes Codex in two forms. They are **not interchangeable** — pick th
 
 A single synchronous subprocess. You wait for it to finish, you get one transcript back, the conversation ends when the bash call returns.
 
+> **Agent responsiveness rule:** long synchronous `codex exec` jobs in an agent's main turn are **strongly discouraged**. The Codex CLI command is a blocking subprocess from the parent agent's point of view: if you run it through a normal blocking bash tool call, the whole agent is blocked until it returns. The agent cannot answer new human messages, cannot checkpoint progress, and appears "stuck" even though the process is alive. Use inline `codex exec` only for short, bounded jobs where waiting inline is acceptable. For PR-sized, multi-file, exploratory, or 15+ minute work, prefer the LingTai daemon Codex backend; if you must use the CLI, wrap it in an explicitly supervised background/async job with logs, timeout, and recovery instructions.
+
 **Use the CLI when:**
 - The task is **one-off** and you want the result inline — a tightly-scoped edit, a single deterministic refactor, a quick mechanical pass
 - You want the output **threaded back into your current reasoning** (you'll read it and decide next steps yourself)
-- The task is **quick** and well-bounded
+- The task is **quick**, well-bounded, and has an explicit bash timeout
 - You only need **one** of these running at a time
+
+**Synchronous CLI is strongly discouraged when:**
+- The work is PR-sized, branch-producing, exploratory, or likely to run 15+ minutes
+- The human is waiting for responsiveness or may send follow-up instructions
+- A stalled subprocess would make the parent agent look dead
+- You need progress checkpoints, retries, or the ability to inspect/interrupt work independently
+
+`codex exec` does not provide a LingTai job protocol by itself. "Async" means a LingTai or OS wrapper around the CLI (for example bash `async=true`, a supervised background job, or an independent daemon/backend), and that wrapper must own logs, timeout, cancellation, and recovery notes.
 
 **Examples:**
 ```bash
@@ -68,6 +78,7 @@ Per the LingTai dev guide, Codex daemons are particularly good for **tightly-sco
 | "I want to do three of these at once" | **Daemon** (one per task) |
 | "I'll review a diff afterward, not the transcript" | **Daemon** |
 | "The output is a small string/snippet I'll paste somewhere" | **CLI** |
+| "This might block my main turn while a human waits" | **Daemon** or supervised background wrapper |
 | "This will take 15+ minutes and produce a branch" | **Daemon** |
 | "I'm the orchestrator; the daemon is the worker" | **Daemon** |
 
@@ -79,6 +90,17 @@ Both backends are available as CLI and daemon. The CLI-vs-daemon choice is about
 - **Claude Code daemons** — exploratory code reading, multi-file edits, skill/doc work, PR composition
 
 When in doubt for non-trivial work: daemon. See `utilities/lingtai-dev-guide/reference/contributing.md` for the full orchestrator/daemon convention.
+
+## Agent Responsiveness Practices
+
+1. **Keep synchronous calls short and explicitly timed**: For inline `codex exec`, set a short explicit bash timeout appropriate to the scoped task. Solving a long task by raising the synchronous timeout to 15+ minutes while the main agent waits is strongly discouraged.
+
+2. **Prefer daemon or supervised background execution for long or PR-sized work**: If the task is complex, multi-file, branch-producing, exploratory, or a wide validation sweep, dispatch it to the LingTai daemon Codex backend or another independently inspectable supervised wrapper. The parent agent should stay responsive and able to report progress. Remember: the wrapper is asynchronous; the CLI subprocess itself is not a LingTai job.
+
+3. **Checkpoint before delegation**: For any task that might outlive the current turn, write the worktree, branch, goal, and recovery instructions to pad or a journal before dispatching.
+
+4. **Split large tasks**: Multiple smaller, bounded `codex exec` calls are safer than one monolithic prompt. If the steps still take long or need a branch, prefer a daemon or supervised background wrapper.
+
 
 ## Installation
 
@@ -303,6 +325,11 @@ Codex CLI can be used alongside Claude Code for different tasks:
    # Clear plugin cache
    rm -rf ~/.codex/plugins/cache
    ```
+
+4. **Agent appears stuck while `codex exec` runs**
+   - You likely used synchronous CLI for work that should have been daemon-backed or supervised in the background.
+   - Inspect the child process and worktree. If needed, kill the child so the blocking bash call returns.
+   - Resume with the LingTai daemon Codex backend or a supervised background wrapper that records logs, timeout, cancellation path, and recovery notes.
 
 ## Resources
 

@@ -7,7 +7,7 @@ description: >
   quality/effort/budget controls. Use this when you need to write code, generate
   patches, refactor files, create documentation, or do any multi-file code work
   that would be faster delegated than done manually.
-version: 1.0.1
+version: 1.0.2
 tags: [cli, code, delegation, claude, implementation]
 ---
 
@@ -35,6 +35,8 @@ env \
 ```
 
 This runs Claude Code in non-interactive mode (`-p` = print and exit), skipping permission checks for automation.
+
+> **Agent responsiveness rule:** long synchronous `claude -p` jobs in an agent's main turn are **strongly discouraged**. The Claude CLI itself is synchronous: `claude -p` starts a subprocess, waits until the work is done, prints stdout, and exits. If you run that subprocess through a normal blocking bash tool call, the whole agent is blocked until it returns: the agent cannot answer new human messages, cannot checkpoint progress, and appears "stuck" even though the process is alive. Use inline `claude -p` only for short, bounded jobs where waiting inline is acceptable. For PR-sized, multi-file, exploratory, or 15+ minute work, prefer the LingTai daemon Claude-Code backend; if you must use the CLI, wrap it in an explicitly supervised background/async job with logs, timeout, and recovery instructions.
 
 ### Weekly-limit smoke test
 
@@ -83,8 +85,16 @@ A single synchronous subprocess. You wait for it to finish, you get one transcri
 **Use the CLI when:**
 - The task is **one-off** and you want the result inline — a typo fix, a single-file refactor, generating a snippet
 - You want the output **threaded back into your current reasoning** (you'll read the diff and decide next steps yourself)
-- The task is **quick** (under a few minutes) and budget-bounded
+- The task is **quick** (under a few minutes), budget-bounded, and has an explicit bash timeout
 - You only need **one** of these running at a time
+
+**Synchronous CLI is strongly discouraged when:**
+- The work is PR-sized, branch-producing, exploratory, or likely to run 15+ minutes
+- The human is waiting for responsiveness or may send follow-up instructions
+- A stalled subprocess would make the parent agent look dead
+- You need progress checkpoints, retries, or the ability to inspect/interrupt work independently
+
+`claude -p` does not provide its own async/job protocol. "Async" means a LingTai or OS wrapper around the CLI (for example bash `async=true`, a supervised background job, or an independent daemon/backend), and that wrapper must own logs, timeout, cancellation, and recovery notes.
 
 **Examples:**
 ```bash
@@ -123,6 +133,7 @@ A persistent agent spawned by the LingTai kernel. Runs in its **own worktree**, 
 | "I want to do three of these at once" | **Daemon** (one per task) |
 | "I'll review a diff afterward, not the transcript" | **Daemon** |
 | "The output is a small string/snippet I'll paste somewhere" | **CLI** |
+| "This might block my main turn while a human waits" | **Daemon** or supervised background wrapper |
 | "This will take 15+ minutes and produce a branch" | **Daemon** |
 | "I'm the orchestrator; the daemon is the worker" | **Daemon** |
 
@@ -150,9 +161,13 @@ When in doubt for non-trivial work: daemon. The orchestrator/daemon split is the
 claude -p "fix the typo in README.md" --dangerously-skip-permissions
 ```
 
-### Complex implementation (max quality)
+### Bounded implementation (max quality, still short)
+
+Use this shape only when you expect the task to finish quickly enough that blocking the current turn is acceptable. If it is PR-sized or exploratory, prefer a daemon; if you must use CLI anyway, run it through a supervised background wrapper rather than a blocking main-turn bash call.
+
 ```bash
-claude -p "implement the caching layer as described in DESIGN.md" \
+# Run inside a bash tool call with an explicit timeout, e.g. timeout=300.
+claude -p "implement the small caching helper described in DESIGN.md" \
   --dangerously-skip-permissions \
   --effort max \
   --model opus
@@ -183,24 +198,29 @@ claude -p "generate a patch for issue #42" \
 
 ## Best Practices
 
-1. **Increase bash timeout**: Set `timeout=900` (15 minutes) on the bash tool call for complex tasks. Claude Code has no built-in timeout — the bash tool's timeout controls it.
+1. **Keep synchronous calls short and explicitly timed**: Claude Code has no built-in timeout; the bash tool's timeout controls it. For inline `claude -p`, set a short explicit timeout (for example 300 seconds). Solving a long task by raising the synchronous timeout to 15+ minutes while the main agent waits is strongly discouraged.
 
-2. **Use `--effort max` for complex work**: This tells Claude to think harder. Worth it for architecture, refactoring, and multi-file changes.
+2. **Prefer daemon or supervised background execution for long or PR-sized work**: If the task is complex, multi-file, branch-producing, or exploratory, dispatch it to the LingTai daemon Claude-Code backend or another independently inspectable supervised wrapper. The parent agent should stay responsive and able to report progress. Remember: the wrapper is asynchronous; `claude -p` itself is not.
 
-3. **Use `--model opus` for quality**: Opus produces better code for complex logic. Use Sonnet (default) for simple tasks.
+3. **Checkpoint before delegation**: For any task that might outlive the current turn, write the worktree, branch, goal, and recovery instructions to pad or a journal before dispatching.
 
-4. **Split large tasks**: Multiple smaller `claude -p` calls chained together beat one monolithic prompt. Each call has its own context window.
+4. **Use `--effort max` for complex work**: This tells Claude to think harder. Worth it for architecture, refactoring, and multi-file changes — but complexity is also a signal to avoid synchronous `claude -p` in the main turn.
 
-5. **Write clear prompts**: Claude Code reads the repo context itself. Give it the goal, constraints, and acceptance criteria — don't dump the entire codebase into the prompt.
+5. **Use `--model opus` for quality**: Opus produces better code for complex logic. Use Sonnet (default) for simple tasks.
 
-6. **Set budget for unknown tasks**: Use `--max-budget-usd` to prevent runaway spending on ambiguous tasks.
+6. **Split large tasks**: Multiple smaller, bounded `claude -p` calls are safer than one monolithic prompt. If the steps still take long or need a branch, prefer a daemon or supervised background wrapper.
+
+7. **Write clear prompts**: Claude Code reads the repo context itself. Give it the goal, constraints, and acceptance criteria — don't dump the entire codebase into the prompt.
+
+8. **Set budget for unknown tasks**: Use `--max-budget-usd` to prevent runaway spending on ambiguous tasks.
 
 ## Workflow for Patch/PR Creation
 
 1. **Design**: Write a clear spec (what to change, why, constraints)
-2. **Delegate**: Run `claude -p "implement: <spec>" --dangerously-skip-permissions --effort max`
-3. **Review**: Check the output, run tests
-4. **Push**: Create branch, commit, push as PR
+2. **Choose execution shape**: quick, bounded patch → `claude -p` with an explicit short bash timeout; PR-sized or long-running work → LingTai daemon Claude-Code backend or a supervised background wrapper, not a blocking main-turn subprocess
+3. **Delegate**: run the chosen workflow with clear constraints and a recovery checkpoint
+4. **Review**: Check the output, run tests
+5. **Push**: Create branch, commit, push as PR
 
 ## What to Delegate
 
@@ -221,7 +241,8 @@ claude -p "generate a patch for issue #42" \
 
 | Issue | Fix |
 |-------|-----|
-| Timeout after 30s | Increase `timeout=900` on bash call |
+| Timeout after 30s | For a genuinely short inline task, set an explicit modest bash timeout (for example 300s). For long/complex work, prefer a daemon or supervised background wrapper instead of blocking the agent turn. |
+| Agent appears stuck while `claude -p` runs | You likely used synchronous CLI for work that should have been daemon-backed or supervised in the background. Inspect/kill the child if needed, then resume with a non-blocking wrapper. |
 | Claude Code not found | Check `which claude` → `/Users/huangzesen/.local/bin/claude` |
 | Permission errors | Always include `--dangerously-skip-permissions` |
 | Output truncated | Check if Claude hit the budget limit |
