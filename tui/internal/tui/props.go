@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,13 +47,13 @@ type PropsModel struct {
 	pickerIdx  int
 
 	// Detail view: full-screen single-column breakdown of token usage
-	// by provider, recent activity, MCP servers, daemon count. Toggled
+	// by provider, recent activity, MCP servers, daemon run counts. Toggled
 	// with Ctrl+D. Esc closes detail and returns to the summary.
-	detailOpen        bool
-	detailByProvider  map[string]fs.TokenTotals
-	detailRecent      []fs.LedgerEntry
-	detailDaemonCount int
-	detailMCPNames    []string
+	detailOpen         bool
+	detailByProvider   map[string]fs.TokenTotals
+	detailRecent       []fs.LedgerEntry
+	detailDaemonCounts fs.DaemonCounts
+	detailMCPNames     []string
 }
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
@@ -186,7 +185,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		case "ctrl+d":
 			// Toggle detail view. Reload the per-provider breakdown
 			// from disk on every open so the data is fresh — these
-			// reads are cheap (single jsonl + one init.json).
+			// reads are cheap (small local ledger, init, and daemon files).
 			m.detailOpen = !m.detailOpen
 			if m.detailOpen {
 				m.loadDetail()
@@ -221,15 +220,8 @@ func (m *PropsModel) loadDetail() {
 		}
 	}
 
-	// Daemon spawn count from delegates/ledger.jsonl.
-	m.detailDaemonCount = 0
-	if data, err := os.ReadFile(filepath.Join(m.selectedDir, "delegates", "ledger.jsonl")); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) != "" {
-				m.detailDaemonCount++
-			}
-		}
-	}
+	// Daemon run counts from daemons/<run_id>/daemon.json.
+	m.detailDaemonCounts = fs.CountDaemons(m.selectedDir)
 }
 
 // syncViewportContent re-renders left+right panels into the viewport.
@@ -667,6 +659,8 @@ func (m PropsModel) renderRight(maxW int) string {
 		c := lipgloss.NewStyle().Foreground(NetworkActivityColor(m.network.Activity.Status))
 		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(m.network.Activity.Status)))
 	}
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_daemons")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d %s", m.network.Activity.RunningDaemons, i18n.T("props.network_daemons_running"))))
 
 	// Tokens
 	lines = append(lines, "")
@@ -706,8 +700,8 @@ func (m PropsModel) renderRight(maxW int) string {
 }
 
 // renderDetail renders the full-screen detail view: token usage broken
-// down by provider, recent activity, MCP servers, and a daemon spawn
-// count. Toggled with Ctrl+D from the kanban summary.
+// down by provider, recent activity, MCP servers, and daemon run counts.
+// Toggled with Ctrl+D from the kanban summary.
 func (m PropsModel) renderDetail() string {
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
@@ -832,14 +826,14 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Daemon spawn count.
-	if m.detailDaemonCount > 0 {
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
-		lines = append(lines, "")
-		lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
-			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCount)))
-		lines = append(lines, "")
-	}
+	// Daemon run counts.
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
+	lines = append(lines, "")
+	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_running")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Running)))
+	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
+	lines = append(lines, "")
 
 	return strings.Join(lines, "\n")
 }

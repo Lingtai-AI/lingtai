@@ -42,7 +42,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | **network.go** | | |
 | `BuildNetwork(baseDir)` | `tui/internal/fs/network.go:8` | full topology: nodes, avatar edges, contact edges, mail edges, stats |
 | **activity.go** | | |
-| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:25` | lightweight non-human project activity badge: active, daemon-active, idle, asleep, suspend |
+| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:34` | lightweight non-human project activity badge: active, daemon-active, idle, asleep, suspend; only counts daemon runs for heartbeat-live parent agents |
+| `CountDaemons(agentDir)` | `tui/internal/fs/activity.go:110` | counts parseable `daemons/<run_id>/daemon.json` files for selected-agent daemon running/total displays |
 | **resolve.go** | | |
 | `ParseAddress(addr)` | `tui/internal/fs/resolve.go:16` | `"localhost:/path"` or `"[ipv6]:/path"` → `(host, path, ok)` |
 | `IsRemoteAddress(addr)` | `tui/internal/fs/resolve.go:62` | true if non-localhost host prefix |
