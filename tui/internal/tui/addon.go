@@ -12,12 +12,14 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-// AddonSavedMsg is sent when addon view is dismissed.
+// AddonSavedMsg is sent when the MCP control panel is dismissed.
 type AddonSavedMsg struct{}
 
-// AddonModel is the /addon view — read-only display of configured addons.
-// Reads from {lingtaiDir}/.addons/{addon}/config.json, a project-level
-// shared location (one config file per addon, multi-account via accounts array).
+// AddonModel is the /mcp control panel (also reachable via the legacy /addon
+// alias) — a read-only view of each MCP bridge's configuration and status.
+// Each MCP server (IMAP, Telegram, Feishu, WeChat) is configured by a file at
+// {lingtaiDir}/.addons/{name}/config.json, a project-level shared location
+// (one config file per MCP, multi-account via the accounts array).
 type AddonModel struct {
 	lingtaiDir string // <project>/.lingtai/ directory
 	width      int
@@ -28,9 +30,9 @@ type AddonModel struct {
 	addonErrors map[string]string
 }
 
-// NewAddonModel constructs the /addon view. lingtaiDir is the project's .lingtai/
-// directory (parent of all agent dirs). Addon configs live at
-// lingtaiDir/.addons/<addon>/config.json.
+// NewAddonModel constructs the /mcp control panel. lingtaiDir is the project's
+// .lingtai/ directory (parent of all agent dirs). Each MCP bridge's config
+// lives at lingtaiDir/.addons/<name>/config.json.
 func NewAddonModel(lingtaiDir string) AddonModel {
 	configs, errs := readAddonConfigs(lingtaiDir)
 	return AddonModel{
@@ -63,8 +65,8 @@ func (m AddonModel) View() string {
 
 	// Title bar
 	titleText := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent).Render(i18n.T("welcome.title"))
-	titleBar := titleText + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("addon.title"))
-	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("addon.back"))
+	titleBar := titleText + " " + StyleAccent.Render(RuneBullet) + " " + StyleTitle.Render(i18n.T("mcp.title"))
+	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("mcp.back"))
 	padding := m.width - lipgloss.Width(titleBar) - lipgloss.Width(escHint) - 1
 	if padding > 0 {
 		b.WriteString(titleBar + strings.Repeat(" ", padding) + escHint + "\n")
@@ -74,7 +76,7 @@ func (m AddonModel) View() string {
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
 
 	// Description
-	b.WriteString(StyleSubtle.Render("  "+i18n.T("addon.readonly_desc")) + "\n\n")
+	b.WriteString(StyleSubtle.Render("  "+i18n.T("mcp.readonly_desc")) + "\n\n")
 
 	// Addon list
 	for _, name := range AllAddons {
@@ -89,7 +91,7 @@ func (m AddonModel) View() string {
 
 		content, ok := m.addonConfigs[name]
 		if !ok || content == "" {
-			b.WriteString("    " + StyleFaint.Render(i18n.T("addon.not_configured")) + "\n\n")
+			b.WriteString("    " + StyleFaint.Render(i18n.T("mcp.not_configured")) + "\n\n")
 			continue
 		}
 
@@ -103,7 +105,7 @@ func (m AddonModel) View() string {
 
 	// Footer
 	b.WriteString(strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render("  "+i18n.T("addon.footer_hint")) + "\n")
+	b.WriteString(StyleFaint.Render("  "+i18n.T("mcp.footer_hint")) + "\n")
 
 	return b.String()
 }
@@ -142,7 +144,7 @@ func readAddonConfigs(lingtaiDir string) (map[string]string, map[string]string) 
 		// Validate it parses as JSON; if not, report as an error
 		var probe any
 		if jerr := json.Unmarshal(data, &probe); jerr != nil {
-			errs[addon] = i18n.TF("addon.parse_error", jerr.Error())
+			errs[addon] = i18n.TF("mcp.parse_error", jerr.Error())
 			continue
 		}
 		configs[addon] = string(data)

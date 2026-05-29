@@ -379,7 +379,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
 
 	case AddonSavedMsg:
-		a.mail.AddSystemMessage(i18n.T("addon.saved"))
+		a.mail.AddSystemMessage(i18n.T("mcp.saved"))
 		return a.switchToView("mail")
 
 	case SetupSavedMsg:
@@ -704,7 +704,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg("lingtai-portal not found on PATH. Run: brew link --overwrite lingtai-tui")
 		}
 		return a, nil
-	case "addon":
+	case "mcp":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
 			a.addon = NewAddonModel(a.projectDir)
@@ -1257,7 +1257,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewAgora
 		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.agora.Init(), a.sendSize())
-	case "addon":
+	case "mcp":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
 			a.addon = NewAddonModel(a.projectDir)
