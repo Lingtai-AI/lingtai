@@ -74,6 +74,7 @@ var addonSpecs = map[string]addonSpec{
 	"telegram": {module: "lingtai_telegram", envVarName: "LINGTAI_TELEGRAM_CONFIG", defaultRel: ".secrets/telegram.json"},
 	"feishu":   {module: "lingtai_feishu", envVarName: "LINGTAI_FEISHU_CONFIG", defaultRel: ".secrets/feishu.json"},
 	"wechat":   {module: "lingtai_wechat", envVarName: "LINGTAI_WECHAT_CONFIG", defaultRel: ".secrets/wechat/config.json"},
+	"whatsapp": {module: "lingtai_whatsapp", envVarName: "LINGTAI_WHATSAPP_CONFIG", defaultRel: ".secrets/whatsapp.json"},
 }
 
 func convertAddonsInInitFile(initPath, agentDir, globalDir string) {

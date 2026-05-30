@@ -31,7 +31,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 
 	p := DefaultPreset()
 	opts := AgentOpts{
-		Addons: []string{"imap", "telegram", "feishu", "wechat"},
+		Addons: []string{"imap", "telegram", "feishu", "wechat", "whatsapp"},
 	}
 	if err := GenerateInitJSONWithOpts(p, "alice", "alice", lingtaiDir, globalDir, opts); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 	if !ok {
 		t.Fatalf("addons not a list: %T (%v)", got["addons"], got["addons"])
 	}
-	wantNames := map[string]bool{"imap": true, "telegram": true, "feishu": true, "wechat": true}
+	wantNames := map[string]bool{"imap": true, "telegram": true, "feishu": true, "wechat": true, "whatsapp": true}
 	if len(addons) != len(wantNames) {
 		t.Errorf("addons len = %d, want %d (%v)", len(addons), len(wantNames), addons)
 	}
@@ -69,7 +69,7 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 	if !ok {
 		t.Fatalf("mcp not a dict: %T (%v)", got["mcp"], got["mcp"])
 	}
-	for _, name := range []string{"imap", "telegram", "feishu", "wechat"} {
+	for _, name := range []string{"imap", "telegram", "feishu", "wechat", "whatsapp"} {
 		entry, ok := mcp[name].(map[string]interface{})
 		if !ok {
 			t.Errorf("mcp.%s missing or wrong type: %T", name, mcp[name])

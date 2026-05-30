@@ -1064,8 +1064,8 @@ func AddonSecretsPathFromAgent(addon string) string {
 	return filepath.Join(".secrets", addon+".json")
 }
 
-// defaultMCPSpec returns the canonical wiring for one of the four curated
-// addons (imap / telegram / feishu / wechat) — the Python module to invoke,
+// defaultMCPSpec returns the canonical wiring for one of the curated
+// addons (imap / telegram / feishu / wechat / whatsapp) — the Python module to invoke,
 // the env-var name the MCP reads its config path from, and the config path
 // (relative to the agent working dir) to point that env var at by default.
 //
@@ -1086,6 +1086,8 @@ func defaultMCPSpec(name string) (module, envVar, configRel string, supported bo
 		return "lingtai_feishu", "LINGTAI_FEISHU_CONFIG", filepath.Join(".secrets", "feishu.json"), true
 	case "wechat":
 		return "lingtai_wechat", "LINGTAI_WECHAT_CONFIG", filepath.Join(".secrets", "wechat", "config.json"), true
+	case "whatsapp":
+		return "lingtai_whatsapp", "LINGTAI_WHATSAPP_CONFIG", filepath.Join(".secrets", "whatsapp.json"), true
 	}
 	return "", "", "", false
 }
