@@ -573,4 +573,4 @@ For Chinese-language discussion and early testing, join the WeChat group by scan
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
