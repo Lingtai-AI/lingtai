@@ -12,16 +12,20 @@ description: >
   (3) openai-codex — OpenAI Codex CLI for local coding agent with remote
   control, Vim editing, plugins, hooks, and Chrome browser integration.
   Read when the human asks to use OpenAI Codex or compare with Claude Code;
-  (4) token-usage — token usage tracking and cost reporting;
-  (5) html-report — checklist + template for producing standalone HTML
+  (4) opencode — OpenCode CLI for local coding-agent runs with 75+ provider
+  routing, non-interactive `opencode run`, reusable `opencode serve`, custom
+  agents, MCP integration, and session resume/fork support. Read when the
+  human asks to use OpenCode as a CLI tool or compare coding CLIs;
+  (5) token-usage — token usage tracking and cost reporting;
+  (6) html-report — checklist + template for producing standalone HTML
   research memos, dashboards, and audit reports (with MathJax math
   rendering, anchor navigation, print styles). Read when the human asks
   for an HTML deliverable, especially one containing equations;
-  (6) xiaomi-mimo — discovery protocol for the Xiaomi MiMo (小米MiMo)
+  (7) xiaomi-mimo — discovery protocol for the Xiaomi MiMo (小米MiMo)
   LLM provider: one API key, OpenAI/Anthropic-compatible endpoint, family
   of ~9 models spanning long-context reasoning, multimodal chat, and TTS.
   Read when the human asks to use or configure Xiaomi MiMo;
-  (7) zhipu-coding-plan — pointer for the Zhipu / Z.AI GLM coding-plan
+  (8) zhipu-coding-plan — pointer for the Zhipu / Z.AI GLM coding-plan
   subscription that unlocks vision, web search, web page reading, and
   zread MCP servers from one API key. Read when the human asks about
   Zhipu / Z.AI / BigModel credentials or the coding-plan subscription.
@@ -31,7 +35,7 @@ description: >
   `lingtai-tui bootstrap` in a shell — that re-extracts shipped skills
   to ~/.lingtai-tui/utilities/ without restarting the TUI — then call
   `system(action="refresh")` to pick them up.
-version: 1.6.0
+version: 1.7.0
 tags: [utilities, umbrella, toolkit]
 ---
 
@@ -47,6 +51,7 @@ A collection of small, useful skills. Each sub-skill lives in its own folder und
 | [claude-code](claude-code/) | Delegate code implementation, patch writing, docs, and refactoring to Claude Code CLI | Human asks to write code, generate patches, refactor, or delegate implementation work |
 | [minimax-cli](minimax-cli/) | MiniMax CLI for text-to-image, text-to-video, music generation, TTS, and vision | Human asks for image/video/music generation, TTS narration, or vision tasks |
 | [openai-codex](openai-codex/) | OpenAI Codex CLI — local coding agent with remote control, Vim editing, plugins, hooks, and Chrome extension | Human asks to use OpenAI Codex CLI, compare with Claude Code, or needs browser integration |
+| [opencode](opencode/) | OpenCode CLI — provider-flexible local coding agent with `opencode run`, `serve`, custom agents, MCPs, and session resume/fork | Human asks to use OpenCode as a CLI tool, compare coding CLIs, or script a provider-flexible coding agent |
 | [html-report](html-report/) | Checklist + standalone HTML template (MathJax, nav, print styles) for research memos, dashboards, audit reports | Human asks for an HTML deliverable — especially one with equations, where `<pre>`/`<code>` won't render LaTeX |
 | [xiaomi-mimo](xiaomi-mimo/) | Discovery protocol for Xiaomi MiMo (小米MiMo) — OpenAI/Anthropic-compatible LLM provider with one key unlocking ~9 models (reasoning, multimodal, TTS) | Human asks to use or configure Xiaomi MiMo |
 | [zhipu-coding-plan](zhipu-coding-plan/) | Pointer for the Zhipu / Z.AI GLM coding-plan subscription (one key → vision, web search, web read, zread MCP servers) | Human asks about Zhipu / Z.AI / BigModel credentials or the coding-plan subscription |
