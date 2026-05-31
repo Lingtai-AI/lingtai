@@ -58,7 +58,7 @@ Concrete things people run LingTai for today:
 | **Lives in your project** | One `.lingtai/` folder per project. The assistant is a real process with a directory home — you can `ls`, `cat`, and `tail -f` it. |
 | **Long-term memory you can read** | Pad for active context, knowledge for durable facts, character for who the assistant is. Plain Markdown on disk, not a hidden vector store. |
 | **Skills and workflows** | Reusable, on-demand procedures: web research, paper fetching, vision/audio understanding, MCP debugging, release pipelines, your own. Skills load when relevant; your prompt stays small. |
-| **Multiple channels, one mind** | Talk to the same assistant from the TUI, Telegram, Feishu/Lark, WeChat, or IMAP email. External messages wake the same long-lived process, with the same memory and tools. |
+| **Multiple channels, one mind** | Talk to the same assistant from the TUI, Telegram, Feishu/Lark, WeChat, WhatsApp, or IMAP email. External messages wake the same long-lived process, with the same memory and tools. |
 | **Real tools** | Read/write files, run shell commands, browse the web, fetch and extract pages, understand images, work with audio, call any MCP server, and delegate implementation to coding CLIs like Claude Code, Codex, or OpenCode. |
 | **Schedules and automation** | Recurring tasks, scheduled checks, and reminders the assistant *acts on*, with delivery to whichever channel you prefer. |
 | **Grows into a team when needed** | Spawn persistent avatars (specialist peers with their own memory) or short-lived daemons (focused workers for one batch task) — supervise the whole network from one place. |
@@ -86,6 +86,7 @@ LingTai bridges the same long-lived assistant to the messaging surfaces you alre
 | `telegram` | Talk to your assistant from Telegram (DMs, optional allowlist, voice/file passthrough). |
 | `feishu` | Feishu/Lark — uses a WebSocket long connection, no public IP required. |
 | `wechat` | WeChat through an iLink/gewechat-style bridge. |
+| `whatsapp` | WhatsApp through the curated LingTai WhatsApp bridge. |
 | `imap` | Real email through IMAP/SMTP — multi-account, with safety defaults for unknown senders. |
 
 Channels are doors into the *same* assistant, not separate bots. Memory, tools, and history are shared across them. Configure from the TUI's `/mcp` control panel, or declare them in `init.json`.
@@ -104,7 +105,7 @@ Frequently used slash commands:
 |---|---|
 | `/setup` | Change model, recipe, language, tools, or behavior. |
 | `/kanban` | Inspect agent + project status. |
-| `/mcp` | Configure external channels (Telegram/Feishu/WeChat/IMAP/…). |
+| `/mcp` | Configure external channels (Telegram/Feishu/WeChat/WhatsApp/IMAP/…). |
 | `/skills` | Browse available skills and capabilities. |
 | `/viz` | Open the network visualization. |
 | `/insights` | Ask the assistant for a reflective second look. |
