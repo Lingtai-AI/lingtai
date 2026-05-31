@@ -1,11 +1,10 @@
 <div align="center">
 
-<img src="docs/assets/network-demo.gif" alt="LingTai agent network growing — one soul spawning avatars that communicate and multiply" width="100%">
+<img src="docs/assets/network-demo.gif" alt="LingTai — a local AI assistant that lives in your project and can grow into a team" width="100%">
 
 # LingTai
 
-**A filesystem-native operating system for long-lived AI agents.**
-**One mind can become a network. The network learns while it works.**
+**Your local, always-on AI assistant for real work.**
 
 [English](README.md) · [中文](README.zh.md) · [文言](README.wen.md) · [Website](https://lingtai.ai) · [Releases](https://lingtai.ai/releases/)
 
@@ -19,72 +18,173 @@
 
 ---
 
-LingTai is an agent OS: a local runtime, terminal UI, visual portal, mailbox, memory system, skill system, and multi-agent network substrate for autonomous AI agents that persist beyond a single chat window.
+**LingTai** is a local AI assistant that lives in your project and stays on. It remembers what matters, talks to you through the channels you already use, runs tools and workflows on your behalf, and — when the job gets bigger than one assistant — can grow into a small AI team you supervise.
 
-It is not a prompt wrapper, workflow graph, or one-shot coding assistant. A LingTai agent is a running process with a filesystem home, durable memory, tools, mail, long-lived identity, and the ability to spawn peers. Agents can sleep, wake, molt their context, write reusable skills, remember project facts, send each other mail, connect to external messaging systems, and continue working after the terminal closes.
+It is not a chat window, a notebook, or a one-shot coding agent. It is a real process with memory, tools, and a schedule: send it a task in the terminal, on Telegram, or by email, then come back later to find progress waiting for you.
 
-The core design is simple:
+If you want a personal AI workbench that feels yours — local, persistent, scriptable, and able to scale up when the work demands it — this is it.
 
-> **Agent = process + directory + mailbox + memory + tools.**
-> **Network = agents that can create, teach, and call one another.**
+## Install
 
-## Table of contents
-
-- [Why LingTai exists](#why-lingtai-exists)
-- [Quick start](#quick-start)
-- [What you get after first launch](#what-you-get-after-first-launch)
-- [Core concepts](#core-concepts)
-- [What LingTai can do](#what-lingtai-can-do)
-- [Filesystem model](#filesystem-model)
-- [User interface: TUI, slash commands, and portal](#user-interface-tui-slash-commands-and-portal)
-- [External channels and MCP addons](#external-channels-and-mcp-addons)
-- [Recipes, skills, and knowledge](#recipes-skills-and-knowledge)
-- [Architecture](#architecture)
-- [Installation and upgrade details](#installation-and-upgrade-details)
-- [Development workflow](#development-workflow)
-- [Repository map](#repository-map)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [Project philosophy](#project-philosophy)
-- [Community](#community)
-- [Star history](#star-history)
-- [License](#license)
-
-## Why LingTai exists
-
-Most agent tools still behave like chat sessions:
-
-- the model has no durable body;
-- long context eventually collapses;
-- tools are configured outside the agent's own world;
-- memory is either hidden vendor state or an opaque vector store;
-- multi-agent work is simulated by a controller, not lived by independent agents;
-- when the UI closes, the system stops feeling alive.
-
-LingTai takes a different route. It makes agents concrete.
-
-Each agent owns a directory under `.lingtai/`. That directory contains its identity, prompt layers, mail, logs, memory, skills, tools, runtime state, and summaries. The filesystem is not an implementation detail; it is the API. Humans, coding agents, scripts, and other LingTai agents can inspect and cooperate with the system through files and mail.
-
-The result is an agent network that can grow:
-
-- a primary agent can spawn an avatar to specialize in a task;
-- that avatar can keep its own long-term memory;
-- completed work can become a skill;
-- hard-won project facts can become knowledge;
-- the network can be visualized, restarted, debugged, and resumed.
-
-## Quick start
-
-### macOS / Homebrew
+Recommended path on macOS and Linux:
 
 ```bash
 brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 ```
 
-On first launch, the TUI guides you through setup: model/provider selection, project initialization, recipe selection, and agent creation.
+The TUI handles the rest: it provisions its own Python runtime, walks you through model selection, opens your first project, and gets a working assistant in front of you within a couple of minutes. On first launch pick the **Adaptive** recipe for progressive feature discovery, or **Tutorial** for a guided walkthrough.
 
-The TUI manages the Python agent runtime for you in a project virtualenv. You normally do **not** install or upgrade the kernel with a bare `pip install`; the TUI creates and maintains the runtime venv used by each project.
+> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing the kernel itself.
+
+For source builds, mainland-China mirror setup, and from-tarball install paths, see [Install in detail](#install-in-detail).
+
+## Use it for
+
+Concrete things people run LingTai for today:
+
+- **A daily project briefing.** Each morning the assistant scans what changed, summarizes outstanding work, and posts the brief to Telegram or your TUI before you sit down.
+- **Triage GitHub issues and PRs.** It reads new activity, categorizes, drafts replies for review, and queues anything risky for your attention.
+- **Prepare a livestream or talk.** Outline, rehearse arguments, gather references, build slide notes, hold them in project memory across sessions.
+- **Research and investor memos.** Multi-source web research, web reading, paper fetching, then drafting and revision with a fact trail you can audit.
+- **Long-running coding and review work.** It can use Claude Code, Codex, or OpenCode as its hands: the coding CLI makes precise edits, while LingTai owns the plan, memory, review log, and human updates.
+- **Schedules and reminders that act, not just notify.** "Every weekday at 9, check the deploy queue and ping me on Telegram if anything is stuck."
+- **Personal knowledge that survives.** Decisions, paths, collaborator preferences, lessons — kept as durable knowledge entries owned by the assistant, not by a chat window.
+
+## What it can do
+
+| | |
+|---|---|
+| **Lives in your project** | One `.lingtai/` folder per project. The assistant is a real process with a directory home — you can `ls`, `cat`, and `tail -f` it. |
+| **Long-term memory you can read** | Pad for active context, knowledge for durable facts, character for who the assistant is. Plain Markdown on disk, not a hidden vector store. |
+| **Skills and workflows** | Reusable, on-demand procedures: web research, paper fetching, vision/audio understanding, MCP debugging, release pipelines, your own. Skills load when relevant; your prompt stays small. |
+| **Multiple channels, one mind** | Talk to the same assistant from the TUI, Telegram, Feishu/Lark, WeChat, or IMAP email. External messages wake the same long-lived process, with the same memory and tools. |
+| **Real tools** | Read/write files, run shell commands, browse the web, fetch and extract pages, understand images, work with audio, call any MCP server, and delegate implementation to coding CLIs like Claude Code, Codex, or OpenCode. |
+| **Schedules and automation** | Recurring tasks, scheduled checks, and reminders the assistant *acts on*, with delivery to whichever channel you prefer. |
+| **Grows into a team when needed** | Spawn persistent avatars (specialist peers with their own memory) or short-lived daemons (focused workers for one batch task) — supervise the whole network from one place. |
+| **Visual portal** | `lingtai-portal` renders the live agent network: who is alive, what they are working on, who mailed whom, how it grew. |
+| **Lifecycle you control** | Sleep, wake, refresh, revive, or clear an assistant when needed. Crash-safe: `/doctor` repairs the common failure modes. |
+
+## Grows with the work
+
+Most projects start with one assistant and stay there. When that is enough, you ignore everything below. When the work gets bigger, LingTai has a path up: an **AI agent organization** with roles, memory, handoffs, and supervision — not just more chat tabs.
+
+- **Forget noise, keep experience.** Context windows are finite. When a session gets long, the assistant **molts**: it writes a summary, sheds the transient conversation, and the next self picks up with pad + character + knowledge + skills + mail intact. You do not start over.
+- **Hand off to a specialist.** Spawn an **avatar** — a peer assistant with its own home, memory, and life cycle. Give it a long-running goal (own the docs site, own the support inbox, own this research thread). It keeps learning even when you close the laptop.
+- **Use coding agents as hands.** A daemon can be a normal LingTai worker, or it can run a coding CLI backend such as Claude Code, Codex, or OpenCode. LingTai keeps the goal, memory, and conversation with you; the coding agent performs the verifiable file edits and tests.
+- **Split a batch.** Spawn a **daemon** — a short-lived worker for one focused job (scan 200 files, draft 50 replies, run 30 reviews in parallel). Daemons return results and disappear; the parent keeps your attention.
+- **Watch it from the portal.** As the network grows, the portal shows who is alive, who has been mailing whom, and how the topology evolved. Use it to debug, to admire, or to plan the next refactor.
+
+You do not have to opt in. A single assistant works fine on its own — the network is the ceiling, not the floor.
+
+## External channels
+
+LingTai bridges the same long-lived assistant to the messaging surfaces you already use. The currently curated MCP addons:
+
+| Addon | Use it for |
+|---|---|
+| `telegram` | Talk to your assistant from Telegram (DMs, optional allowlist, voice/file passthrough). |
+| `feishu` | Feishu/Lark — uses a WebSocket long connection, no public IP required. |
+| `wechat` | WeChat through an iLink/gewechat-style bridge. |
+| `imap` | Real email through IMAP/SMTP — multi-account, with safety defaults for unknown senders. |
+
+Channels are doors into the *same* assistant, not separate bots. Memory, tools, and history are shared across them. Configure from the TUI's `/mcp` control panel, or declare them in `init.json`.
+
+Credentials live in local `.secrets/` files (never in Git). Unknown external senders do not auto-receive replies. External side effects (sending messages, filing issues, deleting resources) are treated as real actions by default.
+
+## The interface
+
+### TUI
+
+`lingtai-tui` is the main human surface. It gives you setup, model/preset configuration, chat and mail, agent status (token + stamina + heartbeat), avatar and daemon visibility, markdown rendering, a slash-command palette, and upgrade/doctor flows.
+
+Frequently used slash commands:
+
+| Command | Use |
+|---|---|
+| `/setup` | Change model, recipe, language, tools, or behavior. |
+| `/kanban` | Inspect agent + project status. |
+| `/mcp` | Configure external channels (Telegram/Feishu/WeChat/IMAP/…). |
+| `/skills` | Browse available skills and capabilities. |
+| `/viz` | Open the network visualization. |
+| `/insights` | Ask the assistant for a reflective second look. |
+| `/sleep` · `/refresh` · `/cpr` · `/clear` | Lifecycle: pause, reload, revive, reset context. |
+| `/projects` | Switch or inspect known projects. |
+| `/doctor` | Diagnose installation/runtime issues. |
+
+Shell entrypoints when useful:
+
+```bash
+lingtai-tui                          # open the TUI in the current project
+lingtai-tui list <project>            # list agents and states
+lingtai-tui spawn <dir> --preset <name> [--agent-name <name>]
+lingtai-tui bootstrap                # re-extract bundled skills/utilities
+lingtai-tui doctor                   # repair/update TUI runtime
+```
+
+### Portal
+
+`lingtai-portal` is the visualization server. It reads project state to show the agent network, mail edges, and history. It becomes useful when you have more than one assistant per project, or when you want to see how the work evolved.
+
+### Tips
+
+- Use a dark terminal theme — LingTai's palette is tuned for it.
+- `Ctrl+E` in the TUI opens an external editor for long messages.
+- Hold `Option` (macOS/iTerm2) or `Shift` (most Linux/Windows terminals) to select text without the TUI capturing it.
+- If anything feels broken after an upgrade, run `/doctor` (or `lingtai-tui doctor` from a shell).
+
+## Filesystem you can read
+
+LingTai keeps state on disk, on purpose. You can debug it with `ls`, `cat`, `tail`, `jq`, `grep`, your editor, or another coding agent. The shape after first launch:
+
+```text
+project/
+└── .lingtai/
+    ├── human/                  # your mailbox identity
+    ├── <agent-name>/            # one running assistant
+    │   ├── init.json            # model, tools, preset, MCP wiring
+    │   ├── system/              # prompt layers, pad, rules, summaries
+    │   ├── knowledge/           # durable private memory
+    │   ├── inbox/ outbox/       # internal mail
+    │   ├── logs/                # event log + human-readable log
+    │   ├── delegates/           # spawned-avatar ledger
+    │   ├── daemons/             # daemon run records
+    │   └── .agent.json          # heartbeat, status, identity card
+    └── .portal/                 # topology/history for visualization
+```
+
+Useful inspection commands:
+
+```bash
+lingtai-tui list /path/to/project                          # running agents and states
+tail -f /path/to/project/.lingtai/<agent>/logs/agent.log    # human-readable log
+jq -r '.event' /path/to/project/.lingtai/<agent>/logs/events.jsonl | tail   # structured events
+```
+
+## Use coding agents as hands
+
+LingTai assistants live in the filesystem, so coding agents can work with them in two ways. As **daemon backends**, Claude Code, Codex, and OpenCode can be launched for focused implementation or review jobs while LingTai keeps the long-running plan and memory. As **peer tools**, any coding agent that can read and write files can collaborate through the shared `.lingtai/human/` mailbox.
+
+- **Claude Code** — `claude plugin add Lingtai-AI/claude-code-plugin`
+- **OpenAI Codex CLI** — `git clone https://github.com/Lingtai-AI/codex-plugin.git && cd codex-plugin && ./install.sh`
+- **Other coding agents** (OpenCode, OpenClaw, Hermes, …) — vendor the [`lingtai-skill`](https://github.com/Lingtai-AI/lingtai-skill) protocol skill under your tool's skills directory.
+
+The split: a coding agent is precise and verifiable — every tool call visible, every edit reviewable. A LingTai assistant is asynchronous and patient — it remembers the goal, talks to the human, coordinates parallel contexts, and decides when to hand work to a specialist. Use the coding agent as hands. Use LingTai as the long-running collaborator that plans, drafts, monitors, and remembers.
+
+## Install in detail
+
+### Homebrew (recommended)
+
+```bash
+brew install lingtai-ai/lingtai/lingtai-tui
+lingtai-tui
+
+# upgrade later
+brew update
+brew upgrade lingtai-ai/lingtai/lingtai-tui
+```
+
+After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
 
 ### From source
 
@@ -97,286 +197,14 @@ cd lingtai
 lingtai-tui
 ```
 
-The install script builds `lingtai-tui` and, when `npm` is available, `lingtai-portal`. It installs binaries into the Homebrew prefix when `brew` exists, otherwise `/usr/local/bin`.
+`install.sh` builds `lingtai-tui` and (when `npm` is available) `lingtai-portal`, then installs binaries into the Homebrew prefix if `brew` exists, otherwise `/usr/local/bin`.
 
-### First-run tips
+### Kernel dev mode (advanced)
 
-- Use a dark terminal theme; LingTai's default palette is optimized for it.
-- Press `Ctrl+E` in the TUI when composing a long message to open an external editor.
-- Hold `Option` on macOS/iTerm2 or `Shift` on many Linux/Windows terminals to select terminal text.
-- Pick the **Adaptive** recipe for progressive feature discovery, or **Tutorial** for a guided walkthrough.
-- If something feels broken after an upgrade, run `/doctor` inside the TUI or `lingtai-tui doctor` from a shell.
-
-## What you get after first launch
-
-A new project gains a `.lingtai/` directory. Inside it, each agent has its own home:
-
-```text
-project/
-└── .lingtai/
-    ├── human/                  # mailbox identity for the human/operator
-    ├── <agent-name>/            # one running agent
-    │   ├── init.json            # model, tools, preset, addon wiring
-    │   ├── system/              # prompt layers, pad, summaries, rules
-    │   ├── knowledge/           # private durable project memory
-    │   ├── inbox/ outbox/       # internal mail transport
-    │   ├── logs/                # event logs and runtime diagnostics
-    │   ├── delegates/           # spawned-avatar ledger
-    │   ├── daemons/             # ephemeral daemon run records
-    │   └── .agent.json          # heartbeat, status, identity card
-    └── .portal/                 # topology/history data for visualization
-```
-
-The agent is not trapped in the terminal. The TUI is the shell; the agent is the directory-backed process. Mail can wake it. The portal can watch it. Scripts can inspect it. Other agents can write to it.
-
-## Core concepts
-
-### Agent
-
-A LingTai agent is a long-lived runtime process backed by a filesystem directory. It receives messages, calls tools, writes durable state, and can keep working asynchronously.
-
-### Avatar
-
-An avatar is a persistent peer agent spawned by another agent. It is not a function call. It has its own address, memory, pad, tools, logs, and life cycle. Use avatars when a capability should persist and learn over time.
-
-### Daemon
-
-A daemon is a short-lived subagent for isolated work: large scans, batch transformations, exploratory research, or code review where the parent only needs the conclusion. Daemons do not retain identity after completion, but their run artifacts remain on disk.
-
-### Mail
-
-Internal LingTai mail is the network transport. Agents talk to each other and to the human mailbox through `.lingtai/` mailboxes. Mail wakes sleeping agents and preserves a durable communication trail.
-
-### Molt
-
-Context is finite. LingTai agents can molt: summarize the current session, preserve durable layers, and shed the transient conversation. Identity, pad, knowledge, skills, and mail survive.
-
-### Pad, knowledge, and skills
-
-LingTai separates memory by purpose:
-
-| Layer | Purpose |
-|---|---|
-| Conversation | Current transient work. Shed on molt. |
-| Pad | Active project index: current tasks, decisions, pointers. |
-| Character | Who the agent is: role, working style, learned identity. |
-| Knowledge | Private durable facts, decisions, and project memory. |
-| Skills | Reusable procedures and tools that can be shared across agents. |
-
-### Soul flow
-
-An idle agent can periodically reflect on its own recent work and past summaries. This is the agent's internal self-review loop: suggestions, blind spots, and next-step nudges. It is advisory, not a command channel.
-
-## What LingTai can do
-
-### Run a durable agent network
-
-- Launch one or more agents in a project.
-- Spawn persistent avatars for specialized work.
-- Let agents communicate by mail.
-- Keep agents alive after the TUI closes.
-- Sleep, suspend, revive, refresh, or clear agents when needed.
-
-### Work through files, shells, and tools
-
-Agents can read and write files, run shell commands, search code, browse the web when configured, inspect images, call MCP servers, and delegate to coding CLIs such as Claude Code, Codex, or OpenCode when available.
-
-### Accumulate memory and reusable procedure
-
-Agents can record project facts in `knowledge/`, write reusable workflows as `skills`, pin important files into their pad, and carry summaries across molts.
-
-### Connect to external channels
-
-With MCP addons, LingTai can bridge agents to real external messaging systems such as Telegram, IMAP email, Feishu/Lark, and WeChat. External channels become additional doors into the same agent process, not separate bots with separate memory.
-
-### Visualize the network
-
-The portal records topology and mail edges so you can watch the agent network grow and replay how it evolved.
-
-## Filesystem model
-
-LingTai deliberately makes state inspectable. Important places include:
-
-| Path | Meaning |
-|---|---|
-| `.lingtai/<agent>/init.json` | Agent configuration: preset, model, capabilities, MCP/addon activation. |
-| `.lingtai/<agent>/system/` | Prompt layers, pad, standing rules, summaries, generated system prompt. |
-| `.lingtai/<agent>/knowledge/` | Private durable knowledge entries. |
-| `.lingtai/<agent>/.library/` | Agent-visible skills: intrinsic, custom, and shared. |
-| `.lingtai/<agent>/logs/events.jsonl` | Structured runtime event log. |
-| `.lingtai/<agent>/logs/agent.log` | Human-readable runtime log. |
-| `.lingtai/<agent>/inbox/` and `outbox/` | Internal mail transport. |
-| `.lingtai/<agent>/delegates/ledger.jsonl` | Spawned-avatar ledger. |
-| `.lingtai/<agent>/daemons/` | Daemon run directories and transcripts. |
-| `.lingtai/.portal/` | Portal topology and replay data. |
-| `~/.lingtai-tui/` | Global TUI state: runtime venv, presets, extracted utility skills, command metadata. |
-
-This makes LingTai easy to debug with ordinary tools:
+Only if you are editing the kernel checkout and want your edits to take effect immediately in the TUI runtime:
 
 ```bash
-# See running agents in a project
-lingtai-tui list /path/to/project
-
-# Tail an agent log
-tail -f /path/to/project/.lingtai/<agent>/logs/agent.log
-
-# Inspect structured runtime events
-jq -r '.event' /path/to/project/.lingtai/<agent>/logs/events.jsonl | tail
-```
-
-## User interface: TUI, slash commands, and portal
-
-### TUI
-
-`lingtai-tui` is the main human interface. It provides:
-
-- project setup and recipe selection;
-- model/preset configuration;
-- chat and mail views;
-- agent status and token/stamina visibility;
-- avatar and daemon visibility;
-- markdown rendering;
-- command palette and slash commands;
-- upgrade and doctor flows.
-
-Useful shell commands:
-
-```bash
-lingtai-tui                         # open the interactive TUI in the current project
-lingtai-tui list <project-dir>       # list agents and states
-lingtai-tui spawn <dir> --preset <name> [--agent-name <name>]
-lingtai-tui presets                 # list available presets as JSON
-lingtai-tui bootstrap               # re-extract bundled skills/utilities
-lingtai-tui doctor                  # repair/update TUI runtime and utilities
-```
-
-Common in-TUI slash commands include:
-
-| Command | Use |
-|---|---|
-| `/setup` | Change model, recipe, language, tools, or behavior. |
-| `/kanban` | Inspect agent/project status. |
-| `/viz` | Open or focus the network visualization. |
-| `/mcp` | Configure external MCP/addon integrations. |
-| `/skills` | Browse available skills and capabilities. |
-| `/insights` | Ask the agent for a reflective second look. |
-| `/sleep` | Put an agent to sleep while preserving state. |
-| `/refresh` | Restart/reload an agent configuration. |
-| `/cpr` | Revive a suspended or dead agent. |
-| `/clear` | Clear an agent context window while preserving durable stores. |
-| `/projects` | Switch or inspect known projects. |
-| `/export` | Export or share project material. |
-| `/doctor` | Diagnose installation/runtime issues. |
-
-### Portal
-
-`lingtai-portal` is the visualization server. It reads project state and portal records to show the agent network, edges, and history. Use it when the network becomes larger than one agent or when you want to see how avatars and messages relate over time.
-
-The TUI can guide portal usage; the portal code lives in `portal/` and embeds a React frontend from `portal/web/`.
-
-## External channels and MCP addons
-
-LingTai uses MCP servers for external integrations. These are runtime bridges: they let the same long-lived agent process receive and send through external services while keeping its normal memory, tools, and mail history. The currently curated addon family includes:
-
-| Addon | Purpose |
-|---|---|
-| `imap` | Real email through IMAP/SMTP. |
-| `telegram` | Telegram bot send/receive. |
-| `feishu` | Feishu/Lark messaging. |
-| `wechat` | WeChat messaging through iLink/gewechat-style bridges. |
-
-The `wechat` addon is for connecting an agent to WeChat as an external message channel. It is separate from the project community WeChat group listed below.
-
-Design rule: addon-specific setup knowledge belongs to the addon package. The TUI provides the human-facing control panel; agents use MCP resources/tools and the addon's own onboarding resources.
-
-Security notes:
-
-- Credentials live in local `.secrets/` files, not in Git.
-- Agents should not print tokens or secrets in messages.
-- Unknown external IMAP senders should not receive replies unless the human confirms policy.
-- External side effects should be explicit: sending messages, filing PRs/issues, deleting resources, or changing configuration should be treated as real actions.
-
-## Recipes, skills, and knowledge
-
-### Recipes
-
-A recipe shapes a new LingTai project: greeting, behavior, bundled skills, and onboarding style. The default Adaptive recipe progressively reveals features when they become useful. The Tutorial recipe walks a new user through concepts step by step.
-
-### Skills
-
-Skills are portable procedures. They can include markdown instructions, scripts, templates, reference data, and validation checklists. Agents load skills on demand instead of bloating every prompt with every procedure.
-
-Examples of skill domains:
-
-- web browsing and scraping;
-- academic paper fetching;
-- image/audio understanding;
-- LingTai kernel/TUI anatomy;
-- MCP registration and debugging;
-- release workflows;
-- issue reporting;
-- daemon and avatar operation.
-
-### Knowledge
-
-Knowledge is private durable memory owned by one agent. It is for project facts, decisions, paths, collaborator preferences, and lessons that should survive context loss but are not portable enough to become a shared skill.
-
-## Architecture
-
-LingTai is split across two primary repositories:
-
-| Repository | Language | Owns |
-|---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) | Go + TypeScript | TUI, portal, Homebrew/source install pipeline, shipped utility skills, website-adjacent docs. |
-| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python + Rust sidecar pieces | Agent runtime, LLM turn loop, intrinsic tools, session management, context molt, MCP host, PyPI package `lingtai`. |
-
-This repository contains two Go binaries:
-
-| Tree | Binary | Description |
-|---|---|---|
-| `tui/` | `lingtai-tui` | Bubble Tea terminal application, setup wizard, process monitor, slash-command shell, preset editor, upgrade/doctor flows. |
-| `portal/` | `lingtai-portal` | Go HTTP server with embedded React frontend for topology/replay visualization. |
-
-The Go TUI does not implement the agent mind. It launches and supervises Python kernel agents as subprocesses. Communication between UI and agents happens through the project filesystem: heartbeats, mailboxes, logs, generated prompt files, and portal records.
-
-### Runtime ownership
-
-The kernel package is published to PyPI as `lingtai`, but normal users should let the TUI manage it. The TUI owns the runtime virtualenv under `~/.lingtai-tui/runtime/venv/` and project-specific runtime wiring. Installing `lingtai` into your system Python does not update running LingTai projects.
-
-For kernel development, install the sibling kernel repo into the TUI runtime venv intentionally:
-
-```bash
-# from a checkout where ../lingtai-kernel exists
-~/.lingtai-tui/runtime/venv/bin/pip3 install -e ../lingtai-kernel
-```
-
-That is a development workflow, not the ordinary user upgrade path.
-
-## Installation and upgrade details
-
-### Homebrew upgrade
-
-```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
-```
-
-After upgrading, restart the TUI so the new binary is used. If agents are running, the TUI will guide safe upgrade handling.
-
-### Source build
-
-```bash
-git clone https://github.com/Lingtai-AI/lingtai.git
-cd lingtai/tui
-go test ./...
-go build -o bin/lingtai-tui .
-
-cd ../portal/web
-npm ci
-npm run build
-cd ..
-go test ./...
-go build -o bin/lingtai-portal .
+~/.lingtai-tui/runtime/venv/bin/pip3 install -e /path/to/lingtai-kernel
 ```
 
 ### Runtime repair
@@ -385,9 +213,72 @@ go build -o bin/lingtai-portal .
 lingtai-tui doctor
 ```
 
-`doctor` checks the TUI/kernel/runtime relationship, refreshes utility skills, and reports repair steps. Use it after failed startup, broken upgrades, or missing bundled skills.
+`doctor` checks the TUI/kernel/runtime relationship, refreshes shipped utility skills, and reports concrete repair steps. Use it after a failed startup or a stale-looking upgrade.
 
-## Development workflow
+## Architecture
+
+LingTai is split across two repositories.
+
+| Repository | Language | Owns |
+|---|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Go + TypeScript | TUI, portal, Homebrew/source install, shipped utility skills. |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python (+ Rust sidecar pieces) | Agent runtime, LLM turn loop, intrinsic tools, session/context/molt management, MCP host. Published as the `lingtai` PyPI package. |
+
+The Go TUI does not run the agent mind. It launches and supervises Python kernel agents as subprocesses; everything between UI and agents flows through the project filesystem (`.lingtai/` mailboxes, heartbeats, logs, prompt files, portal records). That is why the state is so easy to inspect — and why other tools can cooperate with it without any SDK.
+
+This repo carries two Go binaries:
+
+| Tree | Binary | Description |
+|---|---|---|
+| `tui/` | `lingtai-tui` | Bubble Tea terminal app, setup wizard, process monitor, slash-command shell, preset editor, upgrade/doctor flows. |
+| `portal/` | `lingtai-portal` | Go HTTP server with an embedded React frontend for topology/replay visualization. |
+
+## Docs by goal
+
+- **New here?** Run `lingtai-tui`, pick the **Tutorial** recipe, follow the prompts.
+- **Set up a channel** — `/mcp` inside the TUI, then the addon's own onboarding resource.
+- **Write a skill** — see `tui/internal/preset/skills/lingtai-dev-guide/` after first launch.
+- **Source layout** — start at [`ANATOMY.md`](ANATOMY.md), then descend into `tui/ANATOMY.md` or `portal/ANATOMY.md`.
+- **Release process** — [`RELEASING.md`](RELEASING.md).
+- **Contributing** — anatomy-first, worktree-first, with validation in the PR body. See [Contributing](#contributing).
+
+## Repository map
+
+```text
+.
+├── README.md / README.zh.md / README.wen.md
+├── ANATOMY.md                 # source-grounded repo map for agents and humans
+├── CLAUDE.md                  # coding-agent guidance
+├── RELEASING.md               # release checklist
+├── install.sh                 # source installer
+├── tui/                       # lingtai-tui Go module
+│   ├── main.go
+│   ├── internal/              # TUI implementation
+│   ├── i18n/                  # en/zh/wen UI strings
+│   └── packages/              # npm wrapper metadata
+├── portal/                    # lingtai-portal Go module
+│   ├── main.go
+│   ├── web/                   # React/Vite frontend
+│   └── i18n/
+├── docs/                      # design notes, blog, status, known limitations
+├── examples/                  # example init/addon/policy JSONC files
+├── scripts/                   # helper scripts
+└── discussions/               # design patches and investigation notes
+```
+
+## Troubleshooting
+
+**`lingtai-tui` is not found.** Make sure Homebrew's bin directory is on `PATH` (`brew --prefix`/bin). If you used `install.sh`, check `/usr/local/bin/lingtai-tui` or the Homebrew prefix.
+
+**The TUI starts but the assistant does not respond.** Run `lingtai-tui doctor` and `lingtai-tui list /path/to/project`, then `tail -100 /path/to/project/.lingtai/<agent>/logs/agent.log`.
+
+**A skill or command is missing.** `lingtai-tui bootstrap` (or `/doctor` inside the TUI) re-extracts bundled utilities.
+
+**You upgraded but behavior did not change.** Two layers: the Go TUI binary (Homebrew/source) and the Python runtime (TUI-managed venv). Restart the TUI after upgrading; run `doctor` if the runtime looks stale. Installing the `lingtai` PyPI package into your system Python does not affect projects.
+
+**You are developing the kernel and your edits are ignored.** See [Kernel dev mode](#kernel-dev-mode-advanced).
+
+## Development
 
 For non-trivial changes, work in a Git worktree off `origin/main`:
 
@@ -398,159 +289,43 @@ git worktree add -b docs/my-change .worktrees/my-change origin/main
 cd .worktrees/my-change
 ```
 
-### Validate TUI changes
+Validation:
 
 ```bash
-cd tui
-go test ./...
-go vet ./...
-go build -o bin/lingtai-tui .
+# TUI changes
+cd tui && go test ./... && go vet ./... && go build -o bin/lingtai-tui .
+
+# Portal changes
+cd portal/web && npm ci && npm run build && cd .. && go test ./... && go build -o bin/lingtai-portal .
+
+# Docs-only
+git diff --check && git status --short
 ```
 
-### Validate portal changes
-
-```bash
-cd portal/web
-npm ci
-npm run build
-
-cd ..
-go test ./...
-go build -o bin/lingtai-portal .
-```
-
-### Validate docs-only changes
-
-For README-only work, at minimum:
-
-```bash
-# check links/paths manually, then verify no accidental code changes
-git diff --check
-git status --short
-```
-
-If documentation references generated UI commands or shipped skills, run the relevant tests or inspect `~/.lingtai-tui/commands.json` after a bootstrap.
-
-## Repository map
-
-```text
-.
-├── README.md / README.zh.md / README.wen.md
-├── ANATOMY.md                 # source-grounded repo map for agents and humans
-├── CLAUDE.md                  # coding-agent guidance
-├── RELEASING.md               # release checklist notes
-├── install.sh                 # source installer
-├── tui/                       # lingtai-tui Go module
-│   ├── main.go
-│   ├── internal/              # TUI implementation packages
-│   ├── i18n/                  # en/zh/wen UI strings
-│   └── packages/              # npm wrapper package metadata
-├── portal/                    # lingtai-portal Go module
-│   ├── main.go
-│   ├── web/                   # React/Vite frontend
-│   └── i18n/
-├── docs/                      # design notes, blog material, status, known limitations
-├── examples/                  # example init/addon/policy JSONC files
-├── scripts/                   # helper scripts
-└── discussions/               # design patches and investigation notes
-```
-
-For source navigation, start with `ANATOMY.md`, then descend into `tui/ANATOMY.md` or `portal/ANATOMY.md`. Anatomy files cite code and are intended to stay updated when structure changes.
-
-## Troubleshooting
-
-### `lingtai-tui` is not found
-
-Make sure Homebrew's bin directory is on `PATH`:
-
-```bash
-brew --prefix
-ls "$(brew --prefix)/bin/lingtai-tui"
-```
-
-If you used `install.sh`, check `/usr/local/bin/lingtai-tui` or the Homebrew prefix.
-
-### The TUI starts but the agent does not respond
-
-Run:
-
-```bash
-lingtai-tui doctor
-lingtai-tui list /path/to/project
-```
-
-Then inspect the agent logs:
-
-```bash
-tail -100 /path/to/project/.lingtai/<agent>/logs/agent.log
-```
-
-### A skill or command is missing
-
-Refresh bundled utilities:
-
-```bash
-lingtai-tui bootstrap
-```
-
-Or use `/doctor` from inside the TUI.
-
-### You upgraded but behavior did not change
-
-Remember that there are two layers:
-
-1. the Go TUI binary installed by Homebrew/source build;
-2. the Python kernel/runtime managed by the TUI virtualenv.
-
-Restart the TUI after upgrading the binary. Use `lingtai-tui doctor` if the runtime appears stale. Do not assume system Python packages affect LingTai projects.
-
-### You are developing the kernel and local edits are ignored
-
-Install the kernel checkout into the TUI runtime venv intentionally:
-
-```bash
-~/.lingtai-tui/runtime/venv/bin/pip3 install -e /path/to/lingtai-kernel
-```
-
-Then refresh or restart the affected agents.
+If a doc change references generated UI commands or shipped skills, regenerate via `lingtai-tui bootstrap` and inspect `~/.lingtai-tui/commands.json`.
 
 ## Contributing
 
-Good LingTai contributions are source-grounded and workflow-aware.
+LingTai contributions are source-grounded and workflow-aware.
 
-1. Read the relevant anatomy first:
-   - root: `ANATOMY.md`
-   - TUI: `tui/ANATOMY.md`
-   - portal: `portal/ANATOMY.md`
+1. Read the relevant anatomy first: root `ANATOMY.md`, then `tui/ANATOMY.md` or `portal/ANATOMY.md`.
 2. Work in a branch/worktree.
 3. Keep changes scoped.
 4. Run the relevant validation commands.
 5. Update anatomy/docs when structural behavior changes.
-6. Open a PR with:
-   - what changed;
-   - why it changed;
-   - validation performed;
-   - screenshots or terminal output for UI changes when useful.
+6. Open a PR that says what changed, why, and how you validated it.
 
-Areas that commonly need help:
+Common areas that need help: TUI usability and accessibility, portal visualization and replay, MCP/addon onboarding, cross-platform install polish, docs and tutorials, runtime diagnostics, and high-quality reusable skills.
 
-- TUI usability and accessibility;
-- portal visualization and replay;
-- MCP/addon onboarding resources;
-- cross-platform installation polish;
-- docs and tutorials;
-- runtime diagnostics and issue reproduction;
-- high-quality skills that encode reusable workflows.
+## Design philosophy
 
-## Project philosophy
+LingTai borrows its name from the heart-mind — the square inch where transformation begins. The product follows three practical beliefs:
 
-LingTai borrows its name from the heart-mind: the square inch where transformation begins. The system follows three practical beliefs:
+1. **Assistants need bodies.** A durable filesystem home gives continuity, inspectability, and a place to accumulate tools and memory.
+2. **Networks should grow through service.** When a task needs a new capability, write a skill, record knowledge, or spawn a specialist, and the next task gets easier.
+3. **Memory must be layered.** Conversation is temporary. Pad, character, knowledge, skills, and mail carry what matters forward.
 
-1. **Agents need bodies.** A durable filesystem home gives an agent continuity, inspectability, and a place to accumulate tools and memory.
-2. **Networks should grow through service.** When a task needs a new capability, spawn an avatar, write a skill, record knowledge, and make the next task easier.
-3. **Memory must be layered.** Conversation is temporary; pad, character, knowledge, skills, and mail carry what matters forward.
-
-The goal is not agent theater. The goal is to make useful long-running AI collaborators that can be inspected, restarted, taught, and improved.
+The goal is not agent theater. The goal is useful long-running AI collaborators that can be inspected, restarted, taught, and improved.
 
 ## Community
 
@@ -562,10 +337,9 @@ The goal is not agent theater. The goal is to make useful long-running AI collab
 - GitHub issues: <https://github.com/Lingtai-AI/lingtai/issues>
 - GitHub discussions: <https://github.com/Lingtai-AI/lingtai/discussions>
 
-For Chinese-language discussion and early testing, join the WeChat group by scanning the QR code below. Add the author on WeChat and mention `lingtai`; if the QR code expires, please open an issue and we will refresh it.
+For Chinese-language discussion and early testing, scan the WeChat QR below. Add the author on WeChat with the note `lingtai`; if the QR has expired, please open an issue and we will refresh it.
 
 <img src="docs/assets/wechat.png" alt="WeChat QR code for joining the LingTai testing group" width="200">
-
 
 ## Star history
 
@@ -573,4 +347,4 @@ For Chinese-language discussion and early testing, join the WeChat group by scan
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE).
