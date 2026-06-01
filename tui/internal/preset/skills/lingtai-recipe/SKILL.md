@@ -37,15 +37,32 @@ Every LingTai project uses a recipe — selected during `/setup`, inherited from
 
 This skill is the one place to look for anything recipe-related. Pick the sub-file that matches what you're doing, then read it in full before acting.
 
-## Choose the sub-guide
+## Nested reference catalog
 
-- **Understanding / authoring a recipe** — format reference: bundle directory structure, `recipe.json` schema (`id`, `name`, `description`, `version`, `library_name`), the four optional behavioral layers, locale fallback rules, library sibling mechanics, validator contract, how to create and test a custom recipe.
+`lingtai-recipe` owns these nested references. They are parent-owned drill-down
+files, not standalone top-level skills.
 
-  → Read `reference/recipe-format/SKILL.md`.
+```yaml
+- name: recipe-format-reference
+  location: reference/recipe-format/SKILL.md
+  description: |
+    Authoritative recipe bundle format reference: directory structure,
+    `recipe.json` schema, optional behavioral layers, locale fallback rules,
+    library sibling mechanics, validator contract, and custom recipe testing.
+- name: recipe-export-flow
+  location: reference/export-recipe/SKILL.md
+  description: |
+    Standalone recipe-export procedure for distilling a live network's culture
+    into a portable recipe bundle: scope disambiguation, metadata collection,
+    authoring, validation, sensitivity sweep, git initialization, and handoff.
+```
 
-- **Exporting a standalone recipe** — distilling just the culture (optional `greet/comment/covenant/procedures`, optional library of skills) into a bundle others can use to start *new* networks. No agents, no mailboxes.
+## Routing table
 
-  → Read `reference/export-recipe/SKILL.md` and follow it end-to-end.
+| If you need to... | Read |
+|---|---|
+| Understand or author a recipe bundle: structure, `recipe.json`, optional layers, locale fallback, library sibling, validation, testing | `reference/recipe-format/SKILL.md` |
+| Export a standalone recipe: distill culture into optional `greet/comment/covenant/procedures` plus optional skill library; no agents, no mailboxes | `reference/export-recipe/SKILL.md` |
 
 ## Disambiguate scope BEFORE picking a sub-guide
 

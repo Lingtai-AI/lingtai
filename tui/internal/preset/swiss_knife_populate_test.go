@@ -3,6 +3,7 @@ package preset
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,23 @@ func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
 			t.Fatalf("expected bundled lingtai-recipe file %s to be extracted: %v", rel, err)
+		}
+	}
+
+
+	rootBody, err := os.ReadFile(filepath.Join(utilitiesDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"```yaml",
+		"- name: recipe-format-reference",
+		"location: reference/recipe-format/SKILL.md",
+		"- name: recipe-export-flow",
+		"Routing table",
+	} {
+		if !strings.Contains(string(rootBody), want) {
+			t.Errorf("lingtai-recipe root missing nested metadata %q", want)
 		}
 	}
 

@@ -259,6 +259,11 @@ func TestBuildSkillFolderEntries_RecipeNestedReferences(t *testing.T) {
 	}
 	rootBody := string(rootBodyBytes)
 	for _, want := range []string{
+		"Nested reference catalog",
+		"```yaml",
+		"- name: recipe-format-reference",
+		"- name: recipe-export-flow",
+		"Routing table",
 		"reference/recipe-format/SKILL.md",
 		"reference/export-recipe/SKILL.md",
 		"gitignore.template",
