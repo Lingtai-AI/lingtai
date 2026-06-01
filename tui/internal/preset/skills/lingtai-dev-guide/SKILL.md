@@ -1,213 +1,105 @@
 ---
 name: lingtai-dev-guide
 description: >
-  Comprehensive developer guide for contributing to the LingTai project — the
-  agent operating system. Covers the full landscape: three codebases (Python
-  kernel, Go TUI/portal, Python MCPs), architecture overview, dev environment
-  setup, contributing workflows, MCP development, skill authoring, progressive
-  disclosure pattern, release process, troubleshooting, security auditing, and
-  network governance. Read this when you are about to make code changes to any
-  part of LingTai, set up a dev environment, understand how the pieces fit
-  together, develop a new MCP addon, or debug/troubleshoot a running agent.
-  Do NOT use for using LingTai as an end user (use the tutorial-guide skill).
-version: 2.0.1
-tags: [python, golang, typescript, agent, architecture, contributing, reference, mcp, debug, troubleshoot, security]
+  Router for contributing to the LingTai project. Use this when you are about
+  to change LingTai code or docs, set up a dev environment, navigate the Go
+  TUI/portal repo or Python kernel, develop MCP addons, prepare a release,
+  troubleshoot a running network, audit security, or govern avatars. This is
+  for developers and contributors; for end-user lessons, use tutorial-guide.
+version: 2.1.0
 ---
 
 # LingTai Developer Guide
 
-This skill is the single entry point for anyone developing on or contributing to LingTai. It uses **progressive disclosure** — start here for the big picture, then drill into specifics via the reference files and linked skills.
+This skill is the developer router for LingTai. Start here, choose exactly the
+reference you need, then read that nested file before touching code. The root
+stays short on purpose; the detailed procedures live under `reference/<topic>/`.
 
-## Progressive Disclosure Pattern
+## Non-negotiable rules
 
-| Level | What | When to use |
-|---|---|---|
-| **Level 1** | This guide — the 10,000-foot view | First time, orientation |
-| **Level 2** | Reference files — deep dives on specific topics | When you need detail on one area |
-| **Level 3** | Anatomy skills — navigate by structure | When you need to find specific code |
-| **Level 4** | Code + tests — the ground truth | When you're making changes |
+- **Progressive disclosure:** router → nested reference → anatomy skill → code +
+  tests. Do not jump straight from memory to edits.
+- **Code is truth:** reference files route and summarize; cited source files,
+  tests, and `ANATOMY.md` files are authoritative.
+- **Anatomy travels with code:** if you move/rename/split/delete code cited by an
+  `ANATOMY.md`, update the anatomy in the same commit.
+- **Explicit human authorization gates:** do not open/merge PRs, push commits,
+  file issues, close/delete resources, or change config unless the human gave an
+  imperative authorization for that side effect.
+- **Human-facing deliverables prefer HTML:** substantial plans, audits, release
+  notes, and PR-readiness reports should be standalone HTML unless waived.
+- **Release/install docs rule:** LingTai runtime is normally managed by the
+  TUI-created project venv; do not present bare `pip install/upgrade lingtai` as
+  the standard user path. Use manual pip/venv commands only for developer,
+  diagnostic, or verification contexts.
 
-**Rule: never jump levels.** Read the guide first, then the reference, then the anatomy, then the code.
+## Nested reference catalog
 
-## Decision tree — where do I start?
-
-| I want to... | Read this |
+| If you need to... | Read |
 |---|---|
-| Understand the project structure and how the pieces fit together | `reference/architecture.md` |
-| Set up a local dev environment from scratch | `reference/setup.md` |
-| Make changes to the TUI, portal, kernel, or addons | `reference/contributing.md` |
-| Avoid known pitfalls and footguns | `reference/gotchas.md` |
-| Ship a release | `reference/releasing.md` |
-| Diagnose a stuck, errored, or misbehaving agent | `reference/debug-troubleshoot.md` |
-| Audit security (secrets, permissions, data exposure) | `reference/security-audit.md` |
-| Prepare for a molt (checklist + template) | `lingtai-molt-template` skill (separate skill) |
-| Manage avatar network lifecycle and health | `reference/network-governance.md` |
-| Sweep GitHub org for open issues/PRs | `reference/contributing.md` → Portfolio sweep section |
-| Navigate the kernel source code by structure | `lingtai-kernel-anatomy` skill (separate skill) |
-| Navigate the TUI/portal source code by structure | `lingtai-tui-anatomy` skill (separate skill) |
-| Understand how agents work at runtime | `lingtai-kernel-anatomy` skill → descend from `src/lingtai_kernel/ANATOMY.md` |
-| Set up or develop an MCP addon | `mcp-manual` skill → then `lingtai-kernel-anatomy reference/mcp-protocol.md` |
-| Author or publish a skill | `library-manual` skill |
-| Understand recipes and export networks | `lingtai-recipe` skill |
+| Understand the project shape, repos, IPC, and state layout | `reference/architecture/SKILL.md` |
+| Set up a local development environment | `reference/setup/SKILL.md` |
+| Make a contribution in TUI, portal, kernel, addons, or skills | `reference/contributing/SKILL.md` |
+| Avoid common footguns while coding | `reference/gotchas/SKILL.md` |
+| Ship a TUI/portal or kernel release | `reference/releasing/SKILL.md` |
+| Diagnose a stuck, errored, or misbehaving LingTai network | `reference/debug-troubleshoot/SKILL.md` |
+| Audit secrets, permissions, MCP config, channels, or data exposure | `reference/security-audit/SKILL.md` |
+| Operate an avatar network over time | `reference/network-governance/SKILL.md` |
 
-## Quick orientation
+## Related skills to load instead or next
 
-LingTai is an **agent operating system** — a minimal kernel that gives AI agents thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Everything else is plugged in from outside via MCP-compatible interfaces.
+| Need | Skill |
+|---|---|
+| Navigate Go TUI/portal code structurally | `lingtai-tui-anatomy` |
+| Navigate Python kernel code structurally | `lingtai-kernel-anatomy` |
+| Develop, register, or troubleshoot MCP servers/addons | `mcp-manual` first, then `lingtai-kernel-anatomy` `reference/mcp-protocol.md` |
+| Author or publish skills | `skills-manual` |
+| Customize, export, or package project methodology as a recipe | `lingtai-recipe` |
+| Work on portal APIs, topology recording, replay, or `.portal/` state | `lingtai-portal-guide` |
+| Prepare for a consequential molt during long dev work | `lingtai-molt-template` |
+| Explain LingTai to an end user lesson-by-lesson | `tutorial-guide` |
+| Sweep the GitHub org read-only for current issues/PRs | `lingtai-repo-watch` |
+| Report a LingTai bug or stale documentation | `lingtai-issue-report` |
 
-### The three codebases
+## Orientation snapshot
 
-| Repo | Language | What it ships | Key entry points |
+| Repo / package | Stack | Main role | Where to start |
 |---|---|---|---|
-| [`lingtai`](https://github.com/Lingtai-AI/lingtai) | Go + TypeScript | `lingtai-tui` (terminal UI) and `lingtai-portal` (web portal) | `tui/main.go`, `portal/main.go` |
-| [`lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python | `lingtai` PyPI package (agent runtime, LLM interface, mailbox, tools) | `src/lingtai_kernel/ANATOMY.md` |
-| MCP addons (×4) | Python | `lingtai-imap`, `lingtai-telegram`, `lingtai-feishu`, `lingtai-wechat` | Each repo's `README.md` |
+| `Lingtai-AI/lingtai` | Go + TypeScript | `lingtai-tui`, `lingtai-portal`, bundled utilities | `reference/architecture/SKILL.md`, then `lingtai-tui-anatomy` |
+| `Lingtai-AI/lingtai-kernel` | Python | agent runtime, tools, mailbox, soul/molt, intrinsic capabilities | `lingtai-kernel-anatomy` |
+| `lingtai-imap`, `lingtai-telegram`, `lingtai-feishu`, `lingtai-wechat`, `lingtai-whatsapp` | Python MCPs | channel/addon integrations | `mcp-manual` plus each addon's README |
 
-### The agent model: kernel → agent → network
+## Common routing examples
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    lingtai (Go)                      │
-│                                                     │
-│  ┌─────────────┐    ┌──────────────┐               │
-│  │  lingtai-tui │    │ lingtai-portal│              │
-│  │  (terminal)  │    │  (web)       │               │
-│  └──────┬───────┘    └──────┬───────┘               │
-│         └─────────┬─────────┘                        │
-│                   │                                  │
-│          Filesystem only                             │
-│          (.lingtai/<agent>/)                         │
-│                   │                                  │
-└───────────────────┼──────────────────────────────────┘
-                    │
-┌───────────────────┼──────────────────────────────────┐
-│          lingtai-kernel (Python)                      │
-│                   │                                  │
-│  ┌────────────────┴────────────────┐                 │
-│  │         Agent runtime           │                 │
-│  │  turn loop · tools · mailbox    │                 │
-│  │  soul · molt · notifications    │                 │
-│  └────────────────┬────────────────┘                 │
-│                   │                                  │
-│  ┌────────────────┴────────────────┐                 │
-│  │         MCP tools               │                 │
-│  │  imap · telegram · feishu · wechat                │
-│  └─────────────────────────────────┘                 │
-└──────────────────────────────────────────────────────┘
-```
+- **"I need to change a TUI screen"** → `reference/contributing/SKILL.md` →
+  `lingtai-tui-anatomy` → relevant Go files → focused `go test`.
+- **"I need to add a capability or inspect runtime behavior"** →
+  `lingtai-kernel-anatomy` → relevant kernel anatomy/code → kernel tests.
+- **"An agent is quiet or unreachable"** → `reference/debug-troubleshoot/SKILL.md`
+  → `lingtai-doctor` if local health surfaces disagree.
+- **"I am preparing a release"** → `reference/releasing/SKILL.md` and use
+  `reference/release-html-log-template.html` as the starter HTML report if you do
+  not already have a stronger release-specific design.
+- **"This broad dev task needs triage"** → run the read-only portfolio sweep in
+  `reference/contributing/SKILL.md`, then ask for authorization before mutating
+  GitHub state.
 
-**Key architectural decisions:**
+## Skill layout
 
-1. **Filesystem-only IPC.** The TUI/portal never open a socket to a running agent. All communication is through files: manifests, heartbeats, signal files, mailbox folders, `.notification/`.
-2. **Kernel is standalone.** `lingtai_kernel` never imports from the wrapper `lingtai`. The wrapper depends on the kernel one-directionally.
-3. **MCP is the extension point.** Domain tools are plugged in via MCP servers. The 4 first-party addons (imap, telegram, feishu, wechat) each ship as a standalone PyPI package with a LICC v1 inbox callback.
-
-### Key concepts
-
-| Concept | What it is | Where to learn more |
-|---|---|---|
-| **Avatar** (他我) | An independent agent process spawned by another agent | Covenant §I |
-| **Molt** (凝蜕) | Context shedding — crystallize worth, shed ephemera | Covenant §V, `procedures.md` |
-| **Lingtai** (灵台) | Your character/identity — persists across molts | `psyche` tool, `lingtai-kernel-anatomy` |
-| **Pad** | Working sketchboard — living index of current work | `psyche` tool, `procedures.md` |
-| **Codex** | Durable self-memory — verifiable truths | `codex` tool |
-| **Library** | Skill catalog — reusable procedures | `library-manual` skill |
-| **Preset** | Atomic `{llm, capabilities}` bundle | `tui/internal/preset/`, `lingtai-tui-anatomy` |
-| **LICC** | LingTai Inbox Callback Contract — MCP→agent event delivery | `lingtai-kernel-anatomy reference/mcp-protocol.md` |
-
-### The utility layer: skills
-
-Skills are reusable procedures, workflows, and reference material that agents load on-demand. They use **progressive disclosure** — a routing hub (`SKILL.md`) with reference files loaded only when needed.
-
-| Location | Who owns it | Editable? |
-|---|---|---|
-| `<agent>/.library/intrinsic/` | CLI-managed. Wiped and rewritten on every refresh. | No |
-| `<agent>/.library/custom/` | You. CLI never touches this. | Yes |
-| `../.library_shared/` | Network-shared. Add with `cp -r`. | Admin only |
-| `~/.lingtai-tui/utilities/` | TUI-shipped utilities. | Depends on the skill |
-
-To author a new skill: read the `library-manual` skill for the full workflow (frontmatter schema, template, validator, publishing). To publish to the shared library: `cp -r .library/custom/<name> ../.library_shared/<name>` then `system(action='refresh')`.
-
-## MCP addon development
-
-The 4 first-party MCP addons are:
-
-| Addon | Repo | What it does |
-|---|---|---|
-| `lingtai-imap` | [GitHub](https://github.com/Lingtai-AI/lingtai-imap) | IMAP/SMTP email integration |
-| `lingtai-telegram` | [GitHub](https://github.com/Lingtai-AI/lingtai-telegram) | Telegram Bot API messaging |
-| `lingtai-feishu` | [GitHub](https://github.com/Lingtai-AI/lingtai-feishu) | Feishu/Lark messaging |
-| `lingtai-wechat` | [GitHub](https://github.com/Lingtai-AI/lingtai-wechat) | WeChat (iLink) messaging |
-
-**To develop a new MCP addon:**
-
-1. Read the `mcp-manual` skill for the registration workflow
-2. Read `lingtai-kernel-anatomy reference/mcp-protocol.md` for the LICC v1 protocol spec
-3. Each addon is a standalone Python package with its own `README.md` — fetch it via `find_readme.py <pkg-name>`
-4. Key contract: the MCP server must implement the LICC v1 inbox callback for event delivery to agents
-5. Register via `init.json` `mcp.<name>` entries
-
-## Contributing workflow
-
-1. **Orchestrator + daemons, not hand-coding.** For any non-trivial coding, research, or change task, the orchestrator's job is to *plan, dispatch, and review* — not to hand-code. Decompose the work into daemon-sized tasks and dispatch them to Claude Code / Codex daemon backends, which are the right tools for code reading, modification, testing, refactoring, PR preparation, batch scanning, and mechanical validation. Use as much safe parallelism as the decomposition allows: independent daemons run concurrently in their own worktrees/branches, each with a scoped brief and a do-not-touch list.
-2. **Portfolio sweep before broad planning.** Before planning any broad LingTai dev work, run a read-only `gh` org sweep across `Lingtai-AI/*` to enumerate open issues and PRs, and let the current PR/issue surface guide what to pick up. Summarize stale, unreviewed, and relevant items. See `reference/contributing.md` for the full sweep workflow.
-3. **Issue → worktree/branch → PR → merge.** Non-trivial changes are tracked end-to-end: open or pick an issue, work in an isolated worktree on a topic branch, push, open a PR, review, merge. No long-lived ad-hoc branches; no edits in the main checkout.
-4. **Anatomy updates are mandatory.** If your change moves, renames, splits, merges, or deletes a file/function/class cited by an `ANATOMY.md`, update the anatomy in the **same commit**. See `lingtai-kernel-anatomy` (Python) or `lingtai-tui-anatomy` (Go) for the full convention.
-5. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`.
-6. **Filesystem-only IPC.** Any new cross-process communication must follow the file-based pattern.
-7. **Skill authoring for reusable procedures.** If your change creates a reusable workflow, write it as a skill.
-8. **Every PR ships a human-facing HTML explainer by default.** Write a single self-contained `.html` (inline CSS, no remote assets) under `reports/` in the worktree and hand the human its absolute path *before* asking for review or merge. The only exception is a strictly one-line docs/chore PR with an explicit "no report needed" waiver from the human. See `reference/contributing.md` for the file naming and the required sections.
-
-For the full contributing guide (orchestrator/daemon discipline, portfolio sweep, build commands, gotchas, anatomy maintenance, migration contract): read `reference/contributing.md`.
-
-## Reference files
-
-| File | What it covers |
-|---|---|
-| `reference/architecture.md` | Two repos, components, IPC, state layout, cross-repo dependencies |
-| `reference/setup.md` | Dev environment prerequisites, cloning, building, dev mode, editable installs |
-| `reference/contributing.md` | How to change TUI, portal, kernel, addons, skills; anatomy maintenance |
-| `reference/gotchas.md` | Known pitfalls (Bubble Tea paste, migrations, auto-upgrader, three-locale rule) |
-| `reference/releasing.md` | Release process for TUI/portal and kernel |
-| `reference/debug-troubleshoot.md` | Process, memory, communication, tools, health checks, escalation protocol |
-| `reference/security-audit.md` | Secret scanning, file permissions, MCP config, communication security, data exposure |
-| `reference/network-governance.md` | Avatar lifecycle, permission management, health monitoring, CPR protocol |
-
-## Troubleshooting & Maintenance
-
-> **Read `lingtai-kernel-anatomy` first** to understand the architecture; return here for operational procedures when something goes wrong.
-
-### Quick Diagnosis
-
-```
-Agent unresponsive?      → reference/debug-troubleshoot.md → Process diagnosis → Five lifecycle states lookup
-Lost memory after molt?  → `lingtai-molt-template` skill → 9-section template + verification checklist
-Found exposed secrets?   → reference/security-audit.md → Secret scanning scripts
-Avatar network unstable? → reference/network-governance.md → Health monitoring + CPR protocol
+```text
+lingtai-dev-guide/
+├── SKILL.md
+└── reference/
+    ├── architecture/SKILL.md
+    ├── setup/SKILL.md
+    ├── contributing/SKILL.md
+    ├── gotchas/SKILL.md
+    ├── releasing/SKILL.md
+    ├── release-html-log-template.html
+    ├── debug-troubleshoot/SKILL.md
+    ├── security-audit/SKILL.md
+    └── network-governance/SKILL.md
 ```
 
-### Security Audit Principles
-
-1. **Strictly read-only**: Audit scripts must not modify any files
-2. **Severity ratings**: Critical / High / Medium / Low
-3. **Known architectural limitations**: Plaintext storage, etc. — flag these as "architectural constraints," not "configuration issues"
-
-### Relationship to lingtai-kernel-anatomy
-
-- **lingtai-kernel-anatomy**: Descriptive documentation — five-layer storage, filesystem layout, runtime state machine, email protocol
-- **This guide (troubleshooting sections)**: Operational documentation — fault diagnosis, security scanning, molt procedures, network governance
-- Recommended reading order: anatomy → this guide's troubleshooting reference files
-
-## Related skills
-
-- **`lingtai-kernel-anatomy`** — the convention for `ANATOMY.md` files in the kernel. Read this when navigating kernel source.
-- **`lingtai-tui-anatomy`** — the convention for `ANATOMY.md` files in the Go monorepo. Read this when navigating TUI/portal source.
-- **`lingtai-issue-report`** — protocol for reporting bugs, stale docs, or design issues. Read this when you spot a defect.
-- **`lingtai-molt-template`** — structured 9-section template and pre-molt verification checklist. Load this when preparing for a consequential molt.
-- **`library-manual`** — how the skill library works. Read this when authoring or publishing skills.
-- **`mcp-manual`** — how MCP servers are registered and activated. Read this when working on addons.
-- **`lingtai-recipe`** — recipe authoring and network export. Read this when packaging or sharing methodologies.
-- **`lingtai-portal-guide`** — portal internals (API, topology, replay). Read this when working on the web portal.
-- **`tutorial-guide`** — the 12-lesson curriculum for end users. Not for developers.
-
----
-> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.
+Now read the nested reference that matches the task, then verify against current
+repo state before acting.

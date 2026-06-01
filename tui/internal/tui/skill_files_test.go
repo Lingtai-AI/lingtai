@@ -240,3 +240,69 @@ func TestBuildSkillFolderEntries_DailyReflectionNestedReferences(t *testing.T) {
 		t.Error("nested data collection child should identify itself as a nested daily-reflection reference")
 	}
 }
+
+func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "lingtai-dev-guide")
+
+	entries := buildSkillFolderEntries(skillDir)
+	if len(entries) == 0 {
+		t.Fatal("no entries; is lingtai-dev-guide missing?")
+	}
+	if entries[0].Label != "SKILL.md" {
+		t.Errorf("first entry = %q, want SKILL.md", entries[0].Label)
+	}
+
+	rootBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBody := string(rootBodyBytes)
+	for _, want := range []string{
+		"Nested reference catalog",
+		"reference/architecture/SKILL.md",
+		"reference/setup/SKILL.md",
+		"reference/contributing/SKILL.md",
+		"reference/gotchas/SKILL.md",
+		"reference/releasing/SKILL.md",
+		"reference/debug-troubleshoot/SKILL.md",
+		"reference/security-audit/SKILL.md",
+		"reference/network-governance/SKILL.md",
+	} {
+		if !strings.Contains(rootBody, want) {
+			t.Errorf("lingtai-dev-guide root missing %q", want)
+		}
+	}
+
+	labels := make(map[string]MarkdownEntry)
+	for _, e := range entries {
+		labels[e.Label] = e
+	}
+	for _, want := range []string{
+		"architecture/SKILL.md",
+		"setup/SKILL.md",
+		"contributing/SKILL.md",
+		"gotchas/SKILL.md",
+		"releasing/SKILL.md",
+		"debug-troubleshoot/SKILL.md",
+		"security-audit/SKILL.md",
+		"network-governance/SKILL.md",
+		"release-html-log-template.html",
+	} {
+		e, ok := labels[want]
+		if !ok {
+			t.Fatalf("missing nested lingtai-dev-guide entry %q", want)
+		}
+		if e.Group != "reference" {
+			t.Errorf("entry %q group = %q, want reference", want, e.Group)
+		}
+	}
+
+	childBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "architecture", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(childBodyBytes), "Nested lingtai-dev-guide reference") {
+		t.Error("nested architecture child should identify itself as a nested lingtai-dev-guide reference")
+	}
+}

@@ -1,5 +1,14 @@
+---
+name: dev-guide-releasing
+description: >
+  Nested lingtai-dev-guide reference for release work: required HTML release logs, TUI/portal tagging and Homebrew tap updates, kernel clean-worktree releases, PyPI upload, verification, and post-release hygiene.
+version: 1.0.0
+---
+
 # Release Process
 
+
+Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 
 ## Shareable HTML release log (required for every public release)
 
@@ -17,11 +26,11 @@ Use the recent `lingtai 0.10.8` PyPI log as the model. At minimum, the HTML rele
 
 Format rules:
 
-- Keep it **self-contained**: inline CSS, no remote fonts/scripts/assets, and no dependency on local paths.
+- Keep it **self-contained**: inline CSS, no remote fonts, scripts, or assets, and no dependency on local paths.
 - Keep it **shareable**: write for an external reader, not for an agent; do not include secrets, raw private paths unless they are public repo paths, or internal message IDs.
 - Keep it **verifiable**: every version/tag/hash/test count in the report must come from commands run during the release.
 - Save the file under the releasing repo's `reports/` directory with a descriptive name, for example `reports/lingtai-0.10.8-release-log.html`.
-- Use `reference/release-html-log-template.html` as the starter skeleton when you do not already have a stronger release-specific design.
+- Use `../release-html-log-template.html` as the starter skeleton when you do not already have a stronger release-specific design.
 
 Before announcing completion, validate the log itself:
 

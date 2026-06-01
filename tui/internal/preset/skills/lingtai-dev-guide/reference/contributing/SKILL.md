@@ -1,5 +1,14 @@
+---
+name: dev-guide-contributing
+description: >
+  Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
+version: 1.0.0
+---
+
 # Contributing to LingTai
 
+
+Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 This guide covers how to make changes to each component of the LingTai project.
 
 ## General principles
@@ -198,7 +207,7 @@ Skills live in two places:
 | `../.library_shared/` | Network-shared. Add with `cp -r`, edit with admin permission. | Admin only. |
 | `~/.lingtai-tui/utilities/` | TUI-shipped utilities. | Depends on the skill. |
 
-To author a new skill, see the `library-manual` skill for the full workflow (frontmatter schema, template, validator, publishing).
+To author a new skill, see the `skills-manual` skill for the full workflow (frontmatter schema, template, validator, publishing).
 
 ## Anatomy maintenance
 

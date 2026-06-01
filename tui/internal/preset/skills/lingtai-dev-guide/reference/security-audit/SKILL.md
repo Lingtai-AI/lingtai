@@ -1,5 +1,14 @@
+---
+name: dev-guide-security-audit
+description: >
+  Nested lingtai-dev-guide reference for security audits: secret scanning, file permissions, MCP config, communication security, data exposure, agent permission review, severity classification, and report format.
+version: 1.0.0
+---
+
 # LingTai Security Audit Reference
 
+
+Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 > **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document performs security audits based on the Lingtai architecture's file system layout, process model, and communication mechanisms.
 
 ---
@@ -410,12 +419,12 @@ try:
     capabilities = [c[0] for c in data.get('capabilities', [])]
     karma = admin.get('karma', False)
     nirvana = admin.get('nirvana', False)
-    
+
     print(f'Config: $conf')
     print(f'  karma: {karma}')
     print(f'  nirvana: {nirvana}')
     print(f'  capabilities: {capabilities}')
-    
+
     if nirvana:
         print('  🔴 CRITICAL: nirvana=True — can permanently delete agents')
     if karma and not nirvana:

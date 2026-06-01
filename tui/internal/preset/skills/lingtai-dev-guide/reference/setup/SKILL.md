@@ -1,5 +1,14 @@
+---
+name: dev-guide-setup
+description: >
+  Nested lingtai-dev-guide reference for local developer environment setup: cloning repos, building TUI/portal, dev-mode symlinks, editable kernel install, MCP addon setup, and verification.
+version: 1.0.0
+---
+
 # Development Environment Setup
 
+
+Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 ## Prerequisites
 
 | Tool | Version | Purpose |
