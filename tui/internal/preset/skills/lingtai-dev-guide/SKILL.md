@@ -35,6 +35,54 @@ stays short on purpose; the detailed procedures live under `reference/<topic>/`.
 
 ## Nested reference catalog
 
+`lingtai-dev-guide` owns these nested references. They are parent-owned
+drill-down files, not standalone top-level skills.
+
+```yaml
+- name: dev-guide-architecture
+  location: reference/architecture/SKILL.md
+  description: |
+    Project shape, repositories, IPC boundaries, runtime state layout, and where
+    to start when orienting yourself in LingTai development.
+- name: dev-guide-setup
+  location: reference/setup/SKILL.md
+  description: |
+    Local development environment setup for the Go TUI/portal repo, Python
+    kernel, MCP addons, and related verification commands.
+- name: dev-guide-contributing
+  location: reference/contributing/SKILL.md
+  description: |
+    Contribution workflows for TUI, portal, kernel, addons, bundled utilities,
+    skill changes, tests, PR preparation, and review discipline.
+- name: dev-guide-gotchas
+  location: reference/gotchas/SKILL.md
+  description: |
+    Known pitfalls and footguns while coding LingTai: runtime venv assumptions,
+    prompt/system behavior, packaging, state files, and stale-doc hazards.
+- name: dev-guide-releasing
+  location: reference/releasing/SKILL.md
+  description: |
+    Release procedures for TUI/portal and kernel changes, including readiness
+    checks, changelog/reporting expectations, and release artifact guidance.
+- name: dev-guide-debug-troubleshoot
+  location: reference/debug-troubleshoot/SKILL.md
+  description: |
+    Diagnosing stuck, errored, quiet, or misbehaving LingTai networks with logs,
+    health surfaces, doctor checks, and code-backed troubleshooting.
+- name: dev-guide-security-audit
+  location: reference/security-audit/SKILL.md
+  description: |
+    Security auditing for secrets, permissions, MCP/addon config, channels,
+    data exposure, and safe reporting of findings.
+- name: dev-guide-network-governance
+  location: reference/network-governance/SKILL.md
+  description: |
+    Operating avatar networks over time: delegation, collaboration, durable
+    knowledge, stewardship norms, and long-running network maintenance.
+```
+
+## Routing table
+
 | If you need to... | Read |
 |---|---|
 | Understand the project shape, repos, IPC, and state layout | `reference/architecture/SKILL.md` |

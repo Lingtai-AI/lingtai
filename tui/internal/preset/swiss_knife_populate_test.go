@@ -3,6 +3,7 @@ package preset
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,23 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
 			t.Fatalf("expected bundled lingtai-dev-guide file %s to be extracted: %v", rel, err)
+		}
+	}
+
+
+	rootBody, err := os.ReadFile(filepath.Join(utilitiesDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"```yaml",
+		"- name: dev-guide-architecture",
+		"location: reference/architecture/SKILL.md",
+		"- name: dev-guide-network-governance",
+		"Routing table",
+	} {
+		if !strings.Contains(string(rootBody), want) {
+			t.Errorf("lingtai-dev-guide root missing nested metadata %q", want)
 		}
 	}
 

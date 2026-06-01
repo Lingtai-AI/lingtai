@@ -260,6 +260,16 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 	rootBody := string(rootBodyBytes)
 	for _, want := range []string{
 		"Nested reference catalog",
+		"```yaml",
+		"- name: dev-guide-architecture",
+		"- name: dev-guide-setup",
+		"- name: dev-guide-contributing",
+		"- name: dev-guide-gotchas",
+		"- name: dev-guide-releasing",
+		"- name: dev-guide-debug-troubleshoot",
+		"- name: dev-guide-security-audit",
+		"- name: dev-guide-network-governance",
+		"Routing table",
 		"reference/architecture/SKILL.md",
 		"reference/setup/SKILL.md",
 		"reference/contributing/SKILL.md",
