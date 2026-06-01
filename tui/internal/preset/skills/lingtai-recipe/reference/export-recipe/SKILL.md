@@ -1,8 +1,19 @@
+---
+name: recipe-export-flow
+description: >
+  Nested lingtai-recipe reference for exporting a standalone recipe bundle from
+  a live network or methodology: scope disambiguation, human-in-the-loop metadata
+  collection, bundle authoring, validation, git initialization, and handoff.
+version: 1.0.0
+---
+
 # Exporting a Recipe
 
-*This is the recipe-export sub-guide of the `lingtai-recipe` skill. For an overview of all recipe-related flows, read `../SKILL.md`.*
+Nested lingtai-recipe reference. Read this after the top-level router sends you here.
 
-**Prerequisites:** Read `../reference/recipe-format.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
+*This is the recipe-export sub-guide of the `lingtai-recipe` skill. For an overview of all recipe-related flows, read `../../SKILL.md`.*
+
+**Prerequisites:** Read `../recipe-format/SKILL.md` first — it defines the bundle shape, `recipe.json` schema, the four behavioral layers (all optional), the library sibling, and how the validator enforces all of it. This sub-guide assumes you understand all of that.
 
 A recipe is the culture of a network, distilled into a portable seed. Your job is to help the human reflect on their network's culture and package the parts worth sharing. An exported recipe is a **bundle directory** — a git repo the recipient clones and points `/setup` at.
 
@@ -81,7 +92,7 @@ echo $HOME
 
 Store the result. All paths use `$HOME/lingtai-agora/recipes/` as the base. **Note: `lingtai-agora`, NOT `.lingtai-agora` — no leading dot.** The agora directory is a user-visible workspace, not a hidden config directory.
 
-**0b. Read `../reference/recipe-format.md`** to refresh your understanding of the bundle shape.
+**0b. Read `../recipe-format/SKILL.md`** to refresh your understanding of the bundle shape.
 
 **0c. Reflect on the living network.** Before asking the human anything, examine the network to understand its culture. **You are reflecting on the inner network (the agents in `.lingtai/`), not on whatever recipe was originally applied to seed it.** The applied recipe is one input among several — the network's *current* behavior may have drifted, grown new skills, or specialized in ways the seeding recipe never described. Distill what the network is now, not what it was told to be.
 
@@ -123,7 +134,7 @@ If `$HOME/lingtai-agora/recipes/<id>/` already exists, ask before overwriting.
 
 ## Step 2: Author the Bundle
 
-Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../reference/recipe-format.md` for the exact format and rules of each component.
+Once you have the human's input, author all files in one pass. You WRITE the content (not copy) — the recipe should be a distillation, not a raw dump of existing files. Refer to `../recipe-format/SKILL.md` for the exact format and rules of each component.
 
 ### Pre-flight: Create all directories first
 
@@ -155,23 +166,23 @@ Write `$BUNDLE/.recipe/recipe.json` with the required fields. Example:
 }
 ```
 
-- `id` — kebab-case machine identifier (required).
-- `name` — display name, localized per-locale via `.recipe/<lang>/recipe.json` variants (required).
-- `description` — one-line hint, localized (required).
+- `id` — kebab-case machine identifier (required, stable across locales).
+- `name` — canonical display name shown in the TUI recipe picker (required). Keep one canonical language here.
+- `description` — canonical one-line picker hint (required). Keep one canonical language here.
 - `version` — optional, defaults to `"1.0.0"` if absent. Bump on iteration.
 - `library_name` — name of a sibling folder inside the bundle; `null` if the recipe ships no library.
 
-If shipping locale variants of the manifest, write `$BUNDLE/.recipe/zh/recipe.json` and/or `$BUNDLE/.recipe/wen/recipe.json`. Locale variants only need `name` and `description`; the rest is inherited from the root manifest.
+Do **not** write locale variants of `recipe.json`. There is exactly one manifest: `$BUNDLE/.recipe/recipe.json`. If the recipe is multilingual, localize the human-facing layers instead (`greet/<lang>/greet.md`, `comment/<lang>/comment.md`, etc.). The validator rejects `.recipe/<lang>/recipe.json` because the runtime ignores those files and they can silently drop load-bearing fields like `library_name`.
 
 ### 2b. `greet.md` — First Contact (optional)
 
-Write `$BUNDLE/.recipe/greet/greet.md` (and `$BUNDLE/.recipe/greet/zh/greet.md` if multilingual). Follow the rules and placeholder list in `../reference/recipe-format.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
+Write `$BUNDLE/.recipe/greet/greet.md` (and `$BUNDLE/.recipe/greet/zh/greet.md` if multilingual). Follow the rules and placeholder list in `../recipe-format/SKILL.md`. Write fresh recipe-specific content — do NOT copy templates or include `[system]` prefixes.
 
 Skip this layer entirely if the recipe wants a silent agent (agent waits for the first human message instead of sending a greeting).
 
 ### 2c. `comment.md` — Behavioral DNA (optional)
 
-Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture gets distilled. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../reference/recipe-format.md` for the format rules (no placeholders, static text, injected every turn).
+Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture gets distilled. **Draw from the living network** — look at how the orchestrator actually behaves and distill that into portable instructions. See `../recipe-format/SKILL.md` for the format rules (no placeholders, static text, injected every turn).
 
 **What to distill.** Walk through each of these areas and extract what's worth keeping:
 
@@ -226,7 +237,7 @@ Do NOT flatten this to `$BUNDLE/<library_name>/SKILL.md` — the scanner only re
 
 ### 2e–2f. `covenant.md` / `procedures.md` (optional, usually skip)
 
-Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../reference/recipe-format.md` for details.
+Only create these if the network's principles or procedures fundamentally differ from the system default. Most recipes don't need them. See `../recipe-format/SKILL.md` for details.
 
 ```
 $BUNDLE/.recipe/covenant/covenant.md
@@ -258,7 +269,9 @@ Show the human the `find` output and read back each file's content via email. It
 The validator ships with the TUI at a stable per-user path, so you can run it from anywhere.
 
 ```bash
-python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py "$HOME/lingtai-agora/recipes/<id>/"
+TOOL_DIR=scripts
+VALIDATOR="$HOME/.lingtai-tui/utilities/lingtai-recipe/$TOOL_DIR/validate_recipe.py"
+python3 "$VALIDATOR" "$HOME/lingtai-agora/recipes/<id>/"
 ```
 
 This is the canonical structural check. It verifies `.recipe/recipe.json`, the schema, behavioral-layer shape, placeholder discipline, and library sibling existence. Exit code 0 means the bundle is structurally valid.

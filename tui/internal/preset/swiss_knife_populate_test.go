@@ -95,3 +95,33 @@ func TestPopulateBundledLibrary_DailyReflectionNestedReferences(t *testing.T) {
 		}
 	}
 }
+
+// TestPopulateBundledLibrary_RecipeNestedReferences verifies that the embedded
+// utility-library copier preserves lingtai-recipe's nested reference files and
+// assets after the export procedure moved out of assets/.
+func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
+	globalDir := t.TempDir()
+	PopulateBundledLibrary("", globalDir)
+
+	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-recipe")
+	for _, rel := range []string{
+		"SKILL.md",
+		"reference/recipe-format/SKILL.md",
+		"reference/export-recipe/SKILL.md",
+		"assets/gitignore.template",
+		"scripts/validate_recipe.py",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
+			t.Fatalf("expected bundled lingtai-recipe file %s to be extracted: %v", rel, err)
+		}
+	}
+
+	for _, old := range []string{
+		"reference/recipe-format.md",
+		"assets/export-recipe.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, old)); !os.IsNotExist(err) {
+			t.Fatalf("old lingtai-recipe path %s should not be extracted (err=%v)", old, err)
+		}
+	}
+}

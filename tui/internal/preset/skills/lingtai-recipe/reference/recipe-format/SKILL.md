@@ -1,6 +1,18 @@
+---
+name: recipe-format-reference
+description: >
+  Nested lingtai-recipe reference for authoring and validating recipe bundles:
+  bundle structure, .recipe/recipe.json schema, behavioral layers, library
+  sibling mechanics, locale fallback, validator checks, hand-authored recipes,
+  testing, and publishing.
+version: 1.0.0
+---
+
 # Recipe Format Reference
 
-*This is the authoring reference of the `lingtai-recipe` skill. For overview of all recipe-related flows, read `../SKILL.md`. For the recipe export flow, read `../assets/export-recipe.md`.*
+Nested lingtai-recipe reference. Read this after the top-level router sends you here.
+
+*This is the authoring reference of the `lingtai-recipe` skill. For overview of all recipe-related flows, read `../../SKILL.md`. For the recipe export flow, read `../export-recipe/SKILL.md`.*
 
 A **recipe bundle** is a directory that ships two kinds of content, side-by-side:
 
@@ -330,7 +342,8 @@ For the four behavioral layers, a single root-level file serves all languages; p
 Before `git init`-ing a bundle for sharing, run the validator:
 
 ```bash
-python3 ~/.lingtai-tui/utilities/lingtai-recipe/scripts/validate_recipe.py <bundle-root>
+TOOL_DIR=scripts
+python3 "$HOME/.lingtai-tui/utilities/lingtai-recipe/$TOOL_DIR/validate_recipe.py" <bundle-root>
 ```
 
 Exit code 0 means the bundle is structurally valid. Warnings are reported but do not block. Exit code 1 means the bundle has errors and should not be shipped.
@@ -391,6 +404,6 @@ Iterate: edit the bundle in place, then run `/setup` again to re-apply. The TUI 
 
 ## Publishing a Recipe
 
-Read `assets/export-recipe.md` for the full publish flow. It walks you through authoring (or distilling from a running network) a recipe bundle and turning it into a shareable git repo. Recipients clone the repo and point `/setup` at it.
+Read `../export-recipe/SKILL.md` for the full publish flow. It walks you through authoring (or distilling from a running network) a recipe bundle and turning it into a shareable git repo. Recipients clone the repo and point `/setup` at it.
 
 Both flows invoke the same validator before `git init`. If the validator errors, the export stops.
