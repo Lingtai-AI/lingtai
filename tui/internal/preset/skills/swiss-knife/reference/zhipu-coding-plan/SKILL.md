@@ -1,7 +1,7 @@
 ---
 name: zhipu-coding-plan
 description: >
-  Use the Zhipu / Z.AI GLM coding-plan subscription as a unified backend
+  Nested swiss-knife reference for Zhipu / Z.AI coding-plan capabilities. Use the Zhipu / Z.AI GLM coding-plan subscription as a unified backend
   for vision (multimodal screenshot/diagram analysis), web search, web
   page reading, and zread (open-source GitHub repo browsing). One API
   key unlocks all four MCP servers. This skill is a thin pointer: it

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -64,4 +65,72 @@ func firstLineOf(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// TestBuildSkillFolderEntries_SwissKnifeNestedReferences verifies that the
+// shipped swiss-knife utility skill is a router with nested reference SKILL.md
+// files, and that the TUI drill-in view exposes those nested files under the
+// reference group without promoting them to sibling top-level utility folders.
+func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "swiss-knife")
+
+	entries := buildSkillFolderEntries(skillDir)
+	if len(entries) == 0 {
+		t.Fatal("no entries; is swiss-knife missing?")
+	}
+	if entries[0].Label != "SKILL.md" {
+		t.Errorf("first entry = %q, want SKILL.md", entries[0].Label)
+	}
+
+	rootBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBody := string(rootBodyBytes)
+	for _, want := range []string{
+		"Nested reference catalog",
+		"reference/claude-code/SKILL.md",
+		"reference/openai-codex/SKILL.md",
+		"reference/opencode/SKILL.md",
+		"reference/minimax-cli/SKILL.md",
+		"reference/token-usage/SKILL.md",
+		"reference/html-report/SKILL.md",
+		"reference/xiaomi-mimo/SKILL.md",
+		"reference/zhipu-coding-plan/SKILL.md",
+	} {
+		if !strings.Contains(rootBody, want) {
+			t.Errorf("swiss-knife root missing %q", want)
+		}
+	}
+
+	labels := make(map[string]MarkdownEntry)
+	for _, e := range entries {
+		labels[e.Label] = e
+	}
+	for _, want := range []string{
+		"claude-code/SKILL.md",
+		"openai-codex/SKILL.md",
+		"opencode/SKILL.md",
+		"html-report/SKILL.md",
+		"html-report/assets/template.html",
+		"token-usage/SKILL.md",
+		"token-usage/scripts/cost_report.py",
+	} {
+		e, ok := labels[want]
+		if !ok {
+			t.Fatalf("missing nested swiss-knife entry %q", want)
+		}
+		if e.Group != "reference" {
+			t.Errorf("entry %q group = %q, want reference", want, e.Group)
+		}
+	}
+
+	childBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "claude-code", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(childBodyBytes), "Nested swiss-knife reference for Claude Code CLI") {
+		t.Error("nested claude-code child should identify itself as a nested swiss-knife reference for Claude Code CLI")
+	}
 }

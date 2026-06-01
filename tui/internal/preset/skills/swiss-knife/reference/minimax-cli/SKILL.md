@@ -1,7 +1,7 @@
 ---
 name: minimax-cli
 description: >
-  Manual (not a tool). Points you at the official MiniMax CLI `mmx` —
+  Nested swiss-knife reference for the MiniMax `mmx` CLI. Manual (not a tool). Points you at the official MiniMax CLI `mmx` —
   one binary that, given a MiniMax key, handles every modality MiniMax
   offers: text-to-image generation, text-to-video generation, music
   generation (with-lyrics or instrumental), text-to-speech (TTS), and

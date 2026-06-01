@@ -1,7 +1,7 @@
 ---
 name: claude-code
 description: >
-  Delegate code implementation, patch writing, documentation, and refactoring to
+  Nested swiss-knife reference for Claude Code CLI. Delegate code implementation, patch writing, documentation, and refactoring to
   Claude Code CLI (Anthropic's coding agent). Runs non-interactively from bash,
   uses the human's Claude Max subscription (no additional API costs), and supports
   quality/effort/budget controls. Use this when you need to write code, generate
@@ -102,7 +102,7 @@ A single synchronous subprocess. You wait for it to finish, you get one transcri
 claude -p "fix the typo in line 42 of README.md" --dangerously-skip-permissions
 
 # Generate a small patch you'll review immediately
-claude -p "add a --verbose flag to scripts/build.sh" --dangerously-skip-permissions
+claude -p "add a --verbose flag to the build script" --dangerously-skip-permissions
 
 # Quick documentation pass on one file
 claude -p "add docstrings to utils/parser.py" --dangerously-skip-permissions

@@ -37,12 +37,12 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Called by `tui/internal/tui/`** — all Bubble Tea screens (network home, preset editor, first-run wizard, recipe selector).
 - **Calls `tui/internal/config/`** — for `GlobalDirName` constant.
 - **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Also reads/writes per-project `.lingtai/<agent>/init.json` and `.lingtai/.tui-asset/`.
-- **Embeds prompt fragments** — covenant, principle, procedures, soul, templates, recipe_assets, skills — via `//go:embed`. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them.
+- **Embeds prompt fragments** — covenant, principle, procedures, soul, templates, recipe_assets, skills — via `//go:embed`. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router.
 
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State

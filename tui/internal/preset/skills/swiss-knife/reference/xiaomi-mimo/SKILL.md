@@ -1,7 +1,7 @@
 ---
 name: xiaomi-mimo
 description: >
-  Discovery protocol (not a reference) for Xiaomi MiMo (小米MiMo) — an
+  Nested swiss-knife reference for Xiaomi MiMo provider discovery. Discovery protocol (not a reference) for Xiaomi MiMo (小米MiMo) — an
   OpenAI-/Anthropic-compatible LLM provider whose single API key unlocks
   a family of ~9 models behind one chat-completions endpoint. The family
   spans long-context text reasoning, multimodal-input chat (image / audio

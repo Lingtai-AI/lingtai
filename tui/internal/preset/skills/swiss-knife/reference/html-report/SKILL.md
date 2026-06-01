@@ -1,7 +1,7 @@
 ---
 name: html-report
 description: >
-  Produce polished, self-contained HTML deliverables (research memos,
+  Nested swiss-knife reference for standalone HTML deliverables. Produce polished, self-contained HTML deliverables (research memos,
   literature maps, dashboards, audit reports, side-by-side comparisons)
   that humans open in a browser or receive as Telegram/email attachments.
   Covers a standalone HTML skeleton, math rendering with MathJax (LaTeX
@@ -31,7 +31,7 @@ If the content is short and equation-free, plain text or Markdown is usually eno
 
 ## Standalone HTML skeleton
 
-The bundled template at `~/.lingtai-tui/utilities/swiss-knife/html-report/assets/template.html` is a working starting point: typography reset, cards, callouts, tables, anchor nav, print-friendly layout, and MathJax wired up. Copy it, fill in the sections, save under `paper/drafts/` (or another project-local path).
+The bundled template at `~/.lingtai-tui/utilities/swiss-knife/reference/html-report/assets/template.html` is a working starting point: typography reset, cards, callouts, tables, anchor nav, print-friendly layout, and MathJax wired up. Copy it, fill in the sections, save under `paper/drafts/` (or another project-local path).
 
 Key rules for any HTML you produce, whether from the template or freshly authored:
 
@@ -71,7 +71,7 @@ If the artifact contains equations:
 4. Escape LaTeX backslashes correctly if you are templating from a programming language — `\\(` in a Python f-string becomes `\(` in the output.
 
 5. **Online vs offline tradeoff.** CDN MathJax is one line and works everywhere with network. For fully offline artifacts (air-gapped reader, archival), either:
-   - Vendor MathJax under `assets/mathjax/` and reference it locally, or
+   - Vendor MathJax under a local asset folder and reference it locally, or
    - Pre-render equations to SVG/PNG at generation time and embed them as `<img>` (most robust, no JS needed).
 
    Pick the offline path explicitly if the human said "must work offline." Otherwise CDN is the default.
@@ -102,7 +102,7 @@ Run through these every time, in order. They are cheap and the failure modes are
 The full template lives at `assets/template.html` in this sub-skill. It includes typography, MathJax, a navigation sidebar, cards, callouts, tables, and print styles. Copy it as your starting point:
 
 ```bash
-cp ~/.lingtai-tui/utilities/swiss-knife/html-report/assets/template.html \
+cp ~/.lingtai-tui/utilities/swiss-knife/reference/html-report/assets/template.html \
    paper/drafts/<your-topic>-$(date -u +%Y-%m-%d).html
 ```
 

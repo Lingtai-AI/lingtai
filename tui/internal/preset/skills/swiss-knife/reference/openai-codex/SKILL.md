@@ -1,7 +1,7 @@
 ---
 name: openai-codex
 description: >
-  Manual (not a tool) for OpenAI Codex CLI — OpenAI's coding agent that runs
+  Nested swiss-knife reference for OpenAI Codex CLI. Manual (not a tool) for OpenAI Codex CLI — OpenAI's coding agent that runs
   locally from your terminal. Built in Rust for speed and efficiency. Supports
   headless remote control, Vim editing, plugin management, hooks, and Chrome
   browser integration. Read this when the human asks to use OpenAI Codex CLI,

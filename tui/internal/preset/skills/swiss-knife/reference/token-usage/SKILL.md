@@ -1,7 +1,7 @@
 ---
 name: token-usage
 description: >
-  Network-wide token usage and cost calculator using litellm's model pricing database.
+  Nested swiss-knife reference for token usage and cost reports. Network-wide token usage and cost calculator using litellm's model pricing database.
   Reads token_ledger.jsonl from all agents, matches models to litellm pricing, and
   produces a per-agent and grand-total cost report. Supports any model litellm knows
   about (2700+ models) plus custom pricing overrides. Use when the human asks about
@@ -19,7 +19,7 @@ Network-wide token cost analysis powered by [litellm](https://github.com/BerriAI
 Run the bundled script:
 
 ```bash
-~/.lingtai-tui/runtime/venv/bin/python3 ~/.lingtai-tui/utilities/swiss-knife/token-usage/scripts/cost_report.py /path/to/.lingtai
+~/.lingtai-tui/runtime/venv/bin/python3 ~/.lingtai-tui/utilities/swiss-knife/reference/token-usage/scripts/cost_report.py /path/to/.lingtai
 ```
 
 Optional flags:
