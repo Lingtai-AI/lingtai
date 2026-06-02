@@ -374,3 +374,71 @@ func TestBuildSkillFolderEntries_RecipeNestedReferences(t *testing.T) {
 		t.Error("nested recipe-format child should identify itself as a nested lingtai-recipe reference")
 	}
 }
+
+func TestBuildSkillFolderEntries_TutorialGuideNestedReferences(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "lingtai-tutorial-guide")
+
+	entries := buildSkillFolderEntries(skillDir)
+	if len(entries) == 0 {
+		t.Fatal("no entries; is lingtai-tutorial-guide missing?")
+	}
+	if entries[0].Label != "SKILL.md" {
+		t.Errorf("first entry = %q, want SKILL.md", entries[0].Label)
+	}
+
+	rootBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBody := string(rootBodyBytes)
+	for _, want := range []string{
+		"Nested reference catalog",
+		"Routing table",
+		"name: tutorial-guide-orientation",
+		"name: tutorial-guide-agent-runtime",
+		"name: tutorial-guide-communication",
+		"name: tutorial-guide-memory-and-molt",
+		"name: tutorial-guide-capabilities",
+		"name: tutorial-guide-operations-and-graduation",
+		"location: reference/orientation/SKILL.md",
+		"location: reference/agent-runtime/SKILL.md",
+		"location: reference/communication/SKILL.md",
+		"location: reference/memory-and-molt/SKILL.md",
+		"location: reference/capabilities/SKILL.md",
+		"location: reference/operations-and-graduation/SKILL.md",
+	} {
+		if !strings.Contains(rootBody, want) {
+			t.Errorf("tutorial-guide root missing %q", want)
+		}
+	}
+
+	labels := make(map[string]MarkdownEntry)
+	for _, e := range entries {
+		labels[e.Label] = e
+	}
+	for _, want := range []string{
+		"orientation/SKILL.md",
+		"agent-runtime/SKILL.md",
+		"communication/SKILL.md",
+		"memory-and-molt/SKILL.md",
+		"capabilities/SKILL.md",
+		"operations-and-graduation/SKILL.md",
+	} {
+		e, ok := labels[want]
+		if !ok {
+			t.Fatalf("missing nested tutorial-guide entry %q", want)
+		}
+		if e.Group != "reference" {
+			t.Errorf("entry %q group = %q, want reference", want, e.Group)
+		}
+	}
+
+	childBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "orientation", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(childBodyBytes), "Nested tutorial-guide reference") {
+		t.Error("nested orientation child should identify itself as a nested tutorial-guide reference")
+	}
+}

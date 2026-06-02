@@ -199,3 +199,34 @@ func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
 		}
 	}
 }
+
+// TestPopulateBundledLibrary_TutorialGuideNestedReferences verifies that the
+// embedded utility-library copier preserves tutorial-guide's nested lesson
+// reference tree on disk.
+func TestPopulateBundledLibrary_TutorialGuideNestedReferences(t *testing.T) {
+	globalDir := t.TempDir()
+	PopulateBundledLibrary("", globalDir)
+
+	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-tutorial-guide")
+	for _, rel := range []string{
+		"SKILL.md",
+		"reference/orientation/SKILL.md",
+		"reference/agent-runtime/SKILL.md",
+		"reference/communication/SKILL.md",
+		"reference/memory-and-molt/SKILL.md",
+		"reference/capabilities/SKILL.md",
+		"reference/operations-and-graduation/SKILL.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
+			t.Fatalf("expected bundled tutorial-guide file %s to be extracted: %v", rel, err)
+		}
+	}
+
+	for _, old := range []string{
+		"reference/communication-and-capabilities/SKILL.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, old)); !os.IsNotExist(err) {
+			t.Fatalf("old tutorial-guide path %s should not be extracted (err=%v)", old, err)
+		}
+	}
+}
