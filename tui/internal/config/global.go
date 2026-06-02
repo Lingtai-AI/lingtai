@@ -80,6 +80,21 @@ type TUIConfig struct {
 	MailPageSize int    `json:"mail_page_size"`
 	Theme        string `json:"theme,omitempty"` // theme name: "ink-dark" (default), etc.
 	Insights     bool   `json:"insights"`
+	StatusLine   string `json:"status_line,omitempty"`
+}
+
+const (
+	StatusLineOff     = "off"
+	StatusLineCompact = "compact"
+	StatusLineDefault = "default"
+	StatusLineFull    = "full"
+)
+
+var validStatusLineModes = map[string]bool{
+	StatusLineOff:     true,
+	StatusLineCompact: true,
+	StatusLineDefault: true,
+	StatusLineFull:    true,
 }
 
 // DefaultTUIConfig returns sensible defaults.
@@ -88,6 +103,7 @@ func DefaultTUIConfig() TUIConfig {
 		Language:     "en",
 		MailPageSize: 100,
 		Insights:     false,
+		StatusLine:   StatusLineDefault,
 	}
 }
 
@@ -106,6 +122,9 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	}
 	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
 		tc.MailPageSize = 100 // migrate old values below minimum
+	}
+	if !validStatusLineModes[tc.StatusLine] {
+		tc.StatusLine = StatusLineDefault
 	}
 	// Insights defaults to false when absent from JSON.
 	// No override needed — zero value of bool is false.
@@ -215,5 +234,3 @@ func EnsureConfigPersisted(globalDir string) {
 	}
 	_ = os.WriteFile(configPath, []byte("{}\n"), 0o644)
 }
-
-

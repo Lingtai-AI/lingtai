@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // Settings holds per-project preferences at .lingtai/human/settings.json.
@@ -64,18 +64,18 @@ const (
 
 // SettingsModel is the /settings view.
 type SettingsModel struct {
-	cursor     int
-	tuiConfig  config.TUIConfig
-	fields     []SettingField
-	globalDir  string
-	projectDir string // .lingtai/ dir for per-project settings
-	orchDir    string // orchestrator dir for agent name
-	nickname   string // human's nickname from human/.agent.json
-	agentName  string // agent's true name from orch/.agent.json
+	cursor       int
+	tuiConfig    config.TUIConfig
+	fields       []SettingField
+	globalDir    string
+	projectDir   string        // .lingtai/ dir for per-project settings
+	orchDir      string        // orchestrator dir for agent name
+	nickname     string        // human's nickname from human/.agent.json
+	agentName    string        // agent's true name from orch/.agent.json
 	editingLocal localFieldIdx // which local field is being edited (-1 = none)
 	editing      bool
-	width      int
-	height     int
+	width        int
+	height       int
 }
 
 func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUIConfig) SettingsModel {
@@ -126,6 +126,20 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		insightsCurrent = 1
 	}
 
+	statusLineOptions := []string{
+		config.StatusLineOff,
+		config.StatusLineCompact,
+		config.StatusLineDefault,
+		config.StatusLineFull,
+	}
+	statusLineCurrent := 2
+	for i, mode := range statusLineOptions {
+		if tuiCfg.StatusLine == mode {
+			statusLineCurrent = i
+			break
+		}
+	}
+
 	// Read agent language from init.json
 	agentLangOptions := []string{"en", "zh", "wen"}
 	agentLangCurrent := 0
@@ -153,6 +167,7 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
 		{Key: "insights", Label: "settings.insights", Options: insightsOptions, Current: insightsCurrent},
+		{Key: "status_line", Label: "settings.status_line", Options: statusLineOptions, Current: statusLineCurrent},
 		{Key: "agent_lang", Label: "settings.agent_lang", Options: agentLangOptions, Current: agentLangCurrent},
 	}
 
@@ -281,6 +296,8 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		}
 	case "insights":
 		m.tuiConfig.Insights = val == "on"
+	case "status_line":
+		m.tuiConfig.StatusLine = val
 	case "theme":
 		m.tuiConfig.Theme = val
 		SetThemeByName(val)
@@ -417,6 +434,8 @@ func (m SettingsModel) View() string {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)
+		} else if f.Key == "status_line" {
+			displayVal = i18n.T("settings.status_line_" + value)
 		}
 
 		// Highlight selected
@@ -493,4 +512,3 @@ func (m SettingsModel) View() string {
 
 	return b.String()
 }
-

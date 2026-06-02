@@ -4,7 +4,7 @@
 
 This is the ~19k LOC Bubble Tea v2 package that renders every screen of `lingtai-tui`. Each screen is a struct implementing `Init()`, `Update(msg)`, `View()`, living in its own `.go` file. The package is intentionally flat — breaking it into sub-packages would fight Bubble Tea's convention (every model must be the same `tea.Model` type for the dispatcher), and Go's single-type-per-package constraint makes this the grain that matches the framework.
 
-Screen routing is centralized in the `App` struct (`app.go`), which holds every screen as a field, dispatches commands via `switchToView`, and maps the slash-command palette (`/mail`, `/setup`, `/doctor`, etc.) to view transitions.
+Screen routing is centralized in the `App` struct (`app.go`), which holds every screen as a field, dispatches commands via `switchToView`, maps the slash-command palette (`/mail`, `/setup`, `/doctor`, etc.) to view transitions, and reserves/renders the global bottom status line.
 
 ## Components
 
@@ -14,10 +14,10 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`app.go:46-82`** — `App` struct: holds every screen model plus routing state (`currentView`, `orchDir`, `orchName`, `recoveryMode`).
 - **`app.go:97-183`** — `NewApp`: constructor deciding initial view — mail view (returning user), first-run wizard (new user or rehydration), or recovery mode (global config lost, agents intact).
 - **`app.go:185-193`** — `App.Init()`: delegates to the initial view's `Init()`.
-- **`app.go:195-589`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` forwarded to current view, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
+- **`app.go:195-589`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` forwarded to current view, with one row reserved when the global status line is enabled, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
 - **`app.go:591-956`** — `handlePaletteCommand`: maps slash-command strings to view transitions (`/doctor` → `appViewDoctor`, `/knowledge` → `appViewCodex` (canonical; hidden `/library` and `/codex` aliases), `/skills` → `appViewLibrary`, etc.) and direct actions (`/suspend`, `/cpr`, `/refresh`, `/clear`, `/molt`, `/btw`, `/export`).
 - **`app.go:1104-1216`** — `switchToView(viewName string)`: the canonical route-to-view dispatcher used by `ViewChangeMsg` and palette commands returning to a view. Reconstructs models fresh on entry.
-- **`app.go:1218-1273`** — `App.View()`: delegates to current view's `View()`, wraps in `tea.NewView` with alt-screen + mouse mode.
+- **`app.go:1218-1273`** — `App.View()`: delegates to current view's `View()`, appends the global bottom status line from `statusline.go` when enabled, then wraps in `tea.NewView` with alt-screen + mouse mode.
 - **`app.go:1277-1465`** — portal launch, style helpers, `SetTUIVersion`.
 
 ### Screens
@@ -29,7 +29,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`doctor.go:49-757`** — `DoctorModel`. Health check screen. First runs `config.RunDoctorUpdate` (forced TUI + Python upgrade) and refreshes `preset.Bootstrap`, utility skills, and `ExportCommandsJSON`; then continues with the traditional diagnostics — version drift, heartbeat stats, capability validation, Python venv path, kernel CLI probe, LLM reachability. Constructor: `NewDoctorModel` (`doctor.go:58`). The same forced-update routine is reachable from the shell as `lingtai-tui doctor`, useful when the TUI cannot start.
 - **`preset_editor.go:244-1691`** — `PresetEditorModel`. Full preset editing form (LLM provider/model, API key, capabilities on/off, model parameters). Constructor: `NewPresetEditorModel` (`preset_editor.go:317`). Used by both the standalone `/presets` flow and the first-run wizard's stepEditPreset.
 - **`preset_library.go:101-593`** — `PresetLibraryModel`. Preset browser: list templates/saved, create new, import. Constructor: `NewPresetLibraryModel` (`preset_library.go:120`). Wired to `/presets`.
-- **`settings.go:72-553`** — `SettingsModel`. TUI preferences: theme, language, mail page size, agent default language, insights toggle. Constructor: `NewSettingsModel` (`settings.go:87`). Wired to `/settings`.
+- **`settings.go:72-553`** — `SettingsModel`. TUI preferences: theme, language, mail page size, status line mode, agent default language, insights toggle. Constructor: `NewSettingsModel` (`settings.go:87`). Wired to `/settings`.
 - **`addon.go:21-164`** — `AddonModel`. The `/mcp` control panel — a read-only view of each MCP bridge's config and status (IMAP, Telegram, Feishu, WeChat). Configs live at `<lingtaiDir>/.addons/<name>/config.json`. Constructor: `NewAddonModel` (`addon.go:34`). Wired to `/mcp` (the Go type retains the historical `Addon*` naming; the `/addon` slash-command was retired by PR #204 and `TestDefaultCommandsDoesNotKeepAddonAlias` enforces it stays gone).
 - **`login.go:52-475`** — `LoginModel`. OAuth flows (Codex, Anthropic API key login). Constructor: `NewLoginModel` (`login.go:88`). Wired to `/login`.
 - **`agora.go:44-404`** — `AgoraModel`. Network sharing: import/export workflows, clone discovery, recipe bundle manager. Constructor: `NewAgoraModel` (`agora.go:67`). Wired to `/agora`.
@@ -46,6 +46,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`input.go:26-277`** — `InputModel`. Reusable compose widget with textarea, paste support, and multiline expand. Used by `MailModel`.
 - **`palette.go:28-231`** — `PaletteModel`. Slash-command palette widget (type `/` to trigger, `/help` lists commands). Used by `MailModel` and `SettingsModel`.
 - **`styles.go:1-471`** — Theme system: `Theme` type, `ActiveTheme()`, `SetThemeByName()`, `Color*` constants, `themedTextareaStyles()`, lipgloss rendering helpers.
+- **`statusline.go`** — Global bottom status line helpers. Computes status-line mode, child window size reservation, current view/project/orchestrator labels, context/stamina, network activity, and full-mode token totals.
 - **`codex_entries.go:13-88`** — `buildAgentCodexEntries`: scans `knowledge/<name>/KNOWLEDGE.md` folders (after a one-time migration of legacy `codex/codex.json` / `knowledge/knowledge.json` stores via `migrateLegacyJSONStores`), converts to `MarkdownEntry` slices for the `CodexModel`.
 - **`mailbox_entries.go:17-321`** — `buildMailboxEntries`: reads per-agent mailbox folders, converts to `MarkdownEntry` slices for the `MailboxModel`.
 - **`recipe_entries.go:14-96`** — `buildRecipeEntries`: scans recipe directories for markdown files (greet, comment, covenant, procedures, skills).
@@ -68,11 +69,11 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **Parent:** `tui/` (`tui/ANATOMY.md`)
 - **Subfolders:** none — the package is intentionally flat.
 - **Siblings in `tui/internal/`:** `preset/`, `migrate/`, `globalmigrate/`, `fs/`, `config/`, `process/`, `postman/`, `timemachine/`.
-- **File count:** 35 `.go` files (20 screen models + supporting types + helpers).
+- **File count:** 37 non-test `.go` files (20 screen models + supporting types + helpers).
 
 ## State
 
-- **Writes:** per-project `settings.json` (orchestrator selection, mail page size, theme, language). Signal files on agent directories. `init.json` rewrites during setup/preset edits.
+- **Writes:** per-project `settings.json` (orchestrator selection) and global `tui_config.json` preferences (mail page size, theme, language, status line mode, insights). Signal files on agent directories. `init.json` rewrites during setup/preset edits.
 - **Reads:** agent working directories (`.agent.json`, `.agent.heartbeat`, `init.json`, `knowledge/<name>/KNOWLEDGE.md` (legacy `codex/codex.json` / `knowledge/knowledge.json` only via one-time migration), `mailbox/`, `logs/token_ledger.jsonl`, `history/chat_history.jsonl`, `system/*.md`, `.library/`). Global config (`~/.lingtai-tui/config.json`, `presets/`, `runtime/`).
 - **Ephemeral:** `App.currentView`, `App.startupBanner`, `App.recoveryMode`. All screens maintain local cursor positions, scroll offsets, and input buffers — lost on process exit (Bubble Tea is stateless across launches).
 

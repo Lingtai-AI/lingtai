@@ -19,7 +19,7 @@ This package manages the TUI's bootstrap sequence — the steps that run before 
 - **`venv.go:240-253`** — `CheckTUIUpgrade`: compares running TUI binary version against latest GitHub release. Returns tag if upgrade available. Used by the startup-time prompt in `main.go`.
 - **`venv.go:168-190`** — `linkLingtaiCLI`: symlinks `lingtai` CLI from venv into brew prefix or `~/.local/bin`.
 - **`global.go:30-42`** — `Config`: global config at `~/.lingtai-tui/config.json`. Keys map env-var names to API key values.
-- **`global.go:78-83`** — `TUIConfig`: TUI preferences at `~/.lingtai-tui/tui_config.json` (language, mail page size, theme, insights).
+- **`global.go:78-83`** — `TUIConfig`: TUI preferences at `~/.lingtai-tui/tui_config.json` (language, mail page size, theme, insights, status line mode).
 - **`global.go:178-188`** — `WriteEnvFile`: writes `~/.lingtai-tui/.env` from Config.Keys. Loaded by agents via `env_file` in `init.json`.
 - **`registry.go`** — preset registry management (see `preset/ANATOMY.md`).
 

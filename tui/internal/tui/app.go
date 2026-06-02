@@ -189,41 +189,43 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		childMsg := a.childWindowSize(msg)
 		// Forward to current view so it can resize
 		var cmd tea.Cmd
 		switch a.currentView {
 		case appViewMail:
-			a.mail, cmd = a.mail.Update(msg)
+			a.mail, cmd = a.mail.Update(childMsg)
 		case appViewSetup:
-			a.setup, cmd = a.setup.Update(msg)
+			a.setup, cmd = a.setup.Update(childMsg)
 		case appViewSettings:
-			a.settings, cmd = a.settings.Update(msg)
+			a.settings, cmd = a.settings.Update(childMsg)
+			a.tuiConfig = a.settings.tuiConfig
 		case appViewProps:
-			a.props, cmd = a.props.Update(msg)
+			a.props, cmd = a.props.Update(childMsg)
 		case appViewAddon:
-			a.addon, cmd = a.addon.Update(msg)
+			a.addon, cmd = a.addon.Update(childMsg)
 		case appViewDoctor:
-			a.doctor, cmd = a.doctor.Update(msg)
+			a.doctor, cmd = a.doctor.Update(childMsg)
 		case appViewNirvana:
-			a.nirvana, cmd = a.nirvana.Update(msg)
+			a.nirvana, cmd = a.nirvana.Update(childMsg)
 		case appViewLibrary:
-			a.library, cmd = a.library.Update(msg)
+			a.library, cmd = a.library.Update(childMsg)
 		case appViewProjects:
-			a.projects, cmd = a.projects.Update(msg)
+			a.projects, cmd = a.projects.Update(childMsg)
 		case appViewAgora:
-			a.agora, cmd = a.agora.Update(msg)
+			a.agora, cmd = a.agora.Update(childMsg)
 		case appViewFirstRun:
-			a.firstRun, cmd = a.firstRun.Update(msg)
+			a.firstRun, cmd = a.firstRun.Update(childMsg)
 		case appViewLogin:
-			a.login, cmd = a.login.Update(msg)
+			a.login, cmd = a.login.Update(childMsg)
 		case appViewCodex:
-			a.codex, cmd = a.codex.Update(msg)
+			a.codex, cmd = a.codex.Update(childMsg)
 		case appViewMailbox:
-			a.mailbox, cmd = a.mailbox.Update(msg)
+			a.mailbox, cmd = a.mailbox.Update(childMsg)
 		case appViewSystem:
-			a.system, cmd = a.system.Update(msg)
+			a.system, cmd = a.system.Update(childMsg)
 		case appViewPresets:
-			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
+			a.presetLibrary, cmd = a.presetLibrary.Update(childMsg)
 		}
 		return a, cmd
 
@@ -478,8 +480,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.setup, cmd = a.setup.Update(msg)
 		return a, cmd
 	case appViewSettings:
+		oldStatusLineEnabled := a.statusLineEnabled()
 		updated, cmd := a.settings.Update(msg)
 		a.settings = updated
+		a.tuiConfig = a.settings.tuiConfig
+		if oldStatusLineEnabled != a.statusLineEnabled() {
+			return a, tea.Batch(cmd, a.sendSize())
+		}
 		return a, cmd
 	case appViewProps:
 		updated, cmd := a.props.Update(msg)
@@ -722,6 +729,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
+		a.tuiConfig = tuiCfg
 		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "nirvana":
@@ -1212,6 +1220,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
+		a.tuiConfig = tuiCfg
 		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "props", "kanban":
@@ -1312,6 +1321,11 @@ func (a App) View() tea.View {
 		content = a.system.View()
 	case appViewPresets:
 		content = a.presetLibrary.View()
+	}
+	if a.statusLineEnabled() {
+		if bar := a.renderStatusLine(); bar != "" {
+			content = appendStatusLineContent(content, bar, a.childHeight())
+		}
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

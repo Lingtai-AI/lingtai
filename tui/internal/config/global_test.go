@@ -207,6 +207,13 @@ func TestDefaultTUIConfig_DisablesInsights(t *testing.T) {
 	}
 }
 
+func TestDefaultTUIConfig_EnablesDefaultStatusLine(t *testing.T) {
+	cfg := DefaultTUIConfig()
+	if cfg.StatusLine != StatusLineDefault {
+		t.Fatalf("DefaultTUIConfig().StatusLine = %q, want %q", cfg.StatusLine, StatusLineDefault)
+	}
+}
+
 func TestLoadTUIConfig_MissingOrAbsentInsightsDisablesInsights(t *testing.T) {
 	dir := t.TempDir()
 	if cfg := LoadTUIConfig(dir); cfg.Insights {
@@ -219,5 +226,37 @@ func TestLoadTUIConfig_MissingOrAbsentInsightsDisablesInsights(t *testing.T) {
 	}
 	if cfg := LoadTUIConfig(dir); cfg.Insights {
 		t.Fatal("tui_config.json without insights enabled insights; want false")
+	}
+}
+
+func TestLoadTUIConfig_StatusLineDefaultsAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	if cfg := LoadTUIConfig(dir); cfg.StatusLine != StatusLineDefault {
+		t.Fatalf("missing tui_config.json status line = %q, want %q", cfg.StatusLine, StatusLineDefault)
+	}
+
+	path := filepath.Join(dir, "tui_config.json")
+	payload := []byte(`{"language":"en","mail_page_size":100}`)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.StatusLine != StatusLineDefault {
+		t.Fatalf("absent status_line = %q, want %q", cfg.StatusLine, StatusLineDefault)
+	}
+
+	payload = []byte(`{"language":"en","mail_page_size":100,"status_line":"compact"}`)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.StatusLine != StatusLineCompact {
+		t.Fatalf("valid status_line = %q, want %q", cfg.StatusLine, StatusLineCompact)
+	}
+
+	payload = []byte(`{"language":"en","mail_page_size":100,"status_line":"verbose"}`)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.StatusLine != StatusLineDefault {
+		t.Fatalf("invalid status_line = %q, want %q", cfg.StatusLine, StatusLineDefault)
 	}
 }
