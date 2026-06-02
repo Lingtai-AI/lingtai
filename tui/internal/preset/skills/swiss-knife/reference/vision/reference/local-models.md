@@ -51,14 +51,14 @@ Models are cached under `~/.cache/huggingface/hub/`. Delete a directory there if
 
 ```bash
 # Default model (qwen2-vl-2b)
-python scripts/describe.py image.png --backend local
+python3 <skill-path>/scripts/describe.py image.png --backend local
 
 # Specific model
-python scripts/describe.py image.png --backend local --model moondream2
-python scripts/describe.py image.png --backend local --model qwen2-vl-7b
+python3 <skill-path>/scripts/describe.py image.png --backend local --model moondream2
+python3 <skill-path>/scripts/describe.py image.png --backend local --model qwen2-vl-7b
 
 # Force CPU (useful for debugging or if GPU is busy)
-python scripts/describe.py image.png --backend local --model qwen2-vl-2b --device cpu
+python3 <skill-path>/scripts/describe.py image.png --backend local --model qwen2-vl-2b --device cpu
 ```
 
 Available `--model` values:
@@ -69,7 +69,7 @@ Available `--model` values:
 
 For other models from Hugging Face, pass the full repo ID with `--model-id`:
 ```bash
-python scripts/describe.py image.png --backend local --model-id "<org>/<model>"
+python3 <skill-path>/scripts/describe.py image.png --backend local --model-id "<org>/<model>"
 ```
 The script will try generic Transformers loading; provider-specific quirks may not work.
 
@@ -100,17 +100,17 @@ Local models shine for batch work because there's no per-call latency from API r
 
 ```bash
 # Pre-warm the model (loads weights once)
-python scripts/describe.py warmup.png --backend local --model qwen2-vl-2b > /dev/null
+python3 <skill-path>/scripts/describe.py warmup.png --backend local --model qwen2-vl-2b > /dev/null
 
 # Then loop — model stays in memory across calls if you keep a single process
 for f in images/*.jpg; do
-  python scripts/describe.py "$f" --backend local --model qwen2-vl-2b \
+  python3 <skill-path>/scripts/describe.py "$f" --backend local --model qwen2-vl-2b \
     --prompt "Read all visible text. Output only the text." \
     | jq -r .response > "ocr/$(basename "$f" .jpg).txt"
 done
 ```
 
-For *true* batching (one model load, many images in one call), write a Python script that imports the script's `analyze_local` function and calls it in a loop. See [batch-patterns.md](batch-patterns.md) for that approach.
+For *true* batching (one model load, many images in one call), write a Python script that imports the bundled script's `analyze_local` function from `<skill-path>/scripts/describe.py` and calls it in a loop.
 
 ## Failure Modes
 

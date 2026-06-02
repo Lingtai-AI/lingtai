@@ -22,9 +22,9 @@ Use this skill when a task needs MiniMax-backed media generation or one-shot she
 |---|---|
 | Generate image, video, music, or TTS | `mmx image/video/music/speech ...` after reading the subcommand's `--help` |
 | Understand an image from a shell script | `mmx vision ...` for ad-hoc one-shots |
-| Vision as an in-turn tool call | Use the `vision` skill first; it may expose the kernel `vision` tool or a registered MCP |
-| Music tied to project journals | Use the `dj` skill for the workflow, then this skill for the MiniMax provider step |
-| Transcribe speech or analyze audio numerically | Use the `listen` skill (local, no MiniMax key needed) |
+| Vision as an in-turn tool call | Read the sibling `../vision/SKILL.md` first; it may expose the kernel `vision` tool or a registered MCP |
+| Music tied to project journals | Use the sibling `../dj/SKILL.md` for the workflow, then this skill for the MiniMax provider step |
+| Transcribe speech or analyze audio numerically | Use the sibling `../listen/SKILL.md` (local, no MiniMax key needed) |
 
 This skill is the **canonical MiniMax CLI reference** shipped with the TUI. The top-level `minimax-cli` skill is only a discoverability pointer into this nested reference, so keep MiniMax command recipes and credential guidance here rather than duplicating them there.
 

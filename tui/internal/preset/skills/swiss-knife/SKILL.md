@@ -4,16 +4,18 @@ description: >
   Umbrella router for small, focused CLI tools and integrations. Read this
   when a task might need one of the bundled utility references, then load only
   the nested reference that matches the need: claude-code, openai-codex, or
-  opencode for coding CLIs; minimax-cli for MiniMax media/TTS/vision; dj for
-  journal-inspired music generation; token-usage for token/cost reports;
-  html-report for standalone browser deliverables; xiaomi-mimo for Xiaomi MiMo
-  provider discovery; zhipu-coding-plan for Z.AI / BigModel coding-plan
-  capabilities; headless-bot for provisioning fresh LingTai bot projects such as
-  Telegram bots from `lingtai-tui spawn`; find-something-to-do for idle
-  curiosity practice. This
+  opencode for coding CLIs; minimax-cli for MiniMax media/TTS/vision; vision for
+  image understanding (describe/OCR/critique); listen for local audio
+  transcription and music analysis; academic-research for fetching papers,
+  citation networks, and LaTeX writing; dj for journal-inspired music
+  generation; token-usage for token/cost reports; html-report for standalone
+  browser deliverables; xiaomi-mimo for Xiaomi MiMo provider discovery;
+  zhipu-coding-plan for Z.AI / BigModel coding-plan capabilities; headless-bot
+  for provisioning fresh LingTai bot projects such as Telegram bots from
+  `lingtai-tui spawn`; find-something-to-do for idle curiosity practice. This
   parent is the route map; each nested reference is self-contained under
   `reference/<name>/SKILL.md`.
-version: 2.1.0
+version: 2.2.0
 tags: [utilities, umbrella, toolkit, nested-skill]
 ---
 
@@ -53,6 +55,27 @@ nested_references:
     description: >
       Nested swiss-knife reference for the MiniMax `mmx` CLI. Read this for
       MiniMax-backed image, video, music, TTS, or ad-hoc shell vision tasks.
+  - name: vision
+    location: reference/vision/SKILL.md
+    description: >
+      Nested swiss-knife reference for image understanding. Read this when you
+      need to describe, OCR, or critique an image and aren't sure which path
+      applies — it routes between the built-in `vision` tool, the sibling
+      `minimax-cli` reference, and a local Hugging Face VLM fallback.
+  - name: listen
+    location: reference/listen/SKILL.md
+    description: >
+      Nested swiss-knife reference for local audio analysis. Read this when the
+      human asks you to transcribe a voice note, extract lyrics, critique
+      generated music, or measure audio characteristics — all local, no API key
+      (Whisper transcription and librosa music analysis).
+  - name: academic-research
+    location: reference/academic-research/SKILL.md
+    description: >
+      Nested swiss-knife reference for academic literature work. Read this to
+      fetch full-text papers by DOI/arXiv-ID/PMID, trace citation networks, run
+      scholar analysis, or write/compile LaTeX manuscripts — indexes 12 API
+      references and 6 pipeline workflows.
   - name: dj
     location: reference/dj/SKILL.md
     description: >
@@ -106,6 +129,9 @@ nested_references:
 | Use or compare OpenAI Codex CLI | `reference/openai-codex/SKILL.md` |
 | Use or compare OpenCode CLI | `reference/opencode/SKILL.md` |
 | Generate images, video, music, TTS, or MiniMax shell vision | `reference/minimax-cli/SKILL.md` |
+| Describe, OCR, or critique an image (pick the cheapest available path) | `reference/vision/SKILL.md` |
+| Transcribe speech/voice notes or analyze music locally (no API key) | `reference/listen/SKILL.md` |
+| Fetch papers, trace citations, run scholar analysis, or write LaTeX | `reference/academic-research/SKILL.md` |
 | Compose music from a project journal, session mood, or requested genre | `reference/dj/SKILL.md` |
 | Report token usage or model costs | `reference/token-usage/SKILL.md` |
 | Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |

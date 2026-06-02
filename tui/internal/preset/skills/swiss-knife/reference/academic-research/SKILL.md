@@ -1,9 +1,10 @@
 ---
 name: academic-research
 description: >
-  Find papers, fetch full-text PDFs, trace citations, write LaTeX manuscripts.
+  Nested swiss-knife reference for academic literature work — find papers, fetch
+  full-text PDFs, trace citations, write LaTeX manuscripts.
   **First action for any "get me this paper" request:**
-  `python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py <DOI|arXiv-ID|PMID>` — walks
+  `python3 <skill-path>/scripts/fetch_paper.py <DOI|arXiv-ID|PMID>` — walks
   arXiv → Unpaywall → Europe PMC → CORE → publisher-page extraction (Nature/APS/AIP/IOP/Cambridge)
   → LibGen and saves the paper, metadata, and a resumable manifest under `papers/{slug}/`.
   Read the body when you need to escape the script: custom query shapes, citation networks,
@@ -11,14 +12,13 @@ description: >
   references and 6 pipeline workflows under `reference/`.
 version: 3.0.0
 allowed-tools: Bash(python3 *) Bash(curl *) Bash(pip *) Bash(pip3 *)
-tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, doi, pdf, citation, pipeline, europe-pmc, nasa-ads, inspire-hep]
-parent: web-browsing
+tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, doi, pdf, citation, pipeline, europe-pmc, nasa-ads, inspire-hep, nested-skill]
 ---
 
 # Academic Research
 
-> **This is a modular skill.** Try the bundled script first. Load specific
-> reference files only when you need to escape it.
+> **Nested swiss-knife reference.** A modular skill: try the bundled script
+> first, then load specific reference files only when you need to escape it.
 
 ## Try this first
 
@@ -28,18 +28,18 @@ the next session can resume from.
 
 ```bash
 # Fetch by any identifier
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py 10.1103/PhysRevLett.125.015001
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py arXiv:2301.00001
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py PMID:12345678
+python3 <skill-path>/scripts/fetch_paper.py 10.1103/PhysRevLett.125.015001
+python3 <skill-path>/scripts/fetch_paper.py arXiv:2301.00001
+python3 <skill-path>/scripts/fetch_paper.py PMID:12345678
 
 # Batch (one identifier per line in the file)
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py --batch dois.txt --out papers/
+python3 <skill-path>/scripts/fetch_paper.py --batch dois.txt --out papers/
 
 # Resolve metadata only (no PDF download)
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py 10.1038/nature12373 --dry-run
+python3 <skill-path>/scripts/fetch_paper.py 10.1038/nature12373 --dry-run
 
 # Skip LibGen (e.g. legal-sensitive environment)
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py <id> --no-libgen
+python3 <skill-path>/scripts/fetch_paper.py <id> --no-libgen
 ```
 
 **Output layout** (idempotent — re-runs skip entries with `status: ok`):
