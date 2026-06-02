@@ -97,6 +97,63 @@ func TestPopulateBundledLibrary_DailyReflectionNestedReferences(t *testing.T) {
 	}
 }
 
+// TestPopulateBundledLibrary_DevGuideNestedReferences verifies that the
+// embedded utility-library copier preserves lingtai-dev-guide's nested reference
+// tree after the root was reduced to a router.
+func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
+	globalDir := t.TempDir()
+	PopulateBundledLibrary("", globalDir)
+
+	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-dev-guide")
+	for _, rel := range []string{
+		"SKILL.md",
+		"reference/architecture/SKILL.md",
+		"reference/setup/SKILL.md",
+		"reference/contributing/SKILL.md",
+		"reference/gotchas/SKILL.md",
+		"reference/releasing/SKILL.md",
+		"reference/release-html-log-template.html",
+		"reference/debug-troubleshoot/SKILL.md",
+		"reference/security-audit/SKILL.md",
+		"reference/network-governance/SKILL.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
+			t.Fatalf("expected bundled lingtai-dev-guide file %s to be extracted: %v", rel, err)
+		}
+	}
+
+	rootBody, err := os.ReadFile(filepath.Join(utilitiesDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"```yaml",
+		"- name: dev-guide-architecture",
+		"location: reference/architecture/SKILL.md",
+		"- name: dev-guide-network-governance",
+		"Routing table",
+	} {
+		if !strings.Contains(string(rootBody), want) {
+			t.Errorf("lingtai-dev-guide root missing nested metadata %q", want)
+		}
+	}
+
+	for _, old := range []string{
+		"reference/architecture.md",
+		"reference/setup.md",
+		"reference/contributing.md",
+		"reference/gotchas.md",
+		"reference/releasing.md",
+		"reference/debug-troubleshoot.md",
+		"reference/security-audit.md",
+		"reference/network-governance.md",
+	} {
+		if _, err := os.Stat(filepath.Join(utilitiesDir, old)); !os.IsNotExist(err) {
+			t.Fatalf("old lingtai-dev-guide flat reference path %s should not be extracted (err=%v)", old, err)
+		}
+	}
+}
+
 // TestPopulateBundledLibrary_RecipeNestedReferences verifies that the embedded
 // utility-library copier preserves lingtai-recipe's nested reference files and
 // assets after the export procedure moved out of assets/.
@@ -116,7 +173,6 @@ func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
 			t.Fatalf("expected bundled lingtai-recipe file %s to be extracted: %v", rel, err)
 		}
 	}
-
 
 	rootBody, err := os.ReadFile(filepath.Join(utilitiesDir, "SKILL.md"))
 	if err != nil {

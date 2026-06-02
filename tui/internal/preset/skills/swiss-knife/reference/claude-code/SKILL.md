@@ -137,7 +137,7 @@ A persistent agent spawned by the LingTai kernel. Runs in its **own worktree**, 
 | "This will take 15+ minutes and produce a branch" | **Daemon** |
 | "I'm the orchestrator; the daemon is the worker" | **Daemon** |
 
-When in doubt for non-trivial work: daemon. The orchestrator/daemon split is the project's default discipline — see `utilities/lingtai-dev-guide/reference/contributing.md` for the full convention.
+When in doubt for non-trivial work: daemon. The orchestrator/daemon split is the project's default discipline — see `utilities/lingtai-dev-guide/reference/contributing/SKILL.md` for the full convention.
 
 ## Key Flags
 

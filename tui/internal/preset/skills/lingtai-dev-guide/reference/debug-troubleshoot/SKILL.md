@@ -1,5 +1,14 @@
+---
+name: dev-guide-debug-troubleshoot
+description: >
+  Nested lingtai-dev-guide reference for diagnosing LingTai failures: agent process state, OOM/crashes, avatar spawn issues, post-molt memory loss, mail delivery, scheduled messages, tool timeouts, and escalation.
+version: 1.0.0
+---
+
 # LingTai Debug & Troubleshoot Reference
 
+
+Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 > **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document diagnoses issues based on the Lingtai architecture's process model, memory layers, and communication mechanisms.
 
 ---

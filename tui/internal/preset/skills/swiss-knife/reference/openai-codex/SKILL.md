@@ -89,7 +89,7 @@ Both backends are available as CLI and daemon. The CLI-vs-daemon choice is about
 - **Codex daemons** — tightly-scoped diffs, deterministic refactors, mechanical validation
 - **Claude Code daemons** — exploratory code reading, multi-file edits, skill/doc work, PR composition
 
-When in doubt for non-trivial work: daemon. See `utilities/lingtai-dev-guide/reference/contributing.md` for the full orchestrator/daemon convention.
+When in doubt for non-trivial work: daemon. See `utilities/lingtai-dev-guide/reference/contributing/SKILL.md` for the full orchestrator/daemon convention.
 
 ## Agent Responsiveness Practices
 
