@@ -1,18 +1,19 @@
 ---
 name: listen
 description: >
-  Analyze audio locally — transcribe speech with Whisper, or extract musical
-  features (tempo, key, dynamics, spectral profile) with librosa. Both run
-  on the user's machine with no API key. Read this when the human asks you
-  to transcribe a voice note, extract lyrics from singing, critique generated
-  music, or analyze audio characteristics. For *creating* music or audio,
-  use the `media-creation` skill instead.
+  Nested swiss-knife reference for local audio analysis — transcribe speech
+  with Whisper, or extract musical features (tempo, key, dynamics, spectral
+  profile) with librosa. Both run on the user's machine with no API key. Read
+  this when the human asks you to transcribe a voice note, extract lyrics from
+  singing, critique generated music, or analyze audio characteristics. For
+  *creating* music or audio, use the sibling `minimax-cli` reference (or `dj` for journal-inspired music) instead.
 version: 1.0.0
+tags: [audio, transcribe, whisper, librosa, music-analysis, nested-skill]
 ---
 
 # listen
 
-> Local-only audio analysis. No API key, no network. Two actions: transcribe (speech → text) or appreciate (music → numerical critique).
+> Nested swiss-knife reference for local-only audio analysis. No API key, no network. Two actions: transcribe (speech → text) or appreciate (music → numerical critique).
 
 ## Two Actions
 
@@ -24,8 +25,8 @@ version: 1.0.0
 Both actions are wrappers around the bundled scripts. Run them with `bash` like any other command-line tool:
 
 ```
-bash python <skill-path>/scripts/transcribe.py <audio-file>
-bash python <skill-path>/scripts/appreciate.py <audio-file>
+python3 <skill-path>/scripts/transcribe.py <audio-file>
+python3 <skill-path>/scripts/appreciate.py <audio-file>
 ```
 
 The scripts auto-install their dependencies via `lingtai.venv_resolve.ensure_package` on first run, so the first invocation may take ~30 s.
@@ -33,7 +34,7 @@ The scripts auto-install their dependencies via `lingtai.venv_resolve.ensure_pac
 ## transcribe — speech to text
 
 ```
-python scripts/transcribe.py <audio-path> [--model base] [--device cpu]
+python3 <skill-path>/scripts/transcribe.py <audio-path> [--model base] [--device cpu]
 ```
 
 | Flag | Default | Notes |
@@ -63,7 +64,7 @@ Output: a JSON document on stdout with:
 ## appreciate — music analysis
 
 ```
-python scripts/appreciate.py <audio-path>
+python3 <skill-path>/scripts/appreciate.py <audio-path>
 ```
 
 No flags — purely analytical. Output: a JSON document with:
@@ -99,8 +100,8 @@ These are **measurements, not opinions**. Your job is to translate the numbers i
 | Voice note, lecture, podcast | `transcribe` |
 | Music with vocals — want lyrics | `transcribe` (warn human: lyrics may be wrong) |
 | Music — want to know if it matches a brief | `appreciate` |
-| Generated audio from `media-creation/compose` — QA | `appreciate` |
-| TTS output from `media-creation/talk` — verify pronunciation | `transcribe` (round-trip QA) |
+| Generated music from the sibling `minimax-cli` reference or `dj` — QA | `appreciate` |
+| TTS output from the sibling `minimax-cli` reference — verify pronunciation | `transcribe` (round-trip QA) |
 | Both (transcript + analysis) | Run both scripts |
 
 ## Going Deeper
@@ -115,9 +116,9 @@ You can write your own scripts using the same dependencies — `librosa` and `fa
 
 ## When NOT to use this skill
 
-- Human asked you to *create* audio (music, speech, sound effect) — use `media-creation`.
-- Human asked you to *describe* a video or image — use `vision`.
-- You only need to play audio for the human — use `media-creation/talk` or the OS-native player.
+- Human asked you to *create* audio (music, speech, sound effect) — use the sibling `minimax-cli` reference; for journal-inspired music, use `dj`.
+- Human asked you to *describe* a video or image — use the sibling `vision` reference (`../vision/SKILL.md`).
+- You only need to play audio for the human — use an OS-native player; this reference only analyzes audio files.
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

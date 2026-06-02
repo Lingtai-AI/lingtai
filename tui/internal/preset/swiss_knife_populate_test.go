@@ -23,6 +23,16 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 		"reference/openai-codex/SKILL.md",
 		"reference/opencode/SKILL.md",
 		"reference/minimax-cli/SKILL.md",
+		"reference/vision/SKILL.md",
+		"reference/vision/scripts/describe.py",
+		"reference/vision/reference/local-models.md",
+		"reference/listen/SKILL.md",
+		"reference/listen/scripts/transcribe.py",
+		"reference/listen/scripts/appreciate.py",
+		"reference/academic-research/SKILL.md",
+		"reference/academic-research/scripts/fetch_paper.py",
+		"reference/academic-research/reference/api-arxiv.md",
+		"reference/academic-research/reference/pipeline-latex-writing.md",
 		"reference/dj/SKILL.md",
 		"reference/token-usage/SKILL.md",
 		"reference/token-usage/scripts/cost_report.py",
@@ -57,6 +67,12 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	for _, oldTopLevel := range []string{
 		filepath.Join(globalDir, "utilities", "dj", "SKILL.md"),
 		filepath.Join(globalDir, "utilities", "find-something-to-do", "SKILL.md"),
+		filepath.Join(globalDir, "utilities", "vision", "SKILL.md"),
+		filepath.Join(globalDir, "utilities", "vision", "scripts", "describe.py"),
+		filepath.Join(globalDir, "utilities", "listen", "SKILL.md"),
+		filepath.Join(globalDir, "utilities", "listen", "scripts", "transcribe.py"),
+		filepath.Join(globalDir, "utilities", "academic-research", "SKILL.md"),
+		filepath.Join(globalDir, "utilities", "academic-research", "scripts", "fetch_paper.py"),
 	} {
 		if _, err := os.Stat(oldTopLevel); !os.IsNotExist(err) {
 			t.Fatalf("old top-level utility skill %s should not be extracted after moving under swiss-knife (err=%v)", oldTopLevel, err)

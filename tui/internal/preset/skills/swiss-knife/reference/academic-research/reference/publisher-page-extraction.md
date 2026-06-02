@@ -78,7 +78,7 @@ print(md_path)  # → /path/to/output/PhysRevLett.125.015001.md
 python -m download_paper.batch_process --input dois.txt --out papers/
 
 # Or stay inside fetch_paper.py's contract:
-python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_paper.py --batch dois.txt --out papers/
+python3 <skill-path>/scripts/fetch_paper.py --batch dois.txt --out papers/
 ```
 
 The second form is preferred because it preserves the `manifest.json`
