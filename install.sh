@@ -37,11 +37,16 @@ if command -v curl &>/dev/null && \
   export NPM_CONFIG_REGISTRY="https://registry.npmmirror.com"
 fi
 
-# Detect install path — use Homebrew prefix if available, else /usr/local/bin
+# Detect install path — prefer Homebrew prefix, then a writable /usr/local/bin,
+# else fall back to a user-writable dir so non-Homebrew systems don't abort with
+# a Permission denied at the install step.
 if command -v brew &>/dev/null; then
   BIN_DIR="$(brew --prefix)/bin"
-else
+elif [ -w /usr/local/bin ]; then
   BIN_DIR="/usr/local/bin"
+else
+  BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$BIN_DIR"
 fi
 
 # Check dependencies — install via brew if missing
@@ -99,5 +104,16 @@ fi
 echo "==> Cleaning up ..."
 rm -rf "$BUILD_DIR"
 
-echo "==> Done. $(lingtai-tui version 2>&1 || echo "$VERSION")"
+echo "==> Done. $("$BIN_DIR/lingtai-tui" version 2>&1 || echo "$VERSION")"
+
+# Tell the user how to put BIN_DIR on PATH if it isn't already, so the next
+# shell can find lingtai-tui (common on fresh accounts using the ~/.local/bin fallback).
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    echo "==> Note: $BIN_DIR is not on your PATH. Add it with:"
+    echo "      echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+    ;;
+esac
+
 echo "    To revert to Homebrew version later: brew reinstall lingtai-tui"
