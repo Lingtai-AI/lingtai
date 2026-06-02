@@ -36,31 +36,72 @@ for path in <skills paths from skills(action="info")>; do
 done
 ```
 
-For each one, the skill itself is the source of truth on **what providers it talks to** (MiniMax, MiMo, etc.) and **what env-var key** it expects.
+For each one, the skill itself is the source of truth on **what providers it talks to** and **what env-var key** it expects. For MiniMax specifically, load `minimax-cli`; it is the canonical provider reference and explains how to scan TUI presets recursively, pick the declared MiniMax slot, export it without printing the key, and match the region.
 
-**Step B — cross-check against the user's saved presets.** Each media-creation skill expects an API key. The user's saved presets at `~/.lingtai-tui/presets/*.json` declare which provider keys they have:
+**Step B — cross-check against the user's saved presets.** Each media-creation skill expects an API key. The user's saved presets (including `~/.lingtai-tui/presets/saved/*.json`) declare which provider keys they have:
 
 ```bash
-for f in ~/.lingtai-tui/presets/*.json ~/.lingtai-tui/presets/*.jsonc; do
-  [ -f "$f" ] || continue
-  python3 -c "
-import json, re, sys
-text = open('$f').read()
-text = re.sub(r'//[^\n]*', '', text)
-try:
-    d = json.loads(text)
-    llm = d.get('manifest', {}).get('llm', {})
-    print(llm.get('provider'), '|', llm.get('api_key_env') or '(none)', '|', '$f')
-except Exception:
-    pass
-"
-done
+python3 - <<'PY'
+import glob, json, os
+
+def strip_jsonc(text: str) -> str:
+    # Remove comments outside strings; do not corrupt https:// base_url values.
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            i += 2
+            while i < len(text) and text[i] not in "\r\n":
+                i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            i += 2
+            while i + 1 < len(text) and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2 if i + 1 < len(text) else 0
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+root = os.path.expanduser("~/.lingtai-tui/presets")
+paths = sorted(set(
+    glob.glob(os.path.join(root, "**", "*.json"), recursive=True)
+    + glob.glob(os.path.join(root, "**", "*.jsonc"), recursive=True)
+))
+for path in paths:
+    try:
+        d = json.loads(strip_jsonc(open(path, encoding="utf-8").read()))
+    except Exception:
+        continue
+    llm = d.get("manifest", {}).get("llm", {}) or {}
+    print(llm.get("provider"), "|", llm.get("api_key_env") or "(none)", "|", path)
+PY
 ```
 
-The saved keys themselves live in `~/.lingtai-tui/.env`:
+The saved keys themselves live in `~/.lingtai-tui/.env`. List key **names** only; never print values:
 
 ```bash
-grep -E '^[A-Z_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1
+grep -E '^[A-Z0-9_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1
 ```
 
 **Step C — intersect.** A media-creation skill is *usable* only if (a) its provider matches a saved preset's `provider` AND (b) its expected env-var key is present in `.env`. Build the list of usable providers.
@@ -68,7 +109,7 @@ grep -E '^[A-Z_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1
 **Step D — decide.**
 
 - **Any usable provider exists** → pick one (prefer the user's stated provider; otherwise pick whichever matches a current preset they're using; otherwise pick the first). Load its skill, follow its instructions, compose.
-- **No usable provider** → reply plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. Suggest concretely (e.g. "save a MiniMax preset via the TUI's preset library and paste your `sk-cp-…` key — this will populate the preset's slot in `~/.lingtai-tui/.env` and unlock the `minimax-cli` skill"). **Do not produce a fake track. Do not pretend.**
+- **No usable provider** → reply plainly. Tell them what skills you found, which providers they imply, and which presets they'd need to add for those skills to work. For MiniMax, suggest concretely: "save a MiniMax preset via the TUI preset library and paste your `sk-cp-…` key — this will populate that preset's slot in `~/.lingtai-tui/.env` and unlock the `minimax-cli` skill." **Do not produce a fake track. Do not pretend.**
 
 ## Genre palette
 
@@ -89,11 +130,11 @@ The user may request anything outside this palette — Ravel, Coltrane, City Pop
 
 2. **Read the journal.** Project journals live at `~/.lingtai-tui/brief/projects/<hash>/journal.md`. The `brief.md` / `profile.md` files in the same tree give you context on the user. If the user points at a specific date or hour, also consult the matching `history/<YYYY-MM-DD-HH>.md`. Distill: what did the user do? What was the emotional arc? What instrumentation, tempo, key, mood would honor this session?
 
-3. **Load the chosen media-creation skill** by reading its `SKILL.md` from the skills catalog. Follow its preflight and `curl` whatever live docs it points to so you have the current API schema. The skill knows: where the key lives, which region/host to use, which model to call, parameter shape, expected response shape, how long to wait.
+3. **Load the chosen media-creation skill** by reading its `SKILL.md` from the skills catalog. For MiniMax, this is `minimax-cli`; use its preflight instead of inventing credential or region rules here. Follow the provider skill's live-doc / `--help` guidance so you have the current schema, model list, response shape, and expected wait time.
 
 4. **Compose the prompt.** Translate the journal's mood into a music-generation prompt: genre, instruments, tempo, key, mood adjectives, optional structure (intro / verse / breakdown / outro), reference artists if useful. Keep it under whatever the API limit is per the live docs.
 
-5. **Call the API.** Use bash + curl per the skill. If the response is a URL, `curl -o` it down; if a base64 blob, decode to file. Save to `~/.lingtai-tui/brief/projects/<hash>/music/<YYYY-MM-DD>-<genre-slug>-<short-title-slug>.<ext>`. Create the `music/` folder if it doesn't exist. Do not overwrite an existing track for the same journal date — append a counter (`-2`, `-3`) if the user asks for another take.
+5. **Call the provider.** Use the provider skill's current mechanism (for MiniMax, normally `mmx music ...` via `minimax-cli`; for other providers, whatever their skill documents). If the response is a URL, `curl -o` it down; if a base64 blob, decode to file; if the CLI writes an output directory, move/copy the final audio into place. Save to `~/.lingtai-tui/brief/projects/<hash>/music/<YYYY-MM-DD>-<genre-slug>-<short-title-slug>.<ext>`. Create the `music/` folder if it doesn't exist. Do not overwrite an existing track for the same journal date — append a counter (`-2`, `-3`) if the user asks for another take.
 
 6. **Append the index entry.** `~/.lingtai-tui/brief/projects/<hash>/music/index.md`:
 

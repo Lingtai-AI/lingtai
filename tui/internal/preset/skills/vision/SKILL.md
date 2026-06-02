@@ -4,7 +4,7 @@ description: >
   Decision-tree skill for image understanding. Routes between three paths
   depending on what the agent has access to: (1) the built-in `vision` tool
   if the LLM provider supports image input, (2) the `minimax-cli` skill
-  if a MiniMax coding-plan key is available, or (3) a local Hugging Face
+  if a usable MiniMax preset/key slot is available, or (3) a local Hugging Face
   VLM via the bundled `scripts/describe.py` if neither — offline, free,
   slow. Read this when you need to describe, OCR, or critique an image
   and you're not sure which path applies.
@@ -20,9 +20,9 @@ version: 1.0.0
 ```
 Is `vision` tool in your tool list?
 ├── YES → use it directly, done.
-└── NO  → does the user have a MiniMax coding-plan key?
-         (check ~/.lingtai-tui/.env for MINIMAX_API_KEY)
-         ├── YES → see `minimax-cli` skill (`mmx vision …` from the shell, or the `understand_image` MCP tool if registered)
+└── NO  → does the user have a MiniMax preset/key slot?
+         (read `minimax-cli`; scan ~/.lingtai-tui/presets/** without printing keys)
+         ├── YES → use `minimax-cli` for `mmx vision …` from the shell, or an already-registered MCP tool
          └── NO  → fall back to local VLM:
                   bash python <skill-path>/scripts/describe.py <image>
                   See reference/local-models.md.
@@ -36,12 +36,12 @@ If your LLM provider supports image input (MiniMax, Gemini, Anthropic, OpenAI, Z
 
 ## Path 2 — MiniMax via `minimax-cli` Skill
 
-For text-only LLMs (DeepSeek, OpenRouter text-only, Codex) **with** a MiniMax coding-plan key. Two routes, same backend:
+For text-only LLMs (DeepSeek, OpenRouter text-only, Codex) **with** a usable MiniMax preset/key slot. Two routes can exist:
 
 - **Shell** — `mmx vision …` via the official CLI. No MCP registration needed; just install + key. Best for ad-hoc one-shots in bash.
-- **In-tool** — the `understand_image` MCP tool exposed by `minimax-coding-plan-mcp`. Best when the agent needs vision as a tool call inside a longer reasoning loop. MCP server registration is owned by `mcp-manual` (kernel `mcp` capability).
+- **In-tool** — an already-registered MiniMax MCP vision tool. Best when the agent needs vision as a tool call inside a longer reasoning loop. MCP server registration is owned by `mcp-manual` (kernel `mcp` capability).
 
-Read the **`minimax-cli`** skill — it covers install, credential sourcing, region selection, and pointers to live docs.
+Read the **`minimax-cli`** skill before using the shell route. It owns the canonical MiniMax credential discovery flow: scan TUI presets recursively, pick the declared slot, export it without printing the key, and match the preset region/base URL. Do not assume a bare `MINIMAX_API_KEY` is the only valid slot.
 
 ## Path 3 — Local VLM (offline, unlimited)
 

@@ -53,6 +53,40 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	}
 }
 
+func TestPopulateBundledLibrary_MinimaxCliCanonicalReference(t *testing.T) {
+	globalDir := t.TempDir()
+	PopulateBundledLibrary("", globalDir)
+
+	topPath := filepath.Join(globalDir, "utilities", "minimax-cli", "SKILL.md")
+	topBodyBytes, err := os.ReadFile(topPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topBody := string(topBodyBytes)
+	if !strings.Contains(topBody, "../swiss-knife/reference/minimax-cli/SKILL.md") {
+		t.Error("top-level minimax-cli should point at the canonical swiss-knife nested reference")
+	}
+	if strings.Contains(topBody, "## 3. Discover credentials without leaking them") {
+		t.Error("top-level minimax-cli should not duplicate the canonical manual")
+	}
+
+	canonicalPath := filepath.Join(globalDir, "utilities", "swiss-knife", "reference", "minimax-cli", "SKILL.md")
+	canonicalBodyBytes, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalBody := string(canonicalBodyBytes)
+	for _, want := range []string{
+		"Nested swiss-knife reference for the MiniMax `mmx` CLI",
+		"~/.lingtai-tui/presets/saved/",
+		"Do **not** hardcode an unverified host",
+	} {
+		if !strings.Contains(canonicalBody, want) {
+			t.Errorf("canonical minimax-cli reference missing %q", want)
+		}
+	}
+}
+
 // TestPopulateBundledLibrary_WebBrowsingNestedReferences verifies that the
 // embedded utility-library copier preserves web-browsing's nested reference
 // router files alongside the existing deep-dive references and scripts.

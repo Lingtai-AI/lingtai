@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -132,6 +133,118 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 	}
 	if !strings.Contains(string(childBodyBytes), "Nested swiss-knife reference for Claude Code CLI") {
 		t.Error("nested claude-code child should identify itself as a nested swiss-knife reference for Claude Code CLI")
+	}
+}
+
+func TestBuildSkillFolderEntries_MinimaxCliCanonicalReference(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillsRoot := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills")
+
+	topBodyBytes, err := os.ReadFile(filepath.Join(skillsRoot, "minimax-cli", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	topBody := string(topBodyBytes)
+	for _, want := range []string{
+		"top-level entry point",
+		"canonical: ../swiss-knife/reference/minimax-cli/SKILL.md",
+		"../swiss-knife/reference/minimax-cli/SKILL.md",
+		"read-only pointer",
+		"Do not duplicate MiniMax command recipes here",
+	} {
+		if !strings.Contains(topBody, want) {
+			t.Errorf("top-level minimax-cli entry missing %q", want)
+		}
+	}
+	if strings.Contains(topBody, "## 3. Discover credentials without leaking them") {
+		t.Error("top-level minimax-cli should stay a thin pointer, not duplicate the canonical manual")
+	}
+
+	canonicalBodyBytes, err := os.ReadFile(filepath.Join(skillsRoot, "swiss-knife", "reference", "minimax-cli", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalBody := string(canonicalBodyBytes)
+	for _, want := range []string{
+		"Nested swiss-knife reference for the MiniMax `mmx` CLI",
+		"## 3. Discover credentials without leaking them",
+		"~/.lingtai-tui/presets/saved/",
+		"Do **not** hardcode an unverified host",
+	} {
+		if !strings.Contains(canonicalBody, want) {
+			t.Errorf("canonical swiss-knife minimax-cli reference missing %q", want)
+		}
+	}
+}
+
+func TestMinimaxCliPresetDiscoverySnippetPreservesHTTPSBaseURL(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	_, thisFile, _, _ := runtime.Caller(0)
+	skillPath := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "swiss-knife", "reference", "minimax-cli", "SKILL.md")
+	bodyBytes, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	if strings.Contains(body, `re.sub(r"//`) || strings.Contains(body, `re.sub(r'//`) {
+		t.Fatal("MiniMax preset-discovery snippet must not use regex // stripping; it corrupts https:// URLs")
+	}
+
+	marker := "List candidate presets (prints slot names and base URLs only, never secret values):"
+	markerIdx := strings.Index(body, marker)
+	if markerIdx < 0 {
+		t.Fatal("missing MiniMax candidate-preset snippet marker")
+	}
+	start := strings.Index(body[markerIdx:], "python3 - <<'PY'\n")
+	if start < 0 {
+		t.Fatal("missing MiniMax candidate-preset python heredoc")
+	}
+	start += markerIdx + len("python3 - <<'PY'\n")
+	end := strings.Index(body[start:], "\nPY\n```")
+	if end < 0 {
+		t.Fatal("missing end of MiniMax candidate-preset python heredoc")
+	}
+	script := body[start : start+end]
+
+	home := t.TempDir()
+	presetDir := filepath.Join(home, ".lingtai-tui", "presets", "saved")
+	if err := os.MkdirAll(presetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	preset := `{
+  // JSONC comment before the LLM block
+  "manifest": {
+    "llm": {
+      "provider": "minimax",
+      "api_key_env": "MINIMAX_CN_1_API_KEY",
+      "base_url": "https://api.minimaxi.com/anthropic"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(presetDir, "minimax.jsonc"), []byte(preset), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(python, "-c", script)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("MiniMax preset-discovery snippet failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{
+		"presets/saved/minimax.jsonc",
+		"slot=MINIMAX_CN_1_API_KEY",
+		"region=CN",
+		"base_url=https://api.minimaxi.com/anthropic",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("MiniMax preset-discovery snippet output missing %q; got:\n%s", want, got)
+		}
 	}
 }
 
