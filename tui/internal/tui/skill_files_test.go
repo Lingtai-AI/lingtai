@@ -92,6 +92,7 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 		"Nested reference catalog",
 		"reference/claude-code/SKILL.md",
 		"reference/openai-codex/SKILL.md",
+		"reference/statusline/SKILL.md",
 		"reference/opencode/SKILL.md",
 		"reference/minimax-cli/SKILL.md",
 		"reference/token-usage/SKILL.md",
@@ -111,6 +112,8 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 	for _, want := range []string{
 		"claude-code/SKILL.md",
 		"openai-codex/SKILL.md",
+		"statusline/SKILL.md",
+		"statusline/scripts/generate_statusline.py",
 		"opencode/SKILL.md",
 		"html-report/SKILL.md",
 		"html-report/assets/template.html",

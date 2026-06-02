@@ -11,7 +11,7 @@ description: >
   LingTai bot projects such as Telegram bots from `lingtai-tui spawn`. This
   parent is the route map; each nested reference is self-contained under
   `reference/<name>/SKILL.md`.
-version: 2.0.1
+version: 2.1.0
 tags: [utilities, umbrella, toolkit, nested-skill]
 ---
 
@@ -40,6 +40,13 @@ nested_references:
       human asks to use Codex directly, compare Codex with Claude Code, or use
       Codex-specific local-agent capabilities such as remote control, Vim editing,
       plugins, hooks, and browser integration.
+  - name: statusline
+    location: reference/statusline/SKILL.md
+    description: >
+      Nested swiss-knife reference for customizing Claude Code's status line.
+      Read this when the human asks to configure a personal status bar, display
+      context/cost/effort/git/worktree information, or install a statusLine
+      command in Claude Code settings.
   - name: opencode
     location: reference/opencode/SKILL.md
     description: >
@@ -90,6 +97,7 @@ nested_references:
 |---|---|
 | Delegate code work to Claude Code CLI | `reference/claude-code/SKILL.md` |
 | Use or compare OpenAI Codex CLI | `reference/openai-codex/SKILL.md` |
+| Customize Claude Code's status line | `reference/statusline/SKILL.md` |
 | Use or compare OpenCode CLI | `reference/opencode/SKILL.md` |
 | Generate images, video, music, TTS, or MiniMax shell vision | `reference/minimax-cli/SKILL.md` |
 | Report token usage or model costs | `reference/token-usage/SKILL.md` |

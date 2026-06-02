@@ -20,6 +20,8 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 		"SKILL.md",
 		"reference/claude-code/SKILL.md",
 		"reference/openai-codex/SKILL.md",
+		"reference/statusline/SKILL.md",
+		"reference/statusline/scripts/generate_statusline.py",
 		"reference/opencode/SKILL.md",
 		"reference/minimax-cli/SKILL.md",
 		"reference/token-usage/SKILL.md",
