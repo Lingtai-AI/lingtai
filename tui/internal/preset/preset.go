@@ -529,11 +529,27 @@ type ResolvedRef struct {
 	Source PresetSource
 	// Exists reports whether the file is readable on disk right now.
 	Exists bool
-	// HasKey reports whether the preset's api_key_env (if any) is
-	// populated in the passed existingKeys map. True when the preset
-	// declares no api_key_env (codex OAuth, locally-hosted custom).
-	// Only meaningful when Exists is true.
+	// HasKey reports whether the preset's credential is actually
+	// configured. For a preset with a non-empty api_key_env, this is true
+	// only when that env var has a value in the passed existingKeys map.
+	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
+	// declares no api_key_env), this is true only when OAuth is configured
+	// (see AuthState.CodexOAuthConfigured). A preset with an empty
+	// api_key_env that is NOT codex has no configured credential and no
+	// OAuth, so this is false. Only meaningful when Exists is true.
 	HasKey bool
+}
+
+// AuthState carries machine-level credential facts the credential guard
+// cannot derive from a preset file alone. Today that is only Codex OAuth,
+// but the struct leaves room to add future OAuth providers without churning
+// the ResolveRefs signature again.
+type AuthState struct {
+	// CodexOAuthConfigured is true when ~/.lingtai-tui/codex-auth.json
+	// parses and carries a non-empty refresh_token. The preset package must
+	// not import the tui package (import cycle), so this is computed by the
+	// caller and passed in.
+	CodexOAuthConfigured bool
 }
 
 // ResolveRefs expands and inspects a list of preset path strings. For
@@ -550,15 +566,28 @@ type ResolvedRef struct {
 // existingKeys is the env-var-name → value map (typically
 // Config.Keys). Pass nil when no key store is available; HasKey will
 // be false for any preset that declares an api_key_env.
+//
+// ResolveRefs assumes NO OAuth is configured (the conservative default):
+// a codex preset resolves to HasKey=false under this entry point. Callers
+// that make credential-sensitive validity decisions should use
+// ResolveRefsWithAuth and pass the real OAuth state.
 func ResolveRefs(refs []string, existingKeys map[string]string) []ResolvedRef {
+	return ResolveRefsWithAuth(refs, existingKeys, AuthState{})
+}
+
+// ResolveRefsWithAuth is ResolveRefs plus machine-level credential state
+// (auth), so the codex-OAuth case can be judged correctly: a codex preset
+// is valid only when auth.CodexOAuthConfigured is true. See ResolveRefs for
+// the ref-string and existingKeys contracts.
+func ResolveRefsWithAuth(refs []string, existingKeys map[string]string, auth AuthState) []ResolvedRef {
 	out := make([]ResolvedRef, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, resolveOneRef(ref, existingKeys))
+		out = append(out, resolveOneRef(ref, existingKeys, auth))
 	}
 	return out
 }
 
-func resolveOneRef(ref string, existingKeys map[string]string) ResolvedRef {
+func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) ResolvedRef {
 	r := ResolvedRef{Ref: ref}
 	if ref == "" {
 		return r
@@ -581,13 +610,28 @@ func resolveOneRef(ref string, existingKeys map[string]string) ResolvedRef {
 	}
 	if p, err := loadFromPath(abs); err == nil {
 		envName := ""
+		provider := ""
 		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 			envName, _ = llm["api_key_env"].(string)
+			provider, _ = llm["provider"].(string)
 		}
-		if envName == "" {
-			r.HasKey = true // OAuth flow / locally-hosted: no key needed
-		} else if v, ok := existingKeys[envName]; ok && v != "" {
-			r.HasKey = true
+		switch {
+		case envName != "":
+			// Keyed provider: valid only when the env var has a value.
+			if v, ok := existingKeys[envName]; ok && v != "" {
+				r.HasKey = true
+			}
+		case provider == "codex":
+			// Codex declares no api_key_env by design — it uses ChatGPT
+			// OAuth (codex-auth.json). Valid only when OAuth is configured.
+			r.HasKey = auth.CodexOAuthConfigured
+		default:
+			// No api_key_env and not codex: no configured credential and no
+			// OAuth, so the preset is not valid. (A preset that genuinely
+			// needs no credential must still be reached through a configured
+			// auth path; an empty api_key_env on a non-codex provider is
+			// treated as missing, not as "no key needed".)
+			r.HasKey = false
 		}
 	}
 	return r

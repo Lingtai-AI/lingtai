@@ -20,7 +20,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `BuiltinPresets()` | `tui/internal/preset/preset.go:446` | minimax, zhipu, mimo, deepseek, gemini, kimi, openrouter, codex, custom |
 | `IsTemplate(p)` | `tui/internal/preset/preset.go:464` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
 | `RefFor(p)` | `tui/internal/preset/preset.go:473` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
-| `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go:528` | health-check: Source, Exists, HasKey for each preset path |
+| `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go:574` | health-check: Source, Exists, HasKey for each preset path; credential validity requires configured `api_key_env` or Codex OAuth |
 | `Validate()` | `tui/internal/preset/preset.go:282` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
 | `CopyBundle` | `tui/internal/preset/recipe_apply.go:59` | copies `.recipe/` (replace) + recipe skill library sibling (merge) + `.lingtai/` (merge) into project |

@@ -72,6 +72,95 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 	})
 }
 
+// writePresetFile writes a minimal valid preset JSON to dir/<name>.json with
+// the given provider and api_key_env, and returns its absolute path. Values
+// are placeholders only — no real secrets.
+func writePresetFile(t *testing.T, dir, name, provider, apiKeyEnv string) string {
+	t.Helper()
+	manifest := map[string]interface{}{
+		"llm": map[string]interface{}{
+			"provider":    provider,
+			"model":       "test-model",
+			"api_key_env": apiKeyEnv,
+		},
+	}
+	doc := map[string]interface{}{
+		"description": map[string]interface{}{"summary": "test preset"},
+		"manifest":    manifest,
+	}
+	raw, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal preset: %v", err)
+	}
+	path := filepath.Join(dir, name+".json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write preset: %v", err)
+	}
+	return path
+}
+
+// TestResolveRefs_ValidityGuard locks in the defensive rule: a preset is only
+// valid (HasKey) when its credential is actually configured. A preset with no
+// configured API key AND no Codex OAuth must NOT be valid. Concretely: a
+// keyed preset is valid only when its env var has a value; a codex preset
+// (OAuth, no api_key_env) is valid only when Codex OAuth is configured; a
+// preset with an empty api_key_env that is not codex is invalid.
+func TestResolveRefs_ValidityGuard(t *testing.T) {
+	dir := t.TempDir()
+	codexRef := writePresetFile(t, dir, "codex", "codex", "")
+	customRef := writePresetFile(t, dir, "custom", "custom", "")
+	keyedRef := writePresetFile(t, dir, "minimax", "minimax", "FOO_API_KEY")
+	missingRef := filepath.Join(dir, "nope.json")
+
+	keysWith := map[string]string{"FOO_API_KEY": "placeholder-value"}
+	keysEmpty := map[string]string{}
+
+	cases := []struct {
+		name       string
+		ref        string
+		keys       map[string]string
+		auth       AuthState
+		wantExists bool
+		wantHasKey bool
+	}{
+		{"codex no OAuth", codexRef, keysEmpty, AuthState{}, true, false},
+		{"codex with OAuth", codexRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, true},
+		{"keyless non-codex is invalid", customRef, keysEmpty, AuthState{}, true, false},
+		{"keyed with key present", keyedRef, keysWith, AuthState{}, true, true},
+		{"keyed with key absent", keyedRef, keysEmpty, AuthState{}, true, false},
+		{"missing file", missingRef, keysEmpty, AuthState{}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveRefsWithAuth([]string{tc.ref}, tc.keys, tc.auth)
+			if len(got) != 1 {
+				t.Fatalf("expected 1 resolved ref, got %d", len(got))
+			}
+			rr := got[0]
+			if rr.Exists != tc.wantExists {
+				t.Errorf("Exists = %v, want %v", rr.Exists, tc.wantExists)
+			}
+			if rr.HasKey != tc.wantHasKey {
+				t.Errorf("HasKey = %v, want %v", rr.HasKey, tc.wantHasKey)
+			}
+		})
+	}
+}
+
+// TestResolveRefs_ConservativeDefault verifies the legacy ResolveRefs entry
+// point assumes no OAuth: a codex preset resolves to HasKey=false through it.
+func TestResolveRefs_ConservativeDefault(t *testing.T) {
+	dir := t.TempDir()
+	codexRef := writePresetFile(t, dir, "codex", "codex", "")
+	got := ResolveRefs([]string{codexRef}, nil)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resolved ref, got %d", len(got))
+	}
+	if got[0].HasKey {
+		t.Errorf("codex via ResolveRefs: HasKey = true, want false (conservative default)")
+	}
+}
+
 func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	withTempPresets(t, func() {
 		p := DefaultPreset()

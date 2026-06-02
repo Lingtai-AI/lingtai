@@ -1463,21 +1463,29 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 	return ""
 }
 
+// codexOAuthConfigured reports whether ~/.lingtai-tui/codex-auth.json
+// parses and carries a non-empty refresh_token — the canonical "Codex OAuth
+// is usable" signal shared across the TUI (login.go, firstrun.go,
+// preset_editor.go all check the same shape). It reads no secret to the
+// screen; it only returns a bool. Pass the result into
+// preset.AuthState.CodexOAuthConfigured so the preset validity guard can
+// judge codex presets correctly without importing this package.
+func codexOAuthConfigured(globalDir string) bool {
+	data, err := os.ReadFile(filepath.Join(globalDir, "codex-auth.json"))
+	if err != nil {
+		return false
+	}
+	var tokens CodexTokens
+	return json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != ""
+}
+
 // validateCodexAuthForAgents scans all agent directories under projectDir
 // for init.json files whose active/default preset is codex. If any exist
 // but ~/.lingtai-tui/codex-auth.json is missing or invalid, returns a
 // warning string. Otherwise returns "".
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	// Quick check: is codex-auth.json valid?
-	authPath := filepath.Join(globalDir, "codex-auth.json")
-	authOK := false
-	if data, err := os.ReadFile(authPath); err == nil {
-		var tokens CodexTokens
-		if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
-			authOK = true
-		}
-	}
-	if authOK {
+	if codexOAuthConfigured(globalDir) {
 		return ""
 	}
 
