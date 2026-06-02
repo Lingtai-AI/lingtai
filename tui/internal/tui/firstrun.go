@@ -475,6 +475,10 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	m.setupOrchDir = orchDir
 	m.setupOrchName = orchName
 	m.step = stepPickPreset
+	// /setup should default to the virtual "keep current preset" row.
+	// Otherwise the first saved/template preset becomes selected and downstream
+	// defaults (capabilities, provider, key slot) appear to reset unexpectedly.
+	m.cursor = -1
 	m.presets, _ = preset.List()
 
 	// Load existing addons from orchestrator's init.json so they are preserved

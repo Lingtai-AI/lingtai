@@ -443,7 +443,6 @@
   "preset_editor.field_api_key": "API 钥",
   "preset_editor.api_key_unset": "（未设——粘于此）",
   "preset_editor.api_key_codex_readonly": "OAuth 凭据——于择预页管之。",
-  "preset_editor.api_key_locked": "已立之预，钥不可更。欲换钥者，另立新预。",
   "preset_editor.field_edit": "编辑",
   "preset_editor.field_streaming": "流式输出",
   "preset_editor.field_karma": "因果",

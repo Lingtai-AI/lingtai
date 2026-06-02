@@ -268,21 +268,12 @@ type PresetEditorModel struct {
 	// API key state. existingKeys is the host's Config.Keys snapshot
 	// (env-var-name → value), used to prefill the api_key field when a
 	// matching env var is already populated. apiKey is the live edit
-	// buffer; apiKeySet flips true when the user types into it (so we
-	// know to emit it on commit even if the new value is empty/cleared).
-	//
-	// apiKeyLocked is set at construction when the preset opens with a
-	// key already stored for its api_key_env slot. Editing an existing
-	// preset's saved key from inside this editor was confusing — users
-	// expected the row to show what was there, not silently overwrite
-	// it. When locked, the inline-edit entry on the api_key row is a
-	// no-op (the codex/OAuth branch already behaves this way for a
-	// different reason). Newly created presets with no stored key
-	// remain freely editable so initial setup still works.
+	// buffer; apiKeySet flips true only when the user explicitly edits
+	// the row (so an untouched masked key remains unchanged on commit,
+	// while a pasted replacement is written by the host).
 	existingKeys map[string]string
 	apiKey       string
 	apiKeySet    bool
-	apiKeyLocked bool
 
 	// Status
 	saveErr string
@@ -295,9 +286,10 @@ type PresetEditorModel struct {
 // on-disk Source rather than its name (so a user-saved preset whose
 // name happens to match a template is correctly treated as editable).
 //
-// existingKeys is Config.Keys (env-var-name → value) so the editor can
-// prefill the api_key row when a key is already saved for this preset's
-// api_key_env. Pass nil when no key store is available (e.g. tests).
+// existingKeys is Config.Keys (env-var-name → value). For user-owned
+// presets, the editor uses it to display an already-saved key as masked.
+// Templates intentionally start with a blank key buffer so creating a new
+// preset never inherits the provider's old shared env slot by accident.
 func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string, globalDir string) PresetEditorModel {
 	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, globalDir, preset.IsTemplate(p))
 }
@@ -324,14 +316,17 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 	cn := textinput.New()
 	cn.CharLimit = 64
 	cn.SetWidth(30)
-	// Prefill the api_key buffer if the preset's declared env slot
-	// already holds a value. The buffer is the source of truth for the
-	// row's display; apiKeySet stays false so we don't emit on commit
-	// unless the user actually changed it.
+	// For saved/user-owned presets, prefill the api_key buffer if the
+	// declared env slot already holds a value; this lets the row render as
+	// masked and preserves the key when untouched. For templates, keep the
+	// buffer empty: editing a template creates a new preset, and that new
+	// preset must not silently inherit an old provider-wide key.
 	apiKey := ""
-	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-		if envName, _ := llm["api_key_env"].(string); envName != "" {
-			apiKey = existingKeys[envName]
+	if !isBuiltin {
+		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+			if envName, _ := llm["api_key_env"].(string); envName != "" {
+				apiKey = existingKeys[envName]
+			}
 		}
 	}
 	return PresetEditorModel{
@@ -347,7 +342,6 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		existingKeys:   existingKeys,
 		globalDir:      globalDir,
 		apiKey:         apiKey,
-		apiKeyLocked:   apiKey != "",
 	}
 }
 
@@ -566,14 +560,6 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		// page. API key field is read-only; no-op here.
 		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
-			return *m, nil
-		}
-		// Preset opened with a key already stored for its api_key_env.
-		// Editing here was confusing — the row shows a masked value but
-		// pressing Enter blanked the buffer and silently overwrote the
-		// stored key on commit. Lock the row instead.
-		if m.apiKeyLocked {
-			m.saveErr = i18n.T("preset_editor.api_key_locked")
 			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
@@ -822,8 +808,12 @@ func (m *PresetEditorModel) applyInline(val string) {
 	case feAPIKey:
 		// Store the raw key in the editor's buffer; the manifest
 		// itself only holds api_key_env (the slot name), assigned at
-		// commit time by the host's stampAutoEnvVar helper. Empty
-		// commit deletes any saved key (treated as "clear it").
+		// commit time by the host's stampAutoEnvVar helper. Opening the
+		// blank replacement editor and pressing Enter without typing is
+		// a no-op, not a clear; key clearing needs an explicit future UI.
+		if val == "" {
+			return
+		}
 		m.apiKey = val
 		m.apiKeySet = true
 	}

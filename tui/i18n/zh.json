@@ -443,7 +443,6 @@
   "preset_editor.field_api_key": "API 密钥",
   "preset_editor.api_key_unset": "（未设置——在此粘贴）",
   "preset_editor.api_key_codex_readonly": "OAuth 凭据 — 于预设选择页管理。",
-  "preset_editor.api_key_locked": "已存在的预设不可改 API 密钥。如需更换，请新建一个预设。",
   "preset_editor.field_edit": "编辑",
   "preset_editor.field_streaming": "流式输出",
   "preset_editor.field_karma": "因果",

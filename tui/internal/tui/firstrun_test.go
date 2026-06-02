@@ -326,6 +326,54 @@ func TestPickPreset_DelCancelsInFlightLogin(t *testing.T) {
 	}
 }
 
+func TestSetupModeDefaultsToKeepCurrentPreset(t *testing.T) {
+	baseDir := t.TempDir()
+	globalDir := t.TempDir()
+	orchDir := filepath.Join(baseDir, "mimo-1")
+	if err := os.MkdirAll(orchDir, 0o755); err != nil {
+		t.Fatalf("mkdir orchDir: %v", err)
+	}
+	initJSON := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"language": "zh",
+			"llm": map[string]interface{}{
+				"provider":    "deepseek",
+				"model":       "deepseek-v4-flash",
+				"api_key_env": "DEEPSEEK_API_KEY",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"vision":     map[string]interface{}{"provider": "inherit"},
+			},
+		},
+	}
+	data, err := json.Marshal(initJSON)
+	if err != nil {
+		t.Fatalf("marshal init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(orchDir, "init.json"), data, 0o644); err != nil {
+		t.Fatalf("write init: %v", err)
+	}
+
+	m := NewSetupModeModel(baseDir, globalDir, orchDir, "mimo-1")
+	if !m.setupMode {
+		t.Fatalf("expected setupMode=true")
+	}
+	if m.step != stepPickPreset {
+		t.Fatalf("expected setup mode to start at preset picker, got %v", m.step)
+	}
+	if m.cursor != -1 {
+		t.Fatalf("/setup should default to keep-current preset row; cursor=%d", m.cursor)
+	}
+	if got := m.getPresetProvider(m.currentPreset()); got != "deepseek" {
+		t.Fatalf("currentPreset should be synthesized from existing init.json, provider=%q", got)
+	}
+	caps, ok := m.currentPreset().Manifest["capabilities"].(map[string]interface{})
+	if !ok || caps["web_search"] == nil || caps["vision"] == nil {
+		t.Fatalf("currentPreset should preserve existing optional capabilities, caps=%#v", caps)
+	}
+}
+
 func TestSetupModeEnterOnKeepCurrentAdvancesToAgentPresets(t *testing.T) {
 	m := FirstRunModel{
 		setupMode: true,

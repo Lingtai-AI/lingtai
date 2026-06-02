@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -101,18 +100,19 @@ func TestPresetEditorShortTerminalDoesNotWrapRowsPastHeight(t *testing.T) {
 	}
 }
 
-// TestPresetEditorAPIKeyLockedWhenAlreadyStored verifies that opening the
-// editor on a preset whose api_key_env slot already holds a value blocks
-// inline edit of the api_key row. Users were confused when the masked row
-// silently overwrote the stored key on commit. New presets (empty
-// existingKeys) must still be editable — covered by the next test.
-func TestPresetEditorAPIKeyLockedWhenAlreadyStored(t *testing.T) {
+// TestPresetEditorAPIKeyEditableWhenAlreadyStored verifies that opening the
+// editor on a preset whose api_key_env slot already holds a value still allows
+// an explicit replacement. The existing key is shown masked, Enter opens a
+// blank paste target, and commit emits APIKeySet only after the user edits.
+func TestPresetEditorAPIKeyEditableWhenAlreadyStored(t *testing.T) {
 	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", keys, "", false)
+	p := testPresetEditorPreset()
+	p.Source = preset.SourceSaved
+	m := NewPresetEditorModel(p, "en", keys, "")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	if !m.apiKeyLocked {
-		t.Fatalf("expected apiKeyLocked=true when preset opens with stored key")
+	if got := m.fieldString(feAPIKey); got == "" || got == "sk-existing-value" {
+		t.Fatalf("expected existing key to render masked, got %q", got)
 	}
 
 	// Walk cursor to feAPIKey (index 9 in editorFieldOrder).
@@ -125,28 +125,108 @@ func TestPresetEditorAPIKeyLockedWhenAlreadyStored(t *testing.T) {
 
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if m.mode != emBrowse {
-		t.Fatalf("expected to stay in browse mode after Enter on locked api_key, got mode=%v", m.mode)
+	if m.mode != emInline {
+		t.Fatalf("expected emInline after Enter on api_key with stored key, got mode=%v", m.mode)
 	}
-	if m.saveErr == "" {
-		t.Fatalf("expected a saveErr message explaining the lock; got empty")
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("api_key replacement input should start blank for easy paste, got %q", got)
 	}
-	want := i18n.T("preset_editor.api_key_locked")
-	if m.saveErr != want {
-		t.Fatalf("expected lock message %q; got %q", want, m.saveErr)
+
+	m.input.SetValue("sk-replacement-value")
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.apiKeySet || m.apiKey != "sk-replacement-value" {
+		t.Fatalf("expected replacement key to be staged; apiKeySet=%v apiKey=%q", m.apiKeySet, m.apiKey)
 	}
 }
 
-// TestPresetEditorAPIKeyEditableWhenNoStoredKey is the inverse: a preset
+func TestPresetEditorAPIKeyUnchangedWhenStoredKeyUntouched(t *testing.T) {
+	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	p := testPresetEditorPreset()
+	p.Source = preset.SourceSaved
+	m := NewPresetEditorModel(p, "en", keys, "")
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatalf("commit returned nil cmd")
+	}
+	msg := cmd()
+	commit, ok := msg.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg", msg)
+	}
+	if commit.APIKeySet {
+		t.Fatalf("untouched stored API key should not be emitted as a replacement")
+	}
+}
+
+func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
+	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	p := testPresetEditorPreset()
+	p.Source = preset.SourceSaved
+	m := NewPresetEditorModel(p, "en", keys, "")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	for i := 0; i < 9; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if editorFieldOrder[m.cursor] != feAPIKey {
+		t.Fatalf("expected cursor on feAPIKey, got %v", editorFieldOrder[m.cursor])
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.mode != emInline {
+		t.Fatalf("expected emInline after opening api_key row, got mode=%v", m.mode)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.apiKeySet {
+		t.Fatalf("blank API key edit should be a no-op, not stage a clear")
+	}
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatalf("commit returned nil cmd")
+	}
+	commit, ok := cmd().(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned non-commit msg")
+	}
+	if commit.APIKeySet {
+		t.Fatalf("blank API key edit should not emit APIKeySet=true")
+	}
+}
+
+func TestPresetEditorTemplateDoesNotInheritStoredProviderKey(t *testing.T) {
+	keys := map[string]string{"MINIMAX_API_KEY": "sk-existing-value"}
+	p := testPresetEditorPreset()
+	p.Source = preset.SourceTemplate
+	m := NewPresetEditorModel(p, "en", keys, "")
+
+	if m.apiKey != "" {
+		t.Fatalf("template editor should not preload old provider key, apiKey=%q", m.apiKey)
+	}
+	if got := m.fieldString(feAPIKey); got == "sk-existing-value" {
+		t.Fatalf("template editor should not render old provider key, got %q", got)
+	}
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatalf("commit returned nil cmd")
+	}
+	commit, ok := cmd().(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned non-commit msg")
+	}
+	if commit.APIKeySet || commit.APIKey != "" {
+		t.Fatalf("untouched template key should not emit old provider key; APIKeySet=%v APIKey=%q", commit.APIKeySet, commit.APIKey)
+	}
+}
+
+// TestPresetEditorAPIKeyEditableWhenNoStoredKey verifies that a preset
 // with no stored key (typical for first-run flow on a fresh template)
-// must still allow inline edit so initial setup works.
+// allows inline edit so initial setup works.
 func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-
-	if m.apiKeyLocked {
-		t.Fatalf("expected apiKeyLocked=false when no stored key")
-	}
 
 	for i := 0; i < 9; i++ {
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
