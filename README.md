@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="docs/assets/network-demo.gif" alt="LingTai — a local AI assistant that lives in your project and can grow into a team" width="100%">
-
 # LingTai
 
-**Your local, always-on AI assistant for real work.**
+**Stop losing your AI at the end of a chat. Give every project a resident agent.**
+
+Local-first · durable memory · mailboxes · real tools · lifecycle · multi-agent networks
 
 [English](README.md) · [中文](README.zh.md) · [文言](README.wen.md) · [Website](https://lingtai.ai) · [Releases](https://lingtai.ai/releases/)
 
@@ -18,64 +18,104 @@
 
 ---
 
-**LingTai** is a local AI assistant that lives in your project and stays on. It remembers what matters, talks to you through the channels you already use, runs tools and workflows on your behalf, and — when the job gets bigger than one assistant — can grow into a small AI team you supervise.
+Most AI tools answer once, then disappear. **LingTai installs a long-lived AI agent inside your project** — a real local process with a home directory, inbox/outbox, memory, tools, sleep/wake controls, and peers it can call when the job gets bigger than one mind.
 
-It is not a chat window, a notebook, or a one-shot coding agent. It is a real process with memory, tools, and a schedule: send it a task in the terminal, on Telegram, or by email, then come back later to find progress waiting for you.
+Send a task from the TUI, Telegram, Feishu/Lark, WeChat, WhatsApp, or email. The same agent wakes up, reads its project memory, uses local tools, writes artifacts, and replies on the channel where you started.
 
-If you want a personal AI workbench that feels yours — local, persistent, scriptable, and able to scale up when the work demands it — this is it.
+## A project agent, not another chat window
 
-## Install
+```text
+You
+  "Watch the repo overnight. If a PR breaks, inspect it, draft a fix,
+   and send me a morning brief."
 
-Recommended path on macOS and Linux:
+LingTai
+  wakes from its mailbox
+  → reads durable project memory
+  → runs shell / web / file / coding-agent tools
+  → writes notes, reports, patches, or schedules
+  → asks a specialist avatar or daemon when parallel work helps
+  → replies on Telegram / TUI / email with the artifacts
+```
+
+Close the terminal if you want. The agent still has a filesystem home under `.lingtai/`, a mailbox, logs you can inspect, and lifecycle controls to sleep, refresh, recover, or molt long sessions without losing the grain.
+
+## Start in three commands
 
 ```bash
 brew install lingtai-ai/lingtai/lingtai-tui
+mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-The TUI handles the rest: it provisions its own Python runtime, walks you through model selection, opens your first project, and gets a working assistant in front of you within a couple of minutes. On first launch pick the **Adaptive** recipe for progressive feature discovery, or **Tutorial** for a guided walkthrough.
+On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
 
-> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing the kernel itself.
+```text
+project/
+└── .lingtai/
+    ├── human/              # your mailbox identity
+    └── <agent>/            # one resident project agent
+        ├── inbox/ outbox/  # messages wake the agent
+        ├── knowledge/      # durable facts and lessons
+        ├── system/         # pad, summaries, standing rules
+        └── logs/           # inspectable runtime trace
+```
+
+> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
 
 For source builds, mainland-China mirror setup, and from-tarball install paths, see [Install in detail](#install-in-detail).
 
-## Use it for
+## What it is good at
 
-Concrete things people run LingTai for today:
-
-- **A daily project briefing.** Each morning the assistant scans what changed, summarizes outstanding work, and posts the brief to Telegram or your TUI before you sit down.
-- **Triage GitHub issues and PRs.** It reads new activity, categorizes, drafts replies for review, and queues anything risky for your attention.
-- **Prepare a livestream or talk.** Outline, rehearse arguments, gather references, build slide notes, hold them in project memory across sessions.
-- **Research and investor memos.** Multi-source web research, web reading, paper fetching, then drafting and revision with a fact trail you can audit.
-- **Long-running coding and review work.** It can use Claude Code, Codex, or OpenCode as its hands: the coding CLI makes precise edits, while LingTai owns the plan, memory, review log, and human updates.
-- **Schedules and reminders that act, not just notify.** "Every weekday at 9, check the deploy queue and ping me on Telegram if anything is stuck."
-- **Personal knowledge that survives.** Decisions, paths, collaborator preferences, lessons — kept as durable knowledge entries owned by the assistant, not by a chat window.
-
-## What it can do
-
-| | |
+| Use LingTai when you want... | What the agent actually does |
 |---|---|
-| **Lives in your project** | One `.lingtai/` folder per project. The assistant is a real process with a directory home — you can `ls`, `cat`, and `tail -f` it. |
-| **Long-term memory you can read** | Pad for active context, knowledge for durable facts, character for who the assistant is. Plain Markdown on disk, not a hidden vector store. |
-| **Skills and workflows** | Reusable, on-demand procedures: web research, paper fetching, vision/audio understanding, MCP debugging, release pipelines, your own. Skills load when relevant; your prompt stays small. |
-| **Multiple channels, one mind** | Talk to the same assistant from the TUI, Telegram, Feishu/Lark, WeChat, WhatsApp, or IMAP email. External messages wake the same long-lived process, with the same memory and tools. |
-| **Real tools** | Read/write files, run shell commands, browse the web, fetch and extract pages, understand images, work with audio, call any MCP server, and delegate implementation to coding CLIs like Claude Code, Codex, or OpenCode. |
-| **Schedules and automation** | Recurring tasks, scheduled checks, and reminders the assistant *acts on*, with delivery to whichever channel you prefer. |
-| **Grows into a team when needed** | Spawn persistent avatars (specialist peers with their own memory) or short-lived daemons (focused workers for one batch task) — supervise the whole network from one place. |
-| **Visual portal** | `lingtai-portal` renders the live agent network: who is alive, what they are working on, who mailed whom, how it grew. |
-| **Lifecycle you control** | Sleep, wake, refresh, revive, or clear an assistant when needed. Crash-safe: `/doctor` repairs the common failure modes. |
+| **A daily project operator** | Scans changes, remembers decisions, summarizes blockers, and posts a brief before you sit down. |
+| **GitHub triage with judgment** | Reads issues/PRs, categorizes risk, drafts replies or patches, and stops for approval before real side effects. |
+| **Research that becomes an artifact** | Searches, fetches, compares, cites, and ships a standalone HTML memo instead of a loose chat transcript. |
+| **Coding work that can run long** | Uses Claude Code, Codex, OpenCode, shell commands, and local files while LingTai keeps the plan and communication. |
+| **Schedules that act** | "Every weekday at 9, check the deploy queue and ping me if anything is stuck" — not just a reminder. |
+| **Memory across sessions** | Keeps paths, preferences, collaborator context, lessons, and reusable procedures for the next run. |
+
+## Why it is different
+
+| Ordinary chat / one-shot agent | LingTai |
+|---|---|
+| The conversation is the product. | The project agent is the product; the conversation is only one input channel. |
+| Closing the window ends the relationship. | The agent has a local home, mailbox, logs, memory, and lifecycle. |
+| Tool use is hidden in one transcript. | State is filesystem-first: inbox/outbox, reports, knowledge, and artifacts are inspectable with normal developer tools. |
+| Scaling means juggling more chats. | Spawn persistent avatars for specialists or short-lived daemons for parallel work; watch the topology in the portal. |
+| A bad turn means restart and hope. | Sleep, wake, refresh, CPR, clear, doctor, and molt are built into the runtime. |
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+    human[Human] --> channels[TUI / Telegram / Email / Feishu / WeChat]
+    channels --> agent[Resident LingTai agent]
+    agent --> tools[Files / Bash / Web / Vision / MCP / Coding CLIs]
+    agent --> memory[Pad / Knowledge / Skills / Character]
+    agent --> lifecycle[Sleep / Wake / Refresh / CPR / Molt]
+    agent --> network[Avatars + Daemons]
+    network --> portal[Live portal visualization]
+    tools --> artifacts[Reports / patches / notes / scheduled work]
+    memory --> agent
+```
 
 ## Grows with the work
 
-Most projects start with one assistant and stay there. When that is enough, you ignore everything below. When the work gets bigger, LingTai has a path up: an **AI agent organization** with roles, memory, handoffs, and supervision — not just more chat tabs.
+Start with one assistant. When the work grows, the network grows with it:
 
-- **Forget noise, keep experience.** Context windows are finite. When a session gets long, the assistant **molts**: it writes a summary, sheds the transient conversation, and the next self picks up with pad + character + knowledge + skills + mail intact. You do not start over.
-- **Hand off to a specialist.** Spawn an **avatar** — a peer assistant with its own home, memory, and life cycle. Give it a long-running goal (own the docs site, own the support inbox, own this research thread). It keeps learning even when you close the laptop.
-- **Use coding agents as hands.** A daemon can be a normal LingTai worker, or it can run a coding CLI backend such as Claude Code, Codex, or OpenCode. LingTai keeps the goal, memory, and conversation with you; the coding agent performs the verifiable file edits and tests.
-- **Split a batch.** Spawn a **daemon** — a short-lived worker for one focused job (scan 200 files, draft 50 replies, run 30 reviews in parallel). Daemons return results and disappear; the parent keeps your attention.
-- **Watch it from the portal.** As the network grows, the portal shows who is alive, who has been mailing whom, and how the topology evolved. Use it to debug, to admire, or to plan the next refactor.
+- **Molt instead of forgetting.** Long sessions shed noisy transcript while carrying forward summaries and durable memory.
+- **Spawn an avatar.** Give a persistent specialist its own memory, mailbox, and responsibility.
+- **Emanate a daemon.** Split a noisy batch into short-lived workers and keep only the conclusions.
+- **Use coding agents as hands.** Claude Code, Codex, and OpenCode can execute precise repo edits while LingTai owns the plan and communication.
+- **Watch it live.** The portal shows who is alive, what they are doing, and how the network has changed.
 
-You do not have to opt in. A single assistant works fine on its own — the network is the ceiling, not the floor.
+<div align="center">
+
+<img src="docs/assets/network-demo.gif" alt="LingTai portal showing a live local network of long-lived project agents" width="100%">
+
+</div>
 
 ## External channels
 
