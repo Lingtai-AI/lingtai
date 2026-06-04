@@ -163,6 +163,12 @@ flowchart LR
 }
 ```
 
+## 文档
+
+- 初用者，可先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)，亦可观 [火柴人动画版](docs/beginner-work-manual-stick-figure.zh.html)。
+- 接外渠者，于 TUI 中用 `/mcp`，再读相应插件之入门文。
+- 读源码者，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
+
 ## 同道
 
 诸君若有问、有疑、有议，可于 [GitHub Issues](https://github.com/Lingtai-AI/lingtai/issues) 或 [Discussions](https://github.com/Lingtai-AI/lingtai/discussions) 言之。

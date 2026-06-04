@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beginner work manual PR explainer</title>
+<style>
+:root{--ink:#1d2b26;--muted:#64736d;--bg:#f6f3ea;--card:#fffdf7;--line:#d9cdb5;--green:#2f6f57;--gold:#b8862b;--red:#b85c55;--shadow:0 10px 30px rgba(51,43,26,.10)}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.65}.wrap{max-width:980px;margin:0 auto;padding:32px 18px 64px}header,.card{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:24px;margin:18px 0}h1{margin:.2em 0;font-size:36px}h2{margin-top:.2em;color:var(--green)}code{background:#f0eadc;padding:.1em .35em;border-radius:6px}.ok{border-left:5px solid var(--green)}.warn{border-left:5px solid var(--gold)}.risk{border-left:5px solid var(--red)}ul{padding-left:1.3em}.diff{white-space:pre-wrap;background:#202821;color:#eaf3ec;border-radius:12px;padding:14px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}.meta{color:var(--muted)}
+</style>
+</head>
+<body><div class="wrap">
+<header>
+  <p class="meta">LingTai docs PR explainer · prepared 2026-06-04</p>
+  <h1>Beginner-friendly LingTai work manual</h1>
+  <p>This report explains the docs-only change that turns GitHub issue #198 into a maintainable beginner manual plus a standalone animated HTML version.</p>
+</header>
+<section class="card ok"><h2>TL;DR</h2>
+<ul>
+<li>Adds <code>docs/beginner-work-manual.zh.md</code>, a plain-language Chinese beginner manual.</li>
+<li>Adds <code>docs/beginner-work-manual-stick-figure.zh.html</code>, a self-contained stick-figure animated version.</li>
+<li>Adds README entry points in <code>README.zh.md</code>, <code>README.md</code>, and <code>README.wen.md</code>.</li>
+<li>Addresses <a href="https://github.com/Lingtai-AI/lingtai/issues/198">Lingtai-AI/lingtai#198</a>.</li>
+</ul>
+</section>
+<section class="card"><h2>Baseline</h2>
+<p>Issue #198 asked for a less developer-centric user manual that explains installation, first launch, API/model setup concepts, slash commands, built-in capabilities, daemon/avatar, memory layers, context/molt, and safety/privacy reminders. The current README already frames LingTai as an AI organization and documents installation and architecture, but there was no single beginner-oriented manual linked from the docs path.</p>
+</section>
+<section class="card"><h2>What was done</h2>
+<ul>
+<li>Wrote a Markdown manual using beginner-first explanations and source-boundary notes.</li>
+<li>Included sections requested by the human review pass: how to trigger daemon/avatar, what to do when context explodes, what common slash commands mean, and what soul flow is.</li>
+<li>Copied the reviewed standalone HTML animation into <code>docs/</code> with inline CSS/SVG and no remote assets.</li>
+<li>Linked the manual from localized READMEs so new users can find it without digging through issues.</li>
+</ul>
+<div class="diff">README.zh.md:
++ 第一次用？... 也可以先读 docs/beginner-work-manual.zh.md
++ 想看可视化解释？打开 docs/beginner-work-manual-stick-figure.zh.html</div>
+</section>
+<section class="card"><h2>Validation</h2>
+<ul>
+<li><code>python3 -m html.parser</code>-equivalent parser check for the standalone HTML and this explainer.</li>
+<li><code>git diff --check</code>.</li>
+<li>Secret/private-path grep for local home-path patterns, <code>sk-...</code>, <code>Bearer ...</code>, and Telegram-token-like patterns in the new docs/report.</li>
+<li>Manual inspection of README link insertion points and issue #198 requirements.</li>
+</ul>
+</section>
+<section class="card warn"><h2>Risks / decisions</h2>
+<ul>
+<li>The manual is Chinese-first because issue #198 and the reviewed draft are Chinese. English README gets a pointer rather than a full translation.</li>
+<li>Slash-command descriptions are intentionally marked version-sensitive and defer to the live TUI/README.</li>
+<li>No code or runtime behavior changes are included.</li>
+</ul>
+</section>
+<section class="card"><h2>Next steps</h2>
+<ul>
+<li>Maintainers can decide whether to translate the manual fully into English.</li>
+<li>If TUI command names change, update the manual alongside README command docs.</li>
+<li>The HTML animation can be embedded or linked from future website/tutorial pages.</li>
+</ul>
+</section>
+<section class="card"><h2>Source index</h2>
+<ul>
+<li><code>README.zh.md</code> at current <code>origin/main</code>.</li>
+<li><a href="https://github.com/Lingtai-AI/lingtai/issues/198">Issue #198</a>.</li>
+<li>Reviewed standalone HTML draft prepared for the beginner manual request.</li>
+</ul>
+</section>
+</div></body></html>
