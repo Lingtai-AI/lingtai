@@ -40,6 +40,30 @@ func testPresetEditorPreset() preset.Preset {
 	}
 }
 
+func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
+	llm := map[string]interface{}{
+		"provider":    "codex",
+		"model":       "gpt-5.5",
+		"api_key":     nil,
+		"api_key_env": "",
+		"base_url":    "https://chatgpt.com/backend-api/codex",
+	}
+	if serviceTier != nil {
+		llm["service_tier"] = serviceTier
+	}
+	return preset.Preset{
+		Name:        "codex-test",
+		Description: preset.PresetDescription{Summary: "Codex editor test preset"},
+		Manifest: map[string]interface{}{
+			"llm": llm,
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "codex"},
+				"vision":     map[string]interface{}{"provider": "codex"},
+			},
+		},
+	}
+}
+
 func TestPresetEditorSmallHeightKeepsSaveVisible(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	var cmd tea.Cmd
@@ -115,10 +139,7 @@ func TestPresetEditorAPIKeyEditableWhenAlreadyStored(t *testing.T) {
 		t.Fatalf("expected existing key to render masked, got %q", got)
 	}
 
-	// Walk cursor to feAPIKey (index 9 in editorFieldOrder).
-	for i := 0; i < 9; i++ {
-		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
+	m.cursor = editorFieldOrderIndex(t, feAPIKey)
 	if editorFieldOrder[m.cursor] != feAPIKey {
 		t.Fatalf("expected cursor on feAPIKey, got %v", editorFieldOrder[m.cursor])
 	}
@@ -228,9 +249,7 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	for i := 0; i < 9; i++ {
-		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
+	m.cursor = editorFieldOrderIndex(t, feAPIKey)
 	if editorFieldOrder[m.cursor] != feAPIKey {
 		t.Fatalf("expected cursor on feAPIKey, got %v", editorFieldOrder[m.cursor])
 	}
@@ -314,6 +333,125 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 	}
 }
 
+func TestPresetEditorCodexServiceTierFastAndNormal(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feServiceTier)
+
+	if !m.fieldVisible(feServiceTier) {
+		t.Fatalf("codex service tier row should be visible")
+	}
+	if got := m.fieldString(feServiceTier); got != "normal" {
+		t.Fatalf("empty llm.service_tier displays %q, want normal", got)
+	}
+
+	m.cycleFocused(+1)
+	llm := m.working.Manifest["llm"].(map[string]interface{})
+	if got, _ := llm["service_tier"].(string); got != "fast" {
+		t.Fatalf("cycling normal -> fast wrote service_tier=%#v, want fast", llm["service_tier"])
+	}
+	_, cmd := m.commit()
+	commit := cmd().(PresetEditorCommitMsg)
+	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	if got, _ := committedLLM["service_tier"].(string); got != "fast" {
+		t.Fatalf("committed fast service_tier=%#v, want fast", committedLLM["service_tier"])
+	}
+
+	m.cycleFocused(+1)
+	if _, ok := llm["service_tier"]; ok {
+		t.Fatalf("cycling fast -> normal should remove llm.service_tier; got %#v", llm["service_tier"])
+	}
+	_, cmd = m.commit()
+	commit = cmd().(PresetEditorCommitMsg)
+	committedLLM = commit.Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committedLLM["service_tier"]; ok {
+		t.Fatalf("committed normal service tier should omit llm.service_tier; got %#v", committedLLM["service_tier"])
+	}
+}
+
+func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T) {
+	cases := []struct {
+		name        string
+		serviceTier interface{}
+		wantDisplay string
+		wantSaved   bool
+	}{
+		{name: "absent", serviceTier: nil, wantDisplay: "normal"},
+		{name: "fast", serviceTier: "fast", wantDisplay: "fast", wantSaved: true},
+		{name: "unknown", serviceTier: "flex", wantDisplay: "normal"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(tc.serviceTier), "en", nil, "", false)
+			if got := m.fieldString(feServiceTier); got != tc.wantDisplay {
+				t.Fatalf("service tier display = %q, want %q", got, tc.wantDisplay)
+			}
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
+			got, saved := llm["service_tier"].(string)
+			if saved != tc.wantSaved {
+				t.Fatalf("committed service_tier saved=%v, want %v; value=%#v", saved, tc.wantSaved, llm["service_tier"])
+			}
+			if saved && got != "fast" {
+				t.Fatalf("committed service_tier=%q, want fast", got)
+			}
+		})
+	}
+}
+
+func TestPresetEditorServiceTierHiddenForNonCodexAndPreserved(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	view := m.View()
+
+	if m.fieldVisible(feServiceTier) {
+		t.Fatalf("service tier row should be hidden for non-codex provider")
+	}
+	if strings.Contains(view, "service_tier") {
+		t.Fatalf("non-codex editor should not render service_tier row; view:\n%s", view)
+	}
+
+	m.cursor = editorFieldOrderIndex(t, feModel)
+	m.moveCursor(+1)
+	if editorFieldOrder[m.cursor] == feServiceTier {
+		t.Fatalf("cursor landed on hidden service tier field for non-codex preset")
+	}
+	if editorFieldOrder[m.cursor] != feAPICompat {
+		t.Fatalf("cursor after model = %v, want feAPICompat", editorFieldOrder[m.cursor])
+	}
+
+	llm := m.working.Manifest["llm"].(map[string]interface{})
+	llm["service_tier"] = "provider-specific"
+	_, cmd := m.commit()
+	commit := cmd().(PresetEditorCommitMsg)
+	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	if got, _ := committedLLM["service_tier"].(string); got != "provider-specific" {
+		t.Fatalf("non-codex commit should preserve llm.service_tier; got %#v", committedLLM["service_tier"])
+	}
+}
+
+func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset("fast"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+
+	m.cycleFocused(+1) // codex -> custom in provider picker order.
+	llm := m.working.Manifest["llm"].(map[string]interface{})
+	if got := llm["provider"]; got != "custom" {
+		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
+	}
+	if got, _ := llm["service_tier"].(string); got != "fast" {
+		t.Fatalf("provider switch should preserve existing service_tier; got %#v", llm["service_tier"])
+	}
+
+	_, cmd := m.commit()
+	commit := cmd().(PresetEditorCommitMsg)
+	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	if got, _ := committedLLM["service_tier"].(string); got != "fast" {
+		t.Fatalf("non-codex commit after provider switch should preserve service_tier; got %#v", committedLLM["service_tier"])
+	}
+}
+
 func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
@@ -329,6 +467,17 @@ func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
 			t.Fatalf("view missing optional capability %q; view:\n%s", capName, view)
 		}
 	}
+}
+
+func editorFieldOrderIndex(t *testing.T, want editorField) int {
+	t.Helper()
+	for i, got := range editorFieldOrder {
+		if got == want {
+			return i
+		}
+	}
+	t.Fatalf("field %v missing from editorFieldOrder", want)
+	return -1
 }
 
 func renderedLineCount(s string) int {

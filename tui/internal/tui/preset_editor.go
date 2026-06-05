@@ -48,6 +48,7 @@ const (
 	feLoses
 	feProvider
 	feModel
+	feServiceTier
 	feAPICompat
 	feBaseURL
 	feAPIKey
@@ -76,7 +77,7 @@ var capFieldNames = map[editorField]string{
 // optional/provider-conditional capabilities appear as editable rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feAPICompat, feBaseURL, feAPIKey,
+	feProvider, feModel, feServiceTier, feAPICompat, feBaseURL, feAPIKey,
 	feCapWebSearch, feCapVision,
 	feSave,
 }
@@ -137,6 +138,8 @@ var providerModels = map[string][]string{
 	// served on the codex endpoint, so we omit it to avoid 4xx breakage).
 	"codex": {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
 }
+
+var codexServiceTierOptions = []string{"normal", "fast"}
 
 // modelHasVision reports whether a given model accepts image input.
 // Drives both the disabled-row rendering and the model-switch default
@@ -603,6 +606,10 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.input.Focus()
 			m.mode = emInline
 		}
+	case feServiceTier:
+		if m.isCodexProvider() {
+			m.cycleFocused(+1)
+		}
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
@@ -838,6 +845,38 @@ func (m *PresetEditorModel) applyInline(val string) {
 	}
 }
 
+func (m PresetEditorModel) isCodexProvider() bool {
+	return asString(m.llmMap()["provider"]) == "codex"
+}
+
+func (m PresetEditorModel) codexServiceTier() string {
+	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
+	if asString(llm["service_tier"]) == "fast" {
+		return "fast"
+	}
+	return "normal"
+}
+
+func (m *PresetEditorModel) setCodexServiceTier(tier string) {
+	llm := m.llmMap()
+	if asString(llm["provider"]) != "codex" || tier != "fast" {
+		delete(llm, "service_tier")
+		return
+	}
+	llm["service_tier"] = "fast"
+}
+
+func normalizeServiceTier(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil || asString(llm["provider"]) != "codex" {
+		return
+	}
+	if asString(llm["service_tier"]) == "fast" {
+		return
+	}
+	delete(llm, "service_tier")
+}
+
 // setExtra writes into Description.Extra, allocating the map on first
 // use. Empty string deletes the key.
 func (m *PresetEditorModel) setExtra(key, val string) {
@@ -922,6 +961,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
+	case feServiceTier:
+		if m.isCodexProvider() {
+			m.setCodexServiceTier(cycleString(codexServiceTierOptions, m.codexServiceTier(), dir))
+		}
 	case feTier:
 		// Cycle ""→1→2→3→4→5→"" with → and reverse with ←. tierValues
 		// is ordered best-first ([5..1]) for the library's picker, so
@@ -993,6 +1036,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 			delete(llm, "api_key_env")
 		}
 	}
+	normalizeServiceTier(committed.Manifest)
 	return m, func() tea.Msg {
 		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}
@@ -1026,6 +1070,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
+		normalizeServiceTier(committed.Manifest)
 		return m, func() tea.Msg {
 			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 		}
@@ -1043,6 +1088,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
+		normalizeServiceTier(committed.Manifest)
 		return m, func() tea.Msg {
 			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 		}
@@ -1087,6 +1133,8 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 	case feModel:
 		s, _ := llm["model"].(string)
 		return s
+	case feServiceTier:
+		return m.codexServiceTier()
 	case feAPICompat:
 		s, _ := llm["api_compat"].(string)
 		return s
@@ -1253,6 +1301,9 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	rows = append(rows, row(feProvider, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4)))
 	rows = append(rows, row(feModel, m.row(feModel, lbl("model"), asString(llm["model"]), width-4)))
+	if m.fieldVisible(feServiceTier) {
+		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.codexServiceTier(), width-4)))
+	}
 	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
@@ -1300,6 +1351,11 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	}
 	if f == feModel {
 		if strip := m.modelRadioStrip(focused, valStyle); strip != "" {
+			return marker + keyStyle.Render(key) + strip
+		}
+	}
+	if f == feServiceTier {
+		if strip := m.serviceTierRadioStrip(focused, valStyle); strip != "" {
 			return marker + keyStyle.Render(key) + strip
 		}
 	}
@@ -1467,6 +1523,27 @@ func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style
 	return strings.Join(parts, "  ")
 }
 
+func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	if !m.isCodexProvider() {
+		return ""
+	}
+	current := m.codexServiceTier()
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	parts := make([]string, 0, len(codexServiceTierOptions))
+	for _, tier := range codexServiceTierOptions {
+		if tier == current {
+			if focused {
+				parts = append(parts, valStyle.Render("● "+tier))
+			} else {
+				parts = append(parts, "● "+tier)
+			}
+		} else {
+			parts = append(parts, subtle.Render("○ "+tier))
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
 // baseURLRadioStrip renders the base_url field as a horizontal radio
 // strip showing region labels (e.g. "● CN  ○ INTL") when the current
 // provider has regional endpoints. Returns "" when there's no region
@@ -1502,6 +1579,8 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 	switch f {
 	case feProvider, feAPICompat, feTier:
 		return true
+	case feServiceTier:
+		return m.isCodexProvider()
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
 		_, hasPicker := providerModels[provider]
@@ -1584,17 +1663,32 @@ func (m PresetEditorModel) renderPreview(width, height int) string {
 }
 
 func (m *PresetEditorModel) moveCursor(delta int) {
-	m.cursor += delta
-	if m.cursor < 0 {
-		m.cursor = 0
+	if delta == 0 {
+		m.normalizeCursor()
+		m.ensureFocusedVisible()
+		return
 	}
-	if m.cursor > saveFieldIndex {
-		m.cursor = saveFieldIndex
+	step := 1
+	if delta < 0 {
+		step = -1
+		delta = -delta
 	}
+	for i := 0; i < delta; i++ {
+		next := m.cursor + step
+		for next >= 0 && next <= saveFieldIndex && !m.fieldVisible(editorFieldOrder[next]) {
+			next += step
+		}
+		if next < 0 || next > saveFieldIndex {
+			break
+		}
+		m.cursor = next
+	}
+	m.normalizeCursor()
 	m.ensureFocusedVisible()
 }
 
 func (m *PresetEditorModel) ensureFocusedVisible() {
+	m.normalizeCursor()
 	if m.width == 0 || m.height == 0 {
 		return
 	}
@@ -1617,6 +1711,39 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 	}
 	if m.scrollOffset < 0 {
 		m.scrollOffset = 0
+	}
+}
+
+func (m PresetEditorModel) fieldVisible(f editorField) bool {
+	switch f {
+	case feServiceTier:
+		return m.isCodexProvider()
+	default:
+		return true
+	}
+}
+
+func (m *PresetEditorModel) normalizeCursor() {
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor > saveFieldIndex {
+		m.cursor = saveFieldIndex
+	}
+	if m.fieldVisible(editorFieldOrder[m.cursor]) {
+		return
+	}
+	for i := m.cursor + 1; i <= saveFieldIndex; i++ {
+		if m.fieldVisible(editorFieldOrder[i]) {
+			m.cursor = i
+			return
+		}
+	}
+	for i := m.cursor - 1; i >= 0; i-- {
+		if m.fieldVisible(editorFieldOrder[i]) {
+			m.cursor = i
+			return
+		}
 	}
 }
 

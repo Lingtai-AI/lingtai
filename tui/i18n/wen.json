@@ -448,6 +448,7 @@
   "preset_editor.field_loses": "短板",
   "preset_editor.field_provider": "提供商",
   "preset_editor.field_model": "模型",
+  "preset_editor.field_service_tier": "服务层",
   "preset_editor.field_api_compat": "API 兼容",
   "preset_editor.field_base_url": "端点",
   "preset_editor.field_api_key_env": "密钥环境变量",

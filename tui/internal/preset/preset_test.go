@@ -207,6 +207,41 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	})
 }
 
+func TestCodexPresetDefaultOmitsServiceTier(t *testing.T) {
+	p := codexPreset()
+	llm, ok := p.Manifest["llm"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("codex manifest.llm missing or wrong type: %T", p.Manifest["llm"])
+	}
+	if _, ok := llm["service_tier"]; ok {
+		t.Fatalf("codex preset default should omit llm.service_tier; got %#v", llm["service_tier"])
+	}
+
+	tmpDir := t.TempDir()
+	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
+	globalDir := filepath.Join(tmpDir, "global")
+	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
+		t.Fatalf("create lingtai dir: %v", err)
+	}
+	if err := GenerateInitJSON(p, "codex-agent", "codex-agent", lingtaiDir, globalDir); err != nil {
+		t.Fatalf("GenerateInitJSON() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "codex-agent", "init.json"))
+	if err != nil {
+		t.Fatalf("read init.json: %v", err)
+	}
+	var initJSON map[string]interface{}
+	if err := json.Unmarshal(data, &initJSON); err != nil {
+		t.Fatalf("parse init.json: %v", err)
+	}
+	manifest := initJSON["manifest"].(map[string]interface{})
+	generatedLLM := manifest["llm"].(map[string]interface{})
+	if _, ok := generatedLLM["service_tier"]; ok {
+		t.Fatalf("generated codex init.json should omit llm.service_tier; got %#v", generatedLLM["service_tier"])
+	}
+}
+
 func TestDelete_RemovesFile(t *testing.T) {
 	withTempPresets(t, func() {
 		p := DefaultPreset()

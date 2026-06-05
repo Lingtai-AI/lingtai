@@ -453,6 +453,7 @@
   "preset_editor.field_loses": "loses",
   "preset_editor.field_provider": "provider",
   "preset_editor.field_model": "model",
+  "preset_editor.field_service_tier": "service_tier",
   "preset_editor.field_api_compat": "api_compat",
   "preset_editor.field_base_url": "base_url",
   "preset_editor.field_api_key_env": "api_key_env",
