@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Issue #236 — README Development prerequisites</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; margin: 2rem auto; max-width: 920px; padding: 0 1rem; color: #172033; }
+    h1, h2 { line-height: 1.2; }
+    .summary { background: #eef7ff; border-left: 4px solid #2b7cff; padding: 1rem; border-radius: 8px; }
+    code { background: #f3f5f7; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #d8dee9; padding: 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f6f8fa; }
+    .ok { color: #137333; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Issue #236 — README Development prerequisites</h1>
+  <div class="summary">
+    <strong>Conclusion:</strong> this docs-only change adds a concise prerequisites list to the top of the README <code>## Development</code> section so contributors know which tools are needed before running the existing local validation commands.
+  </div>
+
+  <h2>What changed</h2>
+  <p>The PR adds a <code>### Prerequisites</code> subsection to <code>README.md</code> before the worktree and validation recipes. It does not modify runtime code, build scripts, dependency manifests, or contributor automation.</p>
+
+  <h2>Prerequisite evidence</h2>
+  <table>
+    <thead><tr><th>Tool</th><th>Why it is listed</th></tr></thead>
+    <tbody>
+      <tr><td>Git</td><td>The README development flow uses a worktree-based contribution workflow.</td></tr>
+      <tr><td>Go 1.26.1 or newer compatible Go release</td><td>Both <code>tui/go.mod</code> and <code>portal/go.mod</code> declare <code>go 1.26.1</code>.</td></tr>
+      <tr><td>Node.js and npm</td><td>The portal web frontend under <code>portal/web</code> is built with <code>npm ci</code> and <code>npm run build</code>.</td></tr>
+      <tr><td>make</td><td>The repository has component Makefiles in <code>tui/</code> and <code>portal/</code>; the wording avoids implying a root-level <code>make build</code>.</td></tr>
+      <tr><td>POSIX-compatible shell</td><td>The README and installer use shell snippets; Windows users should use WSL/MSYS2 or equivalent.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Risk assessment</h2>
+  <p><span class="ok">Low risk.</span> The change is documentation-only. The Node.js wording intentionally says “recent LTS” instead of claiming the repository pins an exact Node version, because <code>portal/web/package.json</code> currently has no <code>engines</code> field.</p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>grep -n '^go ' tui/go.mod portal/go.mod</code> confirms both modules declare <code>go 1.26.1</code>.</li>
+    <li><code>test -f portal/web/package.json</code> confirms the portal frontend manifest exists.</li>
+    <li><code>git diff --check</code> passes.</li>
+  </ul>
+</body>
+</html>

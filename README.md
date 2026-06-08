@@ -328,6 +328,16 @@ This repo carries two Go binaries:
 
 ## Development
 
+### Prerequisites
+
+Before running the local development commands below, make sure these tools are available:
+
+- **Git** for cloning the repository and using the worktree-based contribution workflow.
+- **Go 1.26.1 or newer compatible Go release**. Both Go modules currently declare `go 1.26.1` (`tui/go.mod` and `portal/go.mod`).
+- **Node.js and npm** for the portal web frontend under `portal/web` (`npm ci` and `npm run build`). Use a recent LTS Node.js release unless the frontend tooling is pinned more tightly in the future.
+- **make** for the Makefile-based workflows in `tui/` and `portal/` (for example, `cd tui && make build` or `cd portal && make build`). The validation commands below also show the direct `go`/`npm` commands.
+- **A POSIX-compatible shell** for the shell snippets and installer scripts. On Windows, use WSL, MSYS2, or an equivalent environment.
+
 For non-trivial changes, work in a Git worktree off `origin/main`:
 
 ```bash
