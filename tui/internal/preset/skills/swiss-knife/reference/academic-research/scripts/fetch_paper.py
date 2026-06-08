@@ -19,6 +19,9 @@ Tier ladder (stops at first success):
     4. CORE           (institutional repository aggregator)
     5. Publisher-page extraction (zhiping0913/Download_paper) for
        10.1038 / 10.1103 / 10.1063 / 10.1088 / 10.1017
+    5b. Authorized publisher (institutional/licensed access — official DOI
+        landing page → same-host PDF → %PDF- validation; opt-out with
+        --no-institutional). Never bypasses paywalls or handles credentials.
     6. LibGen         (last resort, opt-out with --no-libgen)
 
 Output (per paper):
@@ -45,7 +48,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
@@ -335,6 +338,146 @@ def tier_publisher_extract(meta: dict, out_dir: Path) -> Optional[Path]:
     return None
 
 
+def _same_publisher_host(landing_host: str, candidate_host: str) -> bool:
+    """True iff candidate_host is the landing host, its www. alias, or a
+    subdomain of it. Sibling/parent registrable domains are rejected.
+
+    Deliberately strict (see reference/authorized-publisher-access.md): a
+    publisher's licensed PDF is virtually always on the same host that served
+    the article page, so we accept only that host and things strictly under it.
+    """
+    h = (landing_host or "").lower().lstrip(".")
+    c = (candidate_host or "").lower().lstrip(".")
+    if not h or not c:
+        return False
+    if h.startswith("www."):
+        h = h[4:]
+    if c.startswith("www."):
+        c = c[4:]
+    return c == h or c.endswith("." + h)
+
+
+def tier_authorized_publisher(meta: dict, email: str, out_dir: Path) -> Optional[Path]:
+    """Tier 5b — authorized institutional publisher access.
+
+    Conservative, provenance-heavy probe for paywalled-but-licensed PDFs: it
+    follows the official DOI landing page, looks for a publisher-provided PDF
+    URL on the *same host*, and saves it only after validating
+    same-host/subdomain, Content-Type, and %PDF- magic bytes.
+
+    It NEVER bypasses a paywall/CAPTCHA, captures/replays cookies or
+    credentials, guesses sibling domains, or touches a shadow library. If the
+    environment does not already have licensed access, this tier simply misses
+    and the ladder falls through. See reference/authorized-publisher-access.md.
+    """
+    doi = meta.get("doi")
+    if not doi:
+        return None
+
+    headers = {"User-Agent": UA.format(email=email)}
+    try:
+        landing = requests.get(
+            f"https://doi.org/{doi}", headers=headers,
+            timeout=30, allow_redirects=True,
+        )
+    except requests.RequestException as e:
+        print(f"  [tier-5b] landing resolve failed: {e}", file=sys.stderr)
+        return None
+    if landing.status_code != 200:
+        print(f"  [tier-5b] landing HTTP {landing.status_code}", file=sys.stderr)
+        return None
+
+    landing_url = landing.url
+    landing_host = urlparse(landing_url).hostname or ""
+
+    # 1) Prefer the Highwire/Scholar citation_pdf_url meta tag.
+    pdf_url: Optional[str] = None
+    if m := re.search(
+        r'<meta[^>]+name=["\']citation_pdf_url["\'][^>]+content=["\']([^"\']+)["\']',
+        landing.text, re.IGNORECASE,
+    ):
+        pdf_url = urljoin(landing_url, m.group(1))
+    elif m := re.search(
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']citation_pdf_url["\']',
+        landing.text, re.IGNORECASE,
+    ):
+        pdf_url = urljoin(landing_url, m.group(1))
+
+    # 2) Else: a same-host .pdf anchor on the landing page.
+    if not pdf_url:
+        for href in re.findall(r'href=["\']([^"\']+\.pdf[^"\']*)["\']', landing.text, re.IGNORECASE):
+            cand = urljoin(landing_url, href)
+            if _same_publisher_host(landing_host, urlparse(cand).hostname or ""):
+                pdf_url = cand
+                break
+
+    if not pdf_url:
+        return None
+    if not _same_publisher_host(landing_host, urlparse(pdf_url).hostname or ""):
+        print("  [tier-5b] candidate PDF off official host — rejected", file=sys.stderr)
+        return None
+
+    # Validated download: status 200 + same host + application/pdf + %PDF- bytes.
+    dst = out_dir / "paper.pdf"
+    prov = {
+        "doi": doi,
+        "landing_url": landing_url,
+        "pdf_url": pdf_url,
+        "final_url": None,
+        "http_status": None,
+        "content_type": None,
+        "bytes": None,
+        "host_check": None,
+    }
+    try:
+        with requests.get(pdf_url, headers=headers, stream=True,
+                          timeout=60, allow_redirects=True) as r:
+            prov["http_status"] = r.status_code
+            prov["final_url"] = r.url
+            prov["content_type"] = r.headers.get("content-type", "")
+            if r.status_code != 200:
+                print(f"  [tier-5b] PDF HTTP {r.status_code}", file=sys.stderr)
+                return None
+            final_host = urlparse(r.url).hostname or ""
+            if not _same_publisher_host(landing_host, final_host):
+                print("  [tier-5b] PDF redirected off official host — rejected", file=sys.stderr)
+                return None
+            prov["host_check"] = "same-host" if final_host.lstrip("www.") == landing_host.lstrip("www.") else "subdomain"
+            if not prov["content_type"].lower().startswith("application/pdf"):
+                print("  [tier-5b] not application/pdf — rejected", file=sys.stderr)
+                return None
+            chunks = r.iter_content(chunk_size=65536)
+            first = next(chunks, b"")
+            if not first.startswith(b"%PDF-"):
+                print("  [tier-5b] missing %PDF- magic bytes — rejected", file=sys.stderr)
+                return None
+            total = len(first)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_suffix(".pdf.part")
+            with open(tmp, "wb") as f:
+                f.write(first)
+                for chunk in chunks:
+                    if chunk:
+                        total += len(chunk)
+                        if total > 200_000_000:
+                            tmp.unlink(missing_ok=True)
+                            return None
+                        f.write(chunk)
+            if total < 1024:
+                tmp.unlink(missing_ok=True)
+                print("  [tier-5b] body too small — rejected", file=sys.stderr)
+                return None
+            tmp.replace(dst)  # atomic promote
+            prov["bytes"] = total
+    except requests.RequestException as e:
+        print(f"  [tier-5b] PDF download failed: {e}", file=sys.stderr)
+        return None
+
+    # Stash provenance for the manifest. No cookies/auth headers are ever stored.
+    meta["_authorized_provenance"] = prov
+    return dst
+
+
 def tier_libgen(meta: dict, out_dir: Path) -> Optional[Path]:
     """Last-resort LibGen lookup. See reference/libgen-fallback.md for design notes."""
     doi = meta.get("doi")
@@ -431,11 +574,13 @@ TIERS = [
     ("europe_pmc", tier_europe_pmc),
     ("core", tier_core),
     ("publisher_extract", tier_publisher_extract),
+    ("authorized_publisher", tier_authorized_publisher),
     ("libgen", tier_libgen),
 ]
 
 
-def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = True) -> dict:
+def fetch_one(identifier: str, out_root: Path, email: str,
+              allow_libgen: bool = True, allow_institutional: bool = True) -> dict:
     kind, ident = classify(identifier)
     meta = resolve_metadata(kind, ident, email)
     slug = slugify(meta, ident)
@@ -456,6 +601,8 @@ def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = 
 
     for name, fn in TIERS:
         if name == "libgen" and not allow_libgen:
+            continue
+        if name == "authorized_publisher" and not allow_institutional:
             continue
         sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
         print(f"  [tier] {name}...", end=" ", flush=True)
@@ -479,6 +626,10 @@ def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = 
                 "title": meta.get("title"),
                 "ts": int(time.time()),
             }
+            if name == "authorized_publisher":
+                manifest["route"] = "authorized_publisher"
+                if prov := meta.get("_authorized_provenance"):
+                    manifest["provenance"] = prov
             manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
             return manifest
         print("miss")
@@ -504,6 +655,9 @@ def main() -> int:
     p.add_argument("--email", default=DEFAULT_EMAIL,
                    help="email for Unpaywall (use a real address; default from $LINGTAI_RESEARCH_EMAIL)")
     p.add_argument("--no-libgen", action="store_true", help="skip LibGen tier")
+    p.add_argument("--no-institutional", action="store_true",
+                   help="skip the authorized-publisher tier (Tier 5b); use in "
+                        "legal-sensitive or off-network environments")
     p.add_argument("--dry-run", action="store_true", help="resolve metadata only, no PDF fetch")
     args = p.parse_args()
 
@@ -535,7 +689,11 @@ def main() -> int:
     for i, ident in enumerate(identifiers, 1):
         print(f"[{i}/{len(identifiers)}] {ident}")
         try:
-            results.append(fetch_one(ident, out_root, args.email, allow_libgen=not args.no_libgen))
+            results.append(fetch_one(
+                ident, out_root, args.email,
+                allow_libgen=not args.no_libgen,
+                allow_institutional=not args.no_institutional,
+            ))
         except Exception as e:
             print(f"  ERROR: {e}", file=sys.stderr)
             results.append({"status": "error", "reason": str(e), "identifier": ident})

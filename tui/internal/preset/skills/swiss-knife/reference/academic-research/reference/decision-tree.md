@@ -72,7 +72,9 @@ What is your input?
 │   │   ├── Extract DOI (meta[name="citation_doi"]) → follow DOI workflow
 │   │   └── camoufox render (domcontentloaded, not networkidle)
 │   ├── Major paid publishers (Wiley/Elsevier/Science)
-│   │   └── API is the only option; do not attempt direct scraping
+│   │   ├── No access → API metadata only; do not attempt direct scraping or paywall bypass
+│   │   └── On a licensed institutional network → authorized-publisher tier
+│   │       (official landing → same-host PDF → %PDF- check; see authorized-publisher-access.md)
 │   ├── All OA channels failed (Unpaywall/CORE/Europe PMC/arXiv)
 │   │   └── LibGen fallback → see libgen-fallback.md (last resort)
 │   └── Other URLs
@@ -155,7 +157,7 @@ Key integration points:
 
 1. **Google Scholar max 1 request per session** — 429 risk is very high; on 429, fall back to OpenAlex
 2. **Nature/Springer always use `domcontentloaded`** — `networkidle` causes infinite loading timeouts
-3. **Major paid publishers return 403** — Wiley/Elsevier/Science/PNAS almost always 403; API is the only option
+3. **Major paid publishers return 403** — Wiley/Elsevier/Science/PNAS almost always 403 *without access*; API is the only anonymous option. On a **licensed institutional network**, the authorized-publisher tier ([authorized-publisher-access.md](authorized-publisher-access.md)) can fetch the official PDF using access you already have — it never bypasses the paywall or handles credentials
 4. **arXiv PDF has no direct link** — No direct PDF link on the page; derive `/pdf/{ID}.pdf` from the ID
 5. **Playwright stealth is outdated** — Use camoufox or playwright-stealth v2 instead of the old API
 6. **Scanned PDFs** — PyMuPDF cannot extract text; OCR is needed (tesseract / ocrmypdf)

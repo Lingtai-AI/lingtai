@@ -16,6 +16,7 @@ Given a DOI / arXiv ID / paper URL, retrieve the paper's full text (PDF or plain
 3. **Find free PDF** — Unpaywall / arXiv direct link / PMC.
 4. **Download PDF** — Direct download via curl / requests.
 5. **(If OA channels fail, DOI is a supported publisher) Publisher-page extraction** — Nature/APS/AIP/IOP/Cambridge → structured Markdown with LaTeX preserved. See [publisher-page-extraction.md](publisher-page-extraction.md).
+5b. **(If paywalled but you have licensed access) Authorized institutional publisher** — official DOI landing page → same-host publisher PDF → validate `%PDF-` bytes + Content-Type → save with provenance. No paywall bypass, no credential/cookie handling. See [authorized-publisher-access.md](authorized-publisher-access.md).
 6. **(If all of the above fail) LibGen fallback** — See [libgen-fallback.md](libgen-fallback.md) for live mirror discovery and download.
 6. **(If web page, not PDF) Extract web page body** — Select BeautifulSoup or Camoufox based on the site.
 7. **Extract text from PDF** — PyMuPDF text extraction.
@@ -34,7 +35,7 @@ What is the input?
 │   ├─ CrossRef resolve metadata
 │   ├─ Unpaywall find free PDF
 │   │   ├─ Found → Download PDF → Extract text
-│   │   └─ Not found → CORE → Europe PMC → arXiv → publisher-page extract (see publisher-page-extraction.md) → LibGen (last resort, see libgen-fallback.md)
+│   │   └─ Not found → CORE → Europe PMC → arXiv → publisher-page extract (see publisher-page-extraction.md) → authorized institutional publisher (if licensed, see authorized-publisher-access.md) → LibGen (last resort, see libgen-fallback.md)
 │   └─ OpenAlex supplementary metadata
 │
 ├─ arXiv ID (e.g. 2301.00001)
@@ -272,12 +273,13 @@ print(f"Status: {status}, Path: {path}")
 | Scenario | Symptom | Fallback Strategy |
 |----------|---------|-------------------|
 | Unpaywall has no free version | `free: False` | Return landing page URL, prompt user to obtain manually |
-| PDF download returns 403 | `raise_for_status` fails | ① Try downloading via Camoufox browser ② Switch source (PMC / Sci-Hub) |
+| PDF download returns 403 | `raise_for_status` fails | ① Switch OA source (PMC, CORE, arXiv mirror) ② If you have licensed institutional access, use the authorized-publisher tier ([authorized-publisher-access.md](authorized-publisher-access.md)) — it does not defeat the 403, it uses access you already have |
 | PDF is a scanned copy (image format) | PyMuPDF extracts empty text | Requires OCR (pytesseract / Tesseract), outside the scope of this pipeline |
 | Web Tier 2 extraction returns empty | BeautifulSoup finds no match | Fall back to Tier 3: Camoufox browser rendering |
 | Nature/Springer timeout | `networkidle` waits indefinitely | Use `domcontentloaded` event instead (see code comment) |
 | Scholar IP ban | 429 error | ① Wait 60s ② Switch API (OpenAlex) ③ Camoufox + proxy |
-| Major publishers fully block (Wiley/Elsevier) | Cannot download | Only metadata available via API; full text requires institutional access |
+| Major publishers fully block (Wiley/Elsevier) | Cannot download anonymously | If you have **licensed institutional access** (campus/library IP), try the authorized-publisher tier — see [authorized-publisher-access.md](authorized-publisher-access.md). Otherwise only metadata is available via API. |
+| OA fails but you're on a licensed network | Paywalled but subscribed | Authorized institutional publisher tier (5b) — official landing → same-host PDF → `%PDF-` validation, full provenance. See [authorized-publisher-access.md](authorized-publisher-access.md). No paywall bypass, no credential handling. |
 | All OA channels exhausted | Unpaywall + CORE + Europe PMC + arXiv all fail | LibGen fallback — see [libgen-fallback.md](libgen-fallback.md) for live mirror discovery (last resort; legal status varies by jurisdiction) |
 
 ---
@@ -314,4 +316,5 @@ def auto_select_tier(url: str) -> tuple[int, str]:
 - Paper discovery (from keywords/authors) → See [pipeline-discovery.md](pipeline-discovery.md)
 - Citation network & trend analysis → See [pipeline-scholar-analysis.md](pipeline-scholar-analysis.md)
 - Format references → See [pipeline-citation-tracking.md](pipeline-citation-tracking.md)
+- Authorized institutional publisher access (Tier 5b) → See [authorized-publisher-access.md](authorized-publisher-access.md)
 - Comprehensive entry point: What information do I have, and which API should I use? → See [decision-tree.md](decision-tree.md)

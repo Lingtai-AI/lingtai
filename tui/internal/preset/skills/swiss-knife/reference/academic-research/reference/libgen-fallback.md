@@ -2,7 +2,7 @@
 
 > **This is the last-resort fallback.** Use only after Unpaywall, CORE, Europe PMC, and arXiv have all failed. See [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) for the full acquisition chain.
 
-> **Legal notice**: LibGen hosts content of unclear copyright status in many jurisdictions. Use is solely the user's responsibility. Always prefer legitimate open-access channels first. In sensitive jurisdictions, consider using Tor or a VPN.
+> **Legal notice**: LibGen hosts content of unclear copyright status in many jurisdictions. Use is solely the user's responsibility. Always prefer legitimate open-access channels first. If the paper is paywalled but you have **licensed institutional access**, use the authorized-publisher tier ([authorized-publisher-access.md](authorized-publisher-access.md)) *before* this one — it fetches the official, licensed PDF. In sensitive jurisdictions, consider using Tor or a VPN.
 
 ---
 
@@ -177,15 +177,16 @@ If one pattern fails, try the next. The detail page (`ads.php?md5=...`) usually 
 LibGen sits at the end of the acquisition chain:
 
 ```
-Unpaywall → CORE → Europe PMC → arXiv → Publisher OA → LibGen (last resort)
+Unpaywall → CORE → Europe PMC → arXiv → Publisher OA → Authorized publisher (if licensed) → LibGen (last resort)
 ```
 
-**Before trying LibGen**, confirm you have exhausted all legitimate OA channels:
+**Before trying LibGen**, confirm you have exhausted all legitimate channels:
 1. Unpaywall: no OA version found
 2. CORE: no repository copy
 3. Europe PMC: not in PMC (or not biomedical)
 4. arXiv: no preprint version
 5. Publisher page: no free access
+6. Authorized publisher: no licensed institutional access available (or `--no-institutional` set) — see [authorized-publisher-access.md](authorized-publisher-access.md)
 
 Only then proceed to LibGen.
 
