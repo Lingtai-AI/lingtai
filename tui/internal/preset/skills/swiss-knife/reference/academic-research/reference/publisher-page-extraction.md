@@ -3,33 +3,69 @@
 > **Most agents do not need this file.** `scripts/fetch_paper.py` invokes
 > this tier automatically when tiers 1–4 (arXiv / Unpaywall / Europe PMC /
 > CORE) all miss and the DOI prefix matches a supported publisher.
-> Read this only if you need to invoke the tool manually, debug a tier-5
-> failure, or run it outside the script's slug/manifest contract.
+> Read this only if you need to invoke the extractor manually, debug a
+> tier-5 miss, or understand its limits.
+
+> ✅ **Status: in-house, self-contained (issue #136).** This tier no longer
+> depends on any third-party package. The previous design relied on the
+> upstream `zhiping0913/Download_paper` repo, which ships no
+> `setup.py`/`pyproject.toml` and so could never be `pip install`ed — that
+> path has been **removed**. The current extractor is pure stdlib + the
+> `requests` library the skill already uses. There is nothing to install and
+> no install that can fail.
 
 ---
 
 ## What it is
 
-`zhiping0913/Download_paper` is an open-source, AI-friendly extractor that
-opens a publisher's article page in headless Chromium, identifies the
-article body, and produces structured **Markdown with LaTeX formulas
-preserved**, plus high-resolution figures and supplementary materials.
+The Tier-5 extractor is a small set of helpers inside
+`scripts/fetch_paper.py`. Given a DOI whose prefix is in the supported set,
+it:
 
-This is qualitatively different from a generic PDF download:
+1. resolves the DOI to a landing-page URL (the CrossRef resolver URL if
+   present, else `https://doi.org/{doi}`);
+2. issues a single **unauthenticated** HTTP GET (descriptive User-Agent,
+   no cookies, no auth headers);
+3. refuses pages that look like a login / paywall interstitial;
+4. parses `citation_*` / Dublin Core `<meta>` tags for title, authors,
+   journal, abstract, and DOI;
+5. extracts the article body with publisher-agnostic container heuristics
+   (`<article>`, `article-body`/`fulltext`-class `<div>`s, `<main>`, …),
+   stripping nav/script/footer boilerplate; and
+6. writes `paper.md` with a header, the extracted abstract/body, and a
+   **provenance + limitations** footer.
 
-- **PDF tier** (Unpaywall, CORE, arXiv) returns raw bytes; agents must then
-  PyMuPDF-extract text and lose layout/equation fidelity.
-- **Publisher-extract tier** returns Markdown that already has the section
-  structure, citation list, and inline math intact. Better starting
-  material for downstream tasks like literature review or LaTeX writing.
+It is deliberately lightweight. It is **not** a headless-browser renderer
+and does **not** preserve LaTeX, figures, or reference lists faithfully —
+see *Limitations* below.
 
-Repository: https://github.com/zhiping0913/Download_paper
+## Hard policy boundaries
+
+These are enforced by the code, not just documentation:
+
+- **Official pages only.** It fetches exactly the landing URL CrossRef/DOI
+  gives it. It does not crawl, guess alternate hosts, or scrape mirrors.
+- **No paywall or CAPTCHA bypass.** A page matching login/subscription/
+  purchase markers (or a password field plus login wording) is treated as a
+  clean miss — the extractor returns `None` and the ladder falls through to
+  LibGen.
+- **No cookies, sessions, or credentials.** No auth headers are ever sent.
+  If your browser can't read the article without logging in, neither can
+  this tier.
+- **No near-empty artifacts.** If fewer than ~200 characters of body text
+  are recoverable, the tier declines rather than writing a stub `paper.md`.
+
+If you have institutional access, the way to use it is the same way you'd
+read the paper: from a network/host where the publisher already serves the
+HTML unauthenticated (e.g. on-campus IP). This tier captures that HTML; it
+does not manufacture access.
 
 ## When this tier wins
 
 Use only when **all** of the following are true:
 
-1. The paper has no preprint or OA mirror (Unpaywall, Europe PMC, CORE, arXiv all returned no PDF).
+1. The paper has no preprint or OA mirror (Unpaywall, Europe PMC, CORE,
+   arXiv all returned no PDF).
 2. The DOI prefix is in the supported set:
 
    | Prefix | Publisher |
@@ -40,98 +76,111 @@ Use only when **all** of the following are true:
    | 10.1088 | IOP Science (ApJ, ApJL, ApJS, JPhys, …) |
    | 10.1017 | Cambridge University Press |
 
-3. You either have institutional access for the paywalled portion **or**
-   the article is gold/hybrid OA on the publisher site.
-4. The paper is math/formula-heavy and you want the equations preserved.
+3. The official article page is reachable **without logging in** from where
+   the script runs (gold/hybrid OA, or you're on an institutionally-licensed
+   network).
 
 If any of these fail, prefer `tier_libgen` (last-resort PDF) or accept the
 fetch failure and surface it to the user.
 
 ## Manual invocation
 
-The script already does this automatically — only run by hand when
-debugging.
-
-### Install (one-time)
-
-```bash
-pip install git+https://github.com/zhiping0913/Download_paper
-
-# System deps the extractor relies on:
-playwright install chromium          # headless browser
-# pandoc must be on $PATH             # formula conversion
-# python-magic                        # auto-installed by the package
-```
-
-### Single DOI
+The script does this automatically — only run by hand when debugging. The
+helpers live in `fetch_paper.py`, so import them from the scripts directory:
 
 ```python
-from download_paper import download_paper
-md_path = download_paper("10.1103/PhysRevLett.125.015001")
-print(md_path)  # → /path/to/output/PhysRevLett.125.015001.md
+import sys
+sys.path.insert(0, "<skill-path>/scripts")
+import fetch_paper
+
+meta = {
+    "doi": "10.1103/PhysRevLett.125.015001",
+    "url": "https://link.aps.org/doi/10.1103/PhysRevLett.125.015001",
+    "title": "…",            # optional; CrossRef metadata if you have it
+}
+
+from pathlib import Path
+path = fetch_paper.tier_publisher_extract(meta, Path("./out"))
+print(path)   # → out/paper.md, or None on a clean miss
 ```
 
-### Batch
+Lower-level helpers you can call directly while debugging:
+
+```python
+url  = fetch_paper._publisher_landing_url(meta)      # resolve landing URL
+html = fetch_paper._fetch_publisher_html(url)        # unauthenticated GET
+fetch_paper._looks_paywalled(html)                   # bool
+fetch_paper._extract_meta_tags(html)                 # citation_* dict
+fetch_paper._extract_article_body(html)              # plain-text body
+fetch_paper._build_publisher_markdown(meta, html, url)  # final Markdown
+```
+
+To stay inside the script's slug/manifest contract (idempotent re-runs,
+molt-survivable `papers/` resume), prefer the normal entry point:
 
 ```bash
-# Their own CLI:
-python -m download_paper.batch_process --input dois.txt --out papers/
-
-# Or stay inside fetch_paper.py's contract:
 python3 <skill-path>/scripts/fetch_paper.py --batch dois.txt --out papers/
+# or skip this tier entirely:
+python3 <skill-path>/scripts/fetch_paper.py <id> --no-publisher-extract
 ```
-
-The second form is preferred because it preserves the `manifest.json`
-contract — re-runs are idempotent, and agents that survive a molt can
-resume from `papers/` without re-fetching.
 
 ## Output shape
 
-Default output (when invoked directly):
+When the tier hits, it writes a single Markdown file:
 
 ```
-<output-dir>/
-├── {DOI-slug}.md            # full article, sections preserved, LaTeX intact
-├── {DOI-slug}/figures/      # high-res figures
-├── {DOI-slug}/supp/         # supplementary materials
-└── {DOI-slug}/metadata.json # title, authors, year, journal, doi
+papers/{slug}/paper.md      # title, authors, abstract, extracted body,
+                            # + provenance & limitations footer
 ```
 
-When called via `fetch_paper.py`, the Markdown is copied to
-`papers/{slug}/paper.md` and the `manifest.json` records `tier:
-publisher_extract`.
+and `fetch_paper.py` records `tier: publisher_extract` in
+`papers/{slug}/manifest.json`. The Markdown always ends with a footer that
+names the source URL, the extraction method, and the limitations, so any
+downstream consumer can tell this is a heuristic landing-page copy.
+
+## Limitations
+
+This is a regex-based HTML extraction, **not** a typeset full text:
+
+- **Equations** are taken as whatever inline text the page exposes — MathML
+  / image-rendered math is lost or garbled.
+- **Figures and tables** are dropped (only their surrounding text survives).
+- **Reference lists** may be partially captured or missing.
+- **Layout** (columns, sidebars, captions) is flattened to running text.
+
+Treat `paper.md` as a convenience artifact for search/triage/quoting. For
+anything load-bearing, consult the publisher page of record.
 
 ## Failure modes and recovery
 
 | Symptom | Likely cause | Recovery |
 |---------|--------------|----------|
-| First call hangs ~30s then succeeds | Cold Chromium boot | Expected; subsequent calls are warm |
-| `pip install` fails with playwright wheel error | Pinned Chromium for unsupported arch | Try `pip install playwright==1.46.* && playwright install chromium` separately |
-| Anti-bot challenge (CAPTCHA / Cloudflare) | Publisher detected automation | Tool auto-switches to headed mode; needs `$DISPLAY` on Linux. Without a display, this tier will fail — fall through to LibGen |
-| `pandoc: command not found` | pandoc missing from PATH | `brew install pandoc` (macOS), `apt install pandoc` (Linux) |
-| Publisher returns 403 | No institutional access for subscription article | This tier cannot help — log the gap in `manifest.json` and fall through |
-| DOI prefix not in supported set | No publisher handler implemented | Skip this tier; `fetch_paper.py` does this check before invoking |
+| `tier_publisher_extract` returns `None`, page existed | Landing page looked like a login/paywall interstitial | Expected — no bypass is attempted. Provide an OA/institutionally-reachable page, or let the ladder fall through to LibGen |
+| Returns `None`, very short body | Body container didn't match heuristics, or page is mostly an abstract gate | Inspect with `_extract_article_body(html)`; if the publisher uses an unusual container, add a pattern to `_BODY_PATTERNS` |
+| Returns `None`, DOI prefix unsupported | No handler for that publisher | Skip this tier; `fetch_paper.py` checks the prefix before invoking |
+| `requests` timeout / connection error | Network or publisher unreachable | Clean miss; retry later or fall through |
+| Markdown body is garbled math | MathML / image equations | Known limitation — use the publisher page for equations |
 
-When this tier fails, `fetch_paper.py` falls through to `tier_libgen`
-(unless `--no-libgen` was passed). LibGen is qualitatively worse output
-(PDF, not Markdown) but legally and technically a different surface, so
-it often catches what publisher extraction misses.
+When this tier misses, `fetch_paper.py` falls through to `tier_libgen`
+(unless `--no-libgen` was passed). LibGen is a different surface (PDF, not
+Markdown), so it often catches what landing-page extraction can't.
 
 ## Legal note
 
-This tool extracts content from publisher pages your browser would
-normally render. Whether that is permitted depends on:
+This tier extracts content from the publisher page your browser would
+normally render at the same URL, using a plain unauthenticated GET. Whether
+that is permitted depends on:
 
-- Your institutional subscription terms
-- The publisher's robots.txt and ToS
-- Local copyright law
+- your institutional subscription terms,
+- the publisher's robots.txt and ToS, and
+- local copyright law.
 
-Use is the user's responsibility. The tool itself is open-source and does
-not bypass authentication — if you don't have access to the paper in a
-browser, this tier won't get it either.
+Use is the user's responsibility. The extractor does **not** bypass
+authentication, paywalls, or CAPTCHAs — if you can't read the page in a
+browser without logging in, this tier won't get it either.
 
 ## See also
 
 - [pipeline-obtain-pdf.md](pipeline-obtain-pdf.md) — full manual ladder including this tier
-- [libgen-fallback.md](libgen-fallback.md) — the next tier down when this one fails
+- [libgen-fallback.md](libgen-fallback.md) — the next tier down when this one misses
 - [error-handling.md](error-handling.md) — generic 403/429 patterns

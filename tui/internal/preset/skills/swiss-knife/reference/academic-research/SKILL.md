@@ -5,7 +5,7 @@ description: >
   full-text PDFs, trace citations, write LaTeX manuscripts.
   **First action for any "get me this paper" request:**
   `python3 <skill-path>/scripts/fetch_paper.py <DOI|arXiv-ID|PMID>` — walks
-  arXiv → Unpaywall → Europe PMC → CORE → publisher-page extraction (Nature/APS/AIP/IOP/Cambridge)
+  arXiv → Unpaywall → Europe PMC → CORE → in-house publisher-page extraction (Nature/APS/AIP/IOP/Cambridge)
   → LibGen and saves the paper, metadata, and a resumable manifest under `papers/{slug}/`.
   Read the body when you need to escape the script: custom query shapes, citation networks,
   scholar analysis, LaTeX writing, or a tier-specific API call. Indexes 12 deep-dive API
@@ -59,7 +59,7 @@ papers/{first-author-year-firstword}/
 | 2 | Unpaywall | Publisher-blessed gold/green OA |
 | 3 | Europe PMC | Biomedical full-text + PMC mirror |
 | 4 | CORE | Institutional repositories (needs `$CORE_API_KEY`) |
-| 5 | Publisher-page extract | Nature/APS/AIP/IOP/Cambridge → structured Markdown with LaTeX preserved (auto-installs [zhiping0913/Download_paper](https://github.com/zhiping0913/Download_paper) on first use) |
+| 5 | Publisher-page extract | Nature/APS/AIP/IOP/Cambridge → in-house extractor (stdlib + `requests`, no third-party deps). Fetches the **already-accessible** official article / DOI landing page and parses `citation_*` metadata + the article body into structured Markdown. **No paywall/CAPTCHA bypass, no cookies/credentials** — official pages only. A login/paywall page is a clean miss; the ladder then falls through to LibGen. Opt out with `--no-publisher-extract`. |
 | 6 | LibGen | Last resort; opt out with `--no-libgen` |
 
 **Set `$LINGTAI_RESEARCH_EMAIL` to a real address** before first use — Unpaywall
@@ -142,7 +142,7 @@ Each card includes endpoint parameters, runnable code, response shape, rate limi
 - **Google Scholar requires a stealth browser** (camoufox or playwright-stealth v2); legacy `playwright_stealth` API does not work.
 - **arXiv enforces HTTPS** — HTTP requests are 301-redirected automatically.
 - **Library Genesis legality varies by jurisdiction** — use is the user's responsibility. Pass `--no-libgen` to opt out.
-- **Publisher-page extraction (Tier 5)** uses Playwright + pandoc; first invocation installs `zhiping0913/Download_paper` from git. Requires Chromium (`playwright install chromium`) and pandoc on `$PATH`. See [reference/publisher-page-extraction.md](reference/publisher-page-extraction.md).
+- **Publisher-page extraction (Tier 5) is an in-house, self-contained extractor** — stdlib + `requests`, no third-party dependency and nothing to install (replaces the old broken `zhiping0913/Download_paper` path, issue #136). It fetches the already-accessible official article / DOI landing page and parses `citation_*` metadata + the article body into structured Markdown with a provenance/limitations footer. It performs **no paywall/CAPTCHA bypass and no cookie/credential handling** — official pages only. A login/paywall interstitial, an unsupported DOI prefix, or a page with too little readable text is a clean miss, and the ladder falls through to LibGen. Skip the tier with `--no-publisher-extract`. The extraction is heuristic (equations/figures/tables may be lost), so treat the artifact as a convenience copy, not a typeset full text. See [reference/publisher-page-extraction.md](reference/publisher-page-extraction.md).
 - **Writing an empirical paper iteratively can drift from the data** — reviewer rounds make prose more polished and internally consistent without verifying it still matches the experiments on disk. Reviewer agreement is text-consistency evidence, not data-correspondence evidence. Anchor every claim to data files/runner code *before* writing, and re-derive (don't just rewrite) when feedback flags confusion. See [reference/anti-pattern-text-consistency-vs-data-correspondence.md](reference/anti-pattern-text-consistency-vs-data-correspondence.md).
 
 ---

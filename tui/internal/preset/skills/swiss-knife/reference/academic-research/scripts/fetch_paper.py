@@ -17,8 +17,12 @@ Tier ladder (stops at first success):
     2. Unpaywall      (publisher-blessed OA PDFs)
     3. Europe PMC     (biomed full-text + arXiv mirror)
     4. CORE           (institutional repository aggregator)
-    5. Publisher-page extraction (zhiping0913/Download_paper) for
-       10.1038 / 10.1103 / 10.1063 / 10.1088 / 10.1017
+    5. Publisher-page extraction (in-house, stdlib + requests) for
+       10.1038 / 10.1103 / 10.1063 / 10.1088 / 10.1017 — fetches the already-
+       accessible publisher article / DOI landing page and parses
+       citation_* metadata + the article body into structured Markdown.
+       No paywall/CAPTCHA bypass, no cookies/credentials: official pages
+       only (issue #136). Opt out with --no-publisher-extract.
     6. LibGen         (last resort, opt-out with --no-libgen)
 
 Output (per paper):
@@ -36,11 +40,10 @@ re-fetching anything.
 from __future__ import annotations
 
 import argparse
+import html as _html
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -63,6 +66,39 @@ PUBLISHER_EXTRACTABLE_PREFIXES = {
     "10.1088": "IOP Science",
     "10.1017": "Cambridge University Press",
 }
+
+# Tier-5 (publisher-page extraction) is an in-house, self-contained extractor:
+# it fetches the publisher's article / DOI landing page with `requests` and
+# parses citation_* metadata + the article body into structured Markdown using
+# stdlib regex heuristics. It has NO third-party extraction dependency (the old
+# `zhiping0913/Download_paper` path is gone — issue #136) and performs NO
+# paywall/CAPTCHA bypass and NO cookie/credential handling. It only ever reads
+# pages a plain unauthenticated GET can already see. A page that looks like a
+# login/paywall interstitial is treated as a clean miss.
+PUBLISHER_FETCH_UA = (
+    "Mozilla/5.0 (compatible; lingtai-academic-research/3.0; "
+    "+https://github.com/Lingtai-AI/lingtai)"
+)
+
+# Minimum extracted body length (chars) below which we consider the page to have
+# yielded no usable full text and decline to write a near-empty artifact.
+PUBLISHER_MIN_BODY_CHARS = 200
+
+# Phrases that strongly indicate a login / paywall / purchase interstitial
+# rather than a readable article. Matched case-insensitively against the page.
+_PAYWALL_MARKERS = (
+    "sign in to access",
+    "sign in to continue",
+    "log in to access",
+    "purchase this article",
+    "purchase pdf",
+    "get access to this article",
+    "subscribe to access",
+    "requires a subscription",
+    "access through your institution",
+    "you do not have access",
+    "buy this article",
+)
 
 ARXIV_ID_RE = re.compile(r"^(?:arXiv:)?(\d{4}\.\d{4,5})(v\d+)?$", re.IGNORECASE)
 PMID_RE = re.compile(r"^(?:PMID:)?(\d{6,9})$", re.IGNORECASE)
@@ -302,10 +338,15 @@ def tier_core(meta: dict, out_dir: Path) -> Optional[Path]:
 
 
 def tier_publisher_extract(meta: dict, out_dir: Path) -> Optional[Path]:
-    """Use zhiping0913/Download_paper for publisher-page extraction.
+    """In-house publisher landing-page extractor (no third-party deps).
 
-    Lazy-installed on first invocation. Produces Markdown with preserved
-    LaTeX formulas — better than PDF-to-text for math-heavy papers.
+    Fetches the publisher's already-accessible article / DOI landing page and
+    parses citation_* metadata + the article body into structured Markdown.
+    Strictly best-effort and policy-bounded: official pages only, no paywall
+    or CAPTCHA bypass, no cookie/credential handling. Returns the path to the
+    written `paper.md` on success, or None (clean tier miss) otherwise — e.g.
+    no DOI, an unsupported publisher prefix, a login/paywall interstitial, or
+    a page with too little extractable text to be worth keeping.
     """
     doi = meta.get("doi")
     if not doi:
@@ -314,25 +355,29 @@ def tier_publisher_extract(meta: dict, out_dir: Path) -> Optional[Path]:
     if prefix not in PUBLISHER_EXTRACTABLE_PREFIXES:
         return None
 
-    if not _ensure_download_paper():
+    url = _publisher_landing_url(meta)
+    if not url:
         return None
 
-    try:
-        from download_paper import download_paper  # type: ignore
-    except ImportError:
+    html = _fetch_publisher_html(url)
+    if not html:
         return None
 
-    try:
-        md_path = download_paper(doi)  # returns str path to .md
-    except Exception as e:
-        print(f"  [tier-5] Download_paper failed: {e}", file=sys.stderr)
+    if _looks_paywalled(html):
+        print("  [tier-5] landing page looks like a login/paywall page — "
+              "skipping (no bypass attempted).", file=sys.stderr)
         return None
 
-    if md_path and Path(md_path).exists():
-        dst = out_dir / "paper.md"
-        shutil.copy(md_path, dst)
-        return dst
-    return None
+    body = _extract_article_body(html)
+    if len(body.strip()) < PUBLISHER_MIN_BODY_CHARS:
+        # Not enough readable full text — don't write a near-empty artifact.
+        return None
+
+    md = _build_publisher_markdown(meta, html, url)
+    dst = out_dir / "paper.md"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(md, encoding="utf-8")
+    return dst
 
 
 def tier_libgen(meta: dict, out_dir: Path) -> Optional[Path]:
@@ -397,28 +442,230 @@ def _libgen_mirror() -> Optional[str]:
     return None
 
 
-def _ensure_download_paper() -> bool:
-    """Lazy install zhiping0913/Download_paper on first use. Returns True if importable."""
+# ──────────────────────────────────────────────────────────
+#  Tier-5 in-house publisher landing-page extraction helpers
+#
+#  All stdlib + requests. No headless browser, no cookies/credentials, no
+#  paywall/CAPTCHA bypass. These parse the HTML a plain unauthenticated GET
+#  already returns for an open / institutionally-reachable publisher page.
+# ──────────────────────────────────────────────────────────
+
+def _publisher_landing_url(meta: dict) -> Optional[str]:
+    """Resolve a DOI/metadata dict to a landing-page URL to GET.
+
+    Prefer the CrossRef-supplied resolver URL (already publisher-specific);
+    fall back to the canonical https://doi.org/{doi} redirect. None when there
+    is nothing to resolve.
+    """
+    url = meta.get("url")
+    if url and url.startswith(("http://", "https://")):
+        return url
+    doi = meta.get("doi")
+    if doi:
+        return f"https://doi.org/{doi}"
+    return None
+
+
+def _fetch_publisher_html(url: str) -> Optional[str]:
+    """GET a landing page and return its HTML, or None on any failure.
+
+    Sends only a descriptive User-Agent — no cookies, no auth headers. HTML
+    content-types only; a PDF or other binary response is not our job here.
+    """
     try:
-        import download_paper  # type: ignore
-        return True
-    except ImportError:
-        pass
-    print("  [tier-5] installing publisher-extraction tool (Download_paper)...", file=sys.stderr)
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet",
-             "git+https://github.com/zhiping0913/Download_paper"],
-            timeout=180,
+        r = requests.get(
+            url,
+            headers={"User-Agent": PUBLISHER_FETCH_UA},
+            timeout=30,
+            allow_redirects=True,
         )
-        try:
-            import download_paper  # type: ignore  # noqa: F401
-            return True
-        except ImportError:
-            return False
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        print(f"  [tier-5] install failed: {e}", file=sys.stderr)
-        return False
+        r.raise_for_status()
+    except requests.RequestException:
+        return None
+    ctype = (r.headers.get("content-type", "") or "").lower()
+    if "html" not in ctype and "xml" not in ctype:
+        return None
+    text = r.text or ""
+    return text or None
+
+
+def _looks_paywalled(html: str) -> bool:
+    """Heuristic: does this page look like a login / paywall interstitial?
+
+    We refuse to extract from such pages — both because the "content" is just
+    a gate and because pretending to extract it would misrepresent access we
+    do not have. Conservative: a couple of independent signals must agree, or
+    one unambiguous purchase/subscription phrase must be present.
+    """
+    low = html.lower()
+    phrase_hits = sum(1 for m in _PAYWALL_MARKERS if m in low)
+    if phrase_hits:
+        return True
+    # Fall back to structural signals: a password field plus login wording.
+    has_password = 'type="password"' in low or "type='password'" in low
+    has_login_word = ("sign in" in low or "log in" in low or "login" in low)
+    return has_password and has_login_word
+
+
+def _strip_tags(fragment: str) -> str:
+    """Collapse an HTML fragment to readable plain text (stdlib only)."""
+    # Drop script/style wholesale.
+    fragment = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", fragment)
+    # Turn block-ish closers into newlines so paragraphs don't run together.
+    fragment = re.sub(r"(?i)</(p|div|section|h[1-6]|li|tr|br)\s*>", "\n", fragment)
+    fragment = re.sub(r"(?i)<br\s*/?>", "\n", fragment)
+    # Remove remaining tags.
+    fragment = re.sub(r"(?s)<[^>]+>", " ", fragment)
+    fragment = _html.unescape(fragment)
+    # Normalize whitespace, preserving paragraph breaks.
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in fragment.splitlines()]
+    out: list[str] = []
+    for ln in lines:
+        if ln:
+            out.append(ln)
+        elif out and out[-1] != "":
+            out.append("")
+    return "\n".join(out).strip()
+
+
+def _meta_content(html: str, *names: str, multi: bool = False):
+    """Extract <meta name="..." content="..."> values, name-insensitive.
+
+    Handles both attribute orders (name before content and vice versa) and
+    single/double quotes. Returns a list when multi=True, else the first hit
+    or "".
+    """
+    found: list[str] = []
+    name_set = {n.lower() for n in names}
+    meta_re = re.compile(r"(?is)<meta\b([^>]*?)/?>")
+    attr_re = re.compile(
+        r"""(?is)(name|property|content)\s*=\s*(?:"([^"]*)"|'([^']*)')"""
+    )
+    for m in meta_re.finditer(html):
+        attrs = {}
+        for a in attr_re.finditer(m.group(1)):
+            key = a.group(1).lower()
+            val = a.group(2) if a.group(2) is not None else (a.group(3) or "")
+            attrs[key] = val
+        tag_name = (attrs.get("name") or attrs.get("property") or "").lower()
+        if tag_name in name_set and "content" in attrs:
+            content = _html.unescape(attrs["content"]).strip()
+            content = re.sub(r"\s+", " ", content)
+            if content:
+                found.append(content)
+                if not multi:
+                    break
+    if multi:
+        return found
+    return found[0] if found else ""
+
+
+def _extract_meta_tags(html: str) -> dict:
+    """Parse common publisher citation_* / Dublin Core meta tags.
+
+    Returns {title, authors[], journal, abstract, date, doi, pdf_url}. Missing
+    fields come back empty so callers can fall back to CrossRef metadata.
+    """
+    return {
+        "title": _meta_content(html, "citation_title", "dc.title", "dc.Title"),
+        "authors": _meta_content(
+            html, "citation_author", "dc.creator", "dc.Creator", multi=True
+        ),
+        "journal": _meta_content(
+            html, "citation_journal_title", "prism.publicationName"
+        ),
+        "abstract": _meta_content(
+            html, "dc.description", "dc.Description", "description",
+            "citation_abstract", "og:description",
+        ),
+        "date": _meta_content(
+            html, "citation_publication_date", "citation_date", "dc.date", "dc.Date"
+        ),
+        "doi": _meta_content(html, "citation_doi", "dc.identifier"),
+        "pdf_url": _meta_content(html, "citation_pdf_url"),
+        "abstract_url": _meta_content(html, "citation_abstract_html_url"),
+    }
+
+
+# Ordered (regex, group) candidates for locating the article body. First match
+# with enough text wins. Kept publisher-agnostic and intentionally permissive.
+_BODY_PATTERNS = (
+    r'(?is)<article\b[^>]*>(.*?)</article>',
+    r'(?is)<div\b[^>]*\b(?:id|class)\s*=\s*["\'][^"\']*(?:article-?body|article-?text|article-?fulltext|fulltext-?view|main-?content|c-article-body)[^"\']*["\'][^>]*>(.*?)</div>',
+    r'(?is)<section\b[^>]*\b(?:id|class)\s*=\s*["\'][^"\']*(?:article|body|content)[^"\']*["\'][^>]*>(.*?)</section>',
+    r'(?is)<main\b[^>]*>(.*?)</main>',
+)
+
+
+def _extract_article_body(html: str) -> str:
+    """Best-effort plain-text extraction of the article body.
+
+    Tries a sequence of publisher-agnostic container patterns and returns the
+    first that yields a non-trivial amount of text. Navigation, scripts and
+    footers are stripped by `_strip_tags`. Empty string when nothing matches.
+    """
+    best = ""
+    for pat in _BODY_PATTERNS:
+        for m in re.finditer(pat, html):
+            text = _strip_tags(m.group(1))
+            if len(text) > len(best):
+                best = text
+        if len(best) >= PUBLISHER_MIN_BODY_CHARS:
+            return best
+    return best
+
+
+def _build_publisher_markdown(meta: dict, html: str, url: str) -> str:
+    """Assemble a Markdown artifact with provenance + extracted content.
+
+    Prefers CrossRef-resolved `meta` for the header (authoritative), but falls
+    back to the page's own citation_* tags when a field is missing. Always
+    records provenance and an explicit limitations note so downstream agents
+    know this is a heuristic landing-page extraction, not a typeset full text.
+    """
+    tags = _extract_meta_tags(html)
+    title = meta.get("title") or tags.get("title") or "(untitled)"
+    authors = meta.get("authors") or tags.get("authors") or []
+    journal = meta.get("journal") or tags.get("journal") or ""
+    year = meta.get("year") or ""
+    doi = meta.get("doi") or tags.get("doi") or ""
+    abstract = tags.get("abstract") or meta.get("abstract") or ""
+    body = _extract_article_body(html)
+
+    lines = [f"# {title}", ""]
+    if authors:
+        lines += [", ".join(authors), ""]
+    bib = []
+    if journal:
+        bib.append(journal)
+    if year:
+        bib.append(str(year))
+    if bib:
+        lines += ["*" + " · ".join(bib) + "*", ""]
+    if doi:
+        lines += [f"DOI: [{doi}](https://doi.org/{doi})", ""]
+    if abstract:
+        lines += ["## Abstract", "", abstract, ""]
+    if body:
+        lines += ["## Full text (extracted)", "", body, ""]
+
+    lines += [
+        "---",
+        "",
+        "## Provenance & limitations",
+        "",
+        f"- Source: in-house publisher-page extractor (Tier 5), {url}",
+        "- Method: unauthenticated HTTP GET of the official publisher / DOI "
+        "landing page, then stdlib regex parsing of `citation_*` metadata and "
+        "the article body. No login, cookies, credentials, or paywall/CAPTCHA "
+        "bypass were used.",
+        "- **Limitations:** this is a heuristic HTML extraction, not a typeset "
+        "full text. Equations, figures, tables, and reference lists may be "
+        "lost or garbled. Treat as a convenience artifact; consult the "
+        "publisher page of record for anything load-bearing.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 # ──────────────────────────────────────────────────────────
@@ -435,7 +682,8 @@ TIERS = [
 ]
 
 
-def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = True) -> dict:
+def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = True,
+              allow_publisher_extract: bool = True) -> dict:
     kind, ident = classify(identifier)
     meta = resolve_metadata(kind, ident, email)
     slug = slugify(meta, ident)
@@ -456,6 +704,8 @@ def fetch_one(identifier: str, out_root: Path, email: str, allow_libgen: bool = 
 
     for name, fn in TIERS:
         if name == "libgen" and not allow_libgen:
+            continue
+        if name == "publisher_extract" and not allow_publisher_extract:
             continue
         sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
         print(f"  [tier] {name}...", end=" ", flush=True)
@@ -504,6 +754,10 @@ def main() -> int:
     p.add_argument("--email", default=DEFAULT_EMAIL,
                    help="email for Unpaywall (use a real address; default from $LINGTAI_RESEARCH_EMAIL)")
     p.add_argument("--no-libgen", action="store_true", help="skip LibGen tier")
+    p.add_argument("--no-publisher-extract", action="store_true",
+                   help="skip Tier-5 in-house publisher landing-page extraction "
+                        "(the official-page HTML→Markdown extractor for "
+                        "Nature/APS/AIP/IOP/Cambridge DOIs).")
     p.add_argument("--dry-run", action="store_true", help="resolve metadata only, no PDF fetch")
     args = p.parse_args()
 
@@ -535,7 +789,11 @@ def main() -> int:
     for i, ident in enumerate(identifiers, 1):
         print(f"[{i}/{len(identifiers)}] {ident}")
         try:
-            results.append(fetch_one(ident, out_root, args.email, allow_libgen=not args.no_libgen))
+            results.append(fetch_one(
+                ident, out_root, args.email,
+                allow_libgen=not args.no_libgen,
+                allow_publisher_extract=not args.no_publisher_extract,
+            ))
         except Exception as e:
             print(f"  ERROR: {e}", file=sys.stderr)
             results.append({"status": "error", "reason": str(e), "identifier": ident})
