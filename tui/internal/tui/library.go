@@ -25,6 +25,7 @@ type skillEntry struct {
 	Path        string // absolute path to SKILL.md
 	Body        string // raw content of SKILL.md (loaded on select)
 	Group       string // group folder name (e.g., "intrinsic", "custom", recipe name)
+	Remote      string // configured git remote URL when the skill dir is repo-backed; "" otherwise (issue #172)
 }
 
 // skillProblem describes a broken skill folder.
@@ -209,6 +210,7 @@ func parseSkillFile(skillFile, folderName, group string) (*skillEntry, *skillPro
 		Path:        skillFile,
 		Body:        text,
 		Group:       group,
+		Remote:      gitRemoteForDir(filepath.Dir(skillFile)),
 	}, nil
 }
 
@@ -413,6 +415,7 @@ func buildAgentLibraryCatalog(agentDir string, lang string) []MarkdownEntry {
 				Description: sk.Description,
 				Group:       b.name,
 				Path:        sk.Path,
+				Remote:      sk.Remote,
 			}
 			// For intrinsic capability/addon skills, concat SKILL.md +
 			// SKILL-{lang}.md for display (matches pre-rewrite behavior).
@@ -500,6 +503,7 @@ func buildLibraryEntries(libraryDir, lang string, skills []skillEntry, problems 
 				Description: sk.Description,
 				Group:       bucket.name,
 				Path:        sk.Path,
+				Remote:      sk.Remote,
 			}
 			// For intrinsic skills, concat SKILL.md + SKILL-{lang}.md for display.
 			if bucket.name == "intrinsic" {
