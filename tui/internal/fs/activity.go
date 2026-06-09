@@ -23,6 +23,12 @@ type NetworkActivity struct {
 	RunningDaemons int    `json:"running_daemons"`
 }
 
+// DaemonCounts summarizes daemon run files under a single agent directory.
+type DaemonCounts struct {
+	Running int `json:"running"`
+	Total   int `json:"total"`
+}
+
 // ComputeNetworkActivity returns a lightweight activity summary without reading
 // mailboxes, ledgers, contacts, or token logs.
 func ComputeNetworkActivity(baseDir string) (NetworkActivity, error) {
@@ -62,7 +68,7 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 			activity.ActiveAgents++
 		}
 		if node.Alive {
-			activity.RunningDaemons += countRunningDaemons(node.WorkingDir)
+			activity.RunningDaemons += CountDaemons(node.WorkingDir).Running
 		}
 
 		switch state {
@@ -100,14 +106,15 @@ type daemonStateFile struct {
 	FinishedAt json.RawMessage `json:"finished_at"`
 }
 
-func countRunningDaemons(agentDir string) int {
+// CountDaemons counts parseable daemon.json files under agentDir/daemons.
+func CountDaemons(agentDir string) DaemonCounts {
 	daemonDir := filepath.Join(agentDir, "daemons")
 	entries, err := os.ReadDir(daemonDir)
 	if err != nil {
-		return 0
+		return DaemonCounts{}
 	}
 
-	var count int
+	var counts DaemonCounts
 	for _, entry := range entries {
 		var path string
 		if entry.IsDir() {
@@ -117,24 +124,32 @@ func countRunningDaemons(agentDir string) int {
 		} else {
 			continue
 		}
-		if isRunningDaemonFile(path) {
-			count++
+		state, ok := readDaemonStateFile(path)
+		if !ok {
+			continue
+		}
+		counts.Total++
+		if isRunningDaemonState(state) {
+			counts.Running++
 		}
 	}
-	return count
+	return counts
 }
 
-func isRunningDaemonFile(path string) bool {
+func readDaemonStateFile(path string) (daemonStateFile, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return daemonStateFile{}, false
 	}
 
 	var state daemonStateFile
 	if err := json.Unmarshal(data, &state); err != nil {
-		return false
+		return daemonStateFile{}, false
 	}
+	return state, true
+}
 
+func isRunningDaemonState(state daemonStateFile) bool {
 	switch strings.ToLower(strings.TrimSpace(state.State)) {
 	case "running", "active":
 	default:
