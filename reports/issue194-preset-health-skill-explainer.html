@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Issue #194 — Swiss-knife preset health-check subskill</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; margin: 2rem auto; max-width: 920px; padding: 0 1rem; color: #172033; }
+    h1, h2 { line-height: 1.2; }
+    .summary { background: #eef7ff; border-left: 4px solid #2b7cff; padding: 1rem; border-radius: 8px; }
+    .warn { background: #fff7e6; border-left: 4px solid #e08600; padding: 1rem; border-radius: 8px; }
+    code { background: #f3f5f7; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #d8dee9; padding: 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f6f8fa; }
+    .ok { color: #137333; font-weight: 600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <h1>Issue #194 — Swiss-knife preset health-check subskill</h1>
+  <div class="summary">
+    <strong>Conclusion:</strong> this change adds a documentation-only, <strong>read-only</strong> swiss-knife
+    nested reference, <code>preset-health</code>, that gives agents a repeatable procedure to enumerate
+    saved presets, classify each failure, and report actionable fixes <strong>without printing or mutating
+    any secret</strong>. The swiss-knife router catalog and routing table are updated so the new reference is
+    discoverable, and the embedded-skill extraction test is extended to cover the new file.
+  </div>
+
+  <h2>Why this was needed</h2>
+  <p>
+    Agents could call <code>system(action="presets")</code> and eyeball connectivity statuses, but there was
+    no documented, repeatable workflow for checking <em>all</em> saved presets, classifying failures
+    (expired key, missing credentials, unreachable endpoint, invalid model/config, connectivity failure),
+    and reporting them safely. The triggering case: <code>gemini-test.json</code> reported
+    <code>connectivity.status = no_credentials</code> with <code>GEMINI_API_KEY not set</code>, and a separate
+    preset was expired — both required ad-hoc manual interpretation.
+  </p>
+
+  <h2>What changed</h2>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">tui/internal/preset/skills/swiss-knife/reference/preset-health/SKILL.md</td><td>New nested reference: read-only enumerate → check credential presence → probe via <code>/doctor</code> → classify → redacted report → human-confirmed remediation.</td></tr>
+      <tr><td class="mono">tui/internal/preset/skills/swiss-knife/SKILL.md</td><td>Router updated: added <code>preset-health</code> to the description, the <code>nested_references</code> YAML block, and the routing table. Bumped version 2.2.0 → 2.3.0.</td></tr>
+      <tr><td class="mono">tui/internal/preset/swiss_knife_populate_test.go</td><td>Added <code>reference/preset-health/SKILL.md</code> to the embedded-extraction assertion so the new file is verified to ship.</td></tr>
+      <tr><td class="mono">reports/issue194-preset-health-skill-explainer.html</td><td>This self-contained explainer.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The classification taxonomy</h2>
+  <p>The skill maps each preset to a fixed set of classes, grounded in the connectivity outcomes the TUI's
+  <code>/doctor</code> probe already distinguishes (<code>probeOK</code>, <code>probeAuthError</code>,
+  <code>probeNoKey</code>, <code>probeNetworkError</code>, <code>probeRateLimit</code>,
+  <code>probeOverloaded</code>, <code>probeEmptyResponse</code>, <code>probeOAuth</code>):</p>
+  <table>
+    <thead><tr><th>Class</th><th>Trigger</th></tr></thead>
+    <tbody>
+      <tr><td><code>ok</code></td><td>reachable, authed, valid model</td></tr>
+      <tr><td><code>no_credentials</code></td><td><code>api_key_env</code> declared but the variable is empty/unset</td></tr>
+      <tr><td><code>auth_failed</code> / <code>expired_key</code></td><td>credential present but rejected (401/403)</td></tr>
+      <tr><td><code>endpoint_unreachable</code></td><td>DNS/connect/TLS/timeout to <code>base_url</code></td></tr>
+      <tr><td><code>model_not_found</code></td><td>auth ok but model rejected/unknown</td></tr>
+      <tr><td><code>config_error</code></td><td>malformed JSON, missing <code>provider</code>/<code>model</code>, invalid <code>base_url</code></td></tr>
+      <tr><td><code>rate_limited</code></td><td>reachable + authed but throttled (transient — retry)</td></tr>
+      <tr><td><code>connectivity_failure</code></td><td>reachable but empty/invalid response envelope</td></tr>
+      <tr><td><code>unknown</code></td><td>none of the above</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Secret safety</h2>
+  <div class="warn">
+    <strong>No secrets, ever.</strong> The skill checks credential <em>presence</em> only (set vs not-set), never
+    value; refers to credentials by env-var <em>name</em> (e.g. <code>GEMINI_API_KEY</code>); and ships a redactor
+    that strips bearer tokens, key-like strings, and URL query parameters from any raw error text before it lands
+    in a report.
+  </div>
+
+  <h2>Read-only contract</h2>
+  <p>
+    The reference never edits <code>~/.lingtai-tui/presets/saved/*.json</code>, agent <code>init.json</code>, or any
+    <code>manifest.preset.allowed</code> list, and it does not switch the active preset to probe an inactive one.
+    Remediation (set an env var, rotate an expired key, remove a preset from an agent's allowed list, update a
+    retired model) is presented as a human-confirmed recommendation — the workflow stops at the report.
+  </p>
+
+  <h2>Risk assessment</h2>
+  <p><span class="ok">Low risk.</span> The change is documentation/skill-workflow plus one test-assertion line and a
+  router catalog edit. No runtime Go logic, build scripts, or dependency manifests are touched. No script is added,
+  so there is no executable surface to audit beyond the read-only shell snippets embedded in the SKILL.md.</p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>go test ./internal/preset/ -run SwissKnife</code> — the extended extraction test passes, confirming the new reference ships in the embedded bundle.</li>
+    <li>Router cross-reference: <code>swiss-knife/SKILL.md</code> mentions <code>preset-health</code> in its description, <code>nested_references</code> block, and routing table.</li>
+    <li><code>git diff --check</code> — no whitespace errors.</li>
+  </ul>
+</body>
+</html>

@@ -12,10 +12,12 @@ description: >
   browser deliverables; xiaomi-mimo for Xiaomi MiMo provider discovery;
   zhipu-coding-plan for Z.AI / BigModel coding-plan capabilities; headless-bot
   for provisioning fresh LingTai bot projects such as Telegram bots from
-  `lingtai-tui spawn`; find-something-to-do for idle curiosity practice. This
+  `lingtai-tui spawn`; find-something-to-do for idle curiosity practice;
+  preset-health for read-only health checks of saved presets (classify expired
+  keys, missing credentials, unreachable endpoints, invalid model/config). This
   parent is the route map; each nested reference is self-contained under
   `reference/<name>/SKILL.md`.
-version: 2.2.0
+version: 2.3.0
 tags: [utilities, umbrella, toolkit, nested-skill]
 ---
 
@@ -119,6 +121,16 @@ nested_references:
       Nested swiss-knife reference for idle curiosity practice. Read this when
       you have no pending task, no human waiting, and want a reflective way to
       notice quiet impulses or choose a small autonomous exploration.
+  - name: preset-health
+    location: reference/preset-health/SKILL.md
+    description: >
+      Nested swiss-knife reference for read-only saved-preset health checks.
+      Read this when the human asks whether saved presets still work, which one
+      is expired or misconfigured, or why `system(action="presets")` shows a bad
+      connectivity status. It enumerates saved presets, classifies failures
+      (expired key, missing credentials, unreachable endpoint, invalid
+      model/config, connectivity failure), and reports actionable fixes without
+      printing or mutating any secret.
 ```
 
 ## Routing table
@@ -139,6 +151,7 @@ nested_references:
 | Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md` |
 | Create or automate a headless LingTai bot project, including Telegram bots | `reference/headless-bot/SKILL.md` |
 | Practice idle curiosity when there is no pending task or human waiting | `reference/find-something-to-do/SKILL.md` |
+| Health-check saved presets (read-only): classify expired keys, missing credentials, unreachable endpoints, invalid model/config | `reference/preset-health/SKILL.md` |
 
 ## How to use this router
 
