@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- TODO: set a descriptive title — shows in browser tabs and saved filenames -->
+<title>Lesson NN — <!-- TODO lesson title --> | <!-- TODO book title --></title>
+
+<!-- MathJax: required if the lesson contains equations. Write inline math as
+     \( ... \) and display math as \[ ... \]. Never put equations in <pre>/<code>. -->
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)']],
+    displayMath: [['\\[', '\\]'], ['$$', '$$']],
+    processEscapes: true
+  },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   THEME — edit these CSS variables to match the human's requested style.
+   (palette, accent, density). Everything below references them.
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #ffffff;
+  --fg:        #1c1c1e;
+  --muted:     #6b6b70;
+  --accent:    #2563eb;   /* links, headings rule, primary emphasis */
+  --accent-2:  #7c3aed;   /* secondary emphasis */
+  --def-bg:    #eef4ff;   /* definition callout */
+  --def-bd:    #2563eb;
+  --warn-bg:   #fff4e5;   /* warning callout */
+  --warn-bd:   #d97706;
+  --key-bg:    #f3eaff;   /* key-formula / theorem callout */
+  --key-bd:    #7c3aed;
+  --code-bg:   #f4f4f6;
+  --border:    #e3e3e8;
+  --maxw:      52rem;     /* content width — lower = denser */
+  --pad:       1.5rem;
+  --radius:    10px;
+  --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+/* Dark theme example — uncomment / adapt if the human asked for dark:
+:root {
+  --bg:#15171c; --fg:#e6e6ea; --muted:#9a9aa3; --accent:#6ea8fe; --accent-2:#c08cff;
+  --def-bg:#1b2740; --def-bd:#6ea8fe; --warn-bg:#3a2c14; --warn-bd:#e0a458;
+  --key-bg:#2a2140; --key-bd:#c08cff; --code-bg:#1d1f25; --border:#2c2f37;
+}
+*/
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font); line-height: 1.65; font-size: 17px;
+}
+main { max-width: var(--maxw); margin: 0 auto; padding: var(--pad); }
+
+h1, h2, h3 { line-height: 1.25; }
+h1 { font-size: 1.9rem; margin: 0 0 .3rem; }
+h2 { font-size: 1.4rem; margin-top: 2.2rem; padding-bottom: .25rem;
+     border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1.12rem; margin-top: 1.6rem; color: var(--accent-2); }
+a { color: var(--accent); }
+code, pre { background: var(--code-bg); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+code { padding: .1em .35em; font-size: .92em; }
+pre { padding: 1rem; overflow-x: auto; border: 1px solid var(--border); }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; }
+th { background: var(--code-bg); }
+
+/* Header / provenance block */
+.lesson-head { border: 1px solid var(--border); border-radius: var(--radius);
+  padding: var(--pad); margin-bottom: 1.5rem; }
+.lesson-head .objective { font-weight: 600; }
+.provenance { color: var(--muted); font-size: .85rem; margin-top: .6rem; }
+
+/* Callout boxes — emphasis hierarchy. Re-map to the human's requested pattern. */
+.callout { border-left: 5px solid var(--accent); border-radius: var(--radius);
+  padding: .8rem 1rem; margin: 1.1rem 0; }
+.callout .label { font-weight: 700; font-size: .78rem; letter-spacing: .04em;
+  text-transform: uppercase; display: block; margin-bottom: .3rem; }
+.def  { background: var(--def-bg);  border-color: var(--def-bd); }
+.warn { background: var(--warn-bg); border-color: var(--warn-bd); }
+.key  { background: var(--key-bg);  border-color: var(--key-bd); }
+
+/* Worked example */
+.example { border: 1px dashed var(--border); border-radius: var(--radius);
+  padding: 1rem; margin: 1.2rem 0; }
+.example > .label { font-weight: 700; color: var(--accent-2); }
+
+/* Exercises & checkpoint — solutions/answers collapsed so the learner tries first */
+details { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .8rem;
+  margin: .6rem 0; background: var(--code-bg); }
+summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: .5rem; }
+ol.exercises > li { margin: .9rem 0; }
+
+nav.lesson-nav { display: flex; justify-content: space-between;
+  border-top: 1px solid var(--border); margin-top: 2.5rem; padding-top: 1rem; }
+
+/* Print: drop nav, widen margins, keep callouts readable */
+@media print {
+  nav.lesson-nav { display: none; }
+  body { font-size: 12pt; }
+  main { max-width: none; }
+  /* Reveal collapsed answers on paper without requiring the open attribute. */
+  details:not([open]) > *:not(summary) { display: revert; }
+}
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ── Header / provenance ─────────────────────────────────────────── -->
+  <header class="lesson-head">
+    <h1>Lesson NN — <!-- TODO lesson title --></h1>
+    <p class="objective">Objective: After this lesson you can <!-- TODO --></p>
+    <p>Prerequisites: <a href="lesson-(NN-1).html"><!-- TODO prior lesson --></a></p>
+    <p class="provenance">
+      Source: <!-- TODO Title, Author, Edition -->, pp. <!-- TODO range -->.
+      Generated <!-- TODO YYYY-MM-DDTHH:MM:SSZ -->.
+      Distilled study notes — concepts re-explained from the source, not a
+      reproduction of it.
+    </p>
+  </header>
+
+  <!-- ── Concept exposition (your own words) ─────────────────────────── -->
+  <section id="concepts">
+    <h2>Concepts</h2>
+
+    <div class="callout def">
+      <span class="label">Definition</span>
+      <!-- TODO define a key term -->
+    </div>
+
+    <p><!-- TODO teach the concept in your own words. Inline math like \(x^2\). --></p>
+
+    <p>Display math renders centered:</p>
+    \[ <!-- TODO equation, e.g. --> E = mc^2 \]
+
+    <div class="callout key">
+      <span class="label">Key formula</span>
+      <!-- TODO the formula or theorem the learner must remember -->
+    </div>
+
+    <div class="callout warn">
+      <span class="label">Watch out</span>
+      <!-- TODO a common pitfall or misconception -->
+    </div>
+  </section>
+
+  <!-- ── Worked example ──────────────────────────────────────────────── -->
+  <section id="worked-example">
+    <h2>Worked example</h2>
+    <div class="example">
+      <span class="label">Example</span>
+      <p><!-- TODO state the problem --></p>
+      <p><!-- TODO step through the reasoning explicitly, step by step --></p>
+    </div>
+  </section>
+
+  <!-- ── Exercises (solutions hidden) ────────────────────────────────── -->
+  <section id="exercises">
+    <h2>Exercises</h2>
+    <ol class="exercises">
+      <li><!-- TODO easy -->
+        <details><summary>Show solution</summary><!-- TODO --></details>
+      </li>
+      <li><!-- TODO medium -->
+        <details><summary>Show solution</summary><!-- TODO --></details>
+      </li>
+      <li><!-- TODO hard -->
+        <details><summary>Show solution</summary><!-- TODO --></details>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ── Checkpoint: pass these before advancing ─────────────────────── -->
+  <section id="checkpoint">
+    <h2>Checkpoint</h2>
+    <p>If you can answer these without looking back, you are ready for the next lesson.</p>
+    <details><summary>1. <!-- TODO question --></summary><!-- TODO answer --></details>
+    <details><summary>2. <!-- TODO question --></summary><!-- TODO answer --></details>
+    <details><summary>3. <!-- TODO question --></summary><!-- TODO answer --></details>
+  </section>
+
+  <nav class="lesson-nav">
+    <a href="lesson-(NN-1).html">&larr; Previous</a>
+    <a href="index.html">Index</a>
+    <a href="lesson-(NN+1).html">Next &rarr;</a>
+  </nav>
+
+  <footer class="provenance">
+    Source: <!-- TODO Title, Author, Edition -->. Re-explained study notes, not
+    the original text. Verify specifics against the source.
+  </footer>
+
+</main>
+</body>
+</html>

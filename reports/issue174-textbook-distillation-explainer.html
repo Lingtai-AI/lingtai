@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Textbook Distillation Skill — Explainer (Issue #174)</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a22; --fg:#e7e9ee; --muted:#9aa0ac;
+    --accent:#6ea8fe; --accent-2:#c08cff; --ok:#5cd6a0; --warn:#e0a458;
+    --border:#262a34; --code:#1d2029; --maxw:60rem; --radius:12px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);
+    line-height:1.65;font-size:17px}
+  header.hero{background:linear-gradient(135deg,#1a2238,#241a38);
+    border-bottom:1px solid var(--border);padding:3rem 1.5rem}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 1.5rem}
+  header.hero .wrap{padding:0}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;font-size:.78rem}
+  h1{font-size:2.2rem;margin:.4rem 0 .6rem;line-height:1.15}
+  .lede{color:var(--muted);font-size:1.15rem;max-width:46rem}
+  main{padding:2.5rem 0}
+  section{margin:0 0 2.5rem}
+  h2{font-size:1.5rem;margin-top:0;padding-bottom:.3rem;border-bottom:2px solid var(--accent)}
+  h3{font-size:1.12rem;color:var(--accent-2)}
+  a{color:var(--accent)}
+  code{background:var(--code);padding:.12em .4em;border-radius:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:8px;
+    padding:1rem;overflow-x:auto}
+  .panel{background:var(--panel);border:1px solid var(--border);
+    border-radius:var(--radius);padding:1.3rem 1.5rem}
+  .grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+  .flow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:stretch;margin:1rem 0}
+  .step{flex:1 1 150px;background:var(--panel);border:1px solid var(--border);
+    border-radius:10px;padding:.9rem 1rem;position:relative}
+  .step .n{display:inline-block;background:var(--accent);color:#0f1117;font-weight:700;
+    border-radius:50%;width:1.5rem;height:1.5rem;text-align:center;line-height:1.5rem;
+    font-size:.85rem;margin-bottom:.4rem}
+  .step h4{margin:.2rem 0 .3rem;font-size:1rem}
+  .step p{margin:0;color:var(--muted);font-size:.86rem}
+  .arrow{align-self:center;color:var(--muted);font-size:1.4rem}
+  table{border-collapse:collapse;width:100%;margin:1rem 0}
+  th,td{border:1px solid var(--border);padding:.55rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--code)}
+  .callout{border-left:5px solid var(--warn);background:#2a2114;border-radius:10px;
+    padding:.9rem 1.1rem;margin:1.2rem 0}
+  .callout.safe{border-color:var(--ok);background:#11251c}
+  .callout .label{font-weight:700;text-transform:uppercase;font-size:.75rem;
+    letter-spacing:.05em;display:block;margin-bottom:.35rem}
+  ul.checks{list-style:none;padding-left:0}
+  ul.checks li{padding:.3rem 0 .3rem 1.7rem;position:relative}
+  ul.checks li::before{content:"✓";position:absolute;left:0;color:var(--ok);font-weight:700}
+  .muted{color:var(--muted)}
+  footer{border-top:1px solid var(--border);color:var(--muted);font-size:.85rem;
+    padding:1.5rem 0;margin-top:2rem}
+  @media print{
+    body{background:#fff;color:#111;font-size:12pt}
+    header.hero{background:none;border-bottom:1px solid #ccc}
+    .panel,.step,pre,code{background:#f5f5f5;border-color:#ccc}
+    a{color:#1a4fd0}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">LingTai · Issue #174 · Feature Explainer</div>
+    <h1>Textbook Distillation Skill</h1>
+    <p class="lede">Teach yourself from any book, no instructor required. LingTai
+      distills a textbook into a structured learning track and ships
+      self-contained HTML lecture notes in the style you ask for — with worked
+      examples, exercises, and checkpoints to tell you when you're ready to move on.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <h2>What it does</h2>
+    <p>This adds a bundled utility skill,
+      <code>textbook-distillation</code>, under
+      <code>tui/internal/preset/skills/</code>. When you ask LingTai to help you
+      study a book on your own, the agent loads this skill and runs a five-phase,
+      human-in-the-loop workflow that turns the source into lessons you can work
+      through at your own pace.</p>
+    <div class="grid">
+      <div class="panel"><h3>Distill, don't copy</h3><p class="muted">Concepts are
+        re-explained in the agent's own words with fresh examples — never a
+        reproduction of the author's text.</p></div>
+      <div class="panel"><h3>Your style</h3><p class="muted">Palette, layout,
+        emphasis pattern, tone, and density are yours to specify. The notes are
+        built for that style from the start.</p></div>
+      <div class="panel"><h3>Active learning</h3><p class="muted">Every lesson
+        carries worked examples, graded exercises, and a checkpoint with
+        collapsible answers.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The workflow</h2>
+    <div class="flow">
+      <div class="step"><span class="n">1</span><h4>Intake</h4>
+        <p>Identify the source, confirm authorized access, capture the learning
+          goal and style.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">2</span><h4>Chapter map</h4>
+        <p>Skeleton of units, core concepts, prerequisites, weight, and source
+          locations. <em>You approve scope.</em></p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">3</span><h4>Lesson plan</h4>
+        <p>A sequence of one-sitting lessons with objectives, examples,
+          exercises, checkpoints. <em>You approve granularity.</em></p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">4</span><h4>HTML notes</h4>
+        <p>One self-contained styled <code>.html</code> per lesson, MathJax-ready,
+          validated.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">5</span><h4>Review loop</h4>
+        <p>React to lesson 1, then batch the rest plus an index page.</p></div>
+    </div>
+    <p class="muted">Phases 2 and 3 are approval gates: nothing gets generated as
+      HTML until you've confirmed the map and the plan match <em>your</em> goal.</p>
+  </section>
+
+  <section>
+    <h2>What a lesson contains</h2>
+    <table>
+      <tr><th>Section</th><th>Purpose</th></tr>
+      <tr><td>Header &amp; provenance</td><td>Title, objective, source citation
+        (title/author/edition/pages), timestamp, and a caveat that these are
+        re-explained notes — not the original.</td></tr>
+      <tr><td>Prerequisites</td><td>Links back to the lessons you should have done.</td></tr>
+      <tr><td>Concept exposition</td><td>The teaching, in the agent's own words,
+        with definitions boxed and math rendered via MathJax.</td></tr>
+      <tr><td>Worked example</td><td>The reasoning stepped through explicitly.</td></tr>
+      <tr><td>Exercises</td><td>2–5 problems, easy → hard, solutions hidden behind
+        <code>&lt;details&gt;</code> so you try first.</td></tr>
+      <tr><td>Checkpoint</td><td>3–6 self-check questions with collapsible answers —
+        passing them is the signal to advance.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Customizable HTML</h2>
+    <p>A bundled template at
+      <code>assets/lesson-template.html</code> wires up the hard parts so the agent
+      can focus on teaching:</p>
+    <ul class="checks">
+      <li>CSS variables at the top of <code>&lt;style&gt;</code> for palette, accent, and density</li>
+      <li>MathJax configured for <code>\( … \)</code> inline and <code>\[ … \]</code> display math</li>
+      <li>Definition / key-formula / warning callout boxes for a consistent emphasis hierarchy</li>
+      <li>Collapsible exercise solutions and checkpoint answers</li>
+      <li>A print stylesheet that drops navigation and expands answers</li>
+      <li>One file, no external assets except the MathJax CDN — open it anywhere</li>
+    </ul>
+    <p class="muted">HTML mechanics (skeleton, MathJax rules, validation checklist)
+      are reused from the existing <code>swiss-knife → html-report</code> reference
+      rather than duplicated, so equation handling stays consistent across LingTai.</p>
+  </section>
+
+  <section>
+    <h2 id="safety">Source limits, copyright &amp; safety</h2>
+    <div class="callout">
+      <span class="label">Boundaries — not optional</span>
+      The skill is built to help you learn from a book, not to pirate it.
+    </div>
+    <ul class="checks">
+      <li><strong>Distill, do not reproduce</strong> — re-explain concepts; no
+        pasted chapters, no copied prose, no recreated figures.</li>
+      <li><strong>No piracy enabler</strong> — requests like "summarize the whole
+        book so I don't have to buy it" are declined in favor of legitimate study aids.</li>
+      <li><strong>Always cite the source</strong> — every artifact names the
+        title, author, edition, and page range, with a provenance caveat.</li>
+      <li><strong>Confirm authorized access</strong> — the agent only works from
+        material you can point to a legitimate source for.</li>
+      <li><strong>Flag knowledge limits</strong> — when teaching from general
+        knowledge rather than the specific edition, it says so and tells you to
+        verify against the source.</li>
+    </ul>
+    <div class="callout safe">
+      <span class="label">Net effect</span>
+      You get a study guide you can trust: cited, honest about its limits, and
+      designed around active practice rather than passive summary.
+    </div>
+  </section>
+
+  <section>
+    <h2>How it ships</h2>
+    <p>Preset skills are auto-discovered through a Go <code>//go:embed skills</code>
+      directive, so adding the <code>textbook-distillation/</code> directory is all
+      that's needed — no registry or index edit. On TUI startup the bundle is
+      extracted to <code>~/.lingtai-tui/utilities/</code> where agents read it.
+      Frontmatter and catalog integrity are covered by the existing
+      <code>internal/preset</code> and <code>internal/tui</code> Go tests.</p>
+    <pre>tui/internal/preset/skills/textbook-distillation/
+├── SKILL.md                      ← the five-phase workflow
+└── assets/
+    └── lesson-template.html       ← themeable, MathJax-ready lesson scaffold</pre>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  Generated 2026-06-09T03:42:25Z · LingTai issue #174 ·
+  Self-contained explainer for the Textbook Distillation skill.
+</footer>
+
+</body>
+</html>
