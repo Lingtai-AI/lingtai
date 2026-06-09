@@ -287,6 +287,7 @@ This repo carries two Go binaries:
 - **Set up a channel** — `/mcp` inside the TUI, then the addon's own onboarding resource.
 - **Write a skill** — see `tui/internal/preset/skills/lingtai-dev-guide/` after first launch.
 - **Source layout** — start at [`ANATOMY.md`](ANATOMY.md), then descend into `tui/ANATOMY.md` or `portal/ANATOMY.md`.
+- **Navigate by knowledge graph** — generate and query a repo map with Graphify; see [`docs/graphify.md`](docs/graphify.md).
 - **Release process** — [`RELEASING.md`](RELEASING.md).
 - **Contributing** — anatomy-first, worktree-first, with validation in the PR body. See [Contributing](#contributing).
 
