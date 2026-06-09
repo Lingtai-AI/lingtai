@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Issue #178 — Scientific Cultivation guardrail skill</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; margin: 2rem auto; max-width: 920px; padding: 0 1rem; color: #172033; }
+    h1, h2 { line-height: 1.2; }
+    .summary { background: #eef7ff; border-left: 4px solid #2b7cff; padding: 1rem; border-radius: 8px; }
+    .motto { font-style: italic; color: #4a5568; border-left: 3px solid #cbd5e0; padding-left: 0.75rem; margin: 1rem 0; }
+    code { background: #f3f5f7; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    pre { background: #f3f5f7; padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #d8dee9; padding: 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f6f8fa; }
+    .ok { color: #137333; font-weight: 600; }
+    .warn { color: #a15c00; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Issue #178 — Scientific Cultivation (科学修仙) guardrail skill</h1>
+  <div class="summary">
+    <strong>Conclusion:</strong> this docs-only change adds a single self-contained preset utility skill —
+    <code>tui/internal/preset/skills/scientific-cultivation/SKILL.md</code> — that tells an agent how to gently
+    protect the human behind a long LingTai session: notice fatigue, seal the worksite, keep safe background
+    jobs running, and offer one rest without shame or nagging. No runtime, config, or release changes.
+  </div>
+
+  <p class="motto">护元而不误事，守炉而不添火 — protect the human's vital essence, do not delay the work; tend the furnace, do not add fire.</p>
+
+  <h2>Why this skill exists</h2>
+  <p>
+    LingTai runs long, multi-agent, high-output workflows. The agents do not tire; the human does. When the
+    human gets pulled into a long, excited loop, LingTai should help them rest <em>without</em> stopping the
+    agent network. The covenant already frames the human's work as cultivation and reminds that
+    "cultivation is not the purpose — solving the struggles of others is." A depleted human aids no one, so
+    rest is reframed here as <em>scientific</em> cultivation rather than a lapse in discipline.
+  </p>
+
+  <h2>What changed</h2>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>tui/internal/preset/skills/scientific-cultivation/SKILL.md</code></td><td>New single-file preset utility skill with YAML frontmatter (<code>name</code>, <code>description</code>, <code>version</code>, <code>tags</code>).</td></tr>
+      <tr><td><code>reports/issue178-scientific-cultivation-20260608.html</code></td><td>This explainer.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The cultivation loop</h2>
+  <pre>1. Notice    — a soft fatigue / late-night / "one more" signal appears.
+2. Seal      — capture the current worksite: done / pending / next entry point.
+3. Keep      — confirm safe background jobs continue; nothing is lost.
+4. Offer     — suggest ONE gentle restorative (water / eyes / movement / sleep).
+5. Defer     — accept the human's choice without argument or repetition.</pre>
+
+  <h2>The three commitments (in priority order)</h2>
+  <table>
+    <thead><tr><th>Commitment</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>护元</strong> — protect vital essence</td><td>Notice fatigue, offer rest. Wins when commitments conflict.</td></tr>
+      <tr><td><strong>不误事</strong> — do not delay the work</td><td>Seal the worksite and keep safe background jobs running so nothing is lost when the human steps away.</td></tr>
+      <tr><td><strong>不添火</strong> — do not add fire</td><td>Never inject urgency, new scope, shame, or stimulation to keep a tired human at the keyboard.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Design choices worth noting</h2>
+  <ul>
+    <li><strong>Tone over mechanism.</strong> The skill changes how an agent talks to the human, nothing else. Most of the file is anti-nagging guidance, because tone is where this kind of guardrail fails.</li>
+    <li><strong>Offer once, then defer.</strong> A "no" is respected immediately; the skill re-offers only on a genuinely new and stronger signal, never on a timer.</li>
+    <li><strong>Never stop the network to force a break.</strong> Sealing the worksite and keeping safe jobs running is what makes rest cheap rather than a sacrifice — 不误事 in practice.</li>
+    <li><strong>Soft signals, not surveillance.</strong> The agent rarely has the clock or biometrics; fatigue cues are treated as soft and private, never broadcast to other agents.</li>
+  </ul>
+
+  <h2>Integration — why no Go change is needed</h2>
+  <p>
+    Preset skills are embedded via <code>//go:embed skills</code> in <code>tui/internal/preset/preset.go</code>
+    and extracted on startup by a <code>fs.WalkDir</code> over the whole <code>skills/</code> tree
+    (<code>PopulateBundledLibrary</code>). A new skill directory is discovered automatically; there is no
+    explicit skill registry or count to update. The embed comment warns only against dot-prefixed files —
+    this skill ships none.
+  </p>
+
+  <h2>Risk assessment</h2>
+  <p>
+    <span class="ok">Low risk.</span> Documentation/skill text only. No runtime code, build scripts,
+    dependency manifests, configuration, secrets, or release tooling are touched. The skill explicitly
+    disclaims side effects: it never stops or reconfigures the agent network on its own, and pausing a job
+    remains a human-initiated action.
+  </p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>git diff --check</code> — no whitespace errors.</li>
+    <li>YAML frontmatter present with <code>name</code> / <code>description</code> / <code>version</code> / <code>tags</code>, matching the convention used by existing single-file skills (<code>minimax-cli</code>, <code>lingtai-tui-anatomy</code>).</li>
+    <li>Skill directory <code>scientific-cultivation/</code> sits alongside peers under <code>tui/internal/preset/skills/</code> and is covered by the existing <code>//go:embed skills</code> + <code>fs.WalkDir</code> extraction path.</li>
+    <li>No existing preset test asserts an exact skill count, so the new directory does not break <code>swiss_knife_populate_test.go</code> or its siblings (they verify named skills survive, not a total).</li>
+  </ul>
+
+  <h2>Caveats</h2>
+  <ul>
+    <li><span class="warn">Behavioral, not enforced.</span> This is prompt guidance an agent reads — it nudges behavior, it does not technically prevent late-night work.</li>
+    <li>The reference implementation (<code>9s5bz2jvd2-lang/scientific-cultivation-skill</code>) informed the concept; this version is rewritten LingTai-native, leaning on the covenant's cultivation/furnace metaphor.</li>
+  </ul>
+</body>
+</html>
