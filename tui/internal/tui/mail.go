@@ -21,6 +21,12 @@ import (
 // unlimitedPageSize is the effective page size when the user selects "unlimited".
 const unlimitedPageSize = 999999
 
+const (
+	mailInputMinMaxHeight    = 3
+	mailInputHardMaxHeight   = 14
+	mailInputViewportReserve = 8
+)
+
 // ChatMessage represents a single message in the chat stream.
 type ChatMessage struct {
 	From        string
@@ -190,12 +196,38 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	return m
 }
 
+func adaptiveInputMaxHeight(windowHeight int) int {
+	maxHeight := windowHeight / 3
+	if maxHeight < mailInputMinMaxHeight {
+		maxHeight = mailInputMinMaxHeight
+	}
+	if maxHeight > mailInputHardMaxHeight {
+		maxHeight = mailInputHardMaxHeight
+	}
+	if reserveCap := windowHeight - mailInputViewportReserve; reserveCap < maxHeight {
+		maxHeight = reserveCap
+	}
+	if maxHeight < 1 {
+		maxHeight = 1
+	}
+	return maxHeight
+}
+
+func (m *MailModel) updateInputMaxHeight() {
+	if m.height <= 0 {
+		m.input.SetMaxHeight(defaultInputMaxHeight)
+		return
+	}
+	m.input.SetMaxHeight(adaptiveInputMaxHeight(m.height))
+}
+
 // syncViewportHeight recalculates viewport height from current input/palette/banner size.
 // Returns true if the height actually changed.
 func (m *MailModel) syncViewportHeight() bool {
 	if !m.ready {
 		return false
 	}
+	m.updateInputMaxHeight()
 	inputLines := m.input.LineCount()
 	paletteLines := 0
 	if m.input.IsPaletteActive() {
@@ -216,6 +248,44 @@ func (m *MailModel) syncViewportHeight() bool {
 	}
 	m.viewport.SetHeight(vpHeight)
 	return true
+}
+
+func (m *MailModel) inputRegionBounds() (start, end int) {
+	if !m.ready {
+		return -1, -1
+	}
+	paletteLines := 0
+	if m.input.IsPaletteActive() {
+		paletteLines = m.palette.LineCount()
+	}
+	topBannerLines := 0
+	if m.hasMoreOlder() {
+		topBannerLines = 1
+	}
+	bottomBannerLines := 0
+	if m.loadedExtra > 0 {
+		bottomBannerLines = 1
+	}
+	start = 2 + topBannerLines + m.viewport.Height() + bottomBannerLines + 1 + paletteLines
+	end = start + m.input.LineCount() + 1 // input rows plus border line
+	return start, end
+}
+
+func (m *MailModel) mouseInInputRegion(msg tea.MouseWheelMsg) bool {
+	start, end := m.inputRegionBounds()
+	return start >= 0 && msg.Y >= start && msg.Y < end
+}
+
+func (m *MailModel) scrollInputByWheel(msg tea.MouseWheelMsg) bool {
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.input.PageUp()
+		return true
+	case tea.MouseWheelDown:
+		m.input.PageDown()
+		return true
+	}
+	return false
 }
 
 // bannerLineCount returns the total lines reserved for top and bottom banners.
@@ -455,7 +525,11 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		// Forward scroll wheel events to viewport
+		if m.ready && m.mouseInInputRegion(msg) && m.scrollInputByWheel(msg) {
+			m.syncViewportHeight()
+			return m, nil
+		}
+		// Forward scroll wheel events outside the input box to the chat viewport.
 		if m.ready {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -467,6 +541,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width)
+		m.updateInputMaxHeight()
 		if !m.ready {
 			inputLines := m.input.LineCount()
 			// sep(1) + input(N) + border(1) + status(1)
@@ -601,10 +676,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	case EditorDoneMsg:
 		m.pendingMessage = msg.Text
-		firstLine := strings.SplitAfterN(msg.Text, "\n", 2)[0]
-		m.input.SetValue(firstLine)
-		// Refresh viewport after external editor
-		return m, m.refreshMail
+		m.input.SetValue(msg.Text)
+		m.syncViewportHeight()
+		m.maybeShowEditorHint()
+		// Refresh viewport and force a full repaint after the terminal returns from
+		// the external editor; editors such as vim can leave the alt screen visually
+		// stale until Bubble Tea draws a clean frame.
+		return m, tea.Batch(m.refreshMail, tea.ClearScreen)
 
 	case PaletteSelectMsg:
 		m.input.Reset()
@@ -661,6 +739,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
 				m.syncViewportHeight()
+				m.maybeShowEditorHint()
 				// Extract filter from input (text after "/")
 				val := m.input.Value()
 				if len(val) > 1 {
@@ -730,6 +809,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			return m, nil
 
 		case "pgup", "pgdown":
+			if msg.String() == "pgup" && m.input.PageUp() {
+				return m, nil
+			}
+			if msg.String() == "pgdown" && m.input.PageDown() {
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
@@ -741,6 +826,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if m.syncViewportHeight() && m.viewport.AtBottom() {
 			m.viewport.GotoBottom()
 		}
+		m.maybeShowEditorHint()
 		// Check if slash was typed
 		if m.input.IsPaletteActive() {
 			val := m.input.Value()
@@ -753,9 +839,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Forward all other messages (including textinput blink) to input
+	// Forward all other messages (including textarea paste and cursor blink) to input.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if _, ok := msg.(tea.PasteMsg); ok {
+		if m.syncViewportHeight() && m.viewport.AtBottom() {
+			m.viewport.GotoBottom()
+		}
+		m.maybeShowEditorHint()
+	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -1026,6 +1118,13 @@ func (m MailModel) networkActivityBadge() string {
 func (m *MailModel) AddSystemMessage(body string) {
 	m.statusFlash = body
 	m.statusExpiry = time.Now().Add(5 * time.Second)
+}
+
+func (m *MailModel) maybeShowEditorHint() {
+	if strings.TrimSpace(m.input.Value()) == "" || !m.input.AtMaxHeight() {
+		return
+	}
+	m.AddSystemMessage(i18n.T("mail.editor_hint"))
 }
 
 func fileExists(path string) bool {

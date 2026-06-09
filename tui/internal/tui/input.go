@@ -21,6 +21,8 @@ type OpenEditorMsg struct {
 	Text string
 }
 
+const defaultInputMaxHeight = 6
+
 // InputModel wraps a textarea with slash-command palette detection.
 // Enter sends the message (via SendMsg). Ctrl+J inserts a newline.
 type InputModel struct {
@@ -45,10 +47,12 @@ func NewInputModel(humanDir string) InputModel {
 	ti.ShowLineNumbers = false
 	ti.SetStyles(themedTextareaStyles())
 
-	// Let the textarea soft-wrap and auto-grow instead of inserting hard newlines.
+	// Let the textarea soft-wrap and auto-grow until MaxHeight; beyond that
+	// the textarea's internal viewport scrolls instead of growing the mail view.
 	ti.DynamicHeight = true
 	ti.MinHeight = 1
-	ti.MaxHeight = 6
+	ti.MaxHeight = defaultInputMaxHeight
+	ti.MaxContentHeight = ti.CharLimit
 
 	m := InputModel{
 		textarea:   ti,
@@ -207,7 +211,18 @@ func (m InputModel) HasNewlines() bool {
 }
 
 func (m *InputModel) SetValue(s string) {
+	// Programmatic loads (history/editor) should not truncate existing text.
+	// The normal insertion limits are restored for subsequent typing/paste.
+	charLimit := m.textarea.CharLimit
+	maxContentHeight := m.textarea.MaxContentHeight
+	m.textarea.CharLimit = 0
+	m.textarea.MaxContentHeight = 0
 	m.textarea.SetValue(s)
+	m.textarea.CharLimit = charLimit
+	m.textarea.MaxContentHeight = maxContentHeight
+	m.syncScrollViewport()
+	m.textarea.MoveToEnd()
+	m.syncScrollViewport()
 	if len(s) > 0 && s[0] == '/' {
 		m.showPalette = true
 	} else {
@@ -251,6 +266,55 @@ func (m *InputModel) SetWidth(w int) {
 	if w > 10 {
 		m.textarea.SetWidth(w - 10)
 	}
+}
+
+func (m *InputModel) SetMaxHeight(h int) {
+	if h < m.textarea.MinHeight {
+		h = m.textarea.MinHeight
+	}
+	m.textarea.MaxHeight = h
+}
+
+func (m InputModel) MaxHeight() int {
+	return m.textarea.MaxHeight
+}
+
+func (m InputModel) AtMaxHeight() bool {
+	return m.textarea.Height() >= m.textarea.MaxHeight
+}
+
+func (m InputModel) ScrollOffset() int {
+	return m.textarea.ScrollYOffset()
+}
+
+func (m InputModel) ScrollPercent() float64 {
+	return m.textarea.ScrollPercent()
+}
+
+func (m *InputModel) syncScrollViewport() {
+	m.textarea.View()
+}
+
+func (m *InputModel) PageUp() bool {
+	m.syncScrollViewport()
+	before := m.textarea.ScrollYOffset()
+	m.textarea.PageUp()
+	if m.textarea.ScrollYOffset() == before && m.textarea.ScrollPercent() > 0 {
+		m.textarea.PageUp()
+	}
+	m.syncScrollViewport()
+	return m.textarea.ScrollYOffset() != before
+}
+
+func (m *InputModel) PageDown() bool {
+	m.syncScrollViewport()
+	before := m.textarea.ScrollYOffset()
+	m.textarea.PageDown()
+	if m.textarea.ScrollYOffset() == before && m.textarea.ScrollPercent() < 1 {
+		m.textarea.PageDown()
+	}
+	m.syncScrollViewport()
+	return m.textarea.ScrollYOffset() != before
 }
 
 func (m *InputModel) historyPath() string {

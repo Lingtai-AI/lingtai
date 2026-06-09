@@ -138,6 +138,7 @@
   "mail.cpr_all_with_failures": "已复苏 %d 个 Agent；%d 个失败：%s",
   "mail.lang_moved": "器灵语言已移至 /settings。请在那里修改，然后 /refresh。",
   "mail.launch_failed": "启动 Agent失败：%s",
+  "mail.editor_hint": "输入框已可内部滚动：在此处滚轮或按 pgup/pgdn；ctrl+e 打开 vim/编辑器。",
   "mail.no_messages": "暂无消息，等待邮件...",
   "mail.load_more": "▲ 还有 %d 条旧消息 — ctrl+u 加载",
   "mail.collapse": "▼ ctrl+d 收起到最新",
