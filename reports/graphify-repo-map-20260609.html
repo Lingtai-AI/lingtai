@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LingTai Graphify repo map — explainer</title>
+<style>
+body{font:15px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b1020;color:#eef3ff}
+main{max-width:1180px;margin:0 auto;padding:32px 24px 80px}
+section{background:#121a33;border:1px solid #28345f;border-radius:14px;padding:18px;margin:18px 0}
+h1{margin-top:0;font-size:32px} h2{color:#dbeafe} h3{color:#bcd4ff;margin-bottom:6px}
+code{color:#b3ecff} pre{white-space:pre-wrap;word-break:break-word;background:#071021;border:1px solid #28345f;border-radius:10px;padding:14px;overflow:auto}
+.badge{display:inline-block;border:1px solid #28345f;border-radius:999px;padding:4px 9px;background:#16213f;color:#cce9ff;margin-right:8px;margin-bottom:6px}
+.callout{border-left:4px solid #80d8ff;padding-left:14px;color:#dff7ff}
+table{border-collapse:collapse;width:100%;margin-top:8px}
+th,td{border:1px solid #28345f;padding:7px 10px;text-align:left}
+th{background:#16213f;color:#cce9ff}
+a{color:#9fd0ff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:#071021;border:1px solid #28345f;border-radius:10px;padding:14px;text-align:center}
+.stat .n{font-size:26px;color:#9fe3ff;font-weight:700} .stat .l{color:#a9bbe6;font-size:12px}
+.tag-ok{color:#7dab8f} .tag-noise{color:#e6a96b}
+footer{color:#6f7fb0;font-size:12px;margin-top:24px}
+</style></head><body><main>
+
+<h1>LingTai Graphify repo map</h1>
+<p>
+  <span class="badge">docs-only</span>
+  <span class="badge">issue #259</span>
+  <span class="badge">self-contained explainer</span>
+  <span class="badge">artifacts regenerated locally</span>
+</p>
+<p class="callout">
+  A knowledge graph of this repository was generated with <strong>Graphify</strong>
+  to make the codebase easier to navigate and to spot where the architecture/docs
+  graph is noisy or under-connected. The graph itself is <strong>not committed</strong>;
+  it lives in the git-ignored <code>graphify-out/</code> and is regenerated on demand.
+  This page and <code>docs/graphify.md</code> are the curated, checked-in record.
+</p>
+
+<section>
+  <h2>Run at a glance</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">490</div><div class="l">supported files</div></div>
+    <div class="stat"><div class="n">563,347</div><div class="l">words</div></div>
+    <div class="stat"><div class="n">6,588</div><div class="l">nodes</div></div>
+    <div class="stat"><div class="n">9,908</div><div class="l">edges</div></div>
+    <div class="stat"><div class="n">365</div><div class="l">communities</div></div>
+    <div class="stat"><div class="n">87% / 13%</div><div class="l">extracted / inferred edges</div></div>
+  </div>
+  <p>Because the graph is above the 5,000-node threshold, the HTML view Graphify
+     produces is an <strong>aggregated community view</strong> rather than a full
+     node graph.</p>
+</section>
+
+<section>
+  <h2>Artifacts</h2>
+  <table>
+    <tr><th>File</th><th>What it holds</th></tr>
+    <tr><td><code>graphify-out/graph.html</code></td><td>Interactive community map.</td></tr>
+    <tr><td><code>graphify-out/GRAPH_REPORT.md</code></td><td>God nodes, surprising connections, suggested questions.</td></tr>
+    <tr><td><code>graphify-out/graph.json</code></td><td>Raw graph for tooling.</td></tr>
+  </table>
+  <p class="callout">Policy: keep <code>graphify-out/</code> generated locally and
+     git-ignored. Commit only curated docs derived from the report.</p>
+</section>
+
+<section>
+  <h2>How to regenerate</h2>
+  <h3>Agent-assisted (Codex / Claude-style)</h3>
+  <pre>/graphify .</pre>
+  <h3>Headless CLI (needs an LLM backend for docs/papers/images)</h3>
+  <pre>export GEMINI_API_KEY=...
+graphify extract . --backend gemini</pre>
+  <h3>Useful follow-ups</h3>
+  <pre>graphify query "Why does contains() connect so many code and test nodes?"
+graphify explain "Preset"
+graphify path "Agent Operating System" "Filesystem-only IPC"
+graphify export html</pre>
+  <h3>Recommended workflow</h3>
+  <ol>
+    <li>Generate the graph with <code>/graphify .</code> or
+        <code>graphify extract . --backend gemini</code>.</li>
+    <li>Open <code>graphify-out/graph.html</code> for the high-level community map.</li>
+    <li>Read <code>graphify-out/GRAPH_REPORT.md</code> for god nodes and leads.</li>
+    <li>Use <code>query</code> / <code>explain</code> / <code>path</code> to
+        investigate architecture questions <em>before</em> broad changes.</li>
+    <li>Verify inferred and ambiguous edges against source files before treating
+        them as design evidence.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Findings</h2>
+  <h3>Top hub nodes</h3>
+  <table>
+    <tr><th>Node</th><th>Edges</th><th>Read as</th></tr>
+    <tr><td><code>contains()</code></td><td>92</td><td class="tag-noise">generic / noisy hub</td></tr>
+    <tr><td><code>Preset</code></td><td>71</td><td class="tag-ok">genuine architecture hub</td></tr>
+    <tr><td><code>FirstRunModel</code></td><td>57</td><td class="tag-ok">genuine architecture hub</td></tr>
+    <tr><td><code>PresetEditorModel</code></td><td>55</td><td class="tag-ok">genuine architecture hub</td></tr>
+    <tr><td><code>App</code></td><td>48</td><td class="tag-ok">genuine architecture hub</td></tr>
+  </table>
+
+  <h3>Interesting semantic connections</h3>
+  <ul>
+    <li><code>Network Intelligence</code> ≈ <code>AI Organization Substrate</code>.</li>
+    <li><code>Agent Operating System</code> ≈ <code>AI Organization Substrate</code>.</li>
+    <li><code>Email Not Talk Decision</code> ≈ <code>Filesystem-only IPC</code>.</li>
+    <li>English, Chinese, and classical-Chinese README variants all map back to the
+        same AI-organization concept.</li>
+  </ul>
+
+  <h3>Noisy / generic hubs to review</h3>
+  <p>Not package-qualified enough to navigate by — candidates for better labels,
+     exclude rules, or naming conventions in future runs:</p>
+  <p><code>contains()</code>, <code>Delete()</code>, <code>Path</code>,
+     <code>T</code>, <code>main()</code></p>
+</section>
+
+<section>
+  <h2>Actionable improvements</h2>
+  <ol>
+    <li><strong>Cross-link architecture docs</strong> — <code>ANATOMY.md</code>,
+        <code>docs/design.md</code>,
+        <code>docs/design-molt-and-network-intelligence.md</code>, plus
+        <code>tui/ANATOMY.md</code> and <code>portal/ANATOMY.md</code>.</li>
+    <li><strong>Strengthen weakly connected docs</strong> back to core concepts:
+        <code>Preset</code>, <code>Filesystem-only IPC</code>,
+        <code>Agent Operating System</code>, <code>AI Organization Substrate</code>.</li>
+    <li><strong>Clean up noisy hubs</strong> in a future Graphify run (labels /
+        exclude rules / naming).</li>
+    <li><strong>Maintainer refresh workflow</strong> — regenerate before larger
+        architecture changes or releases; manual for now, CI later if useful.</li>
+    <li><strong>Artifact policy</strong> — keep <code>graphify-out/</code>
+        local + ignored; commit only curated docs.</li>
+  </ol>
+</section>
+
+<footer>
+  Generated for issue #259 · branch <code>docs/issue-259-graphify-repo-map-20260609</code> ·
+  See <code>docs/graphify.md</code> for the maintainable Markdown version.
+</footer>
+
+</main></body></html>

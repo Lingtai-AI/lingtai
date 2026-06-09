@@ -74,6 +74,9 @@ lingtai-projects
 .chat_history.json
 _telegram_agent/
 
+# Graphify knowledge-graph output (regenerated locally; see docs/graphify.md)
+graphify-out/
+
 .worktrees
 
 # Local-only files: codex CLI agent guidance, ccusage screenshots
