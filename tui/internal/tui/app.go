@@ -38,6 +38,7 @@ const (
 	appViewMailbox
 	appViewSystem
 	appViewPresets
+	appViewDaemons
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -53,6 +54,7 @@ type App struct {
 	codex         CodexModel
 	system        SystemModel
 	mailbox       MailboxModel
+	daemons       DaemonsModel
 	presetLibrary PresetLibraryModel
 	firstRun      FirstRunModel
 	addon         AddonModel
@@ -224,6 +226,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.system, cmd = a.system.Update(msg)
 		case appViewPresets:
 			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
+		case appViewDaemons:
+			a.daemons, cmd = a.daemons.Update(msg)
 		}
 		return a, cmd
 
@@ -457,7 +461,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons {
 				return a, tea.Quit
 			}
 		}
@@ -528,6 +532,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewPresets:
 		updated, cmd := a.presetLibrary.Update(msg)
 		a.presetLibrary = updated
+		return a, cmd
+	case appViewDaemons:
+		updated, cmd := a.daemons.Update(msg)
+		a.daemons = updated
 		return a, cmd
 	}
 
@@ -732,6 +740,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "daemons":
+		a.currentView = appViewDaemons
+		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.daemons.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -1219,6 +1231,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "daemons":
+		a.currentView = appViewDaemons
+		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.daemons.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -1313,6 +1329,8 @@ func (a App) View() tea.View {
 		content = a.system.View()
 	case appViewPresets:
 		content = a.presetLibrary.View()
+	case appViewDaemons:
+		content = a.daemons.View()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

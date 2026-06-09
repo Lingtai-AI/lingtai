@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LingTai TUI /daemons Page</title>
+<style>
+  :root { color-scheme: light dark; --accent:#7c3aed; --muted:#667085; --ok:#059669; --bg:#f8fafc; --card:#ffffff; --border:#e5e7eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1020; --card:#111827; --border:#263244; --muted:#9ca3af; } }
+  body { margin:0; font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); color:CanvasText; }
+  main { max-width:1080px; margin:0 auto; padding:40px 24px 64px; }
+  h1 { font-size:34px; line-height:1.15; margin:0 0 8px; }
+  h2 { margin-top:32px; }
+  .sub { color:var(--muted); margin:0 0 28px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:0 1px 8px #0001; }
+  .ok { color:var(--ok); font-weight:700; }
+  code { background:color-mix(in srgb, var(--accent) 12%, transparent); padding:2px 6px; border-radius:6px; }
+  pre { background:#0f172a; color:#e5e7eb; padding:16px; border-radius:14px; overflow:auto; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { background:color-mix(in srgb, var(--accent) 12%, transparent); }
+  tr:last-child td { border-bottom:0; }
+  .pill { display:inline-block; border:1px solid var(--border); border-radius:999px; padding:4px 10px; margin:3px; color:var(--muted); }
+</style>
+</head>
+<body><main>
+  <h1>TUI <code>/daemons</code> page</h1>
+  <p class="sub">Read-only daemon run browser for LingTai's terminal UI. The implementation adds a slash command, a Ctrl+T agent switcher, and a two-pane daemon list/detail page.</p>
+
+  <section class="grid">
+    <div class="card"><strong>Command</strong><br><code>/daemons</code> opens the new page from the slash palette and generated command list.</div>
+    <div class="card"><strong>Agent switch</strong><br><code>ctrl+t</code> opens an agent picker, matching existing TUI conventions from kanban/mailbox/system/library.</div>
+    <div class="card"><strong>Data source</strong><br>Reads local runtime artifacts only: <code>daemon.json</code>, <code>logs/events.jsonl</code>, <code>history/chat_history.jsonl</code>, and <code>result.txt</code>.</div>
+    <div class="card"><strong>Safety</strong><br>No lifecycle actions, deletes, or daemon mutations. The selected daemon detail renders the full task, full chat_history turns, full event/tool JSON lines, and full result text read-only.</div>
+  </section>
+
+  <h2>What users see</h2>
+  <table>
+    <tr><th>Region</th><th>Content</th></tr>
+    <tr><td>Header</td><td><code>Daemons — &lt;agent&gt;</code> showing the selected agent.</td></tr>
+    <tr><td>Left pane</td><td>Newest-first daemon runs, each with handle (<code>em-7</code>), state, and task snippet.</td></tr>
+    <tr><td>Right pane</td><td>Selected run metadata, task, full event/tool records, full interactions, and full result text.</td></tr>
+    <tr><td>Footer</td><td>Navigation hints: select with arrows/jk, refresh with r, switch agent with Ctrl+T, Esc back.</td></tr>
+  </table>
+
+  <h2>Implementation map</h2>
+  <ul>
+    <li><code>tui/internal/tui/daemons.go</code> — new <code>DaemonsModel</code>, daemon artifact readers, and rendering helpers.</li>
+    <li><code>tui/internal/tui/app.go</code> — new <code>appViewDaemons</code>, model field, dispatcher/render cases, <code>/daemons</code> routing.</li>
+    <li><code>tui/internal/tui/palette.go</code> — adds the command to <code>DefaultCommands()</code>.</li>
+    <li><code>tui/i18n/{en,zh,wen}.json</code> — three-locale UI strings.</li>
+    <li><code>tui/internal/tui/daemons_test.go</code> — command registration, view routing, and artifact parser coverage.</li>
+    <li><code>tui/internal/tui/ANATOMY.md</code> — updated source-grounded map for the new screen.</li>
+  </ul>
+
+  <h2>Validation</h2>
+  <p class="ok">Passed locally:</p>
+  <pre>cd tui
+ go test ./internal/tui ./i18n
+ go test ./...
+ go build ./...</pre>
+
+  <h2>Limitations / follow-ups</h2>
+  <p>This PR intentionally keeps the first version local and read-only, but the detail view is no longer summary-only: it displays the full task, interaction process, event/tool records, and result text for the selected daemon. Possible future iterations: richer filters by state/backend, search within task/result text, direct jump to raw files, or live daemon process controls if the product direction wants mutation from this page.</p>
+
+  <h2>Review checklist</h2>
+  <span class="pill">No remote mutations except PR branch</span>
+  <span class="pill">Three-locale strings</span>
+  <span class="pill">Anatomy updated</span>
+  <span class="pill">Full detail display</span>
+  <span class="pill">Read-only runtime data</span>
+</main></body></html>
