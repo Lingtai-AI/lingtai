@@ -66,7 +66,7 @@ project/
 
 > The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
 
-For source builds, mainland-China mirror setup, and from-tarball install paths, see [Install in detail](#install-in-detail).
+For source builds, mainland-China mirror setup, from-tarball install paths, and first-time install troubleshooting (missing `brew`, WSL prerequisites), see [Install in detail](#install-in-detail).
 
 ## What it is good at
 
@@ -239,6 +239,25 @@ brew upgrade lingtai-ai/lingtai/lingtai-tui
 ```
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
+
+### First-time install troubleshooting
+
+**`brew` is not installed (macOS or Linux).** Install Homebrew first, then re-run the `brew install` command above:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+The installer ends by printing an `eval` line to add `brew` to your `PATH` — run it (or open a new terminal) before continuing.
+
+**WSL / Ubuntu / Debian.** Homebrew on Linux needs basic build tools before it can install packages. Install the prerequisites, then Homebrew, then LingTai:
+
+```bash
+sudo apt update
+sudo apt install build-essential curl git ca-certificates
+```
+
+**Homebrew is not an option.** Build from source instead — see [From source](#from-source) below. You need Go, `make`, and (for the portal) Node.js/npm.
 
 ### From source
 
