@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>README first-time install troubleshooting — 2026-06-10</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; margin: 32px auto; max-width: 980px; color: #1f2937; }
+  h1, h2 { color: #111827; }
+  code { background: #f3f4f6; padding: 0.12rem 0.28rem; border-radius: 4px; }
+  pre { background: #111827; color: #f9fafb; padding: 16px; border-radius: 10px; overflow: auto; }
+  .summary { background: #ecfdf5; border: 1px solid #10b981; border-radius: 12px; padding: 16px 20px; }
+  .warn { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 12px; padding: 16px 20px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f9fafb; }
+</style>
+</head>
+<body>
+<h1>README first-time install troubleshooting</h1>
+<div class="summary">
+  <strong>结论：</strong>本次改动把「首次安装排障」内容带回 README.md：在 <em>Install in detail</em> 的
+  Homebrew 安装/升级命令之后、<em>Architecture</em> 之前，新增
+  <code>### First-time install troubleshooting</code> 小节，覆盖三类新用户卡点 —— 没有 <code>brew</code>、
+  WSL/Ubuntu 缺 <code>build-essential</code> 等先决依赖、以及完全没有 Homebrew 时的源码构建路径。
+  不改变发布语义：Homebrew 仍是推荐安装方式，<code>pip install lingtai</code> 仍然只是 kernel 开发/诊断用途。
+</div>
+
+<h2>为什么要做</h2>
+<p>早期 README 的 Quick start 里曾有过这块内容（见 git 历史
+<code>af2ba57</code> "docs: add Linux/WSL install steps to all READMEs" 与
+<code>c58e09e</code> "clean quickstart — Homebrew install collapsible"），后来在
+<code>72a5c71</code> "rewrite README product narrative" 的重写中被移除。结果是：Linux/WSL 新用户跑
+<code>brew install lingtai-ai/lingtai/lingtai-tui</code> 时，要么 <code>brew: command not found</code>，
+要么 Homebrew on Linux 因缺 gcc 而编译失败，README 里没有任何指引。Jason 要求把这块内容恢复，
+放在安装详情之后、保持产品 README 的简洁体例。</p>
+
+<h2>新小节内容（README.md, Install in detail 内）</h2>
+<table>
+<tr><th>卡点</th><th>给出的命令 / 指引</th></tr>
+<tr>
+  <td><strong>没有 <code>brew</code></strong>（macOS 或 Linux）</td>
+  <td><pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</pre>
+  并提示安装结束后按 installer 输出的 <code>eval</code> 行把 <code>brew</code> 加进 <code>PATH</code>（或开新终端）。</td>
+</tr>
+<tr>
+  <td><strong>WSL / Ubuntu / Debian</strong></td>
+  <td><pre>sudo apt update
+sudo apt install build-essential curl git ca-certificates</pre>
+  先装先决依赖，再装 Homebrew，再 <code>brew install</code>。相比历史版本（只有 <code>build-essential</code>），
+  按任务要求补上了 <code>curl git ca-certificates</code> —— 这是 Homebrew installer 自身的依赖。</td>
+</tr>
+<tr>
+  <td><strong>完全没有 Homebrew</strong></td>
+  <td>指向同一节内已有的 <a href="https://github.com/Lingtai-AI/lingtai#from-source">From source</a> 小节
+  （anchor 链接 <code>#from-source</code>），并点名先决依赖：Go、<code>make</code>、portal 需要 Node.js/npm。</td>
+</tr>
+</table>
+
+<h2>其他改动</h2>
+<ul>
+<li>Quick start（"Start in three commands"）下方的指路句同步更新，加上
+  "first-time install troubleshooting (missing <code>brew</code>, WSL prerequisites)"，
+  让新用户从页首就能跳到这一节。</li>
+<li>页尾已有的 <code>## Troubleshooting</code>（运行期排障）保持不动 —— 新小节只管「装不上」，
+  老节继续管「装上了但不工作」。两者不重叠。</li>
+</ul>
+
+<h2>位置选择</h2>
+<p>放在 <code>### Homebrew (recommended)</code> 与 <code>### From source</code> 之间：
+紧跟 brew install/upgrade 命令（用户失败的第一现场），又在 <code>## Architecture</code> 之前，
+符合任务给出的位置约束。作为 <code>###</code> 子节挂在 Install in detail 下，不打断顶层叙事节奏。</p>
+
+<div class="warn">
+<strong>注意：</strong>本次只改了 README.md（英文版）。README.zh.md 与 README.wen.md 未同步，
+如需三语言一致可作为后续跟进。报告文件名 <code>pr288-readme-first-install-troubleshooting-explainer.html</code>
+已按 PR #288 命名。
+</div>
+
+<h2>验证</h2>
+<ul>
+<li><code>git diff --check</code> — pass（无空白错误）</li>
+<li>人工核对 anchor：<code>#install-in-detail</code>、<code>#from-source</code> 与 GitHub 标题 slug 规则一致</li>
+<li>历史措辞比对：<code>git show af2ba57 / c58e09e -- README.md</code></li>
+</ul>
+
+<h2>变更文件</h2>
+<ul>
+<li><code>README.md</code> — 新增 First-time install troubleshooting 小节 + Quick start 指路句</li>
+<li><code>reports/pr288-readme-first-install-troubleshooting-explainer.html</code> — 本说明</li>
+</ul>
+</body>
+</html>
