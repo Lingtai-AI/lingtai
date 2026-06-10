@@ -151,6 +151,7 @@ Frequently used slash commands:
 | Command | Use |
 |---|---|
 | `/setup` | Change model, recipe, language, tools, or behavior. |
+| `/export` | Export a reusable recipe for sharing. |
 | `/kanban` | Inspect agent + project status. |
 | `/mcp` | Configure external channels (Telegram/Feishu/WeChat/WhatsApp/IMAP/…). |
 | `/skills` | Browse available skills and capabilities. |

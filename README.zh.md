@@ -151,6 +151,7 @@ flowchart LR
 | 命令 | 用途 |
 |---|---|
 | `/setup` | 调整模型、配方、语言、工具、行为 |
+| `/export` | 导出可复用的配方以供分享 |
 | `/kanban` | 查看助理与项目状态 |
 | `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
 | `/skills` | 浏览可用技能与能力 |
