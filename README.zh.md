@@ -153,6 +153,7 @@ flowchart LR
 | `/setup` | 调整模型、配方、语言、工具、行为 |
 | `/kanban` | 查看助理与项目状态 |
 | `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
+| `/notification` | 查看当前 Agent 可见的原始 notification block |
 | `/skills` | 浏览可用技能与能力 |
 | `/viz` | 打开网络可视化 |
 | `/insights` | 让助理对当前工作做一次自我反思 |
