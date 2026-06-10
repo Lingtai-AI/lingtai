@@ -159,6 +159,7 @@ flowchart LR
 | `/sleep` · `/refresh` · `/cpr` · `/clear` | 生命周期：休眠、重载、复苏、清空上下文 |
 | `/projects` | 切换或查看已知项目 |
 | `/doctor` | 排查安装/运行时问题 |
+| `/help` | 打开斜杠命令帮助浏览器 |
 
 常用 Shell 入口：
 

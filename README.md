@@ -159,6 +159,7 @@ Frequently used slash commands:
 | `/sleep` · `/refresh` · `/cpr` · `/clear` | Lifecycle: pause, reload, revive, reset context. |
 | `/projects` | Switch or inspect known projects. |
 | `/doctor` | Diagnose installation/runtime issues. |
+| `/help` | Open the slash-command help browser. |
 
 Shell entrypoints when useful:
 
