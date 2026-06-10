@@ -80,6 +80,34 @@ func ParseCapabilities(raw json.RawMessage) []string {
 	return nil
 }
 
+// intrinsicCapabilities are the agent capabilities that always exist on a
+// live agent (the kernel wires them in unconditionally) but are not listed
+// in .agent.json's `capabilities` field. The kanban/props view should still
+// present them so the operator sees the complete capability surface.
+var intrinsicCapabilities = []string{"system", "soul", "email", "psyche"}
+
+// CapabilitiesForDisplay returns the operator-visible capability list:
+// the intrinsic capabilities first, followed by the manifest capabilities in
+// their original order, with duplicates removed. Manifest entries that
+// duplicate an intrinsic are dropped (the intrinsic keeps its leading slot).
+func CapabilitiesForDisplay(manifest []string) []string {
+	out := make([]string, 0, len(intrinsicCapabilities)+len(manifest))
+	seen := make(map[string]bool, len(intrinsicCapabilities)+len(manifest))
+	for _, c := range intrinsicCapabilities {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	for _, c := range manifest {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // ReadInitManifest reads init.json from dir, extracts manifest fields,
 // and flattens the llm sub-object (model, provider, base_url) to top level.
 func ReadInitManifest(dir string) (map[string]interface{}, error) {

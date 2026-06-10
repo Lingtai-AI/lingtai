@@ -81,3 +81,96 @@ func TestLoadDaemonSummariesReadsMetadataEventsAndChats(t *testing.T) {
 		t.Fatalf("result = %q", got.Result)
 	}
 }
+
+func TestReadDaemonSummaryParsesPreset(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// preset_name present → used verbatim.
+	write(`{"backend":"lingtai","preset_name":"deepseek-coder","preset_provider":"deepseek","preset_model":"deepseek-chat","model":"deepseek-chat"}`)
+	got, err := readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Preset != "deepseek-coder" {
+		t.Fatalf("preset = %q, want %q", got.Preset, "deepseek-coder")
+	}
+
+	// preset_name null → fall back to provider:model.
+	write(`{"backend":"lingtai","preset_name":null,"preset_provider":"deepseek","preset_model":"deepseek-chat","model":"deepseek-chat"}`)
+	got, err = readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Preset != "deepseek:deepseek-chat" {
+		t.Fatalf("preset fallback = %q, want %q", got.Preset, "deepseek:deepseek-chat")
+	}
+
+	// only model present → fall back to model.
+	write(`{"backend":"lingtai","model":"glm-4"}`)
+	got, err = readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Preset != "glm-4" {
+		t.Fatalf("preset model fallback = %q, want %q", got.Preset, "glm-4")
+	}
+}
+
+func TestRenderDetailShowsPresetNearBackend(t *testing.T) {
+	m := DaemonsModel{
+		items: []daemonSummary{{
+			Dir:     "/tmp/daemons/em-7",
+			State:   "done",
+			Backend: "lingtai",
+			Preset:  "deepseek-coder",
+		}},
+	}
+	out := m.renderDetail(80)
+	if !strings.Contains(out, "deepseek-coder") {
+		t.Fatalf("renderDetail missing preset; got:\n%s", out)
+	}
+	// preset row sits in the metadata block, right after backend.
+	bi := strings.Index(out, "lingtai")
+	pi := strings.Index(out, "deepseek-coder")
+	if bi < 0 || pi < 0 {
+		t.Fatalf("backend or preset missing; got:\n%s", out)
+	}
+	if pi < bi {
+		t.Fatalf("preset rendered before backend; backend=%d preset=%d", bi, pi)
+	}
+}
+
+func TestRenderDetailPutsEventsLast(t *testing.T) {
+	m := DaemonsModel{
+		items: []daemonSummary{{
+			Dir:     "/tmp/daemons/em-7",
+			State:   "done",
+			Backend: "lingtai",
+			Task:    "do the thing",
+			Result:  "all done",
+			Chats:   []daemonChat{{Role: "assistant", Text: "chat line"}},
+			Events:  []daemonEvent{{Event: "tool_call", Name: "read", Raw: `{"event":"tool_call"}`}},
+		}},
+	}
+	out := m.renderDetail(80)
+
+	taskIdx := strings.Index(out, "do the thing")
+	resultIdx := strings.Index(out, "all done")
+	chatIdx := strings.Index(out, "chat line")
+	eventsIdx := strings.Index(out, "tool_call")
+
+	for name, idx := range map[string]int{"task": taskIdx, "result": resultIdx, "chat": chatIdx, "events": eventsIdx} {
+		if idx < 0 {
+			t.Fatalf("%s section missing from detail:\n%s", name, out)
+		}
+	}
+	if !(taskIdx < eventsIdx && resultIdx < eventsIdx && chatIdx < eventsIdx) {
+		t.Fatalf("events not last: task=%d result=%d chat=%d events=%d", taskIdx, resultIdx, chatIdx, eventsIdx)
+	}
+}

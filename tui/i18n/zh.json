@@ -606,6 +606,7 @@
   "daemons.interactions": "交互过程（全量 chat_history）",
   "daemons.result": "结果",
   "daemons.backend": "后端",
+  "daemons.preset": "预设",
   "daemons.current_tool": "当前工具",
   "daemons.turn": "轮次",
   "daemons.started": "开始",

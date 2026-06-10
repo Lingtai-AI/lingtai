@@ -13,6 +13,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | **agent.go** | | |
 | `ReadAgent(dir)` | `tui/internal/fs/agent.go:26` | reads `.agent.json` → `AgentNode` (address, name, state, is_human, capabilities, location) |
 | `ParseCapabilities(raw)` | `tui/internal/fs/agent.go:56` | handles `[]string` and `[["name", {}], ...]` tuple formats |
+| `CapabilitiesForDisplay(manifest)` | `tui/internal/fs/agent.go:93` | prepends intrinsic caps (`system, soul, email, psyche`) to manifest caps, deduped, for operator display (kanban/props) |
 | `ReadInitManifest(dir)` | `tui/internal/fs/agent.go:85` | reads `init.json`, extracts manifest, flattens `llm.*` and `soul.delay` |
 | `DiscoverAgents(baseDir)` | `tui/internal/fs/agent.go:151` | scans for all subdirectories with `.agent.json` |
 | `ReadStatus(dir)` | `tui/internal/fs/agent.go:193` | reads `.status.json` → `AgentStatus` (tokens, runtime) |

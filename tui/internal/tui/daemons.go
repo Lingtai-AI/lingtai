@@ -60,6 +60,7 @@ type daemonSummary struct {
 	State        string
 	Task         string
 	Backend      string
+	Preset       string
 	StartedAt    string
 	UpdatedAt    string
 	CompletedAt  string
@@ -415,6 +416,7 @@ func (m DaemonsModel) renderDetail(maxW int) string {
 	lines = append(lines, sectionStyle.Render(i18n.T("daemons.metadata")))
 	meta := []struct{ label, value string }{
 		{i18n.T("daemons.backend"), d.Backend},
+		{i18n.T("daemons.preset"), d.Preset},
 		{i18n.T("daemons.current_tool"), d.CurrentTool},
 		{i18n.T("daemons.turn"), turnText(d.Turn, d.MaxTurns)},
 		{i18n.T("daemons.started"), d.StartedAt},
@@ -428,25 +430,12 @@ func (m DaemonsModel) renderDetail(maxW int) string {
 		lines = append(lines, fmt.Sprintf("%s %s", labelStyle.Render(row.label+":"), valueStyle.Render(row.value)))
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", labelStyle.Render("events:"), valueStyle.Render(fmt.Sprintf("%d (%d tools)", d.EventCount, d.ToolCount))))
+
+	// Important information first: task → interactions → result. The raw
+	// event/trajectory log goes last so it never buries the summary above it.
 	lines = append(lines, "")
 	lines = append(lines, sectionStyle.Render(i18n.T("daemons.task")))
 	lines = appendWrappedFull(lines, d.Task, maxW, "  ")
-	if len(d.Events) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, sectionStyle.Render(i18n.T("daemons.events")))
-		for _, ev := range d.Events {
-			label := strings.TrimSpace(strings.Join([]string{shortTime(ev.TS), ev.Event, ev.Name, ev.Status}, " "))
-			if label == "" {
-				label = "event"
-			}
-			lines = append(lines, muted.Render("  "+label))
-			body := ev.Raw
-			if body == "" {
-				body = firstNonEmpty(ev.Message, ev.Error)
-			}
-			lines = appendWrappedFull(lines, body, maxW, "    ")
-		}
-	}
 	if len(d.Chats) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, sectionStyle.Render(i18n.T("daemons.interactions")))
@@ -467,6 +456,22 @@ func (m DaemonsModel) renderDetail(maxW int) string {
 		lines = append(lines, "")
 		lines = append(lines, sectionStyle.Render(i18n.T("daemons.result")))
 		lines = appendWrappedFull(lines, d.Result, maxW, "  ")
+	}
+	if len(d.Events) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, sectionStyle.Render(i18n.T("daemons.events")))
+		for _, ev := range d.Events {
+			label := strings.TrimSpace(strings.Join([]string{shortTime(ev.TS), ev.Event, ev.Name, ev.Status}, " "))
+			if label == "" {
+				label = "event"
+			}
+			lines = append(lines, muted.Render("  "+label))
+			body := ev.Raw
+			if body == "" {
+				body = firstNonEmpty(ev.Message, ev.Error)
+			}
+			lines = appendWrappedFull(lines, body, maxW, "    ")
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -555,6 +560,7 @@ func readDaemonSummary(dir string) (daemonSummary, error) {
 	item.Task = stringField(raw, "task")
 	item.State = stringField(raw, "state")
 	item.Backend = stringField(raw, "backend")
+	item.Preset = daemonPreset(raw)
 	item.StartedAt = stringField(raw, "started_at")
 	item.UpdatedAt = stringField(raw, "updated_at")
 	item.CompletedAt = stringField(raw, "completed_at")
@@ -710,6 +716,27 @@ func intField(raw map[string]any, key string) int {
 	default:
 		return 0
 	}
+}
+
+// daemonPreset derives an operator-visible preset label from daemon.json.
+// preset_name is authoritative when present; otherwise fall back through the
+// preset's provider/model, then the run's model, so the row is still useful
+// for older daemons that predate preset_name (where it is null/absent).
+func daemonPreset(raw map[string]any) string {
+	if name := stringField(raw, "preset_name"); name != "" {
+		return name
+	}
+	provider := stringField(raw, "preset_provider")
+	model := stringField(raw, "preset_model")
+	switch {
+	case provider != "" && model != "":
+		return provider + ":" + model
+	case model != "":
+		return model
+	case provider != "":
+		return provider
+	}
+	return stringField(raw, "model")
 }
 
 func firstNonEmpty(values ...string) string {

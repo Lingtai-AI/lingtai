@@ -606,6 +606,7 @@
   "daemons.interactions": "Interactions (full chat_history)",
   "daemons.result": "Result",
   "daemons.backend": "backend",
+  "daemons.preset": "preset",
   "daemons.current_tool": "current tool",
   "daemons.turn": "turn",
   "daemons.started": "started",

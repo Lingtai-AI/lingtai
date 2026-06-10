@@ -543,7 +543,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_capabilities")))
 		lines = append(lines, "")
 		capsJSON, _ := json.Marshal(caps)
-		capNames := fs.ParseCapabilities(capsJSON)
+		capNames := fs.CapabilitiesForDisplay(fs.ParseCapabilities(capsJSON))
 		if len(capNames) > 0 {
 			capStr := strings.Join(capNames, ", ")
 			wrapped := lipgloss.NewStyle().Width(maxW - 6).Render(capStr)
