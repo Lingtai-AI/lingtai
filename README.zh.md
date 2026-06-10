@@ -152,6 +152,7 @@ flowchart LR
 |---|---|
 | `/setup` | 调整模型、配方、语言、工具、行为 |
 | `/kanban` | 查看助理与项目状态 |
+| `/daemons` | 查看各 Agent 的 daemon 运行记录 |
 | `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
 | `/skills` | 浏览可用技能与能力 |
 | `/viz` | 打开网络可视化 |

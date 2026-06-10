@@ -152,6 +152,7 @@ Frequently used slash commands:
 |---|---|
 | `/setup` | Change model, recipe, language, tools, or behavior. |
 | `/kanban` | Inspect agent + project status. |
+| `/daemons` | Inspect per-agent daemon runs and their records. |
 | `/mcp` | Configure external channels (Telegram/Feishu/WeChat/WhatsApp/IMAP/…). |
 | `/skills` | Browse available skills and capabilities. |
 | `/viz` | Open the network visualization. |
