@@ -40,3 +40,25 @@ func truncateToolBody(body string, limit int) string {
 	hidden := len(runes) - limit
 	return string(runes[:limit]) + fmt.Sprintf("… (+%d chars)", hidden)
 }
+
+func isToolMessageType(t string) bool {
+	return t == "tool_call" || t == "tool_result"
+}
+
+// toolGroupSeparatorBefore reports whether a blank separator line should be
+// rendered before the current tool entry to visually group tool calls/results
+// by the LLM API response that produced them.
+func toolGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
+	if prev == nil || !isToolMessageType(prev.Type) || !isToolMessageType(cur.Type) {
+		return false
+	}
+	if prev.ApiCallID != "" || cur.ApiCallID != "" {
+		return prev.ApiCallID != cur.ApiCallID
+	}
+	// Fallback for already-built session streams that lack API grouping
+	// metadata entirely: a new tool_call immediately after a tool_result is
+	// the best visible boundary hint available. Fresh sessions should get
+	// either explicit api_call_id from the kernel or derived ids from hidden
+	// llm_response markers before reaching the renderer.
+	return prev.Type == "tool_result" && cur.Type == "tool_call"
+}

@@ -23,10 +23,11 @@ type SessionEntry struct {
 	Body        string            `json:"body"`
 	Question    string            `json:"question,omitempty"`
 	Attachments []string          `json:"attachments,omitempty"`
-	Source      string            `json:"source,omitempty"`  // "human", "insight" — for inquiry entries
-	FireID      string            `json:"fire_id,omitempty"` // soul_flow fires — used to look up voices in soul_flow.jsonl
-	Sources     []string          `json:"sources,omitempty"` // notification entries — list of source keys (email, soul, system, ...)
-	Meta        *NotificationMeta `json:"meta,omitempty"`    // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
+	Source      string            `json:"source,omitempty"`      // "human", "insight" — for inquiry entries
+	FireID      string            `json:"fire_id,omitempty"`     // soul_flow fires — used to look up voices in soul_flow.jsonl
+	Sources     []string          `json:"sources,omitempty"`     // notification entries — list of source keys (email, soul, system, ...)
+	Meta        *NotificationMeta `json:"meta,omitempty"`        // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
+	ApiCallID   string            `json:"api_call_id,omitempty"` // llm/tool entries — one LLM API round-trip grouping id
 
 	// Delivered is a transient field propagated from MailMessage.Delivered.
 	// Only meaningful for Type == "mail". Not persisted to session.jsonl.
@@ -502,7 +503,7 @@ func parseEvent(line []byte) *SessionEntry {
 	}
 
 	switch eventType {
-	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "insight", "soul_flow", "notification", "aed":
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "llm_call", "llm_response", "insight", "soul_flow", "notification", "aed":
 		// ok
 	default:
 		return nil
@@ -522,6 +523,9 @@ func parseEvent(line []byte) *SessionEntry {
 		Ts:   ts,
 		Type: eventType,
 		Body: text,
+	}
+	if apiCallID, ok := raw["api_call_id"].(string); ok {
+		e.ApiCallID = apiCallID
 	}
 
 	if eventType == "insight" {
@@ -623,6 +627,13 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 			return fmt.Sprintf("(soul flow fired — %d voice(s))", int(count))
 		}
 		return strings.Join(lines, "\n")
+	case "llm_call":
+		if model, ok := entry["model"].(string); ok && model != "" {
+			return "llm call " + model
+		}
+		return "llm call"
+	case "llm_response":
+		return "llm response"
 	case "notification":
 		// Prefer the kernel-logged summary string when present (it
 		// already carries per-source counts in human-readable form).

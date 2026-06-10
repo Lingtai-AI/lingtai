@@ -44,6 +44,7 @@ type ChatMessage struct {
 	Sources     []string             // for Type=="notification": source keys (email, soul, system, ...)
 	Source      string               // for Type=="aed": subtype ("attempt" | "exhausted" | "timeout")
 	Meta        *fs.NotificationMeta // for Type=="notification": kernel vital signs at injection time (issue #40)
+	ApiCallID   string               // for tool_call/tool_result: LLM API round-trip grouping id
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -386,7 +387,24 @@ func (m *MailModel) buildMessages() {
 	allEntries := m.sessionCache.Entries()
 	chatMsgs := make([]ChatMessage, 0, len(allEntries))
 
+	currentApiCallID := ""
+	derivedApiCallSeq := 0
 	for _, e := range allEntries {
+		switch e.Type {
+		case "llm_response":
+			if e.ApiCallID != "" {
+				currentApiCallID = e.ApiCallID
+			} else {
+				derivedApiCallSeq++
+				currentApiCallID = fmt.Sprintf("derived:%d:%s", derivedApiCallSeq, e.Ts)
+			}
+		case "llm_call":
+			currentApiCallID = ""
+		case "tool_call", "tool_result":
+			if e.ApiCallID == "" {
+				e.ApiCallID = currentApiCallID
+			}
+		}
 		if !m.shouldShow(e) {
 			continue
 		}
@@ -421,6 +439,10 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 		return m.verbose >= verboseThinking
 	case "tool_call", "tool_result":
 		return m.verbose >= verboseExtended
+	case "llm_call", "llm_response":
+		// Hidden boundary markers used to derive tool-call grouping for older
+		// events that predate explicit api_call_id on tool events.
+		return false
 	case "insight":
 		// Human /btw inquiries (source "human") are always shown.
 		if e.Source == "human" {
@@ -503,6 +525,7 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		Sources:     e.Sources,
 		Source:      e.Source,
 		Meta:        e.Meta,
+		ApiCallID:   e.ApiCallID,
 	}
 	if e.Type == "mail" {
 		cm.IsFromMe = e.From == "human"
@@ -868,7 +891,11 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	var b strings.Builder
+	var prevVisibleTool *ChatMessage
 	for _, msg := range msgs {
+		if !isToolMessageType(msg.Type) {
+			prevVisibleTool = nil
+		}
 		switch msg.Type {
 		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
 			wrapWidth := m.width - 6
@@ -882,6 +909,9 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			case "thinking", "diary", "text_input", "text_output":
 				evStyle = thinkingStyle
 			default:
+				if toolGroupSeparatorBefore(prevVisibleTool, msg) {
+					b.WriteString("\n")
+				}
 				evStyle = toolStyle
 				// Tool lines get a leading timestamp and honor the user's
 				// per-tool-call truncation setting (0 = full content, the default).
@@ -893,6 +923,10 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(tsPrefix + "[" + msg.Type + "] " + body)
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
+			}
+			if msg.Type == "tool_call" || msg.Type == "tool_result" {
+				msgCopy := msg
+				prevVisibleTool = &msgCopy
 			}
 
 		case "soul_flow":
