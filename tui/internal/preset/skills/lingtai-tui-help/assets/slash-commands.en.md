@@ -9,6 +9,7 @@ views, manage the agent lifecycle, and configure the runtime.
 - Keep typing to filter. Matching is fuzzy: `/skl` finds `skills`, `/ref` finds
   `refresh`.
 - `↑`/`↓` move the selection, `Enter` runs the highlighted command.
+- In the message box, `Enter` sends; `Shift+Enter` or `Ctrl+J` inserts a newline.
 - Some commands take an argument typed after the name, e.g. `/sleep all` or
   `/refresh mimo`.
 

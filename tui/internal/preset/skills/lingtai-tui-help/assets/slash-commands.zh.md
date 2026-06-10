@@ -7,6 +7,7 @@
 - 在消息框中输入 `/` 打开**命令面板**。
 - 继续输入即可过滤，支持模糊匹配：`/skl` 匹配 `skills`，`/ref` 匹配 `refresh`。
 - `↑`/`↓` 移动选择，`Enter` 运行高亮的命令。
+- 在消息框中，`Enter` 发送；`Shift+Enter` 或 `Ctrl+J` 插入换行。
 - 部分命令在名称后接参数，例如 `/sleep all` 或 `/refresh mimo`。
 
 ## 浏览本帮助

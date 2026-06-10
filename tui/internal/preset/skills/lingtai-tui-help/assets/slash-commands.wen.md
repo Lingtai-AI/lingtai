@@ -7,6 +7,7 @@
 - 于讯框中入 `/`，则**命令面板**启。
 - 续输以滤之，许模糊相合：`/skl` 合 `skills`，`/ref` 合 `refresh`。
 - `↑`/`↓` 移其选，`Enter` 行所明之命。
+- 于讯框中，`Enter` 发送；`Shift+Enter` 或 `Ctrl+J` 入换行。
 - 有命于名后系参，如 `/sleep all`、`/refresh mimo`。
 
 ## 阅此帮助
