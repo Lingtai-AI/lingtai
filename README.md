@@ -151,7 +151,7 @@ Frequently used slash commands:
 | Command | Use |
 |---|---|
 | `/setup` | Change model, recipe, language, tools, or behavior. |
-| `/kanban` | Inspect agent + project status. |
+| `/kanban` · `/context` | Inspect agent + project status, or jump straight to the current agent's detail view. |
 | `/mcp` | Configure external channels (Telegram/Feishu/WeChat/WhatsApp/IMAP/…). |
 | `/skills` | Browse available skills and capabilities. |
 | `/viz` | Open the network visualization. |
@@ -177,7 +177,7 @@ lingtai-tui doctor                   # repair/update TUI runtime
 ### Tips
 
 - Use a dark terminal theme — LingTai's palette is tuned for it.
-- `Ctrl+E` in the TUI opens an external editor for long messages.
+- `Shift+Enter` or `Ctrl+J` inserts a newline in the message box; `Ctrl+E` opens an external editor for long messages.
 - Hold `Option` (macOS/iTerm2) or `Shift` (most Linux/Windows terminals) to select text without the TUI capturing it.
 - If anything feels broken after an upgrade, run `/doctor` (or `lingtai-tui doctor` from a shell).
 

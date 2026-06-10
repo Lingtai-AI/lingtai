@@ -11,6 +11,8 @@ views, manage the agent lifecycle, and configure the runtime.
 - `↑`/`↓` move the selection, `Enter` runs the highlighted command.
 - Some commands take an argument typed after the name, e.g. `/sleep all` or
   `/refresh mimo`.
+- In the message box, `Enter` sends. `Shift+Enter` or `Ctrl+J` inserts a
+  newline, and `Ctrl+E` opens the external editor for longer messages.
 
 ## Browsing this help
 
@@ -36,6 +38,7 @@ to `~/Downloads`. Press `Esc` or `q` to return to the mail view.
 
 ### Inspecting the agent
 - `/kanban` — network dashboard of every agent's config and context usage.
+- `/context` — focused context and token detail for the current agent.
 - `/skills` — browse the agent's skill catalog.
 - `/knowledge` — browse the agent's private knowledge (aliases: `/library`,
   `/codex`).
@@ -158,6 +161,14 @@ Shows a dashboard of every agent in the network: properties, LLM config,
 capabilities, and context usage at a glance. Use it for a single terminal view
 comparing all agents' configuration and how full their context windows are. For a
 graphical, browser-based view use `/viz`.
+
+### `/context` — open current agent context details
+**Usage:** `/context`
+
+Opens the same agent dashboard in its focused detail mode for the current agent.
+It shows token usage by provider, totals, recent activity, MCP servers, and
+daemon counts. Use it when you care about one agent's context and runtime usage;
+use `/kanban` when you want the whole network summary first.
 
 ### `/skills` — browse the skill catalog
 **Usage:** `/skills`

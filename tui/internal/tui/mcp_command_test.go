@@ -24,6 +24,16 @@ func TestDefaultCommandsIncludesMCP(t *testing.T) {
 	}
 }
 
+func TestDefaultCommandsIncludesContext(t *testing.T) {
+	cmd, ok := findCommand("context")
+	if !ok {
+		t.Fatal("DefaultCommands() missing context command")
+	}
+	if cmd.Description != "palette.context" || cmd.Detail != "cmd.context" {
+		t.Fatalf("context command keys = (%q, %q), want (palette.context, cmd.context)", cmd.Description, cmd.Detail)
+	}
+}
+
 // /addon should not remain as a compatibility alias; /mcp is the only
 // human-facing command for this control panel.
 func TestDefaultCommandsDoesNotKeepAddonAlias(t *testing.T) {
@@ -38,5 +48,20 @@ func TestMCPCommandOpensControlPanelView(t *testing.T) {
 	got := model.(App)
 	if got.currentView != appViewAddon {
 		t.Fatalf("switchToView(%q) currentView = %v, want appViewAddon", "mcp", got.currentView)
+	}
+}
+
+func TestContextCommandOpensDetailView(t *testing.T) {
+	dir := t.TempDir()
+	app := App{orchDir: dir, projectDir: dir}
+
+	model, _ := app.handlePaletteCommand("context", "")
+	got := model.(App)
+
+	if got.currentView != appViewProps {
+		t.Fatalf("context command currentView = %v, want appViewProps", got.currentView)
+	}
+	if !got.props.detailOpen {
+		t.Fatal("context command should open the props detail view")
 	}
 }

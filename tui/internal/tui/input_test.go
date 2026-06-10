@@ -114,3 +114,16 @@ func TestNoHardNewlinesFromWrapping(t *testing.T) {
 		t.Errorf("textarea value should not have hard newlines from wrapping\ngot:  %q\nwant: %q", got, text)
 	}
 }
+
+func TestInputNewlineShortcuts(t *testing.T) {
+	m := NewInputModel("")
+	keys := map[string]bool{}
+	for _, key := range m.textarea.KeyMap.InsertNewline.Keys() {
+		keys[key] = true
+	}
+	for _, want := range []string{"shift+enter", "ctrl+j"} {
+		if !keys[want] {
+			t.Fatalf("InsertNewline keys = %v, want %q", m.textarea.KeyMap.InsertNewline.Keys(), want)
+		}
+	}
+}

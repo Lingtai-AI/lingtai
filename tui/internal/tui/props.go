@@ -65,6 +65,16 @@ func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 	}
 }
 
+// NewContextPropsModel opens the props screen directly in the detailed context
+// and usage breakdown. It backs the /context command while /kanban remains the
+// network summary entry point.
+func NewContextPropsModel(baseDir, orchDir, globalDir string) PropsModel {
+	m := NewPropsModel(baseDir, orchDir, globalDir)
+	m.detailOpen = true
+	m.loadDetail()
+	return m
+}
+
 type propsLoadMsg struct {
 	network        fs.Network
 	tokens         fs.TokenTotals
@@ -150,6 +160,9 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
+		if m.detailOpen {
+			m.loadDetail()
+		}
 		m.syncViewportContent()
 
 	case tea.MouseWheelMsg:

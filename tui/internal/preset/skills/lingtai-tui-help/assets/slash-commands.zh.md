@@ -8,6 +8,8 @@
 - 继续输入即可过滤，支持模糊匹配：`/skl` 匹配 `skills`，`/ref` 匹配 `refresh`。
 - `↑`/`↓` 移动选择，`Enter` 运行高亮的命令。
 - 部分命令在名称后接参数，例如 `/sleep all` 或 `/refresh mimo`。
+- 在消息框中，`Enter` 发送；`Shift+Enter` 或 `Ctrl+J` 插入换行；
+  `Ctrl+E` 打开外部编辑器，适合长消息。
 
 ## 浏览本帮助
 
@@ -32,6 +34,7 @@
 
 ### 检视智能体
 - `/kanban` — 网络面板，查看每个智能体的配置与上下文用量。
+- `/context` — 查看当前 Agent 的上下文与 token 详情。
 - `/skills` — 浏览智能体的技能目录。
 - `/knowledge` — 浏览智能体的私有知识（别名：`/library`、`/codex`）。
 - `/system` — 浏览智能体的系统文件（system.md、covenant 等）。
@@ -135,6 +138,13 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 显示网络中每个智能体的面板：属性、LLM 配置、能力，以及上下文用量一览。当你想在单一终端
 视图中比较所有智能体的配置及其上下文窗口的充盈程度时使用。若需图形化的浏览器视图，请用
 `/viz`。
+
+### `/context` — 打开当前 Agent 的上下文详情
+**用法：** `/context`
+
+直接打开智能体看板中的当前 Agent 详情视图。这里会显示按提供商统计的 token 用量、总计、
+近期活动、MCP 服务器和 daemon 数量。当你关心单个 Agent 的上下文与运行用量时使用；
+若要先看整个网络概览，请用 `/kanban`。
 
 ### `/skills` — 浏览技能目录
 **用法：** `/skills`

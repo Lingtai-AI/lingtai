@@ -56,6 +56,7 @@ func DefaultCommands() []Command {
 		{Name: "setup", Description: "palette.setup", Detail: "cmd.setup"},
 		{Name: "settings", Description: "palette.settings", Detail: "cmd.settings"},
 		{Name: "kanban", Description: "palette.kanban", Detail: "cmd.kanban"},
+		{Name: "context", Description: "palette.context", Detail: "cmd.context"},
 		{Name: "daemons", Description: "palette.daemons", Detail: "cmd.daemons"},
 		{Name: "notification", Description: "palette.notification", Detail: "cmd.notification"},
 		{Name: "goal", Description: "palette.goal", Detail: "cmd.goal"},

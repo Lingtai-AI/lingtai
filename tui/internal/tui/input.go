@@ -24,7 +24,7 @@ type OpenEditorMsg struct {
 const defaultInputMaxHeight = 6
 
 // InputModel wraps a textarea with slash-command palette detection.
-// Enter sends the message (via SendMsg). Ctrl+J inserts a newline.
+// Enter sends the message (via SendMsg). Shift+Enter and Ctrl+J insert newlines.
 type InputModel struct {
 	textarea    textarea.Model
 	showPalette bool

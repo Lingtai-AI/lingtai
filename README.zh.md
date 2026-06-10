@@ -151,7 +151,7 @@ flowchart LR
 | 命令 | 用途 |
 |---|---|
 | `/setup` | 调整模型、配方、语言、工具、行为 |
-| `/kanban` | 查看助理与项目状态 |
+| `/kanban` · `/context` | 查看助理与项目状态，或直接进入当前 Agent 的详情视图 |
 | `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
 | `/skills` | 浏览可用技能与能力 |
 | `/viz` | 打开网络可视化 |
@@ -177,7 +177,7 @@ lingtai-tui doctor                   # 修复/升级 TUI 运行时
 ### 小贴士
 
 - 终端用深色主题——灵台的调色板是按深色调过的。
-- TUI 里 `Ctrl+E` 打开外部编辑器写长消息。
+- TUI 消息框里 `Shift+Enter` 或 `Ctrl+J` 插入换行；`Ctrl+E` 打开外部编辑器写长消息。
 - 选择文本时按住 `Option`（macOS / iTerm2）或 `Shift`（多数 Linux/Windows 终端），避免被 TUI 抓取。
 - 升级后哪里不对劲？跑 `/doctor`（或在 shell 里 `lingtai-tui doctor`）。
 

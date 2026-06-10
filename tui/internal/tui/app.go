@@ -737,6 +737,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "context":
+		a.currentView = appViewProps
+		a.props = NewContextPropsModel(a.projectDir, a.orchDir, a.globalDir)
+		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "daemons":
 		a.currentView = appViewDaemons
 		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
