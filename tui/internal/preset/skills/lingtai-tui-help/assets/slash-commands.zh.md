@@ -35,6 +35,7 @@
 - `/knowledge` — 浏览智能体的私有知识（别名：`/library`、`/codex`）。
 - `/system` — 浏览智能体的系统文件（system.md、covenant 等）。
 - `/daemons` — 检视各智能体的守护进程运行记录。
+- `/notification` — 显示当前 Agent 可见的原始 notification block（`.notification/*.json`）。
 - `/presets` — 查看本智能体可用 `/refresh` 切换的预设。
 
 ### 网络与分享
@@ -151,6 +152,11 @@
 
 打开守护进程浏览器：检视各智能体的守护进程运行及其状态、完整任务、完整 `chat_history`
 交互，以及完整的工具/事件记录。用于追溯某个后台守护进程究竟做了什么。
+
+### `/notification` — 查看当前 notification block
+**用法：** `/notification`
+
+显示当前 Agent `.notification/` 目录中的原始 JSON 通知块，并按通道列出每个通知文件。用于确认 Agent 在下一次 `system(action="notification")` 注入前能看到哪些 notification payload；已经被内核消费/清除的通知不会再出现在这里，但仍可能作为结构化 tool-call/tool-result 记录留在历史中。
 
 ### `/presets` — 打开预设库
 **用法：** `/presets`

@@ -40,6 +40,7 @@ to `~/Downloads`. Press `Esc` or `q` to return to the mail view.
   `/codex`).
 - `/system` — browse the agent's system files (system.md, covenant, …).
 - `/daemons` — inspect per-agent daemon runs and their records.
+- `/notification` — show the current agent's raw notification block (`.notification/*.json`).
 - `/presets` — view the presets this agent can switch to with `/refresh`.
 
 ### Network & sharing
@@ -178,6 +179,11 @@ rather than its conversation or private knowledge (`/knowledge`).
 Opens the daemon browser: inspect per-agent daemon runs and their status, full
 tasks, full `chat_history` interactions, and full tool/event records. Use it to
 trace exactly what a background daemon did.
+
+### `/notification` — view the current notification block
+**Usage:** `/notification`
+
+Shows the raw JSON notification block in the current agent's `.notification/` directory, plus one entry per channel file. Use it to confirm exactly which notification payloads the agent can see before the next `system(action="notification")` injection. Notifications already consumed or cleared by the kernel will no longer appear here, though they may still be present in history as structured tool-call/tool-result records.
 
 ### `/presets` — open the preset library
 **Usage:** `/presets`

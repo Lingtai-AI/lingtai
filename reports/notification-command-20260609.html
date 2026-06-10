@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LingTai TUI /notification command</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55;max-width:920px;margin:40px auto;padding:0 24px;color:#17202a;background:#fbfbfc}h1{font-size:28px}h2{margin-top:28px}code{background:#eef1f5;padding:2px 5px;border-radius:4px}pre{background:#111827;color:#e5e7eb;padding:16px;border-radius:8px;overflow:auto}.ok{color:#047857;font-weight:700}.card{background:white;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin:14px 0}</style>
+</head>
+<body>
+<h1>TUI <code>/notification</code> command</h1>
+<p class="ok">Status: implemented and validated locally.</p>
+<div class="card">
+<h2>What changed</h2>
+<ul>
+<li>Added a slash command <code>/notification</code> to the palette and help assets.</li>
+<li>Added <code>NotificationModel</code>, a read-only MarkdownViewer page scoped to the current agent.</li>
+<li>The page shows an aggregate raw notification block from <code>&lt;agent&gt;/.notification/*.json</code>, plus one entry per channel file.</li>
+<li>Press <code>r</code> in the view to reload current filesystem state.</li>
+<li>Added English, Chinese, and Wenyan i18n strings and slash-command help entries.</li>
+<li>Updated <code>tui/internal/tui/ANATOMY.md</code>.</li>
+</ul>
+</div>
+<div class="card">
+<h2>Why</h2>
+<p>This gives users a direct way to see the notification block an agent currently sees, without relying on synthesized diary/text rendering. It complements the kernel-side notification-sync change: consumed notifications may remain in history as structured tool-call/tool-result records, while pending notifications are visible here as raw files.</p>
+</div>
+<div class="card">
+<h2>Validation</h2>
+<pre>git diff --check
+cd tui && go test ./internal/tui ./i18n
+cd tui && go test ./...</pre>
+<p>All passed locally.</p>
+</div>
+</body>
+</html>

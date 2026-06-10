@@ -4,20 +4,20 @@
 
 This is the ~20k LOC Bubble Tea v2 package that renders every screen of `lingtai-tui`. Each screen is a struct implementing `Init()`, `Update(msg)`, `View()`, living in its own `.go` file. The package is intentionally flat — breaking it into sub-packages would fight Bubble Tea's convention (every model must be the same `tea.Model` type for the dispatcher), and Go's single-type-per-package constraint makes this the grain that matches the framework.
 
-Screen routing is centralized in the `App` struct (`app.go`), which holds every screen as a field, dispatches commands via `switchToView`, and maps the slash-command palette (`/mail`, `/setup`, `/doctor`, `/daemons`, etc.) to view transitions.
+Screen routing is centralized in the `App` struct (`app.go`), which holds every screen as a field, dispatches commands via `switchToView`, and maps the slash-command palette (`/mail`, `/setup`, `/doctor`, `/daemons`, `/notification`, etc.) to view transitions.
 
 ## Components
 
 ### Root model and dispatcher
 
-- **`app.go:22-42`** — `appView` enum: 16 view constants (`appViewFirstRun` through `appViewDaemons`).
-- **`app.go:45-76`** — `App` struct: holds every screen model plus routing state (`currentView`, `orchDir`, `orchName`, `recoveryMode`).
+- **`app.go:22-43`** — `appView` enum: 17 view constants (`appViewFirstRun` through `appViewHelp`), including `appViewNotification` for `/notification`.
+- **`app.go:46-79`** — `App` struct: holds every screen model plus routing state (`currentView`, `orchDir`, `orchName`, `recoveryMode`).
 - **`app.go:91-177`** — `NewApp`: constructor deciding initial view — mail view (returning user), first-run wizard (new user or rehydration), or recovery mode (global config lost, agents intact).
 - **`app.go:179-187`** — `App.Init()`: delegates to the initial view's `Init()`.
-- **`app.go:189-543`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` forwarded to current view, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
-- **`app.go:545-1170`** — `handlePaletteCommand`: maps slash-command strings to view transitions (`/doctor` → `appViewDoctor`, `/daemons` → `appViewDaemons`, `/knowledge` → `appViewCodex` (canonical; hidden `/library` and `/codex` aliases), `/skills` → `appViewLibrary`, etc.) and direct actions (`/suspend`, `/cpr`, `/refresh`, `/clear`, `/molt`, `/btw`, `/export`).
-- **`app.go:1204-1289`** — `switchToView(viewName string)`: the canonical route-to-view dispatcher used by `ViewChangeMsg` and palette commands returning to a view. Reconstructs models fresh on entry.
-- **`app.go:1292-1344`** — `App.View()`: delegates to current view's `View()`, wraps in `tea.NewView` with alt-screen + mouse mode.
+- **`app.go:191-561`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` forwarded to current view, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
+- **`app.go:563-1170`** — `handlePaletteCommand`: maps slash-command strings to view transitions (`/doctor` → `appViewDoctor`, `/daemons` → `appViewDaemons`, `/notification` → `appViewNotification`, `/knowledge` → `appViewCodex` (canonical; hidden `/library` and `/codex` aliases), `/skills` → `appViewLibrary`, etc.) and direct actions (`/suspend`, `/cpr`, `/refresh`, `/clear`, `/molt`, `/btw`, `/export`).
+- **`app.go:1211-1302`** — `switchToView(viewName string)`:  the canonical route-to-view dispatcher used by `ViewChangeMsg` and palette commands returning to a view. Reconstructs models fresh on entry.
+- **`app.go:1304-1356`** — `App.View()`:  delegates to current view's `View()`, wraps in `tea.NewView` with alt-screen + mouse mode.
 - **`app.go:1347-1529`** — portal launch, style helpers, `SetTUIVersion`.
 
 ### Screens
@@ -37,6 +37,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`codex.go:18-283`** — `CodexModel`. The `/knowledge` view — agent private knowledge browser. Scans each agent's `knowledge/<name>/KNOWLEDGE.md` folder layout via `buildAgentCodexEntries` (`codex_entries.go:36`); legacy `codex/codex.json` / `knowledge/knowledge.json` stores are read only via a one-time migration into the folder layout (`codex_entries.go:13-16`, `:40`). Constructor: `NewCodexModel` (`codex.go:41`). Wired to `/knowledge` (canonical) with hidden `/library` and `/codex` aliases.
 - **`mailbox.go:18-295`** — `MailboxModel`. Per-agent mail folder browser (inbox/sent/archive). Constructor: `NewMailboxModel` (`mailbox.go:46`). Wired to `/mailbox`.
 - **`daemons.go:30-798`** — `DaemonsModel`. Read-only daemon run browser for `/daemons`: discovers agents with `fs.BuildNetwork`, opens a Ctrl+T agent picker, scans `<agent>/daemons/em-*/daemon.json`, `logs/events.jsonl`, `history/chat_history.jsonl`, and `result.txt`, then renders a left run list and right detail pane with task, metadata, full chat_history interactions, full event/tool records, and full result text. Constructor: `NewDaemonsModel` (`daemons.go:97`). Wired to `/daemons`.
+- **`notification.go:18-194`** — `NotificationModel`. Read-only `/notification` view over the current agent's `<agent>/.notification/*.json` files: renders an aggregate raw notification block plus one MarkdownViewer entry per channel file, with `r` to reload. Constructor: `NewNotificationModel` (`notification.go:156`).
 - **`nirvana.go:47-209`** — `NirvanaModel`. Confirmation screen for wiping `.lingtai/`. Constructor: `NewNirvanaModel` (`nirvana.go:56`). Emits `NirvanaDoneMsg` → triggers first-run wizard flow.
 - **`projects.go:35-448`** — `ProjectsModel`. Global project list browser. Constructor: `NewProjectsModel` (`projects.go:50`). Wired to `/projects`.
 - **`mdviewer.go:40-518`** — `MarkdownViewerModel`. Generic markdown display with sidebar navigation. Used by `/skills` detail views, recipe previews, agora browse results, and `/help`.
@@ -46,7 +47,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 ### Non-screen shared types and helpers
 
 - **`input.go:28-294`** — `InputModel`. Reusable compose widget with textarea, paste support, and multiline expand. Used by `MailModel`.
-- **`palette.go:28-231`** — `PaletteModel`. Slash-command palette widget (type `/` to trigger, `/help` lists commands). Used by `MailModel` and `SettingsModel`.
+- **`palette.go:28-232`** — `PaletteModel`. Slash-command palette widget (type `/` to trigger, `/help` lists commands). Used by `MailModel` and `SettingsModel`; `DefaultCommands` includes `/notification` (`palette.go:60`).
 - **`styles.go:1-471`** — Theme system: `Theme` type, `ActiveTheme()`, `SetThemeByName()`, `Color*` constants, `themedTextareaStyles()`, lipgloss rendering helpers.
 - **`codex_entries.go:13-88`** — `buildAgentCodexEntries`: scans `knowledge/<name>/KNOWLEDGE.md` folders (after a one-time migration of legacy `codex/codex.json` / `knowledge/knowledge.json` stores via `migrateLegacyJSONStores`), converts to `MarkdownEntry` slices for the `CodexModel`.
 - **`mailbox_entries.go:17-321`** — `buildMailboxEntries`: reads per-agent mailbox folders, converts to `MarkdownEntry` slices for the `MailboxModel`.
