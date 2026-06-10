@@ -156,7 +156,7 @@ flowchart LR
 | `/skills` | 浏览可用技能与能力 |
 | `/viz` | 打开网络可视化 |
 | `/insights` | 让助理对当前工作做一次自我反思 |
-| `/sleep` · `/refresh` · `/cpr` · `/clear` | 生命周期：休眠、重载、复苏、清空上下文 |
+| `/sleep` · `/refresh` · `/cpr` · `/clear` · `/molt` | 生命周期：休眠、重载、复苏、清空或保存后重置上下文 |
 | `/projects` | 切换或查看已知项目 |
 | `/doctor` | 排查安装/运行时问题 |
 

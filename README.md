@@ -156,7 +156,7 @@ Frequently used slash commands:
 | `/skills` | Browse available skills and capabilities. |
 | `/viz` | Open the network visualization. |
 | `/insights` | Ask the assistant for a reflective second look. |
-| `/sleep` · `/refresh` · `/cpr` · `/clear` | Lifecycle: pause, reload, revive, reset context. |
+| `/sleep` · `/refresh` · `/cpr` · `/clear` · `/molt` | Lifecycle: pause, reload, revive, reset or save-and-reset context. |
 | `/projects` | Switch or inspect known projects. |
 | `/doctor` | Diagnose installation/runtime issues. |
 
