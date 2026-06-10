@@ -154,6 +154,7 @@ flowchart LR
 | `/kanban` | 查看助理与项目状态 |
 | `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
 | `/skills` | 浏览可用技能与能力 |
+| `/knowledge` | 浏览当前 Agent 的私有 knowledge |
 | `/viz` | 打开网络可视化 |
 | `/insights` | 让助理对当前工作做一次自我反思 |
 | `/sleep` · `/refresh` · `/cpr` · `/clear` | 生命周期：休眠、重载、复苏、清空上下文 |

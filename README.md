@@ -154,6 +154,7 @@ Frequently used slash commands:
 | `/kanban` | Inspect agent + project status. |
 | `/mcp` | Configure external channels (Telegram/Feishu/WeChat/WhatsApp/IMAP/…). |
 | `/skills` | Browse available skills and capabilities. |
+| `/knowledge` | Browse the current agent's private knowledge. |
 | `/viz` | Open the network visualization. |
 | `/insights` | Ask the assistant for a reflective second look. |
 | `/sleep` · `/refresh` · `/cpr` · `/clear` | Lifecycle: pause, reload, revive, reset context. |
