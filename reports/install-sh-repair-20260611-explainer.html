@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>install.sh source-helper repair — 2026-06-11</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ok:#34d399; --warn:#fbbf24; --line:#243044; }
+    @media (prefers-color-scheme: light) { :root { --bg:#f8fafc; --card:#ffffff; --text:#111827; --muted:#4b5563; --accent:#2563eb; --ok:#059669; --warn:#b45309; --line:#e5e7eb; } }
+    body { margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+    main { max-width:980px; margin:0 auto; padding:40px 20px 64px; }
+    h1 { font-size:34px; line-height:1.15; margin:0 0 10px; }
+    h2 { margin-top:28px; border-top:1px solid var(--line); padding-top:22px; }
+    .sub { color:var(--muted); margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; margin:16px 0; box-shadow:0 10px 30px rgba(0,0,0,.12); }
+    ul { margin:10px 0 0 22px; padding:0; }
+    code { background:rgba(127,127,127,.16); padding:2px 6px; border-radius:6px; }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--warn); font-weight:700; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>install.sh source-helper repair</h1>
+  <div class="sub">Focused repair for the source-build helper while keeping Homebrew as the primary distribution path.</div>
+
+  <section class="card">
+    <h2 style="margin-top:0;border-top:0;padding-top:0">Conclusion</h2>
+    <p><span class="ok">Scope kept narrow:</span> this patch does not replace Homebrew distribution, does not add release artifacts, and does not change TUI automatic upgrade. It only makes <code>install.sh</code> safer and clearer for people who use the source-build fallback.</p>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2 style="margin-top:0;border-top:0;padding-top:0">What changed</h2>
+      <ul>
+        <li>Corrected the script header/help text: <code>install.sh</code> is a source-build helper; Homebrew remains primary.</li>
+        <li>Added <code>-h/--help</code> and clearer unknown-flag handling.</li>
+        <li>Added cleanup via <code>trap</code> so temporary build directories are removed on failures.</li>
+        <li>Made invalid <code>--ref</code> fail clearly instead of silently falling back to <code>main</code>.</li>
+        <li>Improved missing dependency hints for common package managers on macOS/Linux.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0;border-top:0;padding-top:0">Preserved behavior</h2>
+      <ul>
+        <li>Homebrew bin dir is still preferred when <code>brew</code> exists.</li>
+        <li>Non-Homebrew installs still fall back to writable <code>/usr/local/bin</code> or <code>~/.local/bin</code>.</li>
+        <li>Portal build is still skipped when <code>npm</code> is missing.</li>
+        <li>China-friendly Go/npm mirror auto-detection is unchanged.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0;border-top:0;padding-top:0">Validation</h2>
+    <ul>
+      <li><code>bash -n install.sh</code> — <span class="ok">passed</span></li>
+      <li><code>./install.sh --help</code> — <span class="ok">passed</span></li>
+      <li><code>git diff --check</code> — <span class="ok">passed</span></li>
+    </ul>
+    <p class="sub"><span class="warn">Not run:</span> full source build/install, because that would compile and overwrite local binaries. The change is limited to shell control flow, help text, dependency hints, cleanup, and ref checkout behavior.</p>
+  </section>
+</main>
+</body>
+</html>
