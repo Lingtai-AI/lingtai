@@ -61,5 +61,10 @@ cd tui && go test ./...</pre>
     <p>I attempted a narrow Claude Code implementation job first, but it stalled without producing changes, so I cancelled it and applied the focused patch directly. Jason then clarified the stronger repro: English UI + English agent still emitting Chinese. The PR now covers both the earlier defaulting leak and the actual English-asset prompt cue leak. No merge has been performed.</p>
   </section>
 </main>
+
+<section><h2>Latest update: static principle cleanup</h2>
+<p>After Jason pointed out that <code>principle.md</code> was stale, this PR now also reduces the bundled TUI principle assets from three repeated copies plus “important things bear repeating three times” down to one copy in each language (<code>en</code>, <code>zh</code>, <code>wen</code>).</p>
+<p>A regression test (<code>TestPrincipleAssetsAreNotTriplicated</code>) now checks that each principle asset has exactly one paragraph and no old triple-repetition cue.</p>
+</section>
 </body>
 </html>

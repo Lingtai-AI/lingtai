@@ -117,6 +117,34 @@ func TestEnglishTutorialAssetsContainNoCJKPromptCues(t *testing.T) {
 	}
 }
 
+func TestPrincipleAssetsAreNotTriplicated(t *testing.T) {
+	read := func(t *testing.T, path string) string {
+		t.Helper()
+		data, err := fs.ReadFile(principleFS, path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		return strings.TrimSpace(string(data))
+	}
+
+	for _, path := range []string{
+		"principle/en/principle.md",
+		"principle/zh/principle.md",
+		"principle/wen/principle.md",
+	} {
+		t.Run(path, func(t *testing.T) {
+			body := read(t, path)
+			paragraphs := strings.Split(body, "\n\n")
+			if len(paragraphs) != 1 {
+				t.Fatalf("%s: expected exactly one principle paragraph, got %d", path, len(paragraphs))
+			}
+			if strings.Contains(body, "three times") || strings.Contains(body, "说三次") {
+				t.Fatalf("%s: principle still carries the old triple-repetition cue", path)
+			}
+		})
+	}
+}
+
 func isCJK(r rune) bool {
 	return (r >= '\u4e00' && r <= '\u9fff') ||
 		(r >= '\u3400' && r <= '\u4dbf') ||
