@@ -53,6 +53,39 @@ lingtai-tui
 
 On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
 
+### First-time install troubleshooting
+
+Assume this is your first LingTai install. If the three commands above fail, start here — the common fixes are part of the install path, not a distant appendix.
+
+**`brew` is not installed (macOS or Linux).** Install Homebrew first, then re-run the `brew install` command above:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+The Homebrew installer ends by printing an `eval "$(... shellenv)"` line that adds `brew` to your `PATH`. Run that line (or open a new terminal) before continuing.
+
+**WSL / Ubuntu / Debian.** Homebrew on Linux needs basic build tools before it can install packages. Install the prerequisites first, then Homebrew, then LingTai:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential curl git ca-certificates
+```
+
+**To upgrade later**, use Homebrew again and restart the TUI so the new binary takes over:
+
+```bash
+brew update
+brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui
+```
+
+**`brew install` fails while building.** A missing compiler toolchain is the usual cause. Install the prerequisites above, run `brew update`, and retry. If Homebrew still fails or is not available on your machine, use the [source build](#from-source) path below.
+
+> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
+
+The first project you create will look like this:
+
 ```text
 project/
 └── .lingtai/
@@ -64,9 +97,7 @@ project/
         └── logs/           # inspectable runtime trace
 ```
 
-> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
-
-For source builds, mainland-China mirror setup, from-tarball install paths, and first-time install troubleshooting (missing `brew`, WSL prerequisites), see [Install in detail](#install-in-detail).
+For source builds, mainland-China mirror setup, from-tarball install paths, and advanced runtime repair, see [Install in detail](#install-in-detail).
 
 ## What it is good at
 
@@ -240,26 +271,11 @@ brew upgrade lingtai-ai/lingtai/lingtai-tui
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
 
-### First-time install troubleshooting
-
-**`brew` is not installed (macOS or Linux).** Install Homebrew first, then re-run the `brew install` command above:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-The installer ends by printing an `eval` line to add `brew` to your `PATH` — run it (or open a new terminal) before continuing.
-
-**WSL / Ubuntu / Debian.** Homebrew on Linux needs basic build tools before it can install packages. Install the prerequisites, then Homebrew, then LingTai:
-
-```bash
-sudo apt update
-sudo apt install build-essential curl git ca-certificates
-```
-
-**Homebrew is not an option.** Build from source instead — see [From source](#from-source) below. You need Go, `make`, and (for the portal) Node.js/npm.
+First-time install problems (missing `brew`, WSL/Ubuntu/Debian prerequisites, source-build failures) are covered up top in [First-time install troubleshooting](#first-time-install-troubleshooting).
 
 ### From source
+
+You need Go, `make`, and (for the portal) Node.js/npm.
 
 Use this when hacking on the TUI/portal itself or when Homebrew is unavailable:
 
