@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build lingtai-tui and lingtai-portal from source and install them.
+# Download LingTai's public source archive, build lingtai-tui and lingtai-portal, and install them.
 #
 # This is the source-build helper; Homebrew remains the primary install path
 # (brew install lingtai-ai/lingtai/lingtai-tui). Binaries are installed to the
@@ -14,13 +14,16 @@
 set -euo pipefail
 
 REF="main"
-REPO="https://github.com/Lingtai-AI/lingtai.git"
+ARCHIVE_BASE_URL="https://codeload.github.com/Lingtai-AI/lingtai/tar.gz"
 TMPDIR="${TMPDIR:-/tmp}"
-BUILD_DIR="$TMPDIR/lingtai-install-$$"
+WORK_DIR="$TMPDIR/lingtai-install-$$"
+ARCHIVE_FILE="$WORK_DIR/source.tar.gz"
+EXTRACT_DIR="$WORK_DIR/source"
+BUILD_DIR=""
 
 usage() {
   cat <<'EOF'
-Build lingtai-tui and lingtai-portal from source and install them.
+Download LingTai's public source archive, build lingtai-tui and lingtai-portal, and install them.
 
 Usage:
   curl -sSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
@@ -30,9 +33,10 @@ Options:
   --ref <ref>   Git branch, tag, or commit to build (default: main)
   -h, --help    Show this help
 
-Binaries are installed to the first of: Homebrew's bin directory, a writable
-/usr/local/bin, or ~/.local/bin. The portal is skipped when npm is missing.
-Homebrew remains the primary install path:
+The script downloads a public GitHub source archive instead of using `git clone`,
+so it should not ask for a GitHub account. Binaries are installed to the first
+of: Homebrew's bin directory, a writable /usr/local/bin, or ~/.local/bin. The
+portal is skipped when npm is missing. Homebrew remains the primary install path:
   brew install lingtai-ai/lingtai/lingtai-tui
 EOF
 }
@@ -48,7 +52,7 @@ done
 # Remove the build directory even when a build or install step fails midway.
 cleanup() {
   cd / 2>/dev/null || true
-  rm -rf "$BUILD_DIR"
+  rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
 
@@ -112,9 +116,14 @@ fi
 
 # Check dependencies — install via brew if available, otherwise point at the
 # system package manager.
-if ! command -v git &>/dev/null; then
-  echo "error: git is required but not found. Install it with:" >&2
-  suggest_install git
+if ! command -v curl &>/dev/null; then
+  echo "error: curl is required but not found. Install it with:" >&2
+  suggest_install curl
+  exit 1
+fi
+
+if ! command -v tar &>/dev/null; then
+  echo "error: tar is required but not found. Install it with your system package manager." >&2
   exit 1
 fi
 
@@ -129,21 +138,28 @@ if ! command -v go &>/dev/null; then
   fi
 fi
 
-echo "==> Cloning lingtai ($REF) ..."
-if ! git clone --depth 1 --branch "$REF" "$REPO" "$BUILD_DIR" 2>/dev/null; then
-  # --branch only resolves branches and tags; fall back to a default clone
-  # plus an explicit fetch for commit SHAs and other refs. If that fetch
-  # fails too, the ref does not exist — fail instead of silently building main.
-  git clone --depth 1 "$REPO" "$BUILD_DIR"
-  if [[ "$REF" != "main" ]]; then
-    if ! (cd "$BUILD_DIR" && git fetch --depth 1 origin "$REF" && git checkout --quiet FETCH_HEAD); then
-      echo "error: ref '$REF' not found in $REPO" >&2
-      exit 1
-    fi
-  fi
+echo "==> Downloading lingtai source archive ($REF) ..."
+mkdir -p "$EXTRACT_DIR"
+ARCHIVE_URL="$ARCHIVE_BASE_URL/$REF"
+if ! curl -fL --retry 2 --connect-timeout 10 "$ARCHIVE_URL" -o "$ARCHIVE_FILE"; then
+  echo "error: could not download public source archive for ref '$REF'." >&2
+  echo "       URL: $ARCHIVE_URL" >&2
+  echo "       Check the ref name and network access, then retry." >&2
+  exit 1
 fi
 
-VERSION=$(cd "$BUILD_DIR" && git describe --tags --always 2>/dev/null || echo "dev")
+if ! tar -xzf "$ARCHIVE_FILE" -C "$EXTRACT_DIR"; then
+  echo "error: downloaded source archive could not be extracted." >&2
+  exit 1
+fi
+
+BUILD_DIR=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+if [[ -z "$BUILD_DIR" || ! -d "$BUILD_DIR/tui" ]]; then
+  echo "error: downloaded archive did not contain the expected LingTai source tree." >&2
+  exit 1
+fi
+
+VERSION="$REF"
 
 echo "==> Building lingtai-tui ($VERSION) ..."
 (cd "$BUILD_DIR/tui" && CGO_ENABLED=0 go build -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)

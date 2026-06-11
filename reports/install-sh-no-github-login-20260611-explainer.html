@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>install.sh no-login source download repair</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#0b1020; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ok:#34d399; --line:#253047; }
+    @media (prefers-color-scheme: light) { :root { --bg:#f8fafc; --card:#fff; --text:#111827; --muted:#4b5563; --accent:#2563eb; --ok:#059669; --line:#e5e7eb; } }
+    body { margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+    main { max-width:960px; margin:0 auto; padding:40px 20px 64px; }
+    h1 { font-size:34px; line-height:1.15; margin:0 0 10px; }
+    h2 { margin-top:26px; border-top:1px solid var(--line); padding-top:20px; }
+    .sub { color:var(--muted); margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; margin:16px 0; }
+    ul { margin:8px 0 0 22px; padding:0; }
+    code { background:rgba(127,127,127,.16); padding:2px 6px; border-radius:6px; }
+    .ok { color:var(--ok); font-weight:700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>install.sh no-login source download repair</h1>
+  <div class="sub">Follow-up after PR #305: make the source-build helper avoid GitHub account prompts.</div>
+
+  <section class="card">
+    <h2 style="margin-top:0;border-top:0;padding-top:0">Conclusion</h2>
+    <p><code>install.sh</code> should be non-interactive. Even though LingTai is public, using <code>git clone https://github.com/...</code> inside an installer can trigger local git credential helpers or network/proxy auth prompts on some machines. The fix is to download GitHub's public source archive via <code>codeload.github.com</code> instead of cloning.</p>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0;border-top:0;padding-top:0">What changed</h2>
+    <ul>
+      <li>Replaced <code>git clone</code> with <code>curl -fL https://codeload.github.com/Lingtai-AI/lingtai/tar.gz/&lt;ref&gt;</code>.</li>
+      <li>Removed the hard dependency on <code>git</code> for normal installer operation.</li>
+      <li>Added explicit <code>curl</code> and <code>tar</code> dependency checks.</li>
+      <li>Kept Homebrew as the primary distribution path; this remains a source-build helper.</li>
+      <li>Kept the writable install-dir fallback from #239/#240/#305.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0;border-top:0;padding-top:0">Validation</h2>
+    <ul>
+      <li><code>bash -n install.sh</code> — <span class="ok">passed</span></li>
+      <li><code>./install.sh --help</code> — <span class="ok">passed</span></li>
+      <li>Invalid ref smoke test downloads from public archive URL and exits with a clear 404/error, with no username/password prompt text — <span class="ok">passed</span></li>
+      <li><code>git diff --check</code> — <span class="ok">passed</span></li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
