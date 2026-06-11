@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>README first-time install path</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#7dab8f; --ink:#1f2a24; --muted:#5f6f67; --bg:#f7faf8; --card:#ffffff; --line:#dce7e1; }
+    @media (prefers-color-scheme: dark) { :root { --ink:#e9f2ed; --muted:#a8b8b0; --bg:#101612; --card:#172019; --line:#2b3a31; } }
+    body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:var(--bg); }
+    main { max-width:920px; margin:0 auto; padding:42px 22px 64px; }
+    .hero { background:linear-gradient(135deg, rgba(125,171,143,.22), rgba(212,168,83,.14)); border:1px solid var(--line); border-radius:24px; padding:28px; }
+    h1 { margin:0 0 8px; font-size:32px; line-height:1.15; }
+    h2 { margin-top:30px; font-size:22px; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-top:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; }
+    code { background:rgba(125,171,143,.15); padding:2px 5px; border-radius:6px; }
+    ul { padding-left:22px; }
+    .verdict { display:inline-block; background:var(--accent); color:white; padding:4px 10px; border-radius:999px; font-weight:700; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="verdict">Docs PR ready</div>
+    <h1>README install path now assumes first-time users</h1>
+    <p class="muted">The top quickstart now includes the common troubleshooting steps instead of sending new users to a distant section.</p>
+  </section>
+
+  <h2>What changed</h2>
+  <div class="grid">
+    <div class="card"><strong>Troubleshooting moved up</strong><br>The <code>First-time install troubleshooting</code> section now sits immediately after the three-command quickstart.</div>
+    <div class="card"><strong>Missing Homebrew handled</strong><br>Includes the official Homebrew install command and reminds users to run the printed <code>shellenv</code> line.</div>
+    <div class="card"><strong>WSL/Linux prerequisites included</strong><br>Shows <code>build-essential curl git ca-certificates</code> before Homebrew/source builds.</div>
+    <div class="card"><strong>Upgrade and fallback clarified</strong><br>Shows the Homebrew upgrade path near the top and points build failures to prerequisites or source install.</div>
+  </div>
+
+  <h2>Why</h2>
+  <p>Jason noted that installation remained confusing because basic fixes were hidden too far down. The README now treats missing <code>brew</code>, WSL prerequisites, and source-build failures as normal first-install steps.</p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>git diff --check</code></li>
+    <li>Anchor checks for <code>#first-time-install-troubleshooting</code>, <code>#install-in-detail</code>, and <code>#from-source</code></li>
+  </ul>
+
+  <h2>Scope</h2>
+  <p>Changed <code>README.md</code> and this explainer only. No runtime/code behavior changed.</p>
+</main>
+</body>
+</html>
