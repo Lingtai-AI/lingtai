@@ -102,7 +102,12 @@ func ReadInitManifest(dir string) (map[string]interface{}, error) {
 // readResolvedManifest reads the manifest from the kernel-published artifact
 // at system/manifest.resolved.json.
 func readResolvedManifest(dir string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "system", "manifest.resolved.json"))
+	artifactPath := filepath.Join(dir, "system", "manifest.resolved.json")
+	if isResolvedManifestStale(filepath.Join(dir, "init.json"), artifactPath) {
+		return nil, fmt.Errorf("manifest.resolved.json is older than init.json")
+	}
+
+	data, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest.resolved.json: %w", err)
 	}
@@ -110,11 +115,32 @@ func readResolvedManifest(dir string) (map[string]interface{}, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse manifest.resolved.json: %w", err)
 	}
+	if raw["schema"] != "lingtai.manifest.resolved/v1" {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json schema")
+	}
+	if version, ok := raw["schema_version"].(float64); !ok || version != 1 {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json schema_version")
+	}
+	if raw["source"] != "kernel" {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json source")
+	}
 	manifest, ok := raw["manifest"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("no manifest in manifest.resolved.json")
 	}
 	return manifest, nil
+}
+
+func isResolvedManifestStale(initPath, artifactPath string) bool {
+	initInfo, err := os.Stat(initPath)
+	if err != nil {
+		return false
+	}
+	artifactInfo, err := os.Stat(artifactPath)
+	if err != nil {
+		return false
+	}
+	return initInfo.ModTime().After(artifactInfo.ModTime())
 }
 
 // readRawInitManifest reads the manifest from the raw init.json snapshot.

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestScanLibrary_FollowsSymlinks(t *testing.T) {
@@ -60,6 +61,14 @@ func writeAgentFile(t *testing.T, agentDir, rel, content string) {
 	}
 }
 
+func touchLibraryAgentFile(t *testing.T, agentDir, rel string, mod time.Time) {
+	t.Helper()
+	path := filepath.Join(agentDir, rel)
+	if err := os.Chtimes(path, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadLibraryPaths_PrefersResolvedArtifact(t *testing.T) {
 	agentDir := t.TempDir()
 	// Stale init.json snapshot declares one path...
@@ -105,6 +114,39 @@ func TestReadLibraryPaths_FallsBackToInitWhenArtifactMalformed(t *testing.T) {
 		if len(got) != 1 || got[0] != "~/from-init" {
 			t.Errorf("%s: readLibraryPaths = %v, want [~/from-init]", name, got)
 		}
+	}
+}
+
+func TestReadLibraryPaths_FallsBackToInitWhenArtifactSchemaInvalid(t *testing.T) {
+	agentDir := t.TempDir()
+	writeAgentFile(t, agentDir, "init.json",
+		`{"manifest": {"capabilities": {"skills": {"paths": ["~/from-init"]}}}}`)
+	cases := map[string]string{
+		"wrong schema":  `{"schema": "other/v1", "schema_version": 1, "source": "kernel", "manifest": {"capabilities": {"skills": {"paths": ["~/bad"]}}}}`,
+		"wrong version": `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 2, "source": "kernel", "manifest": {"capabilities": {"skills": {"paths": ["~/bad"]}}}}`,
+		"wrong source":  `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "user", "manifest": {"capabilities": {"skills": {"paths": ["~/bad"]}}}}`,
+	}
+	for name, artifact := range cases {
+		writeAgentFile(t, agentDir, "system/manifest.resolved.json", artifact)
+		got := readLibraryPaths(agentDir)
+		if len(got) != 1 || got[0] != "~/from-init" {
+			t.Errorf("%s: readLibraryPaths = %v, want [~/from-init]", name, got)
+		}
+	}
+}
+
+func TestReadLibraryPaths_FallsBackToInitWhenArtifactStale(t *testing.T) {
+	agentDir := t.TempDir()
+	writeAgentFile(t, agentDir, "system/manifest.resolved.json",
+		`{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "kernel", "manifest": {"capabilities": {"skills": {"paths": ["~/stale-artifact"]}}}}`)
+	writeAgentFile(t, agentDir, "init.json",
+		`{"manifest": {"capabilities": {"skills": {"paths": ["~/fresh-init"]}}}}`)
+	base := time.Now().Add(-time.Hour)
+	touchLibraryAgentFile(t, agentDir, "system/manifest.resolved.json", base)
+	touchLibraryAgentFile(t, agentDir, "init.json", base.Add(time.Minute))
+	got := readLibraryPaths(agentDir)
+	if len(got) != 1 || got[0] != "~/fresh-init" {
+		t.Errorf("readLibraryPaths = %v, want [~/fresh-init]", got)
 	}
 }
 

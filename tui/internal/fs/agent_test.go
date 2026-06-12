@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestReadAgent_ValidManifest(t *testing.T) {
@@ -185,6 +186,14 @@ func writeInitManifestTestFile(t *testing.T, dir, rel, content string) {
 	}
 }
 
+func touchInitManifestTestFile(t *testing.T, dir, rel string, mod time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	if err := os.Chtimes(path, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadInitManifest_PrefersResolvedArtifact(t *testing.T) {
 	dir := t.TempDir()
 	writeInitManifestTestFile(t, dir, "init.json",
@@ -254,5 +263,51 @@ func TestReadInitManifest_FallsBackToInitWhenArtifactMalformed(t *testing.T) {
 		if got := m["agent_name"]; got != "from-init" {
 			t.Errorf("%s: agent_name = %v, want from-init", name, got)
 		}
+	}
+}
+
+func TestReadInitManifest_FallsBackToInitWhenArtifactSchemaInvalid(t *testing.T) {
+	dir := t.TempDir()
+	writeInitManifestTestFile(t, dir, "init.json",
+		`{"manifest": {"agent_name": "from-init"}}`)
+	cases := map[string]string{
+		"wrong schema":  `{"schema": "other/v1", "schema_version": 1, "source": "kernel", "manifest": {"agent_name": "bad"}}`,
+		"wrong version": `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 2, "source": "kernel", "manifest": {"agent_name": "bad"}}`,
+		"wrong source":  `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "user", "manifest": {"agent_name": "bad"}}`,
+	}
+	for name, artifact := range cases {
+		writeInitManifestTestFile(t, dir, "system/manifest.resolved.json", artifact)
+		m, err := ReadInitManifest(dir)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := m["agent_name"]; got != "from-init" {
+			t.Errorf("%s: agent_name = %v, want from-init", name, got)
+		}
+	}
+}
+
+func TestReadInitManifest_FallsBackToInitWhenArtifactStale(t *testing.T) {
+	dir := t.TempDir()
+	writeInitManifestTestFile(t, dir, "system/manifest.resolved.json",
+		`{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "kernel", "manifest": {"agent_name": "stale-artifact"}}`)
+	writeInitManifestTestFile(t, dir, "init.json",
+		`{"manifest": {"agent_name": "fresh-init"}}`)
+	base := time.Now().Add(-time.Hour)
+	touchInitManifestTestFile(t, dir, "system/manifest.resolved.json", base)
+	touchInitManifestTestFile(t, dir, "init.json", base.Add(time.Minute))
+	m, err := ReadInitManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m["agent_name"]; got != "fresh-init" {
+		t.Errorf("agent_name = %v, want fresh-init", got)
+	}
+}
+
+func TestReadInitManifest_ErrorsWhenBothMissing(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := ReadInitManifest(dir); err == nil {
+		t.Error("expected error when neither artifact nor init.json exists")
 	}
 }

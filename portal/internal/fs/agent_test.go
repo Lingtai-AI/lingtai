@@ -4,7 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func touchAgentFile(t *testing.T, dir, rel string, mod time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	if err := os.Chtimes(path, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func writeAgentFile(t *testing.T, dir, rel, content string) {
 	t.Helper()
@@ -94,5 +103,44 @@ func TestReadInitManifest_ErrorsWhenBothMissing(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := ReadInitManifest(dir); err == nil {
 		t.Error("expected error when neither artifact nor init.json exists")
+	}
+}
+
+func TestReadInitManifest_FallsBackToInitWhenArtifactSchemaInvalid(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentFile(t, dir, "init.json",
+		`{"manifest": {"agent_name": "from-init"}}`)
+	cases := map[string]string{
+		"wrong schema":  `{"schema": "other/v1", "schema_version": 1, "source": "kernel", "manifest": {"agent_name": "bad"}}`,
+		"wrong version": `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 2, "source": "kernel", "manifest": {"agent_name": "bad"}}`,
+		"wrong source":  `{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "user", "manifest": {"agent_name": "bad"}}`,
+	}
+	for name, artifact := range cases {
+		writeAgentFile(t, dir, "system/manifest.resolved.json", artifact)
+		m, err := ReadInitManifest(dir)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := m["agent_name"]; got != "from-init" {
+			t.Errorf("%s: agent_name = %v, want from-init", name, got)
+		}
+	}
+}
+
+func TestReadInitManifest_FallsBackToInitWhenArtifactStale(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentFile(t, dir, "system/manifest.resolved.json",
+		`{"schema": "lingtai.manifest.resolved/v1", "schema_version": 1, "source": "kernel", "manifest": {"agent_name": "stale-artifact"}}`)
+	writeAgentFile(t, dir, "init.json",
+		`{"manifest": {"agent_name": "fresh-init"}}`)
+	base := time.Now().Add(-time.Hour)
+	touchAgentFile(t, dir, "system/manifest.resolved.json", base)
+	touchAgentFile(t, dir, "init.json", base.Add(time.Minute))
+	m, err := ReadInitManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m["agent_name"]; got != "fresh-init" {
+		t.Errorf("agent_name = %v, want fresh-init", got)
 	}
 }

@@ -293,16 +293,27 @@ func readLibraryPaths(agentDir string) []string {
 // unreadable / malformed (caller falls back to raw init.json), true means the
 // artifact is authoritative — including when it declares no skills paths.
 func readResolvedLibraryPaths(agentDir string) ([]string, bool) {
-	data, err := os.ReadFile(filepath.Join(agentDir, "system", "manifest.resolved.json"))
+	artifactPath := filepath.Join(agentDir, "system", "manifest.resolved.json")
+	if isResolvedLibraryManifestStale(filepath.Join(agentDir, "init.json"), artifactPath) {
+		return nil, false
+	}
+
+	data, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return nil, false
 	}
 	var artifact struct {
-		Manifest *struct {
+		Schema        string  `json:"schema"`
+		SchemaVersion float64 `json:"schema_version"`
+		Source        string  `json:"source"`
+		Manifest      *struct {
 			Capabilities map[string]json.RawMessage `json:"capabilities"`
 		} `json:"manifest"`
 	}
 	if err := json.Unmarshal(data, &artifact); err != nil || artifact.Manifest == nil {
+		return nil, false
+	}
+	if artifact.Schema != "lingtai.manifest.resolved/v1" || artifact.SchemaVersion != 1 || artifact.Source != "kernel" {
 		return nil, false
 	}
 	if raw, ok := artifact.Manifest.Capabilities["skills"]; ok {
@@ -317,6 +328,18 @@ func readResolvedLibraryPaths(agentDir string) ([]string, bool) {
 		return lib.Paths, true
 	}
 	return nil, true
+}
+
+func isResolvedLibraryManifestStale(initPath, artifactPath string) bool {
+	initInfo, err := os.Stat(initPath)
+	if err != nil {
+		return false
+	}
+	artifactInfo, err := os.Stat(artifactPath)
+	if err != nil {
+		return false
+	}
+	return initInfo.ModTime().After(artifactInfo.ModTime())
 }
 
 // skillsPathsFromCapabilities extracts skills.paths from a raw capabilities
