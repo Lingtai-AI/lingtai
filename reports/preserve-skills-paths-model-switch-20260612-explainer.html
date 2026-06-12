@@ -66,7 +66,7 @@ for _, capName := range optionalCapabilities {
     <ul>
       <li>Idempotent: existing <code>skills.paths</code> values are preserved exactly.</li>
       <li>Conservative: built-in templates are not patched because they are regenerated and already carry the default paths.</li>
-      <li>Durable: the preset is patched instead of individual agent <code>init.json</code> files, because active presets rematerialize agent capabilities on refresh/boot.</li>
+      <li>Durable: the preset is patched instead of individual agent <code>init.json</code> files, because active presets rematerialize agent capabilities on refresh/boot. (Follow-up: review found that already-materialized agents keep the damaged <code>init.json</code> until an explicit refresh, so project migration m038 patches those files directly — see <code>agent-init-skills-paths-migration-20260612-explainer.html</code>.)</li>
       <li>Migration etiquette: TUI migration version bumps from 36 to 37, and the portal registry receives the matching no-op version entry to keep the shared meta version space aligned.</li>
     </ul>
 
