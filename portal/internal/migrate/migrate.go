@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 36
+const CurrentVersion = 37
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -59,6 +59,7 @@ var migrations = []Migration{
 	{Version: 34, Name: "library-skills-caps", Fn: func(_ string) error { return nil }},                   // TUI-only: rewrites codex/library capability keys to library/skills
 	{Version: 35, Name: "remove-brief", Fn: migrateRemoveBrief},                                           // shared: strips brief.md + brief_file/brief keys after secretary removal
 	{Version: 36, Name: "sqlite-log-backfill", Fn: func(_ string) error { return nil }},                   // TUI-only: optional command-line SQLite log backfill prompt/progress
+	{Version: 37, Name: "preset-skills-paths", Fn: func(_ string) error { return nil }},                   // TUI-only: patches saved preset skill path overrides
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any
