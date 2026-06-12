@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Runtime Checkout Refresh Docs — PR Explainer</title>
+  <style>
+    :root { --bg:#fbf7ef; --ink:#241b12; --muted:#6b5b4b; --card:#fffaf2; --line:#e4d6c4; --accent:#8a4b1f; --ok:#176b3a; --warn:#9a5b00; }
+    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); line-height:1.55; }
+    main { max-width: 960px; margin: 0 auto; padding: 36px 20px 60px; }
+    h1 { margin:0 0 8px; font-size: 32px; }
+    h2 { margin-top: 30px; border-bottom:1px solid var(--line); padding-bottom:6px; color:var(--accent); }
+    .sub { color:var(--muted); margin-bottom: 24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:16px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { background:#f1e6d8; padding:1px 5px; border-radius:5px; }
+    pre { overflow:auto; background:#2a2119; color:#f7efe4; padding:14px; border-radius:10px; font-size:13px; }
+    ul { padding-left: 22px; }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--warn); font-weight:700; }
+    table { border-collapse: collapse; width:100%; margin-top: 10px; }
+    th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+    th { background:#f3e8da; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Runtime Checkout Refresh Documentation</h1>
+  <div class="sub">Explainer for <code>docs-runtime-checkout-refresh-20260612</code></div>
+
+  <section class="card">
+    <h2>TL;DR</h2>
+    <p>This docs-only change adds the missing developer workflow Jason requested: after a kernel PR is merged, verify the <em>actual runtime import paths</em>, fast-forward the editable checkout if stale, call <code>system(refresh)</code>, then rerun the probe before declaring the fix live.</p>
+  </section>
+
+  <h2>Baseline</h2>
+  <p>The existing <code>lingtai-dev-guide</code> explained how to install the kernel editable into <code>~/.lingtai-tui/runtime/venv</code>, but it did not cover the production pitfall we just hit: a running agent may import from an editable checkout that is behind <code>origin/main</code>, a detached worktree, or a legacy addon checkout.</p>
+
+  <h2>What changed</h2>
+  <table>
+    <tr><th>File</th><th>Change</th></tr>
+    <tr><td><code>reference/setup/SKILL.md</code></td><td>Added a full command recipe: probe <code>module.__file__</code> for <code>lingtai</code>, <code>lingtai_kernel</code>, curated MCP modules, and compatibility wrappers; inspect git root/branch/HEAD; fast-forward intended editable checkout; refresh; rerun probe.</td></tr>
+    <tr><td><code>reference/gotchas/SKILL.md</code></td><td>Added a gotcha entry describing stale editable checkouts after merge, symptoms such as missing imports, and the fix route back to setup.</td></tr>
+  </table>
+
+  <h2>Representative diff snippets</h2>
+  <pre>## Verify the runtime checkout a running agent actually uses
+RUNTIME_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
+$RUNTIME_PY - &lt;&lt;'PY'
+import importlib, pathlib, subprocess
+mods = ["lingtai", "lingtai_kernel", "lingtai.mcp_servers", ...]
+...
+PY</pre>
+  <pre>## Runtime editable checkout can be stale after a merge
+A successful PR merge does not prove running agents are executing the merged code.</pre>
+
+  <h2>Validation</h2>
+  <ul>
+    <li class="ok">PASS</li>
+    <li><code>git diff --check</code></li>
+    <li>Frontmatter sanity check for the router, setup reference, and gotchas reference.</li>
+    <li><code>rg</code> confirmed the new headings are present.</li>
+  </ul>
+
+  <h2>Risks and decisions</h2>
+  <ul>
+    <li>This is docs-only; no runtime behavior changes.</li>
+    <li>The fast-forward recipe explicitly says <code>git switch main</code> only if safe, to avoid trampling a worktree branch.</li>
+    <li>The probe includes both curated paths and compatibility wrappers so developers notice old standalone addon repos.</li>
+  </ul>
+
+  <h2>Next steps</h2>
+  <p>Open the PR, then rename this report to the PR-numbered filename required by the guide.</p>
+
+  <h2>Source index</h2>
+  <ul>
+    <li><code>tui/internal/preset/skills/lingtai-dev-guide/reference/setup/SKILL.md</code></li>
+    <li><code>tui/internal/preset/skills/lingtai-dev-guide/reference/gotchas/SKILL.md</code></li>
+  </ul>
+</main>
+</body>
+</html>

@@ -94,6 +94,77 @@ Verify:
 
 **Important:** Use `uv`, not `pip` — the venv is uv-managed and has no `pip` symlink, only `pip3`.
 
+## Verify the runtime checkout a running agent actually uses
+
+After merging or updating kernel code, do not assume a running agent is using the
+checkout you just edited. The TUI runtime venv may point at an editable checkout
+that is behind `origin/main`, or at a detached worktree left by an earlier test.
+Before declaring a runtime fix live, probe the interpreter the agent will use,
+update the checkout if needed, refresh the agent, then probe again.
+
+Use the TUI runtime venv unless the agent's `init.json` explicitly names a
+different Python executable:
+
+```bash
+RUNTIME_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
+$RUNTIME_PY - <<'PY'
+import importlib, pathlib, subprocess
+mods = [
+    "lingtai",
+    "lingtai_kernel",
+    "lingtai.mcp_servers",
+    "lingtai.mcp_servers.telegram",
+    "lingtai_telegram",
+]
+for name in mods:
+    try:
+        mod = importlib.import_module(name)
+    except Exception as exc:
+        print(f"{name}: NOT IMPORTABLE ({type(exc).__name__}: {exc})")
+        continue
+    path = pathlib.Path(getattr(mod, "__file__", "")).resolve()
+    print(f"{name}: {path}")
+    cur = path
+    for parent in [cur, *cur.parents]:
+        if (parent / ".git").exists() or (parent / ".git").is_file():
+            try:
+                head = subprocess.check_output(
+                    ["git", "-C", str(parent), "rev-parse", "--short=12", "HEAD"],
+                    text=True,
+                ).strip()
+                branch = subprocess.check_output(
+                    ["git", "-C", str(parent), "branch", "--show-current"],
+                    text=True,
+                ).strip() or "(detached)"
+                print(f"  git: {parent} {branch} {head}")
+            except Exception as exc:
+                print(f"  git probe failed: {exc}")
+            break
+PY
+```
+
+If the probe resolves to the expected editable kernel checkout but the HEAD is
+behind, fast-forward that checkout first:
+
+```bash
+cd ~/Documents/GitHub/lingtai-kernel   # or the path printed by the probe
+git fetch origin main
+git switch main                         # only if it is safe to leave a worktree branch
+git pull --ff-only origin main
+```
+
+Then refresh the agent so it reloads Python modules, MCP registrations, prompt
+sections, and runtime config:
+
+```python
+system(action="refresh", reason="pick up updated runtime checkout")
+```
+
+Finally rerun the import probe from the same interpreter. For addon/MCP work,
+verify both the curated package path (for example `lingtai.mcp_servers.telegram`)
+and any compatibility wrapper (`lingtai_telegram`) so stale external addon
+checkouts do not masquerade as the active implementation.
+
 ## Set up MCP addons (optional)
 
 If developing MCP server addons (imap, telegram, feishu, wechat):

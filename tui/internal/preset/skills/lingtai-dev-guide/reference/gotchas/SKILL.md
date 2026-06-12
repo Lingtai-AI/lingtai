@@ -77,6 +77,25 @@ Upgrading lingtai 0.8.0 → 0.8.2...
 
 Use `uv`, not `pip` — the venv is uv-managed and has no `pip` symlink.
 
+## Runtime editable checkout can be stale after a merge
+
+A successful PR merge does not prove running agents are executing the merged
+code. The TUI-created runtime venv may have `lingtai` installed editable from a
+checkout such as `~/Documents/GitHub/lingtai-kernel`, and that checkout may be
+behind `origin/main` even after the PR merged. Agents can also be launched from
+older detached worktrees or legacy addon checkouts.
+
+**Symptom:** a feature that is present on GitHub is missing at runtime; imports
+such as `lingtai.mcp_servers` fail; an MCP/addon path still points at an old
+standalone repo or a detached worktree.
+
+**Fix:** probe the exact Python interpreter named by the agent/runtime, print
+`module.__file__` for `lingtai`, `lingtai_kernel`, and relevant MCP/addon
+modules, inspect the git root/HEAD behind those paths, fast-forward the checkout
+if it is the intended editable source, then call `system(action="refresh")` and
+rerun the probe. See `reference/setup/SKILL.md` → “Verify the runtime checkout a
+running agent actually uses” for the full command recipe.
+
 ## Migration cross-package contract
 
 TUI and portal share `meta.json` but have separate migration registries. **When adding a TUI migration, you MUST also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`.**
