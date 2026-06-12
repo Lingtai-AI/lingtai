@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #310 — CLI-Anything swiss-knife skill with web-browsing cross-route</title>
+<style>
+:root{--bg:#f6f8fc;--card:#fff;--ink:#172033;--muted:#5d6880;--line:#d8deea;--accent:#2457d6;--ok:#166534;--warn:#9a3412;--soft:#eef4ff}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1100px;margin:0 auto;padding:32px 20px 48px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 10px 30px rgba(28,43,78,.06)}h1{font-size:32px;line-height:1.15;margin:0 0 12px}h2{margin:0 0 14px;font-size:22px}.muted{color:var(--muted)}.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.badge{border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:var(--soft);font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:14px}.kpi{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fbfcff}.kpi b{display:block;margin-bottom:8px}code{background:#f1f4f9;border:1px solid #dbe2ee;border-radius:6px;padding:1px 5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}.ok{color:var(--ok);font-weight:700}.warn{color:var(--warn);font-weight:700}ul{padding-left:22px}li{margin:7px 0}.flow{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}.box{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fbfcff}.arrow{font-size:24px;color:var(--accent);font-weight:700}@media(max-width:700px){.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);text-align:center}}</style>
+</head>
+<body><main>
+<section class="card"><h1>PR #310: CLI-Anything as a swiss-knife skill, cross-routed from web-browsing</h1>
+<p class="muted">Issue <a href="https://github.com/Lingtai-AI/lingtai/issues/193">#193</a> asks whether LingTai can build and operate browser-based CLIs for authenticated websites. After reviewing <a href="https://github.com/HKUDS/CLI-Anything">HKUDS/CLI-Anything</a> and Claude Code fable's placement review, this PR keeps CLI-Anything in Swiss Knife while making web-browsing explicitly route action-taking site workflows to it.</p>
+<div class="badges"><span class="badge">Refs #193</span><span class="badge">Swiss Knife child skill</span><span class="badge">web-browsing cross-reference</span><span class="badge">Docs/skill only</span><span class="badge">No runtime behavior change</span></div></section>
+
+<section class="card"><h2>What changed</h2><div class="grid">
+<div class="kpi"><b>New skill reference</b><code>tui/internal/preset/skills/swiss-knife/reference/cli-anything/SKILL.md</code></div>
+<div class="kpi"><b>Swiss Knife router</b><code>swiss-knife/SKILL.md</code> now routes CLI-Anything, browser-based CLI, authenticated-site harness, and GUI/software/web workflow requests.</div>
+<div class="kpi"><b>web-browsing router</b><code>web-browsing/SKILL.md</code> now points action-taking authenticated-site workflows to the CLI-Anything reference instead of forcing them into the read/extract pipeline.</div>
+<div class="kpi"><b>PR scope corrected</b>The earlier broad core-feature proposal was removed; this is a reusable agent workflow/skill, not a browser automation substrate implementation.</div>
+</div></section>
+
+<section class="card"><h2>Routing model</h2>
+<div class="flow"><div class="box"><b>web-browsing</b><br>Use for reading: fetch, extract, scrape, search, JS-render, or inspect pages without side effects.</div><div class="arrow">⇄</div><div class="box"><b>swiss-knife / cli-anything</b><br>Use for acting/wrapping: browser-based CLI, authenticated-site operation, site-specific harnesses, and GUI/software/web workflow CLIs with explicit approval.</div></div>
+<p>The seam is <b>read vs. act</b>, not merely “web vs. CLI.” This avoids broadening web-browsing into a side-effecting automation manual while still making the CLI-Anything reference discoverable from the most likely entry point.</p></section>
+
+<section class="card"><h2>Safety and scope</h2>
+<ul>
+<li><span class="ok">Official APIs/MCPs first:</span> CLI-Anything is for cases where a stable API/MCP does not exist or the GUI workflow is the source of truth.</li>
+<li><span class="ok">Narrow harnesses:</span> prefer site-specific, testable commands with dry-run and structured output; do not promise arbitrary authenticated website automation.</li>
+<li><span class="ok">Explicit approval:</span> installing tools, launching apps, using logged-in sessions, sending messages, submitting forms, modifying records, deleting, buying, or other side effects require human authorization.</li>
+<li><span class="ok">No secret capture:</span> do not store raw credentials, cookies, MFA codes, recovery codes, or long-lived tokens in skills, reports, logs, or prompts.</li>
+<li><span class="warn">Anti-bot reality:</span> LinkedIn-like sites involve ToS, bot detection, rate limits, account safety, duplicate submission risks, and commercial-grade anti-automation challenges. CLI-Anything is a harness pattern, not a magic bypass.</li>
+</ul></section>
+
+<section class="card"><h2>Open-source references captured in the skill</h2>
+<p>The new reference distinguishes CLI harnesses from the deeper agent-native browser substrate and points agents to projects worth evaluating:</p>
+<ul>
+<li>Browser Use</li><li>Stagehand</li><li>Skyvern</li><li>BrowserOS</li><li>Steel Browser</li><li>DOMShell</li><li>LaVague</li><li>CLI-Anything</li>
+</ul></section>
+
+<section class="card"><h2>Validation status</h2>
+<ul>
+<li><code>git diff --check</code> passed after the skill/router edits.</li>
+<li><code>go test ./internal/preset</code> is the relevant bundled-skill/package smoke check.</li>
+<li>Jason requested extra independent daemon opinions after the skill edits; review artifacts were captured in the agent workspace and their actionable nits were folded into this diff.</li>
+</ul></section>
+</main></body></html>

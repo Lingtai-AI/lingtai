@@ -9,7 +9,9 @@ description: >
   transcription and music analysis; academic-research for fetching papers,
   citation networks, and LaTeX writing; dj for journal-inspired music
   generation; token-usage for token/cost reports; html-report for standalone
-  browser deliverables; xiaomi-mimo for Xiaomi MiMo provider discovery;
+  browser deliverables; cli-anything for authenticated websites without APIs,
+  browser-based or site-specific CLI harnesses, and agent-native
+  GUI/software/web workflows; xiaomi-mimo for Xiaomi MiMo provider discovery;
   zhipu-coding-plan for Z.AI / BigModel coding-plan capabilities; headless-bot
   for provisioning fresh LingTai bot projects such as Telegram bots from
   `lingtai-tui spawn`; find-something-to-do for idle curiosity practice;
@@ -17,7 +19,7 @@ description: >
   keys, missing credentials, unreachable endpoints, invalid model/config). This
   parent is the route map; each nested reference is self-contained under
   `reference/<name>/SKILL.md`.
-version: 2.3.0
+version: 2.4.0
 tags: [utilities, umbrella, toolkit, nested-skill]
 ---
 
@@ -96,6 +98,14 @@ nested_references:
       Nested swiss-knife reference for standalone HTML deliverables. Read this
       when the human asks for a polished browser-openable report, dashboard,
       memo, comparison, or any HTML artifact with MathJax equations.
+  - name: cli-anything
+    location: reference/cli-anything/SKILL.md
+    description: >
+      Nested swiss-knife reference for CLI-Anything. Read this when the human
+      asks whether to use CLI-Anything, wants a browser-based or site-specific
+      CLI harness, needs a practical way to approach authenticated websites
+      without public APIs, or wants an agent-native harness for a GUI/software/web
+      workflow using CLI-Hub, existing harnesses, or a scoped new harness design.
   - name: xiaomi-mimo
     location: reference/xiaomi-mimo/SKILL.md
     description: >
@@ -147,6 +157,7 @@ nested_references:
 | Compose music from a project journal, session mood, or requested genre | `reference/dj/SKILL.md` |
 | Report token usage or model costs | `reference/token-usage/SKILL.md` |
 | Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |
+| Use CLI-Anything / CLI-Hub; design a browser-based or site-specific CLI harness; operate an authenticated site with explicit approval; wrap GUI/software/web workflows for agents | `reference/cli-anything/SKILL.md` |
 | Discover/configure Xiaomi MiMo | `reference/xiaomi-mimo/SKILL.md` |
 | Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md` |
 | Create or automate a headless LingTai bot project, including Telegram bots | `reference/headless-bot/SKILL.md` |

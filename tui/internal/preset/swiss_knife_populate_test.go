@@ -41,6 +41,7 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 		"reference/token-usage/scripts/custom_pricing.json",
 		"reference/html-report/SKILL.md",
 		"reference/html-report/assets/template.html",
+		"reference/cli-anything/SKILL.md",
 		"reference/headless-bot/SKILL.md",
 		"reference/headless-bot/scripts/create_telegram_bot_project.py",
 		"reference/xiaomi-mimo/SKILL.md",

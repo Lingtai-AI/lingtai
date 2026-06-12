@@ -5,8 +5,12 @@ description: >
   `python3 <skill-path>/scripts/extract_page.py <URL>`: it auto-tiers across
   PDFs, metadata APIs, trafilatura, BeautifulSoup, Playwright, Jina, and AI
   search. Read this router when the script fails, you need site/tier routing,
-  or you are composing a multi-step web/research pipeline.
-version: 3.1.0
+  or you are composing a multi-step web/research pipeline. If the task is to
+  operate an authenticated site or build a browser-based/site-specific CLI
+  harness instead of reading content, route to swiss-knife's CLI-Anything
+  reference.
+version: 3.2.0
+tags: [web, browsing, extraction, scraping, search, cli-anything, browser-harness]
 ---
 
 # web-browsing — Router
@@ -41,6 +45,11 @@ python3 <skill-path>/scripts/extract_page.py "https://example.com" --json out.js
 Read further only if that returns nothing useful, you need a custom extraction
 shape, or you are composing a multi-step pipeline such as academic search → DOI
 → free PDF → text.
+
+If the goal is not to read/extract/search content but to **operate** an
+authenticated site, submit actions, or design a browser-based/site-specific CLI
+harness, do not force it into the extractor pipeline. Route to Swiss Knife's
+CLI-Anything reference: `../swiss-knife/reference/cli-anything/SKILL.md`.
 
 ## Nested reference catalog
 
@@ -77,7 +86,8 @@ URL arrives → run scripts/extract_page.py first
   ├─ Needs structured scraping?   → Tier 2 BeautifulSoup
   ├─ JS-rendered/protected?       → Tier 3 Playwright stealth
   ├─ Still failing?               → Tier 4 Jina Reader / Firecrawl
-  └─ Need to discover content?    → Tier 5 search / AI-native search
+  ├─ Need to discover content?    → Tier 5 search / AI-native search
+  └─ Need to operate a site?      → Swiss Knife CLI-Anything reference
 ```
 
 ## Router table
@@ -86,6 +96,7 @@ URL arrives → run scripts/extract_page.py first
 |---|---|
 | Specific tier commands; manual PDF/API/Trafilatura/BeautifulSoup/Playwright/Jina/Firecrawl/search examples | `reference/tier-quick-refs/SKILL.md` |
 | Auto-tier misroutes a page; choose a tier; per-site recommendations; limitations; real-time data endpoints | `reference/routing-and-sites/SKILL.md` |
+| Operate an authenticated website; submit actions; build a browser-based CLI; design a site-specific harness; use CLI-Anything / CLI-Hub for a web workflow with side effects | `../swiss-knife/reference/cli-anything/SKILL.md` (sibling skill path from the bundled skills root) |
 | Editing or validating this skill; bundled JSON asset files; deep-dive reference index; semantic sweep and dirty-first testing | `reference/maintenance-bundles/SKILL.md` |
 
 ## Tier overview
@@ -109,5 +120,8 @@ URL arrives → run scripts/extract_page.py first
 - Prefer source-specific APIs for structured/current data when available.
 - Do not use web browsing for content already in the conversation or when an MCP
   or first-class tool covers the source more cleanly.
+- Do not use this skill to justify side-effecting authenticated-site automation.
+  For browser-based CLIs or site-specific harnesses, route to Swiss Knife's
+  CLI-Anything reference and require explicit human authorization.
 - When changing this skill, run the maintenance reference's semantic sweep so the
   script, JSON asset files, and docs stay aligned.
