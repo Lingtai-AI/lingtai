@@ -146,19 +146,7 @@ flowchart LR
 
 `lingtai-tui` 是主交互界面。提供：项目初始化、模型/预设配置、对话与信箱、助理状态（token + 体力 + 心跳）、分身/神識可见性、Markdown 渲染、命令面板、升级与 doctor 流程。
 
-常用斜杠命令：
-
-| 命令 | 用途 |
-|---|---|
-| `/setup` | 调整模型、配方、语言、工具、行为 |
-| `/kanban` | 查看助理与项目状态 |
-| `/mcp` | 配置外部渠道（Telegram/飞书/微信/WhatsApp/IMAP/…） |
-| `/skills` | 浏览可用技能与能力 |
-| `/viz` | 打开网络可视化 |
-| `/insights` | 让助理对当前工作做一次自我反思 |
-| `/sleep` · `/refresh` · `/cpr` · `/clear` | 生命周期：休眠、重载、复苏、清空上下文 |
-| `/projects` | 切换或查看已知项目 |
-| `/doctor` | 排查安装/运行时问题 |
+在 TUI 里输入 `/help` 可查看完整斜杠命令参考。权威文档维护在内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)；顶层 README 只链接到那里，避免重复维护命令目录。
 
 常用 Shell 入口：
 

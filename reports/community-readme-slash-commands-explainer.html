@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PR #322 — README 只链接 canonical /help，补充 help assets</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f7f8fb; color: #172033; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+    .card { background: #fff; border: 1px solid #dde3ee; border-radius: 16px; padding: 22px 24px; margin: 16px 0; box-shadow: 0 8px 22px rgba(25, 37, 60, .05); }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin-top: 0; font-size: 20px; }
+    code { background: #edf2f7; border-radius: 6px; padding: 1px 5px; }
+    ul { padding-left: 22px; }
+    .ok { color: #116329; font-weight: 700; }
+    .warn { color: #8a4b00; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #d8dee9; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; }
+    .small { color: #536173; font-size: 14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>PR #322 — community slash-command docs consolidation</h1>
+  <p class="small">更新后方向：顶层 README 不再复制 slash-command catalog，只链接到 canonical <code>/help</code> 文档；实际补充保留在内置 help assets。</p>
+
+  <section class="card">
+    <h2>结论</h2>
+    <p><span class="ok">已按 Jason 反馈修正。</span> 原先把多个命令逐条加进 README 的做法会造成双写维护；现在 PR #322 改为：</p>
+    <ul>
+      <li><code>README.md</code>：删除逐条命令表，写一句“在 TUI 用 <code>/help</code> 查看完整命令参考”，并链接到 <code>slash-commands.en.md</code>。</li>
+      <li><code>README.zh.md</code>：同样删除逐条命令表，链接到 <code>slash-commands.zh.md</code>。</li>
+      <li><code>lingtai-tui-help</code> 三语 help assets：保留 <code>#301</code> 的有效补充——消息框 <code>Enter</code> 发送，<code>Shift+Enter</code> / <code>Ctrl+J</code> 换行。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>覆盖的原 community draft PR</h2>
+    <table>
+      <tr><th>PR</th><th>处理方式</th></tr>
+      <tr><td><code>#290/#291/#292/#293/#294/#297/#298</code></td><td>不逐条复制到 README；用 canonical <code>/help</code> 链接解决顶层 README 漂移问题。</td></tr>
+      <tr><td><code>#301</code></td><td>其 multiline-input 提示进入 canonical help assets。</td></tr>
+    </table>
+    <p class="small">本 PR 没有 merge/close/comment 原 draft PR；是否标记 superseded 仍等待 Jason 明确授权。</p>
+  </section>
+
+  <section class="card">
+    <h2>验证</h2>
+    <ul>
+      <li><code>go test ./internal/preset</code>（在 <code>tui/</code> 下）</li>
+      <li><code>git diff --check</code></li>
+      <li>README 中的 help asset 链接目标存在性检查</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>建议</h2>
+    <p>如果 Jason 认为当前方向 reasonable，再决定是否合并 PR #322。合并后再单独决定是否到原 draft PR comment/close 为 superseded。</p>
+  </section>
+</main>
+</body>
+</html>
