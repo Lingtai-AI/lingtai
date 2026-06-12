@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -330,6 +331,105 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 	}
 	if _, ok := caps["web_search"]; !ok {
 		t.Fatalf("commit lost optional web_search capability: %#v", caps)
+	}
+}
+
+// TestSyncCapsToModelPreservesNonOptionalCapabilities is the regression
+// test for issue #311: switching models must not delete capability
+// entries that are not model-conditional (skills.paths overrides, bash
+// policy, etc.). Only the optionalCapabilities (web_search, vision) may
+// be reset to the target model's defaults.
+func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
+	skillsPaths := []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
+	p := testPresetEditorPreset()
+	p.Manifest["capabilities"] = map[string]interface{}{
+		"web_search": map[string]interface{}{"provider": "zhipu"},
+		"vision":     map[string]interface{}{"provider": "inherit"},
+		"skills":     map[string]interface{}{"paths": skillsPaths},
+		"bash":       map[string]interface{}{"yolo": true},
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+	// mimo-v2.5-pro is a cataloged text-only model: vision must drop,
+	// web_search must reset to the default backend.
+	m.syncCapsToModel("mimo-v2.5-pro")
+
+	caps, ok := m.working.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("capabilities missing/wrong type after model switch: %T", m.working.Manifest["capabilities"])
+	}
+	skills, ok := caps["skills"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("model switch dropped skills capability: %#v", caps)
+	}
+	if !reflect.DeepEqual(skills["paths"], skillsPaths) {
+		t.Fatalf("model switch mangled skills.paths: got %#v, want %#v", skills["paths"], skillsPaths)
+	}
+	bash, ok := caps["bash"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("model switch dropped bash capability override: %#v", caps)
+	}
+	if yolo, _ := bash["yolo"].(bool); !yolo {
+		t.Fatalf("model switch lost bash yolo override: %#v", bash)
+	}
+	ws, ok := caps["web_search"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("model switch lost web_search: %#v", caps)
+	}
+	if got := ws["provider"]; got != "duckduckgo" {
+		t.Fatalf("web_search should reset to target model default duckduckgo, got %#v", got)
+	}
+	if _, hasVision := caps["vision"]; hasVision {
+		t.Fatalf("vision should be dropped for text-only model: %#v", caps)
+	}
+}
+
+func TestSyncCapsToModelAddsVisionAndKeepsSkillsOnVisionModel(t *testing.T) {
+	skillsPaths := []interface{}{"../.library_shared"}
+	p := testPresetEditorPreset()
+	p.Manifest["capabilities"] = map[string]interface{}{
+		"web_search": map[string]interface{}{"provider": "duckduckgo"},
+		"skills":     map[string]interface{}{"paths": skillsPaths},
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+	// mimo-v2.5 is vision-capable: vision must appear with its default.
+	m.syncCapsToModel("mimo-v2.5")
+
+	caps, ok := m.working.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("capabilities missing/wrong type after model switch: %T", m.working.Manifest["capabilities"])
+	}
+	skills, ok := caps["skills"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("model switch dropped skills capability: %#v", caps)
+	}
+	if !reflect.DeepEqual(skills["paths"], skillsPaths) {
+		t.Fatalf("model switch mangled skills.paths: got %#v, want %#v", skills["paths"], skillsPaths)
+	}
+	vision, ok := caps["vision"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("vision-capable model should gain vision default: %#v", caps)
+	}
+	if got := vision["provider"]; got != "inherit" {
+		t.Fatalf("vision default provider = %#v, want \"inherit\"", got)
+	}
+}
+
+func TestSyncCapsToModelLeavesCapsAloneForUnknownModel(t *testing.T) {
+	p := testPresetEditorPreset()
+	p.Manifest["capabilities"] = map[string]interface{}{
+		"web_search": map[string]interface{}{"provider": "zhipu"},
+		"skills":     map[string]interface{}{"paths": []interface{}{"../.library_shared"}},
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	before := m.working.Manifest["capabilities"]
+
+	m.syncCapsToModel("some-free-text-model")
+
+	if !reflect.DeepEqual(m.working.Manifest["capabilities"], before) {
+		t.Fatalf("unknown model id must not touch capabilities: got %#v, want %#v",
+			m.working.Manifest["capabilities"], before)
 	}
 }
 

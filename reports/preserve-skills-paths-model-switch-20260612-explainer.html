@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preset editor: preserve skills.paths on model switch</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#5b6cff; --muted:#667085; --border:#d0d5dd; --bg:#f8fafc; }
+    body { margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#101828; background:var(--bg); }
+    main { max-width:920px; margin:40px auto; padding:0 22px 48px; }
+    .card { background:white; border:1px solid var(--border); border-radius:18px; padding:24px; box-shadow:0 10px 28px rgba(16,24,40,.08); }
+    h1 { margin:0 0 10px; font-size:30px; line-height:1.15; }
+    h2 { margin-top:28px; font-size:20px; }
+    .lede { color:var(--muted); margin-top:0; }
+    .pill { display:inline-block; border-radius:999px; padding:4px 10px; background:#eef2ff; color:#3538cd; font-weight:600; font-size:13px; }
+    ul { padding-left:22px; }
+    code { background:#f2f4f7; padding:2px 5px; border-radius:6px; }
+    pre { background:#f2f4f7; padding:14px; border-radius:10px; overflow-x:auto; font-size:14px; }
+    pre code { background:none; padding:0; }
+    .ok { border-left:4px solid #12b76a; padding-left:14px; }
+    .warn { border-left:4px solid #f79009; padding-left:14px; }
+    @media (prefers-color-scheme: dark) { body { background:#0b1020; color:#e4e7ec; } .card { background:#111827; border-color:#344054; } .lede { color:#98a2b3; } code { background:#1f2937; } pre { background:#1f2937; } .pill { background:#20295f; color:#c7d7fe; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <span class="pill">Issue #311 · TUI preset editor</span>
+    <h1>Model switch no longer deletes <code>skills.paths</code> overrides</h1>
+    <p class="lede">Switching the model in the preset editor used to wholesale-replace <code>manifest.capabilities</code> with the target model's defaults, silently deleting <code>skills.paths</code> and every other non-model-dependent capability override. Now only the genuinely model-conditional capabilities (<code>web_search</code>, <code>vision</code>) are reset.</p>
+
+    <h2>The bug</h2>
+    <p><code>syncCapsToModel</code> in <code>tui/internal/tui/preset_editor.go</code> ran on every model change (provider cycle and model cycle) and did:</p>
+    <pre><code>m.working.Manifest["capabilities"] = defaultCapsFor(modelID)</code></pre>
+    <p><code>defaultCapsFor</code> only ever returns <code>web_search</code> (plus <code>vision</code> for image-capable models). So a preset with</p>
+    <pre><code>"capabilities": {
+  "web_search": {"provider": "zhipu"},
+  "skills": {"paths": ["../.library_shared", "~/.lingtai-tui/utilities"]},
+  "bash": {"yolo": true}
+}</code></pre>
+    <p>lost <code>skills</code> and <code>bash</code> entirely the moment the user cycled to a different model — even though those entries have nothing to do with which model is selected.</p>
+
+    <h2>The fix</h2>
+    <p><code>syncCapsToModel</code> now mutates the existing capabilities map in place, iterating only over <code>optionalCapabilities</code> (<code>web_search</code>, <code>vision</code>):</p>
+    <pre><code>caps := m.capsMap()
+defaults := defaultCapsFor(modelID)
+for _, capName := range optionalCapabilities {
+    if def, ok := defaults[capName]; ok {
+        caps[capName] = def
+    } else {
+        delete(caps, capName)
+    }
+}</code></pre>
+    <ul>
+      <li><code>web_search</code> still resets to the target model's default backend.</li>
+      <li><code>vision</code> still appears for vision-capable models and is removed for text-only ones.</li>
+      <li>Everything else — <code>skills.paths</code>, <code>bash</code> policy, any other core-capability kwargs — survives the switch untouched.</li>
+      <li>The existing guard is unchanged: free-text model ids not in the catalog (<code>modelHasVision</code>) leave capabilities completely alone.</li>
+    </ul>
+
+    <h2>Tests (written first, watched fail)</h2>
+    <ul>
+      <li><code>TestSyncCapsToModelPreservesNonOptionalCapabilities</code> — starts with <code>skills.paths</code> + <code>bash.yolo</code> + a non-default <code>web_search</code> backend + <code>vision</code>, switches to text-only <code>mimo-v2.5-pro</code>; asserts skills/bash survive intact, <code>web_search</code> resets to <code>duckduckgo</code>, <code>vision</code> drops. <strong>Failed before the fix</strong> ("model switch dropped skills capability").</li>
+      <li><code>TestSyncCapsToModelAddsVisionAndKeepsSkillsOnVisionModel</code> — switches to vision-capable <code>mimo-v2.5</code>; asserts <code>vision: {provider: inherit}</code> appears and <code>skills.paths</code> survives. <strong>Failed before the fix.</strong></li>
+      <li><code>TestSyncCapsToModelLeavesCapsAloneForUnknownModel</code> — pins the pre-existing free-text-model guard so the early return doesn't regress.</li>
+    </ul>
+
+    <h2>Files touched</h2>
+    <ul>
+      <li><code>tui/internal/tui/preset_editor.go</code> — <code>syncCapsToModel</code> body + doc comment (~10 lines).</li>
+      <li><code>tui/internal/tui/preset_editor_test.go</code> — three regression tests.</li>
+    </ul>
+    <p class="warn">ANATOMY.md was not touched: its <code>preset_editor.go</code> citation ranges were already approximate before this change, and no cited anchor moved.</p>
+
+    <h2>Validation</h2>
+    <p class="ok"><code>cd tui &amp;&amp; go test ./internal/tui/</code> — full package passes. <code>go build ./...</code>, <code>go vet ./internal/tui/</code>, and <code>git diff --check</code> all clean. Red phase verified: both new preservation tests failed against the pre-fix code with the exact symptom from the issue.</p>
+  </div>
+</main>
+</body>
+</html>

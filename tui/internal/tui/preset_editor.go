@@ -893,17 +893,26 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 	m.working.Description.Extra[key] = val
 }
 
-// syncCapsToModel resets the manifest's capabilities to the default
-// set for the new model. User customizations to capability config
-// (e.g. disabling email) are dropped — switching models is an explicit
-// "give me this model's defaults" action. For free-text models not in
-// the providerModels catalog, leave caps alone; we don't know what
-// counts as "default" for an arbitrary openrouter/custom model id.
+// syncCapsToModel resets the model-conditional optional capabilities
+// (web_search, vision) to the default set for the new model. All other
+// capability entries — skills.paths overrides, bash policy, anything
+// not in optionalCapabilities — are not model-dependent and survive the
+// switch untouched. For free-text models not in the providerModels
+// catalog, leave caps alone; we don't know what counts as "default"
+// for an arbitrary openrouter/custom model id.
 func (m *PresetEditorModel) syncCapsToModel(modelID string) {
 	if _, known := modelHasVision[modelID]; !known {
 		return
 	}
-	m.working.Manifest["capabilities"] = defaultCapsFor(modelID)
+	caps := m.capsMap()
+	defaults := defaultCapsFor(modelID)
+	for _, capName := range optionalCapabilities {
+		if def, ok := defaults[capName]; ok {
+			caps[capName] = def
+		} else {
+			delete(caps, capName)
+		}
+	}
 }
 
 // cycleFocused rotates enum fields by `dir` (+1 or -1).
