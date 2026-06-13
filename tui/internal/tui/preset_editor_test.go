@@ -42,6 +42,10 @@ func testPresetEditorPreset() preset.Preset {
 }
 
 func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
+	return testCodexPresetEditorPresetWithThinking(serviceTier, nil)
+}
+
+func testCodexPresetEditorPresetWithThinking(serviceTier interface{}, thinking interface{}) preset.Preset {
 	llm := map[string]interface{}{
 		"provider":    "codex",
 		"model":       "gpt-5.5",
@@ -51,6 +55,9 @@ func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
 	}
 	if serviceTier != nil {
 		llm["service_tier"] = serviceTier
+	}
+	if thinking != nil {
+		llm["thinking"] = thinking
 	}
 	return preset.Preset{
 		Name:        "codex-test",
@@ -497,6 +504,145 @@ func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T)
 				t.Fatalf("committed service_tier=%q, want fast", got)
 			}
 		})
+	}
+}
+
+func TestPresetEditorCodexThinkingRowAndOptions(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	view := m.View()
+
+	if !m.fieldVisible(feThinking) {
+		t.Fatalf("codex reasoning effort row should be visible")
+	}
+	if got := m.fieldString(feThinking); got != "high" {
+		t.Fatalf("empty llm.thinking displays %q, want high", got)
+	}
+	if !strings.Contains(view, "Reasoning effort") {
+		t.Fatalf("codex editor should render Reasoning effort row; view:\n%s", view)
+	}
+	for _, effort := range codexThinkingOptions {
+		if !strings.Contains(view, effort) {
+			t.Fatalf("codex editor should render thinking option %q; view:\n%s", effort, view)
+		}
+	}
+}
+
+func TestPresetEditorCodexThinkingSelectionAndCommit(t *testing.T) {
+	cases := []struct {
+		effort    string
+		wantSaved bool
+	}{
+		{effort: "low", wantSaved: true},
+		{effort: "medium", wantSaved: true},
+		{effort: "high"},
+		{effort: "xhigh", wantSaved: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.effort, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+			m.cursor = editorFieldOrderIndex(t, feThinking)
+			m.setCodexThinking(tc.effort)
+			if got := m.fieldString(feThinking); got != tc.effort {
+				t.Fatalf("thinking display = %q, want %q", got, tc.effort)
+			}
+
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
+			got, saved := llm["thinking"].(string)
+			if saved != tc.wantSaved {
+				t.Fatalf("committed thinking saved=%v, want %v; value=%#v", saved, tc.wantSaved, llm["thinking"])
+			}
+			if saved && got != tc.effort {
+				t.Fatalf("committed thinking=%q, want %q", got, tc.effort)
+			}
+		})
+	}
+}
+
+func TestPresetEditorCodexThinkingDisplayAndCommitNormalization(t *testing.T) {
+	cases := []struct {
+		name        string
+		thinking    interface{}
+		wantDisplay string
+		wantSaved   bool
+		wantValue   string
+	}{
+		{name: "absent", thinking: nil, wantDisplay: "high"},
+		{name: "explicit high", thinking: "high", wantDisplay: "high"},
+		{name: "low", thinking: "low", wantDisplay: "low", wantSaved: true, wantValue: "low"},
+		{name: "unknown", thinking: "turbo", wantDisplay: "high"},
+		{name: "wrong type", thinking: 12, wantDisplay: "high"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPresetWithThinking(nil, tc.thinking), "en", nil, "", false)
+			if got := m.fieldString(feThinking); got != tc.wantDisplay {
+				t.Fatalf("thinking display = %q, want %q", got, tc.wantDisplay)
+			}
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
+			got, saved := llm["thinking"].(string)
+			if saved != tc.wantSaved {
+				t.Fatalf("committed thinking saved=%v, want %v; value=%#v", saved, tc.wantSaved, llm["thinking"])
+			}
+			if saved && got != tc.wantValue {
+				t.Fatalf("committed thinking=%q, want %q", got, tc.wantValue)
+			}
+		})
+	}
+}
+
+func TestPresetEditorThinkingHiddenAndRemovedForNonCodex(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+	llm := m.working.Manifest["llm"].(map[string]interface{})
+	llm["thinking"] = "low"
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	view := m.View()
+
+	if m.fieldVisible(feThinking) {
+		t.Fatalf("reasoning effort row should be hidden for non-codex provider")
+	}
+	if strings.Contains(view, "Reasoning effort") || strings.Contains(view, "llm.thinking") {
+		t.Fatalf("non-codex editor should not render thinking row; view:\n%s", view)
+	}
+
+	m.cursor = editorFieldOrderIndex(t, feServiceTier)
+	m.normalizeCursor()
+	if editorFieldOrder[m.cursor] == feThinking {
+		t.Fatalf("cursor landed on hidden thinking field for non-codex preset")
+	}
+
+	_, cmd := m.commit()
+	commit := cmd().(PresetEditorCommitMsg)
+	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committedLLM["thinking"]; ok {
+		t.Fatalf("non-codex commit should remove llm.thinking; got %#v", committedLLM["thinking"])
+	}
+}
+
+func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPresetWithThinking(nil, "low"), "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+
+	m.cycleFocused(+1) // codex -> custom in provider picker order.
+	llm := m.working.Manifest["llm"].(map[string]interface{})
+	if got := llm["provider"]; got != "custom" {
+		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
+	}
+	if _, ok := llm["thinking"]; ok {
+		t.Fatalf("provider switch away from codex should remove llm.thinking; got %#v", llm["thinking"])
+	}
+
+	_, cmd := m.commit()
+	commit := cmd().(PresetEditorCommitMsg)
+	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committedLLM["thinking"]; ok {
+		t.Fatalf("non-codex commit after provider switch should omit llm.thinking; got %#v", committedLLM["thinking"])
 	}
 }
 

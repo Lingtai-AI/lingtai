@@ -49,6 +49,7 @@ const (
 	feProvider
 	feModel
 	feServiceTier
+	feThinking
 	feAPICompat
 	feBaseURL
 	feAPIKey
@@ -77,7 +78,7 @@ var capFieldNames = map[editorField]string{
 // optional/provider-conditional capabilities appear as editable rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feServiceTier, feAPICompat, feBaseURL, feAPIKey,
+	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feBaseURL, feAPIKey,
 	feCapWebSearch, feCapVision,
 	feSave,
 }
@@ -140,6 +141,10 @@ var providerModels = map[string][]string{
 }
 
 var codexServiceTierOptions = []string{"normal", "fast"}
+
+var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
+
+const presetEditorFieldLabelWidth = 18
 
 // modelHasVision reports whether a given model accepts image input.
 // Drives both the disabled-row rendering and the model-switch default
@@ -606,7 +611,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.input.Focus()
 			m.mode = emInline
 		}
-	case feServiceTier:
+	case feServiceTier, feThinking:
 		if m.isCodexProvider() {
 			m.cycleFocused(+1)
 		}
@@ -866,6 +871,30 @@ func (m *PresetEditorModel) setCodexServiceTier(tier string) {
 	llm["service_tier"] = "fast"
 }
 
+func (m PresetEditorModel) codexThinking() string {
+	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
+	switch asString(llm["thinking"]) {
+	case "low", "medium", "high", "xhigh":
+		return asString(llm["thinking"])
+	default:
+		return "high"
+	}
+}
+
+func (m *PresetEditorModel) setCodexThinking(effort string) {
+	llm := m.llmMap()
+	if asString(llm["provider"]) != "codex" {
+		delete(llm, "thinking")
+		return
+	}
+	switch effort {
+	case "low", "medium", "xhigh":
+		llm["thinking"] = effort
+	default:
+		delete(llm, "thinking")
+	}
+}
+
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil || asString(llm["provider"]) != "codex" {
@@ -875,6 +904,28 @@ func normalizeServiceTier(manifest map[string]interface{}) {
 		return
 	}
 	delete(llm, "service_tier")
+}
+
+func normalizeThinking(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return
+	}
+	if asString(llm["provider"]) != "codex" {
+		delete(llm, "thinking")
+		return
+	}
+	switch asString(llm["thinking"]) {
+	case "low", "medium", "xhigh":
+		return
+	default:
+		delete(llm, "thinking")
+	}
+}
+
+func normalizeLLMForCommit(manifest map[string]interface{}) {
+	normalizeServiceTier(manifest)
+	normalizeThinking(manifest)
 }
 
 // setExtra writes into Description.Extra, allocating the map on first
@@ -925,6 +976,9 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "openrouter", "codex", "custom"}
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
+		if newProvider != "codex" {
+			delete(m.llmMap(), "thinking")
+		}
 		// Reset model to the new provider's first canonical entry when the
 		// current model isn't valid for the new provider. Without this, a
 		// minimax→zhipu switch leaves "MiniMax-M3" in model
@@ -973,6 +1027,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feServiceTier:
 		if m.isCodexProvider() {
 			m.setCodexServiceTier(cycleString(codexServiceTierOptions, m.codexServiceTier(), dir))
+		}
+	case feThinking:
+		if m.isCodexProvider() {
+			m.setCodexThinking(cycleString(codexThinkingOptions, m.codexThinking(), dir))
 		}
 	case feTier:
 		// Cycle ""→1→2→3→4→5→"" with → and reverse with ←. tierValues
@@ -1045,7 +1103,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 			delete(llm, "api_key_env")
 		}
 	}
-	normalizeServiceTier(committed.Manifest)
+	normalizeLLMForCommit(committed.Manifest)
 	return m, func() tea.Msg {
 		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}
@@ -1079,7 +1137,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
-		normalizeServiceTier(committed.Manifest)
+		normalizeLLMForCommit(committed.Manifest)
 		return m, func() tea.Msg {
 			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 		}
@@ -1097,7 +1155,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.mode = emBrowse
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
-		normalizeServiceTier(committed.Manifest)
+		normalizeLLMForCommit(committed.Manifest)
 		return m, func() tea.Msg {
 			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 		}
@@ -1144,6 +1202,8 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		return s
 	case feServiceTier:
 		return m.codexServiceTier()
+	case feThinking:
+		return m.codexThinking()
 	case feAPICompat:
 		s, _ := llm["api_compat"].(string)
 		return s
@@ -1313,6 +1373,9 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	if m.fieldVisible(feServiceTier) {
 		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.codexServiceTier(), width-4)))
 	}
+	if m.fieldVisible(feThinking) {
+		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.codexThinking(), width-4)))
+	}
 	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
@@ -1347,7 +1410,7 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 // strip render when the provider has a known model list, so all
 // options are visible at once and ←/→ visibly moves the dot.
 func (m PresetEditorModel) row(f editorField, key, value string, width int) string {
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(15)
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(presetEditorFieldLabelWidth)
 	marker := "  "
 	valStyle := lipgloss.NewStyle()
 	focused := editorFieldOrder[m.cursor] == f
@@ -1368,6 +1431,11 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 			return marker + keyStyle.Render(key) + strip
 		}
 	}
+	if f == feThinking {
+		if strip := m.thinkingRadioStrip(focused, valStyle); strip != "" {
+			return marker + keyStyle.Render(key) + strip
+		}
+	}
 	if f == feBaseURL {
 		if strip := m.baseURLRadioStrip(focused, valStyle); strip != "" {
 			return marker + keyStyle.Render(key) + strip
@@ -1377,7 +1445,7 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 		value = "—"
 	}
 	if f != feTier {
-		value = truncate(value, width-lipgloss.Width(marker)-15)
+		value = truncate(value, width-lipgloss.Width(marker)-presetEditorFieldLabelWidth)
 	}
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
 }
@@ -1553,6 +1621,27 @@ func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss
 	return strings.Join(parts, "  ")
 }
 
+func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	if !m.isCodexProvider() {
+		return ""
+	}
+	current := m.codexThinking()
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	parts := make([]string, 0, len(codexThinkingOptions))
+	for _, effort := range codexThinkingOptions {
+		if effort == current {
+			if focused {
+				parts = append(parts, valStyle.Render("● "+effort))
+			} else {
+				parts = append(parts, "● "+effort)
+			}
+		} else {
+			parts = append(parts, subtle.Render("○ "+effort))
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
 // baseURLRadioStrip renders the base_url field as a horizontal radio
 // strip showing region labels (e.g. "● CN  ○ INTL") when the current
 // provider has regional endpoints. Returns "" when there's no region
@@ -1588,7 +1677,7 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 	switch f {
 	case feProvider, feAPICompat, feTier:
 		return true
-	case feServiceTier:
+	case feServiceTier, feThinking:
 		return m.isCodexProvider()
 	case feModel:
 		provider := asString(m.llmMap()["provider"])
@@ -1725,7 +1814,7 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
-	case feServiceTier:
+	case feServiceTier, feThinking:
 		return m.isCodexProvider()
 	default:
 		return true

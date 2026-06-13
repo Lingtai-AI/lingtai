@@ -219,6 +219,9 @@ func TestCodexPresetDefaultOmitsServiceTier(t *testing.T) {
 	if _, ok := llm["service_tier"]; ok {
 		t.Fatalf("codex preset default should omit llm.service_tier; got %#v", llm["service_tier"])
 	}
+	if _, ok := llm["thinking"]; ok {
+		t.Fatalf("codex preset default should omit llm.thinking; got %#v", llm["thinking"])
+	}
 
 	tmpDir := t.TempDir()
 	lingtaiDir := filepath.Join(tmpDir, ".lingtai")
@@ -242,6 +245,9 @@ func TestCodexPresetDefaultOmitsServiceTier(t *testing.T) {
 	generatedLLM := manifest["llm"].(map[string]interface{})
 	if _, ok := generatedLLM["service_tier"]; ok {
 		t.Fatalf("generated codex init.json should omit llm.service_tier; got %#v", generatedLLM["service_tier"])
+	}
+	if _, ok := generatedLLM["thinking"]; ok {
+		t.Fatalf("generated codex init.json should omit llm.thinking; got %#v", generatedLLM["thinking"])
 	}
 }
 
