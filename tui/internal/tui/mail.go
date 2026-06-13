@@ -927,7 +927,11 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 					tsPrefix = StyleFaint.Render(ts) + " "
 				}
 				if isToolMessageType(msg.Type) && m.verbose == verboseThinking {
-					body = firstRenderedLine(body)
+					if msg.Type == "tool_call" {
+						body = compactToolCallSummary(body)
+					} else {
+						body = firstRenderedLine(body)
+					}
 				} else {
 					body = truncateToolBody(body, m.toolCallTruncate)
 				}

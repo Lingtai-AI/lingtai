@@ -55,6 +55,28 @@ func TestTruncateToolBody_TruncatesAtLimitWithIndicator(t *testing.T) {
 	}
 }
 
+func TestCompactToolCallSummary_TruncatesLongSingleLineTo100Runes(t *testing.T) {
+	body := "tool({\"args\":\"" + strings.Repeat("字", 140) + "\"})"
+	got := compactToolCallSummary(body)
+	if n := len([]rune(got)); n != toolCallSummaryLimit {
+		t.Fatalf("compactToolCallSummary length = %d runes, want %d; got %q", n, toolCallSummaryLimit, got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("compactToolCallSummary should mark truncation with ellipsis, got %q", got)
+	}
+	if strings.Contains(got, strings.Repeat("字", 120)) {
+		t.Fatalf("compactToolCallSummary retained more than the 100-rune cap: %q", got)
+	}
+}
+
+func TestCompactToolCallSummary_TakesFirstLineBefore100RuneCap(t *testing.T) {
+	body := "read({})\n" + strings.Repeat("x", 200)
+	got := compactToolCallSummary(body)
+	if got != "read({})" {
+		t.Fatalf("compactToolCallSummary should preserve short first line only, got %q", got)
+	}
+}
+
 func TestFormatToolTimestamp_EmptyIsEmpty(t *testing.T) {
 	if got := formatToolTimestamp(""); got != "" {
 		t.Errorf("empty timestamp must format to empty string, got %q", got)
@@ -398,16 +420,23 @@ func TestShouldShowToolEntriesAtVerboseThinkingOnlyAsSummaries(t *testing.T) {
 }
 
 func TestRenderMessages_TruncatesToolEntriesToFirstLineAtVerboseThinking(t *testing.T) {
-	m := MailModel{width: 100, verbose: verboseThinking}
+	longToolCall := "read({\"file_path\":\"/tmp/a\",\"payload\":\"" + strings.Repeat("x", 160) + "\"})\nmore args"
+	m := MailModel{width: 260, verbose: verboseThinking}
 	out := m.renderMessages([]ChatMessage{
-		{Type: "tool_call", Body: "read({\"file_path\":\"/tmp/a\"})\nmore args", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
+		{Type: "tool_call", Body: longToolCall, ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
 		{Type: "tool_result", Body: "read → ok 12ms\nresult: {\n  \"large\": true\n}", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
 	})
 	if !strings.Contains(out, "read({") || !strings.Contains(out, "read → ok 12ms") {
 		t.Fatalf("rendered output missing first lines: %q", out)
 	}
 	if strings.Contains(out, "more args") || strings.Contains(out, "large") || strings.Contains(out, "result:") {
-		t.Fatalf("Ctrl+O level 1 should render only first tool_call/tool_result lines, got %q", out)
+		t.Fatalf("Ctrl+O level 1 should render only compact tool_call/tool_result summaries, got %q", out)
+	}
+	if strings.Contains(out, strings.Repeat("x", 120)) {
+		t.Fatalf("Ctrl+O level 1 should cap long single-line tool_call summaries to 100 chars, got %q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("Ctrl+O level 1 should mark truncated long tool_call summaries, got %q", out)
 	}
 }
 

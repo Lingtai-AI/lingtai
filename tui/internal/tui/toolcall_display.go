@@ -53,6 +53,24 @@ func firstRenderedLine(body string) string {
 	return body
 }
 
+const toolCallSummaryLimit = 100
+
+// compactToolCallSummary keeps Ctrl+O level-1 tool_call entries short even
+// when the first rendered line is a long single-line JSON payload. The limit is
+// counted in runes from the TUI-rendered string perspective, not terminal visual
+// width; the deeper Ctrl+O level still renders the full tool_call body.
+func compactToolCallSummary(body string) string {
+	line := firstRenderedLine(body)
+	runes := []rune(line)
+	if len(runes) <= toolCallSummaryLimit {
+		return line
+	}
+	if toolCallSummaryLimit <= 1 {
+		return "…"
+	}
+	return string(runes[:toolCallSummaryLimit-1]) + "…"
+}
+
 // toolGroupSeparatorBefore reports whether a blank separator line should be
 // rendered before the current tool entry to visually group tool calls/results
 // by the LLM API response that produced them.

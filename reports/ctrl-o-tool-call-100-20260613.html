@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ctrl+O 第一层 tool_call 100 字符截断修正</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fbf7ef; --card:#fffaf2; --ink:#241b16; --muted:#6d625b; --accent:#9b5c19; --ok:#207245; --line:#e6d8c6; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#181411; --card:#221c18; --ink:#f3e8dc; --muted:#c6b6a7; --accent:#e0a15c; --ok:#7bd88f; --line:#40352e; } }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; }
+    main { max-width:920px; margin:0 auto; padding:40px 22px 56px; }
+    h1 { margin:0 0 8px; font-size:30px; }
+    h2 { margin-top:28px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+    .subtitle { color:var(--muted); margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:16px 0; }
+    code { background:rgba(127,90,40,.14); padding:1px 5px; border-radius:5px; }
+    ul { padding-left:22px; }
+    .ok { color:var(--ok); font-weight:700; }
+    .accent { color:var(--accent); font-weight:700; }
+    table { border-collapse:collapse; width:100%; margin-top:10px; }
+    th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+    th { background:rgba(127,90,40,.10); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Ctrl+O 第一层 <code>tool_call</code> 100 字符截断修正</h1>
+  <p class="subtitle">本地 worktree：<code>/Users/huangzesen/work/GitHub/lingtai/.worktrees/ctrl-o-tool-call-100-20260613</code></p>
+
+  <section class="card">
+    <h2>结论</h2>
+    <p><span class="ok">本地实现与测试已完成。</span>本补丁只改变 TUI 渲染层：第一层 Ctrl+O 中 <code>tool_call</code> 先取展示字符串第一行，再按 rune 计数截到 100 字符并加省略号；第二层 Ctrl+O 仍显示全量内容。</p>
+  </section>
+
+  <section class="card">
+    <h2>需求对应</h2>
+    <table>
+      <tr><th>Jason 指令</th><th>实现</th></tr>
+      <tr><td>“在你的角度 / 这是一行的东西 / 截断到100char吧 / 第一层”</td><td><code>compactToolCallSummary</code>：从 TUI 字符串角度取第一行并限制到 <code>toolCallSummaryLimit = 100</code> runes。</td></tr>
+      <tr><td>第二层仍全量</td><td><code>verboseExtended</code> 未改，仍走 <code>truncateToolBody</code>，默认 <code>toolCallTruncate=0</code> 即全量。</td></tr>
+      <tr><td><code>tool_result</code> 第一层不变</td><td>第一层 <code>tool_result</code> 仍只走 <code>firstRenderedLine</code>，未加 100 字符 cap。</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>改动文件</h2>
+    <ul>
+      <li><code>tui/internal/tui/toolcall_display.go</code>：新增 <code>toolCallSummaryLimit</code> 与 <code>compactToolCallSummary</code>。</li>
+      <li><code>tui/internal/tui/mail.go</code>：仅在 <code>msg.Type == "tool_call" && verboseThinking</code> 时使用 100 字符摘要。</li>
+      <li><code>tui/internal/tui/toolcall_display_test.go</code>：新增 helper 单测，并扩展第一层渲染测试覆盖长单行 JSON。</li>
+      <li><code>tui/internal/tui/ANATOMY.md</code>：同步记录 Ctrl+O 第一层 <code>tool_call</code> 100 rune cap 与第二层全量规则。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>验证</h2>
+    <ul>
+      <li><span class="ok">PASS</span> <code>cd tui && go test ./internal/tui ./internal/fs</code></li>
+      <li><span class="ok">PASS</span> <code>cd tui && go test ./...</code></li>
+      <li><span class="ok">PASS</span> <code>git diff --check</code></li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>当前状态 / 待授权</h2>
+    <p>目前只在本地 worktree 修改，尚未 commit、push、开 PR、merge 或 rebuild。若 Jason 确认，我下一步会提交 commit、推分支并开 PR；之后再按授权决定是否走 review/merge/rebuild。</p>
+  </section>
+</main>
+</body>
+</html>
