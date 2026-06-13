@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 func TestTruncateToolBody_NoLimitReturnsFull(t *testing.T) {
@@ -375,5 +377,48 @@ func TestBuildMessagesAssignsApiCallIDToDiaryThinkingAndTextInput(t *testing.T) 
 	}
 	if ids := got["text_input"]; len(ids) != 1 || ids[0] != "api_one" {
 		t.Fatalf("text_input api_call_id values = %#v, want [api_one]", ids)
+	}
+}
+
+func TestShouldShowToolResultAtVerboseThinkingOnlyAsSummary(t *testing.T) {
+	entry := fs.SessionEntry{Type: "tool_result", Body: "read → ok\nresult: full payload"}
+	m := MailModel{verbose: verboseOff}
+	if m.shouldShow(entry) {
+		t.Fatalf("tool_result should be hidden when Ctrl+O is off")
+	}
+	m.verbose = verboseThinking
+	if !m.shouldShow(entry) {
+		t.Fatalf("tool_result first-line summary should show at Ctrl+O level 2")
+	}
+	toolCall := fs.SessionEntry{Type: "tool_call", Body: "read({})"}
+	if m.shouldShow(toolCall) {
+		t.Fatalf("tool_call should remain hidden until Ctrl+O level 3")
+	}
+	m.verbose = verboseExtended
+	if !m.shouldShow(entry) || !m.shouldShow(toolCall) {
+		t.Fatalf("tool_result and tool_call should both show at Ctrl+O level 3")
+	}
+}
+
+func TestRenderMessages_TruncatesToolResultToFirstLineAtVerboseThinking(t *testing.T) {
+	m := MailModel{width: 100, verbose: verboseThinking}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "tool_result", Body: "read → ok 12ms\nresult: {\n  \"large\": true\n}", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
+	})
+	if !strings.Contains(out, "read → ok 12ms") {
+		t.Fatalf("rendered output missing first line: %q", out)
+	}
+	if strings.Contains(out, "large") || strings.Contains(out, "result:") {
+		t.Fatalf("Ctrl+O level 2 should render only the first tool_result line, got %q", out)
+	}
+}
+
+func TestRenderMessages_ShowsFullToolResultAtVerboseExtended(t *testing.T) {
+	m := MailModel{width: 100, verbose: verboseExtended}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "tool_result", Body: "read → ok 12ms\nresult: {\n  \"large\": true\n}", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
+	})
+	if !strings.Contains(out, "read → ok 12ms") || !strings.Contains(out, "large") || !strings.Contains(out, "result:") {
+		t.Fatalf("Ctrl+O level 3 should render the full tool_result body, got %q", out)
 	}
 }

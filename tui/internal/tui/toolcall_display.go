@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
@@ -43,6 +44,13 @@ func truncateToolBody(body string, limit int) string {
 
 func isToolMessageType(t string) bool {
 	return t == "tool_call" || t == "tool_result"
+}
+
+func firstRenderedLine(body string) string {
+	if i := strings.IndexAny(body, "\r\n"); i >= 0 {
+		return body[:i]
+	}
+	return body
 }
 
 // toolGroupSeparatorBefore reports whether a blank separator line should be
