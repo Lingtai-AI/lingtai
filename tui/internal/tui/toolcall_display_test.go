@@ -380,45 +380,44 @@ func TestBuildMessagesAssignsApiCallIDToDiaryThinkingAndTextInput(t *testing.T) 
 	}
 }
 
-func TestShouldShowToolResultAtVerboseThinkingOnlyAsSummary(t *testing.T) {
-	entry := fs.SessionEntry{Type: "tool_result", Body: "read → ok\nresult: full payload"}
+func TestShouldShowToolEntriesAtVerboseThinkingOnlyAsSummaries(t *testing.T) {
+	toolResult := fs.SessionEntry{Type: "tool_result", Body: "read → ok\nresult: full payload"}
+	toolCall := fs.SessionEntry{Type: "tool_call", Body: "read({})\nmore args"}
 	m := MailModel{verbose: verboseOff}
-	if m.shouldShow(entry) {
-		t.Fatalf("tool_result should be hidden when Ctrl+O is off")
+	if m.shouldShow(toolResult) || m.shouldShow(toolCall) {
+		t.Fatalf("tool entries should be hidden when Ctrl+O is off")
 	}
 	m.verbose = verboseThinking
-	if !m.shouldShow(entry) {
-		t.Fatalf("tool_result first-line summary should show at Ctrl+O level 2")
-	}
-	toolCall := fs.SessionEntry{Type: "tool_call", Body: "read({})"}
-	if m.shouldShow(toolCall) {
-		t.Fatalf("tool_call should remain hidden until Ctrl+O level 3")
+	if !m.shouldShow(toolResult) || !m.shouldShow(toolCall) {
+		t.Fatalf("tool_call/tool_result first-line summaries should show at Ctrl+O level 1")
 	}
 	m.verbose = verboseExtended
-	if !m.shouldShow(entry) || !m.shouldShow(toolCall) {
-		t.Fatalf("tool_result and tool_call should both show at Ctrl+O level 3")
+	if !m.shouldShow(toolResult) || !m.shouldShow(toolCall) {
+		t.Fatalf("tool_call/tool_result should both show full bodies at Ctrl+O level 2")
 	}
 }
 
-func TestRenderMessages_TruncatesToolResultToFirstLineAtVerboseThinking(t *testing.T) {
+func TestRenderMessages_TruncatesToolEntriesToFirstLineAtVerboseThinking(t *testing.T) {
 	m := MailModel{width: 100, verbose: verboseThinking}
 	out := m.renderMessages([]ChatMessage{
+		{Type: "tool_call", Body: "read({\"file_path\":\"/tmp/a\"})\nmore args", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
 		{Type: "tool_result", Body: "read → ok 12ms\nresult: {\n  \"large\": true\n}", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
 	})
-	if !strings.Contains(out, "read → ok 12ms") {
-		t.Fatalf("rendered output missing first line: %q", out)
+	if !strings.Contains(out, "read({") || !strings.Contains(out, "read → ok 12ms") {
+		t.Fatalf("rendered output missing first lines: %q", out)
 	}
-	if strings.Contains(out, "large") || strings.Contains(out, "result:") {
-		t.Fatalf("Ctrl+O level 2 should render only the first tool_result line, got %q", out)
+	if strings.Contains(out, "more args") || strings.Contains(out, "large") || strings.Contains(out, "result:") {
+		t.Fatalf("Ctrl+O level 1 should render only first tool_call/tool_result lines, got %q", out)
 	}
 }
 
-func TestRenderMessages_ShowsFullToolResultAtVerboseExtended(t *testing.T) {
+func TestRenderMessages_ShowsFullToolEntriesAtVerboseExtended(t *testing.T) {
 	m := MailModel{width: 100, verbose: verboseExtended}
 	out := m.renderMessages([]ChatMessage{
+		{Type: "tool_call", Body: "read({\"file_path\":\"/tmp/a\"})\nmore args", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
 		{Type: "tool_result", Body: "read → ok 12ms\nresult: {\n  \"large\": true\n}", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
 	})
-	if !strings.Contains(out, "read → ok 12ms") || !strings.Contains(out, "large") || !strings.Contains(out, "result:") {
-		t.Fatalf("Ctrl+O level 3 should render the full tool_result body, got %q", out)
+	if !strings.Contains(out, "read → ok 12ms") || !strings.Contains(out, "large") || !strings.Contains(out, "result:") || !strings.Contains(out, "more args") {
+		t.Fatalf("Ctrl+O level 2 should render full tool_call/tool_result bodies, got %q", out)
 	}
 }
