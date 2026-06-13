@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -193,6 +192,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		// Reserve rows for root chrome first, then forward the *reduced*
+		// child window size — never the raw terminal height. See
+		// layout.go (LayoutBudget) for the contract.
+		msg = a.layoutBudget().ChildWindowSize()
 		// Forward to current view so it can resize
 		var cmd tea.Cmd
 		switch a.currentView {
@@ -1196,11 +1199,14 @@ func firstLine(err error) string {
 
 // tryLock is defined in lock_unix.go / lock_windows.go
 
-// sendSize returns a tea.Cmd that sends the current terminal dimensions to the
-// newly created view so it doesn't render with zero width/height.
+// sendSize returns a tea.Cmd that sends the current *child* window size to a
+// newly created view so it doesn't render with zero width/height. The size is
+// the terminal dimensions reduced by any root chrome (see layout.go) — the same
+// budget the incoming-WindowSizeMsg handler forwards, so a freshly-routed view
+// and a resized view agree on their height.
 func (a App) sendSize() tea.Cmd {
-	w, h := a.width, a.height
-	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
+	cs := a.layoutBudget().ChildWindowSize()
+	return func() tea.Msg { return cs }
 }
 
 // RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
@@ -1317,11 +1323,7 @@ func (a App) View() tea.View {
 	case appViewFirstRun:
 		content = a.firstRun.View()
 	case appViewMail:
-		banner := ""
-		if a.startupBanner != "" {
-			banner = "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner) + "\n"
-		}
-		content = banner + a.mail.View()
+		content = a.mail.View()
 	case appViewSetup:
 		content = a.setup.View()
 	case appViewSettings:
@@ -1355,6 +1357,10 @@ func (a App) View() tea.View {
 	case appViewHelp:
 		content = a.help.View()
 	}
+	// Compose root-owned chrome (top banner today) around the child content.
+	// The child was already sized to the reduced budget, so chrome occupies
+	// the rows the child yielded rather than being appended past full height.
+	content = a.composeWithChrome(content)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion

@@ -14,11 +14,16 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **`app.go:46-79`** — `App` struct: holds every screen model plus routing state (`currentView`, `orchDir`, `orchName`, `recoveryMode`).
 - **`app.go:91-177`** — `NewApp`: constructor deciding initial view — mail view (returning user), first-run wizard (new user or rehydration), or recovery mode (global config lost, agents intact).
 - **`app.go:179-187`** — `App.Init()`: delegates to the initial view's `Init()`.
-- **`app.go:191-561`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` forwarded to current view, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
+- **`app.go:191-561`** — `App.Update()`: the central dispatcher. Three layers: (1) `WindowSizeMsg` — records the full terminal size on `App`, then forwards the *reduced* child window size from `layoutBudget().ChildWindowSize()` (NOT the raw terminal height) to the current view so root chrome rows are reserved before the child sizes itself, (2) cross-view messages (`ViewChangeMsg`, `FirstRunDoneMsg`, `SetupSavedMsg`, `NirvanaDoneMsg`, `AddonSavedMsg`, etc.), (3) `KeyPressMsg` for `ctrl+c`/`q` quit, (4) fallthrough to current view's `Update()`.
 - **`app.go:563-1170`** — `handlePaletteCommand`: maps slash-command strings to view transitions (`/doctor` → `appViewDoctor`, `/daemons` → `appViewDaemons`, `/notification` → `appViewNotification`, `/knowledge` → `appViewCodex` (canonical; hidden `/library` and `/codex` aliases), `/skills` → `appViewLibrary`, etc.) and direct actions (`/suspend`, `/cpr`, `/refresh`, `/clear`, `/molt`, `/btw`, `/goal`, `/export`).
 - **`app.go:1211-1302`** — `switchToView(viewName string)`:  the canonical route-to-view dispatcher used by `ViewChangeMsg` and palette commands returning to a view. Reconstructs models fresh on entry.
-- **`app.go:1304-1356`** — `App.View()`:  delegates to current view's `View()`, wraps in `tea.NewView` with alt-screen + mouse mode.
+- **`app.go:1304-1356`** — `App.View()`:  delegates to current view's `View()` for the child content, then wraps it with root-owned chrome via `composeWithChrome` (top banner today) BEFORE building the `tea.NewView` (alt-screen + mouse mode). The startup banner is no longer prepended inside the mail-view branch — it is root chrome composed for the whole app, so it renders in the rows the child yielded rather than being appended past full terminal height.
+- **`app.go:1199-1206`** — `App.sendSize()`: returns a `tea.Cmd` carrying the *child* window size (terminal size minus root chrome rows) from `layoutBudget().ChildWindowSize()`, so a freshly-routed view and a resized view agree on height.
 - **`app.go:1347-1529`** — portal launch, style helpers, `SetTUIVersion`.
+
+### Root layout budget (`layout.go`)
+
+- **`layout.go`** — the root-owned layout-ownership contract (issue #308). `LayoutBudget{Width, Height, TopChromeRows, BottomChromeRows, ChildHeight}` describes how the terminal is split between root chrome and the child screen. `App.layoutBudget()` reserves `topChromeRows()` (one row when `startupBanner` is non-empty, else zero) + `bottomChromeRows()` (always zero — an inert hook for a future status area) and clamps `ChildHeight` to `>= 0`. `LayoutBudget.ChildWindowSize()` is the `tea.WindowSizeMsg` forwarded to the child (full width, reduced height) by both `App.Update`'s incoming-`WindowSizeMsg` handler and `App.sendSize()`. `App.topChrome()` renders the banner row and `App.composeWithChrome()` stacks it above the child content in `View()`. This is the foundation a future persistent status line plugs into: declare rows in `layoutBudget()`, render in the chrome helpers, and the child automatically yields the space. Covered by `layout_test.go`.
 
 ### Screens
 
@@ -72,7 +77,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 - **Parent:** `tui/` (`tui/ANATOMY.md`)
 - **Subfolders:** none — the package is intentionally flat.
 - **Siblings in `tui/internal/`:** `preset/`, `migrate/`, `globalmigrate/`, `fs/`, `config/`, `process/`, `postman/`, `timemachine/`.
-- **File count:** 35 `.go` files (20 screen models + supporting types + helpers).
+- **File count:** ~43 non-test `.go` files (20 screen models + supporting types + helpers, including `layout.go` for the root layout budget).
 
 ## State
 

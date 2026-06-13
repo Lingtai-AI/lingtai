@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Issue #308 – Root-Owned TUI Layout Budget</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; line-height: 1.6; color: #222; padding: 0 1rem; }
+  h1 { border-bottom: 2px solid #e63; padding-bottom: .4rem; }
+  h2 { margin-top: 2rem; color: #333; }
+  code, pre { background: #f4f4f4; border-radius: 4px; }
+  code { padding: 0 .3em; font-size: .92em; }
+  pre { padding: 1em; overflow-x: auto; font-size: .88em; }
+  .bad  { color: #c00; }
+  .good { color: #060; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: .4rem .7rem; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .label { display: inline-block; padding: .15em .5em; border-radius: 3px; font-size: .8em; font-weight: bold; }
+  .label-feat { background: #dfd; color: #060; }
+  .label-test { background: #def; color: #039; }
+  .label-doc  { background: #fef3c7; color: #92600a; }
+  .note { background: #f8f8f8; border-left: 3px solid #e63; padding: .6rem 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Issue #308 &mdash; Root-Owned TUI Layout Budget</h1>
+<p><em>2026-06-13 &mdash; worktree fix/root-layout-budget-308-20260613</em></p>
+
+<h2>Summary</h2>
+<p>
+  The root <code>App</code> model (<code>tui/internal/tui/app.go</code>) sizes every
+  child screen by forwarding the raw terminal <code>tea.WindowSizeMsg</code> straight
+  through. Child screens therefore size themselves to the <em>full</em> terminal
+  height. Any persistent root-level chrome (a status bar, a warning banner) then has
+  to be <strong>appended after</strong> the child has already rendered at full height
+  &mdash; which pushes content off-screen or corrupts the layout.
+</p>
+<p>
+  Today the only such consumer is the <strong>startup banner</strong> (the Codex-auth
+  warning), which <code>View()</code> prepended to the mail content <em>after</em> the
+  mail view had already sized itself to the full terminal height. This PR builds the
+  small, explicit <strong>layout-ownership contract</strong> the banner &mdash; and any
+  future root chrome / status line &mdash; can consume safely. It is the
+  <em>foundation</em>, not a revival of the full status-line feature from PR #241.
+</p>
+
+<div class="note">
+  <strong>Non-goal:</strong> no new persistent status-bar setting or UI. Bottom chrome is
+  an inert hook reserving zero rows until a real product surface needs it.
+</div>
+
+<h2>The contract</h2>
+<p>New file <code>tui/internal/tui/layout.go</code>:</p>
+<pre>
+type LayoutBudget struct {
+    Width  int
+    Height int // full terminal height
+
+    TopChromeRows    int // rows reserved at top for root chrome
+    BottomChromeRows int // rows reserved at bottom (0 today)
+    ChildHeight      int // height handed to the child (clamped &gt;= 0)
+}
+
+func (b LayoutBudget) ChildWindowSize() tea.WindowSizeMsg  // full width, reduced height
+
+func (a App) layoutBudget() LayoutBudget   // reserve chrome rows, clamp child &gt;= 0
+func (a App) topChromeRows() int           // 1 when startupBanner != "", else 0
+func (a App) bottomChromeRows() int        // always 0 (inert hook)
+func (a App) topChrome() string            // renders the banner row
+func (a App) composeWithChrome(child) string // stacks chrome above child content
+</pre>
+
+<h2>The flow: reserve &rarr; forward &rarr; compose</h2>
+<table>
+  <tr><th>Stage</th><th>Before</th><th>After</th></tr>
+  <tr>
+    <td><strong>Reserve</strong></td>
+    <td>&mdash;</td>
+    <td><code>layoutBudget()</code> reserves <code>topChromeRows()</code> +
+        <code>bottomChromeRows()</code> and computes <code>ChildHeight</code>.</td>
+  </tr>
+  <tr>
+    <td><strong>Forward</strong> (<code>Update</code> &amp; <code>sendSize</code>)</td>
+    <td class="bad">child receives raw terminal <code>Width&times;Height</code></td>
+    <td class="good">child receives <code>ChildWindowSize()</code> &mdash; full width,
+        height reduced by reserved rows</td>
+  </tr>
+  <tr>
+    <td><strong>Compose</strong> (<code>View</code>)</td>
+    <td class="bad">banner prepended to mail content <em>after</em> the child sized to
+        full height (mail-view branch only)</td>
+    <td class="good"><code>composeWithChrome()</code> stacks root chrome above the
+        already-reduced child content, for the whole app</td>
+  </tr>
+</table>
+
+<h2>Changes</h2>
+<table>
+  <tr><th>Part</th><th>File</th><th>What changed</th></tr>
+  <tr>
+    <td><span class="label label-feat">feat</span></td>
+    <td><code>tui/internal/tui/layout.go</code> <em>(new)</em></td>
+    <td>The <code>LayoutBudget</code> contract, <code>layoutBudget()</code>,
+        <code>ChildWindowSize()</code>, top/bottom chrome row helpers, and
+        <code>composeWithChrome()</code>.</td>
+  </tr>
+  <tr>
+    <td><span class="label label-feat">feat</span></td>
+    <td><code>tui/internal/tui/app.go</code></td>
+    <td>
+      <code>Update</code>'s <code>WindowSizeMsg</code> handler records the full terminal
+      size on <code>App</code>, then forwards <code>layoutBudget().ChildWindowSize()</code>
+      to the current view. <code>sendSize()</code> forwards the same reduced child size.
+      <code>View()</code> drops the mail-view banner prepend and wraps <em>all</em> child
+      content with <code>composeWithChrome()</code>. The now-unused <code>lipgloss</code>
+      import moved to <code>layout.go</code>.
+    </td>
+  </tr>
+  <tr>
+    <td><span class="label label-test">test</span></td>
+    <td><code>tui/internal/tui/layout_test.go</code> <em>(new)</em></td>
+    <td>8 focused tests (see below).</td>
+  </tr>
+  <tr>
+    <td><span class="label label-doc">doc</span></td>
+    <td><code>tui/internal/tui/ANATOMY.md</code></td>
+    <td>Updated <code>App.Update</code> / <code>App.View</code> / <code>sendSize</code>
+        descriptions and added a "Root layout budget (layout.go)" section.</td>
+  </tr>
+</table>
+
+<h2>Why this is the status-area foundation</h2>
+<p>
+  Root chrome ownership is now <strong>explicit and declarative</strong>. A future
+  persistent status line plugs in by: (1) declaring its rows in
+  <code>layoutBudget()</code> (e.g. <code>bottomChromeRows()</code> returns 1), and
+  (2) rendering them in a chrome helper composed by <code>View()</code>. The child
+  screen <em>automatically</em> yields the space because every sizing path
+  &mdash; the live resize (<code>Update</code>) and the route-entry seed
+  (<code>sendSize</code>) &mdash; forwards the reduced budget. No screen has to know
+  about the status area; the contract is enforced once, at the root.
+</p>
+
+<h2>Tests run</h2>
+<p>From <code>tui/</code>: <code>go test ./internal/tui</code> &mdash; <span class="good">PASS</span> (full package, no regressions). New cases:</p>
+<table>
+  <tr><th>Test</th><th>Proves</th></tr>
+  <tr><td><code>TestLayoutBudgetNoChrome</code></td><td>no chrome &rarr; child size == terminal size, zero reserved rows.</td></tr>
+  <tr><td><code>TestLayoutBudgetTopChrome</code></td><td>non-empty banner &rarr; exactly 1 top row reserved, child height &minus; 1.</td></tr>
+  <tr><td><code>TestUpdateForwardsReducedHeight</code></td><td><code>Update(WindowSizeMsg)</code> forwards child height 23 (24 &minus; 1) while <code>App.height</code> stays 24.</td></tr>
+  <tr><td><code>TestUpdateNoChromeForwardsFullHeight</code></td><td>no chrome &rarr; <code>Update</code> forwards full height.</td></tr>
+  <tr><td><code>TestSendSizeForwardsReducedHeight</code></td><td><code>sendSize()</code> forwards the reduced child size, matching the <code>Update</code> path.</td></tr>
+  <tr><td><code>TestSendSizeNoChromeForwardsFullHeight</code></td><td>no chrome &rarr; <code>sendSize()</code> forwards full size.</td></tr>
+  <tr><td><code>TestViewComposesBannerOnce</code></td><td><code>View()</code> renders the banner token exactly once, composed outside child content.</td></tr>
+  <tr><td><code>TestLayoutBudgetClampsSmallHeight</code></td><td>terminal too short &rarr; <code>ChildHeight</code> clamps to &gt;= 0, no panic.</td></tr>
+</table>
+<p>
+  The Update/sendSize/View tests run against the <code>/help</code> view (a real
+  constructor that records its forwarded height in <code>help.inner.height</code>),
+  since <code>startupBanner</code> is root chrome independent of which view is current
+  &mdash; a zero-value <code>MailModel</code> has a nil textarea and panics on size.
+</p>
+
+<h2>Limitations &amp; next steps</h2>
+<ul>
+  <li><strong>Bottom chrome is inert.</strong> <code>bottomChromeRows()</code> returns 0;
+      it exists only as a tested hook. A real bottom status line is a follow-up PR.</li>
+  <li><strong>Banner is one row.</strong> The current banner is single-line by
+      construction (<code>firstLine()</code> sanitises embedded newlines elsewhere). A
+      multi-row chrome consumer would set <code>topChromeRows()</code> accordingly and
+      ensure <code>topChrome()</code> renders exactly that many rows.</li>
+  <li><strong>Child re-clamping unchanged.</strong> Screens still re-clamp the height they
+      receive to their own minimums (e.g. mail's viewport floor of 1). The budget only
+      guarantees a non-negative forwarded height; per-screen minimums are out of scope.</li>
+  <li><strong>No new product surface.</strong> Deliberately no status-bar setting/UI
+      &mdash; this is the layout refactor foundation only (distinct from PR #241).</li>
+</ul>
+
+</body>
+</html>
