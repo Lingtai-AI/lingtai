@@ -312,7 +312,7 @@
   "props.preset_source_template": "template",
   "props.preset_source_saved": "saved",
   "props.detail_title": "Agent Detail",
-  "props.detail_open": "detail",
+  "props.detail_open": "context detail",
   "props.detail_back_to_summary": "back to summary",
   "props.detail_tokens_by_provider": "Token usage by provider",
   "props.detail_no_tokens": "No token usage recorded yet.",
@@ -609,5 +609,6 @@
   "mail.goal_no_agent": "No current agent is selected; cannot send a goal request.",
   "palette.goal": "Guide goal creation",
   "cmd.goal": "Goal guide — send a system notification asking the current agent to read the goal manual, guide the human through objective/criteria/reminder/cancellation semantics, and only create .notification/goal.json after confirmation",
-  "props.detail_context_stats": "Current context statistics"
+  "props.detail_context_stats": "Current context statistics",
+  "props.ctrl_d_hint": "ctrl+d open context detail breakdown"
 }

@@ -307,7 +307,7 @@
   "props.preset_source_template": "模",
   "props.preset_source_saved": "存",
   "props.detail_title": "器灵之详",
-  "props.detail_open": "详",
+  "props.detail_open": "语境详",
   "props.detail_back_to_summary": "返概",
   "props.detail_tokens_by_provider": "诸厂之 token 用",
   "props.detail_no_tokens": "未尝有 token 之用。",
@@ -609,5 +609,6 @@
   "mail.goal_no_agent": "今无所择器灵，不可遣设愿之讯。",
   "palette.goal": "导立愿",
   "cmd.goal": "导立愿——投 system notification，使当前器灵读 goal manual，导人明 objective / criteria / reminder / 取消之义，待确认后方写 .notification/goal.json",
-  "props.detail_context_stats": "今识之计"
+  "props.detail_context_stats": "今识之计",
+  "props.ctrl_d_hint": "ctrl+d 察语境之详"
 }

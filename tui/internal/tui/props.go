@@ -116,8 +116,8 @@ func (m PropsModel) loadData() tea.Msg {
 
 func (m PropsModel) Init() tea.Cmd { return m.loadData }
 
-// propsHeaderLines is the number of lines used by the header (title + separator).
-const propsHeaderLines = 2
+// propsHeaderLines is the number of lines used by the header (title + separator + optional callout).
+const propsHeaderLines = 3
 
 // propsFooterLines is the number of lines used by the footer (separator + hints).
 const propsFooterLines = 2
@@ -345,6 +345,11 @@ func (m PropsModel) View() string {
 		title = i18n.T("props.detail_title")
 	}
 	header := StyleTitle.Render("  "+title) + "\n" + strings.Repeat("\u2500", m.width)
+	if !m.detailOpen {
+		header += "\n" + "  " + StyleAccent.Render("⎔ "+i18n.T("props.ctrl_d_hint"))
+	} else {
+		header += "\n"
+	}
 
 	scrollHint := ""
 	if m.ready && !m.viewport.AtBottom() {

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>/kanban Ctrl+D 提示小改说明</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; }
+    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:linear-gradient(135deg,#0f172a,#111827); color:var(--text); }
+    main { max-width:960px; margin:0 auto; padding:40px 20px; }
+    h1 { margin:0 0 12px; font-size:32px; }
+    h2 { margin-top:28px; color:#bfdbfe; }
+    .card { background:rgba(17,24,39,.86); border:1px solid rgba(148,163,184,.25); border-radius:16px; padding:20px; margin:16px 0; box-shadow:0 12px 28px rgba(0,0,0,.25); }
+    .lead { color:var(--muted); font-size:17px; line-height:1.6; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre { background:#020617; border:1px solid rgba(148,163,184,.22); border-radius:12px; padding:14px; overflow:auto; }
+    ul { line-height:1.7; }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--warn); font-weight:700; }
+    .pill { display:inline-block; border:1px solid rgba(56,189,248,.45); color:#bae6fd; border-radius:999px; padding:4px 10px; margin:2px; font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>/kanban 顶部加入 Ctrl+D 详情提示</h1>
+  <p class="lead">本小改采纳 ktwu01 #289 背后的可发现性问题，但不新增顶层 <code>/context</code> 命令：既有入口仍为 <code>/kanban</code>，详情页仍由 <code>Ctrl+D</code> 打开。</p>
+
+  <section class="card">
+    <h2>结论</h2>
+    <p><span class="ok">可合并。</span> 改动范围小，未改变 slash-command 路由、未新增命令，只把 <code>Ctrl+D</code> 提示从右下角弱提示提升为 <code>/kanban</code> 标题分隔线下方的醒目提示。</p>
+    <p><span class="pill">TUI-only</span><span class="pill">i18n en/zh/wen</span><span class="pill">测试覆盖</span><span class="pill">无外部副作用</span></p>
+  </section>
+
+  <section class="card">
+    <h2>为什么不收 /context</h2>
+    <ul>
+      <li><code>/context</code> 只是 <code>/kanban → Ctrl+D</code> 的别名，不提供新能力。</li>
+      <li>新增顶层 slash command 会扩大命令面，降低命令列表清晰度。</li>
+      <li>真正问题是用户不容易发现 <code>Ctrl+D</code>，因此应修提示，而非加别名。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>改动内容</h2>
+    <ul>
+      <li><code>tui/internal/tui/props.go</code>：在 <code>/kanban</code> 非详情模式标题下方渲染醒目的 <code>ctrl+d open context detail breakdown</code> callout；详情模式中隐藏该 callout。</li>
+      <li><code>tui/i18n/{en,zh,wen}.json</code>：加入 <code>props.ctrl_d_hint</code>，并将原 footer 中 <code>detail</code> 文案扩成“context detail / 上下文详情 / 语境详”。</li>
+      <li><code>tui/internal/tui/props_test.go</code>：新增测试，确认普通 <code>/kanban</code> 视图显示 callout，详情视图不重复显示，同时 footer 仍保留 <code>ctrl+d</code> 提示。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>验证</h2>
+    <pre><code>cd tui && go test ./internal/tui ./i18n -count=1
+cd tui && go test ./... -count=1
+git diff --check</code></pre>
+    <p>三项均已通过。全量 <code>go test ./...</code> 亦通过；测试生成的 <code>tui/internal/tui/logs/</code> 已清除。</p>
+  </section>
+
+  <section class="card">
+    <h2>风险与取舍</h2>
+    <ul>
+      <li>顶部多占 1 行视口高度，以换取可发现性；这是 Jason 明确要求的“上面显眼”提示。</li>
+      <li>不触碰命令 palette，不影响用户已知的 <code>/kanban</code> 与 <code>Ctrl+D</code> 行为。</li>
+      <li>不解决 #237/#299/#302 的较大功能诉求；这些已另行 triage。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

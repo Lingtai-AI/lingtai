@@ -307,7 +307,7 @@
   "props.preset_source_template": "模板",
   "props.preset_source_saved": "已存",
   "props.detail_title": "智能体详情",
-  "props.detail_open": "详情",
+  "props.detail_open": "上下文详情",
   "props.detail_back_to_summary": "返回概览",
   "props.detail_tokens_by_provider": "按提供商统计的 token 使用",
   "props.detail_no_tokens": "尚未记录 token 使用。",
@@ -609,5 +609,6 @@
   "mail.goal_no_agent": "当前没有选中的 Agent，无法发送 goal 引导通知。",
   "palette.goal": "引导创建 goal",
   "cmd.goal": "Goal 引导——发送 system notification，让当前 Agent 阅读 goal manual，引导人类明确 objective / criteria / reminder / 取消语义，并只在确认后创建 .notification/goal.json",
-  "props.detail_context_stats": "当前上下文统计"
+  "props.detail_context_stats": "当前上下文统计",
+  "props.ctrl_d_hint": "ctrl+d 查看上下文详情"
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -104,5 +105,37 @@ func TestPropsLoadDetailKeepsLastFortyLedgerEntries(t *testing.T) {
 	}
 	if got := m.detailRecent[len(m.detailRecent)-1].Model; got != "m5" {
 		t.Fatalf("oldest retained recent model = %q, want m5", got)
+	}
+}
+
+func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
+	// The non-detail header must prominently advertise ctrl+d for context detail.
+	m := PropsModel{
+		width:  80,
+		height: 24,
+		ready:  true,
+	}
+	m.viewport.SetWidth(80)
+	m.viewport.SetHeight(20)
+
+	view := ansi.Strip(m.View())
+
+	// The callout line must mention the i18n key text.
+	hint := i18n.T("props.ctrl_d_hint")
+	if !strings.Contains(view, hint) {
+		t.Fatalf("View() header missing ctrl+d callout hint %q:\n%s", hint, view)
+	}
+
+	// Also verify the standard footer line keeps ctrl+d with the renamed label.
+	label := i18n.T("props.detail_open")
+	if !strings.Contains(view, "ctrl+d "+label) {
+		t.Fatalf("View() footer missing 'ctrl+d %s':\n%s", label, view)
+	}
+
+	// When detailOpen, the callout should NOT appear.
+	m.detailOpen = true
+	viewDetail := ansi.Strip(m.View())
+	if strings.Contains(viewDetail, hint) {
+		t.Fatalf("View() detail mode should NOT show callout:\n%s", viewDetail)
 	}
 }
