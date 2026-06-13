@@ -6,7 +6,7 @@ description: >
   TUI/portal repo or Python kernel, develop MCP addons, prepare a release,
   troubleshoot a running network, audit security, or govern avatars. This is
   for developers and contributors; for end-user lessons, use tutorial-guide.
-version: 2.1.0
+version: 2.2.0
 ---
 
 # LingTai Developer Guide
@@ -53,7 +53,8 @@ drill-down files, not standalone top-level skills.
   location: reference/contributing/SKILL.md
   description: |
     Contribution workflows for TUI, portal, kernel, addons, bundled utilities,
-    skill changes, tests, PR preparation, and review discipline.
+    skill changes, tests, PR preparation, review discipline, and local
+    worktree hygiene (auditing and cleaning stale git worktrees).
 - name: dev-guide-gotchas
   location: reference/gotchas/SKILL.md
   description: |
@@ -131,6 +132,9 @@ drill-down files, not standalone top-level skills.
 - **"This broad dev task needs triage"** → run the read-only portfolio sweep in
   `reference/contributing/SKILL.md`, then ask for authorization before mutating
   GitHub state.
+- **"Local worktrees are piling up"** → the "Worktree hygiene" section in
+  `reference/contributing/SKILL.md`: audit first, remove only merged + clean
+  secondary worktrees, record what was removed.
 
 ## Skill layout
 

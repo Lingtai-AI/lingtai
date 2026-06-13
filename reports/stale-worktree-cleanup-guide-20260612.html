@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stale Worktree Cleanup Guide — docs PR explainer</title>
+<style>
+  :root {
+    --ink: #2b2620; --paper: #faf6ef; --card: #ffffff; --accent: #9a6b2f;
+    --line: #e3d9c8; --code-bg: #f3ede1; --good: #3a7d44; --warn: #a05c12;
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+         background: var(--paper); color: var(--ink); margin: 0; line-height: 1.55; }
+  main { max-width: 860px; margin: 0 auto; padding: 2rem 1.2rem 4rem; }
+  h1 { font-size: 1.5rem; border-bottom: 3px solid var(--accent); padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; color: var(--accent); margin-top: 2rem; }
+  .meta { font-size: .85rem; color: #6f6455; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+            padding: 1rem 1.3rem; margin-top: 1rem; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .85em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: .8rem 1rem; border-radius: 6px;
+        overflow-x: auto; line-height: 1.4; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .ok { color: var(--good); font-weight: 600; }
+  .keep { color: var(--warn); font-weight: 600; }
+  ul { padding-left: 1.3rem; }
+  .diff-add { color: var(--good); }
+</style>
+</head>
+<body>
+<main>
+<h1>Stale Worktree Cleanup Guide</h1>
+<p class="meta">Docs PR · branch <code>docs/stale-worktree-cleanup-guide-20260612</code> · 2026-06-12 · requested by Jason</p>
+
+<section>
+<h2>TL;DR</h2>
+<p>The dev guide's worktree loop said "clean up the worktree" but never explained how, so stale
+worktrees accumulate across agents and repos. This PR adds a <strong>"Worktree hygiene"</strong>
+section to <code>reference/contributing/SKILL.md</code> — audit recipe, removal criteria,
+keep/skip list, removal commands, record-and-report step — and routes to it from the top-level
+<code>lingtai-dev-guide</code> router. Docs only; no code changes.</p>
+</section>
+
+<section>
+<h2>Baseline</h2>
+<p>An actual cleanup on 2026-06-12 swept secondary worktrees in <code>Lingtai-AI/lingtai</code> and
+<code>Lingtai-AI/lingtai-kernel</code>. The policy that emerged (merged-only, remote-gone-only,
+skip source-dirty, protect the live release target, force-remove only generated dirt) existed
+nowhere in the dev guide. This PR encodes it so future agents don't re-derive it — or get it wrong.</p>
+</section>
+
+<section>
+<h2>What was done</h2>
+<table>
+<tr><th>File</th><th>Change</th></tr>
+<tr><td><code>tui/internal/preset/skills/lingtai-dev-guide/reference/contributing/SKILL.md</code></td>
+<td>New <strong>"Worktree hygiene: cleaning stale local worktrees"</strong> section (5 steps below);
+pointer added at step 4 of the issue→worktree→PR→merge loop; description + version bumped to 1.1.0.</td></tr>
+<tr><td><code>tui/internal/preset/skills/lingtai-dev-guide/SKILL.md</code></td>
+<td>Catalog description for <code>dev-guide-contributing</code> now mentions worktree hygiene;
+new routing example <em>"Local worktrees are piling up"</em>; version bumped to 2.2.0.</td></tr>
+<tr><td><code>reports/stale-worktree-cleanup-guide-20260612.html</code></td>
+<td>This explainer.</td></tr>
+</table>
+
+<p>The new section's shape:</p>
+<ol>
+  <li><strong>Audit first</strong> — <code>git fetch --prune</code>, then a shell loop over
+  <code>git worktree list --porcelain</code> printing per-worktree
+  <code>branch / merged / remote / dirty_files</code>. Dry-run only; inspect dirty trees by hand.</li>
+  <li><strong>Removal criteria (all must hold)</strong> — secondary worktree; HEAD is ancestor of
+  <code>origin/main</code>; remote branch gone or detached HEAD; clean or generated-only dirt
+  (<code>logs/</code>, <code>artifacts/</code>, review-tool outputs).</li>
+  <li><strong>Keep/skip list</strong> <span class="keep">— when in doubt, skip:</span> primary checkout;
+  live release/binary-target worktrees (e.g. <code>release-vX.Y.Z-&lt;date&gt;</code>); unmerged
+  branches; remote branch still exists (likely open PR); source-dirty even if merged;
+  other agents' worktrees unless explicitly in scope.</li>
+  <li><strong>Remove</strong> — <code>git worktree remove</code> (<code>--force</code> only for
+  generated-only dirt), <code>git worktree prune</code>, <code>git branch -d</code> (never
+  escalate to <code>-D</code>; a refusal means re-check the audit).</li>
+  <li><strong>Record and report</strong> — log removed paths/branches/SHAs and skipped+reason,
+  save a report file, tell the human. SHAs are the recovery path.</li>
+</ol>
+</section>
+
+<section>
+<h2>Validation</h2>
+<ul>
+  <li><span class="ok">Audit recipe dry-run</span> — executed read-only against the real
+  <code>lingtai</code> repo (26 secondary worktrees enumerated). Output correctly classified
+  merged/unmerged, remote exists/gone, dirty counts — and flagged the live
+  <code>release-v0.8.16-20260612</code> worktree as merged+remote-gone, the exact case the
+  keep/skip list protects.</li>
+  <li><span class="ok">Frontmatter sanity</span> — YAML frontmatter of both edited SKILL.md files
+  parses cleanly.</li>
+  <li><span class="ok">git diff --check</span> — no whitespace errors.</li>
+</ul>
+</section>
+
+<section>
+<h2>Risks / decisions</h2>
+<ul>
+  <li>Placed the procedure in <code>contributing/SKILL.md</code> (not <code>gotchas</code>) because
+  it is a workflow, not a footgun; the gotchas file only mentions worktrees in passing.</li>
+  <li>The recipe deliberately fails safe: every ambiguous state (dirty, unmerged, remote exists,
+  detached-but-protected) lands on "skip". The only force path is generated-only dirt.</li>
+  <li>Real cleanup-report paths from the 2026-06-12 sweep are referenced generically
+  ("save a report file") rather than embedding private absolute paths.</li>
+</ul>
+</section>
+
+<section>
+<h2>Next steps</h2>
+<ul>
+  <li>Jason reviews; push + PR are intentionally left to the human.</li>
+  <li>Rename this file to <code>pr&lt;NUMBER&gt;-stale-worktree-cleanup-guide-explainer.html</code>
+  once the PR number exists.</li>
+</ul>
+</section>
+
+<section>
+<h2>Source index</h2>
+<ul>
+  <li><code>tui/internal/preset/skills/lingtai-dev-guide/SKILL.md</code> — router (edited)</li>
+  <li><code>tui/internal/preset/skills/lingtai-dev-guide/reference/contributing/SKILL.md</code> — new section (edited)</li>
+  <li>Cleanup sweep of 2026-06-12 — policy source (report retained outside the repo)</li>
+</ul>
+</section>
+</main>
+</body>
+</html>

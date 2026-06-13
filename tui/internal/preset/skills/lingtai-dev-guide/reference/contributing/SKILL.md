@@ -1,8 +1,8 @@
 ---
 name: dev-guide-contributing
 description: >
-  Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
-version: 1.0.0
+  Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, stale-worktree cleanup, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
+version: 1.1.0
 ---
 
 # Contributing to LingTai
@@ -34,7 +34,7 @@ Non-trivial work flows through this loop. No exceptions for "small" fixes that t
 1. **Issue.** Open or pick a GitHub issue that names the problem. If one does not exist, write one — it is the durable record of the contract.
 2. **Worktree + branch.** Create an isolated `git worktree` off `origin/main` on a topic branch (`fix/...`, `feat/...`, `docs/...`, `chore/...`). Never edit the main checkout, and never share a worktree across two parallel daemons.
 3. **PR.** Push the branch and open a PR against `Lingtai-AI/<repo>`. The PR body cites the issue, summarizes the change, and lists validation steps.
-4. **Merge.** After review, merge via the GitHub UI (or `gh pr merge`). Delete the branch and clean up the worktree.
+4. **Merge.** After review, merge via the GitHub UI (or `gh pr merge`). Delete the branch and clean up the worktree. Worktrees that outlive this step accumulate — see "Worktree hygiene" below for the periodic cleanup procedure.
 
 ### 3. Decompose into daemon-sized tasks
 
@@ -77,6 +77,89 @@ Skipping the sweep is how you end up duplicating in-flight work, stomping on som
 ### 6. Self-operate GitHub via `GH_TOKEN` when the human provides one
 
 For any of the `gh` invocations above — issue triage, PR creation, the portfolio sweep — if the human pastes a GitHub token into the session and you have bash, use it directly: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste and don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then ask explicit per-action consent before any mutation (issue creation, PR open/merge, comments). Never echo, log, or persist the token; let it live only in the env of the single command. The full protocol lives in `procedures.md` under "Self-Operating GitHub via GH_TOKEN".
+
+## Worktree hygiene: cleaning stale local worktrees
+
+Every merged PR leaves a worktree behind unless someone removes it, and with
+multiple agents/daemons running in parallel, `.worktrees/` fills up fast. Run
+this cleanup periodically (or when a sweep shows worktrees piling up). The
+discipline is **audit first, remove conservatively, record everything**.
+
+### 1. Audit first — never remove on sight
+
+Fetch with prune so remote-branch existence checks are accurate, then list
+every worktree with its merge/dirt/remote status:
+
+```bash
+cd <repo-primary-checkout>
+git fetch --prune origin
+
+git worktree list --porcelain | awk '/^worktree /{print $2}' | tail -n +2 |
+while read -r wt; do
+  branch=$(git -C "$wt" branch --show-current)        # empty = detached HEAD
+  head=$(git -C "$wt" rev-parse HEAD)
+  if git merge-base --is-ancestor "$head" origin/main; then merged=yes; else merged=no; fi
+  if [ -n "$branch" ] && git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+    remote=exists; else remote=gone; fi
+  dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
+  echo "$wt | branch=${branch:-DETACHED} | merged=$merged | remote=$remote | dirty_files=$dirty"
+done
+```
+
+(`tail -n +2` skips the first entry, which is the primary checkout.) For any
+dirty worktree, inspect `git -C "$wt" status --porcelain` by hand to see
+*what* is dirty before deciding anything.
+
+### 2. Removal criteria — all must hold
+
+Remove a worktree only when **every** condition is true:
+
+- It is a **secondary** worktree (never the primary checkout).
+- Its HEAD is an **ancestor of `origin/main`** (`git merge-base --is-ancestor`
+  succeeded — the work is fully merged).
+- Its **remote branch is gone** (deleted after merge) or it is on a detached
+  HEAD. A remote branch that still exists may back an in-flight PR.
+- It is **clean**, or dirty only with **generated artifacts** — `logs/`,
+  `artifacts/`, review-tool outputs (Claude/GLM review files), build
+  droppings. Generated-only dirt may be force-removed; anything that looks
+  like source edits may not.
+
+### 3. Keep/skip list — when in doubt, skip
+
+- **Primary checkout** — never a removal candidate.
+- **Live/protected worktrees** — anything currently serving a purpose, e.g. a
+  release worktree that a deployed binary was built from and still resolves to
+  (such as `release-vX.Y.Z-<date>`). Check `which`/symlinks before touching
+  anything release-shaped.
+- **Unmerged branches** — HEAD not an ancestor of `origin/main`. That is
+  in-flight or abandoned-but-undecided work; not yours to delete.
+- **Remote branch still exists** — likely an open PR; skip.
+- **Source-dirty worktrees** — uncommitted edits to tracked source files mean
+  skip, *even if the branch is merged*. Someone may have WIP there.
+- **Other agents' worktrees** — directories under another agent's project or
+  working area are out of scope unless the human explicitly included them.
+
+### 4. Remove
+
+```bash
+git worktree remove .worktrees/<slug>            # clean worktree
+git worktree remove --force .worktrees/<slug>    # ONLY for generated-only dirt (step 2)
+git worktree prune                               # drop metadata for already-deleted dirs
+git branch -d <branch>                           # -d (not -D): refuses unmerged branches
+```
+
+Stick with `git branch -d` — its refusal on an unmerged branch is a safety
+net, not an obstacle. If `-d` refuses, re-check your audit instead of
+escalating to `-D`.
+
+### 5. Record and report
+
+Write down what was removed (worktree path, branch, HEAD SHA) and what was
+skipped with the reason (e.g. `~/path/to/.worktrees/<slug> — skipped:
+source-dirty`), save it as a small report file, and tell the human what was
+cleaned. The SHA list is the recovery path: a merged branch's commits remain
+reachable from `origin/main`, and even unmerged SHAs stay in the reflog for a
+while.
 
 ## Changing the TUI (`tui/`)
 
