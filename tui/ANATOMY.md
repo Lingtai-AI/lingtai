@@ -42,6 +42,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 - **Parent:** repo root (`../ANATOMY.md`)
 - **Subfolders:**
   - `tui/internal/tui/` — Bubble Tea screens (~19k LOC; `tui/internal/tui/ANATOMY.md`)
+  - `tui/internal/doctorreport/` — redacted report writer used by interactive `/doctor` to save GitHub-ready diagnostic bundles
   - `tui/internal/preset/` — preset load/save/apply, embeds templates/recipes
   - `tui/internal/migrate/` — per-project migrations (shared version space with portal)
   - `tui/internal/globalmigrate/` — per-machine migrations (`~/.lingtai-tui/`)

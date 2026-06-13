@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/doctorreport"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
@@ -37,6 +39,12 @@ func SetTUIVersion(v string) {
 // doctorResultMsg is sent when the async diagnostic completes.
 type doctorResultMsg struct {
 	Lines []doctorLine
+	Draft *doctorreport.Draft
+}
+
+type doctorReportSavedMsg struct {
+	path string
+	err  error
 }
 
 type doctorLine struct {
@@ -51,10 +59,19 @@ type DoctorModel struct {
 	orchDir   string
 	globalDir string
 	lines     []doctorLine
+	draft     *doctorreport.Draft
 	loading   bool
+	saving    bool
+	savedPath string
+	saveErr   error
 	width     int
 	height    int
 }
+
+var (
+	doctorReportNow   = func() time.Time { return time.Now().UTC() }
+	writeDoctorReport = doctorreport.Write
+)
 
 func NewDoctorModel(orchDir, globalDir string) DoctorModel {
 	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
@@ -75,10 +92,31 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 		m.height = msg.Height
 	case doctorResultMsg:
 		m.lines = msg.Lines
+		m.draft = msg.Draft
 		m.loading = false
+		m.saving = false
+		m.savedPath = ""
+		m.saveErr = nil
+	case doctorReportSavedMsg:
+		m.saving = false
+		if msg.err != nil {
+			m.saveErr = msg.err
+			return m, nil
+		}
+		m.savedPath = msg.path
+		m.saveErr = nil
 	case tea.KeyPressMsg:
 		if msg.String() == "esc" {
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		}
+		if msg.String() == "r" && m.canSaveReport() {
+			m.saving = true
+			m.saveErr = nil
+			dir := doctorReportDir(m.globalDir, m.orchDir, *m.draft)
+			draft := cloneDoctorReportDraft(*m.draft)
+			return m, func() tea.Msg {
+				return doctorReportSavedMsg{path: dir, err: writeDoctorReport(dir, draft)}
+			}
 		}
 	}
 	return m, nil
@@ -119,9 +157,29 @@ func (m DoctorModel) View() string {
 	}
 
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render("  [esc] "+i18n.T("manage.back")) + "\n")
+	b.WriteString(m.footer() + "\n")
 
 	return b.String()
+}
+
+func (m DoctorModel) canSaveReport() bool {
+	return !m.loading && m.draft != nil && !m.saving && m.savedPath == ""
+}
+
+func (m DoctorModel) footer() string {
+	parts := []string{"[esc] " + i18n.T("manage.back")}
+	switch {
+	case m.saving:
+		parts = append(parts, "saving report...")
+	case m.savedPath != "":
+		parts = append(parts, "report saved: "+m.savedPath)
+	case m.canSaveReport():
+		parts = append(parts, "[r] save report")
+	}
+	if m.saveErr != nil {
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorSuspended).Render("save failed: "+m.saveErr.Error()))
+	}
+	return StyleFaint.Render("  " + strings.Join(parts, "  "))
 }
 
 // --- Diagnostic logic ---
@@ -185,7 +243,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 2: read init.json to get LLM config
-	provider, model, apiKey, baseURL, apiCompat, err := readLLMConfig(orchDir)
+	llmDetails, err := readLLMConfigDetails(orchDir)
 	if err != nil {
 		lines = append(lines, doctorLine{
 			Text: i18n.TF("doctor.config_error", err),
@@ -193,8 +251,13 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_refresh"), Hint: true,
 		})
-		return doctorResultMsg{Lines: lines}
+		return buildDoctorResult(orchDir, lines, llmDetails)
 	}
+	provider := llmDetails.Provider
+	model := llmDetails.Model
+	apiKey := llmDetails.APIKey
+	baseURL := llmDetails.BaseURL
+	apiCompat := llmDetails.APICompat
 
 	// Phase 2.5: check base_url for providers that require it
 	if baseURL == "" {
@@ -289,7 +352,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	// agent/MCP/log/notification checks.
 	lines = append(lines, runKernelDoctorIntrinsic(orchDir, globalDir)...)
 
-	return doctorResultMsg{Lines: lines}
+	return buildDoctorResult(orchDir, lines, llmDetails)
 }
 
 func doctorLineFromConfig(line config.DoctorLine) doctorLine {
@@ -310,6 +373,135 @@ func doctorLineFromConfig(line config.DoctorLine) doctorLine {
 	}
 	converted.Text = prefix + " " + line.Text
 	return converted
+}
+
+func buildDoctorResult(orchDir string, lines []doctorLine, llm llmConfigDetails) doctorResultMsg {
+	draft := &doctorreport.Draft{
+		GeneratedAt: doctorReportNow(),
+		AgentName:   filepath.Base(orchDir),
+		Lines:       doctorReportLines(lines),
+		LLM: doctorreport.LLMConfig{
+			Provider:      llm.Provider,
+			Model:         llm.Model,
+			BaseHost:      baseHostForReport(llm.BaseURL),
+			APICompat:     llm.APICompat,
+			APIKeyEnv:     llm.APIKeyEnv,
+			APIKeyPresent: llm.APIKey != "",
+		},
+		LogTail: readDoctorReportLogTail(orchDir),
+	}
+	return doctorResultMsg{Lines: lines, Draft: draft}
+}
+
+func doctorReportLines(lines []doctorLine) []doctorreport.Line {
+	out := make([]doctorreport.Line, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, doctorreport.Line{
+			Severity: doctorReportSeverity(line),
+			Text:     strings.TrimSpace(line.Text),
+		})
+	}
+	return out
+}
+
+func doctorReportSeverity(line doctorLine) doctorreport.Severity {
+	switch {
+	case line.Hint:
+		return doctorreport.SeverityHint
+	case line.Warn:
+		return doctorreport.SeverityWarn
+	case line.OK:
+		return doctorreport.SeverityOK
+	default:
+		return doctorreport.SeverityFail
+	}
+}
+
+func doctorReportDir(globalDir, orchDir string, draft doctorreport.Draft) string {
+	agentName := draft.AgentName
+	if agentName == "" {
+		agentName = filepath.Base(orchDir)
+	}
+	name := "doctor-" + doctorReportNow().UTC().Format("20060102-150405")
+	if slug := slugForReportPath(agentName); slug != "" {
+		name += "-" + slug
+	}
+	return filepath.Join(globalDir, "reports", name)
+}
+
+func slugForReportPath(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func cloneDoctorReportDraft(draft doctorreport.Draft) doctorreport.Draft {
+	draft.Lines = append([]doctorreport.Line(nil), draft.Lines...)
+	draft.LogTail = append([]string(nil), draft.LogTail...)
+	return draft
+}
+
+func baseHostForReport(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parseValue := raw
+	if !strings.Contains(parseValue, "://") {
+		parseValue = "https://" + parseValue
+	}
+	if parsed, err := url.Parse(parseValue); err == nil && parsed.Host != "" {
+		host := parsed.Hostname()
+		if port := parsed.Port(); port != "" {
+			return host + ":" + port
+		}
+		return host
+	}
+	withoutCreds := raw
+	if at := strings.LastIndex(withoutCreds, "@"); at >= 0 {
+		withoutCreds = withoutCreds[at+1:]
+	}
+	withoutCreds = strings.TrimPrefix(strings.TrimPrefix(withoutCreds, "https://"), "http://")
+	if slash := strings.Index(withoutCreds, "/"); slash >= 0 {
+		withoutCreds = withoutCreds[:slash]
+	}
+	return strings.TrimRight(withoutCreds, "/")
+}
+
+func readDoctorReportLogTail(orchDir string) []string {
+	logPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	f, err := os.Open(logPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	const maxLines = 20
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	tail := make([]string, 0, maxLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(tail) < maxLines {
+			tail = append(tail, line)
+			continue
+		}
+		copy(tail, tail[1:])
+		tail[len(tail)-1] = line
+	}
+	return tail
 }
 
 // --- Event log scanning ---
@@ -358,43 +550,61 @@ func findLastAPIError(orchDir string) string {
 // on 127.0.0.1:34891) gets probed with `Authorization: Bearer <key>`,
 // silently falls into the 404 path that's mapped to probeOK, and masks
 // the real connectivity state.
+type llmConfigDetails struct {
+	Provider  string
+	Model     string
+	APIKey    string
+	BaseURL   string
+	APICompat string
+	APIKeyEnv string
+}
+
 func readLLMConfig(orchDir string) (provider, model, apiKey, baseURL, apiCompat string, err error) {
+	details, err := readLLMConfigDetails(orchDir)
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+	return details.Provider, details.Model, details.APIKey, details.BaseURL, details.APICompat, nil
+}
+
+func readLLMConfigDetails(orchDir string) (llmConfigDetails, error) {
 	initPath := filepath.Join(orchDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("cannot read init.json")
+		return llmConfigDetails{}, fmt.Errorf("cannot read init.json")
 	}
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", "", "", "", "", fmt.Errorf("invalid init.json")
+		return llmConfigDetails{}, fmt.Errorf("invalid init.json")
 	}
 
 	manifest, _ := raw["manifest"].(map[string]interface{})
 	if manifest == nil {
-		return "", "", "", "", "", fmt.Errorf("no manifest in init.json")
+		return llmConfigDetails{}, fmt.Errorf("no manifest in init.json")
 	}
 
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
-		return "", "", "", "", "", fmt.Errorf("no manifest.llm in init.json")
+		return llmConfigDetails{}, fmt.Errorf("no manifest.llm in init.json")
 	}
 
-	provider, _ = llm["provider"].(string)
-	model, _ = llm["model"].(string)
-	apiKey, _ = llm["api_key"].(string)
-	baseURL, _ = llm["base_url"].(string)
-	apiCompat, _ = llm["api_compat"].(string)
+	details := llmConfigDetails{}
+	details.Provider, _ = llm["provider"].(string)
+	details.Model, _ = llm["model"].(string)
+	details.APIKey, _ = llm["api_key"].(string)
+	details.BaseURL, _ = llm["base_url"].(string)
+	details.APICompat, _ = llm["api_compat"].(string)
+	details.APIKeyEnv, _ = llm["api_key_env"].(string)
 
-	if apiKey == "" {
-		apiKeyEnv, _ := llm["api_key_env"].(string)
-		if apiKeyEnv != "" {
+	if details.APIKey == "" {
+		if details.APIKeyEnv != "" {
 			envFile, _ := raw["env_file"].(string)
-			apiKey = lookupEnvKey(envFile, orchDir, apiKeyEnv)
+			details.APIKey = lookupEnvKey(envFile, orchDir, details.APIKeyEnv)
 		}
 	}
 
-	return provider, model, apiKey, baseURL, apiCompat, nil
+	return details, nil
 }
 
 // lookupEnvKey resolves an environment variable name, checking os.Environ first,

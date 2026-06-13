@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Issue 237 – /doctor report explainer</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#2563eb; --ok:#15803d; --warn:#b45309; --muted:#64748b; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; margin: 0; padding: 2rem; background: Canvas; color: CanvasText; }
+    main { max-width: 980px; margin: 0 auto; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin-bottom: .25rem; }
+    .subtitle { color: var(--muted); margin-top: 0; }
+    .card { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 14px; padding: 1rem 1.25rem; margin: 1rem 0; background: color-mix(in srgb, Canvas 94%, CanvasText 6%); }
+    .tl { border-left: 5px solid var(--accent); }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { background: color-mix(in srgb, CanvasText 10%, transparent); border-radius: 4px; padding: .1rem .25rem; }
+    pre { overflow:auto; padding: .9rem; border-radius: 10px; background: color-mix(in srgb, CanvasText 8%, transparent); }
+    table { border-collapse: collapse; width: 100%; margin: .75rem 0; }
+    th, td { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); padding: .55rem; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 10%, transparent); }
+    ul { padding-left: 1.4rem; }
+    .small { font-size: .92rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Issue 237: one-step <code>/doctor</code> diagnostic report bundle</h1>
+  <p class="subtitle">Explainer for the TUI change that lets users save a redacted GitHub-ready doctor report from the interactive doctor screen.</p>
+
+  <section class="card tl">
+    <h2>TL;DR</h2>
+    <p>This PR adds the first interactive report path for issue <code>#237</code>: after <code>/doctor</code> finishes, the footer offers <code>[r] save report</code>. Pressing <code>r</code> writes a redacted bundle under the global LingTai reports directory without rerunning doctor or mutating the install again.</p>
+    <ul>
+      <li><span class="ok">Done:</span> in-memory doctor draft, explicit save action, redacted markdown/JSON/log artifacts, tests, and real temp-project smoke validation.</li>
+      <li><span class="ok">Kept stable:</span> shell <code>lingtai-tui doctor</code> behavior and existing <code>esc</code> handling.</li>
+      <li><span class="warn">Deferred:</span> a shell-first <code>doctor report --output</code> command can be a follow-up if needed.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Baseline</h2>
+    <p>Before this change, <code>/doctor</code> could repair/check the local install and display diagnostic output, but a user filing a GitHub bug report still had to manually copy terminal text and redact private data. The issue asks for a one-step diagnostic bundle that is safe to attach to bug reports.</p>
+  </section>
+
+  <section class="card">
+    <h2>What changed</h2>
+    <table>
+      <thead><tr><th>Area</th><th>Change</th></tr></thead>
+      <tbody>
+        <tr><td><code>internal/doctorreport</code></td><td>New report writer builds <code>report.md</code>, <code>metadata.json</code>, <code>redaction.json</code>, and optional redacted log tail from a doctor draft.</td></tr>
+        <tr><td><code>DoctorModel</code></td><td>Captures the finished doctor output as an in-memory draft and exposes <code>[r] save report</code> only when a draft is available and not yet saved.</td></tr>
+        <tr><td>Save path</td><td>Pressing <code>r</code> writes the stored draft once; it does not rerun <code>RunDoctorUpdate</code>, <code>probeLLM</code>, bootstrap, utility-skill refresh, or command export.</td></tr>
+        <tr><td>Tests</td><td>Added unit coverage for artifact writing/redaction and TUI behavior including no-rerun save, repeated save, and save failure surfacing.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Representative diff snippets</h3>
+    <pre><code>// Doctor screen footer only advertises save when the completed run has a draft.
+if m.reportDraft != nil &amp;&amp; m.reportSavedPath == "" {
+    footer += " • [r] save report"
+}</code></pre>
+    <pre><code>// Save writes the in-memory draft; it is deliberately separate from runDoctor().
+path, err := doctorreport.WriteDraft(globalDir, agentName, *m.reportDraft)</code></pre>
+  </section>
+
+  <section class="card">
+    <h2>Validation</h2>
+    <ul>
+      <li><code>go test ./...</code> from <code>tui/</code>: passed.</li>
+      <li><code>git diff --check origin/main...HEAD</code>: passed.</li>
+      <li>Focused tests previously run: <code>go test ./internal/doctorreport ./internal/tui</code>: passed.</li>
+      <li>Real smoke test with a temporary project and a real DeepSeek preset: spawn project, run TUI <code>/doctor</code>, press <code>r</code>, verify report files were generated, then suspend the temp agent.</li>
+      <li>Secret scan of generated artifacts found no raw API-key value, bearer token, GitHub token shape, Telegram bot token shape, unredacted home username path, or URL path/query under the LLM host.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Risks and decisions</h2>
+    <ul>
+      <li><strong>Why in-memory draft?</strong> It avoids a second doctor pass. This matters because doctor can repair/update the runtime and should not be repeated just to save a report.</li>
+      <li><strong>Why explicit <code>r</code>?</strong> No artifact is written unless the user asks for it, matching the issue’s bug-report workflow without surprising users.</li>
+      <li><strong>Why report writer owns redaction?</strong> Centralizing redaction keeps future report surfaces from duplicating ad-hoc filtering logic.</li>
+      <li><strong>Remaining risk:</strong> Redaction is conservative and covered for common token/path/log shapes, but future diagnostics may add new sensitive fields and should route through <code>doctorreport</code> rather than bypassing it.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Next steps</h2>
+    <ol>
+      <li>Review this PR for the interactive <code>/doctor</code> save path.</li>
+      <li>If reviewers want a non-interactive command too, add a follow-up <code>lingtai-tui doctor report --output ...</code> path that reuses <code>doctorreport</code>.</li>
+      <li>When new diagnostic fields are added later, add redaction tests in <code>internal/doctorreport</code>.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>Source index</h2>
+    <ul>
+      <li><code>tui/internal/doctorreport/report.go</code> — draft/report artifact writer and redaction helpers.</li>
+      <li><code>tui/internal/doctorreport/report_test.go</code> — report artifact and redaction coverage.</li>
+      <li><code>tui/internal/tui/doctor.go</code> — interactive doctor draft capture, footer, save handling.</li>
+      <li><code>tui/internal/tui/app.go</code> — app wiring for doctor report save dependencies.</li>
+      <li><code>tui/internal/tui/doctor_test.go</code> — TUI behavior coverage for report saving.</li>
+    </ul>
+    <p class="small">This explainer intentionally avoids local machine paths, private mailbox IDs, and raw report contents.</p>
+  </section>
+</main>
+</body>
+</html>
