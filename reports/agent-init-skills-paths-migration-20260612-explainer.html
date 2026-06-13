@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>m038: restore skills.paths in materialized agent init.json</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#5b6cff; --muted:#667085; --border:#d0d5dd; --bg:#f8fafc; }
+    body { margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#101828; background:var(--bg); }
+    main { max-width:920px; margin:40px auto; padding:0 22px 48px; }
+    .card { background:white; border:1px solid var(--border); border-radius:18px; padding:24px; box-shadow:0 10px 28px rgba(16,24,40,.08); }
+    h1 { margin:0 0 10px; font-size:30px; line-height:1.15; }
+    h2 { margin-top:28px; font-size:20px; }
+    .lede { color:var(--muted); margin-top:0; }
+    .pill { display:inline-block; border-radius:999px; padding:4px 10px; background:#eef2ff; color:#3538cd; font-weight:600; font-size:13px; }
+    ul { padding-left:22px; }
+    code { background:#f2f4f7; padding:2px 5px; border-radius:6px; }
+    pre { background:#f2f4f7; padding:14px; border-radius:10px; overflow-x:auto; font-size:14px; }
+    pre code { background:none; padding:0; }
+    .ok { border-left:4px solid #12b76a; padding-left:14px; }
+    @media (prefers-color-scheme: dark) { body { background:#0b1020; color:#e4e7ec; } .card { background:#111827; border-color:#344054; } .lede { color:#98a2b3; } code { background:#1f2937; } pre { background:#1f2937; } .pill { background:#20295f; color:#c7d7fe; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <span class="pill">PR #312 follow-up · project migration m038</span>
+    <h1>Repair <code>skills.paths</code> in already-materialized agent <code>init.json</code></h1>
+    <p class="lede">PR #312 fixed the preset editor bug that deleted <code>skills.paths</code> on model switch, and m037 repaired the saved presets it damaged. Jason's review pointed out the target that actually matters: agents <em>materialized while the bug was live</em> carry the same damage in their own <code>init.json</code>, and they keep running with it regardless of the repaired preset. m038 is the per-project companion that patches those files directly.</p>
+
+    <h2>What m038 does</h2>
+    <p>On the project's next TUI launch, the migration walks every agent directory under <code>.lingtai/</code> (skipping hidden dirs and <code>human/</code>) and silently ensures <code>manifest.capabilities.skills.paths</code> exists in each <code>init.json</code>, restoring the defaults when missing:</p>
+    <pre><code>"skills": {
+  "paths": ["../.library_shared", "~/.lingtai-tui/utilities"]
+}</code></pre>
+    <p>Same rules as m037, applied per agent via the shared <code>patchPresetSkillsPathsMap</code> helper:</p>
+    <ul>
+      <li>Existing <code>skills.paths</code> values (custom overrides) are preserved exactly — the file isn't even rewritten.</li>
+      <li>Other <code>skills</code> config keys and all sibling capability entries (<code>web_search</code>, <code>bash</code>, …) are untouched.</li>
+      <li>A missing <code>manifest.capabilities</code> map is created; a non-object <code>capabilities</code> (or <code>manifest</code>) means that file is skipped safely.</li>
+      <li>Malformed <code>init.json</code> is skipped with a stderr note only; one broken agent never stalls the migration.</li>
+      <li>Writes are atomic (temp file + rename), matching every other migration in the package.</li>
+    </ul>
+
+    <h2>Migration etiquette</h2>
+    <ul>
+      <li>Both registries bump <code>CurrentVersion</code> 37 → 38 with <code>m038 agent-init-skills-paths</code>.</li>
+      <li>The migration touches shared on-disk state (agent <code>init.json</code>) and both binaries run migrations against the shared <code>meta.json</code> version space, so the repair is implemented with identical logic in <strong>both</strong> <code>tui/internal/migrate</code> and <code>portal/internal/migrate</code> — whichever binary opens the project first performs the one-time repair. A no-op portal stub would have let a portal-first launch stamp the project at version 38 and silently skip the repair forever.</li>
+    </ul>
+
+    <h2>Tests</h2>
+    <ul>
+      <li><code>TestMigrateAgentInitSkillsPathsPatchesMultipleAgents</code> — two agents (paths lost vs. whole skills entry lost) both repaired; sibling <code>web_search</code> config survives.</li>
+      <li><code>TestMigrateAgentInitSkillsPathsCreatesMissingCapabilitiesMap</code> — an init.json with no capabilities map at all gets one with the default skills paths.</li>
+      <li><code>TestMigrateAgentInitSkillsPathsPreservesCustomPaths</code> — custom <code>skills.paths</code> leaves the file byte-identical.</li>
+      <li><code>TestMigrateAgentInitSkillsPathsSkipsMalformedAndNonMapCases</code> — truncated JSON, list-shaped <code>capabilities</code>, and string <code>manifest</code> are all left unchanged while a valid sibling agent is still patched.</li>
+      <li>Portal: <code>TestRunFrom37PatchesAgentInitAndAdvancesTo38</code> pins the portal-opened-first scenario — <code>Run</code> on a version-37 project repairs agent <code>init.json</code> and advances <code>meta.json</code> to 38 — plus portal copies of the preserve-custom-paths and malformed/non-map skip tests.</li>
+    </ul>
+
+    <h2>Files touched</h2>
+    <ul>
+      <li><code>tui/internal/migrate/m038_agent_init_skills_paths.go</code> and <code>portal/internal/migrate/m038_agent_init_skills_paths.go</code> — the migration, identical logic in both packages (+ test files).</li>
+      <li><code>tui/internal/migrate/migrate.go</code> / <code>portal/internal/migrate/migrate.go</code> — version 38 registry entries.</li>
+    </ul>
+
+    <h2>Validation</h2>
+    <p class="ok">gofmt clean on all touched files; focused <code>TestMigrateAgentInitSkillsPaths*</code>, <code>TestPatchPresetSkillsPaths*</code>, and <code>TestRunFrom37*</code> pass; full <code>go test ./internal/migrate</code> passes in both the TUI and portal modules.</p>
+  </div>
+</main>
+</body>
+</html>

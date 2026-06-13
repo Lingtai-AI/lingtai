@@ -8,7 +8,7 @@ import (
 )
 
 // CurrentVersion is the latest migration version compiled into this binary.
-const CurrentVersion = 37
+const CurrentVersion = 38
 
 type metaFile struct {
 	Version int `json:"version"`
@@ -60,6 +60,7 @@ var migrations = []Migration{
 	{Version: 35, Name: "remove-brief", Fn: migrateRemoveBrief},                                           // shared: strips brief.md + brief_file/brief keys after secretary removal
 	{Version: 36, Name: "sqlite-log-backfill", Fn: func(_ string) error { return nil }},                   // TUI-only: optional command-line SQLite log backfill prompt/progress
 	{Version: 37, Name: "preset-skills-paths", Fn: func(_ string) error { return nil }},                   // TUI-only: patches saved preset skill path overrides
+	{Version: 38, Name: "agent-init-skills-paths", Fn: migrateAgentInitSkillsPaths},                       // shared: restores missing skills.paths in agent init.json — whichever binary migrates first must repair
 }
 
 // StampCurrent writes meta.json at CurrentVersion without running any
