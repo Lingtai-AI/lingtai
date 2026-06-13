@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Default Context Window: 300K</title>
+<style>
+:root{--bg:#0f172a;--panel:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b;--line:#334155}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#0f172a,#111827 55%,#0b1220);color:var(--text);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:980px;margin:0 auto;padding:42px 22px 60px}h1{font-size:44px;line-height:1.05;margin:0 0 12px}h2{margin-top:34px;border-top:1px solid var(--line);padding-top:24px}.lede{font-size:20px;color:#cbd5e1;max-width:780px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:28px 0}.card{background:rgba(17,24,39,.78);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.22)}.kicker{color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.big{font-size:34px;font-weight:800;margin:6px 0}.muted{color:var(--muted)}code{background:#020617;border:1px solid #1e293b;border-radius:8px;padding:2px 6px}pre{background:#020617;border:1px solid #1e293b;border-radius:14px;padding:16px;overflow:auto}.ok{color:var(--ok);font-weight:700}.warn{color:var(--warn);font-weight:700}ul{padding-left:22px}li{margin:7px 0}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin:4px 6px 4px 0;color:#cbd5e1}.footer{margin-top:36px;color:var(--muted);font-size:14px}</style>
+</head>
+<body><main>
+<p class="kicker">LingTai TUI PR explainer</p>
+<h1>Default agent context window moves from 200K to 300K</h1>
+<p class="lede">Jason asked to raise the LingTai TUI default context window now that Codex GPT-5.5 via OAuth/Codex is understood to support a larger practical window. This PR changes the default for newly generated agents while leaving existing user configs and provider-specific presets alone.</p>
+
+<div class="grid">
+  <section class="card"><div class="kicker">Before</div><div class="big">200,000</div><div class="muted">Default <code>context_limit</code> for new TUI-generated agents.</div></section>
+  <section class="card"><div class="kicker">After</div><div class="big">300,000</div><div class="muted">New default with safer headroom below Codex GPT-5.5's reported 400K OAuth/Codex limit.</div></section>
+  <section class="card"><div class="kicker">Scope</div><div class="big">2 files</div><div class="muted">Preset generation default + first-run/setup UI fallback/display default.</div></section>
+</div>
+
+<h2>What changed</h2>
+<ul>
+  <li><code>tui/internal/preset/preset.go</code>: <code>DefaultAgentOpts().ContextLimit</code> now returns <code>300000</code>.</li>
+  <li><code>tui/internal/tui/firstrun.go</code>: first-run/setup defaults and invalid-input fallbacks now use <code>300000</code>.</li>
+  <li>No provider-specific preset limits were changed.</li>
+  <li>No existing project <code>init.json</code> files are mutated by this PR; this only changes newly generated/default values.</li>
+</ul>
+
+<h2>Why 300K?</h2>
+<p>OAuth/Codex GPT-5.5 public discussion points to a 400K Codex context window, while LingTai's current generated-agent default was 200K. A 300K default gives agents more usable room without treating the 400K provider ceiling as a safe operating target.</p>
+
+<h2>Validation</h2>
+<p>Focused validation for preset/default generation and first-run code should pass before merge:</p>
+<pre><code>git diff --check
+(cd tui && go test ./internal/preset/...)
+(cd tui && go test ./internal/tui -run 'FirstRun|Generate|Context' -count=1)</code></pre>
+<p class="muted">If broad TUI tests are run, remove transient <code>tui/internal/tui/logs/</code> before final clean-status checks.</p>
+
+<h2>Risk notes</h2>
+<ul>
+  <li><span class="ok">Low runtime risk:</span> this is a default-value change, not a runtime scheduler or tool-call change.</li>
+  <li><span class="warn">Compatibility:</span> smaller-context providers can still be configured with explicit preset values; the PR does not force existing agents upward.</li>
+  <li><span class="ok">Operator path:</span> Jason separately asked local bots to update their own <code>init.json</code> values and refresh; that is an operational action outside this PR.</li>
+</ul>
+
+<p class="footer">Prepared 2026-06-13 for the 300K default context-window PR.</p>
+</main></body></html>
