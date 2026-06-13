@@ -13,6 +13,7 @@ import (
 
 type fakeRunner struct {
 	versions          []string
+	packageVersions   map[string]string
 	failPip           bool
 	editableSource    string // when non-empty, the editable-detect probe reports EDITABLE <source>
 	fileSearchStdout  string // when non-empty, returned for the file_io_sidecar probe
@@ -48,6 +49,21 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 		}
 		return CommandResult{Stdout: "WHEEL\n"}
 	}
+	if strings.Contains(call, "importlib.metadata import version") {
+		pkg := ""
+		if start := strings.Index(call, "version(\""); start >= 0 {
+			rest := call[start+len("version(\""):]
+			if end := strings.Index(rest, "\")"); end >= 0 {
+				pkg = rest[:end]
+			}
+		}
+		if r.packageVersions != nil {
+			if v, ok := r.packageVersions[pkg]; ok {
+				return CommandResult{Stdout: v + "\n"}
+			}
+		}
+		return CommandResult{Stdout: "1.0.0\n"}
+	}
 	if strings.Contains(call, "import lingtai") {
 		if len(r.versions) == 0 {
 			return CommandResult{Err: errors.New("no version queued"), Stderr: "ModuleNotFoundError: lingtai"}
@@ -64,12 +80,25 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 
 func testVersionClient(t *testing.T, latestPyPI, latestTUI string) *http.Client {
 	t.Helper()
-	return &http.Client{Transport: versionRoundTripper{latestPyPI: latestPyPI, latestTUI: latestTUI}}
+	return testVersionClientWithPackages(t, latestPyPI, latestTUI, nil)
+}
+
+func testVersionClientWithPackages(t *testing.T, latestPyPI, latestTUI string, latestPackages map[string]string) *http.Client {
+	t.Helper()
+	merged := map[string]string{}
+	for _, pkg := range curatedMCPPackages {
+		merged[pkg] = "1.0.0"
+	}
+	for pkg, version := range latestPackages {
+		merged[pkg] = version
+	}
+	return &http.Client{Transport: versionRoundTripper{latestPyPI: latestPyPI, latestTUI: latestTUI, latestPackages: merged}}
 }
 
 type versionRoundTripper struct {
-	latestPyPI string
-	latestTUI  string
+	latestPyPI     string
+	latestTUI      string
+	latestPackages map[string]string
 }
 
 func (rt versionRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -77,6 +106,13 @@ func (rt versionRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	switch {
 	case req.URL.Host == "pypi.org" && req.URL.Path == "/pypi/lingtai/json":
 		body = fmt.Sprintf(`{"info":{"version":%q}}`, rt.latestPyPI)
+	case req.URL.Host == "pypi.org" && strings.HasPrefix(req.URL.Path, "/pypi/") && strings.HasSuffix(req.URL.Path, "/json"):
+		pkg := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/pypi/"), "/json")
+		version := rt.latestPackages[pkg]
+		if version == "" {
+			version = "1.0.0"
+		}
+		body = fmt.Sprintf(`{"info":{"version":%q}}`, version)
 	case req.URL.Host == "api.github.com" && req.URL.Path == "/repos/Lingtai-AI/lingtai/releases/latest":
 		body = fmt.Sprintf(`{"tag_name":%q}`, rt.latestTUI)
 	default:
@@ -229,10 +265,10 @@ func TestUpgradePythonRuntimeVerifiesPostInstallVersion(t *testing.T) {
 	}
 }
 
-func TestUpgradePythonRuntimeSkipsEditableInstall(t *testing.T) {
-	// Editable installs (pip/uv -e) must be left alone — running pip install
-	// --upgrade would silently clobber the dev source checkout. The check
-	// must skip BOTH the PyPI fetch and the install command.
+func TestUpgradePythonRuntimeSkipsEditableLingtaiInstall(t *testing.T) {
+	// Editable lingtai installs (pip/uv -e) must be left alone: the runtime may
+	// still inspect curated MCP addons, but it must not reinstall the lingtai
+	// wheel and clobber the dev source checkout.
 	runner := &fakeRunner{
 		versions:       []string{"0.10.6"},
 		editableSource: "file:///Users/dev/lingtai-kernel",
@@ -255,16 +291,15 @@ func TestUpgradePythonRuntimeSkipsEditableInstall(t *testing.T) {
 	if !containsLine(result.Lines, "editable install") {
 		t.Fatalf("expected editable-install info line: %+v", result.Lines)
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("editable install must not trigger pip upgrade: %#v", runner.calls)
+	if containsCall(runner.calls, "pip install --upgrade lingtai ") {
+		t.Fatalf("editable install must not trigger lingtai wheel upgrade: %#v", runner.calls)
 	}
 }
 
-func TestUpgradePythonRuntimeForceRespectsEditableInstall(t *testing.T) {
+func TestUpgradePythonRuntimeForceRespectsEditableLingtaiInstall(t *testing.T) {
 	// Even force=true (doctor's repair path) must not clobber an editable
-	// install — a forced wheel reinstall is more destructive than the broken
-	// state it was trying to fix, and the user can always re-create dev mode
-	// with `uv pip install -e`.
+	// lingtai install. Force may repair curated MCP addons, but the command must
+	// not include the lingtai wheel target.
 	runner := &fakeRunner{
 		versions:       []string{"0.10.6"},
 		editableSource: "file:///Users/dev/lingtai-kernel",
@@ -278,11 +313,66 @@ func TestUpgradePythonRuntimeForceRespectsEditableInstall(t *testing.T) {
 		Home:       home,
 		LookupEnv:  env,
 	})
-	if result.Updated {
-		t.Fatalf("forced editable upgrade must not report Updated")
+	if !result.Updated {
+		t.Fatalf("forced editable curated-addon repair should report Updated: %+v", result.Lines)
 	}
-	if containsCall(runner.calls, "pip install --upgrade lingtai") {
-		t.Fatalf("forced editable must not trigger pip upgrade: %#v", runner.calls)
+	if containsCall(runner.calls, "pip install --upgrade lingtai ") {
+		t.Fatalf("forced editable must not trigger lingtai wheel upgrade: %#v", runner.calls)
+	}
+	if !containsCall(runner.calls, "pip install --upgrade lingtai-imap") {
+		t.Fatalf("forced editable should repair curated addons: %#v", runner.calls)
+	}
+}
+
+func TestUpgradePythonRuntimeUpgradesCuratedMCPWhenLingtaiCurrent(t *testing.T) {
+	runner := &fakeRunner{
+		versions: []string{"0.9.7", "0.9.7"},
+		packageVersions: map[string]string{
+			"lingtai-feishu": "0.2.0",
+		},
+	}
+	home, env := noDevHome(t)
+	result := UpgradePythonRuntime(t.TempDir(), false, &UpgradeRuntimeOptions{
+		HTTPClient: testVersionClientWithPackages(t, "0.9.7", "v0.8.1", map[string]string{"lingtai-feishu": "0.2.1"}),
+		Runner:     runner,
+		LookPath:   func(string) (string, error) { return "", errors.New("no uv") },
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	if !result.Healthy || !result.Updated {
+		t.Fatalf("expected healthy updated result for stale curated addon: %+v", result)
+	}
+	if !containsCall(runner.calls, "pip install --upgrade lingtai lingtai-imap lingtai-telegram lingtai-feishu lingtai-wechat lingtai-whatsapp") {
+		t.Fatalf("expected scoped lingtai + curated MCP upgrade call, got %#v", runner.calls)
+	}
+}
+
+func TestUpgradePythonRuntimeEditableUpgradesCuratedMCPWithoutLingtaiWheel(t *testing.T) {
+	runner := &fakeRunner{
+		versions:       []string{"0.10.6"},
+		editableSource: "file:///Users/dev/lingtai-kernel",
+		packageVersions: map[string]string{
+			"lingtai-feishu": "0.2.0",
+		},
+	}
+	home, env := noDevHome(t)
+	result := UpgradePythonRuntime(t.TempDir(), false, &UpgradeRuntimeOptions{
+		HTTPClient: testVersionClientWithPackages(t, "0.10.7", "v0.8.1", map[string]string{"lingtai-feishu": "0.2.1"}),
+		Runner:     runner,
+		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat:       statAllExist,
+		Home:       home,
+		LookupEnv:  env,
+	})
+	if !result.Healthy || !result.Updated {
+		t.Fatalf("expected editable runtime to upgrade stale curated addon only: %+v", result)
+	}
+	if containsCall(runner.calls, "pip install --upgrade lingtai ") {
+		t.Fatalf("editable runtime must not include lingtai wheel target: %#v", runner.calls)
+	}
+	if !containsCall(runner.calls, "pip install --upgrade lingtai-imap lingtai-telegram lingtai-feishu lingtai-wechat lingtai-whatsapp") {
+		t.Fatalf("expected scoped curated MCP upgrade call, got %#v", runner.calls)
 	}
 }
 

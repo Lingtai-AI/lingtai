@@ -16,6 +16,14 @@ import (
 	"time"
 )
 
+var curatedMCPPackages = []string{
+	"lingtai-imap",
+	"lingtai-telegram",
+	"lingtai-feishu",
+	"lingtai-wechat",
+	"lingtai-whatsapp",
+}
+
 // RuntimeVenvDir returns ~/.lingtai-tui/runtime/venv/.
 func RuntimeVenvDir(globalDir string) string {
 	return filepath.Join(globalDir, "runtime", "venv")
@@ -126,7 +134,10 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		name, args := devEditableInstallCommand(globalDir, venvPython, dev, exec.LookPath)
 		install = exec.Command(name, args...)
 	} else if uvCmd != "" {
-		install = exec.Command(uvCmd, "pip", "install", "lingtai", "-p", venvPath)
+		args := []string{"pip", "install", "lingtai"}
+		args = append(args, curatedMCPPackages...)
+		args = append(args, "-p", venvPath)
+		install = exec.Command(uvCmd, args...)
 	} else {
 		var pipCmd string
 		if runtime.GOOS == "windows" {
@@ -134,7 +145,9 @@ func ensureVenv(globalDir string, quiet bool, progress ProgressFunc) error {
 		} else {
 			pipCmd = filepath.Join(venvPath, "bin", "pip")
 		}
-		install = exec.Command(pipCmd, "install", "lingtai")
+		args := []string{"install", "lingtai"}
+		args = append(args, curatedMCPPackages...)
+		install = exec.Command(pipCmd, args...)
 	}
 	if !quiet {
 		install.Stdout = os.Stdout
@@ -293,8 +306,9 @@ func EnsureAddons(python, agentDir string) error {
 	return nil
 }
 
-// CheckUpgrade compares installed lingtai version to PyPI latest.
-// Runs pip install --upgrade if a newer version is available.
+// CheckUpgrade compares installed lingtai and LingTai curated MCP addon
+// package versions to PyPI latest. Runs pip install --upgrade if a newer
+// lingtai or curated addon version is available.
 // Returns true if an upgrade was performed.
 // Non-blocking: silently returns false on any error (offline, timeout, etc.).
 func CheckUpgrade(globalDir string) bool {
@@ -791,6 +805,7 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 			editable, source := isEditableLingtaiInstall(opts.Runner, python)
 			if editable && dev.isEditableForKernel(source) {
 				result.add(DoctorOK, "Python lingtai already editable for local dev checkout (%s); skipping reinstall", dev.KernelSrc)
+				maybeUpgradeCuratedMCPPackages(&result, globalDir, python, opts, force)
 				return result
 			}
 			result.add(DoctorInfo, "Local dev checkout detected at %s; installing lingtai editable to replace the %s runtime",
@@ -823,10 +838,11 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 	// install -e`.
 	if editable, editableSource := isEditableLingtaiInstall(opts.Runner, python); editable {
 		if editableSource != "" {
-			result.add(DoctorOK, "Python lingtai is an editable install (%s); skipping upgrade", editableSource)
+			result.add(DoctorOK, "Python lingtai is an editable install (%s); skipping lingtai wheel upgrade", editableSource)
 		} else {
-			result.add(DoctorOK, "Python lingtai is an editable install; skipping upgrade")
+			result.add(DoctorOK, "Python lingtai is an editable install; skipping lingtai wheel upgrade")
 		}
+		maybeUpgradeCuratedMCPPackages(&result, globalDir, python, opts, force)
 		return result
 	}
 
@@ -838,8 +854,8 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 		}
 	} else {
 		result.add(DoctorInfo, "Latest Python lingtai on PyPI: %s", latest)
-		if !force && installed == latest {
-			result.add(DoctorOK, "Python lingtai runtime is up to date")
+		if !force && installed == latest && !curatedMCPPackagesNeedUpgrade(&result, python, opts) {
+			result.add(DoctorOK, "Python lingtai runtime and curated MCP addons are up to date")
 			return result
 		}
 	}
@@ -947,15 +963,110 @@ except Exception:
 	return true, source
 }
 
+func curatedMCPPackagesNeedUpgrade(result *UpgradeRuntimeResult, python string, opts *UpgradeRuntimeOptions) bool {
+	needsUpgrade := false
+	for _, pkg := range curatedMCPPackages {
+		installed, err := pythonPackageVersion(opts.Runner, python, pkg)
+		if err != nil {
+			result.add(DoctorWarn, "Could not import curated MCP package %s from %s: %v", pkg, python, err)
+			needsUpgrade = true
+			continue
+		}
+		latest, err := fetchLatestPyPIPackageVersion(opts.HTTPClient, pkg)
+		if err != nil {
+			result.add(DoctorWarn, "Could not check latest %s on PyPI: %v", pkg, err)
+			continue
+		}
+		result.add(DoctorInfo, "Curated MCP %s: installed %s, latest %s", pkg, installed, latest)
+		if packageVersionNewer(installed, latest) {
+			needsUpgrade = true
+		}
+	}
+	return needsUpgrade
+}
+
+func maybeUpgradeCuratedMCPPackages(result *UpgradeRuntimeResult, globalDir, python string, opts *UpgradeRuntimeOptions, force bool) {
+	if !force && !curatedMCPPackagesNeedUpgrade(result, python, opts) {
+		result.add(DoctorOK, "LingTai curated MCP addons are up to date")
+		return
+	}
+	argsName, args := curatedMCPUpgradeCommand(globalDir, python, opts.LookPath)
+	result.add(DoctorInfo, "Running: %s %s", argsName, strings.Join(args, " "))
+	cmdResult := opts.Runner.Run(argsName, args...)
+	appendCommandOutputToRuntime(result, cmdResult)
+	if cmdResult.Err != nil {
+		result.add(DoctorFail, "Curated MCP addon upgrade command failed: %v", cmdResult.Err)
+		return
+	}
+	result.Updated = true
+	result.add(DoctorOK, "LingTai curated MCP addons verified after upgrade")
+}
+
+func pythonPackageVersion(runner CommandRunner, python, pkg string) (string, error) {
+	script := fmt.Sprintf(`from importlib.metadata import version; print(version(%q))`, pkg)
+	res := runner.Run(python, "-c", script)
+	if res.Err != nil {
+		detail := strings.TrimSpace(res.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(res.Stdout)
+		}
+		if detail == "" {
+			detail = res.Err.Error()
+		}
+		return "", fmt.Errorf("%s", lastNonEmptyLine(detail))
+	}
+	version := strings.TrimSpace(res.Stdout)
+	if version == "" {
+		return "", fmt.Errorf("empty version output")
+	}
+	return version, nil
+}
+
+func fetchLatestPyPIPackageVersion(client *http.Client, pkg string) (string, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Second}
+	}
+	resp, err := client.Get("https://pypi.org/pypi/" + pkg + "/json")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("PyPI returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var pypi struct {
+		Info struct {
+			Version string `json:"version"`
+		} `json:"info"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pypi); err != nil {
+		return "", err
+	}
+	if pypi.Info.Version == "" {
+		return "", fmt.Errorf("PyPI response for %s had no info.version", pkg)
+	}
+	return pypi.Info.Version, nil
+}
+
+func packageVersionNewer(currentVersion, latestVersion string) bool {
+	return releaseNewer(currentVersion, latestVersion)
+}
+
 func runtimeUpgradeCommand(globalDir, python string, lookPath func(string) (string, error)) (string, []string) {
 	if uv, err := lookPath("uv"); err == nil && uv != "" {
-		return uv, []string{"pip", "install", "--upgrade", "lingtai", "-p", RuntimeVenvDir(globalDir)}
+		args := []string{"pip", "install", "--upgrade", "lingtai"}
+		args = append(args, curatedMCPPackages...)
+		args = append(args, "-p", RuntimeVenvDir(globalDir))
+		return uv, args
 	}
 	pipCmd := filepath.Join(filepath.Dir(python), "pip")
 	if runtime.GOOS == "windows" {
 		pipCmd = filepath.Join(filepath.Dir(python), "pip.exe")
 	}
-	return pipCmd, []string{"install", "--upgrade", "lingtai"}
+	args := []string{"install", "--upgrade", "lingtai"}
+	args = append(args, curatedMCPPackages...)
+	return pipCmd, args
 }
 
 // devRuntimeKind labels the runtime being replaced, for the log line.
@@ -978,6 +1089,8 @@ func devEditableInstallCommand(globalDir, python string, dev devCheckout, lookPa
 		for _, t := range targets {
 			args = append(args, "-e", t)
 		}
+		args = append(args, "--upgrade")
+		args = append(args, curatedMCPPackages...)
 		args = append(args, "-p", RuntimeVenvDir(globalDir))
 		return uv, args
 	}
@@ -989,6 +1102,24 @@ func devEditableInstallCommand(globalDir, python string, dev devCheckout, lookPa
 	for _, t := range targets {
 		args = append(args, "-e", t)
 	}
+	args = append(args, "--upgrade")
+	args = append(args, curatedMCPPackages...)
+	return pipCmd, args
+}
+
+func curatedMCPUpgradeCommand(globalDir, python string, lookPath func(string) (string, error)) (string, []string) {
+	if uv, err := lookPath("uv"); err == nil && uv != "" {
+		args := []string{"pip", "install", "--upgrade"}
+		args = append(args, curatedMCPPackages...)
+		args = append(args, "-p", RuntimeVenvDir(globalDir))
+		return uv, args
+	}
+	pipCmd := filepath.Join(filepath.Dir(python), "pip")
+	if runtime.GOOS == "windows" {
+		pipCmd = filepath.Join(filepath.Dir(python), "pip.exe")
+	}
+	args := []string{"install", "--upgrade"}
+	args = append(args, curatedMCPPackages...)
 	return pipCmd, args
 }
 

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>LingTai runtime curated MCP upgrade fix</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.6;margin:0;background:#f7f7fb;color:#222}.wrap{max-width:960px;margin:0 auto;padding:32px}section{background:white;border:1px solid #e6e6ef;border-radius:14px;padding:22px;margin:16px 0;box-shadow:0 2px 8px #00000008}h1{font-size:30px;margin:0 0 10px}h2{margin-top:0;color:#27325f}.pill{display:inline-block;background:#e9f2ff;color:#174a8b;border-radius:999px;padding:4px 10px;font-size:13px;margin-right:8px}code{background:#f0f0f6;border-radius:5px;padding:2px 5px}pre{background:#101828;color:#e6edf3;border-radius:10px;padding:14px;overflow:auto}.ok{color:#147a3d;font-weight:600}.warn{color:#9a5b00;font-weight:600}ul{padding-left:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.grid{grid-template-columns:1fr}}</style>
+</head>
+<body><div class="wrap">
+<h1>Runtime upgrade now refreshes LingTai curated MCP packages</h1>
+<p><span class="pill">Repo: Lingtai-AI/lingtai</span><span class="pill">Branch: fix/runtime-eager-addon-upgrade</span><span class="pill">Date: 2026-06-12</span></p>
+<section><h2>结论</h2>
+<p>这个改动修的是 Feishu stale PyPI 包暴露出来的长期问题：<code>pip install --upgrade lingtai</code> 默认只升级指定包，依赖如果仍满足 loose lower bound 就不会动。因此 runtime 以后不再只升级 <code>lingtai</code>，而是显式把 LingTai curated MCP 包一起列为升级目标。</p>
+<pre>lingtai
+lingtai-imap
+lingtai-telegram
+lingtai-feishu
+lingtai-wechat
+lingtai-whatsapp</pre>
+<p>范围是刻意收窄的：<strong>不使用全局 eager dependency upgrade</strong>，不会让任意三方传递依赖都跟着升级。</p>
+</section>
+<section><h2>行为变化</h2><div class="grid"><div><h3>普通 PyPI runtime</h3><ul><li>启动/doctor 检查 <code>lingtai</code> 版本。</li><li>同时检查五个 curated MCP 包的 installed/latest 版本。</li><li>如果 <code>lingtai</code> 或任一 curated MCP 过旧，运行 scoped upgrade。</li></ul></div><div><h3>editable/dev runtime</h3><ul><li>继续保护 editable <code>lingtai</code>，不 clobber 本地 kernel checkout。</li><li>但仍检查并升级 curated MCP wheel 包。</li><li>force/doctor 模式也只修 addon，不把 <code>lingtai</code> 换回 wheel。</li></ul></div></div></section>
+<section><h2>实现点</h2><ul><li><code>tui/internal/config/venv.go</code> 新增 curated MCP 包列表和版本检查。</li><li><code>runtimeUpgradeCommand</code>：升级命令变成 <code>lingtai + curated MCP packages</code>。</li><li><code>curatedMCPUpgradeCommand</code>：editable runtime 下只升级 curated MCP 包，不含 <code>lingtai</code>。</li><li><code>EnsureVenv</code> / dev editable install 初次安装也显式安装 curated MCP 包。</li><li>测试 fake runner 增加 <code>importlib.metadata.version()</code> 与 per-package PyPI JSON 支持。</li><li><code>ANATOMY.md</code> 更新，明确不是 arbitrary dependency eager upgrade。</li></ul></section>
+<section><h2>验证</h2><p class="ok">已通过 focused 测试：</p><pre>cd tui && go test ./internal/config</pre><p>提交/PR 前还会继续跑：</p><pre>git diff --check
+cd tui && go test ./...</pre></section>
+<section><h2>边界</h2><ul><li>这个 PR 解决“runtime upgrade 时 addon 不跟新”的机制问题。</li><li>Feishu 当前 issue 还需要另一个 PR：发布/准备 <code>lingtai-feishu 0.2.1</code>。</li><li>kernel 还需要另一个 PR：把依赖下限提高到 <code>lingtai-feishu&gt;=0.2.1</code>，防止 fresh install 选择旧包。</li></ul></section>
+</div></body></html>
