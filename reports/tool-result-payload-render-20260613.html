@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TUI tool_result payload rendering</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --text:#e5e7eb; --muted:#94a3b8; --line:#334155; --accent:#38bdf8; --ok:#34d399; --warn:#fbbf24; --code:#020617; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top left,#1e3a8a 0,#0f172a 42%,#020617 100%); color:var(--text); line-height:1.6; }
+    main { max-width:1100px; margin:0 auto; padding:40px 22px 72px; }
+    h1 { font-size:clamp(30px,5vw,48px); line-height:1.08; margin:0 0 12px; letter-spacing:-.04em; }
+    h2 { margin-top:34px; padding-top:24px; border-top:1px solid var(--line); }
+    p, li { color:#cbd5e1; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { color:#bae6fd; background:rgba(2,6,23,.65); padding:2px 5px; border-radius:6px; }
+    pre { white-space:pre-wrap; overflow:auto; background:var(--code); border:1px solid #1f2937; border-radius:16px; padding:16px; color:#dbeafe; }
+    .badge { display:inline-block; padding:4px 10px; border:1px solid #2563eb; border-radius:999px; background:rgba(37,99,235,.16); color:#bfdbfe; font-size:13px; }
+    .lede { font-size:18px; color:#d1d5db; max-width:920px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; margin:20px 0; }
+    .card { background:rgba(17,24,39,.86); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 12px 36px rgba(0,0,0,.25); }
+    .callout { border-left:4px solid var(--accent); background:rgba(56,189,248,.09); padding:14px 16px; border-radius:12px; }
+    .ok { border-left-color:var(--ok); background:rgba(52,211,153,.09); }
+    .warn { border-left-color:var(--warn); background:rgba(251,191,36,.09); }
+    table { width:100%; border-collapse:collapse; background:rgba(17,24,39,.72); border-radius:16px; overflow:hidden; }
+    th, td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:#bfdbfe; background:rgba(30,41,59,.9); }
+    tr:last-child td { border-bottom:0; }
+    .small { color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <span class="badge">LingTai TUI follow-up for kernel PR #273</span>
+  <h1>Render full <code>tool_result</code> payloads in the TUI</h1>
+  <p class="lede">Jason asked whether PR #273’s nested <code>tool_error</code> metadata would be visible in the terminal UI. Source inspection showed it was LLM-visible but not TUI-visible: the TUI reduced every <code>tool_result</code> event to <code>tool_name → status elapsed_ms</code>. This change makes the TUI render the result payload regardless of shape, with a 10,000-character cap.</p>
+
+  <div class="callout ok"><strong>Outcome:</strong> In Ctrl+O extended view, a failed tool result now shows the normal summary, then <code>tool_error</code> reason / arg keys / guidance when present, then the rendered <code>result</code>. Strings, scalars, arrays, objects, and spill manifests all render in a deterministic form.</div>
+
+  <h2>Problem</h2>
+  <p>Kernel PR #273 adds model-visible recovery metadata under <code>result.tool_error</code>, but the current TUI session ingestion path threw the payload away when producing the chat stream body:</p>
+  <pre><code>[tool_result] system → error 12ms</code></pre>
+  <p>That meant an operator using the TUI could not see why the tool failed or what recovery guidance the model received.</p>
+
+  <h2>Change</h2>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>tui/internal/fs/session.go</code></td><td>Replaced the one-line <code>tool_result</code> body builder with <code>formatToolResultEvent</code>. It renders any <code>result</code> form; nested <code>tool_error</code> is surfaced first; long result text is capped at 10,000 runes.</td></tr>
+      <tr><td><code>tui/internal/fs/session_tail_test.go</code></td><td>Added parser tests for nested <code>tool_error</code> visibility and long scalar result truncation.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Rendered shape</h2>
+  <pre><code>[tool_result] system → error 12ms
+  tool_error: system failed during tool_returned_error: event_id is stale
+  arg_keys: action, event_id
+  guidance:
+  - Do not blindly retry the same tool call unchanged.
+  - If the failure depends on mutable external state, read the current state before retrying.
+  result: {
+    "status": "error",
+    "message": "event_id is stale",
+    "tool_error": { ... }
+  }</code></pre>
+
+  <h2>Cap behavior</h2>
+  <p>The cap applies to the rendered <code>result:</code> text, not to the concise summary lines. It is rune-based, so non-ASCII text is not split mid-byte. If the result exceeds 10,000 characters, the TUI appends:</p>
+  <pre><code>… truncated to 10000 chars</code></pre>
+  <p>Existing kernel spill manifests are rendered as their manifest JSON. The TUI does not read sidecar files; that keeps the UI path read-only and avoids unexpectedly loading huge artifacts.</p>
+
+  <h2>Validation</h2>
+  <ul>
+    <li><code>go test ./internal/fs</code> — passed.</li>
+    <li><code>go test ./...</code> from the <code>tui</code> module — passed, including headless tests.</li>
+  </ul>
+
+  <h2>Boundary</h2>
+  <div class="callout warn">This TUI PR does not change the kernel’s tool-result semantics. Kernel PR #273 remains the source of the nested <code>tool_error</code> payload; this PR only preserves and displays that information in the terminal UI.</div>
+
+  <p class="small">Worktree: <code>/Users/huangzesen/work/GitHub/lingtai/.worktrees/render-tool-result-payload-20260613</code>. Generated 2026-06-13.</p>
+</main>
+</body>
+</html>

@@ -692,15 +692,98 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 		// is no truncation, so this path keeps full content.
 		return fmt.Sprintf("%s(%s)", name, args)
 	case "tool_result":
-		name, _ := entry["tool_name"].(string)
-		status, _ := entry["status"].(string)
-		elapsed := ""
-		if ms, ok := entry["elapsed_ms"].(float64); ok {
-			elapsed = fmt.Sprintf(" %dms", int(ms))
-		}
-		return fmt.Sprintf("%s → %s%s", name, status, elapsed)
+		return formatToolResultEvent(entry)
 	}
 	return ""
+}
+
+const maxToolResultRenderChars = 10000
+
+func formatToolResultEvent(entry map[string]interface{}) string {
+	name, _ := entry["tool_name"].(string)
+	status, _ := entry["status"].(string)
+	elapsed := ""
+	if ms, ok := entry["elapsed_ms"].(float64); ok {
+		elapsed = fmt.Sprintf(" %dms", int(ms))
+	}
+
+	lines := []string{fmt.Sprintf("%s → %s%s", name, status, elapsed)}
+	result, hasResult := entry["result"]
+	if !hasResult {
+		return lines[0]
+	}
+
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		if toolErr, ok := resultMap["tool_error"].(map[string]interface{}); ok {
+			lines = append(lines, formatToolErrorSummary(toolErr)...)
+		}
+	}
+
+	if resultText := formatToolResultValue(result); resultText != "" {
+		lines = append(lines, "result: "+truncateToolResultText(resultText))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatToolErrorSummary(toolErr map[string]interface{}) []string {
+	var lines []string
+	if reason, ok := toolErr["reason"].(string); ok && reason != "" {
+		lines = append(lines, "tool_error: "+reason)
+	} else if summary, ok := toolErr["summary"].(string); ok && summary != "" {
+		lines = append(lines, "tool_error: "+summary)
+	}
+	if argKeys := stringifyToolResultList(toolErr["arg_keys"]); len(argKeys) > 0 {
+		lines = append(lines, "arg_keys: "+strings.Join(argKeys, ", "))
+	}
+	if guidance := stringifyToolResultList(toolErr["guidance"]); len(guidance) > 0 {
+		lines = append(lines, "guidance:")
+		for _, item := range guidance {
+			lines = append(lines, "- "+item)
+		}
+	}
+	return lines
+}
+
+func stringifyToolResultList(value interface{}) []string {
+	items, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		switch v := item.(type) {
+		case string:
+			if v != "" {
+				out = append(out, v)
+			}
+		default:
+			out = append(out, fmt.Sprint(v))
+		}
+	}
+	return out
+}
+
+func formatToolResultValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return v
+	default:
+		data, err := json.MarshalIndent(v, "", "  ")
+		if err == nil {
+			return string(data)
+		}
+		return fmt.Sprint(v)
+	}
+}
+
+func truncateToolResultText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= maxToolResultRenderChars {
+		return text
+	}
+	return string(runes[:maxToolResultRenderChars]) + fmt.Sprintf("\n… truncated to %d chars", maxToolResultRenderChars)
 }
 
 // ---------------------------------------------------------------------------

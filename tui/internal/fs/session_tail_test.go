@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -308,5 +309,79 @@ func TestParseEventNotificationNoMeta(t *testing.T) {
 	}
 	if e.Meta != nil {
 		t.Errorf("Meta = %+v; want nil for legacy events", e.Meta)
+	}
+}
+
+func TestParseEventToolResultRendersToolErrorPayload(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":            1781258400.0,
+		"type":          "tool_result",
+		"tool_name":     "system",
+		"status":        "error",
+		"elapsed_ms":    12.0,
+		"tool_trace_id": "trace-1",
+		"result": map[string]interface{}{
+			"status":    "error",
+			"message":   "event_id is stale",
+			"retryable": "unknown",
+			"tool_args": map[string]interface{}{"action": "dismiss", "event_id": "old"},
+			"arg_keys":  []interface{}{"action", "event_id"},
+			"tool_error": map[string]interface{}{
+				"reason":   "system failed during tool_returned_error: event_id is stale",
+				"arg_keys": []interface{}{"action", "event_id"},
+				"guidance": []interface{}{
+					"Do not blindly retry the same tool call unchanged.",
+					"If the failure depends on mutable external state, read the current state before retrying.",
+				},
+			},
+		},
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil")
+	}
+	if e.Type != "tool_result" {
+		t.Fatalf("Type = %q, want tool_result", e.Type)
+	}
+	for _, want := range []string{
+		"system → error 12ms",
+		"tool_error: system failed during tool_returned_error: event_id is stale",
+		"arg_keys: action, event_id",
+		"guidance:",
+		"- Do not blindly retry the same tool call unchanged.",
+		"result: {",
+	} {
+		if !strings.Contains(e.Body, want) {
+			t.Fatalf("Body missing %q:\n%s", want, e.Body)
+		}
+	}
+}
+
+func TestParseEventToolResultRendersScalarAndCapsLongResult(t *testing.T) {
+	long := strings.Repeat("界", maxToolResultRenderChars+5)
+	raw := map[string]interface{}{
+		"ts":         1781258400.0,
+		"type":       "tool_result",
+		"tool_name":  "bash",
+		"status":     "ok",
+		"elapsed_ms": 1.0,
+		"result":     long,
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil")
+	}
+	if !strings.Contains(e.Body, "bash → ok 1ms") {
+		t.Fatalf("Body missing summary: %s", e.Body[:80])
+	}
+	if !strings.Contains(e.Body, "truncated to 10000 chars") {
+		t.Fatalf("Body missing truncation marker")
+	}
+	if got := strings.Count(e.Body, "界"); got != maxToolResultRenderChars {
+		t.Fatalf("rendered rune count = %d, want %d", got, maxToolResultRenderChars)
 	}
 }
