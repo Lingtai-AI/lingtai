@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>ctrl+o API-call spacing hotfix</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:900px;margin:40px auto;padding:0 24px;line-height:1.55;color:#222}code{background:#f4f1ec;padding:.1em .3em;border-radius:4px}h1{color:#6b3f1d}.ok{background:#eef8ee;border-left:4px solid #3a7d44;padding:12px 16px}.note{background:#fff8e8;border-left:4px solid #d69b2d;padding:12px 16px}li{margin:.35em 0}</style>
+<h1>ctrl+o API-call spacing hotfix</h1>
+<p class="ok"><strong>Conclusion:</strong> the hotfix groups all ctrl+o verbose LLM-round-trip entries by <code>api_call_id</code>, so diary/internal output from separate API calls gets a blank separator while entries from the same API call stay together.</p>
+<h2>What broke</h2>
+<p>PR #323 fixed <code>text_output</code> spacing by API call, but <code>thinking</code>, <code>diary</code>, and <code>text_input</code> still did not inherit the derived <code>api_call_id</code>. That left diary/internal output visually glued together even though the hidden <code>llm_response</code> markers already identified API-call boundaries.</p>
+<h2>What changed</h2>
+<ul>
+<li><code>buildMessages</code> now assigns derived API-call ids to <code>thinking</code>, <code>diary</code>, <code>text_input</code>, <code>text_output</code>, <code>tool_call</code>, and <code>tool_result</code>.</li>
+<li><code>renderMessages</code> now tracks one previous visible API-grouped verbose entry across internal output and tools.</li>
+<li><code>apiCallGroupSeparatorBefore</code> inserts a blank line only when the non-empty <code>api_call_id</code> changes.</li>
+<li>Legacy tool streams without metadata keep the old <code>tool_result</code> → <code>tool_call</code> fallback separator.</li>
+</ul>
+<h2>Validation</h2>
+<ul>
+<li>Focused render/build tests for diary, mixed verbose entries, existing text output, and tool grouping.</li>
+<li><code>cd tui && go test ./internal/tui -count=1</code></li>
+<li><code>git diff --check</code></li>
+</ul>
+<p class="note">This PR only opens the fix; it does not merge or rebuild unless Jason approves.</p>

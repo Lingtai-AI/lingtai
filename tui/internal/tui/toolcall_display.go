@@ -63,6 +63,31 @@ func toolGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 	return prev.Type == "tool_result" && cur.Type == "tool_call"
 }
 
+func isApiGroupedVerboseMessageType(t string) bool {
+	switch t {
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
+		return true
+	default:
+		return false
+	}
+}
+
+// apiCallGroupSeparatorBefore reports whether a blank separator line should be
+// rendered before cur in the ctrl+o verbose stream. Thinking/diary/text/tool
+// entries that share an api_call_id came from the same LLM API round-trip and
+// stay visually grouped; a non-empty api_call_id change starts a new group.
+// Legacy tool streams without metadata keep the historical tool_result ->
+// tool_call fallback so older transcripts still show a visible boundary.
+func apiCallGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
+	if prev == nil || !isApiGroupedVerboseMessageType(prev.Type) || !isApiGroupedVerboseMessageType(cur.Type) {
+		return false
+	}
+	if prev.ApiCallID != "" || cur.ApiCallID != "" {
+		return prev.ApiCallID != cur.ApiCallID
+	}
+	return toolGroupSeparatorBefore(prev, cur)
+}
+
 func isTextOutputMessageType(t string) bool {
 	return t == "text_output"
 }

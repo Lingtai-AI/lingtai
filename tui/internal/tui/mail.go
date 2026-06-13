@@ -400,7 +400,7 @@ func (m *MailModel) buildMessages() {
 			}
 		case "llm_call":
 			currentApiCallID = ""
-		case "text_output", "tool_call", "tool_result":
+		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
 			if e.ApiCallID == "" {
 				e.ApiCallID = currentApiCallID
 			}
@@ -891,14 +891,10 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	var b strings.Builder
-	var prevVisibleTool *ChatMessage
-	var prevVisibleTextOutput *ChatMessage
+	var prevVisibleApiGroup *ChatMessage
 	for _, msg := range msgs {
-		if !isToolMessageType(msg.Type) {
-			prevVisibleTool = nil
-		}
-		if msg.Type != "text_output" {
-			prevVisibleTextOutput = nil
+		if !isApiGroupedVerboseMessageType(msg.Type) {
+			prevVisibleApiGroup = nil
 		}
 		switch msg.Type {
 		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
@@ -911,12 +907,12 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			tsPrefix := ""
 			switch msg.Type {
 			case "thinking", "diary", "text_input", "text_output":
-				if textOutputGroupSeparatorBefore(prevVisibleTextOutput, msg) {
+				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
 					b.WriteString("\n")
 				}
 				evStyle = thinkingStyle
 			default:
-				if toolGroupSeparatorBefore(prevVisibleTool, msg) {
+				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
 					b.WriteString("\n")
 				}
 				evStyle = toolStyle
@@ -931,13 +927,9 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
 			}
-			if msg.Type == "text_output" {
+			if isApiGroupedVerboseMessageType(msg.Type) {
 				msgCopy := msg
-				prevVisibleTextOutput = &msgCopy
-			}
-			if msg.Type == "tool_call" || msg.Type == "tool_result" {
-				msgCopy := msg
-				prevVisibleTool = &msgCopy
+				prevVisibleApiGroup = &msgCopy
 			}
 
 		case "soul_flow":

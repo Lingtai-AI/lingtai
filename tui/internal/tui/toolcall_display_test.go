@@ -294,3 +294,86 @@ func TestBuildMessagesAssignsApiCallIDToTextOutput(t *testing.T) {
 		t.Fatalf("text_output api_call_id values = %q, %q; want api_one, api_two", textOutputs[0].ApiCallID, textOutputs[1].ApiCallID)
 	}
 }
+
+func TestRenderMessages_InsertsBlankLineBetweenDiaryApiCallGroups(t *testing.T) {
+	m := MailModel{width: 100}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "diary", Body: "first diary", ApiCallID: "api_one"},
+		{Type: "diary", Body: "second diary", ApiCallID: "api_two"},
+	})
+	if !strings.Contains(out, "first diary") || !strings.Contains(out, "second diary") {
+		t.Fatalf("rendered output missing diary bodies: %q", out)
+	}
+	if !strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a blank separator line between diary api groups, got %q", out)
+	}
+}
+
+func TestRenderMessages_KeepsMixedVerboseEntriesInSameApiCallGroup(t *testing.T) {
+	m := MailModel{width: 100}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "diary", Body: "reasoning", ApiCallID: "api_one"},
+		{Type: "text_output", Body: "answer", ApiCallID: "api_one"},
+		{Type: "tool_call", Body: "read({})", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
+		{Type: "tool_result", Body: "read ok", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
+	})
+	if strings.Contains(out, "\n\n") {
+		t.Fatalf("mixed verbose entries from the same api_call_id should stay grouped, got %q", out)
+	}
+}
+
+func TestRenderMessages_SeparatesMixedVerboseApiCallGroups(t *testing.T) {
+	m := MailModel{width: 100}
+	out := m.renderMessages([]ChatMessage{
+		{Type: "diary", Body: "first diary", ApiCallID: "api_one"},
+		{Type: "tool_call", Body: "read({})", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
+		{Type: "diary", Body: "second diary", ApiCallID: "api_two"},
+	})
+	if !strings.Contains(out, "first diary") || !strings.Contains(out, "second diary") {
+		t.Fatalf("rendered output missing mixed verbose bodies: %q", out)
+	}
+	if !strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a blank separator line before the new api group, got %q", out)
+	}
+}
+
+func TestBuildMessagesAssignsApiCallIDToDiaryThinkingAndTextInput(t *testing.T) {
+	humanDir := t.TempDir()
+	orchDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(orchDir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	events := strings.Join([]string{
+		`{"ts":1781300000,"type":"llm_response","api_call_id":"api_one"}`,
+		`{"ts":1781300001,"type":"diary","text":"first diary"}`,
+		`{"ts":1781300002,"type":"thinking","text":"first thinking"}`,
+		`{"ts":1781300003,"type":"text_input","text":"first input"}`,
+		`{"ts":1781300004,"type":"llm_call","api_call_id":"api_two"}`,
+		`{"ts":1781300005,"type":"llm_response","api_call_id":"api_two"}`,
+		`{"ts":1781300006,"type":"diary","text":"second diary"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(orchDir, "logs", "events.jsonl"), []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", unlimitedPageSize, "", "en", false, 0)
+	m.verbose = verboseThinking
+	m.buildMessages()
+
+	got := map[string][]string{}
+	for _, msg := range m.messages {
+		switch msg.Type {
+		case "diary", "thinking", "text_input":
+			got[msg.Type] = append(got[msg.Type], msg.ApiCallID)
+		}
+	}
+	if ids := got["diary"]; len(ids) != 2 || ids[0] != "api_one" || ids[1] != "api_two" {
+		t.Fatalf("diary api_call_id values = %#v, want [api_one api_two]", ids)
+	}
+	if ids := got["thinking"]; len(ids) != 1 || ids[0] != "api_one" {
+		t.Fatalf("thinking api_call_id values = %#v, want [api_one]", ids)
+	}
+	if ids := got["text_input"]; len(ids) != 1 || ids[0] != "api_one" {
+		t.Fatalf("text_input api_call_id values = %#v, want [api_one]", ids)
+	}
+}
