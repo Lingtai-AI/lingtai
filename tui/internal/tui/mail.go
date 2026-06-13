@@ -83,8 +83,8 @@ type verboseLevel int
 
 const (
 	verboseOff      verboseLevel = iota // normal: mail only
-	verboseThinking                     // ctrl+o cycle: mail + soul + tool_result first lines
-	verboseExtended                     // ctrl+o cycle: everything (+ tool_call, full tool_result)
+	verboseThinking                     // ctrl+o cycle: mail + soul + tool_call/tool_result first lines
+	verboseExtended                     // ctrl+o cycle: full tool_call/tool_result
 )
 
 // spinnerFrames is a star-burst spinner shown flanking the thinking quote.
@@ -437,14 +437,11 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 		return true
 	case "thinking", "diary", "text_input", "text_output", "soul_flow", "notification", "aed":
 		return m.verbose >= verboseThinking
-	case "tool_result":
-		// Ctrl+O level 2 uses tool results as compact progress markers:
+	case "tool_call", "tool_result":
+		// Ctrl+O level 1 uses tool entries as compact progress markers:
 		// render only the first line there, and reserve the full body for
-		// level 3. Tool calls remain level-3-only because their args can be
-		// just as noisy as result payloads.
+		// level 2. The cycle has no third verbose layer.
 		return m.verbose >= verboseThinking
-	case "tool_call":
-		return m.verbose >= verboseExtended
 	case "llm_call", "llm_response":
 		// Hidden boundary markers used to derive tool-call grouping for older
 		// events that predate explicit api_call_id on tool events.
@@ -922,14 +919,14 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 					b.WriteString("\n")
 				}
 				evStyle = toolStyle
-				// Tool lines get a leading timestamp. Ctrl+O level 2 shows only
-				// the first line of tool_result as a compact index; Ctrl+O level 3
-				// shows full tool calls/results, still honoring the user's
+				// Tool lines get a leading timestamp. Ctrl+O level 1 shows only
+				// the first line of tool_call/tool_result as a compact index; Ctrl+O
+				// level 2 shows full tool calls/results, still honoring the user's
 				// per-tool-call truncation setting (0 = full content, the default).
 				if ts := formatToolTimestamp(msg.Timestamp); ts != "" {
 					tsPrefix = StyleFaint.Render(ts) + " "
 				}
-				if msg.Type == "tool_result" && m.verbose == verboseThinking {
+				if isToolMessageType(msg.Type) && m.verbose == verboseThinking {
 					body = firstRenderedLine(body)
 				} else {
 					body = truncateToolBody(body, m.toolCallTruncate)
