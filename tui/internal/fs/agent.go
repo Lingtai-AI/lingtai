@@ -572,6 +572,8 @@ func DeriveLedgerProvider(endpoint, model string) string {
 		return "gemini"
 	case strings.Contains(ep, "openrouter.ai"):
 		return "openrouter"
+	case strings.Contains(ep, "api.nvidia.com"):
+		return "nvidia"
 	case ep != "":
 		// Recognized URL but not in our table — surface the host so the
 		// user can still see the breakdown without a code change.

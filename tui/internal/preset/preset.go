@@ -215,7 +215,7 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "openrouter": 5, "codex": 6, "custom": 7,
+		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7, "custom": 8,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -451,6 +451,7 @@ func BuiltinPresets() []Preset {
 		deepseekPreset(),
 		geminiPreset(),
 		kimiPreset(),
+		nvidiaPreset(),
 		openrouterPreset(),
 		codexPreset(),
 		customPreset(),
@@ -468,6 +469,7 @@ var builtinNames = map[string]bool{
 	"deepseek":    true,
 	"gemini":      true,
 	"kimi":        true,
+	"nvidia":      true,
 	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
@@ -899,6 +901,36 @@ func kimiPreset() Preset {
 			// Kimi Code is text-only — no media generation. For audio
 			// analysis use the `listen` skill; for media creation register
 			// the MiniMax-Media MCP server via the `mcp-manual` skill.
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
+func nvidiaPreset() Preset {
+	// NVIDIA NIM / NVIDIA API Catalog (build.nvidia.com) — an
+	// OpenAI-compatible /chat/completions gateway hosting a large catalog
+	// of open-weight models (Llama, Qwen, Kimi, GPT-OSS, Nemotron, ...) at
+	// no per-token cost on the free developer tier. Default model is
+	// Llama 3.3 70B Instruct; users clone this preset to switch to any
+	// other catalog ID (e.g. qwen/qwen3-coder-480b-a35b-instruct,
+	// moonshotai/kimi-k2-thinking, openai/gpt-oss-120b). Provider is the
+	// generic "nvidia" string routed through the kernel's OpenAI-compatible
+	// client via api_compat=openai + the explicit base_url below.
+	return Preset{
+		Name:        "nvidia",
+		Description: PresetDescription{Summary: "NVIDIA NIM — free OpenAI-compatible catalog (Llama, Qwen, Kimi, GPT-OSS, ...), tool calls"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "nvidia", "model": "meta/llama-3.3-70b-instruct",
+				"api_key": nil, "api_key_env": "NVIDIA_API_KEY",
+				"base_url": "https://integrate.api.nvidia.com/v1", "api_compat": "openai",
+			},
+			// NVIDIA NIM is a text /chat/completions gateway — no media
+			// generation. For audio analysis use the `listen` skill; for
+			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
 				"skills":     skillsDefault(),

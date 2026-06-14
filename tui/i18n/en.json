@@ -239,6 +239,7 @@
   "setup.provider_minimax": "MiniMax (Recommended)",
   "setup.provider_zhipu": "Zhipu GLM Coding Plan",
   "setup.provider_deepseek": "DeepSeek V4 (1M context, tool calls)",
+  "setup.provider_nvidia": "NVIDIA NIM (free OpenAI-compatible catalog, tool calls)",
   "setup.provider_openrouter": "OpenRouter (gateway to many models)",
   "setup.provider_codex": "OpenAI Codex (ChatGPT OAuth)",
   "setup.provider_custom": "Custom",

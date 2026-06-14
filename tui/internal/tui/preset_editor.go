@@ -131,6 +131,19 @@ var providerModels = map[string][]string{
 	"zhipu":    {"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
 	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
 	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+	// NVIDIA NIM catalog IDs (build.nvidia.com) served on the free tier.
+	// Default flagship first; the rest are popular open-weight options.
+	// Users can also free-text any other catalog ID on this row.
+	"nvidia": {
+		"meta/llama-3.3-70b-instruct",
+		"meta/llama-3.1-70b-instruct",
+		"qwen/qwen3-coder-480b-a35b-instruct",
+		"moonshotai/kimi-k2-thinking",
+		"openai/gpt-oss-120b",
+		"nvidia/llama-3.1-nemotron-ultra-253b-v1",
+		"mistralai/mistral-nemotron",
+		"microsoft/phi-4-mini-instruct",
+	},
 	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
 	// gpt-5.5 is OAuth-exclusive (not available via API key); see SKILL.md
 	// next to this file for the canonical source list and why each one is
