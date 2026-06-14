@@ -10,6 +10,8 @@ version: 1.0.0
 
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 
+> For consequential paired TUI/Portal + kernel releases, website release-log/blog work, or any release train involving GitHub/PyPI/Homebrew plus public website copy, read `reference/release-workflow/SKILL.md` after this compact procedure. It owns the full checklist and reusable release blog template.
+
 ## Shareable HTML release log (required for every public release)
 
 Every public LingTai release must produce a polished, self-contained HTML release log before the final human report. This applies to all public release surfaces: the TUI/portal Homebrew release from the `lingtai` repo, the kernel `lingtai` package on PyPI, and first-party MCP/addon packages. Treat the HTML file as the canonical external-facing changelog artifact for the release: it should be ready for Jason or another maintainer to send to users, investors, or collaborators without needing extra context from the agent transcript.
