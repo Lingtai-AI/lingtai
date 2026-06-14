@@ -921,13 +921,16 @@ func hardRefreshDir(lingtaiCmd, dir string) error {
 	os.Remove(filepath.Join(dir, ".refresh.taken"))
 	os.Remove(suspendFile)
 	resetActivePresetToDefault(dir)
-	_, err := process.ForceLaunchAgent(lingtaiCmd, dir)
+	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
 	// Defensive: ForceLaunchAgent → launchAgentUnsafe calls fs.CleanSignals
 	// internally, but a fresh .suspend written by another path between our
 	// remove() above and the relaunch would put the new process to sleep.
 	// Removing again here is cheap and idempotent.
 	os.Remove(suspendFile)
-	return err
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
 // waitForLockClear polls for .agent.lock to free (force-removing it after
