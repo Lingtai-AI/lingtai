@@ -761,6 +761,36 @@ func skillsDefault() map[string]interface{} {
 	}
 }
 
+// openAICompatTextPreset builds the manifest shape shared by the
+// OpenAI-compatible, text-only providers (DeepSeek, Kimi, NVIDIA, ...):
+// an `api_compat: "openai"` LLM with an explicit base_url and a
+// key sourced from api_key_env, plus the default DuckDuckGo web_search
+// and skills capabilities. No vision/media capability — these endpoints
+// are text /chat/completions gateways. Providers that diverge from this
+// shape (vision, regional URLs, native adapters, OAuth) build their
+// Preset literally instead of calling this helper.
+func openAICompatTextPreset(name, summary, model, apiKeyEnv, baseURL string, tier string) Preset {
+	desc := PresetDescription{Summary: summary}
+	if tier != "" {
+		desc.Tier = tier
+	}
+	return Preset{
+		Name:        name,
+		Description: desc,
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": name, "model": model,
+				"api_key": nil, "api_key_env": apiKeyEnv,
+				"base_url": baseURL, "api_compat": "openai",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
 func minimaxPreset() Preset {
 	mm := map[string]interface{}{
 		"provider":    "minimax",
@@ -838,25 +868,14 @@ func mimoPreset() Preset {
 }
 
 func deepseekPreset() Preset {
-	return Preset{
-		Name:        "deepseek",
-		Description: PresetDescription{Summary: "DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "deepseek", "model": "deepseek-v4-flash",
-				"api_key": nil, "api_key_env": "DEEPSEEK_API_KEY",
-				"base_url": "https://api.deepseek.com", "api_compat": "openai",
-			},
-			// DeepSeek's public API is text-only — no media generation. For
-			// audio analysis (transcription, music critique), use the `listen`
-			// skill; for media creation, register the MiniMax-Media MCP server
-			// via the `mcp-manual` skill (kernel `mcp` capability).
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
+	// DeepSeek's public API is text-only — no media generation. For audio
+	// analysis (transcription, music critique), use the `listen` skill; for
+	// media creation, register the MiniMax-Media MCP server via the
+	// `mcp-manual` skill (kernel `mcp` capability).
+	return openAICompatTextPreset(
+		"deepseek",
+		"DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls",
+		"deepseek-v4-flash", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
 }
 
 func geminiPreset() Preset {
@@ -888,25 +907,12 @@ func kimiPreset() Preset {
 	// Subscription-based (no per-token billing); model `kimi-for-coding`.
 	// Tool calling supported. The kernel auto-sets User-Agent
 	// "LingTai-Agent/1.0" for the `kimi` provider per Kimi's ToS — UA
-	// spoofing risks account suspension.
-	return Preset{
-		Name:        "kimi",
-		Description: PresetDescription{Summary: "Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling", Tier: "3"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "kimi", "model": "kimi-for-coding",
-				"api_key": nil, "api_key_env": "KIMI_CODE_API_KEY",
-				"base_url": "https://api.kimi.com/coding/v1", "api_compat": "openai",
-			},
-			// Kimi Code is text-only — no media generation. For audio
-			// analysis use the `listen` skill; for media creation register
-			// the MiniMax-Media MCP server via the `mcp-manual` skill.
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
+	// spoofing risks account suspension. Text-only — no media generation;
+	// use the `listen` skill for audio, `mcp-manual` for media creation.
+	return openAICompatTextPreset(
+		"kimi",
+		"Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling",
+		"kimi-for-coding", "KIMI_CODE_API_KEY", "https://api.kimi.com/coding/v1", "3")
 }
 
 func nvidiaPreset() Preset {
@@ -918,25 +924,16 @@ func nvidiaPreset() Preset {
 	// other catalog ID (e.g. qwen/qwen3-coder-480b-a35b-instruct,
 	// moonshotai/kimi-k2-thinking, openai/gpt-oss-120b). Provider is the
 	// generic "nvidia" string routed through the kernel's OpenAI-compatible
-	// client via api_compat=openai + the explicit base_url below.
-	return Preset{
-		Name:        "nvidia",
-		Description: PresetDescription{Summary: "NVIDIA NIM — free OpenAI-compatible catalog (Llama, Qwen, Kimi, GPT-OSS, ...), tool calls"},
-		Manifest: map[string]interface{}{
-			"llm": map[string]interface{}{
-				"provider": "nvidia", "model": "meta/llama-3.3-70b-instruct",
-				"api_key": nil, "api_key_env": "NVIDIA_API_KEY",
-				"base_url": "https://integrate.api.nvidia.com/v1", "api_compat": "openai",
-			},
-			// NVIDIA NIM is a text /chat/completions gateway — no media
-			// generation. For audio analysis use the `listen` skill; for
-			// media creation register a provider's MCP server via `mcp-manual`.
-			"capabilities": map[string]interface{}{
-				"web_search": map[string]interface{}{"provider": "duckduckgo"},
-				"skills":     skillsDefault(),
-			},
-		},
-	}
+	// client via api_compat=openai + the explicit base_url. Text-only — no
+	// media generation; use `listen` for audio, `mcp-manual` for media.
+	//
+	// NOTE: the kernel must register the "nvidia" provider with
+	// prompt_cache_key disabled — NVIDIA NIM rejects that OpenAI-only field
+	// with HTTP 400. See lingtai-kernel llm/_register.py.
+	return openAICompatTextPreset(
+		"nvidia",
+		"NVIDIA NIM — free OpenAI-compatible catalog (Llama, Qwen, Kimi, GPT-OSS, ...), tool calls",
+		"meta/llama-3.3-70b-instruct", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1", "")
 }
 
 func openrouterPreset() Preset {
