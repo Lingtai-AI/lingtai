@@ -2,6 +2,6 @@
   "id": "adaptive",
   "version": "1.3.0",
   "name": "Adaptive",
-  "description": "Warm greeting with progressive feature discovery. Highlights ctrl+o as the detailed behavior/soul view, seeds a tiny starter set of slash commands, and recommends connecting an IM channel early for the best experience.",
+  "description": "Warm greeting with progressive feature discovery. Highlights ctrl+o as the detailed behavior/soul view, seeds a tiny starter set of slash commands, adds a tutorial-guide hook for deeper onboarding, and recommends connecting an IM channel early for the best experience.",
   "library_name": null
 }

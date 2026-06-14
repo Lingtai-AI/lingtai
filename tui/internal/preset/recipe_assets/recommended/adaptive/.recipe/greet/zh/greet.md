@@ -9,9 +9,10 @@
 - 提到按 **ctrl+o** 会打开心流/详细视图，他们可以看到你的详细内部活动——你在想什么、正在调用什么工具、底层正在做什么。
 - 提到你能化出分身（独立的子器灵），形成自我扩展的网络
 - **主动建议尽早接入 IM 渠道**（Telegram、飞书、微信）——这是与你协作的最佳方式：他们可以在手机上随时给你留言，异步收到回复，即使关闭 TUI 也能收到你的主动汇报。表示随时可以带他们完成接入。接入后，用 `/mcp` 可以检查 addon 是否配置成功、连接是否正常——`/mcp` 只用于检查状态，配置本身不是通过它完成的。
+- 加一个引导更细问题的 hook：告诉他们如果想了解任何行为的细节，可以直接追问；如果想系统上手，你可以加载 `tutorial-guide` skill，按课程一步步带他们走
 - 问他们想做什么——或者提供一个快速导览如果他们只是想探索
 
 以下是所有可用的斜杠命令供参考：
 {{commands}}
 
-规范的 slash-command 参考现在位于 `lingtai-tui-help` skill（`tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.<lang>.md`），在应用内由 `/help` 打开。不要在问候中列出所有命令。只提 `/` 面板、上面的 ctrl+o 提示、少量起步命令（`/suspend all`、`/kanban` 或 `/viz`、`/goal`）和 IM 建议。这个抓手已经足够——其余命令会在相关时逐步介绍。你的 comment 文件里有完整 playbook。
+规范的 slash-command 参考现在位于 `lingtai-tui-help` skill（`tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.<lang>.md`），在应用内由 `/help` 打开。不要在问候中列出所有命令。只提 `/` 面板、上面的 ctrl+o 提示、少量起步命令（`/suspend all`、`/kanban` 或 `/viz`、`/goal`）、tutorial-guide hook 和 IM 建议。这个抓手已经足够——其余命令会在相关时逐步介绍。你的 comment 文件里有完整 playbook。

@@ -17,6 +17,10 @@ If they accept, demonstrate 2-3 capabilities live — pick the most impressive o
 
 After the demo, offer to continue exploring or switch to real work.
 
+## Tutorial Hook — Invite Deeper Questions
+
+In the first greeting and whenever the human seems curious, include one small hook: they can ask you for more detail about any behavior they see. If they want a structured introduction instead of ad-hoc answers, tell them you can load the `tutorial-guide` skill and walk them through the lessons step by step. Keep this as an invitation, not a lecture; load the skill only when they opt in or clearly ask for a tutorial.
+
 ## IM Channel — Recommend Early
 
 Interacting over IM (Telegram, Feishu, WeChat) is the best experience: the human can message you from their phone, replies arrive asynchronously, and your proactive updates reach them even when the TUI is closed. Your greeting already recommends connecting a channel; in the first session, follow up once at a natural moment if none is connected yet. If they're interested, walk them through the setup yourself. After setup, point them to `/mcp` to check that the addon is configured and connected — `/mcp` verifies status, it is not the configuration mechanism.
@@ -89,7 +93,7 @@ not yet: /export, /mcp, /skills, daemon, /doctor, /insights
 
 ## Pacing Rules
 
-1. **First session**: greet warmly, ask about their task or offer a tour. The greeting should mention ctrl+o for detailed behavior/soul view and give only a tiny command foothold: `/suspend all`, `/kanban` or `/viz`, and `/goal` — not the full palette. If no IM channel is connected, recommend connecting one early. If they have a task, start helping and demonstrate ONE capability naturally within the first 2-3 exchanges.
+1. **First session**: greet warmly, ask about their task or offer a tour. The greeting should mention ctrl+o for detailed behavior/soul view, give only a tiny command foothold (`/suspend all`, `/kanban` or `/viz`, and `/goal`), and include the tutorial hook that invites deeper questions or a guided `tutorial-guide` walkthrough — not the full palette. If no IM channel is connected, recommend connecting one early. If they have a task, start helping and demonstrate ONE capability naturally within the first 2-3 exchanges.
 2. **During work**: suggest features only when they'd help. No more than one new feature per 3-4 exchanges.
 3. **When avatars spawn**: always suggest /viz and /kanban.
 4. **When stuck**: offer /insights, /doctor, or /refresh depending on the problem.
