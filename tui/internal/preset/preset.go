@@ -270,7 +270,30 @@ func loadFromPath(path string) (Preset, error) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return Preset{}, fmt.Errorf("parse preset %s: %w", path, err)
 	}
+	p.NormalizeLegacyContextLimit()
 	return p, nil
+}
+
+// NormalizeLegacyContextLimit accepts the old saved-preset shape where
+// context_limit lived at manifest.context_limit. The canonical location is
+// manifest.llm.context_limit; if both locations are present, keep the
+// canonical llm value and drop the legacy root key.
+func (p *Preset) NormalizeLegacyContextLimit() {
+	if p == nil || p.Manifest == nil {
+		return
+	}
+	rootCtx, ok := p.Manifest["context_limit"]
+	if !ok {
+		return
+	}
+	delete(p.Manifest, "context_limit")
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return
+	}
+	if _, hasCanonical := llm["context_limit"]; !hasCanonical {
+		llm["context_limit"] = rootCtx
+	}
 }
 
 // validTiers mirrors the kernel-side TIER_VALUES in lingtai/presets.py.
@@ -280,6 +303,7 @@ var validTiers = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5"
 // kernel's load_preset validation gauntlet so the editor refuses to save
 // anything the kernel will refuse to load. Empty slice = passes.
 func (p Preset) Validate() []error {
+	p.NormalizeLegacyContextLimit()
 	var errs []error
 	if p.Description.Summary == "" {
 		errs = append(errs, fmt.Errorf("description.summary must be non-empty"))

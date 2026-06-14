@@ -1154,9 +1154,12 @@ func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
 		// Don't refuse the relaunch — the user asked to refresh.
 		// Falling back to whatever active currently is.
 	}
-	_, err := process.ForceLaunchAgent(lingtaiCmd, dir)
+	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
 	os.Remove(suspendFile)
-	return err
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
@@ -1176,8 +1179,25 @@ func reviveDir(lingtaiCmd, dir string) error {
 		// Process likely died without releasing lock — clean up
 		os.Remove(lockFile)
 	}
-	_, err := process.LaunchAgent(lingtaiCmd, dir)
-	return err
+	cmd, err := process.LaunchAgent(lingtaiCmd, dir)
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+}
+
+func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fs.IsAlive(dir, 3.0) {
+			return nil
+		}
+		if cmd != nil && !process.IsAgentRunning(dir) {
+			return fmt.Errorf("agent launch exited before writing a fresh heartbeat; see %s", filepath.Join(dir, "logs", "agent.log"))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("agent launch did not write a fresh heartbeat within %s; see %s", timeout, filepath.Join(dir, "logs", "agent.log"))
 }
 
 // firstLine returns the first line of err.Error(), trimmed of trailing

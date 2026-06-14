@@ -48,6 +48,66 @@ func TestSaveAndLoad_Roundtrip(t *testing.T) {
 	})
 }
 
+func TestLoadFromPath_NormalizesLegacyRootContextLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.json")
+	data := map[string]interface{}{
+		"name":        "legacy",
+		"description": map[string]interface{}{"summary": "legacy"},
+		"manifest": map[string]interface{}{
+			"llm":           map[string]interface{}{"provider": "x", "model": "y"},
+			"capabilities":  map[string]interface{}{},
+			"context_limit": float64(300000),
+		},
+	}
+	raw, _ := json.Marshal(data)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write preset: %v", err)
+	}
+
+	p, err := loadFromPath(path)
+	if err != nil {
+		t.Fatalf("loadFromPath() error: %v", err)
+	}
+	if _, ok := p.Manifest["context_limit"]; ok {
+		t.Fatalf("legacy root context_limit still present: %#v", p.Manifest)
+	}
+	llm := p.Manifest["llm"].(map[string]interface{})
+	if got := llm["context_limit"]; got != float64(300000) {
+		t.Fatalf("manifest.llm.context_limit = %#v, want 300000", got)
+	}
+	if errs := p.Validate(); len(errs) != 0 {
+		t.Fatalf("Validate() errors after normalization: %v", errs)
+	}
+}
+
+func TestValidate_ConflictingLegacyRootContextLimitPreservesLLM(t *testing.T) {
+	p := Preset{
+		Name:        "conflict",
+		Description: PresetDescription{Summary: "conflict"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider":      "x",
+				"model":         "y",
+				"context_limit": float64(1000000),
+			},
+			"capabilities":  map[string]interface{}{},
+			"context_limit": float64(300000),
+		},
+	}
+
+	if errs := p.Validate(); len(errs) != 0 {
+		t.Fatalf("Validate() errors: %v", errs)
+	}
+	if _, ok := p.Manifest["context_limit"]; ok {
+		t.Fatalf("legacy root context_limit still present: %#v", p.Manifest)
+	}
+	llm := p.Manifest["llm"].(map[string]interface{})
+	if got := llm["context_limit"]; got != float64(1000000) {
+		t.Fatalf("manifest.llm.context_limit = %#v, want canonical 1000000", got)
+	}
+}
+
 func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 	withTempPresets(t, func() {
 		if err := RefreshTemplates(); err != nil {
