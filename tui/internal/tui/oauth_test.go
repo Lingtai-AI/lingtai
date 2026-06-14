@@ -304,11 +304,10 @@ func TestStartOAuthFlow_Cancellable(t *testing.T) {
 	}
 }
 
-// TestStartOAuthFlow_LoopbackCallbackDoesNotCompleteUnderTheHood verifies
-// Jason's UX requirement: even if the browser reaches the localhost callback,
-// OAuth must not exchange tokens or emit success until the user explicitly
-// pastes the code/URL back into the terminal textarea.
-func TestStartOAuthFlow_LoopbackCallbackDoesNotCompleteUnderTheHood(t *testing.T) {
+// TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow verifies the
+// same-machine browser OAuth path remains first-class: the localhost callback
+// completes the legacy working flow without requiring terminal paste-back.
+func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T) {
 	const epoch uint64 = 99
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -341,30 +340,22 @@ func TestStartOAuthFlow_LoopbackCallbackDoesNotCompleteUnderTheHood(t *testing.T
 	if err != nil {
 		t.Fatalf("read callback body: %v", err)
 	}
-	if !strings.Contains(string(body), "Nothing has been completed") {
-		t.Fatalf("callback body should tell the user to return to terminal, got: %s", string(body))
+	if !strings.Contains(string(body), "Login successful") {
+		t.Fatalf("callback body should confirm browser login success, got: %s", string(body))
 	}
 
-	select {
-	case msg := <-session.msgs:
-		t.Fatalf("loopback callback unexpectedly emitted session message before textarea submit: %T %#v", msg, msg)
-	case <-time.After(150 * time.Millisecond):
-		// Success: the browser callback did not complete OAuth under the hood.
-	}
-
-	cancel()
 	for {
 		raw := drainSession(t, session, 3*time.Second)
 		switch msg := raw.(type) {
 		case CodexOAuthDoneMsg:
-			if !errors.Is(msg.Err, ErrCodexAuthCancelled) {
-				t.Fatalf("after cancel Err = %v, want ErrCodexAuthCancelled", msg.Err)
+			if msg.Err == nil && msg.Tokens == nil {
+				t.Fatalf("terminal message had neither tokens nor error: %#v", msg)
 			}
 			return
 		case CodexOAuthURLMsg:
 			continue
 		default:
-			t.Fatalf("unexpected message after cancel: %T", raw)
+			t.Fatalf("unexpected message after browser callback: %T", raw)
 		}
 	}
 }
@@ -400,117 +391,12 @@ func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
 	}
 }
 
-// TestExtractOAuthCode covers all manual-callback input formats.
-func TestExtractOAuthCode(t *testing.T) {
-	const (
-		wantCode  = "auth-code-xyz"
-		wantState = "test-state-abc"
-	)
-
-	tests := []struct {
-		name      string
-		raw       string
-		wantCode  string
-		wantErr   bool
-		errSubstr string
-	}{
-		{
-			name:     "full localhost callback URL with code and state",
-			raw:      "http://localhost:1455/auth/callback?code=auth-code-xyz&state=test-state-abc",
-			wantCode: wantCode,
-		},
-		{
-			name:     "full URL state omitted (no state in URL)",
-			raw:      "http://localhost:1455/auth/callback?code=auth-code-xyz",
-			wantCode: wantCode,
-		},
-		{
-			name:     "raw query string with leading ?",
-			raw:      "?code=auth-code-xyz&state=test-state-abc",
-			wantCode: wantCode,
-		},
-		{
-			name:     "raw query string without leading ?",
-			raw:      "code=auth-code-xyz&state=test-state-abc",
-			wantCode: wantCode,
-		},
-		{
-			name:     "raw code only (no = sign)",
-			raw:      "auth-code-xyz",
-			wantCode: wantCode,
-		},
-		{
-			name:      "state mismatch in URL",
-			raw:       "http://localhost:1455/auth/callback?code=auth-code-xyz&state=wrong-state",
-			wantErr:   true,
-			errSubstr: "state mismatch",
-		},
-		{
-			name:      "state mismatch in query string",
-			raw:       "code=auth-code-xyz&state=wrong-state",
-			wantErr:   true,
-			errSubstr: "state mismatch",
-		},
-		{
-			name:      "oauth error in URL",
-			raw:       "http://localhost:1455/auth/callback?error=access_denied&error_description=User+denied",
-			wantErr:   true,
-			errSubstr: "access_denied",
-		},
-		{
-			name:      "oauth error in query string",
-			raw:       "error=access_denied&error_description=User+denied",
-			wantErr:   true,
-			errSubstr: "access_denied",
-		},
-		{
-			name:      "missing code in URL",
-			raw:       "http://localhost:1455/auth/callback?state=test-state-abc",
-			wantErr:   true,
-			errSubstr: "missing authorization code",
-		},
-		{
-			name:      "empty input",
-			raw:       "",
-			wantErr:   true,
-			errSubstr: "missing OAuth callback URL or code",
-		},
-		{
-			name:      "whitespace only",
-			raw:       "   ",
-			wantErr:   true,
-			errSubstr: "missing OAuth callback URL or code",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			code, err := extractOAuthCode(tc.raw, wantState)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil (code=%q)", tc.errSubstr, code)
-				}
-				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
-					t.Errorf("error = %q, want it to contain %q", err.Error(), tc.errSubstr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if code != tc.wantCode {
-				t.Errorf("code = %q, want %q", code, tc.wantCode)
-			}
-		})
-	}
-}
-
 // TestWaitCodexOAuthMsg verifies that waitCodexOAuthMsg routes messages
 // from the session channel as correct Bubble Tea message types.
 func TestWaitCodexOAuthMsg(t *testing.T) {
 	makeSession := func() (*codexOAuthSession, chan interface{}) {
 		ch := make(chan interface{}, 2)
-		s := &codexOAuthSession{msgs: ch, manualCh: make(chan string, 1)}
+		s := &codexOAuthSession{msgs: ch}
 		return s, ch
 	}
 
@@ -564,40 +450,112 @@ func TestWaitCodexOAuthMsg(t *testing.T) {
 	})
 }
 
-// TestSubmitCallback verifies that SubmitCallback delivers the raw string
-// to the manualCh without blocking, and that a nil session is a no-op.
-func TestSubmitCallback(t *testing.T) {
-	t.Run("delivers to channel", func(t *testing.T) {
-		s := &codexOAuthSession{manualCh: make(chan string, 1)}
-		s.SubmitCallback("http://localhost:1455/auth/callback?code=abc&state=xyz")
-		select {
-		case got := <-s.manualCh:
-			if got != "http://localhost:1455/auth/callback?code=abc&state=xyz" {
-				t.Errorf("got %q, want full URL", got)
+func TestRequestCodexDeviceCode(t *testing.T) {
+	var sawClientID bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["client_id"] == codexClientID {
+			sawClientID = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_auth_id":"dev-123","user_code":"ABCD-EFGH","interval":"1"}`)
+	}))
+	defer server.Close()
+
+	got, err := requestCodexDeviceCode(context.Background(), server.Client(), server.URL, codexClientID)
+	if err != nil {
+		t.Fatalf("requestCodexDeviceCode: %v", err)
+	}
+	if !sawClientID {
+		t.Fatal("request did not include codex client_id")
+	}
+	if got.VerificationURL != server.URL+"/codex/device" {
+		t.Fatalf("VerificationURL = %q", got.VerificationURL)
+	}
+	if got.UserCode != "ABCD-EFGH" || got.DeviceAuthID != "dev-123" {
+		t.Fatalf("unexpected device code: %#v", got)
+	}
+	if got.Interval != time.Second {
+		t.Fatalf("Interval = %s, want 1s", got.Interval)
+	}
+}
+
+func TestRequestCodexDeviceCodeRateLimitSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, "Too Many Requests")
+	}))
+	defer server.Close()
+
+	_, err := requestCodexDeviceCode(context.Background(), server.Client(), server.URL, codexClientID)
+	if err == nil || !strings.Contains(err.Error(), "429") || !strings.Contains(err.Error(), "Too Many Requests") {
+		t.Fatalf("err = %v, want 429 rate-limit detail", err)
+	}
+}
+
+func TestPollCodexDeviceAuth(t *testing.T) {
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/accounts/deviceauth/token":
+			polls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode poll request: %v", err)
 			}
+			if body["device_auth_id"] != "dev-123" || body["user_code"] != "ABCD-EFGH" {
+				t.Fatalf("poll body = %#v", body)
+			}
+			if polls == 1 {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"authorization_code":"auth-code","code_challenge":"challenge","code_verifier":"verifier"}`)
 		default:
-			t.Fatal("manualCh was empty after SubmitCallback")
+			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-	})
+	}))
+	defer server.Close()
 
-	t.Run("nil session is a no-op", func(t *testing.T) {
-		var s *codexOAuthSession
-		s.SubmitCallback("anything") // must not panic
+	got, err := pollCodexDeviceAuth(context.Background(), server.Client(), server.URL, codexDeviceCode{
+		DeviceAuthID: "dev-123",
+		UserCode:     "ABCD-EFGH",
+		Interval:     time.Millisecond,
 	})
+	if err != nil {
+		t.Fatalf("pollCodexDeviceAuth: %v", err)
+	}
+	if got.AuthorizationCode != "auth-code" || got.CodeVerifier != "verifier" {
+		t.Fatalf("unexpected success response: %#v", got)
+	}
+	if polls != 2 {
+		t.Fatalf("polls = %d, want 2", polls)
+	}
+}
 
-	t.Run("full channel does not block", func(t *testing.T) {
-		s := &codexOAuthSession{manualCh: make(chan string, 1)}
-		s.SubmitCallback("first")
-		// Channel is now full. Second call must return immediately, not block.
-		done := make(chan struct{})
-		go func() {
-			s.SubmitCallback("second")
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Fatal("SubmitCallback blocked on full channel")
-		}
+func TestPollCodexDeviceAuthRateLimitSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, "Too Many Requests")
+	}))
+	defer server.Close()
+
+	_, err := pollCodexDeviceAuth(context.Background(), server.Client(), server.URL, codexDeviceCode{
+		DeviceAuthID: "dev-123",
+		UserCode:     "ABCD-EFGH",
+		Interval:     time.Millisecond,
 	})
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("err = %v, want 429 rate-limit surface", err)
+	}
 }

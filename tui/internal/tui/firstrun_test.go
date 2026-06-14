@@ -495,3 +495,35 @@ func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 		t.Fatalf("covenantInput = %q, want path containing %q", got, want)
 	}
 }
+
+func TestPickPreset_CodexEnterShowsMethodChooser(t *testing.T) {
+	dir := t.TempDir()
+	m := FirstRunModel{
+		step:      stepPickPreset,
+		globalDir: dir,
+		cursor:    0, // Codex credential row when there are no visible presets.
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("opening the Codex method chooser must not start a network command")
+	}
+	if !m.codexChoosingMethod {
+		t.Fatal("Enter on Codex credential row should show method chooser")
+	}
+	if m.codexLoggingIn {
+		t.Fatal("method chooser should not start login yet")
+	}
+	if m.codexMethodCursor != 0 {
+		t.Fatalf("default method cursor = %d, want browser OAuth (0)", m.codexMethodCursor)
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.codexMethodCursor != 1 {
+		t.Fatalf("Down should select device code; cursor=%d", m.codexMethodCursor)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Device code") || !strings.Contains(view, "remote") {
+		t.Fatalf("chooser view should mention remote-friendly device code; view=%s", view)
+	}
+}

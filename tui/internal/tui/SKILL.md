@@ -65,7 +65,7 @@ Codex is the odd one out — it uses ChatGPT OAuth instead of an API key. A few 
 - **`api_key_env: ""`** in the preset. Don't change to a placeholder env var name; the kernel's `_codex` factory in `lingtai-kernel/src/lingtai/llm/_register.py` ignores `api_key` entirely and reads the OAuth token from `~/.lingtai-tui/codex-auth.json`.
 - **`base_url: "https://chatgpt.com/backend-api/codex"`** — note the `/codex` suffix. Without it, requests hit `/backend-api` (the generic ChatGPT backend) and fail with HTML / Cloudflare responses. Source: `lingtai-kernel/discussions/codex-oauth-stateless-patch.md`.
 - **No model picker on `stepPresetKey`.** The codex flow used to render a model strip on the API-key page; that picker was removed in 2026-05 in favor of the standard editor model row. The first-run wizard's stepPresetKey for codex is now pure OAuth-status display. If you find yourself wanting to add a picker there again, you've hit a different bug — fix the editor instead.
-- **Auto-advance after OAuth.** `CodexOAuthDoneMsg` writes the token bundle and immediately runs the clone-and-advance sequence; no second Enter press. The user expects the wizard to "just work" after browser login.
+- **Two login methods, one completion path.** Codex login first shows a method chooser: browser OAuth/localhost for same-machine use, or device code for remote/headless use. `CodexOAuthDoneMsg` writes the token bundle after either method completes; stale completions are epoch-gated so cancelled attempts cannot overwrite `codex-auth.json`.
 - **Empty email is valid.** OpenAI's id_token JWT sometimes ships without the profile claim. We treat `RefreshToken != ""` as the canonical "session is usable" signal and fall back to `(logged in)` for display. Don't gate any logic on `Email != ""`.
 
 ## Verification when bumping the codex list
@@ -83,9 +83,9 @@ After editing `providerModels["codex"]` / `modelHasVision`:
 - `preset_editor.go:149` — `modelHasVision` map
 - `preset_editor.go:120` — `capabilityProviderOptions` (web_search, vision provider routing)
 - `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
-- `firstrun.go` `enterPresetKeyFor` — codex OAuth flow on first-run wizard
-- `firstrun.go` `CodexOAuthDoneMsg` handler — auto-advance after OAuth
-- `oauth.go` — PKCE flow, token exchange, JWT email parser
+- `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
+- `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion
+- `oauth.go` — browser OAuth, device-code login, token exchange, JWT email parser
 - `lingtai-kernel/discussions/codex-oauth-stateless-patch.md` — kernel-side stateless responses contract
 
 When in doubt, search the OpenAI Codex docs and the codex-rs Rust source (https://github.com/openai/codex) for ground truth on what the chatgpt.com endpoint actually accepts.
