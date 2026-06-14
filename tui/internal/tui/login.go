@@ -73,6 +73,15 @@ type LoginModel struct {
 	// can't wipe a credential. deleteArmedIdx == -1 means no arm.
 	codexLoginEpoch uint64
 	deleteArmedIdx  int
+	// codexSession holds the active OAuth session for manual callback submission.
+	codexSession *codexOAuthSession
+	// codexAuthURL is set from CodexOAuthURLMsg; shown so remote-browser
+	// users can copy-open the URL on another machine.
+	codexAuthURL string
+	// codexPasteMode / codexPasteInput: 'p' enters paste mode;
+	// Enter submits the pasted callback URL/code; Esc exits.
+	codexPasteMode  bool
+	codexPasteInput textarea.Model
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +240,16 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			}
 		}
 
+	case CodexOAuthURLMsg:
+		// Non-terminal: listener is ready; store URL for display and keep listening.
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexAuthURL = msg.AuthURL
+		m.codexPasteMode = true
+		m.codexPasteInput = newCodexCallbackTextarea()
+		return m, waitCodexOAuthMsg(m.codexSession)
+
 	case CodexOAuthDoneMsg:
 		// Drop late callbacks from a cancelled session.
 		if msg.Epoch != m.codexLoginEpoch {
@@ -238,6 +257,10 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 		m.codexLogging = false
 		m.codexCancel = nil
+		m.codexSession = nil
+		m.codexAuthURL = ""
+		m.codexPasteMode = false
+		m.codexPasteInput = textarea.Model{}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
 				m.message = i18n.T("login.codex_cancelled")
@@ -297,6 +320,18 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			return m, func() tea.Msg { return checkHealth(e) }
 		}
 
+	case tea.PasteMsg:
+		if m.codexPasteMode {
+			var cmd tea.Cmd
+			m.codexPasteInput, cmd = m.codexPasteInput.Update(msg)
+			return m, cmd
+		}
+		if m.reenteringKey {
+			var cmd tea.Cmd
+			m.keyInput, cmd = m.keyInput.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyPressMsg:
 		if m.reenteringKey {
 			return m.updateKeyReentry(msg)
@@ -317,6 +352,47 @@ func (m *LoginModel) entryByProvider(provider string) *loginEntry {
 }
 
 func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
+	// Manual callback textarea: OAuth never completes merely because
+	// the browser hit localhost; the user must paste the code/URL back
+	// here and press Enter. Esc cancels the in-flight flow.
+	if m.codexPasteMode {
+		switch msg.String() {
+		case "enter":
+			raw := strings.TrimSpace(m.codexPasteInput.Value())
+			if raw == "" {
+				return m, nil
+			}
+			if m.codexSession != nil {
+				// The CodexOAuthURLMsg handler already re-issued
+				// waitCodexOAuthMsg; that command remains blocked on
+				// session.msgs while the user types here. SubmitCallback
+				// wakes the OAuth goroutine, and the existing wait command
+				// delivers the terminal CodexOAuthDoneMsg.
+				m.codexSession.SubmitCallback(raw)
+			}
+			m.codexPasteMode = false
+			m.codexPasteInput = textarea.Model{}
+			return m, nil
+		case "esc":
+			if m.codexCancel != nil {
+				m.codexCancel()
+				m.codexCancel = nil
+			}
+			m.codexLoginEpoch++
+			m.codexLogging = false
+			m.codexSession = nil
+			m.codexAuthURL = ""
+			m.codexPasteMode = false
+			m.codexPasteInput = textarea.Model{}
+			m.message = i18n.T("login.codex_cancelled")
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.codexPasteInput, cmd = m.codexPasteInput.Update(msg)
+			return m, cmd
+		}
+	}
+
 	// Any key other than a second logout/delete trigger disarms the
 	// two-press confirmation. Backspace, "delete", and "r" all
 	// arm/confirm; everything else clears the arm. Up/Down still need
@@ -336,6 +412,10 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.codexCancel = nil
 			m.codexLoginEpoch++
 			m.codexLogging = false
+			m.codexSession = nil
+			m.codexAuthURL = ""
+			m.codexPasteMode = false
+			m.codexPasteInput = textarea.Model{}
 		}
 		return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 	case "up", "k":
@@ -351,14 +431,15 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			entry := m.entries[m.cursor]
 			if entry.IsOAuth {
 				m.codexLogging = true
+				m.codexAuthURL = ""
+				m.codexPasteMode = false
+				m.codexPasteInput = textarea.Model{}
 				m.codexLoginEpoch++
 				epoch := m.codexLoginEpoch
 				ctx, cancel := context.WithCancel(context.Background())
 				m.codexCancel = cancel
-				ch := startOAuthFlow(ctx, epoch)
-				return m, func() tea.Msg {
-					return <-ch
-				}
+				m.codexSession = startOAuthFlow(ctx, epoch)
+				return m, waitCodexOAuthMsg(m.codexSession)
 			}
 			// API key entry — show re-entry textarea.
 			m.reenteringKey = true
@@ -377,6 +458,10 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.codexCancel = nil
 			m.codexLoginEpoch++
 			m.codexLogging = false
+			m.codexSession = nil
+			m.codexAuthURL = ""
+			m.codexPasteMode = false
+			m.codexPasteInput = textarea.Model{}
 			m.message = i18n.T("login.codex_cancelled")
 			return m, nil
 		}
@@ -558,7 +643,16 @@ func (m LoginModel) View() string {
 
 	// Codex logging state.
 	if m.codexLogging {
-		b.WriteString("\n  " + StyleAccent.Render("Waiting for browser authentication...") + "\n")
+		b.WriteString("\n  " + StyleAccent.Render(i18n.T("codex.logging_in")) + "\n")
+		if m.codexAuthURL != "" {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.manual_auth_url_label")) + "\n")
+			b.WriteString("  " + StyleAccent.Render(m.codexAuthURL) + "\n")
+		}
+		if m.codexPasteMode {
+			b.WriteString("\n  " + i18n.T("codex.manual_paste_prompt") + "\n")
+			b.WriteString("  " + m.codexPasteInput.View() + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.manual_paste_hint")) + "\n")
+		}
 	}
 
 	// Transient message.

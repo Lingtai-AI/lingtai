@@ -231,6 +231,17 @@ type FirstRunModel struct {
 	// callback from a previous, cancelled flow). Closes the
 	// token-write race noted in G-7 of the review.
 	codexLoginEpoch uint64
+	// codexSession holds the active OAuth session returned by startOAuthFlow.
+	// Used to submit a manual callback URL when the user's browser is on a
+	// different machine. Nil when no OAuth flow is in progress.
+	codexSession *codexOAuthSession
+	// codexAuthURL is the authorization URL received from CodexOAuthURLMsg.
+	// Shown in the UI so the user can open it on another machine.
+	codexAuthURL string
+	// codexPasteMode is true while OAuth requires explicit textarea
+	// confirmation; users paste callback URL/code into codexPasteInput.
+	codexPasteMode  bool
+	codexPasteInput textarea.Model
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
@@ -584,6 +595,19 @@ func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets 
 	return m
 }
 
+func newCodexCallbackTextarea() textarea.Model {
+	input := textarea.New()
+	input.SetHeight(1)
+	input.CharLimit = 1024
+	input.ShowLineNumbers = false
+	input.Placeholder = i18n.T("codex.manual_paste_placeholder")
+	input.Prompt = ""
+	input.KeyMap.InsertNewline.SetKeys()
+	input.SetStyles(themedTextareaStyles())
+	input.Focus()
+	return input
+}
+
 func (m FirstRunModel) Init() tea.Cmd {
 	if m.setupMode {
 		// Already bootstrapped — no init needed, just blink for text inputs
@@ -775,6 +799,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.setupErr = msg.err
 		return m, nil
 
+	case CodexOAuthURLMsg:
+		// Non-terminal: the listener is ready and the auth URL is known.
+		// Store it for display and keep listening for the done message.
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexAuthURL = msg.AuthURL
+		m.codexPasteMode = true
+		m.codexPasteInput = newCodexCallbackTextarea()
+		return m, waitCodexOAuthMsg(m.codexSession)
+
 	case CodexOAuthDoneMsg:
 		// Drop late callbacks from a cancelled session: codexLoginEpoch
 		// is bumped on each start AND on cancel, so a stale Epoch means
@@ -785,6 +820,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		}
 		m.codexLoggingIn = false
 		m.codexCancel = nil
+		m.codexSession = nil
+		m.codexAuthURL = ""
+		m.codexPasteMode = false
+		m.codexPasteInput = textarea.Model{}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
 				m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
@@ -988,6 +1027,48 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, cmd
 
 		case stepPickPreset:
+			// Manual callback textarea: OAuth never completes merely because
+			// the browser hit localhost; the user must paste the code/URL back
+			// here and press Enter. Esc cancels the in-flight flow.
+			if m.codexPasteMode {
+				switch msg.String() {
+				case "enter":
+					raw := strings.TrimSpace(m.codexPasteInput.Value())
+					if raw == "" {
+						return m, nil
+					}
+					if m.codexSession != nil {
+						// The CodexOAuthURLMsg handler already re-issued
+						// waitCodexOAuthMsg; that command remains blocked on
+						// session.msgs while the user types here. SubmitCallback
+						// wakes the OAuth goroutine, and the existing wait command
+						// delivers the terminal CodexOAuthDoneMsg.
+						m.codexSession.SubmitCallback(raw)
+					}
+					m.codexPasteMode = false
+					m.codexPasteInput = textarea.Model{}
+					return m, nil
+				case "esc":
+					if m.codexCancel != nil {
+						m.codexCancel()
+						m.codexCancel = nil
+					}
+					m.codexLoginEpoch++
+					m.codexLoggingIn = false
+					m.codexLogoutArmed = false
+					m.codexSession = nil
+					m.codexAuthURL = ""
+					m.codexPasteMode = false
+					m.codexPasteInput = textarea.Model{}
+					m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.codexPasteInput, cmd = m.codexPasteInput.Update(msg)
+					return m, cmd
+				}
+			}
+
 			presetMinIdx := 0
 			if m.setupMode {
 				presetMinIdx = -1 // allow "keep current" at index -1
@@ -1085,12 +1166,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.codexLogoutArmed = false
 					m.codexLoggingIn = true
 					m.message = ""
+					m.codexAuthURL = ""
+					m.codexPasteMode = false
+					m.codexPasteInput = textarea.Model{}
 					m.codexLoginEpoch++
 					epoch := m.codexLoginEpoch
 					ctx, cancel := context.WithCancel(context.Background())
 					m.codexCancel = cancel
-					oauthCh := startOAuthFlow(ctx, epoch)
-					return m, func() tea.Msg { return <-oauthCh }
+					m.codexSession = startOAuthFlow(ctx, epoch)
+					return m, waitCodexOAuthMsg(m.codexSession)
 				}
 				// Setup mode's synthetic "keep current" row is already the
 				// chosen default preset; Enter should advance just like the
@@ -1155,6 +1239,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.codexLoginEpoch++
 						m.codexLoggingIn = false
 						m.codexLogoutArmed = false
+						m.codexSession = nil
+						m.codexAuthURL = ""
+						m.codexPasteMode = false
+						m.codexPasteInput = textarea.Model{}
 						m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
 						return m, nil
 					case m.codexAuth.valid && !m.codexLogoutArmed:
@@ -1201,6 +1289,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.codexCancel = nil
 					m.codexLoginEpoch++
 					m.codexLoggingIn = false
+					m.codexSession = nil
+					m.codexAuthURL = ""
+					m.codexPasteMode = false
+					m.codexPasteInput = textarea.Model{}
 				}
 				if m.setupMode {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
@@ -2073,6 +2165,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// Forward unhandled messages (e.g. tea.PasteMsg) to the focused textinput
 		var cmd tea.Cmd
 		switch m.step {
+		case stepPickPreset:
+			if m.codexPasteMode {
+				m.codexPasteInput, cmd = m.codexPasteInput.Update(msg)
+				return m, cmd
+			}
 		case stepEditPreset:
 			// Editor owns its inline textarea; forward paste so the
 			// user can paste into name/summary/api_key/etc. fields.
@@ -2247,12 +2344,23 @@ func (m FirstRunModel) View() string {
 				if m.cursor == visibleCount {
 					row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_relogin_hint"))
 				}
+				b.WriteString(row + "\n")
 			} else if m.codexLoggingIn {
 				row += "  " + StyleFaint.Render(i18n.T("codex.logging_in"))
+				b.WriteString(row + "\n")
+				if m.codexAuthURL != "" {
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.manual_auth_url_label")) + "\n")
+					b.WriteString("  " + StyleAccent.Render(m.codexAuthURL) + "\n")
+				}
+				if m.codexPasteMode {
+					b.WriteString("\n  " + i18n.T("codex.manual_paste_prompt") + "\n")
+					b.WriteString("  " + m.codexPasteInput.View() + "\n")
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.manual_paste_hint")) + "\n")
+				}
 			} else {
 				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_unauthed_hint"))
+				b.WriteString(row + "\n")
 			}
-			b.WriteString(row + "\n")
 		}
 
 		// Footer buttons (Back/Next) — at visibleCount+1 and +2.

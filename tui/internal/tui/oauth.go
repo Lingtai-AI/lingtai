@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // ErrCodexAuthRevoked is returned by refreshCodexTokens when OpenAI's
@@ -73,6 +75,56 @@ type CodexOAuthDoneMsg struct {
 	Epoch  uint64
 }
 
+// CodexOAuthURLMsg is emitted as soon as the local listener is ready and
+// the authorization URL has been built. The UI shows AuthURL so users on a
+// different computer can copy/open it manually instead of relying on the
+// local browser launch. RedirectURI is shown as the expected callback host.
+type CodexOAuthURLMsg struct {
+	AuthURL     string
+	RedirectURI string
+	Epoch       uint64
+}
+
+// codexOAuthSession carries the OAuth message stream plus a manual callback
+// input channel. SubmitCallback accepts the full localhost callback URL copied
+// from the browser address bar, a raw query string containing code/state, or a
+// raw authorization code. This is the remote-browser fallback for setups where
+// the TUI and the human's browser are not on the same machine.
+type codexOAuthSession struct {
+	msgs     <-chan interface{}
+	manualCh chan string
+}
+
+func (s *codexOAuthSession) SubmitCallback(raw string) {
+	if s == nil || s.manualCh == nil {
+		return
+	}
+	select {
+	case s.manualCh <- raw:
+	default:
+	}
+}
+
+func waitCodexOAuthMsg(session *codexOAuthSession) tea.Cmd {
+	if session == nil || session.msgs == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-session.msgs
+		if !ok {
+			return CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled}
+		}
+		switch m := msg.(type) {
+		case CodexOAuthURLMsg:
+			return m
+		case CodexOAuthDoneMsg:
+			return m
+		default:
+			return CodexOAuthDoneMsg{Err: fmt.Errorf("unknown OAuth message %T", msg)}
+		}
+	}
+}
+
 // generatePKCE creates a PKCE verifier and challenge pair.
 // The verifier is 32 random bytes base64url-encoded (no padding).
 // The challenge is the SHA-256 hash of the verifier, base64url-encoded (no padding).
@@ -107,16 +159,16 @@ func generateState() string {
 // the caller can stop showing the "logging in" state. epoch is echoed
 // back on the message so a handler can ignore late callbacks from a
 // cancelled session (see FirstRunModel.codexLoginEpoch).
-func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg {
-	ch := make(chan CodexOAuthDoneMsg, 1)
+func startOAuthFlow(ctx context.Context, epoch uint64) *codexOAuthSession {
+	ch := make(chan interface{}, 2)
+	manualCh := make(chan string, 1)
 
 	go func() {
 		defer close(ch)
 
-		// emit sends a result tagged with this session's epoch. The
-		// outer channel has capacity 1; emit is only called once per
-		// goroutine, on each return path.
-		emit := func(msg CodexOAuthDoneMsg) {
+		// emitDone sends a terminal result tagged with this session's epoch.
+		// The message channel also carries one non-terminal CodexOAuthURLMsg.
+		emitDone := func(msg CodexOAuthDoneMsg) {
 			msg.Epoch = epoch
 			ch <- msg
 		}
@@ -131,7 +183,7 @@ func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg 
 		if err != nil {
 			listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", fallbackPort))
 			if err != nil {
-				emit(CodexOAuthDoneMsg{Err: fmt.Errorf("listen on :%d or :%d: %w", defaultPort, fallbackPort, err)})
+				emitDone(CodexOAuthDoneMsg{Err: fmt.Errorf("listen on :%d or :%d: %w", defaultPort, fallbackPort, err)})
 				return
 			}
 		}
@@ -141,55 +193,46 @@ func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg 
 		// — that's the exact string OpenAI's allowlist matches against.
 		redirectURI := fmt.Sprintf("http://localhost:%d%s", port, callbackPath)
 
-		// Channel for the authorization code from the callback handler.
-		codeCh := make(chan string, 1)
-		errCh := make(chan error, 1)
+		// The loopback callback only renders instructions. It must not
+		// complete OAuth under the hood: the user has to copy the code
+		// or callback URL back into the TUI textarea so success is visible.
+		serveErrCh := make(chan error, 1)
 
 		mux := http.NewServeMux()
 		mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
-
-			// Check for OAuth error response.
-			if oauthErr := q.Get("error"); oauthErr != "" {
-				desc := q.Get("error_description")
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprintf(w, "<html><body><h1>Login failed</h1><p>%s: %s</p></body></html>", html.EscapeString(oauthErr), html.EscapeString(desc))
-				errCh <- fmt.Errorf("oauth error: %s: %s", oauthErr, desc)
-				return
-			}
-
-			// Validate state.
-			if q.Get("state") != state {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprint(w, "<html><body><h1>Login failed</h1><p>State mismatch.</p></body></html>")
-				errCh <- fmt.Errorf("state mismatch")
-				return
-			}
-
-			// Extract code.
-			code := q.Get("code")
-			if code == "" {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprint(w, "<html><body><h1>Login failed</h1><p>Missing authorization code.</p></body></html>")
-				errCh <- fmt.Errorf("missing authorization code")
-				return
+			callbackURL := "http://" + r.Host + r.URL.RequestURI()
+			if r.Host == "" {
+				callbackURL = r.URL.String()
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "<html><body><h1>Login successful!</h1><p>You can close this tab and return to the terminal.</p></body></html>")
-			codeCh <- code
-		})
 
+			if oauthErr := q.Get("error"); oauthErr != "" {
+				desc := q.Get("error_description")
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, "<html><body><h1>Login needs terminal confirmation</h1><p>OAuth returned an error: %s %s</p><p>Copy this URL back to the terminal so it can show the error.</p><pre>%s</pre></body></html>", html.EscapeString(oauthErr), html.EscapeString(desc), html.EscapeString(callbackURL))
+				return
+			}
+
+			code := q.Get("code")
+			if q.Get("state") != state || code == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, "<html><body><h1>Login needs terminal confirmation</h1><p>The callback is missing a code or has the wrong state.</p><p>Copy this URL back to the terminal so it can show the exact error.</p><pre>")
+				fmt.Fprint(w, html.EscapeString(callbackURL))
+				fmt.Fprint(w, "</pre></body></html>")
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "<html><body><h1>Authorization received</h1><p>Return to the terminal and paste this code into the OAuth textarea. Nothing has been completed in the terminal yet.</p><pre>%s</pre><p>You may also paste the full callback URL from the address bar.</p></body></html>", html.EscapeString(code))
+		})
 		server := &http.Server{Handler: mux}
 
 		// Serve in background.
 		go func() {
 			if serveErr := server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
-				errCh <- fmt.Errorf("http serve: %w", serveErr)
+				serveErrCh <- fmt.Errorf("http serve: %w", serveErr)
 			}
 		}()
 
@@ -204,24 +247,30 @@ func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg 
 
 		authURL := buildAuthorizeURL(redirectURI, challenge, state)
 
+		ch <- CodexOAuthURLMsg{AuthURL: authURL, RedirectURI: redirectURI, Epoch: epoch}
 		openBrowser(authURL)
 
-		// Wait for code, error, timeout, or cancellation.
+		// Wait for explicit textarea input, server error, timeout, or cancellation.
 		timer := time.NewTimer(oauthTimeout)
 		defer timer.Stop()
 
 		var code string
 		select {
-		case code = <-codeCh:
-			// got authorization code
-		case e := <-errCh:
-			emit(CodexOAuthDoneMsg{Err: e})
+		case raw := <-manualCh:
+			manualCode, err := extractOAuthCode(raw, state)
+			if err != nil {
+				emitDone(CodexOAuthDoneMsg{Err: err})
+				return
+			}
+			code = manualCode
+		case e := <-serveErrCh:
+			emitDone(CodexOAuthDoneMsg{Err: e})
 			return
 		case <-timer.C:
-			emit(CodexOAuthDoneMsg{Err: fmt.Errorf("oauth timed out after %s", oauthTimeout)})
+			emitDone(CodexOAuthDoneMsg{Err: fmt.Errorf("oauth timed out after %s", oauthTimeout)})
 			return
 		case <-ctx.Done():
-			emit(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
+			emitDone(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
 			return
 		}
 
@@ -230,20 +279,61 @@ func startOAuthFlow(ctx context.Context, epoch uint64) <-chan CodexOAuthDoneMsg 
 		// POST (network slow, user changed their mind).
 		select {
 		case <-ctx.Done():
-			emit(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
+			emitDone(CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled})
 			return
 		default:
 		}
 		tokens, err := exchangeCodeForTokens(codexTokenURL, code, verifier, redirectURI)
 		if err != nil {
-			emit(CodexOAuthDoneMsg{Err: fmt.Errorf("token exchange: %w", err)})
+			emitDone(CodexOAuthDoneMsg{Err: fmt.Errorf("token exchange: %w", err)})
 			return
 		}
 
-		emit(CodexOAuthDoneMsg{Tokens: tokens})
+		emitDone(CodexOAuthDoneMsg{Tokens: tokens})
 	}()
 
-	return ch
+	return &codexOAuthSession{msgs: ch, manualCh: manualCh}
+}
+
+// extractOAuthCode accepts the manual fallback input from the user. The browser
+// address bar may contain the full localhost callback URL, or the user may paste
+// only the raw query string. State is still validated exactly as the loopback
+// handler validates it, so a stale or unrelated callback cannot be exchanged.
+func extractOAuthCode(raw, wantState string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("missing OAuth callback URL or code")
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return "", fmt.Errorf("parse OAuth callback URL: %w", err)
+		}
+		return extractOAuthCodeFromValues(u.Query(), wantState)
+	}
+	if strings.Contains(raw, "=") {
+		q, err := url.ParseQuery(strings.TrimPrefix(raw, "?"))
+		if err != nil {
+			return "", fmt.Errorf("parse OAuth callback query: %w", err)
+		}
+		return extractOAuthCodeFromValues(q, wantState)
+	}
+	return raw, nil
+}
+
+func extractOAuthCodeFromValues(q url.Values, wantState string) (string, error) {
+	if oauthErr := q.Get("error"); oauthErr != "" {
+		desc := q.Get("error_description")
+		return "", fmt.Errorf("oauth error: %s: %s", oauthErr, desc)
+	}
+	if got := q.Get("state"); got != "" && got != wantState {
+		return "", fmt.Errorf("state mismatch")
+	}
+	code := q.Get("code")
+	if code == "" {
+		return "", fmt.Errorf("missing authorization code")
+	}
+	return code, nil
 }
 
 // buildAuthorizeURL assembles the OAuth authorize URL with the parameter

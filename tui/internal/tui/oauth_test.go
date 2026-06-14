@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -188,9 +190,9 @@ func TestExchangeCodeForTokens(t *testing.T) {
 
 func TestExtractEmailFromJWT(t *testing.T) {
 	tests := []struct {
-		name  string
-		jwt   string
-		want  string
+		name string
+		jwt  string
+		want string
 	}{
 		{
 			name: "valid jwt with email",
@@ -239,56 +241,131 @@ func TestExtractEmailFromJWT(t *testing.T) {
 	}
 }
 
+// drainSession reads one message from a codexOAuthSession via waitCodexOAuthMsg.
+// It blocks until a message arrives or the deadline is hit.
+func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duration) interface{} {
+	t.Helper()
+	ch := make(chan interface{}, 1)
+	go func() {
+		msg, ok := <-session.msgs
+		if !ok {
+			ch <- CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled}
+			return
+		}
+		ch <- msg
+	}()
+	select {
+	case msg := <-ch:
+		return msg
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for OAuth session message after %s", timeout)
+		return nil
+	}
+}
+
 // TestStartOAuthFlow_Cancellable verifies that cancelling the supplied
 // context tears down the listener and emits an ErrCodexAuthCancelled
 // message with the caller's epoch echoed back. This is the load-bearing
 // guarantee for the Del-cancel UX in FirstRunModel and LoginModel.
-//
-// We can't drive the real OAuth flow here (it would try to bind to
-// port 1455/1457 and contact auth.openai.com), so we settle for the
-// behaviour the caller relies on: cancel → prompt return with the
-// expected epoch and error. Port-release verification would need a
-// hard-coded port mock; the production path's `defer server.Shutdown`
-// is already exercised by httptest in the existing TestExchangeCodeForTokens.
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
-	// startOAuthFlow attempts net.Listen on 1455/1457. In CI those
-	// ports may or may not be free, but the cancel path runs after
-	// the bind succeeds (because we cancel asynchronously). If neither
-	// port binds the flow emits an immediate listen error — skip in
-	// that case so we don't flake on a CI box with the ports in use.
 	const epoch uint64 = 42
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := startOAuthFlow(ctx, epoch)
+	session := startOAuthFlow(ctx, epoch)
 
-	// Give the goroutine a moment to bind the listener and call
-	// openBrowser (which is fire-and-forget — `open <url>` on darwin
-	// or nothing in CI). Then cancel.
+	// Give the goroutine a moment to bind the listener, then cancel.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 
+	// Drain messages until we get a terminal CodexOAuthDoneMsg.
+	for {
+		raw := drainSession(t, session, 3*time.Second)
+		switch msg := raw.(type) {
+		case CodexOAuthURLMsg:
+			// Non-terminal: listener is ready; loop to the next message.
+			if msg.Epoch != epoch {
+				t.Errorf("URLMsg Epoch = %d, want %d", msg.Epoch, epoch)
+			}
+			continue
+		case CodexOAuthDoneMsg:
+			if msg.Epoch != epoch {
+				t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+			}
+			if msg.Err == nil {
+				t.Fatal("expected non-nil Err on cancellation")
+			}
+			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+				return // success
+			}
+			// Listener bind failure — environment-dependent.
+			t.Skipf("listener bind failed (likely ports 1455/1457 in use); cancellation path could not run: %v", msg.Err)
+		}
+	}
+}
+
+// TestStartOAuthFlow_LoopbackCallbackDoesNotCompleteUnderTheHood verifies
+// Jason's UX requirement: even if the browser reaches the localhost callback,
+// OAuth must not exchange tokens or emit success until the user explicitly
+// pastes the code/URL back into the terminal textarea.
+func TestStartOAuthFlow_LoopbackCallbackDoesNotCompleteUnderTheHood(t *testing.T) {
+	const epoch uint64 = 99
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session := startOAuthFlow(ctx, epoch)
+	first := drainSession(t, session, 3*time.Second)
+	urlMsg, ok := first.(CodexOAuthURLMsg)
+	if !ok {
+		if done, ok := first.(CodexOAuthDoneMsg); ok && done.Err != nil {
+			t.Skipf("listener bind failed (likely ports 1455/1457 in use): %v", done.Err)
+		}
+		t.Fatalf("expected CodexOAuthURLMsg, got %T", first)
+	}
+
+	authURL, err := url.Parse(urlMsg.AuthURL)
+	if err != nil {
+		t.Fatalf("parse AuthURL: %v", err)
+	}
+	state := authURL.Query().Get("state")
+	if state == "" {
+		t.Fatal("AuthURL did not include state")
+	}
+
+	resp, err := http.Get(urlMsg.RedirectURI + "?code=browser-code&state=" + url.QueryEscape(state))
+	if err != nil {
+		t.Fatalf("GET callback: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read callback body: %v", err)
+	}
+	if !strings.Contains(string(body), "Nothing has been completed") {
+		t.Fatalf("callback body should tell the user to return to terminal, got: %s", string(body))
+	}
+
 	select {
-	case msg := <-ch:
-		if msg.Epoch != epoch {
-			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
-		}
-		if msg.Err == nil {
-			t.Fatal("expected non-nil Err on cancellation")
-		}
-		// Two acceptable error paths:
-		//   1. The listener bound and the select observed ctx.Done()
-		//      → ErrCodexAuthCancelled.
-		//   2. The listener failed to bind (port in use) → "listen
-		//      on …" error before the select. That's an environment
-		//      problem, not a bug in our code; skip rather than fail.
-		if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+	case msg := <-session.msgs:
+		t.Fatalf("loopback callback unexpectedly emitted session message before textarea submit: %T %#v", msg, msg)
+	case <-time.After(150 * time.Millisecond):
+		// Success: the browser callback did not complete OAuth under the hood.
+	}
+
+	cancel()
+	for {
+		raw := drainSession(t, session, 3*time.Second)
+		switch msg := raw.(type) {
+		case CodexOAuthDoneMsg:
+			if !errors.Is(msg.Err, ErrCodexAuthCancelled) {
+				t.Fatalf("after cancel Err = %v, want ErrCodexAuthCancelled", msg.Err)
+			}
 			return
+		case CodexOAuthURLMsg:
+			continue
+		default:
+			t.Fatalf("unexpected message after cancel: %T", raw)
 		}
-		// Listener bind failure path — environment-dependent.
-		t.Skipf("listener bind failed (likely ports 1455/1457 in use); cancellation path could not run: %v", msg.Err)
-	case <-time.After(3 * time.Second):
-		t.Fatal("startOAuthFlow did not emit a result within 3s of cancel")
 	}
 }
 
@@ -297,9 +374,6 @@ func TestStartOAuthFlow_Cancellable(t *testing.T) {
 // carries the caller's epoch. That's the invariant the handler relies on
 // to gate token-writes (Epoch must match m.codexLoginEpoch).
 func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
-	// Occupy both real ports so the listener fails. If that itself
-	// fails (e.g. permissions), skip — the assertion still holds in
-	// the real failure path even if we can't force it here.
 	l1, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
 	if err != nil {
 		t.Skipf("cannot bind :%d to force listen-failure: %v", defaultPort, err)
@@ -312,16 +386,218 @@ func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
 	defer l2.Close()
 
 	const epoch uint64 = 7
-	ch := startOAuthFlow(context.Background(), epoch)
-	select {
-	case msg := <-ch:
-		if msg.Epoch != epoch {
-			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
-		}
-		if msg.Err == nil {
-			t.Error("expected listen error, got nil Err")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("startOAuthFlow did not emit a result within 2s")
+	session := startOAuthFlow(context.Background(), epoch)
+	raw := drainSession(t, session, 2*time.Second)
+	msg, ok := raw.(CodexOAuthDoneMsg)
+	if !ok {
+		t.Fatalf("expected CodexOAuthDoneMsg, got %T", raw)
 	}
+	if msg.Epoch != epoch {
+		t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+	}
+	if msg.Err == nil {
+		t.Error("expected listen error, got nil Err")
+	}
+}
+
+// TestExtractOAuthCode covers all manual-callback input formats.
+func TestExtractOAuthCode(t *testing.T) {
+	const (
+		wantCode  = "auth-code-xyz"
+		wantState = "test-state-abc"
+	)
+
+	tests := []struct {
+		name      string
+		raw       string
+		wantCode  string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:     "full localhost callback URL with code and state",
+			raw:      "http://localhost:1455/auth/callback?code=auth-code-xyz&state=test-state-abc",
+			wantCode: wantCode,
+		},
+		{
+			name:     "full URL state omitted (no state in URL)",
+			raw:      "http://localhost:1455/auth/callback?code=auth-code-xyz",
+			wantCode: wantCode,
+		},
+		{
+			name:     "raw query string with leading ?",
+			raw:      "?code=auth-code-xyz&state=test-state-abc",
+			wantCode: wantCode,
+		},
+		{
+			name:     "raw query string without leading ?",
+			raw:      "code=auth-code-xyz&state=test-state-abc",
+			wantCode: wantCode,
+		},
+		{
+			name:     "raw code only (no = sign)",
+			raw:      "auth-code-xyz",
+			wantCode: wantCode,
+		},
+		{
+			name:      "state mismatch in URL",
+			raw:       "http://localhost:1455/auth/callback?code=auth-code-xyz&state=wrong-state",
+			wantErr:   true,
+			errSubstr: "state mismatch",
+		},
+		{
+			name:      "state mismatch in query string",
+			raw:       "code=auth-code-xyz&state=wrong-state",
+			wantErr:   true,
+			errSubstr: "state mismatch",
+		},
+		{
+			name:      "oauth error in URL",
+			raw:       "http://localhost:1455/auth/callback?error=access_denied&error_description=User+denied",
+			wantErr:   true,
+			errSubstr: "access_denied",
+		},
+		{
+			name:      "oauth error in query string",
+			raw:       "error=access_denied&error_description=User+denied",
+			wantErr:   true,
+			errSubstr: "access_denied",
+		},
+		{
+			name:      "missing code in URL",
+			raw:       "http://localhost:1455/auth/callback?state=test-state-abc",
+			wantErr:   true,
+			errSubstr: "missing authorization code",
+		},
+		{
+			name:      "empty input",
+			raw:       "",
+			wantErr:   true,
+			errSubstr: "missing OAuth callback URL or code",
+		},
+		{
+			name:      "whitespace only",
+			raw:       "   ",
+			wantErr:   true,
+			errSubstr: "missing OAuth callback URL or code",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, err := extractOAuthCode(tc.raw, wantState)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil (code=%q)", tc.errSubstr, code)
+				}
+				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), tc.errSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if code != tc.wantCode {
+				t.Errorf("code = %q, want %q", code, tc.wantCode)
+			}
+		})
+	}
+}
+
+// TestWaitCodexOAuthMsg verifies that waitCodexOAuthMsg routes messages
+// from the session channel as correct Bubble Tea message types.
+func TestWaitCodexOAuthMsg(t *testing.T) {
+	makeSession := func() (*codexOAuthSession, chan interface{}) {
+		ch := make(chan interface{}, 2)
+		s := &codexOAuthSession{msgs: ch, manualCh: make(chan string, 1)}
+		return s, ch
+	}
+
+	t.Run("CodexOAuthURLMsg passes through", func(t *testing.T) {
+		s, ch := makeSession()
+		ch <- CodexOAuthURLMsg{AuthURL: "https://example.com/auth", RedirectURI: "http://localhost:1455/auth/callback", Epoch: 1}
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		urlMsg, ok := msg.(CodexOAuthURLMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthURLMsg, got %T", msg)
+		}
+		if urlMsg.AuthURL != "https://example.com/auth" {
+			t.Errorf("AuthURL = %q, want %q", urlMsg.AuthURL, "https://example.com/auth")
+		}
+	})
+
+	t.Run("CodexOAuthDoneMsg passes through", func(t *testing.T) {
+		s, ch := makeSession()
+		ch <- CodexOAuthDoneMsg{Tokens: &CodexTokens{AccessToken: "tok"}, Epoch: 2}
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		doneMsg, ok := msg.(CodexOAuthDoneMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthDoneMsg, got %T", msg)
+		}
+		if doneMsg.Tokens == nil || doneMsg.Tokens.AccessToken != "tok" {
+			t.Errorf("unexpected tokens: %+v", doneMsg.Tokens)
+		}
+	})
+
+	t.Run("closed channel returns ErrCodexAuthCancelled", func(t *testing.T) {
+		s, ch := makeSession()
+		close(ch)
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		doneMsg, ok := msg.(CodexOAuthDoneMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthDoneMsg, got %T", msg)
+		}
+		if !errors.Is(doneMsg.Err, ErrCodexAuthCancelled) {
+			t.Errorf("Err = %v, want ErrCodexAuthCancelled", doneMsg.Err)
+		}
+	})
+
+	t.Run("nil session returns nil cmd", func(t *testing.T) {
+		cmd := waitCodexOAuthMsg(nil)
+		if cmd != nil {
+			t.Error("expected nil cmd for nil session")
+		}
+	})
+}
+
+// TestSubmitCallback verifies that SubmitCallback delivers the raw string
+// to the manualCh without blocking, and that a nil session is a no-op.
+func TestSubmitCallback(t *testing.T) {
+	t.Run("delivers to channel", func(t *testing.T) {
+		s := &codexOAuthSession{manualCh: make(chan string, 1)}
+		s.SubmitCallback("http://localhost:1455/auth/callback?code=abc&state=xyz")
+		select {
+		case got := <-s.manualCh:
+			if got != "http://localhost:1455/auth/callback?code=abc&state=xyz" {
+				t.Errorf("got %q, want full URL", got)
+			}
+		default:
+			t.Fatal("manualCh was empty after SubmitCallback")
+		}
+	})
+
+	t.Run("nil session is a no-op", func(t *testing.T) {
+		var s *codexOAuthSession
+		s.SubmitCallback("anything") // must not panic
+	})
+
+	t.Run("full channel does not block", func(t *testing.T) {
+		s := &codexOAuthSession{manualCh: make(chan string, 1)}
+		s.SubmitCallback("first")
+		// Channel is now full. Second call must return immediately, not block.
+		done := make(chan struct{})
+		go func() {
+			s.SubmitCallback("second")
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("SubmitCallback blocked on full channel")
+		}
+	})
 }
