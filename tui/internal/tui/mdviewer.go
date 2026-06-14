@@ -23,6 +23,7 @@ type MarkdownEntry struct {
 	Group       string // section header (entries with same group are grouped)
 	Path        string // absolute path to file (read on selection)
 	Content     string // pre-built content (used instead of Path if non-empty)
+	Remote      string // configured git remote URL for repo-backed skills; "" otherwise (issue #172)
 }
 
 // MarkdownViewerCloseMsg is sent when the user exits the viewer.

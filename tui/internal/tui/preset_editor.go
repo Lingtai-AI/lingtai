@@ -118,10 +118,32 @@ var capabilityProviderOptions = map[string][]string{
 // new flagship ships, add it (and remove deprecated entries — agents
 // will hit 4xx if they pick a retired model).
 var providerModels = map[string][]string{
-	"minimax":  {"MiniMax-M2.7-highspeed", "MiniMax-M2.7"},
-	"zhipu":    {"GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
+	// MiniMax: official supported LLM model IDs (API Overview), newest first.
+	// M3 is the current flagship/default; the older M2.x IDs remain supported
+	// and are kept as selectable fallbacks.
+	"minimax": {
+		"MiniMax-M3",
+		"MiniMax-M2.7", "MiniMax-M2.7-highspeed",
+		"MiniMax-M2.5", "MiniMax-M2.5-highspeed",
+		"MiniMax-M2.1", "MiniMax-M2.1-highspeed",
+		"MiniMax-M2",
+	},
+	"zhipu":    {"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
 	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
 	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+	// NVIDIA NIM catalog IDs (build.nvidia.com) served on the free tier.
+	// Default flagship first; the rest are popular open-weight options.
+	// Users can also free-text any other catalog ID on this row.
+	"nvidia": {
+		"meta/llama-3.3-70b-instruct",
+		"meta/llama-3.1-70b-instruct",
+		"qwen/qwen3-coder-480b-a35b-instruct",
+		"moonshotai/kimi-k2-thinking",
+		"openai/gpt-oss-120b",
+		"nvidia/llama-3.1-nemotron-ultra-253b-v1",
+		"mistralai/mistral-nemotron",
+		"microsoft/phi-4-mini-instruct",
+	},
 	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
 	// gpt-5.5 is OAuth-exclusive (not available via API key); see SKILL.md
 	// next to this file for the canonical source list and why each one is
@@ -141,10 +163,21 @@ var codexServiceTierOptions = []string{"normal", "fast"}
 // the user isn't blocked from enabling it on a model the editor
 // doesn't catalog.
 var modelHasVision = map[string]bool{
-	// MiniMax: both M2.7 sizes accept images.
-	"MiniMax-M2.7-highspeed": true,
+	// MiniMax: keyed to the official supported LLM model IDs. Only the known
+	// multimodal entries auto-enable vision — M3 (current flagship) and the
+	// M2.7 variants, which prior code treated as image-capable. The older
+	// M2.5/M2.1/M2 IDs are marked false so the editor doesn't auto-enable
+	// vision for them when uncertain.
+	"MiniMax-M3":             true,
 	"MiniMax-M2.7":           true,
+	"MiniMax-M2.7-highspeed": true,
+	"MiniMax-M2.5":           false,
+	"MiniMax-M2.5-highspeed": false,
+	"MiniMax-M2.1":           false,
+	"MiniMax-M2.1-highspeed": false,
+	"MiniMax-M2":             false,
 	// Zhipu coding-plan models — current generation supports vision.
+	"GLM-5.2":     true,
 	"GLM-5.1":     true,
 	"GLM-5-Turbo": true,
 	"GLM-4.7":     true,
@@ -271,21 +304,12 @@ type PresetEditorModel struct {
 	// API key state. existingKeys is the host's Config.Keys snapshot
 	// (env-var-name → value), used to prefill the api_key field when a
 	// matching env var is already populated. apiKey is the live edit
-	// buffer; apiKeySet flips true when the user types into it (so we
-	// know to emit it on commit even if the new value is empty/cleared).
-	//
-	// apiKeyLocked is set at construction when the preset opens with a
-	// key already stored for its api_key_env slot. Editing an existing
-	// preset's saved key from inside this editor was confusing — users
-	// expected the row to show what was there, not silently overwrite
-	// it. When locked, the inline-edit entry on the api_key row is a
-	// no-op (the codex/OAuth branch already behaves this way for a
-	// different reason). Newly created presets with no stored key
-	// remain freely editable so initial setup still works.
+	// buffer; apiKeySet flips true only when the user explicitly edits
+	// the row (so an untouched masked key remains unchanged on commit,
+	// while a pasted replacement is written by the host).
 	existingKeys map[string]string
 	apiKey       string
 	apiKeySet    bool
-	apiKeyLocked bool
 
 	// Status
 	saveErr string
@@ -298,9 +322,10 @@ type PresetEditorModel struct {
 // on-disk Source rather than its name (so a user-saved preset whose
 // name happens to match a template is correctly treated as editable).
 //
-// existingKeys is Config.Keys (env-var-name → value) so the editor can
-// prefill the api_key row when a key is already saved for this preset's
-// api_key_env. Pass nil when no key store is available (e.g. tests).
+// existingKeys is Config.Keys (env-var-name → value). For user-owned
+// presets, the editor uses it to display an already-saved key as masked.
+// Templates intentionally start with a blank key buffer so creating a new
+// preset never inherits the provider's old shared env slot by accident.
 func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]string, globalDir string) PresetEditorModel {
 	return NewPresetEditorModelWithBuiltinFlag(p, lang, existingKeys, globalDir, preset.IsTemplate(p))
 }
@@ -327,14 +352,17 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 	cn := textinput.New()
 	cn.CharLimit = 64
 	cn.SetWidth(30)
-	// Prefill the api_key buffer if the preset's declared env slot
-	// already holds a value. The buffer is the source of truth for the
-	// row's display; apiKeySet stays false so we don't emit on commit
-	// unless the user actually changed it.
+	// For saved/user-owned presets, prefill the api_key buffer if the
+	// declared env slot already holds a value; this lets the row render as
+	// masked and preserves the key when untouched. For templates, keep the
+	// buffer empty: editing a template creates a new preset, and that new
+	// preset must not silently inherit an old provider-wide key.
 	apiKey := ""
-	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-		if envName, _ := llm["api_key_env"].(string); envName != "" {
-			apiKey = existingKeys[envName]
+	if !isBuiltin {
+		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
+			if envName, _ := llm["api_key_env"].(string); envName != "" {
+				apiKey = existingKeys[envName]
+			}
 		}
 	}
 	return PresetEditorModel{
@@ -350,7 +378,6 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		existingKeys:   existingKeys,
 		globalDir:      globalDir,
 		apiKey:         apiKey,
-		apiKeyLocked:   apiKey != "",
 	}
 }
 
@@ -569,14 +596,6 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		// page. API key field is read-only; no-op here.
 		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
-			return *m, nil
-		}
-		// Preset opened with a key already stored for its api_key_env.
-		// Editing here was confusing — the row shows a masked value but
-		// pressing Enter blanked the buffer and silently overwrote the
-		// stored key on commit. Lock the row instead.
-		if m.apiKeyLocked {
-			m.saveErr = i18n.T("preset_editor.api_key_locked")
 			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
@@ -829,8 +848,12 @@ func (m *PresetEditorModel) applyInline(val string) {
 	case feAPIKey:
 		// Store the raw key in the editor's buffer; the manifest
 		// itself only holds api_key_env (the slot name), assigned at
-		// commit time by the host's stampAutoEnvVar helper. Empty
-		// commit deletes any saved key (treated as "clear it").
+		// commit time by the host's stampAutoEnvVar helper. Opening the
+		// blank replacement editor and pressing Enter without typing is
+		// a no-op, not a clear; key clearing needs an explicit future UI.
+		if val == "" {
+			return
+		}
 		m.apiKey = val
 		m.apiKeySet = true
 	}
@@ -884,17 +907,26 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 	m.working.Description.Extra[key] = val
 }
 
-// syncCapsToModel resets the manifest's capabilities to the default
-// set for the new model. User customizations to capability config
-// (e.g. disabling email) are dropped — switching models is an explicit
-// "give me this model's defaults" action. For free-text models not in
-// the providerModels catalog, leave caps alone; we don't know what
-// counts as "default" for an arbitrary openrouter/custom model id.
+// syncCapsToModel resets the model-conditional optional capabilities
+// (web_search, vision) to the default set for the new model. All other
+// capability entries — skills.paths overrides, bash policy, anything
+// not in optionalCapabilities — are not model-dependent and survive the
+// switch untouched. For free-text models not in the providerModels
+// catalog, leave caps alone; we don't know what counts as "default"
+// for an arbitrary openrouter/custom model id.
 func (m *PresetEditorModel) syncCapsToModel(modelID string) {
 	if _, known := modelHasVision[modelID]; !known {
 		return
 	}
-	m.working.Manifest["capabilities"] = defaultCapsFor(modelID)
+	caps := m.capsMap()
+	defaults := defaultCapsFor(modelID)
+	for _, capName := range optionalCapabilities {
+		if def, ok := defaults[capName]; ok {
+			caps[capName] = def
+		} else {
+			delete(caps, capName)
+		}
+	}
 }
 
 // cycleFocused rotates enum fields by `dir` (+1 or -1).
@@ -904,12 +936,12 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feProvider:
 		// Order matches the builtin presets (preset.go BuiltinPresets).
 		// Keep this in sync when adding a new provider/builtin.
-		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "openrouter", "codex", "custom"}
+		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "custom"}
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
 		// Reset model to the new provider's first canonical entry when the
 		// current model isn't valid for the new provider. Without this, a
-		// minimax→zhipu switch leaves "MiniMax-M2.7-highspeed" in model
+		// minimax→zhipu switch leaves "MiniMax-M3" in model
 		// and validation passes silently while the kernel later 4xxs.
 		if models, ok := providerModels[newProvider]; ok && len(models) > 0 {
 			currentModel := asString(m.llmMap()["model"])

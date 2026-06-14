@@ -15,18 +15,19 @@ import (
 
 // SessionEntry is the JSON-serializable entry stored in session.jsonl.
 type SessionEntry struct {
-	Ts          string   `json:"ts"`
-	Type        string   `json:"type"`
-	From        string   `json:"from,omitempty"`
-	To          string   `json:"to,omitempty"`
-	Subject     string   `json:"subject,omitempty"`
-	Body        string   `json:"body"`
-	Question    string   `json:"question,omitempty"`
-	Attachments []string `json:"attachments,omitempty"`
-	Source      string   `json:"source,omitempty"` // "human", "insight" — for inquiry entries
-	FireID      string   `json:"fire_id,omitempty"` // soul_flow fires — used to look up voices in soul_flow.jsonl
-	Sources     []string `json:"sources,omitempty"` // notification entries — list of source keys (email, soul, system, ...)
-	Meta        *NotificationMeta `json:"meta,omitempty"` // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
+	Ts          string            `json:"ts"`
+	Type        string            `json:"type"`
+	From        string            `json:"from,omitempty"`
+	To          string            `json:"to,omitempty"`
+	Subject     string            `json:"subject,omitempty"`
+	Body        string            `json:"body"`
+	Question    string            `json:"question,omitempty"`
+	Attachments []string          `json:"attachments,omitempty"`
+	Source      string            `json:"source,omitempty"`      // "human", "insight" — for inquiry entries
+	FireID      string            `json:"fire_id,omitempty"`     // soul_flow fires — used to look up voices in soul_flow.jsonl
+	Sources     []string          `json:"sources,omitempty"`     // notification entries — list of source keys (email, soul, system, ...)
+	Meta        *NotificationMeta `json:"meta,omitempty"`        // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
+	ApiCallID   string            `json:"api_call_id,omitempty"` // llm/tool entries — one LLM API round-trip grouping id
 
 	// Delivered is a transient field propagated from MailMessage.Delivered.
 	// Only meaningful for Type == "mail". Not persisted to session.jsonl.
@@ -40,10 +41,10 @@ type SessionEntry struct {
 // underlying state hasn't been computed yet, and older events.jsonl rows
 // pre-dating issue #40 carry no meta at all.
 type NotificationMeta struct {
-	CurrentTime        string                  `json:"current_time,omitempty"`
+	CurrentTime        string                   `json:"current_time,omitempty"`
 	Context            *NotificationMetaContext `json:"context,omitempty"`
-	StaminaLeftSeconds float64                 `json:"stamina_left_seconds,omitempty"`
-	InjectionSeq       int                     `json:"injection_seq,omitempty"`
+	StaminaLeftSeconds float64                  `json:"stamina_left_seconds,omitempty"`
+	InjectionSeq       int                      `json:"injection_seq,omitempty"`
 }
 
 type NotificationMetaContext struct {
@@ -55,15 +56,15 @@ type NotificationMetaContext struct {
 // SessionCache is an append-only cache backed by session.jsonl.
 // It incrementally tails three data sources and appends new entries.
 type SessionCache struct {
-	path        string          // human/logs/session.jsonl
-	entries     []SessionEntry  // in-memory mirror of all entries
-	lastMailTs  string          // highest mail ReceivedAt ingested (watermark for live-session dedup)
-	eventsOff   int64           // byte offset in events.jsonl
-	inquiryOff  int64           // byte offset in soul_inquiry.jsonl
-	soulFlowOff int64           // byte offset in soul_flow.jsonl (voice index source)
-	projectPath string          // absolute path of the project directory (parent of .lingtai/)
-	lastHour    time.Time       // hour (truncated) of the most recent entry
-	rebuilding  bool            // true during RebuildFromSources — suppress file writes
+	path        string         // human/logs/session.jsonl
+	entries     []SessionEntry // in-memory mirror of all entries
+	lastMailTs  string         // highest mail ReceivedAt ingested (watermark for live-session dedup)
+	eventsOff   int64          // byte offset in events.jsonl
+	inquiryOff  int64          // byte offset in soul_inquiry.jsonl
+	soulFlowOff int64          // byte offset in soul_flow.jsonl (voice index source)
+	projectPath string         // absolute path of the project directory (parent of .lingtai/)
+	lastHour    time.Time      // hour (truncated) of the most recent entry
+	rebuilding  bool           // true during RebuildFromSources — suppress file writes
 
 	// soulVoices indexes voices by fire_id, populated by tailing
 	// soul_flow.jsonl. Used to inflate soul_flow SessionEntry bodies that
@@ -94,7 +95,6 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 	}
 	return sc
 }
-
 
 // RebuildFromSources reads all three data sources from scratch, merges and
 // sorts them chronologically, writes session.jsonl, and sets offsets to EOF
@@ -503,7 +503,7 @@ func parseEvent(line []byte) *SessionEntry {
 	}
 
 	switch eventType {
-	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "insight", "soul_flow", "notification", "aed":
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "llm_call", "llm_response", "insight", "soul_flow", "notification", "aed":
 		// ok
 	default:
 		return nil
@@ -523,6 +523,9 @@ func parseEvent(line []byte) *SessionEntry {
 		Ts:   ts,
 		Type: eventType,
 		Body: text,
+	}
+	if apiCallID, ok := raw["api_call_id"].(string); ok {
+		e.ApiCallID = apiCallID
 	}
 
 	if eventType == "insight" {
@@ -624,6 +627,13 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 			return fmt.Sprintf("(soul flow fired — %d voice(s))", int(count))
 		}
 		return strings.Join(lines, "\n")
+	case "llm_call":
+		if model, ok := entry["model"].(string); ok && model != "" {
+			return "llm call " + model
+		}
+		return "llm call"
+	case "llm_response":
+		return "llm response"
 	case "notification":
 		// Prefer the kernel-logged summary string when present (it
 		// already carries per-source counts in human-readable form).
@@ -677,20 +687,103 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 				args = string(data)
 			}
 		}
-		if len(args) > 200 {
-			args = args[:200] + "..."
-		}
+		// Carry the full args verbatim. Truncation (if any) is applied at
+		// render time per the user's tool_call_truncate setting; the default
+		// is no truncation, so this path keeps full content.
 		return fmt.Sprintf("%s(%s)", name, args)
 	case "tool_result":
-		name, _ := entry["tool_name"].(string)
-		status, _ := entry["status"].(string)
-		elapsed := ""
-		if ms, ok := entry["elapsed_ms"].(float64); ok {
-			elapsed = fmt.Sprintf(" %dms", int(ms))
-		}
-		return fmt.Sprintf("%s → %s%s", name, status, elapsed)
+		return formatToolResultEvent(entry)
 	}
 	return ""
+}
+
+const maxToolResultRenderChars = 10000
+
+func formatToolResultEvent(entry map[string]interface{}) string {
+	name, _ := entry["tool_name"].(string)
+	status, _ := entry["status"].(string)
+	elapsed := ""
+	if ms, ok := entry["elapsed_ms"].(float64); ok {
+		elapsed = fmt.Sprintf(" %dms", int(ms))
+	}
+
+	lines := []string{fmt.Sprintf("%s → %s%s", name, status, elapsed)}
+	result, hasResult := entry["result"]
+	if !hasResult {
+		return lines[0]
+	}
+
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		if toolErr, ok := resultMap["tool_error"].(map[string]interface{}); ok {
+			lines = append(lines, formatToolErrorSummary(toolErr)...)
+		}
+	}
+
+	if resultText := formatToolResultValue(result); resultText != "" {
+		lines = append(lines, "result: "+truncateToolResultText(resultText))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatToolErrorSummary(toolErr map[string]interface{}) []string {
+	var lines []string
+	if reason, ok := toolErr["reason"].(string); ok && reason != "" {
+		lines = append(lines, "tool_error: "+reason)
+	} else if summary, ok := toolErr["summary"].(string); ok && summary != "" {
+		lines = append(lines, "tool_error: "+summary)
+	}
+	if argKeys := stringifyToolResultList(toolErr["arg_keys"]); len(argKeys) > 0 {
+		lines = append(lines, "arg_keys: "+strings.Join(argKeys, ", "))
+	}
+	if guidance := stringifyToolResultList(toolErr["guidance"]); len(guidance) > 0 {
+		lines = append(lines, "guidance:")
+		for _, item := range guidance {
+			lines = append(lines, "- "+item)
+		}
+	}
+	return lines
+}
+
+func stringifyToolResultList(value interface{}) []string {
+	items, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		switch v := item.(type) {
+		case string:
+			if v != "" {
+				out = append(out, v)
+			}
+		default:
+			out = append(out, fmt.Sprint(v))
+		}
+	}
+	return out
+}
+
+func formatToolResultValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return v
+	default:
+		data, err := json.MarshalIndent(v, "", "  ")
+		if err == nil {
+			return string(data)
+		}
+		return fmt.Sprint(v)
+	}
+}
+
+func truncateToolResultText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= maxToolResultRenderChars {
+		return text
+	}
+	return string(runes[:maxToolResultRenderChars]) + fmt.Sprintf("\n… truncated to %d chars", maxToolResultRenderChars)
 }
 
 // ---------------------------------------------------------------------------

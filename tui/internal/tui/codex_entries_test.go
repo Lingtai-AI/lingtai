@@ -22,7 +22,7 @@ func TestDefaultCommandsIncludesKnowledge(t *testing.T) {
 
 func TestBuildAgentCodexEntries_ReadsFilesystemKnowledge(t *testing.T) {
 	agentDir := t.TempDir()
-	knowledgePath := filepath.Join(agentDir, "knowledge", "research", "mimo", "KNOWLEDGE.md")
+	knowledgePath := filepath.Join(agentDir, "knowledge", "mimo", "KNOWLEDGE.md")
 	if err := os.MkdirAll(filepath.Dir(knowledgePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +39,54 @@ func TestBuildAgentCodexEntries_ReadsFilesystemKnowledge(t *testing.T) {
 	if got.Label != "MiMo provider notes" {
 		t.Errorf("label = %q, want %q", got.Label, "MiMo provider notes")
 	}
-	if got.Group != filepath.Join("research", "mimo") {
-		t.Errorf("group = %q, want %q", got.Group, filepath.Join("research", "mimo"))
+	if got.Group != "Knowledge" {
+		t.Errorf("group = %q, want %q", got.Group, "Knowledge")
 	}
 	if got.Path != knowledgePath {
 		t.Errorf("path = %q, want %q", got.Path, knowledgePath)
 	}
 	if got.Content != "" {
 		t.Errorf("filesystem knowledge entries should be path-backed, got content %q", got.Content)
+	}
+}
+
+func TestBuildAgentCodexEntries_HidesNestedSubKnowledgeFromTopLayer(t *testing.T) {
+	agentDir := t.TempDir()
+	parentPath := filepath.Join(agentDir, "knowledge", "session-journal", "KNOWLEDGE.md")
+	childPath := filepath.Join(agentDir, "knowledge", "session-journal", "2026-06-09-molt-1-child", "KNOWLEDGE.md")
+	if err := os.MkdirAll(filepath.Dir(childPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentBody := "---\nname: session-journal\ndescription: Routing index for session journals.\n---\n# Session Journal Index\n"
+	childBody := "---\nname: child-entry\ndescription: Second layer detail that should not appear in the top-level catalog.\n---\n# Child Entry\n"
+	if err := os.WriteFile(parentPath, []byte(parentBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(childPath, []byte(childBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := buildAgentCodexEntries(agentDir)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1 top-level parent only: %+v", len(entries), entries)
+	}
+	if entries[0].Label != "session-journal" {
+		t.Fatalf("top-level label = %q, want session-journal", entries[0].Label)
+	}
+	if entries[0].Path != parentPath {
+		t.Fatalf("top-level path = %q, want %q", entries[0].Path, parentPath)
+	}
+
+	drillInEntries := buildKnowledgeFolderEntries(filepath.Dir(entries[0].Path))
+	foundChild := false
+	for _, entry := range drillInEntries {
+		if entry.Path == childPath {
+			foundChild = true
+			break
+		}
+	}
+	if !foundChild {
+		t.Fatalf("nested sub-knowledge should remain reachable after drilling into the parent; entries=%+v", drillInEntries)
 	}
 }
 

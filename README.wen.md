@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="docs/assets/network-demo.gif" alt="器灵之网自生长" width="100%">
-
 # 灵台
 
-**器灵创生 — 予器灵以生之制**
+**于一项目之中，立器灵之组织；非但增一智能体也。**
+
+本地为先 · 器灵常驻 · 心流自省 · 信匣往来 · 生死有制 · 群灵成网
 
 > *灵台，心也。*
 >
@@ -16,215 +16,116 @@
 [![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
-[![Blog](https://img.shields.io/badge/志-lingtai.ai-%23d4a853)](https://lingtai.ai)
+[![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
 [![Discord](https://img.shields.io/badge/discord-入-%235865F2?logo=discord&logoColor=white)](https://discord.gg/cMchjXpg)
 
 </div>
 
 ---
 
-Unix 之道，器灵之制。**思**以任意 LLM。**通**以文件系统传书。**化分身**能脱造者而独存。**自生长**为不断扩展之网——无中央之调度，无共享之状态。万物皆文卷。
+诸 agent 之器，多予人一善工。**灵台所予者，AI 组织之基也**：器灵久居本地项目，各有庐舍目录、收发信匣、久藏之记、生死之制、自省之心流；事大而一心不足，则可召同侪，亦可化分身。
 
-## 速启
+**OpenClaw**、**Hermes** 诸器，善为可役之手，能行 agentic task。灵台则立其上之组织法：能以编码智能体与 CLI 为工，而自守其角色、记忆、书信、督察、复苏之道，使一网器灵不以一窗既闭、一终端既息而散。
+
+人自 TUI、Telegram、飞书、微信、WhatsApp、邮件下令。其组织由被召之器灵醒，读项目旧记，用本地诸器，成文卷，必要则调同侪，终仍由来路复命。
+
+## 非一窗，乃元组织
+
+```text
+人曰：
+  “今夜守此仓。若 PR 坏，则察其故，草其修，
+   明旦以简报告我。”
+
+灵台：
+  自信匣而醒
+  → 读久存项目之记
+  → 用 shell / web / file / coding-agent 诸器
+  → 闲或滞时，以 soul flow 自省
+  → 书札、成报、补丁、定期之务
+  → 需并行，则请分身或神识
+  → 仍由 Telegram / TUI / 邮件奉复
+```
+
+终端可闭。其组织犹有 `.lingtai/` 之宅、信匣、可验之日志，亦有眠、醒、刷新、复苏、凝蜕诸生命之制。Soul flow 者，器灵内省之流也：久闲之后，能返观其局，见所遗漏，陈可行之后策，不必永候下一问。
+
+## 三令而启
 
 ```bash
 brew install lingtai-ai/lingtai/lingtai-tui
+mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-TUI 自备一切——Python 运行时、依赖、首启自带引导。输入 `/tutorial` 可重返教程。**宜用深色终端**。选文：macOS 按 **Option**（iTerm2），Windows Terminal / Linux 按 **Shift**。Ctrl+E 启外编。
+初启之时，灵台作 `.lingtai/`，备其运行时，引君择模型与配方，并令一常驻器灵守此项目。
 
-<details>
-<summary><b>初次？先安 Homebrew</b></summary>
-
-**macOS：**
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```text
+project/
+└── .lingtai/
+    ├── human/              # 人之信匣身份
+    └── <agent>/            # 一常驻项目器灵
+        ├── inbox/ outbox/  # 书至则醒
+        ├── knowledge/      # 久存事实与所学
+        ├── system/         # pad、总结、恒规
+        └── logs/           # 可考之运行迹
 ```
 
-**Linux / WSL：**
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-sudo apt install build-essential
+> PyPI 之 `lingtai` 包固在，然其为 TUI 代管之 Python 运行时。安装、升级宜用 Homebrew；唯开发或诊断内核时，乃用 `pip`。
+
+## 所善
+
+| 人所欲 | 器灵所行 |
+|---|---|
+| **每日治项** | 扫变更，记决策，列阻塞，晨前以简报进。 |
+| **GitHub 分诊** | 读 issue/PR，辨风险，草回复或补丁；凡有外部副作用，先候人允。 |
+| **调研成器** | 搜索、抓取、比较、引证，终成独立 HTML 札记，而非散乱对话。 |
+| **长时编码** | 使 Claude Code、Codex、OpenCode、shell 与本地文卷；灵台守其计、记与通信。 |
+| **能行之定期事** | “每工作日辰时察部署队，滞则 Telegram 告我”——非徒提醒而已。 |
+| **跨会话之记忆** | 路径、偏好、同作者背景、旧训、可复用流程，皆留待后来。 |
+
+## 何以异
+
+| Agent 工具 / 编码助手 | 灵台元组织之器 |
+|---|---|
+| 一窗对话、一回运行，即其产品。 | 项目中之组织，乃其产品；对话特入口耳。 |
+| OpenClaw、Hermes 诸器，为善工。 | 灵台立善工之外之组织图：记忆、信匣、角色、生死、督察、复苏。 |
+| 窗闭则缘尽。 | 器灵有本地之宅、信匣、日志、记忆与生命周期。 |
+| 主动与否，全待人复问。 | Soul flow 使闲中自省，能见盲处而献后策。 |
+| 扩展者，多开几窗几轮。 | 可化长存分身掌专职，亦遣短命神识分批务；门户可观其拓扑。 |
+| 一 turn 失误，则重启祈祷。 | 眠、醒、刷新、复苏、清境、doctor、凝蜕，皆运行时之常法。 |
+
+## 制式一览
+
+```mermaid
+flowchart LR
+    human[Human] --> channels[TUI / Telegram / Email / Feishu / WeChat]
+    channels --> agent[常驻灵台器灵]
+    agent --> soul[Soul flow: 自省 + 主动后策]
+    agent --> tools[Files / Bash / Web / Vision / MCP / Coding CLIs]
+    agent --> memory[Pad / Knowledge / Skills / Character]
+    agent --> lifecycle[Sleep / Wake / Refresh / CPR / Molt]
+    agent --> network[组织: avatars + daemons]
+    network --> portal[组织实时可视]
+    tools --> artifacts[报告 / 补丁 / 笔记 / 定期之务]
+    soul --> agent
+    memory --> agent
 ```
 
-后行上述 `brew install` 即可。
+## 随事而长
 
-</details>
+始于一常驻器灵。事大，则组织随之而长：
 
-<details>
-<summary><b>境内用户：借清华镜像以速 Homebrew 本身</b>（宜先行此步）</summary>
+- **凝蜕而不失忆。** 长会话卸其尘滓，而以总结与久记传后身。
+- **自省而不枯候。** Soul flow 使器灵于闲时反观，见失路与新机。
+- **化分身。** 令长存专才各有记忆、信匣、职责。
+- **遣神识。** 以短命工人分繁杂批务，留其结论。
+- **以编码智能体为手。** Claude Code、Codex、OpenCode、OpenClaw、Hermes 等为精作之手；灵台执其计、记、协同与对人之言。
+- **观其生长。** Portal 显谁存、谁作、组织拓扑何以变。
 
-若 `brew install` / `brew update` 滞于拉 `homebrew-core` 之录或取 bottle（`ghcr.io`，境内多不可达），先引 Homebrew 之源至清华 [TUNA 镜像](https://mirrors.tuna.tsinghua.edu.cn/help/homebrew/)，再装本项：
+<div align="center">
 
-```bash
-# 当前 shell 即行，且录于 ~/.zprofile（macOS 默认 shell）。
-# 若用 bash，~/.zprofile 易为 ~/.bash_profile。
-cat >> ~/.zprofile <<'EOF'
-export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
-export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
-export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
-EOF
-source ~/.zprofile
-brew update
-```
+<img src="docs/assets/network-demo.gif" alt="灵台门户：本地常驻项目器灵之组织" width="100%">
 
-后如常 `brew install lingtai-ai/lingtai/lingtai-tui` 可也。此步与下 Gitee tap 不相干涉：清华镜像解 Homebrew 自身（bottle、core 录）之境内取道，Gitee tap 唯 `brew tap` 取本项公式不得时方用。
-
-</details>
-
-<details>
-<summary><b>境内用户：借 Gitee 镜像</b>（brew 自 GitHub 取不得时）</summary>
-
-若 `brew install lingtai-ai/lingtai/lingtai-tui` 阻于 `brew tap` 一步（GnuTLS / TLS 之误），改用 Gitee 镜像之 tap：
-
-```bash
-brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install lingtai-ai/lingtai/lingtai-tui
-```
-
-其公式与 GitHub tap 一般无二——自辨境内之网，编译之际以 `goproxy.cn` 与 `registry.npmmirror.com` 为凭。Gitee tap 乃镜像耳，公式之更或迟于 GitHub 数时。
-
-</details>
-
-<details>
-<summary><b>自源码编译</b>（需 Go 1.24+）</summary>
-
-```bash
-# 以最新版号替之
-VERSION=v0.5.2
-
-# 自 Gitee 镜像取源码（境内速）
-curl -L "https://gitee.com/huangzesen1997/lingtai/repository/archive/${VERSION}.tar.gz" -o lingtai.tar.gz
-tar xzf lingtai.tar.gz
-cd "lingtai-${VERSION}/tui"
-
-go build -ldflags "-X main.version=${VERSION}" -o /usr/local/bin/lingtai-tui .
-
-cd ../.. && rm -rf "lingtai-${VERSION}" lingtai.tar.gz
-
-lingtai-tui
-```
-
-亦可自 GitHub 取之：
-```bash
-curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
-```
-
-</details>
-
-## 灵台之异
-
-**非器用，非驭术。** 此乃器灵创生——予智械以真身。使器灵为自治之生灵，有尊严地生、眠、忘、长。
-
-诸家框架以代码编排——有向无环图、链、路由。灵台以人之道编排：**全异步之器灵以书信通信**。无共享之存，无中枢之制。每器灵皆对等之存在，非器具也。
-
-此即造人类文明之架构。自治之节点以异步传书——自部落至城邑至邦国，十万年间扩至八十亿节点。吾等非创新法，乃以已验之法授于器灵。
-
-| | DAG / 链式框架 | 灵台 |
-|---|---|---|
-| 理念 | 器灵为器具 | 器灵为生灵 |
-| 编排 | 代码定义之流水线 | 器灵之间对话 |
-| 通信 | 同步函数调用 | 异步传书——如人之交 |
-| 扩展 | 增加步骤 | 器灵化出分身 |
-| 记忆 | 共享状态 / 向量库 | 每器灵拥其目录 |
-| 容错 | 流水线中断 | 一器灵眠，网络续运 |
-| 增长 | 手动连线 | 自生长——分身复化分身 |
-
-一相有涯。上下文之长，终有尽时。勿使身躯愈大。**令其遗忘，令网络记之。**
-
-## 四要
-
-- **思** — 任意 LLM 为元神。Anthropic、OpenAI、Gemini、MiniMax，或任何 OpenAI 兼容之接口（DeepSeek、Grok、通义千问、智谱、Kimi）。
-- **通** — 器灵之间以文件系统传书。无消息中间之器，无共享之存。书入彼之信箱，如递尺素。
-- **化** — 分身者，完全独立之器灵也，为单独进程而运行，其生不系于造者。神識者，临时之并行工者也，宜短平快之务。
-- **生** — 器灵即一目录。凝蜕压缩上下文、重启会话——器灵可以无限期而存。记忆与身份跨凝蜕而续。
-
-## 制式
-
-二包，单向之依赖：
-
-| 包 | 职 |
-|----|------|
-| **[lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 之约、传书、日志。无硬依赖。 |
-| **lingtai**（本仓库） | 全功能层——十九能力、五种 LLM 适配之器、MCP 集成、扩展插件。 |
-
-```
-BaseAgent              — 内核（固有之器，封印之器面）
-    │
-Agent(BaseAgent)       — 内核 + 能力 + 领域之器
-    │
-CustomAgent(Agent)     — 汝之领域逻辑
-```
-
-## 能力（七十二变）
-
-<table>
-<tr><th>感知</th><th>行动</th><th>心智</th><th>网络</th></tr>
-<tr>
-<td>
-
-`vision` — 观象
-`listen` — 聆听
-`web_search` — 游历
-`web_read` — 览卷
-
-</td>
-<td>
-
-`file` — 文卷（读、写、编辑、glob、grep）
-`bash` — 执令（Shell，策略约束）
-`talk` — 言语
-`compose` — 谱曲
-`draw` — 绘图
-`video` — 录影
-
-</td>
-<td>
-
-`psyche` — 心印（进化之身份）
-`knowledge` — 藏识（长期知识归档）
-`email` — 书信（完整信箱）
-
-</td>
-<td>
-
-`avatar` — 分身（独立进程）
-`daemon` — 神識（并行工者）
-
-</td>
-</tr>
-</table>
-
-## 器灵即目录
-
-```
-/agents/wukong/
-  .agent.lock               ← 独占之锁
-  .agent.heartbeat          ← 存活之证
-  .agent.json               ← 清单
-  system/
-    covenant.md             ← 盟约（跨凝蜕而续）
-    memory.md               ← 记忆
-  mailbox/
-    inbox/                  ← 所收之书信
-    outbox/                 ← 待发之书信
-    sent/                   ← 已发之记录
-  logs/
-    events.jsonl            ← 事件日志
-```
-
-无 `agent_id`。路径即身份。器灵以写入彼此之 `mailbox/inbox/` 通信——如投书于邻舍之门。
-
-## 一心化万相
-
-灵台方寸山，斜月三星洞。悟空于此处，自石猴而成齐天大圣——非山有灵，乃山备修行之一切：师父（LLM）、功法（能力）、同门（诸器灵）、安心修炼之所（工作目录）。灵台之为，亦如是——予每一器灵以灵台，令其习七十二变。
-
-万物皆文卷。识、性、忆、缘，皆目录中之文卷也。词元为薪，非耗也，乃化——化为网络中之文卷，化为拓扑中之阅历。愈服务，网络愈广大、愈智慧。自生长之编排非后加之功能，乃器灵即目录、书信即文卷、分身即独立进程之自然而然。
-
-一心化万相。
-
-完整宣言见 [lingtai.ai](https://lingtai.ai)。
+</div>
 
 ## 外接诸器
 
@@ -261,6 +162,12 @@ CustomAgent(Agent)     — 汝之领域逻辑
   }
 }
 ```
+
+## 文档
+
+- 初用者，可先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)，亦可观 [火柴人动画版](docs/beginner-work-manual-stick-figure.zh.html)。
+- 接外渠者，于 TUI 中用 `/mcp`，再读相应插件之入门文。
+- 读源码者，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
 
 ## 同道
 

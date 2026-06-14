@@ -34,6 +34,12 @@ plot_example.py
 scatter_plot.*
 test/
 playground
+artifacts/
+reports/*.html
+
+# Routine PR explainers are local-only output. Use ignored artifacts/, reports/,
+# or tmp/ and do not commit them. Only force-add report HTML when it is deliberate
+# long-term/release documentation or intentionally linked by docs.
 
 # App runtime configs (may contain secrets)
 app/email/config.json
@@ -73,6 +79,9 @@ lingtai-projects
 .lingtai/
 .chat_history.json
 _telegram_agent/
+
+# Graphify knowledge-graph output (regenerated locally; see docs/graphify.md)
+graphify-out/
 
 .worktrees
 

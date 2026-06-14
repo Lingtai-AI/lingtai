@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -188,9 +190,9 @@ func TestExchangeCodeForTokens(t *testing.T) {
 
 func TestExtractEmailFromJWT(t *testing.T) {
 	tests := []struct {
-		name  string
-		jwt   string
-		want  string
+		name string
+		jwt  string
+		want string
 	}{
 		{
 			name: "valid jwt with email",
@@ -239,56 +241,122 @@ func TestExtractEmailFromJWT(t *testing.T) {
 	}
 }
 
+// drainSession reads one message from a codexOAuthSession via waitCodexOAuthMsg.
+// It blocks until a message arrives or the deadline is hit.
+func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duration) interface{} {
+	t.Helper()
+	ch := make(chan interface{}, 1)
+	go func() {
+		msg, ok := <-session.msgs
+		if !ok {
+			ch <- CodexOAuthDoneMsg{Err: ErrCodexAuthCancelled}
+			return
+		}
+		ch <- msg
+	}()
+	select {
+	case msg := <-ch:
+		return msg
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for OAuth session message after %s", timeout)
+		return nil
+	}
+}
+
 // TestStartOAuthFlow_Cancellable verifies that cancelling the supplied
 // context tears down the listener and emits an ErrCodexAuthCancelled
 // message with the caller's epoch echoed back. This is the load-bearing
 // guarantee for the Del-cancel UX in FirstRunModel and LoginModel.
-//
-// We can't drive the real OAuth flow here (it would try to bind to
-// port 1455/1457 and contact auth.openai.com), so we settle for the
-// behaviour the caller relies on: cancel → prompt return with the
-// expected epoch and error. Port-release verification would need a
-// hard-coded port mock; the production path's `defer server.Shutdown`
-// is already exercised by httptest in the existing TestExchangeCodeForTokens.
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
-	// startOAuthFlow attempts net.Listen on 1455/1457. In CI those
-	// ports may or may not be free, but the cancel path runs after
-	// the bind succeeds (because we cancel asynchronously). If neither
-	// port binds the flow emits an immediate listen error — skip in
-	// that case so we don't flake on a CI box with the ports in use.
 	const epoch uint64 = 42
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := startOAuthFlow(ctx, epoch)
+	session := startOAuthFlow(ctx, epoch)
 
-	// Give the goroutine a moment to bind the listener and call
-	// openBrowser (which is fire-and-forget — `open <url>` on darwin
-	// or nothing in CI). Then cancel.
+	// Give the goroutine a moment to bind the listener, then cancel.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 
-	select {
-	case msg := <-ch:
-		if msg.Epoch != epoch {
-			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+	// Drain messages until we get a terminal CodexOAuthDoneMsg.
+	for {
+		raw := drainSession(t, session, 3*time.Second)
+		switch msg := raw.(type) {
+		case CodexOAuthURLMsg:
+			// Non-terminal: listener is ready; loop to the next message.
+			if msg.Epoch != epoch {
+				t.Errorf("URLMsg Epoch = %d, want %d", msg.Epoch, epoch)
+			}
+			continue
+		case CodexOAuthDoneMsg:
+			if msg.Epoch != epoch {
+				t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+			}
+			if msg.Err == nil {
+				t.Fatal("expected non-nil Err on cancellation")
+			}
+			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+				return // success
+			}
+			// Listener bind failure — environment-dependent.
+			t.Skipf("listener bind failed (likely ports 1455/1457 in use); cancellation path could not run: %v", msg.Err)
 		}
-		if msg.Err == nil {
-			t.Fatal("expected non-nil Err on cancellation")
+	}
+}
+
+// TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow verifies the
+// same-machine browser OAuth path remains first-class: the localhost callback
+// completes the legacy working flow without requiring terminal paste-back.
+func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T) {
+	const epoch uint64 = 99
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session := startOAuthFlow(ctx, epoch)
+	first := drainSession(t, session, 3*time.Second)
+	urlMsg, ok := first.(CodexOAuthURLMsg)
+	if !ok {
+		if done, ok := first.(CodexOAuthDoneMsg); ok && done.Err != nil {
+			t.Skipf("listener bind failed (likely ports 1455/1457 in use): %v", done.Err)
 		}
-		// Two acceptable error paths:
-		//   1. The listener bound and the select observed ctx.Done()
-		//      → ErrCodexAuthCancelled.
-		//   2. The listener failed to bind (port in use) → "listen
-		//      on …" error before the select. That's an environment
-		//      problem, not a bug in our code; skip rather than fail.
-		if errors.Is(msg.Err, ErrCodexAuthCancelled) {
+		t.Fatalf("expected CodexOAuthURLMsg, got %T", first)
+	}
+
+	authURL, err := url.Parse(urlMsg.AuthURL)
+	if err != nil {
+		t.Fatalf("parse AuthURL: %v", err)
+	}
+	state := authURL.Query().Get("state")
+	if state == "" {
+		t.Fatal("AuthURL did not include state")
+	}
+
+	resp, err := http.Get(urlMsg.RedirectURI + "?code=browser-code&state=" + url.QueryEscape(state))
+	if err != nil {
+		t.Fatalf("GET callback: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read callback body: %v", err)
+	}
+	if !strings.Contains(string(body), "Login successful") {
+		t.Fatalf("callback body should confirm browser login success, got: %s", string(body))
+	}
+
+	for {
+		raw := drainSession(t, session, 3*time.Second)
+		switch msg := raw.(type) {
+		case CodexOAuthDoneMsg:
+			if msg.Err == nil && msg.Tokens == nil {
+				t.Fatalf("terminal message had neither tokens nor error: %#v", msg)
+			}
 			return
+		case CodexOAuthURLMsg:
+			continue
+		default:
+			t.Fatalf("unexpected message after browser callback: %T", raw)
 		}
-		// Listener bind failure path — environment-dependent.
-		t.Skipf("listener bind failed (likely ports 1455/1457 in use); cancellation path could not run: %v", msg.Err)
-	case <-time.After(3 * time.Second):
-		t.Fatal("startOAuthFlow did not emit a result within 3s of cancel")
 	}
 }
 
@@ -297,9 +365,6 @@ func TestStartOAuthFlow_Cancellable(t *testing.T) {
 // carries the caller's epoch. That's the invariant the handler relies on
 // to gate token-writes (Epoch must match m.codexLoginEpoch).
 func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
-	// Occupy both real ports so the listener fails. If that itself
-	// fails (e.g. permissions), skip — the assertion still holds in
-	// the real failure path even if we can't force it here.
 	l1, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
 	if err != nil {
 		t.Skipf("cannot bind :%d to force listen-failure: %v", defaultPort, err)
@@ -312,16 +377,185 @@ func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
 	defer l2.Close()
 
 	const epoch uint64 = 7
-	ch := startOAuthFlow(context.Background(), epoch)
-	select {
-	case msg := <-ch:
-		if msg.Epoch != epoch {
-			t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+	session := startOAuthFlow(context.Background(), epoch)
+	raw := drainSession(t, session, 2*time.Second)
+	msg, ok := raw.(CodexOAuthDoneMsg)
+	if !ok {
+		t.Fatalf("expected CodexOAuthDoneMsg, got %T", raw)
+	}
+	if msg.Epoch != epoch {
+		t.Errorf("Epoch = %d, want %d", msg.Epoch, epoch)
+	}
+	if msg.Err == nil {
+		t.Error("expected listen error, got nil Err")
+	}
+}
+
+// TestWaitCodexOAuthMsg verifies that waitCodexOAuthMsg routes messages
+// from the session channel as correct Bubble Tea message types.
+func TestWaitCodexOAuthMsg(t *testing.T) {
+	makeSession := func() (*codexOAuthSession, chan interface{}) {
+		ch := make(chan interface{}, 2)
+		s := &codexOAuthSession{msgs: ch}
+		return s, ch
+	}
+
+	t.Run("CodexOAuthURLMsg passes through", func(t *testing.T) {
+		s, ch := makeSession()
+		ch <- CodexOAuthURLMsg{AuthURL: "https://example.com/auth", RedirectURI: "http://localhost:1455/auth/callback", Epoch: 1}
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		urlMsg, ok := msg.(CodexOAuthURLMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthURLMsg, got %T", msg)
 		}
-		if msg.Err == nil {
-			t.Error("expected listen error, got nil Err")
+		if urlMsg.AuthURL != "https://example.com/auth" {
+			t.Errorf("AuthURL = %q, want %q", urlMsg.AuthURL, "https://example.com/auth")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("startOAuthFlow did not emit a result within 2s")
+	})
+
+	t.Run("CodexOAuthDoneMsg passes through", func(t *testing.T) {
+		s, ch := makeSession()
+		ch <- CodexOAuthDoneMsg{Tokens: &CodexTokens{AccessToken: "tok"}, Epoch: 2}
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		doneMsg, ok := msg.(CodexOAuthDoneMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthDoneMsg, got %T", msg)
+		}
+		if doneMsg.Tokens == nil || doneMsg.Tokens.AccessToken != "tok" {
+			t.Errorf("unexpected tokens: %+v", doneMsg.Tokens)
+		}
+	})
+
+	t.Run("closed channel returns ErrCodexAuthCancelled", func(t *testing.T) {
+		s, ch := makeSession()
+		close(ch)
+		cmd := waitCodexOAuthMsg(s)
+		msg := cmd()
+		doneMsg, ok := msg.(CodexOAuthDoneMsg)
+		if !ok {
+			t.Fatalf("expected CodexOAuthDoneMsg, got %T", msg)
+		}
+		if !errors.Is(doneMsg.Err, ErrCodexAuthCancelled) {
+			t.Errorf("Err = %v, want ErrCodexAuthCancelled", doneMsg.Err)
+		}
+	})
+
+	t.Run("nil session returns nil cmd", func(t *testing.T) {
+		cmd := waitCodexOAuthMsg(nil)
+		if cmd != nil {
+			t.Error("expected nil cmd for nil session")
+		}
+	})
+}
+
+func TestRequestCodexDeviceCode(t *testing.T) {
+	var sawClientID bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["client_id"] == codexClientID {
+			sawClientID = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_auth_id":"dev-123","user_code":"ABCD-EFGH","interval":"1"}`)
+	}))
+	defer server.Close()
+
+	got, err := requestCodexDeviceCode(context.Background(), server.Client(), server.URL, codexClientID)
+	if err != nil {
+		t.Fatalf("requestCodexDeviceCode: %v", err)
+	}
+	if !sawClientID {
+		t.Fatal("request did not include codex client_id")
+	}
+	if got.VerificationURL != server.URL+"/codex/device" {
+		t.Fatalf("VerificationURL = %q", got.VerificationURL)
+	}
+	if got.UserCode != "ABCD-EFGH" || got.DeviceAuthID != "dev-123" {
+		t.Fatalf("unexpected device code: %#v", got)
+	}
+	if got.Interval != time.Second {
+		t.Fatalf("Interval = %s, want 1s", got.Interval)
+	}
+}
+
+func TestRequestCodexDeviceCodeRateLimitSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/accounts/deviceauth/usercode" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, "Too Many Requests")
+	}))
+	defer server.Close()
+
+	_, err := requestCodexDeviceCode(context.Background(), server.Client(), server.URL, codexClientID)
+	if err == nil || !strings.Contains(err.Error(), "429") || !strings.Contains(err.Error(), "Too Many Requests") {
+		t.Fatalf("err = %v, want 429 rate-limit detail", err)
+	}
+}
+
+func TestPollCodexDeviceAuth(t *testing.T) {
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/accounts/deviceauth/token":
+			polls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode poll request: %v", err)
+			}
+			if body["device_auth_id"] != "dev-123" || body["user_code"] != "ABCD-EFGH" {
+				t.Fatalf("poll body = %#v", body)
+			}
+			if polls == 1 {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"authorization_code":"auth-code","code_challenge":"challenge","code_verifier":"verifier"}`)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := pollCodexDeviceAuth(context.Background(), server.Client(), server.URL, codexDeviceCode{
+		DeviceAuthID: "dev-123",
+		UserCode:     "ABCD-EFGH",
+		Interval:     time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("pollCodexDeviceAuth: %v", err)
+	}
+	if got.AuthorizationCode != "auth-code" || got.CodeVerifier != "verifier" {
+		t.Fatalf("unexpected success response: %#v", got)
+	}
+	if polls != 2 {
+		t.Fatalf("polls = %d, want 2", polls)
+	}
+}
+
+func TestPollCodexDeviceAuthRateLimitSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, "Too Many Requests")
+	}))
+	defer server.Close()
+
+	_, err := pollCodexDeviceAuth(context.Background(), server.Client(), server.URL, codexDeviceCode{
+		DeviceAuthID: "dev-123",
+		UserCode:     "ABCD-EFGH",
+		Interval:     time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("err = %v, want 429 rate-limit surface", err)
 	}
 }

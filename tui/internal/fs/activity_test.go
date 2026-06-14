@@ -98,6 +98,33 @@ func TestComputeNetworkActivity_TerminalAndFinishedDaemonsIgnored(t *testing.T) 
 	}
 }
 
+func TestCountDaemons(t *testing.T) {
+	agentDir := t.TempDir()
+
+	writeDaemonState(t, agentDir, "running", map[string]interface{}{
+		"state": "running",
+	})
+	writeDaemonState(t, agentDir, "active", map[string]interface{}{
+		"state": "active",
+	})
+	writeDaemonState(t, agentDir, "terminal", map[string]interface{}{
+		"state": "done",
+	})
+	writeDaemonState(t, agentDir, "finished", map[string]interface{}{
+		"state":       "running",
+		"finished_at": "2026-05-24T12:00:00Z",
+	})
+	writeMalformedDaemonState(t, agentDir, "malformed")
+
+	counts := CountDaemons(agentDir)
+	if counts.Running != 2 {
+		t.Fatalf("running daemons = %d, want 2", counts.Running)
+	}
+	if counts.Total != 4 {
+		t.Fatalf("total daemons = %d, want 4", counts.Total)
+	}
+}
+
 func TestComputeNetworkActivity_AllIdle(t *testing.T) {
 	base := t.TempDir()
 	writeActivityAgent(t, base, "alice", "IDLE", true)
@@ -207,4 +234,15 @@ func writeStaleHeartbeat(t *testing.T, dir string) {
 func writeDaemonState(t *testing.T, agentDir, runID string, state map[string]interface{}) {
 	t.Helper()
 	writeJSON(t, filepath.Join(agentDir, "daemons", runID, "daemon.json"), state)
+}
+
+func writeMalformedDaemonState(t *testing.T, agentDir, runID string) {
+	t.Helper()
+	path := filepath.Join(agentDir, "daemons", runID, "daemon.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir daemon: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("{bad json"), 0o644); err != nil {
+		t.Fatalf("write malformed daemon: %v", err)
+	}
 }

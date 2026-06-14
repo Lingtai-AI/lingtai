@@ -9,10 +9,10 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 ## Components
 
 ### Registry (`migrate.go`)
-- `CurrentVersion` (`migrate.go:11`) — `35`. Must match the TUI's `CurrentVersion` exactly; the cross-binary contract requires lockstep bumps.
+- `CurrentVersion` (`migrate.go:11`) — `36`. Must match the TUI's `CurrentVersion` exactly; the cross-binary contract requires lockstep bumps.
 - `metaFile` struct (`migrate.go:13-15`) — `{"version": N}` shape of `.lingtai/meta.json`.
 - `Migration` type (`migrate.go:18-22`) — version + name + function.
-- `migrations` slice (`migrate.go:25-61`) — the append-only ordered list of all 35 migrations. **Real** entries have a named migration function; **no-op stubs** use `func(_ string) error { return nil }`.
+- `migrations` slice (`migrate.go:25-61`) — the append-only ordered list of all 36 migrations. **Real** entries have a named migration function; **no-op stubs** use `func(_ string) error { return nil }`.
 
 ### Real migrations (touch shared on-disk state)
 - **m001** — `topology-to-portal` (`m001_topology.go:9-31`). Portal-only: moves `topology.jsonl` from `.tui-asset/` to `.portal/`.
@@ -30,7 +30,7 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 - **m035** — `remove-brief` (`m035_remove_brief.go:13`). Portal mirror of the TUI's brief-cleanup migration: deletes `system/brief.md` for each agent, drops `brief`/`brief_file` from `init.json`, and drops `brief` from `human/settings.json`. Touches shared on-disk state — either binary may be the first to open a post-secretary-removal project, so identical logic lives in both packages.
 
 ### No-op stubs (preserve version slots)
-m005 (`soul-inquiry-source`), m007 (`normalize-ledger`), m008 (`recipe-state`), m009 (`procedures`), m010 (`legacy-addons-warn`), m011 (`session-backfill`), m012 (`session-resort`), m013 (`agora-rename`), m014 (`skills-groups`), m016 (`rename-pad-codex-library`), m017 (`rename-preset-caps`), m018 (`library-split`), m019 (`procedures-english-only`), m020 (`pseudo-agent-subscriptions`), m021 (`library-paths`), m022 (`recipe-lang-suffix`), m023 (`recipe-state-rename`), m024 (`add-active-preset`), m025 (`preset-description-object`), m032 (`cleanup-codex-oauth`), m033 (`strip-codex-api-key-env`), m034 (`library-skills-caps`). (m035 is real — listed above.)
+m005 (`soul-inquiry-source`), m007 (`normalize-ledger`), m008 (`recipe-state`), m009 (`procedures`), m010 (`legacy-addons-warn`), m011 (`session-backfill`), m012 (`session-resort`), m013 (`agora-rename`), m014 (`skills-groups`), m016 (`rename-pad-codex-library`), m017 (`rename-preset-caps`), m018 (`library-split`), m019 (`procedures-english-only`), m020 (`pseudo-agent-subscriptions`), m021 (`library-paths`), m022 (`recipe-lang-suffix`), m023 (`recipe-state-rename`), m024 (`add-active-preset`), m025 (`preset-description-object`), m032 (`cleanup-codex-oauth`), m033 (`strip-codex-api-key-env`), m034 (`library-skills-caps`). m036 (`sqlite-log-backfill`). (m035 is real — listed above.)
 
 All are `TUI-only` — they touch `.tui-asset/`, global preset files, the TUI's saved-preset directory, or TUI-side capability aliases. The portal doesn't care about these but must hold the version slot so `meta.json` version numbers match.
 

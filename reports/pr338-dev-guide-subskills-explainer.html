@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PR #338 Explainer — lingtai-dev-guide subskills (release-workflow + 3 new references)</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f7f3ec; --fg:#1f2933; --card:#fffaf2; --muted:#667085; --accent:#9a5b18; --ok:#1f7a4d; --line:#e6d6c4; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#15120f; --fg:#f5efe7; --card:#211b16; --muted:#b7aa9b; --accent:#f0b35f; --ok:#6ee7a8; --line:#3a2f26; } }
+    body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--fg); }
+    main { max-width: 980px; margin: 0 auto; padding: 40px 20px 64px; }
+    h1 { margin:0 0 8px; font-size: 2rem; line-height:1.2; }
+    h2 { margin-top: 28px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+    h3 { margin-bottom: 6px; }
+    code { background: color-mix(in srgb, var(--line) 45%, transparent); padding: .1rem .35rem; border-radius: 4px; }
+    .lead { color:var(--muted); font-size:1.08rem; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px 20px; margin:16px 0; box-shadow:0 1px 0 rgba(0,0,0,.03); }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px; }
+    .pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:4px 10px; margin:3px 6px 3px 0; color:var(--muted); }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--accent); font-weight:700; }
+    ul { padding-left: 1.3rem; }
+    table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    th, td { border:1px solid var(--line); padding:6px 10px; text-align:left; vertical-align:top; }
+    th { background: color-mix(in srgb, var(--line) 35%, transparent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>PR #338 Explainer：把 dev-guide 经验沉淀成 4 个 nested reference</h1>
+  <p class="lead">本 PR 从一个 release-workflow subskill 扩展成一个更大的 <code>lingtai-dev-guide</code> 文档 PR：在已有 release-workflow reference 之外，再新增 3 个 nested reference，把 skill-audit 收敛出的高频开发者/运维经验固化进现有 skill 路由系统，并保持根 router 简短。</p>
+
+  <div class="card">
+    <strong>结论（conclusion-first）：</strong>这是纯文档/技能路由改动，不改运行时代码逻辑。新增 4 个 <code>reference/&lt;topic&gt;/SKILL.md</code> 子技能（release-workflow 已在前序提交，本轮再加 3 个），更新根 router 的 catalog / routing table / layout / version，并同步更新 nested-reference 测试与本地 HTML explainer。所有 shipped 文档已去私有化（无 secrets、无私有绝对路径，仅保留占位符和 repo-relative 示例）。
+  </div>
+
+  <h2>新增的三个 nested reference</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>1. runtime-self-check</h3>
+      <p><code>reference/runtime-self-check/SKILL.md</code></p>
+      <ul>
+        <li>合并：<code>agent-runtime-self-check</code> / <code>agent-runtime-import-probe</code> / <code>lingtai-active-tui-rebuild</code> + 运行环境/源检查、active binary/dev-mode symlink、clean release worktree 重建、MCP/addon 来源与 tool surface、post-refresh 诊断、安全证据回报。</li>
+        <li>读-only 诊断；唯一允许的写操作是被授权的开发者重建（<code>make build</code> / editable 重装）。</li>
+        <li>secrets 一律 <code>&lt;REDACTED&gt;</code>，私有路径泛化为 <code>&lt;your-lingtai-checkout&gt;</code> / <code>~/.lingtai-tui/...</code>。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>2. pr-review-deliverables</h3>
+      <p><code>reference/pr-review-deliverables/SKILL.md</code></p>
+      <ul>
+        <li>合并：<code>lingtai-pr-review-gate</code> / <code>github-pr-with-html-explainer</code> / <code>html-deliverable-template</code> + 相关 release-style-audit 交付要素。</li>
+        <li>覆盖 PR readiness、多模型/daemon/Claude read-only review gate、自包含本地 HTML explainer、PR body hygiene（含 <code>gh pr edit</code> GraphQL 警告 note）、source-labeled deliverable + validation/syntax check、maintainer 授权边界。</li>
+        <li>不复刻 release-workflow：release-specific 发布交给 <code>reference/release-workflow/SKILL.md</code>。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>3. skill-stewardship</h3>
+      <p><code>reference/skill-stewardship/SKILL.md</code></p>
+      <ul>
+        <li>合并：<code>skill-benchmark-framework</code> / 归一 skill 蒸馏元方法 / skill 审计 triage / session-journal 作为 skill 种子 / shared-library 候选 grooming。</li>
+        <li>覆盖何时写 skill、router vs nested-reference 模式、去私有化/参数化、投产前轻量 benchmark/checklist、PR-ready skill cleanup。</li>
+        <li>交叉链接 <code>skills-manual</code> 处理通用 skill 编写，不复刻整本 manual。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>改动范围</h2>
+  <table>
+    <tr><th>文件</th><th>改动</th></tr>
+    <tr><td><code>reference/release-workflow/SKILL.md</code> (+ <code>assets/release-blog-template.md</code>)</td><td>前序提交已加入；本轮保持不变，作为 release 发布交叉链接目标。</td></tr>
+    <tr><td><code>reference/runtime-self-check/SKILL.md</code></td><td><span class="ok">新增</span></td></tr>
+    <tr><td><code>reference/pr-review-deliverables/SKILL.md</code></td><td><span class="ok">新增</span></td></tr>
+    <tr><td><code>reference/skill-stewardship/SKILL.md</code></td><td><span class="ok">新增</span></td></tr>
+    <tr><td><code>lingtai-dev-guide/SKILL.md</code></td><td>根 router：nested catalog + routing table + layout 加入三项；version <code>2.3.0 → 2.4.0</code>；description 补充新能力。</td></tr>
+    <tr><td><code>tui/internal/tui/skill_files_test.go</code></td><td>更新 <code>TestBuildSkillFolderEntries_DevGuideNestedReferences</code>：catalog 名称、reference 路径、labels map，并新增三项子技能 self-identification + 关键内容断言。</td></tr>
+    <tr><td><code>reports/pr338-dev-guide-subskills-explainer.html</code></td><td>本文件——替换原 release-workflow-only explainer，反映更大范围。</td></tr>
+  </table>
+
+  <h2>为什么这样做</h2>
+  <ul>
+    <li>skill audit（daemon A/B/C + skill-audit-data.json）显示 runtime self-check、PR/HTML 交付、skill 蒸馏/质量门禁是全网最高频、收敛性最强的开发者经验（runtime self-check 被 8–11+ agent 独立提出）。把它们沉淀为 <code>lingtai-dev-guide</code> 的 nested reference，可随 TUI utilities 一起分发，而不是停留在各 agent 的临时 custom skill。</li>
+    <li>保持 progressive disclosure：根 router 仍短（catalog + routing table + 交叉链接），细节落在 <code>reference/&lt;topic&gt;/</code>。</li>
+    <li>避免重复：三项都交叉链接已有 reference（release-workflow / security-audit / debug-troubleshoot / contributing / skills-manual），不复刻其内容。</li>
+    <li>去私有化是硬要求：shipped 文档不含具体人名、dev-1/dev-2/dev-3 私有路径、secrets、Telegram/email；仅用占位符与 repo-relative 示例。</li>
+  </ul>
+
+  <h2>验证</h2>
+  <div class="card">
+    <p class="ok">通过：</p>
+    <ul>
+      <li><code>git diff --check</code> — exit 0，无空白/冲突标记。</li>
+      <li><code>go test ./internal/tui -run TestBuildSkillFolderEntries_DevGuideNestedReferences -v</code> — PASS。</li>
+      <li><code>go test ./internal/tui ./internal/preset</code> — 全部 PASS（含 preset 打包测试）。</li>
+    </ul>
+  </div>
+
+  <h2>发布边界</h2>
+  <p><span class="warn">注意：</span>本 PR 只新增/更新 dev-guide 文档与对应测试。它不发布任何版本、不改网站、不打 tag、不上传 PyPI、不更新 Homebrew，也不开/合并/编辑远端 PR。任何外部副作用仍需 maintainer 明确授权。</p>
+
+  <h2>Review checklist</h2>
+  <ul>
+    <li>确认三项新 reference 的授权边界 / 去私有化 / 安全回报规则足够清楚。</li>
+    <li>确认根 router 未因新增条目变得过长，仍符合 progressive disclosure。</li>
+    <li>确认交叉链接（release-workflow / skills-manual 等）方向正确、不重复内容。</li>
+    <li>确认测试断言覆盖三项子技能的 self-identification 与关键内容。</li>
+  </ul>
+
+  <h2>Source index</h2>
+  <ul>
+    <li>Audit 报告：<code>skill-audit-recs/daemon-a-lingtai.md</code>、<code>daemon-b-kernel.md</code>、<code>daemon-c-product.md</code>（产生于本地 agent 工作目录，非随 PR 分发）。</li>
+    <li>Audit 数据：<code>reports/skill-audit-20260613/skill-audit-data.json</code>（同上，本地）。</li>
+    <li>本 PR shipped 文件：见上方“改动范围”表。</li>
+  </ul>
+</main>
+</body>
+</html>

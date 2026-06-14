@@ -44,11 +44,29 @@ func TestLineCount_ExplicitNewlines(t *testing.T) {
 	}
 }
 
-func TestLineCount_MaxSix(t *testing.T) {
+func TestLineCount_DefaultMaxHeight(t *testing.T) {
 	m := newTestInput(80)
 	m.textarea.SetValue("a\nb\nc\nd\ne\nf\ng\nh")
-	if h := m.LineCount(); h != 6 {
-		t.Errorf("8 lines: expected capped height 6, got %d", h)
+	if h := m.LineCount(); h != defaultInputMaxHeight {
+		t.Errorf("8 lines: expected capped height %d, got %d", defaultInputMaxHeight, h)
+	}
+}
+
+func TestLineCount_SetMaxHeight(t *testing.T) {
+	m := newTestInput(80)
+	m.SetMaxHeight(10)
+	m.textarea.SetValue("a\nb\nc\nd\ne\nf\ng\nh")
+	if h := m.LineCount(); h != 8 {
+		t.Errorf("8 lines with max height 10: expected height 8, got %d", h)
+	}
+}
+
+func TestAtMaxHeight(t *testing.T) {
+	m := newTestInput(80)
+	m.SetMaxHeight(3)
+	m.textarea.SetValue("a\nb\nc\nd")
+	if !m.AtMaxHeight() {
+		t.Errorf("expected input to report being at max height")
 	}
 }
 

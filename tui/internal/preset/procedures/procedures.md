@@ -35,9 +35,12 @@ operations, preset swaps, notification handling, and karma actions.
 ### Molt and Durable Stores
 
 Before context exhaustion, update pad, knowledge, character, and skills as
-needed, then molt deliberately with a useful briefing. For detailed molt/pad
-practice, read `psyche-manual`; for the broader memory model, read
-`system-manual`.
+needed, then molt deliberately with a useful briefing. Character (`lingtai`) is
+the one most easily skipped: if this session changed your operating style,
+obligations, relationship to the human, taste, safety posture, or trust model,
+update `lingtai` before you molt — pad, knowledge, and skills are not a
+substitute for it. For detailed molt/pad practice, read `psyche-manual`; for the
+broader memory model, read `system-manual`.
 
 ### Skill Routing — When to Load What
 

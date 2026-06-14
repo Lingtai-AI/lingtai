@@ -37,7 +37,7 @@
       "provider": "minimax",
 
       // Model name as recognized by the provider's API.
-      "model": "MiniMax-M2.7-highspeed",
+      "model": "MiniMax-M3",
 
       // API key — set to null and use api_key_env to read from environment (recommended).
       // Never hardcode secrets here.
@@ -126,9 +126,10 @@
     // Empty = use default molt behavior.
     "molt_prompt": "",
 
-    // Max LLM request turns per wake cycle.
-    // Safety limit — agent sleeps after this many turns.
-    "max_turns": 50,
+    // Per-wake loop budget: max iterations of the LLM/tool-call loop per
+    // wake cycle. Every tool call counts as a turn, not just LLM requests.
+    // Safety limit — agent sleeps once the budget is exhausted.
+    "max_turns": 500,
 
     // Max LLM API requests per minute, gated at the adapter layer.
     // Shared across all agents in the same TUI process that use the same

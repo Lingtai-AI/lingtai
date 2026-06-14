@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -32,12 +31,14 @@ const (
 	appViewNirvana
 	appViewLibrary
 	appViewProjects
-	appViewAgora
 	appViewLogin
 	appViewCodex
 	appViewMailbox
 	appViewSystem
 	appViewPresets
+	appViewDaemons
+	appViewNotification
+	appViewHelp
 )
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -49,11 +50,13 @@ type App struct {
 	props         PropsModel
 	library       LibraryModel
 	projects      ProjectsModel
-	agora         AgoraModel
 	codex         CodexModel
 	system        SystemModel
 	mailbox       MailboxModel
+	daemons       DaemonsModel
+	notification  NotificationModel
 	presetLibrary PresetLibraryModel
+	help          HelpModel
 	firstRun      FirstRunModel
 	addon         AddonModel
 	doctor        DoctorModel
@@ -162,7 +165,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 		app.currentView = appViewMail
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
-		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights)
+		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights, tuiCfg.ToolCallTruncate)
 
 		// Validate codex-auth.json if any agent uses a codex preset.
 		if warn := validateCodexAuthForAgents(globalDir, projectDir); warn != "" {
@@ -189,6 +192,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		// Reserve rows for root chrome first, then forward the *reduced*
+		// child window size — never the raw terminal height. See
+		// layout.go (LayoutBudget) for the contract.
+		msg = a.layoutBudget().ChildWindowSize()
 		// Forward to current view so it can resize
 		var cmd tea.Cmd
 		switch a.currentView {
@@ -210,8 +217,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.library, cmd = a.library.Update(msg)
 		case appViewProjects:
 			a.projects, cmd = a.projects.Update(msg)
-		case appViewAgora:
-			a.agora, cmd = a.agora.Update(msg)
 		case appViewFirstRun:
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		case appViewLogin:
@@ -224,6 +229,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.system, cmd = a.system.Update(msg)
 		case appViewPresets:
 			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
+		case appViewDaemons:
+			a.daemons, cmd = a.daemons.Update(msg)
+		case appViewNotification:
+			a.notification, cmd = a.notification.Update(msg)
+		case appViewHelp:
+			a.help, cmd = a.help.Update(msg)
 		}
 		return a, cmd
 
@@ -233,12 +244,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.switchToView(msg.View)
 
 	case MarkdownViewerCloseMsg:
-		// If agora is active, forward to AgoraModel (detail → list, not mail)
-		if a.currentView == appViewAgora {
-			updated, cmd := a.agora.Update(msg)
-			a.agora = updated
-			return a, cmd
-		}
 		a.currentView = appViewMail
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 
@@ -267,6 +272,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
 		} else {
 			a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
+		}
+		return a, a.mail.refreshMail
+
+	case clearDoneMsg:
+		if msg.err != nil {
+			a.mail.AddSystemMessage(i18n.TF("mail.clear_failed", firstLine(msg.err)))
+		} else if msg.completed {
+			a.mail.AddSystemMessage(i18n.T("mail.cleared"))
+		} else {
+			a.mail.AddSystemMessage(i18n.T("mail.clear_requested"))
 		}
 		return a, a.mail.refreshMail
 
@@ -300,7 +315,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.mail = NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			a.mail = NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
@@ -345,7 +360,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -398,7 +413,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+			a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 			if a.lingtaiCmd != "" {
 				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
@@ -442,7 +457,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights)
+		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -457,7 +472,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewAgora && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets {
+			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
 				return a, tea.Quit
 			}
 		}
@@ -505,10 +520,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.projects.Update(msg)
 		a.projects = updated
 		return a, cmd
-	case appViewAgora:
-		updated, cmd := a.agora.Update(msg)
-		a.agora = updated
-		return a, cmd
 	case appViewLogin:
 		var cmd tea.Cmd
 		a.login, cmd = a.login.Update(msg)
@@ -528,6 +539,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewPresets:
 		updated, cmd := a.presetLibrary.Update(msg)
 		a.presetLibrary = updated
+		return a, cmd
+	case appViewDaemons:
+		updated, cmd := a.daemons.Update(msg)
+		a.daemons = updated
+		return a, cmd
+	case appViewNotification:
+		updated, cmd := a.notification.Update(msg)
+		a.notification = updated
+		return a, cmd
+	case appViewHelp:
+		updated, cmd := a.help.Update(msg)
+		a.help = updated
 		return a, cmd
 	}
 
@@ -622,23 +645,8 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			lingtaiCmd := a.lingtaiCmd
 			dir := targetDir
 			return a, func() tea.Msg {
-				// Suspend and wait for process to die
-				suspendFile := filepath.Join(dir, ".suspend")
-				os.WriteFile(suspendFile, []byte(""), 0o644)
-				lockFile := filepath.Join(dir, ".agent.lock")
-				for i := 0; i < 40; i++ {
-					if tryLock(lockFile) {
-						break
-					}
-					time.Sleep(250 * time.Millisecond)
-				}
-				os.Remove(suspendFile)
-				// Wipe conversation history (token ledger is preserved)
-				os.Remove(filepath.Join(dir, "history", "chat_history.jsonl"))
-				os.Remove(filepath.Join(dir, "system", "context.md"))
-				// Relaunch with clean context
-				_, err := process.LaunchAgent(lingtaiCmd, dir)
-				return refreshDoneMsg{err: err}
+				completed, err := requestClearContext(lingtaiCmd, dir)
+				return clearDoneMsg{completed: completed, err: err}
 			}
 		}
 		return a, nil
@@ -732,6 +740,30 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "daemons":
+		a.currentView = appViewDaemons
+		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.daemons.Init(), a.sendSize())
+	case "notification":
+		a.currentView = appViewNotification
+		a.notification = NewNotificationModel(a.orchDir)
+		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "goal":
+		if targetDir == "" {
+			addMsg(i18n.T("mail.goal_no_agent"))
+			return a, nil
+		}
+		if !fs.IsAlive(targetDir, 3.0) {
+			addMsg(i18n.T("mail.btw_suspended"))
+			return a, nil
+		}
+		eventID, err := writeGoalRequestNotification(targetDir, args, time.Now())
+		if err != nil {
+			addMsg(i18n.TF("mail.goal_failed", firstLine(err)))
+			return a, nil
+		}
+		addMsg(i18n.TF("mail.goal_sent", eventID))
+		return a, nil
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -774,10 +806,6 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			a.presetLibrary = NewPresetLibraryModel(a.tuiConfig.Language, a.globalDir)
 		}
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
-	case "agora":
-		a.currentView = appViewAgora
-		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.agora.Init(), a.sendSize())
 	case "export":
 		if args != "" && args != "recipe" {
 			addMsg(i18n.T("export.help"))
@@ -835,6 +863,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("mail.btw_usage"))
 		}
 		return a, nil
+	case "help":
+		a.currentView = appViewHelp
+		a.help = NewHelpModel()
+		return a, tea.Batch(a.help.Init(), a.sendSize())
 	case "quit":
 		return a, tea.Quit
 	}
@@ -889,13 +921,16 @@ func hardRefreshDir(lingtaiCmd, dir string) error {
 	os.Remove(filepath.Join(dir, ".refresh.taken"))
 	os.Remove(suspendFile)
 	resetActivePresetToDefault(dir)
-	_, err := process.ForceLaunchAgent(lingtaiCmd, dir)
+	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
 	// Defensive: ForceLaunchAgent → launchAgentUnsafe calls fs.CleanSignals
 	// internally, but a fresh .suspend written by another path between our
 	// remove() above and the relaunch would put the new process to sleep.
 	// Removing again here is cheap and idempotent.
 	os.Remove(suspendFile)
-	return err
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
 // waitForLockClear polls for .agent.lock to free (force-removing it after
@@ -1122,9 +1157,12 @@ func hardRefreshDirWithPreset(lingtaiCmd, dir, presetPath string) error {
 		// Don't refuse the relaunch — the user asked to refresh.
 		// Falling back to whatever active currently is.
 	}
-	_, err := process.ForceLaunchAgent(lingtaiCmd, dir)
+	cmd, err := process.ForceLaunchAgent(lingtaiCmd, dir)
 	os.Remove(suspendFile)
-	return err
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
 // reviveDir waits for .agent.lock to free (force-removing it if the holder
@@ -1144,8 +1182,25 @@ func reviveDir(lingtaiCmd, dir string) error {
 		// Process likely died without releasing lock — clean up
 		os.Remove(lockFile)
 	}
-	_, err := process.LaunchAgent(lingtaiCmd, dir)
-	return err
+	cmd, err := process.LaunchAgent(lingtaiCmd, dir)
+	if err != nil {
+		return err
+	}
+	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
+}
+
+func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fs.IsAlive(dir, 3.0) {
+			return nil
+		}
+		if cmd != nil && !process.IsAgentRunning(dir) {
+			return fmt.Errorf("agent launch exited before writing a fresh heartbeat; see %s", filepath.Join(dir, "logs", "agent.log"))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("agent launch did not write a fresh heartbeat within %s; see %s", timeout, filepath.Join(dir, "logs", "agent.log"))
 }
 
 // firstLine returns the first line of err.Error(), trimmed of trailing
@@ -1167,11 +1222,14 @@ func firstLine(err error) string {
 
 // tryLock is defined in lock_unix.go / lock_windows.go
 
-// sendSize returns a tea.Cmd that sends the current terminal dimensions to the
-// newly created view so it doesn't render with zero width/height.
+// sendSize returns a tea.Cmd that sends the current *child* window size to a
+// newly created view so it doesn't render with zero width/height. The size is
+// the terminal dimensions reduced by any root chrome (see layout.go) — the same
+// budget the incoming-WindowSizeMsg handler forwards, so a freshly-routed view
+// and a resized view agree on their height.
 func (a App) sendSize() tea.Cmd {
-	w, h := a.width, a.height
-	return func() tea.Msg { return tea.WindowSizeMsg{Width: w, Height: h} }
+	cs := a.layoutBudget().ChildWindowSize()
+	return func() tea.Msg { return cs }
 }
 
 // RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
@@ -1201,6 +1259,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		}
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
+		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
 		// Restart mail tick + refresh + pulse (ticks die when another view is active)
@@ -1218,6 +1277,14 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProps
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
+	case "daemons":
+		a.currentView = appViewDaemons
+		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.daemons.Init(), a.sendSize())
+	case "notification":
+		a.currentView = appViewNotification
+		a.notification = NewNotificationModel(a.orchDir)
+		return a, tea.Batch(a.notification.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -1253,10 +1320,6 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewProjects
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.projects.Init(), a.sendSize())
-	case "agora":
-		a.currentView = appViewAgora
-		a.agora = NewAgoraModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.agora.Init(), a.sendSize())
 	case "mcp":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
@@ -1269,6 +1332,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.firstRun = NewFirstRunModel(a.projectDir, a.globalDir, true, "")
 		a.firstRun.welcomeOnly = true
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
+	case "help":
+		a.currentView = appViewHelp
+		a.help = NewHelpModel()
+		return a, tea.Batch(a.help.Init(), a.sendSize())
 	}
 	return a, nil
 }
@@ -1279,11 +1346,7 @@ func (a App) View() tea.View {
 	case appViewFirstRun:
 		content = a.firstRun.View()
 	case appViewMail:
-		banner := ""
-		if a.startupBanner != "" {
-			banner = "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner) + "\n"
-		}
-		content = banner + a.mail.View()
+		content = a.mail.View()
 	case appViewSetup:
 		content = a.setup.View()
 	case appViewSettings:
@@ -1300,8 +1363,6 @@ func (a App) View() tea.View {
 		content = a.library.View()
 	case appViewProjects:
 		content = a.projects.View()
-	case appViewAgora:
-		content = a.agora.View()
 	case appViewLogin:
 		content = a.login.View()
 	case appViewCodex:
@@ -1312,7 +1373,17 @@ func (a App) View() tea.View {
 		content = a.system.View()
 	case appViewPresets:
 		content = a.presetLibrary.View()
+	case appViewDaemons:
+		content = a.daemons.View()
+	case appViewNotification:
+		content = a.notification.View()
+	case appViewHelp:
+		content = a.help.View()
 	}
+	// Compose root-owned chrome (top banner today) around the child content.
+	// The child was already sized to the reduced budget, so chrome occupies
+	// the rows the child yielded rather than being appended past full height.
+	content = a.composeWithChrome(content)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -1463,21 +1534,29 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 	return ""
 }
 
+// codexOAuthConfigured reports whether ~/.lingtai-tui/codex-auth.json
+// parses and carries a non-empty refresh_token — the canonical "Codex OAuth
+// is usable" signal shared across the TUI (login.go, firstrun.go,
+// preset_editor.go all check the same shape). It reads no secret to the
+// screen; it only returns a bool. Pass the result into
+// preset.AuthState.CodexOAuthConfigured so the preset validity guard can
+// judge codex presets correctly without importing this package.
+func codexOAuthConfigured(globalDir string) bool {
+	data, err := os.ReadFile(filepath.Join(globalDir, "codex-auth.json"))
+	if err != nil {
+		return false
+	}
+	var tokens CodexTokens
+	return json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != ""
+}
+
 // validateCodexAuthForAgents scans all agent directories under projectDir
 // for init.json files whose active/default preset is codex. If any exist
 // but ~/.lingtai-tui/codex-auth.json is missing or invalid, returns a
 // warning string. Otherwise returns "".
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	// Quick check: is codex-auth.json valid?
-	authPath := filepath.Join(globalDir, "codex-auth.json")
-	authOK := false
-	if data, err := os.ReadFile(authPath); err == nil {
-		var tokens CodexTokens
-		if json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != "" {
-			authOK = true
-		}
-	}
-	if authOK {
+	if codexOAuthConfigured(globalDir) {
 		return ""
 	}
 

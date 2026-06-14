@@ -21,6 +21,12 @@ import (
 // unlimitedPageSize is the effective page size when the user selects "unlimited".
 const unlimitedPageSize = 999999
 
+const (
+	mailInputMinMaxHeight    = 3
+	mailInputHardMaxHeight   = 14
+	mailInputViewportReserve = 8
+)
+
 // ChatMessage represents a single message in the chat stream.
 type ChatMessage struct {
 	From        string
@@ -38,6 +44,7 @@ type ChatMessage struct {
 	Sources     []string             // for Type=="notification": source keys (email, soul, system, ...)
 	Source      string               // for Type=="aed": subtype ("attempt" | "exhausted" | "timeout")
 	Meta        *fs.NotificationMeta // for Type=="notification": kernel vital signs at injection time (issue #40)
+	ApiCallID   string               // for text_output/tool_call/tool_result: LLM API round-trip grouping id
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -76,8 +83,8 @@ type verboseLevel int
 
 const (
 	verboseOff      verboseLevel = iota // normal: mail only
-	verboseThinking                     // ctrl+o cycle: mail + soul (thinking, diary, text_input, text_output)
-	verboseExtended                     // ctrl+o cycle: everything (+ tool_call, tool_result)
+	verboseThinking                     // ctrl+o cycle: mail + soul + tool_call/tool_result first lines
+	verboseExtended                     // ctrl+o cycle: full tool_call/tool_result
 )
 
 // spinnerFrames is a star-burst spinner shown flanking the thinking quote.
@@ -144,10 +151,11 @@ type MailModel struct {
 	showEditorWarn    bool             // one-time vim warning overlay
 	editorWarnText    string           // text to pass to editor after warning
 	insightsEnabled   bool             // from settings — show insight events
+	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
 	sessionCache      *fs.SessionCache // append-only session log
 }
 
-func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool) MailModel {
+func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
 	input := NewInputModel(humanDir)
 	input.textarea.Focus()
 	palette := NewPaletteModel()
@@ -176,6 +184,7 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		globalDir:         globalDir,
 		quoteIdx:          -1,
 		insightsEnabled:   insights,
+		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
 		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
 	}
@@ -188,12 +197,38 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	return m
 }
 
+func adaptiveInputMaxHeight(windowHeight int) int {
+	maxHeight := windowHeight / 3
+	if maxHeight < mailInputMinMaxHeight {
+		maxHeight = mailInputMinMaxHeight
+	}
+	if maxHeight > mailInputHardMaxHeight {
+		maxHeight = mailInputHardMaxHeight
+	}
+	if reserveCap := windowHeight - mailInputViewportReserve; reserveCap < maxHeight {
+		maxHeight = reserveCap
+	}
+	if maxHeight < 1 {
+		maxHeight = 1
+	}
+	return maxHeight
+}
+
+func (m *MailModel) updateInputMaxHeight() {
+	if m.height <= 0 {
+		m.input.SetMaxHeight(defaultInputMaxHeight)
+		return
+	}
+	m.input.SetMaxHeight(adaptiveInputMaxHeight(m.height))
+}
+
 // syncViewportHeight recalculates viewport height from current input/palette/banner size.
 // Returns true if the height actually changed.
 func (m *MailModel) syncViewportHeight() bool {
 	if !m.ready {
 		return false
 	}
+	m.updateInputMaxHeight()
 	inputLines := m.input.LineCount()
 	paletteLines := 0
 	if m.input.IsPaletteActive() {
@@ -214,6 +249,44 @@ func (m *MailModel) syncViewportHeight() bool {
 	}
 	m.viewport.SetHeight(vpHeight)
 	return true
+}
+
+func (m *MailModel) inputRegionBounds() (start, end int) {
+	if !m.ready {
+		return -1, -1
+	}
+	paletteLines := 0
+	if m.input.IsPaletteActive() {
+		paletteLines = m.palette.LineCount()
+	}
+	topBannerLines := 0
+	if m.hasMoreOlder() {
+		topBannerLines = 1
+	}
+	bottomBannerLines := 0
+	if m.loadedExtra > 0 {
+		bottomBannerLines = 1
+	}
+	start = 2 + topBannerLines + m.viewport.Height() + bottomBannerLines + 1 + paletteLines
+	end = start + m.input.LineCount() + 1 // input rows plus border line
+	return start, end
+}
+
+func (m *MailModel) mouseInInputRegion(msg tea.MouseWheelMsg) bool {
+	start, end := m.inputRegionBounds()
+	return start >= 0 && msg.Y >= start && msg.Y < end
+}
+
+func (m *MailModel) scrollInputByWheel(msg tea.MouseWheelMsg) bool {
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.input.PageUp()
+		return true
+	case tea.MouseWheelDown:
+		m.input.PageDown()
+		return true
+	}
+	return false
 }
 
 // bannerLineCount returns the total lines reserved for top and bottom banners.
@@ -314,7 +387,24 @@ func (m *MailModel) buildMessages() {
 	allEntries := m.sessionCache.Entries()
 	chatMsgs := make([]ChatMessage, 0, len(allEntries))
 
+	currentApiCallID := ""
+	derivedApiCallSeq := 0
 	for _, e := range allEntries {
+		switch e.Type {
+		case "llm_response":
+			if e.ApiCallID != "" {
+				currentApiCallID = e.ApiCallID
+			} else {
+				derivedApiCallSeq++
+				currentApiCallID = fmt.Sprintf("derived:%d:%s", derivedApiCallSeq, e.Ts)
+			}
+		case "llm_call":
+			currentApiCallID = ""
+		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
+			if e.ApiCallID == "" {
+				e.ApiCallID = currentApiCallID
+			}
+		}
 		if !m.shouldShow(e) {
 			continue
 		}
@@ -348,7 +438,14 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 	case "thinking", "diary", "text_input", "text_output", "soul_flow", "notification", "aed":
 		return m.verbose >= verboseThinking
 	case "tool_call", "tool_result":
-		return m.verbose >= verboseExtended
+		// Ctrl+O level 1 uses tool entries as compact progress markers:
+		// render only the first line there, and reserve the full body for
+		// level 2. The cycle has no third verbose layer.
+		return m.verbose >= verboseThinking
+	case "llm_call", "llm_response":
+		// Hidden boundary markers used to derive tool-call grouping for older
+		// events that predate explicit api_call_id on tool events.
+		return false
 	case "insight":
 		// Human /btw inquiries (source "human") are always shown.
 		if e.Source == "human" {
@@ -431,6 +528,7 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		Sources:     e.Sources,
 		Source:      e.Source,
 		Meta:        e.Meta,
+		ApiCallID:   e.ApiCallID,
 	}
 	if e.Type == "mail" {
 		cm.IsFromMe = e.From == "human"
@@ -453,7 +551,11 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		// Forward scroll wheel events to viewport
+		if m.ready && m.mouseInInputRegion(msg) && m.scrollInputByWheel(msg) {
+			m.syncViewportHeight()
+			return m, nil
+		}
+		// Forward scroll wheel events outside the input box to the chat viewport.
 		if m.ready {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -465,6 +567,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width)
+		m.updateInputMaxHeight()
 		if !m.ready {
 			inputLines := m.input.LineCount()
 			// sep(1) + input(N) + border(1) + status(1)
@@ -599,10 +702,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	case EditorDoneMsg:
 		m.pendingMessage = msg.Text
-		firstLine := strings.SplitAfterN(msg.Text, "\n", 2)[0]
-		m.input.SetValue(firstLine)
-		// Refresh viewport after external editor
-		return m, m.refreshMail
+		m.input.SetValue(msg.Text)
+		m.syncViewportHeight()
+		m.maybeShowEditorHint()
+		// Refresh viewport and force a full repaint after the terminal returns from
+		// the external editor; editors such as vim can leave the alt screen visually
+		// stale until Bubble Tea draws a clean frame.
+		return m, tea.Batch(m.refreshMail, tea.ClearScreen)
 
 	case PaletteSelectMsg:
 		m.input.Reset()
@@ -659,6 +765,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
 				m.syncViewportHeight()
+				m.maybeShowEditorHint()
 				// Extract filter from input (text after "/")
 				val := m.input.Value()
 				if len(val) > 1 {
@@ -728,6 +835,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			return m, nil
 
 		case "pgup", "pgdown":
+			if msg.String() == "pgup" && m.input.PageUp() {
+				return m, nil
+			}
+			if msg.String() == "pgdown" && m.input.PageDown() {
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
@@ -739,6 +852,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if m.syncViewportHeight() && m.viewport.AtBottom() {
 			m.viewport.GotoBottom()
 		}
+		m.maybeShowEditorHint()
 		// Check if slash was typed
 		if m.input.IsPaletteActive() {
 			val := m.input.Value()
@@ -751,9 +865,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Forward all other messages (including textinput blink) to input
+	// Forward all other messages (including textarea paste and cursor blink) to input.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if _, ok := msg.(tea.PasteMsg); ok {
+		if m.syncViewportHeight() && m.viewport.AtBottom() {
+			m.viewport.GotoBottom()
+		}
+		m.maybeShowEditorHint()
+	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -774,7 +894,11 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	var b strings.Builder
+	var prevVisibleApiGroup *ChatMessage
 	for _, msg := range msgs {
+		if !isApiGroupedVerboseMessageType(msg.Type) {
+			prevVisibleApiGroup = nil
+		}
 		switch msg.Type {
 		case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
 			wrapWidth := m.width - 6
@@ -782,15 +906,43 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				wrapWidth = 20
 			}
 			var evStyle lipgloss.Style
+			body := msg.Body
+			tsPrefix := ""
 			switch msg.Type {
 			case "thinking", "diary", "text_input", "text_output":
+				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
+					b.WriteString("\n")
+				}
 				evStyle = thinkingStyle
 			default:
+				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
+					b.WriteString("\n")
+				}
 				evStyle = toolStyle
+				// Tool lines get a leading timestamp. Ctrl+O level 1 shows only
+				// the first line of tool_call/tool_result as a compact index; Ctrl+O
+				// level 2 shows full tool calls/results, still honoring the user's
+				// per-tool-call truncation setting (0 = full content, the default).
+				if ts := formatToolTimestamp(msg.Timestamp); ts != "" {
+					tsPrefix = StyleFaint.Render(ts) + " "
+				}
+				if isToolMessageType(msg.Type) && m.verbose == verboseThinking {
+					if msg.Type == "tool_call" {
+						body = compactToolCallSummary(body)
+					} else {
+						body = firstRenderedLine(body)
+					}
+				} else {
+					body = truncateToolBody(body, m.toolCallTruncate)
+				}
 			}
-			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render("[" + msg.Type + "] " + msg.Body)
+			wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(tsPrefix + "[" + msg.Type + "] " + body)
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
+			}
+			if isApiGroupedVerboseMessageType(msg.Type) {
+				msgCopy := msg
+				prevVisibleApiGroup = &msgCopy
 			}
 
 		case "soul_flow":
@@ -1016,6 +1168,13 @@ func (m MailModel) networkActivityBadge() string {
 func (m *MailModel) AddSystemMessage(body string) {
 	m.statusFlash = body
 	m.statusExpiry = time.Now().Add(5 * time.Second)
+}
+
+func (m *MailModel) maybeShowEditorHint() {
+	if strings.TrimSpace(m.input.Value()) == "" || !m.input.AtMaxHeight() {
+		return
+	}
+	m.AddSystemMessage(i18n.T("mail.editor_hint"))
 }
 
 func fileExists(path string) bool {

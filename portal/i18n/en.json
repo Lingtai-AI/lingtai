@@ -179,7 +179,7 @@
   "preset.saved": "Saved Presets",
   "preset.templates": "New Preset",
   "preset.name_minimax": "minimax (Recommended)",
-  "preset.desc_minimax": "MiniMax M2.7 — full multimodal (Token Plan)",
+  "preset.desc_minimax": "MiniMax M3 — full multimodal (Token Plan)",
   "preset.name_custom": "custom",
   "preset.desc_custom": "OpenAI / Anthropic compatible — web search + web browse",
   "presets.back": "back",

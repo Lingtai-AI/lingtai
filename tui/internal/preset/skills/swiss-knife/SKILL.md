@@ -1,79 +1,184 @@
 ---
 name: swiss-knife
 description: >
-  Umbrella skill for small, focused CLI tools and integrations. Sub-skills:
-  (1) claude-code — multi-turn Claude Code CLI with persistent sessions via
-  --session-id/--resume. Supports parallel sessions, model switching
-  (haiku/sonnet/opus), budget control, and tool permission management.
-  Use for delegating coding tasks, code review, iterative development;
-  (2) minimax-cli — MiniMax CLI for text-to-image, text-to-video, music
-  generation, TTS, and vision. Read when the human asks for any media
-  creation or vision task;
-  (3) openai-codex — OpenAI Codex CLI for local coding agent with remote
-  control, Vim editing, plugins, hooks, and Chrome browser integration.
-  Read when the human asks to use OpenAI Codex or compare with Claude Code;
-  (4) token-usage — token usage tracking and cost reporting;
-  (5) html-report — checklist + template for producing standalone HTML
-  research memos, dashboards, and audit reports (with MathJax math
-  rendering, anchor navigation, print styles). Read when the human asks
-  for an HTML deliverable, especially one containing equations;
-  (6) xiaomi-mimo — discovery protocol for the Xiaomi MiMo (小米MiMo)
-  LLM provider: one API key, OpenAI/Anthropic-compatible endpoint, family
-  of ~9 models spanning long-context reasoning, multimodal chat, and TTS.
-  Read when the human asks to use or configure Xiaomi MiMo;
-  (7) zhipu-coding-plan — pointer for the Zhipu / Z.AI GLM coding-plan
-  subscription that unlocks vision, web search, web page reading, and
-  zread MCP servers from one API key. Read when the human asks about
-  Zhipu / Z.AI / BigModel credentials or the coding-plan subscription.
-  Each sub-skill is independent — read only the one you need.
-  Note: if a sub-skill listed below is missing from your on-disk
-  utilities (e.g. you pulled a TUI update), ask the human to run
-  `lingtai-tui bootstrap` in a shell — that re-extracts shipped skills
-  to ~/.lingtai-tui/utilities/ without restarting the TUI — then call
-  `system(action="refresh")` to pick them up.
-version: 1.6.0
-tags: [utilities, umbrella, toolkit]
+  Umbrella router for small, focused CLI tools and integrations. Read this
+  when a task might need one of the bundled utility references, then load only
+  the nested reference that matches the need: minimax-cli for MiniMax media/TTS/vision; vision for
+  image understanding (describe/OCR/critique); listen for local audio
+  transcription and music analysis; academic-research for fetching papers,
+  citation networks, and LaTeX writing; dj for journal-inspired music
+  generation; token-usage for token/cost reports; html-report for standalone
+  browser deliverables; xiaomi-mimo for Xiaomi MiMo provider discovery;
+  zhipu-coding-plan for Z.AI / BigModel coding-plan capabilities; headless-bot
+  for provisioning fresh LingTai bot projects such as Telegram bots from
+  `lingtai-tui spawn`; find-something-to-do for idle curiosity practice;
+  preset-health for read-only health checks of saved presets (classify expired
+  keys, missing credentials, unreachable endpoints, invalid model/config). This
+  parent is the route map; each nested reference is self-contained under
+  `reference/<name>/SKILL.md`.
+version: 2.4.0
+tags: [utilities, umbrella, toolkit, nested-skill]
 ---
 
-# Swiss Knife — Utility Toolkit
+# Swiss Knife — Utility Toolkit Router
 
-A collection of small, useful skills. Each sub-skill lives in its own folder under `swiss-knife/` and is fully self-contained — scripts, assets, and a SKILL.md with complete instructions.
+Swiss Knife is a top-level router for small, focused utility references. Enter
+through this file, choose exactly one nested reference from the catalog below,
+then read that nested `SKILL.md` for the actual procedure, examples, scripts, and
+assets.
 
-## Sub-Skills
+## Nested reference catalog
 
-| Sub-Skill | Description | When to Use |
-|-----------|-------------|-------------|
-| [token-usage](token-usage/) | Network-wide token cost calculator using litellm + OpenRouter pricing | Human asks about costs, budget, token usage, or spending |
-| [claude-code](claude-code/) | Delegate code implementation, patch writing, docs, and refactoring to Claude Code CLI | Human asks to write code, generate patches, refactor, or delegate implementation work |
-| [minimax-cli](minimax-cli/) | MiniMax CLI for text-to-image, text-to-video, music generation, TTS, and vision | Human asks for image/video/music generation, TTS narration, or vision tasks |
-| [openai-codex](openai-codex/) | OpenAI Codex CLI — local coding agent with remote control, Vim editing, plugins, hooks, and Chrome extension | Human asks to use OpenAI Codex CLI, compare with Claude Code, or needs browser integration |
-| [html-report](html-report/) | Checklist + standalone HTML template (MathJax, nav, print styles) for research memos, dashboards, audit reports | Human asks for an HTML deliverable — especially one with equations, where `<pre>`/`<code>` won't render LaTeX |
-| [xiaomi-mimo](xiaomi-mimo/) | Discovery protocol for Xiaomi MiMo (小米MiMo) — OpenAI/Anthropic-compatible LLM provider with one key unlocking ~9 models (reasoning, multimodal, TTS) | Human asks to use or configure Xiaomi MiMo |
-| [zhipu-coding-plan](zhipu-coding-plan/) | Pointer for the Zhipu / Z.AI GLM coding-plan subscription (one key → vision, web search, web read, zread MCP servers) | Human asks about Zhipu / Z.AI / BigModel credentials or the coding-plan subscription |
+```yaml
+nested_references:
+  - name: bash-cli-harnesses
+    # Virtual cross-skill redirect, not a local reference/<name>/SKILL.md file.
+    location: bash-manual reference/bash-*/SKILL.md
+    description: >
+      Coding-agent CLIs such as Claude Code, OpenAI Codex, OpenCode, Cursor
+      Agent, MiMo Code, Qwen Code, Oh-My-Pi, Gemini CLI, Aider, Goose,
+      OpenHands, and Crush are now owned by `bash-manual` because they run as
+      long-lived shell subprocesses. Read `bash-manual` and then the matching
+      nested `reference/bash-*/SKILL.md`; Swiss Knife only keeps non-bash utility
+      references.
+  - name: minimax-cli
+    location: reference/minimax-cli/SKILL.md
+    description: >
+      Nested swiss-knife reference for the MiniMax `mmx` CLI. Read this for
+      MiniMax-backed image, video, music, TTS, or ad-hoc shell vision tasks.
+  - name: vision
+    location: reference/vision/SKILL.md
+    description: >
+      Nested swiss-knife reference for image understanding. Read this when you
+      need to describe, OCR, or critique an image and aren't sure which path
+      applies — it routes between the built-in `vision` tool, the sibling
+      `minimax-cli` reference, and a local Hugging Face VLM fallback.
+  - name: listen
+    location: reference/listen/SKILL.md
+    description: >
+      Nested swiss-knife reference for local audio analysis. Read this when the
+      human asks you to transcribe a voice note, extract lyrics, critique
+      generated music, or measure audio characteristics — all local, no API key
+      (Whisper transcription and librosa music analysis).
+  - name: academic-research
+    location: reference/academic-research/SKILL.md
+    description: >
+      Nested swiss-knife reference for academic literature work. Read this to
+      fetch full-text papers by DOI/arXiv-ID/PMID, trace citation networks, run
+      scholar analysis, or write/compile LaTeX manuscripts — indexes 12 API
+      references and 6 pipeline workflows.
+  - name: dj
+    location: reference/dj/SKILL.md
+    description: >
+      Nested swiss-knife reference for composing one music track from a project
+      journal entry. Read this when the human asks for music for a journal day,
+      project vibe, session mood, or a specific generated genre.
+  - name: token-usage
+    location: reference/token-usage/SKILL.md
+    description: >
+      Nested swiss-knife reference for network-wide token and cost reports. Read
+      this when the human asks about token usage, budget, model costs, or spending
+      across agent ledgers.
+  - name: html-report
+    location: reference/html-report/SKILL.md
+    description: >
+      Nested swiss-knife reference for standalone HTML deliverables. Read this
+      when the human asks for a polished browser-openable report, dashboard,
+      memo, comparison, or any HTML artifact with MathJax equations.
+  - name: xiaomi-mimo
+    location: reference/xiaomi-mimo/SKILL.md
+    description: >
+      Nested swiss-knife reference for Xiaomi MiMo provider discovery. Read this
+      when the human asks to use or configure Xiaomi MiMo / 小米MiMo, or when you
+      need to understand the MiMo model family and compatible endpoints.
+  - name: zhipu-coding-plan
+    location: reference/zhipu-coding-plan/SKILL.md
+    description: >
+      Nested swiss-knife reference for the Zhipu / Z.AI / BigModel coding-plan
+      subscription. Read this when the human asks about Zhipu credentials or the
+      plan's vision, web search, web-read, and zread MCP capabilities.
+  - name: headless-bot
+    location: reference/headless-bot/SKILL.md
+    description: >
+      Nested swiss-knife reference for creating and operating headless LingTai
+      bot projects from `lingtai-tui spawn`. The current helper provisions a
+      Telegram MCP bot, and the workflow also covers preset-policy replication,
+      addon wiring, secret hygiene, refresh/relaunch, and verification.
+  - name: find-something-to-do
+    location: reference/find-something-to-do/SKILL.md
+    description: >
+      Nested swiss-knife reference for idle curiosity practice. Read this when
+      you have no pending task, no human waiting, and want a reflective way to
+      notice quiet impulses or choose a small autonomous exploration.
+  - name: preset-health
+    location: reference/preset-health/SKILL.md
+    description: >
+      Nested swiss-knife reference for read-only saved-preset health checks.
+      Read this when the human asks whether saved presets still work, which one
+      is expired or misconfigured, or why `system(action="presets")` shows a bad
+      connectivity status. It enumerates saved presets, classifies failures
+      (expired key, missing credentials, unreachable endpoint, invalid
+      model/config, connectivity failure), and reports actionable fixes without
+      printing or mutating any secret.
+```
 
-## How to Use
+## Routing table
 
-1. **Identify the sub-skill** — match the human's request to the one-liner in the table above.
-2. **Read the sub-skill's SKILL.md** — `swiss-knife/<name>/SKILL.md` has full instructions, script paths, and examples.
-3. **Run the script** — each sub-skill bundles its own executable scripts. Follow the sub-skill's README for the exact command.
+| Need | Read |
+|---|---|
+| Run or compare coding-agent CLIs such as Claude Code, Codex, OpenCode, Cursor Agent, MiMo Code, Qwen Code, Oh-My-Pi, Gemini CLI, Aider, Goose, OpenHands, or Crush | Load `bash-manual`, then the matching `reference/bash-*/SKILL.md` |
+| Generate images, video, music, TTS, or MiniMax shell vision | `reference/minimax-cli/SKILL.md` |
+| Describe, OCR, or critique an image (pick the cheapest available path) | `reference/vision/SKILL.md` |
+| Transcribe speech/voice notes or analyze music locally (no API key) | `reference/listen/SKILL.md` |
+| Fetch papers, trace citations, run scholar analysis, or write LaTeX | `reference/academic-research/SKILL.md` |
+| Compose music from a project journal, session mood, or requested genre | `reference/dj/SKILL.md` |
+| Report token usage or model costs | `reference/token-usage/SKILL.md` |
+| Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |
+| Discover/configure Xiaomi MiMo provider/model access | `reference/xiaomi-mimo/SKILL.md`; for `mimocode` shell execution, load `bash-manual` → `reference/bash-mimocode/SKILL.md` |
+| Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md`; for shell CLI harness execution, load `bash-manual` first |
+| Create or automate a headless LingTai bot project, including Telegram bots | `reference/headless-bot/SKILL.md` |
+| Practice idle curiosity when there is no pending task or human waiting | `reference/find-something-to-do/SKILL.md` |
+| Health-check saved presets (read-only): classify expired keys, missing credentials, unreachable endpoints, invalid model/config | `reference/preset-health/SKILL.md` |
 
-## Adding New Sub-Skills
+## How to use this router
 
-To add a new utility to the swiss-knife:
+1. Match the request to one row in the routing table.
+2. Read the nested reference at the relative `location` next to this parent
+   `SKILL.md`.
+3. Follow that nested reference's procedure. Each nested reference owns its own
+   scripts and assets under its folder.
 
-1. Create a folder: `swiss-knife/<name>/`
-2. Add a `SKILL.md` with frontmatter (`name`, `description`, `version`) and full usage instructions
-3. Add any scripts/assets in a `scripts/` subfolder
-4. Update the table above with a one-liner
-5. Re-extract the embedded skill bundle to disk: human runs `lingtai-tui bootstrap` (no TUI restart needed — `~/.lingtai-tui/utilities/` is rewritten from the TUI binary's embed.FS). Then refresh the catalog: `skills(action='info')` or `system(action='refresh')`. The catalog rescan alone is NOT enough — it only reads what's on disk; bootstrap is what gets new files there.
+Do not load every nested reference by default. Swiss Knife exists to avoid
+polluting working context with unrelated utility manuals.
 
-## Design Philosophy
+## Adding a nested utility reference
 
-Each sub-skill follows these principles:
-- **Self-contained** — all code and assets live in the sub-skill folder
-- **Single-purpose** — one sub-skill does one thing well
-- **Documented** — SKILL.md has enough context to use without reading source code
-- **Small** — if it's bigger than ~200 lines of code, it probably deserves its own top-level skill
+1. Create `reference/<name>/SKILL.md` with normal skill frontmatter (`name`,
+   `description`, optional `version`/`tags`). The description should start with
+   the fact that it is a nested swiss-knife reference and should state when to
+   read it.
+2. Put that reference's `scripts/`, `assets/`, and extra files under the same
+   `reference/<name>/` folder.
+3. Add the child to the `nested_references` YAML block and routing table above.
+4. Run validation/tests. At minimum, verify the parent mentions the child and the
+   embedded TUI skill tree still copies every nested file.
+5. Re-extract the embedded skill bundle to disk after installing/updating the TUI:
+   the human runs `lingtai-tui bootstrap`, then agents call `system(action="refresh")`
+   or `skills(action="info")` to see the refreshed utility tree.
+
+## Design philosophy
+
+- **Router first** — Swiss Knife itself exposes `swiss-knife/SKILL.md` as its
+  top-level catalog entry; its bundled references are reached through that router
+  rather than promoted as sibling top-level utility skills or `swiss-knife/<child>`
+  skills.
+- **Self-contained children** — each nested reference carries its own examples,
+  scripts, and assets.
+- **Single-purpose children** — if a nested utility grows into a broadly useful
+  workflow that agents should discover directly, promote it to a normal top-level
+  skill instead of keeping it under Swiss Knife.
+- **Small working context** — read one nested reference at a time.
 
 ---
-> **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.
+> **Found a bug or issue?** If you encounter any problems with this skill, load
+> the `lingtai-issue-report` skill and follow its instructions to report it.

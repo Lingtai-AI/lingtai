@@ -156,6 +156,7 @@ type FirstRunModel struct {
 	soulDelayInput textinput.Model
 	moltPressInput textinput.Model
 	maxRpmInput    textinput.Model
+	maxAedInput    textinput.Model
 	// Authority toggles
 	karmaIdx   int // 0=true, 1=false
 	nirvanaIdx int // 0=false, 1=true
@@ -230,6 +231,20 @@ type FirstRunModel struct {
 	// callback from a previous, cancelled flow). Closes the
 	// token-write race noted in G-7 of the review.
 	codexLoginEpoch uint64
+	// codexSession holds the active OAuth session returned by startOAuthFlow.
+	// Used to submit a manual callback URL when the user's browser is on a
+	// different machine. Nil when no OAuth flow is in progress.
+	codexSession *codexOAuthSession
+	// codexAuthURL is the authorization URL received from CodexOAuthURLMsg.
+	// Shown in the UI so the user can open it on another machine.
+	codexAuthURL string
+	// codexChoosingMethod shows the two-path login chooser before
+	// starting any network flow: browser OAuth for same-machine use,
+	// or device code for remote/headless use.
+	codexChoosingMethod bool
+	codexMethodCursor   int // 0=browser OAuth, 1=device code
+	codexDeviceURL      string
+	codexDeviceCode     string
 	// keyFieldIdx tracks the cursor position on stepPresetKey:
 	//   0 = textarea (focused, user typing/pasting)
 	//   1 = Back button
@@ -345,6 +360,11 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	mri.SetWidth(15)
 	mri.Prompt = ""
 
+	mai := textinput.New()
+	mai.CharLimit = 3
+	mai.SetWidth(15)
+	mai.Prompt = ""
+
 	covi := textinput.New()
 	covi.CharLimit = 256
 	covi.SetWidth(50)
@@ -403,6 +423,7 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 		soulDelayInput:    sdi,
 		moltPressInput:    mpi,
 		maxRpmInput:       mri,
+		maxAedInput:       mai,
 		covenantInput:     covi,
 		principleInput:    prini,
 		soulFlowInput:     sfli,
@@ -475,6 +496,10 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	m.setupOrchDir = orchDir
 	m.setupOrchName = orchName
 	m.step = stepPickPreset
+	// /setup should default to the virtual "keep current preset" row.
+	// Otherwise the first saved/template preset becomes selected and downstream
+	// defaults (capabilities, provider, key slot) appear to reset unexpectedly.
+	m.cursor = -1
 	m.presets, _ = preset.List()
 
 	// Load existing addons from orchestrator's init.json so they are preserved
@@ -571,6 +596,27 @@ func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets 
 	m.rehydrateOrchDir = orchDir
 	m.rehydrateOrchName = orchName
 	return m
+}
+
+func (m FirstRunModel) startCodexLogin(deviceCode bool) (FirstRunModel, tea.Cmd) {
+	m.codexReloginArmed = false
+	m.codexLogoutArmed = false
+	m.codexChoosingMethod = false
+	m.codexLoggingIn = true
+	m.message = ""
+	m.codexAuthURL = ""
+	m.codexDeviceURL = ""
+	m.codexDeviceCode = ""
+	m.codexLoginEpoch++
+	epoch := m.codexLoginEpoch
+	ctx, cancel := context.WithCancel(context.Background())
+	m.codexCancel = cancel
+	if deviceCode {
+		m.codexSession = startDeviceAuthFlow(ctx, epoch)
+	} else {
+		m.codexSession = startOAuthFlow(ctx, epoch)
+	}
+	return m, waitCodexOAuthMsg(m.codexSession)
 }
 
 func (m FirstRunModel) Init() tea.Cmd {
@@ -764,6 +810,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.setupErr = msg.err
 		return m, nil
 
+	case CodexOAuthURLMsg:
+		// Non-terminal: the browser listener is ready and the auth URL is known.
+		// Store it for display and keep listening for the done message.
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexAuthURL = msg.AuthURL
+		return m, waitCodexOAuthMsg(m.codexSession)
+
+	case CodexDeviceCodeMsg:
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexDeviceURL = msg.VerificationURL
+		m.codexDeviceCode = msg.UserCode
+		return m, waitCodexOAuthMsg(m.codexSession)
+
 	case CodexOAuthDoneMsg:
 		// Drop late callbacks from a cancelled session: codexLoginEpoch
 		// is bumped on each start AND on cancel, so a stale Epoch means
@@ -774,6 +837,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		}
 		m.codexLoggingIn = false
 		m.codexCancel = nil
+		m.codexSession = nil
+		m.codexAuthURL = ""
+		m.codexDeviceURL = ""
+		m.codexDeviceCode = ""
+		m.codexChoosingMethod = false
 		if msg.Err != nil {
 			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
 				m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
@@ -977,6 +1045,24 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, cmd
 
 		case stepPickPreset:
+			if m.codexChoosingMethod {
+				switch msg.String() {
+				case "up", "k", "down", "j", "tab":
+					if m.codexMethodCursor == 0 {
+						m.codexMethodCursor = 1
+					} else {
+						m.codexMethodCursor = 0
+					}
+					return m, nil
+				case "enter", "return":
+					return m.startCodexLogin(m.codexMethodCursor == 1)
+				case "esc":
+					m.codexChoosingMethod = false
+					m.message = ""
+					return m, nil
+				}
+			}
+
 			presetMinIdx := 0
 			if m.setupMode {
 				presetMinIdx = -1 // allow "keep current" at index -1
@@ -1072,14 +1158,10 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					m.codexReloginArmed = false
 					m.codexLogoutArmed = false
-					m.codexLoggingIn = true
+					m.codexChoosingMethod = true
+					m.codexMethodCursor = 0
 					m.message = ""
-					m.codexLoginEpoch++
-					epoch := m.codexLoginEpoch
-					ctx, cancel := context.WithCancel(context.Background())
-					m.codexCancel = cancel
-					oauthCh := startOAuthFlow(ctx, epoch)
-					return m, func() tea.Msg { return <-oauthCh }
+					return m, nil
 				}
 				// Setup mode's synthetic "keep current" row is already the
 				// chosen default preset; Enter should advance just like the
@@ -1144,6 +1226,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.codexLoginEpoch++
 						m.codexLoggingIn = false
 						m.codexLogoutArmed = false
+						m.codexSession = nil
+						m.codexAuthURL = ""
+						m.codexDeviceURL = ""
+						m.codexDeviceCode = ""
+						m.codexChoosingMethod = false
 						m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
 						return m, nil
 					case m.codexAuth.valid && !m.codexLogoutArmed:
@@ -1190,6 +1277,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.codexCancel = nil
 					m.codexLoginEpoch++
 					m.codexLoggingIn = false
+					m.codexSession = nil
+					m.codexAuthURL = ""
 				}
 				if m.setupMode {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
@@ -1724,7 +1813,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					ctxLimit, _ := strconv.Atoi(m.ctxLimitInput.Value())
 					if ctxLimit <= 0 {
-						ctxLimit = 200000
+						ctxLimit = 300000
 					}
 					soulDelay, _ := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
 					if soulDelay <= 0 {
@@ -1738,6 +1827,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					if maxRpm < 0 {
 						maxRpm = 60
 					}
+					maxAedAttempts, _ := strconv.Atoi(m.maxAedInput.Value())
+					maxAedAttempts = preset.ClampAedAttempts(maxAedAttempts)
 					opts := preset.AgentOpts{
 						Language:       langs[m.agentLangIdx],
 						Stamina:        stamina,
@@ -1745,6 +1836,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						SoulDelay:      soulDelay,
 						MoltPressure:   moltPress,
 						MaxRpm:         maxRpm,
+						MaxAedAttempts: maxAedAttempts,
 						Karma:          m.karmaIdx == 0,
 						Nirvana:        m.nirvanaIdx == 0,
 						CovenantFile:   m.covenantInput.Value(),
@@ -1781,7 +1873,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				ctxLimit, err := strconv.Atoi(m.ctxLimitInput.Value())
 				if err != nil || ctxLimit <= 0 {
-					ctxLimit = 200000
+					ctxLimit = 300000
 				}
 				soulDelay, err := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
 				if err != nil || soulDelay <= 0 {
@@ -1795,6 +1887,11 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || maxRpm < 0 {
 					maxRpm = 60
 				}
+				maxAedAttempts, err := strconv.Atoi(m.maxAedInput.Value())
+				if err != nil {
+					maxAedAttempts = preset.DefaultMaxAedAttempts
+				}
+				maxAedAttempts = preset.ClampAedAttempts(maxAedAttempts)
 				opts := preset.AgentOpts{
 					Language:       langs[m.agentLangIdx],
 					Stamina:        stamina,
@@ -1802,6 +1899,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					SoulDelay:      soulDelay,
 					MoltPressure:   moltPress,
 					MaxRpm:         maxRpm,
+					MaxAedAttempts: maxAedAttempts,
 					Karma:          m.karmaIdx == 0,
 					Nirvana:        m.nirvanaIdx == 0,
 					CovenantFile:   m.covenantInput.Value(),
@@ -1877,16 +1975,18 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.moltPressInput, cmd = m.moltPressInput.Update(msg)
 				case 7:
 					m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
-				case 10:
+				case 8:
+					m.maxAedInput, cmd = m.maxAedInput.Update(msg)
+				case 11:
 					m.covenantInput, cmd = m.covenantInput.Update(msg)
 					m.covenantDirty = true
-				case 11:
+				case 12:
 					m.principleInput, cmd = m.principleInput.Update(msg)
 					m.principleDirty = true
-				case 12:
+				case 13:
 					m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
 					m.soulFlowDirty = true
-				case 13:
+				case 14:
 					m.commentInput, cmd = m.commentInput.Update(msg)
 				}
 				return m, cmd
@@ -2075,13 +2175,15 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				m.moltPressInput, cmd = m.moltPressInput.Update(msg)
 			case 7:
 				m.maxRpmInput, cmd = m.maxRpmInput.Update(msg)
-			case 10:
-				m.covenantInput, cmd = m.covenantInput.Update(msg)
+			case 8:
+				m.maxAedInput, cmd = m.maxAedInput.Update(msg)
 			case 11:
-				m.principleInput, cmd = m.principleInput.Update(msg)
+				m.covenantInput, cmd = m.covenantInput.Update(msg)
 			case 12:
-				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
+				m.principleInput, cmd = m.principleInput.Update(msg)
 			case 13:
+				m.soulFlowInput, cmd = m.soulFlowInput.Update(msg)
+			case 14:
 				m.commentInput, cmd = m.commentInput.Update(msg)
 			}
 		case stepRecipe:
@@ -2223,12 +2325,38 @@ func (m FirstRunModel) View() string {
 				if m.cursor == visibleCount {
 					row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_relogin_hint"))
 				}
+				b.WriteString(row + "\n")
+			} else if m.codexChoosingMethod {
+				row += "  " + StyleFaint.Render(i18n.T("codex.method_title"))
+				b.WriteString(row + "\n")
+				labels := []string{i18n.T("codex.method_browser"), i18n.T("codex.method_device")}
+				details := []string{i18n.T("codex.method_browser_detail"), i18n.T("codex.method_device_detail")}
+				for i := range labels {
+					methodCursor := "    "
+					if i == m.codexMethodCursor {
+						methodCursor = StyleAccent.Render("  > ")
+					}
+					b.WriteString(methodCursor + labels[i] + "\n")
+					b.WriteString("      " + StyleFaint.Render(details[i]) + "\n")
+				}
+				b.WriteString("  " + StyleFaint.Render(i18n.T("codex.method_hint")) + "\n")
 			} else if m.codexLoggingIn {
 				row += "  " + StyleFaint.Render(i18n.T("codex.logging_in"))
+				b.WriteString(row + "\n")
+				if m.codexAuthURL != "" {
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.browser_auth_url_label")) + "\n")
+					b.WriteString("  " + StyleAccent.Render(m.codexAuthURL) + "\n")
+				}
+				if m.codexDeviceURL != "" {
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_auth_url_label")) + "\n")
+					b.WriteString("  " + StyleAccent.Render(m.codexDeviceURL) + "\n")
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_code_label")) + " " + StyleAccent.Render(m.codexDeviceCode) + "\n")
+					b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_waiting_hint")) + "\n")
+				}
 			} else {
 				row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_unauthed_hint"))
+				b.WriteString(row + "\n")
 			}
-			b.WriteString(row + "\n")
 		}
 
 		// Footer buttons (Back/Next) — at visibleCount+1 and +2.
@@ -2629,6 +2757,7 @@ func (m FirstRunModel) View() string {
 			{5, i18n.T("firstrun.soul_delay"), i18n.T("firstrun.soul_delay_hint"), m.soulDelayInput.View()},
 			{6, i18n.T("firstrun.molt_pressure"), i18n.T("firstrun.molt_pressure_hint"), m.moltPressInput.View()},
 			{7, i18n.T("firstrun.max_rpm"), i18n.T("firstrun.max_rpm_hint"), m.maxRpmInput.View()},
+			{8, i18n.T("firstrun.max_aed_attempts"), i18n.T("firstrun.max_aed_attempts_hint"), m.maxAedInput.View()},
 		}
 		for _, nf := range numFields {
 			hint := StyleFaint.Render(" (" + nf.hint + ")")
@@ -2828,16 +2957,16 @@ func centerText(s string, width int) string {
 
 // agentNameDirFieldCount is the number of fields in stepAgentNameDir,
 // including the Back/Next button slots at the end.
-const agentNameDirFieldCount = 16
+const agentNameDirFieldCount = 17
 
 // Field indices:
 // 0=name, 1=dir, 2=lang,
-// 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure, 7=max_rpm,
-// 8=karma, 9=nirvana,
-// 10=covenant, 11=principle, 12=soul_flow, 13=comment
-// 14=Back, 15=Next  (footer buttons; no input is focused here)
-const agentNameDirBackIdx = 14
-const agentNameDirNextIdx = 15
+// 3=stamina, 4=context_limit, 5=soul_delay, 6=molt_pressure, 7=max_rpm, 8=max_aed_attempts,
+// 9=karma, 10=nirvana,
+// 11=covenant, 12=principle, 13=soul_flow, 14=comment
+// 15=Back, 16=Next  (footer buttons; no input is focused here)
+const agentNameDirBackIdx = 15
+const agentNameDirNextIdx = 16
 
 // runCheckCaps runs `python -m lingtai check-caps` in a goroutine.
 func (m FirstRunModel) runCheckCaps() tea.Cmd {
@@ -3265,6 +3394,19 @@ func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 				}
 			}
 		}
+
+		// If the picker cursor points at a saved preset that was not found
+		// in the existing allowed list (e.g. the user just created it in the
+		// preset editor), auto-check it so a just-added preset doesn't silently
+		// stay unauthorized. The user can still uncheck it with [space].
+		if m.cursor >= 0 {
+			for r, idx := range m.savedPresetIdx {
+				if idx == m.cursor && !m.presetAllowed[r] {
+					m.presetAllowed[r] = true
+					break
+				}
+			}
+		}
 	}
 
 	return nil
@@ -3487,30 +3629,32 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	m.nameInput.Focus()
 	m.dirInput.Blur()
 
-	// Language — inherit from preset, fallback to TUI config language
+	// Language — fresh first-run/rehydration agents follow the current TUI
+	// language so recipe prompts (notably Tutorial) match the UI the human chose.
+	// Preset language is only a fallback for malformed/empty TUI config; /setup
+	// surfaces the existing agent language below from init.json.
 	m.agentLangIdx = 0
-	presetLang, hasLang := p.Manifest["language"].(string)
-	if !hasLang || presetLang == "" {
-		presetLang = config.LoadTUIConfig(m.globalDir).Language
-	}
-	for i, lang := range []string{"en", "zh", "wen"} {
-		if lang == presetLang {
-			m.agentLangIdx = i
-			break
-		}
+	presetLang, _ := p.Manifest["language"].(string)
+	tuiLang := config.LoadTUIConfig(m.globalDir).Language
+	if idx, ok := languageIndex(tuiLang); ok {
+		m.agentLangIdx = idx
+	} else if idx, ok := languageIndex(presetLang); ok {
+		m.agentLangIdx = idx
 	}
 
 	// Numeric defaults — overridden by saved init.json values in setup mode below.
 	m.staminaInput.SetValue("36000")
-	m.ctxLimitInput.SetValue("200000")
+	m.ctxLimitInput.SetValue("300000")
 	m.soulDelayInput.SetValue("99999")
 	m.moltPressInput.SetValue("0.8")
 	m.maxRpmInput.SetValue("60")
+	m.maxAedInput.SetValue(strconv.Itoa(preset.DefaultMaxAedAttempts))
 	m.staminaInput.Blur()
 	m.ctxLimitInput.Blur()
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
 	m.maxRpmInput.Blur()
+	m.maxAedInput.Blur()
 
 	// Pre-fill prompt paths based on language — also overridden below in setup mode.
 	langs := []string{"en", "zh", "wen"}
@@ -3551,6 +3695,9 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 			if v, ok := numberFromJSON(manifest["max_rpm"]); ok {
 				m.maxRpmInput.SetValue(formatNumber(v))
 			}
+			if v, ok := numberFromJSON(manifest["max_aed_attempts"]); ok {
+				m.maxAedInput.SetValue(formatNumber(v))
+			}
 			if admin, ok := manifest["admin"].(map[string]interface{}); ok {
 				if karma, ok := admin["karma"].(bool); ok {
 					if karma {
@@ -3565,6 +3712,12 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 					} else {
 						m.nirvanaIdx = 1
 					}
+				}
+			}
+			if existingLang, _ := manifest["language"].(string); existingLang != "" {
+				if idx, ok := languageIndex(existingLang); ok {
+					m.agentLangIdx = idx
+					m.updatePromptPaths()
 				}
 			}
 		}
@@ -3637,6 +3790,7 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 	m.soulDelayInput.Blur()
 	m.moltPressInput.Blur()
 	m.maxRpmInput.Blur()
+	m.maxAedInput.Blur()
 	m.covenantInput.Blur()
 	m.principleInput.Blur()
 	m.soulFlowInput.Blur()
@@ -3659,18 +3813,29 @@ func (m *FirstRunModel) focusAgentField() tea.Cmd {
 		return m.moltPressInput.Focus()
 	case 7:
 		return m.maxRpmInput.Focus()
-	case 8, 9:
+	case 8:
+		return m.maxAedInput.Focus()
+	case 9, 10:
 		return nil // karma/nirvana — cycle selectors
-	case 10:
-		return m.covenantInput.Focus()
 	case 11:
-		return m.principleInput.Focus()
+		return m.covenantInput.Focus()
 	case 12:
-		return m.soulFlowInput.Focus()
+		return m.principleInput.Focus()
 	case 13:
+		return m.soulFlowInput.Focus()
+	case 14:
 		return m.commentInput.Focus()
 	}
 	return nil
+}
+
+func languageIndex(lang string) (int, bool) {
+	for i, candidate := range []string{"en", "zh", "wen"} {
+		if lang == candidate {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // updatePromptPaths updates prompt path fields when language changes,
@@ -4135,7 +4300,22 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 		return m, nil
 	}
 	if m.setupMode {
-		propagatePresetPolicyToNetwork(m.baseDir, dirName, presetCanonicalRef(p), m.pendingAgentOpts.AllowedPresets)
+		// Derive the real policy default ref for propagation. When the user
+		// chose "Keep current preset" (cursor == -1), p is the synthetic
+		// keep_current preset whose presetCanonicalRef would produce a
+		// non-existent path. Use the existing init.json's manifest.preset.default
+		// instead so propagation never broadcasts keep_current.json to peers.
+		policyDefaultRef := presetCanonicalRef(p)
+		if m.cursor == -1 && m.setupKeepInitJSON != nil {
+			if mn, ok := m.setupKeepInitJSON["manifest"].(map[string]interface{}); ok {
+				if pre, ok := mn["preset"].(map[string]interface{}); ok {
+					if def, ok := pre["default"].(string); ok && def != "" {
+						policyDefaultRef = def
+					}
+				}
+			}
+		}
+		propagatePresetPolicyToNetwork(m.baseDir, dirName, policyDefaultRef, m.pendingAgentOpts.AllowedPresets)
 	}
 	return m, func() tea.Msg { return SetupSavedMsg{} }
 }

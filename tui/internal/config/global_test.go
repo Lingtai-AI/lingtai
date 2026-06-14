@@ -207,6 +207,35 @@ func TestDefaultTUIConfig_DisablesInsights(t *testing.T) {
 	}
 }
 
+func TestDefaultTUIConfig_NoToolCallTruncation(t *testing.T) {
+	// Default must show full tool call content (no truncation). 0 means
+	// "untruncated" in the rendering path.
+	cfg := DefaultTUIConfig()
+	if cfg.ToolCallTruncate != 0 {
+		t.Fatalf("DefaultTUIConfig().ToolCallTruncate = %d, want 0 (no truncation)", cfg.ToolCallTruncate)
+	}
+}
+
+func TestLoadTUIConfig_MissingDefaultsToNoTruncation(t *testing.T) {
+	dir := t.TempDir()
+	if cfg := LoadTUIConfig(dir); cfg.ToolCallTruncate != 0 {
+		t.Fatalf("missing tui_config.json set ToolCallTruncate=%d; want 0", cfg.ToolCallTruncate)
+	}
+}
+
+func TestSaveAndLoadTUIConfig_PreservesToolCallTruncate(t *testing.T) {
+	dir := t.TempDir()
+	tc := DefaultTUIConfig()
+	tc.ToolCallTruncate = 200
+	if err := SaveTUIConfig(dir, tc); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded := LoadTUIConfig(dir)
+	if loaded.ToolCallTruncate != 200 {
+		t.Errorf("ToolCallTruncate = %d after round-trip, want 200", loaded.ToolCallTruncate)
+	}
+}
+
 func TestLoadTUIConfig_MissingOrAbsentInsightsDisablesInsights(t *testing.T) {
 	dir := t.TempDir()
 	if cfg := LoadTUIConfig(dir); cfg.Insights {

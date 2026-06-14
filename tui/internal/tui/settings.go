@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // Settings holds per-project preferences at .lingtai/human/settings.json.
@@ -64,18 +64,18 @@ const (
 
 // SettingsModel is the /settings view.
 type SettingsModel struct {
-	cursor     int
-	tuiConfig  config.TUIConfig
-	fields     []SettingField
-	globalDir  string
-	projectDir string // .lingtai/ dir for per-project settings
-	orchDir    string // orchestrator dir for agent name
-	nickname   string // human's nickname from human/.agent.json
-	agentName  string // agent's true name from orch/.agent.json
+	cursor       int
+	tuiConfig    config.TUIConfig
+	fields       []SettingField
+	globalDir    string
+	projectDir   string        // .lingtai/ dir for per-project settings
+	orchDir      string        // orchestrator dir for agent name
+	nickname     string        // human's nickname from human/.agent.json
+	agentName    string        // agent's true name from orch/.agent.json
 	editingLocal localFieldIdx // which local field is being edited (-1 = none)
 	editing      bool
-	width      int
-	height     int
+	width        int
+	height       int
 }
 
 func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUIConfig) SettingsModel {
@@ -126,6 +126,29 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		insightsCurrent = 1
 	}
 
+	// Tool-call display truncation. "off" (the default) shows full tool call
+	// content; the finite options cap each tool line at that many characters.
+	toolTruncOptions := []string{"off", "200", "500", "1000"}
+	toolTruncCurrent := 0 // default: off (no truncation)
+	if tuiCfg.ToolCallTruncate > 0 {
+		truncStr := fmt.Sprintf("%d", tuiCfg.ToolCallTruncate)
+		matched := false
+		for i, o := range toolTruncOptions {
+			if o == truncStr {
+				toolTruncCurrent = i
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			// A custom value persisted from outside the wizard: surface it as
+			// an extra selectable option so it round-trips instead of silently
+			// snapping back to "off".
+			toolTruncOptions = append(toolTruncOptions, truncStr)
+			toolTruncCurrent = len(toolTruncOptions) - 1
+		}
+	}
+
 	// Read agent language from init.json
 	agentLangOptions := []string{"en", "zh", "wen"}
 	agentLangCurrent := 0
@@ -153,6 +176,7 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
 		{Key: "insights", Label: "settings.insights", Options: insightsOptions, Current: insightsCurrent},
+		{Key: "tool_truncate", Label: "settings.tool_truncate", Options: toolTruncOptions, Current: toolTruncCurrent},
 		{Key: "agent_lang", Label: "settings.agent_lang", Options: agentLangOptions, Current: agentLangCurrent},
 	}
 
@@ -281,6 +305,14 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		}
 	case "insights":
 		m.tuiConfig.Insights = val == "on"
+	case "tool_truncate":
+		if val == "off" {
+			m.tuiConfig.ToolCallTruncate = 0
+		} else {
+			n := 0
+			fmt.Sscanf(val, "%d", &n)
+			m.tuiConfig.ToolCallTruncate = n
+		}
 	case "theme":
 		m.tuiConfig.Theme = val
 		SetThemeByName(val)
@@ -413,7 +445,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "insights" || (f.Key == "mail_page_size" && value == "unlimited") {
+		if f.Key == "insights" || (f.Key == "mail_page_size" && value == "unlimited") || (f.Key == "tool_truncate" && value == "off") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)
@@ -493,4 +525,3 @@ func (m SettingsModel) View() string {
 
 	return b.String()
 }
-

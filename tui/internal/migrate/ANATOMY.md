@@ -10,9 +10,9 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 35) |
+| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 36) |
 | `Migration` struct | `tui/internal/migrate/migrate.go:20` | `{Version int, Name string, Fn func(string) error}` |
-| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m035, append-only |
+| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m036, append-only |
 | `Run(lingtaiDir)` | `tui/internal/migrate/migrate.go:68` | reads `meta.json` → runs pending migrations → persists atomically |
 | `StampCurrent(lingtaiDir)` | `tui/internal/migrate/migrate.go:116` | stamps `CurrentVersion` without running migrations (fresh projects) |
 | `metaFile` struct | `tui/internal/migrate/migrate.go:14` | `{Version int, AddonCommentCleanupNotified bool}` |
@@ -25,6 +25,7 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 | m033 | `tui/internal/migrate/m033_strip_codex_api_key_env.go:21` | strip bogus `api_key_env` from saved codex presets |
 | m034 | `tui/internal/migrate/m034_library_skills_caps.go:23` | rename capability keys `codex`→`library` and `library`→`skills` |
 | m035 | `tui/internal/migrate/m035_remove_brief.go:13` | strip secretary-era brief plumbing: delete `system/brief.md`, drop `brief`/`brief_file` keys from each agent `init.json`, drop `brief` from `human/settings.json` |
+| m036 | `tui/internal/migrate/m036_sqlite_log_backfill.go:34` | optional command-line prompt/progress to backfill stopped agents' historical `events.jsonl` into derived `logs/log.sqlite`; safe to skip |
 
 Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002 is a no-op `func(_ string) error { return nil }` — it preserves the version slot.
 
@@ -32,14 +33,14 @@ Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002
 
 - **Called by** `tui/main.go` — Bootstrap runs `Run(lingtaiDir)` on startup; `InitProject` calls `StampCurrent` for fresh projects.
 - **Reads/writes** `<project>/.lingtai/meta.json` — version stamp shared with portal.
-- **Migrations touch** `init.json`, `presets/saved/`, `.portal/`, `.tui-asset/`, and agent subdirectories.
+- **Migrations touch** `init.json`, `presets/saved/`, `.portal/`, `.tui-asset/`, and agent subdirectories. m036 may also create/replace derived per-agent `logs/log.sqlite` when the user explicitly confirms the backfill prompt.
 - **Cross-binary contract with portal** — see `portal/internal/migrate/ANATOMY.md`. Each `CurrentVersion` bump must be mirrored. Migrations touching shared state (e.g. m029, m030) live in both packages. TUI-only migrations get a no-op stub in the portal registry.
 
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
 - **Subfolders:** none — flat package, one file per migration
-- **Siblings:** `tui/internal/preset/ANATOMY.md` — m029/m030 reference preset directory layout; `tui/internal/globalmigrate/` — per-machine analogue under `~/.lingtai-tui/`
+- **Siblings:** `tui/internal/preset/ANATOMY.md` — m029/m030 reference preset directory layout; `tui/internal/globalmigrate/` — per-machine analogue under `~/.lingtai-tui/`; `tui/internal/processscan/` — m036 reuses ps-based running-agent detection before attempting offline SQLite rebuilds
 
 ## State
 
@@ -54,3 +55,4 @@ Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002
 - **Fresh-project shortcut.** `StampCurrent` writes `CurrentVersion` without running migrations — a freshly-generated project conforms to the current schema by construction. Running historical migrations against it would corrupt valid data (e.g. m016 renames `library→codex`, but a fresh project never had the old key).
 - **Version-check error.** `Run` returns `"data version N is newer than this binary supports (M); upgrade lingtai-tui"` when meta.json version exceeds `CurrentVersion`.
 - **Idempotent.** Migrations are designed to be re-runnable — they check preconditions and skip if already applied (e.g. m029 checks for existing `allowed` list).
+- **Optional sidecar backfill.** m036 is a TUI-only, user-confirmed command-line migration for the kernel SQLite log sidecar. It warns that large histories may take time, shows progress when confirmed, and emphasizes that skipping does not affect normal use because JSONL remains the source of truth.

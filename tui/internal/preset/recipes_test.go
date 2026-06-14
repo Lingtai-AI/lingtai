@@ -3,6 +3,7 @@ package preset
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,6 +175,35 @@ func TestScanCategory_Examples(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("ScanCategory(examples) did not find tutorial")
+	}
+}
+
+func TestAdaptiveRecipeRecommendsIMAndUsesMCPForStatus(t *testing.T) {
+	paths := []string{
+		"recipe_assets/recommended/adaptive/.recipe/greet/greet.md",
+		"recipe_assets/recommended/adaptive/.recipe/greet/zh/greet.md",
+		"recipe_assets/recommended/adaptive/.recipe/greet/wen/greet.md",
+		"recipe_assets/recommended/adaptive/.recipe/comment/comment.md",
+		"recipe_assets/recommended/adaptive/.recipe/comment/zh/comment.md",
+		"recipe_assets/recommended/adaptive/.recipe/comment/wen/comment.md",
+	}
+	for _, path := range paths {
+		body, err := recipeAssetsFS.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		text := string(body)
+		for _, want := range []string{"IM", "Telegram", "/mcp"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing %q", path, want)
+			}
+		}
+		if strings.Contains(text, "/addon") {
+			t.Errorf("%s mentions retired /addon command; use /mcp for status checks", path)
+		}
+		if strings.Contains(strings.ToLower(text), "/mcp` to configure") || strings.Contains(strings.ToLower(text), "/mcp to configure") {
+			t.Errorf("%s describes /mcp as the configuration mechanism; it should only check status", path)
+		}
 	}
 }
 

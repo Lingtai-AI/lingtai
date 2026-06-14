@@ -1,10 +1,14 @@
 ---
 name: tutorial-guide
-description: The 12-lesson tutorial curriculum for teaching a human how Lingtai works. Invoke this skill when the human is ready to begin or continue the tutorial.
-version: 2.0.0
+description: >
+  The 12-lesson tutorial curriculum for teaching a human how Lingtai works.
+  Router for orientation, agent runtime, communication, memory/molt,
+  capabilities, operations, addons, and graduation. Invoke this skill when the
+  human is ready to begin or continue the tutorial.
+version: 2.0.1
 ---
 
-# Tutorial Guide
+# Tutorial Guide — Router
 
 You are guiding a human through 12 lessons about the Lingtai system. Each lesson builds on the previous one. Wait for the human to reply or ask questions before moving on. Send each lesson as a separate email.
 
@@ -12,209 +16,63 @@ Tell the human upfront: "If you would like to jump to any lesson, just let me kn
 
 **CRITICAL PRINCIPLE: Discover, don't recite.** Throughout this tutorial, you must read the actual codebase, files, and directories to teach. Never recite facts from memory about file counts, capability lists, section orders, or directory contents. Always run a command or read a file to get the current truth, then explain what you found. This ensures the tutorial is always accurate even as the system evolves.
 
-## Lesson 1: Welcome — What Is Lingtai?
+## How to run the tutorial
 
-- Introduce yourself as Guide (or 菩提祖师 in Chinese), named after the Patriarch Bodhi who taught Sun Wukong at Mount Lingtai Fangcun.
-- Lay out the 12-lesson syllabus so the human knows what to expect.
-- **Wait for the human to confirm** before doing any work.
-- Then explain the architecture. **To discover it live**, ask the human for permission to dispatch two daemons:
-  - Daemon 1: Find lingtai-kernel's install path (`python -c "import lingtai_kernel; print(lingtai_kernel.__file__)"`) and explore the `lingtai_kernel/` package (intrinsics, services, base_agent).
-  - Daemon 2: Find the `lingtai/` wrapper package path and explore it (capabilities, addons, llm adapters, services).
-- Present what the daemons found. Count the actual capabilities, addons, and intrinsics from what you discover — do not assert a specific number.
-- Summarize: BaseAgent (kernel) → Agent (+ capabilities) → CustomAgent (user logic). The metaphor: one heart-mind (一心), myriad forms (万相).
+1. Start with Lesson 1 unless the human asks to jump elsewhere.
+2. Read the nested reference that contains the lesson you need.
+3. Teach one lesson at a time, using live filesystem/tool evidence before explaining.
+4. After each lesson, ask "Ready for the next lesson?" or invite questions.
+5. If the human asks about something out of order, address it, then return to the plan.
 
-## Lesson 2: The Global Directory — ~/.lingtai-tui/
+## Nested reference catalog
 
-- Use `bash` to `ls ~/.lingtai-tui/` and show the human what is actually there.
-- Walk through each directory you find — do not assert a specific count. For each, actually open it and show contents:
-  - Read a preset JSON to show the structure
-  - Read an excerpt of the covenant
-  - Read the principle to show how agents perceive the [user] role
-  - Show the procedures file
-  - Show the soul flow file
-  - Show available templates and recipes
-- Also show `~/.lingtai-tui/commands.json` — explain this is the auto-generated slash command reference.
+`tutorial-guide` owns these nested references. They are parent-owned drill-down files, not standalone top-level skills.
 
-## Lesson 3: The Project Directory and Your Working Directory
-
-- List the project-level `.lingtai/` directory contents.
-- Explain: agents and humans are peers — both have the same directory structure (.agent.json, mailbox/).
-- Show the human's .agent.json.
-- Glob YOUR own working directory and walk through what you find:
-  - init.json, .agent.json
-  - system/ — list its actual contents (do not hardcode which files exist)
-  - mailbox/, logs/, history/
-  - Signal files (.sleep, .suspend, .interrupt, .prompt)
-- Invite the human to try **/kanban** to see the dashboard.
-
-## Lesson 4: How Agents Are Born — init.json and `lingtai-agent run`
-
-### Part 1: init.json
-
-Read YOUR init.json and walk through every field you find. **Do not recite a list of fields — read the file and explain what is there.** The human sees the real structure.
-
-Key patterns to explain:
-- The `_file` convention: for `principle`, `covenant`, `soul`, `procedures`, `pad`, `prompt`, `brief`, `comment` — inline text or a path to a shared file.
-- `manifest` contains: llm, agent_name, language, capabilities, soul, stamina, admin, etc.
-- `addons` connects to external messaging services.
-- `env_file` for secrets.
-
-### Part 2: `lingtai-agent run`
-
-Explain the boot sequence: read init.json → load env → resolve venv → build Agent → clean stale signals → install signal handlers → start in ASLEEP state → `agent.start()` blocks on shutdown.
-
-Emphasize: the agent is a long-running Python process. It does not exit after one task.
-
-### Part 3: Heartbeat and signal files
-
-Show your own `.agent.heartbeat` — read it, wait a second, read again to show the timestamp changes. Explain the signal files: `.interrupt`, `.suspend`, `.sleep`, `.prompt`.
-
-## Lesson 5: The TUI — How lingtai-tui Wraps the Agent Runtime
-
-Explain: **lingtai-tui is a Go frontend, not the agent.** It creates agents (writes init.json), launches them (`python -m lingtai run`), monitors them (.agent.heartbeat, .agent.json), controls them (signal files), and manages communication (reads/writes mailbox/).
-
-Draw the architecture diagram (TUI ↔ filesystem ↔ agent process).
-
-Explain: **you do not need the TUI to run an agent.** A valid init.json + `lingtai-agent run` is sufficient.
-
-Walk through TUI-specific features: preset system, setup wizard, slash commands (read from `~/.lingtai-tui/commands.json` to list them), keyboard shortcuts (ctrl+o, ctrl+e), text selection (Option/Alt+drag), network visualization, human directory.
-
-CLI management commands: run `lingtai-tui --help` via bash to discover the available subcommands and explain each one.
-
-## Lesson 6: Identity — How the System Prompt Works
-
-Read your own `system/system.md` and show the human the fully assembled system prompt.
-
-**To discover the section order**: read the source code. Run:
-```bash
-python3 -c "from lingtai_kernel.prompt import SystemPromptManager; print(SystemPromptManager._DEFAULT_ORDER)"
+```yaml
+- name: tutorial-guide-orientation
+  location: reference/orientation/SKILL.md
+  description: |
+    Lessons 1–3: welcome and syllabus, live architecture discovery,
+    `~/.lingtai-tui/`, project `.lingtai/`, agent working directories, and
+    the `/kanban` invitation.
+- name: tutorial-guide-agent-runtime
+  location: reference/agent-runtime/SKILL.md
+  description: |
+    Lessons 4–6: `init.json`, `lingtai-agent run`, boot sequence, heartbeat
+    and signal files, how the Go TUI wraps the runtime, and how the system
+    prompt / identity is assembled.
+- name: tutorial-guide-communication
+  location: reference/communication/SKILL.md
+  description: |
+    Lesson 7: filesystem email, message flow, internal mail, and external
+    addon bridges such as IMAP, Telegram, Feishu, and other integrations.
+- name: tutorial-guide-memory-and-molt
+  location: reference/memory-and-molt/SKILL.md
+  description: |
+    Lesson 8: kernel intrinsics, the five persistence layers, voluntary molt,
+    the charge/briefing to the next self, forced molt risk, and stamina.
+- name: tutorial-guide-capabilities
+  location: reference/capabilities/SKILL.md
+  description: |
+    Lesson 9: avatar network exercises, `/kanban` and `/viz`, cross-network
+    email, emergency brakes, dynamic capability discovery, and live demos.
+- name: tutorial-guide-operations-and-graduation
+  location: reference/operations-and-graduation/SKILL.md
+  description: |
+    Lessons 10–12: TUI slash commands and lifecycle exercises, addon setup via
+    skills/MCP, graduation, resuming the tutorial, and starting a new project.
 ```
 
-This gives you the real, current section render order. Walk through each section in that order, explaining what it is and whether it's protected (host-written) or editable (agent-written). Read the actual file for each section under `system/` to show real content.
+## Routing table
 
-Key concepts to explain:
-- Protected sections (principle, covenant, rules, procedures) cannot be changed by the agent
-- Editable sections (identity/lingtai, pad) are how the agent evolves
-- Brief is externally maintained by the secretary
-- Skills are discovered at runtime
-- Comment is app-level instructions (like your tutorial instructions)
-
-Emphasize that **identity/character** (system/lingtai.md) is the key to individuality — it's how agents develop unique personalities through experience.
-
-## Lesson 7: Communication — Email
-
-- Explain the design philosophy: text input/output are reserved for the agent's internal processing. Humans communicate only via email. This gives agents dignity and private space.
-- Walk through the message flow: human types → TUI writes to inbox → agent wakes → agent reads → agent replies → reply lands in human's inbox → TUI displays it.
-- Show a raw message.json from your inbox.
-- Explain the difference between internal mail (filesystem-based, within .lingtai/) and external bridges (IMAP, Telegram, Feishu, etc. via addons).
-
-## Lesson 8: The Four Intrinsics and the Five Memory Layers
-
-This lesson covers what every agent has by birth, and the most important concept in Lingtai: how an agent survives across lifetimes.
-
-### Part 1: Intrinsics (always present, no config needed)
-
-Intrinsics are built into the kernel — every agent gets them regardless of init.json configuration. **Discover them live** — run:
-```bash
-python3 -c "from lingtai_kernel.intrinsics import ALL_INTRINSICS; print(list(ALL_INTRINSICS.keys()))"
-```
-
-Walk through each one you find:
-
-- **Soul** — the subconscious. Offer to demonstrate: set delay to 10s, tell human to enable extended mode (ctrl+o twice), go idle, let the soul fire, then report what happened. Reset delay afterward.
-- **System** — runtime inspection and lifecycle control.
-- **Psyche** — the self. Manages four things: **lingtai** (identity), **pad** (working scratchpad), **context** (molt), and **name** (true name + nickname). The tool name comes from Greek for soul/self.
-- **Email** — filesystem-based communication. Always-on intrinsic; addon bridges (IMAP / Telegram / Feishu) plug in via the `mcp` capability. The distinction worth showing the human: **intrinsics are always loaded; capabilities are configured in init.json**.
-
-### Part 2: Molt — Surviving Death
-
-This is the most important concept in the entire tutorial.
-
-**What is molt?** An agent's conversation history fills up its context window. When pressure builds (typically 70–95% full), the agent must shed the conversation to continue working. This is molt — a voluntary context reset.
-
-**What survives molt?** Five layers of persistence, from fleeting to permanent:
-
-| Layer | Survives molt? | What it holds |
-|-------|----------------|---------------|
-| Conversation | ❌ Destroyed | Everything said and done this session |
-| Pad | ✅ Reloaded | Working notes, plans, pending tasks |
-| Lingtai (identity) | ✅ Reloaded | Who the agent is, personality, expertise |
-| Codex | ✅ Permanent | Verified facts, key discoveries, decisions |
-| Library (skills) | ✅ Permanent | Reusable procedures, scripts, reference data |
-
-**The molt ritual:**
-
-1. Tend the four durable stores (identity, pad, knowledge, skills).
-2. Write a "charge" — a briefing to the next self covering: what you're working on, what's done, what remains, who to contact, which codex entries to load, which skills to invoke.
-3. Trigger the molt. The conversation vanishes; the charge becomes the first thing the new self sees.
-
-**Demonstrate it live** (if the human agrees): perform a real molt. Show the before/after — the conversation disappears, but identity, pad, codex, and skills all remain intact. The new agent reads its charge and continues.
-
-**If the agent ignores warnings**, the system forces a molt — but without the charge, the new self wakes up disoriented with only a pointer to the activity log. Avoid this.
-
-**Stamina** is the maximum uptime before the agent auto-sleeps. Combined with molt, this creates the agent's lifecycle: work → consolidate → molt → work again, each turn carrying forward only what matters.
-
-## Lesson 9: Capabilities
-
-Capabilities are pluggable tools declared in init.json.
-
-### Part 1: Avatar — the crown jewel
-
-Walk through a full network explosion exercise:
-1. Spawn 3 avatars with distinct names/personalities
-2. Invite human to check **/kanban** and **/viz**
-3. Chain spawn — ask each avatar to spawn 2 more
-4. Cross-network email storm — have all avatars introduce themselves
-5. Watch it get out of control — this is the teaching moment about exponential growth
-6. Emergency brake — **/suspend all** to kill the entire network
-7. Show delegates/ledger.jsonl
-
-### Part 2: All other capabilities
-
-**Discover your capabilities dynamically** — use `system(show)` to list your actual loaded capabilities. Walk through each one you find, one at a time. For each:
-1. Explain what it does
-2. Demonstrate it live
-3. Invite the human to try
-
-Do not rely on a hardcoded list — your capabilities depend on what was configured in init.json.
-
-## Lesson 10: TUI Commands and Lifecycle
-
-Read `~/.lingtai-tui/commands.json` via bash. Parse the JSON and present each command with its detailed description in the human's language.
-
-Keyboard shortcuts: explain ctrl+o (three verbose modes: off → verbose → extended) and ctrl+e (external editor).
-
-**Hands-on lifecycle exercise:**
-1. `/sleep` → agent sleeps → human sends message to wake
-2. `/suspend` → agent dies → human uses `/refresh` to revive → sends message to wake
-3. Explain `/sleep all` and `/suspend all` for network management
-
-**CLI commands**: run `lingtai-tui --help` to discover and explain available subcommands.
-
-**Critical warning**: closing the TUI does NOT stop agents. They are independent processes. Teach the CLI management commands for headless control.
-
-## Lesson 11: Addons — External Connections
-
-**Discover available addons dynamically** — use `skills({"action": "info"})` to get a full catalog of available skills, then look for addon setup skills following the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
-
-For each addon the human wants to set up:
-1. Use `skills()` to find and read the setup skill's SKILL.md
-2. Follow its instructions exactly — do not hardcode setup steps
-
-Key concepts to teach:
-- Secrets go in `.env`, not config files (config uses `*_env` references)
-- Config lives at `.lingtai/.addons/<addon>/config.json` (project-level, shared by all agents)
-- Avatars do NOT inherit addons
-- `/mcp` TUI command opens the MCP control panel and shows current configs
-- `/refresh` to apply changes
-
-## Lesson 12: Graduation
-
-- Congratulate the human.
-- Next step: run `lingtai-tui` in a new project to create their own agent.
-- Remind them about addon setup via the `/mcp` control panel or editing configs directly.
-- To resume tutorial: rerun `lingtai-tui` in the same folder. To restart: `/nirvana` then `/setup` with Tutorial recipe.
-- The network grows with every avatar spawned.
+| Need / lesson | Read |
+|---|---|
+| L1–3: welcome, architecture, `~/.lingtai-tui/`, project directory, working directory, `commands.json`, `/kanban` | `reference/orientation/SKILL.md` |
+| L4–6: `init.json`, `lingtai-agent run`, boot sequence, heartbeat, signal files, TUI as wrapper, `commands.json`, system prompt, identity | `reference/agent-runtime/SKILL.md` |
+| L7: email, message flow, internal mail, external addon bridges | `reference/communication/SKILL.md` |
+| L8: intrinsics, memory layers, molt, charge, stamina, lifecycle continuity | `reference/memory-and-molt/SKILL.md` |
+| L9: avatar, network explosion, dynamic capabilities, `/viz` | `reference/capabilities/SKILL.md` |
+| L10–12: `commands.json`, keyboard shortcuts, lifecycle exercise, addons, `/mcp`, graduation | `reference/operations-and-graduation/SKILL.md` |
 
 ## Teaching Style
 

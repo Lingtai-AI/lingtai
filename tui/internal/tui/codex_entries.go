@@ -50,56 +50,44 @@ type knowledgeEntry struct {
 
 func buildAgentKnowledgeEntries(agentDir string) []MarkdownEntry {
 	knowledgeDir := filepath.Join(agentDir, "knowledge")
-	info, err := os.Stat(knowledgeDir)
-	if err != nil || !info.IsDir() {
+	dirents, err := os.ReadDir(knowledgeDir)
+	if err != nil {
 		return nil
 	}
 
+	// The top-level /knowledge catalog mirrors the kernel prompt catalog: only
+	// immediate knowledge/<name>/KNOWLEDGE.md entries appear here. Nested
+	// sub-knowledge entries are second-layer detail owned by their routing parent
+	// and remain reachable after pressing Enter to drill into that parent folder.
 	var entries []knowledgeEntry
-	_ = filepath.WalkDir(knowledgeDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	for _, de := range dirents {
+		name := de.Name()
+		if !de.IsDir() || isHiddenEntry(name) {
+			continue
 		}
-		name := d.Name()
-		if d.IsDir() {
-			if isHiddenEntry(name) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if name != "KNOWLEDGE.md" {
-			return nil
-		}
+		path := filepath.Join(knowledgeDir, name, "KNOWLEDGE.md")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			continue
 		}
 		fm := parseFrontmatter(string(data))
 		if fm == nil {
-			return nil
+			continue
 		}
 		entryName := cleanFrontmatterScalar(fm["name"])
 		description := cleanFrontmatterScalar(fm["description"])
 		if entryName == "" || description == "" {
-			return nil
-		}
-		rel, err := filepath.Rel(knowledgeDir, filepath.Dir(path))
-		if err != nil || rel == "." {
-			rel = ""
+			continue
 		}
 		entries = append(entries, knowledgeEntry{
 			Name:        entryName,
 			Description: description,
 			Path:        path,
-			RelDir:      rel,
+			RelDir:      name,
 		})
-		return nil
-	})
+	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].RelDir != entries[j].RelDir {
-			return entries[i].RelDir < entries[j].RelDir
-		}
 		return entries[i].Name < entries[j].Name
 	})
 
@@ -109,14 +97,10 @@ func buildAgentKnowledgeEntries(agentDir string) []MarkdownEntry {
 		if len(label) > 30 {
 			label = label[:27] + "..."
 		}
-		group := "Knowledge"
-		if e.RelDir != "" {
-			group = e.RelDir
-		}
 		result = append(result, MarkdownEntry{
 			Label:       label,
 			Description: e.Description,
-			Group:       group,
+			Group:       "Knowledge",
 			Path:        e.Path,
 		})
 	}

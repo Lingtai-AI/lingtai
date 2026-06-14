@@ -56,8 +56,10 @@ func DefaultCommands() []Command {
 		{Name: "setup", Description: "palette.setup", Detail: "cmd.setup"},
 		{Name: "settings", Description: "palette.settings", Detail: "cmd.settings"},
 		{Name: "kanban", Description: "palette.kanban", Detail: "cmd.kanban"},
+		{Name: "daemons", Description: "palette.daemons", Detail: "cmd.daemons"},
+		{Name: "notification", Description: "palette.notification", Detail: "cmd.notification"},
+		{Name: "goal", Description: "palette.goal", Detail: "cmd.goal"},
 		{Name: "projects", Description: "palette.projects", Detail: "cmd.projects"},
-		{Name: "agora", Description: "palette.agora", Detail: "cmd.agora"},
 		{Name: "export", Description: "palette.export", Detail: "cmd.export"},
 		{Name: "skills", Description: "palette.skills", Detail: "cmd.skills"},
 		{Name: "knowledge", Description: "palette.knowledge", Detail: "cmd.knowledge"},
@@ -68,6 +70,7 @@ func DefaultCommands() []Command {
 		{Name: "molt", Description: "palette.molt", Detail: "cmd.molt"},
 		{Name: "nirvana", Description: "palette.nirvana", Detail: "cmd.nirvana"},
 		{Name: "login", Description: "palette.login", Detail: "cmd.login"},
+		{Name: "help", Description: "palette.help", Detail: "cmd.help"},
 		{Name: "quit", Description: "palette.quit", Detail: "cmd.quit"},
 	}
 }

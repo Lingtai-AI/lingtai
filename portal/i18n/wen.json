@@ -179,7 +179,7 @@
   "preset.saved": "已存预设",
   "preset.templates": "新建预设",
   "preset.name_minimax": "minimax（荐）",
-  "preset.desc_minimax": "MiniMax M2.7 — 全模态（Token 计划）",
+  "preset.desc_minimax": "MiniMax M3 — 全模态（Token 计划）",
   "preset.name_custom": "custom",
   "preset.desc_custom": "OpenAI / Anthropic 兼容 — 网搜 + 网览",
   "presets.back": "返",

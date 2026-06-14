@@ -215,7 +215,7 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "openrouter": 5, "codex": 6, "custom": 7,
+		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7, "custom": 8,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -270,7 +270,30 @@ func loadFromPath(path string) (Preset, error) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return Preset{}, fmt.Errorf("parse preset %s: %w", path, err)
 	}
+	p.NormalizeLegacyContextLimit()
 	return p, nil
+}
+
+// NormalizeLegacyContextLimit accepts the old saved-preset shape where
+// context_limit lived at manifest.context_limit. The canonical location is
+// manifest.llm.context_limit; if both locations are present, keep the
+// canonical llm value and drop the legacy root key.
+func (p *Preset) NormalizeLegacyContextLimit() {
+	if p == nil || p.Manifest == nil {
+		return
+	}
+	rootCtx, ok := p.Manifest["context_limit"]
+	if !ok {
+		return
+	}
+	delete(p.Manifest, "context_limit")
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return
+	}
+	if _, hasCanonical := llm["context_limit"]; !hasCanonical {
+		llm["context_limit"] = rootCtx
+	}
 }
 
 // validTiers mirrors the kernel-side TIER_VALUES in lingtai/presets.py.
@@ -280,6 +303,7 @@ var validTiers = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5"
 // kernel's load_preset validation gauntlet so the editor refuses to save
 // anything the kernel will refuse to load. Empty slice = passes.
 func (p Preset) Validate() []error {
+	p.NormalizeLegacyContextLimit()
 	var errs []error
 	if p.Description.Summary == "" {
 		errs = append(errs, fmt.Errorf("description.summary must be non-empty"))
@@ -451,6 +475,7 @@ func BuiltinPresets() []Preset {
 		deepseekPreset(),
 		geminiPreset(),
 		kimiPreset(),
+		nvidiaPreset(),
 		openrouterPreset(),
 		codexPreset(),
 		customPreset(),
@@ -468,6 +493,7 @@ var builtinNames = map[string]bool{
 	"deepseek":    true,
 	"gemini":      true,
 	"kimi":        true,
+	"nvidia":      true,
 	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
@@ -513,6 +539,17 @@ func RefFor(p Preset) string {
 	return "~/.lingtai-tui/presets/" + subdir + "/" + p.Name + ".json"
 }
 
+// isSyntheticPreset reports whether p is the in-memory-only "Keep current
+// preset" sentinel that NewSetupModeModel builds from an existing init.json.
+// It has no backing file on disk; RefFor would otherwise derive a non-existent
+// path like ~/.lingtai-tui/presets/saved/keep_current.json.
+//
+// Be deliberately narrow here: SourceUnknown also appears on hand-built presets
+// in tests or callers that intentionally want RefFor's saved/ fallback.
+func isSyntheticPreset(p Preset) bool {
+	return p.Source == SourceUnknown && p.Name == "keep_current"
+}
+
 // ResolvedRef is a single entry in ResolveRefs's output. It captures
 // everything a UI surface (the kanban Presets section in particular)
 // needs to render an at-a-glance health check for a preset path
@@ -529,11 +566,27 @@ type ResolvedRef struct {
 	Source PresetSource
 	// Exists reports whether the file is readable on disk right now.
 	Exists bool
-	// HasKey reports whether the preset's api_key_env (if any) is
-	// populated in the passed existingKeys map. True when the preset
-	// declares no api_key_env (codex OAuth, locally-hosted custom).
-	// Only meaningful when Exists is true.
+	// HasKey reports whether the preset's credential is actually
+	// configured. For a preset with a non-empty api_key_env, this is true
+	// only when that env var has a value in the passed existingKeys map.
+	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
+	// declares no api_key_env), this is true only when OAuth is configured
+	// (see AuthState.CodexOAuthConfigured). A preset with an empty
+	// api_key_env that is NOT codex has no configured credential and no
+	// OAuth, so this is false. Only meaningful when Exists is true.
 	HasKey bool
+}
+
+// AuthState carries machine-level credential facts the credential guard
+// cannot derive from a preset file alone. Today that is only Codex OAuth,
+// but the struct leaves room to add future OAuth providers without churning
+// the ResolveRefs signature again.
+type AuthState struct {
+	// CodexOAuthConfigured is true when ~/.lingtai-tui/codex-auth.json
+	// parses and carries a non-empty refresh_token. The preset package must
+	// not import the tui package (import cycle), so this is computed by the
+	// caller and passed in.
+	CodexOAuthConfigured bool
 }
 
 // ResolveRefs expands and inspects a list of preset path strings. For
@@ -550,15 +603,28 @@ type ResolvedRef struct {
 // existingKeys is the env-var-name → value map (typically
 // Config.Keys). Pass nil when no key store is available; HasKey will
 // be false for any preset that declares an api_key_env.
+//
+// ResolveRefs assumes NO OAuth is configured (the conservative default):
+// a codex preset resolves to HasKey=false under this entry point. Callers
+// that make credential-sensitive validity decisions should use
+// ResolveRefsWithAuth and pass the real OAuth state.
 func ResolveRefs(refs []string, existingKeys map[string]string) []ResolvedRef {
+	return ResolveRefsWithAuth(refs, existingKeys, AuthState{})
+}
+
+// ResolveRefsWithAuth is ResolveRefs plus machine-level credential state
+// (auth), so the codex-OAuth case can be judged correctly: a codex preset
+// is valid only when auth.CodexOAuthConfigured is true. See ResolveRefs for
+// the ref-string and existingKeys contracts.
+func ResolveRefsWithAuth(refs []string, existingKeys map[string]string, auth AuthState) []ResolvedRef {
 	out := make([]ResolvedRef, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, resolveOneRef(ref, existingKeys))
+		out = append(out, resolveOneRef(ref, existingKeys, auth))
 	}
 	return out
 }
 
-func resolveOneRef(ref string, existingKeys map[string]string) ResolvedRef {
+func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) ResolvedRef {
 	r := ResolvedRef{Ref: ref}
 	if ref == "" {
 		return r
@@ -581,13 +647,28 @@ func resolveOneRef(ref string, existingKeys map[string]string) ResolvedRef {
 	}
 	if p, err := loadFromPath(abs); err == nil {
 		envName := ""
+		provider := ""
 		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 			envName, _ = llm["api_key_env"].(string)
+			provider, _ = llm["provider"].(string)
 		}
-		if envName == "" {
-			r.HasKey = true // OAuth flow / locally-hosted: no key needed
-		} else if v, ok := existingKeys[envName]; ok && v != "" {
-			r.HasKey = true
+		switch {
+		case envName != "":
+			// Keyed provider: valid only when the env var has a value.
+			if v, ok := existingKeys[envName]; ok && v != "" {
+				r.HasKey = true
+			}
+		case provider == "codex":
+			// Codex declares no api_key_env by design — it uses ChatGPT
+			// OAuth (codex-auth.json). Valid only when OAuth is configured.
+			r.HasKey = auth.CodexOAuthConfigured
+		default:
+			// No api_key_env and not codex: no configured credential and no
+			// OAuth, so the preset is not valid. (A preset that genuinely
+			// needs no credential must still be reached through a configured
+			// auth path; an empty api_key_env on a non-codex provider is
+			// treated as missing, not as "no key needed".)
+			r.HasKey = false
 		}
 	}
 	return r
@@ -711,10 +792,10 @@ func minimaxPreset() Preset {
 	}
 	return Preset{
 		Name:        "minimax",
-		Description: PresetDescription{Summary: "MiniMax M2.7 — full multimodal capabilities"},
+		Description: PresetDescription{Summary: "MiniMax M3 — full multimodal capabilities"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider": "minimax", "model": "MiniMax-M2.7-highspeed",
+				"provider": "minimax", "model": "MiniMax-M3",
 				"api_key": nil, "api_key_env": "MINIMAX_API_KEY",
 				"base_url": ProviderRegionURLs["minimax"][0].URL,
 			},
@@ -844,6 +925,36 @@ func kimiPreset() Preset {
 			// Kimi Code is text-only — no media generation. For audio
 			// analysis use the `listen` skill; for media creation register
 			// the MiniMax-Media MCP server via the `mcp-manual` skill.
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
+func nvidiaPreset() Preset {
+	// NVIDIA NIM / NVIDIA API Catalog (build.nvidia.com) — an
+	// OpenAI-compatible /chat/completions gateway hosting a large catalog
+	// of open-weight models (Llama, Qwen, Kimi, GPT-OSS, Nemotron, ...) at
+	// no per-token cost on the free developer tier. Default model is
+	// Llama 3.3 70B Instruct; users clone this preset to switch to any
+	// other catalog ID (e.g. qwen/qwen3-coder-480b-a35b-instruct,
+	// moonshotai/kimi-k2-thinking, openai/gpt-oss-120b). Provider is the
+	// generic "nvidia" string routed through the kernel's OpenAI-compatible
+	// client via api_compat=openai + the explicit base_url below.
+	return Preset{
+		Name:        "nvidia",
+		Description: PresetDescription{Summary: "NVIDIA NIM — free OpenAI-compatible catalog (Llama, Qwen, Kimi, GPT-OSS, ...), tool calls"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "nvidia", "model": "meta/llama-3.3-70b-instruct",
+				"api_key": nil, "api_key_env": "NVIDIA_API_KEY",
+				"base_url": "https://integrate.api.nvidia.com/v1", "api_compat": "openai",
+			},
+			// NVIDIA NIM is a text /chat/completions gateway — no media
+			// generation. For audio analysis use the `listen` skill; for
+			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
 				"skills":     skillsDefault(),
@@ -1031,6 +1142,20 @@ func BundledSkillNames() map[string]bool {
 	return names
 }
 
+// ReadBundledSkillFile returns the contents of a file inside a bundled skill,
+// read straight from the embedded skillsFS. The skill argument is the skill
+// directory name (e.g. "lingtai-tui-help"); relPath is the path inside that
+// skill, using forward slashes (e.g. "assets/slash-commands.en.md"). This lets
+// in-binary callers (like the TUI /help view) render bundled skill assets
+// without relying on the on-disk extraction in PopulateBundledLibrary.
+func ReadBundledSkillFile(skill, relPath string) (string, error) {
+	data, err := skillsFS.ReadFile("skills/" + skill + "/" + relPath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // CovenantPath returns the absolute path to the covenant file for a language.
 func CovenantPath(globalDir, lang string) string {
 	return filepath.Join(globalDir, "covenant", lang, "covenant.md")
@@ -1188,6 +1313,7 @@ type AgentOpts struct {
 	SoulDelay      float64  // seconds between soul cycles
 	MoltPressure   float64  // 0–1 ratio triggering molt
 	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
+	MaxAedAttempts int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
 	Karma          bool     // lifecycle control over other agents
 	Nirvana        bool     // permanent agent destruction
 	CovenantFile   string   // path to covenant file
@@ -1212,15 +1338,40 @@ type AgentOpts struct {
 // DefaultAgentOpts returns sensible defaults for agent creation.
 func DefaultAgentOpts() AgentOpts {
 	return AgentOpts{
-		Language:     "en",
-		Stamina:      36000,
-		ContextLimit: 200000,
-		SoulDelay:    99999,
-		MoltPressure: 0.8,
-		MaxRpm:       60,
-		Karma:        true,
-		Nirvana:      false,
+		Language:       "en",
+		Stamina:        36000,
+		ContextLimit:   300000,
+		SoulDelay:      99999,
+		MoltPressure:   0.8,
+		MaxRpm:         60,
+		MaxAedAttempts: DefaultMaxAedAttempts,
+		Karma:          true,
+		Nirvana:        false,
 	}
+}
+
+// AED max-attempts validation bounds. DefaultMaxAedAttempts is the TUI
+// first-run/setup default for newly generated init.json manifests. Keep this
+// default explicit so setup, tests, and generated init.json agree on the same
+// AED retry count.
+const (
+	DefaultMaxAedAttempts = 5
+	MinMaxAedAttempts     = 1
+	MaxMaxAedAttempts     = 100
+)
+
+// ClampAedAttempts validates a user-supplied AED max-attempts value. A value of
+// zero or below (the zero value, or empty/invalid input parsed to 0) falls back
+// to DefaultMaxAedAttempts; anything above MaxMaxAedAttempts is clamped down to
+// the ceiling. The result is always within [MinMaxAedAttempts, MaxMaxAedAttempts].
+func ClampAedAttempts(n int) int {
+	if n < MinMaxAedAttempts {
+		return DefaultMaxAedAttempts
+	}
+	if n > MaxMaxAedAttempts {
+		return MaxMaxAedAttempts
+	}
+	return n
 }
 
 // GenerateInitJSON creates a full init.json from a preset using default opts.
@@ -1302,8 +1453,15 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	manifest["context_limit"] = opts.ContextLimit
 	manifest["molt_pressure"] = opts.MoltPressure
 	manifest["molt_prompt"] = ""
-	manifest["max_turns"] = 100
+	// Per-wake loop budget: every iteration of the LLM/tool-call loop
+	// counts as a turn, not just LLM requests, so tool-heavy work burns
+	// through it quickly. The agent sleeps when the budget is exhausted.
+	manifest["max_turns"] = 500
 	manifest["max_rpm"] = opts.MaxRpm
+	// AED max-attempts: normalize through ClampAedAttempts so a zero-value
+	// AgentOpts (caller didn't set it) still writes a valid default rather
+	// than 0, which the kernel would treat as "never retry".
+	manifest["max_aed_attempts"] = ClampAedAttempts(opts.MaxAedAttempts)
 	manifest["streaming"] = false
 	// Track which preset this agent was created from. The kernel reads this
 	// at boot to materialize manifest.llm + manifest.capabilities from the
@@ -1339,6 +1497,28 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 									if s, ok := e.(string); ok && s != "" {
 										existingAllowed = append(existingAllowed, s)
 									}
+								}
+							}
+							// When the caller passed a synthetic preset (e.g. the
+							// "Keep current preset" sentinel Name="keep_current"
+							// built in NewSetupModeModel), RefFor() above produces
+							// a path that doesn't correspond to any real file.
+							// Preserve the existing on-disk default ref so we never
+							// write keep_current.json into manifest.preset.{default,allowed}.
+							// Older init.json files may lack manifest.preset.default; in that
+							// case fall back to the real active ref instead.
+							if isSyntheticPreset(p) {
+								syntheticRef := RefFor(p)
+								if existingDef, ok := pre["default"].(string); ok && existingDef != "" {
+									presetRef = existingDef
+								} else if activeRef != "" && activeRef != syntheticRef {
+									presetRef = activeRef
+								}
+								// activeRef was already set to the existing active above; if it
+								// was still pointing at the synthetic ref, snap it to the real
+								// policy default.
+								if activeRef == syntheticRef {
+									activeRef = presetRef
 								}
 							}
 						}

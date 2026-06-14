@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灵台工作手册｜初中生也能懂的火柴人动画版</title>
+<style>
+:root{
+  --ink:#22312b;--muted:#66756f;--bg:#f7f4ec;--card:#fffdf7;--line:#d9cdb5;
+  --green:#7dab8f;--green2:#2f6f57;--gold:#d4a853;--red:#c96d62;--blue:#6f8fb8;
+  --shadow:0 12px 35px rgba(61,48,28,.12);--radius:22px;
+}
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,#fff8dc 0,#f7f4ec 42%,#eef4ef 100%);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Arial,sans-serif;line-height:1.75}
+a{color:var(--green2)} .wrap{max-width:1160px;margin:0 auto;padding:28px 18px 70px}.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:24px;align-items:center;padding:30px;border:1px solid var(--line);border-radius:30px;background:linear-gradient(145deg,rgba(255,253,247,.96),rgba(239,247,240,.92));box-shadow:var(--shadow)}
+.badge{display:inline-flex;gap:8px;align-items:center;padding:6px 12px;border:1px solid #c8dbc9;border-radius:999px;background:#f3fbf5;color:var(--green2);font-weight:700;font-size:14px}h1{font-size:clamp(30px,5vw,54px);line-height:1.12;margin:16px 0 12px}.subtitle{font-size:20px;color:#3d5149;margin:0 0 16px}.note{color:var(--muted);font-size:14px}.hero-list{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}.pill{padding:10px 12px;border-radius:14px;background:#fff;border:1px solid #e7dcc8;font-weight:650}.section{margin-top:28px;padding:26px;border:1px solid var(--line);border-radius:var(--radius);background:rgba(255,253,247,.92);box-shadow:var(--shadow)}.section h2{font-size:30px;margin:0 0 14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#fff;border:1px solid #eadfcd;border-radius:18px;padding:18px}.card h3{margin:0 0 8px;font-size:20px}.big{font-size:22px;font-weight:800;color:var(--green2)}.muted{color:var(--muted)}.steps{counter-reset:s}.step{position:relative;padding:18px 18px 18px 62px;margin:12px 0;border:1px solid #e6d9c2;border-radius:18px;background:#fff}.step:before{counter-increment:s;content:counter(s);position:absolute;left:18px;top:18px;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--green);color:white;font-weight:900}.cmd{background:#26332e;color:#eef8ee;padding:14px 16px;border-radius:16px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.warn{border-left:5px solid var(--gold);background:#fff9e7}.danger{border-left:5px solid var(--red);background:#fff4f3}.ok{border-left:5px solid var(--green);background:#f3fbf5}.tiny{font-size:13px}.toc{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.toc a{text-decoration:none;background:#fff;border:1px solid #e4d7c4;padding:7px 10px;border-radius:999px;color:#32463e;font-weight:650}.source{font-size:13px;color:#68746f;border-top:1px dashed #d8ceb9;margin-top:18px;padding-top:12px}
+/* animation */
+.stage{position:relative;min-height:420px;border-radius:26px;background:linear-gradient(#dff2ff 0 45%,#f1ead8 45%);border:1px solid #cbd8cf;overflow:hidden}.sun{position:absolute;right:34px;top:28px;width:58px;height:58px;border-radius:50%;background:#ffd76a;box-shadow:0 0 0 12px rgba(255,215,106,.25);animation:pulse 3s infinite}.ground{position:absolute;left:0;right:0;bottom:0;height:62px;background:#b9d19d}.house{position:absolute;left:50%;top:120px;transform:translateX(-50%);width:245px;height:155px;background:#fff8e8;border:4px solid #5f6d61;border-radius:14px}.house:before{content:"";position:absolute;left:-20px;top:-66px;border-left:142px solid transparent;border-right:142px solid transparent;border-bottom:76px solid #8cb99b}.house-title{position:absolute;left:0;right:0;top:22px;text-align:center;font-weight:900;font-size:28px;color:#2f6f57}.window{position:absolute;width:48px;height:42px;border:3px solid #69756d;background:#dff2ff;top:72px;border-radius:8px}.w1{left:34px}.w2{right:34px}.door{position:absolute;left:103px;bottom:0;width:40px;height:66px;border:3px solid #69756d;border-bottom:0;background:#d4a853;border-radius:12px 12px 0 0}.person{position:absolute;width:70px;height:96px}.person svg{width:100%;height:100%;overflow:visible}.p-human{left:35px;bottom:65px;animation:walkHuman 12s infinite ease-in-out}.p-agent{right:62px;bottom:65px;animation:walkAgent 12s infinite ease-in-out}.bubble{position:absolute;max-width:210px;padding:10px 12px;border:2px solid #52665d;border-radius:18px;background:#fff;box-shadow:0 6px 18px rgba(0,0,0,.08);font-weight:750}.b1{left:20px;top:48px;animation:bubble1 12s infinite}.b2{right:24px;top:55px;animation:bubble2 12s infinite}.file{position:absolute;width:52px;height:64px;background:#fff;border:3px solid #52665d;border-radius:8px;left:105px;bottom:100px;animation:fileFly 12s infinite}.file:after{content:"任务";position:absolute;left:9px;top:20px;font-weight:900;color:#2f6f57}.toolbox{position:absolute;right:86px;top:205px;display:flex;gap:8px;animation:toolsPop 12s infinite}.tool{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:#fff;border:3px solid #52665d;font-size:23px}.memory{position:absolute;left:88px;top:218px;display:grid;grid-template-columns:repeat(2,42px);gap:8px;animation:memoryPop 12s infinite}.mem{background:#f3fbf5;border:3px solid #52665d;border-radius:10px;display:grid;place-items:center;font-size:20px}.mini{position:absolute;bottom:73px;left:50%;width:42px;height:58px;opacity:0}.m1{animation:mini1 12s infinite}.m2{animation:mini2 12s infinite}.m3{animation:mini3 12s infinite}.report{position:absolute;right:92px;bottom:135px;width:82px;height:92px;background:#fff;border:3px solid #52665d;border-radius:10px;animation:reportDone 12s infinite}.report:before{content:"报告";position:absolute;left:22px;top:18px;font-size:20px;font-weight:900;color:#2f6f57}.check{position:absolute;right:109px;bottom:206px;font-size:40px;color:var(--green2);animation:checkPop 12s infinite}.caption{position:absolute;left:24px;right:24px;bottom:16px;background:rgba(255,253,247,.9);border:1px solid #ded2bc;border-radius:16px;padding:10px 14px;text-align:center;font-weight:800}.scene-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.scene{padding:12px;border-radius:16px;border:1px solid #e6d9c2;background:#fff}.scene svg{width:100%;height:110px}.scene b{color:var(--green2)}
+@media (prefers-reduced-motion: reduce){*, *::before, *::after{animation:none!important;transition:none!important}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@keyframes walkHuman{0%,8%{left:35px}18%,100%{left:88px}}
+@keyframes walkAgent{0%,42%{right:62px}56%,100%{right:120px}}
+@keyframes bubble1{0%,18%{opacity:1;transform:translateY(0)}25%,100%{opacity:.12;transform:translateY(-6px)}}
+@keyframes bubble2{0%,54%{opacity:.12;transform:translateY(5px)}62%,100%{opacity:1;transform:translateY(0)}}
+@keyframes fileFly{0%,18%{opacity:1;transform:translate(0,0) rotate(-3deg)}32%,45%{opacity:1;transform:translate(360px,-110px) rotate(8deg)}52%,100%{opacity:0;transform:translate(460px,-120px)}}
+@keyframes toolsPop{0%,30%{opacity:0;transform:scale(.8)}40%,70%{opacity:1;transform:scale(1)}80%,100%{opacity:.25;transform:scale(.92)}}
+@keyframes memoryPop{0%,25%{opacity:0;transform:scale(.8)}34%,72%{opacity:1;transform:scale(1)}82%,100%{opacity:.28}}
+@keyframes mini1{0%,42%{opacity:0;transform:translate(0,0)}50%,78%{opacity:1;transform:translate(-108px,-36px)}88%,100%{opacity:0;transform:translate(-160px,-70px)}}
+@keyframes mini2{0%,46%{opacity:0;transform:translate(0,0)}54%,80%{opacity:1;transform:translate(0,-58px)}90%,100%{opacity:0;transform:translate(20px,-90px)}}
+@keyframes mini3{0%,50%{opacity:0;transform:translate(0,0)}58%,82%{opacity:1;transform:translate(112px,-35px)}92%,100%{opacity:0;transform:translate(170px,-68px)}}
+@keyframes reportDone{0%,58%{opacity:0;transform:translateY(20px)}68%,100%{opacity:1;transform:translateY(0)}}
+@keyframes checkPop{0%,65%{opacity:0;transform:scale(.4)}72%,100%{opacity:1;transform:scale(1)}}
+@media(max-width:850px){.hero,.two{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.scene-grid{grid-template-columns:1fr 1fr}.hero-list{grid-template-columns:1fr}.stage{min-height:390px}.toolbox{right:25px}.memory{left:24px}.house{width:210px}.house:before{border-left-width:122px;border-right-width:122px}.p-agent{right:18px}.report{right:35px}.note,.source{font-size:14px}}
+@media(max-width:480px){.bubble{max-width:160px;font-size:13px}.b1{left:10px}.b2{right:10px;top:96px}.caption{font-size:13px;padding:8px 10px}.file{animation:fileFlyMobile 12s infinite}@keyframes fileFlyMobile{0%,18%{opacity:1;transform:translate(0,0) rotate(-3deg)}32%,45%{opacity:1;transform:translate(180px,-92px) rotate(8deg)}52%,100%{opacity:0;transform:translate(230px,-105px)}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <span class="badge">火柴人动画版 · 给第一次见 LingTai 的人</span>
+      <h1>灵台工作手册</h1>
+      <p class="subtitle">你可以把灵台想成一个“长期 AI 助手”。它不只会聊天，还能记住项目、读文件、使用工具、找其他 AI 帮忙；如果外接渠道已配置且可用，通常会把结果发回你发起任务的地方。</p>
+      <div class="toc">
+        <a href="#what">1. 是什么</a><a href="#start">2. 十分钟上手</a><a href="#tools">3. 会什么</a><a href="#memory">4. 记忆</a><a href="#helpers">5. 分神/分身</a><a href="#context">6. 上下文爆炸</a><a href="#slash">7. / 指令</a><a href="#soul">8. 心流</a><a href="#safe">9. 安全与排障</a>
+      </div>
+      <p class="note">如果你看不懂 TUI、MCP、daemon 这些词，没关系。先把灵台理解成“会长期帮你做事的 AI 助手”；专业词后面慢慢认识。整理依据：Lingtai-AI/lingtai README.zh.md、GitHub issue #198，以及当时的 TUI/Portal 与 kernel 版本；具体版本号以最新 README、Releases 与 TUI 内 `/doctor` 为准。</p>
+    </div>
+    <div class="stage" role="img" aria-label="火柴人动画：人把任务交给灵台，灵台调用记忆、工具和分神，最后回复报告。">
+      <div class="sun"></div><div class="ground"></div>
+      <div class="house"><div class="house-title">灵台</div><div class="window w1"></div><div class="window w2"></div><div class="door"></div></div>
+      <div class="bubble b1">帮我盯项目，明早给报告！</div><div class="bubble b2">收到，我会读记忆、用工具、叫帮手。</div>
+      <div class="file"></div>
+      <div class="person p-human"><svg viewBox="0 0 80 110"><circle cx="40" cy="18" r="13" fill="none" stroke="#26332e" stroke-width="5"/><line x1="40" y1="31" x2="40" y2="62" stroke="#26332e" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="42" x2="18" y2="54" stroke="#26332e" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="42" x2="62" y2="54" stroke="#26332e" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="62" x2="24" y2="94" stroke="#26332e" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="62" x2="59" y2="94" stroke="#26332e" stroke-width="5" stroke-linecap="round"/></svg></div>
+      <div class="person p-agent"><svg viewBox="0 0 80 110"><circle cx="40" cy="18" r="13" fill="none" stroke="#2f6f57" stroke-width="5"/><line x1="40" y1="31" x2="40" y2="62" stroke="#2f6f57" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="42" x2="18" y2="54" stroke="#2f6f57" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="42" x2="62" y2="54" stroke="#2f6f57" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="62" x2="24" y2="94" stroke="#2f6f57" stroke-width="5" stroke-linecap="round"/><line x1="40" y1="62" x2="59" y2="94" stroke="#2f6f57" stroke-width="5" stroke-linecap="round"/></svg></div>
+      <div class="toolbox"><div class="tool">📁</div><div class="tool">🔎</div><div class="tool">🛠</div></div>
+      <div class="memory"><div class="mem">简</div><div class="mem">知</div><div class="mem">技</div><div class="mem">邮</div></div>
+      <div class="mini m1"><svg viewBox="0 0 60 80"><circle cx="30" cy="12" r="9" fill="none" stroke="#6f8fb8" stroke-width="4"/><line x1="30" y1="22" x2="30" y2="48" stroke="#6f8fb8" stroke-width="4"/><line x1="30" y1="32" x2="12" y2="42" stroke="#6f8fb8" stroke-width="4"/><line x1="30" y1="32" x2="48" y2="42" stroke="#6f8fb8" stroke-width="4"/><line x1="30" y1="48" x2="18" y2="70" stroke="#6f8fb8" stroke-width="4"/><line x1="30" y1="48" x2="45" y2="70" stroke="#6f8fb8" stroke-width="4"/></svg></div>
+      <div class="mini m2"><svg viewBox="0 0 60 80"><circle cx="30" cy="12" r="9" fill="none" stroke="#d4a853" stroke-width="4"/><line x1="30" y1="22" x2="30" y2="48" stroke="#d4a853" stroke-width="4"/><line x1="30" y1="32" x2="12" y2="42" stroke="#d4a853" stroke-width="4"/><line x1="30" y1="32" x2="48" y2="42" stroke="#d4a853" stroke-width="4"/><line x1="30" y1="48" x2="18" y2="70" stroke="#d4a853" stroke-width="4"/><line x1="30" y1="48" x2="45" y2="70" stroke="#d4a853" stroke-width="4"/></svg></div>
+      <div class="mini m3"><svg viewBox="0 0 60 80"><circle cx="30" cy="12" r="9" fill="none" stroke="#c96d62" stroke-width="4"/><line x1="30" y1="22" x2="30" y2="48" stroke="#c96d62" stroke-width="4"/><line x1="30" y1="32" x2="12" y2="42" stroke="#c96d62" stroke-width="4"/><line x1="30" y1="32" x2="48" y2="42" stroke="#c96d62" stroke-width="4"/><line x1="30" y1="48" x2="18" y2="70" stroke="#c96d62" stroke-width="4"/><line x1="30" y1="48" x2="45" y2="70" stroke="#c96d62" stroke-width="4"/></svg></div>
+      <div class="report"></div><div class="check">✓</div><div class="caption">人发任务 → 灵台醒来 → 读记忆/用工具/叫帮手 → 回到原渠道汇报</div>
+    </div>
+  </section>
+
+  <section class="section" id="what"><h2>1｜灵台到底是什么？</h2>
+    <div class="grid">
+      <div class="card"><div class="big">不是普通聊天框</div><p>普通聊天框像“你问一句，它答一句”。灵台更像一个在项目里长期工作的 AI 组织。</p></div>
+      <div class="card"><div class="big">有自己的家</div><p>每个项目会有 <code>.lingtai/</code>。里面有智能体、信箱、记忆、日志、配置、运行状态和可视化记录。</p></div>
+      <div class="card"><div class="big">能长大</div><p>任务复杂时，它能叫几个“临时小帮手 Daemon”一起查资料，也能培养“长期专门助手 Avatar”。</p></div>
+    </div>
+    <p class="ok card"><b>一句话：</b>灵台不是只会陪你聊天的 AI，而是一个能长期帮你管理项目、记住事情、分配任务的 AI 工作系统。</p>
+  </section>
+
+  <section class="section" id="start"><h2>2｜十分钟上手流程</h2>
+    <div class="step"><b>安装并打开。</b>README 当前推荐 Homebrew；第一次进项目后启动 TUI。如果你没用过命令行，请先找会电脑操作的人帮你完成安装；下面这些命令是输入到“终端”里的。</div>
+    <pre class="cmd">brew install lingtai-ai/lingtai/lingtai-tui
+mkdir my-project && cd my-project
+lingtai-tui</pre>
+    <div class="step"><b>首次配置。</b>跟着 TUI 选模型/配方/语言/工具。第一次不知道选什么，可以先选 Tutorial 或默认引导。</div>
+    <div class="step"><b>发一个小任务。</b>例如：“帮我整理这个项目的文件结构，写一份 5 条以内的总结。”先用小任务确认它能读文件、能回复。</div>
+    <div class="step"><b>学 6 个常用命令。</b><code>/setup</code> 配模型和行为；<code>/kanban</code> 看助手和项目状态；<code>/mcp</code> 配微信/Telegram/邮箱等外接渠道；<code>/skills</code> 看技能；<code>/viz</code> 看组织图；<code>/doctor</code> 排障。</div>
+    <div class="step"><b>开始长期项目。</b>告诉它项目背景、你的偏好、哪些内容要长期记住；重要产物让它写成文件或 HTML。</div>
+    <p class="warn card"><b>小提醒：</b>普通用户请优先按 README 推荐的方法安装或升级。不要随便用 <code>pip install lingtai</code>，它可能不是你真正要升级的部分。大陆网络卡住时，看 README 里的清华镜像 / Gitee tap 说明。Windows 路线仍以最新 README/官网为准。</p>
+  </section>
+
+  <section class="section" id="tools"><h2>3｜灵台会做什么？</h2>
+    <div class="scene-grid">
+      <div class="scene"><svg viewBox="0 0 180 110"><rect x="35" y="18" width="110" height="74" rx="12" fill="#fff" stroke="#52665d" stroke-width="5"/><path d="M50 38h80M50 55h68M50 72h48" stroke="#7dab8f" stroke-width="6" stroke-linecap="round"/></svg><b>读文件</b><br>整理项目资料、写报告、做表格。</div>
+      <div class="scene"><svg viewBox="0 0 180 110"><circle cx="76" cy="48" r="30" fill="none" stroke="#52665d" stroke-width="7"/><line x1="98" y1="70" x2="132" y2="92" stroke="#52665d" stroke-width="8" stroke-linecap="round"/><path d="M63 48h26M76 35v26" stroke="#d4a853" stroke-width="6"/></svg><b>查网页</b><br>搜索、自动读取网页内容、核对资料来源。</div>
+      <div class="scene"><svg viewBox="0 0 180 110"><rect x="30" y="20" width="120" height="72" rx="12" fill="#eef7ff" stroke="#52665d" stroke-width="5"/><circle cx="70" cy="52" r="14" fill="#d4a853"/><path d="M38 84l34-28 24 19 18-15 36 24" fill="none" stroke="#2f6f57" stroke-width="6"/></svg><b>看图片</b><br>识别截图、图表、海报文字。</div>
+      <div class="scene"><svg viewBox="0 0 180 110"><rect x="32" y="28" width="116" height="58" rx="12" fill="#fff" stroke="#52665d" stroke-width="5"/><path d="M48 48h84M48 66h58" stroke="#c96d62" stroke-width="6"/><path d="M132 18l18 18" stroke="#52665d" stroke-width="6"/></svg><b>用工具</b><br>在你允许时执行电脑命令、运行测试、生成网页，或请写代码工具帮忙。</div>
+    </div>
+    <div class="two" style="margin-top:16px">
+      <div class="card"><h3>外接渠道</h3><p>配置相应 MCP/插件后，同一个长期助手可以从 TUI、微信、Telegram、飞书/Lark、WhatsApp、邮件等入口收到任务。<b>配置正确且渠道可用时，通常回到原渠道。</b></p></div>
+      <div class="card"><h3>可视化</h3><p><code>/viz</code> 或 Portal（图形化展示页）可以看见谁在线、谁给谁发信、组织怎样长大。</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="memory"><h2>4｜灵台怎样“记住事情”？</h2>
+    <div class="grid">
+      <div class="card"><h3>对话</h3><p>像课堂草稿纸，当前有用，太长会清理。</p></div>
+      <div class="card"><h3>当前便签 Pad</h3><p>像任务看板，记录临时笔记、当前计划和下一步。</p></div>
+      <div class="card"><h3>项目知识 Knowledge</h3><p>像项目档案，保存私有事实、路径、长期决策。</p></div>
+      <div class="card"><h3>做事方法 Skills</h3><p>像可复用教程，把做事方法沉淀给以后再用。</p></div>
+      <div class="card"><h3>长期规则 Character</h3><p>像性格和长期规则，告诉它“我是谁、我怎么做事”。</p></div>
+      <div class="card"><h3>整理记忆 Molt / 凝蜕</h3><p>聊天太长、上下文快装不下时，它会把重要内容整理成“给下一轮自己的交接信”，再轻装继续。像收拾书包，不是失忆。</p></div>
+    </div>
+    <p class="ok card"><b>给初学者的用法：</b>重要背景要明确说“请记到长期知识/当前便签里”；复杂任务做完，可以说：“请把这次任务的背景、已完成内容、下一步计划整理成一段，下次我可以直接接着做。”如果你看到它提示“上下文很满/需要凝蜕”，就让它先整理现场再继续。</p>
+  </section>
+
+  <section class="section" id="helpers"><h2>5｜怎样触发分神 / 分身？</h2>
+    <div class="two">
+      <div class="card"><h3>临时小帮手 Daemon / 分神</h3><p>像临时请 3 个同学分头查资料。适合：资料很多、内容很杂、需要交叉校对，但你只想要最后结论的任务。做完就把结论交回来，不长期存在。</p></div>
+      <div class="card"><h3>长期专门助手 Avatar / 分身</h3><p>像培养一个专门同事。适合：长期项目、固定领域、需要记住历史和风格的任务。分身会长期存在，越用越像一个固定岗位。</p></div>
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card ok"><h3>你可以这样叫分神</h3><p>“这个资料很多，请派 3 个分神：一个查来源，一个看有没有错，一个把结果改成初中生能懂。”</p></div>
+      <div class="card ok"><h3>你可以这样叫分身</h3><p>“这个营养科普项目要长期做，请建一个专门负责证据核验的分身，以后固定找它。”</p></div>
+      <div class="card warn"><h3>什么时候别乱开？</h3><p>很小的事不用分神；需要真实发消息、删文件、发 issue、推代码的事，要先让人确认。分身适合长期岗位，不适合一次性小任务。</p></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>编码工具是“手”，灵台是“长期大脑”</h3><p>如果你不写代码，可以先跳过这一段。Claude Code、Codex、OpenCode 等更适合精确改代码；灵台更适合计划、记忆、调度、沟通、长期项目管理。两者可以搭配。</p></div>
+  </section>
+
+
+  <section class="section" id="context"><h2>6｜上下文“爆炸”了怎么办？</h2>
+    <p>上下文可以理解成 AI 这一轮能摊在桌面上的纸。任务越长，纸越多；快放不下时，就要“收桌面”。灵台的办法叫 <b>凝蜕 / molt</b>：先把重点打包，再换一张干净桌子继续。</p>
+    <div class="grid">
+      <div class="card warn"><h3>信号</h3><p>对话很长、它提示 context/molt、开始反复找不到前文、或一个任务做了很多轮还没收束。</p></div>
+      <div class="card ok"><h3>正确做法</h3><p>让它先写交接：“请总结已完成、未完成、关键文件、下一步、要联系谁，再凝蜕/继续。”</p></div>
+      <div class="card danger"><h3>不要这样</h3><p>不要在快满时继续塞大量新任务；不要让它什么都不总结就刷新；不要把“凝蜕”当作失败，它是正常收纳。</p></div>
+    </div>
+    <div class="card" style="margin-top:16px"><b>一句话模板：</b>“先收功：把当前任务、文件路径、结论、坑点、下一步整理好；该记入长期知识/便签的记好；然后再凝蜕继续。”</div>
+  </section>
+
+  <section class="section" id="slash"><h2>7｜常见 / 指令小抄</h2>
+    <p>这些是在 LingTai TUI 里常见的斜杠命令。不同版本可能会增减，最终以 TUI 里实际显示和最新 README 为准。</p>
+    <div class="grid">
+      <div class="card"><h3><code>/setup</code></h3><p>第一次设置或重新检查项目、模型、渠道等基础配置。</p></div>
+      <div class="card"><h3><code>/kanban</code></h3><p>看当前有哪些 agent、任务、状态，像项目看板。</p></div>
+      <div class="card"><h3><code>/mcp</code></h3><p>配置微信、Telegram、飞书、邮箱等外接工具；没配好就不能从这些渠道收发。</p></div>
+      <div class="card"><h3><code>/skills</code></h3><p>查看/管理“做事方法手册”。复杂项目可以把流程写成 skill，避免每次从零开始。</p></div>
+      <div class="card"><h3><code>/viz</code></h3><p>打开可视化网络，看 agent 之间的关系和历史。</p></div>
+      <div class="card"><h3><code>/insights</code></h3><p>看系统整理出的洞察、回顾或运行观察。</p></div>
+      <div class="card"><h3><code>/sleep</code></h3><p>让 agent 休息；它仍可被消息唤醒。</p></div>
+      <div class="card"><h3><code>/refresh</code></h3><p>刷新当前 agent 的身体/配置。适合改配置后重载；不是随便清空一切。</p></div>
+      <div class="card"><h3><code>/doctor</code></h3><p>体检：排查启动、配置、工具、日志等问题。</p></div>
+      <div class="card"><h3><code>/cpr</code></h3><p>复苏卡住或假死的 agent。先诊断，再复苏。</p></div>
+      <div class="card"><h3><code>/clear</code></h3><p>强制重置某个 agent。影响较大，谨慎用。</p></div>
+      <div class="card"><h3><code>/projects</code></h3><p>切换或查看项目网络。</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="soul"><h2>8｜心流是什么？</h2>
+    <p>心流可以理解成“AI 在空闲时的自我复盘”。它会回看最近做过的事，提醒自己哪里可能遗漏、哪里应该沉淀、哪里该继续。它不是人发来的消息，也不是必须照做的命令。</p>
+    <div class="three">
+      <div class="card"><h3>像什么？</h3><p>像一个人做完一天工作后写反思：“今天哪里做得好？哪里可能漏了？下次怎么更稳？”</p></div>
+      <div class="card"><h3>有什么用？</h3><p>帮助 agent 发现盲点：该不该回信、该不该写入知识、该不该做成 skill、是否需要休息或收功。</p></div>
+      <div class="card warn"><h3>注意边界</h3><p>心流只是内心提醒，不代表外界事实。涉及人类新消息、文件变化、网页资料时，仍要通过对应渠道核实。</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="safe"><h2>9｜安全、隐私与排障</h2>
+    <div class="grid">
+      <div class="card danger"><h3>密钥不要外泄</h3><p>API Key、token、密码可以理解成“软件钥匙”，只放受保护配置或 <code>.secrets/</code>。不要贴进公开报告、issue、截图。</p></div>
+      <div class="card warn"><h3>外部动作要确认</h3><p>发消息、提 issue、删文件、推代码都是真实动作。在你确认之前，不要让它自动发送、删除或发布内容。</p></div>
+      <div class="card warn"><h3>专业内容要复核</h3><p>医学、营养、法律、金融等内容，AI 可辅助整理，但最后要人类专家审核。陌生外部邮件也不应自动回复，除非用户确认。</p></div>
+    </div>
+    <h3>常见问题</h3>
+    <div class="two">
+      <div class="card"><b>打不开 / 命令找不到</b><br>检查 Homebrew 的 bin 是否在 PATH；或者按 README 的安装详解重新装。</div>
+      <div class="card"><b>助手不回应</b><br>先等一小会儿：它可能在跑长工具、整理记忆或恢复。然后看 <code>/kanban</code>，再在 TUI 里用 <code>/doctor</code>；技术同学可再查 <code>lingtai-tui list</code> 和日志。</div>
+      <div class="card"><b>升级后没变化</b><br>重启 TUI；在 TUI 里用 <code>/doctor</code> 或在终端运行 <code>lingtai-tui doctor</code>。TUI 程序和 Python 运行时是两层。</div>
+      <div class="card"><b>技能/命令丢了</b><br>试 <code>lingtai-tui bootstrap</code> 或 TUI 里的 <code>/doctor</code>。如果切换模型/预设后微信、Telegram 等工具消失，检查 <code>/setup</code>、<code>/mcp</code> 和当前预设能力。</div>
+    </div>
+  </section>
+
+  <section class="section"><h2>10｜一张小抄：怎么把任务说清楚</h2>
+    <div class="step"><b>说目标：</b>“帮我整理这周的会议记录。”</div>
+    <div class="step"><b>说范围：</b>“只看 <code>meeting-notes</code> 文件夹，不要改原文。”</div>
+    <div class="step"><b>说形式：</b>“输出 5 条重点和 3 个待办事项。”</div>
+    <div class="step"><b>说安全：</b>“不要发给别人，只生成草稿；不要泄露 token 或密码。”</div>
+    <div class="step"><b>说回报方式：</b>“完成后在微信告诉我摘要和文件路径。”</div>
+  </section>
+
+  <section class="section"><h2>来源与本版边界</h2>
+    <ul>
+      <li>GitHub issue：<a href="https://github.com/Lingtai-AI/lingtai/issues/198">Lingtai-AI/lingtai #198 docs: add a beginner-friendly LingTai user manual</a>（open，更新于 2026-05-28）。</li>
+      <li>当前 README.zh.md：Lingtai-AI/lingtai，HEAD <code>9aa992a</code>，提交信息：<code>docs: align localized READMEs with organization framing</code>，时间 2026-06-03。</li>
+      <li>版本号会持续更新：当前的 TUI/Portal 与 <code>lingtai-kernel</code> 版本，请以最新 README、<a href="https://lingtai.ai/releases/">Releases</a> 与 TUI 内 <code>/doctor</code> 为准，本页不再固定具体版本。</li>
+      <li>本页是“给普通用户看的解释版”，不是安装/开发的唯一权威文档。命令只列常用项；完整列表、具体版本号、平台支持和 UI 文案，以最新 README、官网和 TUI 内置 <code>/setup</code>/<code>/mcp</code>/<code>/doctor</code> 为准。</li>
+    </ul>
+    <p class="source">整理时间：2026-06-04。用途：LingTai 初学者工作手册的火柴人动画版；本版补充分神/分身、上下文爆炸、斜杠指令和心流说明。</p>
+  </section>
+</div>
+</body>
+</html>

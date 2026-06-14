@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,13 +47,14 @@ type PropsModel struct {
 	pickerIdx  int
 
 	// Detail view: full-screen single-column breakdown of token usage
-	// by provider, recent activity, MCP servers, daemon count. Toggled
+	// by provider, recent activity, MCP servers, daemon run counts. Toggled
 	// with Ctrl+D. Esc closes detail and returns to the summary.
-	detailOpen        bool
-	detailByProvider  map[string]fs.TokenTotals
-	detailRecent      []fs.LedgerEntry
-	detailDaemonCount int
-	detailMCPNames    []string
+	detailOpen         bool
+	detailByProvider   map[string]fs.TokenTotals
+	detailRecent       []fs.LedgerEntry
+	detailContextStats fs.ContextStats
+	detailDaemonCounts fs.DaemonCounts
+	detailMCPNames     []string
 }
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
@@ -116,8 +116,8 @@ func (m PropsModel) loadData() tea.Msg {
 
 func (m PropsModel) Init() tea.Cmd { return m.loadData }
 
-// propsHeaderLines is the number of lines used by the header (title + separator).
-const propsHeaderLines = 2
+// propsHeaderLines is the number of lines used by the header (title + separator + optional callout).
+const propsHeaderLines = 3
 
 // propsFooterLines is the number of lines used by the footer (separator + hints).
 const propsFooterLines = 2
@@ -186,7 +186,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		case "ctrl+d":
 			// Toggle detail view. Reload the per-provider breakdown
 			// from disk on every open so the data is fresh — these
-			// reads are cheap (single jsonl + one init.json).
+			// reads are cheap (small local ledger, init, and daemon files).
 			m.detailOpen = !m.detailOpen
 			if m.detailOpen {
 				m.loadDetail()
@@ -208,7 +208,8 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 // opened so the user sees fresh numbers.
 func (m *PropsModel) loadDetail() {
 	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
-	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, 20)
+	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, 40)
+	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
 
 	// MCP names from init.json's mcp block.
 	m.detailMCPNames = nil
@@ -221,15 +222,8 @@ func (m *PropsModel) loadDetail() {
 		}
 	}
 
-	// Daemon spawn count from delegates/ledger.jsonl.
-	m.detailDaemonCount = 0
-	if data, err := os.ReadFile(filepath.Join(m.selectedDir, "delegates", "ledger.jsonl")); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) != "" {
-				m.detailDaemonCount++
-			}
-		}
-	}
+	// Daemon run counts from daemons/<run_id>/daemon.json.
+	m.detailDaemonCounts = fs.CountDaemons(m.selectedDir)
 }
 
 // syncViewportContent re-renders left+right panels into the viewport.
@@ -351,6 +345,11 @@ func (m PropsModel) View() string {
 		title = i18n.T("props.detail_title")
 	}
 	header := StyleTitle.Render("  "+title) + "\n" + strings.Repeat("\u2500", m.width)
+	if !m.detailOpen {
+		header += "\n" + "  " + StyleAccent.Render("⎔ "+i18n.T("props.ctrl_d_hint"))
+	} else {
+		header += "\n"
+	}
 
 	scrollHint := ""
 	if m.ready && !m.viewport.AtBottom() {
@@ -520,7 +519,8 @@ func (m PropsModel) renderLeft(maxW int) string {
 
 			if len(allowedRefs) > 0 {
 				cfg, _ := config.LoadConfig(m.globalDir)
-				resolved := preset.ResolveRefs(allowedRefs, cfg.Keys)
+				auth := preset.AuthState{CodexOAuthConfigured: codexOAuthConfigured(m.globalDir)}
+				resolved := preset.ResolveRefsWithAuth(allowedRefs, cfg.Keys, auth)
 				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
 				for _, rr := range resolved {
 					marker := lipgloss.NewStyle().Foreground(StateColor("ACTIVE")).Render("✓")
@@ -550,7 +550,7 @@ func (m PropsModel) renderLeft(maxW int) string {
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_capabilities")))
 		lines = append(lines, "")
 		capsJSON, _ := json.Marshal(caps)
-		capNames := fs.ParseCapabilities(capsJSON)
+		capNames := fs.CapabilitiesForDisplay(fs.ParseCapabilities(capsJSON))
 		if len(capNames) > 0 {
 			capStr := strings.Join(capNames, ", ")
 			wrapped := lipgloss.NewStyle().Width(maxW - 6).Render(capStr)
@@ -667,6 +667,8 @@ func (m PropsModel) renderRight(maxW int) string {
 		c := lipgloss.NewStyle().Foreground(NetworkActivityColor(m.network.Activity.Status))
 		lines = append(lines, "  "+labelStyle.Render(networkActivityLabel()+": ")+c.Render(networkActivityStatusLabel(m.network.Activity.Status)))
 	}
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.network_daemons")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d %s", m.network.Activity.RunningDaemons, i18n.T("props.network_daemons_running"))))
 
 	// Tokens
 	lines = append(lines, "")
@@ -706,8 +708,8 @@ func (m PropsModel) renderRight(maxW int) string {
 }
 
 // renderDetail renders the full-screen detail view: token usage broken
-// down by provider, recent activity, MCP servers, and a daemon spawn
-// count. Toggled with Ctrl+D from the kanban summary.
+// down by provider, recent activity, MCP servers, and daemon run counts.
+// Toggled with Ctrl+D from the kanban summary.
 func (m PropsModel) renderDetail() string {
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
@@ -795,7 +797,34 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Recent activity — last 20 ledger entries, newest first.
+	// Current retained context statistics.
+	if m.detailContextStats.Entries > 0 {
+		stats := m.detailContextStats
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_context_stats")))
+		lines = append(lines, "")
+		lines = append(lines, "    "+labelStyle.Render("entries:                  ")+
+			valueStyle.Render(fmt.Sprintf("%d", stats.Entries)))
+		lines = append(lines, "    "+labelStyle.Render("messages:                 ")+
+			valueStyle.Render(fmt.Sprintf("system:%d  assistant:%d  user:%d", stats.SystemMessages, stats.AssistantMessages, stats.UserMessages)))
+		lines = append(lines, "    "+labelStyle.Render("text input / output:      ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.TextInputs, stats.TextOutputs)))
+		lines = append(lines, "    "+labelStyle.Render("tool calls / results:     ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.ToolCalls, stats.ToolResults)))
+		if len(stats.ToolCounts) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "    "+labelStyle.Render("tools in context:"))
+			for _, tc := range stats.ToolCounts {
+				lines = append(lines, fmt.Sprintf("      %-14s calls:%s  results:%s",
+					valueStyle.Render(tc.Name),
+					formatComma(int64(tc.Calls)),
+					formatComma(int64(tc.Results)),
+				))
+			}
+		}
+		lines = append(lines, "")
+	}
+
+	// Recent activity — last 40 ledger entries, newest first.
 	if len(m.detailRecent) > 0 {
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_recent_activity")))
 		lines = append(lines, "")
@@ -832,14 +861,14 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Daemon spawn count.
-	if m.detailDaemonCount > 0 {
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
-		lines = append(lines, "")
-		lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
-			valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCount)))
-		lines = append(lines, "")
-	}
+	// Daemon run counts.
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemons")))
+	lines = append(lines, "")
+	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_running")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Running)))
+	lines = append(lines, "    "+labelStyle.Render(i18n.T("props.detail_daemons_total")+": ")+
+		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
+	lines = append(lines, "")
 
 	return strings.Join(lines, "\n")
 }

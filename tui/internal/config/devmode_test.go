@@ -29,15 +29,17 @@ func makeKernelCheckout(t *testing.T, base, rel string) string {
 func TestFindDevCheckoutsRequiresExplicitEnv(t *testing.T) {
 	home := t.TempDir()
 	makeKernelCheckout(t, home, filepath.Join("work", "GitHub"))
+	lookupEnv := func(string) (string, bool) { return "", false }
 
-	if _, ok := findDevCheckouts(home, nil); ok {
+	if _, ok := findDevCheckouts(home, lookupEnv); ok {
 		t.Fatalf("expected no dev checkouts without LINGTAI_DEV_ROOT")
 	}
 }
 
 func TestFindDevCheckoutsReturnsFalseWhenAbsent(t *testing.T) {
 	home := t.TempDir()
-	if _, ok := findDevCheckouts(home, nil); ok {
+	lookupEnv := func(string) (string, bool) { return "", false }
+	if _, ok := findDevCheckouts(home, lookupEnv); ok {
 		t.Fatalf("expected no dev checkouts in an empty home")
 	}
 }

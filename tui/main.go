@@ -629,7 +629,7 @@ func findOrchestratorBlueprint(lingtaiDir string) (dirName, agentName string) {
 func printHelp() {
 	fmt.Println("Usage: lingtai-tui")
 	fmt.Println("       lingtai-tui purge [dir]")
-	fmt.Println("       lingtai-tui list [dir]")
+	fmt.Println("       lingtai-tui list [--detailed|-d] [--admin] [dir]")
 	fmt.Println("       lingtai-tui suspend [dir]")
 	fmt.Println("       lingtai-tui clean")
 	fmt.Println("       lingtai-tui postman [--port N] [dir ...]")
@@ -642,7 +642,8 @@ func printHelp() {
 	fmt.Println("  purge        Kill all lingtai agent processes on this machine.")
 	fmt.Println("               Agents are autonomous — they keep running after you")
 	fmt.Println("               exit the TUI. Use purge when you need them all dead.")
-	fmt.Println("  list         Show running lingtai processes (all, or only those in <dir>)")
+	fmt.Println("  list         Show running agents as a decentralized contact-book view.")
+	fmt.Println("               Marks main agents; --detailed adds names/state/path; --admin adds admin flags.")
 	fmt.Println("  suspend      Gracefully suspend agents via signal files (all, or those in <dir>)")
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
 	fmt.Println("  postman      Start the mail relay daemon (UDP, port 7777 by default)")

@@ -547,3 +547,8 @@ anthropic = ["anthropic>=0.40"]
 minimax = ["minimax>=0.1"]
 all = ["lingtai[gemini,openai,anthropic,minimax]"]
 ```
+
+## Related Design Notes
+
+- [Molt, 转世, and Network Intelligence](design-molt-and-network-intelligence.md) — how forced memory loss creates emergent expertise in agent networks.
+- [From Tree and Graph to Cyclic Manifold](cyclic-manifold-architecture.md) — the system's shape as a cyclic, self-returning state space: outward exploration returning through pad / knowledge / skills / lingtai / molt to a durable center.

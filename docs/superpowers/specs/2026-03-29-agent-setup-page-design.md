@@ -28,7 +28,7 @@ Add 6 new fields (13 total), organized into sections:
 
   ── Runtime ──
   Stamina: 36000                     (awake time before auto-sleep)
-  Context limit: 200000              (max context window)
+  Context limit: 300000              (max context window)
   Soul delay: 120                    (idle time before soul speaks)
   Molt pressure: 0.8                 (context % to trigger molt)
 

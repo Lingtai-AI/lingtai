@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -80,9 +81,95 @@ func ParseCapabilities(raw json.RawMessage) []string {
 	return nil
 }
 
-// ReadInitManifest reads init.json from dir, extracts manifest fields,
-// and flattens the llm sub-object (model, provider, base_url) to top level.
+// intrinsicCapabilities are the agent capabilities that always exist on a
+// live agent (the kernel wires them in unconditionally) but are not listed
+// in .agent.json's `capabilities` field. The kanban/props view should still
+// present them so the operator sees the complete capability surface.
+var intrinsicCapabilities = []string{"system", "soul", "email", "psyche"}
+
+// CapabilitiesForDisplay returns the operator-visible capability list:
+// the intrinsic capabilities first, followed by the manifest capabilities in
+// their original order, with duplicates removed. Manifest entries that
+// duplicate an intrinsic are dropped (the intrinsic keeps its leading slot).
+func CapabilitiesForDisplay(manifest []string) []string {
+	out := make([]string, 0, len(intrinsicCapabilities)+len(manifest))
+	seen := make(map[string]bool, len(intrinsicCapabilities)+len(manifest))
+	for _, c := range intrinsicCapabilities {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	for _, c := range manifest {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ReadInitManifest returns the agent's manifest fields with the llm
+// sub-object (model, provider, base_url) and soul.delay flattened to top
+// level. It prefers the kernel-published resolved-manifest artifact
+// (system/manifest.resolved.json — preset materialized, validated,
+// secret-redacted; kernel issue #259) and falls back to raw init.json when
+// the artifact is absent or malformed (stopped / never-booted agents).
 func ReadInitManifest(dir string) (map[string]interface{}, error) {
+	manifest, err := readResolvedInitManifest(dir)
+	if err != nil {
+		manifest, err = readRawInitManifest(dir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	flattenInitManifest(manifest)
+	return manifest, nil
+}
+
+func readResolvedInitManifest(dir string) (map[string]interface{}, error) {
+	artifactPath := filepath.Join(dir, "system", "manifest.resolved.json")
+	if isResolvedManifestStale(filepath.Join(dir, "init.json"), artifactPath) {
+		return nil, fmt.Errorf("manifest.resolved.json is older than init.json")
+	}
+
+	data, err := os.ReadFile(artifactPath)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest.resolved.json: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse manifest.resolved.json: %w", err)
+	}
+	if raw["schema"] != "lingtai.manifest.resolved/v1" {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json schema")
+	}
+	if version, ok := raw["schema_version"].(float64); !ok || version != 1 {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json schema_version")
+	}
+	if raw["source"] != "kernel" {
+		return nil, fmt.Errorf("unsupported manifest.resolved.json source")
+	}
+	manifest, ok := raw["manifest"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("no manifest in manifest.resolved.json")
+	}
+	return manifest, nil
+}
+
+func isResolvedManifestStale(initPath, artifactPath string) bool {
+	initInfo, err := os.Stat(initPath)
+	if err != nil {
+		return false
+	}
+	artifactInfo, err := os.Stat(artifactPath)
+	if err != nil {
+		return false
+	}
+	return initInfo.ModTime().After(artifactInfo.ModTime())
+}
+
+func readRawInitManifest(dir string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "init.json"))
 	if err != nil {
 		return nil, fmt.Errorf("read init.json: %w", err)
@@ -95,6 +182,10 @@ func ReadInitManifest(dir string) (map[string]interface{}, error) {
 	if !ok {
 		return nil, fmt.Errorf("no manifest in init.json")
 	}
+	return manifest, nil
+}
+
+func flattenInitManifest(manifest map[string]interface{}) {
 	// Flatten llm sub-object into top level
 	if llm, ok := manifest["llm"].(map[string]interface{}); ok {
 		for _, key := range []string{"model", "provider", "base_url", "api_compat", "api_key_env"} {
@@ -109,7 +200,6 @@ func ReadInitManifest(dir string) (map[string]interface{}, error) {
 			manifest["soul_delay"] = v
 		}
 	}
-	return manifest, nil
 }
 
 // WritePrompt writes a .prompt signal file to inject a [system] text input message.
@@ -188,6 +278,28 @@ type AgentStatus struct {
 	} `json:"runtime"`
 }
 
+// ContextToolCount is a stable per-tool summary from the current chat history.
+type ContextToolCount struct {
+	Name    string
+	Calls   int
+	Results int
+}
+
+// ContextStats summarizes the currently retained chat context from
+// history/chat_history.jsonl. It counts structural message/block types rather
+// than tokens; token budget remains in AgentStatus.Tokens.Context.
+type ContextStats struct {
+	Entries           int
+	SystemMessages    int
+	AssistantMessages int
+	UserMessages      int
+	TextInputs        int
+	TextOutputs       int
+	ToolCalls         int
+	ToolResults       int
+	ToolCounts        []ContextToolCount
+}
+
 // ReadStatus reads .status.json from an agent directory.
 // Returns zero struct if missing or unreadable.
 func ReadStatus(dir string) AgentStatus {
@@ -198,6 +310,121 @@ func ReadStatus(dir string) AgentStatus {
 	}
 	json.Unmarshal(data, &s)
 	return s
+}
+
+// ReadContextStats reads the agent's retained chat history and returns a
+// structural summary for diagnostics. Missing/unreadable/malformed rows are
+// treated as empty/partial data so the kanban detail view remains best-effort.
+func ReadContextStats(dir string) ContextStats {
+	var stats ContextStats
+	data, err := os.ReadFile(filepath.Join(dir, "history", "chat_history.jsonl"))
+	if err != nil {
+		return stats
+	}
+
+	callCounts := map[string]int{}
+	resultCounts := map[string]int{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry struct {
+			Role    string          `json:"role"`
+			System  string          `json:"system"`
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		stats.Entries++
+		switch entry.Role {
+		case "system":
+			stats.SystemMessages++
+		case "assistant":
+			stats.AssistantMessages++
+		case "user":
+			stats.UserMessages++
+		}
+
+		// Current kernel history stores text/tool blocks in content[]. Older or
+		// ad-hoc rows may store plain content strings; count those as text by
+		// role rather than dropping the whole row. The system prompt lives in the
+		// top-level `system` field and is counted as a system message, not as
+		// text input/output.
+		var blocks []json.RawMessage
+		if len(entry.Content) > 0 {
+			if err := json.Unmarshal(entry.Content, &blocks); err != nil {
+				var plain string
+				if err := json.Unmarshal(entry.Content, &plain); err == nil && plain != "" {
+					if entry.Role == "assistant" {
+						stats.TextOutputs++
+					} else if entry.Role != "system" {
+						stats.TextInputs++
+					}
+				}
+			}
+		}
+		for _, raw := range blocks {
+			var block struct {
+				Type string `json:"type"`
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			switch block.Type {
+			case "tool_call":
+				stats.ToolCalls++
+				name := block.Name
+				if name == "" {
+					name = "unknown"
+				}
+				callCounts[name]++
+			case "tool_result":
+				stats.ToolResults++
+				name := block.Name
+				if name == "" {
+					name = "unknown"
+				}
+				resultCounts[name]++
+			case "text":
+				if entry.Role == "assistant" {
+					stats.TextOutputs++
+				} else if entry.Role != "system" {
+					stats.TextInputs++
+				}
+			}
+		}
+	}
+
+	names := make([]string, 0, len(callCounts)+len(resultCounts))
+	seen := map[string]bool{}
+	for name := range callCounts {
+		names = append(names, name)
+		seen[name] = true
+	}
+	for name := range resultCounts {
+		if !seen[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Slice(names, func(i, j int) bool {
+		ci, cj := callCounts[names[i]], callCounts[names[j]]
+		if ci != cj {
+			return ci > cj
+		}
+		return names[i] < names[j]
+	})
+	for _, name := range names {
+		stats.ToolCounts = append(stats.ToolCounts, ContextToolCount{
+			Name:    name,
+			Calls:   callCounts[name],
+			Results: resultCounts[name],
+		})
+	}
+	return stats
 }
 
 // TokenTotals holds summed token usage across multiple agents.
@@ -345,6 +572,8 @@ func DeriveLedgerProvider(endpoint, model string) string {
 		return "gemini"
 	case strings.Contains(ep, "openrouter.ai"):
 		return "openrouter"
+	case strings.Contains(ep, "api.nvidia.com"):
+		return "nvidia"
 	case ep != "":
 		// Recognized URL but not in our table — surface the host so the
 		// user can still see the breakdown without a code change.

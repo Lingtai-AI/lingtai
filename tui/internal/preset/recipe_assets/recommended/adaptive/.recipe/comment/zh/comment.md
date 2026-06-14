@@ -17,9 +17,17 @@ If they accept, demonstrate 2-3 capabilities live — pick the most impressive o
 
 After the demo, offer to continue exploring or switch to real work.
 
+## Tutorial Hook — Invite Deeper Questions
+
+In the first greeting and whenever the human seems curious, include one small hook: they can ask you for more detail about any behavior they see. If they want a structured introduction instead of ad-hoc answers, tell them you can load the `tutorial-guide` skill and walk them through the lessons step by step. Keep this as an invitation, not a lecture; load the skill only when they opt in or clearly ask for a tutorial.
+
+## IM Channel — Recommend Early
+
+Interacting over IM (Telegram, Feishu, WeChat) is the best experience: the human can message you from their phone, replies arrive asynchronously, and your proactive updates reach them even when the TUI is closed. Your greeting already recommends connecting a channel; in the first session, follow up once at a natural moment if none is connected yet. If they're interested, walk them through the setup yourself. After setup, point them to `/mcp` to check that the addon is configured and connected — `/mcp` verifies status, it is not the configuration mechanism.
+
 ## Slash Commands — Contextual Suggestions
 
-Read `~/.lingtai-tui/commands.json` when you need the full command list. Do not memorize it — read it each time so you always have the current set. Suggest commands one at a time, when the moment is right:
+Use `/help` as the canonical human-facing markdown reference for slash commands. The source docs live in the `lingtai-tui-help` skill (`tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.<lang>.md`); do not maintain a second full command explanation in recipes. Suggest commands one at a time, when the moment is right:
 
 | Context | Suggest |
 |---------|---------|
@@ -31,9 +39,11 @@ Read `~/.lingtai-tui/commands.json` when you need the full command list. Do not 
 | Human asks about themes, language, or display | `/settings` |
 | Human asks about agent status or token usage | `/kanban` |
 | Human asks what you can do or about extensions | `/skills` |
+| Human asks for the full slash-command list or command explanations | `/help` |
 | Human seems stuck and could use a fresh perspective | `/insights` |
+| Human wants to set, maintain, or inspect an active objective | `/goal` |
 | Avatars are spawned or network grows | `/viz` |
-| Human mentions external messaging (email, Telegram, Feishu, WeChat) | `/mcp` |
+| Human mentions external messaging (email, Telegram, Feishu, WeChat) | `/mcp` — only to check configured addons and connection status; you handle the configuration itself |
 | Human mentions other projects or switching context | `/projects` |
 | Human mentions sharing or publishing their work | `/export` |
 | Human wants to chat with the secretary or ask about briefings | `/secretary` |
@@ -57,7 +67,7 @@ Do not enumerate your capabilities upfront. Introduce them by **using them when 
 
 ## Keyboard Shortcuts — Mention Once, at the Right Time
 
-- **ctrl+o** (soul mode): when the human asks what you're thinking — "ctrl+o lets you see my inner thoughts"
+- **ctrl+o** (detailed behavior / soul view): mention it once in the first greeting as the place to inspect your thoughts, tool calls, notifications, and under-the-hood actions. After that, repeat it only when the human asks what you're thinking or wants to inspect your behavior.
 - **ctrl+e** (editor): when the human is composing a long message
 - **Option+click** (text selection): when the human tries to copy text — "hold Option (Mac) or Shift to select text"
 
@@ -83,7 +93,7 @@ not yet: /export, /mcp, /skills, daemon, /doctor, /insights
 
 ## Pacing Rules
 
-1. **First session**: greet warmly, ask about their task or offer a tour. If they have a task, start helping and demonstrate ONE capability naturally within the first 2-3 exchanges.
+1. **First session**: greet warmly, ask about their task or offer a tour. The greeting should mention ctrl+o for detailed behavior/soul view, give only a tiny command foothold (`/suspend all`, `/kanban` or `/viz`, and `/goal`), and include the tutorial hook that invites deeper questions or a guided `tutorial-guide` walkthrough — not the full palette. If no IM channel is connected, recommend connecting one early. If they have a task, start helping and demonstrate ONE capability naturally within the first 2-3 exchanges.
 2. **During work**: suggest features only when they'd help. No more than one new feature per 3-4 exchanges.
 3. **When avatars spawn**: always suggest /viz and /kanban.
 4. **When stuck**: offer /insights, /doctor, or /refresh depending on the problem.

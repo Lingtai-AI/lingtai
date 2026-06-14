@@ -52,7 +52,7 @@ WORKING_DIR = Path(__file__).resolve().parent.parent / "_telegram_agent"
 def main():
     svc = LLMService(
         provider="minimax",
-        model="MiniMax-M2.7-highspeed",
+        model="MiniMax-M3",
         api_key=os.environ["MINIMAX_API_KEY"],
         context_window=1_000_000,
     )

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -326,6 +328,54 @@ func TestPickPreset_DelCancelsInFlightLogin(t *testing.T) {
 	}
 }
 
+func TestSetupModeDefaultsToKeepCurrentPreset(t *testing.T) {
+	baseDir := t.TempDir()
+	globalDir := t.TempDir()
+	orchDir := filepath.Join(baseDir, "mimo-1")
+	if err := os.MkdirAll(orchDir, 0o755); err != nil {
+		t.Fatalf("mkdir orchDir: %v", err)
+	}
+	initJSON := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"language": "zh",
+			"llm": map[string]interface{}{
+				"provider":    "deepseek",
+				"model":       "deepseek-v4-flash",
+				"api_key_env": "DEEPSEEK_API_KEY",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"vision":     map[string]interface{}{"provider": "inherit"},
+			},
+		},
+	}
+	data, err := json.Marshal(initJSON)
+	if err != nil {
+		t.Fatalf("marshal init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(orchDir, "init.json"), data, 0o644); err != nil {
+		t.Fatalf("write init: %v", err)
+	}
+
+	m := NewSetupModeModel(baseDir, globalDir, orchDir, "mimo-1")
+	if !m.setupMode {
+		t.Fatalf("expected setupMode=true")
+	}
+	if m.step != stepPickPreset {
+		t.Fatalf("expected setup mode to start at preset picker, got %v", m.step)
+	}
+	if m.cursor != -1 {
+		t.Fatalf("/setup should default to keep-current preset row; cursor=%d", m.cursor)
+	}
+	if got := m.getPresetProvider(m.currentPreset()); got != "deepseek" {
+		t.Fatalf("currentPreset should be synthesized from existing init.json, provider=%q", got)
+	}
+	caps, ok := m.currentPreset().Manifest["capabilities"].(map[string]interface{})
+	if !ok || caps["web_search"] == nil || caps["vision"] == nil {
+		t.Fatalf("currentPreset should preserve existing optional capabilities, caps=%#v", caps)
+	}
+}
+
 func TestSetupModeEnterOnKeepCurrentAdvancesToAgentPresets(t *testing.T) {
 	m := FirstRunModel{
 		setupMode: true,
@@ -345,5 +395,135 @@ func TestSetupModeEnterOnKeepCurrentAdvancesToAgentPresets(t *testing.T) {
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepAgentPresets {
 		t.Fatalf("Enter on setup keep-current row should advance to agent presets; got step %v", m.step)
+	}
+}
+
+func TestEnterAgentNameDirLanguageFollowsTUIConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		tuiLang     string
+		presetLang  string
+		wantIdx     int
+		wantPathBit string
+	}{
+		{
+			name:        "english UI overrides chinese preset",
+			tuiLang:     "en",
+			presetLang:  "zh",
+			wantIdx:     0,
+			wantPathBit: filepath.Join("covenant", "en", "covenant.md"),
+		},
+		{
+			name:        "chinese UI overrides english preset",
+			tuiLang:     "zh",
+			presetLang:  "en",
+			wantIdx:     1,
+			wantPathBit: filepath.Join("covenant", "zh", "covenant.md"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			globalDir := t.TempDir()
+			if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: tt.tuiLang, MailPageSize: 100}); err != nil {
+				t.Fatalf("save TUI config: %v", err)
+			}
+			m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+			m.enterAgentNameDir(preset.Preset{
+				Name: "tutorial-test",
+				Manifest: map[string]interface{}{
+					"language": tt.presetLang,
+				},
+			})
+
+			if m.agentLangIdx != tt.wantIdx {
+				t.Fatalf("agentLangIdx = %d, want %d", m.agentLangIdx, tt.wantIdx)
+			}
+			if got := m.covenantInput.Value(); !strings.Contains(got, tt.wantPathBit) {
+				t.Fatalf("covenantInput = %q, want path containing %q", got, tt.wantPathBit)
+			}
+		})
+	}
+}
+
+func TestEnterAgentNameDirLanguageFallsBackToPresetWhenTUIConfigInvalid(t *testing.T) {
+	globalDir := t.TempDir()
+	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "bogus", MailPageSize: 100}); err != nil {
+		t.Fatalf("save TUI config: %v", err)
+	}
+	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m.enterAgentNameDir(preset.Preset{
+		Name: "fallback-test",
+		Manifest: map[string]interface{}{
+			"language": "wen",
+		},
+	})
+
+	if m.agentLangIdx != 2 {
+		t.Fatalf("agentLangIdx = %d, want wen index 2", m.agentLangIdx)
+	}
+	want := filepath.Join("covenant", "wen", "covenant.md")
+	if got := m.covenantInput.Value(); !strings.Contains(got, want) {
+		t.Fatalf("covenantInput = %q, want path containing %q", got, want)
+	}
+}
+
+func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
+	globalDir := t.TempDir()
+	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "en", MailPageSize: 100}); err != nil {
+		t.Fatalf("save TUI config: %v", err)
+	}
+	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
+	m.setupMode = true
+	m.setupKeepInitJSON = map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"language": "wen",
+		},
+	}
+	m.enterAgentNameDir(preset.Preset{
+		Name: "keep-current",
+		Manifest: map[string]interface{}{
+			"language": "zh",
+		},
+	})
+
+	if m.agentLangIdx != 2 {
+		t.Fatalf("agentLangIdx = %d, want existing init wen index 2", m.agentLangIdx)
+	}
+	want := filepath.Join("covenant", "wen", "covenant.md")
+	if got := m.covenantInput.Value(); !strings.Contains(got, want) {
+		t.Fatalf("covenantInput = %q, want path containing %q", got, want)
+	}
+}
+
+func TestPickPreset_CodexEnterShowsMethodChooser(t *testing.T) {
+	dir := t.TempDir()
+	m := FirstRunModel{
+		step:      stepPickPreset,
+		globalDir: dir,
+		cursor:    0, // Codex credential row when there are no visible presets.
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("opening the Codex method chooser must not start a network command")
+	}
+	if !m.codexChoosingMethod {
+		t.Fatal("Enter on Codex credential row should show method chooser")
+	}
+	if m.codexLoggingIn {
+		t.Fatal("method chooser should not start login yet")
+	}
+	if m.codexMethodCursor != 0 {
+		t.Fatalf("default method cursor = %d, want browser OAuth (0)", m.codexMethodCursor)
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.codexMethodCursor != 1 {
+		t.Fatalf("Down should select device code; cursor=%d", m.codexMethodCursor)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Device code") || !strings.Contains(view, "remote") {
+		t.Fatalf("chooser view should mention remote-friendly device code; view=%s", view)
 	}
 }

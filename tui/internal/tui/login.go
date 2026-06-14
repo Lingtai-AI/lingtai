@@ -73,6 +73,18 @@ type LoginModel struct {
 	// can't wipe a credential. deleteArmedIdx == -1 means no arm.
 	codexLoginEpoch uint64
 	deleteArmedIdx  int
+	// codexSession holds the active OAuth session for manual callback submission.
+	codexSession *codexOAuthSession
+	// codexAuthURL is set from CodexOAuthURLMsg; shown so remote-browser
+	// users can copy-open the URL on another machine.
+	codexAuthURL string
+	// codexChoosingMethod shows the two-path Codex login chooser before any
+	// network side effect: browser OAuth for same-machine use, or device code
+	// for remote/headless use.
+	codexChoosingMethod bool
+	codexMethodCursor   int // 0=browser OAuth, 1=device code
+	codexDeviceURL      string
+	codexDeviceCode     string
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +243,22 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			}
 		}
 
+	case CodexOAuthURLMsg:
+		// Non-terminal: browser listener is ready; store URL for display and keep listening.
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexAuthURL = msg.AuthURL
+		return m, waitCodexOAuthMsg(m.codexSession)
+
+	case CodexDeviceCodeMsg:
+		if msg.Epoch != m.codexLoginEpoch {
+			return m, nil
+		}
+		m.codexDeviceURL = msg.VerificationURL
+		m.codexDeviceCode = msg.UserCode
+		return m, waitCodexOAuthMsg(m.codexSession)
+
 	case CodexOAuthDoneMsg:
 		// Drop late callbacks from a cancelled session.
 		if msg.Epoch != m.codexLoginEpoch {
@@ -238,6 +266,8 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 		m.codexLogging = false
 		m.codexCancel = nil
+		m.codexSession = nil
+		m.codexAuthURL = ""
 		if msg.Err != nil {
 			if errors.Is(msg.Err, ErrCodexAuthCancelled) {
 				m.message = i18n.T("login.codex_cancelled")
@@ -297,6 +327,13 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			return m, func() tea.Msg { return checkHealth(e) }
 		}
 
+	case tea.PasteMsg:
+		if m.reenteringKey {
+			var cmd tea.Cmd
+			m.keyInput, cmd = m.keyInput.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyPressMsg:
 		if m.reenteringKey {
 			return m.updateKeyReentry(msg)
@@ -305,6 +342,24 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m LoginModel) startCodexLogin(deviceCode bool) (LoginModel, tea.Cmd) {
+	m.codexChoosingMethod = false
+	m.codexLogging = true
+	m.codexAuthURL = ""
+	m.codexDeviceURL = ""
+	m.codexDeviceCode = ""
+	m.codexLoginEpoch++
+	epoch := m.codexLoginEpoch
+	ctx, cancel := context.WithCancel(context.Background())
+	m.codexCancel = cancel
+	if deviceCode {
+		m.codexSession = startDeviceAuthFlow(ctx, epoch)
+	} else {
+		m.codexSession = startOAuthFlow(ctx, epoch)
+	}
+	return m, waitCodexOAuthMsg(m.codexSession)
 }
 
 func (m *LoginModel) entryByProvider(provider string) *loginEntry {
@@ -317,6 +372,24 @@ func (m *LoginModel) entryByProvider(provider string) *loginEntry {
 }
 
 func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
+	if m.codexChoosingMethod {
+		switch msg.String() {
+		case "up", "k", "down", "j", "tab":
+			if m.codexMethodCursor == 0 {
+				m.codexMethodCursor = 1
+			} else {
+				m.codexMethodCursor = 0
+			}
+			return m, nil
+		case "enter":
+			return m.startCodexLogin(m.codexMethodCursor == 1)
+		case "esc":
+			m.codexChoosingMethod = false
+			m.message = ""
+			return m, nil
+		}
+	}
+
 	// Any key other than a second logout/delete trigger disarms the
 	// two-press confirmation. Backspace, "delete", and "r" all
 	// arm/confirm; everything else clears the arm. Up/Down still need
@@ -336,6 +409,10 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.codexCancel = nil
 			m.codexLoginEpoch++
 			m.codexLogging = false
+			m.codexSession = nil
+			m.codexAuthURL = ""
+			m.codexDeviceURL = ""
+			m.codexDeviceCode = ""
 		}
 		return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 	case "up", "k":
@@ -350,15 +427,10 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(m.entries) {
 			entry := m.entries[m.cursor]
 			if entry.IsOAuth {
-				m.codexLogging = true
-				m.codexLoginEpoch++
-				epoch := m.codexLoginEpoch
-				ctx, cancel := context.WithCancel(context.Background())
-				m.codexCancel = cancel
-				ch := startOAuthFlow(ctx, epoch)
-				return m, func() tea.Msg {
-					return <-ch
-				}
+				m.codexChoosingMethod = true
+				m.codexMethodCursor = 0
+				m.message = ""
+				return m, nil
 			}
 			// API key entry — show re-entry textarea.
 			m.reenteringKey = true
@@ -377,6 +449,10 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.codexCancel = nil
 			m.codexLoginEpoch++
 			m.codexLogging = false
+			m.codexSession = nil
+			m.codexAuthURL = ""
+			m.codexDeviceURL = ""
+			m.codexDeviceCode = ""
 			m.message = i18n.T("login.codex_cancelled")
 			return m, nil
 		}
@@ -556,9 +632,35 @@ func (m LoginModel) View() string {
 		b.WriteString("  " + StyleFaint.Render("[Enter] save  [Esc] cancel") + "\n")
 	}
 
+	// Codex login method chooser.
+	if m.codexChoosingMethod {
+		b.WriteString("\n  " + StyleAccent.Render(i18n.T("codex.method_title")) + "\n")
+		labels := []string{i18n.T("codex.method_browser"), i18n.T("codex.method_device")}
+		details := []string{i18n.T("codex.method_browser_detail"), i18n.T("codex.method_device_detail")}
+		for i := range labels {
+			cursor := "    "
+			if i == m.codexMethodCursor {
+				cursor = StyleAccent.Render("  > ")
+			}
+			b.WriteString(cursor + labels[i] + "\n")
+			b.WriteString("      " + StyleFaint.Render(details[i]) + "\n")
+		}
+		b.WriteString("  " + StyleFaint.Render(i18n.T("codex.method_hint")) + "\n")
+	}
+
 	// Codex logging state.
 	if m.codexLogging {
-		b.WriteString("\n  " + StyleAccent.Render("Waiting for browser authentication...") + "\n")
+		b.WriteString("\n  " + StyleAccent.Render(i18n.T("codex.logging_in")) + "\n")
+		if m.codexAuthURL != "" {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.browser_auth_url_label")) + "\n")
+			b.WriteString("  " + StyleAccent.Render(m.codexAuthURL) + "\n")
+		}
+		if m.codexDeviceURL != "" {
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_auth_url_label")) + "\n")
+			b.WriteString("  " + StyleAccent.Render(m.codexDeviceURL) + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_code_label")) + " " + StyleAccent.Render(m.codexDeviceCode) + "\n")
+			b.WriteString("  " + StyleFaint.Render(i18n.T("codex.device_waiting_hint")) + "\n")
+		}
 	}
 
 	// Transient message.

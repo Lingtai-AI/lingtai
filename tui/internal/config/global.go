@@ -80,6 +80,12 @@ type TUIConfig struct {
 	MailPageSize int    `json:"mail_page_size"`
 	Theme        string `json:"theme,omitempty"` // theme name: "ink-dark" (default), etc.
 	Insights     bool   `json:"insights"`
+	// ToolCallTruncate is the max number of characters shown per tool_call /
+	// tool_result line in the transcript. 0 (the default) means no truncation —
+	// full content is shown. A positive value caps each tool line and the
+	// renderer appends a "… (+N chars)" indicator. Stored as omitempty so the
+	// untruncated default leaves no key in tui_config.json.
+	ToolCallTruncate int `json:"tool_call_truncate,omitempty"`
 }
 
 // DefaultTUIConfig returns sensible defaults.
@@ -215,5 +221,3 @@ func EnsureConfigPersisted(globalDir string) {
 	}
 	_ = os.WriteFile(configPath, []byte("{}\n"), 0o644)
 }
-
-

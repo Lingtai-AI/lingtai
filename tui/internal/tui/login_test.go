@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -137,5 +138,38 @@ func TestLoginModel_LateOAuthDoneIgnoredAfterCancel(t *testing.T) {
 	m, _ = m.Update(stale)
 	if _, err := os.Stat(filepath.Join(dir, "codex-auth.json")); !os.IsNotExist(err) {
 		t.Errorf("stale OAuth callback must not write codex-auth.json; stat err: %v", err)
+	}
+}
+
+func TestLoginModel_CodexEnterShowsMethodChooser(t *testing.T) {
+	dir := t.TempDir()
+	seedLoginCodexAuth(t, dir)
+
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 1 || !m.entries[0].IsOAuth {
+		t.Fatalf("expected single codex OAuth entry; got %#v", m.entries)
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("opening the method chooser must not start a network command")
+	}
+	if !m.codexChoosingMethod {
+		t.Fatal("Enter on Codex OAuth entry should show method chooser")
+	}
+	if m.codexLogging {
+		t.Fatal("method chooser should not start login yet")
+	}
+	if m.codexMethodCursor != 0 {
+		t.Fatalf("default method cursor = %d, want browser OAuth (0)", m.codexMethodCursor)
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.codexMethodCursor != 1 {
+		t.Fatalf("Down should select device code; cursor=%d", m.codexMethodCursor)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Device code") || !strings.Contains(view, "remote") {
+		t.Fatalf("chooser view should mention remote-friendly device code; view=%s", view)
 	}
 }

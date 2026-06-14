@@ -7,10 +7,10 @@ description: >
   project uses one (selected at `/setup` time, inherited from a clone,
   or auto-discovered when a project already has `.recipe/` at its
   root). The skill body fans out into two substantive sub-guides so
-  you load only what the task needs: `reference/recipe-format.md` for
+  you load only what the task needs: `reference/recipe-format/SKILL.md` for
   the bundle format + `recipe.json` schema + library sibling rules +
   validator contract (read first when authoring or customising); and
-  `assets/export-recipe.md` for shipping the methodology / culture as
+  `reference/export-recipe/SKILL.md` for shipping the methodology / culture as
   a bundle others can use to seed *new* networks (no agents, no
   mailboxes). Body also warns about the three different
   recipe-shaped artifacts that can co-exist in one project (inner
@@ -37,15 +37,32 @@ Every LingTai project uses a recipe — selected during `/setup`, inherited from
 
 This skill is the one place to look for anything recipe-related. Pick the sub-file that matches what you're doing, then read it in full before acting.
 
-## Choose the sub-guide
+## Nested reference catalog
 
-- **Understanding / authoring a recipe** — format reference: bundle directory structure, `recipe.json` schema (`id`, `name`, `description`, `version`, `library_name`), the four optional behavioral layers, locale fallback rules, library sibling mechanics, validator contract, how to create and test a custom recipe.
+`lingtai-recipe` owns these nested references. They are parent-owned drill-down
+files, not standalone top-level skills.
 
-  → Read `reference/recipe-format.md`.
+```yaml
+- name: recipe-format-reference
+  location: reference/recipe-format/SKILL.md
+  description: |
+    Authoritative recipe bundle format reference: directory structure,
+    `recipe.json` schema, optional behavioral layers, locale fallback rules,
+    library sibling mechanics, validator contract, and custom recipe testing.
+- name: recipe-export-flow
+  location: reference/export-recipe/SKILL.md
+  description: |
+    Standalone recipe-export procedure for distilling a live network's culture
+    into a portable recipe bundle: scope disambiguation, metadata collection,
+    authoring, validation, sensitivity sweep, git initialization, and handoff.
+```
 
-- **Exporting a standalone recipe** — distilling just the culture (optional `greet/comment/covenant/procedures`, optional library of skills) into a bundle others can use to start *new* networks. No agents, no mailboxes.
+## Routing table
 
-  → Read `assets/export-recipe.md` and follow it end-to-end.
+| If you need to... | Read |
+|---|---|
+| Understand or author a recipe bundle: structure, `recipe.json`, optional layers, locale fallback, library sibling, validation, testing | `reference/recipe-format/SKILL.md` |
+| Export a standalone recipe: distill culture into optional `greet/comment/covenant/procedures` plus optional skill library; no agents, no mailboxes | `reference/export-recipe/SKILL.md` |
 
 ## Disambiguate scope BEFORE picking a sub-guide
 
@@ -63,9 +80,9 @@ A single project directory can hold up to three recipe-shaped artifacts at once,
 lingtai-recipe/
 ├── SKILL.md                         ← this menu
 ├── reference/
-│   └── recipe-format.md             ← authoritative recipe format reference
+│   ├── recipe-format/SKILL.md       ← authoritative recipe format reference
+│   └── export-recipe/SKILL.md       ← standalone recipe-export procedure
 ├── assets/
-│   ├── export-recipe.md             ← standalone recipe-export procedure
 │   └── gitignore.template           ← canonical .gitignore for exported recipes
 └── scripts/
     └── validate_recipe.py           ← invoked by the export flow before git-init
@@ -93,7 +110,7 @@ If you have memory of an older version of this skill, these are the things that 
 - **`recipe.json` is single-canonical, never localized.** Localized display strings belong only in `greet.md` / `comment.md` / `covenant.md` / `procedures.md`.
 - **Network exports are gone (v3.2).** Earlier versions of this skill described an `export-network` flow that shipped the live `.lingtai/` snapshot alongside the recipe. That flow has been retired — `/export` now means recipe-only. Recipes are the seed; the garden is grown fresh in each new project.
 
-Now go read the relevant sub-file.
+Now go read the relevant nested reference.
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

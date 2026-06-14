@@ -20,12 +20,12 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `agentManifest` struct (`agent.go:13-23`) — raw `.agent.json` JSON shape.
 - `ReadAgent(dir)` (`agent.go:26-53`) — reads `.agent.json` → `AgentNode`. Derives `IsHuman` from `admin: null`.
 - `ParseCapabilities(raw)` (`agent.go:56-81`) — handles `[]string` (TUI-generated) and `[[name, {}], ...]` (live agent) formats.
-- `ReadInitManifest(dir)` (`agent.go:85-113`) — reads `init.json`, flattens `llm.{model, provider, base_url}` and `soul.delay` to top-level.
-- `WritePrompt(agentDir, content)` (`agent.go:117-119`) — writes `.prompt` signal file.
-- `DiscoverAgents(baseDir)` (`agent.go:134-154`) — scans for subdirectories with `.agent.json`.
-- `AgentStatus` struct + `ReadStatus(dir)` (`agent.go:157-184`) — runtime context/runtime from `.status.json`.
-- `TokenTotals` + `AggregateTokens(dirs)` (`agent.go:186-206`) — sums token usage across agents.
-- `SumTokenLedger(path)` (`agent.go:210-239`) — reads and sums a single `token_ledger.jsonl`.
+- `ReadInitManifest(dir)` (`agent.go:90-100`) — returns the agent's manifest, preferring the kernel-published resolved artifact `system/manifest.resolved.json` (`readResolvedManifest`, `agent.go:104`; kernel issue #259) and falling back to raw `init.json` (`readRawInitManifest`, `agent.go:121`) when the artifact is absent/malformed. Either way `flattenManifest` (`agent.go:138`) hoists `llm.{model, provider, base_url}` and `soul.delay` to top-level.
+- `WritePrompt(agentDir, content)` (`agent.go:157-159`) — writes `.prompt` signal file.
+- `DiscoverAgents(baseDir)` (`agent.go:175-195`) — scans for subdirectories with `.agent.json`.
+- `AgentStatus` struct + `ReadStatus(dir)` (`agent.go:197-224`) — runtime context/runtime from `.status.json`.
+- `TokenTotals` + `AggregateTokens(dirs)` (`agent.go:227-248`) — sums token usage across agents.
+- `SumTokenLedger(path)` (`agent.go:252-279`) — reads and sums a single `token_ledger.jsonl`.
 
 ### Heartbeat (`heartbeat.go`)
 - `IsAlive(dir, thresholdSec)` (`heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (2.0s for the portal).
@@ -77,7 +77,7 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 ## Connections
 
 - **Called by** `portal/internal/api/` (handlers build `Network` payloads; replay calls `ReconstructTape`; mail composer calls `WriteMail`).
-- **Reads** `.lingtai/<agent>/.agent.json`, `.agent.heartbeat`, `.status.json`, `init.json`, `logs/events.jsonl`, `logs/token_ledger.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `mailbox/inbox/*/message.json`, `mailbox/archive/*/message.json`, `mailbox/sent/*/message.json`.
+- **Reads** `.lingtai/<agent>/.agent.json`, `.agent.heartbeat`, `.status.json`, `system/manifest.resolved.json` (preferred over `init.json` when present), `init.json`, `logs/events.jsonl`, `logs/token_ledger.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `mailbox/inbox/*/message.json`, `mailbox/archive/*/message.json`, `mailbox/sent/*/message.json`.
 - **Writes** signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`) and atomically updates human location in `.agent.json`. Writes outbound mail to inbox/outbox/sent directories.
 - **Cross-reference** `tui/internal/fs/` shares the same read pattern for agent manifests, heartbeats, mail, and ledgers. The portal adds `reconstruct.go` (tape reconstruction — the TUI doesn't do this), `MailCache` for incremental polling (the TUI reads all mail fresh each time), and `WriteMail` for the portal's mail composer. Address resolution and signal writing are identical across both binaries.
 

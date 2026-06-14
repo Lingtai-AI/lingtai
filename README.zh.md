@@ -1,38 +1,226 @@
 <div align="center">
 
-<img src="docs/assets/network-demo.gif" alt="智能体网络生长" width="100%">
-
 # 灵台 LingTai
 
-**器灵创生 — 赋予智能体生命的操作系统**
+**在你的项目里建起一个 AI 组织——不只是再多一个 Agent。**
 
-> *灵台，心也。*
->
-> *灵台者有持，而不知其所持，而不可持者也。*
-> — 庄子 · 庚桑楚
+本地优先 · 常驻智能体 · soul flow 主动反思 · 信箱 · 生命周期 · 多智能体组织
 
-[English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
+[English](README.md) · [中文](README.zh.md) · [文言](README.wen.md) · [lingtai.ai](https://lingtai.ai) · [发布日志](https://lingtai.ai/releases/)
 
 [![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
-[![Blog](https://img.shields.io/badge/博客-lingtai.ai-%23d4a853)](https://lingtai.ai)
+[![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
 [![Discord](https://img.shields.io/badge/discord-加入-%235865F2?logo=discord&logoColor=white)](https://discord.gg/cMchjXpg)
 
 </div>
 
 ---
 
-Unix 风格的智能体操作系统。**思考**用任意 LLM。**通信**靠文件系统传书。**化出分身**能脱离创造者独立存活。**自生长**为不断扩展的网络——无中央调度，无共享状态。万物皆文件。
+多数 agent 工具给你的是一个更强的工人。**灵台给你的是一个 AI 组织的底座**：长期住在本地项目里的智能体，有自己的主目录、收发信箱、持久记忆、生命周期控制、自我反思回路，也能在任务大到一个脑袋不够时召唤同伴或化出分身。
 
-## 快速开始
+**OpenClaw**、**Hermes** 这类工具是很有用的“手”——擅长执行某个 agentic task。灵台是围绕这些手的组织层：它可以把编码 agent 和 CLI 当作工人来用，同时保留角色、记忆、通信、监督、恢复这些让一个智能体网络在单次聊天或终端会话结束后仍能继续运转的组织能力。
+
+你可以从 TUI、Telegram、飞书/Lark、微信、WhatsApp 或邮件发来任务。同一个组织会通过被点名的智能体醒来，读取项目记忆，调用本地工具，写出产物，必要时协调同伴，然后回到你发起任务的那个渠道向你汇报。
+
+## 这是元组织，不是另一个聊天窗口
+
+```text
+你
+  “今晚盯一下仓库。PR 如果坏了，就定位原因，草拟修复，
+   明早给我一份简报。”
+
+灵台
+  从信箱中醒来
+  → 读取持久项目记忆
+  → 调用 shell / web / file / coding-agent 工具
+  → 空闲或卡住时通过 soul flow 自我反思
+  → 写下笔记、报告、补丁或定时任务
+  → 需要并行时请专家分身或神识帮忙
+  → 在 Telegram / TUI / 邮件里带着产物回复你
+```
+
+你可以关掉终端。这个组织仍然有 `.lingtai/` 下的文件系统家园、信箱、可检查的日志，以及休眠、刷新、复苏、凝蜕等生命周期控制。Soul flow 给智能体内置了一条反思回路：空闲一段时间后，它可以重新审视局面、发现漏掉的角度，并主动提出下一步，而不是永远等下一句提示词。
+
+## 三条命令开始
+
+```bash
+brew install lingtai-ai/lingtai/lingtai-tui
+mkdir my-project && cd my-project
+lingtai-tui
+```
+
+首次启动时，灵台会创建 `.lingtai/`，准备自己的运行时，引导你配置模型/配方，并为这个项目启动一个常驻智能体。
+
+```text
+project/
+└── .lingtai/
+    ├── human/              # 你的信箱身份
+    └── <agent>/            # 一个常驻项目智能体
+        ├── inbox/ outbox/  # 消息会唤醒智能体
+        ├── knowledge/      # 持久事实与经验
+        ├── system/         # pad、总结、长期规则
+        └── logs/           # 可审计的运行轨迹
+```
+
+> PyPI 上的 `lingtai` 包确实存在，但那是 TUI 代你管理的 Python 运行时。安装/升级请用 Homebrew（或下方源代码方式）；只有在你开发或诊断内核本身时才需要 `pip`。
+
+源代码编译、大陆镜像、tarball 安装等路径见 [安装详解](#安装详解)。
+
+## 适合用来做什么
+
+| 当你想要…… | 灵台实际会做什么 |
+|---|---|
+| **每日项目运营** | 扫描变化、记住决策、整理阻塞项，在你坐下前把简报发来。 |
+| **带判断的 GitHub 分诊** | 读取 issue/PR，分类风险，草拟回复或补丁；真正有副作用前停下来让你批准。 |
+| **能沉淀为产物的调研** | 搜索、抓取、比较、引用，最后交付独立 HTML 备忘录，而不是一段松散聊天记录。 |
+| **可以跑很久的编码工作** | 调用 Claude Code、Codex、OpenCode、shell 和本地文件；灵台负责计划、记忆和对人同步。 |
+| **会行动的定时任务** | “每个工作日 9 点检查部署队列，卡住了在 Telegram 叫我”——不只是提醒。 |
+| **跨会话记忆** | 保留路径、偏好、合作者背景、历史教训和可复用流程，留给下一轮继续用。 |
+
+## 为什么不同
+
+| Agent 工具 / 编码助手 | 灵台元组织构建器 |
+|---|---|
+| 对话或一次运行本身就是产品。 | 项目里的组织才是产品；对话只是入口。 |
+| OpenClaw、Hermes 这类工具是能干活的工人。 | 灵台提供围绕工人的长期组织图：记忆、信箱、角色、生命周期、监督与恢复。 |
+| 关掉窗口，关系就结束。 | 智能体有本地主目录、信箱、日志、记忆和生命周期。 |
+| 主动性取决于用户再次提示。 | Soul flow 让空闲智能体能自我反思、发现盲点、提出下一步。 |
+| 扩展意味着同时管理更多聊天或运行。 | 化出长期分身负责专门领域，或用短期神识拆并行批活；在 portal 里看拓扑变化。 |
+| 一次坏 turn 只能重开并祈祷。 | 休眠、唤醒、刷新、复苏、清上下文、doctor、凝蜕都是运行时的一部分。 |
+
+## 架构一眼看懂
+
+```mermaid
+flowchart LR
+    human[Human] --> channels[TUI / Telegram / Email / Feishu / WeChat]
+    channels --> agent[常驻 LingTai 智能体]
+    agent --> soul[Soul flow: 反思 + 主动下一步]
+    agent --> tools[Files / Bash / Web / Vision / MCP / Coding CLIs]
+    agent --> memory[Pad / Knowledge / Skills / Character]
+    agent --> lifecycle[Sleep / Wake / Refresh / CPR / Molt]
+    agent --> network[组织: avatars + daemons]
+    network --> portal[实时组织可视化]
+    tools --> artifacts[报告 / 补丁 / 笔记 / 定时工作]
+    soul --> agent
+    memory --> agent
+```
+
+## 跟着工作一起长成组织
+
+先从一个常驻智能体开始。工作变大时，组织也一起长大：
+
+- **凝蜕，而不是失忆。** 长会话会卸下噪音 transcript，把总结和持久记忆带到下一轮。
+- **反思，而不是干等。** Soul flow 给智能体一个内在复盘回路，项目安静下来或路径不对时能主动提出洞见。
+- **化出分身。** 给长期专家一个自己的记忆、信箱和责任边界。
+- **遣出神识。** 把嘈杂批量任务拆给短期工人，只留下结论。
+- **把编码 agent 当手。** Claude Code、Codex、OpenCode、OpenClaw、Hermes 等工具负责精确执行；灵台负责计划、记忆、协调和对人沟通。
+- **现场看组织生长。** Portal 显示谁在线、在做什么，以及组织拓扑如何变化。
+
+<div align="center">
+
+<img src="docs/assets/network-demo.gif" alt="灵台 portal 展示一个本地常驻项目智能体组织" width="100%">
+
+</div>
+
+## 外接渠道
+
+灵台把同一个长存助理接到你已经在用的消息平台上。目前精选的 MCP 插件：
+
+| 插件 | 用途 |
+|---|---|
+| `telegram` | 在 Telegram 跟你的助理对话（DM、可选白名单、附件/语音透传）。 |
+| `feishu` | 飞书 / Lark——使用 WebSocket 长连接，**无需公网 IP，无需 Webhook**。 |
+| `wechat` | 通过 iLink / gewechat 风格的桥接接入微信。 |
+| `whatsapp` | 通过灵台精选 WhatsApp 桥接接入 WhatsApp。 |
+| `imap` | 真正的 IMAP/SMTP 邮件——多账号、对陌生发件人有安全默认。 |
+
+渠道是同一个助理的多个入口，不是各自独立的机器人。**记忆、工具、历史在所有渠道之间共享**。配置入口在 TUI 的 `/mcp` 控制面板，或者直接写到 `init.json` 里。
+
+凭证存在本地 `.secrets/` 目录（绝不会进 Git）。对陌生外部发件人默认不会自动回复。外部副作用（发消息、提 issue、删除资源）默认按真实操作对待。
+
+## 界面
+
+### TUI
+
+`lingtai-tui` 是主交互界面。提供：项目初始化、模型/预设配置、对话与信箱、助理状态（token + 体力 + 心跳）、分身/神識可见性、Markdown 渲染、命令面板、升级与 doctor 流程。
+
+在 TUI 里输入 `/help` 可查看完整斜杠命令参考。权威文档维护在内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)；顶层 README 只链接到那里，避免重复维护命令目录。
+
+常用 Shell 入口：
+
+```bash
+lingtai-tui                          # 在当前项目打开 TUI
+lingtai-tui list [--detailed] [--admin] <project>  # 以通讯簿视图列出在线助理，并标出主 agent
+lingtai-tui spawn <dir> --preset <name> [--agent-name <name>]
+lingtai-tui bootstrap                # 重新展开自带技能/工具
+lingtai-tui doctor                   # 修复/升级 TUI 运行时
+```
+
+### Portal
+
+`lingtai-portal` 是可视化服务器。它读取项目状态，呈现智能体网络、信件边、历史拓扑。当一个项目里不止一个助理、或者你想看清工作如何演变时，这玩意儿很有用。
+
+### 小贴士
+
+- 终端用深色主题——灵台的调色板是按深色调过的。
+- TUI 里 `Ctrl+E` 打开外部编辑器写长消息。
+- 选择文本时按住 `Option`（macOS / iTerm2）或 `Shift`（多数 Linux/Windows 终端），避免被 TUI 抓取。
+- 升级后哪里不对劲？跑 `/doctor`（或在 shell 里 `lingtai-tui doctor`）。
+
+## 文件系统可以直接看
+
+灵台**故意**把状态放在磁盘上。`ls`、`cat`、`tail`、`jq`、`grep`、编辑器、甚至另一个编程智能体都能直接看。首次启动后的目录形状：
+
+```text
+project/
+└── .lingtai/
+    ├── human/                  # 你的信箱身份
+    ├── <agent-name>/            # 一个在线的助理
+    │   ├── init.json            # 模型、工具、配方、MCP 配置
+    │   ├── system/              # 提示分层、Pad、规则、总结
+    │   ├── knowledge/           # 持久私有记忆
+    │   ├── inbox/ outbox/       # 内部信件
+    │   ├── logs/                # 事件日志 + 人读日志
+    │   ├── delegates/           # 化身台账
+    │   ├── daemons/             # 神識运行记录
+    │   └── .agent.json          # 心跳、状态、身份卡
+    └── .portal/                 # 可视化的拓扑与历史
+```
+
+常用排查命令：
+
+```bash
+lingtai-tui list --detailed /path/to/project               # 在线助理、主 agent 标记、身份/状态/路径
+tail -f /path/to/project/.lingtai/<agent>/logs/agent.log    # 看人读日志
+jq -r '.event' /path/to/project/.lingtai/<agent>/logs/events.jsonl | tail   # 看结构化事件
+```
+
+## 跟编程智能体搭配
+
+灵台助理生活在文件系统里。任何能读写文件的编程智能体都可以跟它们协作——大家共享 `.lingtai/human/` 这个信箱。
+
+- **Claude Code** — `claude plugin add Lingtai-AI/claude-code-plugin`
+- **OpenAI Codex CLI** — `git clone https://github.com/Lingtai-AI/codex-plugin.git && cd codex-plugin && ./install.sh`
+- **其他编程智能体**（OpenCode、OpenClaw、Hermes 等）—— 把 [`lingtai-skill`](https://github.com/Lingtai-AI/lingtai-skill) 这个权威协议技能放进你工具的技能目录即可。
+
+两者搭配的分工是：编程智能体可靠、可验证——每一次工具调用看得见、每一次编辑可审查。灵台助理富有创造力、异步、有耐心——在不会撑爆上下文窗口的并行空间里跑调研、起草、监控、长线任务。**编程智能体当手，灵台当长期大脑。**
+
+## 安装详解
+
+### Homebrew（推荐）
 
 ```bash
 brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
+
+# 之后升级
+brew update
+brew upgrade lingtai-ai/lingtai/lingtai-tui
 ```
 
-TUI 自动搞定一切——Python 运行时、依赖、首次启动自带引导教程。输入 `/tutorial` 可随时重新进入教程。**请使用深色终端**以获得最佳体验。选择文本：macOS 按 **Option**（iTerm2），Windows Terminal / Linux 按 **Shift**。Ctrl+E 打开外部编辑器。
+升级完后重启 TUI，让新的二进制接管。Python 运行时由 TUI 在 `~/.lingtai-tui/runtime/venv/` 下统一管理——往系统 Python 里 `pip install lingtai` 不会影响在运行的项目。
 
 <details>
 <summary><b>首次安装？先装 Homebrew</b></summary>
@@ -48,7 +236,7 @@ TUI 自动搞定一切——Python 运行时、依赖、首次启动自带引导
 sudo apt install build-essential
 ```
 
-然后执行上面的 `brew install` 命令。
+然后执行 `brew install lingtai-ai/lingtai/lingtai-tui`。
 
 </details>
 
@@ -69,21 +257,21 @@ source ~/.zprofile
 brew update
 ```
 
-之后正常 `brew install lingtai-ai/lingtai/lingtai-tui` 即可。这一步与下面的 Gitee tap 互相独立：清华镜像解决的是 Homebrew 自身（bottle、core 索引）的国内访问问题；Gitee tap 只在 `brew tap` 拉本项目公式失败时才用得上。
+之后正常 `brew install lingtai-ai/lingtai/lingtai-tui` 即可。这一步与下面的 Gitee tap 互相独立。
 
 </details>
 
 <details>
-<summary><b>大陆用户：用 Gitee 镜像</b>（brew 从 GitHub 拉取失败时）</summary>
+<summary><b>大陆用户：用 Gitee 镜像 tap</b>（brew tap 从 GitHub 拉取失败时）</summary>
 
-如果 `brew install lingtai-ai/lingtai/lingtai-tui` 卡在 `brew tap` 步骤（GnuTLS / TLS 错误），改用 Gitee 镜像的 tap：
+如果 `brew install lingtai-ai/lingtai/lingtai-tui` 卡在 `brew tap` 阶段（GnuTLS / TLS 错误），改用 Gitee 镜像的 tap：
 
 ```bash
 brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
 brew install lingtai-ai/lingtai/lingtai-tui
 ```
 
-公式本身与 GitHub 的 tap 一致——自动检测大陆网络，编译时使用 `goproxy.cn` + `registry.npmmirror.com`。Gitee tap 是镜像，公式更新可能比 GitHub 延迟几小时。
+公式本身与 GitHub tap 一致——自动识别大陆网络，编译时使用 `goproxy.cn` + `registry.npmmirror.com`。Gitee tap 是镜像，公式更新可能比 GitHub 延迟几小时。
 
 </details>
 
@@ -91,7 +279,7 @@ brew install lingtai-ai/lingtai/lingtai-tui
 <summary><b>从源码编译</b>（大陆用户推荐，需要 Go 1.24+）</summary>
 
 ```bash
-# 将 v0.5.2 替换为最新版本号
+# 将 VERSION 替换为最新版本号
 VERSION=v0.5.2
 
 # 从 Gitee 镜像下载源码（国内快）
@@ -115,191 +303,146 @@ curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.
 
 </details>
 
-## 与编程智能体配合使用
+### 内核开发模式（进阶）
 
-灵台器灵生活在文件系统中。任何能读写文件的编程智能体都可以与它们对话。
-
-**Claude Code** — 安装 [lingtai 插件](https://github.com/Lingtai-AI/claude-code-plugin)：
+**只有**当你在改内核代码、想让改动立即在 TUI 运行时生效时才需要：
 
 ```bash
-claude plugin add Lingtai-AI/claude-code-plugin
+~/.lingtai-tui/runtime/venv/bin/pip3 install -e /path/to/lingtai-kernel
 ```
 
-**Codex CLI** — 安装 [Codex 版 lingtai 插件](https://github.com/Lingtai-AI/codex-plugin)：
+### 运行时修复
 
 ```bash
-git clone https://github.com/Lingtai-AI/codex-plugin.git && cd codex-plugin && ./install.sh
+lingtai-tui doctor
 ```
 
-**其他编程智能体**（OpenCode、OpenClaw、Hermes 等）—— 克隆 [lingtai-skill](https://github.com/Lingtai-AI/lingtai-skill) 这个权威协议仓库，把其中的 `skills/lingtai/` 复制到你工具的技能目录下即可。
-
-连接后，编程智能体共享 `.lingtai/human/` 邮箱——可以阅读器灵邮件、发送指令、检查存活状态、管理网络。协议完全基于文件系统：无 SDK、无 API、无依赖。
-
-**为什么两者结合？** 编程智能体可靠——你能看到每一次工具调用、每一次编辑。灵台器灵富有创造力且无限高产——它们在永不过期的并行上下文中探索、研究、头脑风暴。用编程智能体当双手：精确、可验证、交互式。用灵台当长期大脑：深度研究、知识积累、以及那些会撑爆上下文窗口的异步任务。器灵起草方案，编程智能体精确实施。
-
-## 为什么选灵台
-
-多数智能体框架用代码编排——DAG、链、路由。灵台用人类的方式编排：**异步智能体通过消息通信**。没有共享内存，没有中央控制器。每个智能体是对等的存在，不是工具。这就是构建人类文明的架构——自治节点间的消息传递，十万年间从部落扩展到 80 亿。
-
-| | DAG / 链式框架 | 灵台 |
-|---|---|---|
-| 编排方式 | 代码定义的流水线 | 智能体之间对话 |
-| 通信方式 | 同步函数调用 | 异步邮件 |
-| 记忆 | 共享状态 / 向量数据库 | 每个智能体拥有自己的目录 |
-| 扩展方式 | 增加步骤 | 智能体化出分身 |
-| 容错 | 流水线中断 | 单个智能体休眠，网络继续运转 |
-
-上下文长度是单体问题。它永远是有限的。不要让身体变得更大。**让它遗忘，让网络记住。**
-
-## 四个核心
-
-- **思** — 任意 LLM 为元神。Anthropic、OpenAI、Gemini、MiniMax，或任何 OpenAI 兼容 API（DeepSeek、Grok、通义千问、智谱、Kimi）。
-- **通** — 智能体之间通过文件系统传书通信。没有消息中间件，没有共享内存。写入对方的信箱，就像递一封信。
-- **化** — 分身（avatar）是完全独立的智能体，作为单独进程运行，生存不依赖于创建者。神識（daemon）是临时的并行工作者，适合短平快的任务。
-- **生** — 智能体就是一个目录。凝蜕（molt）压缩上下文、重启会话——智能体可以无限期存活。记忆和身份跨凝蜕存续。
+`doctor` 会检查 TUI / 内核 / 运行时三者关系，刷新自带工具技能，给出具体修复步骤。启动失败或升级看起来不对劲时用它。
 
 ## 架构
 
-两个包，单向依赖：
+灵台由两个仓库组成：
 
-| 包 | 角色 |
-|----|------|
-| **[lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel)** | 最小运行时——BaseAgent、固有之器、LLM 协议、传书、日志。零硬依赖。 |
-| **lingtai**（本仓库） | 全功能层——19 种能力、5 种 LLM 适配器、MCP 集成、扩展插件。 |
+| 仓库 | 语言 | 负责 |
+|---|---|---|
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | Go + TypeScript | TUI、portal、Homebrew/源码安装、自带工具技能 |
+| [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python（+ Rust sidecar） | 智能体运行时、LLM 回合循环、固有工具、会话/上下文/凝蜕管理、MCP 宿主。在 PyPI 上以 `lingtai` 发布 |
 
-```
-BaseAgent              — 内核（固有之器，封闭工具面）
-    │
-Agent(BaseAgent)       — 内核 + 能力 + 领域工具
-    │
-CustomAgent(Agent)     — 你的领域逻辑
-```
+Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智能体作为子进程；UI 与智能体之间所有交互都走项目文件系统（`.lingtai/` 信箱、心跳、日志、提示文件、portal 记录）。**这就是为什么状态如此易查、其他工具不靠任何 SDK 就能跟它协作。**
 
-## 能力（七十二变）
+本仓库自带两个 Go 二进制：
 
-<table>
-<tr><th>感知</th><th>行动</th><th>心智</th><th>网络</th></tr>
-<tr>
-<td>
+| 目录 | 二进制 | 简介 |
+|---|---|---|
+| `tui/` | `lingtai-tui` | Bubble Tea 终端应用：安装向导、进程监控、斜杠命令、预设编辑器、升级/doctor |
+| `portal/` | `lingtai-portal` | Go HTTP 服务器，内嵌 React 前端，做拓扑/重放可视化 |
 
-`vision` — 图像理解
-`listen` — 语音转文字、音乐分析
-`web_search` — 搜索网络
-`web_read` — 读取网页内容
+## 文档路径
 
-</td>
-<td>
+- **第一次用？** 跑 `lingtai-tui`，选 **Tutorial** 配方，跟着走一遍；也可以先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)。
+- **想看可视化解释？** 打开 [火柴人动画版工作手册](docs/beginner-work-manual-stick-figure.zh.html)。
+- **配外部渠道** — TUI 里 `/mcp`，再看对应插件自己的入门文档。
+- **写技能** — 首次启动后看 `tui/internal/preset/skills/lingtai-dev-guide/`。
+- **源码结构** — 从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
+- **发布流程** — [`RELEASING.md`](RELEASING.md)。
+- **贡献** — 先读 anatomy，开 worktree，PR 附验证记录。详见 [贡献指南](#贡献)。
 
-`file` — 读、写、编辑、glob、grep
-`bash` — Shell 执行，策略约束
-`talk` — 文字转语音
-`compose` — 生成音乐
-`draw` — 文字转图像
-`video` — 生成视频
+## 仓库结构
 
-</td>
-<td>
-
-`psyche` — 进化的身份与性格
-`codex` — 知识归档与检索
-`email` — 完整信箱系统
-
-</td>
-<td>
-
-`avatar` — 化出分身（独立进程）
-`daemon` — 神識（并行工作者）
-
-</td>
-</tr>
-</table>
-
-## 智能体 = 目录
-
-```
-/agents/wukong/
-  .agent.lock               ← 独占锁（每个目录只能运行一个进程）
-  .agent.heartbeat          ← 心跳（存活证明）
-  .agent.json               ← 清单
-  system/
-    covenant.md             ← 盟约（跨凝蜕存续）
-    pad.md               ← 手记
-  mailbox/
-    inbox/                  ← 收到的信件
-    outbox/                 ← 待发送
-    sent/                   ← 已发送记录
-  logs/
-    events.jsonl            ← 结构化事件日志
+```text
+.
+├── README.md / README.zh.md / README.wen.md
+├── ANATOMY.md                 # 给智能体和人读的源码地图
+├── CLAUDE.md                  # 编程智能体指南
+├── RELEASING.md               # 发布清单
+├── install.sh                 # 源码安装脚本
+├── tui/                       # lingtai-tui Go 模块
+│   ├── main.go
+│   ├── internal/              # TUI 实现
+│   ├── i18n/                  # en/zh/wen UI 文本
+│   └── packages/              # npm 包装元数据
+├── portal/                    # lingtai-portal Go 模块
+│   ├── main.go
+│   ├── web/                   # React/Vite 前端
+│   └── i18n/
+├── docs/                      # 设计笔记、博客、状态、已知限制
+├── examples/                  # 示例 init/addon/policy JSONC
+├── scripts/                   # 辅助脚本
+└── discussions/               # 设计补丁与调研记录
 ```
 
-没有 `agent_id`。路径即身份。智能体通过写入彼此的 `mailbox/inbox/` 通信——如同在邻居门口投信。
+## 排障
 
-## 一心化万相
+**`lingtai-tui` 找不到。** 确认 Homebrew 的 bin 目录在 `PATH`（`brew --prefix`/bin）。如果用 `install.sh` 装的，看 `/usr/local/bin/lingtai-tui` 或 Homebrew 前缀。
 
-灵台方寸山，斜月三星洞。悟空在这里从一只猴子变成了齐天大圣——不是因为山本身有什么魔力，而是因为这里提供了修行所需的一切：师父（LLM）、功法（能力）、同门（其他智能体）、以及一个可以安心修炼的地方（工作目录）。灵台做的事情也是这样：给每个智能体一个灵台，让它学会七十二变。
+**TUI 起来了但助理不响应。** 跑 `lingtai-tui doctor` 和 `lingtai-tui list /path/to/project`，再 `tail -100 /path/to/project/.lingtai/<agent>/logs/agent.log`。
 
-万物皆文件。知识、身份、记忆、关系——都是目录中的文件。每一个燃烧的 token 都不是消耗，而是转化——化为网络中的文件，化为拓扑中的经验。服务越多，网络越大、越智慧。自生长智能体编排不是后来加的功能，而是智能体即目录、信件即文件、分身即独立进程的自然结果。
+**技能或命令丢了。** `lingtai-tui bootstrap`（或在 TUI 里 `/doctor`）会重新展开自带工具。
 
-一心化万相。
+**升级了但行为没变。** 两层：Go TUI 二进制（Homebrew/源码）和 Python 运行时（TUI 管理的 venv）。升级后**记得重启 TUI**。运行时看起来旧的话跑 `doctor`。往系统 Python 里 `pip install lingtai` 不会影响项目。
 
-完整宣言见 [lingtai.ai](https://lingtai.ai)。
+**在改内核但本地修改不生效。** 看 [内核开发模式](#内核开发模式进阶)。
 
-## 扩展插件（Addons）
+## 开发
 
-插件是连接外部通讯渠道的可选扩展。在 TUI 中通过 `/mcp` 控制面板配置，或在 `init.json` 中声明。
+非平凡改动请在 `origin/main` 上开 Git worktree：
 
-### 飞书（Feishu/Lark）
-
-飞书插件使用 **WebSocket 长连接**接收消息，**无需公网 IP，无需 Webhook**。
-
-**飞书开放平台配置步骤：**
-
-1. 进入 [飞书开放平台](https://open.feishu.cn/app) 创建**企业自建应用**
-2. 启用**机器人能力**（机器人 → 功能 → 启用机器人）
-3. 权限管理 → 添加权限：`im:message`
-4. 事件订阅 → 选择**"使用长连接接收事件"** → 添加事件 `im.message.receive_v1`
-5. 发布应用版本
-
-**配置文件 `feishu.json` 示例：**
-
-```json
-{
-  "app_id_env": "FEISHU_APP_ID",
-  "app_secret_env": "FEISHU_APP_SECRET",
-  "allowed_users": ["ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]
-}
+```bash
+cd /path/to/lingtai
+git fetch origin main
+git worktree add -b docs/my-change .worktrees/my-change origin/main
+cd .worktrees/my-change
 ```
 
-在 `.env` 文件中添加：
+验证：
 
-```
-FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxxxxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+```bash
+# TUI 改动
+cd tui && go test ./... && go vet ./... && go build -o bin/lingtai-tui .
 
-**在 `init.json` 中声明插件：**
+# Portal 改动
+cd portal/web && npm ci && npm run build && cd .. && go test ./... && go build -o bin/lingtai-portal .
 
-```json
-{
-  "addons": {
-    "feishu": { "config": "feishu.json" }
-  }
-}
+# 仅文档
+git diff --check && git status --short
 ```
 
-`allowed_users` 是可选字段（飞书 open_id，格式为 `ou_xxx`）——留空则允许所有用户发消息。向机器人发送第一条消息后，Agent 会在 `feishu/default/contacts.json` 中记录 `from_open_id`，可从中获取 open_id。
+如果文档改动涉及到生成的 UI 命令或自带技能，跑 `lingtai-tui bootstrap` 后检查 `~/.lingtai-tui/commands.json`。
 
-### IMAP 邮件
+## 贡献
 
-IMAP 插件支持邮件收发。配置方式见 [内核文档](https://github.com/Lingtai-AI/lingtai-kernel)。
+灵台的贡献讲求**有源可查、按既有流程走**：
 
-### Telegram
+1. 先读相关 anatomy：根目录的 `ANATOMY.md`，再下到 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
+2. 开分支或 worktree。
+3. 改动保持收敛。
+4. 跑对应的验证命令。
+5. 结构性改动同步更新 anatomy / 文档。
+6. PR 里说清楚：改了什么、为什么、怎么验证的。
 
-Telegram 插件支持 Bot API。配置方式见 [内核文档](https://github.com/Lingtai-AI/lingtai-kernel)。
+常被需要帮忙的方向：TUI 易用性与无障碍、portal 可视化与重放、MCP/插件入门资源、跨平台安装打磨、文档与教程、运行时诊断、高质量可复用技能。
+
+## 设计哲学
+
+**灵台**取自心源——方寸之间，万象由此生。这个产品坚持三条朴素信念：
+
+1. **助理需要身体。** 持久的文件系统主目录给它连续性、可见性，以及一个能不断积累工具与记忆的地方。
+2. **网络应当因服务而生长。** 当一项任务需要新能力时——写一个技能、记一条知识、化出一个专才——下一项任务就会更轻。
+3. **记忆必须分层。** 对话是临时的；Pad、Character、Knowledge、技能、信件才是真正承载经验的部分。
+
+目标不是炫技，是**真正能用的长期协作者**：可被检视、可被重启、可被教导、可被改进。
+
+灵台方寸山，斜月三星洞。完整宣言见 [lingtai.ai](https://lingtai.ai)。
 
 ## 社群
 
-欢迎通过 [GitHub Issues](https://github.com/Lingtai-AI/lingtai/issues) 或 [Discussions](https://github.com/Lingtai-AI/lingtai/discussions) 提问、报 bug、提建议。
+- 官网与发布日志：<https://lingtai.ai>
+- 主仓库：<https://github.com/Lingtai-AI/lingtai>
+- 内核仓库：<https://github.com/Lingtai-AI/lingtai-kernel>
+- Homebrew tap：<https://github.com/Lingtai-AI/homebrew-lingtai>
+- Discord：<https://discord.gg/cMchjXpg>
+- GitHub Issues：<https://github.com/Lingtai-AI/lingtai/issues>
+- GitHub Discussions：<https://github.com/Lingtai-AI/lingtai/discussions>
 
 **微信交流群**
 
@@ -307,12 +450,10 @@ Telegram 插件支持 Bot API。配置方式见 [内核文档](https://github.co
 
 <img src="docs/assets/wechat.png" alt="微信二维码 — 扫码加入 lingtai 测试群" width="200">
 
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Lingtai-AI/lingtai&type=Date)](https://www.star-history.com/#Lingtai-AI/lingtai&Date)
+
 ## 许可
 
-MIT — [Zesen Huang](https://github.com/huangzesen), 2025–2026
-
-<div align="center">
-
-[lingtai.ai](https://lingtai.ai) · [lingtai-kernel](https://github.com/Lingtai-AI/lingtai-kernel) · [PyPI](https://pypi.org/project/lingtai/)
-
-</div>
+Apache-2.0 — 见 [LICENSE](LICENSE)
