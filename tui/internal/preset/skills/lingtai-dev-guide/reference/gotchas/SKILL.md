@@ -40,21 +40,57 @@ ta.SetStyles(themedTextareaStyles())
 
 ## Dev-mode rebuild gotcha
 
-When running symlinked dev binaries, a stale portal binary against a freshly-migrated project fails with:
+When running symlinked dev binaries, a stale TUI or portal binary against a
+freshly-migrated project fails with:
 
 ```
+data version N is newer than this binary supports (M); upgrade lingtai-tui
 data version N is newer than this binary supports (M); upgrade lingtai-portal
 ```
 
-**Root cause:** The TUI and portal share `meta.json`. After ANY migration bump, both binaries must be rebuilt.
+**Root cause:** The TUI and portal share `.lingtai/meta.json`. Any binary whose
+compiled migration `CurrentVersion` is lower than the project's `meta.json`
+version must refuse to open the project; otherwise it might misread or downgrade
+newer state. This can happen even when the feature PR you wanted is already on
+`main`: another local branch or newer dev binary may have already written a
+higher data version to the target project.
 
-**Fix:** After any migration bump:
+**Preflight before replacing a local dev binary for an existing project:**
+
+```bash
+PROJECT=/path/to/project
+CHECKOUT=/path/to/lingtai-checkout
+
+printf 'project meta version: '
+python3 - <<PY
+import json, pathlib
+meta = pathlib.Path('$PROJECT/.lingtai/meta.json')
+print(json.loads(meta.read_text()).get('version') if meta.exists() else '<none>')
+PY
+
+printf 'tui CurrentVersion: '
+grep -R 'const CurrentVersion' "$CHECKOUT/tui/internal/migrate/migrate.go"
+printf 'portal CurrentVersion: '
+grep -R 'const CurrentVersion' "$CHECKOUT/portal/internal/migrate/migrate.go"
+```
+
+If the target project's version is higher than the checkout's `CurrentVersion`,
+**do not install that binary over the user's active `lingtai-tui`**. Either build
+from a checkout/branch that includes the matching migration, or stop and explain
+that the requested `main` rebuild cannot safely open that project yet. Do not
+"fix" this by editing `meta.json` downward.
+
+**Fix after any migration bump:** rebuild both binaries from the same checkout:
+
 ```bash
 cd ~/Documents/GitHub/lingtai/tui && make build
 cd ~/Documents/GitHub/lingtai/portal && make build
 ```
 
-The brew-installed pair never hits this because they ship together at the same version.
+The brew-installed pair normally avoids this because the released TUI and portal
+ship together at the same version. Local dev binaries and one-off test overlays
+are the dangerous case; always do the preflight above before overwriting an
+active binary for a real project.
 
 ## Auto-upgrader clobbers editable install
 
