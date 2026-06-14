@@ -34,6 +34,12 @@ plot_example.py
 scatter_plot.*
 test/
 playground
+artifacts/
+
+# Do not ignore reports/ globally: this repo intentionally tracks selected
+# human-facing PR/release explainers under reports/. Use artifacts/ or tmp/ for
+# local-only generated output, and force-add reports only when they are durable
+# review artifacts.
 
 # App runtime configs (may contain secrets)
 app/email/config.json

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LingTai repo hygiene clarification</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fbf7ef; --card:#fffaf2; --ink:#241b16; --muted:#6d625b; --accent:#9b5c19; --line:#e6d8c6; --ok:#207245; --warn:#a45b00; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#181411; --card:#221c18; --ink:#f3e8dc; --muted:#c6b6a7; --accent:#e0a15c; --line:#40352e; --ok:#7bd88f; --warn:#ffbd66; } }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:920px; margin:0 auto; padding:40px 22px 56px; }
+    h1 { margin:0 0 8px; font-size:30px; }
+    h2 { margin-top:28px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+    .subtitle { color:var(--muted); margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:16px 0; }
+    code { background:rgba(127,90,40,.14); padding:1px 5px; border-radius:5px; }
+    ul { padding-left:22px; }
+    .ok { color:var(--ok); font-weight:700; }
+    .warn { color:var(--warn); font-weight:700; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th,td { border:1px solid var(--line); padding:8px 10px; vertical-align:top; text-align:left; }
+    th { background:rgba(127,90,40,.10); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>LingTai main repo hygiene clarification</h1>
+  <p class="subtitle">Scope: conservative cleanup PR for <code>Lingtai-AI/lingtai</code>; generated after Claude proposal and conservative synthesis.</p>
+
+  <section class="card">
+    <h2>TL;DR</h2>
+    <p><span class="ok">This PR intentionally does not delete historical reports, discussions, or prompt archives.</span> It makes the repository hygiene contract explicit and adds <code>artifacts/</code> as the local-only output directory for throwaway generated files.</p>
+  </section>
+
+  <section class="card">
+    <h2>Baseline</h2>
+    <ul>
+      <li>Claude Code proposed removing several generated-looking <code>reports/*.html</code> files and adding broad ignore patterns.</li>
+      <li>Local evidence showed <code>reports/</code> is part of the current PR/release explainer workflow: the dev guide requires human-facing HTML explainers under <code>reports/</code>.</li>
+      <li><code>discussions/</code> holds agent-filed patch/design specs and should not be bulk-deleted during generic cleanup.</li>
+      <li><code>prompt/archive/</code> has historical prompt material and references from older planning docs; it remains manual-review territory.</li>
+      <li><code>tui/bin/</code> and <code>portal/bin/</code> are already ignored by their package-level <code>.gitignore</code> files, so no root change is needed for them.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>What changed</h2>
+    <table>
+      <tr><th>File</th><th>Change</th></tr>
+      <tr><td><code>.gitignore</code></td><td>Adds <code>artifacts/</code> for local-only generated output and documents why <code>reports/</code> is not globally ignored.</td></tr>
+      <tr><td><code>CLAUDE.md</code></td><td>Adds a repository hygiene section: keep cleanup small and evidence-backed; do not bulk-delete <code>reports/</code>, <code>discussions/</code>, or <code>prompt/archive/</code>; use <code>tmp/</code>/<code>artifacts/</code> for scratch output.</td></tr>
+      <tr><td><code>reports/repo-hygiene-20260613.html</code></td><td>This self-contained explainer.</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Validation</h2>
+    <ul>
+      <li><span class="ok">PASS</span> <code>git diff --check</code></li>
+      <li><span class="ok">PASS</span> <code>git check-ignore -v artifacts/example tmp/example .worktrees/example</code></li>
+      <li><span class="ok">PASS</span> Verified <code>reports/example.html</code> is not globally ignored.</li>
+      <li><span class="ok">PASS</span> Verified <code>tui/bin/lingtai-tui</code> and <code>portal/bin/lingtai-portal</code> are already ignored by package-level <code>.gitignore</code> files.</li>
+      <li><span class="warn">Note</span> GLM/Zhipu review was attempted per Jason's requested flow, but all configured Zhipu keys returned insufficient-balance/resource-package errors. This PR therefore keeps scope minimal and non-destructive.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Risks / decisions</h2>
+    <ul>
+      <li>No source, build, runtime, or release behavior changes.</li>
+      <li>No deletion of tracked historical artifacts in this PR.</li>
+      <li>Future cleanup of individual reports, discussions, or prompt archive files should be owner-approved and issue-specific.</li>
+      <li>Addon repo cleanup should be handled in separate per-repo PRs after the same conservative review.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

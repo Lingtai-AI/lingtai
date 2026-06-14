@@ -35,6 +35,15 @@ git branch -d <branch-slug>
 
 **Hard rule:** if a change touches more than ~10 lines or spans more than one file, move it to a worktree before editing. Single-line fixes and doc tweaks can stay in the main checkout. The 30 seconds to spin up a worktree are recouped the first time a parallel session resets the branch out from under you.
 
+## Repository hygiene: reports, discussions, and scratch output
+
+Treat repo cleanup as a small, evidence-backed change, not a bulk deletion pass. This repo intentionally keeps some human-facing artifacts in git history:
+
+- `reports/` contains selected PR/release explainers and review artifacts that are handed to humans. Do not bulk-delete or globally ignore `reports/`; use `artifacts/` or `tmp/` for local-only generated output, and only add a report when it is meant to survive with the PR/release record.
+- `discussions/` contains agent-filed patch specs and design notes. Do not remove or rewrite them during generic cleanup; close or archive them only through an owner-approved, issue-specific decision.
+- `prompt/archive/` contains historical prompt material. Treat it as manual-review territory unless a reference check and owner approval say otherwise.
+- Local scratch directories (`tmp/`, `artifacts/`, `.worktrees/`, build bins, caches) should be ignored rather than committed. If a cleanup proposal touches durable docs/reports/discussions, split that into a separate owner-gated PR.
+
 ## What is 灵台
 
 灵台 (Língtái) is a generic agent framework — an "agent operating system" providing the minimal kernel for AI agents: thinking (LLM), perceiving (vision, search), acting (file I/O), and communicating (inter-agent email). Domain tools, coordination, and orchestration are plugged in from outside via MCP-compatible interfaces.
