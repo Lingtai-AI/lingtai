@@ -25,24 +25,17 @@ func BuildNetwork(baseDir string) (Network, error) {
 		}
 	}
 
-	nodeIndex := make(map[string]bool)
+	discoveredDirs := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
-		nodeIndex[n.WorkingDir] = true
+		discoveredDirs[n.WorkingDir] = true
 	}
 
 	var avatarEdges []AvatarEdge
 	for _, n := range nodes {
-		edges, childDirs := ReadLedger(n.WorkingDir)
-		avatarEdges = append(avatarEdges, edges...)
-		for _, cd := range childDirs {
-			if !nodeIndex[cd] {
-				relCD := RelativizeAddress(cd, baseDir)
-				nodes = append(nodes, AgentNode{
-					Address:    relCD,
-					AgentName:  "",
-					WorkingDir: cd,
-				})
-				nodeIndex[cd] = true
+		edges, _ := ReadLedger(n.WorkingDir)
+		for _, e := range edges {
+			if discoveredDirs[e.Child] {
+				avatarEdges = append(avatarEdges, e)
 			}
 		}
 	}
