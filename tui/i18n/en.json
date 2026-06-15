@@ -480,6 +480,7 @@
   "preset_editor.field_api_key": "API key",
   "preset_editor.api_key_unset": "(not set — paste here)",
   "preset_editor.api_key_codex_readonly": "OAuth credential — manage on the preset picker page.",
+  "preset_editor.api_key_claude_code_readonly": "No API key — the claude CLI handles auth. Run `claude` or `claude setup-token` to log in.",
   "preset_editor.field_edit": "edit",
   "preset_editor.field_streaming": "streaming",
   "preset_editor.field_karma": "karma",

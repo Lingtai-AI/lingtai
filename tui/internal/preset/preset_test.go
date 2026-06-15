@@ -114,8 +114,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 10 {
-			t.Fatalf("expected 10 presets, got %d", len(presets))
+		if len(presets) != 11 {
+			t.Fatalf("expected 11 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -124,7 +124,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "custom"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "claude-code", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -168,6 +168,7 @@ func writePresetFile(t *testing.T, dir, name, provider, apiKeyEnv string) string
 func TestResolveRefs_ValidityGuard(t *testing.T) {
 	dir := t.TempDir()
 	codexRef := writePresetFile(t, dir, "codex", "codex", "")
+	claudeCodeRef := writePresetFile(t, dir, "claude-code", "claude-code", "")
 	customRef := writePresetFile(t, dir, "custom", "custom", "")
 	keyedRef := writePresetFile(t, dir, "minimax", "minimax", "FOO_API_KEY")
 	missingRef := filepath.Join(dir, "nope.json")
@@ -185,6 +186,8 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 	}{
 		{"codex no OAuth", codexRef, keysEmpty, AuthState{}, true, false},
 		{"codex with OAuth", codexRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, true},
+		{"claude-code no CLI", claudeCodeRef, keysEmpty, AuthState{}, true, false},
+		{"claude-code with CLI", claudeCodeRef, keysEmpty, AuthState{ClaudeCodeAvailable: true}, true, true},
 		{"keyless non-codex is invalid", customRef, keysEmpty, AuthState{}, true, false},
 		{"keyed with key present", keyedRef, keysWith, AuthState{}, true, true},
 		{"keyed with key absent", keyedRef, keysEmpty, AuthState{}, true, false},

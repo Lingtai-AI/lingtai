@@ -3959,6 +3959,10 @@ func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
 	if m.getPresetProvider(p) == "codex" {
 		return false
 	}
+	// claude-code authenticates via the local `claude` CLI, not a pasted key.
+	if m.getPresetProvider(p) == "claude-code" {
+		return false
+	}
 	envName, ok := llmStringField(p, "api_key_env")
 	if !ok || envName == "" {
 		return false

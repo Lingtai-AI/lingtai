@@ -519,7 +519,10 @@ func (m PropsModel) renderLeft(maxW int) string {
 
 			if len(allowedRefs) > 0 {
 				cfg, _ := config.LoadConfig(m.globalDir)
-				auth := preset.AuthState{CodexOAuthConfigured: codexOAuthConfigured(m.globalDir)}
+				auth := preset.AuthState{
+					CodexOAuthConfigured: codexOAuthConfigured(m.globalDir),
+					ClaudeCodeAvailable:  claudeCodeAvailable(),
+				}
 				resolved := preset.ResolveRefsWithAuth(allowedRefs, cfg.Keys, auth)
 				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))
 				for _, rr := range resolved {

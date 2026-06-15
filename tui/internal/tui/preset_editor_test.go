@@ -535,10 +535,10 @@ func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset("fast"), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
 
-	m.cycleFocused(+1) // codex -> custom in provider picker order.
+	m.cycleFocused(+1) // codex -> claude-code in provider picker order.
 	llm := m.working.Manifest["llm"].(map[string]interface{})
-	if got := llm["provider"]; got != "custom" {
-		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
+	if got := llm["provider"]; got != "claude-code" {
+		t.Fatalf("provider after cycling from codex = %#v, want claude-code", got)
 	}
 	if got, _ := llm["service_tier"].(string); got != "fast" {
 		t.Fatalf("provider switch should preserve existing service_tier; got %#v", llm["service_tier"])

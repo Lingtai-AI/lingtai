@@ -150,6 +150,9 @@ var providerModels = map[string][]string{
 	// included or excluded (e.g. gpt-5.5-pro is ChatGPT-Pro-only and not
 	// served on the codex endpoint, so we omit it to avoid 4xx breakage).
 	"codex": {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
+	// claude-code: aliases passed to `claude --model` (resolve to the latest
+	// of each tier). Full ids (e.g. claude-sonnet-4-5) also work via free-text.
+	"claude-code": {"sonnet", "opus", "haiku"},
 }
 
 var codexServiceTierOptions = []string{"normal", "fast"}
@@ -598,6 +601,11 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
 			return *m, nil
 		}
+		// claude-code authenticates via the local `claude` CLI — no API key.
+		if asString(m.llmMap()["provider"]) == "claude-code" {
+			m.saveErr = i18n.T("preset_editor.api_key_claude_code_readonly")
+			return *m, nil
+		}
 		// Edit the live key buffer, not the env-var-name. We start
 		// blank rather than prefilling the existing value so the user
 		// can paste a new key without first deleting the masked
@@ -936,7 +944,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feProvider:
 		// Order matches the builtin presets (preset.go BuiltinPresets).
 		// Keep this in sync when adding a new provider/builtin.
-		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "custom"}
+		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "claude-code", "custom"}
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
 		// Reset model to the new provider's first canonical entry when the

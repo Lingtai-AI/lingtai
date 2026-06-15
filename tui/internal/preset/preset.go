@@ -215,7 +215,7 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7, "custom": 8,
+		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7, "claude-code": 8, "custom": 9,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -478,6 +478,7 @@ func BuiltinPresets() []Preset {
 		nvidiaPreset(),
 		openrouterPreset(),
 		codexPreset(),
+		claudeCodePreset(),
 		customPreset(),
 	}
 }
@@ -497,6 +498,7 @@ var builtinNames = map[string]bool{
 	"openrouter":  true,
 	"codex":       true,
 	"codex_oauth": true,
+	"claude-code": true,
 	"custom":      true,
 }
 
@@ -587,6 +589,13 @@ type AuthState struct {
 	// not import the tui package (import cycle), so this is computed by the
 	// caller and passed in.
 	CodexOAuthConfigured bool
+
+	// ClaudeCodeAvailable is true when the `claude` CLI is installed and on
+	// PATH. The claude-code provider authenticates through the CLI's own
+	// stored credentials, so availability of the binary is the credential
+	// signal we can check without importing the tui package. Computed by the
+	// caller (exec.LookPath) and passed in.
+	ClaudeCodeAvailable bool
 }
 
 // ResolveRefs expands and inspects a list of preset path strings. For
@@ -662,6 +671,12 @@ func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) R
 			// Codex declares no api_key_env by design — it uses ChatGPT
 			// OAuth (codex-auth.json). Valid only when OAuth is configured.
 			r.HasKey = auth.CodexOAuthConfigured
+		case provider == "claude-code":
+			// claude-code declares no api_key_env — the `claude` CLI owns
+			// auth (its stored subscription/OAuth credentials). Valid when
+			// the CLI is installed; runtime surfaces a login error if the
+			// user has not authenticated yet.
+			r.HasKey = auth.ClaudeCodeAvailable
 		default:
 			// No api_key_env and not codex: no configured credential and no
 			// OAuth, so the preset is not valid. (A preset that genuinely
@@ -1003,6 +1018,31 @@ func codexPreset() Preset {
 			"capabilities": map[string]interface{}{
 				"web_search": cx,
 				"vision":     cx,
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
+func claudeCodePreset() Preset {
+	return Preset{
+		Name:        "claude-code",
+		Description: PresetDescription{Summary: "Claude subscription (Pro/Max) via the local claude CLI — no API key"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				// Drives the local `claude` CLI as the agent's reasoning core
+				// on your Claude subscription. Auth is owned by the CLI itself
+				// (run `claude` or `claude setup-token` to log in) — there is no
+				// api_key_env and no base_url. Model is a claude alias
+				// (sonnet/opus/haiku); the list is curated in preset_editor.go.
+				"provider": "claude-code", "model": "sonnet",
+				"api_key": nil, "api_key_env": "",
+			},
+			// The claude-code brain handles text + tool calls only (no native
+			// vision/media through the CLI). Web search routes through the
+			// provider-agnostic duckduckgo backend, same as the API presets.
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
 				"skills":     skillsDefault(),
 			},
 		},

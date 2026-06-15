@@ -1560,6 +1560,16 @@ func codexOAuthConfigured(globalDir string) bool {
 	return json.Unmarshal(data, &tokens) == nil && tokens.RefreshToken != ""
 }
 
+// claudeCodeAvailable reports whether the `claude` CLI is installed and on
+// PATH. The claude-code provider authenticates through the CLI's own stored
+// subscription/OAuth credentials, so the presence of the binary is the
+// credential signal the TUI can check. Actual login state is verified by the
+// CLI at runtime (the kernel adapter surfaces a login error if not authed).
+func claudeCodeAvailable() bool {
+	_, err := exec.LookPath("claude")
+	return err == nil
+}
+
 // validateCodexAuthForAgents scans all agent directories under projectDir
 // for init.json files whose active/default preset is codex. If any exist
 // but ~/.lingtai-tui/codex-auth.json is missing or invalid, returns a
