@@ -10,9 +10,9 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 36) |
+| `CurrentVersion` | `tui/internal/migrate/migrate.go:12` | latest version compiled into this binary (currently 38) |
 | `Migration` struct | `tui/internal/migrate/migrate.go:20` | `{Version int, Name string, Fn func(string) error}` |
-| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m036, append-only |
+| `migrations` slice | `tui/internal/migrate/migrate.go:27` | ordered list of all m001..m038, append-only |
 | `Run(lingtaiDir)` | `tui/internal/migrate/migrate.go:68` | reads `meta.json` → runs pending migrations → persists atomically |
 | `StampCurrent(lingtaiDir)` | `tui/internal/migrate/migrate.go:116` | stamps `CurrentVersion` without running migrations (fresh projects) |
 | `metaFile` struct | `tui/internal/migrate/migrate.go:14` | `{Version int, AddonCommentCleanupNotified bool}` |
@@ -26,6 +26,8 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 | m034 | `tui/internal/migrate/m034_library_skills_caps.go:23` | rename capability keys `codex`→`library` and `library`→`skills` |
 | m035 | `tui/internal/migrate/m035_remove_brief.go:13` | strip secretary-era brief plumbing: delete `system/brief.md`, drop `brief`/`brief_file` keys from each agent `init.json`, drop `brief` from `human/settings.json` |
 | m036 | `tui/internal/migrate/m036_sqlite_log_backfill.go:34` | optional command-line prompt/progress to backfill stopped agents' historical `events.jsonl` into derived `logs/log.sqlite`; safe to skip |
+| m037 | `tui/internal/migrate/m037_preset_skills_paths.go` | patch saved preset skill path overrides for the shared-library split |
+| m038 | `tui/internal/migrate/m038_agent_init_context_preset_repair.go` | repair existing agent `init.json`: copy legacy root `manifest.context_limit` into `manifest.llm.context_limit` and rewrite stale/missing codex preset refs to `codex-gpt5.5.json` when available |
 
 Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002 is a no-op `func(_ string) error { return nil }` — it preserves the version slot.
 
@@ -45,7 +47,7 @@ Each migration file exports one `func migrateXxx(lingtaiDir string) error`. m002
 ## State
 
 - **`<project>/.lingtai/meta.json`** — `{"version": <N>, "addon_comment_cleanup_notified": <bool>}`. Written atomically (temp+rename) on every migration run.
-- **Per-agent `init.json`** — mutated by several migrations (m017 rename caps, m024 add active preset, m026 path form, m027 strip media, m028 addons→MCP, m029 allowed list, m034 library/skills capability keys).
+- **Per-agent `init.json`** — mutated by several migrations (m017 rename caps, m024 add active preset, m026 path form, m027 strip media, m028 addons→MCP, m029 allowed list, m034 library/skills capability keys, m038 context/preset repair).
 
 ## Notes
 

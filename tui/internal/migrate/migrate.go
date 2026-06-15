@@ -9,7 +9,7 @@ import (
 
 // CurrentVersion is the latest migration version compiled into this binary.
 // IMPORTANT: when bumping, also bump portal/internal/migrate/migrate.go (see CLAUDE.md).
-const CurrentVersion = 37
+const CurrentVersion = 38
 
 type metaFile struct {
 	Version                     int  `json:"version"`
@@ -62,6 +62,7 @@ var migrations = []Migration{
 	{Version: 35, Name: "remove-brief", Fn: migrateRemoveBrief},
 	{Version: 36, Name: "sqlite-log-backfill", Fn: migrateSQLiteLogBackfill},
 	{Version: 37, Name: "preset-skills-paths", Fn: migratePresetSkillsPaths},
+	{Version: 38, Name: "agent-init-context-preset-repair", Fn: migrateAgentInitContextPresetRepair},
 }
 
 // Run executes all pending migrations on the given .lingtai/ directory.
