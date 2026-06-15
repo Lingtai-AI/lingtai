@@ -527,3 +527,35 @@ func TestPickPreset_CodexEnterShowsMethodChooser(t *testing.T) {
 		t.Fatalf("chooser view should mention remote-friendly device code; view=%s", view)
 	}
 }
+
+// TestPickPreset_SetupModeCodexEnterRoutesToCredentials verifies that in
+// /setup mode, pressing Enter on the Codex credential row emits
+// ViewChangeMsg{View:"login"} — routing to the Setup → Credentials subpage —
+// instead of opening the inline browser/device-code chooser (which is the
+// first-run/non-setupMode path tested above).
+func TestPickPreset_SetupModeCodexEnterRoutesToCredentials(t *testing.T) {
+	dir := t.TempDir()
+	m := FirstRunModel{
+		step:      stepPickPreset,
+		globalDir: dir,
+		setupMode: true,
+		cursor:    0, // Codex credential row: no visible presets, so pickCodexAuthIdx == 0.
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.codexChoosingMethod {
+		t.Fatal("setup mode Codex row should NOT open the inline method chooser")
+	}
+	if cmd == nil {
+		t.Fatal("setup mode Codex row must return a command (ViewChangeMsg)")
+	}
+	msg := cmd()
+	vc, ok := msg.(ViewChangeMsg)
+	if !ok {
+		t.Fatalf("expected ViewChangeMsg; got %T: %v", msg, msg)
+	}
+	if vc.View != "login" {
+		t.Fatalf("expected ViewChangeMsg{View:\"login\"}; got View=%q", vc.View)
+	}
+}

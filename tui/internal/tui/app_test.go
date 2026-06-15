@@ -84,3 +84,27 @@ func TestHelpViewMouseWheelReachesViewport(t *testing.T) {
 		t.Fatal("mouse wheel in /help did not scroll viewport off the top")
 	}
 }
+
+func TestLoginCommandOpensSetupCredentialsSubpage(t *testing.T) {
+	a := App{currentView: appViewMail, globalDir: t.TempDir(), orchDir: t.TempDir()}
+	model, _ := a.handlePaletteCommand("login", "")
+	got := model.(App)
+	if got.currentView != appViewLogin {
+		t.Fatalf("/login currentView = %v, want appViewLogin compatibility surface", got.currentView)
+	}
+	if !got.login.setupSubpage {
+		t.Fatal("/login should route to the Setup credentials subpage, not a standalone login surface")
+	}
+}
+
+func TestSetupCredentialsArgsOpenCredentialsSubpage(t *testing.T) {
+	a := App{currentView: appViewMail, globalDir: t.TempDir(), projectDir: t.TempDir(), orchDir: t.TempDir()}
+	model, _ := a.handlePaletteCommand("setup", "credentials")
+	got := model.(App)
+	if got.currentView != appViewLogin {
+		t.Fatalf("/setup credentials currentView = %v, want appViewLogin credentials subpage", got.currentView)
+	}
+	if !got.login.setupSubpage {
+		t.Fatal("/setup credentials should use setup-subpage login model")
+	}
+}

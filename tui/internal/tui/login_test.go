@@ -173,3 +173,141 @@ func TestLoginModel_CodexEnterShowsMethodChooser(t *testing.T) {
 		t.Fatalf("chooser view should mention remote-friendly device code; view=%s", view)
 	}
 }
+
+// TestLoginModel_EnterWithNoCredentialsOpensMethodChooser verifies that
+// when the credentials page has no saved credentials, pressing Enter opens
+// the Codex browser/device-code chooser so the user can add their first
+// credential without leaving the page.
+func TestLoginModel_EnterWithNoCredentialsOpensMethodChooser(t *testing.T) {
+	dir := t.TempDir()
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 0 {
+		t.Fatalf("precondition: expected empty entries; got %#v", m.entries)
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("opening method chooser must not start a network command")
+	}
+	if !m.codexChoosingMethod {
+		t.Fatal("Enter with no credentials should open the Codex method chooser")
+	}
+	if m.codexLogging {
+		t.Fatal("method chooser should not start login yet")
+	}
+	if m.codexMethodCursor != 0 {
+		t.Fatalf("default method cursor = %d, want browser OAuth (0)", m.codexMethodCursor)
+	}
+
+	// View should contain the method chooser options.
+	m.width = 80
+	view := m.View()
+	if !strings.Contains(view, "Browser") {
+		t.Fatalf("chooser view should mention browser method; view=%q", view)
+	}
+}
+
+// TestLoginModel_EmptyViewShowsAddRow verifies the view shows an affordance
+// for adding a Codex credential when no credentials are saved yet.
+func TestLoginModel_EmptyViewShowsAddRow(t *testing.T) {
+	dir := t.TempDir()
+	m := NewLoginModel("", dir)
+	m.width = 80
+	view := m.View()
+	if !strings.Contains(view, "Add Codex OAuth") {
+		t.Fatalf("empty credentials view should show 'Add Codex OAuth' row; view=%q", view)
+	}
+	if !strings.Contains(view, "login with Codex") {
+		t.Fatalf("empty credentials footer should mention 'login with Codex'; view=%q", view)
+	}
+}
+
+// seedNonCodexAPIKey writes a non-Codex API key (zhipu) into the config so
+// NewLoginModel picks it up without a codex-auth.json present.
+func seedNonCodexAPIKey(t *testing.T, dir string) {
+	t.Helper()
+	cfg := `{"keys":{"zhipu":"sk-stub-zhipu-key"}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+}
+
+// TestLoginModel_NonCodexOnlyShowsAddCodexRow verifies that when only a
+// non-Codex credential exists (e.g. zhipu) and no codex-auth.json is present,
+// the view still renders the "Add Codex OAuth" virtual row.
+func TestLoginModel_NonCodexOnlyShowsAddCodexRow(t *testing.T) {
+	dir := t.TempDir()
+	seedNonCodexAPIKey(t, dir)
+
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 1 || m.entries[0].Provider == "codex" {
+		t.Fatalf("precondition: expected one non-Codex entry; got %#v", m.entries)
+	}
+
+	m.width = 80
+	view := m.View()
+	if !strings.Contains(view, "Add Codex OAuth") {
+		t.Fatalf("non-Codex-only credentials view should show 'Add Codex OAuth' row; view=%q", view)
+	}
+}
+
+// TestLoginModel_NonCodexOnlyEnterOnVirtualRowOpensChooser verifies that
+// navigating down onto the virtual "Add Codex OAuth" row and pressing Enter
+// opens the method chooser without starting any network operation.
+func TestLoginModel_NonCodexOnlyEnterOnVirtualRowOpensChooser(t *testing.T) {
+	dir := t.TempDir()
+	seedNonCodexAPIKey(t, dir)
+
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 1 {
+		t.Fatalf("precondition: expected one entry; got %d", len(m.entries))
+	}
+	// cursor starts at 0 (the zhipu entry). Navigate down to virtual row.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("Down should move cursor to virtual row (1); got %d", m.cursor)
+	}
+	// Press Enter on virtual row.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("Enter on virtual Add Codex row must not start a network command")
+	}
+	if !m.codexChoosingMethod {
+		t.Fatal("Enter on virtual Add Codex row should open the method chooser")
+	}
+	if m.codexLogging {
+		t.Fatal("method chooser must not start login yet")
+	}
+}
+
+// TestLoginModel_NonCodexOnlyCursorBoundedByVirtualRow verifies that cursor
+// navigation does not go past the virtual "Add Codex OAuth" row.
+func TestLoginModel_NonCodexOnlyCursorBoundedByVirtualRow(t *testing.T) {
+	dir := t.TempDir()
+	seedNonCodexAPIKey(t, dir)
+
+	m := NewLoginModel("", dir)
+	// Press down twice — should stop at index 1 (virtual row).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("cursor should be clamped at virtual row index 1; got %d", m.cursor)
+	}
+}
+
+func TestSetupCredentialsModelUsesSetupChrome(t *testing.T) {
+	dir := t.TempDir()
+	m := NewSetupCredentialsModel("", dir)
+	m.width = 100
+
+	if !m.setupSubpage {
+		t.Fatal("setup credentials constructor should mark LoginModel as a setup subpage")
+	}
+	view := m.View()
+	if !strings.Contains(view, "Setup") || !strings.Contains(view, "Credentials") {
+		t.Fatalf("setup credentials view should be titled as setup credentials; view=%s", view)
+	}
+	if !strings.Contains(view, "/setup") || !strings.Contains(view, "/login") {
+		t.Fatalf("setup credentials note should explain /setup ownership and /login shortcut; view=%s", view)
+	}
+}

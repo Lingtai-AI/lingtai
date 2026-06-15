@@ -557,6 +557,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a App) openSetupCredentials() (App, tea.Cmd) {
+	a.currentView = appViewLogin
+	a.login = NewSetupCredentialsModel(a.orchDir, a.globalDir)
+	return a, tea.Batch(a.login.Init(), a.sendSize())
+}
+
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	addMsg := func(text string) {
 		a.mail.AddSystemMessage(text)
@@ -720,10 +726,12 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case "login":
-		a.currentView = appViewLogin
-		a.login = NewLoginModel(a.orchDir, a.globalDir)
-		return a, tea.Batch(a.login.Init(), a.sendSize())
+		return a.openSetupCredentials()
 	case "setup":
+		trimmedArgs := strings.TrimSpace(args)
+		if strings.EqualFold(trimmedArgs, "credentials") || strings.EqualFold(trimmedArgs, "login") {
+			return a.openSetupCredentials()
+		}
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
@@ -1268,6 +1276,8 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
 		return a, tea.Batch(a.firstRun.Init(), a.sendSize())
+	case "login":
+		return a.openSetupCredentials()
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)

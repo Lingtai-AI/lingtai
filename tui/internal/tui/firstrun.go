@@ -1142,12 +1142,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor == pickNextIdx {
 					return m, m.enterAgentPresets()
 				}
-				// Codex 凭据 row: single-purpose OAuth login.
-				//   not authed         → start OAuth
-				//   authed, unarmed    → arm relogin; show confirm hint
-				//   authed, armed      → start OAuth (overwrites tokens)
-				//   logging in         → no-op
+				// Codex 凭据 row:
+				//   /setup mode        → open the Setup → Credentials subpage
+				//   first-run mode     → keep the inline OAuth bootstrap flow
+				// In /setup, credentials are owned by the dedicated credentials
+				// subpage so the same Codex browser/device-code chooser is used
+				// from `/setup credentials`, `/login`, and this row.
 				if m.cursor == pickCodexAuthIdx {
+					if m.setupMode {
+						return m, func() tea.Msg { return ViewChangeMsg{View: "login"} }
+					}
 					if m.codexLoggingIn {
 						return m, nil
 					}
@@ -2311,7 +2315,20 @@ func (m FirstRunModel) View() string {
 			label := i18n.T("preset.codex_credential_row_label")
 			labelStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			row := cursor + labelStyle.Render(label)
-			if m.codexAuth.valid {
+			if m.setupMode {
+				if m.codexAuth.valid {
+					okStyle := lipgloss.NewStyle().Foreground(ColorActive)
+					if m.codexAuth.email != "" {
+						row += "  " + okStyle.Render("✓ "+m.codexAuth.email)
+					} else {
+						row += "  " + okStyle.Render("✓ "+i18n.T("preset.codex_credential_authed_badge"))
+					}
+				}
+				if m.cursor == visibleCount {
+					row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_setup_hint"))
+				}
+				b.WriteString(row + "\n")
+			} else if m.codexAuth.valid {
 				// Login-only row: just confirm the authed state and
 				// point the user at 新建预设 for actual preset creation.
 				okStyle := lipgloss.NewStyle().Foreground(ColorActive)
@@ -2373,6 +2390,8 @@ func (m FirstRunModel) View() string {
 		// Codex 凭据 row exposes context-specific Del verbs; saved
 		// (non-template) presets keep the original "delete preset" hint.
 		switch {
+		case m.setupMode && m.cursor == visibleCount:
+			// Credential mutations live in Setup → Credentials in /setup mode.
 		case m.cursor == visibleCount && m.codexLoggingIn:
 			b.WriteString(StyleFaint.Render("  [Del] "+i18n.T("firstrun.preset_pick.codex_cancel_login")) + "\n")
 		case m.cursor == visibleCount && m.codexAuth.valid:
