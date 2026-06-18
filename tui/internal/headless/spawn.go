@@ -5,31 +5,51 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/globalmigrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
+const defaultReadyTimeout = 10 * time.Second
+
+var (
+	launchAgent             = process.LaunchAgent
+	findAgentProcesses      = process.FindAgentProcesses
+	terminateAgentProcesses = process.TerminateAgentProcesses
+	readHeartbeat           = fs.ReadHeartbeat
+	readySleep              = time.Sleep
+	readyPollInterval       = 200 * time.Millisecond
+	processExitGrace        = 2 * time.Second
+)
+
 // SpawnOpts holds the parsed flags for the spawn subcommand.
 type SpawnOpts struct {
-	Dir        string // target project directory (will be made absolute)
-	Preset     string // preset name
-	AgentName  string // agent name (empty = basename of Dir)
-	Language   string // "en", "zh", or "wen"
-	SkipLaunch bool   // skip agent launch (for testing)
+	Dir          string        // target project directory (will be made absolute)
+	Preset       string        // preset name
+	AgentName    string        // agent name (empty = basename of Dir)
+	Language     string        // "en", "zh", or "wen"
+	SkipLaunch   bool          // skip agent launch (for testing)
+	ReadyTimeout time.Duration // wait-ready timeout after launch
 }
 
 // SpawnOutput is the JSON response on success.
 type SpawnOutput struct {
-	Status     string `json:"status"`
-	ProjectDir string `json:"project_dir"`
-	AgentName  string `json:"agent_name"`
-	AgentDir   string `json:"agent_dir"`
-	Preset     string `json:"preset"`
-	Recipe     string `json:"recipe"`
-	PID        int    `json:"pid"`
+	Status                      string  `json:"status"`
+	ReadinessStatus             string  `json:"readiness_status"`
+	ProjectDir                  string  `json:"project_dir"`
+	AgentName                   string  `json:"agent_name"`
+	AgentDir                    string  `json:"agent_dir"`
+	Preset                      string  `json:"preset"`
+	Recipe                      string  `json:"recipe"`
+	PID                         int     `json:"pid"`
+	InspectableProcessConfirmed bool    `json:"inspectable_process_confirmed"`
+	HeartbeatConfirmed          bool    `json:"heartbeat_confirmed"`
+	HeartbeatAgeSeconds         float64 `json:"heartbeat_age_seconds,omitempty"`
+	ReadyTimeoutSeconds         float64 `json:"ready_timeout_seconds"`
 }
 
 // resolveAgentName returns AgentName if set, otherwise the basename of Dir.
@@ -77,9 +97,11 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	// Ensure venv exists, then always run the non-blocking upgrade check so
 	// newly-created/repaired runtimes do not stay on a stale lingtai wheel until
 	// the next launch.
-	if _, err := config.EnsureRuntime(globalDir); err != nil {
-		WriteError(stderr, "venv setup failed: "+err.Error(), "bootstrap_failed")
-		return 1
+	if !opts.SkipLaunch {
+		if _, err := config.EnsureRuntimeQuiet(globalDir, nil); err != nil {
+			WriteError(stderr, "venv setup failed: "+err.Error(), "bootstrap_failed")
+			return 1
+		}
 	}
 
 	// Bootstrap presets + assets
@@ -141,25 +163,130 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 
 	// Launch the agent (async — start and return immediately)
 	pid := 0
+	status := "created"
+	readinessStatus := "not_launched"
+	inspectableProcessConfirmed := false
+	heartbeatConfirmed := false
+	heartbeatAgeSeconds := 0.0
+	readyTimeout := readyTimeoutOrDefault(opts.ReadyTimeout)
 	if !opts.SkipLaunch {
 		lingtaiCmd := config.LingtaiCmd(globalDir)
-		cmd, err := process.LaunchAgent(lingtaiCmd, agentDir)
+		cmd, err := launchAgent(lingtaiCmd, agentDir)
 		if err != nil {
 			WriteError(stderr, "agent launch failed: "+err.Error(), "launch_failed")
 			return 1
 		}
 		pid = cmd.Process.Pid
 		cmd.Process.Release()
+
+		ready := waitForAgentReady(agentDir, readyTimeout)
+		if ready.Code != "ready" {
+			details := map[string]interface{}{
+				"agent_dir":                     agentDir,
+				"pid":                           pid,
+				"readiness_status":              ready.Code,
+				"inspectable_process_confirmed": ready.InspectableProcessConfirmed,
+				"heartbeat_confirmed":           ready.HeartbeatConfirmed,
+				"heartbeat":                     ready.Heartbeat,
+				"ready_timeout_seconds":         readyTimeout.Seconds(),
+			}
+			if cleanupErr := terminateAgentProcesses(agentDir); cleanupErr != nil {
+				details["cleanup_error"] = cleanupErr.Error()
+			}
+			WriteErrorDetail(stderr, ready.Message, ready.Code, details)
+			return 1
+		}
+		status = "ready"
+		readinessStatus = ready.Code
+		inspectableProcessConfirmed = ready.InspectableProcessConfirmed
+		heartbeatConfirmed = ready.HeartbeatConfirmed
+		heartbeatAgeSeconds = ready.Heartbeat.AgeSeconds
+		if ready.PID != 0 {
+			pid = ready.PID
+		}
 	}
 
 	WriteJSON(stdout, SpawnOutput{
-		Status:     "launched",
-		ProjectDir: opts.Dir,
-		AgentName:  agentName,
-		AgentDir:   agentDir,
-		Preset:     opts.Preset,
-		Recipe:     "plain",
-		PID:        pid,
+		Status:                      status,
+		ReadinessStatus:             readinessStatus,
+		ProjectDir:                  opts.Dir,
+		AgentName:                   agentName,
+		AgentDir:                    agentDir,
+		Preset:                      opts.Preset,
+		Recipe:                      "plain",
+		PID:                         pid,
+		InspectableProcessConfirmed: inspectableProcessConfirmed,
+		HeartbeatConfirmed:          heartbeatConfirmed,
+		HeartbeatAgeSeconds:         heartbeatAgeSeconds,
+		ReadyTimeoutSeconds:         readyTimeout.Seconds(),
 	})
 	return 0
+}
+
+type readinessResult struct {
+	Code                        string
+	Message                     string
+	PID                         int
+	InspectableProcessConfirmed bool
+	HeartbeatConfirmed          bool
+	Heartbeat                   fs.HeartbeatStatus
+}
+
+func readyTimeoutOrDefault(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return defaultReadyTimeout
+	}
+	return timeout
+}
+
+func waitForAgentReady(agentDir string, timeout time.Duration) readinessResult {
+	timeout = readyTimeoutOrDefault(timeout)
+	started := time.Now()
+	deadline := started.Add(timeout)
+	var lastHeartbeat fs.HeartbeatStatus
+	var lastPID int
+	var inspectable bool
+
+	for {
+		lastHeartbeat = readHeartbeat(agentDir, 3.0)
+		heartbeatConfirmed := lastHeartbeat.Fresh
+		procs := findAgentProcesses(agentDir)
+		inspectable = len(procs) > 0
+		if inspectable {
+			lastPID = procs[0].PID
+		}
+		if heartbeatConfirmed && inspectable {
+			status := fs.ReadStatus(agentDir)
+			if status.Runtime.PID != 0 {
+				lastPID = status.Runtime.PID
+			}
+			return readinessResult{
+				Code:                        "ready",
+				PID:                         lastPID,
+				InspectableProcessConfirmed: true,
+				HeartbeatConfirmed:          true,
+				Heartbeat:                   lastHeartbeat,
+			}
+		}
+		if !inspectable && time.Since(started) > processExitGrace {
+			return readinessResult{
+				Code:                        "process_exited_before_ready",
+				Message:                     fmt.Sprintf("agent process exited before writing an inspectable fresh heartbeat; see %s", filepath.Join(agentDir, "logs", "agent.log")),
+				InspectableProcessConfirmed: false,
+				HeartbeatConfirmed:          heartbeatConfirmed,
+				Heartbeat:                   lastHeartbeat,
+			}
+		}
+		if time.Now().After(deadline) {
+			return readinessResult{
+				Code:                        "readiness_timeout",
+				Message:                     fmt.Sprintf("agent did not become inspectable with a fresh heartbeat within %s; see %s", timeout, filepath.Join(agentDir, "logs", "agent.log")),
+				PID:                         lastPID,
+				InspectableProcessConfirmed: inspectable,
+				HeartbeatConfirmed:          heartbeatConfirmed,
+				Heartbeat:                   lastHeartbeat,
+			}
+		}
+		readySleep(readyPollInterval)
+	}
 }

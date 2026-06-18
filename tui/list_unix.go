@@ -69,6 +69,10 @@ func listMain() {
 	}
 
 	if len(procs) == 0 {
+		if opts.JSON {
+			printListJSON(os.Stdout, procs, nil, opts)
+			return
+		}
 		if opts.FilterDir != "" {
 			fmt.Printf("No lingtai processes running in %s.\n", opts.FilterDir)
 		} else {
@@ -111,6 +115,11 @@ func listMain() {
 
 	phantomDirs := detectPhantomDirs(procs, opts.FilterDir)
 	annotateListProcs(procs)
+	procs = collapseListProcsByAgentDir(procs)
+	if opts.JSON {
+		printListJSON(os.Stdout, procs, phantomDirs, opts)
+		return
+	}
 	printList(os.Stdout, procs, phantomDirs, opts, true)
 	fmt.Printf("\n%d process(es) running.\n", len(procs))
 	printListWarnings(os.Stdout, phantomDirs, opts.FilterDir)

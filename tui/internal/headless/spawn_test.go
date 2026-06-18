@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/process"
 )
 
 func TestRunSpawn_RejectsExistingLingtaiDir(t *testing.T) {
@@ -149,8 +152,11 @@ func TestRunSpawn_SuccessOutput_HasRequiredFields(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("stdout not valid JSON: %v\nbody: %s", err, stdout.String())
 	}
-	if result.Status != "launched" {
-		t.Errorf("status = %q, want %q", result.Status, "launched")
+	if result.Status != "created" {
+		t.Errorf("status = %q, want %q", result.Status, "created")
+	}
+	if result.ReadinessStatus != "not_launched" {
+		t.Errorf("readiness_status = %q, want %q", result.ReadinessStatus, "not_launched")
 	}
 	if result.AgentName != "test-agent" {
 		t.Errorf("agent_name = %q, want %q", result.AgentName, "test-agent")
@@ -160,6 +166,84 @@ func TestRunSpawn_SuccessOutput_HasRequiredFields(t *testing.T) {
 	}
 	if result.Recipe != "plain" {
 		t.Errorf("recipe = %q, want %q", result.Recipe, "plain")
+	}
+	if result.ReadyTimeoutSeconds != defaultReadyTimeout.Seconds() {
+		t.Errorf("ready_timeout_seconds = %v, want %v", result.ReadyTimeoutSeconds, defaultReadyTimeout.Seconds())
+	}
+}
+
+func TestWaitForAgentReadySuccess(t *testing.T) {
+	restore := stubReadyDeps(t)
+	defer restore()
+
+	readHeartbeat = func(string, float64) fs.HeartbeatStatus {
+		return fs.HeartbeatStatus{Exists: true, Fresh: true, Timestamp: 1, AgeSeconds: 0.1}
+	}
+	findAgentProcesses = func(string) []process.AgentProcess {
+		return []process.AgentProcess{{PID: 777, Command: "python -m lingtai run /tmp/a"}}
+	}
+
+	got := waitForAgentReady(t.TempDir(), 50*time.Millisecond)
+	if got.Code != "ready" {
+		t.Fatalf("Code = %q, want ready", got.Code)
+	}
+	if got.PID != 777 || !got.HeartbeatConfirmed || !got.InspectableProcessConfirmed {
+		t.Fatalf("unexpected readiness result: %+v", got)
+	}
+}
+
+func TestWaitForAgentReadyTimeout(t *testing.T) {
+	restore := stubReadyDeps(t)
+	defer restore()
+
+	readHeartbeat = func(string, float64) fs.HeartbeatStatus {
+		return fs.HeartbeatStatus{Exists: false, Fresh: false}
+	}
+	findAgentProcesses = func(string) []process.AgentProcess {
+		return []process.AgentProcess{{PID: 777, Command: "python -m lingtai run /tmp/a"}}
+	}
+
+	got := waitForAgentReady(t.TempDir(), 5*time.Millisecond)
+	if got.Code != "readiness_timeout" {
+		t.Fatalf("Code = %q, want readiness_timeout", got.Code)
+	}
+	if !got.InspectableProcessConfirmed || got.HeartbeatConfirmed {
+		t.Fatalf("unexpected readiness result: %+v", got)
+	}
+}
+
+func TestWaitForAgentReadyProcessExited(t *testing.T) {
+	restore := stubReadyDeps(t)
+	defer restore()
+	processExitGrace = time.Millisecond
+
+	readHeartbeat = func(string, float64) fs.HeartbeatStatus {
+		return fs.HeartbeatStatus{Exists: false, Fresh: false}
+	}
+	findAgentProcesses = func(string) []process.AgentProcess { return nil }
+
+	got := waitForAgentReady(t.TempDir(), 50*time.Millisecond)
+	if got.Code != "process_exited_before_ready" {
+		t.Fatalf("Code = %q, want process_exited_before_ready", got.Code)
+	}
+}
+
+func stubReadyDeps(t *testing.T) func() {
+	t.Helper()
+	origFind := findAgentProcesses
+	origRead := readHeartbeat
+	origSleep := readySleep
+	origPoll := readyPollInterval
+	origGrace := processExitGrace
+	readySleep = func(time.Duration) {}
+	readyPollInterval = time.Millisecond
+	processExitGrace = 500 * time.Millisecond
+	return func() {
+		findAgentProcesses = origFind
+		readHeartbeat = origRead
+		readySleep = origSleep
+		readyPollInterval = origPoll
+		processExitGrace = origGrace
 	}
 }
 

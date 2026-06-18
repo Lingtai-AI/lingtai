@@ -1042,7 +1042,7 @@ func presetsMain() {
 func spawnMain() {
 	if len(os.Args) < 3 {
 		headless.ExitError(
-			"usage: lingtai-tui spawn <directory> --preset <name> [--agent-name <name>] [--language <en|zh|wen>]",
+			"usage: lingtai-tui spawn <directory> --preset <name> [--agent-name <name>] [--language <en|zh|wen>] [--wait-ready-timeout <duration>]",
 			"invalid_args")
 	}
 
@@ -1072,6 +1072,16 @@ func spawnMain() {
 				headless.ExitError("--language must be en, zh, or wen", "invalid_args")
 			}
 			opts.Language = lang
+		case "--wait-ready-timeout":
+			if i+1 >= len(os.Args) {
+				headless.ExitError("--wait-ready-timeout requires a value", "invalid_args")
+			}
+			i++
+			timeout, err := time.ParseDuration(os.Args[i])
+			if err != nil || timeout <= 0 {
+				headless.ExitError("--wait-ready-timeout must be a positive duration like 10s", "invalid_args")
+			}
+			opts.ReadyTimeout = timeout
 		default:
 			headless.ExitError("unknown flag: "+os.Args[i], "invalid_args")
 		}

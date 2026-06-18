@@ -9,14 +9,19 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// withTempHome redirects HOME to a temp dir for isolated preset tests.
+// withTempHome redirects home env vars to a temp dir for isolated preset tests.
 // Follows the same pattern as preset_test.go:withTempPresets.
 func withTempHome(t *testing.T) {
 	t.Helper()
-	orig := os.Getenv("HOME")
+	origHome := os.Getenv("HOME")
+	origUserProfile := os.Getenv("USERPROFILE")
 	tmp := t.TempDir()
 	os.Setenv("HOME", tmp)
-	t.Cleanup(func() { os.Setenv("HOME", orig) })
+	os.Setenv("USERPROFILE", tmp)
+	t.Cleanup(func() {
+		os.Setenv("HOME", origHome)
+		os.Setenv("USERPROFILE", origUserProfile)
+	})
 }
 
 func TestRunPresets_EmptyDir_ReturnsEmptyList(t *testing.T) {

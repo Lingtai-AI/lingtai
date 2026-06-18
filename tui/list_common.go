@@ -17,6 +17,7 @@ type listOptions struct {
 	FilterDir string
 	Detailed  bool
 	Admin     bool
+	JSON      bool
 }
 
 type listProc struct {
@@ -40,6 +41,30 @@ type listAgentInfo struct {
 	ReadError      string
 }
 
+type listJSONOutput struct {
+	Status      string         `json:"status"`
+	Count       int            `json:"count"`
+	FilterDir   string         `json:"filter_dir,omitempty"`
+	Processes   []listJSONProc `json:"processes"`
+	PhantomDirs []string       `json:"phantom_dirs,omitempty"`
+}
+
+type listJSONProc struct {
+	PID        string             `json:"pid"`
+	Uptime     string             `json:"uptime,omitempty"`
+	Role       string             `json:"role"`
+	Agent      string             `json:"agent"`
+	Project    string             `json:"project"`
+	AgentDir   string             `json:"agent_dir"`
+	Address    string             `json:"address"`
+	AgentName  string             `json:"agent_name"`
+	Nickname   string             `json:"nickname,omitempty"`
+	State      string             `json:"state"`
+	ReadError  string             `json:"read_error,omitempty"`
+	Heartbeat  fs.HeartbeatStatus `json:"heartbeat"`
+	LockExists bool               `json:"lock_exists"`
+}
+
 func parseListArgs(args []string) (listOptions, error) {
 	var opts listOptions
 	for _, arg := range args {
@@ -49,14 +74,16 @@ func parseListArgs(args []string) (listOptions, error) {
 		case "--admin":
 			opts.Admin = true
 			opts.Detailed = true
+		case "--json":
+			opts.JSON = true
 		case "--help", "-h":
-			return opts, fmt.Errorf("usage: lingtai-tui list [--detailed|-d] [--admin] [dir]")
+			return opts, fmt.Errorf("usage: lingtai-tui list [--detailed|-d] [--admin] [--json] [dir]")
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return opts, fmt.Errorf("unknown list flag %q\nusage: lingtai-tui list [--detailed|-d] [--admin] [dir]", arg)
+				return opts, fmt.Errorf("unknown list flag %q\nusage: lingtai-tui list [--detailed|-d] [--admin] [--json] [dir]", arg)
 			}
 			if opts.FilterDir != "" {
-				return opts, fmt.Errorf("list accepts at most one directory filter\nusage: lingtai-tui list [--detailed|-d] [--admin] [dir]")
+				return opts, fmt.Errorf("list accepts at most one directory filter\nusage: lingtai-tui list [--detailed|-d] [--admin] [--json] [dir]")
 			}
 			abs, err := filepath.Abs(arg)
 			if err != nil {
@@ -219,6 +246,35 @@ func annotateListProcs(procs []listProc) {
 	}
 }
 
+func collapseListProcsByAgentDir(procs []listProc) []listProc {
+	if len(procs) < 2 {
+		return procs
+	}
+	out := make([]listProc, 0, len(procs))
+	indexByDir := map[string]int{}
+	for _, p := range procs {
+		if p.Dir == "" {
+			out = append(out, p)
+			continue
+		}
+		idx, ok := indexByDir[p.Dir]
+		if !ok {
+			indexByDir[p.Dir] = len(out)
+			out = append(out, p)
+			continue
+		}
+		status := fs.ReadStatus(p.Dir)
+		statusPID := ""
+		if status.Runtime.PID != 0 {
+			statusPID = fmt.Sprint(status.Runtime.PID)
+		}
+		if statusPID != "" && p.PID == statusPID {
+			out[idx] = p
+		}
+	}
+	return out
+}
+
 func printList(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts listOptions, showUptime bool) {
 	if opts.Admin {
 		if showUptime {
@@ -274,6 +330,51 @@ func printList(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts 
 			}
 		}
 	}
+}
+
+func printListJSON(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts listOptions) {
+	phantoms := make([]string, 0, len(phantomDirs))
+	for dir := range phantomDirs {
+		phantoms = append(phantoms, dir)
+	}
+	sort.Strings(phantoms)
+
+	out := listJSONOutput{
+		Status:      "ok",
+		Count:       len(procs),
+		FilterDir:   opts.FilterDir,
+		Processes:   make([]listJSONProc, 0, len(procs)),
+		PhantomDirs: phantoms,
+	}
+	for _, p := range procs {
+		role := roleLabel(p.Info)
+		address := firstNonEmpty(p.Info.Address, p.Agent)
+		name := firstNonEmpty(p.Info.AgentName, p.Agent)
+		state := firstNonEmpty(p.Info.State, "unknown")
+		out.Processes = append(out.Processes, listJSONProc{
+			PID:        p.PID,
+			Uptime:     p.Uptime,
+			Role:       role,
+			Agent:      p.Agent,
+			Project:    p.Project,
+			AgentDir:   p.Dir,
+			Address:    address,
+			AgentName:  name,
+			Nickname:   p.Info.Nickname,
+			State:      state,
+			ReadError:  p.Info.ReadError,
+			Heartbeat:  fs.ReadHeartbeat(p.Dir, fs.AgentAliveThresholdSec),
+			LockExists: fileExists(filepath.Join(p.Dir, ".agent.lock")),
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func printListWarnings(w io.Writer, phantomDirs map[string]bool, filterDir string) {
