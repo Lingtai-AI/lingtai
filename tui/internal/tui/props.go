@@ -361,9 +361,11 @@ func (m PropsModel) View() string {
 
 	var footerLine string
 	if m.detailOpen {
-		footerLine = "  esc " + i18n.T("props.detail_back_to_summary") + scrollHint
+		footerLine = "  ctrl+r reload " + RuneBullet +
+			" esc " + i18n.T("props.detail_back_to_summary") + scrollHint
 	} else {
-		footerLine = "  " + i18n.T("hints.props_off") + " " + RuneBullet +
+		footerLine = "  ctrl+r reload " + RuneBullet +
+			" " + i18n.T("hints.props_off") + " " + RuneBullet +
 			" esc " + i18n.T("manage.back") + " " + RuneBullet +
 			" " + i18n.T("hints.props_select") + " " + RuneBullet +
 			" ctrl+d " + i18n.T("props.detail_open") + scrollHint
