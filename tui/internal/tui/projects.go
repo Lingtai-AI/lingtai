@@ -228,7 +228,9 @@ func (m ProjectsModel) Update(msg tea.Msg) (ProjectsModel, tea.Cmd) {
 				return m, func() tea.Msg { return agoraTabToggleMsg{} }
 			}
 			return m, nil
-		case "r":
+		case "ctrl+r", "r":
+			// ctrl+r is the canonical refresh across views; bare r is kept
+			// as a pre-existing alias for this list-only view.
 			return m, m.loadData
 		default:
 			m.viewport, cmd = m.viewport.Update(msg)

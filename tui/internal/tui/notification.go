@@ -180,14 +180,14 @@ func NewNotificationModel(agentDir string) NotificationModel {
 
 func newNotificationViewer(agentDir string) MarkdownViewerModel {
 	viewer := NewMarkdownViewer(buildNotificationEntries(agentDir), notificationTitleFor(agentDir))
-	viewer.FooterHint = "r reload"
+	viewer.FooterHint = "ctrl+r reload"
 	return viewer
 }
 
 func (m NotificationModel) Init() tea.Cmd { return m.inner.Init() }
 
 func (m NotificationModel) Update(msg tea.Msg) (NotificationModel, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "r" {
+	if key, ok := msg.(tea.KeyPressMsg); ok && (key.String() == "ctrl+r" || key.String() == "r") {
 		width, height := m.inner.width, m.inner.height
 		m.inner = newNotificationViewer(m.agentDir)
 		if width > 0 && height > 0 {

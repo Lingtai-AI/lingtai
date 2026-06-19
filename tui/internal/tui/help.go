@@ -71,6 +71,16 @@ func NewHelpModel() HelpModel {
 func (m HelpModel) Init() tea.Cmd { return m.inner.Init() }
 
 func (m HelpModel) Update(msg tea.Msg) (HelpModel, tea.Cmd) {
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+r" {
+		width, height := m.inner.width, m.inner.height
+		m.inner = NewMarkdownViewer(buildHelpEntries(), i18n.T("help.title"))
+		if width > 0 && height > 0 {
+			var cmd tea.Cmd
+			m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: width, Height: height})
+			return m, cmd
+		}
+		return m, nil
+	}
 	var cmd tea.Cmd
 	m.inner, cmd = m.inner.Update(msg)
 	return m, cmd

@@ -70,6 +70,20 @@ func codexTitleFor(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, name)
 }
 
+// reloadInner rebuilds the knowledge catalog for the selected agent from disk,
+// resetting the inner markdown viewer to the top. Invoked by ctrl+r.
+func (m CodexModel) reloadInner() (CodexModel, tea.Cmd) {
+	entries := buildAgentCodexEntries(m.selectedDir)
+	m.inner = NewMarkdownViewer(entries, codexTitleFor(m.selectedDir))
+	m.inner.FooterHint = i18n.T("hints.props_select")
+	if m.width > 0 && m.height > 0 {
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		return m, cmd
+	}
+	return m, nil
+}
+
 func (m CodexModel) loadAgents() tea.Msg {
 	net, _ := fs.BuildNetwork(m.baseDir)
 	var nodes []fs.AgentNode
@@ -185,6 +199,8 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 			return m, cmd
 		}
 		switch msg.String() {
+		case "ctrl+r":
+			return m.reloadInner()
 		case "ctrl+t":
 			if len(m.agentNodes) == 0 {
 				return m, nil

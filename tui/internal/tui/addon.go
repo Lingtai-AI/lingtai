@@ -58,6 +58,9 @@ func (m AddonModel) Update(msg tea.Msg) (AddonModel, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			return m, func() tea.Msg { return AddonSavedMsg{} }
+		case "ctrl+r":
+			m.addonConfigs, m.addonErrors = readAddonConfigs(m.lingtaiDir)
+			return m, nil
 		}
 	}
 	return m, nil

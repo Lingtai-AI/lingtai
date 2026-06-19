@@ -173,6 +173,9 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		case "ctrl+r":
+			// Reload the dashboard data (network, tokens, agent status) from disk.
+			return m, m.loadData
 		case "ctrl+t":
 			m.pickerOpen = true
 			for i, n := range m.agentNodes {

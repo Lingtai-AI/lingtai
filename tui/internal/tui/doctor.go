@@ -61,6 +61,12 @@ func NewDoctorModel(orchDir, globalDir string) DoctorModel {
 }
 
 func (m DoctorModel) Init() tea.Cmd {
+	return m.runDoctorCmd()
+}
+
+// runDoctorCmd returns the command that runs the diagnostic. Shared by Init()
+// (initial load) and the ctrl+r refresh handler.
+func (m DoctorModel) runDoctorCmd() tea.Cmd {
 	orchDir := m.orchDir
 	globalDir := m.globalDir
 	return func() tea.Msg {
@@ -77,8 +83,13 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 		m.lines = msg.Lines
 		m.loading = false
 	case tea.KeyPressMsg:
-		if msg.String() == "esc" {
+		switch msg.String() {
+		case "esc":
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		case "ctrl+r":
+			// Re-run the full diagnostic from scratch.
+			m.loading = true
+			return m, m.runDoctorCmd()
 		}
 	}
 	return m, nil

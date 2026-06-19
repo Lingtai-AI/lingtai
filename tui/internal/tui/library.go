@@ -722,6 +722,19 @@ func (m LibraryModel) Init() tea.Cmd {
 	return tea.Batch(m.inner.Init(), m.loadAgents)
 }
 
+func (m LibraryModel) reloadCatalog() (LibraryModel, tea.Cmd) {
+	entries := buildAgentLibraryCatalog(m.selectedDir, m.lang)
+	m.inner = NewMarkdownViewer(entries, libraryTitleFor(m.selectedDir))
+	m.inner.FooterHint = i18n.T("hints.skills_catalog")
+	m.drillIn = nil
+	if m.width > 0 && m.height > 0 {
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		return m, cmd
+	}
+	return m, nil
+}
+
 const (
 	libraryHeaderLines = 2
 	libraryFooterLines = 2
@@ -827,6 +840,8 @@ func (m LibraryModel) Update(msg tea.Msg) (LibraryModel, tea.Cmd) {
 			return m, cmd
 		}
 		switch msg.String() {
+		case "ctrl+r":
+			return m.reloadCatalog()
 		case "ctrl+t":
 			if len(m.agentNodes) == 0 {
 				// Picker opens even if empty so the user gets a visual cue;

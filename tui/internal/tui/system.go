@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -181,6 +181,18 @@ func (m SystemModel) Init() tea.Cmd {
 	return tea.Batch(m.inner.Init(), m.loadAgents)
 }
 
+func (m SystemModel) reloadInner() (SystemModel, tea.Cmd) {
+	entries := buildAgentSystemEntries(m.selectedDir)
+	m.inner = NewMarkdownViewer(entries, systemTitleFor(m.selectedDir))
+	m.inner.FooterHint = i18n.T("hints.props_select")
+	if m.width > 0 && m.height > 0 {
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		return m, cmd
+	}
+	return m, nil
+}
+
 const (
 	systemHeaderLines = 2
 	systemFooterLines = 2
@@ -225,6 +237,8 @@ func (m SystemModel) Update(msg tea.Msg) (SystemModel, tea.Cmd) {
 			return m.updatePicker(msg)
 		}
 		switch msg.String() {
+		case "ctrl+r":
+			return m.reloadInner()
 		case "ctrl+t":
 			if len(m.agentNodes) == 0 {
 				return m, nil

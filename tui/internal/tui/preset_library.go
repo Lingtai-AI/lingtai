@@ -99,9 +99,9 @@ const (
 // PresetLibraryModel is the dedicated screen for browsing and tagging the
 // preset library at ~/.lingtai-tui/presets/.
 type PresetLibraryModel struct {
-	presets []preset.Preset
-	cursor  int
-	lang    string // "en", "zh", or "wen" — drives tier label rendering
+	presets   []preset.Preset
+	cursor    int
+	lang      string // "en", "zh", or "wen" — drives tier label rendering
 	globalDir string // ~/.lingtai-tui — plumbed through to PresetEditorModel
 	// activeRef is the home-shortened path of the currently-active
 	// preset for the agent this view is scoped to (manifest.preset.
@@ -110,10 +110,10 @@ type PresetLibraryModel struct {
 	// the agent's allow-list. Compared against preset.RefFor(p).
 	activeRef string
 
-	focus    presetLibraryFocus
-	tierIdx  int    // selection within the tag picker (0..len(tierValues), last = "untag")
-	saveErr  string // short error from the last save attempt
-	editor   PresetEditorModel // active when focus == presetLibFocusEditor
+	focus   presetLibraryFocus
+	tierIdx int               // selection within the tag picker (0..len(tierValues), last = "untag")
+	saveErr string            // short error from the last save attempt
+	editor  PresetEditorModel // active when focus == presetLibFocusEditor
 
 	width  int
 	height int
@@ -346,8 +346,9 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			m.focus = presetLibFocusEditor
 			m.saveErr = ""
 			return m, m.editor.Init()
-		case "r":
-			// Reload from disk.
+		case "ctrl+r", "r":
+			// Reload from disk. ctrl+r is the canonical refresh key; bare r
+			// is preserved as the pre-existing alias for this picker view.
 			m.presets, _ = preset.List()
 			if m.cursor >= len(m.presets) {
 				m.cursor = len(m.presets) - 1

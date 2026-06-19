@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -81,6 +81,18 @@ func mailboxOwnerName(agentDir string) string {
 	return name
 }
 
+func (m MailboxModel) reloadInner() (MailboxModel, tea.Cmd) {
+	entries := buildMailboxEntries(m.selectedDir)
+	m.inner = NewMarkdownViewer(entries, mailboxTitleFor(m.selectedDir))
+	m.inner.FooterHint = i18n.T("hints.props_select")
+	if m.width > 0 && m.height > 0 {
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		return m, cmd
+	}
+	return m, nil
+}
+
 func (m MailboxModel) loadAgents() tea.Msg {
 	net, _ := fs.BuildNetwork(m.baseDir)
 	var nodes []fs.AgentNode
@@ -135,6 +147,8 @@ func (m MailboxModel) Update(msg tea.Msg) (MailboxModel, tea.Cmd) {
 			return m.updatePicker(msg)
 		}
 		switch msg.String() {
+		case "ctrl+r":
+			return m.reloadInner()
 		case "ctrl+t":
 			if len(m.agentNodes) == 0 {
 				return m, nil

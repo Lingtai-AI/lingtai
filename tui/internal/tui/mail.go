@@ -778,6 +778,11 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "ctrl+r":
+			// Refresh the mail thread and agent state from disk. ctrl+r is a
+			// control key, so it does not interfere with typing `r` into the
+			// compose textarea (which falls through to the default branch).
+			return m, m.refreshMail
 		case "ctrl+o":
 			// Cycle: normal → thinking → extended → normal
 			switch m.verbose {
