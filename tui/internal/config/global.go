@@ -86,7 +86,18 @@ type TUIConfig struct {
 	// renderer appends a "… (+N chars)" indicator. Stored as omitempty so the
 	// untruncated default leaves no key in tui_config.json.
 	ToolCallTruncate int `json:"tool_call_truncate,omitempty"`
+	// AutoRefreshOff disables the 1s auto-refresh of reloadable views. Auto
+	// refresh is ON by default, so this is stored as an inverse flag with
+	// omitempty: the default (enabled) leaves no key in tui_config.json, and
+	// only an explicit opt-out writes "auto_refresh_off": true. Read via
+	// AutoRefreshEnabled() rather than this field directly.
+	AutoRefreshOff bool `json:"auto_refresh_off,omitempty"`
 }
+
+// AutoRefreshEnabled reports whether reloadable views should auto-refresh on
+// the 1s tick. Auto refresh is the default; only an explicit opt-out
+// (auto_refresh_off=true) turns it off.
+func (tc TUIConfig) AutoRefreshEnabled() bool { return !tc.AutoRefreshOff }
 
 // DefaultTUIConfig returns sensible defaults.
 func DefaultTUIConfig() TUIConfig {

@@ -126,6 +126,15 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		insightsCurrent = 1
 	}
 
+	// Auto-refresh: when on (the default), reloadable views (e.g. the kanban
+	// dashboard) refresh from disk every second. Ctrl+R remains the manual
+	// fallback regardless of this setting.
+	autoRefreshOptions := []string{"off", "on"}
+	autoRefreshCurrent := 1 // default on
+	if !tuiCfg.AutoRefreshEnabled() {
+		autoRefreshCurrent = 0
+	}
+
 	// Tool-call display truncation. "off" (the default) shows full tool call
 	// content; the finite options cap each tool line at that many characters.
 	toolTruncOptions := []string{"off", "200", "500", "1000"}
@@ -176,6 +185,7 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		{Key: "mail_page_size", Label: "settings.mail_page_size", Options: pageSizeOptions, Current: pageSizeCurrent},
 		{Key: "theme", Label: "settings.theme", Options: themeOptions, Current: themeCurrent},
 		{Key: "insights", Label: "settings.insights", Options: insightsOptions, Current: insightsCurrent},
+		{Key: "auto_refresh", Label: "settings.auto_refresh", Options: autoRefreshOptions, Current: autoRefreshCurrent},
 		{Key: "tool_truncate", Label: "settings.tool_truncate", Options: toolTruncOptions, Current: toolTruncCurrent},
 		{Key: "agent_lang", Label: "settings.agent_lang", Options: agentLangOptions, Current: agentLangCurrent},
 	}
@@ -305,6 +315,10 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		}
 	case "insights":
 		m.tuiConfig.Insights = val == "on"
+	case "auto_refresh":
+		// Stored as an inverse flag (auto_refresh_off) so the default-on case
+		// writes no key; see config.TUIConfig.AutoRefreshOff.
+		m.tuiConfig.AutoRefreshOff = val == "off"
 	case "tool_truncate":
 		if val == "off" {
 			m.tuiConfig.ToolCallTruncate = 0
@@ -445,7 +459,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "insights" || (f.Key == "mail_page_size" && value == "unlimited") || (f.Key == "tool_truncate" && value == "off") {
+		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "mail_page_size" && value == "unlimited") || (f.Key == "tool_truncate" && value == "off") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)

@@ -75,6 +75,12 @@ type App struct {
 	pendingCustomDir string
 	recoveryMode     bool   // global config lost, agents intact — setup then propagate
 	startupBanner    string // non-empty warning shown on first render
+	// autoRefreshArmed is true while exactly one auto-refresh ticker is in
+	// flight. It guards against starting a second concurrent ticker when the
+	// feature is re-enabled or a view is re-entered. The autoRefreshTickMsg
+	// handler keeps it true while it re-arms; turning the feature off lets the
+	// loop lapse and flips this back to false.
+	autoRefreshArmed bool
 }
 
 func humanAddr(projectDir string) string {
@@ -96,10 +102,11 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 	lingtaiCmd := config.LingtaiCmd(globalDir)
 
 	app := App{
-		globalDir:  globalDir,
-		projectDir: projectDir,
-		lingtaiCmd: lingtaiCmd,
-		tuiConfig:  tuiCfg,
+		globalDir:        globalDir,
+		projectDir:       projectDir,
+		lingtaiCmd:       lingtaiCmd,
+		tuiConfig:        tuiCfg,
+		autoRefreshArmed: tuiCfg.AutoRefreshEnabled(),
 	}
 
 	if needsRecovery && len(orchestrators) > 0 {
@@ -178,13 +185,37 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 }
 
 func (a App) Init() tea.Cmd {
+	// The app-level auto-refresh tick runs alongside whatever the initial view
+	// needs. It is a single ticker for all reloadable views (see
+	// auto_refresh.go); each tick asks the current view to reload if it opts in
+	// via autoReloadable. Started here when enabled, and re-armed on each tick.
+	var cmds []tea.Cmd
 	switch a.currentView {
 	case appViewFirstRun:
-		return a.firstRun.Init()
+		cmds = append(cmds, a.firstRun.Init())
 	case appViewMail:
-		return a.mail.Init()
+		cmds = append(cmds, a.mail.Init())
 	}
-	return nil
+	if a.tuiConfig.AutoRefreshEnabled() {
+		// Init runs once on a value copy; the autoRefreshTickMsg handler owns
+		// the armed flag from here on. Arming unconditionally here is safe
+		// because no ticker exists yet at startup.
+		cmds = append(cmds, autoRefreshTick())
+	}
+	return tea.Batch(cmds...)
+}
+
+// startAutoRefresh returns the App with an auto-refresh ticker armed, plus the
+// command to run, but only if the feature is enabled and no ticker is already
+// in flight. When a ticker already exists (or the feature is off) it returns
+// the App unchanged and a nil command, so callers can invoke it freely (on view
+// switch or settings change) without ever spawning a second concurrent ticker.
+func (a App) startAutoRefresh() (App, tea.Cmd) {
+	if !a.tuiConfig.AutoRefreshEnabled() || a.autoRefreshArmed {
+		return a, nil
+	}
+	a.autoRefreshArmed = true
+	return a, autoRefreshTick()
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -463,6 +494,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
+
+	case autoRefreshTickMsg:
+		// Single app-level auto-refresh tick. If disabled, let the loop lapse —
+		// mark it unarmed and do not re-arm, so it stays stopped until a
+		// settings change re-enables it (via switchToView -> startAutoRefresh).
+		// If enabled, ask the current view to reload (no-op when it doesn't opt
+		// in or returns nil), then schedule the next tick.
+		if !a.tuiConfig.AutoRefreshEnabled() {
+			a.autoRefreshArmed = false
+			return a, nil
+		}
+		a.autoRefreshArmed = true
+		a, reloadCmd := a.autoRefreshActiveView()
+		return a, tea.Batch(reloadCmd, autoRefreshTick())
 
 	// === Global keys ===
 
@@ -1270,8 +1315,12 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
-		// Restart mail tick + refresh + pulse (ticks die when another view is active)
-		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
+		// Restart mail tick + refresh + pulse (ticks die when another view is active).
+		// Also (re)start the app-level auto-refresh ticker: this is the path
+		// taken when leaving /settings, where auto refresh may have just been
+		// toggled back on. startAutoRefresh is a no-op if it is already armed.
+		a, arCmd := a.startAutoRefresh()
+		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize(), arCmd)
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
@@ -1285,8 +1334,13 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "props", "kanban":
 		a.currentView = appViewProps
+		// Reload config so a just-toggled auto-refresh setting is honored when
+		// entering the kanban directly, then (re)start the ticker if needed.
+		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
-		return a, tea.Batch(a.props.Init(), a.sendSize())
+		a.props.AutoRefresh = a.tuiConfig.AutoRefreshEnabled()
+		a, arCmd := a.startAutoRefresh()
+		return a, tea.Batch(a.props.Init(), a.sendSize(), arCmd)
 	case "daemons":
 		a.currentView = appViewDaemons
 		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
