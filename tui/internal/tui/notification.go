@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 )
 
 // NotificationModel is the /notification view: a history browser over the
-// latest 10 notification_pair_injected blocks from logs/log.sqlite.
+// latest 10 notification_block_injected snapshots from logs/log.sqlite.
+// Each snapshot carries the actual canonical payload the agent saw
+// (notifications + _notification_guidance), not just a compact summary.
 // Left/right keys step among the in-memory list; r/ctrl+r reloads.
 // Esc returns to the mail view.
 type NotificationModel struct {
@@ -22,10 +25,10 @@ type NotificationModel struct {
 	width    int
 	height   int
 
-	// latest 10 blocks loaded on open/reload, index 0 = newest
-	blocks []sqlitelog.NotificationBlock
+	// latest 10 actual-block snapshots loaded on open/reload, index 0 = newest
+	snapshots []sqlitelog.NotificationBlockSnapshot
 
-	// cursor into blocks; -1 means no blocks available
+	// cursor into snapshots; -1 means no snapshots available
 	cursor int
 
 	// error from last query (shown inline)
@@ -33,7 +36,7 @@ type NotificationModel struct {
 }
 
 // NewNotificationModel creates the /notification model for agentDir.
-// It immediately loads the latest 10 notification blocks.
+// It immediately loads the latest 10 notification_block_injected snapshots.
 func NewNotificationModel(agentDir string) NotificationModel {
 	m := NotificationModel{agentDir: agentDir, cursor: -1}
 	m.load()
@@ -49,14 +52,14 @@ func (m *NotificationModel) load() {
 		m.err = "logs/log.sqlite not found. Run `lingtai-agent log rebuild <agent_dir>` to create it."
 		return
 	}
-	blocks, err := sqlitelog.QueryNotificationBlocks(m.agentDir, 10)
+	snaps, err := sqlitelog.QueryNotificationBlockSnapshots(m.agentDir, 10)
 	if err != nil {
 		m.err = fmt.Sprintf("query error: %v", err)
 		return
 	}
 	m.err = ""
-	m.blocks = blocks
-	if len(blocks) > 0 {
+	m.snapshots = snaps
+	if len(snaps) > 0 {
 		m.cursor = 0
 	} else {
 		m.cursor = -1
@@ -76,7 +79,7 @@ func (m NotificationModel) Update(msg tea.Msg) (NotificationModel, tea.Cmd) {
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "left":
 			// older = higher cursor index (index 0 = newest)
-			if m.cursor >= 0 && m.cursor < len(m.blocks)-1 {
+			if m.cursor >= 0 && m.cursor < len(m.snapshots)-1 {
 				m.cursor++
 			}
 		case "right":
@@ -100,13 +103,16 @@ func (m NotificationModel) View() string {
 		return renderNotificationPanel(title, body, hint, m.width, m.height)
 	}
 
-	if len(m.blocks) == 0 || m.cursor < 0 {
-		body := StyleSubtle.Render("No notification_pair_injected blocks found in logs/log.sqlite.")
+	if len(m.snapshots) == 0 || m.cursor < 0 {
+		body := StyleSubtle.Render(
+			"No persisted notification_block_injected snapshots found. " +
+				"This log may predate actual notification block persistence.",
+		)
 		return renderNotificationPanel(title, body, hint, m.width, m.height)
 	}
 
-	block := m.blocks[m.cursor]
-	body := renderNotificationBlock(block, m.cursor, len(m.blocks), m.blockWrapWidth())
+	snap := m.snapshots[m.cursor]
+	body := renderNotificationSnapshot(snap, m.cursor, len(m.snapshots), m.blockWrapWidth())
 	return renderNotificationPanel(title, body, hint, m.width, m.height)
 }
 
@@ -129,9 +135,10 @@ func (m NotificationModel) blockWrapWidth() int {
 	return wrapWidth
 }
 
-// renderNotificationBlock formats a single NotificationBlock for display,
-// mirroring the mail view's notification render style.
-func renderNotificationBlock(b sqlitelog.NotificationBlock, cursor, total, wrapWidth int) string {
+// renderNotificationSnapshot formats a single NotificationBlockSnapshot for display.
+// It shows the event identity, global _notification_guidance, and each channel's
+// actual payload from the canonical block the agent saw.
+func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, total, wrapWidth int) string {
 	var sb strings.Builder
 
 	if wrapWidth <= 0 {
@@ -139,48 +146,64 @@ func renderNotificationBlock(b sqlitelog.NotificationBlock, cursor, total, wrapW
 	}
 
 	// ── Block index counter ─────────────────────────────────────────────────
-	idxStyle := StyleFaint
-	sb.WriteString(idxStyle.Render(fmt.Sprintf("block %d of %d", cursor+1, total)))
+	sb.WriteString(StyleFaint.Render(fmt.Sprintf("snapshot %d of %d", cursor+1, total)))
 	sb.WriteString("\n")
 
 	// ── Event identity row ──────────────────────────────────────────────────
-	tsStr := b.Time().Format(time.RFC3339)
-	idStyle := StyleFaint
-	callStyle := StyleFaint
-
-	idPart := idStyle.Render(fmt.Sprintf("id=%d", b.ID))
+	tsStr := s.Time().Format(time.RFC3339)
+	idPart := StyleFaint.Render(fmt.Sprintf("id=%d", s.ID))
 	tsPart := StyleSubtle.Render(tsStr)
 	row := idPart + "  " + tsPart
-	if b.CallID != "" {
-		row += "  " + callStyle.Render("call_id="+b.CallID)
+	if s.Mode != "" {
+		row += "  " + StyleFaint.Render("mode="+s.Mode)
+	}
+	if s.CallID != "" {
+		row += "  " + StyleFaint.Render("call_id="+s.CallID)
 	}
 	sb.WriteString(row + "\n")
 	sb.WriteString("\n")
 
-	// ── Body text (summary) ─────────────────────────────────────────────────
-	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
 
-	sb.WriteString(labelStyle.Render("  ✉ notifications") + "\n")
-	if b.Summary != "" {
-		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(b.Summary)
+	// ── Global _notification_guidance ───────────────────────────────────────
+	if s.Guidance != "" {
+		sb.WriteString(labelStyle.Render("  ✦ _notification_guidance") + "\n")
+		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(s.Guidance)
 		for _, line := range strings.Split(wrapped, "\n") {
-			sb.WriteString(notifStyle.Render("    "+line) + "\n")
+			sb.WriteString(notifStyle.Faint(true).Render("    "+line) + "\n")
 		}
+		sb.WriteString("\n")
 	}
 
-	// ── Sources list ────────────────────────────────────────────────────────
-	if len(b.Sources) > 0 {
-		for _, src := range b.Sources {
+	// ── Per-channel notification payloads ───────────────────────────────────
+	if len(s.Notifications) > 0 {
+		sb.WriteString(labelStyle.Render("  ✉ notifications") + "\n")
+		// Render channels in sorted order for determinism.
+		channels := make([]string, 0, len(s.Notifications))
+		for ch := range s.Notifications {
+			channels = append(channels, ch)
+		}
+		sort.Strings(channels)
+		for _, ch := range channels {
+			payload := s.Notifications[ch]
+			sb.WriteString(labelStyle.Render("    ["+ch+"]") + "\n")
+			for _, line := range strings.Split(payload, "\n") {
+				sb.WriteString(notifStyle.Render("      "+line) + "\n")
+			}
+		}
+	} else if len(s.Sources) > 0 {
+		// Fallback: sources list without payload body (malformed/old event)
+		sb.WriteString(labelStyle.Render("  ✉ sources") + "\n")
+		for _, src := range s.Sources {
 			sb.WriteString(notifStyle.Render("    • "+src) + "\n")
 		}
 	}
 
 	// ── Meta footer (context%, stamina, time, seq) ──────────────────────────
-	if b.Meta != nil {
-		if footer := formatBlockMetaFooter(b.Meta); footer != "" {
-			footerStyle := notifStyle.Faint(true)
-			sb.WriteString(footerStyle.Render("    "+footer) + "\n")
+	if s.Meta != nil {
+		if footer := formatBlockMetaFooter(s.Meta); footer != "" {
+			sb.WriteString(notifStyle.Faint(true).Render("    "+footer) + "\n")
 		}
 	}
 

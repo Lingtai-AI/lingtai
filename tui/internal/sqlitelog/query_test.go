@@ -381,3 +381,166 @@ func TestNotificationBlockTime(t *testing.T) {
 		t.Fatalf("unexpected year: %d", tt.Year())
 	}
 }
+
+// ── NotificationBlockSnapshot tests ──────────────────────────────────────────
+
+func TestQueryNotificationBlockSnapshotsEmpty(t *testing.T) {
+	agentDir := makeTestDB(t)
+	snaps, err := QueryNotificationBlockSnapshots(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlockSnapshots: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
+	}
+}
+
+func TestQueryNotificationBlockSnapshotsFiltersType(t *testing.T) {
+	// Only notification_block_injected rows should be returned.
+	fieldsJSON := `{"mode":"synthetic_notification_pair","sources":["email","system"],"payload":{"_notification_guidance":"kernel guidance","notifications":{"email":{"data":{"count":1}},"system":{"events":[]}}},"meta":{}}`
+	agentDir := makeTestDB(t,
+		`INSERT INTO events(ts,type,fields_json) VALUES(1000.0,'notification_pair_injected','{"sources":["email"]}');`,
+		fmt.Sprintf(`INSERT INTO events(ts,type,fields_json) VALUES(1001.0,'notification_block_injected','%s');`, fieldsJSON),
+		`INSERT INTO events(ts,type,fields_json) VALUES(1002.0,'tool_call','{"name":"read"}');`,
+	)
+	snaps, err := QueryNotificationBlockSnapshots(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlockSnapshots: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot (notification_block_injected only), got %d", len(snaps))
+	}
+	snap := snaps[0]
+	if snap.Guidance != "kernel guidance" {
+		t.Errorf("Guidance = %q, want 'kernel guidance'", snap.Guidance)
+	}
+	if len(snap.Sources) != 2 {
+		t.Errorf("Sources = %v, want [email system]", snap.Sources)
+	}
+	if snap.Notifications == nil {
+		t.Fatal("Notifications is nil")
+	}
+	if _, ok := snap.Notifications["email"]; !ok {
+		t.Errorf("expected email channel in Notifications, got %v", snap.Notifications)
+	}
+	if _, ok := snap.Notifications["system"]; !ok {
+		t.Errorf("expected system channel in Notifications, got %v", snap.Notifications)
+	}
+}
+
+func TestQueryNotificationBlockSnapshotsLatest10(t *testing.T) {
+	sqls := make([]string, 12)
+	for i := 0; i < 12; i++ {
+		fj := fmt.Sprintf(
+			`{"mode":"synthetic_notification_pair","sources":["email"],"payload":{"_notification_guidance":"guidance%d","notifications":{"email":{}}},"meta":{}}`,
+			i,
+		)
+		sqls[i] = fmt.Sprintf(
+			`INSERT INTO events(ts,type,fields_json) VALUES(%d.0,'notification_block_injected','%s');`,
+			1000+i, fj,
+		)
+	}
+	agentDir := makeTestDB(t, sqls...)
+	snaps, err := QueryNotificationBlockSnapshots(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlockSnapshots: %v", err)
+	}
+	if len(snaps) != 10 {
+		t.Fatalf("expected 10 snapshots with limit=10, got %d", len(snaps))
+	}
+	// newest first → guidance11 at index 0
+	if snaps[0].Guidance != "guidance11" {
+		t.Fatalf("expected newest first (guidance11), got %q", snaps[0].Guidance)
+	}
+}
+
+func TestParseNotificationBlockSnapshotFields(t *testing.T) {
+	fieldsJSON := `{
+		"mode": "synthetic_notification_pair",
+		"call_id": "notif_abc",
+		"sources": ["email", "system"],
+		"payload": {
+			"_notification_guidance": "kernel-level guidance",
+			"notifications": {
+				"email": {"data": {"count": 3}, "_notification_guidance": "email guidance"},
+				"system": {"events": [{"body": "test"}]}
+			}
+		},
+		"meta": {
+			"current_time": "2026-06-20T10:00:00-07:00",
+			"stamina_left_seconds": 3600.0,
+			"injection_seq": 5,
+			"context": {
+				"system_tokens": 1000,
+				"history_tokens": 5000,
+				"usage": 0.06
+			}
+		}
+	}`
+	s := NotificationBlockSnapshot{}
+	parseNotificationBlockSnapshotFields(fieldsJSON, &s)
+
+	if s.Mode != "synthetic_notification_pair" {
+		t.Errorf("Mode = %q, want synthetic_notification_pair", s.Mode)
+	}
+	if s.CallID != "notif_abc" {
+		t.Errorf("CallID = %q, want notif_abc", s.CallID)
+	}
+	if len(s.Sources) != 2 || s.Sources[0] != "email" {
+		t.Errorf("Sources = %v", s.Sources)
+	}
+	if s.Guidance != "kernel-level guidance" {
+		t.Errorf("Guidance = %q", s.Guidance)
+	}
+	if s.Notifications == nil {
+		t.Fatal("Notifications is nil")
+	}
+	if _, ok := s.Notifications["email"]; !ok {
+		t.Errorf("email missing from Notifications: %v", s.Notifications)
+	}
+	if _, ok := s.Notifications["system"]; !ok {
+		t.Errorf("system missing from Notifications: %v", s.Notifications)
+	}
+	if s.Meta == nil {
+		t.Fatal("Meta is nil")
+	}
+	if s.Meta.InjectionSeq != 5 {
+		t.Errorf("InjectionSeq = %d, want 5", s.Meta.InjectionSeq)
+	}
+	if s.Meta.StaminaLeftSeconds != 3600.0 {
+		t.Errorf("StaminaLeftSeconds = %v", s.Meta.StaminaLeftSeconds)
+	}
+	if s.Meta.ContextSystemTokens != 1000 {
+		t.Errorf("ContextSystemTokens = %d", s.Meta.ContextSystemTokens)
+	}
+}
+
+func TestParseNotificationBlockSnapshotFieldsInvalidJSON(t *testing.T) {
+	s := NotificationBlockSnapshot{ID: 99}
+	parseNotificationBlockSnapshotFields("not-json", &s)
+	// Should not panic; identity fields unaffected
+	if s.ID != 99 {
+		t.Errorf("ID changed unexpectedly")
+	}
+	if s.Guidance != "" || s.Mode != "" {
+		t.Errorf("unexpected fields set on parse failure")
+	}
+}
+
+func TestQueryNotificationBlockSnapshotsMissingDB(t *testing.T) {
+	_, err := QueryNotificationBlockSnapshots(t.TempDir(), 10)
+	if err == nil {
+		t.Fatal("expected error for missing sqlite sidecar")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNotificationBlockSnapshotTime(t *testing.T) {
+	s := NotificationBlockSnapshot{Ts: 1781577055.46409}
+	tt := s.Time()
+	if tt.Year() != 2026 {
+		t.Fatalf("unexpected year: %d", tt.Year())
+	}
+}
