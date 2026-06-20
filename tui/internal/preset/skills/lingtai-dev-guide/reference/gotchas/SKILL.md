@@ -1,8 +1,8 @@
 ---
 name: dev-guide-gotchas
 description: >
-  Nested lingtai-dev-guide reference for known implementation footguns: Bubble Tea v2 paste, textarea theming, dev-mode rebuilds, editable installs, migrations, localization, authorization gates, and config conventions.
-version: 1.0.0
+  Nested lingtai-dev-guide reference for known implementation footguns: Bubble Tea v2 paste, textarea theming, dev-mode rebuilds, editable installs, migrations, localization, authorization gates, config conventions, and rebuild-gate test false-passes.
+version: 1.1.0
 ---
 
 # Gotchas and Known Pitfalls
@@ -172,6 +172,28 @@ The Go module names are `github.com/anthropics/lingtai-tui` and `github.com/anth
 ## Notifications — single-slot wire invariant
 
 At most ONE `system(action="notification")` pair lives in the wire history at any time. When the kernel detects a fingerprint change, it strips the prior pair and reinjects a fresh one. Agents observe the **current** notification state, not a history of arrivals.
+
+## Rebuild-gate test can false-pass on incidental bucket changes
+
+A service/adapter that rebuilds only when a coarse "bucket" of inputs changes
+(e.g. provider / model / base_url / provider-defaults) is hard to test honestly.
+A regression test that asserts "refresh rebuilds the service" can **pass for the
+wrong reason**: if the test fixture also perturbs an unrelated field that feeds
+the same bucket (`max_rpm`, some provider-default), the rebuild fires off that
+incidental change — not the condition under test. The test goes green while the
+real code path it was meant to protect is still broken.
+
+This surfaced while verifying the Codex prompt-cache refresh fix (PRs #406/#411):
+the rebuild gate is bucket-based, so a test must hold the bucket fixed except for
+the *one* condition it is exercising.
+
+**Discipline:** when testing a bucket-gated rebuild, vary only the field under
+test and pin everything else in the bucket. Assert on the *effect* the rebuild is
+supposed to produce (the live object was reconstructed; the expected metadata/
+fingerprint changed), not merely that "a rebuild happened" — otherwise an
+incidental bucket delta gives you a false-pass. See
+`reference/runtime-self-check/SKILL.md` §6 for the live-object verification side
+of the same problem.
 
 ## `uv` vs `pip`
 

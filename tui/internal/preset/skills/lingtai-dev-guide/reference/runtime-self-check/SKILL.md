@@ -6,8 +6,10 @@ description: >
   actually running, confirm the editable source and git HEAD, verify the active
   TUI/portal binary and dev-mode symlinks, rebuild the TUI from a clean release
   worktree, inspect MCP/addon module sources and tool surface, and report
-  evidence safely with secrets redacted.
-version: 1.0.0
+  evidence safely with secrets redacted. Includes verifying that long-lived
+  runtime objects (services/adapters/caches) were actually rebuilt after a
+  refresh, not just that new source is imported.
+version: 1.1.0
 ---
 
 # Runtime Self-Check
@@ -35,6 +37,8 @@ parameterized forms (`<your-lingtai-checkout>`, `~/.lingtai-tui/...`).
 - Right after a `refresh` — verify the runtime picked up the intended code.
 - After switching branches/worktrees or reinstalling the kernel editable.
 - A code fix is merged/built but old behaviour persists ("did it actually load?").
+- A fix is imported but a long-lived service/adapter/cache still serves stale
+  behaviour after `refresh` — source-on-disk ≠ rebuilt-at-runtime (see §6).
 - A preset swap, MCP boot failure, or addon change needs source-of-truth checks.
 - You must report runtime state to a maintainer and want a safe evidence pack.
 
@@ -159,9 +163,47 @@ After a `refresh`, walk this list before trusting new behaviour:
 - [ ] §2 active binary resolves to the expected path; version string matches dev/brew expectation.
 - [ ] §3 if a fix should be live, the relevant binary/kernel was actually rebuilt/reinstalled.
 - [ ] §4 MCP/addon modules import from the expected source; tool surface present.
+- [ ] §6 if a fix "should be live" but behaviour disagrees, the runtime object was actually rebuilt — verified via metadata/fingerprint, not just the import probe.
 - [ ] No secrets, tokens, chat IDs, or private absolute paths captured for the report.
 
-## 6. Safe evidence reporting
+## 6. Live object/adapter lifecycle — source-on-disk ≠ rebuilt-at-runtime
+
+The §1–§2 probes confirm the right *files* are imported. They do **not** prove
+the long-lived runtime *objects* built from those files were rebuilt after a
+`refresh`. A service or adapter constructed once at agent init can survive
+refreshes if the inputs that gate its rebuild did not change — so new source can
+be on disk and imported, yet the live agent still serves a stale object.
+
+This bit the Codex prompt-cache work (PRs #406/#411). The affinity/cache source
+was present and imported, but after a live `refresh` the token ledger still
+showed the old stable id with no `prompt_cache_key` and no rotation. Root cause:
+the agent only rebuilt its `LLMService` when a coarse rebuild-gate bucket
+(provider/model/base_url/provider-defaults) changed; that bucket was stable
+across refresh for this provider, so the old service and its cached adapter
+outlived the refresh. The fix forced a service/adapter rebuild on the relevant
+live refresh while preserving chat-history replay.
+
+The reusable lesson: **when a fix "should be live" but behaviour disagrees,
+grepping or importing the source is not evidence — verify the runtime object.**
+
+- Identify what gates the rebuild of the object in question (a service, adapter,
+  client, or cache). Confirm that gate actually changes when the fix is supposed
+  to take effect — a rebuild that depends on an input stable across refresh will
+  silently never fire.
+- Verify object *identity/lifecycle*, not just presence: was the adapter
+  re-constructed, or is the same instance still alive from agent init?
+- Check the observable metadata the fix is supposed to produce. For cache work
+  that means the token ledger: is `codex_prompt_cache_key` (or the equivalent
+  field) **non-empty**, and does the stable id rotate when it should?
+- Where you can compute a fingerprint, compare before/after concretely — e.g. an
+  old `sha256(anchor)[:8]`-style id versus an epoch-stamped one — rather than
+  trusting "the code looks right."
+
+If the metadata or fingerprint still reflects the old behaviour after refresh,
+the object was not rebuilt regardless of what the import probe says; that is the
+bug, not a red herring.
+
+## 7. Safe evidence reporting
 
 When reporting runtime state to a maintainer, produce a compact, source-labeled
 evidence pack. Recommended shape:

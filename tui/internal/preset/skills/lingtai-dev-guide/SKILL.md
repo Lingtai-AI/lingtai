@@ -8,7 +8,7 @@ description: >
   publication-bound release workflow, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.4.0
+version: 2.4.1
 ---
 
 # LingTai Developer Guide
@@ -96,8 +96,9 @@ drill-down files, not standalone top-level skills.
     Developer/operator runtime self-check after refresh/checkout/preset/MCP
     change: probe which lingtai code is running, confirm editable source and git
     HEAD, verify the active TUI/portal binary and dev-mode symlinks, rebuild from
-    a clean worktree, inspect MCP/addon sources, and report evidence with secrets
-    redacted.
+    a clean worktree, inspect MCP/addon sources, confirm long-lived runtime
+    objects (services/adapters/caches) actually rebuilt after refresh rather than
+    serving stale behaviour, and report evidence with secrets redacted.
 - name: dev-guide-pr-review-deliverables
   location: reference/pr-review-deliverables/SKILL.md
   description: |
@@ -128,7 +129,7 @@ drill-down files, not standalone top-level skills.
 | Diagnose a stuck, errored, or misbehaving LingTai network | `reference/debug-troubleshoot/SKILL.md` |
 | Audit secrets, permissions, MCP config, channels, or data exposure | `reference/security-audit/SKILL.md` |
 | Operate an avatar network over time | `reference/network-governance/SKILL.md` |
-| Verify which runtime/binary is actually running after a refresh or rebuild | `reference/runtime-self-check/SKILL.md` |
+| Verify which runtime/binary is actually running after a refresh or rebuild, or why a fix that's on disk still serves stale behaviour (a long-lived service/adapter/cache that didn't rebuild) | `reference/runtime-self-check/SKILL.md` |
 | Get a PR review-ready: review gates, HTML explainer, PR hygiene | `reference/pr-review-deliverables/SKILL.md` |
 | Turn experience into a durable, de-privatized, PR-ready skill | `reference/skill-stewardship/SKILL.md` |
 
