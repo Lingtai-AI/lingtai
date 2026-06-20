@@ -451,8 +451,10 @@ func AggregateTokens(dirs []string) TokenTotals {
 	return t
 }
 
-// SumTokenLedger reads a token_ledger.jsonl file and sums all entries.
-// Returns zero totals if the file is missing or unreadable.
+// SumTokenLedger reads a token_ledger.jsonl file and sums main-agent entries.
+// Daemon-sourced rows are skipped because they are reported separately from
+// daemons/<run_id>/logs/token_ledger.jsonl. Returns zero totals if the file is
+// missing or unreadable.
 func SumTokenLedger(path string) TokenTotals {
 	var t TokenTotals
 	data, err := os.ReadFile(path)
@@ -464,13 +466,11 @@ func SumTokenLedger(path string) TokenTotals {
 		if line == "" {
 			continue
 		}
-		var entry struct {
-			Input    int64 `json:"input"`
-			Output   int64 `json:"output"`
-			Thinking int64 `json:"thinking"`
-			Cached   int64 `json:"cached"`
-		}
+		var entry LedgerEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if isDaemonLedgerEntry(entry) {
 			continue
 		}
 		t.Input += entry.Input
@@ -484,8 +484,10 @@ func SumTokenLedger(path string) TokenTotals {
 
 // LedgerEntry is a single per-call line from logs/token_ledger.jsonl
 // surfaced to UI consumers (the kanban detail view, primarily). Older
-// entries written before kernel v0.7.x have no Model/Endpoint — those
-// fields are simply empty.
+// entries written before kernel v0.7.x have no Model/Endpoint/Source — those
+// fields are simply empty. Source/EmID/RunID let readers distinguish parent
+// agent calls from historical daemon rows that were mirrored into parent
+// ledgers.
 type LedgerEntry struct {
 	TS       string `json:"ts"`
 	Input    int64  `json:"input"`
@@ -494,14 +496,18 @@ type LedgerEntry struct {
 	Cached   int64  `json:"cached"`
 	Model    string `json:"model,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
+	Source   string `json:"source,omitempty"`
+	EmID     string `json:"em_id,omitempty"`
+	RunID    string `json:"run_id,omitempty"`
 }
 
-// SumTokenLedgerByProvider reads a token_ledger.jsonl, groups entries
-// by derived provider name, and returns the totals plus the most-recent
+// SumTokenLedgerByProvider reads a token_ledger.jsonl, groups main-agent
+// entries by derived provider name, and returns the totals plus the most-recent
 // `recentN` raw entries (newest first). Provider attribution comes from
 // the entry's `endpoint` host when present; falls back to a `model`
 // prefix match; otherwise "unknown".
 //
+// Daemon-sourced rows are skipped here and rendered from daemon run ledgers.
 // Missing/unreadable file returns empty maps and nil entries — caller
 // renders an empty state rather than erroring.
 func SumTokenLedgerByProvider(path string, recentN int) (
@@ -520,6 +526,9 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 		}
 		var entry LedgerEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if isDaemonLedgerEntry(entry) {
 			continue
 		}
 		provider := DeriveLedgerProvider(entry.Endpoint, entry.Model)
@@ -541,6 +550,12 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 		recent[i], recent[j] = recent[j], recent[i]
 	}
 	return byProvider, recent
+}
+
+func isDaemonLedgerEntry(entry LedgerEntry) bool {
+	return strings.EqualFold(strings.TrimSpace(entry.Source), "daemon") ||
+		strings.TrimSpace(entry.EmID) != "" ||
+		strings.TrimSpace(entry.RunID) != ""
 }
 
 // DeriveLedgerProvider maps a ledger entry's endpoint host (or model

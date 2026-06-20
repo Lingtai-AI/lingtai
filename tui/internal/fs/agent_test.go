@@ -369,3 +369,52 @@ func TestReadContextStatsReturnsZeroWhenHistoryMissing(t *testing.T) {
 		t.Fatalf("expected zero tool stats for missing history, got %+v", stats)
 	}
 }
+
+func TestSumTokenLedgerSkipsDaemonRows(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	body := strings.Join([]string{
+		`{"ts":"2026-06-20T03:00:00Z","input":10,"output":2,"thinking":1,"cached":4,"model":"main"}`,
+		`{"source":"daemon","em_id":"em-1","run_id":"em-1-run","ts":"2026-06-20T03:00:01Z","input":100,"output":20,"thinking":10,"cached":40,"model":"daemon"}`,
+		`{"run_id":"em-2-run","ts":"2026-06-20T03:00:02Z","input":200,"output":40,"thinking":20,"cached":80,"model":"daemon-no-source"}`,
+	}, "\n")
+	if err := os.WriteFile(ledgerPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	totals := SumTokenLedger(ledgerPath)
+	if totals.APICalls != 1 || totals.Input != 10 || totals.Output != 2 || totals.Thinking != 1 || totals.Cached != 4 {
+		t.Fatalf("totals = %+v, want only main row", totals)
+	}
+}
+
+func TestSumTokenLedgerByProviderSkipsDaemonRows(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	body := strings.Join([]string{
+		`{"ts":"2026-06-20T03:00:00Z","input":10,"output":2,"cached":4,"model":"gpt-5.5","endpoint":"https://api.openai.com/v1"}`,
+		`{"source":"daemon","em_id":"em-1","run_id":"em-1-run","ts":"2026-06-20T03:00:01Z","input":100,"output":20,"cached":40,"model":"deepseek-v4-pro","endpoint":"https://api.deepseek.com"}`,
+		`{"em_id":"em-2","ts":"2026-06-20T03:00:02Z","input":200,"output":40,"cached":80,"model":"daemon-no-run"}`,
+	}, "\n")
+	if err := os.WriteFile(ledgerPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	byProvider, recent := SumTokenLedgerByProvider(ledgerPath, 100)
+	if len(recent) != 1 {
+		t.Fatalf("recent len = %d, want 1: %#v", len(recent), recent)
+	}
+	if recent[0].Model != "gpt-5.5" {
+		t.Fatalf("recent[0].Model = %q, want gpt-5.5", recent[0].Model)
+	}
+	if len(byProvider) != 1 {
+		t.Fatalf("provider count = %d, want 1: %#v", len(byProvider), byProvider)
+	}
+	openai := byProvider["openai"]
+	if openai.APICalls != 1 || openai.Input != 10 || openai.Output != 2 || openai.Cached != 4 {
+		t.Fatalf("openai totals = %+v, want only main row", openai)
+	}
+	if _, ok := byProvider["deepseek"]; ok {
+		t.Fatalf("daemon deepseek row should be excluded: %#v", byProvider)
+	}
+}

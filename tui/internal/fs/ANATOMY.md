@@ -21,8 +21,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `ReadStatus(dir)` | `tui/internal/fs/agent.go:303` | reads `.status.json` → `AgentStatus` (tokens, runtime) |
 | `ReadContextStats(dir)` | `tui/internal/fs/agent.go:315` | summarizes retained `history/chat_history.jsonl`: entries, role counts, text input/output, tool calls/results, and per-tool distribution |
 | `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:439` | sums `TokenTotals` across multiple agent ledgers |
-| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:454` | sums a single `token_ledger.jsonl` → `TokenTotals` |
-| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:499` | groups ledger entries by derived provider name + recent N entries |
+| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:458` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
+| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:513` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
 | **daemon_ledger.go** | | |
 | `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:41` | aggregates recent per-call token ledgers from `daemons/<run_id>/logs/token_ledger.jsonl`, newest first, tagged with daemon run id/handle/state for kanban Ctrl+D split lanes |
 | `DeriveLedgerProvider` | `tui/internal/fs/agent.go:525` | maps endpoint host / model prefix → canonical provider name |
@@ -77,7 +77,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 ## Connections
 
 - **Called by `tui/internal/tui/`** — every Bubble Tea screen reads agent state through this package (network home, agent detail, mail viewer, kanban, session log).
-- **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
+- **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
 - **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<mailbox-id>/`.
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
@@ -90,7 +90,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 
 ## State
 
-- **Reads (never writes)**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/token_ledger.jsonl`, `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
+- **Reads (never writes)**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field.
 
 ## Notes
