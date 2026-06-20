@@ -53,16 +53,21 @@ type PropsModel struct {
 	pickerOpen bool
 	pickerIdx  int
 
-	// Detail view: full-screen single-column breakdown of token usage
-	// by provider, recent activity, MCP servers, daemon run counts. Toggled
+	// Detail view: full-screen breakdown of token usage, split recent
+	// main/daemon calls, MCP servers, and daemon run counts. Toggled
 	// with Ctrl+D. Esc closes detail and returns to the summary.
 	detailOpen         bool
 	detailByProvider   map[string]fs.TokenTotals
-	detailRecent       []fs.LedgerEntry
+	detailRecent       []fs.LedgerEntry       // selected main agent recent calls (newest first)
+	detailDaemonRecent []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
 	detailContextStats fs.ContextStats
 	detailDaemonCounts fs.DaemonCounts
 	detailMCPNames     []string
 }
+
+// detailRecentCalls is the number of recent token-ledger calls shown in each
+// Ctrl+D recent-call lane (main agent on the left, daemons on the right).
+const detailRecentCalls = 100
 
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 	return PropsModel{
@@ -235,7 +240,11 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 // opened so the user sees fresh numbers.
 func (m *PropsModel) loadDetail() {
 	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
-	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, 40)
+	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, detailRecentCalls)
+	// Daemon calls are scoped to the selected agent's own daemon run dirs
+	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
+	// network. Missing ledgers render an empty lane.
+	m.detailDaemonRecent = fs.DaemonRecentLedger(m.selectedDir, detailRecentCalls)
 	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
 
 	// MCP names from init.json's mcp block.
@@ -758,6 +767,7 @@ func (m PropsModel) renderDetail() string {
 	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
 
 	var lines []string
+
 	lines = append(lines, "")
 	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_tokens_by_provider")))
 	lines = append(lines, "")
@@ -865,33 +875,6 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Recent activity — last 40 ledger entries, newest first.
-	if len(m.detailRecent) > 0 {
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_recent_activity")))
-		lines = append(lines, "")
-		for _, e := range m.detailRecent {
-			provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
-			model := e.Model
-			if model == "" {
-				model = "—"
-			}
-			ts := e.TS
-			if len(ts) > 16 {
-				ts = ts[:16] // 2026-04-30T03:14
-			}
-			line := fmt.Sprintf("  %s  %-10s  %-30s  in:%s  out:%s  cached:%s",
-				subtleStyle.Render(ts),
-				labelStyle.Render(provider),
-				valueStyle.Render(truncate(model, 30)),
-				formatComma(e.Input),
-				formatComma(e.Output),
-				formatComma(e.Cached),
-			)
-			lines = append(lines, line)
-		}
-		lines = append(lines, "")
-	}
-
 	// MCP servers.
 	if len(m.detailMCPNames) > 0 {
 		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_mcp")))
@@ -911,7 +894,147 @@ func (m PropsModel) renderDetail() string {
 		valueStyle.Render(fmt.Sprintf("%d", m.detailDaemonCounts.Total)))
 	lines = append(lines, "")
 
+	// Raw recent token-ledger lanes are useful for diagnosis but visually noisy,
+	// so they come last after the higher-signal provider totals, context, MCP,
+	// and daemon-count summaries.
+	lines = append(lines, m.renderRecentCallLanes()...)
+
 	return strings.Join(lines, "\n")
+}
+
+// renderRecentCallLanes renders the lower diagnostic ledger section in a
+// single-column order: selected main-agent calls first, then stacked daemon
+// calls. Raw ledgers are intentionally below the higher-signal summaries in
+// renderDetail.
+func (m PropsModel) renderRecentCallLanes() []string {
+	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_recent_main")))
+	lines = append(lines, "")
+	lines = append(lines, m.renderMainCallRows()...)
+	lines = append(lines, "")
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_recent_daemons")))
+	lines = append(lines, "")
+	lines = append(lines, m.renderDaemonCallRows()...)
+	lines = append(lines, "")
+	return lines
+}
+
+// renderMainCallRows renders the selected agent's recent per-call ledger
+// entries (newest first). Rows deliberately avoid truncating model/endpoint
+// fields so detail mode can preserve raw diagnostic evidence.
+func (m PropsModel) renderMainCallRows() []string {
+	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+
+	if len(m.detailRecent) == 0 {
+		return []string{"  " + subtleStyle.Render(i18n.T("props.detail_recent_empty"))}
+	}
+
+	lines := []string{
+		"  " + labelStyle.Render(fmt.Sprintf("%-16s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+			"time", "provider", "model", "input", "output", "thinking", "cached", "cache%", "endpoint")),
+	}
+	for _, e := range m.detailRecent {
+		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
+		model := e.Model
+		if model == "" {
+			model = "—"
+		}
+		endpoint := e.Endpoint
+		if endpoint == "" {
+			endpoint = "—"
+		}
+		line := fmt.Sprintf("  %-16s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+			shortTS(e.TS),
+			provider,
+			model,
+			formatComma(e.Input),
+			formatComma(e.Output),
+			formatComma(e.Thinking),
+			formatComma(e.Cached),
+			formatCacheRate(e.Cached, e.Input),
+			endpoint,
+		)
+		lines = append(lines, valueStyle.Render(line))
+	}
+	return lines
+}
+
+// renderDaemonCallRows renders all daemon per-call ledger entries (newest
+// first), each row retaining daemon handle/run id/state plus provider/model /
+// endpoint data without truncation.
+func (m PropsModel) renderDaemonCallRows() []string {
+	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+
+	if len(m.detailDaemonRecent) == 0 {
+		return []string{"  " + subtleStyle.Render(i18n.T("props.detail_recent_daemons_empty"))}
+	}
+
+	lines := []string{
+		"  " + labelStyle.Render(fmt.Sprintf("%-16s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+			"time", "daemon", "run", "state", "provider", "model", "input", "output", "thinking", "cached", "cache%", "endpoint")),
+	}
+	for _, e := range m.detailDaemonRecent {
+		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
+		model := e.Model
+		if model == "" {
+			model = "—"
+		}
+		endpoint := e.Endpoint
+		if endpoint == "" {
+			endpoint = "—"
+		}
+		handle := e.Handle
+		if handle == "" {
+			handle = "—"
+		}
+		runID := e.RunID
+		if runID == "" {
+			runID = "—"
+		}
+		state := e.State
+		if state == "" {
+			state = "—"
+		}
+		line := fmt.Sprintf("  %-16s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+			shortTS(e.TS),
+			handle,
+			runID,
+			state,
+			provider,
+			model,
+			formatComma(e.Input),
+			formatComma(e.Output),
+			formatComma(e.Thinking),
+			formatComma(e.Cached),
+			formatCacheRate(e.Cached, e.Input),
+			endpoint,
+		)
+		lines = append(lines, valueStyle.Render(line))
+	}
+	return lines
+}
+
+func formatCacheRate(cached, input int64) string {
+	if input <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", 100.0*float64(cached)/float64(input))
+}
+
+// shortTS trims an ISO-8601 timestamp to minute precision (2026-04-30T03:14)
+// for compact display, leaving shorter/empty strings untouched.
+func shortTS(ts string) string {
+	if len(ts) > 16 {
+		return ts[:16]
+	}
+	return ts
 }
 
 // renderShareBar returns a small unicode bar (filled + empty cells)
