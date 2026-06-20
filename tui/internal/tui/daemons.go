@@ -556,11 +556,11 @@ func (m DaemonsModel) renderDetail(maxW int) string {
 		{i18n.T("daemons.current_tool"), d.CurrentTool},
 		{i18n.T("daemons.turn"), turnText(d.Turn, d.MaxTurns)},
 		{i18n.T("daemons.duration"), daemonDuration(d)},
-		{i18n.T("daemons.started"), d.StartedAt},
-		{i18n.T("daemons.updated"), d.UpdatedAt},
-		{i18n.T("daemons.completed"), d.CompletedAt},
-		{i18n.T("daemons.finished"), d.FinishedAt},
-		{i18n.T("daemons.last_event"), d.LastEventAt},
+		{i18n.T("daemons.started"), formatDaemonTimestamp(d.StartedAt)},
+		{i18n.T("daemons.updated"), formatDaemonTimestamp(d.UpdatedAt)},
+		{i18n.T("daemons.completed"), formatDaemonTimestamp(d.CompletedAt)},
+		{i18n.T("daemons.finished"), formatDaemonTimestamp(d.FinishedAt)},
+		{i18n.T("daemons.last_event"), formatDaemonTimestamp(d.LastEventAt)},
 		{i18n.T("daemons.tokens"), daemonTokenText(d.Tokens)},
 	}
 	for _, row := range meta {
@@ -718,6 +718,13 @@ func readDaemonSummary(dir string) (daemonSummary, error) {
 	item.Chats = readDaemonChats(filepath.Join(dir, "history", "chat_history.jsonl"))
 	item.Result = readDaemonResult(filepath.Join(dir, "result.txt"))
 	item.Tokens = readDaemonTokens(filepath.Join(dir, "logs", "token_ledger.jsonl"))
+	// CLI backends (claude/claude-p, codex, opencode, cursor) never write a
+	// per-call token_ledger.jsonl, but the kernel may keep UI-only running
+	// totals in daemon.json. Fall back to those so their usage still shows;
+	// the per-call ledger remains authoritative whenever it exists.
+	if item.Tokens.Calls == 0 {
+		item.Tokens = daemonTokensFromState(raw)
+	}
 	if item.ModifiedTime.IsZero() {
 		item.ModifiedTime = newestTimestamp(item.StartedAt, item.UpdatedAt, item.CompletedAt, item.FinishedAt, item.LastEventAt)
 	}
@@ -814,13 +821,81 @@ func readDaemonTokens(path string) daemonTokenSummary {
 		if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
 			continue
 		}
-		total.Input += intField(raw, "input")
-		total.Output += intField(raw, "output")
-		total.Thinking += intField(raw, "thinking")
-		total.Cached += intField(raw, "cached")
+		entry := tokenEntryFromRaw(raw)
+		total.Input += entry.Input
+		total.Output += entry.Output
+		total.Thinking += entry.Thinking
+		total.Cached += entry.Cached
 		total.Calls++
 	}
 	return total
+}
+
+// tokenEntryFromRaw extracts per-call token counts from one ledger entry,
+// tolerating two schemas:
+//
+//   - the kernel's canonical ledger ("input"/"output"/"thinking"/"cached"),
+//     written by lingtai-backend daemons; and
+//   - Anthropic Messages-API field names ("input_tokens"/"output_tokens" plus
+//     "cache_read_input_tokens"/"cache_creation_input_tokens" and
+//     "reasoning_tokens"/"thinking_tokens"), as carried by Claude Code /
+//     claude-p usage payloads.
+//
+// Canonical fields take precedence when both appear; cached folds together
+// cache-read and cache-creation so the displayed number matches the kernel's
+// normalized "cached" (raw + read + write) convention.
+func tokenEntryFromRaw(raw map[string]any) daemonTokenSummary {
+	pick := func(keys ...string) int {
+		for _, k := range keys {
+			if _, ok := raw[k]; ok {
+				return intField(raw, k)
+			}
+		}
+		return 0
+	}
+	var e daemonTokenSummary
+	e.Input = pick("input", "input_tokens")
+	e.Output = pick("output", "output_tokens")
+	e.Thinking = pick("thinking", "thinking_tokens", "reasoning_tokens", "reasoning")
+	if _, ok := raw["cached"]; ok {
+		e.Cached = intField(raw, "cached")
+	} else {
+		e.Cached = intField(raw, "cache_read_input_tokens") + intField(raw, "cache_creation_input_tokens")
+	}
+	return e
+}
+
+// daemonTokensFromState reads daemon.json running token totals. Current
+// claude-p/claude-code runs store UI-only usage in "cli_tokens"; older
+// daemon.json files may only have the legacy "tokens" snapshot. Calls stays
+// 0 for the legacy snapshot because it does not retain a per-call count.
+func daemonTokensFromState(raw map[string]any) daemonTokenSummary {
+	// CLI backends such as claude-p intentionally do not write LingTai token
+	// ledgers. The kernel persists their UI-only usage in cli_tokens so
+	// /daemons can still show what Claude Code reported. Older daemon.json
+	// files only have tokens, so keep that as a fallback.
+	if block, ok := raw["cli_tokens"].(map[string]any); ok {
+		cli := daemonTokenSummary{
+			Input:    intField(block, "input"),
+			Output:   intField(block, "output"),
+			Thinking: intField(block, "thinking"),
+			Cached:   intField(block, "cached"),
+			Calls:    intField(block, "calls"),
+		}
+		if cli.Calls > 0 || cli.Input+cli.Output+cli.Thinking+cli.Cached > 0 {
+			return cli
+		}
+	}
+	block, ok := raw["tokens"].(map[string]any)
+	if !ok {
+		return daemonTokenSummary{}
+	}
+	return daemonTokenSummary{
+		Input:    intField(block, "input"),
+		Output:   intField(block, "output"),
+		Thinking: intField(block, "thinking"),
+		Cached:   intField(block, "cached"),
+	}
 }
 
 func splitLines(s string) []string {
@@ -975,11 +1050,22 @@ func daemonDuration(d daemonSummary) string {
 }
 
 func daemonTokenText(t daemonTokenSummary) string {
-	if t.Calls == 0 {
+	total := t.Input + t.Output + t.Thinking
+	// Nothing to show when there are neither calls nor token totals. The
+	// daemon.json fallback (CLI backends) yields totals with Calls==0, so we
+	// can't gate on Calls alone.
+	if t.Calls == 0 && total == 0 && t.Cached == 0 {
 		return ""
 	}
-	total := t.Input + t.Output + t.Thinking
-	return fmt.Sprintf("%d calls / %d tokens (in %d, out %d, think %d, cached %d)", t.Calls, total, t.Input, t.Output, t.Thinking, t.Cached)
+	if t.Calls == 0 {
+		// daemon.json snapshot: totals without a per-call count.
+		return fmt.Sprintf("%s tokens (in %s, out %s, think %s, cached %s)",
+			formatComma(int64(total)), formatComma(int64(t.Input)), formatComma(int64(t.Output)),
+			formatComma(int64(t.Thinking)), formatComma(int64(t.Cached)))
+	}
+	return fmt.Sprintf("%s calls / %s tokens (in %s, out %s, think %s, cached %s)",
+		formatComma(int64(t.Calls)), formatComma(int64(total)), formatComma(int64(t.Input)),
+		formatComma(int64(t.Output)), formatComma(int64(t.Thinking)), formatComma(int64(t.Cached)))
 }
 
 func parseDaemonTime(ts string) (time.Time, bool) {
@@ -1004,10 +1090,29 @@ func formatSeconds(seconds float64) string {
 }
 
 func shortTime(ts string) string {
+	return formatDaemonTimestamp(ts)
+}
+
+// formatDaemonTimestamp renders a daemon timestamp in local time with an
+// explicit UTC offset marker, keeping seconds resolution because daemon
+// events fire at sub-minute granularity (for example,
+// 2026-06-12 20:00:05 U-7:00). Mirrors the /kanban offset style
+// (utcOffsetLabel) without coupling to its minute-only format.
+//
+// Non-parseable legacy strings keep the old compact behavior: the leading
+// "YYYY-MM-DD HH:MM:SS" slice with the RFC3339 "T" replaced by a space.
+func formatDaemonTimestamp(ts string) string {
+	if ts == "" {
+		return ""
+	}
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		local := t.Local()
+		return local.Format("2006-01-02 15:04:05") + " " + utcOffsetLabel(local)
+	}
 	if len(ts) >= 19 {
 		return strings.ReplaceAll(ts[:19], "T", " ")
 	}
-	return ts
+	return strings.ReplaceAll(ts, "T", " ")
 }
 
 func appendWrappedFull(lines []string, text string, maxW int, prefix string) []string {

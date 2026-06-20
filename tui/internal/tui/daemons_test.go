@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -170,6 +171,11 @@ func TestRenderDetailShowsPresetNearBackend(t *testing.T) {
 }
 
 func TestRenderDetailShowsDaemonTimingAndTokens(t *testing.T) {
+	// Pin the zone so the localized timestamps below are deterministic.
+	origLocal := time.Local
+	t.Cleanup(func() { time.Local = origLocal })
+	time.Local = time.FixedZone("test", -7*60*60)
+
 	m := DaemonsModel{
 		items: []daemonSummary{{
 			Dir:         "/tmp/daemons/em-7",
@@ -183,7 +189,7 @@ func TestRenderDetailShowsDaemonTimingAndTokens(t *testing.T) {
 		}},
 	}
 	out := m.renderDetail(120)
-	for _, want := range []string{"duration", "6s", "finished", "2026-06-09T01:02:09Z", "last event", "2026-06-09T01:02:06Z", "tokens", "2 calls / 20 tokens"} {
+	for _, want := range []string{"duration", "6s", "finished", "2026-06-08 18:02:09 U-7:00", "last event", "2026-06-08 18:02:06 U-7:00", "tokens", "2 calls / 20 tokens"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("renderDetail missing %q; got:\n%s", want, out)
 		}
@@ -302,4 +308,157 @@ func testDaemonsModelWithItems(t *testing.T, count, height int) DaemonsModel {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
 	m, _ = m.Update(daemonsLoadMsg{selectedDir: agentDir, items: items})
 	return m
+}
+
+func TestDaemonTimestampRendersLocalOffset(t *testing.T) {
+	origLocal := time.Local
+	t.Cleanup(func() { time.Local = origLocal })
+	time.Local = time.FixedZone("test", -7*60*60)
+
+	got := formatDaemonTimestamp("2026-06-13T03:00:05Z")
+	want := "2026-06-12 20:00:05 U-7:00"
+	if got != want {
+		t.Fatalf("formatDaemonTimestamp() = %q, want %q", got, want)
+	}
+}
+
+func TestDaemonTimestampKeepsInvalidLegacyCompact(t *testing.T) {
+	// Non-parseable legacy strings fall back to the old compact trim.
+	got := formatDaemonTimestamp("2026-06-13T03:00:05-no-zone-here")
+	want := "2026-06-13 03:00:05"
+	if got != want {
+		t.Fatalf("formatDaemonTimestamp() = %q, want legacy compact %q", got, want)
+	}
+	if got := formatDaemonTimestamp(""); got != "" {
+		t.Fatalf("formatDaemonTimestamp(\"\") = %q, want empty", got)
+	}
+}
+
+func TestRenderDetailTimestampsUseLocalOffset(t *testing.T) {
+	origLocal := time.Local
+	t.Cleanup(func() { time.Local = origLocal })
+	time.Local = time.FixedZone("test", -7*60*60)
+
+	m := DaemonsModel{
+		items: []daemonSummary{{
+			Dir:         "/tmp/daemons/em-7",
+			State:       "done",
+			Backend:     "lingtai",
+			StartedAt:   "2026-06-09T01:02:03Z",
+			FinishedAt:  "2026-06-09T01:02:09Z",
+			LastEventAt: "2026-06-09T01:02:06Z",
+			Chats: []daemonChat{
+				{Role: "assistant", Kind: "reply", Text: "chat line", TS: "2026-06-09T01:02:07Z"},
+			},
+			Events: []daemonEvent{
+				{Event: "tool_call", Name: "read", Raw: `{"event":"tool_call"}`, TS: "2026-06-09T01:02:05Z"},
+			},
+		}},
+	}
+	out := m.renderDetail(120)
+	// Metadata + row timestamps all rendered in local time with a U-offset
+	// marker. The raw RFC3339 "Z" form must not survive into the view.
+	for _, want := range []string{
+		"2026-06-08 18:02:03 U-7:00", // started
+		"2026-06-08 18:02:09 U-7:00", // finished
+		"2026-06-08 18:02:06 U-7:00", // last event
+		"2026-06-08 18:02:07 U-7:00", // chat row
+		"2026-06-08 18:02:05 U-7:00", // event row
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderDetail missing local-offset time %q; got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "2026-06-09T01:02") {
+		t.Fatalf("renderDetail leaked raw RFC3339 timestamp; got:\n%s", out)
+	}
+}
+
+func TestReadDaemonTokensSupportsClaudeNativeFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token_ledger.jsonl")
+	// Claude Code / claude-p style usage: Anthropic Messages-API field names
+	// (input_tokens/output_tokens/cache_read_input_tokens/cache_creation_input_tokens
+	// + reasoning_tokens), mixed with one canonical-schema row.
+	body := strings.Join([]string{
+		`{"input_tokens":100,"output_tokens":40,"reasoning_tokens":7,"cache_read_input_tokens":60,"cache_creation_input_tokens":20}`,
+		`{"input":5,"output":3,"thinking":1,"cached":2}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := readDaemonTokens(path)
+	// input = 100 + 5; output = 40 + 3; thinking = 7 + 1;
+	// cached = (cache_read 60 + cache_creation 20) + 2.
+	if got.Calls != 2 || got.Input != 105 || got.Output != 43 || got.Thinking != 8 || got.Cached != 82 {
+		t.Fatalf("claude-native tokens not summed: %#v", got)
+	}
+}
+
+func TestReadDaemonSummaryFallsBackToDaemonJSONTokens(t *testing.T) {
+	dir := t.TempDir()
+	// claude-p / CLI backends never write a token_ledger.jsonl, but the
+	// kernel keeps a running tokens block in daemon.json. Surface that when
+	// the ledger is absent so CLI-backend usage still shows.
+	body := `{"backend":"claude-p","state":"done","tokens":{"input":1200,"output":340,"thinking":15,"cached":900}}`
+	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tokens.Input != 1200 || got.Tokens.Output != 340 || got.Tokens.Thinking != 15 || got.Tokens.Cached != 900 {
+		t.Fatalf("daemon.json tokens fallback not applied: %#v", got.Tokens)
+	}
+	// Calls is unknown from the daemon.json snapshot; daemonTokenText must
+	// still render when only the block totals are present.
+	// total = input + output + thinking = 1200 + 340 + 15 = 1555.
+	txt := daemonTokenText(got.Tokens)
+	if !strings.Contains(txt, "1,555 tokens") {
+		t.Fatalf("daemonTokenText(%#v) = %q, want a token total", got.Tokens, txt)
+	}
+}
+
+func TestReadDaemonSummaryFallsBackToCLITokens(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"backend":"claude-p","state":"done","tokens":{"input":0,"output":0,"thinking":0,"cached":0},"cli_tokens":{"input":6950,"output":4,"thinking":0,"cached":18689,"calls":1}}`
+	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tokens.Input != 6950 || got.Tokens.Output != 4 || got.Tokens.Cached != 18689 || got.Tokens.Calls != 1 {
+		t.Fatalf("cli_tokens fallback not applied: %#v", got.Tokens)
+	}
+	txt := daemonTokenText(got.Tokens)
+	if !strings.Contains(txt, "1 calls") || !strings.Contains(txt, "6,954 tokens") || !strings.Contains(txt, "cached 18,689") {
+		t.Fatalf("daemonTokenText(%#v) = %q, want cli token details", got.Tokens, txt)
+	}
+}
+
+func TestReadDaemonSummaryPrefersLedgerOverDaemonJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"backend":"lingtai","tokens":{"input":1,"output":1,"thinking":1,"cached":1}}`
+	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "token_ledger.jsonl"),
+		[]byte(`{"input":50,"output":20,"thinking":3,"cached":10}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readDaemonSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The per-call ledger is authoritative when present; the daemon.json
+	// block is only a fallback.
+	if got.Tokens.Calls != 1 || got.Tokens.Input != 50 || got.Tokens.Output != 20 {
+		t.Fatalf("ledger should win over daemon.json block: %#v", got.Tokens)
+	}
 }
