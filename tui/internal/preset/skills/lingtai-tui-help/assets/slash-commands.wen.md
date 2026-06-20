@@ -37,7 +37,7 @@
 - `/knowledge` — 阅器灵之私知（别名：`/library`、`/codex`）。
 - `/system` — 阅器灵之系统诸文（system.md、covenant 等）。
 - `/daemons` — 察各器灵守护之运及其录。
-- `/notification` — 示当前器灵所见通知原块（`.notification/*.json`）。
+- `/notification` — 观当前 Agent 近日所受告块，并可以左右翻阅。
 - `/presets` — 览此器灵可以 `/refresh` 换之预设。
 
 ### 网络与分享
@@ -157,10 +157,10 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 启守护之阅器：察各器灵守护之运及其态、全任务、全 `chat_history` 之交，及全工具/事件之录。
 用以溯某后台守护究竟何为。
 
-### `/notification` — 览当下通知之块
-**用：** `/notification`
+### `/notification` — 观近日告块
+**用法：** `/notification`
 
-示当前器灵 `.notification/` 目录中之 JSON 通知原块，并按诸道列各通知文卷。用于察器灵于下一次 `system(action="notification")` 注入前所见之 payload；已为内核取用或清去者不复现于此，然或仍以结构化 tool-call/tool-result 留于史中。
+显当前所聚 Agent 近日所受之 agent-visible 告块（自 `logs/log.sqlite` 重建）。凡徽标有疑、Agent 言有告，或欲验近来实际注入彼灵之告块，可用之。左/右翻阅近告，`r` 重载，Esc/`q` 返聊天；此视只读，不 dismiss，亦不改告。
 
 ### `/presets` — 启预设之库
 **用：** `/presets`

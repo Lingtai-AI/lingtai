@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,14 +47,14 @@ func TestNotificationModelNoSQLite(t *testing.T) {
 	if view == "" {
 		t.Fatal("View() returned empty string")
 	}
-	// Should contain a hint about the missing sqlite file.
 	if !strings.Contains(view, "log.sqlite") {
 		t.Fatalf("View() did not mention log.sqlite: %s", view)
 	}
 }
 
-// TestNotificationModelWithSQLite exercises navigation with a real sqlite file.
-func TestNotificationModelWithSQLite(t *testing.T) {
+// TestNotificationModelNoBlocks checks graceful display when sqlite exists
+// but has no notification_pair_injected rows.
+func TestNotificationModelNoBlocks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sqlite3 binary (POSIX only)")
 	}
@@ -68,6 +69,7 @@ func TestNotificationModelWithSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := filepath.Join(logsDir, "log.sqlite")
+	// Only non-block notification rows
 	sql := `CREATE TABLE events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		ts REAL NOT NULL,
@@ -82,54 +84,23 @@ func TestNotificationModelWithSQLite(t *testing.T) {
 		run_id TEXT,
 		inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 	);
-	INSERT INTO events(ts,type,fields_json) VALUES(1000.0,'notification_pair_injected','{"sources":["email"],"summary":"first"}');
-	INSERT INTO events(ts,type,fields_json) VALUES(1001.0,'email_notification_published','{"count":2}');
-	INSERT INTO events(ts,type,fields_json) VALUES(1002.0,'notification_pair_injected','{"sources":["email"],"summary":"third"}');`
+	INSERT INTO events(ts,type,fields_json) VALUES(1000.0,'email_notification_published','{"count":1}');`
 	if out, err := exec.Command(bin, db, sql).CombinedOutput(); err != nil {
 		t.Fatalf("createDB: %v\n%s", err, out)
 	}
 
 	m := NewNotificationModel(agentDir)
-	// Should start at newest event.
-	if m.current == nil {
-		t.Fatal("current should be set after init with real sqlite")
+	if m.cursor != -1 {
+		t.Fatalf("cursor should be -1 when no blocks, got %d", m.cursor)
 	}
-	if !strings.Contains(m.current.FieldsJSON, "third") {
-		t.Fatalf("expected newest event first, got fields_json=%s", m.current.FieldsJSON)
-	}
-	if m.total != 3 {
-		t.Fatalf("total = %d, want 3", m.total)
-	}
-
-	// Navigate to older event.
-	m.stepOlder()
-	if m.current == nil {
-		t.Fatal("current nil after stepOlder")
-	}
-	if !strings.Contains(m.current.FieldsJSON, "count") {
-		t.Fatalf("expected middle event after stepOlder, got fields_json=%s", m.current.FieldsJSON)
-	}
-
-	// Navigate back to newer.
-	m.stepNewer()
-	if !strings.Contains(m.current.FieldsJSON, "third") {
-		t.Fatalf("expected newest after stepNewer, got fields_json=%s", m.current.FieldsJSON)
-	}
-
-	// View renders without error.
-	m.width = 100
-	m.height = 30
 	view := m.View()
-	if !strings.Contains(view, "notification_pair_injected") {
-		t.Fatalf("View() does not show event type: %s", view)
-	}
-	if !strings.Contains(view, "third") {
-		t.Fatalf("View() does not show fields_json content: %s", view)
+	if !strings.Contains(view, "No notification") {
+		t.Fatalf("View() should show no-blocks message: %s", view)
 	}
 }
 
-// TestNotificationModelKeyNavigation checks that Update dispatches left/right keys.
-func TestNotificationModelKeyNavigation(t *testing.T) {
+// TestNotificationModelWithBlocks exercises block loading and navigation.
+func TestNotificationModelWithBlocks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sqlite3 binary (POSIX only)")
 	}
@@ -138,6 +109,179 @@ func TestNotificationModelKeyNavigation(t *testing.T) {
 		t.Skip("sqlite3 not in PATH")
 	}
 
+	agentDir := makeNotificationDB(t, bin, []string{
+		`{"sources":["email"],"summary":"first block"}`,
+		`{"sources":["soul"],"summary":"second block"}`,
+		`{"sources":["email","soul"],"summary":"third block","meta":{"stamina_left_seconds":3600,"injection_seq":1}}`,
+	})
+
+	m := NewNotificationModel(agentDir)
+	if len(m.blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(m.blocks))
+	}
+	// cursor=0 is newest (third block)
+	if !strings.Contains(m.blocks[0].Summary, "third") {
+		t.Fatalf("expected newest block first, got summary=%q", m.blocks[0].Summary)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+
+	// View shows body text
+	m.width = 100
+	m.height = 30
+	view := m.View()
+	if !strings.Contains(view, "third block") {
+		t.Fatalf("View() does not show summary: %s", view)
+	}
+	if !strings.Contains(view, "block 1 of 3") {
+		t.Fatalf("View() does not show block counter: %s", view)
+	}
+}
+
+// TestNotificationModelNavigation checks left/right key navigation among blocks.
+func TestNotificationModelNavigation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires sqlite3 binary (POSIX only)")
+	}
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+
+	agentDir := makeNotificationDB(t, bin, []string{
+		`{"summary":"block A"}`,
+		`{"summary":"block B"}`,
+		`{"summary":"block C"}`,
+	})
+
+	m := NewNotificationModel(agentDir)
+	// Start at newest (index 0 = block C)
+	if m.blocks[m.cursor].Summary != "block C" {
+		t.Fatalf("expected block C at start, got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// left → older (index 1 = block B)
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.blocks[m.cursor].Summary != "block B" {
+		t.Fatalf("after left: expected block B, got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// left → older (index 2 = block A)
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.blocks[m.cursor].Summary != "block A" {
+		t.Fatalf("after second left: expected block A, got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// left at end should stay on block A
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.blocks[m.cursor].Summary != "block A" {
+		t.Fatalf("left at oldest should stay: got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// right → newer (index 1 = block B)
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.blocks[m.cursor].Summary != "block B" {
+		t.Fatalf("after right: expected block B, got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// right → newest (index 0 = block C)
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.blocks[m.cursor].Summary != "block C" {
+		t.Fatalf("after second right: expected block C, got %q", m.blocks[m.cursor].Summary)
+	}
+
+	// right at newest should stay
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.blocks[m.cursor].Summary != "block C" {
+		t.Fatalf("right at newest should stay: got %q", m.blocks[m.cursor].Summary)
+	}
+}
+
+// TestNotificationModelEscBack checks that esc emits ViewChangeMsg{View:"mail"}.
+func TestNotificationModelEscBack(t *testing.T) {
+	m := NewNotificationModel(t.TempDir())
+
+	var gotMsg tea.Msg
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_ = m2
+	if cmd == nil {
+		t.Fatal("esc should return a cmd")
+	}
+	gotMsg = cmd()
+	vc, ok := gotMsg.(ViewChangeMsg)
+	if !ok {
+		t.Fatalf("esc cmd returned %T, want ViewChangeMsg", gotMsg)
+	}
+	if vc.View != "mail" {
+		t.Fatalf("ViewChangeMsg.View = %q, want mail", vc.View)
+	}
+}
+
+// TestNotificationModelQBack checks that q also emits ViewChangeMsg{View:"mail"}.
+func TestNotificationModelQBack(t *testing.T) {
+	m := NewNotificationModel(t.TempDir())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd == nil {
+		t.Fatal("q should return a cmd")
+	}
+	msg := cmd()
+	vc, ok := msg.(ViewChangeMsg)
+	if !ok {
+		t.Fatalf("q cmd returned %T, want ViewChangeMsg", msg)
+	}
+	if vc.View != "mail" {
+		t.Fatalf("ViewChangeMsg.View = %q, want mail", vc.View)
+	}
+}
+
+// TestNotificationModelBackspaceBack checks that backspace also emits ViewChangeMsg{View:"mail"}.
+func TestNotificationModelBackspaceBack(t *testing.T) {
+	m := NewNotificationModel(t.TempDir())
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if cmd == nil {
+		t.Fatal("expected backspace to emit a ViewChangeMsg command")
+	}
+	msg := cmd()
+	vc, ok := msg.(ViewChangeMsg)
+	if !ok {
+		t.Fatalf("backspace cmd returned %T, want ViewChangeMsg", msg)
+	}
+	if vc.View != "mail" {
+		t.Fatalf("ViewChangeMsg.View = %q, want mail", vc.View)
+	}
+}
+
+// TestNotificationModelLatest10Limit verifies only 10 blocks loaded when more exist.
+func TestNotificationModelLatest10Limit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires sqlite3 binary (POSIX only)")
+	}
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+
+	summaries := make([]string, 12)
+	for i := range summaries {
+		summaries[i] = fmt.Sprintf(`{"summary":"msg%d"}`, i)
+	}
+	agentDir := makeNotificationDB(t, bin, summaries)
+
+	m := NewNotificationModel(agentDir)
+	if len(m.blocks) != 10 {
+		t.Fatalf("expected 10 blocks (limit), got %d", len(m.blocks))
+	}
+	// newest block should be msg11
+	if m.blocks[0].Summary != "msg11" {
+		t.Fatalf("expected newest block msg11, got %q", m.blocks[0].Summary)
+	}
+}
+
+// makeNotificationDB is a test helper that inserts notification_pair_injected
+// rows with the given fields_json strings and returns the agent dir.
+func makeNotificationDB(t *testing.T, bin string, fieldsJSONs []string) string {
+	t.Helper()
 	agentDir := t.TempDir()
 	logsDir := filepath.Join(agentDir, "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -157,32 +301,16 @@ func TestNotificationModelKeyNavigation(t *testing.T) {
 		scope TEXT,
 		run_id TEXT,
 		inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-	);
-	INSERT INTO events(ts,type,fields_json) VALUES(1000.0,'notification_pair_injected','{"n":1}');
-	INSERT INTO events(ts,type,fields_json) VALUES(1001.0,'notification_pair_injected','{"n":2}');`
+	);`
+	for i, fj := range fieldsJSONs {
+		// Use single quotes escaped; fj must not contain single quotes for simplicity
+		sql += fmt.Sprintf(
+			"\nINSERT INTO events(ts,type,fields_json) VALUES(%d.0,'notification_pair_injected','%s');",
+			1000+i, fj,
+		)
+	}
 	if out, err := exec.Command(bin, db, sql).CombinedOutput(); err != nil {
-		t.Fatalf("createDB: %v\n%s", err, out)
+		t.Fatalf("makeNotificationDB: %v\n%s", err, out)
 	}
-
-	m := NewNotificationModel(agentDir)
-	if m.current == nil {
-		t.Fatal("no current event after init")
-	}
-	startID := m.current.ID
-
-	// left key → older (lower id)
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.current == nil {
-		t.Fatal("current nil after left key")
-	}
-	if m.current.ID >= startID {
-		t.Fatalf("left key should move to older event (lower id), got id=%d start=%d", m.current.ID, startID)
-	}
-	afterLeft := m.current.ID
-
-	// right key → back to newer
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.current.ID <= afterLeft {
-		t.Fatalf("right key should move to newer event, got id=%d prev=%d", m.current.ID, afterLeft)
-	}
+	return agentDir
 }

@@ -1,6 +1,7 @@
 package sqlitelog
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,5 +246,138 @@ func TestMissingDB(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// ── NotificationBlock tests ───────────────────────────────────────────────────
+
+func TestQueryNotificationBlocksEmpty(t *testing.T) {
+	agentDir := makeTestDB(t)
+	blocks, err := QueryNotificationBlocks(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlocks: %v", err)
+	}
+	if len(blocks) != 0 {
+		t.Fatalf("expected 0 blocks, got %d", len(blocks))
+	}
+}
+
+func TestQueryNotificationBlocksFiltersType(t *testing.T) {
+	// Only notification_pair_injected rows should be returned.
+	agentDir := makeTestDB(t,
+		`INSERT INTO events(ts,type,fields_json) VALUES(1000.0,'email_notification_published','{"count":1}');`,
+		`INSERT INTO events(ts,type,fields_json) VALUES(1001.0,'notification_pair_injected','{"sources":["email"],"summary":"hello world"}');`,
+		`INSERT INTO events(ts,type,fields_json) VALUES(1002.0,'tool_call','{"name":"read"}');`,
+	)
+	blocks, err := QueryNotificationBlocks(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlocks: %v", err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block (notification_pair_injected only), got %d", len(blocks))
+	}
+	if blocks[0].Summary != "hello world" {
+		t.Fatalf("Summary = %q, want %q", blocks[0].Summary, "hello world")
+	}
+	if len(blocks[0].Sources) != 1 || blocks[0].Sources[0] != "email" {
+		t.Fatalf("Sources = %v, want [email]", blocks[0].Sources)
+	}
+}
+
+func TestQueryNotificationBlocksLatest10(t *testing.T) {
+	// Insert 12 notification_pair_injected rows; we should get 10 newest.
+	sqls := make([]string, 12)
+	for i := 0; i < 12; i++ {
+		sqls[i] = fmt.Sprintf(
+			`INSERT INTO events(ts,type,fields_json) VALUES(%d.0,'notification_pair_injected','{"summary":"msg%d"}');`,
+			1000+i, i,
+		)
+	}
+	agentDir := makeTestDB(t, sqls...)
+	blocks, err := QueryNotificationBlocks(agentDir, 10)
+	if err != nil {
+		t.Fatalf("QueryNotificationBlocks: %v", err)
+	}
+	if len(blocks) != 10 {
+		t.Fatalf("expected 10 blocks with default limit, got %d", len(blocks))
+	}
+	// newest first → summary msg11 at index 0
+	if blocks[0].Summary != "msg11" {
+		t.Fatalf("expected newest first (msg11), got %q", blocks[0].Summary)
+	}
+}
+
+func TestParseNotificationBlockFieldsMeta(t *testing.T) {
+	fieldsJSON := `{
+		"call_id": "abc123",
+		"summary": "You have 1 new email.",
+		"sources": ["email", "soul"],
+		"meta": {
+			"current_time": "2026-06-20T10:00:00-07:00",
+			"stamina_left_seconds": 35884.5,
+			"injection_seq": 3,
+			"context": {
+				"system_tokens": 38398,
+				"history_tokens": 109121,
+				"usage": 0.147519
+			}
+		}
+	}`
+	b := NotificationBlock{}
+	parseNotificationBlockFields(fieldsJSON, &b)
+
+	if b.CallID != "abc123" {
+		t.Errorf("CallID = %q, want abc123", b.CallID)
+	}
+	if b.Summary != "You have 1 new email." {
+		t.Errorf("Summary = %q", b.Summary)
+	}
+	if len(b.Sources) != 2 || b.Sources[0] != "email" {
+		t.Errorf("Sources = %v", b.Sources)
+	}
+	if b.Meta == nil {
+		t.Fatal("Meta is nil")
+	}
+	if b.Meta.InjectionSeq != 3 {
+		t.Errorf("InjectionSeq = %d, want 3", b.Meta.InjectionSeq)
+	}
+	if b.Meta.StaminaLeftSeconds != 35884.5 {
+		t.Errorf("StaminaLeftSeconds = %v", b.Meta.StaminaLeftSeconds)
+	}
+	if b.Meta.ContextSystemTokens != 38398 {
+		t.Errorf("ContextSystemTokens = %d", b.Meta.ContextSystemTokens)
+	}
+	if b.Meta.ContextUsage != 0.147519 {
+		t.Errorf("ContextUsage = %v", b.Meta.ContextUsage)
+	}
+}
+
+func TestParseNotificationBlockFieldsInvalidJSON(t *testing.T) {
+	b := NotificationBlock{ID: 42}
+	parseNotificationBlockFields("not-json", &b)
+	// Should not panic; identity fields unaffected
+	if b.ID != 42 {
+		t.Errorf("ID changed unexpectedly")
+	}
+	if b.Summary != "" || b.CallID != "" {
+		t.Errorf("unexpected fields set on parse failure")
+	}
+}
+
+func TestQueryNotificationBlocksMissingDB(t *testing.T) {
+	_, err := QueryNotificationBlocks(t.TempDir(), 10)
+	if err == nil {
+		t.Fatal("expected error for missing sqlite sidecar")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNotificationBlockTime(t *testing.T) {
+	b := NotificationBlock{Ts: 1781577055.46409}
+	tt := b.Time()
+	if tt.Year() != 2026 {
+		t.Fatalf("unexpected year: %d", tt.Year())
 	}
 }

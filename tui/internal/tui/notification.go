@@ -13,36 +13,34 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
-// NotificationModel is the /notification view: a just-in-time history browser
-// over the current agent's logs/log.sqlite. Left/right keys step through
-// notification-related events by id without preloading or caching.
+// NotificationModel is the /notification view: a history browser over the
+// latest 10 notification_pair_injected blocks from logs/log.sqlite.
+// Left/right keys step among the in-memory list; r/ctrl+r reloads.
+// Esc returns to the mail view.
 type NotificationModel struct {
 	agentDir string
 	width    int
 	height   int
 
-	// current event being displayed; nil means "show index / no event selected"
-	current *sqlitelog.NotificationEvent
+	// latest 10 blocks loaded on open/reload, index 0 = newest
+	blocks []sqlitelog.NotificationBlock
 
-	// total count loaded on open (best-effort; 0 when unavailable)
-	total int
+	// cursor into blocks; -1 means no blocks available
+	cursor int
 
 	// error from last query (shown inline)
 	err string
-
-	// statusLine is the one-line footer hint
-	statusLine string
 }
 
 // NewNotificationModel creates the /notification model for agentDir.
-// It immediately queries for the latest notification event.
+// It immediately loads the latest 10 notification blocks.
 func NewNotificationModel(agentDir string) NotificationModel {
-	m := NotificationModel{agentDir: agentDir}
-	m.loadLatest()
+	m := NotificationModel{agentDir: agentDir, cursor: -1}
+	m.load()
 	return m
 }
 
-func (m *NotificationModel) loadLatest() {
+func (m *NotificationModel) load() {
 	if m.agentDir == "" {
 		m.err = "No agent selected."
 		return
@@ -51,53 +49,18 @@ func (m *NotificationModel) loadLatest() {
 		m.err = "logs/log.sqlite not found. Run `lingtai-agent log rebuild <agent_dir>` to create it."
 		return
 	}
-	events, err := sqlitelog.QueryNotifications(m.agentDir, 50)
+	blocks, err := sqlitelog.QueryNotificationBlocks(m.agentDir, 10)
 	if err != nil {
 		m.err = fmt.Sprintf("query error: %v", err)
 		return
 	}
 	m.err = ""
-	m.total = len(events)
-	if len(events) == 0 {
-		m.current = nil
-		return
+	m.blocks = blocks
+	if len(blocks) > 0 {
+		m.cursor = 0
+	} else {
+		m.cursor = -1
 	}
-	// Start at newest (index 0 = highest id in DESC order).
-	m.current = &events[0]
-}
-
-func (m *NotificationModel) stepOlder() {
-	if m.current == nil {
-		return
-	}
-	prev, err := sqlitelog.QueryNotificationBefore(m.agentDir, m.current.ID)
-	if err != nil {
-		m.err = fmt.Sprintf("query error: %v", err)
-		return
-	}
-	m.err = ""
-	if prev != nil {
-		m.current = prev
-	}
-}
-
-func (m *NotificationModel) stepNewer() {
-	if m.current == nil {
-		return
-	}
-	next, err := sqlitelog.QueryNotificationAfter(m.agentDir, m.current.ID)
-	if err != nil {
-		m.err = fmt.Sprintf("query error: %v", err)
-		return
-	}
-	m.err = ""
-	if next != nil {
-		m.current = next
-	}
-}
-
-func (m *NotificationModel) reload() {
-	m.loadLatest()
 }
 
 func (m NotificationModel) Init() tea.Cmd { return nil }
@@ -109,12 +72,20 @@ func (m NotificationModel) Update(msg tea.Msg) (NotificationModel, tea.Cmd) {
 		m.height = msg.Height
 	case tea.KeyPressMsg:
 		switch msg.String() {
+		case "esc", "q", "backspace":
+			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "left":
-			m.stepOlder()
+			// older = higher cursor index (index 0 = newest)
+			if m.cursor >= 0 && m.cursor < len(m.blocks)-1 {
+				m.cursor++
+			}
 		case "right":
-			m.stepNewer()
+			// newer = lower cursor index
+			if m.cursor > 0 {
+				m.cursor--
+			}
 		case "ctrl+r", "r":
-			m.reload()
+			m.load()
 		}
 	}
 	return m, nil
@@ -129,12 +100,13 @@ func (m NotificationModel) View() string {
 		return renderNotificationPanel(title, body, hint, m.width, m.height)
 	}
 
-	if m.current == nil {
-		body := StyleSubtle.Render("No notification events found in logs/log.sqlite.")
+	if len(m.blocks) == 0 || m.cursor < 0 {
+		body := StyleSubtle.Render("No notification_pair_injected blocks found in logs/log.sqlite.")
 		return renderNotificationPanel(title, body, hint, m.width, m.height)
 	}
 
-	body := renderNotificationEvent(*m.current, m.total)
+	block := m.blocks[m.cursor]
+	body := renderNotificationBlock(block, m.cursor, len(m.blocks), m.blockWrapWidth())
 	return renderNotificationPanel(title, body, hint, m.width, m.height)
 }
 
@@ -146,38 +118,101 @@ func notificationTitle(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, filepath.Base(agentDir))
 }
 
-// renderNotificationEvent formats a single notification event for display.
-func renderNotificationEvent(ev sqlitelog.NotificationEvent, total int) string {
-	var b strings.Builder
+func (m NotificationModel) blockWrapWidth() int {
+	wrapWidth := m.width - 8
+	if wrapWidth < 40 {
+		return 40
+	}
+	if wrapWidth > 120 {
+		return 120
+	}
+	return wrapWidth
+}
 
-	// Header row
-	tsStr := ev.Time().Format(time.RFC3339)
-	typeStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+// renderNotificationBlock formats a single NotificationBlock for display,
+// mirroring the mail view's notification render style.
+func renderNotificationBlock(b sqlitelog.NotificationBlock, cursor, total, wrapWidth int) string {
+	var sb strings.Builder
+
+	if wrapWidth <= 0 {
+		wrapWidth = 76
+	}
+
+	// ── Block index counter ─────────────────────────────────────────────────
+	idxStyle := StyleFaint
+	sb.WriteString(idxStyle.Render(fmt.Sprintf("block %d of %d", cursor+1, total)))
+	sb.WriteString("\n")
+
+	// ── Event identity row ──────────────────────────────────────────────────
+	tsStr := b.Time().Format(time.RFC3339)
 	idStyle := StyleFaint
+	callStyle := StyleFaint
 
-	fmt.Fprintf(&b, "%s  %s  %s\n",
-		typeStyle.Render(ev.Type),
-		idStyle.Render(fmt.Sprintf("id=%d", ev.ID)),
-		StyleSubtle.Render(tsStr),
-	)
+	idPart := idStyle.Render(fmt.Sprintf("id=%d", b.ID))
+	tsPart := StyleSubtle.Render(tsStr)
+	row := idPart + "  " + tsPart
+	if b.CallID != "" {
+		row += "  " + callStyle.Render("call_id="+b.CallID)
+	}
+	sb.WriteString(row + "\n")
+	sb.WriteString("\n")
 
-	if ev.Source != "" && ev.Source != "." {
-		fmt.Fprintf(&b, "%s\n", StyleFaint.Render("source: "+ev.Source))
+	// ── Body text (summary) ─────────────────────────────────────────────────
+	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+
+	sb.WriteString(labelStyle.Render("  ✉ notifications") + "\n")
+	if b.Summary != "" {
+		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(b.Summary)
+		for _, line := range strings.Split(wrapped, "\n") {
+			sb.WriteString(notifStyle.Render("    "+line) + "\n")
+		}
 	}
 
-	b.WriteString("\n")
-
-	// Fields JSON, pretty-printed
-	pretty := sqlitelog.PrettyFields(ev)
-	b.WriteString(pretty)
-	b.WriteString("\n")
-
-	if total > 0 {
-		b.WriteString("\n")
-		b.WriteString(StyleFaint.Render(fmt.Sprintf("%d notification event(s) in history", total)))
+	// ── Sources list ────────────────────────────────────────────────────────
+	if len(b.Sources) > 0 {
+		for _, src := range b.Sources {
+			sb.WriteString(notifStyle.Render("    • "+src) + "\n")
+		}
 	}
 
-	return b.String()
+	// ── Meta footer (context%, stamina, time, seq) ──────────────────────────
+	if b.Meta != nil {
+		if footer := formatBlockMetaFooter(b.Meta); footer != "" {
+			footerStyle := notifStyle.Faint(true)
+			sb.WriteString(footerStyle.Render("    "+footer) + "\n")
+		}
+	}
+
+	return sb.String()
+}
+
+// formatBlockMetaFooter renders the NotificationBlockMeta vital signs as
+// a compact line like "ctx 14.8% · stamina 9h58m · 21:10 PDT · seq 2".
+// Returns "" when no displayable fields are present.
+func formatBlockMetaFooter(m *sqlitelog.NotificationBlockMeta) string {
+	if m == nil {
+		return ""
+	}
+	var parts []string
+	if m.ContextUsage > 0 {
+		parts = append(parts, fmt.Sprintf("ctx %.1f%%", m.ContextUsage*100))
+	}
+	if m.StaminaLeftSeconds > 0 {
+		parts = append(parts, "stamina "+formatStaminaShort(m.StaminaLeftSeconds))
+	}
+	if m.CurrentTime != "" {
+		if short := formatCurrentTimeShort(m.CurrentTime); short != "" {
+			parts = append(parts, short)
+		}
+	}
+	if m.InjectionSeq > 0 {
+		parts = append(parts, fmt.Sprintf("seq %d", m.InjectionSeq))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ")
 }
 
 // renderNotificationPanel wraps content in a simple titled box.
