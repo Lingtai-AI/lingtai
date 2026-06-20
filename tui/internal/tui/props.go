@@ -38,6 +38,13 @@ type PropsModel struct {
 	tokens     fs.TokenTotals
 	adminStart string // admin agent's started_at timestamp
 
+	// AutoRefresh reflects whether the app-level 1s auto-refresh is enabled.
+	// It only drives the footer hint (a "live" badge); the actual reloading is
+	// driven by the app tick via AutoReloadCmd. Set by switchToView from
+	// tuiConfig; defaults false so a bare NewPropsModel shows the manual-only
+	// hint.
+	AutoRefresh bool
+
 	// Scrollable viewport for content
 	viewport viewport.Model
 	ready    bool // viewport initialized
@@ -115,6 +122,23 @@ func (m PropsModel) loadData() tea.Msg {
 }
 
 func (m PropsModel) Init() tea.Cmd { return m.loadData }
+
+// AutoReloadCmd implements autoReloadable: on the app-level 1s tick, reload the
+// kanban dashboard from disk so network/token/status data stays live without a
+// manual Ctrl+R. It returns the same command as Ctrl+R (loadData), which
+// updates fields in place and re-renders without resetting scroll, cursor, or
+// folder state.
+//
+// Returns nil — skipping this tick — while the agent picker is open (selectedDir
+// is mid-change). The Ctrl+D detail pane remains live: App.autoRefreshActiveView
+// refreshes the detail caches in place before this command reloads the outer
+// dashboard data.
+func (m PropsModel) AutoReloadCmd() tea.Cmd {
+	if m.pickerOpen {
+		return nil
+	}
+	return m.loadData
+}
 
 // propsHeaderLines is the number of lines used by the header (title + separator + optional callout).
 const propsHeaderLines = 3
@@ -359,11 +383,22 @@ func (m PropsModel) View() string {
 		scrollHint = " " + RuneBullet + " ↑↓ scroll"
 	}
 
+	// Refresh hint: a "live" badge when auto-refresh is on, plus the ctrl+r
+	// manual fallback that exists either way. Consolidated here so the kanban
+	// has a single source of truth for the reload hint (supersedes #369, which
+	// added a bare "ctrl+r reload" hint before auto-refresh existed).
+	refreshHint := i18n.T("props.ctrl_r_reload")
+	if m.AutoRefresh {
+		refreshHint = i18n.T("hints.auto_refresh_live") + " " + RuneBullet + " " + refreshHint
+	}
+
 	var footerLine string
 	if m.detailOpen {
-		footerLine = "  esc " + i18n.T("props.detail_back_to_summary") + scrollHint
+		footerLine = "  " + refreshHint + " " + RuneBullet +
+			" esc " + i18n.T("props.detail_back_to_summary") + scrollHint
 	} else {
-		footerLine = "  " + i18n.T("hints.props_off") + " " + RuneBullet +
+		footerLine = "  " + refreshHint + " " + RuneBullet +
+			" " + i18n.T("hints.props_off") + " " + RuneBullet +
 			" esc " + i18n.T("manage.back") + " " + RuneBullet +
 			" " + i18n.T("hints.props_select") + " " + RuneBullet +
 			" ctrl+d " + i18n.T("props.detail_open") + scrollHint
