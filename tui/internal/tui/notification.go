@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -164,13 +165,25 @@ func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, t
 	sb.WriteString("\n")
 
 	labelStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorAgent)
 	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
 
-	// ── Global _notification_guidance ───────────────────────────────────────
+	// ── Modern parallel metadata blocks (kernel #443+) ──────────────────────
+	writeNotificationMapBlock(&sb, "_tool", s.Tool, []string{
+		"tool_name", "name", "tool_call_id", "id", "status", "current_time", "time",
+		"elapsed_ms", "elapsed", "char_count", "threshold_chars", "truncated", "spill_path",
+	}, wrapWidth, labelStyle, valueStyle)
+	writeNotificationMapBlock(&sb, "_runtime.state", s.RuntimeState, []string{
+		"current_time", "context", "stamina_left_seconds", "stamina", "active_turn_tool_calls",
+	}, wrapWidth, labelStyle, valueStyle)
+	writeNotificationMapBlock(&sb, "_runtime.guidance", s.RuntimeGuidance, []string{
+		"schema", "schema_version", "version", "title", "summary", "body", "message", "action",
+	}, wrapWidth, labelStyle, valueStyle)
+
+	// ── Global _notification_guidance ────────────────────────────────────────
 	if s.Guidance != "" {
 		sb.WriteString(labelStyle.Render("  ✦ _notification_guidance") + "\n")
-		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(s.Guidance)
-		for _, line := range strings.Split(wrapped, "\n") {
+		for _, line := range wrappedNotificationLines(s.Guidance, wrapWidth) {
 			sb.WriteString(notifStyle.Faint(true).Render("    "+line) + "\n")
 		}
 		sb.WriteString("\n")
@@ -208,6 +221,83 @@ func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, t
 	}
 
 	return sb.String()
+}
+
+func writeNotificationMapBlock(sb *strings.Builder, title string, data map[string]interface{}, preferred []string, wrapWidth int, labelStyle, valueStyle lipgloss.Style) {
+	if len(data) == 0 {
+		return
+	}
+	sb.WriteString(labelStyle.Render("  ◈ "+title) + "\n")
+	for _, key := range orderedNotificationKeys(data, preferred) {
+		lines := wrappedNotificationLines(formatNotificationValue(data[key]), wrapWidth-10)
+		if len(lines) == 0 {
+			continue
+		}
+		sb.WriteString(labelStyle.Render("    "+key+": ") + valueStyle.Render(lines[0]) + "\n")
+		for _, line := range lines[1:] {
+			sb.WriteString(valueStyle.Render("      "+line) + "\n")
+		}
+	}
+	sb.WriteString("\n")
+}
+
+func orderedNotificationKeys(data map[string]interface{}, preferred []string) []string {
+	seen := make(map[string]bool, len(data))
+	keys := make([]string, 0, len(data))
+	for _, key := range preferred {
+		if _, ok := data[key]; ok {
+			keys = append(keys, key)
+			seen[key] = true
+		}
+	}
+	extra := make([]string, 0, len(data))
+	for key := range data {
+		if !seen[key] {
+			extra = append(extra, key)
+		}
+	}
+	sort.Strings(extra)
+	return append(keys, extra...)
+}
+
+func formatNotificationValue(v interface{}) string {
+	switch x := v.(type) {
+	case nil:
+		return "<nil>"
+	case string:
+		return x
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if x == float64(int64(x)) {
+			return fmt.Sprintf("%.0f", x)
+		}
+		return fmt.Sprintf("%g", x)
+	case float32:
+		return fmt.Sprintf("%g", x)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%v", x)
+	default:
+		b, err := json.MarshalIndent(v, "", "  ")
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func wrappedNotificationLines(text string, wrapWidth int) []string {
+	if wrapWidth <= 0 {
+		wrapWidth = 76
+	}
+	if text == "" {
+		return []string{""}
+	}
+	wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(text)
+	return strings.Split(wrapped, "\n")
 }
 
 // formatBlockMetaFooter renders the NotificationBlockMeta vital signs as

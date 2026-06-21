@@ -353,6 +353,53 @@ func TestNotificationModelSnapshotRendersChannelContent(t *testing.T) {
 	}
 }
 
+// TestNotificationModelSnapshotRendersToolRuntimeBlocks checks the kernel #443
+// four-block metadata shape: _tool, _runtime.state, _runtime.guidance, and
+// notifications / _notification_guidance are rendered as readable sections.
+func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires sqlite3 binary (POSIX only)")
+	}
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+
+	fields := []string{
+		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"payload":{"_tool":{"tool_name":"read","tool_call_id":"call_read_123","status":"ok","elapsed_ms":42,"char_count":1200,"threshold_chars":3000},"_runtime":{"state":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":1234,"active_turn_tool_calls":7,"context":{"usage":0.42,"history_tokens":12345}},"guidance":{"schema_version":"1","title":"Large result guidance","body":"Summarize the result after reading it."}},"_notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}},"meta":{"injection_seq":9}}`,
+	}
+	agentDir := makeNotificationSnapshotDB(t, bin, fields)
+
+	m := NewNotificationModel(agentDir)
+	m.width = 120
+	m.height = 50
+	view := m.View()
+
+	checks := []string{
+		"_tool",
+		"tool_name",
+		"read",
+		"tool_call_id",
+		"call_read_123",
+		"_runtime.state",
+		"active_turn_tool_calls",
+		"7",
+		"_runtime.guidance",
+		"Large result guidance",
+		"Summarize the result after reading it.",
+		"_notification_guidance",
+		"Handle channel payloads through their producer tools.",
+		"notifications",
+		"system",
+		"seq 9",
+	}
+	for _, want := range checks {
+		if !strings.Contains(view, want) {
+			t.Fatalf("View() should contain %q: %s", want, view)
+		}
+	}
+}
+
 // makeNotificationSnapshotDB is a test helper that inserts notification_block_injected
 // rows with the given fields_json strings and returns the agent dir.
 func makeNotificationSnapshotDB(t *testing.T, bin string, fieldsJSONs []string) string {

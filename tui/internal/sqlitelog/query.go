@@ -163,9 +163,9 @@ func QueryNotificationBlocks(agentDir string, limit int) ([]NotificationSummaryE
 
 // NotificationBlockSnapshot is a parsed notification_block_injected event row.
 // It carries the actual canonical payload that was injected into the model's
-// context — the same dict with "notifications" and "_notification_guidance"
-// that the agent sees — rather than the compact summary stored by
-// notification_pair_injected.
+// context. Modern kernel payloads are parallel metadata blocks (`_tool`,
+// `_runtime.state`, `_runtime.guidance`, and notifications/guidance) rather
+// than the old provider-visible `_tool_result_metadata` compatibility blob.
 type NotificationBlockSnapshot struct {
 	// Raw event identity
 	ID     int64
@@ -179,8 +179,12 @@ type NotificationBlockSnapshot struct {
 	Meta    *NotificationBlockMeta
 
 	// Canonical payload as the agent saw it.
-	Guidance      string            // payload._notification_guidance
-	Notifications map[string]string // channel → JSON-encoded channel dict
+	Payload         map[string]interface{} // full payload dict, retained for future renderers
+	Tool            map[string]interface{} // payload._tool
+	RuntimeState    map[string]interface{} // payload._runtime.state or payload["_runtime.state"]
+	RuntimeGuidance map[string]interface{} // payload._runtime.guidance or payload["_runtime.guidance"]
+	Guidance        string                 // payload._notification_guidance
+	Notifications   map[string]string      // channel → JSON-encoded channel dict
 }
 
 // Time returns the wall-clock time for the snapshot.
@@ -199,6 +203,11 @@ type snapshotFields struct {
 	Meta    map[string]interface{} `json:"meta"`
 }
 
+func notificationMap(v interface{}) (map[string]interface{}, bool) {
+	m, ok := v.(map[string]interface{})
+	return m, ok
+}
+
 // parseNotificationBlockSnapshotFields parses a fields_json string into a
 // NotificationBlockSnapshot. Returns a zero-value snapshot on parse failure.
 func parseNotificationBlockSnapshotFields(fieldsJSON string, s *NotificationBlockSnapshot) {
@@ -211,10 +220,28 @@ func parseNotificationBlockSnapshotFields(fieldsJSON string, s *NotificationBloc
 	s.Sources = f.Sources
 
 	if f.Payload != nil {
+		s.Payload = f.Payload
+		if tool, ok := notificationMap(f.Payload["_tool"]); ok {
+			s.Tool = tool
+		}
+		if state, ok := notificationMap(f.Payload["_runtime.state"]); ok {
+			s.RuntimeState = state
+		}
+		if guidance, ok := notificationMap(f.Payload["_runtime.guidance"]); ok {
+			s.RuntimeGuidance = guidance
+		}
+		if runtimeBlock, ok := notificationMap(f.Payload["_runtime"]); ok {
+			if state, ok := notificationMap(runtimeBlock["state"]); ok {
+				s.RuntimeState = state
+			}
+			if guidance, ok := notificationMap(runtimeBlock["guidance"]); ok {
+				s.RuntimeGuidance = guidance
+			}
+		}
 		if g, ok := f.Payload["_notification_guidance"].(string); ok {
 			s.Guidance = g
 		}
-		if notifs, ok := f.Payload["notifications"].(map[string]interface{}); ok {
+		if notifs, ok := notificationMap(f.Payload["notifications"]); ok {
 			s.Notifications = make(map[string]string, len(notifs))
 			for ch, v := range notifs {
 				b, err := json.MarshalIndent(v, "", "  ")

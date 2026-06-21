@@ -53,7 +53,7 @@ func firstRenderedLine(body string) string {
 	return body
 }
 
-const toolCallSummaryLimit = 100
+const toolCallSummaryLimit = 200
 
 // compactToolCallSummary keeps Ctrl+O level-1 tool_call entries short even
 // when the first rendered line is a long single-line JSON payload. The limit is

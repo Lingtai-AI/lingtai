@@ -576,7 +576,7 @@
   "cmd.settings": "TUI preferences — theme, mail page size, language, auto-insights toggle",
   "cmd.kanban": "Agent network dashboard — view all agents' properties, LLM config, capabilities, and context usage at a glance",
   "cmd.daemons": "Daemon browser — inspect per-agent daemon runs, status, full tasks, full chat_history interactions, and full tool/event records",
-  "cmd.notification": "Notification block snapshots — just-in-time query of the current agent's logs/log.sqlite for notification_block_injected events. Each snapshot shows the actual canonical payload (notifications + _notification_guidance) the agent saw, not just a compact summary. Left/right arrows step through the latest 10 snapshots newest-first.",
+  "cmd.notification": "Notification block snapshots — just-in-time query of the current agent's logs/log.sqlite for notification_block_injected events. Each snapshot shows the actual canonical payload the agent saw as structured sections (_tool, _runtime.state, _runtime.guidance, notifications, and _notification_guidance), not just a compact summary. Left/right arrows step through the latest 10 snapshots newest-first.",
   "cmd.projects": "Browse registered projects and their agent networks",
   "cmd.knowledge": "Browse an agent's private knowledge — local decisions, notes, references, and migrated codex entries. Ctrl+T switches between agents",
   "cmd.library": "Browse an agent's durable knowledge library — accumulated research and findings. Ctrl+T switches between agents",

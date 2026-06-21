@@ -576,7 +576,7 @@
   "cmd.settings": "TUI 偏好——主题、页之大小、言语、自动省察之开关",
   "cmd.kanban": "器灵网络之看板——一览诸灵之性、模型之配、能为与上下文之耗",
   "cmd.daemons": "分神之览——按器灵察 daemon 之态、全任、全量 chat_history 交互与全量器用/诸事",
-  "cmd.notification": "通知块之影——即时叩问当前器灵之 logs/log.sqlite 以得 notification_block_injected 诸事，每影展示器灵实见之完整规范载荷（notifications + _notification_guidance），而非精简摘要。左右键翻阅最新十影",
+  "cmd.notification": "通知块之影——即时叩问当前器灵之 logs/log.sqlite 以得 notification_block_injected 诸事，每影以结构化诸区展示器灵实见之完整规范载荷（_tool、_runtime.state、_runtime.guidance、notifications、_notification_guidance），而非精简摘要。左右键翻阅最新十影",
   "cmd.projects": "览已籍之事及其器灵网络",
   "cmd.knowledge": "览器灵私有 knowledge——本地所断、笔记、所引与迁来 codex 条目。Ctrl+T 择器灵",
   "cmd.library": "览器灵长久识库——所积之知与所得之悟。Ctrl+T 择器灵",
