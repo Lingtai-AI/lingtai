@@ -1,0 +1,9 @@
+# Validation
+
+- `git diff --check` — passed.
+- `go test ./internal/tui ./internal/preset` — passed.
+- `cd tui && go test ./...` — passed.
+- `go build -ldflags "-X main.version=v0.9.4"` — passed; binary printed `lingtai-tui v0.9.4`.
+- `npm --prefix portal/web ci` — passed with existing npm audit / approve-scripts warnings.
+- `npm --prefix portal/web run build` — passed.
+- `cd portal && go test ./...` — passed.

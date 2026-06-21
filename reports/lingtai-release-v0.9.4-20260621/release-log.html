@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LingTai TUI/Portal v0.9.4 release log</title><style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:980px;margin:40px auto;padding:0 24px;line-height:1.55;color:#17202a}code,pre{background:#f5f7f9;padding:.15em .35em;border-radius:4px}pre{padding:12px;overflow:auto}.card{border:1px solid #d8dee4;border-radius:10px;padding:16px;margin:16px 0;background:#fff}h1{color:#275a45}.ok{color:#1a7f37;font-weight:600}</style></head><body><h1>LingTai TUI/Portal v0.9.4</h1><p>Candidate head: <code>4a01c52dcd2ab5d8d67208cff6c8f4b7bf78206f</code>; previous tag: <code>v0.9.3</code>; generated 2026-06-21T02:04:30.</p><div class="card"><h2>Highlights</h2><ul><li>Compact Ctrl+O tool-call markers.</li><li>Structured metadata rendering for /notification.</li><li>Mail replay and full-layer tool-result metadata rendering.</li></ul></div><div class="card"><h2>Validation</h2><ul><li class="ok">TUI focused/full Go tests: passed</li><li class="ok">Release build check: lingtai-tui v0.9.4</li><li class="ok">Portal web build: passed</li><li class="ok">Portal Go tests: passed</li></ul></div><div class="card"><h2>Commits</h2><pre>4a01c52 Merge pull request #383 from Lingtai-AI/mailview-complete-meta-layer
+65de604 Merge origin/main into mailview metadata rendering
+075b600 Merge pull request #385 from Lingtai-AI/dev1-notification-four-block-rendering
+520edcb Render notification metadata blocks
+ae07a5b Merge pull request #384 from Lingtai-AI/fix/tui-ctrl-o-truncation-200-20260621
+749f4bf fix(tui): extend Ctrl-O tool call summaries
+f2b90b4 Render tool result metadata blocks in mail replay
+fb12947 chore(stars): update daily star count</pre></div><div class="card"><h2>Merge commits / PRs</h2><pre>4a01c52 Merge pull request #383 from Lingtai-AI/mailview-complete-meta-layer
+65de604 Merge origin/main into mailview metadata rendering
+075b600 Merge pull request #385 from Lingtai-AI/dev1-notification-four-block-rendering
+ae07a5b Merge pull request #384 from Lingtai-AI/fix/tui-ctrl-o-truncation-200-20260621</pre></div><div class="card"><h2>Diffstat</h2><pre>docs/stars/README.md                      |   8 +-
+ docs/stars/stars.csv                      |   1 +
+ docs/stars/trend.png                      | Bin 48637 -&gt; 47267 bytes
+ tui/i18n/en.json                          |   2 +-
+ tui/i18n/wen.json                         |   2 +-
+ tui/i18n/zh.json                          |   2 +-
+ tui/internal/fs/session.go                | 132 ++++++++++++++++++++++++++----
+ tui/internal/fs/session_tail_test.go      |  77 +++++++++++++++--
+ tui/internal/sqlitelog/query.go           |  39 +++++++--
+ tui/internal/tui/ANATOMY.md               |   4 +-
+ tui/internal/tui/notification.go          |  96 +++++++++++++++++++++-
+ tui/internal/tui/notification_test.go     |  47 +++++++++++
+ tui/internal/tui/toolcall_display.go      |   2 +-
+ tui/internal/tui/toolcall_display_test.go |  18 ++--
+ 14 files changed, 380 insertions(+), 50 deletions(-)</pre></div></body></html>

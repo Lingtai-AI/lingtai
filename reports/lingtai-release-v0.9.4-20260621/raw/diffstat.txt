@@ -1,0 +1,15 @@
+docs/stars/README.md                      |   8 +-
+ docs/stars/stars.csv                      |   1 +
+ docs/stars/trend.png                      | Bin 48637 -> 47267 bytes
+ tui/i18n/en.json                          |   2 +-
+ tui/i18n/wen.json                         |   2 +-
+ tui/i18n/zh.json                          |   2 +-
+ tui/internal/fs/session.go                | 132 ++++++++++++++++++++++++++----
+ tui/internal/fs/session_tail_test.go      |  77 +++++++++++++++--
+ tui/internal/sqlitelog/query.go           |  39 +++++++--
+ tui/internal/tui/ANATOMY.md               |   4 +-
+ tui/internal/tui/notification.go          |  96 +++++++++++++++++++++-
+ tui/internal/tui/notification_test.go     |  47 +++++++++++
+ tui/internal/tui/toolcall_display.go      |   2 +-
+ tui/internal/tui/toolcall_display_test.go |  18 ++--
+ 14 files changed, 380 insertions(+), 50 deletions(-)
