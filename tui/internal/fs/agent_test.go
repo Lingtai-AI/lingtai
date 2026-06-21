@@ -418,3 +418,70 @@ func TestSumTokenLedgerByProviderSkipsDaemonRows(t *testing.T) {
 		t.Fatalf("daemon deepseek row should be excluded: %#v", byProvider)
 	}
 }
+
+func TestSumTokenLedgerStreamsLongLines(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	entry := LedgerEntry{
+		Input:  3,
+		Output: 4,
+		Cached: 6,
+		Model:  strings.Repeat("m", 70*1024),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledgerPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	totals := SumTokenLedger(ledgerPath)
+	if totals.APICalls != 1 || totals.Input != 3 || totals.Output != 4 || totals.Cached != 6 {
+		t.Fatalf("totals = %+v, want long line counted", totals)
+	}
+}
+
+func TestSumTokenLedgerCacheInvalidatesOnSizeChange(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	first := `{"input":1,"output":2}` + "\n"
+	if err := os.WriteFile(ledgerPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if totals := SumTokenLedger(ledgerPath); totals.APICalls != 1 || totals.Input != 1 || totals.Output != 2 {
+		t.Fatalf("first totals = %+v, want one row", totals)
+	}
+
+	second := first + `{"input":3,"output":4}` + "\n"
+	if err := os.WriteFile(ledgerPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if totals := SumTokenLedger(ledgerPath); totals.APICalls != 2 || totals.Input != 4 || totals.Output != 6 {
+		t.Fatalf("second totals = %+v, want cache invalidated after append", totals)
+	}
+}
+
+func TestSumTokenLedgerByProviderBoundsRecent(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	body := strings.Join([]string{
+		`{"ts":"2026-06-20T03:00:00Z","input":1,"model":"gpt-5.5","endpoint":"https://api.openai.com/v1"}`,
+		`{"ts":"2026-06-20T03:00:01Z","input":2,"model":"gpt-5.5","endpoint":"https://api.openai.com/v1"}`,
+		`{"ts":"2026-06-20T03:00:02Z","input":3,"model":"deepseek-v4","endpoint":"https://api.deepseek.com"}`,
+	}, "\n")
+	if err := os.WriteFile(ledgerPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	byProvider, recent := SumTokenLedgerByProvider(ledgerPath, 2)
+	if len(recent) != 2 {
+		t.Fatalf("recent len = %d, want 2: %#v", len(recent), recent)
+	}
+	if recent[0].TS != "2026-06-20T03:00:02Z" || recent[1].TS != "2026-06-20T03:00:01Z" {
+		t.Fatalf("recent order = %#v, want newest two first", recent)
+	}
+	if byProvider["openai"].APICalls != 2 || byProvider["deepseek"].APICalls != 1 {
+		t.Fatalf("byProvider = %#v, want all provider totals", byProvider)
+	}
+}

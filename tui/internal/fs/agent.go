@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // agentManifest is the raw JSON shape of .agent.json.
@@ -317,25 +319,16 @@ func ReadStatus(dir string) AgentStatus {
 // treated as empty/partial data so the kanban detail view remains best-effort.
 func ReadContextStats(dir string) ContextStats {
 	var stats ContextStats
-	data, err := os.ReadFile(filepath.Join(dir, "history", "chat_history.jsonl"))
-	if err != nil {
-		return stats
-	}
-
 	callCounts := map[string]int{}
 	resultCounts := map[string]int{}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	_ = forEachJSONLLine(filepath.Join(dir, "history", "chat_history.jsonl"), func(line []byte) {
 		var entry struct {
 			Role    string          `json:"role"`
 			System  string          `json:"system"`
 			Content json.RawMessage `json:"content"`
 		}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return
 		}
 
 		stats.Entries++
@@ -397,7 +390,7 @@ func ReadContextStats(dir string) ContextStats {
 				}
 			}
 		}
-	}
+	})
 
 	names := make([]string, 0, len(callCounts)+len(resultCounts))
 	seen := map[string]bool{}
@@ -457,29 +450,72 @@ func AggregateTokens(dirs []string) TokenTotals {
 // missing or unreadable.
 func SumTokenLedger(path string) TokenTotals {
 	var t TokenTotals
-	data, err := os.ReadFile(path)
-	if err != nil {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
 		return t
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	if cached, ok := cachedTokenLedgerTotals(path, info); ok {
+		return cached
+	}
+
+	t, err = sumTokenLedgerFile(path)
+	if err != nil {
+		return TokenTotals{}
+	}
+	storeTokenLedgerTotals(path, info, t)
+	return t
+}
+
+func sumTokenLedgerFile(path string) (TokenTotals, error) {
+	var t TokenTotals
+	err := forEachJSONLLine(path, func(line []byte) {
 		var entry LedgerEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return
 		}
 		if isDaemonLedgerEntry(entry) {
-			continue
+			return
 		}
 		t.Input += entry.Input
 		t.Output += entry.Output
 		t.Thinking += entry.Thinking
 		t.Cached += entry.Cached
 		t.APICalls++
+	})
+	return t, err
+}
+
+type tokenLedgerCacheEntry struct {
+	size    int64
+	modTime time.Time
+	totals  TokenTotals
+}
+
+var tokenLedgerTotalsCache = struct {
+	sync.Mutex
+	byPath map[string]tokenLedgerCacheEntry
+}{byPath: map[string]tokenLedgerCacheEntry{}}
+
+func cachedTokenLedgerTotals(path string, info os.FileInfo) (TokenTotals, bool) {
+	key := filepath.Clean(path)
+	tokenLedgerTotalsCache.Lock()
+	defer tokenLedgerTotalsCache.Unlock()
+	entry, ok := tokenLedgerTotalsCache.byPath[key]
+	if !ok || entry.size != info.Size() || !entry.modTime.Equal(info.ModTime()) {
+		return TokenTotals{}, false
 	}
-	return t
+	return entry.totals, true
+}
+
+func storeTokenLedgerTotals(path string, info os.FileInfo, totals TokenTotals) {
+	key := filepath.Clean(path)
+	tokenLedgerTotalsCache.Lock()
+	defer tokenLedgerTotalsCache.Unlock()
+	tokenLedgerTotalsCache.byPath[key] = tokenLedgerCacheEntry{
+		size:    info.Size(),
+		modTime: info.ModTime(),
+		totals:  totals,
+	}
 }
 
 // LedgerEntry is a single per-call line from logs/token_ledger.jsonl
@@ -514,22 +550,13 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 	byProvider map[string]TokenTotals, recent []LedgerEntry,
 ) {
 	byProvider = map[string]TokenTotals{}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return byProvider, nil
-	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	_ = forEachJSONLLine(path, func(line []byte) {
 		var entry LedgerEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return
 		}
 		if isDaemonLedgerEntry(entry) {
-			continue
+			return
 		}
 		provider := DeriveLedgerProvider(entry.Endpoint, entry.Model)
 		t := byProvider[provider]
@@ -540,7 +567,11 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 		t.APICalls++
 		byProvider[provider] = t
 		recent = append(recent, entry)
-	}
+		if recentN > 0 && len(recent) > recentN {
+			copy(recent, recent[len(recent)-recentN:])
+			recent = recent[:recentN]
+		}
+	})
 	// Trim to the last recentN entries, newest last in file → newest at
 	// the end of `recent`. Reverse so callers can iterate "newest first".
 	if recentN > 0 && len(recent) > recentN {

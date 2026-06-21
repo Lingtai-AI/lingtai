@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // DaemonLedgerEntry is a single per-call token_ledger.jsonl line from a
@@ -102,21 +101,13 @@ func readDaemonIdentity(path string) daemonIdentity {
 // file into LedgerEntry values (file order preserved). Missing file or
 // malformed lines are skipped silently.
 func readLedgerEntries(path string) []LedgerEntry {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
 	var out []LedgerEntry
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	_ = forEachJSONLLine(path, func(line []byte) {
 		var e LedgerEntry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			continue
+		if err := json.Unmarshal(line, &e); err != nil {
+			return
 		}
 		out = append(out, e)
-	}
+	})
 	return out
 }
