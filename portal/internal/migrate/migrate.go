@@ -96,12 +96,18 @@ func Run(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 
 	current := 0
+	rawMeta := map[string]json.RawMessage{}
 	if data, err := os.ReadFile(metaPath); err == nil {
+		if err := json.Unmarshal(data, &rawMeta); err != nil {
+			return fmt.Errorf("parse meta.json: %w", err)
+		}
 		var m metaFile
 		if err := json.Unmarshal(data, &m); err != nil {
 			return fmt.Errorf("parse meta.json: %w", err)
 		}
 		current = m.Version
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read meta.json: %w", err)
 	}
 
 	if current > CurrentVersion {
@@ -124,8 +130,21 @@ func Run(lingtaiDir string) error {
 		}
 	}
 
-	// Write new version atomically (write temp + rename)
-	newMeta, _ := json.Marshal(metaFile{Version: CurrentVersion})
+	// Write new version atomically (write temp + rename) while preserving
+	// sibling fields that may be maintained by the TUI binary in the shared
+	// .lingtai/meta.json file.
+	if rawMeta == nil {
+		rawMeta = map[string]json.RawMessage{}
+	}
+	versionData, err := json.Marshal(CurrentVersion)
+	if err != nil {
+		return fmt.Errorf("marshal meta.json version: %w", err)
+	}
+	rawMeta["version"] = versionData
+	newMeta, err := json.Marshal(rawMeta)
+	if err != nil {
+		return fmt.Errorf("marshal meta.json: %w", err)
+	}
 	tmpPath := metaPath + ".tmp"
 	if err := os.WriteFile(tmpPath, newMeta, 0o644); err != nil {
 		return fmt.Errorf("write meta.json.tmp: %w", err)

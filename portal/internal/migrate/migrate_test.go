@@ -55,6 +55,64 @@ func TestRunRejectsTooNew(t *testing.T) {
 	}
 }
 
+func TestRunPreservesMetaSiblingFields(t *testing.T) {
+	dir := t.TempDir()
+	lingtaiDir := filepath.Join(dir, ".lingtai")
+	os.MkdirAll(lingtaiDir, 0o755)
+
+	writeFile(t, filepath.Join(lingtaiDir, "meta.json"), `{
+		"version": 38,
+		"addon_comment_cleanup_notified": true,
+		"custom_state": {"owner": "tui"},
+		"list_state": [1, 2, 3]
+	}`)
+
+	if err := Run(lingtaiDir); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(lingtaiDir, "meta.json"))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("parse meta.json as raw map: %v", err)
+	}
+
+	var version int
+	if err := json.Unmarshal(raw["version"], &version); err != nil {
+		t.Fatalf("parse version: %v", err)
+	}
+	if version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", version, CurrentVersion)
+	}
+
+	var notified bool
+	if err := json.Unmarshal(raw["addon_comment_cleanup_notified"], &notified); err != nil {
+		t.Fatalf("parse addon_comment_cleanup_notified: %v", err)
+	}
+	if !notified {
+		t.Fatal("addon_comment_cleanup_notified was not preserved")
+	}
+
+	var custom map[string]string
+	if err := json.Unmarshal(raw["custom_state"], &custom); err != nil {
+		t.Fatalf("parse custom_state: %v", err)
+	}
+	if custom["owner"] != "tui" {
+		t.Fatalf("custom_state = %#v, want owner=tui", custom)
+	}
+
+	var list []int
+	if err := json.Unmarshal(raw["list_state"], &list); err != nil {
+		t.Fatalf("parse list_state: %v", err)
+	}
+	if len(list) != 3 || list[2] != 3 {
+		t.Fatalf("list_state = %#v, want [1 2 3]", list)
+	}
+}
+
 func TestMigrateTopologyToPortal(t *testing.T) {
 	dir := t.TempDir()
 	lingtaiDir := filepath.Join(dir, ".lingtai")
