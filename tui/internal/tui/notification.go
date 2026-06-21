@@ -137,8 +137,9 @@ func (m NotificationModel) blockWrapWidth() int {
 }
 
 // renderNotificationSnapshot formats a single NotificationBlockSnapshot for display.
-// It shows the event identity, global _notification_guidance, and each channel's
-// actual payload from the canonical block the agent saw.
+// It shows the event identity, modern metadata sections, the full raw meta block,
+// global _notification_guidance, and each channel's actual payload from the
+// canonical block the agent saw.
 func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, total, wrapWidth int) string {
 	var sb strings.Builder
 
@@ -178,6 +179,11 @@ func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, t
 	}, wrapWidth, labelStyle, valueStyle)
 	writeNotificationMapBlock(&sb, "_runtime.guidance", s.RuntimeGuidance, []string{
 		"schema", "schema_version", "version", "title", "summary", "body", "message", "action",
+	}, wrapWidth, labelStyle, valueStyle)
+
+	// ── Full build meta block ───────────────────────────────────────────────
+	writeNotificationMapBlock(&sb, "meta", s.RawMeta, []string{
+		"current_time", "context", "stamina_left_seconds", "injection_seq",
 	}, wrapWidth, labelStyle, valueStyle)
 
 	// ── Global _notification_guidance ────────────────────────────────────────

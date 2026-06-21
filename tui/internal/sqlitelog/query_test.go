@@ -504,6 +504,15 @@ func TestParseNotificationBlockSnapshotFields(t *testing.T) {
 	if s.Meta == nil {
 		t.Fatal("Meta is nil")
 	}
+	if s.RawMeta == nil {
+		t.Fatal("RawMeta is nil")
+	}
+	if got := s.RawMeta["current_time"]; got != "2026-06-20T10:00:00-07:00" {
+		t.Errorf("RawMeta current_time = %v", got)
+	}
+	if ctx, ok := s.RawMeta["context"].(map[string]interface{}); !ok || ctx["history_tokens"] != float64(5000) {
+		t.Errorf("RawMeta context = %v", s.RawMeta["context"])
+	}
 	if s.Meta.InjectionSeq != 5 {
 		t.Errorf("InjectionSeq = %d, want 5", s.Meta.InjectionSeq)
 	}

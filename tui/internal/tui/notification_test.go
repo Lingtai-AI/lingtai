@@ -366,7 +366,7 @@ func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
 	}
 
 	fields := []string{
-		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"payload":{"_tool":{"tool_name":"read","tool_call_id":"call_read_123","status":"ok","elapsed_ms":42,"char_count":1200,"threshold_chars":3000},"_runtime":{"state":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":1234,"active_turn_tool_calls":7,"context":{"usage":0.42,"history_tokens":12345}},"guidance":{"schema_version":"1","title":"Large result guidance","body":"Summarize the result after reading it."}},"_notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}},"meta":{"injection_seq":9}}`,
+		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"payload":{"_tool":{"tool_name":"read","tool_call_id":"call_read_123","status":"ok","elapsed_ms":42,"char_count":1200,"threshold_chars":3000},"_runtime":{"state":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":1234,"active_turn_tool_calls":7,"context":{"usage":0.42,"history_tokens":12345}},"guidance":{"schema_version":"1","title":"Large result guidance","body":"Summarize the result after reading it."}},"_notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}},"meta":{"current_time":"2026-06-21T07:00:00Z","context":{"system_tokens":222,"history_tokens":333,"usage":0.44},"stamina_left_seconds":4321,"injection_seq":9,"extra_debug":{"note":"debug-value"}}}`,
 	}
 	agentDir := makeNotificationSnapshotDB(t, bin, fields)
 
@@ -391,6 +391,14 @@ func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
 		"Handle channel payloads through their producer tools.",
 		"notifications",
 		"system",
+		"meta",
+		"current_time",
+		"stamina_left_seconds",
+		"context",
+		"system_tokens",
+		"history_tokens",
+		"extra_debug",
+		"debug-value",
 		"seq 9",
 	}
 	for _, want := range checks {

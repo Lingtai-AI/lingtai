@@ -177,6 +177,7 @@ type NotificationBlockSnapshot struct {
 	CallID  string   // call_id when available
 	Sources []string // sorted channel names from payload.notifications.keys()
 	Meta    *NotificationBlockMeta
+	RawMeta map[string]interface{} // full fields_json.meta dict for renderers
 
 	// Canonical payload as the agent saw it.
 	Payload         map[string]interface{} // full payload dict, retained for future renderers
@@ -255,6 +256,7 @@ func parseNotificationBlockSnapshotFields(fieldsJSON string, s *NotificationBloc
 	}
 
 	if f.Meta != nil {
+		s.RawMeta = f.Meta
 		m := &NotificationBlockMeta{}
 		if v, ok := f.Meta["current_time"].(string); ok {
 			m.CurrentTime = v
