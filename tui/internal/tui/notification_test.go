@@ -183,44 +183,44 @@ func TestNotificationModelNavigation(t *testing.T) {
 
 	m := NewNotificationModel(agentDir)
 	// Start at newest (index 0 = "C" / active_tool_result)
-	if m.snapshots[m.cursor].Guidance != "C" {
-		t.Fatalf("expected guidance C at start, got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "C" {
+		t.Fatalf("expected guidance C at start, got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// left → older (index 1 = "B")
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.snapshots[m.cursor].Guidance != "B" {
-		t.Fatalf("after left: expected guidance B, got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "B" {
+		t.Fatalf("after left: expected guidance B, got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// left → older (index 2 = "A")
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.snapshots[m.cursor].Guidance != "A" {
-		t.Fatalf("after second left: expected guidance A, got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "A" {
+		t.Fatalf("after second left: expected guidance A, got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// left at end should stay on "A"
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.snapshots[m.cursor].Guidance != "A" {
-		t.Fatalf("left at oldest should stay: got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "A" {
+		t.Fatalf("left at oldest should stay: got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// right → newer (index 1 = "B")
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.snapshots[m.cursor].Guidance != "B" {
-		t.Fatalf("after right: expected guidance B, got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "B" {
+		t.Fatalf("after right: expected guidance B, got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// right → newest (index 0 = "C")
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.snapshots[m.cursor].Guidance != "C" {
-		t.Fatalf("after second right: expected guidance C, got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "C" {
+		t.Fatalf("after second right: expected guidance C, got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 
 	// right at newest should stay
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.snapshots[m.cursor].Guidance != "C" {
-		t.Fatalf("right at newest should stay: got %q", m.snapshots[m.cursor].Guidance)
+	if m.snapshots[m.cursor].NotificationGuidance != "C" {
+		t.Fatalf("right at newest should stay: got %q", m.snapshots[m.cursor].NotificationGuidance)
 	}
 }
 
@@ -302,8 +302,8 @@ func TestNotificationModelLatest10Limit(t *testing.T) {
 		t.Fatalf("expected 10 snapshots (limit), got %d", len(m.snapshots))
 	}
 	// newest snapshot should be guidance11
-	if m.snapshots[0].Guidance != "guidance11" {
-		t.Fatalf("expected newest snapshot guidance11, got %q", m.snapshots[0].Guidance)
+	if m.snapshots[0].NotificationGuidance != "guidance11" {
+		t.Fatalf("expected newest snapshot guidance11, got %q", m.snapshots[0].NotificationGuidance)
 	}
 }
 
@@ -327,7 +327,7 @@ func TestNotificationModelSnapshotRendersChannelContent(t *testing.T) {
 	m.width = 120
 	m.height = 40
 	view := m.View()
-	for _, want := range []string{"all blocks", "_notification_guidance", "notifications.email", "notifications.system"} {
+	for _, want := range []string{"all blocks", "_meta.notification_guidance", "_meta.notifications.email", "_meta.notifications.system"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("View() should show sidebar block %q: %s", want, view)
 		}
@@ -349,10 +349,10 @@ func TestNotificationModelSnapshotRendersChannelContent(t *testing.T) {
 	}
 }
 
-// TestNotificationModelSnapshotRendersToolRuntimeBlocks checks the kernel #443
-// four-block metadata shape: _tool, _runtime.state, _runtime.guidance, and
-// notifications / _notification_guidance are rendered as readable sections.
-func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
+// TestNotificationModelSnapshotRendersMetaEnvelopeBlocks checks the modern
+// `_meta` envelope shape: tool_meta, agent_meta, guidance, and notifications /
+// notification_guidance are rendered as readable `_meta.*` sections.
+func TestNotificationModelSnapshotRendersMetaEnvelopeBlocks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires sqlite3 binary (POSIX only)")
 	}
@@ -362,7 +362,7 @@ func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
 	}
 
 	fields := []string{
-		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"payload":{"_tool":{"tool_name":"read","tool_call_id":"call_read_123","status":"ok","elapsed_ms":42,"char_count":1200,"threshold_chars":3000},"_runtime":{"state":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":1234,"active_turn_tool_calls":7,"context":{"usage":0.42,"history_tokens":12345}},"guidance":{"schema_version":"1","title":"Large result guidance","body":"Summarize the result after reading it."}},"_notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}},"meta":{"current_time":"2026-06-21T07:00:00Z","context":{"system_tokens":222,"history_tokens":333,"usage":0.44},"stamina_left_seconds":4321,"injection_seq":9,"extra_debug":{"note":"debug-value"}}}`,
+		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"_meta":{"tool_meta":{"id":"call_read_123","timestamp":"2026-06-21T07:00:00Z","char_count":1200,"elapsed_ms":42},"agent_meta":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":1234,"active_turn_tool_calls":7,"context":{"usage":0.42,"history_tokens":12345}},"guidance":{"guidance_version":"1","meta_readme":{"tool_meta":"per-result"},"sections":[{"title":"Large result guidance","body":"Summarize the result after reading it."}]},"notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}}}`,
 	}
 	agentDir := makeNotificationSnapshotDB(t, bin, fields)
 
@@ -370,7 +370,7 @@ func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
 	m.width = 120
 	m.height = 50
 	view := m.View()
-	for _, want := range []string{"all blocks", "_tool", "_runtime.state", "_runtime.guidance", "meta", "notifications.system"} {
+	for _, want := range []string{"all blocks", "_meta.tool_meta", "_meta.agent_meta", "_meta.guidance", "_meta.notification_guidance", "_meta.notifications.system"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("View() should show sidebar block %q: %s", want, view)
 		}
@@ -378,34 +378,67 @@ func TestNotificationModelSnapshotRendersToolRuntimeBlocks(t *testing.T) {
 	content := notificationTestEntryContent(t, m, "all blocks")
 
 	checks := []string{
-		"_tool",
-		"tool_name",
-		"read",
-		"tool_call_id",
+		"_meta.tool_meta",
 		"call_read_123",
-		"_runtime.state",
+		"char_count",
+		"_meta.agent_meta",
 		"active_turn_tool_calls",
 		"7",
-		"_runtime.guidance",
+		"_meta.guidance",
 		"Large result guidance",
 		"Summarize the result after reading it.",
-		"_notification_guidance",
+		"meta_readme",
+		"_meta.notification_guidance",
 		"Handle channel payloads through their producer tools.",
-		"notifications",
+		"_meta.notifications",
 		"system",
-		"meta",
-		"current_time",
-		"stamina_left_seconds",
-		"context",
-		"system_tokens",
-		"history_tokens",
-		"extra_debug",
-		"debug-value",
-		"seq 9",
 	}
 	for _, want := range checks {
 		if !strings.Contains(content, want) {
 			t.Fatalf("all blocks entry should contain %q: %s", want, content)
+		}
+	}
+}
+
+// TestNotificationModelSnapshotRendersLegacyPayloadBlocks checks that older
+// rows carrying the pre-envelope `payload`/`meta` shape still render through
+// the legacy fallback, mapped onto the same `_meta.*` display labels.
+func TestNotificationModelSnapshotRendersLegacyPayloadBlocks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires sqlite3 binary (POSIX only)")
+	}
+	bin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+
+	fields := []string{
+		`{"mode":"active_tool_result","call_id":"notif_tool","sources":["system"],"payload":{"_tool":{"tool_name":"read","tool_call_id":"call_read_123","status":"ok","elapsed_ms":42},"_runtime":{"state":{"current_time":"2026-06-21T07:00:00Z","active_turn_tool_calls":7,"context":{"usage":0.42}},"guidance":{"title":"Large result guidance","body":"Summarize the result after reading it."}},"notification_guidance":"Handle channel payloads through their producer tools.","notifications":{"system":{"events":[{"body":"test event"}]}}},"meta":{"current_time":"2026-06-21T07:00:00Z","stamina_left_seconds":4321,"injection_seq":9}}`,
+	}
+	agentDir := makeNotificationSnapshotDB(t, bin, fields)
+
+	m := NewNotificationModel(agentDir)
+	m.width = 120
+	m.height = 50
+	view := m.View()
+	for _, want := range []string{"all blocks", "_meta.tool_meta", "_meta.agent_meta", "_meta.guidance", "_meta.notification_guidance", "_meta.notifications.system"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("legacy View() should show sidebar block %q: %s", want, view)
+		}
+	}
+	content := notificationTestEntryContent(t, m, "all blocks")
+
+	checks := []string{
+		"call_read_123",
+		"active_turn_tool_calls",
+		"Large result guidance",
+		"Handle channel payloads through their producer tools.",
+		"system",
+		"seq 9",
+	}
+	for _, want := range checks {
+		if !strings.Contains(content, want) {
+			t.Fatalf("legacy all blocks entry should contain %q: %s", want, content)
 		}
 	}
 }

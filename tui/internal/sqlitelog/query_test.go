@@ -411,8 +411,8 @@ func TestQueryNotificationBlockSnapshotsFiltersType(t *testing.T) {
 		t.Fatalf("expected 1 snapshot (notification_block_injected only), got %d", len(snaps))
 	}
 	snap := snaps[0]
-	if snap.Guidance != "kernel guidance" {
-		t.Errorf("Guidance = %q, want 'kernel guidance'", snap.Guidance)
+	if snap.NotificationGuidance != "kernel guidance" {
+		t.Errorf("Guidance = %q, want 'kernel guidance'", snap.NotificationGuidance)
 	}
 	if len(snap.Sources) != 2 {
 		t.Errorf("Sources = %v, want [email system]", snap.Sources)
@@ -449,8 +449,8 @@ func TestQueryNotificationBlockSnapshotsLatest10(t *testing.T) {
 		t.Fatalf("expected 10 snapshots with limit=10, got %d", len(snaps))
 	}
 	// newest first → guidance11 at index 0
-	if snaps[0].Guidance != "guidance11" {
-		t.Fatalf("expected newest first (guidance11), got %q", snaps[0].Guidance)
+	if snaps[0].NotificationGuidance != "guidance11" {
+		t.Fatalf("expected newest first (guidance11), got %q", snaps[0].NotificationGuidance)
 	}
 }
 
@@ -460,9 +460,9 @@ func TestParseNotificationBlockSnapshotFields(t *testing.T) {
 		"call_id": "notif_abc",
 		"sources": ["email", "system"],
 		"payload": {
-			"_notification_guidance": "kernel-level guidance",
+			"notification_guidance": "kernel-level guidance",
 			"notifications": {
-				"email": {"data": {"count": 3}, "_notification_guidance": "email guidance"},
+				"email": {"data": {"count": 3}, "notification_guidance": "email guidance"},
 				"system": {"events": [{"body": "test"}]}
 			}
 		},
@@ -489,8 +489,8 @@ func TestParseNotificationBlockSnapshotFields(t *testing.T) {
 	if len(s.Sources) != 2 || s.Sources[0] != "email" {
 		t.Errorf("Sources = %v", s.Sources)
 	}
-	if s.Guidance != "kernel-level guidance" {
-		t.Errorf("Guidance = %q", s.Guidance)
+	if s.NotificationGuidance != "kernel-level guidance" {
+		t.Errorf("NotificationGuidance = %q", s.NotificationGuidance)
 	}
 	if s.Notifications == nil {
 		t.Fatal("Notifications is nil")
@@ -506,6 +506,9 @@ func TestParseNotificationBlockSnapshotFields(t *testing.T) {
 	}
 	if s.RawMeta == nil {
 		t.Fatal("RawMeta is nil")
+	}
+	if s.AgentMeta == nil || s.AgentMeta["current_time"] != "2026-06-20T10:00:00-07:00" {
+		t.Errorf("AgentMeta fallback = %v", s.AgentMeta)
 	}
 	if got := s.RawMeta["current_time"]; got != "2026-06-20T10:00:00-07:00" {
 		t.Errorf("RawMeta current_time = %v", got)
@@ -524,6 +527,69 @@ func TestParseNotificationBlockSnapshotFields(t *testing.T) {
 	}
 }
 
+// TestParseNotificationBlockSnapshotFieldsMetaEnvelope covers the modern
+// top-level `_meta` envelope shape (tool_meta/agent_meta/guidance/
+// notifications/notification_guidance).
+func TestParseNotificationBlockSnapshotFieldsMetaEnvelope(t *testing.T) {
+	fieldsJSON := `{
+		"mode": "active_tool_result",
+		"call_id": "call_abc",
+		"sources": ["email", "system"],
+		"_meta": {
+			"tool_meta": {"id": "call_abc", "char_count": 1200, "elapsed_ms": 42, "synthetic": false},
+			"agent_meta": {
+				"current_time": "2026-06-21T10:00:00-07:00",
+				"stamina_left_seconds": 3600.0,
+				"context": {"system_tokens": 1000, "history_tokens": 5000, "usage": 0.06}
+			},
+			"guidance": {"guidance_version": "1", "meta_readme": {"tool_meta": "per-result"}},
+			"notification_guidance": "kernel-level guidance",
+			"notifications": {
+				"email": {"data": {"count": 3}, "notification_guidance": "email guidance"},
+				"system": {"events": [{"body": "test"}]}
+			}
+		}
+	}`
+	s := NotificationBlockSnapshot{}
+	parseNotificationBlockSnapshotFields(fieldsJSON, &s)
+
+	if s.Mode != "active_tool_result" {
+		t.Errorf("Mode = %q", s.Mode)
+	}
+	if s.ToolMeta == nil || s.ToolMeta["id"] != "call_abc" {
+		t.Errorf("ToolMeta = %v", s.ToolMeta)
+	}
+	if s.AgentMeta == nil || s.AgentMeta["current_time"] != "2026-06-21T10:00:00-07:00" {
+		t.Errorf("AgentMeta = %v", s.AgentMeta)
+	}
+	if s.Guidance == nil || s.Guidance["guidance_version"] != "1" {
+		t.Errorf("Guidance = %v", s.Guidance)
+	}
+	if s.NotificationGuidance != "kernel-level guidance" {
+		t.Errorf("NotificationGuidance = %q", s.NotificationGuidance)
+	}
+	if _, ok := s.Notifications["email"]; !ok {
+		t.Errorf("email missing from Notifications: %v", s.Notifications)
+	}
+	if _, ok := s.Notifications["system"]; !ok {
+		t.Errorf("system missing from Notifications: %v", s.Notifications)
+	}
+	// Vital-signs Meta derived from _meta.agent_meta.
+	if s.Meta == nil {
+		t.Fatal("Meta is nil")
+	}
+	if s.Meta.StaminaLeftSeconds != 3600.0 {
+		t.Errorf("StaminaLeftSeconds = %v", s.Meta.StaminaLeftSeconds)
+	}
+	if s.Meta.ContextSystemTokens != 1000 {
+		t.Errorf("ContextSystemTokens = %d", s.Meta.ContextSystemTokens)
+	}
+	// RawMeta points at the agent_meta block for the modern shape.
+	if s.RawMeta == nil || s.RawMeta["current_time"] != "2026-06-21T10:00:00-07:00" {
+		t.Errorf("RawMeta = %v", s.RawMeta)
+	}
+}
+
 func TestParseNotificationBlockSnapshotFieldsInvalidJSON(t *testing.T) {
 	s := NotificationBlockSnapshot{ID: 99}
 	parseNotificationBlockSnapshotFields("not-json", &s)
@@ -531,7 +597,7 @@ func TestParseNotificationBlockSnapshotFieldsInvalidJSON(t *testing.T) {
 	if s.ID != 99 {
 		t.Errorf("ID changed unexpectedly")
 	}
-	if s.Guidance != "" || s.Mode != "" {
+	if s.NotificationGuidance != "" || s.Mode != "" {
 		t.Errorf("unexpected fields set on parse failure")
 	}
 }

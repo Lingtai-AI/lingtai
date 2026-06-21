@@ -162,10 +162,19 @@ func QueryNotificationBlocks(agentDir string, limit int) ([]NotificationSummaryE
 }
 
 // NotificationBlockSnapshot is a parsed notification_block_injected event row.
-// It carries the actual canonical payload that was injected into the model's
-// context. Modern kernel payloads are parallel metadata blocks (`_tool`,
-// `_runtime.state`, `_runtime.guidance`, and notifications/guidance) rather
-// than the old provider-visible `_tool_result_metadata` compatibility blob.
+// It carries the actual canonical block that was injected into the model's
+// context.
+//
+// Modern kernel events (post notification-meta-envelope) persist a single
+// top-level `_meta` envelope with four blocks: `tool_meta`, `agent_meta`,
+// `guidance`, plus `notifications`/`notification_guidance`. Those populate
+// ToolMeta/AgentMeta/Guidance/Notifications/NotificationGuidance below.
+//
+// Legacy events are still parsed for back-compat: older rows carried a
+// top-level `payload` (with `_tool`, `_runtime.state`/`_runtime.guidance`,
+// `notification_guidance`/`_notification_guidance`, `notifications`) and a
+// separate `meta` dict. Those map onto the same display fields so the
+// /notification view renders old and new rows uniformly.
 type NotificationBlockSnapshot struct {
 	// Raw event identity
 	ID     int64
@@ -175,17 +184,16 @@ type NotificationBlockSnapshot struct {
 	// Parsed from fields_json
 	Mode    string   // "synthetic_notification_pair" or "active_tool_result"
 	CallID  string   // call_id when available
-	Sources []string // sorted channel names from payload.notifications.keys()
+	Sources []string // sorted channel names from notifications.keys()
 	Meta    *NotificationBlockMeta
-	RawMeta map[string]interface{} // full fields_json.meta dict for renderers
+	RawMeta map[string]interface{} // full _meta.agent_meta (modern) or meta (legacy) dict
 
-	// Canonical payload as the agent saw it.
-	Payload         map[string]interface{} // full payload dict, retained for future renderers
-	Tool            map[string]interface{} // payload._tool
-	RuntimeState    map[string]interface{} // payload._runtime.state or payload["_runtime.state"]
-	RuntimeGuidance map[string]interface{} // payload._runtime.guidance or payload["_runtime.guidance"]
-	Guidance        string                 // payload._notification_guidance
-	Notifications   map[string]string      // channel → JSON-encoded channel dict
+	// Canonical `_meta` envelope blocks as the agent saw them.
+	ToolMeta             map[string]interface{} // _meta.tool_meta  (legacy: payload._tool)
+	AgentMeta            map[string]interface{} // _meta.agent_meta (legacy: payload._runtime.state)
+	Guidance             map[string]interface{} // _meta.guidance   (legacy: payload._runtime.guidance)
+	NotificationGuidance string                 // _meta.notification_guidance (legacy: payload.notification_guidance)
+	Notifications        map[string]string      // channel → JSON-encoded channel dict
 }
 
 // Time returns the wall-clock time for the snapshot.
@@ -196,10 +204,12 @@ func (s NotificationBlockSnapshot) Time() time.Time {
 }
 
 // snapshotFields holds the raw fields_json structure for notification_block_injected.
+// `_meta` is the modern envelope; `payload`/`meta` are the legacy shape.
 type snapshotFields struct {
 	Mode    string                 `json:"mode"`
 	CallID  string                 `json:"call_id"`
 	Sources []string               `json:"sources"`
+	MetaEnv map[string]interface{} `json:"_meta"`
 	Payload map[string]interface{} `json:"payload"`
 	Meta    map[string]interface{} `json:"meta"`
 }
@@ -209,8 +219,26 @@ func notificationMap(v interface{}) (map[string]interface{}, bool) {
 	return m, ok
 }
 
+// encodeNotificationChannels JSON-encodes each channel payload to a pretty
+// string for display, matching the previous per-channel rendering.
+func encodeNotificationChannels(notifs map[string]interface{}) map[string]string {
+	out := make(map[string]string, len(notifs))
+	for ch, v := range notifs {
+		b, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			out[ch] = fmt.Sprintf("%v", v)
+		} else {
+			out[ch] = string(b)
+		}
+	}
+	return out
+}
+
 // parseNotificationBlockSnapshotFields parses a fields_json string into a
 // NotificationBlockSnapshot. Returns a zero-value snapshot on parse failure.
+//
+// The modern `_meta` envelope is parsed first; when absent, the legacy
+// `payload`/`meta` shape is parsed as a fallback.
 func parseNotificationBlockSnapshotFields(fieldsJSON string, s *NotificationBlockSnapshot) {
 	var f snapshotFields
 	if err := json.Unmarshal([]byte(fieldsJSON), &f); err != nil {
@@ -220,66 +248,112 @@ func parseNotificationBlockSnapshotFields(fieldsJSON string, s *NotificationBloc
 	s.CallID = f.CallID
 	s.Sources = f.Sources
 
-	if f.Payload != nil {
-		s.Payload = f.Payload
-		if tool, ok := notificationMap(f.Payload["_tool"]); ok {
-			s.Tool = tool
-		}
-		if state, ok := notificationMap(f.Payload["_runtime.state"]); ok {
-			s.RuntimeState = state
-		}
-		if guidance, ok := notificationMap(f.Payload["_runtime.guidance"]); ok {
-			s.RuntimeGuidance = guidance
-		}
-		if runtimeBlock, ok := notificationMap(f.Payload["_runtime"]); ok {
-			if state, ok := notificationMap(runtimeBlock["state"]); ok {
-				s.RuntimeState = state
-			}
-			if guidance, ok := notificationMap(runtimeBlock["guidance"]); ok {
-				s.RuntimeGuidance = guidance
-			}
-		}
-		if g, ok := f.Payload["_notification_guidance"].(string); ok {
-			s.Guidance = g
-		}
-		if notifs, ok := notificationMap(f.Payload["notifications"]); ok {
-			s.Notifications = make(map[string]string, len(notifs))
-			for ch, v := range notifs {
-				b, err := json.MarshalIndent(v, "", "  ")
-				if err != nil {
-					s.Notifications[ch] = fmt.Sprintf("%v", v)
-				} else {
-					s.Notifications[ch] = string(b)
-				}
-			}
-		}
+	if f.MetaEnv != nil {
+		parseMetaEnvelope(f.MetaEnv, s)
+	} else if f.Payload != nil {
+		parseLegacyPayload(f.Payload, f.Meta, s)
 	}
 
-	if f.Meta != nil {
+	// Vital-signs Meta: modern rows carry the build_meta snapshot under
+	// _meta.agent_meta; legacy rows carry it under the separate `meta` dict.
+	rawMeta := s.RawMeta
+	if rawMeta == nil && f.Meta != nil {
+		rawMeta = f.Meta
 		s.RawMeta = f.Meta
-		m := &NotificationBlockMeta{}
-		if v, ok := f.Meta["current_time"].(string); ok {
-			m.CurrentTime = v
-		}
-		if v, ok := f.Meta["stamina_left_seconds"].(float64); ok {
-			m.StaminaLeftSeconds = v
-		}
-		if v, ok := f.Meta["injection_seq"].(float64); ok {
-			m.InjectionSeq = int(v)
-		}
-		if ctx, ok := f.Meta["context"].(map[string]interface{}); ok {
-			if v, ok := ctx["system_tokens"].(float64); ok {
-				m.ContextSystemTokens = int(v)
-			}
-			if v, ok := ctx["history_tokens"].(float64); ok {
-				m.ContextHistoryTokens = int(v)
-			}
-			if v, ok := ctx["usage"].(float64); ok {
-				m.ContextUsage = v
-			}
-		}
-		s.Meta = m
 	}
+	if rawMeta != nil {
+		// Actual legacy kernel rows persisted build_meta only as the separate
+		// top-level `meta` dict, not under payload._runtime.state. Surface it as
+		// the agent_meta display block when no richer legacy runtime state exists.
+		if s.AgentMeta == nil {
+			s.AgentMeta = rawMeta
+		}
+		s.Meta = parseBlockMeta(rawMeta)
+	}
+}
+
+// parseMetaEnvelope reads the modern top-level `_meta` envelope.
+func parseMetaEnvelope(env map[string]interface{}, s *NotificationBlockSnapshot) {
+	if tool, ok := notificationMap(env["tool_meta"]); ok {
+		s.ToolMeta = tool
+	}
+	if agent, ok := notificationMap(env["agent_meta"]); ok {
+		s.AgentMeta = agent
+		// agent_meta carries the build_meta vital signs (current_time,
+		// context, stamina) used by the Meta footer.
+		s.RawMeta = agent
+	}
+	if guidance, ok := notificationMap(env["guidance"]); ok {
+		s.Guidance = guidance
+	}
+	if g, ok := env["notification_guidance"].(string); ok {
+		s.NotificationGuidance = g
+	}
+	if notifs, ok := notificationMap(env["notifications"]); ok {
+		s.Notifications = encodeNotificationChannels(notifs)
+	}
+}
+
+// parseLegacyPayload reads the pre-envelope `payload`/`meta` shape so older
+// rows still render. payload._tool → ToolMeta, payload._runtime.state →
+// AgentMeta, payload._runtime.guidance → Guidance,
+// payload.notification_guidance → NotificationGuidance.
+func parseLegacyPayload(payload, meta map[string]interface{}, s *NotificationBlockSnapshot) {
+	if tool, ok := notificationMap(payload["_tool"]); ok {
+		s.ToolMeta = tool
+	}
+	if state, ok := notificationMap(payload["_runtime.state"]); ok {
+		s.AgentMeta = state
+	}
+	if guidance, ok := notificationMap(payload["_runtime.guidance"]); ok {
+		s.Guidance = guidance
+	}
+	if runtimeBlock, ok := notificationMap(payload["_runtime"]); ok {
+		if state, ok := notificationMap(runtimeBlock["state"]); ok {
+			s.AgentMeta = state
+		}
+		if guidance, ok := notificationMap(runtimeBlock["guidance"]); ok {
+			s.Guidance = guidance
+		}
+	}
+	if g, ok := payload["notification_guidance"].(string); ok {
+		s.NotificationGuidance = g
+	} else if g, ok := payload["_notification_guidance"].(string); ok {
+		s.NotificationGuidance = g
+	}
+	if notifs, ok := notificationMap(payload["notifications"]); ok {
+		s.Notifications = encodeNotificationChannels(notifs)
+	}
+	if meta != nil {
+		s.RawMeta = meta
+	}
+}
+
+// parseBlockMeta extracts the build_meta vital signs from a meta-bearing dict
+// (modern: _meta.agent_meta; legacy: fields_json.meta).
+func parseBlockMeta(m map[string]interface{}) *NotificationBlockMeta {
+	bm := &NotificationBlockMeta{}
+	if v, ok := m["current_time"].(string); ok {
+		bm.CurrentTime = v
+	}
+	if v, ok := m["stamina_left_seconds"].(float64); ok {
+		bm.StaminaLeftSeconds = v
+	}
+	if v, ok := m["injection_seq"].(float64); ok {
+		bm.InjectionSeq = int(v)
+	}
+	if ctx, ok := m["context"].(map[string]interface{}); ok {
+		if v, ok := ctx["system_tokens"].(float64); ok {
+			bm.ContextSystemTokens = int(v)
+		}
+		if v, ok := ctx["history_tokens"].(float64); ok {
+			bm.ContextHistoryTokens = int(v)
+		}
+		if v, ok := ctx["usage"].(float64); ok {
+			bm.ContextUsage = v
+		}
+	}
+	return bm
 }
 
 // QueryNotificationBlockSnapshots fetches the latest notification_block_injected

@@ -576,7 +576,7 @@
   "cmd.settings": "TUI 偏好设置——主题、邮件页面大小、语言、自动洞察开关",
   "cmd.kanban": "器灵网络看板——一览所有器灵的属性、LLM 配置、能力和上下文用量",
   "cmd.daemons": "Daemon 浏览器——按 Agent 查看 daemon 状态、完整任务、完整 chat_history 交互与完整工具/事件记录",
-  "cmd.notification": "通知块快照——即时查询当前 Agent 的 logs/log.sqlite 获取 notification_block_injected 事件。现为 Markdown 式分栏视图：左侧选择载荷区块（_tool、_runtime.state、_runtime.guidance、meta、notifications、_notification_guidance），右侧可滚动查看所选区块；左右方向键仍按最新 10 条逐步翻阅。",
+  "cmd.notification": "通知块快照——即时查询当前 Agent 的 logs/log.sqlite 获取 notification_block_injected 事件。现为 Markdown 式分栏视图：左侧选择 `_meta` 信封区块（_meta.tool_meta、_meta.agent_meta、_meta.guidance、_meta.notification_guidance、_meta.notifications 及各通道 _meta.notifications.<通道>），右侧可滚动查看所选区块；左右方向键仍按最新 10 条逐步翻阅。",
   "cmd.projects": "浏览已注册项目及其器灵网络",
   "cmd.knowledge": "浏览器灵的私有 knowledge——本地决策、笔记、引用与迁移后的 codex 条目。Ctrl+T 切换器灵",
   "cmd.library": "浏览器灵的长期知识库——积累的调研与发现。Ctrl+T 切换器灵",

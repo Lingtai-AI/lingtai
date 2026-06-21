@@ -17,10 +17,12 @@ import (
 
 // NotificationModel is the /notification view: a history browser over the
 // latest 10 notification_block_injected snapshots from logs/log.sqlite.
-// Each snapshot carries the actual canonical payload the agent saw
-// (notifications + _notification_guidance), not just a compact summary.
-// Left/right keys step among the in-memory list; r/ctrl+r reloads.
-// Esc returns to the mail view.
+// Each snapshot carries the actual canonical `_meta` envelope the agent saw —
+// the four blocks tool_meta / agent_meta / guidance / notifications +
+// notification_guidance — not just a compact summary. Older rows persisted in
+// the pre-envelope payload/meta shape are still rendered via the legacy
+// fallback in sqlitelog. Left/right keys step among the in-memory list;
+// r/ctrl+r reloads. Esc returns to the mail view.
 type NotificationModel struct {
 	agentDir string
 	width    int
@@ -195,15 +197,14 @@ func notificationMarkdownEntries(s sqlitelog.NotificationBlockSnapshot, cursor, 
 		}
 		entries = append(entries, MarkdownEntry{Label: label, Description: desc, Group: group, Content: notificationMarkdownMapBlock(s, cursor, total, label, value)})
 	}
-	addMap("_tool", "tool result metadata", s.Tool)
-	addMap("_runtime.state", "runtime state", s.RuntimeState)
-	addMap("_runtime.guidance", "runtime guidance", s.RuntimeGuidance)
-	addMap("meta", "full fields_json.meta", s.RawMeta)
-	if s.Guidance != "" {
-		entries = append(entries, MarkdownEntry{Label: "_notification_guidance", Description: "global guidance", Group: group, Content: notificationMarkdownStringBlock(s, cursor, total, "_notification_guidance", s.Guidance)})
+	addMap("_meta.tool_meta", "per-result tool metadata", s.ToolMeta)
+	addMap("_meta.agent_meta", "agent/current-state snapshot", s.AgentMeta)
+	addMap("_meta.guidance", "kernel guidance", s.Guidance)
+	if s.NotificationGuidance != "" {
+		entries = append(entries, MarkdownEntry{Label: "_meta.notification_guidance", Description: "channel safety framing", Group: group, Content: notificationMarkdownStringBlock(s, cursor, total, "_meta.notification_guidance", s.NotificationGuidance)})
 	}
 	if len(s.Notifications) > 0 {
-		entries = append(entries, MarkdownEntry{Label: "notifications", Description: "all channel payloads", Group: group, Content: notificationMarkdownNotificationsBlock(s, cursor, total, "notifications")})
+		entries = append(entries, MarkdownEntry{Label: "_meta.notifications", Description: "all channel payloads", Group: group, Content: notificationMarkdownNotificationsBlock(s, cursor, total, "_meta.notifications")})
 	}
 	channels := make([]string, 0, len(s.Notifications))
 	for ch := range s.Notifications {
@@ -212,7 +213,7 @@ func notificationMarkdownEntries(s sqlitelog.NotificationBlockSnapshot, cursor, 
 	sort.Strings(channels)
 	for _, ch := range channels {
 		entries = append(entries, MarkdownEntry{
-			Label:       "notifications." + ch,
+			Label:       "_meta.notifications." + ch,
 			Description: "channel payload",
 			Group:       group,
 			Content:     notificationMarkdownChannelBlock(s, cursor, total, ch, s.Notifications[ch]),
@@ -274,14 +275,13 @@ func notificationMarkdownAllBlocks(s sqlitelog.NotificationBlockSnapshot, cursor
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s\n\n", notificationSnapshotMarkdownTitle(s, cursor, total, "all blocks"))
 	sb.WriteString(notificationMarkdownOverview(s, cursor, total))
-	notificationWriteMarkdownMapSection(&sb, "_tool", s.Tool)
-	notificationWriteMarkdownMapSection(&sb, "_runtime.state", s.RuntimeState)
-	notificationWriteMarkdownMapSection(&sb, "_runtime.guidance", s.RuntimeGuidance)
-	notificationWriteMarkdownMapSection(&sb, "meta", s.RawMeta)
-	if s.Guidance != "" {
-		notificationWriteMarkdownStringSection(&sb, "_notification_guidance", s.Guidance)
+	notificationWriteMarkdownMapSection(&sb, "_meta.tool_meta", s.ToolMeta)
+	notificationWriteMarkdownMapSection(&sb, "_meta.agent_meta", s.AgentMeta)
+	notificationWriteMarkdownMapSection(&sb, "_meta.guidance", s.Guidance)
+	if s.NotificationGuidance != "" {
+		notificationWriteMarkdownStringSection(&sb, "_meta.notification_guidance", s.NotificationGuidance)
 	}
-	notificationWriteMarkdownNotificationsSection(&sb, "notifications", s.Notifications)
+	notificationWriteMarkdownNotificationsSection(&sb, "_meta.notifications", s.Notifications)
 	return sb.String()
 }
 
@@ -324,30 +324,27 @@ func notificationMarkdownStringBlock(s sqlitelog.NotificationBlockSnapshot, curs
 
 func notificationBlockNames(s sqlitelog.NotificationBlockSnapshot) []string {
 	blocks := []string{"all blocks", "overview"}
-	if len(s.Tool) > 0 {
-		blocks = append(blocks, "_tool")
+	if len(s.ToolMeta) > 0 {
+		blocks = append(blocks, "_meta.tool_meta")
 	}
-	if len(s.RuntimeState) > 0 {
-		blocks = append(blocks, "_runtime.state")
+	if len(s.AgentMeta) > 0 {
+		blocks = append(blocks, "_meta.agent_meta")
 	}
-	if len(s.RuntimeGuidance) > 0 {
-		blocks = append(blocks, "_runtime.guidance")
+	if len(s.Guidance) > 0 {
+		blocks = append(blocks, "_meta.guidance")
 	}
-	if len(s.RawMeta) > 0 {
-		blocks = append(blocks, "meta")
-	}
-	if s.Guidance != "" {
-		blocks = append(blocks, "_notification_guidance")
+	if s.NotificationGuidance != "" {
+		blocks = append(blocks, "_meta.notification_guidance")
 	}
 	if len(s.Notifications) > 0 {
-		blocks = append(blocks, "notifications")
+		blocks = append(blocks, "_meta.notifications")
 		channels := make([]string, 0, len(s.Notifications))
 		for ch := range s.Notifications {
 			channels = append(channels, ch)
 		}
 		sort.Strings(channels)
 		for _, ch := range channels {
-			blocks = append(blocks, "notifications."+ch)
+			blocks = append(blocks, "_meta.notifications."+ch)
 		}
 	}
 	return blocks
@@ -422,27 +419,22 @@ func renderNotificationSnapshot(s sqlitelog.NotificationBlockSnapshot, cursor, t
 	valueStyle := lipgloss.NewStyle().Foreground(ColorAgent)
 	notifStyle := lipgloss.NewStyle().Foreground(ColorAgent).Italic(true)
 
-	// ── Modern parallel metadata blocks (kernel #443+) ──────────────────────
-	writeNotificationMapBlock(&sb, "_tool", s.Tool, []string{
-		"tool_name", "name", "tool_call_id", "id", "status", "current_time", "time",
-		"elapsed_ms", "elapsed", "char_count", "threshold_chars", "truncated", "spill_path",
+	// ── _meta envelope blocks (tool_meta / agent_meta / guidance) ───────────
+	writeNotificationMapBlock(&sb, "_meta.tool_meta", s.ToolMeta, []string{
+		"id", "timestamp", "char_count", "elapsed_ms", "status", "spilled_char_count", "synthetic",
 	}, wrapWidth, labelStyle, valueStyle)
-	writeNotificationMapBlock(&sb, "_runtime.state", s.RuntimeState, []string{
+	writeNotificationMapBlock(&sb, "_meta.agent_meta", s.AgentMeta, []string{
 		"current_time", "context", "stamina_left_seconds", "stamina", "active_turn_tool_calls",
+		"current_tool_result_chars", "elapsed_ms",
 	}, wrapWidth, labelStyle, valueStyle)
-	writeNotificationMapBlock(&sb, "_runtime.guidance", s.RuntimeGuidance, []string{
-		"schema", "schema_version", "version", "title", "summary", "body", "message", "action",
-	}, wrapWidth, labelStyle, valueStyle)
-
-	// ── Full build meta block ───────────────────────────────────────────────
-	writeNotificationMapBlock(&sb, "meta", s.RawMeta, []string{
-		"current_time", "context", "stamina_left_seconds", "injection_seq",
+	writeNotificationMapBlock(&sb, "_meta.guidance", s.Guidance, []string{
+		"schema_version", "guidance_version", "priority", "render_mode", "sections", "meta_readme",
 	}, wrapWidth, labelStyle, valueStyle)
 
-	// ── Global _notification_guidance ────────────────────────────────────────
-	if s.Guidance != "" {
-		sb.WriteString(labelStyle.Render("  ✦ _notification_guidance") + "\n")
-		for _, line := range wrappedNotificationLines(s.Guidance, wrapWidth) {
+	// ── Channel safety framing: _meta.notification_guidance ─────────────────
+	if s.NotificationGuidance != "" {
+		sb.WriteString(labelStyle.Render("  ✦ _meta.notification_guidance") + "\n")
+		for _, line := range wrappedNotificationLines(s.NotificationGuidance, wrapWidth) {
 			sb.WriteString(notifStyle.Faint(true).Render("    "+line) + "\n")
 		}
 		sb.WriteString("\n")
