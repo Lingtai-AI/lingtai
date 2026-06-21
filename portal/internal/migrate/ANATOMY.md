@@ -9,25 +9,25 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 ## Components
 
 ### Registry (`migrate.go`)
-- `CurrentVersion` (`migrate.go:11`) — `39`. Must match the TUI's `CurrentVersion` exactly; the cross-binary contract requires lockstep bumps.
-- `metaFile` struct (`migrate.go:13-15`) — `{"version": N}` shape of `.lingtai/meta.json`.
-- `Migration` type (`migrate.go:18-22`) — version + name + function.
-- `migrations` slice (`migrate.go:25-61`) — the append-only ordered list of all 36 migrations. **Real** entries have a named migration function; **no-op stubs** use `func(_ string) error { return nil }`.
+- `CurrentVersion` (`portal/internal/migrate/migrate.go:17`) — `39`. Must match the TUI's `CurrentVersion` exactly; the cross-binary contract requires lockstep bumps.
+- `metaFile` struct (`portal/internal/migrate/migrate.go:19-21`) — `{"version": N}` shape of `.lingtai/meta.json`.
+- `Migration` type (`portal/internal/migrate/migrate.go:24-28`) — version + name + function.
+- `migrations` slice (`portal/internal/migrate/migrate.go:31-71`) — the append-only ordered list of all 39 migrations. **Real** entries have a named migration function; **no-op stubs** use `func(_ string) error { return nil }`.
 
 ### Real migrations (touch shared on-disk state)
-- **m001** — `topology-to-portal` (`m001_topology.go:9-31`). Portal-only: moves `topology.jsonl` from `.tui-asset/` to `.portal/`.
-- **m002** — `tape-normalize` (`m002_tape_normalize.go:7-9`). **Now a no-op.** Tape normalization is handled by `ReconstructTape` at portal startup.
+- **m001** — `topology-to-portal` (`portal/internal/migrate/m001_topology.go:9-31`). Portal-only: moves `topology.jsonl` from `.tui-asset/` to `.portal/`.
+- **m002** — `tape-normalize` (`portal/internal/migrate/m002_tape_normalize.go:7-9`). **Now a no-op.** Tape normalization is handled by `ReconstructTape` at portal startup.
 - **m003** — `character-to-lingtai` — rewrites `.lingtai/character/` → `.lingtai/` (shared).
 - **m004** — `relative-addressing` — rewrites absolute paths to relative in `init.json` (shared).
 - **m006** — `relative-addressing-fix` — second pass: calls `migrateRelativeAddressing` again (shared).
 - **m015** — `timemachine-gitignore` (`m015_timemachine_gitignore.go`). Writes a `.gitignore` to the `.lingtai/` root for Time Machine support (shared).
-- **m026** — `preset-path-form` (`m026_preset_path_form.go:21`). Rewrites stem-form preset refs to path-form in `init.json` (shared).
+- **m026** — `preset-path-form` (`portal/internal/migrate/m026_preset_path_form.go:21`). Rewrites stem-form preset refs to path-form in `init.json` (shared).
 - **m027** — `strip-media-capabilities` — drops `compose`/`video`/`draw`/`talk`/`listen` from `init.json` (shared).
 - **m028** — `addons-to-mcp` — rewrites legacy `addons:{name:cfg}` → `addons:[name]` + `mcp.{name}` entries (shared).
 - **m029** — `preset-allowed-list` — rewrites `manifest.preset` to `{default, active, allowed:[paths]}` schema (shared).
 - **m030** — `preset-dir-split` — rewrites flat `presets/` paths to `templates/` or `saved/` subdirs (shared).
 - **m031** — `drop-legacy-intrinsic-capabilities` — drops `psyche`/`email` from `init.json` (shared).
-- **m035** — `remove-brief` (`m035_remove_brief.go:13`). Portal mirror of the TUI's brief-cleanup migration: deletes `system/brief.md` for each agent, drops `brief`/`brief_file` from `init.json`, and drops `brief` from `human/settings.json`. Touches shared on-disk state — either binary may be the first to open a post-secretary-removal project, so identical logic lives in both packages.
+- **m035** — `remove-brief` (`portal/internal/migrate/m035_remove_brief.go:13`). Portal mirror of the TUI's brief-cleanup migration: deletes `system/brief.md` for each agent, drops `brief`/`brief_file` from `init.json`, and drops `brief` from `human/settings.json`. Touches shared on-disk state — either binary may be the first to open a post-secretary-removal project, so identical logic lives in both packages.
 - **m038** — `agent-init-skills-paths` (`m038_agent_init_skills_paths.go`). Restores missing `skills.paths` in per-agent `init.json` files hit by the preset editor model-switch bug (PR #312). Shared on-disk state — whichever binary migrates first must repair.
 - **m039** — `agent-init-context-preset-repair` (`m039_agent_init_context_preset_repair.go`). Combined catch-up: (1) calls `migrateAgentInitSkillsPaths` idempotently, then (2) copies legacy root `manifest.context_limit` into `manifest.llm.context_limit`, and (3) rewrites stale codex.json preset refs. The dual call ensures projects stamped at v38 by either old branch binary receive both repairs. See "Versions 38 and 39 — collision history" below.
 
@@ -39,8 +39,8 @@ m005 (`soul-inquiry-source`), m007 (`normalize-ledger`), m008 (`recipe-state`), 
 All stubs are `TUI-only` — they touch `.tui-asset/`, global preset files, the TUI's saved-preset directory, or TUI-side capability aliases. The portal doesn't care about these but must hold the version slot so `meta.json` version numbers match.
 
 ### Core functions
-- `StampCurrent(lingtaiDir)` (`migrate.go:60-78`) — writes `meta.json` at `CurrentVersion` without running migrations. Used for fresh projects.
-- `Run(lingtaiDir)` (`migrate.go:80-126`) — reads `meta.json`, runs pending migrations in order, writes new version atomically (temp + rename). Returns `data version N is newer...` error if the project has been touched by a newer binary.
+- `StampCurrent(lingtaiDir)` (`portal/internal/migrate/migrate.go:76-90`) — writes `meta.json` at `CurrentVersion` without running migrations. Used for fresh projects.
+- `Run(lingtaiDir)` (`portal/internal/migrate/migrate.go:95-137`) — reads `meta.json`, runs pending migrations in order, writes new version atomically (temp + rename). Returns `data version N is newer...` error if the project has been touched by a newer binary.
 
 ## Connections
 
@@ -63,5 +63,5 @@ All stubs are `TUI-only` — they touch `.tui-asset/`, global preset files, the 
 - **The no-op stub contract.** TUI and portal share the `meta.json` version space. Adding a TUI-only migration requires a corresponding no-op stub in the portal registry — `Fn: func(_ string) error { return nil }` — to preserve the version slot. Otherwise the portal refuses to open any project the TUI has already migrated, producing: `data version N is newer than this binary supports (M); upgrade lingtai-portal`.
 - **Lockstep bumps.** After any migration bump, rebuild both binaries: `(cd tui && make build) && (cd portal && make build)`. A stale portal binary against a freshly-migrated project fails with the same "newer than this binary supports" error.
 - **m002 (`tape-normalize`) is a historical no-op.** It was real in an earlier portal version but its work is now done by `ReconstructTape` in `portal/internal/fs/reconstruct.go` at startup. The version slot is preserved; the function body is `return nil`.
-- **No-op stubs are documented inline** in the registry (`migrate.go:25-59`) with TUI-only comments. Adding a new stub should follow the same pattern: version, name, explicit `Fn: func(_ string) error { return nil }`, and a `// TUI-only:` comment.
+- **No-op stubs are documented inline** in the registry (`portal/internal/migrate/migrate.go:31-71`) with TUI-only comments. Adding a new stub should follow the same pattern: version, name, explicit `Fn: func(_ string) error { return nil }`, and a `// TUI-only:` comment.
 - **Collision-recovery pattern.** When two branches claim the same version and one has already migrated a real project, assign the earlier repair to the lower claimed version and add a combined catch-up at the next free slot. The catch-up calls the earlier function idempotently first, then applies its own logic. See m039 and `tui/internal/migrate/ANATOMY.md` for the canonical example and rule.

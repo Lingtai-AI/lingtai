@@ -9,70 +9,70 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 ## Components
 
 ### Types (`types.go`)
-- `Location` struct (`types.go:5-12`) — cached ipinfo.io geolocation.
-- `AgentNode` (`types.go:15-25`) — discovered agent: address, name, state, alive, capabilities, location. `WorkingDir` is internal-only (`json:"-"`).
-- `AvatarEdge`, `ContactEdge`, `MailEdge` (`types.go:28-49`) — topology edge types.
-- `NetworkStats` (`types.go:52-59`) — aggregate counts by state.
-- `Network` (`types.go:62-69`) — full topology payload: nodes + edges + stats + lang.
-- `MailMessage` (`types.go:72-89`) — inbox/archive/sent message schema, with identity card.
+- `Location` struct (`portal/internal/fs/types.go:5-12`) — cached ipinfo.io geolocation.
+- `AgentNode` (`portal/internal/fs/types.go:15-25`) — discovered agent: address, name, state, alive, capabilities, location. `WorkingDir` is internal-only (`json:"-"`).
+- `AvatarEdge`, `ContactEdge`, `MailEdge` (`portal/internal/fs/types.go:28-49`) — topology edge types.
+- `NetworkStats` (`portal/internal/fs/types.go:52-59`) — aggregate counts by state.
+- `Network` (`portal/internal/fs/types.go:62-69`) — full topology payload: nodes + edges + stats + lang.
+- `MailMessage` (`portal/internal/fs/types.go:72-89`) — inbox/archive/sent message schema, with identity card.
 
 ### Agent Reading (`agent.go`)
-- `agentManifest` struct (`agent.go:13-23`) — raw `.agent.json` JSON shape.
-- `ReadAgent(dir)` (`agent.go:26-53`) — reads `.agent.json` → `AgentNode`. Derives `IsHuman` from `admin: null`.
-- `ParseCapabilities(raw)` (`agent.go:56-81`) — handles `[]string` (TUI-generated) and `[[name, {}], ...]` (live agent) formats.
-- `ReadInitManifest(dir)` (`agent.go:90-100`) — returns the agent's manifest, preferring the kernel-published resolved artifact `system/manifest.resolved.json` (`readResolvedManifest`, `agent.go:104`; kernel issue #259) and falling back to raw `init.json` (`readRawInitManifest`, `agent.go:121`) when the artifact is absent/malformed. Either way `flattenManifest` (`agent.go:138`) hoists `llm.{model, provider, base_url}` and `soul.delay` to top-level.
-- `WritePrompt(agentDir, content)` (`agent.go:157-159`) — writes `.prompt` signal file.
-- `DiscoverAgents(baseDir)` (`agent.go:175-195`) — scans for subdirectories with `.agent.json`.
-- `AgentStatus` struct + `ReadStatus(dir)` (`agent.go:197-224`) — runtime context/runtime from `.status.json`.
-- `TokenTotals` + `AggregateTokens(dirs)` (`agent.go:227-248`) — sums token usage across agents.
-- `SumTokenLedger(path)` (`agent.go:252-279`) — reads and sums a single `token_ledger.jsonl`.
+- `agentManifest` struct (`portal/internal/fs/agent.go:13-23`) — raw `.agent.json` JSON shape.
+- `ReadAgent(dir)` (`portal/internal/fs/agent.go:26-53`) — reads `.agent.json` → `AgentNode`. Derives `IsHuman` from `admin: null`.
+- `ParseCapabilities(raw)` (`portal/internal/fs/agent.go:56-81`) — handles `[]string` (TUI-generated) and `[[name, {}], ...]` (live agent) formats.
+- `ReadInitManifest(dir)` (`portal/internal/fs/agent.go:90-100`) — returns the agent's manifest, preferring the kernel-published resolved artifact `system/manifest.resolved.json` (`readResolvedManifest`, `portal/internal/fs/agent.go:104`; kernel issue #259) and falling back to raw `init.json` (`readRawInitManifest`, `portal/internal/fs/agent.go:121`) when the artifact is absent/malformed. Either way `flattenManifest` (`portal/internal/fs/agent.go:138`) hoists `llm.{model, provider, base_url}` and `soul.delay` to top-level.
+- `WritePrompt(agentDir, content)` (`portal/internal/fs/agent.go:157-159`) — writes `.prompt` signal file.
+- `DiscoverAgents(baseDir)` (`portal/internal/fs/agent.go:175-195`) — scans for subdirectories with `.agent.json`.
+- `AgentStatus` struct + `ReadStatus(dir)` (`portal/internal/fs/agent.go:197-224`) — runtime context/runtime from `.status.json`.
+- `TokenTotals` + `AggregateTokens(dirs)` (`portal/internal/fs/agent.go:227-248`) — sums token usage across agents.
+- `SumTokenLedger(path)` (`portal/internal/fs/agent.go:252-279`) — reads and sums a single `token_ledger.jsonl`.
 
 ### Heartbeat (`heartbeat.go`)
-- `IsAlive(dir, thresholdSec)` (`heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (2.0s for the portal).
-- `IsAliveHuman()` (`heartbeat.go:24-26`) — always true.
+- `IsAlive(dir, thresholdSec)` (`portal/internal/fs/heartbeat.go:11-21`) — reads `.agent.heartbeat`, returns true if fresher than threshold (2.0s for the portal).
+- `IsAliveHuman()` (`portal/internal/fs/heartbeat.go:24-26`) — always true.
 
 ### Mail (`mail.go`)
-- `newMailboxID()` (`mail.go:32`) — builds `YYYYMMDDTHHMMSS-xxxx` short id matching the kernel's `_new_mailbox_id`.
-- `ReadInbox(dir)`, `ReadArchive(dir)` (`mail.go:36-40`) — full-folder reads.
-- `MailCache` struct + `NewMailCache(humanDir)` (`mail.go:46-55`) — incremental mailbox cache tracking inbox+seen mailbox-id directories.
-- `MailCache.Refresh()` (`mail.go:66-91`) — immutable refresh: scans for new messages, merges, sorts by `ReceivedAt`. Safe for goroutine use.
-- `prepareMailDirs(primaryParent, sentParent)` (`mail.go:176`) — allocates a short id and creates every mailbox leaf the send will write, retrying on collisions in any target folder.
-- `WriteMail(recipientDir, senderDir, ...)` (`mail.go:214`) — writes message to inbox (local) or outbox (pseudo-agent/remote), plus sent copy. Allocates id via `prepareMailDirs`. Respects the pseudo-agent contract: if sender has `admin: null`, writes to outbox only.
-- `isPseudoAgent(identity)` (`mail.go:279`) — `admin` nil or absent → true.
+- `newMailboxID()` (`portal/internal/fs/mail.go:32`) — builds `YYYYMMDDTHHMMSS-xxxx` short id matching the kernel's `_new_mailbox_id`.
+- `ReadInbox(dir)`, `ReadArchive(dir)` (`portal/internal/fs/mail.go:36-40`) — full-folder reads.
+- `MailCache` struct + `NewMailCache(humanDir)` (`portal/internal/fs/mail.go:46-55`) — incremental mailbox cache tracking inbox+seen mailbox-id directories.
+- `MailCache.Refresh()` (`portal/internal/fs/mail.go:66-91`) — immutable refresh: scans for new messages, merges, sorts by `ReceivedAt`. Safe for goroutine use.
+- `prepareMailDirs(primaryParent, sentParent)` (`portal/internal/fs/mail.go:176`) — allocates a short id and creates every mailbox leaf the send will write, retrying on collisions in any target folder.
+- `WriteMail(recipientDir, senderDir, ...)` (`portal/internal/fs/mail.go:214`) — writes message to inbox (local) or outbox (pseudo-agent/remote), plus sent copy. Allocates id via `prepareMailDirs`. Respects the pseudo-agent contract: if sender has `admin: null`, writes to outbox only.
+- `isPseudoAgent(identity)` (`portal/internal/fs/mail.go:279`) — `admin` nil or absent → true.
 
 ### Ledger (`ledger.go`)
-- `ReadLedger(dir)` (`ledger.go:17-47`) — scans `delegates/ledger.jsonl` for `event: "avatar"` records, returns `AvatarEdge` pairs and resolved child directories.
+- `ReadLedger(dir)` (`portal/internal/fs/ledger.go:17-47`) — scans `delegates/ledger.jsonl` for `event: "avatar"` records, returns `AvatarEdge` pairs and resolved child directories.
 
 ### Location (`location.go`)
-- `ResolveLocation()` (`location.go:23-48`) — queries `ipinfo.io/json`, returns cached `Location`.
-- `LocationStale(loc, maxAge)` (`location.go:50-61`) — true if `ResolvedAt` is empty/unparseable or older than `maxAge`.
-- `UpdateHumanLocation(humanDir)` (`location.go:63-103`) — resolves location if stale (>1h), writes atomically via temp+rename.
+- `ResolveLocation()` (`portal/internal/fs/location.go:23-48`) — queries `ipinfo.io/json`, returns cached `Location`.
+- `LocationStale(loc, maxAge)` (`portal/internal/fs/location.go:50-61`) — true if `ResolvedAt` is empty/unparseable or older than `maxAge`.
+- `UpdateHumanLocation(humanDir)` (`portal/internal/fs/location.go:63-103`) — resolves location if stale (>1h), writes atomically via temp+rename.
 
 ### Network (`network.go`)
-- `BuildNetwork(baseDir)` (`network.go:8-76`) — discovers agents, reads ledgers+contacts+mail, builds the full `Network` payload (nodes, all edge types, stats). Heartbeat overrides state to SUSPENDED when agent isn't alive.
-- `buildMailEdges(nodes, baseDir)` (`network.go:78-133`) — aggregates inbox+archive into `MailEdge` counts (direct/cc/bcc).
-- `computeStats(nodes, mailEdges)` (`network.go:151-171`) — counts agents by state; sums total mails.
+- `BuildNetwork(baseDir)` (`portal/internal/fs/network.go:8-76`) — discovers agents, reads ledgers+contacts+mail, builds the full `Network` payload (nodes, all edge types, stats). Heartbeat overrides state to SUSPENDED when agent isn't alive.
+- `buildMailEdges(nodes, baseDir)` (`portal/internal/fs/network.go:78-133`) — aggregates inbox+archive into `MailEdge` counts (direct/cc/bcc).
+- `computeStats(nodes, mailEdges)` (`portal/internal/fs/network.go:151-171`) — counts agents by state; sums total mails.
 
 ### Contacts (`contacts.go`)
-- `ReadContacts(dir)` (`contacts.go:15-35`) — reads `mailbox/contacts.json`, resolves target addresses to absolute paths.
+- `ReadContacts(dir)` (`portal/internal/fs/contacts.go:15-35`) — reads `mailbox/contacts.json`, resolves target addresses to absolute paths.
 
 ### Topology Reconstruction (`reconstruct.go`) — **portal-specific**
-- `TapeFrame` struct (`reconstruct.go:14-18`) — timestamped `Network` snapshot.
-- `ReconstructTape(baseDir)` (`reconstruct.go:39-354`) — the portal's defining capability: reads all agents' `logs/events.jsonl` and mailbox contents, replays them chronologically, and produces a sequence of `TapeFrame` snapshots using activity-driven sampling on a 3s grid. Frames are emitted at each `agent_state` event, each mail timestamp, each agent's first-seen time, and at least once per 60s during quiet stretches. `maxTs` clamps to the latest mutation-causing event (state change or mail) — heartbeats during idle tails don't extend the tape. Agents appear when their first event fires; mail accumulates frame-by-frame; avatar/contact edges are static pre-read. This is what drives the replay timeline — the TUI has no equivalent.
-- `readEventsJSONL(agentDir)` (`reconstruct.go:358-383`) — parses `events.jsonl`, filters to `agent_state`, `heartbeat_start`, `refresh_start`.
-- `mailTimestamp(msg)` (`reconstruct.go:385-401`) — extracts best timestamp (SentAt → ReceivedAt) as unix seconds.
+- `TapeFrame` struct (`portal/internal/fs/reconstruct.go:14-18`) — timestamped `Network` snapshot.
+- `ReconstructTape(baseDir)` (`portal/internal/fs/reconstruct.go:39-354`) — the portal's defining capability: reads all agents' `logs/events.jsonl` and mailbox contents, replays them chronologically, and produces a sequence of `TapeFrame` snapshots using activity-driven sampling on a 3s grid. Frames are emitted at each `agent_state` event, each mail timestamp, each agent's first-seen time, and at least once per 60s during quiet stretches. `maxTs` clamps to the latest mutation-causing event (state change or mail) — heartbeats during idle tails don't extend the tape. Agents appear when their first event fires; mail accumulates frame-by-frame; avatar/contact edges are static pre-read. This is what drives the replay timeline — the TUI has no equivalent.
+- `readEventsJSONL(agentDir)` (`portal/internal/fs/reconstruct.go:358-383`) — parses `events.jsonl`, filters to `agent_state`, `heartbeat_start`, `refresh_start`.
+- `mailTimestamp(msg)` (`portal/internal/fs/reconstruct.go:385-401`) — extracts best timestamp (SentAt → ReceivedAt) as unix seconds.
 
 ### Signal (`signal.go`)
-- Signal constants (`signal.go:11-15`) — `.sleep`, `.suspend`, `.interrupt`.
-- `TouchSignal(dir, sig)`, `HasSignal(dir, sig)`, `CleanSignals(dir)` (`signal.go:17-30`) — signal file lifecycle.
-- `SuspendAndWait(dir, timeout)` (`signal.go:34-46`) — touches `.suspend`, polls heartbeat until agent dies or timeout.
+- Signal constants (`portal/internal/fs/signal.go:11-15`) — `.sleep`, `.suspend`, `.interrupt`.
+- `TouchSignal(dir, sig)`, `HasSignal(dir, sig)`, `CleanSignals(dir)` (`portal/internal/fs/signal.go:17-30`) — signal file lifecycle.
+- `SuspendAndWait(dir, timeout)` (`portal/internal/fs/signal.go:34-46`) — touches `.suspend`, polls heartbeat until agent dies or timeout.
 
 ### Address Resolution (`resolve.go`)
-- `ParseAddress(addr)` (`resolve.go:16-55`) — parses `localhost:/path` and `[host]:/path` formats.
-- `IsRemoteAddress(addr)` (`resolve.go:57-61`) — true if host is non-localhost.
-- `FormatAbsoluteAddress(host, path)` (`resolve.go:63-70`) — inverse of ParseAddress.
-- `ResolveAddress(addr, baseDir)` (`resolve.go:76-84`) — host:path addresses returned as-is; relative names joined with `baseDir`.
-- `RelativizeAddress(addr, baseDir)` (`resolve.go:86-98`) — strips `baseDir/` prefix from absolute paths.
+- `ParseAddress(addr)` (`portal/internal/fs/resolve.go:16-55`) — parses `localhost:/path` and `[host]:/path` formats.
+- `IsRemoteAddress(addr)` (`portal/internal/fs/resolve.go:57-61`) — true if host is non-localhost.
+- `FormatAbsoluteAddress(host, path)` (`portal/internal/fs/resolve.go:63-70`) — inverse of ParseAddress.
+- `ResolveAddress(addr, baseDir)` (`portal/internal/fs/resolve.go:76-84`) — host:path addresses returned as-is; relative names joined with `baseDir`.
+- `RelativizeAddress(addr, baseDir)` (`portal/internal/fs/resolve.go:86-98`) — strips `baseDir/` prefix from absolute paths.
 
 ## Connections
 
