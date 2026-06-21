@@ -697,8 +697,6 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 	return ""
 }
 
-const maxToolResultRenderChars = 10000
-
 func formatToolResultEvent(entry map[string]interface{}) string {
 	name, _ := entry["tool_name"].(string)
 	status, _ := entry["status"].(string)
@@ -709,20 +707,130 @@ func formatToolResultEvent(entry map[string]interface{}) string {
 
 	lines := []string{fmt.Sprintf("%s → %s%s", name, status, elapsed)}
 	result, hasResult := entry["result"]
-	if !hasResult {
-		return lines[0]
-	}
+	resultMap, _ := result.(map[string]interface{})
 
-	if resultMap, ok := result.(map[string]interface{}); ok {
+	if resultMap != nil {
 		if toolErr, ok := resultMap["tool_error"].(map[string]interface{}); ok {
 			lines = append(lines, formatToolErrorSummary(toolErr)...)
 		}
 	}
+	lines = appendToolResultMetaBlocks(lines, entry, resultMap)
 
-	if resultText := formatToolResultValue(result); resultText != "" {
-		lines = append(lines, "result: "+truncateToolResultText(resultText))
+	if !hasResult {
+		return strings.Join(lines, "\n")
+	}
+	result = displayToolResultValue(result)
+	if result != nil {
+		if resultText := formatToolResultValue(result); resultText != "" {
+			// Keep the parsed session entry complete. Mail-view verbosity and the
+			// user's tool_truncate preference apply render-time truncation.
+			lines = append(lines, "result: "+resultText)
+		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func appendToolResultMetaBlocks(lines []string, entry map[string]interface{}, resultMap map[string]interface{}) []string {
+	toolBlock := map[string]interface{}{}
+	copyIfPresent(toolBlock, "id", entry, "tool_call_id")
+	copyIfPresent(toolBlock, "trace_id", entry, "tool_trace_id")
+	copyIfPresent(toolBlock, "name", entry, "tool_name")
+	copyIfPresent(toolBlock, "timestamp", entry, "ts")
+	copyIfPresent(toolBlock, "status", entry, "status")
+	copyIfPresent(toolBlock, "elapsed_ms", entry, "elapsed_ms")
+	if len(toolBlock) > 0 {
+		lines = appendMetadataBlock(lines, "_tool", toolBlock)
+	}
+
+	runtimeStateRendered := false
+	runtimeGuidanceRendered := false
+	if runtimeMap := firstMapValue(entry, resultMap, "_runtime"); runtimeMap != nil {
+		if state, ok := runtimeMap["state"]; ok {
+			lines = appendMetadataBlock(lines, "_runtime.state", state)
+			runtimeStateRendered = true
+		}
+		if guidance, ok := runtimeMap["guidance"]; ok {
+			lines = appendMetadataBlock(lines, "_runtime.guidance", guidance)
+			runtimeGuidanceRendered = true
+		}
+	}
+	if resultMap != nil && !runtimeStateRendered {
+		if pending, ok := resultMap["_runtime_pending"]; ok {
+			lines = appendMetadataBlock(lines, "_runtime.state", pending)
+		}
+	}
+	if guidance := firstValue(entry, resultMap, "_runtime_guidance"); guidance != nil && !runtimeGuidanceRendered {
+		lines = appendMetadataBlock(lines, "_runtime.guidance", guidance)
+	}
+	if notifications := firstValue(entry, resultMap, "notifications"); notifications != nil {
+		lines = appendMetadataBlock(lines, "notifications", notifications)
+	}
+	if guidance := firstValue(entry, resultMap, "_notification_guidance"); guidance != nil {
+		lines = appendMetadataBlock(lines, "_notification_guidance", guidance)
+	}
+	return lines
+}
+
+func displayToolResultValue(result interface{}) interface{} {
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		return result
+	}
+	cleaned := make(map[string]interface{}, len(resultMap))
+	for k, v := range resultMap {
+		switch k {
+		case "_runtime_pending", "_runtime", "_runtime_guidance", "notifications", "_notification_guidance", "_tool":
+			continue
+		default:
+			cleaned[k] = v
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func copyIfPresent(dst map[string]interface{}, dstKey string, src map[string]interface{}, srcKey string) {
+	if value, ok := src[srcKey]; ok && value != nil {
+		dst[dstKey] = value
+	}
+}
+
+func firstMapValue(primary map[string]interface{}, secondary map[string]interface{}, key string) map[string]interface{} {
+	if value, ok := primary[key].(map[string]interface{}); ok {
+		return value
+	}
+	if secondary != nil {
+		if value, ok := secondary[key].(map[string]interface{}); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstValue(primary map[string]interface{}, secondary map[string]interface{}, key string) interface{} {
+	if value, ok := primary[key]; ok {
+		return value
+	}
+	if secondary != nil {
+		if value, ok := secondary[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func appendMetadataBlock(lines []string, name string, value interface{}) []string {
+	text := formatToolResultValue(value)
+	if text == "" {
+		return lines
+	}
+	lines = append(lines, name+":")
+	for _, line := range strings.Split(text, "\n") {
+		lines = append(lines, "  "+line)
+	}
+	return lines
 }
 
 func formatToolErrorSummary(toolErr map[string]interface{}) []string {
@@ -776,14 +884,6 @@ func formatToolResultValue(value interface{}) string {
 		}
 		return fmt.Sprint(v)
 	}
-}
-
-func truncateToolResultText(text string) string {
-	runes := []rune(text)
-	if len(runes) <= maxToolResultRenderChars {
-		return text
-	}
-	return string(runes[:maxToolResultRenderChars]) + fmt.Sprintf("\n… truncated to %d chars", maxToolResultRenderChars)
 }
 
 // ---------------------------------------------------------------------------

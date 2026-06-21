@@ -359,8 +359,8 @@ func TestParseEventToolResultRendersToolErrorPayload(t *testing.T) {
 	}
 }
 
-func TestParseEventToolResultRendersScalarAndCapsLongResult(t *testing.T) {
-	long := strings.Repeat("界", maxToolResultRenderChars+5)
+func TestParseEventToolResultRendersScalarAndKeepsLongResult(t *testing.T) {
+	long := strings.Repeat("界", 10005)
 	raw := map[string]interface{}{
 		"ts":         1781258400.0,
 		"type":       "tool_result",
@@ -378,10 +378,75 @@ func TestParseEventToolResultRendersScalarAndCapsLongResult(t *testing.T) {
 	if !strings.Contains(e.Body, "bash → ok 1ms") {
 		t.Fatalf("Body missing summary: %s", e.Body[:80])
 	}
-	if !strings.Contains(e.Body, "truncated to 10000 chars") {
-		t.Fatalf("Body missing truncation marker")
+	if strings.Contains(e.Body, "truncated to") {
+		t.Fatalf("Body should not be truncated before mail-view rendering: %s", e.Body[len(e.Body)-80:])
 	}
-	if got := strings.Count(e.Body, "界"); got != maxToolResultRenderChars {
-		t.Fatalf("rendered rune count = %d, want %d", got, maxToolResultRenderChars)
+	if got := strings.Count(e.Body, "界"); got != 10005 {
+		t.Fatalf("rendered rune count = %d, want %d", got, 10005)
+	}
+}
+
+func TestParseEventToolResultRendersParallelMetaBlocks(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":            1781258400.0,
+		"type":          "tool_result",
+		"tool_name":     "bash",
+		"tool_call_id":  "call_meta",
+		"tool_trace_id": "trace_meta",
+		"status":        "ok",
+		"elapsed_ms":    42.0,
+		"result": map[string]interface{}{
+			"status": "ok",
+			"stdout": "done",
+			"stderr": "",
+			"_runtime_pending": map[string]interface{}{
+				"current_time":         "2026-06-21T00:40:00-07:00",
+				"stamina_left_seconds": 35504.9,
+				"context": map[string]interface{}{
+					"usage": 0.4,
+				},
+			},
+		},
+		"_runtime": map[string]interface{}{
+			"guidance": map[string]interface{}{
+				"guidance_version": "0.3.0",
+				"sections": []interface{}{
+					map[string]interface{}{"title": "Summarize and molt deliberately"},
+				},
+			},
+		},
+		"notifications": map[string]interface{}{
+			"mcp.telegram": map[string]interface{}{"header": "1 new event"},
+		},
+		"_notification_guidance": "read the producer channel first",
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil")
+	}
+	for _, want := range []string{
+		"bash → ok 42ms",
+		"_tool:",
+		`"id": "call_meta"`,
+		`"trace_id": "trace_meta"`,
+		"_runtime.state:",
+		`"current_time": "2026-06-21T00:40:00-07:00"`,
+		"_runtime.guidance:",
+		`"guidance_version": "0.3.0"`,
+		"notifications:",
+		`"mcp.telegram"`,
+		"_notification_guidance:",
+		"read the producer channel first",
+		"result: {",
+		`"stdout": "done"`,
+	} {
+		if !strings.Contains(e.Body, want) {
+			t.Fatalf("Body missing %q:\n%s", want, e.Body)
+		}
+	}
+	if strings.Contains(e.Body, "_runtime_pending") {
+		t.Fatalf("runtime pending metadata should be rendered as _runtime.state, not duplicated in result:\n%s", e.Body)
 	}
 }
