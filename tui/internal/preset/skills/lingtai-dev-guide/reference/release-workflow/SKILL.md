@@ -6,7 +6,7 @@ description: >
   GitHub/PyPI/Homebrew publishing boundaries, the required self-contained HTML
   release log, website release-log/blog drafting, and the reusable release blog
   template.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Release Workflow
@@ -352,21 +352,73 @@ gh pr list --state all --base main --search 'updated:>=YYYY-MM-DD' \
   --json number,title,state,author,createdAt,updatedAt,closedAt,mergedAt,url
 
 gh issue list --state all --search 'updated:>=YYYY-MM-DD' \
-  --json number,title,state,author,createdAt,updatedAt,closedAt,url,comments
+  --json number,title,state,author,createdAt,url
 ```
 
-Contributor inclusion rule for release logs:
+Note `mergedAt` is a PR-only field — do not request it for issues, or `gh` errors.
 
-- commit authors;
-- co-authors from commit trailers;
+#### 7.3a Account for the fate of every PR (required)
+
+A release log that lists only merged authors is incomplete and reads as if the
+window had no rejected or pending work. Every release log must account for the
+**fate of every PR** in the window — merged, closed-unmerged, or still open —
+and must list **every person** who opened a PR or a substantive issue, with a
+one-line summary of what they contributed and (when not merged) why it is still
+included.
+
+Bucket every window PR and aggregate per author with this script:
+
+```bash
+python3 - <<'PY'
+import subprocess, json, collections
+SINCE = "YYYY-MM-DD"                                   # last published-log baseline
+REPOS = {"TUI": "Lingtai-AI/lingtai", "kernel": "Lingtai-AI/lingtai-kernel"}
+def gh(repo, kind, fields):
+    return json.loads(subprocess.check_output(
+        ["gh", kind, "list", "--repo", repo, "--state", "all",
+         "--search", f"updated:>={SINCE}", "--limit", "200", "--json", fields], text=True))
+people = collections.defaultdict(lambda: {"merged":[], "closed":[], "open":[], "issue":[]})
+for short, repo in REPOS.items():
+    for pr in gh(repo, "pr", "number,title,author,state,mergedAt"):
+        fate = "merged" if pr["mergedAt"] else ("closed" if pr["state"]=="CLOSED" else "open")
+        people[pr["author"]["login"]][fate].append(f'{short}#{pr["number"]} {pr["title"]}')
+    for iss in gh(repo, "issue", "number,title,author,state"):
+        people[iss["author"]["login"]]["issue"].append(
+            f'{short}#{iss["number"]}[{iss["state"].lower()}] {iss["title"]}')
+for who, d in sorted(people.items(), key=lambda kv: -len(kv[1]["merged"])):
+    print(f"@{who}: merged={len(d['merged'])} closed-unmerged={len(d['closed'])} "
+          f"open-pr={len(d['open'])} issues={len(d['issue'])}")
+    for k in ("closed","open","issue"):
+        for x in d[k]: print(f"    [{k}] {x}")
+PY
+```
+
+Contributor inclusion rule for release logs — include, and name, all of:
+
+- commit authors and co-authors from commit trailers (parse trailers with robust
+  record separators; line-by-line parsing undercounts `Co-authored-by`);
 - merged PR authors;
-- closed unmerged PR authors, when part of the release-window discussion/work;
-- closed issue reporters and meaningful participants, even if the idea was not
-  adopted;
-- automation/bots when they materially changed release artifacts.
+- **closed-unmerged PR authors** — always, when the PR is part of the
+  release-window discussion/work. State the fate (closed unmerged) and, if a
+  later PR implemented the idea, link that PR (e.g. "#280 closed, landed via
+  #394");
+- **closed or open issue reporters and meaningful participants**, even if the
+  idea was not adopted — name the issues that framed problems the window acted on;
+- automation/bots only when they materially changed release artifacts.
 
-Keep raw JSON/script outputs under a report directory so the contributor list is
-auditable.
+Do **not** credit LingTai network agents (e.g. `mimo-1`, `glm52-blog-explorer`)
+or other non-human automation as contributors, even when they authored commits or
+PRs in the window. The contributor roster names humans and external participants.
+An agent's work is attributed to the human operating it; if agent involvement
+matters, mention it in prose, not in the contributor list.
+
+The release log must contain a dedicated **Contributors** section that lists each
+person (one entry each) with: their merged work, any closed-unmerged PRs and why
+they still count, and any framing issues. Verify a real GitHub login resolves to
+a person, not a bot, before crediting (`gh api users/<login> --jq .type`).
+
+Keep raw JSON/script outputs under a report directory so the contributor list and
+every PR's fate are auditable.
 
 ### 7.4 Draft both zh and en
 
@@ -380,7 +432,9 @@ Substantial release logs should be conclusion-first and concrete:
 - State the whole release window, not just one tag.
 - Include commit count, files changed, LOC added/removed, PR/issue counts.
 - Explain user-visible behavior, not just PR titles.
-- Include contributors comprehensively and safely.
+- Include contributors comprehensively and safely, with the dedicated
+  Contributors section required by 7.3a: name every PR/issue author and the fate
+  of their work, including closed-unmerged PRs.
 - Mention validation/release hygiene as part of delivery.
 
 Suggested section shape for a large cockpit/kernel release:
