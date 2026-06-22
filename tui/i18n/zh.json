@@ -140,6 +140,7 @@
   "mail.launch_failed": "启动 Agent失败：%s",
   "mail.editor_hint": "输入框已可内部滚动：在此处滚轮或按 pgup/pgdn；ctrl+e 打开 vim/编辑器。",
   "mail.no_messages": "暂无消息，等待邮件...",
+  "mail.initial_loading": "loading... / 加载中...",
   "mail.load_more": "▲ 还有 %d 条旧消息 — ctrl+u 加载",
   "mail.collapse": "▼ ctrl+d 收起到最新",
   "mail.placeholder": "输入消息...",

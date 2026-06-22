@@ -65,6 +65,7 @@ type mailRefreshMsg struct {
 	activity     fs.NetworkActivity
 	orchName     string // agent name from .agent.json (may change at runtime)
 	orchNickname string // nickname from .agent.json
+	initial      bool   // true only for the deferred initial rebuild (clears the loading banner)
 }
 type tickMsg time.Time
 
@@ -153,6 +154,7 @@ type MailModel struct {
 	insightsEnabled   bool             // from settings — show insight events
 	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
 	sessionCache      *fs.SessionCache // append-only session log
+	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
@@ -187,6 +189,11 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
 		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
+		// The authoritative session rebuild is deferred to initialRebuild() (see
+		// below), so the first frames render before history is loaded. Show a
+		// loading banner at the top of the stream until that rebuild's refresh
+		// lands; the mailRefreshMsg handler clears it on the initial message.
+		initialLoading: true,
 	}
 	// NOTE: the mail-cache refresh and the authoritative session rebuild are
 	// intentionally NOT done here. NewMailModel runs on the synchronous launch
@@ -216,7 +223,15 @@ func (m MailModel) initialRebuild() tea.Msg {
 	// existing file across restarts.
 	m.sessionCache.RebuildFromSources(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
 	m.cache = cache
-	return m.refreshMail()
+	// Tag the resulting refresh as the initial one so the handler can clear the
+	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
+	// produce untagged mailRefreshMsg values and never re-show the banner.
+	msg := m.refreshMail()
+	if rm, ok := msg.(mailRefreshMsg); ok {
+		rm.initial = true
+		return rm
+	}
+	return msg
 }
 
 func adaptiveInputMaxHeight(windowHeight int) int {
@@ -623,6 +638,11 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailRefreshMsg:
+		if msg.initial {
+			// The deferred initial rebuild has landed — history is now built, so
+			// drop the loading banner. Periodic refreshes leave this untouched.
+			m.initialLoading = false
+		}
 		m.cache = msg.cache
 		m.orchAlive = msg.alive
 		m.orchState = msg.state
@@ -1376,9 +1396,13 @@ func (m MailModel) View() string {
 
 	footer := sep + "\n" + inputSection + "\n" + statusBar
 
-	// Top banner: "▲ N older — ctrl+u to load"
+	// Top banner: a one-time "loading... / 加载中..." line while the deferred
+	// initial session rebuild is still pending, then "▲ N older — ctrl+u to load".
 	topBanner := ""
-	if m.hasMoreOlder() {
+	if m.initialLoading {
+		loadingText := i18n.T("mail.initial_loading")
+		topBanner = StyleFaint.Render(centerText(loadingText, m.width)) + "\n"
+	} else if m.hasMoreOlder() {
 		bannerText := i18n.TF("mail.load_more", m.olderCount())
 		topBanner = StyleFaint.Render(centerText(bannerText, m.width)) + "\n"
 	}

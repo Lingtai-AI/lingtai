@@ -140,6 +140,7 @@
   "mail.launch_failed": "Failed to launch agent: %s",
   "mail.editor_hint": "Input box scrolls at this size. Use pgup/pgdn or mouse wheel here; ctrl+e opens vim/editor.",
   "mail.no_messages": "No messages yet. Waiting for mail...",
+  "mail.initial_loading": "loading... / 加载中...",
   "mail.load_more": "▲ %d older — ctrl+u to load",
   "mail.collapse": "▼ ctrl+d to collapse to recent",
   "mail.placeholder": "Type a message...",
