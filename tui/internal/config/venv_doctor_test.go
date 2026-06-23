@@ -286,7 +286,32 @@ func TestUpgradePythonRuntimeForceRespectsEditableInstall(t *testing.T) {
 	}
 }
 
-func TestReleaseNewerUsesSemanticOrdering(t *testing.T) {
+func TestCompareReleaseVersionsClassifiesOutcomes(t *testing.T) {
+	cases := []struct {
+		current string
+		latest  string
+		want    ReleaseComparisonKind
+	}{
+		{current: "v0.8.1", latest: "v0.8.2", want: ReleaseComparisonUpdateAvailable},
+		{current: "v0.8.2", latest: "v0.8.2", want: ReleaseComparisonUpToDate},
+		{current: "v0.8.3", latest: "v0.8.2", want: ReleaseComparisonUpToDate},
+		{current: "0.8.9", latest: "v0.8.10", want: ReleaseComparisonUpdateAvailable},
+		{current: "2fb2766", latest: "v0.8.2", want: ReleaseComparisonCurrentNonSemver},
+		{current: "", latest: "v0.8.2", want: ReleaseComparisonCurrentMissing},
+		{current: "dev", latest: "v0.8.2", want: ReleaseComparisonDevBuild},
+		{current: "v0.8.2-4-gabcdef", latest: "v0.8.3", want: ReleaseComparisonDevBuild},
+		{current: "banana", latest: "v0.8.2", want: ReleaseComparisonCurrentNonSemver},
+		{current: "v0.8.2", latest: "", want: ReleaseComparisonLatestNonSemver},
+		{current: "v0.8.2", latest: "release-2026", want: ReleaseComparisonLatestNonSemver},
+	}
+	for _, tc := range cases {
+		if got := CompareReleaseVersions(tc.current, tc.latest); got.Kind != tc.want {
+			t.Fatalf("CompareReleaseVersions(%q, %q) kind = %s, want %s", tc.current, tc.latest, got.Kind, tc.want)
+		}
+	}
+}
+
+func TestReleaseNewerKeepsBooleanCompatibility(t *testing.T) {
 	cases := []struct {
 		current string
 		latest  string
@@ -296,6 +321,7 @@ func TestReleaseNewerUsesSemanticOrdering(t *testing.T) {
 		{current: "v0.8.2", latest: "v0.8.2", want: false},
 		{current: "v0.8.3", latest: "v0.8.2", want: false},
 		{current: "0.8.9", latest: "v0.8.10", want: true},
+		{current: "2fb2766", latest: "v0.8.2", want: false},
 		{current: "dev", latest: "v0.8.2", want: false},
 		{current: "v0.8.3", latest: "", want: false},
 	}
@@ -396,6 +422,64 @@ func TestRunDoctorUpdateTUIOutdatedWithoutForceDoesNotRunBrew(t *testing.T) {
 	}
 	if containsCall(runner.calls, "brew") {
 		t.Fatalf("ForceTUI=false must not run brew, got %#v", runner.calls)
+	}
+}
+
+func TestRunDoctorUpdateTUICurrentNonSemverWarns(t *testing.T) {
+	runner := &fakeRunner{versions: []string{"0.9.7", "0.9.7"}}
+	report := RunDoctorUpdate(t.TempDir(), DoctorOptions{
+		CurrentTUIVersion: "2fb2766",
+		ForceTUI:          true,
+		ForcePython:       false,
+		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:            runner,
+		LookPath:          func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
+		Executable:        func() (string, error) { return "/opt/homebrew/bin/lingtai-tui", nil },
+		Home:              t.TempDir(),
+		LookupEnv:         func(string) (string, bool) { return "", false },
+		Readlink:          func(string) (string, error) { return "", os.ErrInvalid },
+		Stat:              statAllExist,
+	})
+	if !report.Healthy {
+		t.Fatalf("non-semver TUI check should remain a warning, not a failure: %+v", report.Lines)
+	}
+	if !containsLine(report.Lines, "current version \"2fb2766\" is not a strict vX.Y.Z release") {
+		t.Fatalf("expected current non-semver warning: %+v", report.Lines)
+	}
+	if containsLine(report.Lines, "TUI is up to date") {
+		t.Fatalf("current non-semver version must not be reported as up to date: %+v", report.Lines)
+	}
+	if containsCall(runner.calls, "brew") {
+		t.Fatalf("non-comparable TUI version must not run brew, got %#v", runner.calls)
+	}
+}
+
+func TestRunDoctorUpdateTUILatestNonSemverWarns(t *testing.T) {
+	runner := &fakeRunner{versions: []string{"0.9.7", "0.9.7"}}
+	report := RunDoctorUpdate(t.TempDir(), DoctorOptions{
+		CurrentTUIVersion: "v0.8.1",
+		ForceTUI:          true,
+		ForcePython:       false,
+		HTTPClient:        testVersionClient(t, "0.9.7", "latest"),
+		Runner:            runner,
+		LookPath:          func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
+		Executable:        func() (string, error) { return "/opt/homebrew/bin/lingtai-tui", nil },
+		Home:              t.TempDir(),
+		LookupEnv:         func(string) (string, bool) { return "", false },
+		Readlink:          func(string) (string, error) { return "", os.ErrInvalid },
+		Stat:              statAllExist,
+	})
+	if !report.Healthy {
+		t.Fatalf("malformed latest TUI check should remain a warning, not a failure: %+v", report.Lines)
+	}
+	if !containsLine(report.Lines, "latest release tag \"latest\" is not a strict vX.Y.Z release") {
+		t.Fatalf("expected latest non-semver warning: %+v", report.Lines)
+	}
+	if containsLine(report.Lines, "TUI is up to date") {
+		t.Fatalf("latest non-semver tag must not be reported as up to date: %+v", report.Lines)
+	}
+	if containsCall(runner.calls, "brew") {
+		t.Fatalf("non-comparable latest tag must not run brew, got %#v", runner.calls)
 	}
 }
 

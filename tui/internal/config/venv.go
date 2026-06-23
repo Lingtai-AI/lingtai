@@ -238,7 +238,8 @@ func findPython() string {
 // Returns the latest version string if an upgrade is available, or "" if up-to-date.
 // Non-blocking: silently returns "" on any error (offline, timeout, etc.).
 func CheckTUIUpgrade(currentVersion string) string {
-	if currentVersion == "" || currentVersion == "dev" || strings.Contains(currentVersion, "-") {
+	currentClass := CompareReleaseVersions(currentVersion, "")
+	if currentClass.Kind == ReleaseComparisonCurrentMissing || currentClass.Kind == ReleaseComparisonDevBuild || currentClass.Kind == ReleaseComparisonCurrentNonSemver {
 		return ""
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -246,7 +247,7 @@ func CheckTUIUpgrade(currentVersion string) string {
 	if err != nil {
 		return ""
 	}
-	if releaseNewer(currentVersion, release.TagName) {
+	if CompareReleaseVersions(currentVersion, release.TagName).Kind == ReleaseComparisonUpdateAvailable {
 		return release.TagName
 	}
 	return ""
@@ -459,10 +460,7 @@ func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
 }
 
 func (r *DoctorReport) checkTUI(opts DoctorOptions) {
-	current := opts.CurrentTUIVersion
-	if current == "" {
-		current = "dev"
-	}
+	current := strings.TrimSpace(opts.CurrentTUIVersion)
 	exe, err := opts.Executable()
 	if err != nil || exe == "" {
 		r.add(DoctorWarn, "TUI executable: unknown (%v)", err)
@@ -472,9 +470,18 @@ func (r *DoctorReport) checkTUI(opts DoctorOptions) {
 			r.add(DoctorWarn, "TUI executable is a symlink to %s; brew may update the Cellar copy without changing this dev/manual link", target)
 		}
 	}
-	r.add(DoctorInfo, "TUI version: %s", current)
+	if current == "" {
+		r.add(DoctorInfo, "TUI version: unknown")
+	} else {
+		r.add(DoctorInfo, "TUI version: %s", current)
+	}
 
-	if current == "dev" || strings.Contains(current, "-") {
+	currentClass := CompareReleaseVersions(current, "")
+	switch currentClass.Kind {
+	case ReleaseComparisonCurrentMissing:
+		r.add(DoctorWarn, "Skipping TUI release upgrade because the current TUI version is unknown")
+		return
+	case ReleaseComparisonDevBuild:
 		r.add(DoctorWarn, "Skipping TUI release upgrade for dev build %q", current)
 		return
 	}
@@ -484,11 +491,30 @@ func (r *DoctorReport) checkTUI(opts DoctorOptions) {
 		return
 	}
 	r.add(DoctorInfo, "Latest TUI release: %s", release.TagName)
-	if !releaseNewer(current, release.TagName) {
+
+	// Startup collapses non-comparable release checks to "no update" so it
+	// will not prompt for brew; /doctor keeps them distinct warnings instead
+	// of reporting a clean up-to-date result.
+	comparison := CompareReleaseVersions(current, release.TagName)
+	switch comparison.Kind {
+	case ReleaseComparisonUpdateAvailable:
+		r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
+	case ReleaseComparisonUpToDate:
 		r.add(DoctorOK, "TUI is up to date")
 		return
+	case ReleaseComparisonCurrentNonSemver:
+		r.add(DoctorWarn, "Cannot compare TUI release versions: current version %q is not a strict vX.Y.Z release; latest is %q", current, release.TagName)
+		return
+	case ReleaseComparisonLatestNonSemver:
+		r.add(DoctorWarn, "Cannot compare TUI release versions: latest release tag %q is not a strict vX.Y.Z release; current is %q", release.TagName, current)
+		return
+	case ReleaseComparisonCurrentMissing:
+		r.add(DoctorWarn, "Skipping TUI release upgrade because the current TUI version is unknown")
+		return
+	case ReleaseComparisonDevBuild:
+		r.add(DoctorWarn, "Skipping TUI release upgrade for dev build %q", current)
+		return
 	}
-	r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
 	if !opts.ForceTUI {
 		return
 	}
@@ -678,20 +704,78 @@ func fetchLatestGitHubRelease(client *http.Client) (latestRelease, error) {
 }
 
 func releaseNewer(currentVersion, latestTag string) bool {
-	if currentVersion == "" || currentVersion == "dev" || strings.Contains(currentVersion, "-") || latestTag == "" {
-		return false
+	return CompareReleaseVersions(currentVersion, latestTag).Kind == ReleaseComparisonUpdateAvailable
+}
+
+// ReleaseComparisonKind is the typed outcome of comparing a running TUI version
+// with a release tag. It distinguishes malformed and dev versions from ordinary
+// "not newer" results.
+type ReleaseComparisonKind string
+
+const (
+	ReleaseComparisonUpdateAvailable  ReleaseComparisonKind = "update_available"
+	ReleaseComparisonUpToDate         ReleaseComparisonKind = "up_to_date"
+	ReleaseComparisonCurrentMissing   ReleaseComparisonKind = "current_missing"
+	ReleaseComparisonCurrentNonSemver ReleaseComparisonKind = "current_non_semver"
+	ReleaseComparisonLatestNonSemver  ReleaseComparisonKind = "latest_non_semver"
+	ReleaseComparisonDevBuild         ReleaseComparisonKind = "dev_build"
+)
+
+// ReleaseComparison is the structured result of a strict vX.Y.Z release
+// comparison.
+type ReleaseComparison struct {
+	Kind           ReleaseComparisonKind
+	CurrentVersion string
+	LatestTag      string
+}
+
+// CompareReleaseVersions classifies the comparison between the running version
+// and the latest release tag. Versions must be strict three-part releases,
+// optionally prefixed with "v"; current dev builds are classified before any
+// latest-tag validation so callers can skip network work when appropriate.
+func CompareReleaseVersions(currentVersion, latestTag string) ReleaseComparison {
+	current := strings.TrimSpace(currentVersion)
+	latest := strings.TrimSpace(latestTag)
+	comparison := ReleaseComparison{
+		CurrentVersion: current,
+		LatestTag:      latest,
 	}
-	latest := parseReleaseVersion(latestTag)
-	current := parseReleaseVersion(currentVersion)
-	if latest == nil || current == nil {
-		return false
+	if current == "" {
+		comparison.Kind = ReleaseComparisonCurrentMissing
+		return comparison
 	}
-	for i := range latest {
-		if latest[i] != current[i] {
-			return latest[i] > current[i]
+	if isDevReleaseVersion(current) {
+		comparison.Kind = ReleaseComparisonDevBuild
+		return comparison
+	}
+
+	currentParsed := parseReleaseVersion(current)
+	if currentParsed == nil {
+		comparison.Kind = ReleaseComparisonCurrentNonSemver
+		return comparison
+	}
+	latestParsed := parseReleaseVersion(latest)
+	if latestParsed == nil {
+		comparison.Kind = ReleaseComparisonLatestNonSemver
+		return comparison
+	}
+	for i := range latestParsed {
+		if latestParsed[i] != currentParsed[i] {
+			if latestParsed[i] > currentParsed[i] {
+				comparison.Kind = ReleaseComparisonUpdateAvailable
+			} else {
+				comparison.Kind = ReleaseComparisonUpToDate
+			}
+			return comparison
 		}
 	}
-	return false
+	comparison.Kind = ReleaseComparisonUpToDate
+	return comparison
+}
+
+func isDevReleaseVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	return strings.EqualFold(version, "dev") || strings.Contains(version, "-")
 }
 
 func parseReleaseVersion(version string) []int {
