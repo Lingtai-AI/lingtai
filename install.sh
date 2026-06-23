@@ -81,7 +81,10 @@ is_exact_checkout_tag() {
   if [[ -z "$tag_commit" ]]; then
     return 1
   fi
-  head_commit="$(git -C "$repo_dir" rev-parse --verify HEAD)"
+  head_commit="$(git -C "$repo_dir" rev-parse --verify HEAD 2>/dev/null || true)"
+  if [[ -z "$head_commit" ]]; then
+    return 1
+  fi
   [[ "$head_commit" == "$tag_commit" ]]
 }
 
@@ -120,13 +123,30 @@ prefix_for_bin_dir() {
 }
 
 json_escape() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s"
+  local s="$1" ch ord
+  local LC_ALL=C
+  local i
+
+  for (( i = 0; i < ${#s}; i++ )); do
+    ch="${s:i:1}"
+    case "$ch" in
+      \\) printf '\\\\' ;;
+      '"') printf '\\"' ;;
+      $'\b') printf '\\b' ;;
+      $'\f') printf '\\f' ;;
+      $'\n') printf '\\n' ;;
+      $'\r') printf '\\r' ;;
+      $'\t') printf '\\t' ;;
+      *)
+        printf -v ord '%d' "'$ch"
+        if (( ord < 32 )); then
+          printf '\\u%04x' "$ord"
+        else
+          printf '%s' "$ch"
+        fi
+        ;;
+    esac
+  done
 }
 
 write_install_metadata() {
@@ -278,6 +298,8 @@ fi
 
 GLOBAL_DIR="$HOME/.lingtai-tui"
 PREFIX="$(prefix_for_bin_dir "$BIN_DIR")"
+# Record the method that produced these binaries. If BIN_DIR is Homebrew's bin,
+# this is still a source install because install.sh built and copied them.
 write_install_metadata \
   "$GLOBAL_DIR" \
   "$PREFIX" \

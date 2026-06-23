@@ -41,6 +41,13 @@ assert_eq "v1.2.3" "$(release_tag_name "refs/tags/v1.2.3")" "full release tag re
 assert_eq "" "$(release_tag_name "v1.2")" "partial release tag rejected"
 assert_eq "v1.2.3" "$(version_for_checkout "$repo" "v1.2.3")" "exact tag version"
 assert_eq "v1.2.3" "$(version_for_checkout "$repo" "refs/tags/v1.2.3")" "exact full tag ref version"
+assert_eq 'quote\"slash\\' "$(json_escape 'quote"slash\')" "json quote/backslash escaping"
+assert_eq '\n' "$(json_escape $'\n')" "json newline escaping"
+assert_eq '\r' "$(json_escape $'\r')" "json carriage return escaping"
+assert_eq '\t' "$(json_escape $'\t')" "json tab escaping"
+assert_eq '\b' "$(json_escape $'\b')" "json backspace escaping"
+assert_eq '\f' "$(json_escape $'\f')" "json form-feed escaping"
+assert_eq '\u0001' "$(json_escape $'\001')" "json generic control-byte escaping"
 
 printf 'second\n' >> "$repo/file.txt"
 git -C "$repo" commit -qam "second"
@@ -115,6 +122,39 @@ data = json.loads(Path(path).read_text())
 
 assert data["requested_ref"] == "main"
 assert data["stamped_version"] == "v1.2.3-1-gabcdef0"
+assert data["managed_binaries"] == [tui_path]
+PY
+
+special_global_dir="$tmp/home-special/.lingtai-tui"
+special_prefix=$'prefix"\\\n\t\b\f\001'
+special_bin_dir=$'bin\rdir'
+special_ref=$'feature/"metadata"\\line\n'
+special_version=$'version\t1'
+write_install_metadata \
+  "$special_global_dir" \
+  "$special_prefix" \
+  "$special_bin_dir" \
+  "$REPO" \
+  "$special_ref" \
+  "$special_ref" \
+  "$tagged_commit" \
+  "$special_version" \
+  "$tui_path" \
+  ""
+
+python3 - "$special_global_dir/install.json" "$special_prefix" "$special_bin_dir" "$special_ref" "$special_version" "$tui_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, prefix, bin_dir, ref, version, tui_path = sys.argv[1:]
+data = json.loads(Path(path).read_text())
+
+assert data["prefix"] == prefix
+assert data["bin_dir"] == bin_dir
+assert data["requested_ref"] == ref
+assert data["resolved_ref"] == ref
+assert data["stamped_version"] == version
 assert data["managed_binaries"] == [tui_path]
 PY
 
