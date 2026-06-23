@@ -150,7 +150,7 @@ Recent migrations worth knowing about:
 
 ### Global migrations (`tui/internal/globalmigrate/`)
 
-Per-machine analogue of `tui/internal/migrate/`. Same conventions (versioned, append-only, forward-only, `m<NNN>_<name>.go` files registered in `globalmigrate.go`), but scoped to global state under `~/.lingtai-tui/`. Version tracked in `~/.lingtai-tui/meta.json`. Use this for cleanup that affects the whole machine rather than a single project — e.g. Homebrew tap rename, `tui_config.json` schema bumps, runtime dir relocation, the preset directory split (m002). Failures are best-effort: they go to stderr and don't abort startup. Run from `main.go` via `globalmigrate.Run(globalDir)`.
+Per-machine analogue of `tui/internal/migrate/`. Same conventions (versioned, append-only, forward-only, `m<NNN>_<name>.go` files registered in `globalmigrate.go`), but scoped to global state under `~/.lingtai-tui/`. Version tracked in `~/.lingtai-tui/meta.json`. Use this for cleanup that affects the whole machine rather than a single project — e.g. Homebrew tap rename, `tui_config.json` schema bumps, runtime dir relocation. Failures are best-effort: they go to stderr and don't abort startup. Run from `main.go` via `globalmigrate.Run(globalDir)`. Note: v2 (`split-presets-dir`, formerly `m002`) is a neutralized no-op tombstone — its destructive preset-moving body caused the preset-loss incident and was removed; the version entry is retained inline for advancement semantics. Migrations that move or delete user files must refuse to overwrite/delete on collision.
 
 ### Preset architecture (`tui/internal/preset/`)
 

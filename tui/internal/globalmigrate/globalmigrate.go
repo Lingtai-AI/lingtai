@@ -29,9 +29,25 @@ type Migration struct {
 }
 
 // migrations is the ordered list of all global migrations. Append-only.
+//
+// Version 2 ("split-presets-dir") is a neutralized no-op tombstone. It
+// originally moved flat ~/.lingtai-tui/presets/*.json files into
+// templates/ and saved/ subdirs, and on a destination collision it
+// silently DELETED the source file. Run via doctorMain() (and on every
+// startup) before preset.Bootstrap, this destroyed user presets —
+// especially built-in-stem names like zhipu.json / mimo.json /
+// deepseek.json, which Bootstrap then rewrote. This caused real data
+// loss (the preset-loss incident; root-caused to /doctor by Jason).
+//
+// The entry is kept (not deleted) so version-advancement semantics are
+// preserved: machines at version 1 still advance to version 2, and
+// machines already at version 2 see no change. The destructive
+// implementation (migrateSplitPresetsDir / moveFile, formerly in
+// m002_split_presets_dir.go) has been removed entirely. See
+// globalmigrate_test.go for the regression guard.
 var migrations = []Migration{
 	{Version: 1, Name: "tap-huangzesen-to-lingtai-ai", Fn: migrateTapHuangzesenToLingtaiAI},
-	{Version: 2, Name: "split-presets-dir", Fn: migrateSplitPresetsDir},
+	{Version: 2, Name: "split-presets-dir", Fn: func(_ string) error { return nil }},
 }
 
 // Run executes all pending global migrations against the given ~/.lingtai-tui/
