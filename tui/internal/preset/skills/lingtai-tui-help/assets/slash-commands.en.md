@@ -56,6 +56,7 @@ to `~/Downloads`. Press `Esc` or `q` to return to the mail view.
 - `/settings` — TUI preferences (theme, page size, language).
 - `/mcp` — MCP control panel for external-service bridges.
 - `/doctor` — diagnose connection issues.
+- `/update` — update the Python kernel (confirm-gated).
 - `/login` — check and manage saved credentials.
 
 ### This view & exit
@@ -269,6 +270,16 @@ availability, and network configuration — and reports what it finds. Use it wh
 an agent fails to start or stops responding and you suspect a credential, model,
 or network problem. Pair with `/login` to re-authenticate if `/doctor` flags a
 credential issue.
+
+### `/update` — update the Python kernel
+**Usage:** `/update`
+
+Checks the installed Python `lingtai` kernel against the latest PyPI release and,
+after you confirm, upgrades **only** the kernel. It touches nothing else — no
+Homebrew TUI upgrade, no preset migration, no library/commands rewrite. If the
+kernel is already current or is an editable dev checkout, it reports that and
+makes no changes. The confirmation is mandatory: `/update` never installs on a
+single keystroke.
 
 ### `/login` — check and manage credentials
 **Usage:** `/login`

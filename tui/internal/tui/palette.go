@@ -51,6 +51,7 @@ func DefaultCommands() []Command {
 		{Name: "clear", Description: "palette.clear", Detail: "cmd.clear"},
 		{Name: "refresh", Description: "palette.refresh", Detail: "cmd.refresh"},
 		{Name: "doctor", Description: "palette.doctor", Detail: "cmd.doctor"},
+		{Name: "update", Description: "palette.update", Detail: "cmd.update"},
 		{Name: "viz", Description: "palette.viz", Detail: "cmd.viz"},
 		{Name: "mcp", Description: "palette.mcp", Detail: "cmd.mcp"},
 		{Name: "setup", Description: "palette.setup", Detail: "cmd.setup"},

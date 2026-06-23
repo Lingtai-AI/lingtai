@@ -28,6 +28,7 @@ const (
 	appViewProps
 	appViewAddon
 	appViewDoctor
+	appViewUpdate
 	appViewNirvana
 	appViewLibrary
 	appViewProjects
@@ -60,6 +61,7 @@ type App struct {
 	firstRun      FirstRunModel
 	addon         AddonModel
 	doctor        DoctorModel
+	update        UpdateModel
 	nirvana       NirvanaModel
 	login         LoginModel
 
@@ -242,6 +244,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.addon, cmd = a.addon.Update(msg)
 		case appViewDoctor:
 			a.doctor, cmd = a.doctor.Update(msg)
+		case appViewUpdate:
+			a.update, cmd = a.update.Update(msg)
 		case appViewNirvana:
 			a.nirvana, cmd = a.nirvana.Update(msg)
 		case appViewLibrary:
@@ -281,6 +285,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doctorResultMsg:
 		if a.currentView == appViewDoctor {
 			a.doctor, _ = a.doctor.Update(msg)
+		}
+		return a, nil
+
+	case updateCheckedMsg:
+		if a.currentView == appViewUpdate {
+			var cmd tea.Cmd
+			a.update, cmd = a.update.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
+	case updateDoneMsg:
+		if a.currentView == appViewUpdate {
+			var cmd tea.Cmd
+			a.update, cmd = a.update.Update(msg)
+			return a, cmd
 		}
 		return a, nil
 
@@ -553,6 +573,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.doctor.Update(msg)
 		a.doctor = updated
 		return a, cmd
+	case appViewUpdate:
+		updated, cmd := a.update.Update(msg)
+		a.update = updated
+		return a, cmd
 	case appViewNirvana:
 		updated, cmd := a.nirvana.Update(msg)
 		a.nirvana = updated
@@ -753,6 +777,13 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			a.currentView = appViewDoctor
 			a.doctor = NewDoctorModel(targetDir, a.globalDir)
 			return a, tea.Batch(a.doctor.Init(), a.sendSize())
+		}
+		return a, nil
+	case "update":
+		if targetDir != "" {
+			a.currentView = appViewUpdate
+			a.update = NewUpdateModel(targetDir, a.globalDir)
+			return a, tea.Batch(a.update.Init(), a.sendSize())
 		}
 		return a, nil
 	case "viz":
@@ -1421,6 +1452,8 @@ func (a App) View() tea.View {
 		content = a.addon.View()
 	case appViewDoctor:
 		content = a.doctor.View()
+	case appViewUpdate:
+		content = a.update.View()
 	case appViewNirvana:
 		content = a.nirvana.View()
 	case appViewLibrary:
