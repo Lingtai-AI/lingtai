@@ -1819,7 +1819,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					}
 					ctxLimit, _ := strconv.Atoi(m.ctxLimitInput.Value())
 					if ctxLimit <= 0 {
-						ctxLimit = 300000
+						ctxLimit = 250000
 					}
 					soulDelay, _ := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
 					if soulDelay <= 0 {
@@ -1875,7 +1875,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				}
 				ctxLimit, err := strconv.Atoi(m.ctxLimitInput.Value())
 				if err != nil || ctxLimit <= 0 {
-					ctxLimit = 300000
+					ctxLimit = 250000
 				}
 				soulDelay, err := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
 				if err != nil || soulDelay <= 0 {
@@ -3668,7 +3668,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 
 	// Numeric defaults — overridden by saved init.json values in setup mode below.
 	m.staminaInput.SetValue("36000")
-	m.ctxLimitInput.SetValue("300000")
+	m.ctxLimitInput.SetValue("250000")
 	m.soulDelayInput.SetValue("99999")
 	m.maxRpmInput.SetValue("60")
 	m.maxAedInput.SetValue(strconv.Itoa(preset.DefaultMaxAedAttempts))

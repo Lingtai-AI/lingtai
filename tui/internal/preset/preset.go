@@ -1399,7 +1399,7 @@ func DefaultAgentOpts() AgentOpts {
 	return AgentOpts{
 		Language:       "en",
 		Stamina:        36000,
-		ContextLimit:   300000,
+		ContextLimit:   250000,
 		SoulDelay:      99999,
 		MaxRpm:         60,
 		MaxAedAttempts: DefaultMaxAedAttempts,
