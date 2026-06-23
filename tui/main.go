@@ -106,7 +106,7 @@ func main() {
 	}
 	if latestVersion != "" {
 		install := config.DetectCurrentTUIInstall(globalDir)
-		if config.SelectTUIUpdater(install).InstallMethod() == config.TUIInstallMethodHomebrew && handleTUIUpgrade(install, version, latestVersion) {
+		if install.Method == config.TUIInstallMethodHomebrew && handleTUIUpgrade(install, version, latestVersion) {
 			return
 		}
 		if install.Method != config.TUIInstallMethodHomebrew {
