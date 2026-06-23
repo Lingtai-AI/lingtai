@@ -158,4 +158,39 @@ assert data["stamped_version"] == version
 assert data["managed_binaries"] == [tui_path]
 PY
 
+non_ascii_global_dir="$tmp/home-non-ascii/.lingtai-tui"
+non_ascii_prefix="$(printf '/Users/jos\303\251/\350\267\257\345\276\204')"
+non_ascii_bin_dir="$non_ascii_prefix/bin"
+non_ascii_ref="$(printf 'feature/jos\303\251-\350\267\257\345\276\204')"
+non_ascii_version="$(printf 'v1.2.3-jos\303\251-\350\267\257\345\276\204')"
+non_ascii_tui_path="$non_ascii_bin_dir/lingtai-tui"
+non_ascii_portal_path="$non_ascii_bin_dir/lingtai-portal"
+write_install_metadata \
+  "$non_ascii_global_dir" \
+  "$non_ascii_prefix" \
+  "$non_ascii_bin_dir" \
+  "$REPO" \
+  "$non_ascii_ref" \
+  "$non_ascii_ref" \
+  "$tagged_commit" \
+  "$non_ascii_version" \
+  "$non_ascii_tui_path" \
+  "$non_ascii_portal_path"
+
+python3 - "$non_ascii_global_dir/install.json" "$non_ascii_prefix" "$non_ascii_bin_dir" "$non_ascii_ref" "$non_ascii_version" "$non_ascii_tui_path" "$non_ascii_portal_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, prefix, bin_dir, ref, version, tui_path, portal_path = sys.argv[1:]
+data = json.loads(Path(path).read_text(encoding="utf-8"))
+
+assert data["prefix"] == prefix
+assert data["bin_dir"] == bin_dir
+assert data["requested_ref"] == ref
+assert data["resolved_ref"] == ref
+assert data["stamped_version"] == version
+assert data["managed_binaries"] == [tui_path, portal_path]
+PY
+
 echo "install.sh helper tests passed"

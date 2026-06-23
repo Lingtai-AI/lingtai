@@ -139,6 +139,7 @@ json_escape() {
       $'\t') printf '\\t' ;;
       *)
         printf -v ord '%d' "'$ch"
+        (( ord < 0 )) && ord=$(( ord + 256 ))
         if (( ord < 32 )); then
           printf '\\u%04x' "$ord"
         else
