@@ -129,6 +129,7 @@ func TestBuildSkillFolderEntries_SwissKnifeNestedReferences(t *testing.T) {
 		"find-something-to-do/SKILL.md",
 		"token-usage/SKILL.md",
 		"token-usage/scripts/cost_report.py",
+		"token-usage/scripts/tool_calls_per_api_call_trend.py",
 	} {
 		e, ok := labels[want]
 		if !ok {

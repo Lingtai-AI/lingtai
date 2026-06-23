@@ -7,7 +7,7 @@ description: >
   image understanding (describe/OCR/critique); listen for local audio
   transcription and music analysis; academic-research for fetching papers,
   citation networks, and LaTeX writing; dj for journal-inspired music
-  generation; token-usage for token/cost reports; html-report for standalone
+  generation; token-usage for token/cost and tool-call/API-call trend reports; html-report for standalone
   browser deliverables; xiaomi-mimo for Xiaomi MiMo provider discovery;
   zhipu-coding-plan for Z.AI / BigModel coding-plan capabilities; headless-bot
   for provisioning fresh LingTai bot projects such as Telegram bots from
@@ -76,8 +76,8 @@ nested_references:
   - name: token-usage
     location: reference/token-usage/SKILL.md
     description: >
-      Nested swiss-knife reference for network-wide token and cost reports. Read
-      this when the human asks about token usage, budget, model costs, or spending
+      Nested swiss-knife reference for network-wide token, cost, cache, and tool-call/API-call trend reports. Read
+      this when the human asks about token usage, budget, model costs, spending, cache behavior, or tools per API call
       across agent ledgers.
   - name: html-report
     location: reference/html-report/SKILL.md
@@ -132,7 +132,7 @@ nested_references:
 | Transcribe speech/voice notes or analyze music locally (no API key) | `reference/listen/SKILL.md` |
 | Fetch papers, trace citations, run scholar analysis, or write LaTeX | `reference/academic-research/SKILL.md` |
 | Compose music from a project journal, session mood, or requested genre | `reference/dj/SKILL.md` |
-| Report token usage or model costs | `reference/token-usage/SKILL.md` |
+| Report token usage, model costs, cache rates, or tool-call/API-call trends | `reference/token-usage/SKILL.md` |
 | Produce standalone HTML reports/dashboards/memos | `reference/html-report/SKILL.md` |
 | Discover/configure Xiaomi MiMo provider/model access | `reference/xiaomi-mimo/SKILL.md`; for `mimocode` shell execution, load `bash-manual` → `reference/bash-mimocode/SKILL.md` |
 | Discover/configure Zhipu / Z.AI coding-plan capabilities | `reference/zhipu-coding-plan/SKILL.md`; for shell CLI harness execution, load `bash-manual` first |
