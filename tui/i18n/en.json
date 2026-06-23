@@ -128,6 +128,7 @@
   "mail.btw_suspended": "Agent is not running. Try /refresh first.",
   "mail.btw_waiting": "Inquiry waiting for agent...",
   "mail.btw_thinking": "Agent is thinking...",
+  "mail.copy_mode": "COPY MODE — drag to select · ⌘C copy · ctrl+y/esc exit",
   "mail.insight_sent": "Requesting insight...",
   "mail.esc_dismiss": "(esc to dismiss)",
   "mail.btw_usage": "Usage: /btw <question>",

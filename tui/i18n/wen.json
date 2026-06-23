@@ -128,6 +128,7 @@
   "mail.btw_suspended": "灵未醒，先 /refresh。",
   "mail.btw_waiting": "旁问待灵受之...",
   "mail.btw_thinking": "灵思中...",
+  "mail.copy_mode": "录文 — 曳而择之 · ⌘C 录之 · ctrl+y/esc 退",
   "mail.insight_sent": "请省中...",
   "mail.esc_dismiss": "(esc 隐)",
   "mail.btw_usage": "用：/btw <问>",

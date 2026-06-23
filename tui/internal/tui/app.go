@@ -280,6 +280,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case MarkdownViewerCloseMsg:
 		a.currentView = appViewMail
+		// Fresh-on-entry: copy mode resets whenever we re-enter the preserved
+		// mail model. This is the confirmed "reset when leaving chat/mail"
+		// behavior — equivalent because copy mode only has any effect while the
+		// mail view is current (see App.View).
+		a.mail.copyMode = false
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 
 	case doctorResultMsg:
@@ -1341,6 +1346,11 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
+		// Fresh-on-entry: copy mode resets on every re-entry to the preserved
+		// mail model (the confirmed "reset when leaving chat/mail" behavior).
+		// This path is more robust than reset-on-leave because the slash-command
+		// handler leaves mail by setting currentView directly, bypassing this.
+		a.mail.copyMode = false
 		// Reload config in case settings changed it
 		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
 		ps := a.tuiConfig.MailPageSize
@@ -1490,6 +1500,13 @@ func (a App) View() tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// Chat/mail copy mode: drop mouse capture so the terminal can drag-select
+	// visible transcript text. Scoped to the mail view only — every other screen
+	// keeps mouse tracking. Bubble Tea diffs MouseMode per frame and emits the
+	// enable/disable escape sequences on transition.
+	if a.currentView == appViewMail && a.mail.copyMode {
+		v.MouseMode = tea.MouseModeNone
+	}
 	t := ActiveTheme()
 	if t.PaintBG {
 		v.BackgroundColor = t.BG
