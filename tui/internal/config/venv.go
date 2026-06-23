@@ -492,6 +492,9 @@ func (r *DoctorReport) checkTUI(opts DoctorOptions) {
 	}
 	r.add(DoctorInfo, "Latest TUI release: %s", release.TagName)
 
+	// Startup collapses non-comparable release checks to "no update" so it
+	// will not prompt for brew; /doctor keeps them distinct warnings instead
+	// of reporting a clean up-to-date result.
 	comparison := CompareReleaseVersions(current, release.TagName)
 	switch comparison.Kind {
 	case ReleaseComparisonUpdateAvailable:
