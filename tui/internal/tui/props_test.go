@@ -249,7 +249,7 @@ func TestPropsRecentLanesSingleColumnShowsMainThenDaemons(t *testing.T) {
 	if mainIdx > daemonIdx {
 		t.Errorf("single-column ledger should show main before daemons:\n%s", out)
 	}
-	for _, want := range []string{"time", "provider", "model", "input", "output", "thinking", "cached", "cache%", "endpoint", "zhipu", "glm-4.6", "https://z.ai", "em-1", "running", "40.0%", "33.3%"} {
+	for _, want := range []string{"time", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint", "zhipu", "glm-4.6", "https://z.ai", "em-1", "running", "40.0%", "33.3%"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("single-column ledger missing %q:\n%s", want, out)
 		}
@@ -277,7 +277,7 @@ func TestPropsRecentLanesDoNotTruncateDiagnosticFields(t *testing.T) {
 		},
 	}
 	out := ansi.Strip(strings.Join(m.renderRecentCallLanes(), "\n"))
-	for _, want := range []string{longModel, longEndpoint, "provider", "daemon", "em-1", "run", "em-1-very-long-run-id", "state", "done", "cache%"} {
+	for _, want := range []string{longModel, longEndpoint, "provider", "daemon", "em-1", "run", "em-1-very-long-run-id", "state", "done", "miss", "cache%"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("single-column ledger missing untruncated field %q:\n%s", want, out)
 		}
@@ -297,6 +297,50 @@ func TestPropsRecentLanesEmptyState(t *testing.T) {
 	}
 	if !strings.Contains(out, i18n.T("props.detail_recent_daemons_empty")) {
 		t.Errorf("missing daemon empty state:\n%s", out)
+	}
+}
+
+func TestCacheMissComplementsCached(t *testing.T) {
+	// miss = input - cached (the input tokens not served from cache).
+	if got := cacheMiss(2, 5); got != 3 {
+		t.Errorf("cacheMiss(2,5) = %d, want 3", got)
+	}
+	// Clamp at zero when cached >= input (or input missing on legacy rows).
+	if got := cacheMiss(7, 5); got != 0 {
+		t.Errorf("cacheMiss(7,5) = %d, want 0 (clamped)", got)
+	}
+	if got := cacheMiss(0, 0); got != 0 {
+		t.Errorf("cacheMiss(0,0) = %d, want 0", got)
+	}
+}
+
+func TestPropsRecentLanesShowCacheMissColumn(t *testing.T) {
+	m := PropsModel{
+		width: 160,
+		detailRecent: []fs.LedgerEntry{
+			// input 5, cached 2 → miss 3
+			{TS: "2026-06-13T03:00:00Z", Input: 5, Output: 1, Cached: 2, Model: "glm-4.6", Endpoint: "https://z.ai"},
+		},
+		detailDaemonRecent: []fs.DaemonLedgerEntry{
+			// input 9, cached 3 → miss 6
+			{LedgerEntry: fs.LedgerEntry{TS: "2026-06-13T03:00:05Z", Input: 9, Cached: 3}, Handle: "em-1", State: "running"},
+		},
+	}
+	mainRows := ansi.Strip(strings.Join(m.renderMainCallRows(), "\n"))
+	if !strings.Contains(mainRows, "miss") {
+		t.Errorf("main call header missing 'miss' column:\n%s", mainRows)
+	}
+	// Both the cached count (2) and its miss complement (3) must appear.
+	if !strings.Contains(mainRows, "3") {
+		t.Errorf("main call row missing cache miss value 3:\n%s", mainRows)
+	}
+
+	daemonRows := ansi.Strip(strings.Join(m.renderDaemonCallRows(), "\n"))
+	if !strings.Contains(daemonRows, "miss") {
+		t.Errorf("daemon call header missing 'miss' column:\n%s", daemonRows)
+	}
+	if !strings.Contains(daemonRows, "6") {
+		t.Errorf("daemon call row missing cache miss value 6:\n%s", daemonRows)
 	}
 }
 

@@ -821,6 +821,7 @@ func (m PropsModel) renderDetail() string {
 			hitStr = fmt.Sprintf("    cache hit: %.1f%%", 100.0*float64(r.t.Cached)/float64(r.t.Input))
 		}
 		lines = append(lines, "    "+labelStyle.Render("api_calls: ")+valueStyle.Render(fmt.Sprintf("%d", r.t.APICalls))+
+			labelStyle.Render("    miss:      ")+valueStyle.Render(formatComma(cacheMiss(r.t.Cached, r.t.Input)))+
 			labelStyle.Render(hitStr))
 		lines = append(lines, "")
 	}
@@ -841,6 +842,8 @@ func (m PropsModel) renderDetail() string {
 			valueStyle.Render(formatComma(tot.Input+tot.Output+tot.Thinking)))
 		lines = append(lines, "    "+labelStyle.Render("cached:                    ")+
 			valueStyle.Render(formatComma(tot.Cached)))
+		lines = append(lines, "    "+labelStyle.Render("miss:                      ")+
+			valueStyle.Render(formatComma(cacheMiss(tot.Cached, tot.Input))))
 		lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
 			valueStyle.Render(fmt.Sprintf("%d", tot.APICalls)))
 		if tot.Input > 0 {
@@ -937,8 +940,8 @@ func (m PropsModel) renderMainCallRows() []string {
 	}
 
 	lines := []string{
-		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
-			"time", "provider", "model", "input", "output", "thinking", "cached", "cache%", "endpoint")),
+		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
+			"time", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")),
 	}
 	for _, e := range m.detailRecent {
 		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
@@ -950,7 +953,7 @@ func (m PropsModel) renderMainCallRows() []string {
 		if endpoint == "" {
 			endpoint = "—"
 		}
-		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
 			shortTS(e.TS),
 			provider,
 			model,
@@ -958,6 +961,7 @@ func (m PropsModel) renderMainCallRows() []string {
 			formatComma(e.Output),
 			formatComma(e.Thinking),
 			formatComma(e.Cached),
+			formatComma(cacheMiss(e.Cached, e.Input)),
 			formatCacheRate(e.Cached, e.Input),
 			endpoint,
 		)
@@ -979,8 +983,8 @@ func (m PropsModel) renderDaemonCallRows() []string {
 	}
 
 	lines := []string{
-		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
-			"time", "daemon", "run", "state", "provider", "model", "input", "output", "thinking", "cached", "cache%", "endpoint")),
+		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
+			"time", "daemon", "run", "state", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")),
 	}
 	for _, e := range m.detailDaemonRecent {
 		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
@@ -1004,7 +1008,7 @@ func (m PropsModel) renderDaemonCallRows() []string {
 		if state == "" {
 			state = "—"
 		}
-		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %7s  %s",
+		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
 			shortTS(e.TS),
 			handle,
 			runID,
@@ -1015,6 +1019,7 @@ func (m PropsModel) renderDaemonCallRows() []string {
 			formatComma(e.Output),
 			formatComma(e.Thinking),
 			formatComma(e.Cached),
+			formatComma(cacheMiss(e.Cached, e.Input)),
 			formatCacheRate(e.Cached, e.Input),
 			endpoint,
 		)
@@ -1028,6 +1033,19 @@ func formatCacheRate(cached, input int64) string {
 		return "—"
 	}
 	return fmt.Sprintf("%.1f%%", 100.0*float64(cached)/float64(input))
+}
+
+// cacheMiss is the absolute cache-miss token count for a ledger row: the input
+// tokens NOT served from cache. input here is the true total input (raw +
+// cache_read + cache_write, normalised per adapter), and cached is the
+// cache_read portion, so the miss complement is input - cached. Clamped at 0 so
+// rows with a missing/zero input (older ledger lines) never report a negative.
+func cacheMiss(cached, input int64) int64 {
+	miss := input - cached
+	if miss < 0 {
+		return 0
+	}
+	return miss
 }
 
 func isTimestampPropField(key string) bool {
