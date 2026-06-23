@@ -39,7 +39,6 @@ func TestInspectKernelIssuesNoMutatingCommands(t *testing.T) {
 	status := inspectKernel(t.TempDir(), inspectKernelOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
 		Runner:     runner,
-		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
 		Stat:       statAllExist,
 		Home:       home,
 		LookupEnv:  env,
@@ -62,7 +61,6 @@ func TestInspectKernelUpToDateNeedsNoUpdate(t *testing.T) {
 	status := inspectKernel(t.TempDir(), inspectKernelOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
 		Runner:     runner,
-		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
 		Stat:       statAllExist,
 		Home:       home,
 		LookupEnv:  env,
@@ -82,7 +80,6 @@ func TestInspectKernelEditableNeedsNoUpdate(t *testing.T) {
 	status := inspectKernel(t.TempDir(), inspectKernelOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
 		Runner:     runner,
-		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
 		Stat:       statAllExist,
 		Home:       home,
 		LookupEnv:  env,
@@ -96,10 +93,41 @@ func TestInspectKernelEditableNeedsNoUpdate(t *testing.T) {
 	}
 }
 
+func TestInspectKernelDevCheckoutNeedsNoUpdate(t *testing.T) {
+	// A PyPI-wheel runtime on a machine with a local dev checkout: the apply
+	// step would reinstall editable rather than upgrade from PyPI, so inspect
+	// must classify it as a dev/editable skip — not show a misleading PyPI
+	// "X → Y" diff. This guards against inspect/apply drift.
+	devRoot := t.TempDir()
+	makeKernelCheckout(t, devRoot, "")
+	runner := &fakeRunner{versions: []string{"0.9.6"}} // wheel install (not editable)
+	status := inspectKernel(t.TempDir(), inspectKernelOptions{
+		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:     runner,
+		Stat:       statAllExist,
+		Home:       t.TempDir(),
+		LookupEnv: func(key string) (string, bool) {
+			if key == "LINGTAI_DEV_ROOT" {
+				return devRoot, true
+			}
+			return "", false
+		},
+	})
+	assertNoMutatingCalls(t, runner.calls)
+	if !status.Editable {
+		t.Fatalf("dev-checkout machine should classify as editable/dev skip: %+v", status)
+	}
+	if status.NeedsUpdate {
+		t.Fatalf("dev checkout must report NeedsUpdate=false (no misleading PyPI diff): %+v", status)
+	}
+}
+
 func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 	// Non-editable, out-of-date install: RunKernelUpdate runs exactly one
 	// uv/pip install --upgrade lingtai (the kernel path) and no brew.
-	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.7"}}
+	// Version probes consumed in order: pre-check import (repair gate),
+	// UpgradePythonRuntime's installed read, then the post-upgrade verify.
+	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.6", "0.9.7"}}
 	home, env := noDevHome(t)
 	report := runKernelUpdate(t.TempDir(), true, runKernelUpdateOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
@@ -127,8 +155,10 @@ func TestRunKernelUpdateRunsKernelUpgradeOnce(t *testing.T) {
 }
 
 func TestRunKernelUpdateSkipsEditableInstall(t *testing.T) {
+	// Two version probes: the pre-check repair gate, then UpgradePythonRuntime's
+	// installed read (which then hits the editable gate and stops).
 	runner := &fakeRunner{
-		versions:       []string{"0.9.6"},
+		versions:       []string{"0.9.6", "0.9.6"},
 		editableSource: "file:///Users/dev/lingtai-kernel",
 	}
 	home, env := noDevHome(t)
@@ -153,21 +183,37 @@ func TestRunKernelUpdateSkipsEditableInstall(t *testing.T) {
 	}
 }
 
-func TestRunKernelUpdateMissingVenvReported(t *testing.T) {
-	// Venv python missing: UpgradePythonRuntime reports it as a warning and
-	// does not run an upgrade. RunKernelUpdate surfaces that without brew.
-	runner := &fakeRunner{}
+func TestRunKernelUpdateMissingVenvRebuildsThenUpgrades(t *testing.T) {
+	// Mirror checkPythonRuntime: a missing venv is rebuilt before the upgrade.
+	// The user already confirmed in /update, so this repair is authorized. The
+	// venv is missing on the first Stat and present afterwards.
+	globalDir := t.TempDir()
+	python := VenvPython(RuntimeVenvDir(globalDir))
+	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.7"}}
 	home, env := noDevHome(t)
-	report := runKernelUpdate(t.TempDir(), true, runKernelUpdateOptions{
+	ensureCalled := false
+	report := runKernelUpdate(globalDir, true, runKernelUpdateOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
 		Runner:     runner,
 		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
-		Stat:       func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-		Home:       home,
-		LookupEnv:  env,
+		Stat: func(path string) (os.FileInfo, error) {
+			if path == python && !ensureCalled {
+				return nil, os.ErrNotExist
+			}
+			return fakeFileInfo{}, nil
+		},
+		Home:           home,
+		LookupEnv:      env,
+		EnsureVenvFunc: func(string) error { ensureCalled = true; return nil },
 	})
-	if !containsLine(report.Lines, "venv not found") {
-		t.Fatalf("expected venv-not-found warning: %+v", report.Lines)
+	if !ensureCalled {
+		t.Fatalf("missing venv must trigger EnsureVenvFunc: %+v", report.Lines)
+	}
+	if !containsLine(report.Lines, "Python runtime venv created") {
+		t.Fatalf("expected venv-created line: %+v", report.Lines)
+	}
+	if !report.Healthy {
+		t.Fatalf("expected healthy report after rebuild + upgrade: %+v", report.Lines)
 	}
 	for _, call := range runner.calls {
 		if strings.Contains(call, "brew") {
@@ -176,9 +222,42 @@ func TestRunKernelUpdateMissingVenvReported(t *testing.T) {
 	}
 }
 
+func TestRunKernelUpdateRebuildFailureIsUnhealthy(t *testing.T) {
+	// When the venv cannot import lingtai and the rebuild fails, the report is
+	// unhealthy and no upgrade is attempted.
+	runner := &fakeRunner{} // no versions queued => import lingtai fails
+	home, env := noDevHome(t)
+	report := runKernelUpdate(t.TempDir(), true, runKernelUpdateOptions{
+		HTTPClient:     testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:         runner,
+		LookPath:       func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat:           statAllExist,
+		Home:           home,
+		LookupEnv:      env,
+		EnsureVenvFunc: func(string) error { return errInjectedRebuild },
+	})
+	if report.Healthy {
+		t.Fatalf("expected unhealthy report when rebuild fails: %+v", report.Lines)
+	}
+	if !containsLine(report.Lines, "Failed to create Python runtime venv") {
+		t.Fatalf("expected rebuild-failure line: %+v", report.Lines)
+	}
+	for _, call := range runner.calls {
+		if strings.Contains(call, "brew") {
+			t.Fatalf("RunKernelUpdate must never run brew: %#v", runner.calls)
+		}
+	}
+}
+
+var errInjectedRebuild = errVenvRebuild("injected rebuild failure")
+
+type errVenvRebuild string
+
+func (e errVenvRebuild) Error() string { return string(e) }
+
 // guard against an accidental coupling to the file-search / TUI surfaces.
 func TestRunKernelUpdateTouchesOnlyKernel(t *testing.T) {
-	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.7"}}
+	runner := &fakeRunner{versions: []string{"0.9.6", "0.9.6", "0.9.7"}}
 	home, env := noDevHome(t)
 	_ = runKernelUpdate(t.TempDir(), true, runKernelUpdateOptions{
 		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
@@ -192,22 +271,5 @@ func TestRunKernelUpdateTouchesOnlyKernel(t *testing.T) {
 		if strings.Contains(call, "file_io_sidecar") {
 			t.Fatalf("RunKernelUpdate must not probe the file-search sidecar: %#v", runner.calls)
 		}
-	}
-}
-
-func TestRunKernelUpdateReportsImportFailure(t *testing.T) {
-	// No version queued => import lingtai fails. The kernel path reports it.
-	runner := &fakeRunner{}
-	home, env := noDevHome(t)
-	report := runKernelUpdate(t.TempDir(), true, runKernelUpdateOptions{
-		HTTPClient: testVersionClient(t, "0.9.7", "v0.8.1"),
-		Runner:     runner,
-		LookPath:   func(string) (string, error) { return "/usr/bin/uv", nil },
-		Stat:       statAllExist,
-		Home:       home,
-		LookupEnv:  env,
-	})
-	if report.Healthy {
-		t.Fatalf("expected unhealthy report on import failure: %+v", report.Lines)
 	}
 }

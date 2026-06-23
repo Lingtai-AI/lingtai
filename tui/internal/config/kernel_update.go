@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"time"
 )
 
@@ -25,7 +24,6 @@ type KernelStatus struct {
 type inspectKernelOptions struct {
 	HTTPClient *http.Client
 	Runner     CommandRunner
-	LookPath   func(string) (string, error)
 	Stat       func(string) (os.FileInfo, error)
 	Home       string
 	LookupEnv  func(string) (string, bool)
@@ -45,9 +43,6 @@ func InspectKernel(globalDir string) KernelStatus {
 func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 	if opts.Runner == nil {
 		opts.Runner = execCommandRunner{}
-	}
-	if opts.LookPath == nil {
-		opts.LookPath = exec.LookPath
 	}
 	if opts.Stat == nil {
 		opts.Stat = os.Stat
@@ -87,6 +82,25 @@ func inspectKernel(globalDir string, opts inspectKernelOptions) KernelStatus {
 		return status
 	}
 
+	// Dev-checkout machines: even when the runtime is a PyPI wheel, the apply
+	// step (UpgradePythonRuntime) converts it to an editable install against the
+	// discovered local source rather than running a PyPI upgrade. Mirror that
+	// classification here so the confirm prompt never shows a misleading
+	// "X → Y" PyPI diff that the apply step would not actually perform. This is
+	// the one place inspect/apply could otherwise drift.
+	home := opts.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
+		if dev, ok := findDevCheckouts(home, opts.LookupEnv); ok {
+			status.Editable = true
+			status.NeedsUpdate = false
+			status.add(DoctorOK, "Local dev checkout detected at %s; the kernel update would reinstall editable, not upgrade from PyPI — skipping", dev.KernelSrc)
+			return status
+		}
+	}
+
 	latest, err := fetchLatestPyPIVersion(opts.HTTPClient)
 	if err != nil {
 		status.add(DoctorWarn, "Could not check latest Python lingtai on PyPI: %v", err)
@@ -120,21 +134,64 @@ type runKernelUpdateOptions struct {
 	Stat       func(string) (os.FileInfo, error)
 	Home       string
 	LookupEnv  func(string) (string, bool)
+	// EnsureVenvFunc rebuilds a missing/broken managed venv before the upgrade,
+	// mirroring the doctor's checkPythonRuntime repair. Production leaves it nil
+	// (a quiet EnsureVenv is used so the TUI alt-screen stays intact).
+	EnsureVenvFunc func(string) error
 }
 
 // RunKernelUpdate runs ONLY the kernel update path — the equivalent of the
-// doctor's checkPythonRuntime → UpgradePythonRuntime step. It never touches the
-// TUI binary (no brew) or the file-search native sidecar. The existing
-// dev-editable safety in UpgradePythonRuntime is preserved unchanged: an
-// editable local checkout is never clobbered, even with force=true. This is
-// the single mutating entry point shared by the /update command (PR 1) and,
-// later, /doctor's gated heal (PR 2).
+// doctor's checkPythonRuntime → UpgradePythonRuntime step, including the
+// venv-repair that step performs when the managed runtime is missing or cannot
+// import lingtai. It never touches the TUI binary (no brew) or the file-search
+// native sidecar. The existing dev-editable safety in UpgradePythonRuntime is
+// preserved unchanged: an editable local checkout is never clobbered, even with
+// force=true. This is the single mutating entry point shared by the /update
+// command (PR 1) and, later, /doctor's gated heal (PR 2).
 func RunKernelUpdate(globalDir string, force bool) DoctorReport {
 	return runKernelUpdate(globalDir, force, runKernelUpdateOptions{})
 }
 
 func runKernelUpdate(globalDir string, force bool, opts runKernelUpdateOptions) DoctorReport {
+	if opts.Runner == nil {
+		opts.Runner = execCommandRunner{}
+	}
+	if opts.Stat == nil {
+		opts.Stat = os.Stat
+	}
+	if opts.EnsureVenvFunc == nil {
+		opts.EnsureVenvFunc = func(dir string) error { return EnsureVenvQuiet(dir, nil) }
+	}
+
 	report := DoctorReport{Healthy: true}
+
+	// Venv-repair, mirroring checkPythonRuntime: a missing python binary or a
+	// venv that cannot import lingtai is rebuilt before the upgrade. Without
+	// this, /update would show a confirm prompt, the user would confirm, and
+	// UpgradePythonRuntime would only warn "venv not found" — leaving the broken
+	// runtime unfixed. The confirmation the user already gave authorizes this.
+	python := VenvPython(RuntimeVenvDir(globalDir))
+	needsEnsure := false
+	if _, err := opts.Stat(python); err != nil {
+		report.add(DoctorWarn, "Python runtime venv missing or incomplete at %s", RuntimeVenvDir(globalDir))
+		needsEnsure = true
+	} else if _, err := pythonLingtaiVersion(opts.Runner, python); err != nil {
+		report.add(DoctorWarn, "Python runtime venv exists but cannot import lingtai: %v", err)
+		needsEnsure = true
+	}
+	if needsEnsure {
+		report.add(DoctorInfo, "Creating Python runtime venv...")
+		if err := opts.EnsureVenvFunc(globalDir); err != nil {
+			report.add(DoctorFail, "Failed to create Python runtime venv: %v", err)
+			return report
+		}
+		if _, err := opts.Stat(python); err != nil {
+			report.add(DoctorFail, "Python runtime venv was created, but %s is still missing: %v", python, err)
+			return report
+		}
+		report.add(DoctorOK, "Python runtime venv created")
+	}
+
 	upgrade := UpgradePythonRuntime(globalDir, force, &UpgradeRuntimeOptions{
 		HTTPClient: opts.HTTPClient,
 		Runner:     opts.Runner,
