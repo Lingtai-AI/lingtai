@@ -158,6 +158,8 @@ lingtai-tui bootstrap                # 重新展开自带技能/工具
 lingtai-tui doctor                   # 修复/升级 TUI 运行时
 ```
 
+`doctor` 还会报告检测到的 TUI 安装方式（`homebrew`、`source/user-local` 或 `unknown/other`）。源码/用户本地安装和未知安装会得到手动升级指引，不会被强行路由到 `brew`。
+
 ### Portal
 
 `lingtai-portal` 是可视化服务器。它读取项目状态，呈现智能体网络、信件边、历史拓扑。当一个项目里不止一个助理、或者你想看清工作如何演变时，这玩意儿很有用。
@@ -380,6 +382,8 @@ lingtai-tui doctor
 ```
 
 `doctor` 会检查 TUI / 内核 / 运行时三者关系，刷新自带工具技能，给出具体修复步骤。启动失败或升级看起来不对劲时用它。
+
+它也会打印检测到的 TUI 安装方式。如果当前二进制不是 Homebrew 管理的，`doctor` 会保持二进制不动，并指向对应 release，而不是猜测性地运行 `brew`。
 
 ## 架构
 

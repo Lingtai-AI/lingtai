@@ -197,6 +197,8 @@ lingtai-tui bootstrap                # re-extract bundled skills/utilities
 lingtai-tui doctor                   # repair/update TUI runtime
 ```
 
+`doctor` also reports the detected TUI install method (`homebrew`, `source/user-local`, or `unknown/other`). Source/user-local and unknown installs get manual update guidance instead of being routed through `brew`.
+
 ### Portal
 
 `lingtai-portal` is the visualization server. It reads project state to show the agent network, mail edges, and history. It becomes useful when you have more than one assistant per project, or when you want to see how the work evolved.
@@ -299,6 +301,8 @@ lingtai-tui doctor
 ```
 
 `doctor` checks the TUI/kernel/runtime relationship, refreshes shipped utility skills, and reports concrete repair steps. Use it after a failed startup or a stale-looking upgrade.
+
+It also prints the detected TUI install method. If the current binary is not Homebrew-managed, `doctor` leaves the binary alone and points you at the matching release instead of guessing with `brew`.
 
 ## Architecture
 
