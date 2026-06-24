@@ -469,9 +469,14 @@ func (m MarkdownViewerModel) renderRight(maxW int) string {
 		return "\n  " + StyleFaint.Render("(no content)")
 	}
 
-	// Strip YAML frontmatter if present
-	if loc := fmRe.FindStringIndex(raw); loc != nil {
-		raw = raw[loc[1]:]
+	// Surface YAML frontmatter (fields like `description`) instead of
+	// discarding it: render the block as a fenced code section above the
+	// body so glamour displays it verbatim and readably, while the body
+	// below renders as normal markdown.
+	if sub := fmRe.FindStringSubmatchIndex(raw); sub != nil {
+		fmBody := strings.TrimRight(raw[sub[2]:sub[3]], "\n")
+		body := raw[sub[1]:]
+		raw = "```yaml\n" + fmBody + "\n```\n\n" + body
 	}
 
 	raw = strings.TrimSpace(raw)

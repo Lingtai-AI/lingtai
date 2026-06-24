@@ -60,19 +60,56 @@ func TestMarkdownViewer_PathEntry(t *testing.T) {
 	}
 }
 
-func TestMarkdownViewer_FrontmatterStripped(t *testing.T) {
+// TestMarkdownViewer_FrontmatterShown verifies that YAML frontmatter is
+// surfaced in the rendered view (as a readable block) rather than discarded,
+// so fields like `description` are visible while the body still renders.
+func TestMarkdownViewer_FrontmatterShown(t *testing.T) {
 	entries := []MarkdownEntry{
-		{Label: "skill", Group: "G", Content: "---\nname: test\n---\n# Real Content"},
+		{Label: "skill", Group: "G", Content: "---\nname: lingtai-demo\ndescription: a one-line summary\n---\n# Real Content\n\nbody text"},
 	}
 	m := NewMarkdownViewer(entries, "Test")
-	m.width = 80
+	m.width = 120
 	m.height = 24
-	right := m.renderRight(60)
+	right := m.renderRight(100)
 	if right == "" {
-		t.Error("renderRight returned empty")
+		t.Fatal("renderRight returned empty")
 	}
-	if strings.Contains(right, "name: test") {
-		t.Error("frontmatter was not stripped")
+	// Frontmatter keys and values are rendered verbatim inside a fenced
+	// code block, so distinctive tokens survive glamour's rendering.
+	for _, want := range []string{"name", "lingtai-demo", "description", "summary"} {
+		if !strings.Contains(right, want) {
+			t.Errorf("expected rendered output to contain frontmatter token %q; got:\n%s", want, right)
+		}
+	}
+	// The markdown body must still render alongside the frontmatter.
+	// glamour styles each heading word separately, so the rendered output
+	// interleaves ANSI sequences between words; assert the words survive
+	// individually rather than as a contiguous "Real Content".
+	for _, want := range []string{"Real", "Content", "body"} {
+		if !strings.Contains(right, want) {
+			t.Errorf("expected body token %q to still render; got:\n%s", want, right)
+		}
+	}
+}
+
+// TestMarkdownViewer_NoFrontmatterUnchanged verifies that documents without
+// frontmatter render exactly as before (no stray code fence is injected).
+func TestMarkdownViewer_NoFrontmatterUnchanged(t *testing.T) {
+	entries := []MarkdownEntry{
+		{Label: "plain", Group: "G", Content: "# Title\n\njust body"},
+	}
+	m := NewMarkdownViewer(entries, "Test")
+	m.width = 120
+	m.height = 24
+	right := m.renderRight(100)
+	if right == "" {
+		t.Fatal("renderRight returned empty")
+	}
+	if strings.Contains(right, "```") || strings.Contains(right, "yaml") {
+		t.Errorf("plain markdown should not gain a frontmatter block; got:\n%s", right)
+	}
+	if !strings.Contains(right, "Title") {
+		t.Errorf("expected body to render; got:\n%s", right)
 	}
 }
 
