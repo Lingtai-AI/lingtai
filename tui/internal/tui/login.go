@@ -109,6 +109,20 @@ type LoginModel struct {
 // NewSetupCredentialsModel opens the credential manager as a /setup subpage.
 // The legacy /login command routes here too, so credential work lives under
 // the setup surface while preserving the old shortcut.
+//
+// UNIFICATION CONTRACT (do not fork): credential and Codex-OAuth logic must
+// NOT diverge between first-run setup and `/setup credentials`. All three
+// entry points — `/setup credentials`, the legacy `/login` shortcut, and the
+// first-run wizard's setup-mode Codex row (which emits
+// ViewChangeMsg{View:"login"}, firstrun.go) — land on THIS constructor and the
+// shared LoginModel. The first-run *wizard itself* (non-setup) manages only
+// the primary/legacy account, but it reads and writes the SAME on-disk store
+// (codex_auth_store.go: legacyCodexAuthPath + listCodexAccounts) and the SAME
+// OAuth entrypoint (startOAuthFlow → buildAuthorizeURL). Adding a second
+// account, account selection (prompt=login via codexForceLogin), and re-auth
+// all live here. If you need new credential behavior, add it to this shared
+// path — never re-implement it in firstrun.go. Guarded by
+// TestSetupAndFirstRunShareCodexAccountStore.
 func NewSetupCredentialsModel(orchDir, globalDir string) LoginModel {
 	m := NewLoginModel(orchDir, globalDir)
 	m.setupSubpage = true
@@ -422,11 +436,26 @@ func (m LoginModel) startCodexLogin(deviceCode bool) (LoginModel, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.codexCancel = cancel
 	if deviceCode {
+		// Device-code login always shows the OpenAI login page on another
+		// device, so there is no browser session to force past — the
+		// forceLogin flag only applies to the browser path.
 		m.codexSession = startDeviceAuthFlow(ctx, epoch)
 	} else {
-		m.codexSession = startOAuthFlow(ctx, epoch)
+		m.codexSession = startOAuthFlow(ctx, epoch, m.codexForceLogin())
 	}
 	return m, waitCodexOAuthMsg(m.codexSession)
+}
+
+// codexForceLogin reports whether the in-flight browser OAuth must force the
+// OpenAI login page (prompt=login) instead of reusing the existing ChatGPT
+// session. True only when ADDING a new account (empty codexLoginTargetPath)
+// while at least one Codex account already exists — that is the "Add another
+// Codex account" path, where reusing the session would silently re-add the
+// account already signed in. Re-authenticating an existing account (target
+// set) and seeding the very first account (no existing entry) keep the
+// default session-reuse behavior.
+func (m *LoginModel) codexForceLogin() bool {
+	return m.codexLoginTargetPath == "" && m.hasCodexOAuth()
 }
 
 func (m *LoginModel) entryByProvider(provider string) *loginEntry {

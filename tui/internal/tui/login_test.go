@@ -504,6 +504,96 @@ func TestLoginModel_NoClaudeCodeAuthRow(t *testing.T) {
 	}
 }
 
+// TestLoginModel_CodexForceLoginDecision pins the add-another-account fix at
+// the decision layer: codexForceLogin (which feeds prompt=login into
+// buildAuthorizeURL) must be true ONLY when adding a new account while one
+// already exists. Re-auth of an existing account and seeding the very first
+// account must NOT force the OpenAI login page — those legitimately reuse the
+// active ChatGPT session.
+func TestLoginModel_CodexForceLoginDecision(t *testing.T) {
+	t.Run("add-another-with-existing forces login", func(t *testing.T) {
+		dir := t.TempDir()
+		seedLoginCodexAuth(t, dir) // one account already present
+		m := NewLoginModel("", dir)
+		// "Add another account": empty target, an existing codex entry present.
+		m.codexLoginTargetPath = ""
+		if !m.codexForceLogin() {
+			t.Fatal("adding another account with an existing one must force prompt=login")
+		}
+	})
+
+	t.Run("re-auth existing account does not force login", func(t *testing.T) {
+		dir := t.TempDir()
+		seedLoginCodexAuth(t, dir)
+		m := NewLoginModel("", dir)
+		// Re-auth targets the existing account's own file.
+		m.codexLoginTargetPath = m.entries[0].CodexPath
+		if m.codexForceLogin() {
+			t.Fatal("re-authenticating an existing account must NOT force prompt=login")
+		}
+	})
+
+	t.Run("first account does not force login", func(t *testing.T) {
+		dir := t.TempDir()
+		m := NewLoginModel("", dir)
+		if len(m.entries) != 0 {
+			t.Fatalf("precondition: expected no codex entries; got %#v", m.entries)
+		}
+		// First-ever account: empty target, no existing entry.
+		m.codexLoginTargetPath = ""
+		if m.codexForceLogin() {
+			t.Fatal("seeding the first account must NOT force prompt=login")
+		}
+	})
+}
+
+// TestSetupAndFirstRunShareCodexAccountStore is the unification guard: the
+// first-run wizard writes the primary Codex account to the legacy file
+// (legacyCodexAuthPath), and the `/setup credentials` LoginModel must read its
+// accounts from that SAME store (listCodexAccounts over globalDir) rather than
+// a forked credential source. If a future change makes either path use its own
+// store/file, this test breaks — first-run and /setup credentials must not
+// fork credential/OAuth logic (see ANATOMY.md). Both also share the single
+// OAuth entrypoint startOAuthFlow→buildAuthorizeURL.
+func TestSetupAndFirstRunShareCodexAccountStore(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate what first-run does on a successful primary login: write the
+	// legacy account file (firstrun.go's CodexOAuthDoneMsg handler uses
+	// legacyCodexAuthPath). We mirror that exact path here.
+	tok := CodexTokens{
+		AccessToken:  "primary-access",
+		RefreshToken: "primary-refresh",
+		ExpiresAt:    9999999999,
+		Email:        "primary@example.com",
+	}
+	data, _ := json.Marshal(tok)
+	if err := os.WriteFile(legacyCodexAuthPath(dir), data, 0o600); err != nil {
+		t.Fatalf("seed legacy codex account: %v", err)
+	}
+
+	// The /setup credentials model (same constructor /login uses) must see the
+	// account first-run wrote — proving a shared store, not a forked one.
+	m := NewSetupCredentialsModel("", dir)
+	var codexEntry *loginEntry
+	for i := range m.entries {
+		if m.entries[i].Provider == "codex" {
+			codexEntry = &m.entries[i]
+			break
+		}
+	}
+	if codexEntry == nil {
+		t.Fatal("/setup credentials must enumerate the Codex account first-run wrote to the legacy store")
+	}
+	if codexEntry.CodexPath != legacyCodexAuthPath(dir) {
+		t.Fatalf("setup credentials codex entry path = %q, want shared legacy path %q",
+			codexEntry.CodexPath, legacyCodexAuthPath(dir))
+	}
+	if !codexEntry.CodexLegacy {
+		t.Error("the first-run primary account must be surfaced as the legacy account")
+	}
+}
+
 func TestSetupCredentialsModelUsesSetupChrome(t *testing.T) {
 	dir := t.TempDir()
 	m := NewSetupCredentialsModel("", dir)

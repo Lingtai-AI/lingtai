@@ -78,7 +78,10 @@ func TestBuildAuthorizeURL(t *testing.T) {
 		state     = "test-state"
 	)
 
-	got := buildAuthorizeURL(redirect, challenge, state)
+	// forceLogin=false is the re-auth / first-account path: the URL must
+	// carry NO prompt parameter so the browser reuses the active ChatGPT
+	// session (the user is re-authenticating the same account).
+	got := buildAuthorizeURL(redirect, challenge, state, false)
 
 	u, err := url.Parse(got)
 	if err != nil {
@@ -108,9 +111,63 @@ func TestBuildAuthorizeURL(t *testing.T) {
 	}
 
 	// No extra params we don't recognize — extras might be silently
-	// rejected or cause future drift.
+	// rejected or cause future drift. With forceLogin=false there is in
+	// particular NO prompt param.
 	for k := range q {
 		if _, ok := want[k]; !ok {
+			t.Errorf("unexpected query param %q (= %q)", k, q.Get(k))
+		}
+	}
+}
+
+// TestBuildAuthorizeURL_ForceLogin pins the add-another-account fix: when
+// forceLogin is true the authorize URL must carry prompt=login so OpenAI's
+// auth server shows the account chooser / login page instead of silently
+// reusing the browser's existing ChatGPT session. Without this, "Add another
+// Codex account" re-adds the account already signed in (Jason's bug after
+// PR #415). Every other allowlisted param must stay identical — prompt=login
+// is purely additive.
+func TestBuildAuthorizeURL_ForceLogin(t *testing.T) {
+	const (
+		redirect  = "http://localhost:1455/auth/callback"
+		challenge = "test-challenge"
+		state     = "test-state"
+	)
+
+	got := buildAuthorizeURL(redirect, challenge, state, true)
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+
+	q := u.Query()
+	if q.Get("prompt") != "login" {
+		t.Errorf("prompt = %q, want %q (force-login must request the login page)", q.Get("prompt"), "login")
+	}
+
+	// The force-login URL must still carry every allowlisted param the
+	// non-force path does — prompt is additive, not a replacement.
+	base := map[string]string{
+		"response_type":              "code",
+		"client_id":                  "app_EMoamEEZ73f0CkXaXp7hrann",
+		"redirect_uri":               redirect,
+		"scope":                      "openid profile email offline_access api.connectors.read api.connectors.invoke",
+		"code_challenge":             challenge,
+		"code_challenge_method":      "S256",
+		"id_token_add_organizations": "true",
+		"codex_cli_simplified_flow":  "true",
+		"state":                      state,
+		"originator":                 "codex_cli_rs",
+	}
+	for k, v := range base {
+		if got := q.Get(k); got != v {
+			t.Errorf("query param %q = %q, want %q", k, got, v)
+		}
+	}
+
+	// The only param beyond the base set may be prompt.
+	for k := range q {
+		if _, ok := base[k]; !ok && k != "prompt" {
 			t.Errorf("unexpected query param %q (= %q)", k, q.Get(k))
 		}
 	}
@@ -270,7 +327,7 @@ func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duratio
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
 	const epoch uint64 = 42
 	ctx, cancel := context.WithCancel(context.Background())
-	session := startOAuthFlow(ctx, epoch)
+	session := startOAuthFlow(ctx, epoch, false)
 
 	// Give the goroutine a moment to bind the listener, then cancel.
 	go func() {
@@ -312,7 +369,7 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := startOAuthFlow(ctx, epoch)
+	session := startOAuthFlow(ctx, epoch, false)
 	first := drainSession(t, session, 3*time.Second)
 	urlMsg, ok := first.(CodexOAuthURLMsg)
 	if !ok {
@@ -377,7 +434,7 @@ func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
 	defer l2.Close()
 
 	const epoch uint64 = 7
-	session := startOAuthFlow(context.Background(), epoch)
+	session := startOAuthFlow(context.Background(), epoch, false)
 	raw := drainSession(t, session, 2*time.Second)
 	msg, ok := raw.(CodexOAuthDoneMsg)
 	if !ok {
