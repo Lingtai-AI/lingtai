@@ -110,10 +110,12 @@ func main() {
 	}
 	if latestVersion != "" {
 		install := config.DetectCurrentTUIInstall(globalDir)
-		if install.Method == config.TUIInstallMethodHomebrew && handleTUIUpgrade(install, version, latestVersion) {
-			return
-		}
-		if install.Method != config.TUIInstallMethodHomebrew {
+		switch install.Method {
+		case config.TUIInstallMethodHomebrew, config.TUIInstallMethodSource:
+			if handleTUIUpgrade(install, version, latestVersion, globalDir) {
+				return
+			}
+		default:
 			fmt.Println("lingtai-tui " + version)
 		}
 	} else {

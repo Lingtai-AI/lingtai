@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,70 +20,170 @@ type runningTUIProcess struct {
 	Command string
 }
 
-func handleTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string) bool {
-	fmt.Printf("lingtai-tui %s (latest: %s)\n", version, latestVersion)
+func handleTUIUpgrade(install config.TUIInstallInfo, version, latestVersion, globalDir string) bool {
+	return handleTUIUpgradeWithOptions(install, version, latestVersion, startupTUIUpgradeOptions{
+		GlobalDir: globalDir,
+	})
+}
 
-	others := findOtherTUIProcesses()
+type startupTUIUpgradeOptions struct {
+	Input     io.Reader
+	Output    io.Writer
+	ErrOutput io.Writer
+
+	Runner config.CommandRunner
+	Stat   func(string) (os.FileInfo, error)
+
+	GlobalDir           string
+	SourceInstallScript string
+
+	CheckTUIUpgrade                 func(string) string
+	FindOtherTUIProcesses           func() []runningTUIProcess
+	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) error
+}
+
+func (o *startupTUIUpgradeOptions) setDefaults() {
+	if o.Input == nil {
+		o.Input = os.Stdin
+	}
+	if o.Output == nil {
+		o.Output = os.Stdout
+	}
+	if o.ErrOutput == nil {
+		o.ErrOutput = os.Stderr
+	}
+	if o.Runner == nil {
+		o.Runner = streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr}
+	}
+	if o.CheckTUIUpgrade == nil {
+		o.CheckTUIUpgrade = config.CheckTUIUpgrade
+	}
+	if o.FindOtherTUIProcesses == nil {
+		o.FindOtherTUIProcesses = findOtherTUIProcesses
+	}
+	if o.PrepareOtherTUIProcessesUpgrade == nil {
+		o.PrepareOtherTUIProcessesUpgrade = prepareOtherTUIProcessesForUpgrade
+	}
+}
+
+func handleTUIUpgradeWithOptions(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
+	opts.setDefaults()
+
+	switch install.Method {
+	case config.TUIInstallMethodHomebrew:
+		return handleHomebrewTUIUpgrade(install, version, latestVersion, opts)
+	case config.TUIInstallMethodSource:
+		return handleSourceTUIUpgrade(install, version, latestVersion, opts)
+	default:
+		fmt.Fprintf(opts.Output, "lingtai-tui %s\n", version)
+		return false
+	}
+}
+
+func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
+	fmt.Fprintf(opts.Output, "lingtai-tui %s (latest: %s)\n", version, latestVersion)
+
+	others := opts.FindOtherTUIProcesses()
 	if len(others) > 0 {
-		fmt.Println("  Other lingtai-tui processes are running:")
+		fmt.Fprintln(opts.Output, "  Other lingtai-tui processes are running:")
 		for _, p := range others {
 			if p.CWD != "" {
-				fmt.Printf("    PID %d  cwd=%s\n", p.PID, p.CWD)
+				fmt.Fprintf(opts.Output, "    PID %d  cwd=%s\n", p.PID, p.CWD)
 			} else {
-				fmt.Printf("    PID %d  %s\n", p.PID, p.Command)
+				fmt.Fprintf(opts.Output, "    PID %d  %s\n", p.PID, p.Command)
 			}
 		}
-		fmt.Println("  Upgrading while they keep running can leave old/new Cellar binaries mixed.")
-		fmt.Print("  Put agents in their projects to sleep, stop those TUI processes, and upgrade now? [y/N] ")
-		if !answerYes(readLineLower()) {
-			fmt.Println("  Upgrade skipped. Quit the other TUI windows first, then run:")
-			fmt.Println("    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
+		fmt.Fprintln(opts.Output, "  Upgrading while they keep running can leave old/new Cellar binaries mixed.")
+		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and upgrade now? [y/N] ")
+		if !answerYes(readLineLower(opts.Input)) {
+			fmt.Fprintln(opts.Output, "  Upgrade skipped. Quit the other TUI windows first, then run:")
+			fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
 			return false
 		}
-		if err := prepareOtherTUIProcessesForUpgrade(others); err != nil {
-			fmt.Fprintf(os.Stderr, "  Could not prepare other TUI processes for upgrade: %v\n", err)
-			fmt.Println("  Upgrade skipped. Please close them manually and try again.")
+		if err := opts.PrepareOtherTUIProcessesUpgrade(others); err != nil {
+			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for upgrade: %v\n", err)
+			fmt.Fprintln(opts.Output, "  Upgrade skipped. Please close them manually and try again.")
 			return false
 		}
 	} else {
-		fmt.Print("  Upgrade now? [Y/n] ")
-		answer := readLineLower()
+		fmt.Fprint(opts.Output, "  Upgrade now? [Y/n] ")
+		answer := readLineLower(opts.Input)
 		if answer == "n" || answer == "no" {
 			return false
 		}
 	}
 
-	fmt.Println("  Upgrading...")
+	fmt.Fprintln(opts.Output, "  Upgrading...")
 	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
 		LatestVersion: latestVersion,
-		Runner:        streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr},
+		Runner:        opts.Runner,
 	})
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
 			err = fmt.Errorf("homebrew upgrade failed")
 		}
-		fmt.Fprintf(os.Stderr, "  Upgrade failed: %v\n", err)
+		fmt.Fprintf(opts.ErrOutput, "  Upgrade failed: %v\n", err)
 		return false
 	}
 
 	// Verify the upgrade actually changed the binary by re-checking the
 	// version. Brew returns exit 0 even for "already installed".
-	postUpgrade := config.CheckTUIUpgrade(version)
+	postUpgrade := opts.CheckTUIUpgrade(version)
 	if postUpgrade != "" {
 		// Still outdated — brew formula not updated yet, don't loop.
-		fmt.Println("  Brew formula not yet updated. Run manually later:")
-		fmt.Println("    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
+		fmt.Fprintln(opts.Output, "  Brew formula not yet updated. Run manually later:")
+		fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
 		return false
 	}
 
-	fmt.Println("  Upgraded! Please restart lingtai-tui to use the new version:")
-	fmt.Println("    lingtai-tui")
+	fmt.Fprintln(opts.Output, "  Upgraded! Please restart lingtai-tui to use the new version:")
+	fmt.Fprintln(opts.Output, "    lingtai-tui")
 	return true
 }
 
-func readLineLower() string {
-	reader := bufio.NewReader(os.Stdin)
+func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
+	fmt.Fprintf(opts.Output, "lingtai-tui %s (latest: %s)\n", version, latestVersion)
+	fmt.Fprintln(opts.Output, "  Source/user-local install detected.")
+	if install.Detail != "" {
+		fmt.Fprintf(opts.Output, "  Install detail: %s\n", install.Detail)
+	}
+	fmt.Fprintln(opts.Output, "  Updating will run the source installer for the latest release tag.")
+	fmt.Fprint(opts.Output, "  Update this source install now? [y/N] ")
+	if !answerYes(readLineLower(opts.Input)) {
+		fmt.Fprintln(opts.Output, "  Update skipped. Run manually later:")
+		fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
+		return false
+	}
+
+	fmt.Fprintln(opts.Output, "  Updating source install...")
+	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
+		LatestVersion:       latestVersion,
+		GlobalDir:           opts.GlobalDir,
+		Runner:              opts.Runner,
+		Stat:                opts.Stat,
+		SourceInstallScript: opts.SourceInstallScript,
+	})
+	printTUIUpdateLines(opts.Output, update.Lines)
+	if !update.Healthy {
+		err := update.Err
+		if err == nil {
+			err = fmt.Errorf("source update failed")
+		}
+		fmt.Fprintf(opts.ErrOutput, "  Update failed: %v\n", err)
+		return false
+	}
+	return true
+}
+
+func printTUIUpdateLines(w io.Writer, lines []config.DoctorLine) {
+	for _, line := range lines {
+		fmt.Fprintf(w, "  %s\n", line.Text)
+	}
+}
+
+func readLineLower(input io.Reader) string {
+	reader := bufio.NewReader(input)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(strings.ToLower(line))
 }
