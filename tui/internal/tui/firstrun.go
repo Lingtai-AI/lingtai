@@ -616,7 +616,13 @@ func (m FirstRunModel) startCodexLogin(deviceCode bool) (FirstRunModel, tea.Cmd)
 	if deviceCode {
 		m.codexSession = startDeviceAuthFlow(ctx, epoch)
 	} else {
-		m.codexSession = startOAuthFlow(ctx, epoch)
+		// First-run manages only the primary (legacy) Codex account: this
+		// is always a first/bootstrap login or a re-auth of that single
+		// account, never an "add another account". So never force the
+		// OpenAI login page — reusing the active session is correct here.
+		// Adding additional accounts (which DOES force-login) lives in
+		// Setup → Credentials (LoginModel.codexForceLogin).
+		m.codexSession = startOAuthFlow(ctx, epoch, false)
 	}
 	return m, waitCodexOAuthMsg(m.codexSession)
 }

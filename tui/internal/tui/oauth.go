@@ -161,7 +161,12 @@ func generateState() string {
 // the caller can stop showing the "logging in" state. epoch is echoed
 // back on the message so a handler can ignore late callbacks from a
 // cancelled session (see FirstRunModel.codexLoginEpoch).
-func startOAuthFlow(ctx context.Context, epoch uint64) *codexOAuthSession {
+//
+// forceLogin is forwarded to buildAuthorizeURL: pass true only when the user
+// is adding a NEW Codex account (so OpenAI shows the login page instead of
+// reusing the active session), false for first/bootstrap login and existing-
+// account re-auth.
+func startOAuthFlow(ctx context.Context, epoch uint64, forceLogin bool) *codexOAuthSession {
 	ch := make(chan interface{}, 2)
 
 	go func() {
@@ -263,7 +268,7 @@ func startOAuthFlow(ctx context.Context, epoch uint64) *codexOAuthSession {
 			_ = server.Shutdown(shutdownCtx)
 		}()
 
-		authURL := buildAuthorizeURL(redirectURI, challenge, state)
+		authURL := buildAuthorizeURL(redirectURI, challenge, state, forceLogin)
 
 		ch <- CodexOAuthURLMsg{AuthURL: authURL, RedirectURI: redirectURI, Epoch: epoch}
 		openBrowser(authURL)
@@ -514,7 +519,17 @@ func pollCodexDeviceAuth(ctx context.Context, client *http.Client, issuerURL str
 // buildAuthorizeURL assembles the OAuth authorize URL with the parameter
 // set OpenAI's allowlist requires for the shared Codex client_id. Every
 // param here is load-bearing — see oauth_test.go for the rationale.
-func buildAuthorizeURL(redirectURI, challenge, state string) string {
+//
+// forceLogin controls account selection. When false (re-auth of an existing
+// account, or the first/bootstrap login) the URL carries no prompt param, so
+// the browser silently reuses any active ChatGPT session — the right thing
+// when the user is re-authenticating the account they're already signed into.
+// When true (the "Add another Codex account" path) we add prompt=login so the
+// OpenAI auth server shows the login page instead of reusing the existing
+// session; without it the second add silently re-adds the same account
+// (Jason's post-#415 bug). prompt=login is the standard OIDC parameter and
+// is purely additive to the allowlisted set.
+func buildAuthorizeURL(redirectURI, challenge, state string, forceLogin bool) string {
 	params := url.Values{
 		"response_type":              {"code"},
 		"client_id":                  {codexClientID},
@@ -526,6 +541,9 @@ func buildAuthorizeURL(redirectURI, challenge, state string) string {
 		"codex_cli_simplified_flow":  {"true"},
 		"state":                      {state},
 		"originator":                 {codexOriginator},
+	}
+	if forceLogin {
+		params.Set("prompt", "login")
 	}
 	return codexAuthURL + "?" + params.Encode()
 }
