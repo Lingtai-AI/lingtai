@@ -1840,10 +1840,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					if ctxLimit <= 0 {
 						ctxLimit = 250000
 					}
-					soulDelay, _ := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
-					if soulDelay <= 0 {
-						soulDelay = 99999
-					}
+					soulDelay := parseOptionalSoulDelay(m.soulDelayInput.Value())
 					maxRpm, _ := strconv.Atoi(m.maxRpmInput.Value())
 					if maxRpm < 0 {
 						maxRpm = 60
@@ -1896,10 +1893,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if err != nil || ctxLimit <= 0 {
 					ctxLimit = 250000
 				}
-				soulDelay, err := strconv.ParseFloat(m.soulDelayInput.Value(), 64)
-				if err != nil || soulDelay <= 0 {
-					soulDelay = 99999
-				}
+				soulDelay := parseOptionalSoulDelay(m.soulDelayInput.Value())
 				maxRpm, err := strconv.Atoi(m.maxRpmInput.Value())
 				if err != nil || maxRpm < 0 {
 					maxRpm = 60
@@ -3678,7 +3672,7 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 	// Numeric defaults — overridden by saved init.json values in setup mode below.
 	m.staminaInput.SetValue("36000")
 	m.ctxLimitInput.SetValue("250000")
-	m.soulDelayInput.SetValue("99999")
+	m.soulDelayInput.SetValue("")
 	m.maxRpmInput.SetValue("60")
 	m.maxAedInput.SetValue(strconv.Itoa(preset.DefaultMaxAedAttempts))
 	m.staminaInput.Blur()
@@ -3794,6 +3788,18 @@ func numberFromJSON(v interface{}) (float64, bool) {
 		return f, true
 	}
 	return 0, false
+}
+
+func parseOptionalSoulDelay(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil || v <= 0 {
+		return nil
+	}
+	return &v
 }
 
 // formatNumber renders an integer-valued float as "N" (no decimal point), for
@@ -4439,7 +4445,10 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 	if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
 		humanAddr = humanNode.Address
 	}
-	soulDelayStr := fmt.Sprintf("%v", opts.SoulDelay)
+	soulDelayStr := "kernel default"
+	if opts.SoulDelay != nil {
+		soulDelayStr = formatNumber(*opts.SoulDelay)
+	}
 	if err := applyRecipe(
 		m.baseDir, orchDir, m.globalDir, humanDir, humanAddr,
 		recipeName, customDir, lang, soulDelayStr,

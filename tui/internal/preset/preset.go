@@ -1432,7 +1432,7 @@ type AgentOpts struct {
 	Language       string   // "en", "zh", or "wen"
 	Stamina        float64  // max uptime in seconds
 	ContextLimit   int      // token budget
-	SoulDelay      float64  // seconds between soul cycles
+	SoulDelay      *float64 // nil means omit soul.delay so the kernel default applies
 	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
 	MaxAedAttempts int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
 	Karma          bool     // lifecycle control over other agents
@@ -1462,7 +1462,7 @@ func DefaultAgentOpts() AgentOpts {
 		Language:       "en",
 		Stamina:        36000,
 		ContextLimit:   250000,
-		SoulDelay:      99999,
+		SoulDelay:      nil,
 		MaxRpm:         60,
 		MaxAedAttempts: DefaultMaxAedAttempts,
 		Karma:          true,
@@ -1568,7 +1568,9 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"karma":   opts.Karma,
 		"nirvana": opts.Nirvana,
 	}
-	manifest["soul"] = map[string]interface{}{"delay": opts.SoulDelay}
+	if opts.SoulDelay != nil {
+		manifest["soul"] = map[string]interface{}{"delay": *opts.SoulDelay}
+	}
 	manifest["stamina"] = opts.Stamina
 	manifest["context_limit"] = opts.ContextLimit
 	// molt_pressure and molt_prompt are intentionally NOT written: the kernel no

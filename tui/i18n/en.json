@@ -44,7 +44,7 @@
   "firstrun.context_limit": "Context limit",
   "firstrun.context_limit_hint": "max context window (applies to all agents)",
   "firstrun.soul_delay": "Soul delay",
-  "firstrun.soul_delay_hint": "seconds idle before agent thinks autonomously (default: 99999 ≈ silent). Soul flow is the agent's subconscious — it reflects on recent work, consults past selves, and surfaces insights. Set low (60-300) for proactive agents, mid (7200) for batch/workhorse agents, leave at default to silence it (applies to all agents)",
+  "firstrun.soul_delay_hint": "seconds idle before agent thinks autonomously (blank = inherit kernel default). Soul flow is the agent's subconscious — it reflects on recent work, consults past selves, and surfaces insights. Set low (60-300) for proactive agents, mid (7200) for batch/workhorse agents, leave blank to inherit the runtime default (applies to all agents)",
   "firstrun.max_rpm": "Max RPM",
   "firstrun.max_rpm_hint": "API requests/min cap, shared across all agents on the same provider; 0 = no cap",
   "firstrun.max_aed_attempts": "AED max attempts",

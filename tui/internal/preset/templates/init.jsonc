@@ -100,11 +100,8 @@
     },
 
     // -------------------------------------------------------
-    // Soul — the agent's subconscious
-    // -------------------------------------------------------
-    // delay: seconds between soul ticks (subconscious reflection).
-    // Higher = less frequent self-reflection, lower resource usage.
-    "soul": { "delay": 99999 },
+    // Soul flow delay is inherited from the kernel default.
+    // Add "soul": { "delay": <seconds> } only when overriding.
 
     // -------------------------------------------------------
     // Lifecycle limits

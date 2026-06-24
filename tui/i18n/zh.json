@@ -44,7 +44,7 @@
   "firstrun.context_limit": "上下文上限",
   "firstrun.context_limit_hint": "最大上下文窗口（应用于所有器灵）",
   "firstrun.soul_delay": "心流间隔",
-  "firstrun.soul_delay_hint": "空闲多少秒后器灵自主思考（默认：99999 ≈ 静默）。心流是器灵的潜意识——它会反思近期工作、咨询往昔之我、浮现洞见。设小值(60-300)使器灵更主动，中值(7200)适合批量/工作型器灵，保持默认则近乎静默（应用于所有器灵）",
+  "firstrun.soul_delay_hint": "空闲多少秒后器灵自主思考（留空则继承 kernel 默认值）。心流是器灵的潜意识——它会反思近期工作、咨询往昔之我、浮现洞见。设小值(60-300)使器灵更主动，中值(7200)适合批量/工作型器灵；留空则使用运行时默认值（应用于所有器灵）",
   "firstrun.max_rpm": "每分请求上限",
   "firstrun.max_rpm_hint": "API 每分钟请求上限，所有共用同一服务商的器灵合用此额度；0 = 不限",
   "firstrun.max_aed_attempts": "AED 最大尝试次数",
