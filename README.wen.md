@@ -56,6 +56,8 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+> 初入 LingTai？先读[小白工作手册](docs/beginner-work-manual.zh.md)（或[单文件 HTML 图解版](docs/beginner-work-manual-stick-figure.zh.html)），再启首个项目。
+
 初启之时，灵台作 `.lingtai/`，备其运行时，引君择模型与配方，并令一常驻器灵守此项目。
 
 ```text
@@ -167,7 +169,7 @@ flowchart LR
 
 ## 文档
 
-- 初用者，可先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)，亦可观 [火柴人动画版](docs/beginner-work-manual-stick-figure.zh.html)。
+- 初用者，可先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)，亦可观 [单文件图解版](docs/beginner-work-manual-stick-figure.zh.html)。
 - 接外渠者，于 TUI 中用 `/mcp`，再读相应插件之入门文。
 - 读源码者，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
 

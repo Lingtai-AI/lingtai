@@ -51,6 +51,8 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+> 第一次用 LingTai？先看[小白工作手册](docs/beginner-work-manual.zh.md)（或[单文件 HTML 图解版](docs/beginner-work-manual-stick-figure.zh.html)），再创建第一个项目。
+
 首次启动时，灵台会创建 `.lingtai/`，准备自己的运行时，引导你配置模型/配方，并为这个项目启动一个常驻智能体。
 
 ```text
@@ -402,7 +404,7 @@ Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智
 ## 文档路径
 
 - **第一次用？** 跑 `lingtai-tui`，选 **Tutorial** 配方，跟着走一遍；也可以先读 [《灵台工作手册（初学者友好版）》](docs/beginner-work-manual.zh.md)。
-- **想看可视化解释？** 打开 [火柴人动画版工作手册](docs/beginner-work-manual-stick-figure.zh.html)。
+- **想看可视化解释？** 打开 [单文件图解版工作手册](docs/beginner-work-manual-stick-figure.zh.html)；这个 HTML 不依赖外部资源，可直接双击打开。
 - **配外部渠道** — TUI 里 `/mcp`，再看对应插件自己的入门文档。
 - **写技能** — 首次启动后看 `tui/internal/preset/skills/lingtai-dev-guide/`。
 - **源码结构** — 从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。

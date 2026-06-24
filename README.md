@@ -51,6 +51,8 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+> New to LingTai? Start with the [Beginner work manual](docs/beginner-work-manual.zh.md) or the [single-file illustrated HTML guide](docs/beginner-work-manual-stick-figure.zh.html) to learn the workflow step by step.
+
 On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
 
 ### First-time install troubleshooting
@@ -320,7 +322,7 @@ This repo carries two Go binaries:
 
 ## Docs by goal
 
-- **New here?** Run `lingtai-tui`, pick the **Tutorial** recipe, follow the prompts. A Chinese beginner-friendly manual is also available at [`docs/beginner-work-manual.zh.md`](docs/beginner-work-manual.zh.md), with an animated version at [`docs/beginner-work-manual-stick-figure.zh.html`](docs/beginner-work-manual-stick-figure.zh.html).
+- **New here?** Run `lingtai-tui`, pick the **Tutorial** recipe, follow the prompts. A Chinese beginner-friendly manual is also available at [`docs/beginner-work-manual.zh.md`](docs/beginner-work-manual.zh.md), with a standalone single-file illustrated version at [`docs/beginner-work-manual-stick-figure.zh.html`](docs/beginner-work-manual-stick-figure.zh.html).
 - **Set up a channel** — `/mcp` inside the TUI, then the addon's own onboarding resource.
 - **Write a skill** — see `tui/internal/preset/skills/lingtai-dev-guide/` after first launch.
 - **Source layout** — start at [`ANATOMY.md`](ANATOMY.md), then descend into `tui/ANATOMY.md` or `portal/ANATOMY.md`.
