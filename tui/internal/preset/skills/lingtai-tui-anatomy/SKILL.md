@@ -22,6 +22,9 @@ description: >
     - You hit a TUI/portal-specific gotcha (Bubble Tea v2 paste delivery,
       textarea theming, the shared meta.json version space, dev-mode
       rebuild) and want to find the place that explains it.
+    - You need to find local companions or inventory running agents on this
+      machine: start with `lingtai-tui list --detailed` / `--admin`, then
+      descend the TUI anatomy if you need the implementation.
 
   How to use:
     1. Read this file once — you are learning the convention.
@@ -103,6 +106,21 @@ You are an agent. Reading 200 lines of code is one tool call; greping a symbol g
 | Enumeration | grep |
 
 The descent: start at the repo root's `ANATOMY.md`, read its Components and Composition, pick the binary tree (`tui/` or `portal/`) whose territory contains your question, open that binary's anatomy, repeat. At each layer the anatomy will tell you whether to descend further or read the cited code directly.
+
+## Finding companions starts with `lingtai-tui list`
+
+Agent inventory is a command-surface question before it is a filesystem
+question.  When the need is "find companions", "which local agents are alive?",
+"where is that agent's working directory?", or "which chat handles does this
+running agent advertise?", run `lingtai-tui list --detailed` first.  Add
+`--admin` when the question depends on admin/karma flags, and pass a project
+path when you only want one project's `.lingtai/` network.
+
+Only fall back to manual `.lingtai/` scans when `lingtai-tui list` cannot answer
+the question (for example, offline agents with no running process).  If you need
+code-level evidence, descend the repo anatomy to `tui/ANATOMY.md`; it points to
+`list_common.go`, `list_unix.go`, and `list_windows.go`, which own this command
+surface.
 
 ## Writing checklist
 
