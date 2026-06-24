@@ -145,6 +145,7 @@ type MailModel struct {
 	wasActive         bool             // true if previous refresh was ACTIVE
 	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
 	pulseTick         int              // pulse animation counter while ACTIVE
+	activeSince       time.Time        // when the agent last entered ACTIVE (zero when not active)
 	inquiryState      string           // "", "sent", "taken" — tracks /btw lifecycle
 	insightPending    bool             // true when waiting for 5s insight delay
 	insightAt         time.Time        // when to fire the auto-insight
@@ -654,10 +655,14 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		isActive := strings.EqualFold(m.orchState, "ACTIVE")
 		isIdle := strings.EqualFold(m.orchState, "IDLE")
 		if isActive && !m.wasActive {
-			// Just became active — advance to next quote, reset pulse
+			// Just became active — advance to next quote, reset pulse, start timer
 			m.quoteIdx++
 			m.pulseTick = 0
 			m.insightPending = false
+			m.activeSince = time.Now()
+		} else if !isActive {
+			// Not active — stop the elapsed timer so the badge drops it
+			m.activeSince = time.Time{}
 		}
 		insightDone := fileExists(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
 		if isIdle && m.wasActive && !m.insightPending && !insightDone && m.insightsEnabled {
@@ -1207,6 +1212,38 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
+// stateGlyph returns the leading glyph for the agent-state badge. ACTIVE uses
+// the rotating spinner frame so the badge visibly animates in normal mode;
+// every other state gets a distinct static glyph (color carries the rest of
+// the distinction via StateColor).
+func (m MailModel) stateGlyph() string {
+	switch strings.ToUpper(m.orchState) {
+	case "ACTIVE":
+		return spinnerFrames[m.pulseTick%len(spinnerFrames)]
+	case "ASLEEP":
+		return "◌"
+	case "SUSPENDED":
+		return "○"
+	case "REFRESHING":
+		return "⟳"
+	default: // IDLE, STUCK, unknown
+		return "◉"
+	}
+}
+
+// activeElapsed returns a short " 12s" / " 3m" suffix while the agent is ACTIVE,
+// or "" otherwise — the "how long has it been working" signal.
+func (m MailModel) activeElapsed() string {
+	if !strings.EqualFold(m.orchState, "ACTIVE") || m.activeSince.IsZero() {
+		return ""
+	}
+	d := time.Since(m.activeSince)
+	if d < time.Minute {
+		return fmt.Sprintf(" %ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf(" %dm", int(d.Minutes()))
+}
+
 func (m MailModel) networkActivityBadge() string {
 	if m.networkActivity.Status == "" {
 		return ""
@@ -1303,7 +1340,11 @@ func (m MailModel) View() string {
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	titleRightBase := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render("◉ "+stateLabel)
+	// Activity indicator: an animated glyph per state (spinner while ACTIVE) plus
+	// a live elapsed timer. This makes normal mode show that the agent is alive
+	// and working without needing Ctrl+O. It lives in the always-visible header
+	// and is independent of the verbose level.
+	titleRightBase := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render(m.stateGlyph()+" "+stateLabel+m.activeElapsed())
 
 	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
 	titleCenter := ""
