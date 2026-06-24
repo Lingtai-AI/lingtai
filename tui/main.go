@@ -126,6 +126,13 @@ func main() {
 	// Best-effort housekeeping — failures don't abort startup.
 	globalmigrate.Run(globalDir)
 
+	// Resolve the UI language early so every user-visible startup string
+	// (codex banner, welcome, agent-count reminder) renders in the configured
+	// locale rather than the i18n default. tuiCfg is reused below.
+	config.MigrateLegacyLanguage(globalDir)
+	tuiCfg := config.LoadTUIConfig(globalDir)
+	i18n.SetLang(tuiCfg.Language)
+
 	// Test Codex OAuth validity on every launch across ALL stored accounts
 	// (legacy ~/.lingtai-tui/codex-auth.json plus per-account files under
 	// codex-auth/). For each account whose access token is expired (or
@@ -226,10 +233,8 @@ func main() {
 		needsFirstRun = true
 	}
 
-	// Load TUI config (migrate language from legacy config.json if needed)
-	config.MigrateLegacyLanguage(globalDir)
-	tuiCfg := config.LoadTUIConfig(globalDir)
-	i18n.SetLang(tuiCfg.Language)
+	// tuiCfg and the UI language were loaded earlier (right after globalDir is
+	// resolved) so startup banners render in the configured locale.
 
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
 

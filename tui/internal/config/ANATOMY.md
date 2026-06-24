@@ -26,10 +26,10 @@ This package manages the TUI's bootstrap sequence — the steps that run before 
 
 ## Connections
 
-- **Called from:** `tui/main.go:228-273`, `tui/internal/tui/firstrun.go:672-675`, and `tui/internal/headless/spawn.go:77-83` — startup/first-run/headless bootstrap paths.
+- **Called from:** `tui/main.go:132-278`, `tui/internal/tui/firstrun.go:672-675`, and `tui/internal/headless/spawn.go:77-83` — startup/first-run/headless bootstrap paths.
 - **Calls out:** PyPI API (`pypi.org/pypi/lingtai/json`), GitHub API (`api.github.com/repos/Lingtai-AI/lingtai/releases/latest`), `uv` / `pip` CLI.
-- **Bootstrap sequence** (in `tui/main.go:228-273`):
-  1. `config.MigrateLegacyLanguage(globalDir)` — one-shot language migration
+- **Bootstrap sequence:**
+  1. `config.MigrateLegacyLanguage(globalDir)` then `config.LoadTUIConfig` + `i18n.SetLang` — one-shot language migration and locale resolution, run early (`tui/main.go:132-134`) so startup banners localize; the rest of the sequence follows at `tui/main.go:237-278`
   2. `config.NeedsVenv(globalDir)` — check if a setup banner should be printed
   3. `config.EnsureRuntime(globalDir)` — create/repair venv if needed, then always auto-check/upgrade or convert the `lingtai` Python runtime
   4. `config.EnsureAddons(python, agentDir)` — verify addon importability

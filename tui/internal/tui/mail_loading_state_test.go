@@ -11,10 +11,12 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-// loadingBannerFragment is a stable substring of the bilingual initial-loading
-// banner ("loading... / 加载中..."). Matching a fragment rather than the whole
-// string keeps the assertion robust to centering padding and ANSI styling.
-const loadingBannerFragment = "加载中"
+// loadingBannerFragment is a locale-resolved substring of the initial-loading
+// banner. The TUI's default locale (set in i18n.init) is "en", so under test
+// this resolves to "loading...". Deriving it from i18n rather than hardcoding a
+// language keeps these tests correct after the banner was split into
+// locale-specific strings (English shows English, Chinese shows Chinese).
+var loadingBannerFragment = i18n.T("mail.initial_loading")
 
 // sizeMail brings a freshly constructed MailModel to the ready state by feeding
 // it a window size, the same way the Bubble Tea runtime does before the first
@@ -33,9 +35,12 @@ func sizeMail(t *testing.T, m MailModel) MailModel {
 // after construction but before the deferred initial rebuild's refresh has been
 // applied, the top of the mail view shows the bilingual loading banner.
 func TestMailShowsInitialLoadingBanner(t *testing.T) {
-	// Sanity-check the i18n key resolves (default locale is "en", loaded in init).
-	if got := i18n.T("mail.initial_loading"); !strings.Contains(got, loadingBannerFragment) {
-		t.Fatalf("mail.initial_loading missing %q fragment; got %q", loadingBannerFragment, got)
+	// Under the default "en" locale the loading banner must be English-only —
+	// no leftover Chinese from the old bilingual "loading... / 加载中..." string.
+	for _, r := range i18n.T("mail.initial_loading") {
+		if r >= 0x4e00 && r <= 0x9fff {
+			t.Fatalf("en mail.initial_loading must not contain Chinese; got %q", i18n.T("mail.initial_loading"))
+		}
 	}
 
 	dir := t.TempDir()

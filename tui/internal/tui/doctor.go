@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -40,13 +41,16 @@ type doctorResultMsg struct {
 }
 
 type doctorLine struct {
-	Text string
-	OK   bool // true = green check, false = red cross (ignored if Warn or Hint)
-	Warn bool // true = amber indicator (neutral info, e.g. version drift)
-	Hint bool // true = suggestion line (indented, dimmed)
+	Text    string
+	OK      bool // true = green check, false = red cross (ignored if Warn or Hint)
+	Warn    bool // true = amber indicator (neutral info, e.g. version drift)
+	Hint    bool // true = suggestion line (indented, dimmed)
+	Section bool // true = section header (un-indented, bold, with a leading blank line)
 }
 
-// DoctorModel is the /doctor dedicated view.
+// DoctorModel is the /doctor dedicated view. The diagnostic output can run far
+// taller than the terminal (runtime + portal + kernel + LLM + per-agent checks),
+// so the body lives in a scrollable viewport rather than a flat string dump.
 type DoctorModel struct {
 	orchDir   string
 	globalDir string
@@ -54,11 +58,20 @@ type DoctorModel struct {
 	loading   bool
 	width     int
 	height    int
+
+	viewport viewport.Model
+	ready    bool // viewport initialized (after first WindowSizeMsg)
 }
 
 func NewDoctorModel(orchDir, globalDir string) DoctorModel {
 	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
 }
+
+// doctorHeaderLines: title row + separator + trailing blank line.
+const doctorHeaderLines = 3
+
+// doctorFooterLines: separator + hint line.
+const doctorFooterLines = 2
 
 func (m DoctorModel) Init() tea.Cmd {
 	return m.runDoctorCmd()
@@ -79,9 +92,35 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		vpHeight := m.height - doctorHeaderLines - doctorFooterLines
+		if vpHeight < 1 {
+			vpHeight = 1
+		}
+		if !m.ready {
+			m.viewport = viewport.New()
+			m.ready = true
+		}
+		m.viewport.SetWidth(m.width)
+		m.viewport.SetHeight(vpHeight)
+		m.syncViewport()
+
 	case doctorResultMsg:
 		m.lines = msg.Lines
 		m.loading = false
+		// A fresh diagnostic re-runs from the top; reset scroll so the user
+		// reads from the first check rather than wherever they last were.
+		if m.ready {
+			m.viewport.GotoTop()
+		}
+		m.syncViewport()
+
+	case tea.MouseWheelMsg:
+		if m.ready {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
@@ -90,34 +129,82 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 			// Re-run the full diagnostic from scratch.
 			m.loading = true
 			return m, m.runDoctorCmd()
+		default:
+			// Forward navigation keys (up/down/pgup/pgdn/home/end) to the
+			// viewport so the diagnostic output is scrollable.
+			if m.ready {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd
+			}
 		}
 	}
 	return m, nil
 }
 
-func (m DoctorModel) View() string {
-	var b strings.Builder
+// syncViewport re-renders the diagnostic body into the viewport. Called after a
+// resize and whenever the line set changes so the scrollable content stays in
+// step with both the data and the current width.
+func (m *DoctorModel) syncViewport() {
+	if !m.ready {
+		return
+	}
+	m.viewport.SetContent(m.renderBody())
+}
 
-	// Title bar
+func (m DoctorModel) View() string {
+	// Header: title row + separator + a trailing blank line (doctorHeaderLines).
 	title := StyleTitle.Render(i18n.T("app.title")) + " " +
 		StyleAccent.Render(RuneBullet) + " " +
 		StyleTitle.Render(i18n.T("doctor.title"))
 	escHint := StyleAccent.Render("[esc] ") + StyleSubtle.Render(i18n.T("manage.back"))
 	padding := m.width - lipgloss.Width(title) - lipgloss.Width(escHint) - 1
+	var titleRow string
 	if padding > 0 {
-		b.WriteString(title + strings.Repeat(" ", padding) + escHint + "\n")
+		titleRow = title + strings.Repeat(" ", padding) + escHint
 	} else {
-		b.WriteString(title + "  " + escHint + "\n")
+		titleRow = title + "  " + escHint
 	}
-	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
+	header := titleRow + "\n" + strings.Repeat("─", m.width) + "\n"
 
 	if m.loading {
-		b.WriteString("  " + i18n.T("doctor.checking") + "\n")
-		return b.String()
+		return header + "\n  " + i18n.T("doctor.checking") + "\n"
 	}
 
-	for _, line := range m.lines {
+	// Body lives in the viewport once it has been sized; before the first
+	// WindowSizeMsg (e.g. a unit test calling View directly) fall back to the
+	// raw body so output is still meaningful.
+	body := m.renderBody()
+	if m.ready {
+		body = m.viewport.View()
+	}
+
+	// Footer: separator + hint line (doctorFooterLines). Surface the scroll
+	// affordance only when there is more below the fold, so a short report
+	// doesn't advertise a control that does nothing.
+	hint := "  [esc] " + i18n.T("manage.back") + " " + RuneBullet +
+		" [ctrl+r] " + i18n.T("props.ctrl_r_reload")
+	if m.ready && !m.viewport.AtBottom() {
+		hint += " " + RuneBullet + " ↑↓ " + i18n.T("doctor.scroll")
+	}
+	footer := strings.Repeat("─", m.width) + "\n" + StyleFaint.Render(hint)
+
+	return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
+}
+
+// renderBody formats the diagnostic lines into the scrollable region. Section
+// headers are un-indented and bold with a leading blank line so the runtime /
+// kernel / LLM / per-agent groups read as distinct blocks; status, warning,
+// and hint lines keep the two-space indent that nests them under their section.
+func (m DoctorModel) renderBody() string {
+	var b strings.Builder
+	for i, line := range m.lines {
 		switch {
+		case line.Section:
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(StyleTitle.Render(line.Text) + "\n")
 		case line.Hint:
 			b.WriteString("  " + StyleAccent.Render(line.Text) + "\n")
 		case line.Warn:
@@ -128,11 +215,7 @@ func (m DoctorModel) View() string {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(line.Text) + "\n")
 		}
 	}
-
-	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
-	b.WriteString(StyleFaint.Render("  [esc] "+i18n.T("manage.back")) + "\n")
-
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // --- Diagnostic logic ---
@@ -145,6 +228,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	// repair stale binaries or Python packages before running the traditional
 	// health checks below. Failures are surfaced but do not short-circuit the
 	// rest of the diagnostic.
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_runtime"), Section: true})
 	updateReport := config.RunDoctorUpdate(globalDir, config.DoctorOptions{
 		CurrentTUIVersion: tuiVersion,
 		ForceTUI:          true,
@@ -167,6 +251,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	}
 
 	// Phase 0: check lingtai-portal on PATH
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_portal"), Section: true})
 	if _, err := exec.LookPath("lingtai-portal"); err == nil {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.portal_ok"), OK: true,
@@ -184,10 +269,12 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	// but Python kernel is old/broken/missing", which is the most common cause
 	// of a post-upgrade regression (especially for CN users hitting mirror
 	// flakiness during install).
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_kernel"), Section: true})
 	kernelOK := checkKernelHealth(orchDir, globalDir, &lines)
 	_ = kernelOK // intentionally not short-circuiting: LLM probe is still useful info
 
 	// Phase 1: read events.jsonl for recent errors
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_llm"), Section: true})
 	lastErr := findLastAPIError(orchDir)
 	if lastErr != "" {
 		lines = append(lines, doctorLine{
@@ -298,6 +385,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	// intrinsic lingtai-doctor script. This keeps the TUI focused on framing
 	// and runtime bootstrap while the kernel-owned skill carries reusable
 	// agent/MCP/log/notification checks.
+	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_agent"), Section: true})
 	lines = append(lines, runKernelDoctorIntrinsic(orchDir, globalDir)...)
 
 	return doctorResultMsg{Lines: lines}

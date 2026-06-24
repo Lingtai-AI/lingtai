@@ -1631,7 +1631,12 @@ func validateOneCodexAuthFile(authPath, label string) string {
 	fresh, err := refreshCodexTokens(tokens.RefreshToken, tokens)
 	if err != nil {
 		if err == ErrCodexAuthRevoked {
-			return fmt.Sprintf("⚠ Codex OAuth (%s) session expired — re-login via /setup → Codex 凭据", label)
+			// Localized banner (#412). The %s slot is a navigation hint
+			// (/setup → <credentials section>), so it carries the section
+			// label, not the account. Per-account coverage (#415) is provided
+			// by validateCodexAuthOnStartup iterating every account file; the
+			// account itself is identified via the malformed banner below.
+			return i18n.TF("codex.oauth_expired_banner", i18n.T("preset.codex_credential_section"))
 		}
 		return ""
 	}
@@ -1696,9 +1701,12 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 			if presetRef == "" || !strings.Contains(presetRef, "codex") {
 				continue
 			}
-			// Resolve the preset's bound account and validate just that file.
+			// Resolve the preset's bound account (#415) and validate just that
+			// file; warn (localized, #412) naming the agent only when its own
+			// bound account is missing — a different account staying invalid
+			// no longer condemns this agent.
 			if !codexPresetRefAuthValid(globalDir, presetRef) {
-				return fmt.Sprintf("⚠ Codex OAuth 未验证 — agent %q 使用 codex 预设", e.Name())
+				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}
 	}
