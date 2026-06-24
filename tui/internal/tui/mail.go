@@ -1340,11 +1340,7 @@ func (m MailModel) View() string {
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	// Activity indicator: an animated glyph per state (spinner while ACTIVE) plus
-	// a live elapsed timer. This makes normal mode show that the agent is alive
-	// and working without needing Ctrl+O. It lives in the always-visible header
-	// and is independent of the verbose level.
-	titleRightBase := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render(m.stateGlyph()+" "+stateLabel+m.activeElapsed())
+	titleRightBase := orchNameStyle.Render(m.orchDisplayName()) + " " + stateStyle.Render("◉ "+stateLabel)
 
 	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
 	titleCenter := ""
@@ -1393,8 +1389,13 @@ func (m MailModel) View() string {
 	}
 	header := titleLine + "\n" + strings.Repeat("\u2500", m.width)
 
-	// Build footer — "Email To: AgentName ─────────"
-	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.orchDisplayName()) + " "
+	// Build footer — "Email To: AgentName  ◉ <state> <elapsed> ─────────"
+	// The activity indicator lives here, in the interaction line, so the human
+	// sees the agent's live state (animated spinner + elapsed while ACTIVE) right
+	// where their attention already is. Reuses the header's stateStyle/stateLabel
+	// and is independent of the verbose level.
+	indicator := stateStyle.Render(m.stateGlyph() + " " + stateLabel + m.activeElapsed())
+	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.orchDisplayName()) + "  " + indicator + " "
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
 		sepWidth = 0
