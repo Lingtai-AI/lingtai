@@ -485,3 +485,70 @@ func TestSumTokenLedgerByProviderBoundsRecent(t *testing.T) {
 		t.Fatalf("byProvider = %#v, want all provider totals", byProvider)
 	}
 }
+
+func TestSumTokenLedgerBySourceGroupsMainDaemonSoul(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	lines := []string{
+		`{"ts":"2026-06-19T09:00:00Z","input":10,"output":1,"thinking":2,"cached":3,"model":"legacy"}`,
+		``, // blank line should be skipped, not counted
+		`{"ts":"2026-06-19T09:01:00Z","source":"main","input":20,"output":2,"thinking":0,"cached":4,"model":"main"}`,
+		`{not valid json}`, // malformed line should be skipped, not counted
+		`{"ts":"2026-06-19T09:02:00Z","source":"HEAL","input":5,"output":1,"thinking":0,"cached":0,"model":"heal"}`, // mixed-case unknown source -> main
+		`{"ts":"2026-06-19T09:03:00Z","source":"soul","input":7,"output":1,"thinking":1,"cached":0,"model":"soul"}`,
+		`{"ts":"2026-06-19T09:04:00Z","source":"daemon","em_id":"em-1","run_id":"run-1","input":30,"output":3,"thinking":0,"cached":5,"model":"daemon-a"}`,
+		`{"ts":"2026-06-19T09:05:00Z","source":"DAEMON","em_id":"em-2","run_id":"run-2","input":40,"output":4,"thinking":1,"cached":6,"model":"daemon-b"}`, // mixed-case daemon
+	}
+	if err := os.WriteFile(ledgerPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	split := SumTokenLedgerBySource(ledgerPath, 1)
+
+	if split.Main.APICalls != 3 || split.Main.Input != 35 || split.Main.Output != 4 || split.Main.Thinking != 2 || split.Main.Cached != 7 {
+		t.Fatalf("main totals = %+v, want calls=3 input=35 output=4 thinking=2 cached=7", split.Main)
+	}
+	if split.Soul.APICalls != 1 || split.Soul.Input != 7 || split.Soul.Output != 1 || split.Soul.Thinking != 1 {
+		t.Fatalf("soul totals = %+v, want calls=1 input=7 output=1 thinking=1", split.Soul)
+	}
+	if split.Daemon.APICalls != 2 || split.Daemon.Input != 70 || split.Daemon.Output != 7 || split.Daemon.Thinking != 1 || split.Daemon.Cached != 11 {
+		t.Fatalf("daemon totals = %+v, want calls=2 input=70 output=7 thinking=1 cached=11", split.Daemon)
+	}
+	if len(split.RecentDaemons) != 1 {
+		t.Fatalf("RecentDaemons len = %d, want 1", len(split.RecentDaemons))
+	}
+	if got := split.RecentDaemons[0].EmID; got != "em-2" {
+		t.Fatalf("newest daemon em_id = %q, want em-2", got)
+	}
+	if got := split.RecentDaemons[0].RunID; got != "run-2" {
+		t.Fatalf("newest daemon run_id = %q, want run-2", got)
+	}
+}
+
+func TestSumTokenLedgerBySourceRecentDaemonsNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	lines := []string{
+		`{"ts":"2026-06-19T09:00:00Z","source":"daemon","em_id":"em-1","input":1}`,
+		`{"ts":"2026-06-19T09:01:00Z","source":"daemon","em_id":"em-2","input":1}`,
+		`{"ts":"2026-06-19T09:02:00Z","source":"daemon","em_id":"em-3","input":1}`,
+	}
+	if err := os.WriteFile(ledgerPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	split := SumTokenLedgerBySource(ledgerPath, 2)
+	if len(split.RecentDaemons) != 2 {
+		t.Fatalf("RecentDaemons len = %d, want 2 (capped)", len(split.RecentDaemons))
+	}
+	if got := []string{split.RecentDaemons[0].EmID, split.RecentDaemons[1].EmID}; got[0] != "em-3" || got[1] != "em-2" {
+		t.Fatalf("RecentDaemons order = %v, want [em-3 em-2] (newest first)", got)
+	}
+}
+
+func TestSumTokenLedgerBySourceMissingFileIsEmpty(t *testing.T) {
+	split := SumTokenLedgerBySource(filepath.Join(t.TempDir(), "absent.jsonl"), 5)
+	if split.Main.APICalls != 0 || split.Daemon.APICalls != 0 || split.Soul.APICalls != 0 || len(split.RecentDaemons) != 0 {
+		t.Fatalf("missing file should yield empty split, got %+v", split)
+	}
+}

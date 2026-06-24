@@ -27,16 +27,18 @@ type PropsModel struct {
 	height    int
 
 	// Left panel: selected agent
-	selectedDir    string         // working dir of the agent shown on left (defaults to orchDir)
-	selectedTokens fs.TokenTotals // cached token ledger for selected agent
-	selectedStatus fs.AgentStatus // cached .status.json for selected agent
-	agentDirs      []string       // all discovered agent dirs (for picker)
-	agentNodes     []fs.AgentNode // discovered agents (for picker display)
+	selectedDir         string              // working dir of the agent shown on left (defaults to orchDir)
+	selectedTokens      fs.TokenTotals      // cached token ledger for selected agent
+	selectedSourceSplit fs.TokenSourceSplit // cached main/daemon/soul split for selected agent
+	selectedStatus      fs.AgentStatus      // cached .status.json for selected agent
+	agentDirs           []string            // all discovered agent dirs (for picker)
+	agentNodes          []fs.AgentNode      // discovered agents (for picker display)
 
 	// Right panel: dashboard snapshot
-	network    fs.Network
-	tokens     fs.TokenTotals
-	adminStart string // admin agent's started_at timestamp
+	network            fs.Network
+	tokens             fs.TokenTotals
+	networkSourceSplit fs.TokenSourceSplit
+	adminStart         string // admin agent's started_at timestamp
 
 	// AutoRefresh reflects whether the app-level 1s auto-refresh is enabled.
 	// It only drives the footer hint (a "live" badge); the actual reloading is
@@ -60,6 +62,7 @@ type PropsModel struct {
 	detailByProvider   map[string]fs.TokenTotals
 	detailRecent       []fs.LedgerEntry       // selected main agent recent calls (newest first)
 	detailDaemonRecent []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
+	detailSourceSplit  fs.TokenSourceSplit    // main/daemon/soul call+token split for the selected agent
 	detailContextStats fs.ContextStats
 	detailDaemonCounts fs.DaemonCounts
 	detailMCPNames     []string
@@ -79,13 +82,15 @@ func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 }
 
 type propsLoadMsg struct {
-	network        fs.Network
-	tokens         fs.TokenTotals
-	selectedTokens fs.TokenTotals
-	selectedStatus fs.AgentStatus
-	adminStart     string
-	agentDirs      []string
-	agentNodes     []fs.AgentNode
+	network             fs.Network
+	tokens              fs.TokenTotals
+	networkSourceSplit  fs.TokenSourceSplit
+	selectedTokens      fs.TokenTotals
+	selectedSourceSplit fs.TokenSourceSplit
+	selectedStatus      fs.AgentStatus
+	adminStart          string
+	agentDirs           []string
+	agentNodes          []fs.AgentNode
 }
 
 func (m PropsModel) loadData() tea.Msg {
@@ -98,7 +103,10 @@ func (m PropsModel) loadData() tea.Msg {
 		}
 	}
 	totals := fs.AggregateTokens(dirs)
-	selectedTokens := fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
+	networkSourceSplit := fs.AggregateTokenSourceSplit(dirs, 5)
+	selectedLedgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
+	selectedTokens := fs.SumTokenLedger(selectedLedgerPath)
+	selectedSourceSplit := fs.SumTokenLedgerBySource(selectedLedgerPath, 5)
 	selectedStatus := fs.ReadStatus(m.selectedDir)
 
 	var adminStart string
@@ -116,13 +124,15 @@ func (m PropsModel) loadData() tea.Msg {
 	}
 
 	return propsLoadMsg{
-		network:        net,
-		tokens:         totals,
-		selectedTokens: selectedTokens,
-		selectedStatus: selectedStatus,
-		adminStart:     adminStart,
-		agentDirs:      allDirs,
-		agentNodes:     net.Nodes,
+		network:             net,
+		tokens:              totals,
+		networkSourceSplit:  networkSourceSplit,
+		selectedTokens:      selectedTokens,
+		selectedSourceSplit: selectedSourceSplit,
+		selectedStatus:      selectedStatus,
+		adminStart:          adminStart,
+		agentDirs:           allDirs,
+		agentNodes:          net.Nodes,
 	}
 }
 
@@ -175,7 +185,9 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 	case propsLoadMsg:
 		m.network = msg.network
 		m.tokens = msg.tokens
+		m.networkSourceSplit = msg.networkSourceSplit
 		m.selectedTokens = msg.selectedTokens
+		m.selectedSourceSplit = msg.selectedSourceSplit
 		m.selectedStatus = msg.selectedStatus
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
@@ -241,6 +253,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 func (m *PropsModel) loadDetail() {
 	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
 	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, detailRecentCalls)
+	m.detailSourceSplit = fs.SumTokenLedgerBySource(ledgerPath, 10)
 	// Daemon calls are scoped to the selected agent's own daemon run dirs
 	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
 	// network. Missing ledgers render an empty lane.
@@ -295,7 +308,9 @@ func (m PropsModel) updatePicker(msg tea.KeyPressMsg) (PropsModel, tea.Cmd) {
 	case "enter":
 		if m.pickerIdx < len(m.agentNodes) {
 			m.selectedDir = m.agentNodes[m.pickerIdx].WorkingDir
-			m.selectedTokens = fs.SumTokenLedger(filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl"))
+			ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
+			m.selectedTokens = fs.SumTokenLedger(ledgerPath)
+			m.selectedSourceSplit = fs.SumTokenLedgerBySource(ledgerPath, 5)
 			m.selectedStatus = fs.ReadStatus(m.selectedDir)
 		}
 		m.pickerOpen = false
@@ -635,6 +650,9 @@ func (m PropsModel) renderLeft(maxW int) string {
 		}
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("cached: %s%s", formatComma(m.selectedTokens.Cached), cacheRateStr)))
 		lines = append(lines, "    "+valueStyle.Render(fmt.Sprintf("api_calls: %d", m.selectedTokens.APICalls)))
+		if sourceSplitHasData(m.selectedSourceSplit) {
+			appendSourceSplitSummary(&lines, "    ", m.selectedSourceSplit, valueStyle)
+		}
 	}
 
 	// Admin
@@ -744,6 +762,9 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_api_calls")))
 	lines = append(lines, "")
 	lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(formatComma(m.tokens.APICalls)))
+	if sourceSplitHasData(m.networkSourceSplit) {
+		appendSourceSplitSummary(&lines, "  ", m.networkSourceSplit, valueStyle)
+	}
 
 	// Mail
 	lines = append(lines, "")
@@ -875,6 +896,64 @@ func (m PropsModel) renderDetail() string {
 					valueStyle.Render(tc.Name),
 					formatComma(int64(tc.Calls)),
 					formatComma(int64(tc.Results)),
+				))
+			}
+		}
+		lines = append(lines, "")
+	}
+
+	// Main/daemon source split. Soul is shown separately and excluded from
+	// the main-vs-daemon denominator so reflection cost does not distort
+	// delegation visibility.
+	if calls := sourceSplitCalls(m.detailSourceSplit); calls > 0 || m.detailSourceSplit.Soul.APICalls > 0 {
+		lines = append(lines, "  "+sectionStyle.Render("Main / daemon call split"))
+		lines = append(lines, "")
+		lines = append(lines, "    "+labelStyle.Render("main calls:          ")+
+			valueStyle.Render(formatComma(m.detailSourceSplit.Main.APICalls)))
+		lines = append(lines, "    "+labelStyle.Render("daemon calls:        ")+
+			valueStyle.Render(formatComma(m.detailSourceSplit.Daemon.APICalls)))
+		if calls > 0 {
+			lines = append(lines, "    "+labelStyle.Render("daemon call share:   ")+
+				valueStyle.Render(fmt.Sprintf("%.1f%%", sourceShare(m.detailSourceSplit.Daemon.APICalls, calls))))
+		}
+		mainSpend := sourceTokenSpend(m.detailSourceSplit.Main)
+		daemonSpend := sourceTokenSpend(m.detailSourceSplit.Daemon)
+		spend := mainSpend + daemonSpend
+		lines = append(lines, "    "+labelStyle.Render("main tokens:         ")+
+			valueStyle.Render(formatComma(mainSpend)))
+		lines = append(lines, "    "+labelStyle.Render("daemon tokens:       ")+
+			valueStyle.Render(formatComma(daemonSpend)))
+		if spend > 0 {
+			lines = append(lines, "    "+labelStyle.Render("daemon token share:  ")+
+				valueStyle.Render(fmt.Sprintf("%.1f%%", sourceShare(daemonSpend, spend))))
+		}
+		if m.detailSourceSplit.Soul.APICalls > 0 {
+			lines = append(lines, "    "+labelStyle.Render("soul calls / tokens: ")+
+				valueStyle.Render(fmt.Sprintf("%s / %s",
+					formatComma(m.detailSourceSplit.Soul.APICalls),
+					formatComma(sourceTokenSpend(m.detailSourceSplit.Soul)))))
+		}
+		if len(m.detailSourceSplit.RecentDaemons) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "    "+labelStyle.Render("recent daemon work:"))
+			for _, e := range m.detailSourceSplit.RecentDaemons {
+				ts := e.TS
+				if len(ts) > 16 {
+					ts = ts[:16]
+				}
+				model := e.Model
+				if model == "" {
+					model = "—"
+				}
+				emID := e.EmID
+				if emID == "" {
+					emID = "daemon"
+				}
+				lines = append(lines, fmt.Sprintf("      %s  %-10s  %-30s  tokens:%s",
+					subtleStyle.Render(ts),
+					labelStyle.Render(emID),
+					valueStyle.Render(truncate(model, 30)),
+					formatComma(e.Input+e.Output+e.Thinking),
 				))
 			}
 		}
@@ -1088,6 +1167,41 @@ func utcOffsetLabel(t time.Time) string {
 // shortTS renders token-ledger timestamps for compact /kanban tables.
 func shortTS(ts string) string {
 	return formatKanbanTimestamp(ts)
+}
+
+func sourceSplitHasData(split fs.TokenSourceSplit) bool {
+	return split.Main.APICalls > 0 || split.Daemon.APICalls > 0 || split.Soul.APICalls > 0
+}
+
+func appendSourceSplitSummary(lines *[]string, prefix string, split fs.TokenSourceSplit, valueStyle lipgloss.Style) {
+	calls := sourceSplitCalls(split)
+	*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("main calls: %s", formatComma(split.Main.APICalls))))
+	*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("daemon calls: %s", formatComma(split.Daemon.APICalls))))
+	if calls > 0 {
+		*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("daemon share: %.1f%% of main+daemon calls", sourceShare(split.Daemon.APICalls, calls))))
+	}
+	*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("main tokens: %s", formatComma(sourceTokenSpend(split.Main)))))
+	*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("daemon tokens: %s", formatComma(sourceTokenSpend(split.Daemon)))))
+	if split.Soul.APICalls > 0 {
+		*lines = append(*lines, prefix+valueStyle.Render(fmt.Sprintf("soul calls / tokens: %s / %s",
+			formatComma(split.Soul.APICalls),
+			formatComma(sourceTokenSpend(split.Soul)))))
+	}
+}
+
+func sourceTokenSpend(t fs.TokenTotals) int64 {
+	return t.Input + t.Output + t.Thinking
+}
+
+func sourceSplitCalls(split fs.TokenSourceSplit) int64 {
+	return split.Main.APICalls + split.Daemon.APICalls
+}
+
+func sourceShare(part, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return 100.0 * float64(part) / float64(total)
 }
 
 // renderShareBar returns a small unicode bar (filled + empty cells)

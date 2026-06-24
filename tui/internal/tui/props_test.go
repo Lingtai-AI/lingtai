@@ -375,3 +375,122 @@ func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
 		t.Fatalf("View() detail mode should NOT show callout:\n%s", viewDetail)
 	}
 }
+
+func TestPropsRenderSummaryShowsExplicitSourceSplit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".agent.json"), []byte(`{"agent_name":"alice","address":"alice","state":"ACTIVE","admin":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := PropsModel{
+		selectedDir:    dir,
+		selectedTokens: fs.TokenTotals{Input: 30, Output: 6, Thinking: 4, APICalls: 4},
+		selectedSourceSplit: fs.TokenSourceSplit{
+			Main:   fs.TokenTotals{Input: 10, Output: 2, APICalls: 1},
+			Daemon: fs.TokenTotals{Input: 20, Output: 4, Thinking: 4, APICalls: 2},
+			Soul:   fs.TokenTotals{Input: 3, Output: 1, APICalls: 1},
+		},
+	}
+
+	left := ansi.Strip(m.renderLeft(80))
+	for _, want := range []string{
+		"main calls: 1",
+		"daemon calls: 2",
+		"daemon share: 66.7% of main+daemon calls",
+		"main tokens: 12",
+		"daemon tokens: 28",
+		"soul calls / tokens: 1 / 4",
+	} {
+		if !strings.Contains(left, want) {
+			t.Fatalf("renderLeft missing %q:\n%s", want, left)
+		}
+	}
+
+	m.networkSourceSplit = m.selectedSourceSplit
+	m.tokens = m.selectedTokens
+	right := ansi.Strip(m.renderRight(80))
+	for _, want := range []string{
+		"main calls: 1",
+		"daemon calls: 2",
+		"daemon share: 66.7% of main+daemon calls",
+		"main tokens: 12",
+		"daemon tokens: 28",
+		"soul calls / tokens: 1 / 4",
+	} {
+		if !strings.Contains(right, want) {
+			t.Fatalf("renderRight missing %q:\n%s", want, right)
+		}
+	}
+}
+
+func TestPropsRenderDetailShowsMainDaemonSplit(t *testing.T) {
+	m := PropsModel{
+		detailSourceSplit: fs.TokenSourceSplit{
+			Main: fs.TokenTotals{
+				Input:    100,
+				Output:   20,
+				Thinking: 5,
+				APICalls: 3,
+			},
+			Daemon: fs.TokenTotals{
+				Input:    50,
+				Output:   10,
+				Thinking: 0,
+				APICalls: 2,
+			},
+			Soul: fs.TokenTotals{
+				Input:    7,
+				Output:   1,
+				APICalls: 1,
+			},
+			RecentDaemons: []fs.LedgerEntry{
+				{TS: "2026-06-19T09:05:00Z", Source: "daemon", EmID: "em-2", RunID: "run-2", Model: "daemon-model", Input: 50, Output: 10},
+			},
+		},
+	}
+
+	detail := ansi.Strip(m.renderDetail())
+	for _, want := range []string{
+		"Main / daemon call split",
+		"main calls:",
+		"daemon calls:",
+		"daemon call share:",
+		"main tokens:",
+		"daemon tokens:",
+		"daemon token share:",
+		"soul calls / tokens:",
+		"recent daemon work:",
+		"em-2",
+		"daemon-model",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("renderDetail missing %q:\n%s", want, detail)
+		}
+	}
+
+	// Daemon call share is 2/(3+2) = 40.0%.
+	if !strings.Contains(detail, "40.0%") {
+		t.Fatalf("renderDetail missing daemon call share 40.0%%:\n%s", detail)
+	}
+}
+
+func TestPropsRenderDetailShowsSplitWhenOnlySoul(t *testing.T) {
+	// With no main/daemon calls but non-zero soul, the section still renders
+	// soul, but omits the daemon-only share rows (no division by zero).
+	m := PropsModel{
+		detailSourceSplit: fs.TokenSourceSplit{
+			Soul: fs.TokenTotals{Input: 7, Output: 1, APICalls: 1},
+		},
+	}
+
+	detail := ansi.Strip(m.renderDetail())
+	if !strings.Contains(detail, "Main / daemon call split") {
+		t.Fatalf("renderDetail should show split section for soul-only:\n%s", detail)
+	}
+	if !strings.Contains(detail, "soul calls / tokens:") {
+		t.Fatalf("renderDetail should show soul row:\n%s", detail)
+	}
+	if strings.Contains(detail, "daemon call share:") {
+		t.Fatalf("renderDetail should omit daemon call share when no main/daemon calls:\n%s", detail)
+	}
+}

@@ -429,6 +429,17 @@ type TokenTotals struct {
 	APICalls int64
 }
 
+// TokenSourceSplit groups token usage by the ledger `source` tag. Main is the
+// foreground agent loop (including legacy entries with no source, plus heal and
+// notification_sync recovery/sync calls); Daemon is delegated work; Soul is
+// shown separately so reflection cost does not inflate the main-vs-daemon ratio.
+type TokenSourceSplit struct {
+	Main          TokenTotals
+	Daemon        TokenTotals
+	Soul          TokenTotals
+	RecentDaemons []LedgerEntry
+}
+
 // AggregateTokens sums token usage from logs/token_ledger.jsonl across all given agent directories.
 // Skips agents whose ledger is missing or unreadable.
 func AggregateTokens(dirs []string) TokenTotals {
@@ -442,6 +453,83 @@ func AggregateTokens(dirs []string) TokenTotals {
 		t.APICalls += ledger.APICalls
 	}
 	return t
+}
+
+// AggregateTokenSourceSplit sums source-grouped usage from token ledgers across agents.
+func AggregateTokenSourceSplit(dirs []string, recentDaemonN int) TokenSourceSplit {
+	var split TokenSourceSplit
+	for _, dir := range dirs {
+		part := SumTokenLedgerBySource(filepath.Join(dir, "logs", "token_ledger.jsonl"), recentDaemonN)
+		split.Main = addTokenTotals(split.Main, part.Main)
+		split.Daemon = addTokenTotals(split.Daemon, part.Daemon)
+		split.Soul = addTokenTotals(split.Soul, part.Soul)
+		split.RecentDaemons = append(split.RecentDaemons, part.RecentDaemons...)
+	}
+	sort.Slice(split.RecentDaemons, func(i, j int) bool {
+		return split.RecentDaemons[i].TS > split.RecentDaemons[j].TS
+	})
+	if recentDaemonN > 0 && len(split.RecentDaemons) > recentDaemonN {
+		split.RecentDaemons = split.RecentDaemons[:recentDaemonN]
+	}
+	return split
+}
+
+func addTokenTotals(a, b TokenTotals) TokenTotals {
+	a.Input += b.Input
+	a.Output += b.Output
+	a.Thinking += b.Thinking
+	a.Cached += b.Cached
+	a.APICalls += b.APICalls
+	return a
+}
+
+func tokenTotalsFromEntry(entry LedgerEntry) TokenTotals {
+	return TokenTotals{
+		Input:    entry.Input,
+		Output:   entry.Output,
+		Thinking: entry.Thinking,
+		Cached:   entry.Cached,
+		APICalls: 1,
+	}
+}
+
+// SumTokenLedgerBySource reads a token_ledger.jsonl file and groups calls by
+// execution source. The main-vs-daemon ratio treats daemon entries as delegated
+// work, soul entries as reflection cost, and all other/legacy sources as main.
+func SumTokenLedgerBySource(path string, recentDaemonN int) TokenSourceSplit {
+	var split TokenSourceSplit
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return split
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry LedgerEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		t := tokenTotalsFromEntry(entry)
+		switch strings.ToLower(entry.Source) {
+		case "daemon":
+			split.Daemon = addTokenTotals(split.Daemon, t)
+			split.RecentDaemons = append(split.RecentDaemons, entry)
+		case "soul":
+			split.Soul = addTokenTotals(split.Soul, t)
+		default:
+			split.Main = addTokenTotals(split.Main, t)
+		}
+	}
+	// Keep newest daemon entries first, matching SumTokenLedgerByProvider.
+	if recentDaemonN > 0 && len(split.RecentDaemons) > recentDaemonN {
+		split.RecentDaemons = split.RecentDaemons[len(split.RecentDaemons)-recentDaemonN:]
+	}
+	for i, j := 0, len(split.RecentDaemons)-1; i < j; i, j = i+1, j-1 {
+		split.RecentDaemons[i], split.RecentDaemons[j] = split.RecentDaemons[j], split.RecentDaemons[i]
+	}
+	return split
 }
 
 // SumTokenLedger reads a token_ledger.jsonl file and sums main-agent entries.
