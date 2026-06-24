@@ -252,7 +252,11 @@ With the TUI's runtime venv:
     -p ~/.lingtai-tui/runtime/venv
 ```
 
-Changes to the kernel source are reflected immediately in the running agent — no rebuild needed (editable install).
+Kernel source changes need no binary rebuild in editable mode, but they are live
+only in the checkout/package the agent actually imports. After a merge in another
+worktree, first identify the runtime import path and git HEAD, fast-forward or
+editable-reinstall that source if needed, then `refresh` and verify with an
+in-situ probe. See `reference/runtime-self-check/SKILL.md` for the checklist.
 
 ### Auto-upgrader gotcha
 

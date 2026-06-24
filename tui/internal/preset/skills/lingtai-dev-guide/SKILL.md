@@ -34,6 +34,11 @@ stays short on purpose; the detailed procedures live under `reference/<topic>/`.
   TUI-created project venv; do not present bare `pip install/upgrade lingtai` as
   the standard user path. Use manual pip/venv commands only for developer,
   diagnostic, or verification contexts.
+- **Patch-to-self refresh rule:** a merged PR or rebuilt checkout is not live in
+  the agent until the runtime-imported source/package is updated, the agent is
+  refreshed, and a live in-situ probe confirms the new behaviour. For kernel
+  fixes, always identify the actual import path and git HEAD first; do not
+  assume the repo you edited is the one this agent imports.
 
 ## Nested reference catalog
 

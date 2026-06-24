@@ -24,6 +24,48 @@ the post-refresh "which runtime am I executing?" probe. Use it after a
 MCP/addon config change — and any time a fix "should be live" but behaviour
 disagrees.
 
+## Patch-to-self checklist — merged PR ≠ live runtime
+
+When you want to test a kernel/TUI fix on the agent you are currently speaking
+through, do **all** of these steps. This is the in-situ path; skipping step 1 is
+how agents repeatedly refresh stale code and conclude the fix failed.
+
+1. **Find the runtime import path.** Use the runtime venv Python, not `python` on
+   PATH, and print `lingtai` / `lingtai_kernel` `__file__`, package metadata, and
+   the nearest git checkout.
+2. **Compare HEADs.** If the running agent imports `/B/lingtai-kernel` but your
+   PR was merged in `/A/lingtai-kernel`, update `/B` (`git fetch origin main &&
+   git pull --ff-only origin main`) or reinstall the intended checkout into the
+   runtime venv. Do not edit protected dirty checkouts; stop and report if
+   fast-forward is not clean.
+3. **Refresh only after the imported source/package is right.** `refresh`
+   reloads from the configured runtime environment; it does not fetch or
+   fast-forward a source tree for you.
+4. **Do an in-situ probe.** Verify the live behaviour or metadata changed on the
+   current agent itself — for example a tool result `_meta`, a token-ledger
+   field, or another direct observable. Source greps and import probes are
+   necessary but not sufficient.
+5. **Report evidence.** Include runtime Python, import path, old/new HEAD, action
+   taken (fast-forward/editable reinstall/rebuild), refresh result, and the live
+   probe.
+
+Minimal kernel probe:
+
+```bash
+VENV_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
+"$VENV_PY" - <<'PY'
+import inspect, importlib.metadata as md
+import lingtai_kernel
+print('python:', __import__('sys').executable)
+print('lingtai_kernel:', lingtai_kernel.__file__)
+try:
+    print('dist:', md.version('lingtai-kernel'))
+    print('direct_url:', md.distribution('lingtai-kernel').read_text('direct_url.json') or '<none>')
+except Exception as e:
+    print('dist metadata:', repr(e))
+PY
+```
+
 ## Core principle
 
 This is a **read-only diagnostic**. Probe, confirm, and report. The only write
@@ -158,6 +200,9 @@ preset/path mismatches, see `reference/debug-troubleshoot/SKILL.md`.
 
 After a `refresh`, walk this list before trusting new behaviour:
 
+- [ ] Patch-to-self: if testing a merged PR on this agent, the imported
+  source/package was updated before refresh, and an in-situ live probe confirms
+  the new behaviour.
 - [ ] §1 import probe: `lingtai.__file__` resolves where you expect (editable vs wheel).
 - [ ] §1 git HEAD of the imported checkout matches the intended commit; tree state noted.
 - [ ] §2 active binary resolves to the expected path; version string matches dev/brew expectation.
