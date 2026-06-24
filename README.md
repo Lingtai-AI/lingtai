@@ -196,6 +196,7 @@ lingtai-tui                          # open the TUI in the current project
 lingtai-tui list [--detailed] [--admin] <project>  # contact-book view of running agents; marks main agents
 lingtai-tui spawn <dir> --preset <name> [--agent-name <name>]
 lingtai-tui bootstrap                # re-extract bundled skills/utilities
+lingtai-tui self-update             # update the TUI binary for the detected install method
 lingtai-tui doctor                   # repair/update TUI runtime
 ```
 
@@ -270,6 +271,8 @@ brew upgrade lingtai-ai/lingtai/lingtai-tui
 ```
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
+
+You can also run `lingtai-tui self-update` to update the TUI binary through the detected install method. At this stage it updates Homebrew installs; source/user-local and unknown installs stop with guidance instead of running `brew`.
 
 First-time install problems (missing `brew`, WSL/Ubuntu/Debian prerequisites, source-build failures) are covered up top in [First-time install troubleshooting](#first-time-install-troubleshooting).
 

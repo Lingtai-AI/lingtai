@@ -73,6 +73,8 @@ project/
 
 > PyPI 之 `lingtai` 包固在，然其为 TUI 代管之 Python 运行时。安装、升级宜用 Homebrew；唯开发或诊断内核时，乃用 `pip`。
 
+> 欲手动更新 TUI，可行 `lingtai-tui self-update`；其先辨装法，Homebrew 则自更，`source/user-local` 与 `unknown/other` 则止而示指引。
+
 > `doctor` 亦辨 TUI 之装法：`homebrew`、`source/user-local`、`unknown/other`。非 Homebrew 者，不妄行 `brew`，但示手动更新之路。
 
 > 大陆网络之镜像、stale tap、源码编译诸细，详见 [README.zh 安装详解](README.zh.md#安装详解)。

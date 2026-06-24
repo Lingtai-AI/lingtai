@@ -157,6 +157,7 @@ lingtai-tui                          # 在当前项目打开 TUI
 lingtai-tui list [--detailed] [--admin] <project>  # 以通讯簿视图列出在线助理，并标出主 agent
 lingtai-tui spawn <dir> --preset <name> [--agent-name <name>]
 lingtai-tui bootstrap                # 重新展开自带技能/工具
+lingtai-tui self-update             # 按检测到的安装方式升级 TUI 二进制
 lingtai-tui doctor                   # 修复/升级 TUI 运行时
 ```
 
@@ -225,6 +226,8 @@ brew upgrade lingtai-ai/lingtai/lingtai-tui
 ```
 
 升级完后重启 TUI，让新的二进制接管。Python 运行时由 TUI 在 `~/.lingtai-tui/runtime/venv/` 下统一管理——往系统 Python 里 `pip install lingtai` 不会影响在运行的项目。
+
+也可以运行 `lingtai-tui self-update`，让 TUI 按检测到的安装方式升级自己的二进制。在当前阶段它会升级 Homebrew 安装；源码/用户本地安装和未知安装会停下并给出指引，而不会运行 `brew`。
 
 <details>
 <summary><b>首次安装？先装 Homebrew</b></summary>
