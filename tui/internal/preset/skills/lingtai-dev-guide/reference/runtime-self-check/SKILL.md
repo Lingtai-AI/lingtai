@@ -9,7 +9,7 @@ description: >
   evidence safely with secrets redacted. Includes verifying that long-lived
   runtime objects (services/adapters/caches) were actually rebuilt after a
   refresh, not just that new source is imported.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Runtime Self-Check
@@ -168,6 +168,49 @@ If `/opt/homebrew/bin/lingtai-{tui,portal}` are dev-mode symlinks into the
 checkout, each `make build` is picked up immediately — no `brew reinstall`. If
 they are real binaries, re-link them (see the setup reference) before expecting
 rebuilds to take effect.
+
+### Verify the rebuild actually landed on PATH (don't trust `make dev`/`--version` alone)
+
+`make dev` succeeding and `lingtai-tui --version` printing a fresh-looking
+`-N-gSHORTSHA` do **not** prove the binary your shell runs is the one you just
+built. On a machine with many worktrees, `/opt/homebrew/bin/lingtai-{tui,portal}`
+often symlink into *some other* worktree's `tui/bin/lingtai-tui`, so building in
+your worktree leaves PATH pointing at a stale binary — and `--version` can read
+the same string from either build. Confirm the link target, the source commit,
+and the binary mtime explicitly:
+
+```bash
+# What does PATH actually resolve to, and where does the symlink point?
+which lingtai-tui
+readlink "$(which lingtai-tui)"          # the immediate symlink target
+readlink -f "$(which lingtai-tui)"       # fully resolved path — which worktree's bin?
+readlink -f "$(which lingtai)"           # same check for the `lingtai` launcher
+
+# Is that the worktree you just built in? Compare to your build output path:
+ls -l "$REPO/tui/bin/lingtai-tui"        # mtime should be seconds-fresh after make
+stat -f '%m %N' "$(readlink -f "$(which lingtai-tui)")"   # mtime of the on-PATH binary
+
+# Source commit the on-PATH binary was built from (must match $REPO's HEAD):
+lingtai-tui --version                    # vX.Y.Z-N-gSHORTSHA — compare SHA to:
+git -C "$REPO" rev-parse --short HEAD
+```
+
+If `readlink -f` resolves into a *different* worktree than `$REPO`, your build
+did not reach PATH. Either re-link `/opt/homebrew/bin/lingtai-{tui,portal}` to
+`$REPO/tui/bin/lingtai-tui` (and the portal equivalent), or build in the
+worktree that the symlink already targets — then re-run the checks above and
+confirm SHA, mtime, and resolved path all agree before trusting the binary.
+
+**Worktree caveat — never strand the PATH symlink.** When you rebuild from a
+clean worktree *because the primary checkout is dirty*, the `/opt` symlink may
+already point into yet another worktree (the one whose binary is currently
+live). Before removing or re-linking anything: (a) run `readlink -f` on both
+`/opt/homebrew/bin/lingtai-tui` and `…/lingtai` to learn which worktree they
+target; (b) ensure `/opt` points at *your* rebuilt `tui/bin/lingtai-tui`, or
+clearly report that it still points elsewhere; and (c) **do not `git worktree
+remove` a worktree that the PATH symlink targets** — that leaves a dangling
+`/opt` link and a broken `lingtai-tui` on PATH. Clean up such a worktree only
+after re-linking `/opt` to a surviving build.
 
 ## 4. MCP / addon source and tool-surface check
 
