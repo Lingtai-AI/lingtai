@@ -1315,6 +1315,12 @@ func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenSt
 	lines = append(lines, "")
 	lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
 		valueStyle.Render(fmt.Sprintf("%d", stats.APICalls)))
+	lines = append(lines, "    "+labelStyle.Render("tokens:                    ")+
+		valueStyle.Render(formatComma(tokens)))
+	lines = append(lines, "    "+labelStyle.Render("input / output / thinking: ")+
+		valueStyle.Render(fmt.Sprintf("%s / %s / %s", formatComma(stats.Input), formatComma(stats.Output), formatComma(stats.Thinking))))
+	lines = append(lines, "    "+labelStyle.Render("cached / missed:           ")+
+		valueStyle.Render(fmt.Sprintf("%s / %s", formatComma(stats.Cached), formatComma(cacheMiss(stats.Cached, stats.Input)))))
 	lines = append(lines, "    "+labelStyle.Render("cache hit rate:            ")+
 		valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
 	lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
