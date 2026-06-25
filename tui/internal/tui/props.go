@@ -60,6 +60,7 @@ type PropsModel struct {
 	detailByProvider   map[string]fs.TokenTotals
 	detailRecent       []fs.LedgerEntry       // selected main agent recent calls (newest first)
 	detailDaemonRecent []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
+	detailSessionStats fs.SessionTokenStats
 	detailContextStats fs.ContextStats
 	detailDaemonCounts fs.DaemonCounts
 	detailMCPNames     []string
@@ -241,6 +242,11 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 func (m *PropsModel) loadDetail() {
 	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
 	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, detailRecentCalls)
+	m.detailSessionStats = fs.SessionTokenStats{}
+	if m.selectedStatus.Runtime.UptimeSeconds > 0 {
+		since := time.Now().Add(-time.Duration(m.selectedStatus.Runtime.UptimeSeconds * float64(time.Second)))
+		m.detailSessionStats = fs.SumSessionTokenLedgerSince(ledgerPath, since)
+	}
 	// Daemon calls are scoped to the selected agent's own daemon run dirs
 	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
 	// network. Missing ledgers render an empty lane.
@@ -854,6 +860,25 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
+	// Current process-session API/cache statistics.
+	if m.detailSessionStats.APICalls > 0 {
+		stats := m.detailSessionStats
+		tokens := stats.Input + stats.Output + stats.Thinking
+		lines = append(lines, "  "+sectionStyle.Render("Current session API"))
+		lines = append(lines, "")
+		lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
+			valueStyle.Render(fmt.Sprintf("%d", stats.APICalls)))
+		lines = append(lines, "    "+labelStyle.Render("cache hit rate:            ")+
+			valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
+		lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
+			valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
+		if stats.HasCodexRequestMode {
+			lines = append(lines, "    "+labelStyle.Render("ws_full / ws_incremental:  ")+
+				valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexWSFull, stats.CodexWSIncremental)))
+		}
+		lines = append(lines, "")
+	}
+
 	// Current retained context statistics.
 	if m.detailContextStats.Entries > 0 {
 		stats := m.detailContextStats
@@ -1027,6 +1052,13 @@ func (m PropsModel) renderDaemonCallRows() []string {
 		lines = append(lines, valueStyle.Render(line))
 	}
 	return lines
+}
+
+func avgPerCall(tokens, calls int64) int64 {
+	if calls <= 0 {
+		return 0
+	}
+	return (tokens + calls/2) / calls
 }
 
 func formatCacheRate(cached, input int64) string {

@@ -429,6 +429,15 @@ type TokenTotals struct {
 	APICalls int64
 }
 
+// SessionTokenStats holds token/cache statistics for the currently running
+// agent session (bounded by the live runtime uptime when available).
+type SessionTokenStats struct {
+	TokenTotals
+	HasCodexRequestMode bool
+	CodexWSFull         int64
+	CodexWSIncremental  int64
+}
+
 // AggregateTokens sums token usage from logs/token_ledger.jsonl across all given agent directories.
 // Skips agents whose ledger is missing or unreadable.
 func AggregateTokens(dirs []string) TokenTotals {
@@ -525,16 +534,17 @@ func storeTokenLedgerTotals(path string, info os.FileInfo, totals TokenTotals) {
 // agent calls from historical daemon rows that were mirrored into parent
 // ledgers.
 type LedgerEntry struct {
-	TS       string `json:"ts"`
-	Input    int64  `json:"input"`
-	Output   int64  `json:"output"`
-	Thinking int64  `json:"thinking"`
-	Cached   int64  `json:"cached"`
-	Model    string `json:"model,omitempty"`
-	Endpoint string `json:"endpoint,omitempty"`
-	Source   string `json:"source,omitempty"`
-	EmID     string `json:"em_id,omitempty"`
-	RunID    string `json:"run_id,omitempty"`
+	TS               string `json:"ts"`
+	Input            int64  `json:"input"`
+	Output           int64  `json:"output"`
+	Thinking         int64  `json:"thinking"`
+	Cached           int64  `json:"cached"`
+	Model            string `json:"model,omitempty"`
+	Endpoint         string `json:"endpoint,omitempty"`
+	Source           string `json:"source,omitempty"`
+	EmID             string `json:"em_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	CodexRequestMode string `json:"codex_request_mode,omitempty"`
 }
 
 // SumTokenLedgerByProvider reads a token_ledger.jsonl, groups main-agent
@@ -581,6 +591,51 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 		recent[i], recent[j] = recent[j], recent[i]
 	}
 	return byProvider, recent
+}
+
+// SumSessionTokenLedgerSince reads a token_ledger.jsonl file and sums
+// non-daemon entries whose timestamps are within the current process session.
+// The caller supplies the session cutoff (usually now - runtime uptime). Rows
+// with malformed timestamps are skipped when a cutoff is present so stale
+// historical rows cannot leak into the "current session" view.
+func SumSessionTokenLedgerSince(path string, since time.Time) SessionTokenStats {
+	var stats SessionTokenStats
+	_ = forEachJSONLLine(path, func(line []byte) {
+		var entry LedgerEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return
+		}
+		if isDaemonLedgerEntry(entry) {
+			return
+		}
+		if !since.IsZero() {
+			ts, err := time.Parse(time.RFC3339, entry.TS)
+			if err != nil || ts.Before(since) {
+				return
+			}
+		}
+		stats.Input += entry.Input
+		stats.Output += entry.Output
+		stats.Thinking += entry.Thinking
+		stats.Cached += entry.Cached
+		stats.APICalls++
+
+		switch strings.ToLower(strings.TrimSpace(entry.CodexRequestMode)) {
+		case "ws_full":
+			stats.HasCodexRequestMode = true
+			stats.CodexWSFull++
+		case "ws_incremental", "ws_increment":
+			stats.HasCodexRequestMode = true
+			stats.CodexWSIncremental++
+		case "":
+			// Non-Codex or older rows.
+		default:
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(entry.CodexRequestMode)), "ws_") {
+				stats.HasCodexRequestMode = true
+			}
+		}
+	})
+	return stats
 }
 
 func isDaemonLedgerEntry(entry LedgerEntry) bool {
