@@ -485,3 +485,27 @@ func TestSumTokenLedgerByProviderBoundsRecent(t *testing.T) {
 		t.Fatalf("byProvider = %#v, want all provider totals", byProvider)
 	}
 }
+
+func TestSumSessionTokenLedgerSinceCountsCurrentCodexRows(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "token_ledger.jsonl")
+	writeLines(t, ledgerPath, []string{
+		`{"ts":"2026-06-20T02:59:59Z","input":100,"output":10,"cached":50,"model":"old","codex_request_mode":"ws_full"}`,
+		`{"source":"daemon","ts":"2026-06-20T03:00:01Z","input":200,"output":20,"cached":100,"model":"daemon","codex_request_mode":"ws_incremental"}`,
+		`{"ts":"2026-06-20T03:00:02Z","input":10,"output":2,"thinking":1,"cached":4,"model":"gpt-5.5","codex_request_mode":"ws_full"}`,
+		`{"source":"main","ts":"2026-06-20T03:00:03Z","input":30,"output":3,"thinking":2,"cached":15,"model":"gpt-5.5","codex_request_mode":"ws_incremental"}`,
+		`{"source":"tc_wake","ts":"2026-06-20T03:00:04Z","input":5,"output":1,"cached":0,"model":"gpt-5.5"}`,
+	})
+
+	since := time.Date(2026, 6, 20, 3, 0, 0, 0, time.UTC)
+	stats := SumSessionTokenLedgerSince(ledgerPath, since)
+	if stats.APICalls != 3 {
+		t.Fatalf("APICalls = %d, want 3", stats.APICalls)
+	}
+	if stats.Input != 45 || stats.Output != 6 || stats.Thinking != 3 || stats.Cached != 19 {
+		t.Fatalf("stats = %+v, want input/output/thinking/cached 45/6/3/19", stats)
+	}
+	if !stats.HasCodexRequestMode || stats.CodexWSFull != 1 || stats.CodexWSIncremental != 1 {
+		t.Fatalf("codex mode counts = has:%v full:%d incremental:%d, want true 1 1", stats.HasCodexRequestMode, stats.CodexWSFull, stats.CodexWSIncremental)
+	}
+}
