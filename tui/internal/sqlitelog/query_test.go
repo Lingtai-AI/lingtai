@@ -657,3 +657,123 @@ func TestQueryMoltSessionWindowsEmpty(t *testing.T) {
 		t.Fatalf("expected zero windows, got current=%v lastSince=%v lastBefore=%v", current, lastSince, lastBefore)
 	}
 }
+
+func TestStreamSessionEventsFiltersRelevantRows(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json) VALUES
+			(1.0, 'heartbeat', '{}'),
+			(2.0, 'text_input', '{"message":"hello"}'),
+			(3.0, 'notification_pair_injected', '{"message":"note"}'),
+			(4.0, 'aed_attempt', '{"error":"boom"}');
+	`)
+	var rows []SessionEventRow
+	err := StreamSessionEvents(agentDir, func(row SessionEventRow) error {
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamSessionEvents error: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 relevant rows, got %d", len(rows))
+	}
+	if rows[0].Type != "text_input" || rows[1].Type != "notification_pair_injected" || rows[2].Type != "aed_attempt" {
+		t.Fatalf("unexpected row order/types: %#v", rows)
+	}
+}
+
+func TestQueryErrorEventsNewestFirst(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json) VALUES
+			(1.0, 'aed_attempt', '{"error":"old"}'),
+			(2.0, 'aed_attempt', '{"error":""}'),
+			(3.0, 'refresh_init_error', '{"error":"new"}'),
+			(4.0, 'text_output', '{"error":"ignored"}');
+	`)
+	rows, err := QueryErrorEvents(agentDir)
+	if err != nil {
+		t.Fatalf("QueryErrorEvents error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 non-empty error rows, got %d", len(rows))
+	}
+	if rows[0].Error != "new" || rows[1].Error != "old" {
+		t.Fatalf("unexpected errors: %#v", rows)
+	}
+}
+
+func TestHasTUIClearCompletionEventUsesOffsetAndSource(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
+			(1.0, 'psyche_molt', '{"source":"human"}', 10),
+			(2.0, 'text_output', '{"source":"tui"}', 20),
+			(3.0, 'clear_received', '{"source":"tui"}', 30);
+	`)
+	ok, err := HasTUIClearCompletionEvent(agentDir, 25)
+	if err != nil {
+		t.Fatalf("HasTUIClearCompletionEvent error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected TUI clear completion after offset")
+	}
+	ok, err = HasTUIClearCompletionEvent(agentDir, 35)
+	if err != nil {
+		t.Fatalf("HasTUIClearCompletionEvent error: %v", err)
+	}
+	if ok {
+		t.Fatalf("did not expect completion before offset")
+	}
+}
+
+func TestEventsIndexCoversJSONLRequiresFullCoverage(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
+			(1.0, 'text_input', '{"message":"early"}', 0),
+			(2.0, 'text_output', '{"message":"late"}', 20);
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	if !coverage.StartsAtBeginning() || !coverage.TailNearEOF() {
+		t.Fatalf("expected complete index coverage: %#v", coverage)
+	}
+
+	agentDir = makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
+			(1.0, 'text_input', '{"message":"late only"}', 8192);
+	`)
+	logsDir = filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 16384)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err = QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	if coverage.StartsAtBeginning() && coverage.TailNearEOF() {
+		t.Fatalf("did not expect partial tail-only coverage: %#v", coverage)
+	}
+}
+
+func TestEventsIndexCoversJSONLDetectsSmallFileTailGap(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
+			(1.0, 'text_input', '{"message":"early only"}', 0);
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 1024*1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	if coverage.StartsAtBeginning() && coverage.TailNearEOF() {
+		t.Fatalf("did not expect coverage when a small file has a large unindexed tail: %#v", coverage)
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
+	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
 // tuiVersion is set once at startup by main via SetTUIVersion.
@@ -421,6 +422,10 @@ type logEvent struct {
 // findLastAPIError scans events.jsonl for the most recent aed_attempt,
 // aed_exhausted, or refresh_init_error event and returns the error string.
 func findLastAPIError(orchDir string) string {
+	if rows, err := sqlitelog.QueryErrorEvents(orchDir); err == nil && len(rows) > 0 {
+		return rows[0].Error
+	}
+
 	logPath := filepath.Join(orchDir, "logs", "events.jsonl")
 	f, err := os.Open(logPath)
 	if err != nil {

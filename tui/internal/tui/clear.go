@@ -1,14 +1,17 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
 const clearSourceTUI = "tui"
@@ -196,25 +199,47 @@ func eventLogOffset(dir string) int64 {
 }
 
 func hasTUIClearCompletionEvent(dir string, offset int64) bool {
-	data, err := os.ReadFile(filepath.Join(dir, "logs", "events.jsonl"))
+	if ok, err := sqlitelog.HasTUIClearCompletionEvent(dir, offset); err == nil && ok {
+		return true
+	}
+
+	path := filepath.Join(dir, "logs", "events.jsonl")
+	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
-	if offset < 0 || offset > int64(len(data)) {
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	if offset < 0 || offset > info.Size() {
 		offset = 0
 	}
-	for _, line := range bytes.Split(data[offset:], []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return false
+	}
+	reader := bufio.NewReader(f)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			line = bytes.TrimSpace(line)
+			if len(line) > 0 {
+				var event map[string]interface{}
+				if err := json.Unmarshal(line, &event); err == nil {
+					eventType, _ := event["type"].(string)
+					source, _ := event["source"].(string)
+					if source == clearSourceTUI && (eventType == "psyche_molt" || eventType == "clear_received") {
+						return true
+					}
+				}
+			}
 		}
-		var event map[string]interface{}
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
+		if readErr == io.EOF {
+			break
 		}
-		eventType, _ := event["type"].(string)
-		source, _ := event["source"].(string)
-		if source == clearSourceTUI && (eventType == "psyche_molt" || eventType == "clear_received") {
-			return true
+		if readErr != nil {
+			break
 		}
 	}
 	return false

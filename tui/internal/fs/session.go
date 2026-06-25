@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
 // SessionEntry is the JSON-serializable entry stored in session.jsonl.
@@ -126,7 +128,9 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	// Ingest everything from offset 0. Uses the unlocked helpers — we already
 	// hold sc.mu and the helpers must not re-lock (non-reentrant mutex).
 	sc.ingestMail(cache, humanAddr, orchDir, orchName)
-	sc.IngestEvents(orchDir)
+	if !sc.ingestEventsFromSQLite(orchDir) {
+		sc.IngestEvents(orchDir)
+	}
 	sc.IngestInquiries(orchDir)
 
 	sc.rebuilding = false
@@ -309,8 +313,8 @@ func splitLast(s, sep string) string {
 // ---------------------------------------------------------------------------
 
 // IngestEvents tails the orchestrator's events.jsonl from the last-read offset,
-// converting new entries to SessionEntry. ALL event types are ingested — verbose
-// filtering happens at render time.
+// converting new entries to SessionEntry. The parser keeps every
+// session-recognized event type; verbose filtering happens at render time.
 //
 // Also refreshes the soul_flow voice index BEFORE parsing events so
 // fresh consultation_fire entries can be inflated with voice text on
@@ -337,6 +341,45 @@ func (sc *SessionCache) IngestEvents(orchDir string) {
 		sc.maybeInflateSoulFlow(&sc.entries[i])
 	}
 	sc.append(newEntries...)
+}
+
+func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
+	if orchDir == "" {
+		return false
+	}
+	coverage, err := sqlitelog.QueryEventsIndexCoverage(orchDir)
+	if err != nil || !coverage.HasRows() || !coverage.TailNearEOF() {
+		return false
+	}
+	sc.ingestSoulFlowVoices(orchDir)
+	newEntries := make([]SessionEntry, 0)
+	if !coverage.StartsAtBeginning() {
+		eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+		prefixEntries, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
+		newEntries = append(newEntries, prefixEntries...)
+	}
+	seenRows := 0
+	err = sqlitelog.StreamSessionEvents(orchDir, func(row sqlitelog.SessionEventRow) error {
+		seenRows++
+		if entry := parseSQLiteEvent(row); entry != nil {
+			newEntries = append(newEntries, *entry)
+		}
+		return nil
+	})
+	if err != nil {
+		return false
+	}
+	if seenRows == 0 && fileSize(filepath.Join(orchDir, "logs", "events.jsonl")) > 0 {
+		return false
+	}
+	for i := range newEntries {
+		sc.maybeInflateSoulFlow(&newEntries[i])
+	}
+	for i := range sc.entries {
+		sc.maybeInflateSoulFlow(&sc.entries[i])
+	}
+	sc.append(newEntries...)
+	return true
 }
 
 // ingestSoulFlowVoices tails soul_flow.jsonl from the last-read offset
@@ -446,6 +489,56 @@ func (sc *SessionCache) maybeInflateSoulFlow(e *SessionEntry) {
 // complete line (terminated by \n), and returns new SessionEntry values plus the
 // updated offset. Lines without a trailing \n (partial writes at EOF) are NOT
 // consumed — they will be retried on the next poll.
+func (sc *SessionCache) tailJSONLRange(path string, offset, end int64, parseFn func([]byte) *SessionEntry) ([]SessionEntry, int64) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, offset
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, offset
+	}
+	if offset < 0 || offset > info.Size() {
+		offset = 0
+	}
+	if end < offset {
+		end = offset
+	}
+	if end > info.Size() {
+		end = info.Size()
+	}
+	if end == offset {
+		return nil, offset
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset
+	}
+	data, err := io.ReadAll(io.LimitReader(f, end-offset))
+	if err != nil {
+		return nil, offset
+	}
+	var entries []SessionEntry
+	consumed := int64(0)
+	for len(data) > 0 {
+		idx := bytes.IndexByte(data, '\n')
+		if idx < 0 {
+			break
+		}
+		line := data[:idx]
+		data = data[idx+1:]
+		consumed += int64(idx) + 1
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 {
+			continue
+		}
+		if e := parseFn(line); e != nil {
+			entries = append(entries, *e)
+		}
+	}
+	return entries, offset + consumed
+}
+
 func (sc *SessionCache) tailJSONL(path string, offset int64, parseFn func([]byte) *SessionEntry) ([]SessionEntry, int64) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -507,6 +600,25 @@ func parseEvent(line []byte) *SessionEntry {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil
 	}
+	return parseEventMap(raw)
+}
+
+func parseSQLiteEvent(row sqlitelog.SessionEventRow) *SessionEntry {
+	var raw map[string]interface{}
+	if row.FieldsJSON != "" {
+		if err := json.Unmarshal([]byte(row.FieldsJSON), &raw); err != nil {
+			return nil
+		}
+	}
+	if raw == nil {
+		raw = make(map[string]interface{})
+	}
+	raw["type"] = row.Type
+	raw["ts"] = row.TS
+	return parseEventMap(raw)
+}
+
+func parseEventMap(raw map[string]interface{}) *SessionEntry {
 	eventType, _ := raw["type"].(string)
 
 	// Promote consultation_fire from a raw event to a first-class

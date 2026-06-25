@@ -3,6 +3,7 @@ package fs
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -91,8 +92,8 @@ func TestIngestMailWatermarkSkipsOldMail(t *testing.T) {
 	cache := MailCache{
 		seen: map[string]int{},
 		Messages: []MailMessage{
-			{From: "human", ReceivedAt: "2026-04-07T00:00:00Z", Message: "old"},   // below watermark — should skip
-			{From: "human", ReceivedAt: "2026-04-11T00:00:00Z", Message: "new"},   // above watermark — should ingest
+			{From: "human", ReceivedAt: "2026-04-07T00:00:00Z", Message: "old"}, // below watermark — should skip
+			{From: "human", ReceivedAt: "2026-04-11T00:00:00Z", Message: "new"}, // above watermark — should ingest
 		},
 	}
 
@@ -105,5 +106,50 @@ func TestIngestMailWatermarkSkipsOldMail(t *testing.T) {
 	}
 	if sc.lastMailTs != "2026-04-11T00:00:00Z" {
 		t.Fatalf("watermark not advanced: got %q", sc.lastMailTs)
+	}
+}
+
+func TestRefreshDoesNotReingestSQLiteHistory(t *testing.T) {
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	tmp := t.TempDir()
+	humanDir := filepath.Join(tmp, "human")
+	orchDir := filepath.Join(tmp, "orch")
+	logsDir := filepath.Join(orchDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventLine := []byte(`{"type":"text_input","ts":1.0,"text":"hello from sqlite"}` + "\n")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), eventLine, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	createSQL := `
+		CREATE TABLE events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts REAL NOT NULL,
+			type TEXT NOT NULL,
+			fields_json TEXT NOT NULL DEFAULT '{}',
+			source_offset INTEGER
+		);
+		INSERT INTO events (ts, type, fields_json, source_offset)
+		VALUES (1.0, 'text_input', '{"text":"hello from sqlite"}', 0);
+	`
+	cmd := exec.Command(sqliteBin, filepath.Join(logsDir, "log.sqlite"), createSQL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("sqlite3 setup failed: %v\n%s", err, out)
+	}
+
+	sc := NewSessionCache(humanDir, tmp)
+	cache := NewMailCache(humanDir).Refresh()
+	sc.RebuildFromSources(cache, "human", orchDir, "orch")
+	if got := sc.Len(); got != 1 {
+		t.Fatalf("after rebuild: expected 1 entry, got %d", got)
+	}
+	sc.Refresh(cache, "human", orchDir, "orch")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	if got := sc.Len(); got != 1 {
+		t.Fatalf("refresh duplicated SQLite history: expected 1 entry, got %d", got)
 	}
 }
