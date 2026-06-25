@@ -20,15 +20,16 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `DiscoverAgents(baseDir)` | `tui/internal/fs/agent.go:240` | scans for all subdirectories with `.agent.json` |
 | `ReadStatus(dir)` | `tui/internal/fs/agent.go:303` | reads `.status.json` → `AgentStatus` (tokens, runtime) |
 | `ReadContextStats(dir)` | `tui/internal/fs/agent.go:320` | summarizes retained `history/chat_history.jsonl`: entries, role counts, text input/output, tool calls/results, and per-tool distribution |
-| `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:443` | sums `TokenTotals` across multiple agent ledgers |
-| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:460` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
-| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:559` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
-| `SumSessionTokenLedgerSince` | `tui/internal/fs/agent.go:601` | sums non-daemon ledger rows since a session cutoff and counts Codex `codex_request_mode` rows (`ws_full` / `ws_incremental`) for `/kanban` Ctrl+D current-session API/cache stats |
+| `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:450` | sums `TokenTotals` across multiple agent ledgers |
+| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:467` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
+| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:566` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
+| `SumMoltSessionTokenLedger` | `tui/internal/fs/agent.go:606` | reads `logs/events.jsonl` `psyche_molt` boundaries and sums non-daemon token-ledger windows for `/kanban` Ctrl+D current and last session API/cache stats, including Codex `codex_request_mode` counts (`ws_full` / `ws_incremental`) |
+| `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:629` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
 | **jsonl.go** | | |
 | `forEachJSONLLine(path, fn)` | `tui/internal/fs/jsonl.go:16` | streams JSONL files one line at a time without `ReadFile`/`strings.Split`, avoiding duplicate buffers and Scanner token limits for ledger/history hot paths |
 | **daemon_ledger.go** | | |
 | `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:40` | aggregates recent per-call token ledgers from `daemons/<run_id>/logs/token_ledger.jsonl`, newest first, tagged with daemon run id/handle/state for kanban Ctrl+D split lanes |
-| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:600` | maps endpoint host / model prefix → canonical provider name |
+| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:729` | maps endpoint host / model prefix → canonical provider name |
 | **heartbeat.go** | | |
 | `IsAlive(dir, thresholdSec)` | `tui/internal/fs/heartbeat.go:11` | reads `.agent.heartbeat` unix timestamp, returns `age < threshold` |
 | `IsAliveHuman()` | `tui/internal/fs/heartbeat.go:24` | always `true` |

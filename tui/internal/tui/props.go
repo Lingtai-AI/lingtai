@@ -56,14 +56,15 @@ type PropsModel struct {
 	// Detail view: full-screen breakdown of token usage, split recent
 	// main/daemon calls, MCP servers, and daemon run counts. Toggled
 	// with Ctrl+D. Esc closes detail and returns to the summary.
-	detailOpen         bool
-	detailByProvider   map[string]fs.TokenTotals
-	detailRecent       []fs.LedgerEntry       // selected main agent recent calls (newest first)
-	detailDaemonRecent []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
-	detailSessionStats fs.SessionTokenStats
-	detailContextStats fs.ContextStats
-	detailDaemonCounts fs.DaemonCounts
-	detailMCPNames     []string
+	detailOpen                bool
+	detailByProvider          map[string]fs.TokenTotals
+	detailRecent              []fs.LedgerEntry       // selected main agent recent calls (newest first)
+	detailDaemonRecent        []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
+	detailCurrentSessionStats fs.SessionTokenStats
+	detailLastSessionStats    fs.SessionTokenStats
+	detailContextStats        fs.ContextStats
+	detailDaemonCounts        fs.DaemonCounts
+	detailMCPNames            []string
 }
 
 // detailRecentCalls is the number of recent token-ledger calls shown in each
@@ -242,11 +243,9 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 func (m *PropsModel) loadDetail() {
 	ledgerPath := filepath.Join(m.selectedDir, "logs", "token_ledger.jsonl")
 	m.detailByProvider, m.detailRecent = fs.SumTokenLedgerByProvider(ledgerPath, detailRecentCalls)
-	m.detailSessionStats = fs.SessionTokenStats{}
-	if m.selectedStatus.Runtime.UptimeSeconds > 0 {
-		since := time.Now().Add(-time.Duration(m.selectedStatus.Runtime.UptimeSeconds * float64(time.Second)))
-		m.detailSessionStats = fs.SumSessionTokenLedgerSince(ledgerPath, since)
-	}
+	sessionStats := fs.SumMoltSessionTokenLedger(m.selectedDir)
+	m.detailCurrentSessionStats = sessionStats.Current
+	m.detailLastSessionStats = sessionStats.Last
 	// Daemon calls are scoped to the selected agent's own daemon run dirs
 	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
 	// network. Missing ledgers render an empty lane.
@@ -860,24 +859,9 @@ func (m PropsModel) renderDetail() string {
 		lines = append(lines, "")
 	}
 
-	// Current process-session API/cache statistics.
-	if m.detailSessionStats.APICalls > 0 {
-		stats := m.detailSessionStats
-		tokens := stats.Input + stats.Output + stats.Thinking
-		lines = append(lines, "  "+sectionStyle.Render("Current session API"))
-		lines = append(lines, "")
-		lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
-			valueStyle.Render(fmt.Sprintf("%d", stats.APICalls)))
-		lines = append(lines, "    "+labelStyle.Render("cache hit rate:            ")+
-			valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
-		lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
-			valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
-		if stats.HasCodexRequestMode {
-			lines = append(lines, "    "+labelStyle.Render("ws_full / ws_incremental:  ")+
-				valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexWSFull, stats.CodexWSIncremental)))
-		}
-		lines = append(lines, "")
-	}
+	// Molt-session API/cache statistics.
+	lines = appendSessionAPIStats(lines, "Current session API", m.detailCurrentSessionStats, sectionStyle, labelStyle, valueStyle)
+	lines = appendSessionAPIStats(lines, "Last session API", m.detailLastSessionStats, sectionStyle, labelStyle, valueStyle)
 
 	// Current retained context statistics.
 	if m.detailContextStats.Entries > 0 {
@@ -1320,6 +1304,27 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenStats, sectionStyle, labelStyle, valueStyle lipgloss.Style) []string {
+	if stats.APICalls <= 0 {
+		return lines
+	}
+	tokens := stats.Input + stats.Output + stats.Thinking
+	lines = append(lines, "  "+sectionStyle.Render(title))
+	lines = append(lines, "")
+	lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
+		valueStyle.Render(fmt.Sprintf("%d", stats.APICalls)))
+	lines = append(lines, "    "+labelStyle.Render("cache hit rate:            ")+
+		valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
+	lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
+		valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
+	if stats.HasCodexRequestMode {
+		lines = append(lines, "    "+labelStyle.Render("ws_full / ws_incremental:  ")+
+			valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexWSFull, stats.CodexWSIncremental)))
+	}
+	lines = append(lines, "")
+	return lines
 }
 
 // refDisplayName extracts the filename stem from a preset path string

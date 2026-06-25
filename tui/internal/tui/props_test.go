@@ -376,13 +376,18 @@ func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
 	}
 }
 
-func TestPropsDetailShowsCurrentSessionAPIStats(t *testing.T) {
+func TestPropsDetailShowsCurrentAndLastSessionAPIStats(t *testing.T) {
 	m := PropsModel{
-		detailSessionStats: fs.SessionTokenStats{
+		detailCurrentSessionStats: fs.SessionTokenStats{
 			TokenTotals:         fs.TokenTotals{Input: 100, Output: 20, Thinking: 10, Cached: 40, APICalls: 2},
 			HasCodexRequestMode: true,
 			CodexWSFull:         1,
 			CodexWSIncremental:  1,
+		},
+		detailLastSessionStats: fs.SessionTokenStats{
+			TokenTotals:         fs.TokenTotals{Input: 45, Output: 5, Cached: 9, APICalls: 1},
+			HasCodexRequestMode: true,
+			CodexWSFull:         1,
 		},
 	}
 	out := ansi.Strip(m.renderDetail())
@@ -392,6 +397,11 @@ func TestPropsDetailShowsCurrentSessionAPIStats(t *testing.T) {
 		"cache hit rate:            40.0%",
 		"tokens/api_call:           65",
 		"ws_full / ws_incremental:  1 / 1",
+		"Last session API",
+		"api_calls:                 1",
+		"cache hit rate:            20.0%",
+		"tokens/api_call:           50",
+		"ws_full / ws_incremental:  1 / 0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("renderDetail missing %q:\n%s", want, out)

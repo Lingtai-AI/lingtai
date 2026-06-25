@@ -4,6 +4,7 @@ package fs
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -429,13 +430,19 @@ type TokenTotals struct {
 	APICalls int64
 }
 
-// SessionTokenStats holds token/cache statistics for the currently running
-// agent session (bounded by the live runtime uptime when available).
+// SessionTokenStats holds token/cache statistics for one agent session window.
 type SessionTokenStats struct {
 	TokenTotals
 	HasCodexRequestMode bool
 	CodexWSFull         int64
 	CodexWSIncremental  int64
+}
+
+// MoltSessionTokenStats groups API/cache statistics for the current and
+// immediately previous molt windows.
+type MoltSessionTokenStats struct {
+	Current SessionTokenStats
+	Last    SessionTokenStats
 }
 
 // AggregateTokens sums token usage from logs/token_ledger.jsonl across all given agent directories.
@@ -593,13 +600,35 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 	return byProvider, recent
 }
 
+// SumMoltSessionTokenLedger reads an agent's logs and sums non-daemon token
+// usage for the current molt session (since the latest psyche_molt event) and
+// the immediately previous session (the window before that latest molt).
+func SumMoltSessionTokenLedger(agentDir string) MoltSessionTokenStats {
+	ledgerPath := filepath.Join(agentDir, "logs", "token_ledger.jsonl")
+	currentSince, lastSince, lastBefore := moltSessionWindows(filepath.Join(agentDir, "logs", "events.jsonl"))
+
+	stats := MoltSessionTokenStats{
+		Current: SumSessionTokenLedgerBetween(ledgerPath, currentSince, time.Time{}),
+	}
+	if !lastBefore.IsZero() {
+		stats.Last = SumSessionTokenLedgerBetween(ledgerPath, lastSince, lastBefore)
+	}
+	return stats
+}
+
 // SumSessionTokenLedgerSince reads a token_ledger.jsonl file and sums
-// non-daemon entries whose timestamps are within the current process session.
-// The caller supplies the session cutoff (usually now - runtime uptime). Rows
-// with malformed timestamps are skipped when a cutoff is present so stale
-// historical rows cannot leak into the "current session" view.
+// non-daemon entries at or after the supplied cutoff. Rows with malformed
+// timestamps are skipped when a cutoff is present so stale historical rows
+// cannot leak into bounded session views.
 func SumSessionTokenLedgerSince(path string, since time.Time) SessionTokenStats {
+	return SumSessionTokenLedgerBetween(path, since, time.Time{})
+}
+
+// SumSessionTokenLedgerBetween reads a token_ledger.jsonl file and sums
+// non-daemon entries in [since, before). A zero bound is open-ended.
+func SumSessionTokenLedgerBetween(path string, since, before time.Time) SessionTokenStats {
 	var stats SessionTokenStats
+	bounded := !since.IsZero() || !before.IsZero()
 	_ = forEachJSONLLine(path, func(line []byte) {
 		var entry LedgerEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
@@ -608,9 +637,15 @@ func SumSessionTokenLedgerSince(path string, since time.Time) SessionTokenStats 
 		if isDaemonLedgerEntry(entry) {
 			return
 		}
-		if !since.IsZero() {
+		if bounded {
 			ts, err := time.Parse(time.RFC3339, entry.TS)
-			if err != nil || ts.Before(since) {
+			if err != nil {
+				return
+			}
+			if !since.IsZero() && ts.Before(since) {
+				return
+			}
+			if !before.IsZero() && !ts.Before(before) {
 				return
 			}
 		}
@@ -636,6 +671,45 @@ func SumSessionTokenLedgerSince(path string, since time.Time) SessionTokenStats 
 		}
 	})
 	return stats
+}
+
+// moltSessionWindows returns the current lower bound, previous lower bound, and
+// previous upper bound from logs/events.jsonl psyche_molt rows. Missing bounds
+// are returned as zero times, which makes the first current session start at the
+// beginning of the ledger while suppressing a nonexistent previous session.
+func moltSessionWindows(eventsPath string) (currentSince, lastSince, lastBefore time.Time) {
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return time.Time{}, time.Time{}, time.Time{}
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	for {
+		var evt struct {
+			Type string  `json:"type"`
+			TS   float64 `json:"ts"`
+		}
+		if err := dec.Decode(&evt); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return currentSince, lastSince, lastBefore
+		}
+		if evt.Type != "psyche_molt" || evt.TS <= 0 {
+			continue
+		}
+		lastSince = currentSince
+		lastBefore = unixFloatTime(evt.TS)
+		currentSince = lastBefore
+	}
+	return currentSince, lastSince, lastBefore
+}
+
+func unixFloatTime(ts float64) time.Time {
+	sec := int64(ts)
+	nsec := int64((ts - float64(sec)) * 1e9)
+	return time.Unix(sec, nsec).UTC()
 }
 
 func isDaemonLedgerEntry(entry LedgerEntry) bool {
