@@ -62,6 +62,27 @@ func TestDoctorPrivacyNoticeShownOnlyWithDraft(t *testing.T) {
 	}
 }
 
+func TestDoctorExportHintVisibleWhileLoadingAndAfterCompletion(t *testing.T) {
+	const exportHint = "Export:"
+
+	// While checks are still running, the export capability must already be
+	// advertised so the user knows the [r] save exists before completion.
+	m := NewDoctorModel(t.TempDir(), t.TempDir())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	if !m.loading {
+		t.Fatal("model should be loading before a result arrives")
+	}
+	if !strings.Contains(m.View(), exportHint) {
+		t.Fatalf("loading doctor view should advertise export:\n%s", m.View())
+	}
+
+	// The hint stays visible after the run completes.
+	m = finishedDoctor(t, t.TempDir(), t.TempDir())
+	if !strings.Contains(m.View(), exportHint) {
+		t.Fatalf("completed doctor view should still advertise export:\n%s", m.View())
+	}
+}
+
 func TestDoctorBareRSavesReportWithoutRerun(t *testing.T) {
 	orchDir := filepath.Join(t.TempDir(), "agent-one")
 	if err := os.MkdirAll(orchDir, 0o755); err != nil {

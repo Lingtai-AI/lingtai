@@ -89,8 +89,10 @@ func NewDoctorModel(orchDir, globalDir string) DoctorModel {
 	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
 }
 
-// doctorHeaderLines: title row + separator + trailing blank line.
-const doctorHeaderLines = 3
+// doctorHeaderLines: title row + separator + export-hint banner + trailing
+// blank line. The export hint is always rendered between the header separator
+// and the body, so it counts toward the space reserved above the viewport.
+const doctorHeaderLines = 4
 
 // doctorFooterLines: separator + hint line.
 const doctorFooterLines = 2
@@ -283,8 +285,15 @@ func (m DoctorModel) View() string {
 	}
 	header := titleRow + "\n" + strings.Repeat("─", m.width) + "\n"
 
+	// Export hint: a prominent, always-visible banner under the header announcing
+	// the save-report capability — shown while checks are still running as well as
+	// after they finish, so the user knows the [r] export exists before reaching
+	// the footer affordance. The footer keeps the live [r]/status; this line is
+	// the up-front advertisement.
+	exportHint := "  " + StyleAccent.Render(i18n.T("doctor.export_hint")) + "\n"
+
 	if m.loading {
-		return header + "\n  " + i18n.T("doctor.checking") + "\n"
+		return header + exportHint + "\n  " + i18n.T("doctor.checking") + "\n"
 	}
 
 	// Body lives in the viewport once it has been sized; before the first
@@ -326,7 +335,7 @@ func (m DoctorModel) View() string {
 	}
 	footer += StyleFaint.Render(hint)
 
-	return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
+	return header + exportHint + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
 }
 
 // renderBody formats the diagnostic lines into the scrollable region. Section
