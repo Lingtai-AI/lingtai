@@ -19,7 +19,7 @@ import (
 // scanning m.messages — the VERBOSE-FILTERED display list. shouldShow() gates
 // "notification" entries behind verbose >= verboseThinking, so at the normal
 // home view (verboseOff) notifications are absent from m.messages and the
-// "ctx N% ▓▓▓░░" segment never renders. Pressing Ctrl+O cycles verbose up,
+// "ctx … ▓▓▓░░ N%" segment never renders. Pressing Ctrl+O cycles verbose up,
 // notifications enter m.messages, and only THEN does the bar appear.
 //
 // The fix sources context usage from the UNFILTERED session-cache entries (the
@@ -99,8 +99,9 @@ func TestHomeTelemetryContextVisibleWithoutCtrlO(t *testing.T) {
 }
 
 // Jason (msg 3217): the row must make its scope explicit with a localized label
-// (e.g. "Current Session" / "当前会话"), via the i18n system — never hard-coded.
-// The label leads the row so the user knows the metrics are session-scoped.
+// (the compact "Session:", Jason's final follow-up trimming the verbose "Current
+// Session"), via the i18n system — never hard-coded. The label leads the row so
+// the user knows the metrics are session-scoped.
 func TestFormatHomeTelemetryShowsLocalizedSessionLabel(t *testing.T) {
 	tel := homeTelemetry{
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
