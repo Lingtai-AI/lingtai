@@ -6,7 +6,7 @@ description: >
   GitHub/PyPI/Homebrew publishing boundaries, the required self-contained HTML
   release log, website release-log/blog drafting, and the reusable release blog
   template.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Release Workflow
@@ -101,6 +101,79 @@ Rules:
 - If you must amend code during release validation, commit it before tagging.
 - Before push/tag/publish, show the human the final candidate refs when approval
   wording is ambiguous.
+
+## 2.5 Parent / daemon division of labor for large release windows
+
+A consequential release window is large and mostly mechanical. Split it so the
+parent (this agent) keeps judgment and authority while claude-p daemons absorb
+the bulk work in parallel.
+
+The parent retains, and does not delegate:
+
+- maintainer authorization boundaries and every external side effect (push, tag,
+  GitHub release, PyPI upload, website deploy, Homebrew tap commit);
+- the final candidate refs and the go/no-go decision;
+- public-facing reports and the human-facing release report;
+- spot-checks of daemon output before trusting it (see the daemon-resume pitfall
+  in §2.6).
+
+Daemons handle the bulky, mechanical blocks, each writing raw outputs to a dated
+report directory so the parent can audit:
+
+- validation gates (TUI/portal/kernel tests, builds, twine/diff checks);
+- scope and contributor audits (commits, PRs, issues across the window);
+- release-notes and HTML-release-log drafting;
+- website release-blog drafting;
+- the Homebrew formula/SHA audit;
+- broad read-only scans (security, stale-doc, repo sweeps).
+
+Constraints for delegated work:
+
+- Give each daemon a clean worktree and a dated report dir
+  (`reports/<task>-YYYYMMDD/`); have it write reports/raw outputs there, not into
+  the conversation only.
+- For read-only audits, include an explicit safety prompt: do **not** write
+  Claude memory, `MEMORY.md`, `~/.claude/`, or global config; touch only the
+  assigned worktree and report dir; keep secrets out of outputs.
+- A daemon proposes; the parent disposes. Treat daemon results as drafts to
+  verify, not as authorized actions already taken.
+
+## 2.6 Release-window pitfalls
+
+Lessons that have cost real time. Read before running long gates or publishing
+any public log.
+
+- **Async shell may be `/bin/sh`, not bash.** A non-interactive default shell can
+  be POSIX `sh`, where Bash process substitution (`cmd > >(tee log)`) is a syntax
+  error and long gate pipelines fail silently or partially. Run long gates inside
+  a daemon, or write an explicit `bash -lc '...'` script, instead of relying on
+  the ambient shell.
+- **A daemon can exit while a background child keeps running.** If a daemon
+  spawns a background process and then returns, its reported output may be
+  incomplete. Do not trust a daemon's summary as final: inspect its report dir,
+  and resume or redo the step deterministically before relying on it.
+- **Public logs cite final merge/tag SHAs, not local validation commits.** When
+  you validate on a pre-squash branch or scratch commit, that SHA is not what
+  ships. Public release logs and HTML logs must cite the final merged/tagged
+  commits. If you validated on a pre-squash tree, prove tree equivalence
+  (e.g. `git diff <validated>..<final>` is empty) and still publish the final
+  refs.
+- **Homebrew may auto-update after the tag.** A GitHub workflow often bumps the
+  tap automatically once the TUI tag is pushed. Before any manual tap edit,
+  verify the bot's commit and SHA landed; do not race it with a hand edit.
+- **Contributor audits cover the whole window and non-code participation.** Do
+  not scope to merged commits / PR authors only. Include closed and rejected
+  issues, issue and PR comments and reviews, and humans who shaped scope or review
+  without authoring code. See §7.3 for the inclusion rule.
+- **Inspect the live `lingtai-web` structure before any website edit.** Never
+  assume blog or release-data paths from memory; the site layout changes (see
+  §7.1).
+- **Keep PR/release explainers local unless intentionally committed.** Draft
+  reports, HTML logs, and explainers live under `reports/` and are not pushed
+  unless the human asked for them to be committed.
+- **External side effects require channel-readable authorization.** An imperative
+  the human can point to on the channel — not an inference — gates every push,
+  tag, release, upload, deploy, or tap commit.
 
 ## 3. TUI/Portal gates
 

@@ -8,7 +8,7 @@ description: >
   publication-bound release workflow, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.5.0
+version: 2.5.1
 ---
 
 # LingTai Developer Guide
@@ -77,9 +77,10 @@ drill-down files, not standalone top-level skills.
   location: reference/release-workflow/SKILL.md
   description: |
     Full command-level release checklist for paired TUI/Portal + kernel releases:
-    scope/candidate heads, clean worktrees, validation gates, GitHub/PyPI/Homebrew
-    publishing, the required self-contained HTML release log, and website
-    release-log/blog drafting with the reusable release blog template.
+    scope/candidate heads, clean worktrees, the parent/daemon division of labor
+    for large windows, release-window pitfalls, validation gates,
+    GitHub/PyPI/Homebrew publishing, the required self-contained HTML release log,
+    and website release-log/blog drafting with the reusable release blog template.
 - name: dev-guide-debug-troubleshoot
   location: reference/debug-troubleshoot/SKILL.md
   description: |
