@@ -1439,13 +1439,13 @@ func (m MailModel) View() string {
 	switch m.verbose {
 	case verboseOff:
 		hints = StyleSubtle.Render(i18n.T("hints.verbose")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.editor")+" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
 	case verboseThinking:
 		hints = lipgloss.NewStyle().Foreground(ColorAgent).Render(i18n.T("hints.verbose_on")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.editor")+" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
 	case verboseExtended:
 		hints = lipgloss.NewStyle().Foreground(ColorThinking).Render(i18n.T("hints.extended_on")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.editor")+" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
 	}
 	statusPad := m.width - lipgloss.Width(leftLabel) - lipgloss.Width(hints) - 1
 	statusBar := leftLabel
