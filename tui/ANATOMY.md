@@ -45,6 +45,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
   - `tui/internal/tui/` — Bubble Tea screens (~19k LOC; `tui/internal/tui/ANATOMY.md`)
   - `tui/internal/sqlitelog/` — sqlite3 CLI-backed helpers for reading kernel `logs/log.sqlite` notification events, session-boundary rows, session replay rows, doctor errors, and clear completion rows
   - `tui/internal/preset/` — preset load/save/apply, embeds templates/recipes
+  - `tui/internal/doctorreport/` — redacted report writer used by interactive `/doctor` to save a GitHub-ready diagnostic bundle (report.md + metadata.json + redaction.json). Owns redaction; collects no raw event logs.
   - `tui/internal/migrate/` — per-project migrations (shared version space with portal)
   - `tui/internal/globalmigrate/` — per-machine migrations (`~/.lingtai-tui/`)
   - `tui/internal/fs/` — filesystem readers for agent state

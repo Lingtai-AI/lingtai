@@ -288,6 +288,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case doctorReportSavedMsg:
+		if a.currentView == appViewDoctor {
+			a.doctor, _ = a.doctor.Update(msg)
+		}
+		return a, nil
+
 	case updateCheckedMsg:
 		if a.currentView == appViewUpdate {
 			var cmd tea.Cmd

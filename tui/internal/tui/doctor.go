@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/doctorreport"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
@@ -36,9 +38,18 @@ func SetTUIVersion(v string) {
 	}
 }
 
-// doctorResultMsg is sent when the async diagnostic completes.
+// doctorResultMsg is sent when the async diagnostic completes. Draft is the
+// in-memory capture handed to the save action so pressing the save key never
+// re-runs the diagnostic.
 type doctorResultMsg struct {
 	Lines []doctorLine
+	Draft *doctorreport.Draft
+}
+
+// doctorReportSavedMsg is sent when the save action finishes writing (or fails).
+type doctorReportSavedMsg struct {
+	Path string
+	Err  error
 }
 
 type doctorLine struct {
@@ -62,14 +73,26 @@ type DoctorModel struct {
 
 	viewport viewport.Model
 	ready    bool // viewport initialized (after first WindowSizeMsg)
+
+	// Report save state. draft is the captured result; once a save succeeds
+	// savedPath is set and the save affordance is replaced by the saved path.
+	draft     *doctorreport.Draft
+	saving    bool
+	savedPath string
+	saveErr   error
 }
+
+// writeDoctorReport is the report writer, indirected for tests.
+var writeDoctorReport = doctorreport.Write
 
 func NewDoctorModel(orchDir, globalDir string) DoctorModel {
 	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
 }
 
-// doctorHeaderLines: title row + separator + trailing blank line.
-const doctorHeaderLines = 3
+// doctorHeaderLines: title row + separator + export-hint banner + trailing
+// blank line. The export hint is always rendered between the header separator
+// and the body, so it counts toward the space reserved above the viewport.
+const doctorHeaderLines = 4
 
 // doctorFooterLines: separator + hint line.
 const doctorFooterLines = 2
@@ -86,6 +109,76 @@ func (m DoctorModel) runDoctorCmd() tea.Cmd {
 	return func() tea.Msg {
 		return runDoctor(orchDir, globalDir)
 	}
+}
+
+// canSaveReport reports whether the save affordance should be offered: the run
+// must be complete, have produced a draft, and not already be mid-save or saved.
+func (m DoctorModel) canSaveReport() bool {
+	return !m.loading && m.draft != nil && !m.saving && m.savedPath == ""
+}
+
+// saveReportCmd writes the captured draft to a freshly-created unique directory
+// under the global reports area. The directory name embeds a UTC timestamp and
+// an agent slug for readability, and uniqueness is guaranteed by os.MkdirTemp
+// (exclusive create) rather than relying on second-resolution timestamps that
+// could collide on a fast double-press.
+func (m DoctorModel) saveReportCmd() tea.Cmd {
+	globalDir := m.globalDir
+	orchDir := m.orchDir
+	draft := *m.draft
+	return func() tea.Msg {
+		dir, err := createDoctorReportDir(globalDir, orchDir, draft)
+		if err != nil {
+			return doctorReportSavedMsg{Err: err}
+		}
+		if err := writeDoctorReport(dir, draft); err != nil {
+			return doctorReportSavedMsg{Err: err}
+		}
+		return doctorReportSavedMsg{Path: dir}
+	}
+}
+
+// createDoctorReportDir makes a unique directory for one saved report under
+// <globalDir>/reports. The prefix is "doctor-<UTC timestamp>-<agent slug>-" and
+// MkdirTemp appends random characters, so two saves in the same second never
+// collide. The reports parent and the report dir are both private (0700).
+func createDoctorReportDir(globalDir, orchDir string, draft doctorreport.Draft) (string, error) {
+	reportsRoot := filepath.Join(globalDir, "reports")
+	if err := os.MkdirAll(reportsRoot, 0o700); err != nil {
+		return "", err
+	}
+	agentName := draft.AgentName
+	if agentName == "" {
+		agentName = filepath.Base(orchDir)
+	}
+	stamp := draft.GeneratedAt
+	if stamp.IsZero() {
+		stamp = time.Now()
+	}
+	prefix := "doctor-" + stamp.UTC().Format("20060102-150405")
+	if slug := slugForReportPath(agentName); slug != "" {
+		prefix += "-" + slug
+	}
+	return os.MkdirTemp(reportsRoot, prefix+"-")
+}
+
+// slugForReportPath lowercases an identity string into a filesystem-safe slug.
+func slugForReportPath(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
@@ -107,13 +200,28 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 
 	case doctorResultMsg:
 		m.lines = msg.Lines
+		m.draft = msg.Draft
 		m.loading = false
+		// A fresh diagnostic invalidates any prior save; the next save writes
+		// the new draft to a new directory.
+		m.saving = false
+		m.savedPath = ""
+		m.saveErr = nil
 		// A fresh diagnostic re-runs from the top; reset scroll so the user
 		// reads from the first check rather than wherever they last were.
 		if m.ready {
 			m.viewport.GotoTop()
 		}
 		m.syncViewport()
+
+	case doctorReportSavedMsg:
+		m.saving = false
+		if msg.Err != nil {
+			m.saveErr = msg.Err
+			return m, nil
+		}
+		m.savedPath = msg.Path
+		m.saveErr = nil
 
 	case tea.MouseWheelMsg:
 		if m.ready {
@@ -130,6 +238,15 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 			// Re-run the full diagnostic from scratch.
 			m.loading = true
 			return m, m.runDoctorCmd()
+		case "r":
+			// Save the completed run as a redacted report. Writes the stored
+			// draft once; does not re-run the diagnostic.
+			if m.canSaveReport() {
+				m.saving = true
+				m.saveErr = nil
+				return m, m.saveReportCmd()
+			}
+			return m, nil
 		default:
 			// Forward navigation keys (up/down/pgup/pgdn/home/end) to the
 			// viewport so the diagnostic output is scrollable.
@@ -168,8 +285,15 @@ func (m DoctorModel) View() string {
 	}
 	header := titleRow + "\n" + strings.Repeat("─", m.width) + "\n"
 
+	// Export hint: a prominent, always-visible banner under the header announcing
+	// the save-report capability — shown while checks are still running as well as
+	// after they finish, so the user knows the [r] export exists before reaching
+	// the footer affordance. The footer keeps the live [r]/status; this line is
+	// the up-front advertisement.
+	exportHint := "  " + StyleAccent.Render(i18n.T("doctor.export_hint")) + "\n"
+
 	if m.loading {
-		return header + "\n  " + i18n.T("doctor.checking") + "\n"
+		return header + exportHint + "\n  " + i18n.T("doctor.checking") + "\n"
 	}
 
 	// Body lives in the viewport once it has been sized; before the first
@@ -185,12 +309,33 @@ func (m DoctorModel) View() string {
 	// doesn't advertise a control that does nothing.
 	hint := "  [esc] " + i18n.T("manage.back") + " " + RuneBullet +
 		" [ctrl+r] " + i18n.T("props.ctrl_r_reload")
+	// Save-report affordance / status. Only one of these applies at a time.
+	switch {
+	case m.saving:
+		hint += " " + RuneBullet + " " + i18n.T("doctor.report_saving")
+	case m.savedPath != "":
+		hint += " " + RuneBullet + " " + i18n.TF("doctor.report_saved", m.savedPath)
+	case m.canSaveReport():
+		hint += " " + RuneBullet + " [r] " + i18n.T("doctor.report_save")
+	}
+	if m.saveErr != nil {
+		hint += " " + RuneBullet + " " +
+			lipgloss.NewStyle().Foreground(ColorSuspended).Render(i18n.TF("doctor.report_save_failed", m.saveErr.Error()))
+	}
 	if m.ready && !m.viewport.AtBottom() {
 		hint += " " + RuneBullet + " ↑↓ " + i18n.T("doctor.scroll")
 	}
-	footer := strings.Repeat("─", m.width) + "\n" + StyleFaint.Render(hint)
+	footer := strings.Repeat("─", m.width) + "\n"
+	// Prominent privacy reminder: whenever a completed run can be (or has been)
+	// saved, spell out that the bundle is local + redacted and should be reviewed
+	// before sharing. Sits on its own accented line above the hint so it reads as
+	// a notice rather than another keybinding.
+	if m.draft != nil {
+		footer += "  " + StyleAccent.Render(i18n.T("doctor.report_privacy_notice")) + "\n"
+	}
+	footer += StyleFaint.Render(hint)
 
-	return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
+	return header + exportHint + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
 }
 
 // renderBody formats the diagnostic lines into the scrollable region. Section
@@ -292,7 +437,9 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		lines = append(lines, doctorLine{
 			Text: i18n.T("doctor.suggest_refresh"), Hint: true,
 		})
-		return doctorResultMsg{Lines: lines}
+		// Config unreadable: still capture the visible lines so a support report
+		// reflects what the user saw; LLM metadata is simply absent.
+		return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, doctorreport.LLMConfig{})}
 	}
 
 	// Phase 2.5: check base_url for providers that require it
@@ -389,7 +536,101 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_agent"), Section: true})
 	lines = append(lines, runKernelDoctorIntrinsic(orchDir, globalDir)...)
 
-	return doctorResultMsg{Lines: lines}
+	llmReport := doctorreport.LLMConfig{
+		Provider:      provider,
+		Model:         model,
+		BaseHost:      baseHostForReport(baseURL),
+		APICompat:     apiCompat,
+		APIKeyEnv:     readLLMAPIKeyEnv(orchDir),
+		APIKeyPresent: apiKey != "",
+	}
+	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
+}
+
+// buildDoctorDraft captures the finished diagnostic as a report draft. It
+// records only the visible result lines and the supplied safe LLM metadata —
+// no event logs, prompts, tool I/O, or command text.
+func buildDoctorDraft(orchDir string, lines []doctorLine, llm doctorreport.LLMConfig) *doctorreport.Draft {
+	return &doctorreport.Draft{
+		GeneratedAt: time.Now().UTC(),
+		AgentName:   filepath.Base(orchDir),
+		Lines:       doctorReportLines(lines),
+		LLM:         llm,
+	}
+}
+
+// doctorReportLines maps the on-screen doctor lines to report lines, preserving
+// the OK / warn / fail / hint / info framing the user saw.
+func doctorReportLines(lines []doctorLine) []doctorreport.Line {
+	out := make([]doctorreport.Line, 0, len(lines))
+	for _, line := range lines {
+		text := strings.TrimSpace(line.Text)
+		if line.Section {
+			out = append(out, doctorreport.Line{Severity: doctorreport.SeverityInfo, Text: text})
+			continue
+		}
+		out = append(out, doctorreport.Line{Severity: doctorReportSeverity(line), Text: text})
+	}
+	return out
+}
+
+func doctorReportSeverity(line doctorLine) doctorreport.Severity {
+	switch {
+	case line.Hint:
+		return doctorreport.SeverityHint
+	case line.Warn:
+		return doctorreport.SeverityWarn
+	case line.OK:
+		return doctorreport.SeverityOK
+	default:
+		return doctorreport.SeverityFail
+	}
+}
+
+// baseHostForReport reduces a base_url to host[:port], dropping any path,
+// query, or embedded credentials so the report never carries a token in a URL.
+func baseHostForReport(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parseValue := raw
+	if !strings.Contains(parseValue, "://") {
+		parseValue = "https://" + parseValue
+	}
+	if parsed, err := url.Parse(parseValue); err == nil && parsed.Host != "" {
+		host := parsed.Hostname()
+		if port := parsed.Port(); port != "" {
+			return host + ":" + port
+		}
+		return host
+	}
+	withoutCreds := raw
+	if at := strings.LastIndex(withoutCreds, "@"); at >= 0 {
+		withoutCreds = withoutCreds[at+1:]
+	}
+	withoutCreds = strings.TrimPrefix(strings.TrimPrefix(withoutCreds, "https://"), "http://")
+	if slash := strings.Index(withoutCreds, "/"); slash >= 0 {
+		withoutCreds = withoutCreds[:slash]
+	}
+	return strings.TrimRight(withoutCreds, "/")
+}
+
+// readLLMAPIKeyEnv returns manifest.llm.api_key_env from init.json (the env var
+// NAME, never its value). Best-effort: returns "" on any read/parse failure.
+func readLLMAPIKeyEnv(orchDir string) string {
+	data, err := os.ReadFile(filepath.Join(orchDir, "init.json"))
+	if err != nil {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	manifest, _ := raw["manifest"].(map[string]interface{})
+	llm, _ := manifest["llm"].(map[string]interface{})
+	env, _ := llm["api_key_env"].(string)
+	return env
 }
 
 func doctorLineFromConfig(line config.DoctorLine) doctorLine {
