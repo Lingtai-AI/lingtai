@@ -27,6 +27,11 @@ const (
 	mailInputViewportReserve = 8
 )
 
+// copyModeToggleKey toggles the chat/mail "copy mode", which disables terminal
+// mouse capture for this view so the user can drag-select visible transcript
+// text. Single constant so the binding is swappable in one place.
+const copyModeToggleKey = "ctrl+y"
+
 // ChatMessage represents a single message in the chat stream.
 type ChatMessage struct {
 	From        string
@@ -158,6 +163,7 @@ type MailModel struct {
 	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
 	sessionCache      *fs.SessionCache // append-only session log
 	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
+	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
@@ -794,6 +800,20 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.showEditorWarn = false
 				return m, nil
 			}
+			return m, nil
+		}
+
+		// Copy mode: the toggle key flips terminal-native text selection for the
+		// chat transcript (App.View drops mouse capture while it is on). esc exits
+		// copy mode when active. Handled before the palette/insight branches so esc
+		// reliably exits copy mode instead of dismissing insights. Input keeps
+		// focus throughout — copy mode only changes the mouse axis.
+		if msg.String() == copyModeToggleKey {
+			m.copyMode = !m.copyMode
+			return m, nil
+		}
+		if m.copyMode && msg.String() == "esc" {
+			m.copyMode = false
 			return m, nil
 		}
 
@@ -1499,7 +1519,17 @@ func (m MailModel) View() string {
 
 	// Status bar: left = flash or dir path, right = hints
 	var leftLabel string
-	if m.inquiryState == "sent" || m.inquiryState == "taken" {
+	if m.copyMode {
+		// Copy mode wins the left label: it is the most important thing to
+		// communicate, and the user needs to see how to exit (mouse is off).
+		// Truncate the plain text to the terminal width before styling so the
+		// badge never wraps onto a second line (the height math assumes one row).
+		badge := "  ◉ " + i18n.T("mail.copy_mode")
+		if m.width > 0 {
+			badge = ansi.Truncate(badge, m.width-1, "…")
+		}
+		leftLabel = lipgloss.NewStyle().Foreground(ColorAccent).Render(badge)
+	} else if m.inquiryState == "sent" || m.inquiryState == "taken" {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAccent).Render("  ◉ " + i18n.T("mail.btw_thinking"))
 	} else if m.statusFlash != "" && time.Now().Before(m.statusExpiry) {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("  ◉ " + m.statusFlash)
