@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // makeManyLines builds a DoctorModel whose diagnostic output is taller than the
@@ -85,5 +86,42 @@ func TestDoctorViewRendersSectionHeaders(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "RUNTIME") {
 		t.Fatal("section header text should appear in the rendered view")
+	}
+}
+
+func TestRenderSectionHeaderAnchorsLabel(t *testing.T) {
+	// Section headers carry the accent marker so group boundaries are scannable;
+	// the label itself must survive verbatim. Strip ANSI so the assertion holds
+	// regardless of the active theme's color codes.
+	out := ansi.Strip(renderSectionHeader("LLM connectivity"))
+	if !strings.HasPrefix(out, doctorSectionMarker) {
+		t.Fatalf("section header should begin with the marker %q, got %q", doctorSectionMarker, out)
+	}
+	if !strings.Contains(out, "LLM connectivity") {
+		t.Fatalf("section header should preserve its label, got %q", out)
+	}
+}
+
+func TestRenderBodyMarksOnlySectionLines(t *testing.T) {
+	// Only Section lines get the marker; status/hint lines stay indented and
+	// unmarked so the marker reliably signals a group boundary.
+	m := NewDoctorModel("/tmp/orch", "/tmp/global")
+	m.lines = []doctorLine{
+		{Text: "Runtime & assets", Section: true},
+		{Text: "✓ ready", OK: true},
+		{Text: "→ do the thing", Hint: true},
+	}
+	lines := strings.Split(ansi.Strip(m.renderBody()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 rendered lines, got %d: %#v", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[0], doctorSectionMarker) {
+		t.Fatalf("section line should be marked, got %q", lines[0])
+	}
+	if strings.Contains(lines[1], doctorSectionMarker) || strings.Contains(lines[2], doctorSectionMarker) {
+		t.Fatalf("non-section lines must not carry the section marker: %#v", lines[1:])
+	}
+	if !strings.HasPrefix(lines[1], "  ") || !strings.HasPrefix(lines[2], "  ") {
+		t.Fatalf("status/hint lines should stay indented: %#v", lines[1:])
 	}
 }

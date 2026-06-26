@@ -283,7 +283,10 @@ func (m DoctorModel) View() string {
 	} else {
 		titleRow = title + "  " + escHint
 	}
-	header := titleRow + "\n" + strings.Repeat("─", m.width) + "\n"
+	// Render the rule faint so the bright title row and the accent-marked
+	// section headers below it carry the visual weight, not the divider.
+	rule := StyleFaint.Render(strings.Repeat("─", m.width))
+	header := titleRow + "\n" + rule + "\n"
 
 	// Export hint: a prominent, always-visible banner under the header announcing
 	// the save-report capability — shown while checks are still running as well as
@@ -325,7 +328,7 @@ func (m DoctorModel) View() string {
 	if m.ready && !m.viewport.AtBottom() {
 		hint += " " + RuneBullet + " ↑↓ " + i18n.T("doctor.scroll")
 	}
-	footer := strings.Repeat("─", m.width) + "\n"
+	footer := rule + "\n"
 	// Prominent privacy reminder: whenever a completed run can be (or has been)
 	// saved, spell out that the bundle is local + redacted and should be reviewed
 	// before sharing. Sits on its own accented line above the hint so it reads as
@@ -338,10 +341,25 @@ func (m DoctorModel) View() string {
 	return header + exportHint + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
 }
 
+// doctorSectionMarker is the accent-colored anchor printed before each section
+// label. It gives the runtime / kernel / LLM / per-agent group headers a
+// consistent left edge so the eye can catch block boundaries while scrolling,
+// instead of the headers reading as just-another-bold-line among the indented
+// ✓/✗ status output below them.
+const doctorSectionMarker = "▸ "
+
+// renderSectionHeader formats a section label as an accent marker followed by
+// the bold title. Extracted so the marker styling is exercisable in tests
+// without re-rendering the whole viewport.
+func renderSectionHeader(label string) string {
+	return StyleAccent.Render(doctorSectionMarker) + StyleTitle.Render(label)
+}
+
 // renderBody formats the diagnostic lines into the scrollable region. Section
-// headers are un-indented and bold with a leading blank line so the runtime /
-// kernel / LLM / per-agent groups read as distinct blocks; status, warning,
-// and hint lines keep the two-space indent that nests them under their section.
+// headers carry an accent marker and bold label with a leading blank line so
+// the runtime / kernel / LLM / per-agent groups read as distinct blocks;
+// status, warning, and hint lines keep the two-space indent that nests them
+// under their section.
 func (m DoctorModel) renderBody() string {
 	var b strings.Builder
 	for i, line := range m.lines {
@@ -350,7 +368,7 @@ func (m DoctorModel) renderBody() string {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(StyleTitle.Render(line.Text) + "\n")
+			b.WriteString(renderSectionHeader(line.Text) + "\n")
 		case line.Hint:
 			b.WriteString("  " + StyleAccent.Render(line.Text) + "\n")
 		case line.Warn:
