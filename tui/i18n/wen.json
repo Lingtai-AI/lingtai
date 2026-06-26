@@ -147,6 +147,7 @@
   "mail.telemetry_api": "问",
   "mail.telemetry_cache": "缓",
   "mail.telemetry_tok_per_api": "字/问",
+  "mail.telemetry_copy_hint": "ctrl+y 择文",
   "mail.telemetry_kanban_hint": "/kanban 详见",
   "mail.no_messages": "暂无书信，候邮中...",
   "mail.initial_loading": "载中...",

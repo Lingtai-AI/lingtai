@@ -147,6 +147,7 @@
   "mail.telemetry_api": "api",
   "mail.telemetry_cache": "cache",
   "mail.telemetry_tok_per_api": "tok/api",
+  "mail.telemetry_copy_hint": "ctrl+y to select text",
   "mail.telemetry_kanban_hint": "/kanban for details",
   "mail.no_messages": "No messages yet. Waiting for mail...",
   "mail.initial_loading": "loading...",

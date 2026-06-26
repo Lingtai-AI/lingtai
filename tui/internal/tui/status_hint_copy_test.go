@@ -128,3 +128,89 @@ func TestHomeHintI18nKeysUseLocalizedExpandCopy(t *testing.T) {
 		})
 	}
 }
+
+// Jason tried the PR #402 copy mode and asked for a visible reminder on the
+// screenshot's upper/first hint line — the telemetry row that ends in
+// "/kanban for details". This pins that the copy reminder ("ctrl+y to select
+// text") renders on that first line, ahead of the kanban pointer, joined by the
+// shared separator so it reads like the lower status hint ("ctrl+o to expand, /
+// for commands"). Asserting the exact combined string (not just "the hint
+// exists") guards against a half-fix the way TestHomeStatusHintShows... does.
+func TestHomeTelemetryFirstLineShowsCopyHint(t *testing.T) {
+	i18n.SetLang("en")
+	t.Cleanup(func() { i18n.SetLang("en") })
+
+	tel := homeTelemetry{
+		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
+		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
+	}
+	// Wide terminal so the right-aligned affordance is not dropped.
+	got := ansi.Strip(formatHomeTelemetry(tel, 160))
+
+	const want = "ctrl+y to select text, /kanban for details"
+	if !strings.Contains(got, want) {
+		t.Errorf("first telemetry line must render the exact combined hint %q; got:\n%s", want, got)
+	}
+
+	// The copy reminder must lead the kanban pointer on the right, after the
+	// metrics — same ordering contract as the kanban-only hint.
+	copyIdx := strings.Index(got, i18n.T("mail.telemetry_copy_hint"))
+	kanbanIdx := strings.Index(got, i18n.T("mail.telemetry_kanban_hint"))
+	apiIdx := strings.Index(got, i18n.T("mail.telemetry_api"))
+	if copyIdx < 0 || kanbanIdx < 0 || apiIdx < 0 {
+		t.Fatalf("expected api metrics + both hints in %q (copy@%d kanban@%d api@%d)", got, copyIdx, kanbanIdx, apiIdx)
+	}
+	if !(apiIdx < copyIdx && copyIdx < kanbanIdx) {
+		t.Errorf("order must be metrics → copy hint → kanban hint in %q (api@%d copy@%d kanban@%d)", got, apiIdx, copyIdx, kanbanIdx)
+	}
+}
+
+// The whole right-side affordance — copy reminder included — must drop together
+// on a terminal too narrow to right-align it, so the metrics keep the space and
+// the row never wraps.
+func TestHomeTelemetryFirstLineDropsCopyHintWhenNarrow(t *testing.T) {
+	i18n.SetLang("en")
+	t.Cleanup(func() { i18n.SetLang("en") })
+
+	tel := homeTelemetry{
+		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
+		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
+	}
+	got := ansi.Strip(formatHomeTelemetry(tel, 30)) // narrow
+
+	if strings.Contains(got, i18n.T("mail.telemetry_copy_hint")) {
+		t.Errorf("narrow row %q must drop the copy hint rather than collide with the metrics", got)
+	}
+	if !strings.Contains(got, i18n.T("mail.telemetry_session")) {
+		t.Errorf("narrow row %q dropped the session label — the affordance drop must not affect the metrics", got)
+	}
+}
+
+// Pin the new copy-hint i18n key across all three locales so future copy edits
+// cannot drop a translation or regress to English-only.
+func TestTelemetryCopyHintI18nKeysLocalized(t *testing.T) {
+	cases := []struct {
+		lang string
+		want string
+	}{
+		{lang: "en", want: "ctrl+y to select text"},
+		{lang: "zh", want: "ctrl+y 选择文本"},
+		{lang: "wen", want: "ctrl+y 择文"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			i18n.SetLang(tc.lang)
+			t.Cleanup(func() { i18n.SetLang("en") })
+
+			got := i18n.T("mail.telemetry_copy_hint")
+			if got != tc.want {
+				t.Errorf("%s i18n[mail.telemetry_copy_hint] = %q, want %q", tc.lang, got, tc.want)
+			}
+			// Every locale keeps the literal ctrl+y key chord so the reminder
+			// actually tells the user which key to press.
+			if !strings.Contains(got, "ctrl+y") {
+				t.Errorf("%s copy hint %q must name the ctrl+y chord", tc.lang, got)
+			}
+		})
+	}
+}

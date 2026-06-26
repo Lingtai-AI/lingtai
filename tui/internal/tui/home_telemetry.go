@@ -269,12 +269,19 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 	return appendKanbanHint(left, width)
 }
 
-// appendKanbanHint right-aligns the "/kanban for details" affordance against the
-// terminal width, padding between the already-rendered left segment and the hint.
-// It returns left unchanged when there isn't room for at least two spaces of gap,
-// so the metrics never get clipped on narrow terminals.
+// appendKanbanHint right-aligns the first-line affordance against the terminal
+// width, padding between the already-rendered left segment and the hint. The hint
+// leads with the copy-mode reminder ("ctrl+y to select text") that Jason asked to
+// surface on this upper line (PR #402), then the "/kanban for details" pointer,
+// joined by the shared hints.sep so it reads like the status bar's lower hint
+// line ("ctrl+o to expand, / for commands"). It returns left unchanged when there
+// isn't room for at least two spaces of gap, so the metrics never get clipped on
+// narrow terminals — the whole affordance is dropped together, copy reminder and
+// all.
 func appendKanbanHint(left string, width int) string {
-	hint := StyleFaint.Render(i18n.T("mail.telemetry_kanban_hint"))
+	hintText := i18n.T("mail.telemetry_copy_hint") +
+		i18n.T("hints.sep") + i18n.T("mail.telemetry_kanban_hint")
+	hint := StyleFaint.Render(hintText)
 	// -1 trailing margin mirrors the status bar's right edge (mail.go statusPad).
 	pad := width - lipgloss.Width(left) - lipgloss.Width(hint) - 1
 	if pad < 2 {
