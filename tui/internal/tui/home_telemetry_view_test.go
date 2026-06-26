@@ -16,12 +16,12 @@ import (
 // PR #441 appended the telemetry row in View() without teaching
 // syncViewportHeight about it. The rendered frame was then one line taller than
 // the terminal, and the terminal's own scroll dropped the TOP line — but the
-// user-visible symptom Jason reported was the BOTTOM status bar (the "ctrl+o
-// soul" hint) vanishing, because the over-tall frame no longer fit. This test
+// user-visible symptom Jason reported was the BOTTOM status bar (the "ctrl+o to
+// expand" hint) vanishing, because the over-tall frame no longer fit. This test
 // builds a real MailModel, forces the telemetry row to render, and asserts:
 //
 //  1. the rendered frame fits within the terminal height (no overflow), and
-//  2. the "ctrl+o soul" hint is still present on the last rendered line.
+//  2. the "ctrl+o to expand" hint is still present on the last rendered line.
 //
 // It is the integration counterpart to TestMailFooterHeightAccountsForTelemetryRow,
 // which pins the arithmetic; this proves the arithmetic actually keeps the bar
@@ -30,8 +30,8 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 	t.Helper()
 	dir := t.TempDir()
 	// Short baseDir ("~") so the status-bar path is narrow enough to leave room
-	// for the right-aligned "ctrl+o soul" hint (a long temp path would push the
-	// hint out by width budget — unrelated to the height-clipping regression).
+	// for the right-aligned "ctrl+o to expand" hint (a long temp path would push
+	// the hint out by width budget — unrelated to the height-clipping regression).
 	//
 	// Force the telemetry row to have data by seeding a notification carrying a
 	// context-usage fraction into the orchestrator's events.jsonl, then driving
@@ -110,10 +110,10 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 		t.Errorf("telemetry row missing from rendered View:\n%s", out)
 	}
 
-	// 3) The "ctrl+o soul" hint (the affordance the regression ate) must survive,
-	//    on the last non-empty rendered line — below the telemetry row.
-	if !strings.Contains(out, "ctrl+o soul") {
-		t.Fatalf("the 'ctrl+o soul' hint was clipped from the footer:\n%s", out)
+	// 3) The "ctrl+o to expand" hint (the affordance the regression ate) must
+	//    survive, on the last non-empty rendered line — below the telemetry row.
+	if !strings.Contains(out, "ctrl+o to expand") {
+		t.Fatalf("the 'ctrl+o to expand' hint was clipped from the footer:\n%s", out)
 	}
 	lastNonEmpty := ""
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -122,12 +122,12 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(lastNonEmpty, "ctrl+o soul") {
-		t.Errorf("the status bar (ctrl+o soul hint) is not the last visible line; telemetry pushed it out of place:\nlast=%q\nfull:\n%s",
+	if !strings.Contains(lastNonEmpty, "ctrl+o to expand") {
+		t.Errorf("the status bar (ctrl+o to expand hint) is not the last visible line; telemetry pushed it out of place:\nlast=%q\nfull:\n%s",
 			lastNonEmpty, out)
 	}
 	// And the telemetry row must sit ABOVE the status bar, not replace or follow it.
-	if idxTel, idxBar := strings.Index(out, ctxLabel), strings.LastIndex(out, "ctrl+o soul"); idxTel >= idxBar {
+	if idxTel, idxBar := strings.Index(out, ctxLabel), strings.LastIndex(out, "ctrl+o to expand"); idxTel >= idxBar {
 		t.Errorf("telemetry row must be ABOVE the status bar (tel=%d bar=%d):\n%s", idxTel, idxBar, out)
 	}
 }
@@ -147,7 +147,7 @@ func TestHomeViewNoTelemetryRowWhenNoData(t *testing.T) {
 	if strings.Contains(out, "tok/api") {
 		t.Errorf("telemetry row should be hidden with no data:\n%s", out)
 	}
-	if !strings.Contains(out, "ctrl+o soul") {
+	if !strings.Contains(out, "ctrl+o to expand") {
 		t.Errorf("status bar hint missing even without telemetry:\n%s", out)
 	}
 }

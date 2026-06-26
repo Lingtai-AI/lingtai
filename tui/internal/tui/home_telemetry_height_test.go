@@ -5,7 +5,7 @@ import "testing"
 // The home telemetry row is an ADDITIVE line below the input box and above the
 // path/shortcut status bar. PR #441 appended it in View() without teaching
 // syncViewportHeight about it, so the rendered frame was one line too tall and
-// the bottom status bar (the "ctrl+o soul" hint) was clipped off-screen.
+// the bottom status bar (the "ctrl+o to expand" hint) was clipped off-screen.
 //
 // mailFooterHeight is the single source of truth for how many terminal rows the
 // footer block occupies. These tests pin the invariant: the telemetry line adds

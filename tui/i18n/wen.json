@@ -121,6 +121,7 @@
   "hints.commands": "/ 令",
   "hints.editor": "ctrl+e 编",
   "hints.extended_on": "ctrl+o 扩",
+  "hints.sep": " • ",
   "hints.verbose": "ctrl+o 灵台",
   "hints.verbose_on": "ctrl+o 灵台",
   "mail.btw_sent": "旁问已遣：%s",

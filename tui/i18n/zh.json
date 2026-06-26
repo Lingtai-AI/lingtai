@@ -121,6 +121,7 @@
   "hints.commands": "/ 命令",
   "hints.editor": "ctrl+e 编辑器",
   "hints.extended_on": "ctrl+o 扩展",
+  "hints.sep": " • ",
   "hints.verbose": "ctrl+o 灵台",
   "hints.verbose_on": "ctrl+o 灵台",
   "mail.btw_sent": "已发送旁问：%s",

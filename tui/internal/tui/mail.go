@@ -286,7 +286,7 @@ func (m *MailModel) syncViewportHeight() bool {
 	// The footer block (sep + palette + input + optional telemetry + status) is
 	// sized by mailFooterHeight so View() and this height budget stay in lockstep
 	// — the telemetry row added by PR #441 must be reserved here or it pushes the
-	// bottom status bar (the "ctrl+o soul" hint) off-screen.
+	// bottom status bar (the "ctrl+o to expand" hint) off-screen.
 	footerHeight := mailFooterHeight(paletteLines, inputLines, telemetryRow)
 	vpHeight := m.height - 2 - bannerLines - footerHeight
 	if vpHeight < 1 {
@@ -1435,17 +1435,22 @@ func (m MailModel) View() string {
 		m.statusFlash = ""
 		leftLabel = StyleSubtle.Render("  " + m.baseDir)
 	}
+	// Separator between the ctrl+o verbosity affordance and the slash-command
+	// affordance. Localized (`hints.sep`): English reads `ctrl+o to expand, / for
+	// commands` (comma); zh/wen keep the bullet convention. The first segment
+	// carries no trailing separator so the comma attaches to "to expand".
+	hintSep := i18n.T("hints.sep")
 	var hints string
 	switch m.verbose {
 	case verboseOff:
 		hints = StyleSubtle.Render(i18n.T("hints.verbose")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(hintSep+i18n.T("hints.commands"))
 	case verboseThinking:
 		hints = lipgloss.NewStyle().Foreground(ColorAgent).Render(i18n.T("hints.verbose_on")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(hintSep+i18n.T("hints.commands"))
 	case verboseExtended:
 		hints = lipgloss.NewStyle().Foreground(ColorThinking).Render(i18n.T("hints.extended_on")) +
-			StyleFaint.Render(" "+RuneBullet+" "+i18n.T("hints.commands"))
+			StyleFaint.Render(hintSep+i18n.T("hints.commands"))
 	}
 	statusPad := m.width - lipgloss.Width(leftLabel) - lipgloss.Width(hints) - 1
 	statusBar := leftLabel
