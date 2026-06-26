@@ -141,7 +141,7 @@
   "mail.token_usage_footer": "令牌：输入 %s · 缓存未命中 %s · 输出 %s · 缓存命中率 %s",
   "mail.telemetry_session": "当前会话",
   "mail.telemetry_tok": "令牌",
-  "mail.telemetry_ctx": "上下文",
+  "mail.telemetry_context": "当前上下文",
   "mail.telemetry_api": "调用",
   "mail.telemetry_cache": "缓存",
   "mail.telemetry_tok_per_api": "令牌/调用",

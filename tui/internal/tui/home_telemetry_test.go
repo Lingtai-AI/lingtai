@@ -7,7 +7,7 @@ import (
 
 // The home telemetry row condenses the CURRENT SESSION's token economy
 // (api · tok · cache · tok/api) plus the live context pressure gauge into one
-// muted line: "api 42  tok 181.6k  cache 88%  tok/api 4.3k  ctx 73% ▓▓▓░░". It
+// muted line: "api 42  tok 181.6k  cache 88%  tok/api 4.3k  Current Context 146.0k/200.0k ▓▓▓░░ 73%". It
 // is scalar-only (never the _meta block hidden by PR #440), scoped to the
 // current molt session (never the global lifetime total), and hides gracefully
 // when no data is available.
@@ -27,16 +27,17 @@ func TestFormatHomeTelemetry(t *testing.T) {
 			exact: "",
 		},
 		{
-			name: "full current-session economy + ctx + bar (wide)",
+			name: "full current-session economy + context + bar (wide)",
 			// 42 calls, 181,585 tokens, 180,224 cached of 181,585 input (99.3%),
-			// avg 4,323 tok/call. ctx 73% → amber bar.
+			// avg 4,323 tok/call. Context 146.0k/200.0k, 73% → amber bar.
 			tel: homeTelemetry{
 				apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
-				cached: 180224, contextLimit: 200000, contextUsage: 0.73,
+				cached: 180224, contextUsed: 146000, contextLimit: 200000, contextUsage: 0.73,
 			},
 			width: 120,
-			// api count, humanized token total, cache rate, tok/api, ctx + bar.
-			want: []string{"api", "42", "tok", "181.6k", "cache", "%", "tok/api", "ctx", "73%", "▓", "░"},
+			// api count, humanized token total, cache rate, tok/api, then the
+			// Current Context scope label, used/limit, bar, and percentage.
+			want: []string{"api", "42", "tok", "181.6k", "cache", "%", "tok/api", "Current Context", "146.0k/200.0k", "▓", "░", "73%"},
 		},
 		{
 			name: "no api calls yet — drop api & tok/api, keep tokens",
@@ -46,17 +47,17 @@ func TestFormatHomeTelemetry(t *testing.T) {
 			},
 			width: 120,
 			want:  []string{"tok", "5.0k"},
-			// no api count, no per-call average, no ctx, no bar
-			notWant: []string{"api", "tok/api", "ctx", "▓"},
+			// no api count, no per-call average, no context segment, no bar
+			notWant: []string{"api", "tok/api", "Current Context", "▓"},
 		},
 		{
 			name: "context only — no session ledger yet",
 			tel: homeTelemetry{
 				apiCalls: 0, sessionTokens: 0, inputTokens: 0,
-				contextLimit: 128000, contextUsage: 0.5,
+				contextUsed: 64000, contextLimit: 128000, contextUsage: 0.5,
 			},
 			width: 120,
-			want:  []string{"ctx", "50%", "▓"},
+			want:  []string{"Current Context", "64.0k/128.0k", "50%", "▓"},
 			// nothing to show for the token economy
 			notWant: []string{"tok", "api", "cache"},
 		},
@@ -67,7 +68,7 @@ func TestFormatHomeTelemetry(t *testing.T) {
 				cached: 9000, contextUsage: 0.14,
 			},
 			width:   30,
-			want:    []string{"api", "42", "tok", "18.4k", "cache", "ctx", "14%"},
+			want:    []string{"api", "42", "tok", "18.4k", "cache", "Current Context", "14%"},
 			notWant: []string{"▓", "░"},
 		},
 	}

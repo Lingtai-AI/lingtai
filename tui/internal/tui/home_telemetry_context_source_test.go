@@ -19,7 +19,7 @@ import (
 // scanning m.messages — the VERBOSE-FILTERED display list. shouldShow() gates
 // "notification" entries behind verbose >= verboseThinking, so at the normal
 // home view (verboseOff) notifications are absent from m.messages and the
-// "ctx N% ▓▓▓░░" segment never renders. Pressing Ctrl+O cycles verbose up,
+// "Current Context … ▓▓▓░░ N%" segment never renders. Pressing Ctrl+O cycles verbose up,
 // notifications enter m.messages, and only THEN does the bar appear.
 //
 // The fix sources context usage from the UNFILTERED session-cache entries (the

@@ -80,6 +80,11 @@ func TestHomeTelemetryPrefersStatusJSONOverNotification(t *testing.T) {
 	if tel.contextLimit != 250000 {
 		t.Fatalf("contextLimit = %d, want 250000 (the .status.json window_size /kanban shows)", tel.contextLimit)
 	}
+	// "used" must come straight from .status.json TotalTokens — the same field
+	// /kanban renders as the numerator — so "used/limit" matches /kanban exactly.
+	if tel.contextUsed != 186500 {
+		t.Fatalf("contextUsed = %d, want 186500 (the .status.json total_tokens /kanban shows)", tel.contextUsed)
+	}
 }
 
 // With no `.status.json` (stopped / never-booted — /kanban shows no context
@@ -129,12 +134,78 @@ func TestHomeTelemetryStatusZeroWindowFallsBack(t *testing.T) {
 	}
 }
 
+// Jason's layout follow-up (msg 3251): the context segment must read as
+//
+//	Current Context 186.5k/250.0k ▓▓▓░░ 75%
+//
+// — an explicit scope label, then used/limit, then the bar, then the percentage
+// on the RIGHT of the bar. It must NOT render the confusing "75% / 250.0k"
+// percentage-first form.
+func TestFormatHomeTelemetryContextLayout(t *testing.T) {
+	tel := homeTelemetry{
+		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
+		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
+	}
+	got := formatHomeTelemetry(tel, 160)
+
+	label := i18n.T("mail.telemetry_context")
+	if label == "mail.telemetry_context" {
+		t.Fatal("i18n key mail.telemetry_context is missing a translation")
+	}
+	// Explicit localized scope label present.
+	if !strings.Contains(got, label) {
+		t.Errorf("context row %q is missing the %q scope label", got, label)
+	}
+	// used/limit present in human form.
+	if !strings.Contains(got, "186.5k/250.0k") {
+		t.Errorf("context row %q must show used/limit as 186.5k/250.0k", got)
+	}
+	// Percentage present and AFTER the used/limit + bar, never before used/limit.
+	usedLimit := strings.Index(got, "186.5k/250.0k")
+	pct := strings.Index(got, "75%")
+	if pct < 0 {
+		t.Fatalf("context row %q is missing the 75%% percentage", got)
+	}
+	if pct < usedLimit {
+		t.Errorf("percentage must follow used/limit (and the bar), not precede it, in %q (pct@%d used/limit@%d)", got, pct, usedLimit)
+	}
+	bar := strings.IndexRune(got, '▓')
+	if bar >= 0 && pct < bar {
+		t.Errorf("percentage must sit to the RIGHT of the bar in %q (pct@%d bar@%d)", got, pct, bar)
+	}
+	// The confusing "% / limit" percentage-first form must never appear.
+	if strings.Contains(got, "75% / 250.0k") {
+		t.Errorf("context row %q renders the confusing percentage-first form", got)
+	}
+}
+
+// On a terminal too narrow for the bar, used/limit and the percentage must still
+// render (the bar is the only droppable core element) — the layout never clips
+// the numbers.
+func TestFormatHomeTelemetryContextLayoutNarrow(t *testing.T) {
+	tel := homeTelemetry{
+		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
+		cached: 180224, contextUsed: 186500, contextLimit: 250000, contextUsage: 0.746,
+	}
+	got := formatHomeTelemetry(tel, 30) // below homeTelemetryBarMinWidth → bar hidden
+
+	if strings.ContainsRune(got, '▓') || strings.ContainsRune(got, '░') {
+		t.Errorf("narrow row %q must drop the bar", got)
+	}
+	if !strings.Contains(got, "186.5k/250.0k") {
+		t.Errorf("narrow row %q must keep used/limit", got)
+	}
+	if !strings.Contains(got, "75%") {
+		t.Errorf("narrow row %q must keep the percentage", got)
+	}
+}
+
 // The "/kanban for details" hint is right-aligned on a wide terminal and present
 // in the rendered row.
 func TestFormatHomeTelemetryShowsKanbanHint(t *testing.T) {
 	tel := homeTelemetry{
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
-		cached: 180224, contextLimit: 250000, contextUsage: 0.73,
+		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
 	got := formatHomeTelemetry(tel, 160)
 
@@ -158,7 +229,7 @@ func TestFormatHomeTelemetryShowsKanbanHint(t *testing.T) {
 func TestFormatHomeTelemetryDropsKanbanHintWhenNarrow(t *testing.T) {
 	tel := homeTelemetry{
 		apiCalls: 42, sessionTokens: 181585, inputTokens: 181585,
-		cached: 180224, contextLimit: 250000, contextUsage: 0.73,
+		cached: 180224, contextUsed: 182500, contextLimit: 250000, contextUsage: 0.73,
 	}
 	got := formatHomeTelemetry(tel, 30) // narrow
 

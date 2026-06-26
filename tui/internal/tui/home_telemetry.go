@@ -15,7 +15,7 @@ import (
 // the bottom path/shortcut status bar. It condenses the CURRENT SESSION's token
 // economy and the live context-window pressure into one high-density line:
 //
-//	api 42  tok 181.6k  cache 88%  tok/api 4.3k    ctx 73% ▓▓▓▓░░
+//	api 42  tok 181.6k  cache 88%  tok/api 4.3k    Current Context 186.5k/250.0k ▓▓▓▓░░ 73%
 //
 // All numbers are scoped to the current molt session (since the latest
 // psyche_molt), NOT the whole-ledger lifetime total and NOT a single round:
@@ -24,7 +24,8 @@ import (
 //   - cache:   cache-hit rate (cached / input)
 //   - tok/api: average tokens per API call
 // and, separately, the live context-window pressure with the gauge Jason liked:
-//   - ctx N% ▓▓░░: latest context-window fill fraction over the model's limit.
+//   - Current Context used/limit ▓▓░░ N%: tokens in use over the model's limit,
+//     the gauge, then the fill percentage on the right of the bar.
 //
 // It is scalar-only — never the noisy `_meta` block hidden by PR #440.
 //
@@ -49,6 +50,7 @@ type homeTelemetry struct {
 	cached        int64   // current-session cached input tokens
 	inputTokens   int64   // current-session input tokens (cache-rate denominator)
 	contextLimit  int64   // model context window; 0 = unknown
+	contextUsed   int64   // context tokens in use (.status.json TotalTokens); 0 = unknown
 	contextUsage  float64 // latest context-usage fraction 0..1; <0 = unknown
 }
 
@@ -95,6 +97,11 @@ func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 		if ctx.WindowSize > 0 {
 			t.contextUsage = ctx.UsagePct / 100
 			t.contextLimit = int64(ctx.WindowSize)
+			// Source the absolute "used" tokens straight from .status.json
+			// TotalTokens — the SAME field /kanban renders as the numerator
+			// (props.go:531) — so "used/limit" matches /kanban exactly rather
+			// than a usage×limit re-derivation that could round differently.
+			t.contextUsed = int64(ctx.TotalTokens)
 		}
 
 		// contextLimit fallback for agents with no live status snapshot.
@@ -209,19 +216,30 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 		segs = append(segs, i18n.T("mail.telemetry_tok_per_api")+" "+humanizeTokenCount(avgPerCall(t.sessionTokens, t.apiCalls)))
 	}
 
-	// ctx 73% / 250k  ▓▓▓░░  — live context-window pressure with the gauge Jason
-	// liked (msg 3195/3196). The bar fills to the latest context-usage fraction;
-	// the absolute window limit is appended when known so "73%" has a referent.
-	// The bar is dropped on narrow terminals but the "ctx N%" number stays.
+	// Current Context  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure
+	// with the gauge Jason liked (msg 3195/3196). Jason's layout follow-up
+	// (msg 3251): the scope reads as an explicit "Current Context" label, then
+	// used/limit, then the bar, then the percentage on the RIGHT of the bar — so
+	// the eye reads "what / how much / how full" in order, never the confusing
+	// "73% / 250k" the percentage-first form produced. The used/limit + bar +
+	// percentage are the core; the bar is dropped on narrow terminals (the
+	// numbers stay), and "Current Context" + percentage always frame the metric.
 	if t.contextUsage >= 0 {
 		pct := t.contextUsage * 100
-		ctx := fmt.Sprintf("%s %.0f%%", i18n.T("mail.telemetry_ctx"), pct)
-		if t.contextLimit > 0 {
-			ctx += " / " + humanizeTokenCount(t.contextLimit)
+		ctx := i18n.T("mail.telemetry_context")
+		if t.contextUsed > 0 && t.contextLimit > 0 {
+			ctx += " " + humanizeTokenCount(t.contextUsed) + "/" + humanizeTokenCount(t.contextLimit)
+		} else if t.contextLimit > 0 {
+			// No absolute "used" (notification fallback path): derive it from the
+			// usage fraction so used/limit still renders rather than vanishing.
+			ctx += " " + humanizeTokenCount(int64(t.contextUsage*float64(t.contextLimit))) + "/" + humanizeTokenCount(t.contextLimit)
 		}
 		if barW := homeTelemetryBarWidth(width); barW > 0 {
 			ctx += "  " + renderContextBar(pct, barW)
 		}
+		// Percentage to the RIGHT of the bar (or right of used/limit when the bar
+		// is hidden), never before used/limit.
+		ctx += fmt.Sprintf(" %.0f%%", pct)
 		segs = append(segs, ctx)
 	}
 
