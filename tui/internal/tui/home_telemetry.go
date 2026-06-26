@@ -57,7 +57,11 @@ type homeTelemetry struct {
 //     SAME source and scope as the molt-session stats panel in props.go
 //   - contextLimit from manifest TOP-LEVEL `context_limit` (fs.ReadInitManifest)
 //   - contextUsage from the freshest notification Meta.Context.Usage in the
-//     current message list (the same value the notification footer renders)
+//     UNFILTERED session cache (the same value the notification footer renders).
+//     It deliberately does NOT read m.messages: that list is verbose-filtered, so
+//     notifications are absent at the home view (verboseOff) and the ctx bar would
+//     only surface after Ctrl+O. Reading the session cache keeps it independent of
+//     view/verbose state.
 //
 // Every source degrades to its "unknown" sentinel independently, so a missing
 // ledger / manifest / notification just drops that fragment rather than the row.
@@ -73,16 +77,31 @@ func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 			t.contextLimit = manifestContextLimit(manifest)
 		}
 	}
-	// Latest context-usage fraction: scan the built messages backward for the
-	// most recent notification that carried a context block.
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		msg := m.messages[i]
-		if msg.Type == "notification" && msg.Meta != nil && msg.Meta.Context != nil && msg.Meta.Context.Usage >= 0 {
-			t.contextUsage = msg.Meta.Context.Usage
-			break
-		}
+	// Latest context-usage fraction. This MUST read the UNFILTERED session-cache
+	// entries, not the verbose-filtered m.messages: shouldShow() gates
+	// "notification" entries behind verbose >= verboseThinking, so at the normal
+	// home view (verboseOff) notifications are absent from m.messages and the ctx
+	// bar would only appear after Ctrl+O cycled verbose up. The session cache
+	// holds every entry regardless of verbose, so the bar is view-state-independent.
+	if m.sessionCache != nil {
+		t.contextUsage = latestContextUsage(m.sessionCache.Entries())
 	}
 	return t
+}
+
+// latestContextUsage scans session entries from newest to oldest and returns the
+// freshest notification's context-usage fraction (0..1), or -1 when no
+// notification carries a usable context block. Entries are assumed
+// chronologically ordered (the session cache sorts by timestamp), so the last
+// matching entry is the freshest.
+func latestContextUsage(entries []fs.SessionEntry) float64 {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Type == "notification" && e.Meta != nil && e.Meta.Context != nil && e.Meta.Context.Usage >= 0 {
+			return e.Meta.Context.Usage
+		}
+	}
+	return -1
 }
 
 // manifestContextLimit resolves the model context window from a manifest read by
@@ -185,6 +204,11 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 	if len(segs) == 0 {
 		return ""
 	}
+	// Lead with a localized scope label (Jason, msg 3217) so the user reads
+	// "these numbers are the CURRENT SESSION" before the metrics. Localized via
+	// i18n (mail.telemetry_session), never hard-coded. A middle-dot sets it off
+	// from the metrics; the whole row is muted by StyleFaint below.
+	segs = append([]string{i18n.T("mail.telemetry_session") + "  " + RuneBullet}, segs...)
 	// Two spaces between segments for a calm, low-density-feeling separation; the
 	// label words themselves are muted by the caller's style.
 	return "  " + StyleFaint.Render(strings.Join(segs, "  "))

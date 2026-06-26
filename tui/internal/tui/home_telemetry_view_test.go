@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // End-to-end regression guard for the #441 home-telemetry clipping bug.
@@ -30,19 +30,32 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 	// Short baseDir ("~") so the status-bar path is narrow enough to leave room
 	// for the right-aligned "ctrl+o soul" hint (a long temp path would push the
 	// hint out by width budget — unrelated to the height-clipping regression).
-	m := NewMailModel(dir, "human@local", "~", dir, "TestOrch", 50, dir, "en", false, 0)
-	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	//
+	// Force the telemetry row to have data by seeding a notification carrying a
+	// context-usage fraction into the orchestrator's events.jsonl, then driving
+	// the normal initialRebuild so it lands in the UNFILTERED session cache —
+	// gatherHomeTelemetry reads the freshest notification context usage from
+	// there (NOT the verbose-filtered m.messages), so this exercises the real
+	// home-view path at verboseOff (no Ctrl+O).
+	orchDir := filepath.Join(dir, "orch")
+	logsDir := filepath.Join(orchDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := `{"type":"notification","ts":1782000000,"summary":"sync","meta":{"context":{"usage":0.73}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(event), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	humanDir := filepath.Join(dir, "human")
+	if err := os.MkdirAll(humanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	// Force the telemetry row to have data WITHOUT a ledger on disk by giving the
-	// model a notification carrying a context-usage fraction — gatherHomeTelemetry
-	// reads the freshest notification Meta.Context.Usage, and hasData() is true
-	// once contextUsage >= 0.
-	usage := 0.73
-	m.messages = []ChatMessage{{
-		Type: "notification",
-		Body: "ctx tick",
-		Meta: &fs.NotificationMeta{Context: &fs.NotificationMetaContext{Usage: usage}},
-	}}
+	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	// Drive the deferred initial rebuild (the normal launch path) so the
+	// notification populates the session cache. No Ctrl+O, verbose stays off.
+	m, _ = m.Update(m.initialRebuild())
 	// Re-sync height now that telemetry visibility flipped on.
 	m.lastInputLines = -1
 	m.syncViewportHeight()
@@ -52,11 +65,20 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 	const w, h = 100, 24
 
-	// Baseline: same model, same size, but no telemetry data. This is the layout
-	// the user had before #441's row was added.
+	// Baseline: same model, same size, and the SAME lifecycle (initialRebuild
+	// clears the loading banner), but an empty orchestrator so there is no
+	// telemetry data. This is the layout the user had before #441's row was added.
 	dir := t.TempDir()
-	base := NewMailModel(dir, "human@local", "~", dir, "TestOrch", 50, dir, "en", false, 0)
+	baseOrch := filepath.Join(dir, "orch")
+	if err := os.MkdirAll(filepath.Join(baseOrch, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := NewMailModel(dir, "human@local", "~", baseOrch, "TestOrch", 50, dir, "en", false, 0)
 	base, _ = base.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	base, _ = base.Update(base.initialRebuild())
+	if base.hasHomeTelemetry() {
+		t.Skip("environment unexpectedly has session telemetry data; skipping the baseline comparison")
+	}
 	baseLines := len(strings.Split(base.View(), "\n"))
 
 	m := newReadyMailModelWithTelemetry(t, w, h)

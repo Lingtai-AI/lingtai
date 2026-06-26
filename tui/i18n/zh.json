@@ -139,6 +139,7 @@
   "mail.editor_hint": "输入框已可内部滚动：在此处滚轮或按 pgup/pgdn；ctrl+e 打开 vim/编辑器。",
   "mail.meta_hidden_hint": "_meta 已隐藏 —— 使用 /notification 查看 meta 块",
   "mail.token_usage_footer": "令牌：输入 %s · 缓存未命中 %s · 输出 %s · 缓存命中率 %s",
+  "mail.telemetry_session": "当前会话",
   "mail.telemetry_tok": "令牌",
   "mail.telemetry_ctx": "上下文",
   "mail.telemetry_api": "调用",
