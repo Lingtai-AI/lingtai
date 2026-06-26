@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/anthropics/lingtai-tui/i18n"
 )
 
 // End-to-end regression guard for the #441 home-telemetry clipping bug.
@@ -101,9 +103,10 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 
 	// 2) The telemetry row must actually be present (proves we're exercising the
 	//    additive path, not silently hiding it). The context segment leads with the
-	//    localized "Current Context" scope label and closes with the percentage on
+	//    localized "ctx" scope label and closes with the percentage on
 	//    the right of the bar.
-	if !strings.Contains(out, "Current Context") || !strings.Contains(out, "73%") {
+	ctxLabel := i18n.T("mail.telemetry_context")
+	if !strings.Contains(out, ctxLabel) || !strings.Contains(out, "73%") {
 		t.Errorf("telemetry row missing from rendered View:\n%s", out)
 	}
 
@@ -124,7 +127,7 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 			lastNonEmpty, out)
 	}
 	// And the telemetry row must sit ABOVE the status bar, not replace or follow it.
-	if idxTel, idxBar := strings.Index(out, "Current Context"), strings.LastIndex(out, "ctrl+o soul"); idxTel >= idxBar {
+	if idxTel, idxBar := strings.Index(out, ctxLabel), strings.LastIndex(out, "ctrl+o soul"); idxTel >= idxBar {
 		t.Errorf("telemetry row must be ABOVE the status bar (tel=%d bar=%d):\n%s", idxTel, idxBar, out)
 	}
 }

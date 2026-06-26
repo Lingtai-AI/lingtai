@@ -15,7 +15,7 @@ import (
 // the bottom path/shortcut status bar. It condenses the CURRENT SESSION's token
 // economy and the live context-window pressure into one high-density line:
 //
-//	api 42  tok 181.6k  cache 88%  tok/api 4.3k    Current Context 186.5k/250.0k ▓▓▓▓░░ 73%
+//	Session:  api 42  tok 181.6k  cache 88%  tok/api 4.3k    ctx 186.5k/250.0k ▓▓▓▓░░ 73%
 //
 // All numbers are scoped to the current molt session (since the latest
 // psyche_molt), NOT the whole-ledger lifetime total and NOT a single round:
@@ -24,7 +24,7 @@ import (
 //   - cache:   cache-hit rate (cached / input)
 //   - tok/api: average tokens per API call
 // and, separately, the live context-window pressure with the gauge Jason liked:
-//   - Current Context used/limit ▓▓░░ N%: tokens in use over the model's limit,
+//   - ctx used/limit ▓▓░░ N%: tokens in use over the model's limit,
 //     the gauge, then the fill percentage on the right of the bar.
 //
 // It is scalar-only — never the noisy `_meta` block hidden by PR #440.
@@ -216,14 +216,16 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 		segs = append(segs, i18n.T("mail.telemetry_tok_per_api")+" "+humanizeTokenCount(avgPerCall(t.sessionTokens, t.apiCalls)))
 	}
 
-	// Current Context  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure
+	// ctx  186.5k/250.0k  ▓▓▓░░ 73%  — live context-window pressure
 	// with the gauge Jason liked (msg 3195/3196). Jason's layout follow-up
-	// (msg 3251): the scope reads as an explicit "Current Context" label, then
-	// used/limit, then the bar, then the percentage on the RIGHT of the bar — so
-	// the eye reads "what / how much / how full" in order, never the confusing
-	// "73% / 250k" the percentage-first form produced. The used/limit + bar +
-	// percentage are the core; the bar is dropped on narrow terminals (the
-	// numbers stay), and "Current Context" + percentage always frame the metric.
+	// (msg 3251): the scope reads as an explicit label, then used/limit, then the
+	// bar, then the percentage on the RIGHT of the bar — so the eye reads
+	// "what / how much / how full" in order, never the confusing "73% / 250k" the
+	// percentage-first form produced. Jason's final follow-up trimmed the verbose
+	// "Current Context" label to the technical abbreviation "ctx" (same in every
+	// locale). The used/limit + bar + percentage are the core; the bar is dropped
+	// on narrow terminals (the numbers stay), and the "ctx" label + percentage
+	// always frame the metric.
 	if t.contextUsage >= 0 {
 		pct := t.contextUsage * 100
 		ctx := i18n.T("mail.telemetry_context")
@@ -248,9 +250,12 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 	}
 	// Lead with a localized scope label (Jason, msg 3217) so the user reads
 	// "these numbers are the CURRENT SESSION" before the metrics. Localized via
-	// i18n (mail.telemetry_session), never hard-coded. A middle-dot sets it off
-	// from the metrics; the whole row is muted by StyleFaint below.
-	segs = append([]string{i18n.T("mail.telemetry_session") + "  " + RuneBullet}, segs...)
+	// i18n (mail.telemetry_session), never hard-coded. Jason's final follow-up
+	// trimmed the verbose "Current Session" to the compact "Session:" label (same
+	// in every locale); the trailing colon now carries the set-off the middle-dot
+	// used to, so the bullet is dropped and the label reads "Session:  api 42 …".
+	// The whole row is muted by StyleFaint below.
+	segs = append([]string{i18n.T("mail.telemetry_session")}, segs...)
 	// Two spaces between segments for a calm, low-density-feeling separation; the
 	// label words themselves are muted by the caller's style.
 	left := "  " + StyleFaint.Render(strings.Join(segs, "  "))

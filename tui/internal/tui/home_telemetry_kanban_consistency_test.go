@@ -136,7 +136,7 @@ func TestHomeTelemetryStatusZeroWindowFallsBack(t *testing.T) {
 
 // Jason's layout follow-up (msg 3251): the context segment must read as
 //
-//	Current Context 186.5k/250.0k ▓▓▓░░ 75%
+//	ctx 186.5k/250.0k ▓▓▓░░ 75%
 //
 // — an explicit scope label, then used/limit, then the bar, then the percentage
 // on the RIGHT of the bar. It must NOT render the confusing "75% / 250.0k"
