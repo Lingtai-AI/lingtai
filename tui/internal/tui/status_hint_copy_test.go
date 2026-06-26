@@ -68,21 +68,63 @@ func TestHomeStatusHintShowsExpandCommandsCopy(t *testing.T) {
 	}
 }
 
-// Pin the i18n keys directly so a future copy edit that reintroduces "soul" into
-// the English home prompt fails loudly at the source, independent of layout.
-func TestHomeHintI18nKeysHaveNoSoul(t *testing.T) {
-	i18n.SetLang("en")
-	t.Cleanup(func() { i18n.SetLang("en") })
-
-	checks := map[string]string{
-		"hints.verbose":    "ctrl+o to expand",
-		"hints.verbose_on": "ctrl+o to expand",
-		"hints.commands":   "/ for commands",
-		"hints.sep":        ", ",
+// Pin the footer i18n keys directly so future copy edits cannot regress to
+// "soul" in English or to the old 灵台 wording in localized UI. These are the
+// exact lower-layer values used by MailModel.View() to render the bottom prompt.
+func TestHomeHintI18nKeysUseLocalizedExpandCopy(t *testing.T) {
+	cases := []struct {
+		lang      string
+		want      map[string]string
+		forbidden []string
+	}{
+		{
+			lang: "en",
+			want: map[string]string{
+				"hints.verbose":    "ctrl+o to expand",
+				"hints.verbose_on": "ctrl+o to expand",
+				"hints.commands":   "/ for commands",
+				"hints.sep":        ", ",
+			},
+			forbidden: []string{"soul"},
+		},
+		{
+			lang: "zh",
+			want: map[string]string{
+				"hints.verbose":    "ctrl+o 展开",
+				"hints.verbose_on": "ctrl+o 展开",
+				"hints.commands":   "/ 命令",
+				"hints.sep":        " • ",
+			},
+			forbidden: []string{"soul", "灵台"},
+		},
+		{
+			lang: "wen",
+			want: map[string]string{
+				"hints.verbose":    "ctrl+o 展",
+				"hints.verbose_on": "ctrl+o 展",
+				"hints.commands":   "/ 令",
+				"hints.sep":        " • ",
+			},
+			forbidden: []string{"soul", "灵台"},
+		},
 	}
-	for key, want := range checks {
-		if got := i18n.T(key); got != want {
-			t.Errorf("i18n[%q] = %q, want %q", key, got, want)
-		}
+
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			i18n.SetLang(tc.lang)
+			t.Cleanup(func() { i18n.SetLang("en") })
+
+			for key, want := range tc.want {
+				got := i18n.T(key)
+				if got != want {
+					t.Errorf("%s i18n[%q] = %q, want %q", tc.lang, key, got, want)
+				}
+				for _, bad := range tc.forbidden {
+					if strings.Contains(got, bad) {
+						t.Errorf("%s i18n[%q] must not contain %q; got %q", tc.lang, key, bad, got)
+					}
+				}
+			}
+		})
 	}
 }
