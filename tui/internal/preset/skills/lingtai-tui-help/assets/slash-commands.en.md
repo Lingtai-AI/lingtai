@@ -19,6 +19,13 @@ views, manage the agent lifecycle, and configure the runtime.
 content panel so `PgUp`/`PgDn` scroll the page. `Ctrl+E` exports the current page
 to `~/Downloads`. Press `Esc` or `q` to return to the mail view.
 
+## Selecting text (`Ctrl+Y`)
+
+`Ctrl+Y` is a global shortcut: from any view it enters **select mode** and shows
+an indicator at the top of the screen. While it is on, mouse capture is released
+so you can drag to select text and copy it with `⌘C` (`Ctrl+Shift+C` on
+Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
+
 ## Commands at a glance
 
 ### Talking to the agent

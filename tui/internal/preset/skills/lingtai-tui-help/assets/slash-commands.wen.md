@@ -15,6 +15,12 @@
 `/help` 启此册于 Markdown 阅器。按 `Tab` 移焦于内容之栏，则 `PgUp`/`PgDn` 可翻页；
 `Ctrl+E` 导今页于 `~/Downloads`；按 `Esc` 或 `q` 还邮视。
 
+## 择文（`Ctrl+Y`）
+
+`Ctrl+Y` 者，通行之捷键也：于任一视中按之，即入**择文之态**，屏首现其示。
+态启之时，释鼠之捕，故可曳而择文，复以 `⌘C` 录之（Linux/Windows 则
+`Ctrl+Shift+C`）。再按 `Ctrl+Y` 或 `Esc` 以退。
+
 ## 诸命概览
 
 ### 与器灵言
