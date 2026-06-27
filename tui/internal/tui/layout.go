@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/anthropics/lingtai-tui/i18n"
 )
 
 // LayoutBudget is the root-owned layout contract. The root App reserves rows
@@ -33,13 +38,25 @@ func (b LayoutBudget) ChildWindowSize() tea.WindowSizeMsg {
 	return tea.WindowSizeMsg{Width: b.Width, Height: b.ChildHeight}
 }
 
-// topChromeRows reports how many rows the root reserves at the top. Today that
-// is one row for the startup banner when it is non-empty, else zero.
+// topChromeRows reports how many rows the root reserves at the top: one for the
+// startup banner when non-empty, plus one for the global select-mode indicator
+// when select mode is on (any non-mail view). They stack when both are present.
 func (a App) topChromeRows() int {
+	rows := 0
 	if a.startupBanner != "" {
-		return 1
+		rows++
 	}
-	return 0
+	if a.selectModeIndicatorActive() {
+		rows++
+	}
+	return rows
+}
+
+// selectModeIndicatorActive reports whether the root should render its global
+// select-mode indicator. The mail view owns its own copyMode badge, so the
+// root indicator is scoped to every other view.
+func (a App) selectModeIndicatorActive() bool {
+	return a.selectMode && a.currentView != appViewMail
 }
 
 // bottomChromeRows reports how many rows the root reserves at the bottom. There
@@ -73,12 +90,33 @@ func (a App) layoutBudget() LayoutBudget {
 // topChrome renders the root-owned top chrome (the rows counted by
 // topChromeRows). Returns "" when there is no top chrome. The returned string,
 // when non-empty, is exactly topChromeRows() rows tall and is composed ABOVE
-// the child content in View().
+// the child content in View(). The startup banner and the select-mode indicator
+// stack (banner first) when both are present.
 func (a App) topChrome() string {
-	if a.startupBanner == "" {
+	var rows []string
+	if a.startupBanner != "" {
+		rows = append(rows, "  "+lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner))
+	}
+	if a.selectModeIndicatorActive() {
+		rows = append(rows, a.selectModeIndicator())
+	}
+	if len(rows) == 0 {
 		return ""
 	}
-	return "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner)
+	return strings.Join(rows, "\n")
+}
+
+// selectModeIndicator renders the one-row global select-mode badge. It reuses
+// the mail view's localized "mail.copy_mode" string so the wording stays
+// centralized (drag to select · ⌘C copy · ctrl+y/esc exit), styled with the
+// same accent the mail badge uses. Truncated to the terminal width so it never
+// wraps the reserved single row.
+func (a App) selectModeIndicator() string {
+	badge := "  ◉ " + i18n.T("mail.copy_mode")
+	if a.width > 0 {
+		badge = ansi.Truncate(badge, a.width-1, "…")
+	}
+	return lipgloss.NewStyle().Foreground(ColorAccent).Render(badge)
 }
 
 // composeWithChrome stacks root top chrome above the child content. With no

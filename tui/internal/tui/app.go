@@ -83,6 +83,12 @@ type App struct {
 	// handler keeps it true while it re-arms; turning the feature off lets the
 	// loop lapse and flips this back to false.
 	autoRefreshArmed bool
+	// selectMode is the global ctrl+y "select text" mode for every view EXCEPT
+	// mail. When on, View() drops mouse capture (so the terminal can drag-select
+	// transcript text) and renders a top-chrome indicator. The mail view owns its
+	// own copyMode (see mail.go) and never sets this flag; entering mail resets
+	// it so the two badges can't both show.
+	selectMode bool
 }
 
 func humanAddr(projectDir string) string {
@@ -285,6 +291,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// behavior — equivalent because copy mode only has any effect while the
 		// mail view is current (see App.View).
 		a.mail.copyMode = false
+		// Likewise clear any global select mode left on by the view we came from
+		// (mail owns its own copyMode; the two must never both be active).
+		a.selectMode = false
 		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
 
 	case doctorResultMsg:
@@ -543,6 +552,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// === Global keys ===
 
 	case tea.KeyPressMsg:
+		// Global select-text mode (ctrl+y). The mail view keeps owning its own
+		// copyMode via mail.go's handler, so only intercept ctrl+y here for every
+		// OTHER view; in mail we fall through and let the mail model toggle. esc
+		// exits select mode when it is on (non-mail), handled before forwarding so
+		// it reliably leaves the mode rather than being consumed by the child view.
+		if a.currentView != appViewMail {
+			switch msg.String() {
+			case copyModeToggleKey:
+				a.selectMode = !a.selectMode
+				return a, nil
+			case "esc":
+				if a.selectMode {
+					a.selectMode = false
+					return a, nil
+				}
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
@@ -1343,6 +1369,10 @@ type refreshAllDoneMsg struct {
 }
 
 func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
+	// Global select mode is scoped to the current view; clear it on any
+	// navigation so it never leaks into the destination (and so entering mail
+	// hands ctrl+y back to the mail model's own copyMode).
+	a.selectMode = false
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
@@ -1500,11 +1530,12 @@ func (a App) View() tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	// Chat/mail copy mode: drop mouse capture so the terminal can drag-select
-	// visible transcript text. Scoped to the mail view only — every other screen
-	// keeps mouse tracking. Bubble Tea diffs MouseMode per frame and emits the
-	// enable/disable escape sequences on transition.
-	if a.currentView == appViewMail && a.mail.copyMode {
+	// Copy/select mode: drop mouse capture so the terminal can drag-select
+	// visible text. The mail view drives this via its own copyMode; every other
+	// view uses the global selectMode (ctrl+y), whose indicator is rendered as
+	// top chrome by composeWithChrome above. Bubble Tea diffs MouseMode per frame
+	// and emits the enable/disable escape sequences on transition.
+	if (a.currentView == appViewMail && a.mail.copyMode) || (a.currentView != appViewMail && a.selectMode) {
 		v.MouseMode = tea.MouseModeNone
 	}
 	t := ActiveTheme()
