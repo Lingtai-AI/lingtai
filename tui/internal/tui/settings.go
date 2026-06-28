@@ -88,10 +88,10 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	pageSizeOptions := []string{"200", "500", "1000", "infinite"}
-	pageSizeCurrent := 0 // default to 200
+	pageSizeOptions := []string{"100", "200", "500", "1000", "infinite"}
+	pageSizeCurrent := 1 // default to 200
 	if tuiCfg.MailPageSize <= 0 {
-		pageSizeCurrent = 3 // infinite
+		pageSizeCurrent = 4 // infinite
 	} else {
 		pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
 		for i, p := range pageSizeOptions {
