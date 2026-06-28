@@ -21,12 +21,84 @@ func TestLedgerSeparatorLabelKeysDistinguishesReconstructAndMolt(t *testing.T) {
 		{TS: ts(2000)},
 		{TS: ts(1000)},
 	}
-	labels := ledgerSeparatorLabelKeys(entries, []time.Time{time.Unix(1500, 0).UTC()})
+	labels := ledgerSeparatorLabelKeys(entries, []time.Time{time.Unix(1500, 0).UTC()}, nil)
 	if got := labels[0]; len(got) != 1 || got[0] != ledgerSeparatorReconstructLabel {
 		t.Fatalf("expected reconstruct label after index 0, got %v", got)
 	}
 	if got := labels[1]; len(got) != 1 || got[0] != ledgerSeparatorMoltLabel {
 		t.Fatalf("expected molt label after index 1, got %v", got)
+	}
+}
+
+func TestLedgerSeparatorLabelKeysRefreshCompleteMarksReconstruct(t *testing.T) {
+	entries := []fs.LedgerEntry{
+		{TS: ts(3000)},
+		{TS: ts(2000)},
+		{TS: ts(1000)},
+	}
+	// refresh_complete at 2500 sits between row 0 (3000) and row 1 (2000).
+	labels := ledgerSeparatorLabelKeys(entries, nil, []time.Time{time.Unix(2500, 0).UTC()})
+	if got := labels[0]; len(got) != 1 || got[0] != ledgerSeparatorReconstructLabel {
+		t.Fatalf("expected reconstruct label after index 0 from refresh_complete, got %v", got)
+	}
+}
+
+func TestLedgerSeparatorLabelKeysNoBaselineRowMarksReconstruct(t *testing.T) {
+	entries := []fs.LedgerEntry{
+		{TS: ts(3000), CodexWSDeltaReason: "ok"},
+		{TS: ts(2000), CodexWSDeltaReason: "no_baseline"},
+		{TS: ts(1000), CodexWSDeltaReason: "ok"},
+	}
+	labels := ledgerSeparatorLabelKeys(entries, nil, nil)
+	if got := labels[1]; len(got) != 1 || got[0] != ledgerSeparatorReconstructLabel {
+		t.Fatalf("expected reconstruct label after no_baseline row index 1, got %v", got)
+	}
+}
+
+func TestLedgerSeparatorLabelKeysFullTransferModeMarksReconstruct(t *testing.T) {
+	entries := []fs.LedgerEntry{
+		{TS: ts(3000), CodexTransferMode: "incremental"},
+		{TS: ts(2000), CodexTransferMode: "full"},
+		{TS: ts(1000), CodexTransferMode: "incremental"},
+	}
+	labels := ledgerSeparatorLabelKeys(entries, nil, nil)
+	if got := labels[1]; len(got) != 1 || got[0] != ledgerSeparatorReconstructLabel {
+		t.Fatalf("expected reconstruct label after full transfer-mode row index 1, got %v", got)
+	}
+}
+
+// When a refresh_complete timestamp AND a full/no_baseline ledger row both
+// imply the SAME boundary, only one "context rebuilt" label is drawn there.
+func TestLedgerSeparatorLabelKeysDeduplicatesReconstruct(t *testing.T) {
+	entries := []fs.LedgerEntry{
+		{TS: ts(3000)},
+		{TS: ts(2000), CodexWSDeltaReason: "no_baseline"}, // reconstruct row
+		{TS: ts(1000)},
+	}
+	// refresh_complete at 2000 lands on the same boundary (after index 1):
+	// 2000 is not-before row[1] (2000) and before nothing older... actually
+	// it sits between row 1 (2000) and row 2 (1000): row[1] >= 2000 > row[2].
+	labels := ledgerSeparatorLabelKeys(entries, nil, []time.Time{time.Unix(2000, 0).UTC()})
+	if got := labels[1]; len(got) != 1 || got[0] != ledgerSeparatorReconstructLabel {
+		t.Fatalf("expected exactly one reconstruct label after index 1, got %v", got)
+	}
+}
+
+func TestRenderMainCallRowsRefreshCompleteShowsContextRebuilt(t *testing.T) {
+	m := PropsModel{
+		detailRecent: []fs.LedgerEntry{
+			{TS: ts(3000), Model: "m", Endpoint: "e"},
+			{TS: ts(1000), Model: "m", Endpoint: "e"},
+		},
+		detailRefreshes: []time.Time{time.Unix(2000, 0).UTC()},
+	}
+	rows := m.renderMainCallRows()
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 rows (header, row, refresh separator, row), got %d:\n%s",
+			len(rows), strings.Join(rows, "\n"))
+	}
+	if !strings.Contains(rows[2], "┈") || !strings.Contains(rows[2], "context rebuilt") {
+		t.Fatalf("expected dotted context-rebuilt separator from refresh_complete, got %q", rows[2])
 	}
 }
 

@@ -59,10 +59,26 @@ func QueryMoltSessionWindows(agentDir string) (currentSince, lastSince, lastBefo
 // QueryRecentMoltTimes fetches the most recent psyche_molt (context rebuild)
 // timestamps from the sqlite sidecar, newest first, capped at limit. It is a
 // targeted, LIMIT-bounded query — never a full table scan. Used to mark
-// context-rebuild boundaries in the /kanban Ctrl+D ledger. Degrades like the
-// other queries here: a missing database or binary returns a descriptive
-// error and a nil slice, and the caller falls back to JSONL or draws nothing.
+// molt boundaries in the /kanban Ctrl+D ledger. Degrades like the other
+// queries here: a missing database or binary returns a descriptive error and
+// a nil slice, and the caller falls back to JSONL or draws nothing.
 func QueryRecentMoltTimes(agentDir string, limit int) ([]time.Time, error) {
+	return queryRecentEventTimes(agentDir, "psyche_molt", limit)
+}
+
+// QueryRecentRefreshCompleteTimes fetches the most recent refresh_complete
+// (/refresh context reconstruction) timestamps from the sqlite sidecar,
+// newest first, capped at limit. Same targeted LIMIT-bounded contract and
+// graceful degradation as QueryRecentMoltTimes. refresh_start is deliberately
+// excluded — only completed refreshes mark a reconstruction boundary.
+func QueryRecentRefreshCompleteTimes(agentDir string, limit int) ([]time.Time, error) {
+	return queryRecentEventTimes(agentDir, "refresh_complete", limit)
+}
+
+// queryRecentEventTimes runs a targeted, LIMIT-bounded query for the newest
+// timestamps of a single event type. eventType is a fixed internal constant
+// (never user input), so it is interpolated directly into the SQL.
+func queryRecentEventTimes(agentDir, eventType string, limit int) ([]time.Time, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -75,7 +91,7 @@ func QueryRecentMoltTimes(agentDir string, limit int) ([]time.Time, error) {
 		return nil, err
 	}
 
-	sql := fmt.Sprintf(`SELECT ts FROM events WHERE type='psyche_molt' ORDER BY ts DESC LIMIT %d`, limit)
+	sql := fmt.Sprintf(`SELECT ts FROM events WHERE type='%s' ORDER BY ts DESC LIMIT %d`, eventType, limit)
 	out, err := exec.Command(bin, "-separator", "\x1f", db, sql).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
