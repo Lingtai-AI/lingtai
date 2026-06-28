@@ -985,6 +985,33 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	toolStyle := lipgloss.NewStyle().Foreground(ColorTool)
 	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
+	// glamour.NewTermRenderer is heavyweight (it parses a style and builds an
+	// ANSI renderer), so constructing one per agent/insight message — as this
+	// loop used to — costs O(visible messages) renderer builds every render
+	// pass, the dominant source of mail-view lag at large page sizes. The word
+	// wrap width is the only per-message variable (it depends on the sender-name
+	// prefix length for mail bubbles), so cache one renderer per distinct width
+	// for the duration of this call. A nil entry records a width whose renderer
+	// failed to construct, so callers fall back to the plain-wrap path exactly
+	// as before without retrying the failed build.
+	glamourStyle := ActiveTheme().GlamourStyle
+	renderers := make(map[int]*glamour.TermRenderer)
+	markdownRenderer := func(wrap int) *glamour.TermRenderer {
+		if r, ok := renderers[wrap]; ok {
+			return r
+		}
+		r, err := glamour.NewTermRenderer(
+			glamour.WithStandardStyle(glamourStyle),
+			glamour.WithWordWrap(wrap),
+		)
+		if err != nil {
+			renderers[wrap] = nil
+			return nil
+		}
+		renderers[wrap] = r
+		return r
+	}
+
 	var b strings.Builder
 	var prevVisibleApiGroup *ChatMessage
 
@@ -1184,11 +1211,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
 			b.WriteString("  " + label + "\n")
 			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
-			r, err := glamour.NewTermRenderer(
-				glamour.WithStandardStyle(ActiveTheme().GlamourStyle),
-				glamour.WithWordWrap(max(wrapWidth-2, 10)),
-			)
-			if err == nil {
+			if r := markdownRenderer(max(wrapWidth-2, 10)); r != nil {
 				rendered, err := r.Render(msg.Body)
 				if err == nil {
 					rendered = strings.Trim(rendered, "\n")
@@ -1242,11 +1265,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			// Render markdown for agent messages, plain wrap for user/system
 			var wrappedBody string
 			if !msg.IsFromMe && msg.From != i18n.T("mail.system_sender") {
-				r, err := glamour.NewTermRenderer(
-					glamour.WithStandardStyle(ActiveTheme().GlamourStyle),
-					glamour.WithWordWrap(bodyWidth),
-				)
-				if err == nil {
+				if r := markdownRenderer(bodyWidth); r != nil {
 					if rendered, rerr := r.Render(msg.Body); rerr == nil {
 						wrappedBody = strings.TrimRight(rendered, "\n")
 					}
