@@ -88,10 +88,10 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	pageSizeOptions := []string{"100", "200", "unlimited"}
-	pageSizeCurrent := 0 // default to 100
+	pageSizeOptions := []string{"200", "500", "1000", "infinite"}
+	pageSizeCurrent := 0 // default to 200
 	if tuiCfg.MailPageSize <= 0 {
-		pageSizeCurrent = 2 // unlimited
+		pageSizeCurrent = 3 // infinite
 	} else {
 		pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
 		for i, p := range pageSizeOptions {
@@ -306,10 +306,10 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		m.tuiConfig.Language = val
 		i18n.SetLang(val)
 	case "mail_page_size":
-		if val == "unlimited" {
+		if val == "infinite" {
 			m.tuiConfig.MailPageSize = 0
 		} else {
-			size := 100
+			size := 200
 			fmt.Sscanf(val, "%d", &size)
 			m.tuiConfig.MailPageSize = size
 		}
@@ -459,7 +459,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "mail_page_size" && value == "unlimited") || (f.Key == "tool_truncate" && value == "off") {
+		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "mail_page_size" && value == "infinite") || (f.Key == "tool_truncate" && value == "off") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)
