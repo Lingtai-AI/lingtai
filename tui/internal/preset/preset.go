@@ -1765,7 +1765,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		"env_file":        config.EnvFilePath(globalDir),
 		"venv_path":       filepath.Join(globalDir, "runtime", "venv"),
 		"pad":             "",
-		"prompt":          "",
+		"lingtai":         "",
 	}
 
 	// Decide which addons to wire.
