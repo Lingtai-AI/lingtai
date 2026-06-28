@@ -18,7 +18,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// unlimitedPageSize is the effective page size when the user selects "unlimited".
+// unlimitedPageSize is the effective page size when the user selects "infinite".
 const unlimitedPageSize = 999999
 
 const (

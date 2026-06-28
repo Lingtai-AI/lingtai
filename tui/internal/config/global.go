@@ -103,7 +103,7 @@ func (tc TUIConfig) AutoRefreshEnabled() bool { return !tc.AutoRefreshOff }
 func DefaultTUIConfig() TUIConfig {
 	return TUIConfig{
 		Language:     "en",
-		MailPageSize: 100,
+		MailPageSize: 200,
 		Insights:     false,
 	}
 }
@@ -121,8 +121,8 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	if tc.Language == "" {
 		tc.Language = "en"
 	}
-	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
-		tc.MailPageSize = 100 // migrate old values below minimum
+	if tc.MailPageSize > 0 && tc.MailPageSize < 200 {
+		tc.MailPageSize = 200 // migrate old values below minimum
 	}
 	// Insights defaults to false when absent from JSON.
 	// No override needed — zero value of bool is false.

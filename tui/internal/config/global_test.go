@@ -216,6 +216,24 @@ func TestDefaultTUIConfig_NoToolCallTruncation(t *testing.T) {
 	}
 }
 
+func TestDefaultTUIConfig_MailPageSize(t *testing.T) {
+	cfg := DefaultTUIConfig()
+	if cfg.MailPageSize != 200 {
+		t.Fatalf("DefaultTUIConfig().MailPageSize = %d, want 200", cfg.MailPageSize)
+	}
+}
+
+func TestLoadTUIConfig_MigratesLegacySmallMailPageSizeToDefault(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte(`{"language":"en","mail_page_size":100}`)
+	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
+		t.Fatalf("legacy small mail_page_size loaded as %d, want 200", cfg.MailPageSize)
+	}
+}
+
 func TestLoadTUIConfig_MissingDefaultsToNoTruncation(t *testing.T) {
 	dir := t.TempDir()
 	if cfg := LoadTUIConfig(dir); cfg.ToolCallTruncate != 0 {

@@ -608,7 +608,7 @@ func TestEnterAgentNameDirLanguageFollowsTUIConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			globalDir := t.TempDir()
-			if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: tt.tuiLang, MailPageSize: 100}); err != nil {
+			if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: tt.tuiLang, MailPageSize: 200}); err != nil {
 				t.Fatalf("save TUI config: %v", err)
 			}
 			m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
@@ -631,7 +631,7 @@ func TestEnterAgentNameDirLanguageFollowsTUIConfig(t *testing.T) {
 
 func TestEnterAgentNameDirLanguageFallsBackToPresetWhenTUIConfigInvalid(t *testing.T) {
 	globalDir := t.TempDir()
-	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "bogus", MailPageSize: 100}); err != nil {
+	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "bogus", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
 	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
@@ -653,7 +653,7 @@ func TestEnterAgentNameDirLanguageFallsBackToPresetWhenTUIConfigInvalid(t *testi
 
 func TestEnterAgentNameDirSetupModeSurfacesExistingInitLanguage(t *testing.T) {
 	globalDir := t.TempDir()
-	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "en", MailPageSize: 100}); err != nil {
+	if err := config.SaveTUIConfig(globalDir, config.TUIConfig{Language: "en", MailPageSize: 200}); err != nil {
 		t.Fatalf("save TUI config: %v", err)
 	}
 	m := NewFirstRunModel(t.TempDir(), globalDir, true, "")
