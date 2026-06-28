@@ -225,12 +225,23 @@ func TestDefaultTUIConfig_MailPageSize(t *testing.T) {
 
 func TestLoadTUIConfig_MigratesLegacySmallMailPageSizeToDefault(t *testing.T) {
 	dir := t.TempDir()
-	payload := []byte(`{"language":"en","mail_page_size":100}`)
+	payload := []byte(`{"language":"en","mail_page_size":50}`)
 	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
 		t.Fatalf("write tui_config.json: %v", err)
 	}
 	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
 		t.Fatalf("legacy small mail_page_size loaded as %d, want 200", cfg.MailPageSize)
+	}
+}
+
+func TestLoadTUIConfig_PreservesHundredMailPageSize(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte(`{"language":"en","mail_page_size":100}`)
+	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 100 {
+		t.Fatalf("mail_page_size=100 loaded as %d, want 100", cfg.MailPageSize)
 	}
 }
 

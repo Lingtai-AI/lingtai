@@ -121,7 +121,7 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	if tc.Language == "" {
 		tc.Language = "en"
 	}
-	if tc.MailPageSize > 0 && tc.MailPageSize < 200 {
+	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
 		tc.MailPageSize = 200 // migrate old values below minimum
 	}
 	// Insights defaults to false when absent from JSON.
