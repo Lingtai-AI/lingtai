@@ -25,6 +25,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:582` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
 | `SumMoltSessionTokenLedger` | `tui/internal/fs/agent.go:622` | uses `logs/log.sqlite` `psyche_molt` boundaries when available (JSONL fallback), then sums cached non-daemon token-ledger windows for `/kanban` Ctrl+D current and last session API/cache stats, including Codex `codex_request_mode` counts (`ws_full` / `ws_incremental`) |
 | `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:696` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
+| **rebuild_marker.go** | | |
+| `RecentRebuildTimes(agentDir, limit)` | `tui/internal/fs/rebuild_marker.go` | best-effort newest-first `psyche_molt` (context-rebuild) timestamps for `/kanban` Ctrl+D ledger separators; prefers `logs/log.sqlite` LIMIT query (`sqlitelog.QueryRecentMoltTimes`), falls back to tailing the last `tailScanLines` (1000) lines of `logs/events.jsonl`; missing/malformed logs yield no markers |
 | **jsonl.go** | | |
 | `forEachJSONLLine(path, fn)` | `tui/internal/fs/jsonl.go:16` | streams JSONL files one line at a time without `ReadFile`/`strings.Split`, avoiding duplicate buffers and Scanner token limits for ledger/history hot paths |
 | **daemon_ledger.go** | | |

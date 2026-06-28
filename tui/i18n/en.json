@@ -357,6 +357,8 @@
   "props.detail_recent_main": "Recent calls — agent (last 100)",
   "props.detail_recent_daemons": "Recent calls — daemons (last 100)",
   "props.detail_recent_empty": "No agent calls recorded yet.",
+  "props.detail_recent_rebuild": "context rebuilt",
+  "props.detail_recent_molt": "molt",
   "props.detail_recent_daemons_empty": "No daemon calls recorded yet.",
   "props.detail_mcp": "MCP servers",
   "props.detail_daemons": "Daemons",

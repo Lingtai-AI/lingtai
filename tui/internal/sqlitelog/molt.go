@@ -56,6 +56,51 @@ func QueryMoltSessionWindows(agentDir string) (currentSince, lastSince, lastBefo
 	return currentSince, lastSince, lastBefore, true, nil
 }
 
+// QueryRecentMoltTimes fetches the most recent psyche_molt (context rebuild)
+// timestamps from the sqlite sidecar, newest first, capped at limit. It is a
+// targeted, LIMIT-bounded query — never a full table scan. Used to mark
+// context-rebuild boundaries in the /kanban Ctrl+D ledger. Degrades like the
+// other queries here: a missing database or binary returns a descriptive
+// error and a nil slice, and the caller falls back to JSONL or draws nothing.
+func QueryRecentMoltTimes(agentDir string, limit int) ([]time.Time, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	db := DBPath(agentDir)
+	if _, err := os.Stat(db); err != nil {
+		return nil, fmt.Errorf("sqlite sidecar not found: %s", db)
+	}
+	bin, err := findSQLite3()
+	if err != nil {
+		return nil, err
+	}
+
+	sql := fmt.Sprintf(`SELECT ts FROM events WHERE type='psyche_molt' ORDER BY ts DESC LIMIT %d`, limit)
+	out, err := exec.Command(bin, "-separator", "\x1f", db, sql).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+				return nil, fmt.Errorf("sqlite3: %s", msg)
+			}
+		}
+		return nil, fmt.Errorf("sqlite3 query failed: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	var times []time.Time
+	for _, line := range strings.Split(raw, "\n") {
+		ts, err := strconv.ParseFloat(strings.TrimSpace(line), 64)
+		if err != nil || ts <= 0 {
+			continue
+		}
+		times = append(times, unixFloatTimeUTC(ts))
+	}
+	return times, nil
+}
+
 func unixFloatTimeUTC(ts float64) time.Time {
 	sec := int64(ts)
 	nsec := int64((ts - float64(sec)) * 1e9)

@@ -559,17 +559,18 @@ func storeTokenLedgerTotals(path string, info os.FileInfo, totals TokenTotals) {
 // agent calls from historical daemon rows that were mirrored into parent
 // ledgers.
 type LedgerEntry struct {
-	TS                string `json:"ts"`
-	Input             int64  `json:"input"`
-	Output            int64  `json:"output"`
-	Thinking          int64  `json:"thinking"`
-	Cached            int64  `json:"cached"`
-	Model             string `json:"model,omitempty"`
-	Endpoint          string `json:"endpoint,omitempty"`
-	Source            string `json:"source,omitempty"`
-	EmID              string `json:"em_id,omitempty"`
-	RunID             string `json:"run_id,omitempty"`
-	CodexTransferMode string `json:"codex_transfer_mode,omitempty"`
+	TS                 string `json:"ts"`
+	Input              int64  `json:"input"`
+	Output             int64  `json:"output"`
+	Thinking           int64  `json:"thinking"`
+	Cached             int64  `json:"cached"`
+	Model              string `json:"model,omitempty"`
+	Endpoint           string `json:"endpoint,omitempty"`
+	Source             string `json:"source,omitempty"`
+	EmID               string `json:"em_id,omitempty"`
+	RunID              string `json:"run_id,omitempty"`
+	CodexTransferMode  string `json:"codex_transfer_mode,omitempty"`
+	CodexWSDeltaReason string `json:"codex_ws_delta_reason,omitempty"`
 }
 
 // SumTokenLedgerByProvider reads a token_ledger.jsonl, groups main-agent

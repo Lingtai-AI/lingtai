@@ -352,6 +352,8 @@
   "props.detail_recent_main": "近召 — 本体（末百）",
   "props.detail_recent_daemons": "近召 — 神识（末百）",
   "props.detail_recent_empty": "本体未尝有召。",
+  "props.detail_recent_rebuild": "灵台重铸",
+  "props.detail_recent_molt": "凝蜕",
   "props.detail_recent_daemons_empty": "神识未尝有召。",
   "props.detail_mcp": "MCP 之器",
   "props.detail_daemons": "神识",

@@ -65,6 +65,7 @@ type PropsModel struct {
 	detailContextStats        fs.ContextStats
 	detailDaemonCounts        fs.DaemonCounts
 	detailMCPNames            []string
+	detailRebuilds            []time.Time // psyche_molt times, newest first; rendered as molt separators
 }
 
 // detailRecentCalls is the number of recent token-ledger calls shown in each
@@ -251,6 +252,9 @@ func (m *PropsModel) loadDetail() {
 	// network. Missing ledgers render an empty lane.
 	m.detailDaemonRecent = fs.DaemonRecentLedger(m.selectedDir, detailRecentCalls)
 	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
+	// Context-rebuild boundaries to mark in the main-agent ledger lane.
+	// Best-effort: empty when no rebuild markers are available.
+	m.detailRebuilds = fs.RecentRebuildTimes(m.selectedDir, detailRecentCalls)
 
 	// MCP names from init.json's mcp block.
 	m.detailMCPNames = nil
@@ -979,6 +983,83 @@ func (m PropsModel) renderRecentCallLanes() []string {
 	return lines
 }
 
+const (
+	ledgerSeparatorReconstructLabel = "props.detail_recent_rebuild"
+	ledgerSeparatorMoltLabel        = "props.detail_recent_molt"
+)
+
+// ledgerSeparatorLabelKeys maps each ledger row index (in a newest-first
+// entries slice) to the dotted separator label(s) that should be drawn after
+// that row. Codex token-ledger rows mark the first call after a reconstruct
+// with codex_ws_delta_reason="epoch_reset"; that row is itself the low-cache
+// reconstruct call, so the visual boundary belongs immediately after it,
+// before the next-older pre-reconstruct row. Molt timestamps are separate
+// boundaries and get their own label.
+func ledgerSeparatorLabelKeys(entries []fs.LedgerEntry, moltTimes []time.Time) map[int][]string {
+	out := map[int][]string{}
+	if len(entries) < 2 {
+		return out
+	}
+	for i := 0; i+1 < len(entries); i++ {
+		if isReconstructLedgerEntry(entries[i]) {
+			addLedgerSeparatorLabel(out, i, ledgerSeparatorReconstructLabel)
+		}
+	}
+	if len(moltTimes) == 0 {
+		return out
+	}
+	parsed := make([]time.Time, len(entries))
+	ok := make([]bool, len(entries))
+	for i, e := range entries {
+		if t, err := time.Parse(time.RFC3339, e.TS); err == nil {
+			parsed[i] = t
+			ok[i] = true
+		}
+	}
+	for _, r := range moltTimes {
+		for i := 0; i+1 < len(entries); i++ {
+			if !ok[i] || !ok[i+1] {
+				continue
+			}
+			// newest-first: parsed[i] is at/after the molt, parsed[i+1] before it.
+			if !parsed[i].Before(r) && parsed[i+1].Before(r) {
+				addLedgerSeparatorLabel(out, i, ledgerSeparatorMoltLabel)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func addLedgerSeparatorLabel(out map[int][]string, idx int, labelKey string) {
+	for _, existing := range out[idx] {
+		if existing == labelKey {
+			return
+		}
+	}
+	out[idx] = append(out[idx], labelKey)
+}
+
+// rebuildSeparatorIndexes is kept as a small test/helper compatibility wrapper
+// for callers that only care whether any separator exists after a row.
+func rebuildSeparatorIndexes(entries []fs.LedgerEntry, rebuilds []time.Time) map[int]bool {
+	labels := ledgerSeparatorLabelKeys(entries, rebuilds)
+	out := make(map[int]bool, len(labels))
+	for idx := range labels {
+		out[idx] = true
+	}
+	return out
+}
+
+func isReconstructLedgerEntry(entry fs.LedgerEntry) bool {
+	switch strings.ToLower(strings.TrimSpace(entry.CodexWSDeltaReason)) {
+	case "epoch_reset", "reconstruct", "reconstructed", "context_rebuild", "context_reconstructed":
+		return true
+	default:
+		return false
+	}
+}
+
 // renderMainCallRows renders the selected agent's recent per-call ledger
 // entries (newest first). Rows deliberately avoid truncating model/endpoint
 // fields so detail mode can preserve raw diagnostic evidence.
@@ -991,11 +1072,16 @@ func (m PropsModel) renderMainCallRows() []string {
 		return []string{"  " + subtleStyle.Render(i18n.T("props.detail_recent_empty"))}
 	}
 
-	lines := []string{
-		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
-			"time", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")),
-	}
-	for _, e := range m.detailRecent {
+	headerLine := fmt.Sprintf("  %-24s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
+		"time", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")
+	lines := []string{"  " + labelStyle.Render(headerLine)}
+
+	// Rows that start a reconstructed context, or that straddle a fallback
+	// rebuild timestamp, get a faint dotted separator drawn after them.
+	separators := ledgerSeparatorLabelKeys(m.detailRecent, m.detailRebuilds)
+	sepWidth := lipgloss.Width(headerLine)
+
+	for i, e := range m.detailRecent {
 		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
 		model := e.Model
 		if model == "" {
@@ -1018,8 +1104,29 @@ func (m PropsModel) renderMainCallRows() []string {
 			endpoint,
 		)
 		lines = append(lines, valueStyle.Render(line))
+		for _, labelKey := range separators[i] {
+			lines = append(lines, rebuildSeparatorLine(sepWidth, labelKey))
+		}
 	}
 	return lines
+}
+
+// rebuildSeparatorLine renders the faint dotted boundary marking a context
+// rebuild between two adjacent ledger calls.
+func rebuildSeparatorLine(width int, labelKey string) string {
+	if width < 8 {
+		width = 8
+	}
+	faint := lipgloss.NewStyle().Foreground(ColorTextFaint)
+	if labelKey == "" {
+		labelKey = ledgerSeparatorReconstructLabel
+	}
+	label := i18n.T(labelKey)
+	dots := width - lipgloss.Width(label) - 1
+	if dots < 3 {
+		return "  " + faint.Render(strings.Repeat("┈", width))
+	}
+	return "  " + faint.Render(strings.Repeat("┈", dots)+" "+label)
 }
 
 // renderDaemonCallRows renders all daemon per-call ledger entries (newest
