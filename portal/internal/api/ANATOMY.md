@@ -1,3 +1,22 @@
+---
+related_files:
+  - portal/ANATOMY.md
+  - portal/internal/fs/ANATOMY.md
+  - portal/internal/api/server.go
+  - portal/internal/api/handlers.go
+  - portal/internal/api/handlers_test.go
+  - portal/internal/api/replay.go
+  - portal/internal/api/replay_test.go
+  - portal/main.go
+  - portal/embed.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # portal/internal/api
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill. **Coding agents** update this file in the same commit as code changes.

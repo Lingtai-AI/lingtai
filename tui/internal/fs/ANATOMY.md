@@ -1,3 +1,42 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/migrate/ANATOMY.md
+  - portal/internal/fs/ANATOMY.md
+  - tui/internal/fs/types.go
+  - tui/internal/fs/agent.go
+  - tui/internal/fs/agent_test.go
+  - tui/internal/fs/activity.go
+  - tui/internal/fs/activity_test.go
+  - tui/internal/fs/daemon_ledger.go
+  - tui/internal/fs/daemon_ledger_test.go
+  - tui/internal/fs/heartbeat.go
+  - tui/internal/fs/heartbeat_test.go
+  - tui/internal/fs/mail.go
+  - tui/internal/fs/mail_test.go
+  - tui/internal/fs/network.go
+  - tui/internal/fs/network_test.go
+  - tui/internal/fs/session.go
+  - tui/internal/fs/session_rebuild_test.go
+  - tui/internal/fs/session_tail_test.go
+  - tui/internal/fs/signal.go
+  - tui/internal/fs/signal_test.go
+  - tui/internal/fs/resolve.go
+  - tui/internal/fs/resolve_test.go
+  - tui/internal/fs/ledger.go
+  - tui/internal/fs/location.go
+  - tui/internal/fs/project_hash.go
+  - tui/internal/fs/contacts.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # fs
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in same-commit as code changes.

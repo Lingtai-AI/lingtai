@@ -1,3 +1,25 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/config/devmode.go
+  - tui/internal/config/devmode_test.go
+  - tui/internal/config/devmode_runtime_test.go
+  - tui/internal/config/global.go
+  - tui/internal/config/global_test.go
+  - tui/internal/config/registry.go
+  - tui/internal/config/venv.go
+  - tui/internal/config/venv_doctor_test.go
+  - tui/main.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # config — bootstrap, venv, global config
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`).

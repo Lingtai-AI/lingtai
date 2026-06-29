@@ -1,3 +1,33 @@
+---
+related_files:
+  - ANATOMY.md
+  - tui/ANATOMY.md
+  - portal/internal/api/ANATOMY.md
+  - portal/internal/fs/ANATOMY.md
+  - portal/internal/migrate/ANATOMY.md
+  - portal/main.go
+  - portal/embed.go
+  - portal/Makefile
+  - portal/go.mod
+  - portal/i18n/i18n.go
+  - portal/i18n/en.json
+  - portal/i18n/zh.json
+  - portal/i18n/wen.json
+  - portal/web/package.json
+  - portal/web/src/App.tsx
+  - portal/web/src/Graph.tsx
+  - portal/web/src/BottomBar.tsx
+  - portal/web/src/FilterPanel.tsx
+  - portal/web/src/api.ts
+  - portal/web/src/types.ts
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # portal
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill. **Coding agents** update this file in the same commit as code changes. **LingTai agents** report drift as issues; do not silently fix.

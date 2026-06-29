@@ -1,3 +1,32 @@
+---
+related_files:
+  - portal/ANATOMY.md
+  - portal/internal/api/ANATOMY.md
+  - tui/internal/fs/ANATOMY.md
+  - portal/internal/fs/types.go
+  - portal/internal/fs/agent.go
+  - portal/internal/fs/agent_test.go
+  - portal/internal/fs/contacts.go
+  - portal/internal/fs/heartbeat.go
+  - portal/internal/fs/ledger.go
+  - portal/internal/fs/location.go
+  - portal/internal/fs/mail.go
+  - portal/internal/fs/mail_test.go
+  - portal/internal/fs/network.go
+  - portal/internal/fs/network_test.go
+  - portal/internal/fs/reconstruct.go
+  - portal/internal/fs/reconstruct_test.go
+  - portal/internal/fs/resolve.go
+  - portal/internal/fs/resolve_test.go
+  - portal/internal/fs/signal.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # portal/internal/fs — Filesystem Reader (Portal)
 
 > **Maintenance:** see `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`.

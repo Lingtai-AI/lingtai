@@ -1,3 +1,30 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/config/ANATOMY.md
+  - tui/internal/fs/ANATOMY.md
+  - tui/internal/migrate/ANATOMY.md
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/preset/preset.go
+  - tui/internal/preset/preset_test.go
+  - tui/internal/preset/recipe_apply.go
+  - tui/internal/preset/recipe_apply_test.go
+  - tui/internal/preset/recipes.go
+  - tui/internal/preset/recipes_test.go
+  - tui/internal/preset/rehydrate.go
+  - tui/internal/preset/state.go
+  - tui/internal/preset/state_test.go
+  - tui/internal/preset/preset_allowed_revoke_test.go
+  - tui/internal/preset/preset_propagate_test.go
+  - tui/internal/preset/preset_agent_json_merge_test.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # preset
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in same-commit as code changes.

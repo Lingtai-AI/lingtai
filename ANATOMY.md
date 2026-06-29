@@ -1,3 +1,29 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - portal/ANATOMY.md
+  - docs/ANATOMY.md
+  - README.md
+  - README.zh.md
+  - README.wen.md
+  - RELEASING.md
+  - CLAUDE.md
+  - install.sh
+  - tui/main.go
+  - tui/go.mod
+  - tui/Makefile
+  - portal/main.go
+  - portal/embed.go
+  - portal/go.mod
+  - portal/Makefile
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # lingtai
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`, ships to `~/.lingtai-tui/utilities/lingtai-tui-anatomy/`). **Coding agents** update this file in the same commit as code changes. **LingTai agents** report drift as issues (mail or `discussions/<name>-patch.md`); do not silently fix.

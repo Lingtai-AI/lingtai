@@ -1,3 +1,37 @@
+---
+related_files:
+  - ANATOMY.md
+  - portal/ANATOMY.md
+  - tui/internal/tui/ANATOMY.md
+  - tui/internal/config/ANATOMY.md
+  - tui/internal/fs/ANATOMY.md
+  - tui/internal/migrate/ANATOMY.md
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/processscan/ANATOMY.md
+  - tui/main.go
+  - tui/Makefile
+  - tui/go.mod
+  - tui/i18n/i18n.go
+  - tui/i18n/en.json
+  - tui/i18n/zh.json
+  - tui/i18n/wen.json
+  - tui/list_common.go
+  - tui/list_common_test.go
+  - tui/list_unix.go
+  - tui/list_windows.go
+  - tui/purge_unix.go
+  - tui/purge_windows.go
+  - tui/suspend_unix.go
+  - tui/suspend_windows.go
+  - tui/upgrade.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # tui — the `lingtai-tui` binary
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`).

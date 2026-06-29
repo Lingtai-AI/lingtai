@@ -1,3 +1,24 @@
+---
+related_files:
+  - ANATOMY.md
+  - README.md
+  - README.zh.md
+  - README.wen.md
+  - docs/beginner-work-manual.zh.md
+  - docs/beginner-work-manual-stick-figure.zh.html
+  - docs/known-limitations.md
+  - docs/status.md
+  - docs/graphify.md
+  - docs/i18n-vocab.md
+  - docs/tool-descriptions.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # docs/
 
 Human- and developer-facing documentation for the Go-side LingTai repo.

@@ -1,3 +1,19 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/migrate/ANATOMY.md
+  - tui/internal/processscan/check.go
+  - tui/internal/process/check.go
+  - tui/internal/process/check_test.go
+  - tui/internal/migrate/m036_sqlite_log_backfill.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # processscan
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `~/.lingtai-tui/utilities/lingtai-tui-anatomy/SKILL.md`). Update this file in the same commit as code changes.

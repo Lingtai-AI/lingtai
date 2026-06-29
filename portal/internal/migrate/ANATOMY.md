@@ -1,3 +1,32 @@
+---
+related_files:
+  - portal/ANATOMY.md
+  - tui/internal/migrate/ANATOMY.md
+  - portal/internal/migrate/migrate.go
+  - portal/internal/migrate/migrate_test.go
+  - portal/internal/migrate/collision_repair_test.go
+  - portal/internal/migrate/m001_topology.go
+  - portal/internal/migrate/m002_tape_normalize.go
+  - portal/internal/migrate/m003_character_to_lingtai.go
+  - portal/internal/migrate/m004_relative_addressing.go
+  - portal/internal/migrate/m015_timemachine_gitignore.go
+  - portal/internal/migrate/m026_preset_path_form.go
+  - portal/internal/migrate/m027_strip_media_capabilities.go
+  - portal/internal/migrate/m028_addons_to_mcp.go
+  - portal/internal/migrate/m029_preset_allowed_list.go
+  - portal/internal/migrate/m030_preset_dir_split.go
+  - portal/internal/migrate/m031_drop_legacy_intrinsic_capabilities.go
+  - portal/internal/migrate/m035_remove_brief.go
+  - portal/internal/migrate/m038_agent_init_skills_paths.go
+  - portal/internal/migrate/m039_agent_init_context_preset_repair.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # portal/internal/migrate — Migration Registry (Portal)
 
 > **Maintenance:** see `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`.

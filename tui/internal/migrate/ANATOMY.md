@@ -1,3 +1,33 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/fs/ANATOMY.md
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/processscan/ANATOMY.md
+  - portal/internal/migrate/ANATOMY.md
+  - tui/internal/migrate/migrate.go
+  - tui/internal/migrate/migrate_test.go
+  - tui/internal/migrate/collision_repair_test.go
+  - tui/internal/migrate/m001_topology.go
+  - tui/internal/migrate/m015_timemachine_gitignore.go
+  - tui/internal/migrate/m026_preset_path_form.go
+  - tui/internal/migrate/m029_preset_allowed_list.go
+  - tui/internal/migrate/m030_preset_dir_split.go
+  - tui/internal/migrate/m033_strip_codex_api_key_env.go
+  - tui/internal/migrate/m034_library_skills_caps.go
+  - tui/internal/migrate/m035_remove_brief.go
+  - tui/internal/migrate/m036_sqlite_log_backfill.go
+  - tui/internal/migrate/m037_preset_skills_paths.go
+  - tui/internal/migrate/m038_agent_init_skills_paths.go
+  - tui/internal/migrate/m039_agent_init_context_preset_repair.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # migrate (TUI)
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`. Coding agents update this file in same-commit as code changes. **Cross-binary contract:** when bumping `CurrentVersion`, also bump `portal/internal/migrate/migrate.go`.

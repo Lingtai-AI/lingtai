@@ -1,3 +1,53 @@
+---
+related_files:
+  - tui/ANATOMY.md
+  - tui/internal/config/ANATOMY.md
+  - tui/internal/fs/ANATOMY.md
+  - tui/internal/preset/ANATOMY.md
+  - tui/main.go
+  - tui/internal/tui/app.go
+  - tui/internal/tui/app_test.go
+  - tui/internal/tui/layout.go
+  - tui/internal/tui/layout_test.go
+  - tui/internal/tui/auto_refresh.go
+  - tui/internal/tui/firstrun.go
+  - tui/internal/tui/firstrun_test.go
+  - tui/internal/tui/mail.go
+  - tui/internal/tui/props.go
+  - tui/internal/tui/library.go
+  - tui/internal/tui/doctor.go
+  - tui/internal/tui/doctor_intrinsic.go
+  - tui/internal/tui/preset_editor.go
+  - tui/internal/tui/preset_library.go
+  - tui/internal/tui/settings.go
+  - tui/internal/tui/addon.go
+  - tui/internal/tui/login.go
+  - tui/internal/tui/system.go
+  - tui/internal/tui/codex.go
+  - tui/internal/tui/codex_entries.go
+  - tui/internal/tui/mailbox.go
+  - tui/internal/tui/mailbox_entries.go
+  - tui/internal/tui/daemons.go
+  - tui/internal/tui/notification.go
+  - tui/internal/tui/goal.go
+  - tui/internal/tui/projects.go
+  - tui/internal/tui/mdviewer.go
+  - tui/internal/tui/help.go
+  - tui/internal/tui/input.go
+  - tui/internal/tui/palette.go
+  - tui/internal/tui/styles.go
+  - tui/internal/tui/oauth.go
+  - tui/internal/tui/claude_auth.go
+  - tui/internal/tui/detect.go
+  - tui/internal/tui/toolcall_display.go
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+
 # tui/internal/tui — Bubble Tea screens
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`).
