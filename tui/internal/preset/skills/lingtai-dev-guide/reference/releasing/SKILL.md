@@ -3,7 +3,7 @@ name: dev-guide-releasing
 description: >
   Compact lingtai-dev-guide release overview: when you are doing a release, the maintainer-authorization boundary, the version scheme, and a pointer to release-workflow for the full TUI/Portal + kernel publishing checklist, GitHub/PyPI/Homebrew steps, the required HTML release log, and the website release blog.
 version: 2.0.0
-last_changed_at: "2026-06-14T00:28:34-07:00"
+last_changed_at: "2026-06-29T02:13:00-07:00"
 ---
 
 # Releasing — Overview
@@ -51,6 +51,6 @@ blog must land first.
 - final public-surface verification and the maintainer report;
 - the **required shareable HTML release log** (per-release, self-contained) and
   its validation, plus `../release-html-log-template.html`;
-- the **website release blog** and its reusable `../release-workflow/assets/release-blog-template.md`.
+- the **website release blog** and the reusable `release-blog-template.md` asset documented in `reference/release-workflow/SKILL.md`.
 
 Start there for any real publish operation.
