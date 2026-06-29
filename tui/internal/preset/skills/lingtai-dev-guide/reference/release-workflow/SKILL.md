@@ -7,7 +7,7 @@ description: >
   release log, website release-log/blog drafting, and the reusable release blog
   template.
 version: 1.2.0
-last_changed_at: "2026-06-26T02:17:42-07:00"
+last_changed_at: "2026-06-29T02:13:00-07:00"
 ---
 
 # Release Workflow
@@ -335,7 +335,7 @@ At minimum, the HTML release log must include:
 
 Format rules:
 
-- **Self-contained:** inline CSS, no remote fonts/scripts/assets, no dependency
+- **Self-contained:** inline CSS, no remote fonts, scripts, or assets; no dependency
   on local paths.
 - **Shareable:** write for an external reader, not an agent; no secrets, no raw
   private paths (public repo paths are fine), no internal message IDs.
