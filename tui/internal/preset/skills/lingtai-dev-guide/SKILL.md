@@ -8,7 +8,7 @@ description: >
   publication-bound release workflow, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.5.1
+version: 2.6.0
 ---
 
 # LingTai Developer Guide
@@ -24,7 +24,9 @@ stays short on purpose; the detailed procedures live under `reference/<topic>/`.
 - **Code is truth:** reference files route and summarize; cited source files,
   tests, and `ANATOMY.md` files are authoritative.
 - **Anatomy travels with code:** if you move/rename/split/delete code cited by an
-  `ANATOMY.md`, update the anatomy in the same commit.
+  `ANATOMY.md`, update the anatomy in the same commit. When creating or
+  materially updating anatomy files, follow the ANATOMY frontmatter contract
+  below.
 - **Explicit human authorization gates:** do not open/merge PRs, push commits,
   file issues, close/delete resources, or change config unless the human gave an
   imperative authorization for that side effect.
@@ -39,6 +41,34 @@ stays short on purpose; the detailed procedures live under `reference/<topic>/`.
   refreshed, and a live in-situ probe confirms the new behaviour. For kernel
   fixes, always identify the actual import path and git HEAD first; do not
   assume the repo you edited is the one this agent imports.
+
+## ANATOMY frontmatter contract
+
+New or materially updated `ANATOMY.md` files should start with YAML frontmatter:
+
+```yaml
+---
+related_files:
+  - path/from/repo/root.ext
+  - path/to/neighbor/ANATOMY.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include neighboring
+  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
+  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
+  maintenance field. If you notice drift between this anatomy and the code,
+  report it. See lingtai-dev-guide for details.
+---
+```
+
+Rules:
+
+- `related_files` uses repo-relative paths only; every entry must be a real file.
+- Include files the anatomy explains and neighboring/parent/child `ANATOMY.md`
+  files where applicable. Do not make a complete graph; choose meaningful
+  anatomy links, but an isolated `ANATOMY.md` is invalid. Anatomy-to-anatomy
+  links must be bidirectional: if A lists B, B should list A.
+- `maintenance` carries the recursive instruction: copy it into new anatomy files
+  and report drift when anatomy and code no longer match.
 
 ## Nested reference catalog
 
@@ -177,6 +207,9 @@ drill-down files, not standalone top-level skills.
 
 - **"I need to change a TUI screen"** → `reference/contributing/SKILL.md` →
   `lingtai-tui-anatomy` → relevant Go files → focused `go test`.
+- **"I need to update an ANATOMY.md"** → repo-specific anatomy skill →
+  apply the ANATOMY frontmatter contract (`related_files` + `maintenance`) and
+  report stale citations, dead paths, or claims that no longer match the code.
 - **"I need to add a capability or inspect runtime behavior"** →
   `lingtai-kernel-anatomy` → relevant kernel anatomy/code → kernel tests.
 - **"An agent is quiet or unreachable"** → `reference/debug-troubleshoot/SKILL.md`
