@@ -151,6 +151,12 @@ drill-down files, not standalone top-level skills.
     seeds, de-privatizing/parameterizing local paths and human details, a
     lightweight pre-publish benchmark, shared-library grooming, and PR-ready skill
     cleanup. Cross-links skills-manual for generic authoring.
+- name: dev-guide-repo-watch
+  location: reference/repo-watch/SKILL.md
+  description: |
+    Read-only workflow for sweeping the Lingtai-AI GitHub org for open issues,
+    open PRs, and recent activity; includes non-self monitoring, digest shape,
+    and LaunchAgent/cron-style stateful alerting.
 - name: dev-guide-cache-hit-rate
   location: reference/cache-hit-rate/SKILL.md
   description: |
@@ -158,9 +164,8 @@ drill-down files, not standalone top-level skills.
     windows (default 1h / 5h / 1d / 3d). Covers the provider-agnostic
     input/cached fields in logs/token_ledger.jsonl, the formula
     (sum(cached)/sum(input) per window), timestamp/timezone handling, the
-    daemon double-count hazard, and a read-only stdlib script
-    (scripts/cache_hit_rate.py) for an agent workdir, project root, or single
-    ledger file.
+    daemon double-count hazard, and the bundled read-only stdlib script documented
+    in that reference for an agent workdir, project root, or single ledger file.
 ```
 
 ## Routing table
@@ -192,7 +197,7 @@ drill-down files, not standalone top-level skills.
 | Work on portal APIs, topology recording, replay, or `.portal/` state | `lingtai-portal-guide` |
 | Prepare for a consequential molt during long dev work | `psyche-manual` |
 | Explain LingTai to an end user lesson-by-lesson | `tutorial-guide` |
-| Sweep the GitHub org read-only for current issues/PRs | `lingtai-repo-watch` |
+| Sweep the GitHub org read-only for current issues/PRs or install a non-self PR/issue monitor | `reference/repo-watch/SKILL.md` |
 | Report a LingTai bug or stale documentation | `lingtai-issue-report` |
 
 ## Orientation snapshot
@@ -214,7 +219,7 @@ drill-down files, not standalone top-level skills.
   `lingtai-kernel-anatomy` → relevant kernel anatomy/code → kernel tests.
 - **"An agent is quiet or unreachable"** → `reference/debug-troubleshoot/SKILL.md`
   → `lingtai-doctor` if local health surfaces disagree.
-- **"I am preparing a release"** → `reference/releasing/SKILL.md` for the overview and authorization boundary, then `reference/release-workflow/SKILL.md` for the full publishing checklist, the required HTML release log, and (for website release blogs) its `reference/release-workflow/assets/release-blog-template.md`.
+- **"I am preparing a release"** → `reference/releasing/SKILL.md` for the overview and authorization boundary, then `reference/release-workflow/SKILL.md` for the full publishing checklist, the required HTML release log, and the website release-blog template documented there.
 - **"This broad dev task needs triage"** → run the read-only portfolio sweep in
   `reference/contributing/SKILL.md`, then ask for authorization before mutating
   GitHub state.
@@ -235,7 +240,7 @@ lingtai-dev-guide/
     ├── releasing/SKILL.md
     ├── release-html-log-template.html
     ├── release-workflow/SKILL.md
-    ├── release-workflow/assets/release-blog-template.md
+    ├── release-workflow assets directory (release-blog-template.md)
     ├── debug-troubleshoot/SKILL.md
     ├── security-audit/SKILL.md
     ├── network-governance/SKILL.md
@@ -244,7 +249,7 @@ lingtai-dev-guide/
     ├── skill-stewardship/SKILL.md
     └── cache-hit-rate/
         ├── SKILL.md
-        └── scripts/cache_hit_rate.py
+        └── scripts directory (cache_hit_rate.py)
 ```
 
 Now read the nested reference that matches the task, then verify against current
