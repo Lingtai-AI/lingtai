@@ -159,6 +159,61 @@ func TestRenderMessages_SummaryLifecycleWithTextRendersActualSummary(t *testing.
 	}
 }
 
+// First Ctrl+O layer (verboseThinking): a generated summary longer than 200
+// runes is rendered as a 200-char preview with a clear ellipsis indicator, not
+// in full. The deeper layer (verboseExtended) keeps the full text.
+func TestRenderMessages_LongSummaryPreviewedInFirstLayer(t *testing.T) {
+	long := strings.Repeat("A", 250) + "TAIL_MARKER"
+	msgs := []ChatMessage{
+		{Type: "apriori_summary", ApiCallID: "api_1", Timestamp: "2026-06-08T07:08:27Z", Summary: &fs.AprioriSummary{
+			Kind:                 "apriori_generated",
+			ToolName:             "bash",
+			Text:                 long,
+			OriginalVisibleChars: 48211,
+			SummaryChars:         len([]rune(long)),
+		}},
+	}
+
+	// First layer: preview only.
+	mFirst := MailModel{width: 100, verbose: verboseThinking}
+	first := mFirst.renderMessages(msgs)
+	if strings.Contains(first, "TAIL_MARKER") {
+		t.Fatalf("first Ctrl+O layer must not render the full summary tail:\n%s", first)
+	}
+	if !strings.Contains(first, "…") {
+		t.Fatalf("first-layer preview of a >200-char summary must show an ellipsis indicator:\n%s", first)
+	}
+
+	// Deeper layer: full text.
+	mDeep := MailModel{width: 100, verbose: verboseExtended}
+	deep := mDeep.renderMessages(msgs)
+	if !strings.Contains(deep, "TAIL_MARKER") {
+		t.Fatalf("deeper Ctrl+O layer must render the full summary text:\n%s", deep)
+	}
+}
+
+// A summary at or under 200 runes is never truncated and gets no misleading
+// ellipsis in the first layer.
+func TestRenderMessages_ShortSummaryNotTruncatedInFirstLayer(t *testing.T) {
+	short := "Build succeeded with 3 warnings."
+	mFirst := MailModel{width: 100, verbose: verboseThinking}
+	out := mFirst.renderMessages([]ChatMessage{
+		{Type: "apriori_summary", ApiCallID: "api_1", Timestamp: "2026-06-08T07:08:27Z", Summary: &fs.AprioriSummary{
+			Kind:                 "apriori_generated",
+			ToolName:             "bash",
+			Text:                 short,
+			OriginalVisibleChars: 48211,
+			SummaryChars:         len([]rune(short)),
+		}},
+	})
+	if !strings.Contains(out, short) {
+		t.Fatalf("short summary must render in full in the first layer:\n%s", out)
+	}
+	if strings.Contains(out, "…") {
+		t.Fatalf("short summary must not show a misleading ellipsis in the first layer:\n%s", out)
+	}
+}
+
 // shouldShow: the summary follows tool-result verbosity — hidden at verboseOff,
 // shown from verboseThinking up.
 func TestShouldShow_AprioriSummaryFollowsToolVerbosity(t *testing.T) {

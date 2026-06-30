@@ -58,6 +58,23 @@ func firstRenderedLine(body string) string {
 
 const toolCallSummaryLimit = 200
 
+// aprioriSummaryPreviewLimit caps the generated summary text shown in the FIRST
+// Ctrl+O/detail layer. The deeper (verboseExtended) layer renders the full
+// summary. Counted in runes, never split mid-codepoint.
+const aprioriSummaryPreviewLimit = 200
+
+// previewSummaryText returns the first aprioriSummaryPreviewLimit runes of the
+// generated summary text with a trailing ellipsis when (and only when) the text
+// is longer than the limit. A text at or under the limit is returned verbatim,
+// so no misleading ellipsis is shown.
+func previewSummaryText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= aprioriSummaryPreviewLimit {
+		return text
+	}
+	return string(runes[:aprioriSummaryPreviewLimit]) + "…"
+}
+
 // compactToolCallSummary keeps Ctrl+O level-1 tool_call entries short even
 // when the first rendered line is a long single-line JSON payload. The limit is
 // counted in runes from the TUI-rendered string perspective, not terminal visual
@@ -127,7 +144,14 @@ func apiCallGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 // verbatim (each already styled and indented). When the summary text is absent
 // (the lifecycle-event path carries counts but not the generated text), the
 // block still renders the label + metadata so it is clear a summary was shown.
-func renderAprioriSummaryBlock(s *fs.AprioriSummary, wrapWidth int) []string {
+//
+// `preview` controls how much of the generated summary text is shown: the first
+// Ctrl+O/detail layer (verboseThinking) passes true to render only a
+// 200-character preview of the summary text; the deeper layer (verboseExtended)
+// passes false to render the full summary. Only the generated summary text is
+// previewed — the fallback no-text note and cap/error messages are always shown
+// whole.
+func renderAprioriSummaryBlock(s *fs.AprioriSummary, wrapWidth int, preview bool) []string {
 	if s == nil {
 		return nil
 	}
@@ -162,6 +186,10 @@ func renderAprioriSummaryBlock(s *fs.AprioriSummary, wrapWidth int) []string {
 	if text == "" && !s.Unavailable {
 		text = i18n.TF("mail.apriori_summary_no_text", formatComma(int64(s.SummaryChars)))
 		bodyStyle = footerStyle
+	} else if text != "" && preview {
+		// First Ctrl+O layer: show only a 200-char preview of the generated
+		// summary text. The deeper layer (preview=false) shows it in full.
+		text = previewSummaryText(text)
 	}
 	if text != "" {
 		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(text)

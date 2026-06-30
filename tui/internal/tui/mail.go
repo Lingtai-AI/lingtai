@@ -1102,7 +1102,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			// sits directly below the raw stdout. The common production shape
 			// instead emits a standalone apriori_summary entry (case below).
 			if msg.Type == "tool_result" && msg.Summary != nil {
-				for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth) {
+				for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth, m.verbose != verboseExtended) {
 					b.WriteString(line + "\n")
 				}
 			}
@@ -1126,7 +1126,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
 				b.WriteString("\n")
 			}
-			for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth) {
+			for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth, m.verbose != verboseExtended) {
 				b.WriteString(line + "\n")
 			}
 			msgCopy := msg
