@@ -696,5 +696,7 @@
   "login.codex_no_saved_presets": "未找到已保存的 Codex 预设；请先选择或保存 Codex 预设，再使用此账户。",
   "login.codex_invalid_account": "该 Codex 账户无效 —— 请先按 [r] 重新认证，再将其设为当前账户。",
   "login.codex_apply_failed": "将 Codex 账户应用到预设失败：%s",
-  "login.codex_entry_hint": "[Enter] 设为当前  [r] 重新认证  [d/Del] 删除"
+  "login.codex_entry_hint": "[Enter] 设为当前  [r] 重新认证  [d/Del] 删除",
+  "mail.image_paste_saved": "已保存剪贴板图片：%s",
+  "mail.image_paste_failed": "未粘贴剪贴板图片：%v"
 }

@@ -230,6 +230,19 @@ func (m *InputModel) SetValue(s string) {
 	}
 }
 
+// AppendText appends text to the compose box on its own line.
+func (m *InputModel) AppendText(s string) {
+	current := m.textarea.Value()
+	switch {
+	case current == "":
+		m.SetValue(s)
+	case strings.HasSuffix(current, "\n"):
+		m.SetValue(current + s)
+	default:
+		m.SetValue(current + "\n" + s)
+	}
+}
+
 func (m *InputModel) Reset() {
 	val := m.textarea.Value()
 	if val != "" {

@@ -696,5 +696,7 @@
   "login.codex_no_saved_presets": "No saved Codex presets found; choose or save a Codex preset to use this account.",
   "login.codex_invalid_account": "This Codex account is not valid — re-authenticate it ([r]) before setting it active.",
   "login.codex_apply_failed": "Failed to apply Codex account to presets: %s",
-  "login.codex_entry_hint": "[Enter] set active  [r] re-auth  [d/Del] remove"
+  "login.codex_entry_hint": "[Enter] set active  [r] re-auth  [d/Del] remove",
+  "mail.image_paste_saved": "Pasted image saved: %s",
+  "mail.image_paste_failed": "No clipboard image pasted: %v"
 }

@@ -696,5 +696,7 @@
   "login.codex_no_saved_presets": "未见已存 Codex 预设；宜先择或存 Codex 预设，乃用此帐。",
   "login.codex_invalid_account": "此 Codex 帐无效 —— 宜先按 [r] 重登，再立为今用。",
   "login.codex_apply_failed": "施 Codex 帐于预设败：%s",
-  "login.codex_entry_hint": "[回车] 立为今用  [r] 重登  [d/Del] 除"
+  "login.codex_entry_hint": "[回车] 立为今用  [r] 重登  [d/Del] 除",
+  "mail.image_paste_saved": "剪贴板图已存：%s",
+  "mail.image_paste_failed": "未得剪贴板图：%v"
 }

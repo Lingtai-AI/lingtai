@@ -865,6 +865,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "ctrl+v":
+			m.pasteClipboardImageFromSystem()
+			return m, nil
 		case "ctrl+r":
 			// Refresh the mail thread and agent state from disk. ctrl+r is a
 			// control key, so it does not interfere with typing `r` into the
