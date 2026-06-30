@@ -279,6 +279,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
+	case tea.FocusMsg:
+		ApplyTerminalBG()
+		return a, nil
+
 	// === Cross-view messages ===
 
 	case ViewChangeMsg:
@@ -1543,6 +1547,7 @@ func (a App) View() tea.View {
 		v.BackgroundColor = t.BG
 		v.ForegroundColor = t.Text
 	}
+	v.ReportFocus = true
 	return v
 }
 

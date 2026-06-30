@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 	"os"
 	"sort"
@@ -172,6 +173,27 @@ var activeTheme = ThemeInkDark()
 func SetTheme(t Theme) {
 	activeTheme = t
 	rebuildStyles()
+}
+
+// ApplyTerminalBG writes the current theme's background and foreground colors
+// directly to the terminal via OSC sequences, bypassing the renderer's dirty-check.
+// This is needed because iTerm2 (and possibly other terminals) lose OSC 11 state
+// during sleep/wake, but Bubble Tea v2's dirty-checking skips re-sending
+// unchanged colors.
+func ApplyTerminalBG() {
+	if activeTheme.PaintBG {
+		fmt.Printf("\x1b]11;%s\x07", colorToHex(activeTheme.BG))
+		fmt.Printf("\x1b]10;%s\x07", colorToHex(activeTheme.Text))
+	}
+}
+
+// colorToHex converts a color.Color to an X11 hex color string (e.g. "#1a1a2e").
+func colorToHex(c color.Color) string {
+	if c == nil {
+		return "#000000"
+	}
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 }
 
 // SetThemeByName looks up a theme by name and applies it.
