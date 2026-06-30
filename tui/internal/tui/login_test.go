@@ -2,10 +2,15 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -27,6 +32,111 @@ func seedLoginCodexAuth(t *testing.T, dir string) string {
 		t.Fatalf("write codex-auth.json: %v", err)
 	}
 	return p
+}
+
+func withLoginHealthRefresh(t *testing.T, fn func(string, CodexTokens) (*CodexTokens, error)) {
+	t.Helper()
+	old := refreshCodexTokensForLoginHealth
+	refreshCodexTokensForLoginHealth = fn
+	t.Cleanup(func() { refreshCodexTokensForLoginHealth = old })
+}
+
+func TestCheckHealth_CodexOAuthUsesTokenFileNotAccessProbe(t *testing.T) {
+	dir := t.TempDir()
+	authPath := seedLoginCodexAuth(t, dir)
+
+	var called atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Store(true)
+		http.Error(w, "stale access token", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	msg := checkHealth(loginEntry{
+		Provider:  "codex",
+		IsOAuth:   true,
+		BaseURL:   srv.URL,
+		Key:       "stale-access-token",
+		CodexPath: authPath,
+	})
+
+	if called.Load() {
+		t.Fatal("Codex OAuth health check must not probe /codex/models with a short-lived access token")
+	}
+	if msg.Status != loginValid {
+		t.Fatalf("Codex OAuth with a valid refresh-token file should be valid; status=%v detail=%q", msg.Status, msg.Detail)
+	}
+}
+
+func TestCheckHealth_CodexOAuthRefreshesExpiredTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "codex-auth.json")
+	oldTokens := CodexTokens{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+		Email:        "stub@example.com",
+	}
+	data, _ := json.Marshal(oldTokens)
+	if err := os.WriteFile(authPath, data, 0o600); err != nil {
+		t.Fatalf("write expired token fixture: %v", err)
+	}
+
+	withLoginHealthRefresh(t, func(refresh string, existing CodexTokens) (*CodexTokens, error) {
+		if refresh != "old-refresh" {
+			t.Fatalf("refresh token = %q, want old-refresh", refresh)
+		}
+		fresh := existing
+		fresh.AccessToken = "new-access"
+		fresh.ExpiresAt = time.Now().Add(time.Hour).Unix()
+		return &fresh, nil
+	})
+
+	msg := checkHealth(loginEntry{Provider: "codex", IsOAuth: true, CodexPath: authPath})
+	if msg.Status != loginValid {
+		t.Fatalf("expired access token with refresh success should be valid; status=%v detail=%q", msg.Status, msg.Detail)
+	}
+	got, ok := readCodexTokenFile(authPath)
+	if !ok {
+		t.Fatal("refreshed token file should parse")
+	}
+	if got.AccessToken != "new-access" {
+		t.Fatalf("refreshed token file access token = %q, want new-access", got.AccessToken)
+	}
+}
+
+func TestCheckHealth_CodexOAuthDistinguishesRevokedAndTransientRefresh(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "codex-auth.json")
+	tokens := CodexTokens{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+	}
+	data, _ := json.Marshal(tokens)
+	if err := os.WriteFile(authPath, data, 0o600); err != nil {
+		t.Fatalf("write expired token fixture: %v", err)
+	}
+
+	t.Run("revoked", func(t *testing.T) {
+		withLoginHealthRefresh(t, func(string, CodexTokens) (*CodexTokens, error) {
+			return nil, ErrCodexAuthRevoked
+		})
+		msg := checkHealth(loginEntry{Provider: "codex", IsOAuth: true, CodexPath: authPath})
+		if msg.Status != loginInvalid {
+			t.Fatalf("revoked refresh token should be invalid; status=%v detail=%q", msg.Status, msg.Detail)
+		}
+	})
+
+	t.Run("transient", func(t *testing.T) {
+		withLoginHealthRefresh(t, func(string, CodexTokens) (*CodexTokens, error) {
+			return nil, errors.New("temporary network failure")
+		})
+		msg := checkHealth(loginEntry{Provider: "codex", IsOAuth: true, CodexPath: authPath})
+		if msg.Status != loginError {
+			t.Fatalf("transient refresh failure should be a health error, not invalid; status=%v detail=%q", msg.Status, msg.Detail)
+		}
+	})
 }
 
 // TestLoginModel_DelTwoPressDeletesCodex verifies the two-press Del

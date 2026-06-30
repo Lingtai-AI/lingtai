@@ -91,6 +91,41 @@ func TestLoginModel_EnterOnCodexSetsActiveAppliesToSavedPresets(t *testing.T) {
 	}
 }
 
+func TestLoginModel_EnterOnCodexAllowsTransientHealthErrorWithValidTokenFile(t *testing.T) {
+	_, globalDir := withTempCodexHome(t)
+	saveCodexPresetForTest(t, "codex-a", "")
+
+	acctPath := filepath.Join(globalDir, codexAuthSubdir, "work.json")
+	writeCodexTokenAt(t, acctPath, "work@example.com")
+
+	m := NewLoginModel("", globalDir)
+	idx := -1
+	for i := range m.entries {
+		if m.entries[i].Provider == "codex" && m.entries[i].CodexPath == acctPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("could not find the per-account codex entry; entries=%#v", m.entries)
+	}
+	m.cursor = idx
+	m.entries[idx].Status = loginError
+	m.entries[idx].Detail = "refresh unavailable"
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("Enter to set active after a transient health error must not start a network command")
+	}
+	wantRef := codexAuthRefForPath(globalDir, acctPath)
+	if ref, ok := reloadSavedRef(t, "codex-a"); !ok || ref != wantRef {
+		t.Fatalf("transient health error with valid refresh-token file should still apply active account; ref=%q present=%v want=%q", ref, ok, wantRef)
+	}
+	if !m.messageOK {
+		t.Fatalf("setting active after transient health error should be confirmation feedback; message=%q", m.message)
+	}
+}
+
 // TestLoginModel_EnterOnLegacyResetsSavedPresets verifies Enter on the legacy
 // account row resets saved Codex presets back to the legacy fallback (no
 // codex_auth_path key).

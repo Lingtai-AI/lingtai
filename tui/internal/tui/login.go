@@ -243,17 +243,15 @@ func checkHealth(e loginEntry) loginHealthMsg {
 		out.Detail = detail
 		return out
 	}
+
+	if e.IsOAuth {
+		return checkCodexOAuthHealth(e, mk)
+	}
 	if e.BaseURL == "" || e.Key == "" {
 		return mk(loginInvalid, "no endpoint")
 	}
 
-	var url string
-	if e.IsOAuth {
-		url = strings.TrimRight(e.BaseURL, "/") + "/codex/models?client_version=1.0.0"
-	} else {
-		url = strings.TrimRight(e.BaseURL, "/") + "/models"
-	}
-
+	url := strings.TrimRight(e.BaseURL, "/") + "/models"
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -276,6 +274,54 @@ func checkHealth(e loginEntry) loginHealthMsg {
 	default:
 		return mk(loginError, fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
+}
+
+// refreshCodexTokensForLoginHealth is a test seam for the /setup credentials
+// Codex health check. Production uses the same refreshCodexTokens implementation
+// as startup validation; tests override it so no real OAuth/token endpoint is hit.
+var refreshCodexTokensForLoginHealth = refreshCodexTokens
+
+// checkCodexOAuthHealth treats the refresh-token grant as the source of truth.
+// A short-lived access_token can expire while the TUI is open; probing
+// /codex/models with that stale access token makes /setup credentials claim
+// "invalid credentials" even though the runtime can still refresh and run.
+// Only a malformed token file or refresh-token revocation should be shown as a
+// re-login condition; transient refresh failures are health errors, not proof
+// that OAuth is invalid.
+func checkCodexOAuthHealth(e loginEntry, mk func(loginStatus, string) loginHealthMsg) loginHealthMsg {
+	if e.CodexPath == "" {
+		return mk(loginInvalid, "no token file")
+	}
+	tokens, ok := readCodexTokenFile(e.CodexPath)
+	if !ok {
+		return mk(loginInvalid, "invalid credentials")
+	}
+
+	const refreshBufferSeconds = 300
+	if tokens.AccessToken != "" && tokens.ExpiresAt > time.Now().Unix()+refreshBufferSeconds {
+		return mk(loginValid, "")
+	}
+
+	fresh, err := refreshCodexTokensForLoginHealth(tokens.RefreshToken, tokens)
+	if err != nil {
+		if errors.Is(err, ErrCodexAuthRevoked) {
+			return mk(loginInvalid, "invalid credentials")
+		}
+		return mk(loginError, "refresh unavailable")
+	}
+	data, err := json.MarshalIndent(fresh, "", "  ")
+	if err != nil {
+		return mk(loginError, "save failed")
+	}
+	tmpPath := e.CodexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+		return mk(loginError, "save failed")
+	}
+	if err := os.Rename(tmpPath, e.CodexPath); err != nil {
+		os.Remove(tmpPath)
+		return mk(loginError, "save failed")
+	}
+	return mk(loginValid, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -470,9 +516,11 @@ func (m LoginModel) startCodexLogin(deviceCode bool) (LoginModel, tea.Cmd) {
 // activeCodexPath is recomputed so the (active) marker tracks the new binding.
 func (m LoginModel) setActiveCodexAccount(entry loginEntry) LoginModel {
 	// Gate on validity: prefer the live health result, but a freshly-listed
-	// account may still be loginChecking — fall back to parsing the token file.
+	// account may still be loginChecking, and transient refresh/network errors
+	// should not force a needless re-login if the token file still carries a
+	// refresh_token. Only loginInvalid is a hard block.
 	valid := entry.Status == loginValid
-	if entry.Status == loginChecking {
+	if !valid && entry.Status != loginInvalid {
 		valid = codexAuthPathValid(entry.CodexPath)
 	}
 	if !valid {
