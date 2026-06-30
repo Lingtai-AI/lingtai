@@ -394,14 +394,14 @@ func TestParseEventLLMResponseCarriesTokenUsage(t *testing.T) {
 	// (input, cache miss, output, cache rate) at the bottom of the ctrl+o API
 	// call group; here we only assert the parse layer captures the scalars.
 	raw := map[string]interface{}{
-		"ts":             1781258400.0,
-		"type":           "llm_response",
-		"api_call_id":    "api_4cd307b10902",
-		"input_tokens":   181585.0,
-		"output_tokens":  2275.0,
-		"cached_tokens":  180224.0,
+		"ts":              1781258400.0,
+		"type":            "llm_response",
+		"api_call_id":     "api_4cd307b10902",
+		"input_tokens":    181585.0,
+		"output_tokens":   2275.0,
+		"cached_tokens":   180224.0,
 		"thinking_tokens": 516.0,
-		"estimated":      false,
+		"estimated":       false,
 	}
 	line, _ := json.Marshal(raw)
 
@@ -426,6 +426,202 @@ func TestParseEventLLMResponseCarriesTokenUsage(t *testing.T) {
 	}
 	if e.TokenUsage.Estimated {
 		t.Errorf("TokenUsage.Estimated = true, want false")
+	}
+}
+
+// Kernel PR #586 + #3833: the `summary=true` (a-priori) summary is logged as an
+// `apriori_summary_generated` lifecycle event immediately after the raw
+// tool_result. parseEvent must promote it to a first-class apriori_summary
+// SessionEntry carrying the correlation id, char counts, and (as of #3833) the
+// generated summary text from `generated_summary`.
+func TestParseEventAprioriSummaryGeneratedLifecycle(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":                     1781258400.0,
+		"type":                   "apriori_summary_generated",
+		"api_call_id":            "api_abc",
+		"tool_name":              "bash",
+		"tool_call_id":           "call_77",
+		"generated_summary":      "Build succeeded with 3 warnings.",
+		"original_visible_chars": 48211.0,
+		"summary_chars":          612.0,
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil for apriori_summary_generated")
+	}
+	if e.Type != "apriori_summary" {
+		t.Fatalf("Type = %q, want apriori_summary", e.Type)
+	}
+	if e.ApiCallID != "api_abc" {
+		t.Errorf("ApiCallID = %q, want api_abc", e.ApiCallID)
+	}
+	if e.Summary == nil {
+		t.Fatal("Summary is nil; want populated")
+	}
+	if e.Summary.Kind != "apriori_generated" {
+		t.Errorf("Summary.Kind = %q, want apriori_generated", e.Summary.Kind)
+	}
+	if e.Summary.ToolCallID != "call_77" {
+		t.Errorf("Summary.ToolCallID = %q, want call_77", e.Summary.ToolCallID)
+	}
+	if e.Summary.ToolName != "bash" {
+		t.Errorf("Summary.ToolName = %q, want bash", e.Summary.ToolName)
+	}
+	if e.Summary.Text != "Build succeeded with 3 warnings." {
+		t.Errorf("Summary.Text = %q, want the generated_summary text", e.Summary.Text)
+	}
+	if e.Summary.OriginalVisibleChars != 48211 {
+		t.Errorf("Summary.OriginalVisibleChars = %d, want 48211", e.Summary.OriginalVisibleChars)
+	}
+	if e.Summary.SummaryChars != 612 {
+		t.Errorf("Summary.SummaryChars = %d, want 612", e.Summary.SummaryChars)
+	}
+	if e.Summary.Unavailable {
+		t.Errorf("Summary.Unavailable = true, want false for a generated summary")
+	}
+}
+
+// Backward compatibility: pre-#3833 logs emit the generated lifecycle event
+// without `generated_summary`. parseEvent must still promote it, leaving Text
+// empty so the renderer falls back to the metadata-only note.
+func TestParseEventAprioriSummaryGeneratedLifecycleNoText(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":                     1781258400.0,
+		"type":                   "apriori_summary_generated",
+		"tool_name":              "bash",
+		"tool_call_id":           "call_77",
+		"original_visible_chars": 48211.0,
+		"summary_chars":          612.0,
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil || e.Summary == nil {
+		t.Fatal("parseEvent returned nil/no summary for text-less generated lifecycle")
+	}
+	if e.Summary.Kind != "apriori_generated" {
+		t.Errorf("Summary.Kind = %q, want apriori_generated", e.Summary.Kind)
+	}
+	if e.Summary.Text != "" {
+		t.Errorf("Summary.Text = %q, want empty for a pre-#3833 log", e.Summary.Text)
+	}
+	if e.Summary.Unavailable {
+		t.Errorf("Summary.Unavailable = true, want false for a generated summary")
+	}
+}
+
+func TestParseEventAprioriSummaryCapRefusedLifecycle(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":                     1781258400.0,
+		"type":                   "apriori_summary_cap_refused",
+		"tool_name":              "read",
+		"tool_call_id":           "call_big",
+		"original_visible_chars": 600000.0,
+		"cap_chars":              500000.0,
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil || e.Summary == nil {
+		t.Fatal("parseEvent returned nil/no summary for cap_refused")
+	}
+	if e.Summary.Kind != "apriori_cap_refused" {
+		t.Errorf("Summary.Kind = %q, want apriori_cap_refused", e.Summary.Kind)
+	}
+	if !e.Summary.Unavailable {
+		t.Errorf("Summary.Unavailable = false, want true for a cap refusal")
+	}
+}
+
+func TestParseEventAprioriSummaryFailedLifecycle(t *testing.T) {
+	for _, evType := range []string{"apriori_summary_failed", "apriori_summary_empty", "apriori_summary_no_summarizer"} {
+		raw := map[string]interface{}{
+			"ts":           1781258400.0,
+			"type":         evType,
+			"tool_name":    "grep",
+			"tool_call_id": "call_err",
+		}
+		line, _ := json.Marshal(raw)
+		e := parseEvent(line)
+		if e == nil || e.Summary == nil {
+			t.Fatalf("parseEvent returned nil/no summary for %s", evType)
+		}
+		if e.Summary.Kind != "apriori_error" {
+			t.Errorf("%s: Summary.Kind = %q, want apriori_error", evType, e.Summary.Kind)
+		}
+		if !e.Summary.Unavailable {
+			t.Errorf("%s: Summary.Unavailable = false, want true", evType)
+		}
+	}
+}
+
+// Defensive secondary shape: when a tool_result event's `result` IS the
+// kernel artifact dict (visible/summary payload logged on the event), parseEvent
+// attaches it to the tool_result entry so the renderer can append the labelled
+// summary section after the raw block.
+func TestParseEventToolResultCarryingAprioriArtifact(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":           1781258400.0,
+		"type":         "tool_result",
+		"tool_name":    "bash",
+		"tool_call_id": "call_art",
+		"status":       "ok",
+		"elapsed_ms":   30.0,
+		"result": map[string]interface{}{
+			"artifact":               "lingtai_apriori_tool_result_summary",
+			"summary_kind":           "apriori_generated",
+			"tool_call_id":           "call_art",
+			"tool_name":              "bash",
+			"generated_summary":      "The build succeeded; 3 warnings, no errors.",
+			"summary_chars":          43.0,
+			"original_visible_chars": 50123.0,
+			"raw_preserved":          true,
+		},
+	}
+	line, _ := json.Marshal(raw)
+
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil")
+	}
+	if e.Type != "tool_result" {
+		t.Fatalf("Type = %q, want tool_result", e.Type)
+	}
+	if e.Summary == nil {
+		t.Fatal("Summary is nil; want detected from artifact in result")
+	}
+	if e.Summary.Text != "The build succeeded; 3 warnings, no errors." {
+		t.Errorf("Summary.Text = %q", e.Summary.Text)
+	}
+	if e.Summary.ToolCallID != "call_art" {
+		t.Errorf("Summary.ToolCallID = %q, want call_art", e.Summary.ToolCallID)
+	}
+	if e.Summary.OriginalVisibleChars != 50123 {
+		t.Errorf("Summary.OriginalVisibleChars = %d, want 50123", e.Summary.OriginalVisibleChars)
+	}
+}
+
+// A plain tool_result without the artifact must not get a Summary — default
+// behavior is unchanged.
+func TestParseEventToolResultWithoutArtifactHasNoSummary(t *testing.T) {
+	raw := map[string]interface{}{
+		"ts":           1781258400.0,
+		"type":         "tool_result",
+		"tool_name":    "bash",
+		"tool_call_id": "call_plain",
+		"status":       "ok",
+		"elapsed_ms":   5.0,
+		"result":       map[string]interface{}{"stdout": "hello", "status": "ok"},
+	}
+	line, _ := json.Marshal(raw)
+	e := parseEvent(line)
+	if e == nil {
+		t.Fatal("parseEvent returned nil")
+	}
+	if e.Summary != nil {
+		t.Fatalf("Summary = %+v, want nil for a non-summary tool_result", e.Summary)
 	}
 }
 

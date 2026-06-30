@@ -51,6 +51,7 @@ type ChatMessage struct {
 	Meta        *fs.NotificationMeta // for Type=="notification": kernel vital signs at injection time (issue #40)
 	ApiCallID   string               // for text_output/tool_call/tool_result: LLM API round-trip grouping id
 	TokenUsage  *fs.TokenUsage       // for Type=="llm_response": per-round token scalars; rendered as a footer at the bottom of the api_call group
+	Summary     *fs.AprioriSummary   // for Type=="apriori_summary" (and tool_result carrying the artifact): the model-visible summary=true result
 }
 
 // ViewChangeMsg requests the app to switch views.
@@ -494,6 +495,11 @@ func (m *MailModel) shouldShow(e fs.SessionEntry) bool {
 		// render only the first line there, and reserve the full body for
 		// level 2. The cycle has no third verbose layer.
 		return m.verbose >= verboseThinking
+	case "apriori_summary":
+		// The model-visible `summary=true` result that replaced a raw tool
+		// payload. Shown at the same Ctrl+O depth as the tool_result it follows
+		// so the agent's actual (compressed) view sits right beside the raw.
+		return m.verbose >= verboseThinking
 	case "llm_response":
 		// Normally a hidden boundary marker used to derive tool-call grouping
 		// for older events. When it carries per-round token usage we keep it so
@@ -588,6 +594,7 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		Meta:        e.Meta,
 		ApiCallID:   e.ApiCallID,
 		TokenUsage:  e.TokenUsage,
+		Summary:     e.Summary,
 	}
 	if e.Type == "mail" {
 		cm.IsFromMe = e.From == "human"
@@ -1104,10 +1111,41 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			for _, line := range strings.Split(wrapped, "\n") {
 				b.WriteString(evStyle.Render("  "+RuneBullet+" "+line) + "\n")
 			}
+			// Defensive secondary shape: a tool_result whose logged result IS the
+			// model-visible summary artifact. Render the labelled summary block
+			// right after the raw block so the agent's actual (compressed) view
+			// sits directly below the raw stdout. The common production shape
+			// instead emits a standalone apriori_summary entry (case below).
+			if msg.Type == "tool_result" && msg.Summary != nil {
+				for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth) {
+					b.WriteString(line + "\n")
+				}
+			}
 			if isApiGroupedVerboseMessageType(msg.Type) {
 				msgCopy := msg
 				prevVisibleApiGroup = &msgCopy
 			}
+
+		case "apriori_summary":
+			// The model-visible `summary=true` result that replaced a raw tool
+			// payload (kernel PR #586). Logged as a lifecycle event right after
+			// its raw tool_result, so in stream order it already lands directly
+			// below the corresponding raw block — exactly where Jason wants the
+			// "this is what the agent actually saw" reminder. It shares the
+			// raw result's api_call_id, so it stays grouped with it (no leading
+			// separator) and a new api round still starts a fresh group.
+			wrapWidth := m.width - 6
+			if wrapWidth < 20 {
+				wrapWidth = 20
+			}
+			if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
+				b.WriteString("\n")
+			}
+			for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth) {
+				b.WriteString(line + "\n")
+			}
+			msgCopy := msg
+			prevVisibleApiGroup = &msgCopy
 
 		case "soul_flow":
 			// Each voice in msg.Body is its own line ("[insights] ..." or

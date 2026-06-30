@@ -698,5 +698,10 @@
   "login.codex_apply_failed": "Failed to apply Codex account to presets: %s",
   "login.codex_entry_hint": "[Enter] set active  [r] re-auth  [d/Del] remove",
   "mail.image_paste_saved": "Pasted image saved: %s",
-  "mail.image_paste_failed": "No clipboard image pasted: %v"
+  "mail.image_paste_failed": "No clipboard image pasted: %v",
+  "mail.apriori_summary_label": "★ summary=true result shown to agent (model-visible)",
+  "mail.apriori_summary_unavailable_label": "★ summary=true requested — no summary shown to agent",
+  "mail.apriori_summary_footer": "%s · %s → %s chars · raw preserved",
+  "mail.apriori_summary_footer_unavailable": "%s · raw %s chars · raw preserved (retrieve by tool_call_id)",
+  "mail.apriori_summary_no_text": "(summary text is not in the event log — the agent saw a %s-char generated summary; the raw is preserved by tool_call_id)"
 }

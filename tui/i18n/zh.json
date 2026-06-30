@@ -698,5 +698,10 @@
   "login.codex_apply_failed": "将 Codex 账户应用到预设失败：%s",
   "login.codex_entry_hint": "[Enter] 设为当前  [r] 重新认证  [d/Del] 删除",
   "mail.image_paste_saved": "已保存剪贴板图片：%s",
-  "mail.image_paste_failed": "未粘贴剪贴板图片：%v"
+  "mail.image_paste_failed": "未粘贴剪贴板图片：%v",
+  "mail.apriori_summary_label": "★ summary=true 结果（智能体所见 / 模型可见）",
+  "mail.apriori_summary_unavailable_label": "★ 已请求 summary=true —— 未向智能体展示摘要",
+  "mail.apriori_summary_footer": "%s · %s → %s 字符 · 原始结果已保留",
+  "mail.apriori_summary_footer_unavailable": "%s · 原始 %s 字符 · 原始结果已保留（凭 tool_call_id 取回）",
+  "mail.apriori_summary_no_text": "（摘要文本不在事件日志中 —— 智能体看到的是 %s 字符的生成摘要；原始结果按 tool_call_id 保留）"
 }

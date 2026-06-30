@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
@@ -91,7 +94,7 @@ func toolGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 
 func isApiGroupedVerboseMessageType(t string) bool {
 	switch t {
-	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "apriori_summary":
 		return true
 	default:
 		return false
@@ -112,6 +115,75 @@ func apiCallGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 		return prev.ApiCallID != cur.ApiCallID
 	}
 	return toolGroupSeparatorBefore(prev, cur)
+}
+
+// renderAprioriSummaryBlock renders the model-visible `summary=true` (a-priori)
+// tool-result summary as a distinct, clearly-labelled block — the thing the
+// agent actually saw after the kernel replaced the raw tool payload. It is
+// rendered right after the corresponding raw tool_result so the contrast is
+// obvious: raw stdout above, the compressed model-visible summary below.
+//
+// `wrapWidth` is the available text width; the caller writes the returned lines
+// verbatim (each already styled and indented). When the summary text is absent
+// (the lifecycle-event path carries counts but not the generated text), the
+// block still renders the label + metadata so it is clear a summary was shown.
+func renderAprioriSummaryBlock(s *fs.AprioriSummary, wrapWidth int) []string {
+	if s == nil {
+		return nil
+	}
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+
+	accent := ColorAccent
+	body := ColorAgent
+	if s.Unavailable {
+		// Cap-refusal / fail-closed error: the agent did NOT get a summary.
+		// Use the tool/distress palette so it does not read as a clean summary.
+		accent = ColorTool
+		body = ColorTool
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(accent).Bold(true)
+	bodyStyle := lipgloss.NewStyle().Foreground(body).Italic(true)
+	footerStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
+
+	var out []string
+
+	label := i18n.T("mail.apriori_summary_label")
+	if s.Unavailable {
+		label = i18n.T("mail.apriori_summary_unavailable_label")
+	}
+	out = append(out, labelStyle.Render("  "+label))
+
+	// Body: the generated summary text (success) or the kernel message
+	// (cap/error). When neither is present (lifecycle-only event), show a
+	// faint note pointing at where the full text lives.
+	text := strings.TrimSpace(s.Text)
+	if text == "" && !s.Unavailable {
+		text = i18n.TF("mail.apriori_summary_no_text", formatComma(int64(s.SummaryChars)))
+		bodyStyle = footerStyle
+	}
+	if text != "" {
+		wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(text)
+		for _, line := range strings.Split(wrapped, "\n") {
+			out = append(out, bodyStyle.Render("    "+line))
+		}
+	}
+
+	// Compact metadata footer: tool name, the compression, raw-preservation.
+	tool := s.ToolName
+	if tool == "" {
+		tool = "tool"
+	}
+	var footer string
+	if s.Unavailable {
+		footer = i18n.TF("mail.apriori_summary_footer_unavailable", tool, formatComma(int64(s.OriginalVisibleChars)))
+	} else {
+		footer = i18n.TF("mail.apriori_summary_footer", tool,
+			formatComma(int64(s.OriginalVisibleChars)), formatComma(int64(s.SummaryChars)))
+	}
+	out = append(out, footerStyle.Render("    "+footer))
+	return out
 }
 
 func isTextOutputMessageType(t string) bool {

@@ -33,6 +33,7 @@ type SessionEntry struct {
 	Meta        *NotificationMeta `json:"meta,omitempty"`        // notification entries — vital signs at injection time (kernel build_meta + injection_seq)
 	ApiCallID   string            `json:"api_call_id,omitempty"` // llm/tool entries — one LLM API round-trip grouping id
 	TokenUsage  *TokenUsage       `json:"token_usage,omitempty"` // llm_response entries — per-round token scalars (input/output/cached)
+	Summary     *AprioriSummary   `json:"summary,omitempty"`     // apriori_summary entries — the model-visible summary=true result that replaced the raw payload
 
 	// Delivered is a transient field propagated from MailMessage.Delivered.
 	// Only meaningful for Type == "mail". Not persisted to session.jsonl.
@@ -72,6 +73,37 @@ type TokenUsage struct {
 	Output    int64 `json:"output"`
 	Cached    int64 `json:"cached"`
 	Estimated bool  `json:"estimated,omitempty"`
+}
+
+// AprioriSummary carries the kernel's `summary=true` (a-priori) tool-result
+// summary — the model-VISIBLE artifact that replaced the raw tool payload
+// before it entered the agent's context (kernel PR #586,
+// `lingtai_apriori_tool_result_summary`). The raw result is still logged
+// verbatim in the preceding `tool_result` event and is the canonical record;
+// this struct is the compressed thing the agent actually saw, so the TUI can
+// render it as a distinct labelled block right after the raw result.
+//
+// The kernel surfaces this in two shapes the TUI reads:
+//   - the success/cap/error artifact dict nested in a `tool_result` event's
+//     `result` map (detected by `artifact == lingtai_apriori_tool_result_summary`); or
+//   - an `apriori_summary_generated` / `apriori_summary_cap_refused` /
+//     `apriori_summary_failed` / `apriori_summary_empty` /
+//     `apriori_summary_no_summarizer` lifecycle event keyed by `tool_call_id`.
+//     The generated success event carries the summary text inline via
+//     `generated_summary` (kernel #3833); older logs may lack it.
+//
+// Kind is the `summary_kind` ("apriori_generated", "apriori_cap_refused",
+// "apriori_error") or the lifecycle event name for the text-less path. Text is
+// the `generated_summary` (success) or the human-readable `message`/`error`
+// (cap/error). All count fields are 0 when the source did not carry them.
+type AprioriSummary struct {
+	Kind                 string `json:"kind,omitempty"`                   // summary_kind or lifecycle event name
+	ToolCallID           string `json:"tool_call_id,omitempty"`           // correlates with the preceding raw tool_result
+	ToolName             string `json:"tool_name,omitempty"`              // tool whose result was summarized
+	Text                 string `json:"text,omitempty"`                   // generated_summary, or refusal/error message
+	OriginalVisibleChars int    `json:"original_visible_chars,omitempty"` // size of the raw payload that was replaced
+	SummaryChars         int    `json:"summary_chars,omitempty"`          // size of the generated summary (0 on cap/error)
+	Unavailable          bool   `json:"unavailable,omitempty"`            // cap-refusal or fail-closed error (no summary text)
 }
 
 // SessionCache is an append-only cache backed by session.jsonl.
@@ -670,11 +702,40 @@ func parseEventMap(raw map[string]interface{}) *SessionEntry {
 		eventType = "aed"
 	}
 
+	// Promote the kernel's a-priori summary (`summary=true`) lifecycle events
+	// into a single first-class "apriori_summary" SessionEntry. The kernel logs
+	// the raw tool_result FIRST and this lifecycle event immediately after, so
+	// in stream order the summary entry already lands right after its raw result
+	// — the renderer keys the visual association on tool_call_id. The generated
+	// success event carries the char counts and (kernel #3833) the summary text
+	// via `generated_summary`; older logs omit the text and the renderer falls
+	// back to a metadata-only block in that case.
+	summaryLifecycle := ""
 	switch eventType {
-	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "llm_call", "llm_response", "insight", "soul_flow", "notification", "aed":
+	case "apriori_summary_generated":
+		summaryLifecycle = "apriori_generated"
+		eventType = "apriori_summary"
+	case "apriori_summary_cap_refused":
+		summaryLifecycle = "apriori_cap_refused"
+		eventType = "apriori_summary"
+	case "apriori_summary_failed", "apriori_summary_empty", "apriori_summary_no_summarizer":
+		summaryLifecycle = "apriori_error"
+		eventType = "apriori_summary"
+	}
+
+	switch eventType {
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result", "llm_call", "llm_response", "insight", "soul_flow", "notification", "aed", "apriori_summary":
 		// ok
 	default:
 		return nil
+	}
+
+	// apriori_summary is the only session type whose body is allowed to be empty
+	// (cap/error lifecycle events, and pre-#3833 logs, carry only counts and no
+	// summary text). Build it here and return early so the shared empty-text
+	// guard below does not drop it.
+	if eventType == "apriori_summary" {
+		return parseAprioriSummaryEvent(raw, summaryLifecycle)
 	}
 
 	text := extractSessionEventText(raw, eventType)
@@ -754,6 +815,23 @@ func parseEventMap(raw map[string]interface{}) *SessionEntry {
 	if eventType == "aed" {
 		e.Source = aedSubtype
 	}
+	if eventType == "tool_result" {
+		// Defensive: if the model-visible result IS the a-priori summary
+		// artifact (a deployment where the visible/summary payload, not the
+		// raw, was logged to this event), attach it so the renderer can append
+		// the labelled summary section right after the raw block. The common
+		// production shape logs the raw here and emits a separate
+		// apriori_summary lifecycle event; both are handled.
+		if s := aprioriSummaryFromArtifact(raw["result"]); s != nil {
+			if s.ToolCallID == "" {
+				s.ToolCallID, _ = raw["tool_call_id"].(string)
+			}
+			if s.ToolName == "" {
+				s.ToolName, _ = raw["tool_name"].(string)
+			}
+			e.Summary = s
+		}
+	}
 	if eventType == "llm_response" {
 		// llm_response carries the per-round token scalars directly on the
 		// event. We extract only these numbers (never the `_meta` envelope) so
@@ -775,6 +853,75 @@ func parseEventMap(raw map[string]interface{}) *SessionEntry {
 		}
 	}
 
+	return e
+}
+
+// aprioriSummaryMarker is the kernel artifact tag stamped on every
+// `summary=true` (a-priori) tool-result replacement/refusal/error dict
+// (kernel `tool_result_summary.APRIORI_SUMMARY_MARKER`).
+const aprioriSummaryMarker = "lingtai_apriori_tool_result_summary"
+
+// aprioriSummaryFromArtifact builds an AprioriSummary from the kernel artifact
+// dict (the model-visible `lingtai_apriori_tool_result_summary` payload) when
+// `result` is that artifact, else returns nil. Used both for the artifact-in-
+// result shape and as a defensive detector on tool_result events.
+func aprioriSummaryFromArtifact(result interface{}) *AprioriSummary {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if marker, _ := m["artifact"].(string); marker != aprioriSummaryMarker {
+		return nil
+	}
+	s := &AprioriSummary{}
+	s.Kind, _ = m["summary_kind"].(string)
+	s.ToolCallID, _ = m["tool_call_id"].(string)
+	s.ToolName, _ = m["tool_name"].(string)
+	s.OriginalVisibleChars = int(intField(m, "original_visible_chars"))
+	s.SummaryChars = int(intField(m, "summary_chars"))
+	if text, _ := m["generated_summary"].(string); text != "" {
+		s.Text = text
+	} else if msg, _ := m["message"].(string); msg != "" {
+		// cap-refusal / fail-closed error: no generated text, surface the
+		// kernel's human-readable explanation instead.
+		s.Text = msg
+	}
+	// status == "summary_unavailable" marks the cap-refusal and error variants;
+	// the generated success variant has no status field.
+	if status, _ := m["status"].(string); status == "summary_unavailable" {
+		s.Unavailable = true
+	}
+	return s
+}
+
+// parseAprioriSummaryEvent builds an apriori_summary SessionEntry from a kernel
+// `apriori_summary_*` lifecycle event. These events carry the char counts and
+// tool identity, and (as of kernel #3833) the generated summary text on the
+// success path via `generated_summary`. Older logs predate that field, so Text
+// stays empty for them and the renderer falls back to a metadata-only block.
+func parseAprioriSummaryEvent(raw map[string]interface{}, kind string) *SessionEntry {
+	ts := ""
+	if tsFloat, ok := raw["ts"].(float64); ok {
+		ts = time.Unix(int64(tsFloat), 0).UTC().Format(time.RFC3339)
+	}
+	s := &AprioriSummary{Kind: kind}
+	s.ToolCallID, _ = raw["tool_call_id"].(string)
+	s.ToolName, _ = raw["tool_name"].(string)
+	s.OriginalVisibleChars = int(intField(raw, "original_visible_chars"))
+	s.SummaryChars = int(intField(raw, "summary_chars"))
+	// The generated success path carries the model-visible summary text inline
+	// (kernel #3833). Older logs omit it; Text stays empty and the renderer
+	// shows the metadata-only fallback note.
+	if text, _ := raw["generated_summary"].(string); text != "" {
+		s.Text = text
+	}
+	if kind == "apriori_cap_refused" || kind == "apriori_error" {
+		s.Unavailable = true
+	}
+	e := &SessionEntry{Ts: ts, Type: "apriori_summary", Summary: s}
+	if apiCallID, ok := raw["api_call_id"].(string); ok {
+		e.ApiCallID = apiCallID
+	}
 	return e
 }
 

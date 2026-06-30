@@ -698,5 +698,10 @@
   "login.codex_apply_failed": "施 Codex 帐于预设败：%s",
   "login.codex_entry_hint": "[回车] 立为今用  [r] 重登  [d/Del] 除",
   "mail.image_paste_saved": "剪贴板图已存：%s",
-  "mail.image_paste_failed": "未得剪贴板图：%v"
+  "mail.image_paste_failed": "未得剪贴板图：%v",
+  "mail.apriori_summary_label": "★ summary=true 之果（器灵所见 / 模型可见）",
+  "mail.apriori_summary_unavailable_label": "★ 已请 summary=true —— 未呈摘要于器灵",
+  "mail.apriori_summary_footer": "%s · %s → %s 字符 · 原始之果已存",
+  "mail.apriori_summary_footer_unavailable": "%s · 原始 %s 字符 · 原始之果已存（凭 tool_call_id 取之）",
+  "mail.apriori_summary_no_text": "（摘要之文不在事件之录 —— 器灵所见者乃 %s 字符之生成摘要；原始之果按 tool_call_id 而存）"
 }
