@@ -23,7 +23,6 @@ type appView int
 const (
 	appViewFirstRun appView = iota
 	appViewMail
-	appViewSetup
 	appViewSettings
 	appViewProps
 	appViewAddon
@@ -46,7 +45,6 @@ const (
 type App struct {
 	currentView   appView
 	mail          MailModel
-	setup         SetupModel
 	settings      SettingsModel
 	props         PropsModel
 	library       LibraryModel
@@ -240,8 +238,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch a.currentView {
 		case appViewMail:
 			a.mail, cmd = a.mail.Update(msg)
-		case appViewSetup:
-			a.setup, cmd = a.setup.Update(msg)
 		case appViewSettings:
 			a.settings, cmd = a.settings.Update(msg)
 		case appViewProps:
@@ -574,7 +570,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewSetup && a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
+			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
 				return a, tea.Quit
 			}
 		}
@@ -589,10 +585,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewMail:
 		updated, cmd := a.mail.Update(msg)
 		a.mail = updated
-		return a, cmd
-	case appViewSetup:
-		var cmd tea.Cmd
-		a.setup, cmd = a.setup.Update(msg)
 		return a, cmd
 	case appViewSettings:
 		updated, cmd := a.settings.Update(msg)
@@ -1488,8 +1480,6 @@ func (a App) View() tea.View {
 		content = a.firstRun.View()
 	case appViewMail:
 		content = a.mail.View()
-	case appViewSetup:
-		content = a.setup.View()
 	case appViewSettings:
 		content = a.settings.View()
 	case appViewProps:
