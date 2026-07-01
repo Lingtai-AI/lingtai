@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -514,8 +515,13 @@ func (m PropsModel) renderLeft(maxW int) string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.section_runtime")))
 	lines = append(lines, "")
+	// Soul flow: show it as an on/off status, NOT a raw delay sentinel.
+	// The enable/disable control is the env opt-in (LINGTAI_SOUL_FLOW_ENABLED),
+	// not soul.delay — a huge delay is no longer an "off switch". When
+	// enabled we surface soul.delay as the reflection cadence; when disabled
+	// we point the reader at the opt-in var and the soul-manual tool.
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.soul_flow")+": ")+m.renderSoulFlowValue(raw, valueStyle, labelStyle))
 	renderFields([]propsField{
-		{"soul_delay", i18n.T("props.soul_delay")},
 		{"molt_count", i18n.T("props.molt_count")},
 		{"max_turns", i18n.T("props.max_turns")},
 		{"max_rpm", i18n.T("props.max_rpm")},
@@ -666,6 +672,51 @@ func (m PropsModel) renderLeft(maxW int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// renderSoulFlowValue renders the /kanban "soul flow" line as an on/off
+// status rather than a raw delay number. The enable control is the env
+// opt-in (LINGTAI_SOUL_FLOW_ENABLED in the agent's env_file), not
+// soul.delay. When enabled we surface soul.delay as cadence (falling back
+// to a localized "default cadence" when the manifest omits it, since the
+// kernel applies its own default); when disabled we say so and point the
+// reader at the opt-in var and the soul-manual tool.
+func (m PropsModel) renderSoulFlowValue(raw map[string]interface{}, valueStyle, labelStyle lipgloss.Style) string {
+	enabled := config.SoulFlowEnabledInEnvFile(m.soulFlowEnvPath(raw))
+
+	if !enabled {
+		// disabled — localized "disabled · opt in via <var> · see soul-manual"
+		return valueStyle.Render(i18n.T("props.soul_flow_disabled")) +
+			labelStyle.Render(i18n.TF("props.soul_flow_disabled_hint", config.SoulFlowEnabledEnvVar))
+	}
+
+	// enabled — show cadence. soul_delay is the flattened soul.delay.
+	cadence := i18n.T("props.soul_flow_cadence_default")
+	if v, ok := raw["soul_delay"]; ok && v != nil {
+		if s := fmt.Sprintf("%v", v); s != "" {
+			cadence = i18n.TF("props.soul_flow_cadence", s)
+		}
+	}
+	return valueStyle.Render(i18n.T("props.soul_flow_enabled")) +
+		labelStyle.Render(" · "+cadence) +
+		labelStyle.Render(i18n.T("props.soul_flow_manual_hint"))
+}
+
+// soulFlowEnvPath resolves the .env file that governs this agent's soul-flow
+// opt-in: the agent's init.json env_file if present (the seam the kernel
+// actually loads), else the global .env under m.globalDir. env_file is
+// normally an absolute path, but tolerate a leading ~ just in case.
+func (m PropsModel) soulFlowEnvPath(raw map[string]interface{}) string {
+	ef, ok := raw["env_file"].(string)
+	if !ok || ef == "" {
+		return config.EnvFilePath(m.globalDir)
+	}
+	if strings.HasPrefix(ef, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			ef = filepath.Join(home, strings.TrimPrefix(ef, "~"))
+		}
+	}
+	return ef
 }
 
 func (m PropsModel) renderRight(maxW int) string {

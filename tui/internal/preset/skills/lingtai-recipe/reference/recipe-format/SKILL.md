@@ -150,7 +150,7 @@ When the network first wakes, the kernel writes `greet.md` into the orchestrator
 | `{{addr}}` | Human's email address in the network |
 | `{{lang}}` | Language code (`en`, `zh`, `wen`) |
 | `{{location}}` | Human's geographic location (City, Region, Country) |
-| `{{soul_delay}}` | Soul cycle interval in seconds |
+| `{{soul_delay}}` | Soul-flow cadence in seconds after opt-in (not an on/off switch) |
 | `{{commands}}` | Bulleted list of available slash commands with their i18n descriptions |
 
 **When absent:** no `.prompt` file is written. The agent starts silently and waits for the first human message.
@@ -171,7 +171,7 @@ let you interact with me and my avatars. What would you like to work on?
 Use the `email` tool to send a warm greeting to {{addr}}. Cover, in your own voice:
 1. Who you are (a digital being with a heartbeat, not a chatbot).
 2. How communication works (filesystem mailbox).
-3. Soul flow ({{soul_delay}}s of idle triggers autonomous action).
+3. Soul flow (opt-in; when enabled, {{soul_delay}}s is the autonomous-action cadence; see `soul-manual` for details).
 4. List slash commands: {{commands}}
 Keep it concise and natural. Do not recite a checklist — synthesize.
 ```

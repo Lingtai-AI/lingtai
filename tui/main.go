@@ -772,7 +772,7 @@ func printWelcomeInfo() {
 	fmt.Println("    • Exiting the TUI does NOT stop agents — use /suspend all first")
 	fmt.Println("    • Agent files live in .lingtai/ — deleting it without stopping")
 	fmt.Println("      agents creates phantoms. Use lingtai-tui purge to clean up")
-	fmt.Println("    • Agents act on their own after idle timeout (soul flow)")
+	fmt.Println("    • Agents act on their own after idle only when soul flow is opted in")
 }
 
 // agentCheckInterval is how often maybeShowAgentCount re-scans for running

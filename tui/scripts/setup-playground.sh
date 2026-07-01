@@ -52,7 +52,6 @@ cat > "$ORCH_DIR/init.json" << INITEOF
       "avatar": {},
       "daemon": {}
     },
-    "soul": {"delay": 30},
     "context_limit": null,
     "max_turns": 500,
     "admin": {"karma": true},
@@ -70,3 +69,5 @@ echo "  1. lingtai-tui $PROJECT_DIR"
 echo "  2. The TUI will ask for your MiniMax API key (first run)"
 echo "  3. Tab to Agent view → press 'r' to launch the orchestrator"
 echo "  4. Tab to Mail view → compose a message"
+echo "  Optional: enable soul flow in /setup when you want autonomous idle reflection"
+echo "            (see soul-manual; cadence is not an on/off switch)"

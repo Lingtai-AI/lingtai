@@ -1426,19 +1426,26 @@ func llmString(llm map[string]interface{}, key string) string {
 
 // AgentOpts holds per-agent configuration values set at creation time.
 type AgentOpts struct {
-	Language       string   // "en", "zh", or "wen"
-	ContextLimit   int      // token budget
-	SoulDelay      *float64 // nil means omit soul.delay so the kernel default applies
-	MaxRpm         int      // API requests-per-minute cap (cooperative network gate); 0 disables
-	MaxAedAttempts int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
-	Karma          bool     // lifecycle control over other agents
-	Nirvana        bool     // permanent agent destruction
-	CovenantFile   string   // path to covenant file
-	PrincipleFile  string   // path to principle file
-	ProceduresFile string   // path to procedures file
-	SoulFile       string   // path to soul flow file
-	CommentFile    string   // path to comment file (optional)
-	Addons         []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
+	Language     string   // "en", "zh", or "wen"
+	ContextLimit int      // token budget
+	SoulDelay    *float64 // nil means omit soul.delay so the kernel default applies
+	// SoulFlowEnabled is the wizard's soul-flow opt-in. When true,
+	// GenerateInitJSONWithOpts writes LINGTAI_SOUL_FLOW_ENABLED=1 into the
+	// global .env (the env_file the agent inherits at boot); when false it
+	// removes the key. Default false — soul flow is opt-in, matching the
+	// kernel default. This is distinct from SoulFile (the soul-flow prompt
+	// path) and from SoulDelay (cadence after opt-in).
+	SoulFlowEnabled bool
+	MaxRpm          int      // API requests-per-minute cap (cooperative network gate); 0 disables
+	MaxAedAttempts  int      // AED (auto-error-recovery) retry attempts per message turn before fallback/sleep
+	Karma           bool     // lifecycle control over other agents
+	Nirvana         bool     // permanent agent destruction
+	CovenantFile    string   // path to covenant file
+	PrincipleFile   string   // path to principle file
+	ProceduresFile  string   // path to procedures file
+	SoulFile        string   // path to soul flow file
+	CommentFile     string   // path to comment file (optional)
+	Addons          []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
 	// AllowedPresets lists the absolute (or ~-prefixed) paths of every
 	// preset this agent is authorized to swap to at runtime. The default
 	// preset is automatically included if missing. When empty, falls back
@@ -1474,6 +1481,15 @@ const (
 	MinMaxAedAttempts     = 1
 	MaxMaxAedAttempts     = 100
 )
+
+// DefaultSoulFlowCadence is the soul.delay (seconds) the wizard stamps
+// when the user opts into soul flow but leaves the cadence field blank.
+// Two hours is a sane "proactive but not chatty" default. It is applied
+// ONLY when soul flow is enabled — a default disabled agent omits the
+// soul block entirely so the kernel's own default applies (and no fires
+// happen while the env opt-in is off). This prevents an enabled agent
+// from silently inheriting the kernel's huge no-op fallback delay.
+const DefaultSoulFlowCadence = 7200.0
 
 // ClampAedAttempts validates a user-supplied AED max-attempts value. A value of
 // zero or below (the zero value, or empty/invalid input parsed to 0) falls back
@@ -1843,6 +1859,21 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	initPath := filepath.Join(agentDir, "init.json")
 	if err := os.WriteFile(initPath, data, 0o644); err != nil {
 		return fmt.Errorf("write init.json: %w", err)
+	}
+
+	// Persist the soul-flow opt-in into the global .env — the env_file the
+	// agent inherits at boot (init.json "env_file" above points here). The
+	// kernel reads LINGTAI_SOUL_FLOW_ENABLED from process env, so this is
+	// the seam that actually turns soul flow on/off. SetEnvVar is merge-
+	// preserving: it touches only this one key and leaves API keys,
+	// comments, and unrelated vars intact. OFF removes the key rather than
+	// writing =0, keeping the file minimal and matching the kernel default.
+	optInValue := ""
+	if opts.SoulFlowEnabled {
+		optInValue = "1"
+	}
+	if err := config.SetEnvVar(globalDir, config.SoulFlowEnabledEnvVar, optInValue); err != nil {
+		return fmt.Errorf("write soul-flow opt-in to .env: %w", err)
 	}
 
 	// Build the wizard-controlled subset of .agent.json. Other fields the

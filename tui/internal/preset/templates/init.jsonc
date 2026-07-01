@@ -100,8 +100,9 @@
     },
 
     // -------------------------------------------------------
-    // Soul flow delay is inherited from the kernel default.
-    // Add "soul": { "delay": <seconds> } only when overriding.
+    // Soul flow is opt-in via LINGTAI_SOUL_FLOW_ENABLED (for example, through /setup).
+    // soul.delay is only the cadence after opt-in; omit it to inherit the kernel default.
+    // Add "soul": { "delay": <seconds> } only when overriding cadence.
 
     // -------------------------------------------------------
     // Lifecycle limits
