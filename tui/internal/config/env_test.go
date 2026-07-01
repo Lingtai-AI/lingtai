@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,6 +135,22 @@ func TestSoulFlowEnabled_MissingFileIsDisabled(t *testing.T) {
 	dir := t.TempDir()
 	if SoulFlowEnabled(dir) {
 		t.Error("SoulFlowEnabled on missing .env = true, want false")
+	}
+}
+
+func TestSoulFlowEnabledInEnvFile_ExplicitPath(t *testing.T) {
+	// The /kanban path reads a specific env_file, which may differ from the
+	// global dir convention.
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	if err := os.WriteFile(envPath, []byte("LINGTAI_SOUL_FLOW_ENABLED=on\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if !SoulFlowEnabledInEnvFile(envPath) {
+		t.Error("SoulFlowEnabledInEnvFile(on) = false, want true")
+	}
+	if SoulFlowEnabledInEnvFile(filepath.Join(dir, "nope.env")) {
+		t.Error("SoulFlowEnabledInEnvFile(missing) = true, want false")
 	}
 }
 

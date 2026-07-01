@@ -387,7 +387,15 @@ func EnvVarTruthy(value string) bool {
 // seed the wizard toggle from the existing on-disk state. A missing file
 // or absent key means disabled — matching the kernel default.
 func SoulFlowEnabled(globalDir string) bool {
-	lines, err := readEnvLines(EnvFilePath(globalDir))
+	return SoulFlowEnabledInEnvFile(EnvFilePath(globalDir))
+}
+
+// SoulFlowEnabledInEnvFile is like SoulFlowEnabled but reads an explicit
+// .env path — used by /kanban/props to reflect the specific env_file an
+// agent's init.json points at (usually the global .env, but honoring an
+// override). A missing file or absent/false key means disabled.
+func SoulFlowEnabledInEnvFile(envPath string) bool {
+	lines, err := readEnvLines(envPath)
 	if err != nil {
 		return false
 	}
