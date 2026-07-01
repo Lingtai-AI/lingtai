@@ -27,9 +27,9 @@ type ReplayChunk struct {
 
 // ReplayFrame is either a keyframe (Net set) or a delta (Delta set).
 type ReplayFrame struct {
-	T     int64        `json:"t"`
-	Net   *fs.Network  `json:"net,omitempty"`
-	Delta *FrameDelta  `json:"d,omitempty"`
+	T     int64       `json:"t"`
+	Net   *fs.Network `json:"net,omitempty"`
+	Delta *FrameDelta `json:"d,omitempty"`
 }
 
 // FrameDelta holds only the fields that changed relative to the previous frame.
@@ -402,18 +402,26 @@ func scanJSONLFrom(topologyPath string, fromMs int64) ([]fs.TapeFrame, error) {
 	return frames, nil
 }
 
-// fullCompile does a complete re-scan of topology.jsonl, rebuilding all caches.
-// Used by the rebuild endpoint. This is the slow path — O(all_frames).
-func fullCompile(topologyPath, replayDir string) (ReplayManifest, error) {
-	// Clear existing caches
-	os.RemoveAll(replayDir)
-	os.MkdirAll(replayDir, 0o755)
-
-	f, err := os.Open(topologyPath)
-	if err != nil {
+// writeReconstructedReplay replaces the replay cache from already-reconstructed
+// frames and truncates topology.jsonl to the last frame for live appends.
+func writeReconstructedReplay(topologyPath, replayDir, progressPath string, frames []fs.TapeFrame) (ReplayManifest, error) {
+	if len(frames) == 0 {
+		return ReplayManifest{}, nil
+	}
+	if err := os.RemoveAll(replayDir); err != nil {
 		return ReplayManifest{}, err
 	}
-	defer f.Close()
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		return ReplayManifest{}, err
+	}
+	if progressPath != "" {
+		if err := os.MkdirAll(filepath.Dir(progressPath), 0o755); err != nil {
+			return ReplayManifest{}, err
+		}
+		if err := os.WriteFile(progressPath, []byte(fmt.Sprintf("0/%d", len(frames))), 0o644); err != nil {
+			return ReplayManifest{}, err
+		}
+	}
 
 	type hourGroup struct {
 		start  int64
@@ -422,17 +430,7 @@ func fullCompile(topologyPath, replayDir string) (ReplayManifest, error) {
 	var hours []*hourGroup
 	hourIndex := make(map[int64]*hourGroup)
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var frame fs.TapeFrame
-		if err := json.Unmarshal([]byte(line), &frame); err != nil {
-			continue
-		}
+	for i, frame := range frames {
 		bucket := hourBucket(frame.T)
 		g, ok := hourIndex[bucket]
 		if !ok {
@@ -441,16 +439,15 @@ func fullCompile(topologyPath, replayDir string) (ReplayManifest, error) {
 			hours = append(hours, g)
 		}
 		g.frames = append(g.frames, frame)
+		if progressPath != "" && (i%1000 == 0 || i == len(frames)-1) {
+			if err := os.WriteFile(progressPath, []byte(fmt.Sprintf("%d/%d", i+1, len(frames))), 0o644); err != nil {
+				return ReplayManifest{}, err
+			}
+		}
 	}
-
-	if len(hours) == 0 {
-		return ReplayManifest{}, nil
-	}
-
-	lastHourStart := hours[len(hours)-1].start
 
 	manifest := ReplayManifest{
-		TapeStart: hours[0].frames[0].T,
+		TapeStart: frames[0].T,
 		TapeEnd:   hours[len(hours)-1].frames[len(hours[len(hours)-1].frames)-1].T,
 	}
 
@@ -462,13 +459,30 @@ func fullCompile(topologyPath, replayDir string) (ReplayManifest, error) {
 		}
 		manifest.Chunks = append(manifest.Chunks, info)
 
-		if g.start != lastHourStart {
-			cachePath := filepath.Join(replayDir, strconv.FormatInt(g.start, 10)+".json.gz")
-			chunk := deltaEncode(g.frames, defaultKeyframeInterval)
-			if err := writeChunkCache(cachePath, chunk); err != nil {
-				return ReplayManifest{}, fmt.Errorf("cache chunk %d: %w", g.start, err)
-			}
+		cachePath := filepath.Join(replayDir, strconv.FormatInt(g.start, 10)+".json.gz")
+		chunk := deltaEncode(g.frames, defaultKeyframeInterval)
+		if err := writeChunkCache(cachePath, chunk); err != nil {
+			return ReplayManifest{}, fmt.Errorf("cache chunk %d: %w", g.start, err)
 		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(topologyPath), 0o755); err != nil {
+		return ReplayManifest{}, err
+	}
+	lastFrame := frames[len(frames)-1]
+	line, err := json.Marshal(lastFrame)
+	if err != nil {
+		return ReplayManifest{}, err
+	}
+	if err := os.WriteFile(topologyPath, append(line, '\n'), 0o644); err != nil {
+		return ReplayManifest{}, err
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return ReplayManifest{}, err
+	}
+	if err := os.WriteFile(filepath.Join(replayDir, "manifest.json"), data, 0o644); err != nil {
+		return ReplayManifest{}, err
 	}
 
 	return manifest, nil
@@ -584,6 +598,7 @@ func NewManifestHandler(baseDir string) http.HandlerFunc {
 func NewRebuildHandler(baseDir string) http.HandlerFunc {
 	topologyPath := filepath.Join(baseDir, ".portal", "topology.jsonl")
 	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
+	progressPath := filepath.Join(baseDir, ".portal", "reconstruct.progress")
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -604,58 +619,14 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 			return
 		}
 
-		// Clear old caches
-		os.RemoveAll(replayDir)
-		os.MkdirAll(replayDir, 0o755)
-
-		// Stream into hourly compressed chunks
-		var currentHour int64 = -1
-		var hourFrames []fs.TapeFrame
-		var chunks []ChunkInfo
-
-		flushHour := func() {
-			if len(hourFrames) == 0 {
-				return
-			}
-			info := ChunkInfo{
-				Start:  currentHour,
-				End:    hourFrames[len(hourFrames)-1].T,
-				Frames: len(hourFrames),
-			}
-			chunks = append(chunks, info)
-			cachePath := filepath.Join(replayDir, strconv.FormatInt(currentHour, 10)+".json.gz")
-			chunk := deltaEncode(hourFrames, defaultKeyframeInterval)
-			writeChunkCache(cachePath, chunk)
-			hourFrames = nil
-		}
-
-		for _, f := range frames {
-			bucket := hourBucket(f.T)
-			if bucket != currentHour {
-				flushHour()
-				currentHour = bucket
-			}
-			hourFrames = append(hourFrames, f)
-		}
-		flushHour()
-
-		// Write minimal topology.jsonl (last frame for live recording)
 		TopologyMu.Lock()
-		lastFrame := frames[len(frames)-1]
-		line, _ := json.Marshal(lastFrame)
-		os.WriteFile(topologyPath, append(line, '\n'), 0o644)
+		manifest, err := writeReconstructedReplay(topologyPath, replayDir, progressPath, frames)
 		TopologyMu.Unlock()
-
-		// Write manifest. TapeStart is the first real frame timestamp, NOT the
-		// first chunk's hour-bucket floor — otherwise the scrubber shows ~55min
-		// of empty padding before the first event ("orphan first hour").
-		manifest := ReplayManifest{
-			TapeStart: frames[0].T,
-			TapeEnd:   chunks[len(chunks)-1].End,
-			Chunks:    chunks,
+		os.Remove(progressPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		mdata, _ := json.Marshal(manifest)
-		os.WriteFile(filepath.Join(replayDir, "manifest.json"), mdata, 0o644)
 
 		if manifest.Chunks == nil {
 			manifest.Chunks = []ChunkInfo{}
