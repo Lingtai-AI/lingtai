@@ -652,7 +652,12 @@ func TestStreamSessionEventsFiltersRelevantRows(t *testing.T) {
 			(1.0, 'heartbeat', '{}'),
 			(2.0, 'text_input', '{"message":"hello"}'),
 			(3.0, 'notification_pair_injected', '{"message":"note"}'),
-			(4.0, 'aed_attempt', '{"error":"boom"}');
+			(4.0, 'aed_attempt', '{"error":"boom"}'),
+			(5.0, 'apriori_summary_generated', '{"tool_name":"bash","tool_call_id":"call_sum","generated_summary":"ok"}'),
+			(6.0, 'apriori_summary_cap_refused', '{"tool_name":"bash","tool_call_id":"call_cap","message":"too large"}'),
+			(7.0, 'apriori_summary_failed', '{"tool_name":"bash","tool_call_id":"call_fail","error":"boom"}'),
+			(8.0, 'apriori_summary_empty', '{"tool_name":"bash","tool_call_id":"call_empty"}'),
+			(9.0, 'apriori_summary_no_summarizer', '{"tool_name":"bash","tool_call_id":"call_no"}');
 	`)
 	var rows []SessionEventRow
 	err := StreamSessionEvents(agentDir, func(row SessionEventRow) error {
@@ -662,11 +667,23 @@ func TestStreamSessionEventsFiltersRelevantRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamSessionEvents error: %v", err)
 	}
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 relevant rows, got %d", len(rows))
+	wantTypes := []string{
+		"text_input",
+		"notification_pair_injected",
+		"aed_attempt",
+		"apriori_summary_generated",
+		"apriori_summary_cap_refused",
+		"apriori_summary_failed",
+		"apriori_summary_empty",
+		"apriori_summary_no_summarizer",
 	}
-	if rows[0].Type != "text_input" || rows[1].Type != "notification_pair_injected" || rows[2].Type != "aed_attempt" {
-		t.Fatalf("unexpected row order/types: %#v", rows)
+	if len(rows) != len(wantTypes) {
+		t.Fatalf("expected %d relevant rows, got %d", len(wantTypes), len(rows))
+	}
+	for i, want := range wantTypes {
+		if rows[i].Type != want {
+			t.Fatalf("rows[%d].Type = %q, want %q; rows=%#v", i, rows[i].Type, want, rows)
+		}
 	}
 }
 

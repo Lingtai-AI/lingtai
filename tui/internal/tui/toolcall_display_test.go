@@ -55,22 +55,22 @@ func TestTruncateToolBody_TruncatesAtLimitWithIndicator(t *testing.T) {
 	}
 }
 
-func TestCompactToolCallSummary_TruncatesLongSingleLineTo200Runes(t *testing.T) {
-	body := "tool({\"args\":\"" + strings.Repeat("字", 300) + "\"})"
+func TestCompactToolCallSummary_TruncatesLongSingleLineAfter250Runes(t *testing.T) {
+	body := strings.Repeat("字", 300)
 	got := compactToolCallSummary(body)
-	if n := len([]rune(got)); n != toolCallSummaryLimit {
-		t.Fatalf("compactToolCallSummary length = %d runes, want %d; got %q", n, toolCallSummaryLimit, got)
+	if n := len([]rune(got)); n != toolCallSummaryPreviewLimit+1 {
+		t.Fatalf("compactToolCallSummary length = %d runes, want %d retained runes plus ellipsis; got %q", n, toolCallSummaryPreviewLimit, got)
+	}
+	if !strings.HasPrefix(got, strings.Repeat("字", toolCallSummaryPreviewLimit)) {
+		t.Fatalf("compactToolCallSummary must retain the first %d runes before ellipsis, got %q", toolCallSummaryPreviewLimit, got)
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("compactToolCallSummary should mark truncation with ellipsis, got %q", got)
 	}
-	if strings.Contains(got, strings.Repeat("字", 220)) {
-		t.Fatalf("compactToolCallSummary retained more than the 200-rune cap: %q", got)
-	}
 }
 
-func TestCompactToolCallSummary_TakesFirstLineBefore200RuneCap(t *testing.T) {
-	body := "read({})\n" + strings.Repeat("x", 200)
+func TestCompactToolCallSummary_TakesFirstLineBefore250RuneCap(t *testing.T) {
+	body := "read({})\n" + strings.Repeat("x", 250)
 	got := compactToolCallSummary(body)
 	if got != "read({})" {
 		t.Fatalf("compactToolCallSummary should preserve short first line only, got %q", got)
@@ -432,8 +432,8 @@ func TestRenderMessages_TruncatesToolEntriesToFirstLineAtVerboseThinking(t *test
 	if strings.Contains(out, "more args") || strings.Contains(out, "large") || strings.Contains(out, "result:") {
 		t.Fatalf("Ctrl+O level 1 should render only compact tool_call/tool_result summaries, got %q", out)
 	}
-	if strings.Contains(out, strings.Repeat("x", 220)) {
-		t.Fatalf("Ctrl+O level 1 should cap long single-line tool_call summaries to 200 chars, got %q", out)
+	if strings.Contains(out, strings.Repeat("x", 260)) {
+		t.Fatalf("Ctrl+O level 1 should cap long single-line tool_call summaries after 250 chars, got %q", out)
 	}
 	if !strings.Contains(out, "…") {
 		t.Fatalf("Ctrl+O level 1 should mark truncated long tool_call summaries, got %q", out)

@@ -56,7 +56,7 @@ func firstRenderedLine(body string) string {
 	return body
 }
 
-const toolCallSummaryLimit = 200
+const toolCallSummaryPreviewLimit = 250
 
 // aprioriSummaryPreviewLimit caps the generated summary text shown in the FIRST
 // Ctrl+O/detail layer. The deeper (verboseExtended) layer renders the full
@@ -82,13 +82,10 @@ func previewSummaryText(text string) string {
 func compactToolCallSummary(body string) string {
 	line := firstRenderedLine(body)
 	runes := []rune(line)
-	if len(runes) <= toolCallSummaryLimit {
+	if len(runes) <= toolCallSummaryPreviewLimit {
 		return line
 	}
-	if toolCallSummaryLimit <= 1 {
-		return "…"
-	}
-	return string(runes[:toolCallSummaryLimit-1]) + "…"
+	return string(runes[:toolCallSummaryPreviewLimit]) + "…"
 }
 
 // toolGroupSeparatorBefore reports whether a blank separator line should be

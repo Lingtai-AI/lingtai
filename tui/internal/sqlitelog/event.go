@@ -99,7 +99,7 @@ func querySQLiteRows(agentDir, sql string, expectedColumns int) ([][]string, err
 	return rows, err
 }
 
-const sessionEventFilterSQL = "(type IN ('thinking','diary','text_input','text_output','tool_call','tool_result','llm_call','llm_response','insight','consultation_fire','notification_pair_injected') OR type IN ('aed_attempt','aed_exhausted','aed_timeout'))"
+const sessionEventFilterSQL = "(type IN ('thinking','diary','text_input','text_output','tool_call','tool_result','llm_call','llm_response','insight','consultation_fire','notification_pair_injected','apriori_summary_generated','apriori_summary_cap_refused','apriori_summary_failed','apriori_summary_empty','apriori_summary_no_summarizer') OR type IN ('aed_attempt','aed_exhausted','aed_timeout'))"
 
 type EventsIndexCoverage struct {
 	FileSize  int64
