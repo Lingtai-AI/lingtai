@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -183,7 +184,78 @@ func EnvFilePath(globalDir string) string {
 	return filepath.Join(globalDir, ".env")
 }
 
-// WriteEnvFile writes API keys from config to ~/.lingtai-tui/.env.
+// SoulFlowEnabledEnvVar is the env var the kernel reads to decide
+// whether soul flow (proactive autonomous action on idle) is enabled.
+// It is opt-in: unset/empty/other = disabled. The kernel treats
+// {1,true,yes,on} (case-insensitive) as enabled. See kernel
+// flow.py:SOUL_FLOW_ENABLED_ENV. The TUI surfaces this as a wizard
+// toggle and persists it into ~/.lingtai-tui/.env via SetEnvVar so the
+// agent inherits it at boot through env_file.
+const SoulFlowEnabledEnvVar = "LINGTAI_SOUL_FLOW_ENABLED"
+
+// parseEnvKey reports whether a raw .env line is a `KEY=VALUE`
+// assignment and, if so, returns its key. Comment lines (leading `#`)
+// and blank lines are reported as non-assignments so callers preserve
+// them verbatim.
+func parseEnvKey(line string) (key string, isAssignment bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", false
+	}
+	eq := strings.IndexByte(line, '=')
+	if eq <= 0 {
+		return "", false
+	}
+	return strings.TrimSpace(line[:eq]), true
+}
+
+// readEnvLines reads the .env file into a slice of raw lines. A missing
+// file yields an empty slice with no error, so callers can treat "no
+// file" and "empty file" identically. A trailing empty element caused
+// by a final newline is dropped.
+func readEnvLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	content := strings.TrimRight(string(data), "\n")
+	if content == "" {
+		return nil, nil
+	}
+	return strings.Split(content, "\n"), nil
+}
+
+// writeEnvLines writes lines back to the .env file with a single
+// trailing newline and 0600 permissions. When the file already exists
+// its existing permission bits are preserved rather than reset to 0600,
+// so a user who tightened them keeps their choice.
+func writeEnvLines(path string, lines []string) error {
+	perm := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	// Ensure the parent (global) dir exists — GenerateInitJSONWithOpts may
+	// write the .env before the wizard's GlobalDir() MkdirAll runs (and
+	// tests point globalDir at a not-yet-created temp path).
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	body := strings.Join(lines, "\n")
+	if body != "" {
+		body += "\n"
+	}
+	return os.WriteFile(path, []byte(body), perm)
+}
+
+// WriteEnvFile writes API keys from config to ~/.lingtai-tui/.env while
+// preserving any unmanaged lines already present in the file (comments,
+// blank lines, and env vars not owned by Config.Keys — most notably
+// LINGTAI_SOUL_FLOW_ENABLED, which the wizard writes separately via
+// SetEnvVar).
+//
 // Each Config.Keys entry maps directly to a `<env-var-name>=<value>`
 // line — the env var name comes from each preset's manifest.llm.
 // api_key_env field, written by the TUI's key-paste flow. No
@@ -191,17 +263,143 @@ func EnvFilePath(globalDir string) string {
 // because a single provider can serve multiple presets with distinct
 // keys.
 //
+// Managed keys already present in the file are updated in place;
+// managed keys absent from the file are appended; unmanaged lines are
+// left untouched. This replaces the previous clobber-everything
+// behavior so a manually- or separately-populated .env survives an API
+// key save.
+//
 // This file is loaded by agents at boot via env_file in init.json.
 func WriteEnvFile(globalDir string, cfg Config) error {
-	var lines []string
+	path := EnvFilePath(globalDir)
+	existing, err := readEnvLines(path)
+	if err != nil {
+		return err
+	}
+
+	// Collect the managed keys we intend to write (skipping empties).
+	managed := make(map[string]string, len(cfg.Keys))
 	for envName, val := range cfg.Keys {
 		if envName == "" || val == "" {
 			continue
 		}
-		lines = append(lines, envName+"="+val)
+		managed[envName] = val
+	}
+
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range existing {
+		key, isAssign := parseEnvKey(line)
+		if !isAssign {
+			out = append(out, line) // comment / blank — preserve verbatim
+			continue
+		}
+		if val, isManaged := managed[key]; isManaged {
+			out = append(out, key+"="+val) // update in place
+			seen[key] = true
+			continue
+		}
+		out = append(out, line) // unmanaged assignment — preserve
+	}
+
+	// Append managed keys that weren't already present. Sort for a
+	// deterministic on-disk order (map iteration is random in Go).
+	var missing []string
+	for envName := range managed {
+		if !seen[envName] {
+			missing = append(missing, envName)
+		}
+	}
+	sort.Strings(missing)
+	for _, envName := range missing {
+		out = append(out, envName+"="+managed[envName])
+	}
+
+	return writeEnvLines(path, out)
+}
+
+// SetEnvVar performs a merge-preserving upsert of a single env var in
+// ~/.lingtai-tui/.env. It reads the file, sets (or, when value is "",
+// removes) exactly the named key, and rewrites — leaving comments,
+// blank lines, unrelated keys, and file permissions untouched. Used for
+// vars the TUI owns outside Config.Keys, such as LINGTAI_SOUL_FLOW_ENABLED.
+//
+// A missing file is treated as empty; removing a key that isn't present
+// is a no-op that still normalizes the file (harmless).
+func SetEnvVar(globalDir, key, value string) error {
+	if key == "" {
+		return nil
 	}
 	path := EnvFilePath(globalDir)
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	existing, err := readEnvLines(path)
+	if err != nil {
+		return err
+	}
+
+	var out []string
+	replaced := false
+	removedExisting := false
+	for _, line := range existing {
+		k, isAssign := parseEnvKey(line)
+		if !isAssign || k != key {
+			out = append(out, line)
+			continue
+		}
+		// Matched the target key.
+		if value == "" {
+			removedExisting = true
+			continue // remove: drop the line entirely
+		}
+		if !replaced {
+			out = append(out, key+"="+value)
+			replaced = true
+		}
+		// Any further duplicate lines for this key are dropped.
+	}
+	if value != "" && !replaced {
+		out = append(out, key+"="+value)
+	}
+	// Removing a key that was never present (and no file to normalize) is a
+	// pure no-op: don't create an empty .env just to "unset" nothing. This
+	// keeps a default-disabled agent from materializing a spurious empty
+	// .env when none existed.
+	if value == "" && !removedExisting {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil
+		}
+	}
+	return writeEnvLines(path, out)
+}
+
+// EnvVarTruthy reports whether the given .env value is one the kernel
+// treats as enabled: 1/true/yes/on, case-insensitive. Empty/absent/other
+// is false. Mirrors kernel flow.py truthy parsing.
+func EnvVarTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// SoulFlowEnabled reports whether ~/.lingtai-tui/.env currently opts into
+// soul flow (LINGTAI_SOUL_FLOW_ENABLED set to a truthy value). Used to
+// seed the wizard toggle from the existing on-disk state. A missing file
+// or absent key means disabled — matching the kernel default.
+func SoulFlowEnabled(globalDir string) bool {
+	lines, err := readEnvLines(EnvFilePath(globalDir))
+	if err != nil {
+		return false
+	}
+	for _, line := range lines {
+		k, isAssign := parseEnvKey(line)
+		if !isAssign || k != SoulFlowEnabledEnvVar {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		return EnvVarTruthy(line[eq+1:])
+	}
+	return false
 }
 
 // EnsureConfigPersisted creates a minimal empty config.json if and

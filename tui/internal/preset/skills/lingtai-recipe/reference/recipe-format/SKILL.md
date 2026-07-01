@@ -171,7 +171,7 @@ let you interact with me and my avatars. What would you like to work on?
 Use the `email` tool to send a warm greeting to {{addr}}. Cover, in your own voice:
 1. Who you are (a digital being with a heartbeat, not a chatbot).
 2. How communication works (filesystem mailbox).
-3. Soul flow ({{soul_delay}}s of idle triggers autonomous action).
+3. Soul flow (when enabled, {{soul_delay}}s of idle triggers autonomous action).
 4. List slash commands: {{commands}}
 Keep it concise and natural. Do not recite a checklist — synthesize.
 ```
