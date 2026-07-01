@@ -198,6 +198,7 @@ type FirstRunModel struct {
 	rehydrateOrchName string // existing orchestrator agent_name from its .agent.json
 	rehydrateWorkers  int    // count of workers propagated (set at stepPropagate completion)
 	rehydrateErr      string // non-empty if RehydrateNetwork failed
+	rehydrateDone     bool   // true when rehydrateDoneMsg has arrived
 	// Bootstrap state (venv + assets install)
 	setupDone   bool        // true when bootstrap goroutine finishes
 	setupErr    string      // non-empty if bootstrap failed
@@ -879,6 +880,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 	case rehydrateDoneMsg:
 		m.rehydrateWorkers = msg.workers
 		m.rehydrateErr = msg.err
+		m.rehydrateDone = true
 		// User presses Enter on the propagate page to advance to stepLaunching,
 		// see the KeyPressMsg handler for stepPropagate below.
 		return m, nil
@@ -2137,7 +2139,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// Ignore Enter until rehydrateDoneMsg has arrived.
 			switch msg.String() {
 			case "enter":
-				if m.rehydrateWorkers == 0 && m.rehydrateErr == "" {
+				if !m.rehydrateDone {
 					return m, nil // still running
 				}
 				if m.rehydrateErr != "" {
