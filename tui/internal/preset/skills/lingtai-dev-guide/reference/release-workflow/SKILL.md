@@ -165,7 +165,9 @@ any public log.
 - **Contributor audits cover the whole window and non-code participation.** Do
   not scope to merged commits / PR authors only. Include closed and rejected
   issues, issue and PR comments and reviews, and humans who shaped scope or review
-  without authoring code. See §7.3 for the inclusion rule.
+  without authoring code. For public release blogs, default to the previous two
+  version windows for each affected repo unless Jason explicitly narrows the
+  scope. See §7.3 for the inclusion rule.
 - **Inspect the live `lingtai-web` structure before any website edit.** Never
   assume blog or release-data paths from memory; the site layout changes (see
   §7.1).
@@ -431,16 +433,21 @@ gh issue list --state all --search 'updated:>=YYYY-MM-DD' \
 
 Contributor inclusion rule for release logs:
 
+- use the **previous two version windows per affected repo** for public website
+  release blogs unless the human explicitly requests a narrower scope;
 - commit authors;
 - co-authors from commit trailers;
 - merged PR authors;
-- closed unmerged PR authors, when part of the release-window discussion/work;
-- closed issue reporters and meaningful participants, even if the idea was not
-  adopted;
+- closed unmerged / rejected PR authors, commenters, and reviewers when part of
+  the release-window discussion/work;
+- closed / rejected issue reporters, commenters, and meaningful participants,
+  even if the idea was not adopted;
+- humans who shaped scope or review without authoring code;
 - automation/bots when they materially changed release artifacts.
 
 Keep raw JSON/script outputs under a report directory so the contributor list is
-auditable.
+auditable, and include the audit horizon/counts in the release entry when the
+site has a validation or provenance section.
 
 ### 7.4 Draft both zh and en
 
