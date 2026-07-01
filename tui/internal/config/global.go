@@ -152,12 +152,17 @@ func GlobalDir() (string, error) {
 }
 
 func LoadConfig(dir string) (Config, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	configPath := filepath.Join(dir, "config.json")
+	data, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		return Config{}, nil
 	}
 	if err != nil {
 		return Config{}, err
+	}
+	// Tighten permissions on existing config.json (migration from 0o644)
+	if info, statErr := os.Stat(configPath); statErr == nil && info.Mode().Perm() != 0o600 {
+		_ = os.Chmod(configPath, 0o600)
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -173,7 +178,7 @@ func SaveConfig(dir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o600); err != nil {
 		return err
 	}
 	return WriteEnvFile(dir, cfg)
