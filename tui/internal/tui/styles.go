@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"golang.org/x/term"
 )
 
 // Theme defines the full color palette and derived styles for the TUI.
@@ -181,6 +182,12 @@ func SetTheme(t Theme) {
 // during sleep/wake, but Bubble Tea v2's dirty-checking skips re-sending
 // unchanged colors.
 func ApplyTerminalBG() {
+	// Skip OSC writes when stdout is not a terminal (e.g. piped, redirected,
+	// or captured by a test harness). This prevents spurious OSC 11/10 bytes
+	// from leaking into pipes and avoids corrupting captured output.
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return
+	}
 	if activeTheme.PaintBG {
 		fmt.Printf("\x1b]11;%s\x07", colorToHex(activeTheme.BG))
 		fmt.Printf("\x1b]10;%s\x07", colorToHex(activeTheme.Text))
