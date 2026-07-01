@@ -875,6 +875,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			case verboseExtended:
 				m.verbose = verboseOff
 			}
+			// Re-render immediately and anchor to bottom so the user
+			// sees the latest output after the verbose level changes.
+			if m.ready {
+				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+				m.viewport.GotoBottom()
+				return m, nil
+			}
 			return m, m.refreshMail
 
 		case "ctrl+u":
