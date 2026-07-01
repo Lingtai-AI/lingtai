@@ -143,6 +143,7 @@
   "mail.token_usage_footer": "字符：入 %s · 未中缓存 %s · 出 %s · 缓存中率 %s",
   "mail.telemetry_session": "Session:",
   "mail.telemetry_tok": "字",
+  "mail.telemetry_miss": "漏",
   "mail.telemetry_context": "ctx",
   "mail.telemetry_api": "问",
   "mail.telemetry_cache": "缓",

@@ -143,6 +143,7 @@
   "mail.token_usage_footer": "词元：输入 %s · 缓存未命中 %s · 输出 %s · 缓存命中率 %s",
   "mail.telemetry_session": "当前",
   "mail.telemetry_tok": "词元",
+  "mail.telemetry_miss": "未命中",
   "mail.telemetry_context": "上下文",
   "mail.telemetry_api": "API调用",
   "mail.telemetry_cache": "缓存",

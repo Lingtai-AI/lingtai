@@ -15,12 +15,13 @@ import (
 // the bottom path/shortcut status bar. It condenses the CURRENT SESSION's token
 // economy and the live context-window pressure into one high-density line:
 //
-//	Session:  api 42  tok 181.6k  cache 88%  tok/api 4.3k    ctx 186.5k/250.0k ▓▓▓▓░░ 73%
+//	Session:  api 42  tok 181.6k (miss 1.4k)  cache 88%  tok/api 4.3k    ctx 186.5k/250.0k ▓▓▓▓░░ 73%
 //
 // All numbers are scoped to the current molt session (since the latest
 // psyche_molt), NOT the whole-ledger lifetime total and NOT a single round:
 //   - api:     LLM API calls this session
 //   - tok:     total session tokens (input + output + thinking)
+//   - (miss):  cache-miss tokens (input not served from cache), glued to tok
 //   - cache:   cache-hit rate (cached / input)
 //   - tok/api: average tokens per API call
 // and, separately, the live context-window pressure with the gauge Jason liked:
@@ -207,7 +208,17 @@ func formatHomeTelemetry(t homeTelemetry, width int) string {
 		segs = append(segs, fmt.Sprintf("%s %d", i18n.T("mail.telemetry_api"), t.apiCalls))
 	}
 	if t.sessionTokens > 0 {
-		segs = append(segs, i18n.T("mail.telemetry_tok")+" "+humanizeTokenCount(t.sessionTokens))
+		tok := i18n.T("mail.telemetry_tok") + " " + humanizeTokenCount(t.sessionTokens)
+		// Cache-miss (input NOT served from cache) glued to the token total in
+		// parens, exactly where Jason asked for it — right after `tok …`, NOT after
+		// the cache percentage. Reuses cacheMiss() (input - cached, clamped ≥0) and
+		// humanizeTokenCount so it reads "tok 1.1M (miss 8.6k)" in the same units as
+		// the token total. Gated on inputTokens > 0 so a session with no recorded
+		// input never shows a bare "(miss 0)".
+		if t.inputTokens > 0 {
+			tok += " (" + i18n.T("mail.telemetry_miss") + " " + humanizeTokenCount(cacheMiss(t.cached, t.inputTokens)) + ")"
+		}
+		segs = append(segs, tok)
 	}
 	if t.inputTokens > 0 {
 		segs = append(segs, i18n.T("mail.telemetry_cache")+" "+formatCacheRate(t.cached, t.inputTokens))

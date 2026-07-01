@@ -35,9 +35,45 @@ func TestFormatHomeTelemetry(t *testing.T) {
 				cached: 180224, contextUsed: 146000, contextLimit: 200000, contextUsage: 0.73,
 			},
 			width: 120,
-			// api count, humanized token total, cache rate, tok/api, then the
-			// ctx scope label, used/limit, bar, and percentage.
-			want: []string{"api", "42", "tok", "181.6k", "cache", "%", "tok/api", "ctx", "146.0k/200.0k", "▓", "░", "73%"},
+			// api count, humanized token total, cache-miss in parens right after
+			// tok (181,585 input - 180,224 cached = 1,361 → 1.4k), cache rate,
+			// tok/api, then the ctx scope label, used/limit, bar, and percentage.
+			want: []string{"api", "42", "tok", "181.6k", "(miss", "1.4k)", "cache", "%", "tok/api", "ctx", "146.0k/200.0k", "▓", "░", "73%"},
+		},
+		{
+			name: "cache miss placed immediately after tok, before cache rate",
+			// 100k input, 90k cached → 10.0k miss. Assert "tok …(miss …)" appears
+			// BEFORE "cache …" in the string so the miss never lands after the
+			// cache percentage (Jason's explicit placement requirement).
+			tel: homeTelemetry{
+				apiCalls: 10, sessionTokens: 120000, inputTokens: 100000,
+				cached: 90000, contextUsage: -1,
+			},
+			width: 120,
+			want:  []string{"tok", "120.0k", "(miss", "10.0k)", "cache"},
+		},
+		{
+			name: "cached exceeds input — miss clamps to 0, no negative",
+			// A ledger row where cached > input must never print a negative miss.
+			tel: homeTelemetry{
+				apiCalls: 5, sessionTokens: 8000, inputTokens: 5000,
+				cached: 7000, contextUsage: -1,
+			},
+			width:   120,
+			want:    []string{"tok", "8.0k", "(miss", "0)"},
+			notWant: []string{"-", "(miss -"},
+		},
+		{
+			name: "no input recorded — miss segment omitted entirely",
+			// sessionTokens present but inputTokens 0 (e.g. output-only accounting):
+			// show tok but never a bare "(miss 0)".
+			tel: homeTelemetry{
+				apiCalls: 0, sessionTokens: 5000, inputTokens: 0, cached: 0,
+				contextUsage: -1,
+			},
+			width:   120,
+			want:    []string{"tok", "5.0k"},
+			notWant: []string{"miss", "(miss"},
 		},
 		{
 			name: "no api calls yet — drop api & tok/api, keep tokens",
@@ -96,6 +132,12 @@ func TestFormatHomeTelemetry(t *testing.T) {
 			// against the localized `mail.telemetry_*` keys going missing.
 			if strings.Contains(got, "mail.telemetry") {
 				t.Errorf("telemetry %q leaked a raw i18n key (missing translation)", got)
+			}
+			// Wherever both the miss segment and the cache rate render, miss must
+			// come FIRST — Jason asked for "(miss …)" glued after tok, never after
+			// the cache percentage.
+			if mi, ci := strings.Index(got, "(miss"), strings.Index(got, "cache"); mi >= 0 && ci >= 0 && mi > ci {
+				t.Errorf("telemetry %q: (miss …) must appear before the cache rate, got miss@%d cache@%d", got, mi, ci)
 			}
 		})
 	}

@@ -143,6 +143,7 @@
   "mail.token_usage_footer": "tokens: input %s · cache miss %s · output %s · cache rate %s",
   "mail.telemetry_session": "Session:",
   "mail.telemetry_tok": "tok",
+  "mail.telemetry_miss": "miss",
   "mail.telemetry_context": "ctx",
   "mail.telemetry_api": "api",
   "mail.telemetry_cache": "cache",
