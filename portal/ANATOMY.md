@@ -42,7 +42,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 - **`portal/embed.go:8-9`** — `//go:embed all:web/dist` compiles the React frontend build output into `webDist embed.FS`. No runtime Node dependency.
 - **`portal/embed.go:11-17`** — `WebFS()` returns `fs.Sub(webDist, "web/dist")` so the HTTP server mounts from the `web/dist/` root.
 - **`Makefile:1-24`** — Build pipeline. `web-build` runs `npm install && npm run build` in `web/`; `go-build` depends on it and stamps `main.version` via `-ldflags`. `cross-compile` targets darwin/linux × arm64/amd64.
-- **`internal/api/`** — HTTP server, handlers, and the 655-line replay endpoint. See `portal/internal/api/ANATOMY.md`.
+- **`internal/api/`** — HTTP server, handlers, and the 680-line replay endpoint. See `portal/internal/api/ANATOMY.md`.
 - **`internal/fs/`** — Filesystem readers: agent manifests, heartbeat, mailbox, network reconstruction (`reconstruct.go`), topology types (`types.go`). Same shape as `tui/internal/fs/` but Portal-specific.
 - **`internal/migrate/`** — Migration registry sharing the `meta.json` version space with the TUI. Each migration mirrors its TUI counterpart (or is a no-op stub). See `portal/internal/migrate/migrate.go`.
 - **`web/`** — React 19 + TypeScript + Vite frontend. Source under `web/src/`; builds to `web/dist/`.
@@ -67,14 +67,14 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 ## State
 
 - **`.portal/port`** — Written on server start (`portal/main.go:73` → `portal/internal/api/server.go:54`). Contains the bound TCP port as an ASCII integer. Read by the TUI to know where to open the browser.
-- **`.portal/topology.jsonl`** — JSONL tape of network snapshots. Each line is `{"t": <unix_ms>, "net": <Network>}`. Appended every 3 seconds by `StartRecording` (`portal/internal/api/server.go:152-157`); also appended by the live handlers on each request.
+- **`.portal/topology.jsonl`** — JSONL tape of network snapshots. Each line is `{"t": <unix_ms>, "net": <Network>}`. Appended every 3 seconds by `StartRecording` (`portal/internal/api/server.go:88-102`); also appended by the live handlers on each request.
 - **`.portal/replay/chunks/`** — Compressed hourly replay chunks (`<hourMs>.json.gz`), each containing delta-encoded frames with keyframes every 100 frames. Plus `manifest.json` indexing all chunks.
-- **`.portal/reconstruct.progress`** — Temporary `"N/M"` progress file during tape reconstruction (`portal/internal/api/server.go:116`). Deleted when reconstruction completes (`portal/internal/api/server.go:139`).
+- **`.portal/reconstruct.progress`** — Temporary `"N/M"` progress file during tape reconstruction. Startup creates/deletes it in `StartRecording` (`portal/internal/api/server.go:76-85`); the shared replay writer updates it while caching reconstructed frames (`portal/internal/api/replay.go:417-446`).
 - **`meta.json`** — Migration version stamp under `.lingtai/`. Shared with the TUI; portal bumps its own `CurrentVersion` in lockstep.
 
 ## Notes
 
 - **Random port is the default.** `--port 0` (the default, `portal/main.go:40`) lets the OS pick an available port (`portal/internal/api/server.go:44-48`). The bound port is written to `.portal/port` so callers can discover it.
-- **Live recording begins at startup.** `StartRecording` (`portal/internal/api/server.go:62-159`) runs in a background goroutine. On first call it checks whether the tape needs reconstruction (`needsReconstruction`, `portal/internal/api/server.go:180-203`), rebuilds from source events if needed, then records a snapshot every 3 seconds.
-- **`needsReconstruction` detects format migration.** If `topology.jsonl` is missing, empty, or uses the pre-`direct/cc/bcc` format, the recorder triggers a full rebuild (`portal/internal/api/server.go:179-203`).
+- **Live recording begins at startup.** `StartRecording` (`portal/internal/api/server.go:62-106`) runs in a background goroutine. On first call it checks whether the tape needs reconstruction (`needsReconstruction`, `portal/internal/api/server.go:126-150`), rebuilds from source events if needed, then records a snapshot every 3 seconds.
+- **`needsReconstruction` detects format migration.** If `topology.jsonl` is missing, empty, or uses the pre-`direct/cc/bcc` format, the recorder triggers a full rebuild (`portal/internal/api/server.go:126-150`).
 - **Dev-mode rebuild gotcha.** After ANY migration bump, rebuild both binaries: `cd tui && make build && cd ../portal && make build`. A stale portal against a migrated project fails with "data version N is newer than this binary supports."

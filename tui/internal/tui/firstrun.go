@@ -2073,7 +2073,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if recipeDir == "" {
 					return m, nil
 				}
-				entries := buildRecipeEntries(recipeDir)
+				entries := buildRecipeEntries(recipeDir, m.currentAgentLanguage())
 				if len(entries) == 0 {
 					return m, nil
 				}
@@ -4338,6 +4338,14 @@ func (m FirstRunModel) resolveCurrentRecipeDir() string {
 	default:
 		return preset.RecipeDir(m.globalDir, recipeName)
 	}
+}
+
+func (m FirstRunModel) currentAgentLanguage() string {
+	langs := []string{"en", "zh", "wen"}
+	if m.agentLangIdx < 0 || m.agentLangIdx >= len(langs) {
+		return "en"
+	}
+	return langs[m.agentLangIdx]
 }
 
 // performSetupSaveOnly writes init.json with the updated runtime settings

@@ -95,8 +95,9 @@ Cross-compilation targets (darwin/linux/windows, amd64/arm64) are available via 
 See `RELEASING.md` for the full process. Key points:
 
 1. Tag and push: `git tag v0.X.Y && git push origin v0.X.Y`
-2. Create GitHub release: `gh release create v0.X.Y --title "v0.X.Y" --notes "..."` (no binary assets — Homebrew builds from source)
-3. Update Homebrew tap: bump version and sha256 in `huangzesen/homebrew-lingtai/lingtai-tui.rb`, commit and push
+2. The root `.github/workflows/release.yml` workflow runs on the pushed `v*` tag and updates `Lingtai-AI/homebrew-lingtai`
+3. Create GitHub release: `gh release create v0.X.Y --title "v0.X.Y" --notes "..."` (no binary assets — Homebrew builds from source)
+4. Edit the Homebrew tap manually only as a fallback/debug step if the workflow failed or could not run
 
 ## Projects
 

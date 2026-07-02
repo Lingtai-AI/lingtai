@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/anthropics/lingtai-portal/internal/fs"
@@ -123,7 +125,7 @@ func TestDeltaEncode_NodeChanges(t *testing.T) {
 	}
 }
 
-func TestCompileChunks_CreatesCache(t *testing.T) {
+func TestBuildManifest_CachesCompletedHour(t *testing.T) {
 	dir := t.TempDir()
 	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
 	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
@@ -139,9 +141,9 @@ func TestCompileChunks_CreatesCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, net, ts)
 	}
 
-	manifest, err := fullCompile(topologyPath, replayDir)
+	manifest, err := buildManifest(topologyPath, replayDir)
 	if err != nil {
-		t.Fatalf("fullCompile: %v", err)
+		t.Fatalf("buildManifest: %v", err)
 	}
 
 	if manifest.TapeStart != 3600000 {
@@ -165,6 +167,78 @@ func TestCompileChunks_CreatesCache(t *testing.T) {
 	}
 }
 
+func TestWriteReconstructedReplay_UsesFirstFrameForTapeStartAndTruncatesTopology(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	progressPath := filepath.Join(dir, ".portal", "reconstruct.progress")
+
+	net := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 1},
+	}
+	frames := []fs.TapeFrame{
+		{T: 3_900_000, Net: net},
+		{T: 3_903_000, Net: net},
+		{T: 7_201_000, Net: net},
+	}
+
+	manifest, err := writeReconstructedReplay(topologyPath, replayDir, progressPath, frames)
+	if err != nil {
+		t.Fatalf("writeReconstructedReplay: %v", err)
+	}
+
+	if manifest.TapeStart != 3_900_000 {
+		t.Errorf("TapeStart = %d, want 3900000", manifest.TapeStart)
+	}
+	if manifest.Chunks[0].Start != 3_600_000 {
+		t.Errorf("Chunks[0].Start = %d, want 3600000", manifest.Chunks[0].Start)
+	}
+	for _, start := range []int64{3_600_000, 7_200_000} {
+		if _, err := os.Stat(filepath.Join(replayDir, strconv.FormatInt(start, 10)+".json.gz")); err != nil {
+			t.Errorf("cache %d missing: %v", start, err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(replayDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var cached ReplayManifest
+	if err := json.Unmarshal(data, &cached); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if cached.TapeStart != manifest.TapeStart {
+		t.Errorf("cached TapeStart = %d, want %d", cached.TapeStart, manifest.TapeStart)
+	}
+
+	topologyData, err := os.ReadFile(topologyPath)
+	if err != nil {
+		t.Fatalf("read topology: %v", err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(topologyData), []byte("\n"))
+	if len(lines) != 1 {
+		t.Fatalf("topology lines = %d, want 1", len(lines))
+	}
+	var last fs.TapeFrame
+	if err := json.Unmarshal(lines[0], &last); err != nil {
+		t.Fatalf("decode topology frame: %v", err)
+	}
+	if last.T != 7_201_000 {
+		t.Errorf("topology frame T = %d, want 7201000", last.T)
+	}
+	progress, err := os.ReadFile(progressPath)
+	if err != nil {
+		t.Fatalf("read progress: %v", err)
+	}
+	if string(progress) != "3/3" {
+		t.Errorf("progress = %q, want 3/3", progress)
+	}
+}
+
 func TestBuildManifest_UsesExistingCache(t *testing.T) {
 	dir := t.TempDir()
 	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
@@ -181,8 +255,8 @@ func TestBuildManifest_UsesExistingCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, net, ts)
 	}
 
-	// First: fullCompile to seed caches
-	m1, err := fullCompile(topologyPath, replayDir)
+	// First: buildManifest should seed completed-hour caches.
+	m1, err := buildManifest(topologyPath, replayDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +299,9 @@ func TestLoadChunk_FromCache(t *testing.T) {
 		AppendTopologyAt(topologyPath, n, ts)
 	}
 
-	fullCompile(topologyPath, replayDir)
+	if _, err := buildManifest(topologyPath, replayDir); err != nil {
+		t.Fatalf("buildManifest: %v", err)
+	}
 
 	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
 	if err != nil {
@@ -263,32 +339,13 @@ func TestBuildManifest_SingleHourAfterRebuild(t *testing.T) {
 		AppendTopologyAt(topologyPath, net, ts)
 	}
 
-	// Simulate what the rebuild handler does:
-	// 1. Cache the chunk as .json.gz (rebuild caches ALL hours including last)
-	os.MkdirAll(replayDir, 0o755)
 	frames := make([]fs.TapeFrame, 4)
 	for i, ts := range []int64{3600000, 3603000, 3606000, 3609000} {
 		frames[i] = fs.TapeFrame{T: ts, Net: net}
 	}
-	chunk := deltaEncode(frames, defaultKeyframeInterval)
-	cachePath := filepath.Join(replayDir, "3600000.json.gz")
-	if err := writeChunkCache(cachePath, chunk); err != nil {
-		t.Fatal(err)
+	if _, err := writeReconstructedReplay(topologyPath, replayDir, "", frames); err != nil {
+		t.Fatalf("writeReconstructedReplay: %v", err)
 	}
-
-	// 2. Write manifest with one chunk
-	manifest := ReplayManifest{
-		TapeStart: 3600000,
-		TapeEnd:   3609000,
-		Chunks:    []ChunkInfo{{Start: 3600000, End: 3609000, Frames: 4}},
-	}
-	mdata, _ := json.Marshal(manifest)
-	os.WriteFile(filepath.Join(replayDir, "manifest.json"), mdata, 0o644)
-
-	// 3. Truncate topology.jsonl to just the last frame (as rebuild does)
-	lastFrame := frames[3]
-	line, _ := json.Marshal(lastFrame)
-	os.WriteFile(topologyPath, append(line, '\n'), 0o644)
 
 	// Now buildManifest should still report 4 frames, not 1
 	m, err := buildManifest(topologyPath, replayDir)
@@ -360,10 +417,13 @@ func TestChunkHandler(t *testing.T) {
 	}
 	AppendTopologyAt(topologyPath, net, 3600000)
 	AppendTopologyAt(topologyPath, net, 3601000)
+	AppendTopologyAt(topologyPath, net, 7200000)
 
 	// Compile first so cache exists
 	replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
-	fullCompile(topologyPath, replayDir)
+	if _, err := buildManifest(topologyPath, replayDir); err != nil {
+		t.Fatalf("buildManifest: %v", err)
+	}
 
 	handler := NewChunkHandler(baseDir)
 	req := httptest.NewRequest("GET", "/api/topology/chunk?start=3600000", nil)

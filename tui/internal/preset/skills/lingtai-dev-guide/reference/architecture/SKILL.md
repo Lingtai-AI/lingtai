@@ -95,7 +95,7 @@ The wrapper depends on the kernel one-directionally. The kernel never imports fr
 
 **TUI → filesystem (write):** Signal files only: `.sleep`, `.suspend`, `.interrupt`, `.clear`, `.prompt`, `.refresh`, `.inquiry`, `.forget`. Plus `init.json` via explicit user actions.
 
-**TUI ↔ Homebrew tap:** Releases push a new formula to `huangzesen/homebrew-lingtai/lingtai-tui.rb`.
+**TUI ↔ Homebrew tap:** Pushing a release tag runs the root release workflow, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`.
 
 **Portal ↔ TUI:** The TUI discovers an installed `lingtai-portal` to launch on `/viz`; otherwise the binaries are independent.
 
@@ -108,7 +108,7 @@ The wrapper depends on the kernel one-directionally. The kernel never imports fr
 | `lingtai-claude-code` | Claude Code plugin (SessionStart hook, marketplace manifest). |
 | `codex-plugin` | OpenAI Codex CLI plugin. |
 | `lingtai-imap` / `lingtai-telegram` / `lingtai-feishu` / `lingtai-wechat` | MCP server addons. Each is a separate PyPI package. |
-| `huangzesen/homebrew-lingtai` | Homebrew tap for `lingtai-tui`. |
+| `Lingtai-AI/homebrew-lingtai` | Homebrew tap for `lingtai-tui`. |
 
 ## Where state lives
 

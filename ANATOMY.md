@@ -8,6 +8,7 @@ related_files:
   - README.wen.md
   - RELEASING.md
   - CLAUDE.md
+  - .github/workflows/release.yml
   - install.sh
   - tui/main.go
   - tui/go.mod
@@ -45,7 +46,8 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 - **`prompt/`** — Localised prompt fragments shared across the TUI/portal.
 - **`assets/`** — Static images (logos, screenshots) used by README and docs.
 - **`README.md` / `README.zh.md` / `README.wen.md`** — Tri-lingual project README. These link to the human-facing beginner manual and animated explainer in `docs/`.
-- **`RELEASING.md`** — Release process: tag, GitHub release, Homebrew tap bump.
+- **`RELEASING.md`** — Release process: tag, GitHub release, automated Homebrew tap update, and manual tap fallback.
+- **`.github/workflows/release.yml`** — Tag-push release workflow. On `v*` tags it computes the source tarball checksum, rewrites `lingtai-tui.rb`, and pushes the formula update to `Lingtai-AI/homebrew-lingtai`.
 - **`CLAUDE.md`** — Repo-specific Claude Code instructions (build commands, gotchas, sibling repos).
 
 ### `tui/` packages
@@ -72,7 +74,7 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 
 | Package | LOC | Role |
 |---------|-----|------|
-| `portal/internal/api/` | ~1.5k | HTTP server (`server.go`), handlers (`handlers.go`), and replay endpoint (`replay.go` — 655 lines, the largest single API surface). Listens on a randomly-chosen port (or `--port`), writes the bound port to `.portal/port` so the TUI can find it. |
+| `portal/internal/api/` | ~1.5k | HTTP server (`server.go`), handlers (`handlers.go`), and replay endpoint (`replay.go` — 680 lines, the largest single API surface). Listens on a randomly-chosen port (or `--port`), writes the bound port to `.portal/port` so the TUI can find it. |
 | `portal/internal/fs/` | ~2.2k | Same shape as `tui/internal/fs/` but tailored to portal's needs: agent reading, heartbeat, mail, network/topology reconstruction (`reconstruct.go`, 326 lines), location resolution. |
 | `portal/internal/migrate/` | — | Versioned migrations for portal-readable state. Shares `meta.json` version space with the TUI; portal-only migrations get a TUI no-op stub and vice versa. Currently mirrors m001 / m002 / m003 / m004 / m006 / m015 / m026–m031 / m035 / m038 / m039 (the entries that touch shared on-disk state). |
 | `portal/web/` | — | React 19 + TypeScript + Vite frontend. Source under `portal/web/src/` (`App.tsx`, `Graph.tsx`, `BottomBar.tsx`, `FilterPanel.tsx`, etc.). Builds to `portal/web/dist/` then `embed.go` (`//go:embed all:web/dist`) compiles it into the Go binary. |
@@ -86,8 +88,8 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 - **TUI → filesystem (write).** Signal files only: `.lingtai/<agent>/{.sleep, .suspend, .interrupt, .clear, .prompt, .refresh, .inquiry, .forget}`. The kernel polls these on each heartbeat tick. `init.json` is also writeable but only via explicit user actions in the wizard / preset editor.
 - **TUI → human pseudo-mailbox.** The TUI is the user's MUA: it writes outbound messages into `.lingtai/human/mailbox/outbox/<uuid>/message.json`; agents poll this folder and claim deliveries.
 - **Portal → filesystem.** Same read pattern as the TUI; additionally writes `.lingtai/.portal/port`, recordings under `.lingtai/.portal/recordings/`, and topology snapshots that feed the replay timeline.
-- **Portal ↔ TUI integration.** `lingtai-tui` calls `gh release` and discovers an installed `lingtai-portal` to launch on `/viz`; otherwise the binaries are independent.
-- **TUI ↔ Homebrew tap.** Releases push a new formula version to `huangzesen/homebrew-lingtai/lingtai-tui.rb`. Users running `brew upgrade lingtai-ai/lingtai/lingtai-tui` pull from there. See `RELEASING.md`.
+- **Portal ↔ TUI integration.** `lingtai-tui` discovers an installed `lingtai-portal` to launch on `/viz`; otherwise the binaries are independent.
+- **TUI ↔ Homebrew tap.** Pushing a release tag runs `.github/workflows/release.yml`, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`. Users running `brew upgrade lingtai-ai/lingtai/lingtai-tui` pull from there. Manual tap edits are fallback/debug steps only. See `RELEASING.md`.
 - **Portal embeds web frontend.** `embed.go` at the portal root compiles `portal/web/dist/` into the Go binary so `lingtai-portal` ships with no runtime dependency on Node.
 
 ### Cross-repo dependencies
@@ -99,7 +101,7 @@ This repo depends on `lingtai-kernel` only at runtime (the Python agent it launc
 - **`lingtai-claude-code`** — Claude Code plugin (SessionStart hook, marketplace manifest).
 - **`codex-plugin`** — OpenAI Codex CLI plugin.
 - **`lingtai-imap` / `lingtai-telegram` / `lingtai-feishu` / `lingtai-wechat`** — MCP server addons. Each ships as a separate PyPI package.
-- **`huangzesen/homebrew-lingtai`** — Homebrew tap for `lingtai-tui`.
+- **`Lingtai-AI/homebrew-lingtai`** — Homebrew tap for `lingtai-tui`.
 
 ## Composition
 

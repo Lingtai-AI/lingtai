@@ -108,3 +108,32 @@ func TestSetupCredentialsArgsOpenCredentialsSubpage(t *testing.T) {
 		t.Fatal("/setup credentials should use setup-subpage login model")
 	}
 }
+
+func TestSetupCommandOpensFirstRunSetupMode(t *testing.T) {
+	projectDir := t.TempDir()
+	globalDir := t.TempDir()
+	orchDir := t.TempDir()
+	a := App{
+		currentView: appViewMail,
+		globalDir:   globalDir,
+		projectDir:  projectDir,
+		orchDir:     orchDir,
+		orchName:    "manager",
+	}
+
+	model, _ := a.handlePaletteCommand("setup", "")
+	got := model.(App)
+
+	if got.currentView != appViewFirstRun {
+		t.Fatalf("/setup currentView = %v, want appViewFirstRun setup workflow", got.currentView)
+	}
+	if !got.firstRun.setupMode {
+		t.Fatal("/setup should enter FirstRunModel setup mode")
+	}
+	if got.firstRun.setupOrchDir != orchDir {
+		t.Fatalf("/setup orch dir = %q, want %q", got.firstRun.setupOrchDir, orchDir)
+	}
+	if got.firstRun.setupOrchName != "manager" {
+		t.Fatalf("/setup orch name = %q, want manager", got.firstRun.setupOrchName)
+	}
+}

@@ -1,4 +1,4 @@
-# Releasing lingtai-tui
+# Releasing lingtai-tui and lingtai-portal
 
 ## Release Process
 
@@ -15,6 +15,10 @@ git tag v0.X.Y
 git push origin v0.X.Y
 ```
 
+Pushing a `v*` tag triggers the root GitHub Actions workflow at
+`.github/workflows/release.yml`. That workflow computes the source tarball
+checksum and updates `Lingtai-AI/homebrew-lingtai` automatically.
+
 ### 3. Create the GitHub release
 
 ```bash
@@ -23,7 +27,27 @@ gh release create v0.X.Y --title "v0.X.Y" --notes "release notes here..."
 
 No binary assets needed — Homebrew builds from source, Linux users build locally.
 
-### 4. Update the Homebrew tap
+### 4. Verify the automated Homebrew tap update
+
+Check the `Release` workflow run for the tag and confirm it pushed a formula
+update to `Lingtai-AI/homebrew-lingtai`.
+
+```bash
+gh run list --workflow Release --event push --limit 5
+gh run watch <run-id>
+```
+
+Then verify the installed version:
+
+```bash
+brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui version  # should show v0.X.Y
+```
+
+### 5. Fallback: update the Homebrew tap manually
+
+Use this only when the root release workflow failed or cannot run. Do not race a
+successful workflow with a hand edit.
 
 ```bash
 # Get the source tarball checksum
@@ -37,12 +61,10 @@ git commit -m "bump lingtai-tui to v0.X.Y"
 git push
 ```
 
-### 5. Verify
-
-```bash
-brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui
-lingtai-tui version  # should show v0.X.Y
-```
+The inactive `tui/.github/workflows/release.yml` path is intentionally not part
+of the release process; GitHub only runs workflows from the repository-root
+`.github/workflows/` directory. Existing npm package files are outside this
+release checklist and are not decided here.
 
 ## Installing without Homebrew
 
