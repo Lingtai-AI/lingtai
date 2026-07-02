@@ -215,8 +215,8 @@ func List() ([]Preset, error) {
 	})
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
-		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7,
-		"claude-agent-sdk": 8, "custom": 9,
+		"kimi": 4, "nvidia": 5, "openrouter": 6, "requesty": 7, "codex": 8,
+		"claude-agent-sdk": 9, "custom": 10,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -478,6 +478,7 @@ func BuiltinPresets() []Preset {
 		kimiPreset(),
 		nvidiaPreset(),
 		openrouterPreset(),
+		requestyPreset(),
 		codexPreset(),
 		claudeAgentSDKPreset(),
 		customPreset(),
@@ -497,6 +498,7 @@ var builtinNames = map[string]bool{
 	"kimi":             true,
 	"nvidia":           true,
 	"openrouter":       true,
+	"requesty":         true,
 	"codex":            true,
 	"codex_oauth":      true,
 	"claude-agent-sdk": true,
@@ -1056,6 +1058,27 @@ func openrouterPreset() Preset {
 				"base_url": nil,
 			},
 			// OpenRouter is a text-only /chat/completions gateway — no media
+			// generation. For audio analysis use the `listen` skill; for
+			// media creation register a provider's MCP server via `mcp-manual`.
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
+func requestyPreset() Preset {
+	return Preset{
+		Name:        "requesty",
+		Description: PresetDescription{Summary: "Requesty — OpenAI-compatible router to DeepSeek, GLM, Qwen, MiniMax, Kimi, Claude, ..."},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "requesty", "model": "openai/gpt-4o-mini",
+				"api_key": nil, "api_key_env": "REQUESTY_API_KEY",
+				"base_url": "https://router.requesty.ai/v1",
+			},
+			// Requesty is a text-only /chat/completions router — no media
 			// generation. For audio analysis use the `listen` skill; for
 			// media creation register a provider's MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{

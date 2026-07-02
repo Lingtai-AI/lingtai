@@ -934,7 +934,7 @@ func classifyWire(provider, apiCompat string) wireProtocol {
 	switch provider {
 	case "anthropic", "minimax":
 		return wireAnthropic
-	case "openai", "openrouter", "deepseek", "kimi", "mimo", "zhipu", "codex", "nvidia":
+	case "openai", "openrouter", "requesty", "deepseek", "kimi", "mimo", "zhipu", "codex", "nvidia":
 		return wireOpenAI
 	case "custom":
 		switch apiCompat {

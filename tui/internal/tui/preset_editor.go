@@ -1056,7 +1056,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feProvider:
 		// Order matches the builtin presets (preset.go BuiltinPresets).
 		// Keep this in sync when adding a new provider/builtin.
-		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "custom"}
+		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "requesty", "codex", "custom"}
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
 		if newProvider != "codex" {

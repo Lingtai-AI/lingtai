@@ -251,6 +251,7 @@
   "setup.provider_deepseek": "DeepSeek V4（百万之文，能唤具）",
   "setup.provider_nvidia": "NVIDIA NIM（免资之库，兼容 OpenAI，能唤具）",
   "setup.provider_openrouter": "OpenRouter（众模型之关）",
+  "setup.provider_requesty": "Requesty（兼容 OpenAI 之众模型之关）",
   "setup.provider_codex": "OpenAI Codex（ChatGPT 帐登）",
   "setup.provider_custom": "自设",
   "codex.press_enter": "按 Enter 启览器以登帐...",

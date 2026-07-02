@@ -36,6 +36,7 @@ var providers = []struct {
 	{"deepseek", "setup.provider_deepseek", "DEEPSEEK_API_KEY"},
 	{"nvidia", "setup.provider_nvidia", "NVIDIA_API_KEY"},
 	{"openrouter", "setup.provider_openrouter", "OPENROUTER_API_KEY"},
+	{"requesty", "setup.provider_requesty", "REQUESTY_API_KEY"},
 	{"custom", "setup.provider_custom", "LLM_API_KEY"},
 }
 

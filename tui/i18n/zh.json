@@ -251,6 +251,7 @@
   "setup.provider_deepseek": "DeepSeek V4（1M 上下文，支持工具调用）",
   "setup.provider_nvidia": "NVIDIA NIM（免费 OpenAI 兼容模型库，支持工具调用）",
   "setup.provider_openrouter": "OpenRouter（多模型聚合网关）",
+  "setup.provider_requesty": "Requesty（兼容 OpenAI 的多模型路由网关）",
   "setup.provider_codex": "OpenAI Codex（ChatGPT 账号登录）",
   "setup.provider_custom": "自定义",
   "codex.press_enter": "按 Enter 选择登录方式...",
