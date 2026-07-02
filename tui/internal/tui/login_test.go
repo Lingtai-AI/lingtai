@@ -331,6 +331,24 @@ func TestLoginModel_EscWithNoLoginExitsToMail(t *testing.T) {
 	}
 }
 
+// TestLoginModel_SetupSubpageEscReturnsToSetup verifies that credentials
+// opened from /setup back out to the setup wizard instead of dumping the
+// user to chat/mail. This covers /setup credentials and the setup-mode
+// Codex auth row, both of which use NewSetupCredentialsModel.
+func TestLoginModel_SetupSubpageEscReturnsToSetup(t *testing.T) {
+	dir := t.TempDir()
+	m := NewSetupCredentialsModel("", dir)
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("setup-subpage Esc should emit a ViewChangeMsg command")
+	}
+	msg := cmd()
+	vc, ok := msg.(ViewChangeMsg)
+	if !ok || vc.View != "setup" {
+		t.Fatalf("setup-subpage Esc should return to setup; got %T %+v", msg, msg)
+	}
+}
+
 // TestLoginModel_CodexRowShownWithExistingEntry verifies the multi-Codex
 // unblock: an "Add another Codex account" row is shown even when a Codex
 // credential already exists, so adding a SECOND account is always reachable
