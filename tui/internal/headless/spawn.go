@@ -126,13 +126,13 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	}
 
 	// Initialize project (.lingtai/, human dir, meta.json)
-	if err := process.InitProject(lingtaiDir, globalDir); err != nil {
+	if err := process.InitProject(lingtaiDir); err != nil {
 		WriteError(stderr, "project init failed: "+err.Error(), "init_failed")
 		return 1
 	}
 
 	// Populate bundled library skills
-	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
+	preset.PopulateBundledLibrary(globalDir)
 
 	// Generate init.json with default opts
 	agentOpts := preset.DefaultAgentOpts()

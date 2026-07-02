@@ -11,7 +11,6 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/migrate"
-	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 // ErrAgentAlreadyRunning is returned by LaunchAgent when a `lingtai-agent run`
@@ -19,7 +18,7 @@ import (
 // to the user rather than re-attempting the launch.
 var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in this workdir")
 
-func InitProject(lingtaiDir, globalDir string) error {
+func InitProject(lingtaiDir string) error {
 	if err := os.MkdirAll(lingtaiDir, 0o755); err != nil {
 		return fmt.Errorf("create .lingtai: %w", err)
 	}
@@ -64,10 +63,6 @@ func InitProject(lingtaiDir, globalDir string) error {
 	if err := os.MkdirAll(libraryShared, 0o755); err != nil {
 		return fmt.Errorf("create .library_shared: %w", err)
 	}
-	// TUI utility skills — extracted to <globalDir>/utilities/ for agents
-	// to discover via the default library.paths in their init.json.
-	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
-
 	// Stamp meta.json at the current migration version so the next TUI
 	// launch doesn't replay migrations against a freshly-created project.
 	// Migrations are upgrade paths for legacy data written by older TUIs;

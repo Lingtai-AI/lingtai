@@ -1221,10 +1221,8 @@ func Bootstrap(globalDir string) error {
 // shipped binary. Directory is rewritten from scratch so a TUI upgrade
 // that renames or removes a utility propagates cleanly.
 //
-// The lingtaiDir argument is retained for compatibility with callers
-// (main.go, launcher.go) and is currently unused. Per-agent .library/
-// is now owned by the kernel library capability, not by the TUI.
-func PopulateBundledLibrary(lingtaiDir, globalDir string) {
+// Per-agent .library/ is owned by the kernel library capability, not by the TUI.
+func PopulateBundledLibrary(globalDir string) {
 	utilitiesDir := filepath.Join(globalDir, "utilities")
 	os.RemoveAll(utilitiesDir)
 	os.MkdirAll(utilitiesDir, 0o755)

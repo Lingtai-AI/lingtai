@@ -43,7 +43,7 @@ func TestBundledLingtaiTuiHelp(t *testing.T) {
 
 	// The assets extract to disk alongside the other utility skills.
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-tui-help")
 	for _, rel := range assets {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, filepath.FromSlash(rel))); err != nil {

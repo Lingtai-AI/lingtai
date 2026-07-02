@@ -44,6 +44,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `List()` | `tui/internal/preset/preset.go:209` | saved (alphabetical) + templates (canonical order); each carries `Source` |
 | `Save(p)` | `tui/internal/preset/preset.go:330` | ALWAYS to `saved/`; never templates |
 | `RefreshTemplates()` | `tui/internal/preset/preset.go:394` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
+| `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1225` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
 | `BuiltinPresets()` | `tui/internal/preset/preset.go:469` | minimax, zhipu, mimo, deepseek, gemini, kimi, nvidia, openrouter, codex, claude-agent-sdk, custom |
 | `IsTemplate(p)` | `tui/internal/preset/preset.go:464` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
 | `RefFor(p)` | `tui/internal/preset/preset.go:473` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
@@ -77,6 +78,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **`~/.lingtai-tui/presets/templates/*.json`** — TUI-owned; rewritten every Bootstrap from `BuiltinPresets()`. Retired templates deleted.
 - **`~/.lingtai-tui/presets/saved/*.json`** — user-owned; `Save()` lands here; never touched by Bootstrap.
 - **`~/.lingtai-tui/presets/_kernel_meta.json`** — skipped by `listFromDir`.
+- **`~/.lingtai-tui/utilities/`** — TUI-owned utility skills; `PopulateBundledLibrary(globalDir)` rewrites this directory explicitly from embedded `skills/`.
 - **`<project>/.lingtai/<agent>/init.json`** — `manifest.preset.{default, active, allowed}` written/patched by recipe apply and rehydration.
 - **`<project>/.lingtai/.tui-asset/recipe-state.json`** — TUI-only project-level recipe selection state.
 

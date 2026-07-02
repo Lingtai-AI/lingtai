@@ -12,7 +12,7 @@ import (
 // nested reference files on disk.
 func TestPopulateBundledLibrary_PortalGuideNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-portal-guide")
 	for _, rel := range []string{

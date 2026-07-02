@@ -51,16 +51,15 @@ This package manages the TUI's bootstrap sequence — the steps that run before 
 
 ## Connections
 
-- **Called from:** `tui/main.go:132-278`, the manual `lingtai-tui self-update` path, `tui/internal/tui/firstrun.go:672-675`, and `tui/internal/headless/spawn.go:77-83` — startup, manual self-update, first-run, and headless bootstrap paths. (NOTE: line citations to recompute against current main via the anatomy citation checker.)
+- **Called from:** `tui/main.go:132-288`, the manual `lingtai-tui self-update` path, `tui/internal/tui/firstrun.go:672-675`, and `tui/internal/headless/spawn.go:97-111` — startup, manual self-update, first-run, and headless bootstrap paths. (NOTE: line citations to recompute against current main via the anatomy citation checker.)
 - **Calls out:** PyPI API (`pypi.org/pypi/lingtai/json`), GitHub API (`api.github.com/repos/Lingtai-AI/lingtai/releases/latest`), `uv` / `pip` CLI, and Homebrew for Homebrew-managed TUI binary updates.
 - **Bootstrap sequence:**
-  1. `config.MigrateLegacyLanguage(globalDir)` then `config.LoadTUIConfig` + `i18n.SetLang` — one-shot language migration and locale resolution, run early (`tui/main.go:132-134`) so startup banners localize; the rest of the sequence follows at `tui/main.go:237-278`
+  1. `config.MigrateLegacyLanguage(globalDir)` then `config.LoadTUIConfig` + `i18n.SetLang` — one-shot language migration and locale resolution, run early (`tui/main.go:132-134`) so startup banners localize; project init and utility skill refresh happen explicitly at `tui/main.go:218-230`, and the returning-user runtime sequence follows at `tui/main.go:269-288`
   2. `config.NeedsVenv(globalDir)` — check if a setup banner should be printed
   3. `config.EnsureRuntime(globalDir)` — create/repair venv if needed, then always auto-check/upgrade or convert the `lingtai` Python runtime
-  4. `config.EnsureAddons(python, agentDir)` — verify addon importability
-  5. `preset.Bootstrap(globalDir)` — copy preset resources
-  6. `tui.ExportCommandsJSON(globalDir)` — export slash commands
-  7. `maybePromptRustToolchain(globalDir)` — one-time optional Rust/Cargo prompt when native file search is unavailable and Cargo is missing
+  4. `preset.Bootstrap(globalDir)` — copy preset resources
+  5. `tui.ExportCommandsJSON(globalDir)` — export slash commands
+  6. `maybePromptRustToolchain(globalDir)` — one-time optional Rust/Cargo prompt when native file search is unavailable and Cargo is missing
 
 ## Composition
 

@@ -407,7 +407,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 			Text: fmt.Sprintf("✗ Bootstrap assets refresh failed: %v", err),
 		})
 	} else {
-		preset.PopulateBundledLibrary("", globalDir)
+		preset.PopulateBundledLibrary(globalDir)
 		ExportCommandsJSON(globalDir)
 		lines = append(lines, doctorLine{
 			Text: "✓ Bootstrap assets, utility skills, and commands.json refreshed", OK: true,

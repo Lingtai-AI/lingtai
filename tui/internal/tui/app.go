@@ -378,7 +378,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ensure human folder exists before launching — InitProject is
 		// idempotent and prevents the race where the agent tries to
 		// send mail before the human mailbox is ready.
-		if err := process.InitProject(a.projectDir, a.globalDir); err != nil {
+		if err := process.InitProject(a.projectDir); err != nil {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
@@ -445,7 +445,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Nirvana complete: .lingtai/ wiped, go to first-run.
 		// Re-init project to recreate the human folder so agents can
 		// deliver mail once the new orchestrator starts.
-		process.InitProject(a.projectDir, a.globalDir)
+		process.InitProject(a.projectDir)
 		a.orchDir = ""
 		a.orchName = ""
 		a.currentView = appViewFirstRun
@@ -503,7 +503,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UsePresetMsg:
 		// Create agent from preset
-		process.InitProject(a.projectDir, a.globalDir)
+		process.InitProject(a.projectDir)
 		p, err := preset.Load(msg.Name)
 		if err != nil {
 			return a, nil

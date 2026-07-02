@@ -14,7 +14,7 @@ import (
 // ~/.lingtai-tui/utilities/swiss-knife/reference/<name>/SKILL.md.
 func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "swiss-knife")
 	for _, rel := range []string{
@@ -86,7 +86,7 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 
 func TestPopulateBundledLibrary_MinimaxCliCanonicalReference(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	// The top-level minimax-cli skill was removed; minimax-cli now lives only as
 	// a swiss-knife nested reference. Guard that the redundant top-level copy does
@@ -117,7 +117,7 @@ func TestPopulateBundledLibrary_MinimaxCliCanonicalReference(t *testing.T) {
 // router files alongside the existing deep-dive references and scripts.
 func TestPopulateBundledLibrary_WebBrowsingNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "web-browsing")
 	for _, rel := range []string{
@@ -141,7 +141,7 @@ func TestPopulateBundledLibrary_WebBrowsingNestedReferences(t *testing.T) {
 // tree after the root was reduced to a router.
 func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-dev-guide")
 	for _, rel := range []string{
@@ -198,7 +198,7 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 // assets after the export procedure moved out of assets/.
 func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-recipe")
 	for _, rel := range []string{
@@ -244,7 +244,7 @@ func TestPopulateBundledLibrary_RecipeNestedReferences(t *testing.T) {
 // reference tree on disk.
 func TestPopulateBundledLibrary_TutorialGuideNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-tutorial-guide")
 	for _, rel := range []string{

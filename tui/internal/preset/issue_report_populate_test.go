@@ -13,7 +13,7 @@ import (
 // split out into the nested leaves.
 func TestPopulateBundledLibrary_IssueReportNestedReferences(t *testing.T) {
 	globalDir := t.TempDir()
-	PopulateBundledLibrary("", globalDir)
+	PopulateBundledLibrary(globalDir)
 
 	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-issue-report")
 	for _, rel := range []string{

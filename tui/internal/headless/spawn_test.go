@@ -125,6 +125,12 @@ func TestRunSpawn_CreatesInitJSON(t *testing.T) {
 	if _, err := os.Stat(humanManifest); err != nil {
 		t.Errorf("human .agent.json not created: %v", err)
 	}
+
+	// Fresh headless projects must still refresh user-level utility skills.
+	utilitySkill := filepath.Join(globalDir, "utilities", "lingtai-tui-help", "SKILL.md")
+	if _, err := os.Stat(utilitySkill); err != nil {
+		t.Errorf("utility skill not extracted: %v", err)
+	}
 }
 
 func TestRunSpawn_SuccessOutput_HasRequiredFields(t *testing.T) {

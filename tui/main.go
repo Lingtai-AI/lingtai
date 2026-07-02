@@ -216,7 +216,7 @@ func main() {
 	}
 
 	// Init project (create human dir)
-	if err := process.InitProject(lingtaiDir, globalDir); err != nil {
+	if err := process.InitProject(lingtaiDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -227,7 +227,7 @@ func main() {
 	}
 	// TUI utility skills — extracted to <globalDir>/utilities/ on every
 	// startup. Agents reach these via the library.paths default in init.json.
-	preset.PopulateBundledLibrary(lingtaiDir, globalDir)
+	preset.PopulateBundledLibrary(globalDir)
 
 	// First run = no config.json in ~/.lingtai-tui/
 	configPath := filepath.Join(globalDir, "config.json")
@@ -973,7 +973,7 @@ func bootstrapMain() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	preset.PopulateBundledLibrary("", globalDir)
+	preset.PopulateBundledLibrary(globalDir)
 	fmt.Printf("Bootstrapped skills to %s/utilities/\n", globalDir)
 }
 
@@ -1004,7 +1004,7 @@ func doctorMain() {
 	} else {
 		fmt.Println("✓ Bootstrap assets refreshed")
 	}
-	preset.PopulateBundledLibrary("", globalDir)
+	preset.PopulateBundledLibrary(globalDir)
 	fmt.Println("✓ Utility skills refreshed")
 	tui.ExportCommandsJSON(globalDir)
 	fmt.Println("✓ commands.json refreshed")
