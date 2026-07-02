@@ -28,6 +28,7 @@ const (
 	appViewAddon
 	appViewDoctor
 	appViewUpdate
+	appViewUpdateTUI
 	appViewNirvana
 	appViewLibrary
 	appViewProjects
@@ -60,6 +61,7 @@ type App struct {
 	addon         AddonModel
 	doctor        DoctorModel
 	update        UpdateModel
+	updateTUI     UpdateTUIModel
 	nirvana       NirvanaModel
 	login         LoginModel
 
@@ -248,6 +250,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.doctor, cmd = a.doctor.Update(msg)
 		case appViewUpdate:
 			a.update, cmd = a.update.Update(msg)
+		case appViewUpdateTUI:
+			a.updateTUI, cmd = a.updateTUI.Update(msg)
 		case appViewNirvana:
 			a.nirvana, cmd = a.nirvana.Update(msg)
 		case appViewLibrary:
@@ -274,6 +278,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.help, cmd = a.help.Update(msg)
 		}
 		return a, cmd
+
+	case tea.FocusMsg:
+		ApplyTerminalBG()
+		return a, nil
 
 	// === Cross-view messages ===
 
@@ -316,6 +324,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == appViewUpdate {
 			var cmd tea.Cmd
 			a.update, cmd = a.update.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
+	case updateTUICheckedMsg:
+		if a.currentView == appViewUpdateTUI {
+			var cmd tea.Cmd
+			a.updateTUI, cmd = a.updateTUI.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
+	case updateTUIDoneMsg:
+		if a.currentView == appViewUpdateTUI {
+			var cmd tea.Cmd
+			a.updateTUI, cmd = a.updateTUI.Update(msg)
 			return a, cmd
 		}
 		return a, nil
@@ -606,6 +630,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.update.Update(msg)
 		a.update = updated
 		return a, cmd
+	case appViewUpdateTUI:
+		updated, cmd := a.updateTUI.Update(msg)
+		a.updateTUI = updated
+		return a, cmd
 	case appViewNirvana:
 		updated, cmd := a.nirvana.Update(msg)
 		a.nirvana = updated
@@ -813,6 +841,13 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			a.currentView = appViewUpdate
 			a.update = NewUpdateModel(targetDir, a.globalDir)
 			return a, tea.Batch(a.update.Init(), a.sendSize())
+		}
+		return a, nil
+	case "update-tui":
+		if a.globalDir != "" {
+			a.currentView = appViewUpdateTUI
+			a.updateTUI = NewUpdateTUIModel(a.globalDir)
+			return a, tea.Batch(a.updateTUI.Init(), a.sendSize())
 		}
 		return a, nil
 	case "viz":
@@ -1490,6 +1525,8 @@ func (a App) View() tea.View {
 		content = a.doctor.View()
 	case appViewUpdate:
 		content = a.update.View()
+	case appViewUpdateTUI:
+		content = a.updateTUI.View()
 	case appViewNirvana:
 		content = a.nirvana.View()
 	case appViewLibrary:
@@ -1533,6 +1570,7 @@ func (a App) View() tea.View {
 		v.BackgroundColor = t.BG
 		v.ForegroundColor = t.Text
 	}
+	v.ReportFocus = true
 	return v
 }
 

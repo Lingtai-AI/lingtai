@@ -432,7 +432,8 @@ type TUIInstallInfo struct {
 	Diagnostics  []DoctorLine
 }
 
-func (i TUIInstallInfo) summary() string {
+// Summary returns a human-readable label for the install method.
+func (i TUIInstallInfo) Summary() string {
 	label := string(i.Method)
 	if i.Method == TUIInstallMethodSource {
 		label = "source/user-local"
@@ -523,11 +524,11 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 	for _, line := range install.Diagnostics {
 		r.add(line.Severity, "%s", line.Text)
 	}
-	r.add(DoctorInfo, "TUI install method: %s", install.summary())
+	r.add(DoctorInfo, "TUI install method: %s", install.Summary())
 	if exe != "" {
 		if target, linkErr := opts.Readlink(exe); linkErr == nil && target != "" {
 			if install.Method != TUIInstallMethodHomebrew {
-				r.add(DoctorWarn, "TUI executable is a symlink to %s; install method is %s, so automatic TUI updates are not routed through brew", target, install.summary())
+				r.add(DoctorWarn, "TUI executable is a symlink to %s; install method is %s, so automatic TUI updates are not routed through brew", target, install.Summary())
 			} else {
 				r.add(DoctorWarn, "TUI executable is a symlink to %s; brew may update the Cellar copy without changing this dev/manual link", target)
 			}

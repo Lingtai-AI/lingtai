@@ -149,8 +149,8 @@ func TestDetectTUIInstallMethodSourceMetadataMatchesExecutable(t *testing.T) {
 	if info.Method != TUIInstallMethodSource {
 		t.Fatalf("method = %s, want source; diagnostics=%+v", info.Method, info.Diagnostics)
 	}
-	if !strings.Contains(info.summary(), "source/user-local") || !strings.Contains(info.summary(), prefix) {
-		t.Fatalf("source summary should mention method and prefix, got %q", info.summary())
+	if !strings.Contains(info.Summary(), "source/user-local") || !strings.Contains(info.Summary(), prefix) {
+		t.Fatalf("source summary should mention method and prefix, got %q", info.Summary())
 	}
 }
 
