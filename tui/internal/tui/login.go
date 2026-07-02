@@ -615,7 +615,15 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			m.message = i18n.T("login.codex_cancelled")
 			return m, nil
 		}
-		return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+		// Idle Esc should back out one navigation level. The shared
+		// credentials model is a /setup subpage, so return there instead
+		// of dumping a user who entered from /setup back to chat. A bare
+		// LoginModel keeps the historical mail fallback for tests/compat.
+		backView := "mail"
+		if m.setupSubpage {
+			backView = "setup"
+		}
+		return m, func() tea.Msg { return ViewChangeMsg{View: backView} }
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
