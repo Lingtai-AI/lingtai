@@ -119,7 +119,7 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 	for _, line := range install.Diagnostics {
 		result.add(line.Severity, "%s", line.Text)
 	}
-	result.add(DoctorInfo, "TUI install method: %s", install.summary())
+	result.add(DoctorInfo, "TUI install method: %s", install.Summary())
 
 	latestVersion := ""
 	release, releaseErr := fetchLatestGitHubRelease(opts.HTTPClient)
@@ -158,8 +158,8 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 		return result
 	}
 	if install.Method == TUIInstallMethodUnknown {
-		result.Err = fmt.Errorf("manual self-update unsupported for %s installs", install.summary())
-		result.add(DoctorFail, "Manual self-update for %s installs is not supported yet.", install.summary())
+		result.Err = fmt.Errorf("manual self-update unsupported for %s installs", install.Summary())
+		result.add(DoctorFail, "Manual self-update for %s installs is not supported yet.", install.Summary())
 		return result
 	}
 	return result

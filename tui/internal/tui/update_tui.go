@@ -182,7 +182,7 @@ func (m UpdateTUIModel) View() string {
 		b.WriteString("  " + i18n.T("update_tui.checking") + "\n")
 	case stateTUIConfirm:
 		b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(
-			i18n.TF("update_tui.method", tuiInstallLabel(m.install))) + "\n\n")
+			i18n.TF("update_tui.method", m.install.Summary())) + "\n\n")
 		b.WriteString("  " + i18n.T("update_tui.prompt") + "\n\n")
 		options := []string{i18n.T("update_tui.confirm"), i18n.T("update_tui.cancel")}
 		for i, opt := range options {
@@ -199,7 +199,7 @@ func (m UpdateTUIModel) View() string {
 	case stateTUIDone:
 		if m.unsupported {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(
-				i18n.TF("update_tui.unsupported", tuiInstallLabel(m.install))) + "\n")
+				i18n.TF("update_tui.unsupported", m.install.Summary())) + "\n")
 			break
 		}
 		for _, line := range m.resultLines {
@@ -223,22 +223,4 @@ func (m UpdateTUIModel) View() string {
 	b.WriteString(StyleFaint.Render("  [esc] "+i18n.T("manage.back")) + "\n")
 
 	return b.String()
-}
-
-// tuiInstallLabel renders a human-readable label for a detected TUI install,
-// mirroring config.TUIInstallInfo.summary() (which is unexported).
-func tuiInstallLabel(install config.TUIInstallInfo) string {
-	label := string(install.Method)
-	switch install.Method {
-	case config.TUIInstallMethodHomebrew:
-		label = "homebrew"
-	case config.TUIInstallMethodSource:
-		label = "source/user-local"
-	case config.TUIInstallMethodUnknown:
-		label = "unknown/other"
-	}
-	if install.Detail != "" {
-		return label + " (" + install.Detail + ")"
-	}
-	return label
 }
