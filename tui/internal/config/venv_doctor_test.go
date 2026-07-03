@@ -16,6 +16,8 @@ type fakeRunner struct {
 	versions          []string
 	failPip           bool
 	editableSource    string // when non-empty, the editable-detect probe reports EDITABLE <source>
+	envMarkerStdout   string // when non-empty, returned for delegated runtime env marker checks
+	envMarkerErr      bool
 	fileSearchStdout  string // when non-empty, returned for the file_io_sidecar probe
 	fileSearchErr     bool
 	fileSearchMissing bool // when true, the probe fails with ModuleNotFoundError for file_io_sidecar
@@ -25,6 +27,15 @@ type fakeRunner struct {
 func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
+	if strings.Contains(call, "lingtai.venv_resolve") && strings.Contains(call, "env-marker") {
+		if r.envMarkerErr {
+			return CommandResult{Err: errors.New("exit status 1"), Stderr: "marker probe failed"}
+		}
+		if r.envMarkerStdout != "" {
+			return CommandResult{Stdout: r.envMarkerStdout}
+		}
+		return CommandResult{Stdout: `{"status":"match"}` + "\n"}
+	}
 	if strings.Contains(call, "file_io_sidecar") {
 		if r.fileSearchMissing {
 			return CommandResult{
@@ -48,6 +59,9 @@ func (r *fakeRunner) Run(name string, args ...string) CommandResult {
 			return CommandResult{Stdout: "EDITABLE " + r.editableSource + "\n"}
 		}
 		return CommandResult{Stdout: "WHEEL\n"}
+	}
+	if strings.Contains(call, "sysconfig.get_platform") && strings.Contains(call, "version_major") {
+		return CommandResult{Stdout: `{"implementation":"CPython","machine":"arm64","sys_platform":"darwin","sysconfig_platform":"macosx-14.0-arm64","version":"3.13.5","version_major":3,"version_minor":13,"version_micro":5}` + "\n"}
 	}
 	if strings.Contains(call, "import lingtai") {
 		if len(r.versions) == 0 {
