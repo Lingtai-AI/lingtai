@@ -4,12 +4,19 @@ owner: tui-preset
 metadata_only: true
 rendered_content:
   - procedures.md
-links:
-  anatomy:
-    - tui/internal/preset/ANATOMY.md
-  section_definitions:
-    - tui/internal/preset/principle/section.yaml
-    - tui/internal/preset/covenant/section.yaml
+related_files:
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/principle/section.yaml
+  - tui/internal/preset/covenant/section.yaml
+  - tui/internal/preset/procedures/procedures.md
+  - tui/internal/preset/skills/lingtai-issue-report/SKILL.md
+  - tui/internal/preset/skills/system-manual/SKILL.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include at least one
+  ANATOMY.md file and at least one peer section.yaml so the prompt-section
+  definition graph stays connected rather than isolated. If you create a new
+  prompt-section YAML, copy this maintenance field. This YAML is metadata only
+  and must not be injected into the agent system prompt.
 purpose: |
   Compact action playbook for the resident system prompt: progressive-disclosure
   routing, tool-choice discipline, communication expectations, molt/store
@@ -23,14 +30,3 @@ boundaries:
     - detailed GitHub issue filing or consent policy
     - long examples, troubleshooting, or command recipes
     - private project facts or reusable skill bodies
-related_files:
-  - tui/internal/preset/procedures/procedures.md
-  - tui/internal/preset/skills/lingtai-issue-report/SKILL.md
-  - tui/internal/preset/skills/system-manual/SKILL.md
-maintenance: |
-  Keep this definition aligned with the rendered prompt section. This YAML is
-  metadata only and must not be injected into the agent system prompt. Include
-  at least one `ANATOMY.md` under `links.anatomy` and at least one peer
-  `section.yaml` under `links.section_definitions` so the prompt-section
-  definition graph stays crawlable rather than isolated. If you create a new
-  prompt-section YAML, copy this maintenance field.

@@ -79,15 +79,18 @@ func TestPromptSectionDefinitionsAreBundled(t *testing.T) {
 				t.Fatalf("read bundled %s: %v", tt.path, err)
 			}
 			body := string(data)
+			if strings.Contains(body, "\nlinks:") || strings.HasPrefix(body, "links:") {
+				t.Fatalf("%s should use anatomy-style related_files, not a links field", tt.path)
+			}
 			for _, want := range tt.want {
 				if !strings.Contains(body, want) {
 					t.Fatalf("%s missing %q\n%s", tt.path, want, body)
 				}
 			}
 			for _, want := range []string{
+				"Keep related_files as repo-relative paths to real files",
 				"must not be injected into the agent system prompt",
-				"at least one `ANATOMY.md` under `links.anatomy`",
-				"at least one peer",
+				"at least one peer section.yaml",
 				"copy this maintenance field",
 			} {
 				if !strings.Contains(body, want) {

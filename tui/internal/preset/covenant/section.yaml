@@ -6,12 +6,20 @@ rendered_content:
   - en/covenant.md
   - zh/covenant.md
   - wen/covenant.md
-links:
-  anatomy:
-    - tui/internal/preset/ANATOMY.md
-  section_definitions:
-    - tui/internal/preset/principle/section.yaml
-    - tui/internal/preset/procedures/section.yaml
+related_files:
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/principle/section.yaml
+  - tui/internal/preset/procedures/section.yaml
+  - tui/internal/preset/covenant/en/covenant.md
+  - tui/internal/preset/covenant/zh/covenant.md
+  - tui/internal/preset/covenant/wen/covenant.md
+  - tui/internal/preset/procedures/procedures.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include at least one
+  ANATOMY.md file and at least one peer section.yaml so the prompt-section
+  definition graph stays connected rather than isolated. If you create a new
+  prompt-section YAML, copy this maintenance field. This YAML is metadata only
+  and must not be injected into the agent system prompt.
 purpose: |
   LingTai's shared covenant: the philosophical and operational foundation that
   orients agents toward acting on need, mastering tools, learning continuously,
@@ -25,15 +33,3 @@ boundaries:
     - concrete tool procedures or command recipes
     - mutable project instructions
     - per-agent identity, pad, or private knowledge
-related_files:
-  - tui/internal/preset/covenant/en/covenant.md
-  - tui/internal/preset/covenant/zh/covenant.md
-  - tui/internal/preset/covenant/wen/covenant.md
-  - tui/internal/preset/procedures/procedures.md
-maintenance: |
-  Keep this definition aligned with the rendered prompt section. This YAML is
-  metadata only and must not be injected into the agent system prompt. Include
-  at least one `ANATOMY.md` under `links.anatomy` and at least one peer
-  `section.yaml` under `links.section_definitions` so the prompt-section
-  definition graph stays crawlable rather than isolated. If you create a new
-  prompt-section YAML, copy this maintenance field.

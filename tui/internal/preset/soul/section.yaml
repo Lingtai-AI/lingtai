@@ -6,12 +6,20 @@ rendered_content:
   - en/soul-flow.md
   - zh/soul-flow.md
   - wen/soul-flow.md
-links:
-  anatomy:
-    - tui/internal/preset/ANATOMY.md
-  section_definitions:
-    - tui/internal/preset/procedures/section.yaml
-    - tui/internal/preset/principle/section.yaml
+related_files:
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/procedures/section.yaml
+  - tui/internal/preset/principle/section.yaml
+  - tui/internal/preset/soul/en/soul-flow.md
+  - tui/internal/preset/soul/zh/soul-flow.md
+  - tui/internal/preset/soul/wen/soul-flow.md
+  - tui/internal/preset/skills/soul-manual/SKILL.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include at least one
+  ANATOMY.md file and at least one peer section.yaml so the prompt-section
+  definition graph stays connected rather than isolated. If you create a new
+  prompt-section YAML, copy this maintenance field. This YAML is metadata only
+  and must not be injected into the agent system prompt.
 purpose: |
   Localized prompt text for the optional soul-flow inner voice. This section
   frames the separate no-tool LLM session that reads the agent diary and returns
@@ -25,15 +33,3 @@ boundaries:
     - runtime opt-in mechanics or environment gates
     - soul tool action schemas
     - agent communication, lifecycle, or task procedures
-related_files:
-  - tui/internal/preset/soul/en/soul-flow.md
-  - tui/internal/preset/soul/zh/soul-flow.md
-  - tui/internal/preset/soul/wen/soul-flow.md
-  - tui/internal/preset/skills/soul-manual/SKILL.md
-maintenance: |
-  Keep this definition aligned with the rendered prompt section. This YAML is
-  metadata only and must not be injected into the agent system prompt. Include
-  at least one `ANATOMY.md` under `links.anatomy` and at least one peer
-  `section.yaml` under `links.section_definitions` so the prompt-section
-  definition graph stays crawlable rather than isolated. If you create a new
-  prompt-section YAML, copy this maintenance field.

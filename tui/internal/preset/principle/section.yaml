@@ -6,12 +6,20 @@ rendered_content:
   - en/principle.md
   - zh/principle.md
   - wen/principle.md
-links:
-  anatomy:
-    - tui/internal/preset/ANATOMY.md
-  section_definitions:
-    - tui/internal/preset/covenant/section.yaml
-    - tui/internal/preset/procedures/section.yaml
+related_files:
+  - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/covenant/section.yaml
+  - tui/internal/preset/procedures/section.yaml
+  - tui/internal/preset/principle/en/principle.md
+  - tui/internal/preset/principle/zh/principle.md
+  - tui/internal/preset/principle/wen/principle.md
+  - tui/internal/preset/procedures/procedures.md
+maintenance: |
+  Keep related_files as repo-relative paths to real files. Include at least one
+  ANATOMY.md file and at least one peer section.yaml so the prompt-section
+  definition graph stays connected rather than isolated. If you create a new
+  prompt-section YAML, copy this maintenance field. This YAML is metadata only
+  and must not be injected into the agent system prompt.
 purpose: |
   Root operating principles for channel-bound communication and the text-input /
   text-output contract. This section establishes what counts as human input,
@@ -25,15 +33,3 @@ boundaries:
     - expanded lifecycle, memory, or tool procedures
     - project-specific standing rules
     - detailed email/chat addon manuals
-related_files:
-  - tui/internal/preset/principle/en/principle.md
-  - tui/internal/preset/principle/zh/principle.md
-  - tui/internal/preset/principle/wen/principle.md
-  - tui/internal/preset/procedures/procedures.md
-maintenance: |
-  Keep this definition aligned with the rendered prompt section. This YAML is
-  metadata only and must not be injected into the agent system prompt. Include
-  at least one `ANATOMY.md` under `links.anatomy` and at least one peer
-  `section.yaml` under `links.section_definitions` so the prompt-section
-  definition graph stays crawlable rather than isolated. If you create a new
-  prompt-section YAML, copy this maintenance field.
