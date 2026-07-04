@@ -92,8 +92,9 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | **network.go** | | |
 | `BuildNetwork(baseDir)` | `tui/internal/fs/network.go:8` | full topology: nodes, avatar edges, contact edges, mail edges, stats |
 | **activity.go** | | |
-| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:34` | lightweight non-human project activity badge: active, daemon-active, idle, asleep, suspend; only counts daemon runs for heartbeat-live parent agents |
-| `CountDaemons(agentDir)` | `tui/internal/fs/activity.go:110` | counts parseable `daemons/<run_id>/daemon.json` files for selected-agent daemon running/total displays |
+| `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:42` | lightweight non-human project activity badge: folds agent state, heartbeat liveness, `.status.json` activity evidence, and running daemons into active, daemon-active, idle, asleep, suspend |
+| `hasStatusActivity(agentDir, now)` | `tui/internal/fs/activity.go:174` | treats heartbeat-live agents as active when status-snapshot evidence is fresh: `active_turn` via mtime/started_at/last_progress_at within 600s, or `last_progress_at` within 90s |
+| `CountDaemons(agentDir)` | `tui/internal/fs/activity.go:238` | counts parseable `daemons/<run_id>/daemon.json` files; running daemons feed project daemon-active status and selected-agent running/total displays |
 | **resolve.go** | | |
 | `ParseAddress(addr)` | `tui/internal/fs/resolve.go:16` | `"localhost:/path"` or `"[ipv6]:/path"` → `(host, path, ok)` |
 | `IsRemoteAddress(addr)` | `tui/internal/fs/resolve.go:62` | true if non-localhost host prefix |
