@@ -29,4 +29,8 @@ related_files:
   - tui/internal/preset/skills/system-manual/SKILL.md
 maintenance: |
   Keep this definition aligned with the rendered prompt section. This YAML is
-  metadata only and must not be injected into the agent system prompt.
+  metadata only and must not be injected into the agent system prompt. Include
+  at least one `ANATOMY.md` under `links.anatomy` and at least one peer
+  `section.yaml` under `links.section_definitions` so the prompt-section
+  definition graph stays crawlable rather than isolated. If you create a new
+  prompt-section YAML, copy this maintenance field.

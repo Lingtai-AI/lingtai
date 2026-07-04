@@ -84,6 +84,16 @@ func TestPromptSectionDefinitionsAreBundled(t *testing.T) {
 					t.Fatalf("%s missing %q\n%s", tt.path, want, body)
 				}
 			}
+			for _, want := range []string{
+				"must not be injected into the agent system prompt",
+				"at least one `ANATOMY.md` under `links.anatomy`",
+				"at least one peer",
+				"copy this maintenance field",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing shared maintenance rule %q\n%s", tt.path, want, body)
+				}
+			}
 		})
 	}
 }
