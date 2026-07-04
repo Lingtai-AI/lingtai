@@ -80,5 +80,5 @@ summary.
 ### Reporting Issues
 
 If you notice a LingTai bug, stale doc, broken URL, silent failure, or missing
-capability, load `lingtai-issue-report`, assemble evidence, and ask the human
-before filing unless already authorized.
+capability, load `lingtai-issue-report`, assemble evidence, and follow that
+skill's filing/consent flow.
