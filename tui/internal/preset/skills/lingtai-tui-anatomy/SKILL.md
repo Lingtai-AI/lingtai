@@ -151,7 +151,7 @@ The same-commit rule is about structural drift, not busywork. Update relevant `A
 - Moves, renames, splits, merges, or deletes a file, function, type, or package cited by anatomy.
 - Changes which package owns a behavior, which package calls another, or which folder is the right entry point for a structural question.
 - Adds, removes, or changes persistent state: files written, schema versions, manifest fields, signal files, tap formula, migration registry.
-- Changes the build pipeline, embed targets (`//go:embed`), subcommand surface (`lingtai-tui purge`/`postman`/`timemachine`/etc.), or HTTP route surface.
+- Changes the build pipeline, embed targets (`//go:embed`), subcommand surface (`lingtai-tui purge`/`postman`/etc.), or HTTP route surface.
 - Adds a new migration to either registry — the cross-binary contract is part of anatomy.
 - Creates a new package that a competent agent can reason about as a unit.
 

@@ -9,7 +9,6 @@ related_files:
   - tui/internal/migrate/migrate_test.go
   - tui/internal/migrate/collision_repair_test.go
   - tui/internal/migrate/m001_topology.go
-  - tui/internal/migrate/m015_timemachine_gitignore.go
   - tui/internal/migrate/m026_preset_path_form.go
   - tui/internal/migrate/m029_preset_allowed_list.go
   - tui/internal/migrate/m030_preset_dir_split.go
@@ -48,7 +47,7 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 | `metaFile` struct | `tui/internal/migrate/migrate.go:20` | `{Version int, AddonCommentCleanupNotified bool}` |
 | `persistMeta` | `tui/internal/migrate/migrate.go:151` | atomic temp+rename write of `meta.json` |
 | m001 | `tui/internal/migrate/m001_topology.go:9` | move `topology.jsonl` from `.tui-asset/` to `.portal/` |
-| m015 | `tui/internal/migrate/m015_timemachine_gitignore.go` | add `.gitignore` to timemachine dir |
+| m015 | `tui/internal/migrate/migrate.go:56` | retained no-op — once wrote a Time Machine `.gitignore`; Time Machine removed (#526), entry kept for contiguous versioning |
 | m026 | `tui/internal/migrate/m026_preset_path_form.go` | rewrite preset paths to `~/...` form |
 | m029 | `tui/internal/migrate/m029_preset_allowed_list.go:32` | legacy `path` → declarative `allowed` list |
 | m030 | `tui/internal/migrate/m030_preset_dir_split.go` | split flat `presets/` → `templates/` + `saved/` |

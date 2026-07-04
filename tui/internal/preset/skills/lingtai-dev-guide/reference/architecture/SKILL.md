@@ -37,7 +37,6 @@ Key packages in `tui/internal/`:
 | `config/` | Global TUI config under `~/.lingtai-tui/` |
 | `process/` | Subprocess launcher for `python -m lingtai run <dir>` |
 | `postman/` | UDP/IPv6 cross-internet agent mesh |
-| `timemachine/` | Git-backed history daemon for topology replay |
 | `i18n/` | en/zh/wen JSON tables (three locales always) |
 
 Key packages in `portal/internal/`:

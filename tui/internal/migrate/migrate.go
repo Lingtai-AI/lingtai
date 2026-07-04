@@ -45,7 +45,15 @@ var migrations = []Migration{
 	{Version: 12, Name: "session-resort", Fn: migrateSessionResort},
 	{Version: 13, Name: "agora-rename", Fn: migrateAgoraRename},
 	{Version: 14, Name: "skills-groups", Fn: migrateSkillsGroups},
-	{Version: 15, Name: "timemachine-gitignore", Fn: migrateTimeMachineGitignore},
+	// Version 15 ("timemachine-gitignore") is a retained no-op. It once wrote
+	// .lingtai/.gitignore for the Time Machine daemon, which was removed
+	// entirely (issue #526). The entry MUST stay: the migration registry is
+	// required to be contiguous (Version == index+1) and to have exactly
+	// CurrentVersion entries, enforced by parity_test.go across TUI and portal.
+	// Removing it would create a version gap and fail that invariant. Projects
+	// that already upgraded past v15 keep their on-disk .lingtai/.gitignore;
+	// removing that file is out of scope.
+	{Version: 15, Name: "timemachine-gitignore", Fn: func(_ string) error { return nil }},
 	{Version: 16, Name: "rename-pad-codex-library", Fn: migrateRenamePadCodexLibrary},
 	{Version: 17, Name: "rename-preset-caps", Fn: migrateRenamePresetCaps},
 	{Version: 18, Name: "library-split", Fn: migrateLibrarySplit},

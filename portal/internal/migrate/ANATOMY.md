@@ -9,7 +9,6 @@ related_files:
   - portal/internal/migrate/m002_tape_normalize.go
   - portal/internal/migrate/m003_character_to_lingtai.go
   - portal/internal/migrate/m004_relative_addressing.go
-  - portal/internal/migrate/m015_timemachine_gitignore.go
   - portal/internal/migrate/m026_preset_path_form.go
   - portal/internal/migrate/m027_strip_media_capabilities.go
   - portal/internal/migrate/m028_addons_to_mcp.go
@@ -49,7 +48,7 @@ Versioned, append-only, forward-only migration system for per-project `.lingtai/
 - **m003** — `character-to-lingtai` — rewrites `.lingtai/character/` → `.lingtai/` (shared).
 - **m004** — `relative-addressing` — rewrites absolute paths to relative in `init.json` (shared).
 - **m006** — `relative-addressing-fix` — second pass: calls `migrateRelativeAddressing` again (shared).
-- **m015** — `timemachine-gitignore` (`m015_timemachine_gitignore.go`). Writes a `.gitignore` to the `.lingtai/` root for Time Machine support (shared).
+- **m015** — `timemachine-gitignore` — retained no-op (inline in `migrate.go`). Once wrote a `.gitignore` to the `.lingtai/` root for the Time Machine daemon; Time Machine was removed (#526). The entry is kept so the registry stays contiguous and version-matched with the TUI (enforced by `parity_test.go`).
 - **m026** — `preset-path-form` (`portal/internal/migrate/m026_preset_path_form.go:21`). Rewrites stem-form preset refs to path-form in `init.json` (shared).
 - **m027** — `strip-media-capabilities` — drops `compose`/`video`/`draw`/`talk`/`listen` from `init.json` (shared).
 - **m028** — `addons-to-mcp` — rewrites legacy `addons:{name:cfg}` → `addons:[name]` + `mcp.{name}` entries (shared).

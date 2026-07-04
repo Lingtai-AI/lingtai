@@ -131,7 +131,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 
 - **Parent:** `tui/` (`tui/ANATOMY.md`)
 - **Subfolders:** none — the package is intentionally flat.
-- **Siblings in `tui/internal/`:** `preset/`, `migrate/`, `globalmigrate/`, `fs/`, `config/`, `process/`, `postman/`, `timemachine/`.
+- **Siblings in `tui/internal/`:** `preset/`, `migrate/`, `globalmigrate/`, `fs/`, `config/`, `process/`, `postman/`.
 - **File count:** ~43 non-test `.go` files (20 screen models + supporting types + helpers, including `layout.go` for the root layout budget).
 
 ## State

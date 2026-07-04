@@ -43,7 +43,16 @@ var migrations = []Migration{
 	{Version: 12, Name: "session-resort", Fn: func(_ string) error { return nil }},
 	{Version: 13, Name: "agora-rename", Fn: func(_ string) error { return nil }},
 	{Version: 14, Name: "skills-groups", Fn: func(_ string) error { return nil }},
-	{Version: 15, Name: "timemachine-gitignore", Fn: migrateTimeMachineGitignore},
+	// Version 15 ("timemachine-gitignore") is a retained no-op. It once wrote
+	// .lingtai/.gitignore for the Time Machine daemon, which was removed
+	// entirely (issue #526). The entry MUST stay: parity_test.go requires the
+	// registry to be contiguous (Version == index+1), to have exactly
+	// CurrentVersion entries, and to match the TUI registry version-for-version.
+	// Removing it would create a version gap and fail that invariant. This was
+	// the one portal migration that actually wrote to disk; it is now inert like
+	// every other portal-side no-op (portal shares the version space but not the
+	// data migrations).
+	{Version: 15, Name: "timemachine-gitignore", Fn: func(_ string) error { return nil }},
 	{Version: 16, Name: "rename-pad-codex-library", Fn: func(_ string) error { return nil }},
 	{Version: 17, Name: "rename-preset-caps", Fn: func(_ string) error { return nil }},
 	{Version: 18, Name: "library-split", Fn: func(_ string) error { return nil }},
