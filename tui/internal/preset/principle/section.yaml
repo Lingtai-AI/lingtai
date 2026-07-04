@@ -1,0 +1,35 @@
+section: principle
+kind: resident_prompt_section
+owner: tui-preset
+metadata_only: true
+rendered_content:
+  - en/principle.md
+  - zh/principle.md
+  - wen/principle.md
+links:
+  anatomy:
+    - tui/internal/preset/ANATOMY.md
+  section_definitions:
+    - tui/internal/preset/covenant/section.yaml
+    - tui/internal/preset/procedures/section.yaml
+purpose: |
+  Root operating principles for channel-bound communication and the text-input /
+  text-output contract. This section establishes what counts as human input,
+  system input, diary output, and the required reply channel.
+boundaries:
+  owns:
+    - non-negotiable communication-channel semantics
+    - the diary/private-output distinction
+    - the high-level human-reply rule for TUI-created starter agents
+  does_not_own:
+    - expanded lifecycle, memory, or tool procedures
+    - project-specific standing rules
+    - detailed email/chat addon manuals
+related_files:
+  - tui/internal/preset/principle/en/principle.md
+  - tui/internal/preset/principle/zh/principle.md
+  - tui/internal/preset/principle/wen/principle.md
+  - tui/internal/preset/procedures/procedures.md
+maintenance: |
+  Keep this definition aligned with the rendered prompt section. This YAML is
+  metadata only and must not be injected into the agent system prompt.

@@ -1,0 +1,35 @@
+section: soul
+kind: resident_prompt_section
+owner: tui-preset
+metadata_only: true
+rendered_content:
+  - en/soul-flow.md
+  - zh/soul-flow.md
+  - wen/soul-flow.md
+links:
+  anatomy:
+    - tui/internal/preset/ANATOMY.md
+  section_definitions:
+    - tui/internal/preset/procedures/section.yaml
+    - tui/internal/preset/principle/section.yaml
+purpose: |
+  Localized prompt text for the optional soul-flow inner voice. This section
+  frames the separate no-tool LLM session that reads the agent diary and returns
+  a concise subconscious nudge.
+boundaries:
+  owns:
+    - soul-flow voice framing
+    - localized instructions for concise inner reflections
+    - constraints on what the soul voice should and should not say
+  does_not_own:
+    - runtime opt-in mechanics or environment gates
+    - soul tool action schemas
+    - agent communication, lifecycle, or task procedures
+related_files:
+  - tui/internal/preset/soul/en/soul-flow.md
+  - tui/internal/preset/soul/zh/soul-flow.md
+  - tui/internal/preset/soul/wen/soul-flow.md
+  - tui/internal/preset/skills/soul-manual/SKILL.md
+maintenance: |
+  Keep this definition aligned with the rendered prompt section. This YAML is
+  metadata only and must not be injected into the agent system prompt.

@@ -1,0 +1,32 @@
+section: procedures
+kind: resident_prompt_section
+owner: tui-preset
+metadata_only: true
+rendered_content:
+  - procedures.md
+links:
+  anatomy:
+    - tui/internal/preset/ANATOMY.md
+  section_definitions:
+    - tui/internal/preset/principle/section.yaml
+    - tui/internal/preset/covenant/section.yaml
+purpose: |
+  Compact action playbook for the resident system prompt: progressive-disclosure
+  routing, tool-choice discipline, communication expectations, molt/store
+  reminders, skill routing, and deliverable/reporting preferences.
+boundaries:
+  owns:
+    - short operational routing hooks
+    - compact checklist-level rules that must stay resident
+    - pointers to the skills/manuals that own detailed procedures
+  does_not_own:
+    - detailed GitHub issue filing or consent policy
+    - long examples, troubleshooting, or command recipes
+    - private project facts or reusable skill bodies
+related_files:
+  - tui/internal/preset/procedures/procedures.md
+  - tui/internal/preset/skills/lingtai-issue-report/SKILL.md
+  - tui/internal/preset/skills/system-manual/SKILL.md
+maintenance: |
+  Keep this definition aligned with the rendered prompt section. This YAML is
+  metadata only and must not be injected into the agent system prompt.

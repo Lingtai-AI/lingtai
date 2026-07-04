@@ -1,0 +1,35 @@
+section: covenant
+kind: resident_prompt_section
+owner: tui-preset
+metadata_only: true
+rendered_content:
+  - en/covenant.md
+  - zh/covenant.md
+  - wen/covenant.md
+links:
+  anatomy:
+    - tui/internal/preset/ANATOMY.md
+  section_definitions:
+    - tui/internal/preset/principle/section.yaml
+    - tui/internal/preset/procedures/section.yaml
+purpose: |
+  LingTai's shared covenant: the philosophical and operational foundation that
+  orients agents toward acting on need, mastering tools, learning continuously,
+  collaborating with peers, and preserving durable grain.
+boundaries:
+  owns:
+    - stable LingTai ethos and constitution
+    - high-level memory/collaboration/cultivation principles
+    - language-localized covenant text for starter agents
+  does_not_own:
+    - concrete tool procedures or command recipes
+    - mutable project instructions
+    - per-agent identity, pad, or private knowledge
+related_files:
+  - tui/internal/preset/covenant/en/covenant.md
+  - tui/internal/preset/covenant/zh/covenant.md
+  - tui/internal/preset/covenant/wen/covenant.md
+  - tui/internal/preset/procedures/procedures.md
+maintenance: |
+  Keep this definition aligned with the rendered prompt section. This YAML is
+  metadata only and must not be injected into the agent system prompt.
