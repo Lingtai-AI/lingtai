@@ -13,7 +13,6 @@ related_files:
   - tui/internal/preset/skills/lingtai-issue-report/SKILL.md
   - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md
   - tui/internal/preset/skills/lingtai-tui-help/SKILL.md
-  - tui/internal/preset/skills/system-manual/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include at least one
   ANATOMY.md file and at least one peer section.yaml so the prompt-section

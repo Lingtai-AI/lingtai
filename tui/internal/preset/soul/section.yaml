@@ -14,7 +14,6 @@ related_files:
   - tui/internal/preset/soul/en/soul-flow.md
   - tui/internal/preset/soul/zh/soul-flow.md
   - tui/internal/preset/soul/wen/soul-flow.md
-  - tui/internal/preset/skills/soul-manual/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include at least one
   ANATOMY.md file and at least one peer section.yaml so the prompt-section

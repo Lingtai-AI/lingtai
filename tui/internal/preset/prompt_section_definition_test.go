@@ -182,6 +182,71 @@ func TestRelatedManualsLinkBackToPromptSectionDefinitions(t *testing.T) {
 	}
 }
 
+func TestRelatedFileEntriesResolve(t *testing.T) {
+	repoRoot := filepath.Clean("../../..")
+	for _, rel := range []string{
+		"covenant/section.yaml",
+		"principle/section.yaml",
+		"procedures/section.yaml",
+		"soul/section.yaml",
+		"skills/lingtai-tui-anatomy/SKILL.md",
+		"skills/lingtai-issue-report/SKILL.md",
+		"skills/lingtai-dev-guide/SKILL.md",
+		"skills/lingtai-tui-help/SKILL.md",
+		"skills/lingtai-tutorial-guide/SKILL.md",
+		"skills/lingtai-recipe/SKILL.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.FromSlash(rel))
+			if err != nil {
+				t.Fatalf("read %s: %v", rel, err)
+			}
+			text := string(data)
+			if strings.HasSuffix(rel, ".md") {
+				text = yamlFrontmatter(t, rel, text)
+			}
+			for _, related := range relatedFiles(text) {
+				if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(related))); err != nil {
+					t.Fatalf("%s related_files entry %q does not resolve from repo root: %v", rel, related, err)
+				}
+			}
+		})
+	}
+}
+
+func yamlFrontmatter(t *testing.T, rel, text string) string {
+	t.Helper()
+	if !strings.HasPrefix(text, "---\n") {
+		t.Fatalf("%s has no YAML frontmatter", rel)
+	}
+	end := strings.Index(text[4:], "\n---\n")
+	if end < 0 {
+		t.Fatalf("%s has unclosed YAML frontmatter", rel)
+	}
+	return text[4 : 4+end]
+}
+
+func relatedFiles(yamlText string) []string {
+	var out []string
+	inRelatedFiles := false
+	for _, line := range strings.Split(yamlText, "\n") {
+		if line == "related_files:" {
+			inRelatedFiles = true
+			continue
+		}
+		if inRelatedFiles {
+			if strings.HasPrefix(line, "  - ") {
+				out = append(out, strings.TrimSpace(strings.TrimPrefix(line, "  - ")))
+				continue
+			}
+			if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") {
+				inRelatedFiles = false
+			}
+		}
+	}
+	return out
+}
+
 func TestBootstrapPopulatesPromptSectionDefinitions(t *testing.T) {
 	dir := t.TempDir()
 	if err := Bootstrap(dir); err != nil {
