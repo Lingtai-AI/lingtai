@@ -3,9 +3,12 @@ package fs
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -14,6 +17,11 @@ const (
 	NetworkStatusIdle         = "idle"
 	NetworkStatusAsleep       = "asleep"
 	NetworkStatusSuspend      = "suspend"
+)
+
+const (
+	networkActiveTurnCap        = 600 * time.Second
+	networkRecentProgressWindow = 90 * time.Second
 )
 
 // NetworkActivity is the project-level activity summary for non-human agents.
@@ -57,6 +65,7 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 	activity := NetworkActivity{Status: NetworkStatusSuspend}
 	var hasIdle bool
 	var hasAsleep bool
+	var hasNonDaemonActive bool
 
 	for _, node := range nodes {
 		if node.IsHuman {
@@ -64,11 +73,18 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 		}
 
 		state := strings.ToUpper(node.State)
+		live := node.Alive
 		if state == "ACTIVE" {
 			activity.ActiveAgents++
+			hasNonDaemonActive = true
 		}
-		if node.Alive {
+
+		if live {
 			activity.RunningDaemons += CountDaemons(node.WorkingDir).Running
+			if state != "ACTIVE" && hasStatusActivity(node.WorkingDir, time.Now()) {
+				activity.ActiveAgents++
+				hasNonDaemonActive = true
+			}
 		}
 
 		switch state {
@@ -78,7 +94,7 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 			// STUCK stays an individual agent state. At network level we fold a
 			// heartbeat-fresh STUCK agent into idle so a live but errored agent
 			// does not make the project look asleep or suspended.
-			if node.Alive {
+			if live {
 				hasIdle = true
 			}
 		case "ASLEEP":
@@ -87,7 +103,7 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 	}
 
 	switch {
-	case activity.ActiveAgents > 0:
+	case hasNonDaemonActive:
 		activity.Status = NetworkStatusActive
 	case activity.RunningDaemons > 0:
 		activity.Status = NetworkStatusDaemonActive
@@ -99,6 +115,118 @@ func computeNetworkActivity(nodes []AgentNode) NetworkActivity {
 		activity.Status = NetworkStatusSuspend
 	}
 	return activity
+}
+
+type networkStatusSnapshot struct {
+	ActiveTurn *networkActiveTurn `json:"active_turn"`
+	Runtime    struct {
+		State          string             `json:"state"`
+		LastProgressAt tolerantJSONNumber `json:"last_progress_at"`
+		NoProgressSecs tolerantJSONNumber `json:"no_progress_seconds"`
+		UptimeSeconds  tolerantJSONNumber `json:"uptime_seconds"`
+		StaminaLeft    tolerantJSONNumber `json:"stamina_left"`
+	} `json:"runtime"`
+}
+
+type networkActiveTurn struct {
+	Kind           string             `json:"kind"`
+	ID             string             `json:"id"`
+	StartedAt      tolerantJSONNumber `json:"started_at"`
+	ElapsedSeconds tolerantJSONNumber `json:"elapsed_seconds"`
+}
+
+type tolerantJSONNumber struct {
+	Value float64
+	OK    bool
+}
+
+func (n *tolerantJSONNumber) UnmarshalJSON(data []byte) error {
+	text := strings.TrimSpace(string(data))
+	if text == "" || text == "null" {
+		return nil
+	}
+	if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return nil
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil
+		}
+		n.Value = v
+		n.OK = true
+		return nil
+	}
+	v, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return nil
+	}
+	n.Value = v
+	n.OK = true
+	return nil
+}
+
+func hasStatusActivity(agentDir string, now time.Time) bool {
+	status, mtime, ok := readNetworkStatusSnapshot(agentDir)
+	if !ok {
+		return false
+	}
+	if status.ActiveTurn != nil {
+		freshAt := mtime
+		if status.ActiveTurn.StartedAt.OK {
+			freshAt = laterTime(freshAt, unixSeconds(status.ActiveTurn.StartedAt.Value))
+		}
+		if status.Runtime.LastProgressAt.OK {
+			freshAt = laterTime(freshAt, unixSeconds(status.Runtime.LastProgressAt.Value))
+		}
+		return within(now, freshAt, networkActiveTurnCap)
+	}
+	if status.Runtime.LastProgressAt.OK {
+		return within(now, unixSeconds(status.Runtime.LastProgressAt.Value), networkRecentProgressWindow)
+	}
+	return false
+}
+
+func readNetworkStatusSnapshot(agentDir string) (networkStatusSnapshot, time.Time, bool) {
+	path := filepath.Join(agentDir, ".status.json")
+	info, err := os.Stat(path)
+	if err != nil {
+		return networkStatusSnapshot{}, time.Time{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return networkStatusSnapshot{}, time.Time{}, false
+	}
+	var status networkStatusSnapshot
+	if err := json.Unmarshal(data, &status); err != nil {
+		return networkStatusSnapshot{}, time.Time{}, false
+	}
+	return status, info.ModTime(), true
+}
+
+func laterTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
+func unixSeconds(v float64) time.Time {
+	sec, frac := math.Modf(v)
+	return time.Unix(int64(sec), int64(frac*1e9))
+}
+
+func within(now, t time.Time, window time.Duration) bool {
+	if t.IsZero() {
+		return false
+	}
+	age := now.Sub(t)
+	return age >= 0 && age <= window
 }
 
 type daemonStateFile struct {

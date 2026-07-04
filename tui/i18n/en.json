@@ -391,7 +391,7 @@
   "network_activity.label": "network",
   "network_activity.short_label": "net",
   "network_activity.status.active": "active",
-  "network_activity.status.daemon-active": "daemon-active",
+  "network_activity.status.daemon-active": "active",
   "network_activity.status.idle": "idle",
   "network_activity.status.asleep": "asleep",
   "network_activity.status.suspend": "suspend",

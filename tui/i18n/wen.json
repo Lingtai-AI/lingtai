@@ -386,7 +386,7 @@
   "network_activity.label": "云",
   "network_activity.short_label": "云",
   "network_activity.status.active": "醒",
-  "network_activity.status.daemon-active": "神动",
+  "network_activity.status.daemon-active": "醒",
   "network_activity.status.idle": "定",
   "network_activity.status.asleep": "眠",
   "network_activity.status.suspend": "假死",

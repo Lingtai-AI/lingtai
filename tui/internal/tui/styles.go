@@ -502,7 +502,7 @@ func NetworkActivityColor(status string) color.Color {
 	case "active":
 		return ColorActive
 	case "daemon-active":
-		return ColorTool
+		return ColorActive
 	case "idle":
 		return ColorIdle
 	case "asleep":

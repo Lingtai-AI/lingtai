@@ -386,7 +386,7 @@
   "network_activity.label": "网络",
   "network_activity.short_label": "网",
   "network_activity.status.active": "活跃",
-  "network_activity.status.daemon-active": "神识活跃",
+  "network_activity.status.daemon-active": "活跃",
   "network_activity.status.idle": "待命",
   "network_activity.status.asleep": "休眠",
   "network_activity.status.suspend": "假死",
