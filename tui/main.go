@@ -322,18 +322,12 @@ func main() {
 		humanDir := filepath.Join(lingtaiDir, "human")
 		go fs.UpdateHumanLocation(humanDir)
 
-		// Launch time machine daemon if not already running
-		if !timemachine.IsRunning(lingtaiDir) {
-			if orchDir := timemachine.FindOrchestrator(lingtaiDir); orchDir != "" {
-				self, _ := os.Executable()
-				tmCmd := exec.Command(self, "timemachine", lingtaiDir)
-				tmCmd.Stdout = nil
-				tmCmd.Stderr = nil
-				if err := tmCmd.Start(); err == nil {
-					tmCmd.Process.Release()
-				}
-			}
-		}
+		// Time machine is no longer auto-launched on TUI startup. The daemon
+		// remains available as a hidden/manual subcommand for one release:
+		//   lingtai-tui timemachine <lingtaiDir>
+		// (see the subcommand dispatch near the top of main). The package,
+		// migration, and tests are retained; only the default auto-launch was
+		// removed. See issue #526.
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 
