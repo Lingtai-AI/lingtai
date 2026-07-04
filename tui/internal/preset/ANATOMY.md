@@ -23,6 +23,7 @@ related_files:
   - tui/internal/preset/soul/section.yaml
   - tui/internal/preset/prompt_section_definition_test.go
   - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md
+  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring

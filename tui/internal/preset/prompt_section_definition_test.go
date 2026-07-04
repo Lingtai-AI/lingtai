@@ -120,6 +120,68 @@ func TestPresetAnatomyLinksPromptSectionDefinitions(t *testing.T) {
 	}
 }
 
+func TestRelatedManualsLinkBackToPromptSectionDefinitions(t *testing.T) {
+	tests := []struct {
+		path string
+		want []string
+	}{
+		{
+			path: "skills/lingtai-tui-anatomy/SKILL.md",
+			want: []string{
+				"related_files:",
+				"tui/internal/preset/ANATOMY.md",
+				"tui/internal/preset/covenant/section.yaml",
+				"tui/internal/preset/principle/section.yaml",
+				"tui/internal/preset/procedures/section.yaml",
+				"tui/internal/preset/soul/section.yaml",
+			},
+		},
+		{
+			path: "skills/lingtai-issue-report/SKILL.md",
+			want: []string{"related_files:", "tui/internal/preset/procedures/section.yaml"},
+		},
+		{
+			path: "skills/lingtai-dev-guide/SKILL.md",
+			want: []string{"related_files:", "tui/internal/preset/procedures/section.yaml"},
+		},
+		{
+			path: "skills/lingtai-tui-help/SKILL.md",
+			want: []string{"related_files:", "tui/internal/preset/procedures/section.yaml"},
+		},
+		{
+			path: "skills/lingtai-tutorial-guide/SKILL.md",
+			want: []string{
+				"related_files:",
+				"tui/internal/preset/covenant/section.yaml",
+				"tui/internal/preset/principle/section.yaml",
+			},
+		},
+		{
+			path: "skills/lingtai-recipe/SKILL.md",
+			want: []string{
+				"related_files:",
+				"tui/internal/preset/covenant/section.yaml",
+				"tui/internal/preset/principle/section.yaml",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.FromSlash(tt.path))
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.path, err)
+			}
+			body := string(data)
+			for _, want := range tt.want {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing bidirectional related_files entry %q", tt.path, want)
+				}
+			}
+		})
+	}
+}
+
 func TestBootstrapPopulatesPromptSectionDefinitions(t *testing.T) {
 	dir := t.TempDir()
 	if err := Bootstrap(dir); err != nil {

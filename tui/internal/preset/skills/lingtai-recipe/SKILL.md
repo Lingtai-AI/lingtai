@@ -22,7 +22,10 @@ description: >
   live system (those go through the kernel's writes to the agent's
   working directory, not through a recipe round-trip).
 version: 3.2.0
-last_changed_at: "2026-06-02T00:08:39-07:00"
+last_changed_at: 2026-07-04T09:14:00Z
+related_files:
+  - tui/internal/preset/covenant/section.yaml
+  - tui/internal/preset/principle/section.yaml
 ---
 
 # lingtai-recipe: Recipes and How to Publish Them

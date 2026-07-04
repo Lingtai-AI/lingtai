@@ -6,10 +6,13 @@ rendered_content:
   - procedures.md
 related_files:
   - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - tui/internal/preset/principle/section.yaml
   - tui/internal/preset/covenant/section.yaml
   - tui/internal/preset/procedures/procedures.md
   - tui/internal/preset/skills/lingtai-issue-report/SKILL.md
+  - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md
+  - tui/internal/preset/skills/lingtai-tui-help/SKILL.md
   - tui/internal/preset/skills/system-manual/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include at least one

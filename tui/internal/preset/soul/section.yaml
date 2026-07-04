@@ -8,6 +8,7 @@ rendered_content:
   - wen/soul-flow.md
 related_files:
   - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - tui/internal/preset/procedures/section.yaml
   - tui/internal/preset/principle/section.yaml
   - tui/internal/preset/soul/en/soul-flow.md

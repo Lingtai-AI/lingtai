@@ -8,12 +8,15 @@ rendered_content:
   - wen/covenant.md
 related_files:
   - tui/internal/preset/ANATOMY.md
+  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - tui/internal/preset/principle/section.yaml
   - tui/internal/preset/procedures/section.yaml
   - tui/internal/preset/covenant/en/covenant.md
   - tui/internal/preset/covenant/zh/covenant.md
   - tui/internal/preset/covenant/wen/covenant.md
   - tui/internal/preset/procedures/procedures.md
+  - tui/internal/preset/skills/lingtai-recipe/SKILL.md
+  - tui/internal/preset/skills/lingtai-tutorial-guide/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include at least one
   ANATOMY.md file and at least one peer section.yaml so the prompt-section

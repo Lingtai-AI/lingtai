@@ -6,7 +6,10 @@ description: >
   capabilities, operations, addons, and graduation. Invoke this skill when the
   human is ready to begin or continue the tutorial.
 version: 2.0.1
-last_changed_at: "2026-06-02T00:34:40-07:00"
+last_changed_at: 2026-07-04T09:14:00Z
+related_files:
+  - tui/internal/preset/covenant/section.yaml
+  - tui/internal/preset/principle/section.yaml
 ---
 
 # Tutorial Guide — Router
