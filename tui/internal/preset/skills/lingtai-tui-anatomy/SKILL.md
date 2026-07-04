@@ -50,13 +50,7 @@ description: >
       separate tree with its own anatomy. Cross-repo references are
       narrative only ("the kernel writes this file; we read it").
 version: 0.1.0
-last_changed_at: 2026-07-04T09:14:00Z
-related_files:
-  - tui/internal/preset/ANATOMY.md
-  - tui/internal/preset/covenant/section.yaml
-  - tui/internal/preset/principle/section.yaml
-  - tui/internal/preset/procedures/section.yaml
-  - tui/internal/preset/soul/section.yaml
+last_changed_at: "2026-06-24T01:56:50-07:00"
 ---
 
 # LingTai (Go) Anatomy — the Convention

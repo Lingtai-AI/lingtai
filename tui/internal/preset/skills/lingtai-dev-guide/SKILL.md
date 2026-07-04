@@ -9,10 +9,7 @@ description: >
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
 version: 2.6.1
-last_changed_at: 2026-07-04T09:14:00Z
-related_files:
-  - tui/internal/preset/procedures/section.yaml
-  - tui/internal/preset/ANATOMY.md
+last_changed_at: "2026-07-03T08:05:00Z"
 ---
 
 # LingTai Developer Guide

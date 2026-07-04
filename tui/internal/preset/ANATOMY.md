@@ -17,13 +17,7 @@ related_files:
   - tui/internal/preset/preset_allowed_revoke_test.go
   - tui/internal/preset/preset_propagate_test.go
   - tui/internal/preset/preset_agent_json_merge_test.go
-  - tui/internal/preset/covenant/section.yaml
-  - tui/internal/preset/principle/section.yaml
-  - tui/internal/preset/procedures/section.yaml
-  - tui/internal/preset/soul/section.yaml
-  - tui/internal/preset/prompt_section_definition_test.go
   - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md
-  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
@@ -59,7 +53,6 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for `claude-agent-sdk`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
 | `Validate()` | `tui/internal/preset/preset.go:282` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
-| Prompt section definitions | `tui/internal/preset/procedures/section.yaml:1`, `tui/internal/preset/prompt_section_definition_test.go:10` | Metadata-only YAML sidecars for TUI-shipped resident prompt sections. Each definition links the rendered content to this anatomy and at least one neighboring `section.yaml`; the kernel does not render these YAML files into agent prompts. |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` | `tui/internal/preset/recipe_apply.go:59` | copies `.recipe/` (replace) + recipe skill library sibling (merge) + `.lingtai/` (merge) into project |
 | `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
@@ -75,12 +68,12 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Called by `tui/internal/tui/`** — all Bubble Tea screens (network home, preset editor, first-run wizard, recipe selector).
 - **Calls `tui/internal/config/`** — for `GlobalDirName` constant.
 - **Reads/writes `~/.lingtai-tui/presets/`** — `templates/` (TUI-owned, rewritten on Bootstrap) and `saved/` (user-owned). Also reads/writes per-project `.lingtai/<agent>/init.json` and `.lingtai/.tui-asset/`.
-- **Embeds prompt fragments and metadata** — covenant, principle, procedures, soul, templates, recipe_assets, skills — via `//go:embed`. The Markdown files are the canonical TUI-shipped prompt text; adjacent `section.yaml` files are metadata-only prompt section definitions that connect each section to this anatomy and neighboring definitions. The kernel reads only the configured Markdown paths from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router.
+- **Embeds prompt fragments** — covenant, principle, procedures, soul, templates, recipe_assets, skills — via `//go:embed`. These are the canonical TUI-shipped prompt text; the kernel reads them from disk after the TUI extracts them. Nested utility skills (for example `skills/swiss-knife/reference/<name>/SKILL.md`) are embedded and extracted as ordinary files under their parent router.
 
 ## Composition
 
 - **Parent:** `tui/internal/` (no own anatomy)
-- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. The resident prompt section folders carry metadata-only `section.yaml` sidecars next to rendered Markdown content. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`.
+- **Subfolders:** `covenant/`, `principle/`, `procedures/`, `templates/`, `soul/`, `recipe_assets/`, `skills/` — all `//go:embed` targets. `skills/swiss-knife/` is a top-level router whose nested utility references live under `skills/swiss-knife/reference/*/SKILL.md`.
 - **Siblings:** `tui/internal/migrate/ANATOMY.md` — migrations m029 (preset allowed list), m030 (preset dir split) live there
 
 ## State
