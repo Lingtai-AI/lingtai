@@ -165,6 +165,16 @@ type MailModel struct {
 	sessionCache      *fs.SessionCache // append-only session log
 	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
 	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
+
+	// Home telemetry is resolved asynchronously off the render/input path (its
+	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
+	// locked/slow sidecar). View()/hasHomeTelemetry()/syncViewportHeight() read
+	// this cached snapshot ONLY; the fetchHomeTelemetry background command
+	// refreshes it via homeTelemetryMsg. See home_telemetry.go's async note.
+	homeTelemetry          homeTelemetry // last-known snapshot; zero value renders no row
+	homeTelemetryLoaded    bool          // true once a background fetch has completed at least once
+	homeTelemetryInFlight  bool          // true while a fetchHomeTelemetry command is running (debounce)
+	homeTelemetryLastFetch time.Time     // completion time of the last fetch, for the TTL floor
 }
 
 func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSize int, globalDir, lang string, insights bool, toolCallTruncate int) MailModel {
@@ -715,6 +725,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.viewport.GotoBottom()
 			}
 		}
+		// Kick off the first background telemetry fetch as soon as a refresh has
+		// landed (including the deferred initial rebuild), so the row can appear on
+		// first load without waiting a full poll tick. Debounced by the same
+		// in-flight/TTL gate, so this and the tick driver never double-fetch.
+		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 
 	case pulseTickMsg:
@@ -724,7 +741,28 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, pulseTick()
 
 	case tickMsg:
-		return m, tea.Batch(m.refreshMail, tickEvery(m.pollRate))
+		// Steady-state driver: alongside the incremental mail refresh, schedule a
+		// background telemetry fetch (debounced by in-flight + TTL). All telemetry
+		// I/O funnels through maybeScheduleHomeTelemetry — the UI path never gathers.
+		cmds = append(cmds, m.refreshMail, tickEvery(m.pollRate))
+		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case homeTelemetryMsg:
+		// A background telemetry fetch completed. Land the snapshot; only re-sync
+		// the viewport height when the row's visibility flipped (data ⇄ no-data),
+		// so ordinary numeric updates don't thrash the layout.
+		if m.applyHomeTelemetry(msg.t, time.Now()) && m.ready {
+			atBottom := m.viewport.AtBottom()
+			m.syncViewportHeight()
+			m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+			if atBottom {
+				m.viewport.GotoBottom()
+			}
+		}
+		return m, nil
 
 	case SendMsg:
 		var text string
@@ -1618,8 +1656,16 @@ func (m MailModel) View() string {
 	// session/context data is available (graceful hide). Scalar-only — never the
 	// `_meta` block hidden by PR #440.
 	footer := sep + "\n" + inputSection + "\n"
-	if telemetry := formatHomeTelemetry(m.gatherHomeTelemetry(), m.width); telemetry != "" {
-		footer += telemetry + "\n"
+	// Read the cached telemetry snapshot ONLY — never gatherHomeTelemetry — so the
+	// render path performs no sqlite/filesystem/JSONL work. The snapshot is
+	// refreshed asynchronously by fetchHomeTelemetry (see home_telemetry.go).
+	// Gate on hasHomeTelemetry() (which carries the homeTelemetryLoaded guard) so
+	// View and syncViewportHeight share the exact same visibility predicate and can
+	// never disagree about whether the row occupies a line.
+	if m.hasHomeTelemetry() {
+		if telemetry := formatHomeTelemetry(m.homeTelemetry, m.width); telemetry != "" {
+			footer += telemetry + "\n"
+		}
 	}
 	footer += statusBar
 

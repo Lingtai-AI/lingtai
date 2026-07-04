@@ -93,6 +93,10 @@ func TestHomeTelemetryContextVisibleWithoutCtrlO(t *testing.T) {
 	if tel.contextUsage < 0 {
 		t.Fatalf("context usage not found at verboseOff: gatherHomeTelemetry must read the unfiltered session cache, not the verbose-filtered m.messages (contextUsage=%v)", tel.contextUsage)
 	}
+	// hasHomeTelemetry reads the cached snapshot the async fetch populates, not
+	// gatherHomeTelemetry directly. Drive the background fetch round-trip (run the
+	// command, feed its message back) so the snapshot reflects the notification.
+	m, _ = m.Update(m.fetchHomeTelemetry())
 	if !m.hasHomeTelemetry() {
 		t.Fatal("hasHomeTelemetry() is false at verboseOff despite a context-bearing notification in the session cache — the bar would be hidden until Ctrl+O")
 	}

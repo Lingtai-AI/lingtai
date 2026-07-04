@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -53,6 +55,89 @@ type homeTelemetry struct {
 	contextLimit  int64   // model context window; 0 = unknown
 	contextUsed   int64   // context tokens in use (.status.json TotalTokens); 0 = unknown
 	contextUsage  float64 // latest context-usage fraction 0..1; <0 = unknown
+}
+
+// --- Async scheduling ------------------------------------------------------
+//
+// gatherHomeTelemetry does real I/O: it reaches fs.SumMoltSessionTokenLedger
+// (sqlite sidecar via /usr/bin/sqlite3, plus a possible events.jsonl parse) and
+// fs.ReadStatus/ReadInitManifest. On a locked or slow-volume sidecar that work
+// can stall for seconds. It therefore MUST NOT run on the Bubble Tea render
+// (View) or input (Update/syncViewportHeight) paths — a stall there freezes the
+// whole TUI.
+//
+// Instead the UI paths read a last-known snapshot cached on the model
+// (m.homeTelemetry), and the I/O runs in the background as a tea.Cmd
+// (fetchHomeTelemetry) that returns a homeTelemetryMsg to refresh the snapshot.
+// The snapshot only moves when the kernel writes new ledger/status data (seconds
+// to minutes apart), so a sub-second staleness on the boundary is invisible.
+//
+// Fetches are debounced by two model flags checked in maybeScheduleHomeTelemetry:
+//   - homeTelemetryInFlight: at most one background fetch runs at a time, so a
+//     burst of keypresses/renders cannot spawn a pile of sqlite subprocesses.
+//   - homeTelemetryLastFetch + homeTelemetryTTL: after a completed fetch we skip
+//     re-fetching until the TTL elapses, so the steady-state 1s poll doesn't
+//     hammer the sidecar and rapid typing costs nothing.
+
+// homeTelemetryTTL is the minimum wall-clock interval between two completed
+// background telemetry fetches. It is deliberately close to the mail poll cadence
+// (m.pollRate, ~1s): the underlying data (token ledger, .status.json) is rewritten
+// by the kernel on a similar cadence, so fetching faster only burns I/O without
+// showing newer numbers. Repeated render/keypress within the TTL reuses the cached
+// snapshot with no I/O at all.
+const homeTelemetryTTL = 1 * time.Second
+
+// homeTelemetryMsg carries a freshly-gathered telemetry snapshot from the
+// background fetch back into the model on the Update path.
+type homeTelemetryMsg struct {
+	t homeTelemetry
+}
+
+// fetchHomeTelemetry is the background worker: it performs all telemetry I/O
+// (sqlite/ledger/status/manifest) off the UI thread and returns a homeTelemetryMsg.
+// It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
+// path + session cache) exactly like refreshMail/initialRebuild — the running
+// command never touches live model state.
+func (m MailModel) fetchHomeTelemetry() tea.Msg {
+	return homeTelemetryMsg{t: m.gatherHomeTelemetry()}
+}
+
+// maybeScheduleHomeTelemetry returns a fetchHomeTelemetry command when a new
+// background fetch is warranted, or nil to reuse the cached snapshot. It is the
+// single debounce/TTL/in-flight gate: callers (the poll tick and post-refresh)
+// funnel through it so no other path spawns telemetry I/O. It mutates only the
+// in-flight/last-fetch bookkeeping, never the snapshot itself (that lands via
+// homeTelemetryMsg), so it is safe to call from the Update path.
+func (m *MailModel) maybeScheduleHomeTelemetry(now time.Time) tea.Cmd {
+	if m.homeTelemetryInFlight {
+		return nil
+	}
+	// Honor the TTL only once we have a snapshot to fall back on; the very first
+	// fetch (nothing cached yet) is always allowed so the row can appear promptly.
+	if m.homeTelemetryLoaded && now.Sub(m.homeTelemetryLastFetch) < homeTelemetryTTL {
+		return nil
+	}
+	m.homeTelemetryInFlight = true
+	return m.fetchHomeTelemetry
+}
+
+// applyHomeTelemetry lands a background fetch result: it stores the snapshot,
+// clears the in-flight flag, and stamps the completion time for the TTL. It
+// returns true when the telemetry row's VISIBILITY flipped (row ⇄ no-row), which
+// is the only telemetry change that affects layout height — the caller re-syncs
+// the viewport only then, avoiding layout thrash on every numeric tick.
+//
+// "was visible" uses hasHomeTelemetry() (the loaded-aware predicate), NOT a bare
+// hasData() on the old snapshot: before the first fetch the row is not visible
+// even though the zero snapshot's hasData() reports true (the contextUsage==0
+// sentinel trap). So the first real landing correctly reports false→true.
+func (m *MailModel) applyHomeTelemetry(t homeTelemetry, now time.Time) (visibilityChanged bool) {
+	was := m.hasHomeTelemetry()
+	m.homeTelemetry = t
+	m.homeTelemetryLoaded = true
+	m.homeTelemetryInFlight = false
+	m.homeTelemetryLastFetch = now
+	return m.hasHomeTelemetry() != was
 }
 
 // gatherHomeTelemetry resolves the telemetry scalars for the orchestrator agent
@@ -172,8 +257,20 @@ func (t homeTelemetry) hasData() bool {
 // It is the single predicate shared by the height budget (syncViewportHeight)
 // and the renderer (View) so they can never disagree about whether the row
 // occupies a line — a disagreement is exactly what clipped the status bar.
+//
+// It reads the last-known cached snapshot (m.homeTelemetry) ONLY — never
+// gatherHomeTelemetry — so it stays on the UI hot path without touching
+// sqlite/filesystem/JSONL. The snapshot is refreshed asynchronously by the
+// fetchHomeTelemetry background command (see the Async scheduling note above).
+//
+// The homeTelemetryLoaded gate matters: a zero-value homeTelemetry has
+// contextUsage == 0, and hasData() treats contextUsage >= 0 as "present" (the
+// unknown sentinel is -1, set only inside gatherHomeTelemetry). So before the
+// first fetch lands we must NOT trust the zero snapshot — we render without the
+// row rather than showing a spurious "ctx 0%". Once a fetch has completed, the
+// snapshot carries the real -1/≥0 sentinel and hasData() is authoritative.
 func (m MailModel) hasHomeTelemetry() bool {
-	return m.gatherHomeTelemetry().hasData()
+	return m.homeTelemetryLoaded && m.homeTelemetry.hasData()
 }
 
 // mailFooterHeight returns how many terminal rows the mail-view footer block

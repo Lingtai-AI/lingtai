@@ -58,6 +58,12 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 	// Drive the deferred initial rebuild (the normal launch path) so the
 	// notification populates the session cache. No Ctrl+O, verbose stays off.
 	m, _ = m.Update(m.initialRebuild())
+	// Home telemetry is now resolved asynchronously: gathering it does I/O off the
+	// UI path via the fetchHomeTelemetry command, and the model only shows the row
+	// once the resulting homeTelemetryMsg has landed. Drive that round-trip here
+	// (run the command, feed its message back through Update) exactly as the
+	// runtime would, so the cached snapshot is populated before we render.
+	m, _ = m.Update(m.fetchHomeTelemetry())
 	// Re-sync height now that telemetry visibility flipped on.
 	m.lastInputLines = -1
 	m.syncViewportHeight()
