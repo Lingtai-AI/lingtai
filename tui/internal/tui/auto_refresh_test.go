@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
@@ -123,14 +124,16 @@ func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
 	// Interactive / markdown / picker-heavy views must not auto-refresh every
 	// second: doing so can reset scroll or selection while the human is navigating
 	// with the keyboard. They retain explicit Ctrl+R refresh only.
+	// Note: /knowledge (appViewCodex) and /skills (appViewLibrary) participate
+	// in auto-refresh via change-aware mtime checks — see
+	// TestCodexAutoRefreshReloadsOnDirectoryChange and
+	// TestLibraryAutoRefreshReloadsOnDirectoryChange below.
 	blocked := []App{
 		{currentView: appViewProjects, projects: NewProjectsModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewDaemons, daemons: NewDaemonsModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewDoctor, doctor: DoctorModel{orchDir: dir, globalDir: dir}, tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewMailbox, mailbox: NewMailboxModel(dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewSystem, system: NewSystemModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
-		{currentView: appViewLibrary, library: NewLibraryModel(dir, dir, "en"), tuiConfig: config.DefaultTUIConfig()},
-		{currentView: appViewCodex, codex: NewCodexModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewPresets, presetLibrary: NewPresetLibraryModel("en", dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewAddon, addon: NewAddonModel(dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewNotification, notification: NewNotificationModel(dir), tuiConfig: config.DefaultTUIConfig()},
@@ -140,6 +143,109 @@ func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
 		if _, cmd := tc.autoRefreshActiveView(); cmd != nil {
 			t.Fatalf("view %v should not participate in 1s auto-refresh; use Ctrl+R", tc.currentView)
 		}
+	}
+}
+
+// TestCodexAutoRefreshNoChangeSkipsReload verifies that /knowledge auto-refresh
+// returns nil when the knowledge/ directory hasn't changed.
+func TestCodexAutoRefreshNoChangeSkipsReload(t *testing.T) {
+	dir := t.TempDir()
+	// Create the knowledge dir so mtime is seeded by the constructor.
+	knowledgeDir := filepath.Join(dir, "knowledge")
+	if err := os.MkdirAll(knowledgeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := App{
+		currentView: appViewCodex,
+		codex:       NewCodexModel(dir, dir),
+		tuiConfig:   config.DefaultTUIConfig(),
+	}
+	_, cmd := app.autoRefreshActiveView()
+	if cmd != nil {
+		t.Fatal("/knowledge auto-refresh should return nil when directory hasn't changed")
+	}
+}
+
+// TestCodexAutoRefreshReloadsOnDirectoryChange verifies that /knowledge
+// auto-refresh triggers a reload when the knowledge/ directory is modified.
+func TestCodexAutoRefreshReloadsOnDirectoryChange(t *testing.T) {
+	dir := t.TempDir()
+	knowledgeDir := filepath.Join(dir, "knowledge")
+	if err := os.MkdirAll(knowledgeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := App{
+		currentView: appViewCodex,
+		codex:       NewCodexModel(dir, dir),
+		tuiConfig:   config.DefaultTUIConfig(),
+	}
+
+	// Simulate a knowledge entry being written (dir mtime advances).
+	if err := os.MkdirAll(filepath.Join(knowledgeDir, "test-entry"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(knowledgeDir, "test-entry", "KNOWLEDGE.md"),
+		[]byte("---\nname: test\ndescription: test\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Set lastMtime to zero to force detection (mkdir+write may happen within
+	// the same filesystem tick window).
+	app.codex.lastMtime = time.Time{}
+	app.codex.width = 80
+	app.codex.height = 24
+
+	updated, _ := app.autoRefreshActiveView()
+	// The reload happened if lastMtime advanced from the zero value.
+	if updated.codex.lastMtime.IsZero() {
+		t.Fatal("/knowledge auto-refresh should reload when directory has changed (lastMtime should be updated)")
+	}
+}
+
+// TestLibraryAutoRefreshNoChangeSkipsReload verifies that /skills auto-refresh
+// returns nil when the .library/ directory hasn't changed.
+func TestLibraryAutoRefreshNoChangeSkipsReload(t *testing.T) {
+	dir := t.TempDir()
+	libraryDir := filepath.Join(dir, ".library")
+	if err := os.MkdirAll(libraryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := App{
+		currentView: appViewLibrary,
+		library:     NewLibraryModel(dir, dir, "en"),
+		tuiConfig:   config.DefaultTUIConfig(),
+	}
+	_, cmd := app.autoRefreshActiveView()
+	if cmd != nil {
+		t.Fatal("/skills auto-refresh should return nil when directory hasn't changed")
+	}
+}
+
+// TestLibraryAutoRefreshReloadsOnDirectoryChange verifies that /skills
+// auto-refresh triggers a reload when the .library/ directory is modified.
+func TestLibraryAutoRefreshReloadsOnDirectoryChange(t *testing.T) {
+	dir := t.TempDir()
+	libraryDir := filepath.Join(dir, ".library")
+	if err := os.MkdirAll(libraryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := App{
+		currentView: appViewLibrary,
+		library:     NewLibraryModel(dir, dir, "en"),
+		tuiConfig:   config.DefaultTUIConfig(),
+	}
+
+	// Simulate a skill being added (dir mtime advances).
+	if err := os.MkdirAll(filepath.Join(libraryDir, "custom", "test-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Set lastMtime to zero to force detection.
+	app.library.lastMtime = time.Time{}
+	app.library.width = 80
+	app.library.height = 24
+
+	updated, _ := app.autoRefreshActiveView()
+	if updated.library.lastMtime.IsZero() {
+		t.Fatal("/skills auto-refresh should reload when directory has changed (lastMtime should be updated)")
 	}
 }
 

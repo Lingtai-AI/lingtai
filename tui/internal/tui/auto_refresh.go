@@ -39,11 +39,15 @@ func autoRefreshCtrlRMsg() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}
 }
 
-// autoRefreshActiveView reloads only the kanban/props view. Other Ctrl+R-
-// reloadable screens (/mailbox, /system, /daemons, markdown viewers, pickers,
-// and editors) are intentionally excluded from the 1s auto-refresh loop because
+// autoRefreshActiveView reloads the kanban/props view and the knowledge/library
+// markdown viewers. Other Ctrl+R-reloadable screens (/mailbox, /system, /daemons,
+// editors) are intentionally excluded from the 1s auto-refresh loop because
 // reloading them resets or disrupts keyboard selection/scroll state. They keep
 // Ctrl+R as the explicit manual refresh path.
+//
+// The knowledge and library views use a change-aware reload (mtime check) so
+// the catalog only rebuilds when the underlying directory actually changed —
+// avoiding unnecessary scroll/selection resets on every tick.
 func (a App) autoRefreshActiveView() (App, tea.Cmd) {
 	switch a.currentView {
 	case appViewProps:
@@ -58,6 +62,16 @@ func (a App) autoRefreshActiveView() (App, tea.Cmd) {
 			a.props.syncViewportContent()
 		}
 		return a, a.props.AutoReloadCmd()
+	case appViewCodex:
+		// /knowledge: reload only when the knowledge/ directory changed on disk.
+		var cmd tea.Cmd
+		a.codex, cmd = a.codex.reloadIfChanged()
+		return a, cmd
+	case appViewLibrary:
+		// /skills: reload only when the skills directories changed on disk.
+		var cmd tea.Cmd
+		a.library, cmd = a.library.reloadIfChanged()
+		return a, cmd
 	}
 	return a, nil
 }

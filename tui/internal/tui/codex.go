@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -30,11 +32,15 @@ type CodexModel struct {
 	pickerIdx  int
 	agentNodes []fs.AgentNode
 
-	width  int
-	height int
-	ready  bool
+	width     int
+	height    int
+	ready     bool
 
 	pickerVP viewport.Model
+
+	// lastMtime tracks the modification time of the knowledge/ directory so
+	// that auto-refresh can skip rebuilding the catalog when nothing changed.
+	lastMtime time.Time
 }
 
 type codexLoadMsg struct {
@@ -47,11 +53,16 @@ func NewCodexModel(baseDir, selectedDir string) CodexModel {
 	entries := buildAgentCodexEntries(selectedDir)
 	inner := NewMarkdownViewer(entries, codexTitleFor(selectedDir))
 	inner.FooterHint = i18n.T("hints.props_select")
-	return CodexModel{
+	m := CodexModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
 		inner:       inner,
 	}
+	// Seed mtime so auto-refresh only fires on changes after construction.
+	if info, err := os.Stat(filepath.Join(selectedDir, "knowledge")); err == nil {
+		m.lastMtime = info.ModTime()
+	}
+	return m
 }
 
 func codexTitleFor(agentDir string) string {
@@ -71,8 +82,13 @@ func codexTitleFor(agentDir string) string {
 }
 
 // reloadInner rebuilds the knowledge catalog for the selected agent from disk,
-// resetting the inner markdown viewer to the top. Invoked by ctrl+r.
+// resetting the inner markdown viewer to the top. Invoked by ctrl+r and
+// auto-refresh (when the directory has changed).
 func (m CodexModel) reloadInner() (CodexModel, tea.Cmd) {
+	m.drillIn = nil // match LibraryModel.reloadCatalog: clear drill-in on reload
+	if info, err := os.Stat(filepath.Join(m.selectedDir, "knowledge")); err == nil {
+		m.lastMtime = info.ModTime()
+	}
 	entries := buildAgentCodexEntries(m.selectedDir)
 	m.inner = NewMarkdownViewer(entries, codexTitleFor(m.selectedDir))
 	m.inner.FooterHint = i18n.T("hints.props_select")
@@ -82,6 +98,26 @@ func (m CodexModel) reloadInner() (CodexModel, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// reloadIfChanged checks whether the knowledge/ directory has been modified
+// since the last reload and, if so, rebuilds the catalog. This is the
+// auto-refresh entry point: cheap (a single os.Stat) when nothing changed,
+// and only rebuilds when new/removed/updated entries are detected.
+func (m CodexModel) reloadIfChanged() (CodexModel, tea.Cmd) {
+	// Skip when the user is interacting (picker open or drilling into an entry).
+	if m.pickerOpen || m.drillIn != nil {
+		return m, nil
+	}
+	info, err := os.Stat(filepath.Join(m.selectedDir, "knowledge"))
+	if err != nil {
+		return m, nil
+	}
+	if !info.ModTime().After(m.lastMtime) {
+		return m, nil
+	}
+	m.lastMtime = info.ModTime()
+	return m.reloadInner()
 }
 
 func (m CodexModel) loadAgents() tea.Msg {

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -659,6 +660,10 @@ type LibraryModel struct {
 	// Picker scrolling viewport (used only while picker is open so very large
 	// networks don't overflow the screen).
 	pickerVP viewport.Model
+
+	// lastMtime tracks the modification time of the .library/ directory so
+	// that auto-refresh can skip rebuilding the catalog when nothing changed.
+	lastMtime time.Time
 }
 
 // libraryLoadMsg carries the discovered agent list for the picker.
@@ -674,12 +679,17 @@ func NewLibraryModel(baseDir, selectedDir, lang string) LibraryModel {
 	entries := buildAgentLibraryCatalog(selectedDir, lang)
 	inner := NewMarkdownViewer(entries, libraryTitleFor(selectedDir))
 	inner.FooterHint = i18n.T("hints.skills_catalog")
-	return LibraryModel{
+	m := LibraryModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
 		lang:        lang,
 		inner:       inner,
 	}
+	// Seed mtime so auto-refresh only fires on changes after construction.
+	if info, err := os.Stat(filepath.Join(selectedDir, ".library")); err == nil {
+		m.lastMtime = info.ModTime()
+	}
+	return m
 }
 
 // libraryTitleFor returns the viewer title annotated with the current agent's
@@ -727,12 +737,33 @@ func (m LibraryModel) reloadCatalog() (LibraryModel, tea.Cmd) {
 	m.inner = NewMarkdownViewer(entries, libraryTitleFor(m.selectedDir))
 	m.inner.FooterHint = i18n.T("hints.skills_catalog")
 	m.drillIn = nil
+	if info, err := os.Stat(filepath.Join(m.selectedDir, ".library")); err == nil {
+		m.lastMtime = info.ModTime()
+	}
 	if m.width > 0 && m.height > 0 {
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 		return m, cmd
 	}
 	return m, nil
+}
+
+// reloadIfChanged checks whether the .library/ directory has been modified
+// since the last reload and, if so, rebuilds the catalog. This is the
+// auto-refresh entry point: cheap (a single os.Stat) when nothing changed,
+// and only rebuilds when new/removed/updated skills are detected.
+func (m LibraryModel) reloadIfChanged() (LibraryModel, tea.Cmd) {
+	if m.pickerOpen || m.drillIn != nil {
+		return m, nil
+	}
+	info, err := os.Stat(filepath.Join(m.selectedDir, ".library"))
+	if err != nil {
+		return m, nil
+	}
+	if !info.ModTime().After(m.lastMtime) {
+		return m, nil
+	}
+	return m.reloadCatalog()
 }
 
 const (
