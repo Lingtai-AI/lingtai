@@ -69,6 +69,7 @@ func DefaultCommands() []Command {
 		{Name: "system", Description: "palette.system", Detail: "cmd.system"},
 		{Name: "mailbox", Description: "palette.mailbox", Detail: "cmd.mailbox"},
 		{Name: "presets", Description: "palette.presets", Detail: "cmd.presets"},
+		{Name: "marketplace", Description: "palette.marketplace", Detail: "cmd.marketplace"},
 		{Name: "molt", Description: "palette.molt", Detail: "cmd.molt"},
 		{Name: "nirvana", Description: "palette.nirvana", Detail: "cmd.nirvana"},
 		{Name: "login", Description: "palette.login", Detail: "cmd.login"},

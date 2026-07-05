@@ -40,6 +40,7 @@ const (
 	appViewPresets
 	appViewDaemons
 	appViewNotification
+	appViewMarketplace
 	appViewHelp
 )
 
@@ -56,6 +57,7 @@ type App struct {
 	mailbox       MailboxModel
 	daemons       DaemonsModel
 	notification  NotificationModel
+	marketplace   MarketplaceModel
 	presetLibrary PresetLibraryModel
 	help          HelpModel
 	firstRun      FirstRunModel
@@ -275,6 +277,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.daemons, cmd = a.daemons.Update(msg)
 		case appViewNotification:
 			a.notification, cmd = a.notification.Update(msg)
+		case appViewMarketplace:
+			a.marketplace, cmd = a.marketplace.Update(msg)
 		case appViewHelp:
 			a.help, cmd = a.help.Update(msg)
 		}
@@ -601,7 +605,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
+			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewMarketplace && a.currentView != appViewHelp {
 				return a, tea.Quit
 			}
 		}
@@ -680,6 +684,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewNotification:
 		updated, cmd := a.notification.Update(msg)
 		a.notification = updated
+		return a, cmd
+	case appViewMarketplace:
+		updated, cmd := a.marketplace.Update(msg)
+		a.marketplace = updated
 		return a, cmd
 	case appViewHelp:
 		updated, cmd := a.help.Update(msg)
@@ -907,6 +915,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNotification
 		a.notification = NewNotificationModel(a.orchDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "marketplace":
+		a.currentView = appViewMarketplace
+		a.marketplace = NewMarketplaceModel(a.globalDir, a.projectDir, a.tuiConfig.Language)
+		return a, tea.Batch(a.marketplace.Init(), a.sendSize())
 	case "goal":
 		if targetDir == "" {
 			addMsg(i18n.T("mail.goal_no_agent"))
@@ -1464,6 +1476,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNotification
 		a.notification = NewNotificationModel(a.orchDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "marketplace":
+		a.currentView = appViewMarketplace
+		a.marketplace = NewMarketplaceModel(a.globalDir, a.projectDir, a.tuiConfig.Language)
+		return a, tea.Batch(a.marketplace.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -1558,6 +1574,8 @@ func (a App) View() tea.View {
 		content = a.daemons.View()
 	case appViewNotification:
 		content = a.notification.View()
+	case appViewMarketplace:
+		content = a.marketplace.View()
 	case appViewHelp:
 		content = a.help.View()
 	}

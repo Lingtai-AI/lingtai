@@ -11,6 +11,8 @@ related_files:
   - tui/internal/preset/recipe_apply_test.go
   - tui/internal/preset/recipes.go
   - tui/internal/preset/recipes_test.go
+  - tui/internal/preset/marketplace.go
+  - tui/internal/preset/marketplace_test.go
   - tui/internal/preset/rehydrate.go
   - tui/internal/preset/state.go
   - tui/internal/preset/state_test.go
@@ -62,6 +64,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `RecipeState` | `tui/internal/preset/state.go:19` | `{Recipe, CustomDir}` — TUI-only, in `recipe-state.json` |
 | `LoadRecipeState` / `SaveRecipeState` | `tui/internal/preset/state.go:35,52` | atomic read/write of `.lingtai/.tui-asset/recipe-state.json` |
 | `RehydrateNetwork` | `tui/internal/preset/rehydrate.go:35` | propagates orchestrator `init.json` to worker agents; strips addons, admin |
+| `MarketplaceEntry` / `MarketplaceEntries` | `tui/internal/preset/marketplace.go` | recipe-marketplace data layer (backs `/marketplace`). A marketplace entry is an **external-skill + recipe combination** — a recipe whose `RecipeInfo.LibraryName != nil`. `MarketplaceEntries` unions `ScanLocalMarketplaceEntries` (agora + category recipes that ship a library, `Origin=local`/`Install=ready`) with the curated static `BuiltinMarketplaceEntries` (`Origin=community`/`Install=manual`, incl. the Roundtable Expert Panel example); a community entry already present locally is shadowed by its local form. No runtime remote fetch — the `Install` field is the seam for a future validated importer. |
 
 ## Connections
 

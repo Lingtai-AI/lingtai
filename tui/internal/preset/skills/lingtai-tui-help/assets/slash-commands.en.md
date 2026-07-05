@@ -51,6 +51,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 - `/daemons` — inspect per-agent daemon runs and their records.
 - `/notification` — show the current agent's latest notification blocks with left/right navigation.
 - `/presets` — view the presets this agent can switch to with `/refresh`.
+- `/marketplace` — browse external-skill + recipe combinations (recipes that ship a skill library).
 
 ### Network & sharing
 - `/mailbox` — browse all mailbox messages and attachments.
@@ -216,6 +217,20 @@ preset's LLM and capabilities, and tag it with a 1–5 star cost/quality tier
 (higher is better); tags propagate to agents and guide daemon/avatar selection.
 This view is read-only inspection plus tag editing — full preset creation happens
 in `/setup`.
+
+### `/marketplace` — browse the recipe marketplace
+**Usage:** `/marketplace`
+
+Opens the recipe marketplace: curated external-skill + recipe combinations. A
+marketplace entry is a recipe that ships a skill library (its `library_name`) —
+it is not a plain recipe store and not a live GitHub search. Entries are grouped
+into **Local** pairings (already on this machine, selectable in `/setup`) and
+**Community** pairings (curated third-party bundles that are browse + preview
+only). Each detail page shows the recipe reference, the external skill library
+and its skills, source/author, tags, and a preview & safety section. Nothing is
+fetched at runtime: to use a community pairing, review its safety text, then
+import the bundle manually into `~/lingtai-agora/recipes/` and validate it —
+once present it appears under Local and becomes selectable in `/setup`.
 
 ### `/mailbox` — browse all mailbox messages
 **Usage:** `/mailbox`
