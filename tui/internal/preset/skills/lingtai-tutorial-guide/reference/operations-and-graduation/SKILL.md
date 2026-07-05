@@ -29,7 +29,7 @@ Keyboard shortcuts: explain ctrl+o (three verbose modes: off → verbose → ext
 
 ## Lesson 11: Addons — External Connections
 
-**Discover available addons dynamically** — use `skills({"action": "info"})` to get a full catalog of available skills, then look for addon setup skills following the naming pattern `lingtai-*-setup`. List whatever you find and ask the human which ones interest them.
+**Discover available skills and addons dynamically** — use `skills({"action": "info"})` to get a full catalog of available skills. Explain that the catalog includes reusable procedures such as addon setup skills (`lingtai-*-setup`) and, if present, `lingtai-issue-report` for structured problem reports. List whatever you find and ask the human which ones interest them.
 
 For each addon the human wants to set up:
 1. Use `skills()` to find and read the setup skill's SKILL.md
