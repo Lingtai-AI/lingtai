@@ -210,6 +210,7 @@ type FirstRunModel struct {
 	codexAuth      struct {
 		valid bool
 		email string // "" if JWT didn't carry one but tokens are valid
+		label string // non-secret display label: email, per-account slug, or localized default
 	}
 	// claudeCodeAuthValid is true when the local Claude Code CLI exists
 	// and reports an authenticated session. The TUI only detects this
@@ -2320,11 +2321,7 @@ func (m FirstRunModel) View() string {
 			if m.setupMode {
 				if m.codexAuth.valid {
 					okStyle := lipgloss.NewStyle().Foreground(ColorActive)
-					if m.codexAuth.email != "" {
-						row += "  " + okStyle.Render("✓ "+m.codexAuth.email)
-					} else {
-						row += "  " + okStyle.Render("✓ "+i18n.T("preset.codex_credential_authed_badge"))
-					}
+					row += "  " + okStyle.Render("✓ "+m.codexAuthDisplayLabel())
 				}
 				if m.cursor == visibleCount {
 					row += "  " + StyleFaint.Render(i18n.T("preset.codex_credential_setup_hint"))
@@ -2334,11 +2331,7 @@ func (m FirstRunModel) View() string {
 				// Login-only row: just confirm the authed state and
 				// point the user at 新建预设 for actual preset creation.
 				okStyle := lipgloss.NewStyle().Foreground(ColorActive)
-				if m.codexAuth.email != "" {
-					row += "  " + okStyle.Render("✓ "+m.codexAuth.email)
-				} else {
-					row += "  " + okStyle.Render("✓ "+i18n.T("preset.codex_credential_authed_badge"))
-				}
+				row += "  " + okStyle.Render("✓ "+m.codexAuthDisplayLabel())
 				// When the cursor parks on this row, surface the relogin
 				// affordance — quiet otherwise.
 				if m.cursor == visibleCount {
@@ -3966,6 +3959,14 @@ func (m FirstRunModel) codexPresetAuthValid(p preset.Preset) bool {
 	return codexAuthPathValid(resolveCodexAuthPath(m.globalDir, ref))
 }
 
+func (m FirstRunModel) codexAuthDisplayLabel() string {
+	label := strings.TrimSpace(m.codexAuth.label)
+	if label != "" {
+		return label
+	}
+	return codexAccountName(codexAccount{Email: m.codexAuth.email, Legacy: true})
+}
+
 func (m *FirstRunModel) refreshCodexAuth() {
 	// codexAuth.valid reflects whether ANY Codex account is configured, so
 	// the inline credential row shows an authed state once the user has at
@@ -3974,27 +3975,25 @@ func (m *FirstRunModel) refreshCodexAuth() {
 	if !ok {
 		// No legacy account; fall back to any per-account file so the row
 		// still reflects "Codex is set up" when only newer accounts exist.
-		if hasAnyCodexAccount(m.globalDir) {
-			m.codexAuth.valid = true
-			m.codexAuth.email = ""
-			for _, a := range listCodexAccounts(m.globalDir) {
-				if a.Valid && a.Email != "" {
-					m.codexAuth.email = a.Email
-					break
-				}
-			}
-			return
-		}
 		m.codexAuth.valid = false
 		m.codexAuth.email = ""
+		m.codexAuth.label = ""
+		for _, a := range listCodexAccounts(m.globalDir) {
+			if !a.Valid {
+				continue
+			}
+			m.codexAuth.valid = true
+			m.codexAuth.email = a.Email
+			m.codexAuth.label = codexAccountName(a)
+			if a.Email != "" {
+				break
+			}
+		}
 		return
 	}
 	m.codexAuth.valid = true
-	if tokens.Email != "" {
-		m.codexAuth.email = tokens.Email
-	} else {
-		m.codexAuth.email = ""
-	}
+	m.codexAuth.email = tokens.Email
+	m.codexAuth.label = codexAccountName(codexAccount{Email: tokens.Email, Legacy: true})
 }
 
 // refreshClaudeCodeAuth checks whether Claude Code is installed and logged in.

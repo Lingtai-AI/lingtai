@@ -156,6 +156,34 @@ func NewSetupCredentialsModel(orchDir, globalDir string) LoginModel {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// codexAccountName returns a recognizable, non-secret account name so
+// multiple Codex accounts can be told apart at a glance. The name prefers the
+// account email; falls back to the per-account file slug; and, for the legacy
+// single-account file with no stored email, uses the localized default-account
+// label (matching PresetEditorModel.codexBoundAccountLabel). It never exposes
+// token material — only the email/slug already derived for display. Kept in
+// login.go (not codex_auth_store.go) so the store helper stays free of the i18n
+// dependency.
+func codexAccountName(acct codexAccount) string {
+	name := strings.TrimSpace(acct.Email)
+	if name != "" {
+		return name
+	}
+	if acct.Legacy {
+		return i18n.T("codex.account_default")
+	}
+	// codexAccount.Label() derives the file slug for a per-account file
+	// (its own fallback for the legacy case is a plain-English "default",
+	// which we deliberately override above with the localized label).
+	return acct.Label()
+}
+
+// codexAccountDisplay returns the credential-row display string for a Codex
+// account: the fixed "OAuth" tag followed by the shared account name.
+func codexAccountDisplay(acct codexAccount) string {
+	return "OAuth — " + codexAccountName(acct)
+}
+
 // providerBaseURL returns the default API base URL for known providers.
 func providerBaseURL(provider string) string {
 	switch provider {
@@ -191,15 +219,9 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 	// Each becomes its own entry so multiple ChatGPT accounts coexist.
 	for _, acct := range listCodexAccounts(globalDir) {
 		tok, _ := readCodexTokenFile(acct.Path)
-		display := "OAuth"
-		if acct.Email != "" {
-			display = "OAuth — " + acct.Email
-		} else if !acct.Legacy {
-			display = "OAuth — " + acct.Label()
-		}
 		m.entries = append(m.entries, loginEntry{
 			Provider:    "codex",
-			Display:     display,
+			Display:     codexAccountDisplay(acct),
 			Status:      loginChecking,
 			IsOAuth:     true,
 			BaseURL:     "https://chatgpt.com/backend-api",
@@ -410,12 +432,17 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 			return m, nil
 		}
 
-		// Update the matching account entry by path, or add a new one.
+		// Update the matching account entry by path, or add a new one. Build the
+		// display name through the shared helper so a re-auth/add keeps the same
+		// recognizable label the constructor renders (email → file slug →
+		// localized default) instead of collapsing to a bare "OAuth" when the
+		// fresh tokens carry no email.
 		isLegacy := target == legacy
-		display := "OAuth"
-		if msg.Tokens.Email != "" {
-			display = "OAuth — " + msg.Tokens.Email
-		}
+		display := codexAccountDisplay(codexAccount{
+			Path:   target,
+			Email:  msg.Tokens.Email,
+			Legacy: isLegacy,
+		})
 		found := false
 		for idx := range m.entries {
 			if m.entries[idx].Provider == "codex" && m.entries[idx].CodexPath == target {

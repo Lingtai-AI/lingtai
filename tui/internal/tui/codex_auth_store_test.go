@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,6 +24,22 @@ func writeStubCodexToken(t *testing.T, path, email string) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write token: %v", err)
 	}
+}
+
+func fakeCodexAccessTokenWithEmail(t *testing.T, email string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payload := map[string]interface{}{
+		"sub": "u-1",
+		"https://api.openai.com/profile": map[string]string{
+			"email": email,
+		},
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return fmt.Sprintf("%s.%s.sig", header, base64.RawURLEncoding.EncodeToString(payloadJSON))
 }
 
 // TestResolveCodexAuthPath_LegacyFallback verifies an empty ref resolves to the
@@ -62,6 +80,55 @@ func TestCodexAuthPathValid(t *testing.T) {
 	os.WriteFile(bad, []byte(`{"access_token":"x"}`), 0o600) // no refresh_token
 	if codexAuthPathValid(bad) {
 		t.Error("a file without a refresh_token should be invalid")
+	}
+}
+
+func TestReadCodexTokenFileDerivesEmailFromAccessToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tok := CodexTokens{
+		AccessToken:  fakeCodexAccessTokenWithEmail(t, "alice@example.com"),
+		RefreshToken: "stub-refresh",
+		ExpiresAt:    9999999999,
+	}
+	data, _ := json.Marshal(tok)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	got, ok := readCodexTokenFile(path)
+	if !ok {
+		t.Fatal("token file should parse as valid")
+	}
+	if got.Email != "alice@example.com" {
+		t.Fatalf("expected email derived from access_token, got %q", got.Email)
+	}
+}
+
+func TestReadCodexTokenFileKeepsEmailForInvalidRefresh(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tok := CodexTokens{
+		AccessToken: fakeCodexAccessTokenWithEmail(t, "invalid@example.com"),
+		ExpiresAt:   9999999999,
+	}
+	data, _ := json.Marshal(tok)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	got, ok := readCodexTokenFile(path)
+	if ok {
+		t.Fatal("token file without refresh_token should remain invalid")
+	}
+	if got.Email != "invalid@example.com" {
+		t.Fatalf("invalid token file should still keep derived email for display; got %q", got.Email)
 	}
 }
 

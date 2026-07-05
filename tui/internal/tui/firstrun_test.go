@@ -343,6 +343,34 @@ func TestPickPreset_OAuthDoneWritesOnMatchingEpoch(t *testing.T) {
 	}
 }
 
+func TestPickPreset_CodexAuthRowShowsAccountLabel(t *testing.T) {
+	i18n.SetLang("en")
+	globalDir := t.TempDir()
+	workPath := filepath.Join(codexAuthDir(globalDir), "work-bob.json")
+	writeCodexAccountFile(t, workPath, "")
+
+	m := FirstRunModel{
+		step:      stepPickPreset,
+		setupMode: true,
+		globalDir: globalDir,
+		cursor:    0,
+	}
+	m.refreshCodexAuth()
+	if !m.codexAuth.valid {
+		t.Fatal("per-account Codex auth should make /setup codex auth row valid")
+	}
+	if m.codexAuth.label != "work-bob" {
+		t.Fatalf("expected per-account slug label, got %q", m.codexAuth.label)
+	}
+	view := m.View()
+	if !strings.Contains(view, "work-bob") {
+		t.Fatalf("/setup codex auth row should show account label; view=%s", view)
+	}
+	if strings.Contains(view, i18n.T("preset.codex_credential_authed_badge")) {
+		t.Fatalf("/setup codex auth row should not fall back to generic logged-in badge; view=%s", view)
+	}
+}
+
 // TestPickPreset_DelCancelsInFlightLogin verifies that pressing Del
 // while codexLoggingIn invokes the stored cancel and bumps the epoch,
 // so any late callback is dropped.

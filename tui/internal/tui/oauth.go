@@ -585,6 +585,9 @@ func exchangeCodeForTokens(tokenURL, code, verifier, redirectURI string) (*Codex
 	}
 
 	email := extractEmailFromJWT(raw.IDToken)
+	if email == "" {
+		email = extractEmailFromJWT(raw.AccessToken)
+	}
 
 	return &CodexTokens{
 		AccessToken:  raw.AccessToken,
@@ -685,6 +688,8 @@ func refreshCodexTokens(refreshToken string, existing CodexTokens) (*CodexTokens
 	}
 	merged.ExpiresAt = time.Now().Unix() + raw.ExpiresIn
 	if email := extractEmailFromJWT(raw.IDToken); email != "" {
+		merged.Email = email
+	} else if email := extractEmailFromJWT(raw.AccessToken); email != "" {
 		merged.Email = email
 	}
 	return &merged, nil
