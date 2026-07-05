@@ -135,7 +135,8 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 			case releaseNewer(current, release.TagName):
 				result.add(DoctorWarn, "TUI update available: %s -> %s", current, release.TagName)
 			default:
-				result.add(DoctorOK, "Latest release is not newer than current TUI version; running updater anyway")
+				result.add(DoctorOK, "TUI is already at the latest version (%s)", current)
+				return result
 			}
 		}
 	}
