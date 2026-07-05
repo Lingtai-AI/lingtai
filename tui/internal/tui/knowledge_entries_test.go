@@ -20,7 +20,7 @@ func TestDefaultCommandsIncludesKnowledge(t *testing.T) {
 	t.Fatal("DefaultCommands() missing knowledge command")
 }
 
-func TestBuildAgentCodexEntries_ReadsFilesystemKnowledge(t *testing.T) {
+func TestBuildAgentKnowledgeCatalogEntries_ReadsFilesystemKnowledge(t *testing.T) {
 	agentDir := t.TempDir()
 	knowledgePath := filepath.Join(agentDir, "knowledge", "mimo", "KNOWLEDGE.md")
 	if err := os.MkdirAll(filepath.Dir(knowledgePath), 0o755); err != nil {
@@ -31,7 +31,7 @@ func TestBuildAgentCodexEntries_ReadsFilesystemKnowledge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries := buildAgentCodexEntries(agentDir)
+	entries := buildAgentKnowledgeCatalogEntries(agentDir)
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries, want 1", len(entries))
 	}
@@ -50,7 +50,7 @@ func TestBuildAgentCodexEntries_ReadsFilesystemKnowledge(t *testing.T) {
 	}
 }
 
-func TestBuildAgentCodexEntries_HidesNestedSubKnowledgeFromTopLayer(t *testing.T) {
+func TestBuildAgentKnowledgeCatalogEntries_HidesNestedSubKnowledgeFromTopLayer(t *testing.T) {
 	agentDir := t.TempDir()
 	parentPath := filepath.Join(agentDir, "knowledge", "session-journal", "KNOWLEDGE.md")
 	childPath := filepath.Join(agentDir, "knowledge", "session-journal", "2026-06-09-molt-1-child", "KNOWLEDGE.md")
@@ -66,7 +66,7 @@ func TestBuildAgentCodexEntries_HidesNestedSubKnowledgeFromTopLayer(t *testing.T
 		t.Fatal(err)
 	}
 
-	entries := buildAgentCodexEntries(agentDir)
+	entries := buildAgentKnowledgeCatalogEntries(agentDir)
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries, want 1 top-level parent only: %+v", len(entries), entries)
 	}
@@ -90,14 +90,14 @@ func TestBuildAgentCodexEntries_HidesNestedSubKnowledgeFromTopLayer(t *testing.T
 	}
 }
 
-func TestBuildAgentCodexEntries_MigratesLegacyCodexJSON(t *testing.T) {
+func TestBuildAgentKnowledgeCatalogEntries_MigratesLegacyCodexJSON(t *testing.T) {
 	agentDir := t.TempDir()
 	codexDir := filepath.Join(agentDir, "codex")
 	if err := os.MkdirAll(codexDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	codexPath := filepath.Join(codexDir, "codex.json")
-	raw, err := json.Marshal(codexFile{Entries: []codexEntry{{
+	raw, err := json.Marshal(legacyKnowledgeFile{Entries: []legacyKnowledgeEntry{{
 		ID:            "codex_test",
 		Title:         "Legacy entry",
 		Summary:       "old store",
@@ -112,7 +112,7 @@ func TestBuildAgentCodexEntries_MigratesLegacyCodexJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries := buildAgentCodexEntries(agentDir)
+	entries := buildAgentKnowledgeCatalogEntries(agentDir)
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries, want 1", len(entries))
 	}
@@ -156,13 +156,13 @@ func TestBuildAgentCodexEntries_MigratesLegacyCodexJSON(t *testing.T) {
 	}
 }
 
-func TestBuildAgentCodexEntries_MigrationIsIdempotent(t *testing.T) {
+func TestBuildAgentKnowledgeCatalogEntries_MigrationIsIdempotent(t *testing.T) {
 	agentDir := t.TempDir()
 	codexDir := filepath.Join(agentDir, "codex")
 	if err := os.MkdirAll(codexDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(codexFile{Entries: []codexEntry{
+	raw, err := json.Marshal(legacyKnowledgeFile{Entries: []legacyKnowledgeEntry{
 		{ID: "a", Title: "First", Content: "one", CreatedAt: "2026-05-12T21:00:00Z"},
 		{ID: "b", Title: "Second", Content: "two", CreatedAt: "2026-05-12T22:00:00Z"},
 	}})
@@ -173,8 +173,8 @@ func TestBuildAgentCodexEntries_MigrationIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := buildAgentCodexEntries(agentDir)
-	second := buildAgentCodexEntries(agentDir)
+	first := buildAgentKnowledgeCatalogEntries(agentDir)
+	second := buildAgentKnowledgeCatalogEntries(agentDir)
 	if len(first) != 2 || len(second) != 2 {
 		t.Fatalf("expected 2 entries on both runs, got %d then %d", len(first), len(second))
 	}
@@ -185,13 +185,13 @@ func TestBuildAgentCodexEntries_MigrationIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestBuildAgentCodexEntries_MigratesLegacyKnowledgeJSON(t *testing.T) {
+func TestBuildAgentKnowledgeCatalogEntries_MigratesLegacyKnowledgeJSON(t *testing.T) {
 	agentDir := t.TempDir()
 	knowledgeDir := filepath.Join(agentDir, "knowledge")
 	if err := os.MkdirAll(knowledgeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(codexFile{Entries: []codexEntry{{
+	raw, err := json.Marshal(legacyKnowledgeFile{Entries: []legacyKnowledgeEntry{{
 		ID: "k1", Title: "From knowledge.json", Summary: "summary", Content: "body",
 	}}})
 	if err != nil {
@@ -202,7 +202,7 @@ func TestBuildAgentCodexEntries_MigratesLegacyKnowledgeJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries := buildAgentCodexEntries(agentDir)
+	entries := buildAgentKnowledgeCatalogEntries(agentDir)
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries, want 1", len(entries))
 	}

@@ -112,7 +112,7 @@ func buildAgentSystemEntries(agentDir string) []MarkdownEntry {
 	return result
 }
 
-// SystemModel is the top-level /system view. Mirrors LibraryModel/CodexModel:
+// SystemModel is the top-level /system view. Mirrors LibraryModel/KnowledgeModel:
 // shows one agent's system/ directory at a time and swaps agents via Ctrl+T.
 type SystemModel struct {
 	baseDir     string

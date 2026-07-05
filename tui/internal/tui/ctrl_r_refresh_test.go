@@ -104,8 +104,8 @@ func TestViewerViewsHandleCtrlRWithoutPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("codex", func(t *testing.T) {
-		m := NewCodexModel(base, agent)
+	t.Run("knowledge", func(t *testing.T) {
+		m := NewKnowledgeModel(base, agent)
 		if _, _ = m.Update(ctrlR()); true {
 		}
 	})

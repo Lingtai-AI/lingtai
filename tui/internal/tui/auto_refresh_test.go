@@ -130,7 +130,7 @@ func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
 		{currentView: appViewMailbox, mailbox: NewMailboxModel(dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewSystem, system: NewSystemModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewLibrary, library: NewLibraryModel(dir, dir, "en"), tuiConfig: config.DefaultTUIConfig()},
-		{currentView: appViewCodex, codex: NewCodexModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
+		{currentView: appViewKnowledge, knowledge: NewKnowledgeModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewPresets, presetLibrary: NewPresetLibraryModel("en", dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewAddon, addon: NewAddonModel(dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewNotification, notification: NewNotificationModel(dir), tuiConfig: config.DefaultTUIConfig()},

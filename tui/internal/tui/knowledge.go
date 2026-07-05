@@ -13,9 +13,9 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// CodexModel is the top-level /knowledge view. Mirrors LibraryModel: shows one
+// KnowledgeModel is the top-level /knowledge view. Mirrors LibraryModel: shows one
 // agent's private knowledge at a time and swaps agents via Ctrl+T.
-type CodexModel struct {
+type KnowledgeModel struct {
 	baseDir     string // .lingtai/ directory (for agent discovery)
 	selectedDir string // working dir of the currently-displayed agent
 
@@ -24,7 +24,9 @@ type CodexModel struct {
 	// Drill-in viewer — non-nil when the user pressed Enter on a knowledge
 	// entry and is browsing files inside that knowledge folder. Esc pops
 	// back to the catalog (clears this pointer).
-	drillIn *MarkdownViewerModel
+	drillIn      *MarkdownViewerModel
+	drillInDir   string
+	drillInTitle string
 
 	pickerOpen bool
 	pickerIdx  int
@@ -37,24 +39,24 @@ type CodexModel struct {
 	pickerVP viewport.Model
 }
 
-type codexLoadMsg struct {
+type knowledgeLoadMsg struct {
 	agentNodes []fs.AgentNode
 }
 
-// NewCodexModel constructs the /knowledge view rooted at baseDir with the given
+// NewKnowledgeModel constructs the /knowledge view rooted at baseDir with the given
 // agent pre-selected.
-func NewCodexModel(baseDir, selectedDir string) CodexModel {
-	entries := buildAgentCodexEntries(selectedDir)
-	inner := NewMarkdownViewer(entries, codexTitleFor(selectedDir))
+func NewKnowledgeModel(baseDir, selectedDir string) KnowledgeModel {
+	entries := buildAgentKnowledgeCatalogEntries(selectedDir)
+	inner := NewMarkdownViewer(entries, knowledgeTitleFor(selectedDir))
 	inner.FooterHint = i18n.T("hints.props_select")
-	return CodexModel{
+	return KnowledgeModel{
 		baseDir:     baseDir,
 		selectedDir: selectedDir,
 		inner:       inner,
 	}
 }
 
-func codexTitleFor(agentDir string) string {
+func knowledgeTitleFor(agentDir string) string {
 	base := i18n.T("palette.knowledge")
 	if agentDir == "" {
 		return base
@@ -70,21 +72,44 @@ func codexTitleFor(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, name)
 }
 
-// reloadInner rebuilds the knowledge catalog for the selected agent from disk,
-// resetting the inner markdown viewer to the top. Invoked by ctrl+r.
-func (m CodexModel) reloadInner() (CodexModel, tea.Cmd) {
-	entries := buildAgentCodexEntries(m.selectedDir)
-	m.inner = NewMarkdownViewer(entries, codexTitleFor(m.selectedDir))
+// reloadCatalog rebuilds the top-level knowledge catalog for the selected agent
+// from disk, resetting the markdown viewer to the top.
+func (m KnowledgeModel) reloadCatalog() (KnowledgeModel, tea.Cmd) {
+	entries := buildAgentKnowledgeCatalogEntries(m.selectedDir)
+	m.inner = NewMarkdownViewer(entries, knowledgeTitleFor(m.selectedDir))
 	m.inner.FooterHint = i18n.T("hints.props_select")
-	if m.width > 0 && m.height > 0 {
-		var cmd tea.Cmd
-		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-		return m, cmd
-	}
-	return m, nil
+	var cmd tea.Cmd
+	m.inner, cmd = m.resizeViewer(m.inner)
+	return m, cmd
 }
 
-func (m CodexModel) loadAgents() tea.Msg {
+// reloadVisible rebuilds the currently-visible knowledge layer from disk. At the
+// catalog layer it reloads the selected agent's top-level entries; when drilled
+// into a knowledge folder, it reloads that folder without requiring a full TUI or
+// agent restart.
+func (m KnowledgeModel) reloadVisible() (KnowledgeModel, tea.Cmd) {
+	if m.drillIn != nil && m.drillInDir != "" {
+		title := m.drillInTitle
+		if title == "" {
+			title = i18n.T("palette.knowledge")
+		}
+		sub := NewMarkdownViewer(buildKnowledgeFolderEntries(m.drillInDir), title)
+		var cmd tea.Cmd
+		sub, cmd = m.resizeViewer(sub)
+		m.drillIn = &sub
+		return m, cmd
+	}
+	return m.reloadCatalog()
+}
+
+func (m KnowledgeModel) resizeViewer(viewer MarkdownViewerModel) (MarkdownViewerModel, tea.Cmd) {
+	if m.width > 0 && m.height > 0 {
+		return viewer.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	}
+	return viewer, nil
+}
+
+func (m KnowledgeModel) loadAgents() tea.Msg {
 	net, _ := fs.BuildNetwork(m.baseDir)
 	var nodes []fs.AgentNode
 	for _, n := range net.Nodes {
@@ -96,24 +121,24 @@ func (m CodexModel) loadAgents() tea.Msg {
 		}
 		nodes = append(nodes, n)
 	}
-	return codexLoadMsg{agentNodes: nodes}
+	return knowledgeLoadMsg{agentNodes: nodes}
 }
 
-func (m CodexModel) Init() tea.Cmd {
+func (m KnowledgeModel) Init() tea.Cmd {
 	return tea.Batch(m.inner.Init(), m.loadAgents)
 }
 
 const (
-	codexHeaderLines = 2
-	codexFooterLines = 2
+	knowledgeHeaderLines = 2
+	knowledgeFooterLines = 2
 )
 
-func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
+func (m KnowledgeModel) Update(msg tea.Msg) (KnowledgeModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpHeight := m.height - codexHeaderLines - codexFooterLines
+		vpHeight := m.height - knowledgeHeaderLines - knowledgeFooterLines
 		if vpHeight < 1 {
 			vpHeight = 1
 		}
@@ -137,7 +162,7 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 		}
 		return m, cmd
 
-	case codexLoadMsg:
+	case knowledgeLoadMsg:
 		m.agentNodes = msg.agentNodes
 		found := false
 		for _, n := range m.agentNodes {
@@ -168,6 +193,8 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 		title := i18n.T("palette.knowledge") + " \u2014 " + msg.Entry.Label
 		sub := NewMarkdownViewer(files, title)
 		m.drillIn = &sub
+		m.drillInDir = knowledgeDir
+		m.drillInTitle = title
 		if m.width > 0 && m.height > 0 {
 			inner := *m.drillIn
 			var cmd tea.Cmd
@@ -182,13 +209,18 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 			return m.updatePicker(msg)
 		}
 		// Drill-in active: keys go to the drill-in viewer instead of
-		// the catalog. Esc/q pops back to the catalog; Ctrl+T is
-		// ignored so the user must Esc first to swap agents.
+		// the catalog. Esc/q pops back to the catalog; Ctrl+R reloads
+		// the current knowledge folder; Ctrl+T is ignored so the user
+		// must Esc first to swap agents.
 		if m.drillIn != nil {
 			switch msg.String() {
 			case "esc", "q":
 				m.drillIn = nil
+				m.drillInDir = ""
+				m.drillInTitle = ""
 				return m, nil
+			case "ctrl+r":
+				return m.reloadVisible()
 			case "ctrl+t":
 				return m, nil
 			}
@@ -200,7 +232,7 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+r":
-			return m.reloadInner()
+			return m.reloadVisible()
 		case "ctrl+t":
 			if len(m.agentNodes) == 0 {
 				return m, nil
@@ -251,7 +283,7 @@ func (m CodexModel) Update(msg tea.Msg) (CodexModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m CodexModel) updatePicker(msg tea.KeyPressMsg) (CodexModel, tea.Cmd) {
+func (m KnowledgeModel) updatePicker(msg tea.KeyPressMsg) (KnowledgeModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+t":
 		m.pickerOpen = false
@@ -274,16 +306,14 @@ func (m CodexModel) updatePicker(msg tea.KeyPressMsg) (CodexModel, tea.Cmd) {
 			newDir := m.agentNodes[m.pickerIdx].WorkingDir
 			if newDir != "" && newDir != m.selectedDir {
 				m.selectedDir = newDir
-				entries := buildAgentCodexEntries(m.selectedDir)
-				m.inner = NewMarkdownViewer(entries, codexTitleFor(m.selectedDir))
-				m.inner.FooterHint = i18n.T("hints.props_select")
-				if m.width > 0 && m.height > 0 {
-					var cmd tea.Cmd
-					m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-					m.pickerOpen = false
-					m.syncPicker()
-					return m, cmd
-				}
+				m.drillIn = nil
+				m.drillInDir = ""
+				m.drillInTitle = ""
+				var cmd tea.Cmd
+				m, cmd = m.reloadCatalog()
+				m.pickerOpen = false
+				m.syncPicker()
+				return m, cmd
 			}
 		}
 		m.pickerOpen = false
@@ -293,7 +323,7 @@ func (m CodexModel) updatePicker(msg tea.KeyPressMsg) (CodexModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m *CodexModel) syncPicker() {
+func (m *KnowledgeModel) syncPicker() {
 	if !m.ready {
 		return
 	}
@@ -302,7 +332,7 @@ func (m *CodexModel) syncPicker() {
 	}
 }
 
-func (m CodexModel) renderPicker() string {
+func (m KnowledgeModel) renderPicker() string {
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 	nameStyle := lipgloss.NewStyle().Foreground(ColorText)
 	selectedStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
@@ -356,9 +386,9 @@ func (m CodexModel) renderPicker() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m CodexModel) View() string {
+func (m KnowledgeModel) View() string {
 	if m.pickerOpen {
-		header := StyleTitle.Render("  "+codexTitleFor(m.selectedDir)) + "\n" + strings.Repeat("─", m.width)
+		header := StyleTitle.Render("  "+knowledgeTitleFor(m.selectedDir)) + "\n" + strings.Repeat("─", m.width)
 		footer := strings.Repeat("─", m.width) + "\n" +
 			StyleFaint.Render("  "+i18n.T("hints.props_select"))
 		body := ""

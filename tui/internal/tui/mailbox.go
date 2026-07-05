@@ -13,7 +13,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// MailboxModel is the top-level /mailbox view. Mirrors CodexModel: shows one
+// MailboxModel is the top-level /mailbox view. Mirrors KnowledgeModel: shows one
 // agent's (or the human's) mailbox at a time and swaps targets via Ctrl+T.
 type MailboxModel struct {
 	baseDir     string // .lingtai/ directory (for agent discovery)

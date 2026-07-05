@@ -34,7 +34,7 @@ const (
 	appViewLibrary
 	appViewProjects
 	appViewLogin
-	appViewCodex
+	appViewKnowledge
 	appViewMailbox
 	appViewSystem
 	appViewPresets
@@ -51,7 +51,7 @@ type App struct {
 	props         PropsModel
 	library       LibraryModel
 	projects      ProjectsModel
-	codex         CodexModel
+	knowledge     KnowledgeModel
 	system        SystemModel
 	mailbox       MailboxModel
 	daemons       DaemonsModel
@@ -263,8 +263,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.firstRun, cmd = a.firstRun.Update(msg)
 		case appViewLogin:
 			a.login, cmd = a.login.Update(msg)
-		case appViewCodex:
-			a.codex, cmd = a.codex.Update(msg)
+		case appViewKnowledge:
+			a.knowledge, cmd = a.knowledge.Update(msg)
 		case appViewMailbox:
 			a.mailbox, cmd = a.mailbox.Update(msg)
 		case appViewSystem:
@@ -365,7 +365,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
 		}
-		return a, a.mail.refreshMail
+		cmds := []tea.Cmd{a.mail.refreshMail}
+		if a.currentView == appViewKnowledge {
+			var kcmd tea.Cmd
+			a.knowledge, kcmd = a.knowledge.reloadVisible()
+			cmds = append(cmds, kcmd)
+		}
+		return a, tea.Batch(cmds...)
 
 	case clearDoneMsg:
 		if msg.err != nil {
@@ -595,7 +601,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewCodex && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
+			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
 				return a, tea.Quit
 			}
 		}
@@ -651,9 +657,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.login, cmd = a.login.Update(msg)
 		return a, cmd
-	case appViewCodex:
-		updated, cmd := a.codex.Update(msg)
-		a.codex = updated
+	case appViewKnowledge:
+		updated, cmd := a.knowledge.Update(msg)
+		a.knowledge = updated
 		return a, cmd
 	case appViewMailbox:
 		updated, cmd := a.mailbox.Update(msg)
@@ -929,9 +935,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
 		return a, tea.Batch(a.projects.Init(), a.sendSize())
 	case "knowledge", "library", "codex":
-		a.currentView = appViewCodex
-		a.codex = NewCodexModel(a.projectDir, a.orchDir)
-		return a, tea.Batch(a.codex.Init(), a.sendSize())
+		a.currentView = appViewKnowledge
+		a.knowledge = NewKnowledgeModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.knowledge.Init(), a.sendSize())
 	case "system":
 		a.currentView = appViewSystem
 		a.system = NewSystemModel(a.projectDir, a.orchDir)
@@ -1466,9 +1472,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.library = NewLibraryModel(a.projectDir, a.orchDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "knowledge", "library", "codex":
-		a.currentView = appViewCodex
-		a.codex = NewCodexModel(a.projectDir, a.orchDir)
-		return a, tea.Batch(a.codex.Init(), a.sendSize())
+		a.currentView = appViewKnowledge
+		a.knowledge = NewKnowledgeModel(a.projectDir, a.orchDir)
+		return a, tea.Batch(a.knowledge.Init(), a.sendSize())
 	case "system":
 		a.currentView = appViewSystem
 		a.system = NewSystemModel(a.projectDir, a.orchDir)
@@ -1540,8 +1546,8 @@ func (a App) View() tea.View {
 		content = a.projects.View()
 	case appViewLogin:
 		content = a.login.View()
-	case appViewCodex:
-		content = a.codex.View()
+	case appViewKnowledge:
+		content = a.knowledge.View()
 	case appViewMailbox:
 		content = a.mailbox.View()
 	case appViewSystem:

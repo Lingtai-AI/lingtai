@@ -10,16 +10,16 @@ import (
 	"strings"
 )
 
-// codexFile matches the legacy storage schema at codex/codex.json written by
+// legacyKnowledgeFile matches the legacy storage schema at codex/codex.json written by
 // older agents. New agents use knowledge/<name>/KNOWLEDGE.md folders. The TUI
 // now performs a one-time migration from this JSON store into the folder
 // layout on first scan, mirroring the kernel's migration semantics.
-type codexFile struct {
-	Version int          `json:"version"`
-	Entries []codexEntry `json:"entries"`
+type legacyKnowledgeFile struct {
+	Version int                    `json:"version"`
+	Entries []legacyKnowledgeEntry `json:"entries"`
 }
 
-type codexEntry struct {
+type legacyKnowledgeEntry struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
 	Summary       string `json:"summary"`
@@ -28,12 +28,12 @@ type codexEntry struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// buildAgentCodexEntries returns the private knowledge entries for a single
+// buildAgentKnowledgeCatalogEntries returns the private knowledge entries for a single
 // agent. Before scanning the canonical knowledge/ folder it runs a one-time
 // migration from legacy JSON stores (codex/codex.json and knowledge/knowledge.json)
 // so /knowledge consistently shows filesystem-backed entries instead of a
 // legacy fallback group.
-func buildAgentCodexEntries(agentDir string) []MarkdownEntry {
+func buildAgentKnowledgeCatalogEntries(agentDir string) []MarkdownEntry {
 	if agentDir == "" {
 		return nil
 	}
@@ -136,7 +136,7 @@ func migrateOneLegacyJSON(knowledgeDir, legacyPath, origin string) {
 	if err != nil {
 		return
 	}
-	var cdx codexFile
+	var cdx legacyKnowledgeFile
 	if err := json.Unmarshal(data, &cdx); err != nil {
 		return
 	}
