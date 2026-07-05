@@ -945,6 +945,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 
+		case "ctrl+end":
+			if m.ready {
+				m.viewport.GotoBottom()
+				return m, nil
+			}
+
 		case "esc":
 			// Dismiss all visible insights
 			changed := false
