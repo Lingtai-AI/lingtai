@@ -624,7 +624,7 @@ func printHelp() {
 	fmt.Println("       lingtai-tui purge [dir]")
 	fmt.Println("       lingtai-tui list [--detailed|-d] [--admin] [dir]")
 	fmt.Println("       lingtai-tui suspend [dir]")
-	fmt.Println("       lingtai-tui clean")
+	fmt.Println("       lingtai-tui clean [--force]")
 	fmt.Println("       lingtai-tui postman [--port N] [dir ...]")
 	fmt.Println("       lingtai-tui bootstrap")
 	fmt.Println("       lingtai-tui presets [--saved-only] [--templates-only]")
@@ -640,6 +640,7 @@ func printHelp() {
 	fmt.Println("               Marks main agents; --detailed adds names/state/path; --admin adds admin flags.")
 	fmt.Println("  suspend      Gracefully suspend agents via signal files (all, or those in <dir>)")
 	fmt.Println("  clean        Suspend agents in current directory, then remove .lingtai/")
+	fmt.Println("               Aborts if agents survive the 10s deadline unless --force is given.")
 	fmt.Println("  postman      Start the mail relay daemon (UDP, port 7777 by default)")
 	fmt.Println("  bootstrap       Re-extract embedded skills to ~/.lingtai-tui/utilities/")
 	fmt.Println("  presets      List available presets as JSON (for agent consumption)")
@@ -819,7 +820,40 @@ func showWelcome(globalDir string) {
 	os.WriteFile(sentinel, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
 }
 
+// aliveDirs returns the subset of dirs whose agent heartbeats are fresher
+// than threshold seconds.
+func aliveDirs(dirs []string, threshold float64) []string {
+	var out []string
+	for _, d := range dirs {
+		if fs.IsAlive(d, threshold) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// waitForSuspend polls the given agent dirs until their heartbeats go stale
+// or the timeout elapses. Returns the dirs still alive at the end (empty
+// slice = clean shutdown).
+func waitForSuspend(dirs []string, timeout time.Duration, threshold float64) []string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(aliveDirs(dirs, threshold)) == 0 {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return aliveDirs(dirs, threshold)
+}
+
 func cleanMain() {
+	force := false
+	for _, a := range os.Args[2:] {
+		if a == "--force" || a == "-f" {
+			force = true
+		}
+	}
+
 	projectDir, _ := os.Getwd()
 	projectDir, _ = filepath.Abs(projectDir)
 	lingtaiDir := filepath.Join(projectDir, ".lingtai")
@@ -868,19 +902,22 @@ func cleanMain() {
 	// Wait for all to die (poll, max 10s)
 	if len(alive) > 0 {
 		fmt.Printf("Suspending %d agent(s)...\n", len(alive))
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			allDead := true
-			for _, dir := range alive {
-				if fs.IsAlive(dir, 3.0) {
-					allDead = false
-					break
-				}
+		survivors := waitForSuspend(alive, 10*time.Second, 3.0)
+		if len(survivors) > 0 && !force {
+			fmt.Fprintf(os.Stderr, "%d agent(s) did not suspend within 10s:\n", len(survivors))
+			for _, dir := range survivors {
+				fmt.Fprintf(os.Stderr, "  %s\n", dir)
 			}
-			if allDead {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Not removing .lingtai/ — deleting it now would orphan these processes (phantoms).")
+			fmt.Fprintln(os.Stderr, "Options:")
+			fmt.Fprintln(os.Stderr, "  1. Wait a moment and re-run: lingtai-tui clean")
+			fmt.Fprintf(os.Stderr, "  2. Force-kill the processes: lingtai-tui purge %s\n", projectDir)
+			fmt.Fprintln(os.Stderr, "  3. Delete anyway (creates phantoms): lingtai-tui clean --force")
+			os.Exit(1)
+		}
+		if len(survivors) > 0 {
+			fmt.Fprintf(os.Stderr, "warning: removing .lingtai/ with %d agent(s) still alive (--force); run 'lingtai-tui purge' afterwards to kill them\n", len(survivors))
 		}
 	}
 
