@@ -88,9 +88,9 @@ func compactToolCallSummary(body string) string {
 	return string(runes[:toolCallSummaryPreviewLimit]) + "…"
 }
 
-// toolGroupSeparatorBefore reports whether a blank separator line should be
-// rendered before the current tool entry to visually group tool calls/results
-// by the LLM API response that produced them.
+// toolGroupSeparatorBefore reports whether a separator line should be rendered
+// before the current tool entry to visually group tool calls/results by the LLM
+// API response that produced them.
 func toolGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 	if prev == nil || !isToolMessageType(prev.Type) || !isToolMessageType(cur.Type) {
 		return false
@@ -115,7 +115,7 @@ func isApiGroupedVerboseMessageType(t string) bool {
 	}
 }
 
-// apiCallGroupSeparatorBefore reports whether a blank separator line should be
+// apiCallGroupSeparatorBefore reports whether a separator line should be
 // rendered before cur in the ctrl+o verbose stream. Thinking/diary/text/tool
 // entries that share an api_call_id came from the same LLM API round-trip and
 // stay visually grouped; a non-empty api_call_id change starts a new group.
@@ -129,6 +129,14 @@ func apiCallGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {
 		return prev.ApiCallID != cur.ApiCallID
 	}
 	return toolGroupSeparatorBefore(prev, cur)
+}
+
+func renderApiCallGroupSeparator(width int) string {
+	separatorWidth := width - 4
+	if separatorWidth < 8 {
+		separatorWidth = 8
+	}
+	return StyleFaint.Render("  " + strings.Repeat("┈", separatorWidth))
 }
 
 // renderAprioriSummaryBlock renders the model-visible `summary=true` (a-priori)
@@ -215,7 +223,7 @@ func isTextOutputMessageType(t string) bool {
 	return t == "text_output"
 }
 
-// textOutputGroupSeparatorBefore reports whether a blank separator line should
+// textOutputGroupSeparatorBefore reports whether a separator line should
 // be rendered before the current text_output entry to mirror tool-call grouping
 // by the LLM API response that produced the assistant text.
 func textOutputGroupSeparatorBefore(prev *ChatMessage, cur ChatMessage) bool {

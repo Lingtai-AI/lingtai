@@ -234,7 +234,7 @@ func TestShouldShow_AprioriSummaryFollowsToolVerbosity(t *testing.T) {
 }
 
 // The summary shares the raw result's api_call_id, so it must NOT introduce a
-// blank separator between the raw result and its summary.
+// separator between the raw result and its summary.
 func TestRenderMessages_SummaryStaysGroupedWithItsToolResult(t *testing.T) {
 	m := MailModel{width: 100}
 	out := m.renderMessages([]ChatMessage{
@@ -243,7 +243,7 @@ func TestRenderMessages_SummaryStaysGroupedWithItsToolResult(t *testing.T) {
 			Kind: "apriori_generated", ToolName: "bash", Text: "ok summary", SummaryChars: 10,
 		}},
 	})
-	if strings.Contains(out, "\n\n") {
-		t.Fatalf("summary sharing the tool_result api_call_id must stay grouped (no blank separator):\n%q", out)
+	if strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("summary sharing the tool_result api_call_id must stay grouped (no separator):\n%q", out)
 	}
 }

@@ -1083,7 +1083,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	// llm_response carrier that holds the scalars arrives at the TOP of the
 	// group in stream order (llm_call → llm_response → tool_call/tool_result),
 	// so we stash it and flush a single faint footer line once the group ends:
-	// before the blank separator that precedes the next group, when a
+	// before the visual separator that precedes the next group, when a
 	// non-grouped entry breaks the run, or at end of stream.
 	tokenFooterStyle := lipgloss.NewStyle().Foreground(ColorTextDim).Faint(true)
 	var pendingUsage *fs.TokenUsage
@@ -1136,12 +1136,12 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			switch msg.Type {
 			case "thinking", "diary", "text_input", "text_output":
 				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
-					b.WriteString("\n")
+					b.WriteString(renderApiCallGroupSeparator(m.width) + "\n")
 				}
 				evStyle = thinkingStyle
 			default:
 				if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
-					b.WriteString("\n")
+					b.WriteString(renderApiCallGroupSeparator(m.width) + "\n")
 				}
 				evStyle = toolStyle
 				// Tool lines get a leading timestamp. Ctrl+O level 1 shows only
@@ -1193,7 +1193,7 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				wrapWidth = 20
 			}
 			if apiCallGroupSeparatorBefore(prevVisibleApiGroup, msg) {
-				b.WriteString("\n")
+				b.WriteString(renderApiCallGroupSeparator(m.width) + "\n")
 			}
 			for _, line := range renderAprioriSummaryBlock(msg.Summary, wrapWidth, m.verbose != verboseExtended) {
 				b.WriteString(line + "\n")

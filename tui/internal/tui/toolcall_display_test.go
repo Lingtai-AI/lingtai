@@ -192,7 +192,7 @@ func TestTruncateToolBody_DeterministicByRune(t *testing.T) {
 	}
 }
 
-func TestRenderMessages_InsertsBlankLineBetweenApiCallGroups(t *testing.T) {
+func TestRenderMessages_InsertsVisualSeparatorBetweenApiCallGroups(t *testing.T) {
 	m := MailModel{width: 100}
 	out := m.renderMessages([]ChatMessage{
 		{Type: "tool_call", Body: "read({})", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
@@ -202,8 +202,8 @@ func TestRenderMessages_InsertsBlankLineBetweenApiCallGroups(t *testing.T) {
 	if !strings.Contains(out, "read → ok") || !strings.Contains(out, "bash({})") {
 		t.Fatalf("rendered output missing tool bodies: %q", out)
 	}
-	if !strings.Contains(out, "read → ok") || !strings.Contains(out, "\n\n") {
-		t.Fatalf("expected a blank separator line between api groups, got %q", out)
+	if !strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a visual separator line between api groups, got %q", out)
 	}
 }
 
@@ -214,8 +214,8 @@ func TestRenderMessages_DoesNotSeparateSameApiCallGroup(t *testing.T) {
 		{Type: "tool_result", Body: "read → ok", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
 		{Type: "tool_call", Body: "bash({})", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:28Z"},
 	})
-	if strings.Contains(out, "\n\n") {
-		t.Fatalf("same api_call_id should render as one group without blank separator: %q", out)
+	if strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("same api_call_id should render as one group without separator: %q", out)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestTextOutputGroupSeparatorBefore_NonTextBoundariesNoSeparator(t *testing.
 	}
 }
 
-func TestRenderMessages_InsertsBlankLineBetweenTextOutputApiCallGroups(t *testing.T) {
+func TestRenderMessages_InsertsVisualSeparatorBetweenTextOutputApiCallGroups(t *testing.T) {
 	m := MailModel{width: 100}
 	out := m.renderMessages([]ChatMessage{
 		{Type: "text_output", Body: "first answer", ApiCallID: "api_one"},
@@ -268,8 +268,8 @@ func TestRenderMessages_InsertsBlankLineBetweenTextOutputApiCallGroups(t *testin
 	if !strings.Contains(out, "first answer") || !strings.Contains(out, "second answer") {
 		t.Fatalf("rendered output missing text_output bodies: %q", out)
 	}
-	if !strings.Contains(out, "\n\n") {
-		t.Fatalf("expected a blank separator line between text_output api groups, got %q", out)
+	if !strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a visual separator line between text_output api groups, got %q", out)
 	}
 }
 
@@ -279,8 +279,8 @@ func TestRenderMessages_DoesNotSeparateSameTextOutputApiCallGroup(t *testing.T) 
 		{Type: "text_output", Body: "first chunk", ApiCallID: "api_one"},
 		{Type: "text_output", Body: "second chunk", ApiCallID: "api_one"},
 	})
-	if strings.Contains(out, "\n\n") {
-		t.Fatalf("same text_output api_call_id should render as one group without blank separator: %q", out)
+	if strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("same text_output api_call_id should render as one group without separator: %q", out)
 	}
 }
 
@@ -319,7 +319,7 @@ func TestBuildMessagesAssignsApiCallIDToTextOutput(t *testing.T) {
 	}
 }
 
-func TestRenderMessages_InsertsBlankLineBetweenDiaryApiCallGroups(t *testing.T) {
+func TestRenderMessages_InsertsVisualSeparatorBetweenDiaryApiCallGroups(t *testing.T) {
 	m := MailModel{width: 100}
 	out := m.renderMessages([]ChatMessage{
 		{Type: "diary", Body: "first diary", ApiCallID: "api_one"},
@@ -328,8 +328,8 @@ func TestRenderMessages_InsertsBlankLineBetweenDiaryApiCallGroups(t *testing.T) 
 	if !strings.Contains(out, "first diary") || !strings.Contains(out, "second diary") {
 		t.Fatalf("rendered output missing diary bodies: %q", out)
 	}
-	if !strings.Contains(out, "\n\n") {
-		t.Fatalf("expected a blank separator line between diary api groups, got %q", out)
+	if !strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a visual separator line between diary api groups, got %q", out)
 	}
 }
 
@@ -341,7 +341,7 @@ func TestRenderMessages_KeepsMixedVerboseEntriesInSameApiCallGroup(t *testing.T)
 		{Type: "tool_call", Body: "read({})", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:26Z"},
 		{Type: "tool_result", Body: "read ok", ApiCallID: "api_one", Timestamp: "2026-06-08T07:08:27Z"},
 	})
-	if strings.Contains(out, "\n\n") {
+	if strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
 		t.Fatalf("mixed verbose entries from the same api_call_id should stay grouped, got %q", out)
 	}
 }
@@ -356,8 +356,8 @@ func TestRenderMessages_SeparatesMixedVerboseApiCallGroups(t *testing.T) {
 	if !strings.Contains(out, "first diary") || !strings.Contains(out, "second diary") {
 		t.Fatalf("rendered output missing mixed verbose bodies: %q", out)
 	}
-	if !strings.Contains(out, "\n\n") {
-		t.Fatalf("expected a blank separator line before the new api group, got %q", out)
+	if !strings.Contains(out, "┈") || strings.Contains(out, "\n\n") {
+		t.Fatalf("expected a visual separator line before the new api group, got %q", out)
 	}
 }
 
