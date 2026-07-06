@@ -153,6 +153,7 @@
   "mail.no_messages": "暂无消息，等待邮件...",
   "mail.initial_loading": "加载中...",
   "mail.load_more": "▲ 还有 %d 条旧消息 — ctrl+u 加载",
+  "mail.jump_bottom_hint": "跳到底部：Ctrl+End",
   "mail.collapse": "▼ ctrl+d 收起到最新",
   "mail.placeholder": "输入消息...",
   "mail.refreshed": "Agent 已重启。",

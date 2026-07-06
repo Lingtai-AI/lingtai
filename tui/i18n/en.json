@@ -153,6 +153,7 @@
   "mail.no_messages": "No messages yet. Waiting for mail...",
   "mail.initial_loading": "loading...",
   "mail.load_more": "▲ %d older — ctrl+u to load",
+  "mail.jump_bottom_hint": "Jump to bottom: Ctrl+End",
   "mail.collapse": "▼ ctrl+d to collapse to recent",
   "mail.placeholder": "Type a message...",
   "mail.refreshed": "Agent restarted.",

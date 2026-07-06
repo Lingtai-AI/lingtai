@@ -387,6 +387,21 @@ func (m *MailModel) visibleMessages() []ChatMessage {
 	return m.messages[len(m.messages)-limit:]
 }
 
+func (m MailModel) chatTailRemainingLines() int {
+	if !m.ready || m.viewport.Height() <= 0 {
+		return 0
+	}
+	remaining := m.viewport.TotalLineCount() - m.viewport.Height() - m.viewport.YOffset()
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func (m MailModel) showChatTailHint() bool {
+	return m.chatTailRemainingLines() > m.viewport.Height()
+}
+
 func (m MailModel) refreshMail() tea.Msg {
 	// Refresh human location (no-op if cache is <1h old)
 	go fs.UpdateHumanLocation(m.humanDir)
@@ -947,9 +962,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 		case "ctrl+end":
 			if m.ready {
+				// Ctrl+End is the chat-tail jump even while the compose textarea
+				// keeps focus; do not forward it to textarea cursor handling.
 				m.viewport.GotoBottom()
 				return m, nil
 			}
+			return m, nil
 
 		case "esc":
 			// Dismiss all visible insights
@@ -1376,6 +1394,51 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	return b.String()
 }
 
+func (m MailModel) viewportWithChatTailHint() string {
+	view := m.viewport.View()
+	if !m.showChatTailHint() {
+		return view
+	}
+
+	text := i18n.T("mail.jump_bottom_hint")
+	maxHintWidth := m.width - 4
+	if maxHintWidth < 10 {
+		return view
+	}
+	if lipgloss.Width(text) > maxHintWidth {
+		text = ansi.Truncate(text, maxHintWidth, "…")
+	}
+	hint := StyleFaint.Render(" " + text + " ")
+	hintWidth := lipgloss.Width(hint)
+	if hintWidth <= 0 || hintWidth > m.width {
+		return view
+	}
+
+	lines := strings.Split(view, "\n")
+	if len(lines) == 0 {
+		return view
+	}
+
+	// Overlay into the viewport's already-padded output. This makes the hint
+	// non-focus and non-layout-affecting: no scroll, history, or input state
+	// changes are needed just to render it.
+	row := len(lines) - 1
+	start := m.width - hintWidth - 2
+	if start < 0 {
+		start = 0
+	}
+	prefix := ansi.Cut(lines[row], 0, start)
+	if pad := start - lipgloss.Width(prefix); pad > 0 {
+		prefix += strings.Repeat(" ", pad)
+	}
+	suffix := m.width - lipgloss.Width(prefix) - hintWidth
+	if suffix < 0 {
+		suffix = 0
+	}
+	lines[row] = prefix + hint + strings.Repeat(" ", suffix)
+	return strings.Join(lines, "\n")
+}
+
 // humanName returns the human's display name. Prefers nickname from .agent.json,
 // falls back to i18n "mail.you".
 func (m MailModel) humanName() string {
@@ -1694,5 +1757,5 @@ func (m MailModel) View() string {
 	}
 
 	// Viewport fills the middle
-	return header + "\n" + topBanner + PaintViewportBG(m.viewport.View(), m.width) + "\n" + bottomBanner + footer
+	return header + "\n" + topBanner + PaintViewportBG(m.viewportWithChatTailHint(), m.width) + "\n" + bottomBanner + footer
 }

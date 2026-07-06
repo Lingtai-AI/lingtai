@@ -153,6 +153,7 @@
   "mail.no_messages": "暂无书信，候邮中...",
   "mail.initial_loading": "载中...",
   "mail.load_more": "▲ 尚有 %d 旧书 — ctrl+u 载之",
+  "mail.jump_bottom_hint": "至末：Ctrl+End",
   "mail.collapse": "▼ ctrl+d 收至近书",
   "mail.placeholder": "书...",
   "mail.refreshed": "器灵已重启。",

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/anthropics/lingtai-tui/i18n"
 )
 
 func ctrlEndKey(t *testing.T) tea.KeyPressMsg {
@@ -35,6 +37,33 @@ func scrollableMailModel(t *testing.T) MailModel {
 	return m
 }
 
+func setMailViewportLineCount(t *testing.T, m *MailModel, lineCount int) {
+	t.Helper()
+	if lineCount < 1 {
+		lineCount = 1
+	}
+	lines := make([]string, lineCount)
+	for i := range lines {
+		lines[i] = "message line"
+	}
+	m.viewport.SetContent(strings.Join(lines, "\n"))
+	if got := m.viewport.TotalLineCount(); got != lineCount {
+		t.Fatalf("viewport line count = %d, want %d", got, lineCount)
+	}
+}
+
+func mailViewportBottomOffset(m MailModel) int {
+	bottom := m.viewport.TotalLineCount() - m.viewport.Height()
+	if bottom < 0 {
+		return 0
+	}
+	return bottom
+}
+
+func hasChatTailHint(m MailModel) bool {
+	return strings.Contains(m.View(), i18n.T("mail.jump_bottom_hint"))
+}
+
 func TestMailCtrlEndKeyRepresentation(t *testing.T) {
 	ctrlEndKey(t)
 }
@@ -42,6 +71,10 @@ func TestMailCtrlEndKeyRepresentation(t *testing.T) {
 func TestMailCtrlEndJumpsViewportToBottom(t *testing.T) {
 	m := scrollableMailModel(t)
 	m.loadedExtra = m.pageSize
+	m.input.SetValue("draft")
+	if !m.input.Focused() {
+		t.Fatalf("precondition: compose textarea should be focused")
+	}
 	before := m.viewport.YOffset()
 
 	updated, cmd := m.Update(ctrlEndKey(t))
@@ -56,6 +89,87 @@ func TestMailCtrlEndJumpsViewportToBottom(t *testing.T) {
 	}
 	if updated.loadedExtra != m.loadedExtra {
 		t.Fatalf("ctrl+end should not collapse loaded history, loadedExtra=%d want %d", updated.loadedExtra, m.loadedExtra)
+	}
+	if !updated.input.Focused() || updated.input.Value() != "draft" {
+		t.Fatalf("ctrl+end should leave compose focus/value unchanged, focused=%v value=%q", updated.input.Focused(), updated.input.Value())
+	}
+}
+
+func TestMailCtrlEndNotReadyReturnsNoop(t *testing.T) {
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m.input.SetValue("draft")
+
+	updated, cmd := m.Update(ctrlEndKey(t))
+	if cmd != nil {
+		t.Fatalf("ctrl+end before ready should not return a command")
+	}
+	if updated.ready {
+		t.Fatalf("ctrl+end before ready should not mark mail ready")
+	}
+	if updated.input.Value() != "draft" {
+		t.Fatalf("ctrl+end before ready should not alter input value: %q", updated.input.Value())
+	}
+}
+
+func TestMailChatTailHintVisibility(t *testing.T) {
+	t.Run("hidden at bottom", func(t *testing.T) {
+		m := newSizedMailModel(t)
+		m.initialLoading = false
+		setMailViewportLineCount(t, &m, m.viewport.Height()*3)
+		m.viewport.GotoBottom()
+
+		if hasChatTailHint(m) {
+			t.Fatalf("chat-tail hint should be hidden at bottom")
+		}
+	})
+
+	t.Run("hidden one page from bottom", func(t *testing.T) {
+		m := newSizedMailModel(t)
+		m.initialLoading = false
+		setMailViewportLineCount(t, &m, m.viewport.Height()*3)
+		m.viewport.SetYOffset(mailViewportBottomOffset(m) - m.viewport.Height())
+		if got, want := m.chatTailRemainingLines(), m.viewport.Height(); got != want {
+			t.Fatalf("remaining lines = %d, want exactly one page (%d)", got, want)
+		}
+
+		if hasChatTailHint(m) {
+			t.Fatalf("chat-tail hint should be hidden at one page from bottom")
+		}
+	})
+
+	t.Run("visible more than one page from bottom", func(t *testing.T) {
+		m := newSizedMailModel(t)
+		m.initialLoading = false
+		setMailViewportLineCount(t, &m, m.viewport.Height()*3)
+		m.viewport.SetYOffset(mailViewportBottomOffset(m) - m.viewport.Height() - 1)
+		if got, want := m.chatTailRemainingLines(), m.viewport.Height()+1; got != want {
+			t.Fatalf("remaining lines = %d, want just over one page (%d)", got, want)
+		}
+
+		if !hasChatTailHint(m) {
+			t.Fatalf("chat-tail hint should be visible when more than one page from bottom")
+		}
+	})
+}
+
+func TestMailCtrlEndHidesChatTailHint(t *testing.T) {
+	m := newSizedMailModel(t)
+	m.initialLoading = false
+	setMailViewportLineCount(t, &m, m.viewport.Height()*3)
+	m.viewport.SetYOffset(mailViewportBottomOffset(m) - m.viewport.Height() - 1)
+	if !hasChatTailHint(m) {
+		t.Fatalf("precondition: chat-tail hint should be visible before ctrl+end")
+	}
+
+	updated, cmd := m.Update(ctrlEndKey(t))
+	if cmd != nil {
+		t.Fatalf("ctrl+end should not return a command")
+	}
+	if !updated.viewport.AtBottom() {
+		t.Fatalf("ctrl+end should jump to bottom")
+	}
+	if hasChatTailHint(updated) {
+		t.Fatalf("chat-tail hint should hide after ctrl+end jumps to bottom")
 	}
 }
 
