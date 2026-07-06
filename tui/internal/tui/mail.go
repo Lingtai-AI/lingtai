@@ -1408,7 +1408,7 @@ func (m MailModel) viewportWithChatTailHint() string {
 	if lipgloss.Width(text) > maxHintWidth {
 		text = ansi.Truncate(text, maxHintWidth, "…")
 	}
-	hint := chatTailHintStyle().Render(" " + text + " ")
+	hint := chatTailHintStyle().Render(text)
 	hintWidth := lipgloss.Width(hint)
 	if hintWidth <= 0 || hintWidth > m.width {
 		return view
@@ -1423,19 +1423,11 @@ func (m MailModel) viewportWithChatTailHint() string {
 	// non-focus and non-layout-affecting: no scroll, history, or input state
 	// changes are needed just to render it.
 	row := len(lines) - 1
-	start := m.width - hintWidth - 2
-	if start < 0 {
-		start = 0
-	}
-	prefix := ansi.Cut(lines[row], 0, start)
-	if pad := start - lipgloss.Width(prefix); pad > 0 {
-		prefix += strings.Repeat(" ", pad)
-	}
-	suffix := m.width - lipgloss.Width(prefix) - hintWidth
+	suffix := m.width - hintWidth
 	if suffix < 0 {
 		suffix = 0
 	}
-	lines[row] = prefix + hint + strings.Repeat(" ", suffix)
+	lines[row] = hint + strings.Repeat(" ", suffix)
 	return strings.Join(lines, "\n")
 }
 

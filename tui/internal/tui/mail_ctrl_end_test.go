@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 )
@@ -170,6 +171,28 @@ func TestMailChatTailHintVisibility(t *testing.T) {
 			t.Fatalf("chat-tail hint should be visible when more than one page from bottom")
 		}
 	})
+}
+
+func TestMailChatTailHintAnchoredBottomLeft(t *testing.T) {
+	m := newSizedMailModel(t)
+	m.initialLoading = false
+	setMailViewportLineCount(t, &m, m.viewport.Height()*3)
+	m.viewport.SetYOffset(mailViewportBottomOffset(m) - m.viewport.Height() - 1)
+
+	view := ansi.Strip(m.viewportWithChatTailHint())
+	lines := strings.Split(view, "\n")
+	if len(lines) == 0 {
+		t.Fatalf("viewport render should have at least one row")
+	}
+
+	text := i18n.T("mail.jump_bottom_hint")
+	lastRow := lines[len(lines)-1]
+	if idx := strings.Index(lastRow, text); idx != 0 {
+		t.Fatalf("chat-tail hint should start at viewport column 0, got index %d in row %q", idx, lastRow)
+	}
+	if previousRows := strings.Join(lines[:len(lines)-1], "\n"); strings.Contains(previousRows, text) {
+		t.Fatalf("chat-tail hint should render on the bottom viewport row only:\n%s", view)
+	}
 }
 
 func TestMailCtrlEndHidesChatTailHint(t *testing.T) {
