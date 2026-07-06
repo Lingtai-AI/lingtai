@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,6 +45,105 @@ func TestSaveAndLoad_Roundtrip(t *testing.T) {
 		if loaded.Description.Summary != p.Description.Summary {
 			t.Errorf("description.summary = %q, want %q",
 				loaded.Description.Summary, p.Description.Summary)
+		}
+	})
+}
+
+// TestLoad_CorruptedJSONSurfacesParseError verifies that a saved preset file
+// containing invalid JSON reports the parse failure rather than collapsing to
+// the generic "preset not found" message (issue #483). The caller needs to
+// know the file exists but is broken, not that it's absent.
+func TestLoad_CorruptedJSONSurfacesParseError(t *testing.T) {
+	withTempPresets(t, func() {
+		dir := SavedDir()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir saved: %v", err)
+		}
+		path := filepath.Join(dir, "broken.json")
+		if err := os.WriteFile(path, []byte("{ this is not json"), 0o644); err != nil {
+			t.Fatalf("write broken preset: %v", err)
+		}
+
+		_, err := Load("broken")
+		if err == nil {
+			t.Fatal("Load() on corrupted JSON returned nil error, want a parse error")
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "preset not found") {
+			t.Errorf("Load() error = %q, must not collapse a parse failure to not-found", msg)
+		}
+		if !strings.Contains(msg, "parse preset") {
+			t.Errorf("Load() error = %q, want it to mention the parse failure", msg)
+		}
+	})
+}
+
+// TestLoad_ReadErrorSurfacesReadError verifies that a non-ENOENT read failure
+// (here: the preset "file" is actually a directory, a deterministic and
+// root-proof failure) surfaces a read/path error rather than not-found.
+func TestLoad_ReadErrorSurfacesReadError(t *testing.T) {
+	withTempPresets(t, func() {
+		dir := SavedDir()
+		// Make saved/blocked.json a directory so os.ReadFile fails with a
+		// non-ENOENT error on every platform, regardless of uid.
+		if err := os.MkdirAll(filepath.Join(dir, "blocked.json"), 0o755); err != nil {
+			t.Fatalf("mkdir saved/blocked.json: %v", err)
+		}
+
+		_, err := Load("blocked")
+		if err == nil {
+			t.Fatal("Load() on a directory-shaped preset returned nil error, want a read error")
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "preset not found") {
+			t.Errorf("Load() error = %q, must not collapse a read failure to not-found", msg)
+		}
+		if !strings.Contains(msg, "read preset") {
+			t.Errorf("Load() error = %q, want it to mention the read failure", msg)
+		}
+	})
+}
+
+// TestLoad_MissingReturnsNotFound verifies the original not-found behavior is
+// preserved when neither a saved nor a template file exists for the name.
+func TestLoad_MissingReturnsNotFound(t *testing.T) {
+	withTempPresets(t, func() {
+		_, err := Load("does-not-exist")
+		if err == nil {
+			t.Fatal("Load() for a missing preset returned nil error, want not-found")
+		}
+		if !strings.Contains(err.Error(), "preset not found") {
+			t.Errorf("Load() error = %q, want it to contain \"preset not found\"", err.Error())
+		}
+	})
+}
+
+// TestLoad_SavedWinsOverCorruptTemplate verifies saved-over-template
+// precedence is unchanged: a valid saved preset is returned even when a
+// same-named template file is corrupt (saved wins, template is never read).
+func TestLoad_SavedWinsOverCorruptTemplate(t *testing.T) {
+	withTempPresets(t, func() {
+		savedDir := SavedDir()
+		tmplDir := TemplatesDir()
+		if err := os.MkdirAll(savedDir, 0o755); err != nil {
+			t.Fatalf("mkdir saved: %v", err)
+		}
+		if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+			t.Fatalf("mkdir templates: %v", err)
+		}
+		// Valid saved preset.
+		writePresetFile(t, savedDir, "dupe", "minimax", "FOO_API_KEY")
+		// Corrupt template with the same name — should never be reached.
+		if err := os.WriteFile(filepath.Join(tmplDir, "dupe.json"), []byte("{ broken"), 0o644); err != nil {
+			t.Fatalf("write broken template: %v", err)
+		}
+
+		p, err := Load("dupe")
+		if err != nil {
+			t.Fatalf("Load() error: %v (saved should win over corrupt template)", err)
+		}
+		if p.Source != SourceSaved {
+			t.Errorf("Load() Source = %v, want SourceSaved", p.Source)
 		}
 	})
 }

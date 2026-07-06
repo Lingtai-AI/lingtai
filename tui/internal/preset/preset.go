@@ -3,6 +3,7 @@ package preset
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -244,6 +245,15 @@ func First() Preset {
 // templates/ — a saved preset with the same name as a template wins
 // (the user's variant overrides). Returns the loaded preset with
 // Source populated.
+//
+// A directory is only skipped when its file is genuinely absent
+// (errors.Is(..., fs.ErrNotExist) through loadFromPath's %w wrapping).
+// Any other error — invalid JSON, permission/read failure, a path that is a
+// directory — is
+// returned to the caller with the underlying cause preserved instead of
+// being collapsed into a generic "preset not found", so a broken file is
+// distinguishable from a missing one (issue #483). Only when BOTH the
+// saved and template files are absent do we return the not-found error.
 func Load(name string) (Preset, error) {
 	for _, attempt := range []struct {
 		dir string
@@ -253,10 +263,18 @@ func Load(name string) (Preset, error) {
 		{TemplatesDir(), SourceTemplate},
 	} {
 		path := filepath.Join(attempt.dir, name+".json")
-		if p, err := loadFromPath(path); err == nil {
+		p, err := loadFromPath(path)
+		if err == nil {
 			p.Source = attempt.src
 			return p, nil
 		}
+		// Genuinely missing here — fall through to the next directory.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		// A real failure (bad JSON, unreadable file, path is a directory):
+		// surface it rather than masking it as not-found.
+		return Preset{}, fmt.Errorf("load preset %q: %w", name, err)
 	}
 	return Preset{}, fmt.Errorf("preset not found: %s", name)
 }
