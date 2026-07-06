@@ -217,6 +217,42 @@ func TestManualTUIUpdateHomebrewRoutesThroughUpdater(t *testing.T) {
 	}
 }
 
+func TestManualTUIUpdateSkipsWhenAlreadyLatest(t *testing.T) {
+	runner := &fakeRunner{}
+	report := RunManualTUIUpdate(t.TempDir(), ManualTUIUpdateOptions{
+		CurrentTUIVersion: "v0.8.1",
+		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:            runner,
+		LookPath: func(name string) (string, error) {
+			if name == "brew" {
+				return "/opt/homebrew/bin/brew", nil
+			}
+			return "", errors.New("not found")
+		},
+		Executable: func() (string, error) { return "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__", nil },
+		LookupEnv:  func(string) (string, bool) { return "", false },
+	})
+
+	if !report.Healthy {
+		t.Fatalf("already-latest result should be healthy: %+v", report)
+	}
+	if report.Updated {
+		t.Fatalf("already-latest result should not report an update: %+v", report)
+	}
+	if report.Err != nil {
+		t.Fatalf("already-latest result should have no error: %v", report.Err)
+	}
+	if !containsLine(report.Lines, "TUI is already at the latest version (v0.8.1)") {
+		t.Fatalf("expected already-latest line: %+v", report.Lines)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("already-latest update must not run any commands, got %#v", runner.calls)
+	}
+	if containsCall(runner.calls, "brew") {
+		t.Fatalf("already-latest update must not run brew, got %#v", runner.calls)
+	}
+}
+
 func TestManualTUIUpdateSourceInstallSucceeds(t *testing.T) {
 	globalDir := t.TempDir()
 	prefix := t.TempDir()

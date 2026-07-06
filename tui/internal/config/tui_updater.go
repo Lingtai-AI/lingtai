@@ -135,7 +135,10 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 			case releaseNewer(current, release.TagName):
 				result.add(DoctorWarn, "TUI update available: %s -> %s", current, release.TagName)
 			default:
-				result.add(DoctorOK, "Latest release is not newer than current TUI version; running updater anyway")
+				// Already at (or ahead of) the latest release: skip the updater
+				// entirely so we don't run Homebrew for a no-op upgrade.
+				result.add(DoctorOK, "TUI is already at the latest version (%s)", release.TagName)
+				return result
 			}
 		}
 	}
