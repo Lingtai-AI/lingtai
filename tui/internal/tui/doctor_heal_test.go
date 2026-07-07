@@ -37,11 +37,13 @@ func healDoctor(t *testing.T, plan config.UpdatePlan, healCalls *[]config.Update
 			HealPlan: plan,
 		}
 	}
-	m.healFn = func(p config.UpdatePlan) doctorHealDoneMsg {
-		if healCalls != nil {
-			*healCalls = append(*healCalls, p)
+	m.healFn = func(p config.UpdatePlan) tea.Cmd {
+		return func() tea.Msg {
+			if healCalls != nil {
+				*healCalls = append(*healCalls, p)
+			}
+			return doctorHealStepMsg{Lines: []doctorLine{{Text: "✓ healed", OK: true}}}
 		}
-		return doctorHealDoneMsg{Lines: []doctorLine{{Text: "✓ healed", OK: true}}}
 	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	return m
@@ -61,6 +63,9 @@ func TestDoctorHealPromptShownWhenNeedsHeal(t *testing.T) {
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, i18n.T("doctor.heal_prompt")) {
 		t.Fatalf("prompt view should contain the heal prompt line:\n%s", view)
+	}
+	if !strings.Contains(view, i18n.T("doctor.heal_actions_header")) {
+		t.Fatalf("prompt view should render the actions header:\n%s", view)
 	}
 	kernelAction := i18n.TF("doctor.heal_action_kernel", "0.9.6", "0.9.7")
 	if !strings.Contains(view, kernelAction) {
@@ -86,8 +91,12 @@ func TestDoctorNoPromptWhenHealthy(t *testing.T) {
 	if m.state != doctorStateReport {
 		t.Fatalf("NeedsHeal()==false must stay in doctorStateReport, got %v", m.state)
 	}
-	if strings.Contains(ansi.Strip(m.View()), i18n.T("doctor.heal_prompt")) {
-		t.Fatalf("healthy result must not render the heal prompt:\n%s", m.View())
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, i18n.T("doctor.heal_prompt")) {
+		t.Fatalf("healthy result must not render the heal prompt:\n%s", view)
+	}
+	if !strings.Contains(view, i18n.T("doctor.healthy_ok")) {
+		t.Fatalf("healthy result should render the explicit healthy summary line:\n%s", view)
 	}
 	if len(calls) != 0 {
 		t.Fatal("healthy result must never run the heal")
@@ -170,6 +179,9 @@ func TestDoctorHealApplyRunsHealOnceThenRerunsDiagnostics(t *testing.T) {
 	if m.lines[1].Text != "✓ healed" {
 		t.Fatalf("heal lines should follow the section header, got %+v", m.lines[1])
 	}
+	if m.lines[2].Text != i18n.T("doctor.heal_done") || !m.lines[2].OK {
+		t.Fatalf("the heal completion line should follow the heal output, got %+v", m.lines[2])
+	}
 	if m.lines[len(m.lines)-1].Text != "✓ diagnosed" {
 		t.Fatalf("fresh diagnostic lines should follow the heal lines, got %+v", m.lines)
 	}
@@ -197,9 +209,11 @@ func TestDoctorHealPromptArrowsStillScroll(t *testing.T) {
 	m.diagnoseFn = func() doctorResultMsg {
 		return doctorResultMsg{Lines: lines, HealPlan: healNeedingPlan()}
 	}
-	m.healFn = func(p config.UpdatePlan) doctorHealDoneMsg {
-		calls = append(calls, p)
-		return doctorHealDoneMsg{}
+	m.healFn = func(p config.UpdatePlan) tea.Cmd {
+		return func() tea.Msg {
+			calls = append(calls, p)
+			return doctorHealStepMsg{}
+		}
 	}
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m, _ = m.Update(runCmd(m.Init()).(doctorResultMsg))
@@ -217,6 +231,142 @@ func TestDoctorHealPromptArrowsStillScroll(t *testing.T) {
 	}
 	if len(calls) != 0 {
 		t.Fatal("scrolling must not run the heal")
+	}
+}
+
+func TestDoctorHealingBlocksRefresh(t *testing.T) {
+	// ctrl+r while a heal is in flight must be rejected: a concurrent
+	// diagnostic would still see the stale pre-heal state, re-open the prompt
+	// over the running cascade, and allow a second overlapping heal.
+	var calls []config.UpdatePlan
+	m := healDoctor(t, healNeedingPlan(), &calls)
+	m, _ = m.Update(runCmd(m.Init()).(doctorResultMsg))
+	m, healCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.state != doctorStateHealing {
+		t.Fatalf("apply should enter doctorStateHealing, got %v", m.state)
+	}
+
+	m, cmd := m.Update(ctrlR())
+	if cmd != nil {
+		t.Fatal("ctrl+r during a heal must not start a diagnostic")
+	}
+	if m.state != doctorStateHealing {
+		t.Fatalf("ctrl+r during a heal must not leave doctorStateHealing, got %v", m.state)
+	}
+	if m.loading {
+		t.Fatal("ctrl+r during a heal must not flip the model into loading")
+	}
+	if view := ansi.Strip(m.View()); strings.Contains(view, "[ctrl+r]") {
+		t.Fatalf("healing footer must not advertise ctrl+r:\n%s", view)
+	}
+
+	// The in-flight heal still completes normally afterwards.
+	m, _ = m.Update(runCmd(healCmd))
+	if !m.loading {
+		t.Fatal("heal completion should still re-run diagnostics")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("exactly one heal must have run, got %d", len(calls))
+	}
+}
+
+func TestDoctorHealStreamsStageLines(t *testing.T) {
+	// The cascade delivers one msg per stage; each stage's output must appear
+	// on screen while the next stage is still running.
+	m := healDoctor(t, healNeedingPlan(), nil)
+	m.healFn = func(p config.UpdatePlan) tea.Cmd {
+		second := func() tea.Msg {
+			return doctorHealStepMsg{Lines: []doctorLine{{Text: "✓ stage2", OK: true}}}
+		}
+		return func() tea.Msg {
+			return doctorHealStepMsg{Lines: []doctorLine{{Text: "✓ stage1", OK: true}}, Next: second}
+		}
+	}
+	m, _ = m.Update(runCmd(m.Init()).(doctorResultMsg))
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m, cmd = m.Update(runCmd(cmd))
+	if m.state != doctorStateHealing {
+		t.Fatalf("mid-cascade the model must stay in doctorStateHealing, got %v", m.state)
+	}
+	if cmd == nil {
+		t.Fatal("a stage msg with Next set must schedule the next stage")
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "✓ stage1") {
+		t.Fatalf("the first stage's output should stream into the view before the cascade finishes:\n%s", view)
+	}
+	if !strings.Contains(view, i18n.T("doctor.heal_section")) {
+		t.Fatalf("streamed output should sit under the heal section header:\n%s", view)
+	}
+
+	m, cmd = m.Update(runCmd(cmd))
+	if !m.loading || cmd == nil {
+		t.Fatal("the final stage should re-run diagnostics")
+	}
+	m, _ = m.Update(runCmd(cmd).(doctorResultMsg))
+	joined := ""
+	for _, line := range m.lines {
+		joined += line.Text + "\n"
+	}
+	if !strings.Contains(joined, "✓ stage1") || !strings.Contains(joined, "✓ stage2") {
+		t.Fatalf("the merged report should carry every stage's output:\n%s", joined)
+	}
+}
+
+// tuiHealablePlan is a plan whose only fixable finding is a Homebrew TUI
+// update — the surface the running process can never observe as fixed,
+// because its baked-in version only changes on restart.
+func tuiHealablePlan() config.UpdatePlan {
+	return config.UpdatePlan{
+		TUI: config.TUIUpdateCheck{
+			UpdateAvailable: true,
+			Install:         config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew},
+			Latest:          "v0.9.4",
+		},
+	}
+}
+
+func TestDoctorTUIHealSuppressesRepromptUntilRestart(t *testing.T) {
+	// diagnoseFn always reports the same stale TUI update, mirroring the real
+	// world: tuiVersion is baked at startup, so the post-heal diagnostic
+	// re-classifies the just-installed update as available. The model must
+	// suppress the re-prompt instead of offering the same brew upgrade forever.
+	var calls []config.UpdatePlan
+	m := healDoctor(t, tuiHealablePlan(), &calls)
+	m.healFn = func(p config.UpdatePlan) tea.Cmd {
+		return func() tea.Msg {
+			calls = append(calls, p)
+			return doctorHealStepMsg{
+				Lines:     []doctorLine{{Text: "✓ brewed", OK: true}},
+				HealedTUI: "v0.9.4",
+			}
+		}
+	}
+	m, _ = m.Update(runCmd(m.Init()).(doctorResultMsg))
+	if m.state != doctorStateHealPrompt {
+		t.Fatalf("healable TUI plan must prompt, got %v", m.state)
+	}
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, cmd = m.Update(runCmd(cmd)) // heal step (records call, reports HealedTUI)
+	m, _ = m.Update(runCmd(cmd).(doctorResultMsg))
+
+	if m.state != doctorStateReport {
+		t.Fatalf("post-heal diagnostic must not re-prompt for the just-healed TUI update, got state %v", m.state)
+	}
+	if m.healPlan.TUIHealable() {
+		t.Fatal("the stored plan must not keep the healed TUI update healable")
+	}
+	restartHint := i18n.TF("doctor.heal_tui_restart_pending", "v0.9.4")
+	joined := ""
+	for _, line := range m.lines {
+		joined += line.Text + "\n"
+	}
+	if !strings.Contains(joined, restartHint) {
+		t.Fatalf("the report should explain the restart-pending suppression:\n%s", joined)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("the brew heal must have run exactly once, got %d", len(calls))
 	}
 }
 
