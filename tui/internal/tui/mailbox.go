@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -32,6 +33,9 @@ type MailboxModel struct {
 	width  int
 	height int
 	ready  bool
+
+	scrollbarDragging   bool
+	scrollbarDragOffset int
 
 	pickerVP viewport.Model
 }
@@ -92,7 +96,7 @@ func (m MailboxModel) mailboxFooterHint() string {
 	if strings.TrimSpace(m.searchQuery) != "" {
 		return fmt.Sprintf("filter %q (%d/%d) · / edit · esc clear", truncate(m.searchQuery, 28), len(m.inner.entries), len(m.allEntries))
 	}
-	return "wheel/pgup/pgdn/home/end navigate · / search · ctrl+t agent · ctrl+r reload"
+	return "wheel/drag scrollbar/pgup/pgdn/home/end navigate · / search · ctrl+t agent · ctrl+r reload"
 }
 
 func (m *MailboxModel) syncInnerSize() tea.Cmd {
@@ -237,6 +241,31 @@ func (m MailboxModel) Update(msg tea.Msg) (MailboxModel, tea.Cmd) {
 		m.inner, cmd = m.inner.Update(msg)
 		return m, cmd
 
+	case tea.MouseClickMsg:
+		if m.handleMailboxScrollbarClick(msg.Mouse()) {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(msg)
+		return m, cmd
+
+	case tea.MouseMotionMsg:
+		if m.handleMailboxScrollbarMotion(msg.Mouse()) {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(msg)
+		return m, cmd
+
+	case tea.MouseReleaseMsg:
+		if m.scrollbarDragging {
+			m.scrollbarDragging = false
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(msg)
+		return m, cmd
+
 	case tea.MouseWheelMsg:
 		if m.pickerOpen {
 			var cmd tea.Cmd
@@ -340,6 +369,137 @@ func (m MailboxModel) mailboxPageStep() int {
 		return h - 2
 	}
 	return 5
+}
+
+func (m MailboxModel) mailboxScrollbarMetrics() (visible bool, thumbTop, thumbHeight, trackHeight, maxOffset int) {
+	if !m.inner.ready {
+		return false, 0, 0, 0, 0
+	}
+	trackHeight = m.inner.leftVP.Height()
+	total := m.inner.leftVP.TotalLineCount()
+	if trackHeight <= 0 || total <= trackHeight {
+		return false, 0, 0, trackHeight, 0
+	}
+	maxOffset = total - trackHeight
+	thumbHeight = trackHeight * trackHeight / total
+	if thumbHeight < 1 {
+		thumbHeight = 1
+	}
+	if thumbHeight > trackHeight {
+		thumbHeight = trackHeight
+	}
+	travel := trackHeight - thumbHeight
+	if travel > 0 && maxOffset > 0 {
+		thumbTop = (m.inner.leftVP.YOffset()*travel + maxOffset/2) / maxOffset
+	}
+	return true, thumbTop, thumbHeight, trackHeight, maxOffset
+}
+
+func (m MailboxModel) mailboxScrollbarX() int {
+	leftW, _ := m.inner.panelWidths()
+	if leftW < 1 {
+		return -1
+	}
+	return leftW - 1
+}
+
+func (m MailboxModel) mouseOnMailboxScrollbar(mouse tea.Mouse) bool {
+	visible, _, _, trackHeight, _ := m.mailboxScrollbarMetrics()
+	if !visible {
+		return false
+	}
+	if mouse.X != m.mailboxScrollbarX() {
+		return false
+	}
+	y := mouse.Y - mdvHeaderLines
+	return y >= 0 && y < trackHeight
+}
+
+func (m *MailboxModel) handleMailboxScrollbarClick(mouse tea.Mouse) bool {
+	if m.pickerOpen || mouse.Button != tea.MouseLeft || !m.mouseOnMailboxScrollbar(mouse) {
+		return false
+	}
+	_, thumbTop, thumbHeight, _, _ := m.mailboxScrollbarMetrics()
+	relY := mouse.Y - mdvHeaderLines
+	if relY >= thumbTop && relY < thumbTop+thumbHeight {
+		m.scrollbarDragOffset = relY - thumbTop
+	} else {
+		m.scrollbarDragOffset = thumbHeight / 2
+	}
+	m.scrollbarDragging = true
+	m.inner.focus = mdvFocusLeft
+	m.setMailboxScrollbarFromY(mouse.Y)
+	return true
+}
+
+func (m *MailboxModel) handleMailboxScrollbarMotion(mouse tea.Mouse) bool {
+	if !m.scrollbarDragging {
+		return false
+	}
+	m.setMailboxScrollbarFromY(mouse.Y)
+	return true
+}
+
+func (m *MailboxModel) setMailboxScrollbarFromY(y int) {
+	visible, _, thumbHeight, trackHeight, maxOffset := m.mailboxScrollbarMetrics()
+	if !visible {
+		return
+	}
+	relY := y - mdvHeaderLines - m.scrollbarDragOffset
+	travel := trackHeight - thumbHeight
+	if travel <= 0 || maxOffset <= 0 {
+		m.inner.leftVP.SetYOffset(0)
+		m.selectMailboxCursorNearViewportTop()
+		return
+	}
+	if relY < 0 {
+		relY = 0
+	}
+	if relY > travel {
+		relY = travel
+	}
+	offset := (relY*maxOffset + travel/2) / travel
+	m.inner.leftVP.SetYOffset(offset)
+	m.selectMailboxCursorNearViewportTop()
+}
+
+func (m *MailboxModel) selectMailboxCursorNearViewportTop() {
+	positions := m.entryNodePositions()
+	if len(positions) == 0 {
+		return
+	}
+	offset := m.inner.leftVP.YOffset()
+	target := positions[0]
+	for _, pos := range positions {
+		m.inner.cursor = pos
+		line := m.inner.cursorLineInLeft()
+		if line >= offset {
+			target = pos
+			break
+		}
+		target = pos
+	}
+	m.inner.cursor = target
+	m.inner.syncRight()
+	m.inner.syncLeft()
+}
+
+func (m MailboxModel) renderMailboxLeftLineWithScrollbar(line string, row, leftW int) string {
+	if leftW <= 1 {
+		return padToWidth(line, leftW)
+	}
+	bodyW := leftW - 1
+	line = ansi.Truncate(line, bodyW, "")
+	line = padToWidth(line, bodyW)
+	visible, thumbTop, thumbHeight, _, _ := m.mailboxScrollbarMetrics()
+	if !visible {
+		return line + " "
+	}
+	glyph := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
+	if row >= thumbTop && row < thumbTop+thumbHeight {
+		glyph = lipgloss.NewStyle().Foreground(ColorAccent).Render("█")
+	}
+	return line + glyph
 }
 
 func (m *MailboxModel) entryNodePositions() []int {
@@ -577,5 +737,66 @@ func (m MailboxModel) View() string {
 		}
 		return header + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
 	}
-	return m.inner.View()
+	return m.renderMailboxView()
+}
+
+func (m MailboxModel) renderMailboxView() string {
+	if !m.inner.ready {
+		return m.inner.View()
+	}
+
+	title := StyleTitle.Render("  "+m.inner.title) + "\n" + strings.Repeat("─", m.inner.width)
+
+	scrollHint := ""
+	if !m.inner.rightVP.AtBottom() {
+		scrollHint = " " + RuneBullet + " pgup/pgdn scroll"
+	}
+	focusHint := "tab switch"
+	exportHint := " " + RuneBullet + " " + i18n.T("mdviewer.export_hint")
+	extraHint := ""
+	if m.inner.FooterHint != "" {
+		extraHint = " " + RuneBullet + " " + m.inner.FooterHint
+	}
+	hintLine := StyleFaint.Render("  ↑↓ " + i18n.T("welcome.select_lang") + "  [Esc] " + i18n.T("firstrun.back") + " " + RuneBullet + " " + focusHint + scrollHint + exportHint + extraHint)
+	if m.inner.status != "" {
+		statusStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+		if m.inner.statusErr {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75"))
+		}
+		hintLine = statusStyle.Render("  " + m.inner.status)
+	}
+	footer := strings.Repeat("─", m.inner.width) + "\n" + hintLine
+
+	leftW, _ := m.inner.panelWidths()
+	leftLines := strings.Split(m.inner.leftVP.View(), "\n")
+	rightLines := strings.Split(m.inner.rightVP.View(), "\n")
+
+	vpHeight := m.inner.height - mdvHeaderLines - mdvFooterLines
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	for len(leftLines) < vpHeight {
+		leftLines = append(leftLines, "")
+	}
+	for len(rightLines) < vpHeight {
+		rightLines = append(rightLines, "")
+	}
+
+	sep := lipgloss.NewStyle().Foreground(ColorTextFaint).Render("│")
+	var body strings.Builder
+	for i := 0; i < vpHeight; i++ {
+		l := ""
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		r := ""
+		if i < len(rightLines) {
+			r = rightLines[i]
+		}
+		l = m.renderMailboxLeftLineWithScrollbar(l, i, leftW)
+		body.WriteString(l + sep + r + "\n")
+	}
+	merged := strings.TrimRight(body.String(), "\n")
+
+	return title + "\n" + PaintViewportBG(merged, m.inner.width) + "\n" + footer
 }

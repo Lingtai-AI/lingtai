@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func writeMailboxViewTestMessage(t *testing.T, baseDir, folder string, idx int, subject, body string, stamp time.Time) {
@@ -131,5 +132,40 @@ func TestMailboxSearchFiltersAndEscClears(t *testing.T) {
 	}
 	if got := len(m.inner.entries); got != 1 {
 		t.Fatalf("multi-word filtered entries = %d, want 1", got)
+	}
+}
+
+func TestMailboxScrollbarDragJumpsMessageList(t *testing.T) {
+	base := t.TempDir()
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 30; i++ {
+		writeMailboxViewTestMessage(t, base, "inbox", i, fmt.Sprintf("message-%02d", i), "body", now.Add(time.Duration(i)*time.Second))
+	}
+
+	m := NewMailboxModel(base)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+	if visible, _, _, _, _ := m.mailboxScrollbarMetrics(); !visible {
+		t.Fatal("expected overflowing mailbox list to render a scrollbar")
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "█") {
+		t.Fatalf("mailbox view should contain a scrollbar thumb, got:\n%s", view)
+	}
+
+	leftW, _ := m.inner.panelWidths()
+	bottomY := mdvHeaderLines + m.inner.leftVP.Height() - 1
+	m, _ = m.Update(tea.MouseClickMsg{X: leftW - 1, Y: bottomY, Button: tea.MouseLeft})
+	if !m.scrollbarDragging {
+		t.Fatal("clicking the scrollbar should start a drag")
+	}
+	if got := m.inner.leftVP.YOffset(); got == 0 {
+		t.Fatal("dragging to the bottom should advance the left viewport offset")
+	}
+	if got := m.inner.currentEntryIndex(); got < 20 {
+		t.Fatalf("dragging to bottom currentEntryIndex = %d, want near the end", got)
+	}
+	m, _ = m.Update(tea.MouseReleaseMsg{})
+	if m.scrollbarDragging {
+		t.Fatal("mouse release should end scrollbar dragging")
 	}
 }
