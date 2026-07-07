@@ -168,11 +168,14 @@ func codexAccountSlug(email, fallback string) string {
 
 // newCodexAuthPath returns a fresh, non-colliding absolute path under
 // codexAuthDir for a new account with the given email. The slug derives from
-// the email; numeric suffixes break collisions with existing files. The
-// directory is NOT created here — the caller creates it at write time.
+// the email's local part (sam@example.com → sam.json); when the tokens carry
+// no email the file is named codex-account.json so the path reads as an
+// account file rather than the ambiguous codex-auth/codex.json. Numeric
+// suffixes break collisions with existing files (sam-2.json). The directory
+// is NOT created here — the caller creates it at write time.
 func newCodexAuthPath(globalDir, email string) string {
 	dir := codexAuthDir(globalDir)
-	slug := codexAccountSlug(email, "codex")
+	slug := codexAccountSlug(email, "codex-account")
 	candidate := filepath.Join(dir, slug+".json")
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		return candidate

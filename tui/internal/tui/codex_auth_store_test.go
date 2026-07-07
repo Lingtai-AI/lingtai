@@ -172,6 +172,23 @@ func TestNewCodexAuthPath_NoCollision(t *testing.T) {
 	}
 }
 
+// TestNewCodexAuthPath_MissingEmailFallback verifies that a new account whose
+// tokens carry no email gets the readable "codex-account" slug (not the bare
+// "codex" that used to land as the confusing codex-auth/codex.json), with the
+// same numeric-suffix collision handling as email-derived slugs.
+func TestNewCodexAuthPath_MissingEmailFallback(t *testing.T) {
+	dir := t.TempDir()
+	first := newCodexAuthPath(dir, "")
+	if filepath.Base(first) != "codex-account.json" {
+		t.Fatalf("no-email account should be codex-account.json; got %q", filepath.Base(first))
+	}
+	writeStubCodexToken(t, first, "")
+	second := newCodexAuthPath(dir, "")
+	if filepath.Base(second) != "codex-account-2.json" {
+		t.Fatalf("collision should yield codex-account-2.json; got %q", filepath.Base(second))
+	}
+}
+
 // TestCodexAuthRefForPath_HomeShortened verifies a per-account path maps back to
 // a "~/"-prefixed ref and the legacy file maps to the implicit empty ref.
 func TestCodexAuthRefForPath_LegacyMapsToEmpty(t *testing.T) {

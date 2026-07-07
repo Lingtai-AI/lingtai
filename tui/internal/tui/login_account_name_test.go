@@ -140,7 +140,7 @@ func TestLoginModel_OAuthDonePreservesRecognizableName(t *testing.T) {
 	_, globalDir := withTempCodexHome(t)
 	// Pre-existing legacy account so the "add another" completion writes a new
 	// per-account file (its slug derives from the email, but tokens here have
-	// none, so the derived path uses the "codex" fallback slug).
+	// none, so the derived path uses the "codex-account" fallback slug).
 	writeCodexAccountFile(t, legacyCodexAuthPath(globalDir), "primary@example.com")
 
 	m := NewLoginModel("", globalDir)
