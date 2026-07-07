@@ -320,12 +320,24 @@ func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duratio
 	}
 }
 
+func suppressBrowserOpenForTest(t *testing.T) chan string {
+	t.Helper()
+	old := openBrowser
+	opened := make(chan string, 8)
+	openBrowser = func(url string) {
+		opened <- url
+	}
+	t.Cleanup(func() { openBrowser = old })
+	return opened
+}
+
 // TestStartOAuthFlow_Cancellable verifies that cancelling the supplied
 // context tears down the listener and emits an ErrCodexAuthCancelled
 // message with the caller's epoch echoed back. This is the load-bearing
 // guarantee for the Del-cancel UX in FirstRunModel and LoginModel.
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
 	const epoch uint64 = 42
+	suppressBrowserOpenForTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := startOAuthFlow(ctx, epoch, false)
 
@@ -366,6 +378,7 @@ func TestStartOAuthFlow_Cancellable(t *testing.T) {
 // completes the legacy working flow without requiring terminal paste-back.
 func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T) {
 	const epoch uint64 = 99
+	opened := suppressBrowserOpenForTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -386,6 +399,14 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 	state := authURL.Query().Get("state")
 	if state == "" {
 		t.Fatal("AuthURL did not include state")
+	}
+	select {
+	case got := <-opened:
+		if got != urlMsg.AuthURL {
+			t.Fatalf("browser opener URL = %q, want %q", got, urlMsg.AuthURL)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for browser opener call")
 	}
 
 	resp, err := http.Get(urlMsg.RedirectURI + "?code=browser-code&state=" + url.QueryEscape(state))
@@ -422,6 +443,7 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 // carries the caller's epoch. That's the invariant the handler relies on
 // to gate token-writes (Epoch must match m.codexLoginEpoch).
 func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
+	suppressBrowserOpenForTest(t)
 	l1, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
 	if err != nil {
 		t.Skipf("cannot bind :%d to force listen-failure: %v", defaultPort, err)

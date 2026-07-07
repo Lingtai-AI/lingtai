@@ -1702,7 +1702,9 @@ func isWSL() bool {
 	return strings.Contains(s, "microsoft") || strings.Contains(s, "wsl")
 }
 
-func openBrowser(url string) {
+var openBrowser = openBrowserReal
+
+func openBrowserReal(url string) {
 	if url == "" {
 		return
 	}
