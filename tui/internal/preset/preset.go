@@ -1918,7 +1918,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	}
 
 	initPath := filepath.Join(agentDir, "init.json")
-	if err := os.WriteFile(initPath, data, 0o644); err != nil {
+	if err := atomicWriteFile(initPath, data, 0o644); err != nil {
 		return fmt.Errorf("write init.json: %w", err)
 	}
 
@@ -1982,8 +1982,13 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		merged["state"] = ""
 	}
 
-	mdata, _ := json.MarshalIndent(merged, "", "  ")
-	os.WriteFile(agentJSONPath, mdata, 0o644)
+	mdata, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal .agent.json: %w", err)
+	}
+	if err := atomicWriteFile(agentJSONPath, mdata, 0o644); err != nil {
+		return fmt.Errorf("write .agent.json: %w", err)
+	}
 
 	return nil
 }
@@ -2084,7 +2089,7 @@ func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSe
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := os.WriteFile(initPath, out, 0o644); err != nil {
+	if err := atomicWriteFile(initPath, out, 0o644); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil

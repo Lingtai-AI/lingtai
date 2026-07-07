@@ -307,13 +307,8 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", initJSONPath, err)
 	}
-	tmp := initJSONPath + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, initJSONPath); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s: %w", tmp, err)
+	if err := atomicWriteFile(initJSONPath, out, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", initJSONPath, err)
 	}
 	return nil
 }

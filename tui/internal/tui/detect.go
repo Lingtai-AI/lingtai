@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/anthropics/lingtai-tui/internal/atomicfile"
 )
 
 // DetectOrchestrators scans baseDir for .agent.json files with admin privileges.
@@ -65,6 +67,7 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 	if err != nil {
 		return nil
 	}
+	var firstWriteErr error
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "human" {
 			continue
@@ -131,9 +134,15 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		if err != nil {
 			continue
 		}
-		os.WriteFile(initPath, out, 0o644)
+		// Atomic: a truncated init.json here would leave the agent
+		// unlaunchable. Keep propagating to the remaining agents on a single
+		// failure (matching the per-agent skip above), but surface the first
+		// write error so the caller no longer silently loses it.
+		if werr := atomicfile.Write(initPath, out, 0o644); werr != nil && firstWriteErr == nil {
+			firstWriteErr = werr
+		}
 	}
-	return nil
+	return firstWriteErr
 }
 
 // IsOrchestrator checks if a manifest has admin with at least one truthy value.

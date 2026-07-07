@@ -108,7 +108,7 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 		if err != nil {
 			return workersRehydrated, fmt.Errorf("marshal %s/init.json: %w", entry.Name(), err)
 		}
-		if err := os.WriteFile(initPath, out, 0o644); err != nil {
+		if err := atomicWriteFile(initPath, out, 0o644); err != nil {
 			return workersRehydrated, fmt.Errorf("write %s/init.json: %w", entry.Name(), err)
 		}
 		workersRehydrated++

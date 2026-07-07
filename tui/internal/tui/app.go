@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/atomicfile"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -419,8 +420,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.orchDir = msg.OrchDir
 		a.orchName = msg.OrchName
-		// Propagate LLM config to all agents in the network
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		// Propagate LLM config to all agents in the network. A failure here
+		// leaves some agents with stale LLM/capability settings but does not
+		// stop the orchestrator from launching, so surface it as a non-blocking
+		// warning (mail view is built below) rather than aborting.
+		var propagateErr error
+		if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: config propagation failed on first-run launch: %v\n", err)
+			propagateErr = err
+		}
 
 		// Recipe application: when the project carries a .recipe/ bundle
 		// (set by the first-run wizard or imported from a bundle), make
@@ -481,6 +489,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		addr := humanAddr(a.projectDir)
 		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 
+		if propagateErr != nil {
+			a.mail.AddSystemMessage(i18n.TF("mail.config_propagate_failed", propagateErr))
+		}
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
 		}
@@ -528,11 +539,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (codex etc.). Without this, recovery would loop forever
 			// because config.json was never created. See issue #181.
 			config.EnsureConfigPersisted(a.globalDir)
-			PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+			// Propagate to all agents; a failure is non-blocking (recovery
+			// still launches the orchestrator) but must be visible, so surface
+			// it in the mail view built just below.
+			var propagateErr error
+			if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: config propagation failed during recovery: %v\n", err)
+				propagateErr = err
+			}
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
 			a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+			if propagateErr != nil {
+				a.mail.AddSystemMessage(i18n.TF("mail.config_propagate_failed", propagateErr))
+			}
 			if a.lingtaiCmd != "" {
 				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
@@ -540,7 +561,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
-		PropagateOrchestratorConfig(a.projectDir, a.orchDir)
+		if err := PropagateOrchestratorConfig(a.projectDir, a.orchDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: config propagation failed after setup save: %v\n", err)
+			a.mail.AddSystemMessage(i18n.TF("mail.config_propagate_failed", err))
+		}
 		a.mail.AddSystemMessage(i18n.T("setup.saved_refresh"))
 		return a.switchToView("mail")
 
@@ -1164,7 +1188,9 @@ func resetActivePresetToDefault(dir string) {
 	if err != nil {
 		return
 	}
-	os.WriteFile(initPath, out, 0o644)
+	// Atomic: a truncated init.json here would leave the agent unlaunchable.
+	// Best-effort by contract (see doc comment), so the error is swallowed.
+	_ = atomicfile.Write(initPath, out, 0o644)
 }
 
 // readAllowedPresets returns the contents of manifest.preset.allowed from
@@ -1313,7 +1339,7 @@ func setActivePreset(dir, presetPath string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(initPath, out, 0o644)
+	return atomicfile.Write(initPath, out, 0o644)
 }
 
 // hardRefreshDirWithPreset is the `/refresh <preset>` cousin of

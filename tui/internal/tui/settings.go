@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/atomicfile"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
@@ -76,6 +77,7 @@ type SettingsModel struct {
 	editing      bool
 	width        int
 	height       int
+	saveErr      string // last config-save failure, shown in the footer
 }
 
 func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUIConfig) SettingsModel {
@@ -331,7 +333,7 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		m.tuiConfig.Theme = val
 		SetThemeByName(val)
 	case "agent_lang":
-		m.saveAgentLang(val)
+		m.recordSaveErr(m.saveAgentLang(val))
 		return nil // don't save TUI config — this writes to init.json
 	}
 	config.SaveTUIConfig(m.globalDir, m.tuiConfig)
@@ -350,65 +352,90 @@ func (m *SettingsModel) localTextPtr() *string {
 }
 
 func (m *SettingsModel) saveLocal() {
+	var err error
 	switch m.editingLocal {
 	case localNickname:
-		m.saveNickname()
+		err = m.saveNickname()
 	case localAgentName:
-		m.saveAgentName()
+		err = m.saveAgentName()
+	}
+	m.recordSaveErr(err)
+}
+
+// recordSaveErr stores a config-save failure for display in the footer, or
+// clears any prior error on success.
+func (m *SettingsModel) recordSaveErr(err error) {
+	if err != nil {
+		m.saveErr = err.Error()
+	} else {
+		m.saveErr = ""
 	}
 }
 
-func (m *SettingsModel) saveNickname() {
+func (m *SettingsModel) saveNickname() error {
 	humanPath := filepath.Join(m.projectDir, "human", ".agent.json")
 	data, err := os.ReadFile(humanPath)
 	if err != nil {
-		return
+		return fmt.Errorf("read %s: %w", humanPath, err)
 	}
 	var manifest map[string]interface{}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return
+		return fmt.Errorf("parse %s: %w", humanPath, err)
 	}
 	if m.nickname == "" {
 		delete(manifest, "nickname")
 	} else {
 		manifest["nickname"] = m.nickname
 	}
-	if out, err := json.MarshalIndent(manifest, "", "  "); err == nil {
-		os.WriteFile(humanPath, out, 0o644)
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", humanPath, err)
 	}
+	if err := atomicfile.Write(humanPath, out, 0o644); err != nil {
+		return fmt.Errorf("save nickname: %w", err)
+	}
+	return nil
 }
 
-func (m *SettingsModel) saveAgentName() {
+func (m *SettingsModel) saveAgentName() error {
 	if m.orchDir == "" || m.agentName == "" {
-		return
+		return nil
 	}
 	// Update init.json manifest.agent_name
 	initPath := filepath.Join(m.orchDir, "init.json")
-	if data, err := os.ReadFile(initPath); err == nil {
-		var init map[string]interface{}
-		if err := json.Unmarshal(data, &init); err == nil {
-			if manifest, ok := init["manifest"].(map[string]interface{}); ok {
-				manifest["agent_name"] = m.agentName
-			}
-			if out, err := json.MarshalIndent(init, "", "  "); err == nil {
-				os.WriteFile(initPath, out, 0o644)
-			}
-		}
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", initPath, err)
 	}
+	var init map[string]interface{}
+	if err := json.Unmarshal(data, &init); err != nil {
+		return fmt.Errorf("parse %s: %w", initPath, err)
+	}
+	if manifest, ok := init["manifest"].(map[string]interface{}); ok {
+		manifest["agent_name"] = m.agentName
+	}
+	out, err := json.MarshalIndent(init, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", initPath, err)
+	}
+	if err := atomicfile.Write(initPath, out, 0o644); err != nil {
+		return fmt.Errorf("save agent name: %w", err)
+	}
+	return nil
 }
 
-func (m *SettingsModel) saveAgentLang(lang string) {
+func (m *SettingsModel) saveAgentLang(lang string) error {
 	if m.orchDir == "" {
-		return
+		return nil
 	}
 	initPath := filepath.Join(m.orchDir, "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return
+		return fmt.Errorf("read %s: %w", initPath, err)
 	}
 	var initData map[string]interface{}
 	if err := json.Unmarshal(data, &initData); err != nil {
-		return
+		return fmt.Errorf("parse %s: %w", initPath, err)
 	}
 	if manifest, ok := initData["manifest"].(map[string]interface{}); ok {
 		manifest["language"] = lang
@@ -417,9 +444,14 @@ func (m *SettingsModel) saveAgentLang(lang string) {
 	initData["principle_file"] = preset.PrinciplePath(m.globalDir, lang)
 	delete(initData, "covenant")
 	delete(initData, "principle")
-	if out, err := json.MarshalIndent(initData, "", "  "); err == nil {
-		os.WriteFile(initPath, out, 0o644)
+	out, err := json.MarshalIndent(initData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", initPath, err)
 	}
+	if err := atomicfile.Write(initPath, out, 0o644); err != nil {
+		return fmt.Errorf("save agent language: %w", err)
+	}
+	return nil
 }
 
 func (m SettingsModel) View() string {
@@ -523,6 +555,10 @@ func (m SettingsModel) View() string {
 
 	// Footer
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
+	if m.saveErr != "" {
+		errStyle := lipgloss.NewStyle().Foreground(ColorSuspended)
+		b.WriteString(errStyle.Render("  "+i18n.T("settings.save_failed")+": "+m.saveErr) + "\n")
+	}
 	var hints string
 	if m.editing {
 		hints = fmt.Sprintf("  [Enter] %s  [Esc] %s", i18n.T("settings.confirm"), i18n.T("settings.back"))
