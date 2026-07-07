@@ -452,6 +452,18 @@ func EnsureRuntime(globalDir string) (bool, error) {
 	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{})
 }
 
+// EnsureRuntimeNoUpgrade builds the managed venv only when it is missing or
+// broken; it never runs the auto-upgrade check. The launch path uses this so
+// upgrading an existing kernel is an explicit, confirmed action (see
+// maybePromptKernelUpgrade in package main) instead of a silent side effect
+// of starting the TUI.
+func EnsureRuntimeNoUpgrade(globalDir string) error {
+	_, err := ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{
+		CheckUpgradeFunc: func(string) bool { return false },
+	})
+	return err
+}
+
 // EnsureRuntimeQuiet is the alt-screen-safe variant used by first-run setup.
 func EnsureRuntimeQuiet(globalDir string, progress ProgressFunc) (bool, error) {
 	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{

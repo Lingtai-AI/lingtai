@@ -259,18 +259,22 @@ func main() {
 
 	if !needsFirstRun {
 		// Returning user — ensure runtime + assets (fast no-ops if already exist).
-		// EnsureRuntime always runs the non-blocking upgrade check after a
-		// successful ensure so repaired/recreated venvs do not wait until the
-		// next launch to pick up a newer lingtai CLI.
-		if config.NeedsVenv(globalDir) {
+		// A missing venv (first install) is built automatically; an existing
+		// kernel is never silently auto-upgraded — when an update is available
+		// and stdout is a TTY, maybePromptKernelUpgrade asks y/N first
+		// (non-TTY launches skip, so scripts/CI are never blocked or mutated).
+		wasFirstInstall := config.NeedsVenv(globalDir)
+		if wasFirstInstall {
 			fmt.Println("Setting up Python environment...")
 		}
-		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
+		if err := config.EnsureRuntimeNoUpgrade(globalDir); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
-		} else if upgraded {
-			fmt.Println("Upgraded lingtai to latest version.")
 		}
+		maybePromptKernelUpgrade(wasFirstInstall, launchKernelUpgradeOptions{
+			Inspect: func() config.KernelStatus { return config.InspectKernel(globalDir) },
+			Apply:   func() config.DoctorReport { return config.RunKernelUpdate(globalDir, true) },
+		})
 		if err := preset.Bootstrap(globalDir); err != nil {
 			fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
 			os.Exit(1)
