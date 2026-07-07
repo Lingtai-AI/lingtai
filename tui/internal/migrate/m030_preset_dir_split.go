@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,14 @@ import (
 //
 // Idempotent: paths that already contain "/templates/" or "/saved/"
 // are left alone.
+//
+// Error handling: schema-critical — an init.json left pointing at the
+// flat layout resolves to nothing once the directories are split, so a
+// failed rewrite (marshal/write/rename) is collected and returned as an
+// aggregate error rather than swallowed. The version then stays put and
+// the migration re-runs on the next launch (issue #502). Unparseable
+// init.json files are still warned and skipped: they predate the
+// migration and a retry can never fix them.
 func migratePresetDirSplit(lingtaiDir string) error {
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
@@ -36,6 +45,7 @@ func migratePresetDirSplit(lingtaiDir string) error {
 		return fmt.Errorf("read .lingtai dir: %w", err)
 	}
 
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -91,17 +101,22 @@ func migratePresetDirSplit(lingtaiDir string) error {
 
 		updated, err := json.MarshalIndent(init, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "m030: marshal failed for %s: %v\n", agentDir, err)
+			errs = append(errs, fmt.Errorf("%s: marshal: %w", name, err))
 			continue
 		}
 		tmp := initPath + ".tmp"
 		if err := os.WriteFile(tmp, updated, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "m030: write tmp failed for %s: %v\n", agentDir, err)
+			errs = append(errs, fmt.Errorf("%s: write tmp: %w", name, err))
 			continue
 		}
 		if err := os.Rename(tmp, initPath); err != nil {
-			fmt.Fprintf(os.Stderr, "m030: rename failed for %s: %v\n", agentDir, err)
+			_ = os.Remove(tmp)
+			errs = append(errs, fmt.Errorf("%s: rename: %w", name, err))
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("preset-dir-split incomplete on %d agent(s): %w",
+			len(errs), errors.Join(errs...))
 	}
 	return nil
 }

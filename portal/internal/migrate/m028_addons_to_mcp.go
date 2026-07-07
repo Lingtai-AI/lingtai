@@ -3,6 +3,7 @@ package migrate
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,14 @@ import (
 // .env parsing) is duplicated here rather than imported from tui/internal/
 // to keep the two binaries layering-clean.
 //
-// Idempotent. Errors per-file are logged and don't abort the run.
+// Idempotent.
+//
+// Error handling: schema-critical — downstream code expects the list form,
+// so failures to complete a conversion (config materialization, marshal,
+// write, rename) are collected per agent and returned as an aggregate error
+// so the version does not advance and the migration re-runs (issue #502).
+// Unparseable or unexpectedly-shaped files are still warned and skipped:
+// they predate the migration, and a retry can never fix them.
 func migrateAddonsToMCP(lingtaiDir string) error {
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
@@ -48,6 +56,7 @@ func migrateAddonsToMCP(lingtaiDir string) error {
 
 	globalDir := globalLingtaiTUIDir()
 
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -58,7 +67,13 @@ func migrateAddonsToMCP(lingtaiDir string) error {
 		}
 		agentDir := filepath.Join(lingtaiDir, name)
 		initPath := filepath.Join(agentDir, "init.json")
-		convertAddonsInInitFile(initPath, agentDir, globalDir)
+		if err := convertAddonsInInitFile(initPath, agentDir, globalDir); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("addons-to-mcp incomplete on %d agent(s): %w",
+			len(errs), errors.Join(errs...))
 	}
 	return nil
 }
@@ -77,34 +92,36 @@ var addonSpecs = map[string]addonSpec{
 	"whatsapp": {module: "lingtai_whatsapp", envVarName: "LINGTAI_WHATSAPP_CONFIG", defaultRel: ".secrets/whatsapp.json"},
 }
 
-func convertAddonsInInitFile(initPath, agentDir, globalDir string) {
+// convertAddonsInInitFile is the per-init.json workhorse. A returned error
+// means the file is still in legacy form and the migration must not be
+// considered complete.
+func convertAddonsInInitFile(initPath, agentDir, globalDir string) error {
 	data, err := os.ReadFile(initPath)
 	if err != nil {
-		return
+		return nil // no init.json — not an agent dir
 	}
 	var doc map[string]interface{}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		fmt.Fprintf(os.Stderr, "m028: skipping %s — unparseable: %v\n", initPath, err)
-		return
+		return nil
 	}
 
 	addonsRaw, ok := doc["addons"]
 	if !ok {
-		return
+		return nil
 	}
 	if _, isList := addonsRaw.([]interface{}); isList {
-		return
+		return nil
 	}
 	addonsDict, ok := addonsRaw.(map[string]interface{})
 	if !ok {
 		fmt.Fprintf(os.Stderr, "m028: skipping %s — addons field neither dict nor list (%T)\n",
 			initPath, addonsRaw)
-		return
+		return nil
 	}
 	if len(addonsDict) == 0 {
 		doc["addons"] = []interface{}{}
-		writeJSONIfChanged(initPath, doc, data)
-		return
+		return writeJSONIfChanged(initPath, doc, data)
 	}
 
 	envMap, _ := loadEnvFile(envFilePath(doc, agentDir))
@@ -131,14 +148,13 @@ func convertAddonsInInitFile(initPath, agentDir, globalDir string) {
 			continue
 		}
 
+		// A materialization failure aborts the whole file (leaving it in
+		// legacy form) rather than writing a list with the addon dropped.
 		configRel, err := resolveOrMaterializeAddonConfig(
 			addonName, addonCfg, agentDir, spec.defaultRel,
 		)
 		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"m028: %s — addon %q: %v (skipping)\n",
-				initPath, addonName, err)
-			continue
+			return fmt.Errorf("addon %q: %w", addonName, err)
 		}
 
 		if err := resolveEnvFieldsInJSONFile(
@@ -168,7 +184,7 @@ func convertAddonsInInitFile(initPath, agentDir, globalDir string) {
 		doc["mcp"] = mcpEntries
 	}
 
-	writeJSONIfChanged(initPath, doc, data)
+	return writeJSONIfChanged(initPath, doc, data)
 }
 
 // globalLingtaiTUIDir mirrors the TUI helper. Returns "" if home is
@@ -359,22 +375,21 @@ func absoluteUnder(base, p string) string {
 	return filepath.Join(base, p)
 }
 
-func writeJSONIfChanged(path string, doc map[string]interface{}, original []byte) {
+func writeJSONIfChanged(path string, doc map[string]interface{}, original []byte) error {
 	updated, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "m028: marshal failed for %s: %v\n", path, err)
-		return
+		return fmt.Errorf("marshal %s: %w", path, err)
 	}
 	if string(updated) == string(original) {
-		return
+		return nil
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, updated, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "m028: write tmp failed for %s: %v\n", path, err)
-		return
+		return fmt.Errorf("write tmp %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		fmt.Fprintf(os.Stderr, "m028: rename failed for %s: %v\n", path, err)
 		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s: %w", path, err)
 	}
+	return nil
 }

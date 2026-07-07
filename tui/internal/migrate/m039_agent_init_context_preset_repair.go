@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,9 +54,15 @@ const (
 // skills-paths, skipping the context/preset repair) skips m038 (already at
 // v38) but gets both via m039's combined call.
 //
-// Best-effort and idempotent: a single broken init.json logs to stderr and
-// the migration continues. Files are only rewritten when something actually
-// changed. Atomic temp+rename writes match the surrounding migration style.
+// Idempotent: files are only rewritten when something actually changed.
+// Atomic temp+rename writes match the surrounding migration style.
+//
+// Error handling: schema-critical — an unrepaired init.json leaves the
+// agent in a refresh/relaunch-dead loop, so a failed write is collected
+// and returned as an aggregate error rather than swallowed; the version
+// then stays put and the repair re-runs on the next launch (issue #502).
+// Unparseable init.json files are still warned and skipped: they predate
+// the migration and a retry can never fix them.
 //
 // Shared on-disk state: the portal carries an identical copy
 // (portal/internal/migrate/m039_agent_init_context_preset_repair.go) —
@@ -80,6 +87,7 @@ func migrateAgentInitContextPresetRepairOnly(lingtaiDir string) error {
 		return fmt.Errorf("read .lingtai dir: %w", err)
 	}
 
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -114,8 +122,12 @@ func migrateAgentInitContextPresetRepairOnly(lingtaiDir string) error {
 		}
 
 		if err := writePresetInit(initPath, init); err != nil {
-			fmt.Fprintf(os.Stderr, "m039: write %s: %v\n", agentDir, err)
+			errs = append(errs, fmt.Errorf("%s: write: %w", name, err))
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("context-preset-repair incomplete on %d agent(s): %w",
+			len(errs), errors.Join(errs...))
 	}
 	return nil
 }
