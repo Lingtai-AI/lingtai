@@ -1768,7 +1768,7 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 	}
 	var banner string
 	for _, acct := range accounts {
-		if msg := validateOneCodexAuthFile(acct.Path, acct.Label()); msg != "" && banner == "" {
+		if msg := validateOneCodexAuthFile(acct.Path, acct.DisplayName()); msg != "" && banner == "" {
 			banner = msg
 		}
 	}

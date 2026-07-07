@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,7 @@ import (
 // with no such field falls back to the legacy file.
 //
 // Everything here treats the token JSON as a secret: contents are parsed only
-// to read the email (for a display label) and to confirm a non-empty
+// to read non-secret display metadata (label/email) and to confirm a non-empty
 // refresh_token. Nothing in this file logs or prints token material.
 
 // legacyCodexAuthFile is the historical single-account filename, kept as the
@@ -45,22 +46,27 @@ func codexAuthDir(globalDir string) string {
 
 // codexAccount describes one stored Codex OAuth credential for display and
 // selection. Path is the absolute on-disk location; Ref is the home-shortened
-// string written into a preset's manifest.llm.codex_auth_path. Email is the
-// account email when the token JWT carried one ("" otherwise). Legacy marks
-// the single historical ~/.lingtai-tui/codex-auth.json file. Valid reports
-// whether the file parses with a non-empty refresh_token.
+// string written into a preset's manifest.llm.codex_auth_path. Label is the
+// user-editable non-secret display name stored alongside the token. Email is
+// the account email when the token JWT carried one ("" otherwise). Legacy
+// marks the single historical ~/.lingtai-tui/codex-auth.json file. Valid
+// reports whether the file parses with a non-empty refresh_token.
 type codexAccount struct {
 	Path   string
 	Ref    string
+	Label  string
 	Email  string
 	Legacy bool
 	Valid  bool
 }
 
-// Label returns a stable, human-friendly identifier for the account that
-// never exposes secret material. Prefers the email; falls back to the file
-// stem (slug) for the per-account files and a fixed label for the legacy file.
-func (a codexAccount) Label() string {
+// DisplayName returns a stable, human-friendly identifier for the account that
+// never exposes secret material. Prefers the user label, then email, then the
+// file stem (slug) for per-account files, and a fixed label for the legacy file.
+func (a codexAccount) DisplayName() string {
+	if strings.TrimSpace(a.Label) != "" {
+		return strings.TrimSpace(a.Label)
+	}
 	if a.Email != "" {
 		return a.Email
 	}
@@ -85,7 +91,47 @@ func readCodexTokenFile(path string) (CodexTokens, bool) {
 	if strings.TrimSpace(tokens.Email) == "" {
 		tokens.Email = extractEmailFromJWT(tokens.AccessToken)
 	}
+	tokens.Label = strings.TrimSpace(tokens.Label)
 	return tokens, strings.TrimSpace(tokens.RefreshToken) != ""
+}
+
+// saveCodexCredentialLabel rewrites only the non-secret display label inside a
+// token bundle, preserving OAuth tokens, email, and any unknown/future JSON
+// fields. An empty label clears the JSON key. The token file remains 0600.
+func saveCodexCredentialLabel(path, label string) (CodexTokens, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return CodexTokens{}, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return CodexTokens{}, err
+	}
+	if raw == nil {
+		return CodexTokens{}, errors.New("codex auth token JSON must be an object")
+	}
+
+	label = strings.TrimSpace(label)
+	if label == "" {
+		delete(raw, "label")
+	} else {
+		encodedLabel, err := json.Marshal(label)
+		if err != nil {
+			return CodexTokens{}, err
+		}
+		raw["label"] = encodedLabel
+	}
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return CodexTokens{}, err
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return CodexTokens{}, err
+	}
+	tokens, _ := readCodexTokenFile(path)
+	tokens.Label = label
+	return tokens, nil
 }
 
 // codexAuthPathValid reports whether the token file at the given absolute path
@@ -221,6 +267,7 @@ func listCodexAccounts(globalDir string) []codexAccount {
 		out = append(out, codexAccount{
 			Path:   legacy,
 			Ref:    "", // legacy maps to the implicit-fallback empty ref
+			Label:  tok.Label,
 			Email:  tok.Email,
 			Legacy: true,
 			Valid:  ok,
@@ -239,12 +286,13 @@ func listCodexAccounts(globalDir string) []codexAccount {
 			extra = append(extra, codexAccount{
 				Path:  p,
 				Ref:   codexAuthRefForPath(globalDir, p),
+				Label: tok.Label,
 				Email: tok.Email,
 				Valid: ok,
 			})
 		}
 		sort.Slice(extra, func(i, j int) bool {
-			return extra[i].Label() < extra[j].Label()
+			return extra[i].DisplayName() < extra[j].DisplayName()
 		})
 		out = append(out, extra...)
 	}

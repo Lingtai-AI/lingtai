@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
@@ -43,6 +45,11 @@ func TestCodexAccountDisplay_LabelPerCase(t *testing.T) {
 		want string
 	}{
 		{
+			name: "user label wins",
+			acct: codexAccount{Label: "Work", Email: "alice@example.com"},
+			want: "OAuth — Work",
+		},
+		{
 			name: "email present",
 			acct: codexAccount{Email: "alice@example.com"},
 			want: "OAuth — alice@example.com",
@@ -69,6 +76,56 @@ func TestCodexAccountDisplay_LabelPerCase(t *testing.T) {
 				t.Fatalf("codexAccountDisplay = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLoginModel_LabelEditSavesAndClears verifies the small /setup credentials
+// label editor rewrites only the stored display label, updates the row
+// immediately, and falls back to email when the label is cleared.
+func TestLoginModel_LabelEditSavesAndClears(t *testing.T) {
+	dir := t.TempDir()
+	authPath := seedLoginCodexAuth(t, dir)
+
+	m := NewLoginModel("", dir)
+	if len(m.entries) != 1 || m.entries[0].Provider != "codex" {
+		t.Fatalf("expected single codex entry; got %#v", m.entries)
+	}
+	l := tea.KeyPressMsg{Text: "l", Code: 'l'}
+	m, cmd := m.Update(l)
+	if cmd != nil {
+		t.Fatal("opening label editor must not start a command")
+	}
+	if !m.editingLabel {
+		t.Fatal("l on a codex row should open label editor")
+	}
+	m.labelInput.SetValue("Work")
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.editingLabel {
+		t.Fatal("Enter should close label editor")
+	}
+	if m.entries[0].Display != "OAuth — Work" {
+		t.Fatalf("row display = %q, want label display", m.entries[0].Display)
+	}
+	got, ok := readCodexTokenFile(authPath)
+	if !ok {
+		t.Fatal("token should remain valid after saving label")
+	}
+	if got.Label != "Work" || got.Email != "stub@example.com" {
+		t.Fatalf("stored token metadata = %#v", got)
+	}
+
+	m, _ = m.Update(l)
+	m.labelInput.SetValue("   ")
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.entries[0].Display != "OAuth — stub@example.com" {
+		t.Fatalf("cleared label display = %q, want email fallback", m.entries[0].Display)
+	}
+	got, ok = readCodexTokenFile(authPath)
+	if !ok {
+		t.Fatal("token should remain valid after clearing label")
+	}
+	if got.Label != "" {
+		t.Fatalf("label after clear = %q, want empty", got.Label)
 	}
 }
 
@@ -171,6 +228,115 @@ func TestLoginModel_OAuthDonePreservesRecognizableName(t *testing.T) {
 	}
 	if got.Display != "OAuth — teammate" {
 		t.Fatalf("re-auth row display = %q, want %q", got.Display, "OAuth — teammate")
+	}
+}
+
+// TestLoginModel_OAuthDonePreservesExistingUserLabel verifies re-auth keeps
+// the local-only display label while replacing the secret token material.
+func TestLoginModel_OAuthDonePreservesExistingUserLabel(t *testing.T) {
+	_, globalDir := withTempCodexHome(t)
+	target := filepath.Join(codexAuthDir(globalDir), "work.json")
+	writeCodexAccountFile(t, target, "old@example.com")
+	if _, err := saveCodexCredentialLabel(target, "Work ChatGPT"); err != nil {
+		t.Fatalf("save initial label: %v", err)
+	}
+
+	m := NewLoginModel("", globalDir)
+	m.codexLoginTargetPath = target
+	m.codexLogging = true
+	m.codexLoginEpoch = 9
+
+	m, _ = m.Update(CodexOAuthDoneMsg{
+		Epoch: 9,
+		Tokens: &CodexTokens{
+			AccessToken:  "new-access",
+			RefreshToken: "new-refresh",
+			Email:        "new@example.com",
+		},
+	})
+
+	var got *loginEntry
+	for i := range m.entries {
+		if m.entries[i].CodexPath == target {
+			got = &m.entries[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("re-auth target row not found; entries=%#v", m.entries)
+	}
+	if got.Display != "OAuth — Work ChatGPT" {
+		t.Fatalf("re-auth row display = %q, want preserved label", got.Display)
+	}
+
+	stored, ok := readCodexTokenFile(target)
+	if !ok {
+		t.Fatal("re-auth token should remain readable")
+	}
+	if stored.Label != "Work ChatGPT" {
+		t.Fatalf("stored label = %q, want preserved label", stored.Label)
+	}
+	if stored.AccessToken != "new-access" || stored.RefreshToken != "new-refresh" || stored.Email != "new@example.com" {
+		t.Fatalf("stored refreshed token metadata = %#v", stored)
+	}
+}
+
+// TestLoginModel_OAuthDonePreservesLabelFromInvalidExistingFile verifies a
+// re-auth keeps the local-only display label even when the old file is
+// JSON-parseable but not currently valid because its refresh token is blank.
+func TestLoginModel_OAuthDonePreservesLabelFromInvalidExistingFile(t *testing.T) {
+	_, globalDir := withTempCodexHome(t)
+	target := filepath.Join(codexAuthDir(globalDir), "needs-reauth.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte(`{
+  "access_token": "old-access",
+  "refresh_token": "",
+  "expires_at": 1,
+  "email": "old@example.com",
+  "label": "Needs Reauth"
+}`), 0o600); err != nil {
+		t.Fatalf("write invalid token: %v", err)
+	}
+
+	m := NewLoginModel("", globalDir)
+	m.codexLoginTargetPath = target
+	m.codexLogging = true
+	m.codexLoginEpoch = 10
+
+	m, _ = m.Update(CodexOAuthDoneMsg{
+		Epoch: 10,
+		Tokens: &CodexTokens{
+			AccessToken:  "new-access",
+			RefreshToken: "new-refresh",
+			Email:        "new@example.com",
+		},
+	})
+
+	stored, ok := readCodexTokenFile(target)
+	if !ok {
+		t.Fatal("re-auth should leave token valid")
+	}
+	if stored.Label != "Needs Reauth" {
+		t.Fatalf("stored label = %q, want preserved invalid-file label", stored.Label)
+	}
+	if stored.RefreshToken != "new-refresh" || stored.AccessToken != "new-access" || stored.Email != "new@example.com" {
+		t.Fatalf("stored refreshed token metadata = %#v", stored)
+	}
+
+	var got *loginEntry
+	for i := range m.entries {
+		if m.entries[i].CodexPath == target {
+			got = &m.entries[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("re-auth target row not found; entries=%#v", m.entries)
+	}
+	if got.Display != "OAuth — Needs Reauth" {
+		t.Fatalf("re-auth row display = %q, want preserved invalid-file label", got.Display)
 	}
 }
 

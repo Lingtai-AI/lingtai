@@ -75,6 +75,8 @@ type LoginModel struct {
 	message       string
 	reenteringKey bool
 	keyInput      textarea.Model
+	editingLabel  bool
+	labelInput    textarea.Model
 	codexLogging  bool
 	// codexCancel cancels an in-flight startOAuthFlow goroutine. Set
 	// when codexLogging flips to true on Enter; cleared in
@@ -165,17 +167,21 @@ func NewSetupCredentialsModel(orchDir, globalDir string) LoginModel {
 // login.go (not codex_auth_store.go) so the store helper stays free of the i18n
 // dependency.
 func codexAccountName(acct codexAccount) string {
-	name := strings.TrimSpace(acct.Email)
+	name := strings.TrimSpace(acct.Label)
+	if name != "" {
+		return name
+	}
+	name = strings.TrimSpace(acct.Email)
 	if name != "" {
 		return name
 	}
 	if acct.Legacy {
 		return i18n.T("codex.account_default")
 	}
-	// codexAccount.Label() derives the file slug for a per-account file
+	// codexAccount.DisplayName() derives the file slug for a per-account file
 	// (its own fallback for the legacy case is a plain-English "default",
 	// which we deliberately override above with the localized label).
-	return acct.Label()
+	return acct.DisplayName()
 }
 
 // codexAccountDisplay returns the credential-row display string for a Codex
@@ -254,6 +260,11 @@ func NewLoginModel(orchDir, globalDir string) LoginModel {
 	ta.CharLimit = 512
 	ta.Placeholder = "paste API key..."
 	m.keyInput = ta
+	li := textarea.New()
+	li.SetHeight(1)
+	li.CharLimit = 80
+	li.Placeholder = i18n.T("login.codex_label_placeholder")
+	m.labelInput = li
 
 	// 5. Derive which Codex account is currently active (all saved Codex
 	// presets agree on it) so its row can be marked. Empty when mixed/none.
@@ -417,6 +428,15 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 		m.codexLoginTargetPath = ""
 
+		// Re-auth should refresh token material without discarding an existing
+		// user label. New OAuth responses normally do not carry the local-only
+		// label, so preserve it when the target file already exists.
+		if strings.TrimSpace(msg.Tokens.Label) == "" && fileExists(target) {
+			if existing, _ := readCodexTokenFile(target); strings.TrimSpace(existing.Label) != "" {
+				msg.Tokens.Label = existing.Label
+			}
+		}
+
 		// Token material is secret: written 0600, never logged.
 		data, err := json.MarshalIndent(msg.Tokens, "", "  ")
 		if err != nil {
@@ -440,6 +460,7 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		isLegacy := target == legacy
 		display := codexAccountDisplay(codexAccount{
 			Path:   target,
+			Label:  msg.Tokens.Label,
 			Email:  msg.Tokens.Email,
 			Legacy: isLegacy,
 		})
@@ -476,6 +497,11 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 
 	case tea.PasteMsg:
+		if m.editingLabel {
+			var cmd tea.Cmd
+			m.labelInput, cmd = m.labelInput.Update(msg)
+			return m, cmd
+		}
 		if m.reenteringKey {
 			var cmd tea.Cmd
 			m.keyInput, cmd = m.keyInput.Update(msg)
@@ -483,6 +509,9 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
+		if m.editingLabel {
+			return m.updateLabelEdit(msg)
+		}
 		if m.reenteringKey {
 			return m.updateKeyReentry(msg)
 		}
@@ -816,6 +845,19 @@ func (m LoginModel) updateNormal(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "l":
+		if m.cursor >= 0 && m.cursor < len(m.entries) && !m.cursorOnVirtualRow() {
+			entry := m.entries[m.cursor]
+			if entry.Provider == "codex" && entry.IsOAuth {
+				tok, _ := readCodexTokenFile(entry.CodexPath)
+				m.editingLabel = true
+				m.labelInput.Reset()
+				m.labelInput.SetValue(tok.Label)
+				m.labelInput.Focus()
+				m.message = ""
+			}
+		}
+		return m, nil
 	case "+", "=":
 		// Add an absent account to the pool at weight 1, or increase a present
 		// account's load-balancing share. "=" is the unshifted "+" on most
@@ -942,6 +984,48 @@ func (m LoginModel) updateKeyReentry(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) 
 	default:
 		var cmd tea.Cmd
 		m.keyInput, cmd = m.keyInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m LoginModel) updateLabelEdit(msg tea.KeyPressMsg) (LoginModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.editingLabel = false
+		m.labelInput.Blur()
+		return m, nil
+	case "enter":
+		if m.cursor < 0 || m.cursor >= len(m.entries) {
+			m.editingLabel = false
+			m.labelInput.Blur()
+			return m, nil
+		}
+		entry := m.entries[m.cursor]
+		label := strings.TrimSpace(m.labelInput.Value())
+		tokens, err := saveCodexCredentialLabel(entry.CodexPath, label)
+		m.editingLabel = false
+		m.labelInput.Blur()
+		if err != nil {
+			m.message = fmt.Sprintf(i18n.T("login.codex_label_save_failed"), err.Error())
+			m.messageOK = false
+			return m, nil
+		}
+		m.entries[m.cursor].Display = codexAccountDisplay(codexAccount{
+			Path:   entry.CodexPath,
+			Label:  tokens.Label,
+			Email:  tokens.Email,
+			Legacy: entry.CodexLegacy,
+		})
+		if label == "" {
+			m.message = i18n.T("login.codex_label_cleared")
+		} else {
+			m.message = i18n.T("login.codex_label_saved")
+		}
+		m.messageOK = true
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.labelInput, cmd = m.labelInput.Update(msg)
 		return m, cmd
 	}
 }
@@ -1097,6 +1181,12 @@ func (m LoginModel) View() string {
 		b.WriteString("  " + StyleFaint.Render("[Enter] save  [Esc] cancel") + "\n")
 	}
 
+	if m.editingLabel && m.cursor >= 0 && m.cursor < len(m.entries) {
+		b.WriteString("\n  " + fmt.Sprintf(i18n.T("login.codex_label_prompt"), m.entries[m.cursor].Display) + "\n")
+		b.WriteString("  " + m.labelInput.View() + "\n")
+		b.WriteString("  " + StyleFaint.Render(i18n.T("login.codex_label_hint")) + "\n")
+	}
+
 	// Codex login method chooser.
 	if m.codexChoosingMethod {
 		b.WriteString("\n  " + StyleAccent.Render(i18n.T("codex.method_title")) + "\n")
@@ -1149,8 +1239,8 @@ func (m LoginModel) View() string {
 	case m.cursorOnVirtualRow():
 		footerHint = i18n.T("login.codex_add_hint") + "  [Esc] back"
 	case m.cursor >= 0 && m.cursor < len(m.entries) && m.entries[m.cursor].IsOAuth:
-		// Enter sets active, r re-auths, +/-/0 edit pool weight, Del/d removes
-		// (see updateNormal).
+		// Enter sets active, r re-auths, l edits label, +/-/0 edit pool weight,
+		// Del/d removes (see updateNormal).
 		footerHint = i18n.T("login.codex_entry_hint") + "  " + i18n.T("login.codex_pool_hint") + "  [Esc] back"
 	default:
 		footerHint = "[Enter] " + i18n.T("login.reauth") + "  [Del] " + i18n.T("login.remove_hint") + "  [Esc] back"

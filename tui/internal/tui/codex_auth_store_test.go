@@ -108,6 +108,82 @@ func TestReadCodexTokenFileDerivesEmailFromAccessToken(t *testing.T) {
 	}
 }
 
+func TestReadCodexTokenFileKeepsUserLabel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
+	tok := CodexTokens{
+		AccessToken:  "stub-access",
+		RefreshToken: "stub-refresh",
+		ExpiresAt:    9999999999,
+		Email:        "alice@example.com",
+		Label:        "Work ChatGPT",
+	}
+	data, _ := json.Marshal(tok)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	got, ok := readCodexTokenFile(path)
+	if !ok {
+		t.Fatal("token file should parse as valid")
+	}
+	if got.Label != "Work ChatGPT" {
+		t.Fatalf("label = %q, want %q", got.Label, "Work ChatGPT")
+	}
+}
+
+func TestSaveCodexCredentialLabelPreservesTokensAndClears(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
+	tok := CodexTokens{
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		ExpiresAt:    12345,
+		Email:        "alice@example.com",
+	}
+	data, _ := json.Marshal(tok)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	saved, err := saveCodexCredentialLabel(path, "  Work  ")
+	if err != nil {
+		t.Fatalf("save label: %v", err)
+	}
+	if saved.Label != "Work" {
+		t.Fatalf("saved label = %q, want Work", saved.Label)
+	}
+	got, ok := readCodexTokenFile(path)
+	if !ok {
+		t.Fatal("token should remain valid after label save")
+	}
+	if got.AccessToken != tok.AccessToken || got.RefreshToken != tok.RefreshToken || got.Email != tok.Email {
+		t.Fatalf("token fields changed after label save: %#v", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat token file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("token file mode = %o, want 0600", info.Mode().Perm())
+	}
+
+	if _, err := saveCodexCredentialLabel(path, "   "); err != nil {
+		t.Fatalf("clear label: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read token: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode token: %v", err)
+	}
+	if _, ok := decoded["label"]; ok {
+		t.Fatalf("empty label should omit JSON key; got %s", string(raw))
+	}
+}
+
 func TestReadCodexTokenFileKeepsEmailForInvalidRefresh(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex-auth.json")
@@ -178,5 +254,73 @@ func TestCodexAuthRefForPath_LegacyMapsToEmpty(t *testing.T) {
 	dir := t.TempDir()
 	if ref := codexAuthRefForPath(dir, legacyCodexAuthPath(dir)); ref != "" {
 		t.Fatalf("legacy path should map to empty ref; got %q", ref)
+	}
+}
+
+func TestSaveCodexCredentialLabelPreservesUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex-auth.json")
+	if err := os.WriteFile(path, []byte(`{
+  "access_token": "access-secret",
+  "refresh_token": "refresh-secret",
+  "expires_at": 12345,
+  "email": "alice@example.com",
+  "future_field": {"nested": true},
+  "scopes": ["chat", "codex"]
+}`), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	saved, err := saveCodexCredentialLabel(path, "  Work  ")
+	if err != nil {
+		t.Fatalf("save label: %v", err)
+	}
+	if saved.Label != "Work" {
+		t.Fatalf("saved label = %q, want Work", saved.Label)
+	}
+	assertUnknownCodexFields(t, path)
+
+	if _, err := saveCodexCredentialLabel(path, "   "); err != nil {
+		t.Fatalf("clear label: %v", err)
+	}
+	assertUnknownCodexFields(t, path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read token: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode token: %v", err)
+	}
+	if _, ok := decoded["label"]; ok {
+		t.Fatalf("label key should be omitted after clearing: %s", raw)
+	}
+}
+
+func assertUnknownCodexFields(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read token: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode token: %v", err)
+	}
+	var future struct {
+		Nested bool `json:"nested"`
+	}
+	if err := json.Unmarshal(decoded["future_field"], &future); err != nil {
+		t.Fatalf("decode future_field: %v", err)
+	}
+	if !future.Nested {
+		t.Fatalf("future_field.nested should survive label save/clear: %s", raw)
+	}
+	var scopes []string
+	if err := json.Unmarshal(decoded["scopes"], &scopes); err != nil {
+		t.Fatalf("decode scopes: %v", err)
+	}
+	if len(scopes) != 2 || scopes[0] != "chat" || scopes[1] != "codex" {
+		t.Fatalf("scopes should survive label save/clear, got %#v", scopes)
 	}
 }

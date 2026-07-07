@@ -65,6 +65,7 @@ type CodexTokens struct {
 	RefreshToken string `json:"refresh_token"`
 	ExpiresAt    int64  `json:"expires_at"`
 	Email        string `json:"email"`
+	Label        string `json:"label,omitempty"`
 }
 
 // CodexOAuthDoneMsg is the Bubble Tea message emitted when OAuth completes.
