@@ -11,18 +11,18 @@ import (
 
 func TestIsDegenerateSubject(t *testing.T) {
 	cases := map[string]bool{
-		"":            true,
-		"   ":         true,
-		"Re:":         true,
-		"Re: ":        true,
-		"RE:":         true,
-		"re:":         true,
-		"Fwd:":        true,
-		"Fw:":         true,
-		"Re: hello":   false,
-		"hello":       false,
-		"Re: 你好":      false,
-		"诗时已至":        false,
+		"":          true,
+		"   ":       true,
+		"Re:":       true,
+		"Re: ":      true,
+		"RE:":       true,
+		"re:":       true,
+		"Fwd:":      true,
+		"Fw:":       true,
+		"Re: hello": false,
+		"hello":     false,
+		"Re: 你好":    false,
+		"诗时已至":      false,
 	}
 	for in, want := range cases {
 		if got := isDegenerateSubject(in); got != want {
@@ -184,5 +184,40 @@ func TestBuildMailboxEntries_DateRendersInLocalTime(t *testing.T) {
 		if wantDate != utcTime.Format("2006-01-02 15:04") {
 			t.Errorf("content still shows raw UTC date without timezone:\n%s", entries[0].Content)
 		}
+	}
+}
+
+// TestBuildMailboxEntries_ScansArchiveFolder ensures the mailbox lookup surface
+// includes archived internal messages as well as inbox/sent.
+func TestBuildMailboxEntries_ScansArchiveFolder(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "mailbox", "archive")
+	if err := os.MkdirAll(archive, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	msgDir := filepath.Join(archive, "20260707T010000-archived")
+	if err := os.MkdirAll(msgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"from":        "human",
+		"to":          []string{"manager"},
+		"subject":     "old requirement",
+		"message":     "this archived mail should still be searchable",
+		"received_at": "2026-07-07T01:00:00Z",
+	})
+	if err := os.WriteFile(filepath.Join(msgDir, "message.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := buildMailboxEntries(dir)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Group != "Archive" {
+		t.Errorf("group = %q, want %q", entries[0].Group, "Archive")
+	}
+	if !strings.Contains(entries[0].Content, "old requirement") {
+		t.Errorf("content = %q, want archived message content", entries[0].Content)
 	}
 }
