@@ -11,27 +11,44 @@ import (
 	"time"
 )
 
-// moltSessionWindowQueryTimeout is a WORKER-LOCAL BACKSTOP that bounds how long
-// the molt-session-window sqlite3 subprocess may run before it is killed. It is
-// NOT the mechanism that protects the UI thread: home telemetry is gathered on a
-// background tea.Cmd (tui: fetchHomeTelemetry), never on the render (View) or
-// keypress (syncViewportHeight) path, so the UI never waits on this query. This
-// deadline exists only so a pathological sidecar — e.g. the kernel wedged holding
-// the write lock indefinitely — cannot pin a background worker forever; on expiry
-// the query degrades to the last cached window (see moltWindowCache). It is
-// deliberately CONSERVATIVE (1s, far above a normal write's brief lock) precisely
-// because it no longer sits on a latency-sensitive path: a tight deadline here
-// would only cause spurious stale reads with no UI-responsiveness benefit.
+// moltSessionWindowQueryTimeout bounds how long any sqlite3 read subprocess in
+// this file may run before it is killed. It guards two paths with the same 1s
+// ceiling:
+//
+//   - The molt-session-window query (queryMoltWindowLive), gathered on a
+//     background tea.Cmd (tui: fetchHomeTelemetry), never on the render (View) or
+//     keypress (syncViewportHeight) path. There it is a LOOSE WORKER-LOCAL
+//     BACKSTOP: the UI never waits on it, so the deadline exists only so a
+//     pathological sidecar — e.g. the kernel wedged holding the write lock
+//     indefinitely — cannot pin a background worker forever; on expiry the query
+//     degrades to the last cached window (see moltWindowCache).
+//   - The recent-event detail query (queryRecentEventTimes), which the /kanban
+//     Ctrl+D detail layer refreshes SYNCHRONOUSLY ON THE UI THREAD every
+//     auto-refresh tick (tui: autoRefreshActiveView -> PropsModel.loadDetail).
+//     There this deadline is a HARD CEILING / FAIL-SAFE against a slow or locked
+//     external-volume database pinning the Bubble Tea Update loop (issue #526).
+//
+// 1s is deliberately CONSERVATIVE — far above a normal write's brief lock. On the
+// background path a tighter deadline would only cause spurious stale reads with no
+// UI benefit; on the UI path it is intentionally a last-resort ceiling, not the
+// primary defense, because tripping it sends the caller into the JSONL fallback,
+// which is itself expensive on external volumes (fs.tailEventTimes still reads the
+// on-disk events.jsonl tail). The busy_timeout below, not this deadline, is what
+// absorbs ordinary lock contention on both paths.
 const moltSessionWindowQueryTimeout = 1 * time.Second
 
 // moltSessionWindowBusyTimeoutMS is the sqlite busy_timeout (milliseconds) applied
-// to the molt-session-window read. A concurrent kernel writer briefly holds the
-// database lock; without busy_timeout the read fails instantly with SQLITE_BUSY,
-// which the caller (fs.SumMoltSessionTokenLedger) treats as "no sqlite result"
-// and falls back to an expensive full events.jsonl parse. A short busy_timeout
-// lets the read wait out a normal write and still return promptly, well within
-// moltSessionWindowQueryTimeout. This too runs on the background worker, not the
-// UI thread.
+// to both sqlite reads in this file (queryMoltWindowLive and queryRecentEventTimes).
+// It is the PRIMARY defense against ordinary lock contention on both the background
+// session-window path and the UI-thread /kanban detail path. A concurrent kernel
+// writer briefly holds the database lock; without busy_timeout the read fails
+// instantly with SQLITE_BUSY, and the caller degrades — fs.SumMoltSessionTokenLedger
+// treats it as "no sqlite result" and reparses events.jsonl; fs.RecentRebuildTimes /
+// fs.RecentRefreshCompleteTimes fall back to the events.jsonl tail — both of which
+// are extra work, and costly on external volumes. 150ms covers common write-lock
+// contention so the read waits the writer out and returns fresh data, while still
+// finishing well within moltSessionWindowQueryTimeout, which stays a rarely-hit
+// ceiling rather than the normal-case path.
 const moltSessionWindowBusyTimeoutMS = 150
 
 // moltSessionWindowCacheTTL is the minimum interval between two live sqlite
@@ -253,6 +270,20 @@ func QueryRecentRefreshCompleteTimes(agentDir string, limit int) ([]time.Time, e
 // queryRecentEventTimes runs a targeted, LIMIT-bounded query for the newest
 // timestamps of a single event type. eventType is a fixed internal constant
 // (never user input), so it is interpolated directly into the SQL.
+//
+// Unlike QueryMoltSessionWindows, this query has callers on the UI thread: the
+// /kanban Ctrl+D detail layer reloads RecentRebuildTimes/RecentRefreshCompleteTimes
+// synchronously inside the 1s auto-refresh tick (tui: autoRefreshActiveView ->
+// PropsModel.loadDetail). A concurrent kernel writer briefly holds the sqlite
+// write lock, and on a slow/external-volume live database that write — plus the
+// read itself — can take seconds. Without bounds this subprocess would block the
+// Bubble Tea Update loop for that whole time, delaying keypress/render handling
+// (issue #526). So the read is bounded exactly like queryMoltWindowLive: a
+// worker-local context deadline (moltSessionWindowQueryTimeout) kills a pinned
+// subprocess, and a short sqlite busy_timeout (moltSessionWindowBusyTimeoutMS)
+// lets it wait out a normal write instead of returning early. Both bounds simply
+// surface as a descriptive error here; the fs-layer callers already degrade to
+// the events.jsonl tail (fs.RecentRebuildTimes) or draw nothing.
 func queryRecentEventTimes(agentDir, eventType string, limit int) ([]time.Time, error) {
 	if limit <= 0 {
 		limit = 10
@@ -266,9 +297,23 @@ func queryRecentEventTimes(agentDir, eventType string, limit int) ([]time.Time, 
 		return nil, err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), moltSessionWindowQueryTimeout)
+	defer cancel()
+
+	// The `.timeout` dot-command sets sqlite's busy_timeout for the session so the
+	// read waits out a concurrent kernel writer instead of failing instantly with
+	// SQLITE_BUSY. It runs via -cmd (before the SELECT) rather than as an inline
+	// PRAGMA so its value is not emitted as a result row that would corrupt parsing.
 	sql := fmt.Sprintf(`SELECT ts FROM events WHERE type='%s' ORDER BY ts DESC LIMIT %d`, eventType, limit)
-	out, err := exec.Command(bin, "-separator", "\x1f", db, sql).Output()
+	out, err := exec.CommandContext(ctx, bin,
+		"-separator", "\x1f",
+		"-cmd", fmt.Sprintf(".timeout %d", moltSessionWindowBusyTimeoutMS),
+		db, sql,
+	).Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("sqlite3 %s query timed out after %s", eventType, moltSessionWindowQueryTimeout)
+		}
 		if ee, ok := err.(*exec.ExitError); ok {
 			if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
 				return nil, fmt.Errorf("sqlite3: %s", msg)
