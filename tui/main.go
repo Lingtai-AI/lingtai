@@ -261,7 +261,7 @@ func main() {
 		// Returning user — ensure runtime + assets (fast no-ops if already exist).
 		// A missing venv (first install) is built automatically; an existing
 		// kernel is never silently auto-upgraded — when an update is available
-		// and stdout is a TTY, maybePromptKernelUpgrade asks y/N first
+		// and stdin+stdout are TTYs, maybePromptKernelUpgrade asks y/N first
 		// (non-TTY launches skip, so scripts/CI are never blocked or mutated).
 		wasFirstInstall := config.NeedsVenv(globalDir)
 		if wasFirstInstall {

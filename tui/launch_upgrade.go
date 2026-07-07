@@ -24,7 +24,13 @@ type launchKernelUpgradeOptions struct {
 
 func (o *launchKernelUpgradeOptions) setDefaults() {
 	if o.IsTTY == nil {
-		o.IsTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+		// Both ends must be terminals: the prompt is written to stdout and the
+		// y/N answer is read from stdin. With only a stdout check, a piped
+		// stdin (wrapper script, process supervisor, `yes |`) would either
+		// hang the launch on the read or auto-accept a venv-mutating upgrade.
+		o.IsTTY = func() bool {
+			return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+		}
 	}
 	if o.Input == nil {
 		o.Input = os.Stdin
@@ -48,11 +54,14 @@ func maybePromptKernelUpgrade(wasFirstInstall bool, opts launchKernelUpgradeOpti
 	}
 	opts.setDefaults()
 
-	status := opts.Inspect()
-	if !status.NeedsUpdate {
+	// TTY gate first: a non-TTY launch must never pay Inspect's network
+	// probe (up to 5s against PyPI when offline) for a prompt it can't show.
+	if !opts.IsTTY() {
 		return
 	}
-	if !opts.IsTTY() {
+
+	status := opts.Inspect()
+	if !status.NeedsUpdate {
 		return
 	}
 

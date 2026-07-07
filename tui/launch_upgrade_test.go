@@ -134,6 +134,9 @@ func TestLaunchKernelUpgradeNonTTYSkipsSilently(t *testing.T) {
 
 	maybePromptKernelUpgrade(false, spy.options(false, "y\n", &out))
 
+	if spy.inspectCalls != 0 {
+		t.Errorf("inspect called %d times on non-TTY, want 0 (must not block scripts/CI on the PyPI probe)", spy.inspectCalls)
+	}
 	if spy.applyCalls != 0 {
 		t.Errorf("apply called %d times on non-TTY, want 0", spy.applyCalls)
 	}
