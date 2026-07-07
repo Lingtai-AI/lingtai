@@ -40,10 +40,21 @@ func SetTUIVersion(v string) {
 
 // doctorResultMsg is sent when the async diagnostic completes. Draft is the
 // in-memory capture handed to the save action so pressing the save key never
-// re-runs the diagnostic.
+// re-runs the diagnostic. HealPlan is the read-only update classification the
+// diagnostic produced; NeedsHeal() decides whether the gated heal prompt is
+// offered.
 type doctorResultMsg struct {
+	Lines    []doctorLine
+	Draft    *doctorreport.Draft
+	HealPlan config.UpdatePlan
+}
+
+// doctorHealDoneMsg is sent when the async heal cascade finishes. Its lines
+// are stashed and prepended (under a heal section header) to the fresh
+// diagnostic that runs right after, so the user sees what the heal did and
+// the post-heal state in one report.
+type doctorHealDoneMsg struct {
 	Lines []doctorLine
-	Draft *doctorreport.Draft
 }
 
 // doctorReportSavedMsg is sent when the save action finishes writing (or fails).
@@ -60,6 +71,22 @@ type doctorLine struct {
 	Section bool // true = section header (un-indented, bold, with a leading blank line)
 }
 
+// doctorState is the /doctor view's state machine, mirroring update.go's
+// stateConfirm idiom:
+//
+//	doctorStateReport ──(NeedsHeal)──> doctorStateHealPrompt ──(apply)──> doctorStateHealing ──> re-run diagnostics
+//	                                        └──(cancel)──> doctorStateReport (report stays visible)
+//
+// Diagnostics are strictly read-only; the heal cascade runs only after the
+// user confirms in doctorStateHealPrompt.
+type doctorState int
+
+const (
+	doctorStateReport doctorState = iota
+	doctorStateHealPrompt
+	doctorStateHealing
+)
+
 // DoctorModel is the /doctor dedicated view. The diagnostic output can run far
 // taller than the terminal (runtime + portal + kernel + LLM + per-agent checks),
 // so the body lives in a scrollable viewport rather than a flat string dump.
@@ -74,6 +101,19 @@ type DoctorModel struct {
 	viewport viewport.Model
 	ready    bool // viewport initialized (after first WindowSizeMsg)
 
+	// Gated-heal state. healPlan is the read-only classification from the last
+	// diagnostic; pendingHealLines carries the heal output across the follow-up
+	// diagnostic so both appear in one report.
+	state            doctorState
+	healPlan         config.UpdatePlan
+	healConfirmIdx   int // 0 = Apply fixes, 1 = Cancel
+	pendingHealLines []doctorLine
+
+	// diagnoseFn / healFn are injection seams for tests. Production callers
+	// get the real read-only runDiagnostics and mutating runHeal.
+	diagnoseFn func() doctorResultMsg
+	healFn     func(config.UpdatePlan) doctorHealDoneMsg
+
 	// Report save state. draft is the captured result; once a save succeeds
 	// savedPath is set and the save affordance is replaced by the saved path.
 	draft     *doctorreport.Draft
@@ -86,7 +126,13 @@ type DoctorModel struct {
 var writeDoctorReport = doctorreport.Write
 
 func NewDoctorModel(orchDir, globalDir string) DoctorModel {
-	return DoctorModel{orchDir: orchDir, globalDir: globalDir, loading: true}
+	return DoctorModel{
+		orchDir:    orchDir,
+		globalDir:  globalDir,
+		loading:    true,
+		diagnoseFn: func() doctorResultMsg { return runDiagnostics(orchDir, globalDir) },
+		healFn:     func(plan config.UpdatePlan) doctorHealDoneMsg { return runHeal(orchDir, globalDir, plan) },
+	}
 }
 
 // doctorHeaderLines: title row + separator + export-hint banner + trailing
@@ -101,13 +147,23 @@ func (m DoctorModel) Init() tea.Cmd {
 	return m.runDoctorCmd()
 }
 
-// runDoctorCmd returns the command that runs the diagnostic. Shared by Init()
-// (initial load) and the ctrl+r refresh handler.
+// runDoctorCmd returns the command that runs the read-only diagnostic. Shared
+// by Init() (initial load), the ctrl+r refresh handler, and the post-heal
+// re-run.
 func (m DoctorModel) runDoctorCmd() tea.Cmd {
-	orchDir := m.orchDir
-	globalDir := m.globalDir
+	diagnose := m.diagnoseFn
 	return func() tea.Msg {
-		return runDoctor(orchDir, globalDir)
+		return diagnose()
+	}
+}
+
+// runHealCmd returns the command that runs the confirmed heal cascade against
+// the plan the user just approved.
+func (m DoctorModel) runHealCmd() tea.Cmd {
+	heal := m.healFn
+	plan := m.healPlan
+	return func() tea.Msg {
+		return heal(plan)
 	}
 }
 
@@ -186,22 +242,41 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpHeight := m.height - doctorHeaderLines - doctorFooterLines
-		if vpHeight < 1 {
-			vpHeight = 1
-		}
 		if !m.ready {
 			m.viewport = viewport.New()
 			m.ready = true
 		}
-		m.viewport.SetWidth(m.width)
-		m.viewport.SetHeight(vpHeight)
-		m.syncViewport()
+		m.resizeViewport()
 
 	case doctorResultMsg:
-		m.lines = msg.Lines
+		lines := msg.Lines
+		// A diagnostic that follows a heal carries the heal output up front,
+		// under its own section header, and the saved draft mirrors the merged
+		// screen so a report matches what the user saw.
+		if len(m.pendingHealLines) > 0 {
+			merged := make([]doctorLine, 0, 1+len(m.pendingHealLines)+len(lines))
+			merged = append(merged, doctorLine{Text: i18n.T("doctor.heal_section"), Section: true})
+			merged = append(merged, m.pendingHealLines...)
+			merged = append(merged, lines...)
+			lines = merged
+			if msg.Draft != nil {
+				msg.Draft.Lines = doctorReportLines(lines)
+			}
+			m.pendingHealLines = nil
+		}
+		m.lines = lines
 		m.draft = msg.Draft
+		m.healPlan = msg.HealPlan
 		m.loading = false
+		// Offer the gated heal only when the plan has something the cascade
+		// can actually fix; otherwise stay in the plain report.
+		if msg.HealPlan.NeedsHeal() {
+			m.state = doctorStateHealPrompt
+			m.healConfirmIdx = 0
+		} else {
+			m.state = doctorStateReport
+		}
+		m.resizeViewport()
 		// A fresh diagnostic invalidates any prior save; the next save writes
 		// the new draft to a new directory.
 		m.saving = false
@@ -213,6 +288,15 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 			m.viewport.GotoTop()
 		}
 		m.syncViewport()
+
+	case doctorHealDoneMsg:
+		// Stash the heal output, then re-run the diagnostic so the user sees
+		// the post-heal state; the merge happens when that result arrives.
+		m.pendingHealLines = msg.Lines
+		m.loading = true
+		m.state = doctorStateReport
+		m.resizeViewport()
+		return m, m.runDoctorCmd()
 
 	case doctorReportSavedMsg:
 		m.saving = false
@@ -237,7 +321,40 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 		case "ctrl+r":
 			// Re-run the full diagnostic from scratch.
 			m.loading = true
+			m.state = doctorStateReport
+			m.pendingHealLines = nil
+			m.resizeViewport()
 			return m, m.runDoctorCmd()
+		}
+		if m.state == doctorStateHealPrompt {
+			// Only the horizontal keys drive the Apply/Cancel selector;
+			// up/down/pgup/pgdn fall through to the viewport below so the user
+			// can still review the full report before deciding.
+			switch msg.String() {
+			case "left", "shift+tab":
+				if m.healConfirmIdx > 0 {
+					m.healConfirmIdx--
+				}
+				return m, nil
+			case "right", "tab":
+				if m.healConfirmIdx < 1 {
+					m.healConfirmIdx++
+				}
+				return m, nil
+			case "enter":
+				if m.healConfirmIdx == 0 {
+					// Apply — confirmation given, run the heal cascade.
+					m.state = doctorStateHealing
+					m.resizeViewport()
+					return m, m.runHealCmd()
+				}
+				// Cancel — no mutation; the report stays on screen.
+				m.state = doctorStateReport
+				m.resizeViewport()
+				return m, nil
+			}
+		}
+		switch msg.String() {
 		case "r":
 			// Save the completed run as a redacted report. Writes the stored
 			// draft once; does not re-run the diagnostic.
@@ -258,6 +375,63 @@ func (m DoctorModel) Update(msg tea.Msg) (DoctorModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// footerHeight returns the number of rows the footer occupies in the current
+// state. The heal prompt adds the prompt line, the enumerated actions, and the
+// two-option selector; the healing state adds its progress line. The base
+// footer (separator + hint) is doctorFooterLines.
+func (m DoctorModel) footerHeight() int {
+	h := doctorFooterLines
+	if m.draft != nil {
+		h++ // privacy notice line
+	}
+	switch m.state {
+	case doctorStateHealPrompt:
+		h += 1 + len(m.healActionLines()) + 2
+	case doctorStateHealing:
+		h++
+	}
+	return h
+}
+
+// resizeViewport re-derives the viewport height from the terminal size and the
+// current state's footer height. Called on WindowSizeMsg AND on every state
+// transition, because the heal prompt's taller footer would otherwise push the
+// view past the bottom of the terminal.
+func (m *DoctorModel) resizeViewport() {
+	if !m.ready {
+		return
+	}
+	vpHeight := m.height - doctorHeaderLines - m.footerHeight()
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.viewport.SetWidth(m.width)
+	m.viewport.SetHeight(vpHeight)
+	m.syncViewport()
+}
+
+// healActionLines enumerates, for the confirmation prompt, the concrete
+// mutations the heal cascade will perform for the current plan. The bootstrap
+// refresh is always listed because the cascade always runs it — the enumerated
+// list must be honest about every mutation.
+func (m DoctorModel) healActionLines() []string {
+	var actions []string
+	if m.healPlan.Kernel.NeedsUpdate {
+		if m.healPlan.Kernel.Installed == "" {
+			// Venv missing or lingtai unimportable: the heal rebuilds the
+			// runtime rather than upgrading a known version.
+			actions = append(actions, i18n.T("doctor.heal_action_kernel_rebuild"))
+		} else {
+			actions = append(actions, i18n.TF("doctor.heal_action_kernel", m.healPlan.Kernel.Installed, m.healPlan.Kernel.Latest))
+		}
+	}
+	if m.healPlan.TUIHealable() {
+		actions = append(actions, i18n.TF("doctor.heal_action_tui", m.healPlan.TUI.Latest))
+	}
+	actions = append(actions, i18n.T("doctor.heal_action_bootstrap"))
+	return actions
 }
 
 // syncViewport re-renders the diagnostic body into the viewport. Called after a
@@ -336,7 +510,31 @@ func (m DoctorModel) View() string {
 	if m.draft != nil {
 		footer += "  " + StyleAccent.Render(i18n.T("doctor.report_privacy_notice")) + "\n"
 	}
-	footer += StyleFaint.Render(hint)
+	switch m.state {
+	case doctorStateHealPrompt:
+		// Gated heal: the prompt, the concrete mutations it would perform, and
+		// the Apply/Cancel selector (same idiom as update.go stateConfirm).
+		footer += "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(i18n.T("doctor.heal_prompt")) + "\n"
+		for _, action := range m.healActionLines() {
+			footer += "    " + lipgloss.NewStyle().Foreground(ColorStuck).Render("• "+action) + "\n"
+		}
+		options := []string{i18n.T("doctor.heal_apply"), i18n.T("doctor.heal_cancel")}
+		for i, opt := range options {
+			cursor := "  "
+			style := StyleSubtle
+			if i == m.healConfirmIdx {
+				cursor = StyleAccent.Render("▸ ")
+				style = lipgloss.NewStyle().Foreground(ColorAgent)
+			}
+			footer += "  " + cursor + style.Render(opt) + "\n"
+		}
+		footer += StyleFaint.Render("  " + i18n.T("doctor.heal_hint"))
+	case doctorStateHealing:
+		footer += "  " + lipgloss.NewStyle().Foreground(ColorStuck).Render(i18n.T("doctor.healing")) + "\n"
+		footer += StyleFaint.Render(hint)
+	default:
+		footer += StyleFaint.Render(hint)
+	}
 
 	return header + exportHint + "\n" + PaintViewportBG(body, m.width) + "\n" + footer
 }
@@ -384,34 +582,24 @@ func (m DoctorModel) renderBody() string {
 
 // --- Diagnostic logic ---
 
-// runDoctor performs the /doctor diagnostic and returns a doctorResultMsg.
-func runDoctor(orchDir, globalDir string) doctorResultMsg {
+// runDiagnostics performs the read-only /doctor diagnostic and returns a
+// doctorResultMsg. It never mutates: no brew, no kernel reinstall, no
+// preset.Bootstrap, no library/commands rewrite. Fixable findings are
+// classified into the returned HealPlan; the mutations run only in runHeal,
+// after the user confirms. (The headless `lingtai-tui doctor` CLI keeps the
+// old force-heal behavior — see main.go's doctorMain.)
+func runDiagnostics(orchDir, globalDir string) doctorResultMsg {
 	var lines []doctorLine
 
-	// Phase -1: forced bootstrap/runtime update. Keep this first so /doctor can
-	// repair stale binaries or Python packages before running the traditional
-	// health checks below. Failures are surfaced but do not short-circuit the
+	// Phase -1: read-only update classification (TUI release, kernel version,
+	// file-search sidecar). Failures are surfaced but do not short-circuit the
 	// rest of the diagnostic.
 	lines = append(lines, doctorLine{Text: i18n.T("doctor.section_runtime"), Section: true})
-	updateReport := config.RunDoctorUpdate(globalDir, config.DoctorOptions{
+	plan := config.InspectUpdate(globalDir, config.DoctorOptions{
 		CurrentTUIVersion: tuiVersion,
-		ForceTUI:          true,
-		ForcePython:       true,
-		QuietEnsureVenv:   true,
 	})
-	for _, line := range updateReport.Lines {
+	for _, line := range plan.Lines {
 		lines = append(lines, doctorLineFromConfig(line))
-	}
-	if err := preset.Bootstrap(globalDir); err != nil {
-		lines = append(lines, doctorLine{
-			Text: fmt.Sprintf("✗ Bootstrap assets refresh failed: %v", err),
-		})
-	} else {
-		preset.PopulateBundledLibrary(globalDir)
-		ExportCommandsJSON(globalDir)
-		lines = append(lines, doctorLine{
-			Text: "✓ Bootstrap assets, utility skills, and commands.json refreshed", OK: true,
-		})
 	}
 
 	// Phase 0: check lingtai-portal on PATH
@@ -457,7 +645,7 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		})
 		// Config unreadable: still capture the visible lines so a support report
 		// reflects what the user saw; LLM metadata is simply absent.
-		return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, doctorreport.LLMConfig{})}
+		return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, doctorreport.LLMConfig{}), HealPlan: plan}
 	}
 
 	// Phase 2.5: check base_url for providers that require it
@@ -562,7 +750,48 @@ func runDoctor(orchDir, globalDir string) doctorResultMsg {
 		APIKeyEnv:     readLLMAPIKeyEnv(orchDir),
 		APIKeyPresent: apiKey != "",
 	}
-	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport)}
+	return doctorResultMsg{Lines: lines, Draft: buildDoctorDraft(orchDir, lines, llmReport), HealPlan: plan}
+}
+
+// runHeal applies the fixes the user confirmed in the heal prompt: the kernel
+// update when the kernel was out of date (RunKernelUpdate also rebuilds a
+// missing/broken venv), the Homebrew TUI upgrade when one was available, and
+// then ALWAYS the bundled-asset refresh (preset bootstrap, utility skills,
+// commands.json) — the same cascade the old forced /doctor ran, now gated
+// behind the enumerated confirmation.
+func runHeal(orchDir, globalDir string, plan config.UpdatePlan) doctorHealDoneMsg {
+	_ = orchDir // the heal cascade touches only global state
+	var lines []doctorLine
+
+	if plan.Kernel.NeedsUpdate {
+		report := config.RunKernelUpdate(globalDir, true)
+		for _, line := range report.Lines {
+			lines = append(lines, doctorLineFromConfig(line))
+		}
+	}
+	if plan.TUIHealable() {
+		update := config.RunTUIUpdate(plan.TUI.Install, config.TUIUpdateOptions{
+			LatestVersion:         plan.TUI.Latest,
+			GlobalDir:             globalDir,
+			IncludeHomebrewUpdate: true,
+			ResolveHomebrewPath:   true,
+		})
+		for _, line := range update.Lines {
+			lines = append(lines, doctorLineFromConfig(line))
+		}
+	}
+	if err := preset.Bootstrap(globalDir); err != nil {
+		lines = append(lines, doctorLine{
+			Text: fmt.Sprintf("✗ Bootstrap assets refresh failed: %v", err),
+		})
+	} else {
+		preset.PopulateBundledLibrary(globalDir)
+		ExportCommandsJSON(globalDir)
+		lines = append(lines, doctorLine{
+			Text: "✓ Bootstrap assets, utility skills, and commands.json refreshed", OK: true,
+		})
+	}
+	return doctorHealDoneMsg{Lines: lines}
 }
 
 // buildDoctorDraft captures the finished diagnostic as a report draft. It

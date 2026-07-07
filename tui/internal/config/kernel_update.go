@@ -125,6 +125,52 @@ func (s *KernelStatus) add(sev DoctorSeverity, format string, args ...interface{
 	s.Lines = append(s.Lines, DoctorLine{Severity: sev, Text: fmt.Sprintf(format, args...)})
 }
 
+// UpdatePlan is the read-only aggregate InspectUpdate produces for the
+// interactive /doctor: the classification of every update surface it can
+// heal, plus the diagnostic lines in check order (TUI, kernel, file-search).
+type UpdatePlan struct {
+	TUI    TUIUpdateCheck
+	Kernel KernelStatus
+	Lines  []DoctorLine
+}
+
+// TUIHealable reports whether the heal cascade can actually update the TUI
+// binary. Only the Homebrew backend mutates; source/unknown installs get
+// manual guidance in the diagnostic lines, so they must not trigger a heal
+// prompt that would then do nothing.
+func (p UpdatePlan) TUIHealable() bool {
+	return p.TUI.UpdateAvailable && p.TUI.Install.Method == TUIInstallMethodHomebrew
+}
+
+// NeedsHeal reports whether the plan contains at least one finding the heal
+// cascade can fix.
+func (p UpdatePlan) NeedsHeal() bool {
+	return p.Kernel.NeedsUpdate || p.TUIHealable()
+}
+
+// InspectUpdate runs the strictly read-only classification of the doctor's
+// update surfaces: the TUI binary release check, the kernel version check,
+// and the file-search sidecar probe. It never runs brew/pip/uv install and
+// never rebuilds the venv — it is the diagnostic half whose apply step is the
+// gated heal (RunKernelUpdate + RunTUIUpdate + asset bootstrap).
+func InspectUpdate(globalDir string, opts DoctorOptions) UpdatePlan {
+	opts = fillDoctorOptionDefaults(opts)
+	report := DoctorReport{Healthy: true}
+	plan := UpdatePlan{}
+	plan.TUI = report.inspectTUI(globalDir, opts)
+	plan.Kernel = inspectKernel(globalDir, inspectKernelOptions{
+		HTTPClient: opts.HTTPClient,
+		Runner:     opts.Runner,
+		Stat:       opts.Stat,
+		Home:       opts.Home,
+		LookupEnv:  opts.LookupEnv,
+	})
+	report.Lines = append(report.Lines, plan.Kernel.Lines...)
+	report.checkFileSearchNative(globalDir, opts)
+	plan.Lines = report.Lines
+	return plan
+}
+
 // runKernelUpdateOptions injects side effects for tests. Production callers use
 // RunKernelUpdate.
 type runKernelUpdateOptions struct {

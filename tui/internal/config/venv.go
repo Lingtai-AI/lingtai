@@ -602,13 +602,11 @@ func (execCommandRunner) Run(name string, args ...string) CommandResult {
 	return CommandResult{Stdout: stdout.String(), Stderr: stderr.String(), Err: err}
 }
 
-// RunDoctorUpdate force-checks and repairs the two shipped update surfaces:
-// the TUI binary and the managed Python `lingtai` runtime. It detects the TUI
-// install method first; today's automated TUI upgrade path is only Homebrew,
-// while source/user-local and unknown installs get explicit manual guidance.
-// Python runtime upgrades are delegated to uv/pip, then verified afterwards.
-func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
-	report := DoctorReport{Healthy: true}
+// fillDoctorOptionDefaults resolves the nil test hooks in DoctorOptions to
+// their production side effects. Shared by RunDoctorUpdate and InspectUpdate
+// so the read-only inspection and the forced repair can never drift on which
+// exec/network/filesystem seams they use.
+func fillDoctorOptionDefaults(opts DoctorOptions) DoctorOptions {
 	if opts.Runner == nil {
 		opts.Runner = execCommandRunner{}
 	}
@@ -627,14 +625,25 @@ func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = &http.Client{Timeout: 5 * time.Second}
 	}
+	if opts.LookupEnv == nil {
+		opts.LookupEnv = os.LookupEnv
+	}
+	return opts
+}
+
+// RunDoctorUpdate force-checks and repairs the two shipped update surfaces:
+// the TUI binary and the managed Python `lingtai` runtime. It detects the TUI
+// install method first; today's automated TUI upgrade path is only Homebrew,
+// while source/user-local and unknown installs get explicit manual guidance.
+// Python runtime upgrades are delegated to uv/pip, then verified afterwards.
+func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
+	report := DoctorReport{Healthy: true}
+	opts = fillDoctorOptionDefaults(opts)
 	if opts.EnsureVenvFunc == nil {
 		opts.EnsureVenvFunc = EnsureVenv
 		if opts.QuietEnsureVenv {
 			opts.EnsureVenvFunc = func(dir string) error { return EnsureVenvQuiet(dir, nil) }
 		}
-	}
-	if opts.LookupEnv == nil {
-		opts.LookupEnv = os.LookupEnv
 	}
 
 	report.checkTUI(globalDir, opts)
@@ -643,7 +652,44 @@ func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
 	return report
 }
 
+// TUIUpdateCheck is the read-only result of inspectTUI: whether a strict
+// vX.Y.Z release newer than the running binary exists, plus the detected
+// install method (which decides whether an automated update path exists) and
+// the latest release tag. Every non-comparable case (dev build, non-semver,
+// unknown current version, GitHub lookup failure) reports
+// UpdateAvailable=false.
+type TUIUpdateCheck struct {
+	UpdateAvailable bool
+	Install         TUIInstallInfo
+	Latest          string
+}
+
 func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
+	check := r.inspectTUI(globalDir, opts)
+	if !opts.ForceTUI || !check.UpdateAvailable {
+		return
+	}
+	update := RunTUIUpdate(check.Install, TUIUpdateOptions{
+		LatestVersion:         check.Latest,
+		GlobalDir:             globalDir,
+		Runner:                opts.Runner,
+		LookPath:              opts.LookPath,
+		Stat:                  opts.Stat,
+		IncludeHomebrewUpdate: true,
+		ResolveHomebrewPath:   true,
+	})
+	for _, line := range update.Lines {
+		r.add(line.Severity, "%s", line.Text)
+	}
+	if !update.Healthy {
+		r.Healthy = false
+	}
+}
+
+// inspectTUI is the read-only half of checkTUI: it detects the install
+// method, reports version/release lines, and classifies whether an update is
+// available — without ever running brew or any other mutating command.
+func (r *DoctorReport) inspectTUI(globalDir string, opts DoctorOptions) TUIUpdateCheck {
 	current := strings.TrimSpace(opts.CurrentTUIVersion)
 	exe, err := opts.Executable()
 	if err != nil || exe == "" {
@@ -675,15 +721,15 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 	switch currentClass.Kind {
 	case ReleaseComparisonCurrentMissing:
 		r.add(DoctorWarn, "Skipping TUI release upgrade because the current TUI version is unknown")
-		return
+		return TUIUpdateCheck{Install: install}
 	case ReleaseComparisonDevBuild:
 		r.add(DoctorWarn, "Skipping TUI release upgrade for dev build %q", current)
-		return
+		return TUIUpdateCheck{Install: install}
 	}
 	release, err := fetchLatestGitHubRelease(opts.HTTPClient)
 	if err != nil {
 		r.add(DoctorWarn, "Could not check latest TUI release on GitHub: %v", err)
-		return
+		return TUIUpdateCheck{Install: install}
 	}
 	r.add(DoctorInfo, "Latest TUI release: %s", release.TagName)
 
@@ -696,38 +742,21 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
 	case ReleaseComparisonUpToDate:
 		r.add(DoctorOK, "TUI is up to date")
-		return
+		return TUIUpdateCheck{Install: install}
 	case ReleaseComparisonCurrentNonSemver:
 		r.add(DoctorWarn, "Cannot compare TUI release versions: current version %q is not a strict vX.Y.Z release; latest is %q", current, release.TagName)
-		return
+		return TUIUpdateCheck{Install: install}
 	case ReleaseComparisonLatestNonSemver:
 		r.add(DoctorWarn, "Cannot compare TUI release versions: latest release tag %q is not a strict vX.Y.Z release; current is %q", release.TagName, current)
-		return
+		return TUIUpdateCheck{Install: install}
 	case ReleaseComparisonCurrentMissing:
 		r.add(DoctorWarn, "Skipping TUI release upgrade because the current TUI version is unknown")
-		return
+		return TUIUpdateCheck{Install: install}
 	case ReleaseComparisonDevBuild:
 		r.add(DoctorWarn, "Skipping TUI release upgrade for dev build %q", current)
-		return
+		return TUIUpdateCheck{Install: install}
 	}
-	if !opts.ForceTUI {
-		return
-	}
-	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:         release.TagName,
-		GlobalDir:             globalDir,
-		Runner:                opts.Runner,
-		LookPath:              opts.LookPath,
-		Stat:                  opts.Stat,
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
-	})
-	for _, line := range update.Lines {
-		r.add(line.Severity, "%s", line.Text)
-	}
-	if !update.Healthy {
-		r.Healthy = false
-	}
+	return TUIUpdateCheck{UpdateAvailable: true, Install: install, Latest: release.TagName}
 }
 
 func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstallInfo {
