@@ -271,7 +271,7 @@ func startOAuthFlow(ctx context.Context, epoch uint64, forceLogin bool) *codexOA
 		authURL := buildAuthorizeURL(redirectURI, challenge, state, forceLogin)
 
 		ch <- CodexOAuthURLMsg{AuthURL: authURL, RedirectURI: redirectURI, Epoch: epoch}
-		openBrowser(authURL)
+		oauthBrowserOpener(authURL)
 
 		// Wait for browser callback, server error, timeout, or cancellation.
 		timer := time.NewTimer(oauthTimeout)
@@ -636,7 +636,16 @@ func extractEmailFromJWT(jwt string) string {
 	return profile.Email
 }
 
-// openBrowser is defined in app.go — reused here for the OAuth flow.
+// oauthBrowserOpener is the indirection startOAuthFlow uses to launch the
+// system browser at the authorize URL. It defaults to openBrowser (defined in
+// app.go) in production; tests override it so that running `go test ./...`
+// never launches a real auth.openai.com login page. Before this seam, the
+// OAuth tests called startOAuthFlow, which called openBrowser unconditionally,
+// so the suite opened real browser tabs on the developer's machine — one of
+// the sources of the "repeated Codex OAuth popup" reports (issue #474,
+// comment 1). Overriding this var in a test must restore the original in a
+// t.Cleanup; it is process-global.
+var oauthBrowserOpener = openBrowser
 
 // refreshCodexTokens exchanges a refresh_token for a fresh access token
 // against auth.openai.com. Returns the merged token bundle (preserving

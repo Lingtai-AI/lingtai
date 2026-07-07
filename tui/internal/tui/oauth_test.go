@@ -298,6 +298,85 @@ func TestExtractEmailFromJWT(t *testing.T) {
 	}
 }
 
+// oauthOpenerStub reports how the process-global oauthBrowserOpener was
+// invoked. startOAuthFlow runs the opener on its own goroutine after sending
+// CodexOAuthURLMsg, so a caller must NOT read the recorded state right after
+// draining that message — there is no happens-before relation and the read can
+// race the write. Use WaitForCall, which blocks on a channel the opener closes,
+// to synchronize before inspecting Called/URL.
+type oauthOpenerStub struct {
+	done chan struct{} // closed exactly once, by the opener, when it fires
+	url  string        // written before done is closed; safe to read after
+}
+
+// WaitForCall blocks until the stubbed opener has fired (and recorded its URL)
+// or the timeout elapses. It returns true iff the opener was invoked. The
+// channel close in the opener happens-before this receive returns, so reading
+// s.url after a true result is data-race-free.
+func (s *oauthOpenerStub) WaitForCall(timeout time.Duration) bool {
+	select {
+	case <-s.done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// stubOAuthBrowserOpener replaces the process-global oauthBrowserOpener for the
+// duration of a test so startOAuthFlow never launches a real browser to
+// auth.openai.com. The original opener is restored via t.Cleanup. This is the
+// seam that stops `go test ./...` from popping real Codex OAuth login pages
+// (issue #474, comment 1). Callers synchronize via the returned stub's
+// WaitForCall before reading its fields. Tests using this must NOT run in
+// parallel — the opener var is process-global and one stub owns it at a time.
+func stubOAuthBrowserOpener(t *testing.T) *oauthOpenerStub {
+	t.Helper()
+	stub := &oauthOpenerStub{done: make(chan struct{})}
+	orig := oauthBrowserOpener
+	oauthBrowserOpener = func(u string) {
+		// Record the URL, then close done — the close publishes the write to
+		// any goroutine that observes the channel closed (WaitForCall).
+		stub.url = u
+		close(stub.done)
+	}
+	t.Cleanup(func() { oauthBrowserOpener = orig })
+	return stub
+}
+
+// TestStartOAuthFlow_DoesNotLaunchRealBrowser is the regression guard for
+// issue #474 (comment 1): startOAuthFlow must route its browser launch through
+// the overridable oauthBrowserOpener seam, not call openBrowser directly. If a
+// future refactor reinstates a direct openBrowser call, the stub below is
+// bypassed and `go test ./...` starts opening real auth.openai.com tabs again;
+// this test fails first by observing the stub was never invoked.
+func TestStartOAuthFlow_DoesNotLaunchRealBrowser(t *testing.T) {
+	stub := stubOAuthBrowserOpener(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session := startOAuthFlow(ctx, 1, false)
+	first := drainSession(t, session, 3*time.Second)
+	urlMsg, ok := first.(CodexOAuthURLMsg)
+	if !ok {
+		if done, ok := first.(CodexOAuthDoneMsg); ok && done.Err != nil {
+			t.Skipf("listener bind failed (likely ports 1455/1457 in use): %v", done.Err)
+		}
+		t.Fatalf("expected CodexOAuthURLMsg, got %T", first)
+	}
+
+	// The opener runs on the flow goroutine after the URL msg is sent, so wait
+	// on the stub's done channel (which happens-before the recorded URL read)
+	// instead of racing it. The opener must have been driven through the seam
+	// with the same URL the flow advertised — proving no real browser launched.
+	if !stub.WaitForCall(3 * time.Second) {
+		t.Fatal("startOAuthFlow did not route through oauthBrowserOpener — a real browser would open")
+	}
+	if stub.url != urlMsg.AuthURL {
+		t.Errorf("opener URL = %q, want the advertised AuthURL %q", stub.url, urlMsg.AuthURL)
+	}
+}
+
 // drainSession reads one message from a codexOAuthSession via waitCodexOAuthMsg.
 // It blocks until a message arrives or the deadline is hit.
 func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duration) interface{} {
@@ -325,6 +404,7 @@ func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duratio
 // message with the caller's epoch echoed back. This is the load-bearing
 // guarantee for the Del-cancel UX in FirstRunModel and LoginModel.
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
+	stubOAuthBrowserOpener(t)
 	const epoch uint64 = 42
 	ctx, cancel := context.WithCancel(context.Background())
 	session := startOAuthFlow(ctx, epoch, false)
@@ -365,6 +445,7 @@ func TestStartOAuthFlow_Cancellable(t *testing.T) {
 // same-machine browser OAuth path remains first-class: the localhost callback
 // completes the legacy working flow without requiring terminal paste-back.
 func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T) {
+	stubOAuthBrowserOpener(t)
 	const epoch uint64 = 99
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
