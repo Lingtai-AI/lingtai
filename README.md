@@ -8,7 +8,6 @@ Local-first · resident agents · soul-flow proactiveness · mailboxes · lifecy
 
 [English](README.md) · [中文](README.zh.md) · [文言](README.wen.md) · [Website](https://lingtai.ai) · [Releases](https://lingtai.ai/releases/)
 
-[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/kernel-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
@@ -46,55 +45,45 @@ Close the terminal if you want. The organization still has a filesystem home und
 ## Start in three commands
 
 ```bash
-brew install lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-> Testing alternative: run the Homebrew-free GitHub Release installer with `curl -fsSL https://lingtai.ai/install.sh | bash`.
+> The hosted installer covers macOS, Linux, and WSL. Native Windows/PowerShell support is planned but not available yet.
 
 > New to LingTai? Start with the [Beginner work manual](docs/beginner-work-manual.zh.md) or the [single-file illustrated HTML guide](docs/beginner-work-manual-stick-figure.zh.html) to learn the workflow step by step.
 
-On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
+The one-line installer sets up `lingtai-tui`, `lingtai-portal`, and the runtime venv — preferring prebuilt release assets and falling back to a source build when a prebuilt binary is not available for your platform. On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
 
 ### First-time install troubleshooting
 
 Assume this is your first LingTai install. If the three commands above fail, start here — the common fixes are part of the install path, not a distant appendix.
 
-**`brew` is not installed (macOS or Linux).** Install Homebrew first, then re-run the `brew install` command above:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-The Homebrew installer ends by printing an `eval "$(... shellenv)"` line that adds `brew` to your `PATH`. Run that line (or open a new terminal) before continuing.
-
-**WSL / Ubuntu / Debian.** Homebrew on Linux needs basic build tools before it can install packages. Install the prerequisites first, then Homebrew, then LingTai:
+**`curl` is not installed.** Install it from your package manager, then re-run the installer. On WSL / Ubuntu / Debian:
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential curl git ca-certificates
+sudo apt install -y curl ca-certificates
 ```
 
-**To upgrade later**, use Homebrew again and restart the TUI so the new binary takes over:
+**If the source-build fallback reports missing system tools.** The installer normally fetches temporary Go and Node toolchains itself. On a minimal WSL / Ubuntu / Debian image, install the basic utilities it needs, then re-run the installer:
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+sudo apt update
+sudo apt install -y curl ca-certificates tar git
+```
+
+**To upgrade later**, re-run the installer, or use `lingtai-tui self-update`, then restart the TUI so the new binary takes over:
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash
 lingtai-tui
 ```
 
-**`brew install` fails while building.** A missing compiler toolchain is the usual cause. Install the prerequisites above, run `brew update`, and retry. If Homebrew still fails or is not available on your machine, use the [source build](#from-source) path below.
+**Mainland China networks.** If the installer's source-build fallback can't reach `proxy.golang.org`/npm, it auto-detects CN networks and falls back to `goproxy.cn` (Go modules) and — independently — `registry.npmmirror.com` (npm, only when its TLS probe passes). For the full playbook (Gitee source mirror, the `GOPROXY`/npm-registry overrides, and the npmmirror-certificate case), see the mainland-China sections in [README.zh](README.zh.md#安装详解).
 
-**Mainland China networks.** If `brew` stalls fetching the index/bottles, the tap is stale or installs an old version, or the build can't reach `proxy.golang.org`/npm, the formula already auto-detects CN networks and falls back to `goproxy.cn` (Go modules) and — independently — `registry.npmmirror.com` (npm, only when its TLS probe passes). For the full playbook (TUNA mirror for Homebrew itself, `brew update`/`brew info`/`untap`+retap for a stale tap, Gitee tap fallback, the `HOMEBREW_GOPROXY`/`HOMEBREW_NPM_CONFIG_REGISTRY` overrides, and the npmmirror-certificate case), see the mainland-China sections in [README.zh](README.zh.md#安装详解). If GitHub tap fetch is the failing step, the quickest Homebrew fallback is usually:
-
-```bash
-brew untap lingtai-ai/lingtai 2>/dev/null || true
-brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install lingtai-ai/lingtai/lingtai-tui
-```
-
-> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use Homebrew (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
+> The `lingtai` PyPI package exists, but it is the Python runtime the TUI manages on your behalf. Use the one-line installer (or the source build below) to install and upgrade; reach for `pip` only when you are developing or diagnosing the kernel itself.
 
 The first project you create will look like this:
 
@@ -109,7 +98,7 @@ project/
         └── logs/           # inspectable runtime trace
 ```
 
-For source builds, mainland-China mirror setup, from-tarball install paths, and advanced runtime repair, see [Install in detail](#install-in-detail).
+For source builds, mainland-China mirror setup, and advanced runtime repair, see [Install in detail](#install-in-detail).
 
 ## What it is good at
 
@@ -261,28 +250,29 @@ ResearchClawBench is a useful companion for the LingTai philosophy: LingTai prov
 
 ## Install in detail
 
-### Homebrew (recommended)
+### One-line installer (recommended)
 
 ```bash
-brew install lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 lingtai-tui
 
 # upgrade later
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
+
+The installer works on macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`, preferring prebuilt release assets and falling back to a source build when a prebuilt binary is not available for your platform. Native Windows/PowerShell support is planned but not available yet.
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
 
-You can also run `lingtai-tui self-update` to update the TUI binary through the detected install method. It updates Homebrew and source/user-local installs; unknown installs stop with guidance instead of running `brew`.
+You can also run `lingtai-tui self-update` to update the TUI binary through the detected install method. It updates source/user-local installs; unknown installs stop with guidance.
 
-First-time install problems (missing `brew`, WSL/Ubuntu/Debian prerequisites, source-build failures) are covered up top in [First-time install troubleshooting](#first-time-install-troubleshooting).
+First-time install problems (missing `curl`, WSL/Ubuntu/Debian prerequisites, source-build failures) are covered up top in [First-time install troubleshooting](#first-time-install-troubleshooting).
 
 ### From source
 
 You need Go, `make`, and (for the portal) Node.js/npm.
 
-Use this when hacking on the TUI/portal itself or when Homebrew is unavailable:
+Use this when hacking on the TUI/portal itself:
 
 ```bash
 git clone https://github.com/Lingtai-AI/lingtai.git
@@ -453,7 +443,6 @@ The goal is not agent theater. The goal is useful long-running AI collaborators 
 - Website and release notes: <https://lingtai.ai>
 - Main repo: <https://github.com/Lingtai-AI/lingtai>
 - Kernel repo: <https://github.com/Lingtai-AI/lingtai-kernel>
-- Homebrew tap: <https://github.com/Lingtai-AI/homebrew-lingtai>
 - Discord: <https://discord.gg/cMchjXpg>
 - GitHub issues: <https://github.com/Lingtai-AI/lingtai/issues>
 - GitHub discussions: <https://github.com/Lingtai-AI/lingtai/discussions>

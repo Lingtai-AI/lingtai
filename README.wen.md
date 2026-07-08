@@ -13,7 +13,6 @@
 
 [English](README.md) | [中文](README.zh.md) | [文言](README.wen.md) | [lingtai.ai](https://lingtai.ai)
 
-[![Homebrew](https://img.shields.io/badge/brew-lingtai--tui-%237dab8f)](https://github.com/Lingtai-AI/homebrew-lingtai)
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
@@ -51,10 +50,12 @@
 ## 三令而启
 
 ```bash
-brew install lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 mkdir my-project && cd my-project
 lingtai-tui
 ```
+
+> 一令安装之脚本，通 macOS、Linux 与 WSL；先取预编译之 release，无则退而源码编译。原生 Windows/PowerShell 尚在计划，未及也。
 
 > 初入 LingTai？先读[小白工作手册](docs/beginner-work-manual.zh.md)（或[单文件 HTML 图解版](docs/beginner-work-manual-stick-figure.zh.html)），再启首个项目。
 
@@ -71,15 +72,15 @@ project/
         └── logs/           # 可考之运行迹
 ```
 
-> PyPI 之 `lingtai` 包固在，然其为 TUI 代管之 Python 运行时。安装、升级宜用 Homebrew；唯开发或诊断内核时，乃用 `pip`。
+> PyPI 之 `lingtai` 包固在，然其为 TUI 代管之 Python 运行时。安装、升级宜用一令安装之脚本；唯开发或诊断内核时，乃用 `pip`。
 
-> 欲手动更新 TUI，可行 `lingtai-tui self-update`；其先辨装法，Homebrew 与 `source/user-local` 皆可自更，`unknown/other` 则止而示指引。
+> 欲手动更新 TUI，可行 `lingtai-tui self-update`；其先辨装法，`source/user-local` 可自更，`unknown/other` 则止而示指引。亦可重跑一令安装之脚本以升级。
 
 > 启时亦察源码/用户本地之新版；若辞，则不动旧二进制，并示 `lingtai-tui self-update` 以待后行。
 
 > `doctor` 亦辨 TUI 之装法：`homebrew`、`source/user-local`、`unknown/other`。非 Homebrew 者，不妄行 `brew`，但示手动更新之路。
 
-> 大陆网络之镜像、stale tap、源码编译诸细，详见 [README.zh 安装详解](README.zh.md#安装详解)。
+> 大陆网络之镜像、源码编译诸细，详见 [README.zh 安装详解](README.zh.md#安装详解)。
 
 ## 所善
 
