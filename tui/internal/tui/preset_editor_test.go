@@ -72,6 +72,38 @@ func testCodexPresetEditorPresetWithThinking(serviceTier interface{}, thinking i
 	}
 }
 
+func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
+	if got := providerModels["zhipu"][0]; got != "GLM-5.2" {
+		t.Fatalf("zhipu default picker model = %q, want GLM-5.2", got)
+	}
+	if got := providerModels["deepseek"][0]; got != "deepseek-v4-pro" {
+		t.Fatalf("deepseek default picker model = %q, want deepseek-v4-pro", got)
+	}
+
+	for _, provider := range []string{"codex", "codex-pool"} {
+		models := providerModels[provider]
+		if len(models) == 0 {
+			t.Fatalf("%s provider model lineup is empty", provider)
+		}
+		if got := models[0]; got != "gpt-5.5" {
+			t.Fatalf("%s default picker model = %q, want gpt-5.5", provider, got)
+		}
+		found56 := false
+		for _, model := range models {
+			if model == "gpt-5.6" {
+				found56 = true
+				break
+			}
+		}
+		if !found56 {
+			t.Fatalf("%s model lineup should include gpt-5.6 while keeping gpt-5.5 first: %#v", provider, models)
+		}
+	}
+	if !modelHasVision["gpt-5.6"] {
+		t.Fatal("gpt-5.6 should be treated as vision-capable like the rest of the GPT-5.x Codex lineup")
+	}
+}
+
 func TestPresetEditorSmallHeightKeepsSaveVisible(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	var cmd tea.Cmd

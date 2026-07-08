@@ -965,7 +965,7 @@ func zhipuPreset() Preset {
 		Description: PresetDescription{Summary: "Zhipu GLM Coding Plan — OpenAI-compatible"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				"provider": "zhipu", "model": "GLM-5.1",
+				"provider": "zhipu", "model": "GLM-5.2",
 				"api_key": nil, "api_key_env": "ZHIPU_API_KEY",
 				"base_url": ProviderRegionURLs["zhipu"][0].URL, "api_compat": "openai",
 			},
@@ -1014,8 +1014,8 @@ func deepseekPreset() Preset {
 	// `mcp-manual` skill (kernel `mcp` capability).
 	return openAICompatTextPreset(
 		"deepseek",
-		"DeepSeek V4 — OpenAI-compatible, 1M context window, tool calls",
-		"deepseek-v4-flash", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
+		"DeepSeek V4 Pro — OpenAI-compatible, 1M context window, tool calls",
+		"deepseek-v4-pro", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
 }
 
 func geminiPreset() Preset {
@@ -1104,11 +1104,11 @@ func codexPreset() Preset {
 		Description: PresetDescription{Summary: "ChatGPT account — vision + web search + tools"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Default to the latest frontier (gpt-5.5). It's only
-				// available via ChatGPT-OAuth — exactly the auth path
-				// codex uses — so it's the right "what do paid ChatGPT
-				// users actually want" pick. Model list is curated in
-				// preset_editor.go's providerModels; see SKILL.md there.
+				// Keep gpt-5.5 as the default even when newer GPT-5.x
+				// entries are selectable in the editor: current Codex +
+				// ChatGPT-account availability can lag public model names,
+				// and Jason explicitly asked that 5.5 remain default. The
+				// model list is curated in preset_editor.go's providerModels.
 				"provider": "codex", "model": "gpt-5.5",
 				"api_key": nil, "api_key_env": "",
 				"base_url": "https://chatgpt.com/backend-api/codex",
@@ -1141,7 +1141,7 @@ func codexPoolPreset() Preset {
 		Description: PresetDescription{Summary: "ChatGPT account pool — load-balances across your Codex accounts"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Same frontier default and endpoint as the single-account
+				// Same gpt-5.5 default and endpoint as the single-account
 				// codex preset; only the provider differs so the kernel routes
 				// through the pool. base_url stays the official Codex endpoint —
 				// the pool selects among token files, not endpoints.

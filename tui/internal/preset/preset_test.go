@@ -482,6 +482,30 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 	})
 }
 
+func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
+	cases := []struct {
+		name      string
+		preset    Preset
+		wantModel string
+	}{
+		{"zhipu", zhipuPreset(), "GLM-5.2"},
+		{"deepseek", deepseekPreset(), "deepseek-v4-pro"},
+		{"codex", codexPreset(), "gpt-5.5"},
+		{"codex-pool", codexPoolPreset(), "gpt-5.5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			llm, ok := tc.preset.Manifest["llm"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("%s manifest.llm missing or wrong type: %T", tc.name, tc.preset.Manifest["llm"])
+			}
+			if got, _ := llm["model"].(string); got != tc.wantModel {
+				t.Fatalf("%s default model = %q, want %q", tc.name, got, tc.wantModel)
+			}
+		})
+	}
+}
+
 func TestCodexPresetDefaultOmitsServiceTierAndSetsThinking(t *testing.T) {
 	p := codexPreset()
 	llm, ok := p.Manifest["llm"].(map[string]interface{})

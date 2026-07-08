@@ -130,7 +130,7 @@ var providerModels = map[string][]string{
 	},
 	"zhipu":    {"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
 	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
-	"deepseek": {"deepseek-v4-flash", "deepseek-v4-pro"},
+	"deepseek": {"deepseek-v4-pro", "deepseek-v4-flash"},
 	// NVIDIA NIM catalog IDs (build.nvidia.com) served on the free tier.
 	// Default flagship first; the rest are popular open-weight options.
 	// Users can also free-text any other catalog ID on this row.
@@ -145,15 +145,15 @@ var providerModels = map[string][]string{
 		"microsoft/phi-4-mini-instruct",
 	},
 	// Codex: ChatGPT-OAuth-only models served by chatgpt.com/backend-api/codex.
-	// gpt-5.5 is OAuth-exclusive (not available via API key); see SKILL.md
-	// next to this file for the canonical source list and why each one is
-	// included or excluded (e.g. gpt-5.5-pro is ChatGPT-Pro-only and not
-	// served on the codex endpoint, so we omit it to avoid 4xx breakage).
-	"codex": {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
+	// Keep gpt-5.5 first because it remains the TUI default; newer entries
+	// such as gpt-5.6 are selectable for early testing when the endpoint/account
+	// enables them. See SKILL.md next to this file for the canonical source list
+	// and why each model is included or excluded (e.g. pro-only variants can 4xx).
+	"codex": {"gpt-5.5", "gpt-5.6", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
 	// codex-pool serves the same ChatGPT-OAuth models as codex — it only
 	// changes which token file each request routes through (the pool), not the
 	// model catalog. Keep the two lists identical.
-	"codex-pool": {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
+	"codex-pool": {"gpt-5.5", "gpt-5.6", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
 	// Claude Agent SDK uses Claude Code CLI aliases, not dated API IDs.
 	// Keep opus first to match Jason's requested Opus 4.8 default;
 	// sonnet/haiku remain selectable for cheaper or faster runs.
@@ -200,12 +200,13 @@ var modelHasVision = map[string]bool{
 	"mimo-v2.5-pro": false,
 	"mimo-v2-flash": false,
 	// DeepSeek: text-only across the board.
-	"deepseek-v4-flash": false,
 	"deepseek-v4-pro":   false,
+	"deepseek-v4-flash": false,
 	// Codex (ChatGPT OAuth): all GPT-5.x family currently accepts images,
 	// including the *-codex tunes. Verify on each model's docs page when
 	// adding new entries; see SKILL.md.
 	"gpt-5.5":       true,
+	"gpt-5.6":       true,
 	"gpt-5.4":       true,
 	"gpt-5.4-mini":  true,
 	"gpt-5.3-codex": true,
