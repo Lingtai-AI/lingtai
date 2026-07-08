@@ -401,6 +401,7 @@ func TestManifestHandler(t *testing.T) {
 	if len(manifest.Chunks) == 0 {
 		t.Error("expected at least 1 chunk")
 	}
+	assertNoCORS(t, rr)
 }
 
 func TestChunkHandler(t *testing.T) {
@@ -455,4 +456,77 @@ func TestChunkHandler(t *testing.T) {
 	if len(chunk.Frames) != 2 {
 		t.Errorf("len(Frames) = %d, want 2", len(chunk.Frames))
 	}
+	assertNoCORS(t, rr)
+}
+
+func TestReplayHandlersDoNotSetCORSHeadersOnFallbackAndErrorPaths(t *testing.T) {
+	t.Run("manifest empty fallback", func(t *testing.T) {
+		handler := NewManifestHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/manifest", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("rebuild method error", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/rebuild", nil))
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("rebuild filesystem error", func(t *testing.T) {
+		handler := NewRebuildHandler(filepath.Join(t.TempDir(), "missing"))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/topology/rebuild", nil))
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("rebuild empty tape", func(t *testing.T) {
+		handler := NewRebuildHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/topology/rebuild", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("chunk missing start error", func(t *testing.T) {
+		handler := NewChunkHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/chunk", nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("chunk invalid start error", func(t *testing.T) {
+		handler := NewChunkHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/chunk?start=nope", nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("chunk filesystem error", func(t *testing.T) {
+		handler := NewChunkHandler(filepath.Join(t.TempDir(), "missing"))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/chunk?start=0", nil))
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
 }

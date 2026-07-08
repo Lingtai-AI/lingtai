@@ -10,14 +10,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	agentfs "github.com/anthropics/lingtai-portal/internal/fs"
 )
 
+const defaultHost = "127.0.0.1"
+
 type Server struct {
 	httpServer *http.Server
 	port       int
+	host       string
 	baseDir    string
 	cancel     context.CancelFunc
 	done       chan struct{}
@@ -40,15 +45,18 @@ func NewServer(baseDir string, staticFS fs.FS) *Server {
 	}
 }
 
-func (s *Server) Start(portFile string, fixedPort int) error {
-	addr := "0.0.0.0:0"
+func (s *Server) Start(portFile, host string, fixedPort int) error {
+	effectiveHost := EffectiveHost(host)
+	port := "0"
 	if fixedPort > 0 {
-		addr = fmt.Sprintf("0.0.0.0:%d", fixedPort)
+		port = strconv.Itoa(fixedPort)
 	}
+	addr := net.JoinHostPort(effectiveHost, port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	s.host = effectiveHost
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	if portFile != "" {
 		os.WriteFile(portFile, []byte(fmt.Sprintf("%d", s.port)), 0o644)
@@ -109,8 +117,52 @@ func (s *Server) Port() int {
 	return s.port
 }
 
+func (s *Server) Host() string {
+	return s.host
+}
+
 func (s *Server) URL() string {
-	return fmt.Sprintf("http://localhost:%d", s.port)
+	host := s.host
+	if host == "" || hostIsLoopback(host) || hostIsWildcard(host) {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(s.port))
+}
+
+func (s *Server) ExternalAccessWarning() string {
+	if !HostRequiresWarning(s.host) {
+		return ""
+	}
+	return fmt.Sprintf("warning: --host %s exposes the unauthenticated portal API beyond loopback; use only on a trusted LAN.", s.host)
+}
+
+func EffectiveHost(host string) string {
+	host = strings.TrimSpace(host)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	}
+	if host == "" {
+		return defaultHost
+	}
+	return host
+}
+
+func HostRequiresWarning(host string) bool {
+	host = EffectiveHost(host)
+	return !hostIsLoopback(host) || hostIsWildcard(host)
+}
+
+func hostIsLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func hostIsWildcard(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 func (s *Server) Stop(ctx context.Context) error {

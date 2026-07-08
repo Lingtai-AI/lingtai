@@ -36,7 +36,6 @@ func NewNetworkHandler(baseDir string) http.HandlerFunc {
 		}
 		network.Lang = i18n.Lang()
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(network)
 	}
 }
@@ -49,7 +48,6 @@ func NewTopologyHandler(baseDir string) http.HandlerFunc {
 		data, err := os.ReadFile(topologyPath)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Write([]byte("[]"))
 			return
 		}
@@ -66,7 +64,6 @@ func NewTopologyHandler(baseDir string) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(entries)
 	}
 }
@@ -142,7 +139,6 @@ func NewProgressHandler(baseDir string) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		data, err := os.ReadFile(progressPath)
 		if err != nil {

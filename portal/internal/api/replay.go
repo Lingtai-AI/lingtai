@@ -578,7 +578,6 @@ func NewManifestHandler(baseDir string) http.HandlerFunc {
 
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
 			json.NewEncoder(w).Encode(ReplayManifest{Chunks: []ChunkInfo{}})
 			return
 		}
@@ -587,7 +586,6 @@ func NewManifestHandler(baseDir string) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(manifest)
 	}
 }
@@ -614,7 +612,6 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 		}
 		if len(frames) == 0 {
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
 			json.NewEncoder(w).Encode(ReplayManifest{Chunks: []ChunkInfo{}})
 			return
 		}
@@ -633,7 +630,6 @@ func NewRebuildHandler(baseDir string) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(manifest)
 	}
 }
@@ -665,7 +661,6 @@ func NewChunkHandler(baseDir string) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")

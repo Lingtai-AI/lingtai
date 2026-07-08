@@ -32,11 +32,13 @@ func main() {
 	}
 
 	var dir string
+	var host string
 	var port int
 	var open bool
 	var lang string
 
 	flag.StringVar(&dir, "dir", "", "Path to project directory (default: current directory)")
+	flag.StringVar(&host, "host", "", "Host to bind (default: 127.0.0.1)")
 	flag.IntVar(&port, "port", 0, "Fixed port (default: random)")
 	flag.BoolVar(&open, "open", false, "Open browser after starting")
 	flag.StringVar(&lang, "lang", "en", "Language (en, zh, wen)")
@@ -71,9 +73,12 @@ func main() {
 	srv := api.NewServer(lingtaiDir, WebFS())
 	srv.StartRecording(lingtaiDir)
 	portFile := filepath.Join(portalDir, "port")
-	if err := srv.Start(portFile, port); err != nil {
+	if err := srv.Start(portFile, host, port); err != nil {
 		fmt.Fprintf(os.Stderr, "error starting server: %v\n", err)
 		os.Exit(1)
+	}
+	if warning := srv.ExternalAccessWarning(); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 
 	fmt.Printf("lingtai-portal serving %s\n", lingtaiDir)

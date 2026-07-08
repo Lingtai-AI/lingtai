@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,85 @@ import (
 
 	"github.com/anthropics/lingtai-portal/internal/fs"
 )
+
+func assertNoCORS(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want absent", got)
+	}
+}
+
+func TestHandlersDoNotSetCORSHeaders(t *testing.T) {
+	t.Run("network success", func(t *testing.T) {
+		handler := NewNetworkHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/network", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("network error", func(t *testing.T) {
+		handler := NewNetworkHandler(filepath.Join(t.TempDir(), "missing"))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/network", nil))
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("topology missing tape", func(t *testing.T) {
+		handler := NewTopologyHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("topology success", func(t *testing.T) {
+		dir := t.TempDir()
+		AppendTopologyAt(filepath.Join(dir, ".portal", "topology.jsonl"), fs.Network{}, 1000)
+		handler := NewTopologyHandler(dir)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("progress missing file", func(t *testing.T) {
+		handler := NewProgressHandler(t.TempDir())
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/progress", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+
+	t.Run("progress success", func(t *testing.T) {
+		dir := t.TempDir()
+		progressPath := filepath.Join(dir, ".portal", "reconstruct.progress")
+		if err := os.MkdirAll(filepath.Dir(progressPath), 0o755); err != nil {
+			t.Fatalf("mkdir progress dir: %v", err)
+		}
+		if err := os.WriteFile(progressPath, []byte("2/5"), 0o644); err != nil {
+			t.Fatalf("write progress: %v", err)
+		}
+		handler := NewProgressHandler(dir)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/topology/progress", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		assertNoCORS(t, rr)
+	})
+}
 
 func TestAppendTopologyAt_ExplicitTimestamp(t *testing.T) {
 	dir := t.TempDir()
