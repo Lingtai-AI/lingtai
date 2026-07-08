@@ -203,6 +203,9 @@ func restMatchesAgentCandidate(rest, candidate string) bool {
 	if strings.EqualFold(rest, candidate) {
 		return true
 	}
+	if containsWhitespace(candidate) {
+		return false
+	}
 	if len(rest) <= len(candidate) {
 		return false
 	}
@@ -227,6 +230,10 @@ func splitQuoted(s string) (value, tail string, ok bool) {
 
 func startsWithWhitespace(s string) bool {
 	return s != "" && unicode.IsSpace(rune(s[0]))
+}
+
+func containsWhitespace(s string) bool {
+	return strings.IndexFunc(s, unicode.IsSpace) >= 0
 }
 
 func splitLeadingFields(line string, count int) ([]string, string, bool) {

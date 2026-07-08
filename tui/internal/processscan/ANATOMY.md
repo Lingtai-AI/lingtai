@@ -35,9 +35,9 @@ maintenance: |
 | `ParsePSListOutput` | `tui/internal/processscan/check.go:56` | unit-testable parser for `ps -eo pid=,etime=,command=` output listing every agent process |
 | `ParseWMICOutput` | `tui/internal/processscan/check.go:81` | Windows WMIC/PowerShell list parser with the same agent-dir extraction rules |
 | `ExtractAgentDir` | `tui/internal/processscan/check.go:122` | launch-marker parser that takes the final run argument intact so spaces survive |
-| `FindAgentProcesses` | `tui/internal/processscan/check.go:255` | shells out to process listing, normalizes one requested agent dir, and parses matches |
-| `FindAllAgentProcesses` | `tui/internal/processscan/check.go:272` | shells out to process listing and returns all visible agent processes for list/purge |
-| `IsAgentRunning` | `tui/internal/processscan/check.go:320` | boolean convenience wrapper used by launch/migration boundaries |
+| `FindAgentProcesses` | `tui/internal/processscan/check.go:262` | shells out to process listing, normalizes one requested agent dir, and parses matches |
+| `FindAllAgentProcesses` | `tui/internal/processscan/check.go:279` | shells out to process listing and returns all visible agent processes for list/purge |
+| `IsAgentRunning` | `tui/internal/processscan/check.go:327` | boolean convenience wrapper used by launch/migration boundaries |
 
 ## Composition
 
@@ -47,6 +47,6 @@ maintenance: |
 ## Invariants
 
 1. Match supported launch forms (`python -m lingtai run`, `lingtai run`, `lingtai-agent run`) and preserve the full final agent-dir argument, including spaces.
-2. For one-dir checks, match only exact `<absAgentDir>` command arguments, allowing extra trailing args but rejecting prefix siblings such as `<absAgentDir>-old`.
+2. For one-dir checks, match only exact `<absAgentDir>` command arguments. Extra trailing args are accepted only when the boundary is unambiguous (quoted dir or no-space dir); unquoted dirs with spaces must be exact so prefix siblings such as `<absAgentDir> beta` do not match.
 3. Keep this package free of imports back into TUI logic packages (`migrate`, `process`, `tui`) so it remains safe for low-level reuse.
 4. Treat process-table detection as advisory. Callers that need correctness under races must also rely on their own hard gate (for example, the kernel offline workdir lock in SQLite rebuilds).

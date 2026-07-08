@@ -52,6 +52,20 @@ func TestParsePSOutputMatchesAgentDirWithSpaces(t *testing.T) {
 	}
 }
 
+func TestParsePSOutputRejectsUnquotedSpacedPrefixSibling(t *testing.T) {
+	abs := "/tmp/Project With Spaces/.lingtai/agent"
+	out := `  1234 /usr/bin/python -m lingtai run /tmp/Project With Spaces/.lingtai/agent beta
+  2345 /usr/bin/python -m lingtai run /tmp/Project With Spaces/.lingtai/agent
+`
+	got := ParsePSOutput(out, abs)
+	if len(got) != 1 {
+		t.Fatalf("got %d procs, want exact match only: %+v", len(got), got)
+	}
+	if got[0].PID != 2345 || got[0].AgentDir != abs {
+		t.Fatalf("unexpected match: %+v", got[0])
+	}
+}
+
 func TestExtractAgentDirFromWindowsCommandLinesWithSpaces(t *testing.T) {
 	tests := []struct {
 		name string
@@ -117,6 +131,23 @@ ProcessId=5678
 	}
 }
 
+func TestParseWMICOutputRejectsUnquotedSpacedPrefixSibling(t *testing.T) {
+	abs := `C:\Users\Raw Lee\AppData\Local\Temp\project\.lingtai\agent`
+	out := `CommandLine=C:\Python\python.exe -m lingtai run C:\Users\Raw Lee\AppData\Local\Temp\project\.lingtai\agent beta
+ProcessId=1234
+
+CommandLine=C:\Python\python.exe -m lingtai run C:\Users\Raw Lee\AppData\Local\Temp\project\.lingtai\agent
+ProcessId=2345
+`
+	got := ParseWMICOutput(out, abs)
+	if len(got) != 1 {
+		t.Fatalf("got %d procs, want exact match only: %+v", len(got), got)
+	}
+	if got[0].PID != 2345 || got[0].AgentDir != abs {
+		t.Fatalf("unexpected match: %+v", got[0])
+	}
+}
+
 func TestParseWMICOutputListsAllWhenAbsEmpty(t *testing.T) {
 	out := `CommandLine=C:\Python\python.exe -m lingtai run C:\tmp\a
 ProcessId=1234
@@ -149,5 +180,19 @@ func TestCommandMatchesAgentDirEOLAndArgBoundary(t *testing.T) {
 	}
 	if commandMatchesAgentDir(`python -m lingtai run /work/foo-sibling`, abs) {
 		t.Fatal("prefix sibling should not match")
+	}
+
+	spacedAbs := `/work/Project With Spaces/.lingtai/agent`
+	if !commandMatchesAgentDir(`python -m lingtai run /work/Project With Spaces/.lingtai/agent`, spacedAbs) {
+		t.Fatal("expected exact unquoted spaced match")
+	}
+	if commandMatchesAgentDir(`python -m lingtai run /work/Project With Spaces/.lingtai/agent beta`, spacedAbs) {
+		t.Fatal("unquoted spaced prefix sibling should not match")
+	}
+	if commandMatchesAgentDir(`python -m lingtai run /work/Project With Spaces/.lingtai/agent --debug`, spacedAbs) {
+		t.Fatal("unquoted spaced trailing args are ambiguous and should not match")
+	}
+	if !commandMatchesAgentDir(`python -m lingtai run "/work/Project With Spaces/.lingtai/agent" --debug`, spacedAbs) {
+		t.Fatal("quoted spaced arg-boundary match should remain supported")
 	}
 }
