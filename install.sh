@@ -4,9 +4,11 @@
 #
 # Homebrew is NOT required. By default this installs the latest GitHub Release:
 # it downloads a prebuilt per-platform binary tarball when one exists, and
-# otherwise falls back to building the release source tarball with Go/npm. It
-# then creates or updates the Python runtime venv and installs the `lingtai`
-# package into it.
+# otherwise falls back to building the release source tarball with Go/npm. If
+# the installed Go is missing or older than tui/go.mod requires (distro
+# packages often are), the official Go toolchain tarball is downloaded for the
+# build. It then creates or updates the Python runtime venv and installs the
+# `lingtai` package into it.
 #
 # Public entry point (once served from the website):
 #   curl -fsSL https://lingtai.ai/install.sh | bash
@@ -29,6 +31,7 @@ REPO="https://github.com/${REPO_SLUG}.git"
 API_BASE="https://api.github.com/repos/${REPO_SLUG}"
 DOWNLOAD_BASE="https://github.com/${REPO_SLUG}/releases/download"
 RAW_INSTALL_URL="https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh"
+GO_DL_BASE="${LINGTAI_GO_DL_BASE:-https://go.dev/dl}"  # official Go toolchain downloads
 
 TMPDIR="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMPDIR/lingtai-install-$$"
@@ -675,6 +678,8 @@ build_from_source() {
   fi
   INSTALL_KIND="source-build"
 
+  ensure_go_for_source "$BUILD_DIR"
+
   say "Building lingtai-tui ($VERSION) ..."
   (cd "$BUILD_DIR/tui" && CGO_ENABLED=0 go build -ldflags "-X main.version=$VERSION" -o "$BUILD_DIR/lingtai-tui" .)
 
@@ -719,9 +724,118 @@ build_from_source() {
   fi
 }
 
-# ensure_build_deps checks/installs Go and, when needed for arbitrary refs, git.
-# Release-tag source fallback downloads the GitHub release tarball, so it does
-# not require git unless we need to resolve an arbitrary --ref.
+# normalize_go_version prints MAJOR.MINOR.PATCH for Go language/toolchain
+# versions (for example: 1.26 -> 1.26.0, go1.26.1 -> 1.26.1).
+normalize_go_version() {
+  local version="${1#go}"
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+    printf '%s.%s.0\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return 0
+  fi
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    printf '%s.%s.%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    return 0
+  fi
+  return 1
+}
+
+# go_version_ge returns success when $1 >= $2 using numeric major/minor/patch
+# comparison. Both inputs may optionally include the leading "go" prefix.
+go_version_ge() {
+  local have required hmaj hmin hpatch rmaj rmin rpatch
+  have="$(normalize_go_version "$1")" || return 1
+  required="$(normalize_go_version "$2")" || return 1
+  IFS=. read -r hmaj hmin hpatch <<<"$have"
+  IFS=. read -r rmaj rmin rpatch <<<"$required"
+  (( hmaj > rmaj )) && return 0
+  (( hmaj < rmaj )) && return 1
+  (( hmin > rmin )) && return 0
+  (( hmin < rmin )) && return 1
+  (( hpatch >= rpatch ))
+}
+
+installed_go_version() {
+  command -v go &>/dev/null || return 1
+  go version 2>/dev/null | sed -n 's/^go version go\([0-9][0-9.]*\).*/\1/p' | head -1
+}
+
+required_go_version_for_source() {
+  local source_dir="$1" version
+  version="$(awk '$1 == "go" { print $2; exit }' "$source_dir/tui/go.mod" 2>/dev/null || true)"
+  [[ -n "$version" ]] || return 1
+  normalize_go_version "$version"
+}
+
+go_toolchain_archive_name() {
+  local version="$1" os="$2" arch="$3"
+  printf 'go%s.%s-%s.tar.gz\n' "$version" "$os" "$arch"
+}
+
+go_toolchain_download_url() {
+  local version="$1" os="$2" arch="$3"
+  printf '%s/%s\n' "${GO_DL_BASE%/}" "$(go_toolchain_archive_name "$version" "$os" "$arch")"
+}
+
+install_go_toolchain() {
+  local version="$1" os arch root archive url fallback_url installed
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+  if [[ "$os" == "unsupported" || "$arch" == "unsupported" ]]; then
+    echo "error: Go $version is required, but automatic Go toolchain download is unsupported on $(uname -s)/$(uname -m)." >&2
+    echo "Install Go $version or newer manually, then re-run this installer." >&2
+    exit 1
+  fi
+  command -v curl &>/dev/null || { echo "error: curl is required to download Go $version" >&2; exit 1; }
+  command -v tar &>/dev/null || { echo "error: tar is required to extract Go $version" >&2; exit 1; }
+
+  root="$BUILD_DIR/go-toolchain"
+  archive="$root/$(go_toolchain_archive_name "$version" "$os" "$arch")"
+  rm -rf "$root"
+  mkdir -p "$root"
+  url="$(go_toolchain_download_url "$version" "$os" "$arch")"
+  fallback_url="https://dl.google.com/go/$(go_toolchain_archive_name "$version" "$os" "$arch")"
+
+  say "Downloading Go $version toolchain for source build ($os/$arch) ..."
+  if ! curl -fsSL --retry 3 --max-time 300 -o "$archive" "$url"; then
+    if [[ "$url" != "$fallback_url" ]]; then
+      warn "Go download failed from $url; retrying $fallback_url"
+      curl -fsSL --retry 3 --max-time 300 -o "$archive" "$fallback_url"
+    else
+      return 1
+    fi
+  fi
+  tar -xzf "$archive" -C "$root"
+  export PATH="$root/go/bin:$PATH"
+  installed="$(installed_go_version || true)"
+  if ! go_version_ge "$installed" "$version"; then
+    echo "error: downloaded Go toolchain is $installed, expected $version or newer" >&2
+    exit 1
+  fi
+}
+
+ensure_go_for_source() {
+  local source_dir="$1" required installed
+  required="$(required_go_version_for_source "$source_dir")" || {
+    echo "error: could not read required Go version from $source_dir/tui/go.mod" >&2
+    exit 1
+  }
+  installed="$(installed_go_version || true)"
+  if [[ -n "$installed" ]] && go_version_ge "$installed" "$required"; then
+    note "Using Go $installed for source build (requires >= $required)."
+    return 0
+  fi
+  if [[ -n "$installed" ]]; then
+    note "Installed Go $installed is older than required $required; using official Go toolchain for this build."
+  else
+    note "Go is not installed; using official Go $required toolchain for this build."
+  fi
+  install_go_toolchain "$required"
+}
+
+# ensure_build_deps checks/installs non-Go source-build dependencies. Go is
+# validated after the source tree is available, because tui/go.mod declares the
+# required version and distro packages (for example Ubuntu jammy Go 1.18) may be
+# too old.
 ensure_build_deps() {
   local need_git="${1:-1}"
   if [[ "$need_git" == "1" ]] && ! command -v git &>/dev/null; then
@@ -730,15 +844,6 @@ ensure_build_deps() {
     else
       echo "error: git is required for --ref source builds but not found. Install it with:" >&2
       suggest_install git
-      exit 1
-    fi
-  fi
-  if ! command -v go &>/dev/null; then
-    if command -v apt-get &>/dev/null && apt_install "the Go toolchain" golang-go; then
-      :
-    else
-      echo "error: go is required but not found. Install it with:" >&2
-      suggest_install go
       exit 1
     fi
   fi
