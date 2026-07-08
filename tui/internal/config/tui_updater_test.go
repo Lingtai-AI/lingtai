@@ -7,6 +7,55 @@ import (
 	"testing"
 )
 
+func TestVersionOutputHasTagRejectsSubstringMatches(t *testing.T) {
+	tests := []struct {
+		output string
+		want   string
+		match  bool
+	}{
+		{"lingtai-tui v1.2.3", "v1.2.3", true},
+		{"lingtai-tui v1.2.30", "v1.2.3", false},
+		{"lingtai-tui v1.2.3-4-gabcdef", "v1.2.3", false},
+		{"v1.2.3", "v1.2.3", true},
+		{"lingtai-tui   v1.2.3  ", "v1.2.3", true},
+		{"lingtai-tui v1.2.3", "", false},
+		{"", "v1.2.3", false},
+	}
+	for _, tc := range tests {
+		if got := versionOutputHasTag(tc.output, tc.want); got != tc.match {
+			t.Errorf("versionOutputHasTag(%q, %q) = %v, want %v", tc.output, tc.want, got, tc.match)
+		}
+	}
+}
+
+func TestRunInstallShAdoptionRejectsSubstringVersion(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	exe := filepath.Join(binDir, "lingtai-tui")
+	// Seed source metadata so the updater reaches the post-install version check.
+	writeSourceInstallMetadataVersion(t, globalDir, prefix, binDir, "v0.8.0", []string{exe})
+	// Runner reports v0.8.10 from the updated binary while we expect v0.8.1.
+	runner := &sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.10", runtimeVersion: "0.9.7"}
+	result := RunTUIUpdate(TUIInstallInfo{
+		Method:       TUIInstallMethodSource,
+		MetadataPath: filepath.Join(globalDir, "install.json"),
+	}, TUIUpdateOptions{
+		LatestVersion:       "v0.8.1",
+		GlobalDir:           globalDir,
+		Runner:              runner,
+		Stat:                statAllExist,
+		SourceInstallScript: "/tmp/install.sh",
+	})
+
+	if result.Healthy || result.Updated {
+		t.Fatalf("expected version verification to reject v0.8.10 for expected v0.8.1: %+v", result)
+	}
+	if !containsLine(result.Lines, "version verification failed") {
+		t.Fatalf("expected version verification failure line: %+v", result.Lines)
+	}
+}
+
 func TestSelectTUIUpdaterRoutesInstallMethods(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -27,52 +76,100 @@ func TestSelectTUIUpdaterRoutesInstallMethods(t *testing.T) {
 	}
 }
 
-func TestHomebrewTUIUpdaterDoctorRunsUpdateThenUpgrade(t *testing.T) {
-	runner := &fakeRunner{}
-	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodHomebrew}, TUIUpdateOptions{
-		LatestVersion:         "v0.8.1",
-		Runner:                runner,
-		LookPath:              func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
+func TestHomebrewTUIUpdaterAdoptsViaInstallShFromBrewPrefix(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	exe := filepath.Join(binDir, "lingtai-tui")
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"},
+		brewPrefix:         prefix,
+	}
+
+	result := RunTUIUpdate(TUIInstallInfo{
+		Method:       TUIInstallMethodHomebrew,
+		MetadataPath: filepath.Join(globalDir, "install.json"),
+	}, TUIUpdateOptions{
+		LatestVersion:       "v0.8.1",
+		GlobalDir:           globalDir,
+		Runner:              runner,
+		Stat:                statAllExist,
+		SourceInstallScript: "/tmp/install.sh",
 	})
 
 	if !result.Healthy || !result.Updated {
-		t.Fatalf("expected healthy updated result: %+v", result)
+		t.Fatalf("expected healthy updated adoption result: %+v", result)
 	}
-	update := "/opt/homebrew/bin/brew update"
-	upgrade := "/opt/homebrew/bin/brew upgrade lingtai-ai/lingtai/lingtai-tui"
-	if !containsCall(runner.calls, update) || !containsCall(runner.calls, upgrade) {
-		t.Fatalf("expected doctor brew calls, got %#v", runner.calls)
+	if !containsCall(runner.calls, "brew --prefix") {
+		t.Fatalf("expected brew --prefix probe, got %#v", runner.calls)
 	}
-	if indexOfCall(runner.calls, update) > indexOfCall(runner.calls, upgrade) {
-		t.Fatalf("expected brew update before brew upgrade, got %#v", runner.calls)
+	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected install.sh adoption call, got %#v", runner.calls)
 	}
-	if !containsLine(result.Lines, "Brew upgrade finished") {
-		t.Fatalf("expected restart guidance line: %+v", result.Lines)
+	if containsCall(runner.calls, "brew upgrade") || containsCall(runner.calls, "brew update") {
+		t.Fatalf("homebrew adoption must not run brew update/upgrade, got %#v", runner.calls)
+	}
+	if !containsLine(result.Lines, "brew reinstall lingtai-tui") {
+		t.Fatalf("expected rollback guidance line: %+v", result.Lines)
+	}
+	if !containsLine(result.Lines, "Adopting Homebrew install") {
+		t.Fatalf("expected adoption line: %+v", result.Lines)
+	}
+	_ = exe
+}
+
+func TestHomebrewTUIUpdaterInfersPrefixFromExecutableWhenNoBrew(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := "/opt/homebrew"
+	binDir := filepath.Join(prefix, "bin")
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"},
+		brewPrefix:         "", // brew --prefix fails
+	}
+
+	result := RunTUIUpdate(TUIInstallInfo{
+		Method:       TUIInstallMethodHomebrew,
+		MetadataPath: filepath.Join(globalDir, "install.json"),
+	}, TUIUpdateOptions{
+		LatestVersion:       "v0.8.1",
+		GlobalDir:           globalDir,
+		Runner:              runner,
+		Stat:                statAllExist,
+		SourceInstallScript: "/tmp/install.sh",
+		Executable:          func() (string, error) { return "/opt/homebrew/Cellar/lingtai-tui/0.8.0/bin/lingtai-tui", nil },
+	})
+
+	if !result.Updated {
+		t.Fatalf("expected adoption to complete after inferring prefix: %+v", result)
+	}
+	if !containsCall(runner.calls, "brew --prefix") {
+		t.Fatalf("expected brew --prefix probe before falling back, got %#v", runner.calls)
+	}
+	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix /opt/homebrew --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected install.sh adoption call with inferred prefix, got %#v", runner.calls)
+	}
+	if containsCall(runner.calls, "brew upgrade") {
+		t.Fatalf("homebrew adoption must not run brew upgrade, got %#v", runner.calls)
 	}
 }
 
-func TestHomebrewTUIUpdaterStartupRunsUpgradeOnlyWithoutLookPath(t *testing.T) {
-	runner := &fakeRunner{}
-	lookedUp := false
+func TestHomebrewTUIUpdaterFailsWhenNoPrefixResolvable(t *testing.T) {
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t},
+		brewPrefix:         "",
+	}
 	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodHomebrew}, TUIUpdateOptions{
-		LatestVersion: "v0.8.1",
-		Runner:        runner,
-		LookPath: func(string) (string, error) {
-			lookedUp = true
-			return "", errors.New("should not be called")
-		},
+		LatestVersion:       "v0.8.1",
+		Runner:              runner,
+		SourceInstallScript: "/tmp/install.sh",
+		Executable:          func() (string, error) { return "/tmp/somewhere/lingtai-tui", nil },
 	})
 
-	if !result.Healthy || !result.Updated {
-		t.Fatalf("expected healthy updated result: %+v", result)
+	if result.Healthy || result.Updated {
+		t.Fatalf("adoption with no resolvable prefix should fail: %+v", result)
 	}
-	if lookedUp {
-		t.Fatalf("startup-style updater should execute brew by name without resolving PATH")
-	}
-	if len(runner.calls) != 1 || runner.calls[0] != "brew upgrade lingtai-ai/lingtai/lingtai-tui" {
-		t.Fatalf("expected only brew upgrade call, got %#v", runner.calls)
+	if containsCall(runner.calls, "--update") {
+		t.Fatalf("adoption must not run install.sh without a prefix, got %#v", runner.calls)
 	}
 }
 
@@ -107,10 +204,10 @@ func TestSourceTUIUpdaterRunsInstallScriptAndVerifiesRuntime(t *testing.T) {
 	if !containsLine(result.Lines, "Source install metadata verified") {
 		t.Fatalf("expected metadata verification line: %+v", result.Lines)
 	}
-	if !containsLine(result.Lines, "Python runtime verified after source update") {
+	if !containsLine(result.Lines, "Python runtime verified after update") {
 		t.Fatalf("expected runtime verification line: %+v", result.Lines)
 	}
-	if !containsLine(result.Lines, "Source/user-local TUI update verified") {
+	if !containsLine(result.Lines, "TUI update verified") {
 		t.Fatalf("expected source update completion line: %+v", result.Lines)
 	}
 }
@@ -182,20 +279,23 @@ func TestTUIUpdaterSourceMetadataFailureDoesNotRunBrew(t *testing.T) {
 	}
 }
 
-func TestManualTUIUpdateHomebrewRoutesThroughUpdater(t *testing.T) {
-	runner := &fakeRunner{}
-	report := RunManualTUIUpdate(t.TempDir(), ManualTUIUpdateOptions{
-		CurrentTUIVersion: "v0.8.0",
-		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
-		Runner:            runner,
-		LookPath: func(name string) (string, error) {
-			if name == "brew" {
-				return "/opt/homebrew/bin/brew", nil
-			}
-			return "", errors.New("not found")
-		},
-		Executable: func() (string, error) { return "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__", nil },
-		LookupEnv:  func(string) (string, bool) { return "", false },
+func TestManualTUIUpdateHomebrewAdoptsViaInstallSh(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"},
+		brewPrefix:         prefix,
+	}
+	report := RunManualTUIUpdate(globalDir, ManualTUIUpdateOptions{
+		CurrentTUIVersion:   "v0.8.0",
+		HTTPClient:          testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:              runner,
+		Stat:                statAllExist,
+		LookPath:            func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
+		Executable:          func() (string, error) { return "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__", nil },
+		LookupEnv:           func(string) (string, bool) { return "", false },
+		SourceInstallScript: "/tmp/install.sh",
 	})
 
 	if !report.Healthy || !report.Updated {
@@ -207,30 +307,29 @@ func TestManualTUIUpdateHomebrewRoutesThroughUpdater(t *testing.T) {
 	if !containsLine(report.Lines, "TUI update available: v0.8.0 -> v0.8.1") {
 		t.Fatalf("expected update-available line: %+v", report.Lines)
 	}
-	update := "/opt/homebrew/bin/brew update"
-	upgrade := "/opt/homebrew/bin/brew upgrade lingtai-ai/lingtai/lingtai-tui"
-	if !containsCall(runner.calls, update) || !containsCall(runner.calls, upgrade) {
-		t.Fatalf("expected manual brew calls, got %#v", runner.calls)
+	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected manual install.sh adoption call, got %#v", runner.calls)
 	}
-	if indexOfCall(runner.calls, update) > indexOfCall(runner.calls, upgrade) {
-		t.Fatalf("expected brew update before brew upgrade, got %#v", runner.calls)
+	if containsCall(runner.calls, "brew upgrade") || containsCall(runner.calls, "brew update") {
+		t.Fatalf("manual homebrew adoption must not run brew update/upgrade, got %#v", runner.calls)
 	}
 }
 
-func TestManualTUIUpdateSkipsWhenAlreadyLatest(t *testing.T) {
+func TestManualTUIUpdateSourceSkipsWhenAlreadyLatest(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	exe := filepath.Join(binDir, "lingtai-tui")
+	writeSourceInstallMetadataVersion(t, globalDir, prefix, binDir, "v0.8.1", []string{exe})
 	runner := &fakeRunner{}
-	report := RunManualTUIUpdate(t.TempDir(), ManualTUIUpdateOptions{
-		CurrentTUIVersion: "v0.8.1",
-		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
-		Runner:            runner,
-		LookPath: func(name string) (string, error) {
-			if name == "brew" {
-				return "/opt/homebrew/bin/brew", nil
-			}
-			return "", errors.New("not found")
-		},
-		Executable: func() (string, error) { return "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__", nil },
-		LookupEnv:  func(string) (string, bool) { return "", false },
+	report := RunManualTUIUpdate(globalDir, ManualTUIUpdateOptions{
+		CurrentTUIVersion:   "v0.8.1",
+		HTTPClient:          testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:              runner,
+		LookPath:            func(string) (string, error) { return "", errors.New("not found") },
+		Executable:          func() (string, error) { return exe, nil },
+		LookupEnv:           func(string) (string, bool) { return "", false },
+		SourceInstallScript: "/tmp/install.sh",
 	})
 
 	if !report.Healthy {
@@ -246,10 +345,62 @@ func TestManualTUIUpdateSkipsWhenAlreadyLatest(t *testing.T) {
 		t.Fatalf("expected already-latest line: %+v", report.Lines)
 	}
 	if len(runner.calls) != 0 {
-		t.Fatalf("already-latest update must not run any commands, got %#v", runner.calls)
+		t.Fatalf("already-latest source update must not run any commands, got %#v", runner.calls)
+	}
+}
+
+func TestManualTUIUpdateHomebrewAdoptsEvenWhenAlreadyLatest(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"},
+		brewPrefix:         prefix,
+	}
+	report := RunManualTUIUpdate(globalDir, ManualTUIUpdateOptions{
+		CurrentTUIVersion:   "v0.8.1", // already latest, but Homebrew should still convert
+		HTTPClient:          testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:              runner,
+		Stat:                statAllExist,
+		LookPath:            func(string) (string, error) { return "/opt/homebrew/bin/brew", nil },
+		Executable:          func() (string, error) { return "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__", nil },
+		LookupEnv:           func(string) (string, bool) { return "", false },
+		SourceInstallScript: "/tmp/install.sh",
+	})
+
+	if !report.Healthy || !report.Updated {
+		t.Fatalf("homebrew already-latest should still adopt: %+v", report)
+	}
+	if !containsLine(report.Lines, "TUI is already at the latest version (v0.8.1)") {
+		t.Fatalf("expected already-latest line before adoption: %+v", report.Lines)
+	}
+	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected install.sh adoption call even when already latest, got %#v", runner.calls)
+	}
+	if containsCall(runner.calls, "brew upgrade") || containsCall(runner.calls, "brew update") {
+		t.Fatalf("homebrew adoption must not run brew update/upgrade, got %#v", runner.calls)
+	}
+}
+
+func TestManualTUIUpdateUnknownReportsUnsupportedWhenAlreadyLatest(t *testing.T) {
+	runner := &fakeRunner{}
+	report := RunManualTUIUpdate(t.TempDir(), ManualTUIUpdateOptions{
+		CurrentTUIVersion: "v0.8.1", // already latest, but unknown must still report unsupported
+		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
+		Runner:            runner,
+		LookPath:          func(string) (string, error) { return "", errors.New("not found") },
+		Executable:        func() (string, error) { return "/tmp/manual/lingtai-tui", nil },
+		LookupEnv:         func(string) (string, bool) { return "", false },
+	})
+
+	if report.Healthy || report.Updated {
+		t.Fatalf("unknown already-latest self-update should be unsupported: %+v", report)
+	}
+	if !containsLine(report.Lines, "TUI install method is unknown") {
+		t.Fatalf("expected unknown updater guidance: %+v", report.Lines)
 	}
 	if containsCall(runner.calls, "brew") {
-		t.Fatalf("already-latest update must not run brew, got %#v", runner.calls)
+		t.Fatalf("unknown self-update must not run brew, got %#v", runner.calls)
 	}
 }
 
@@ -278,7 +429,7 @@ func TestManualTUIUpdateSourceInstallSucceeds(t *testing.T) {
 	if !containsLine(report.Lines, "TUI install method: source/user-local") {
 		t.Fatalf("expected source install method line: %+v", report.Lines)
 	}
-	if !containsLine(report.Lines, "Source/user-local TUI update verified") {
+	if !containsLine(report.Lines, "TUI update verified") {
 		t.Fatalf("expected source updater success: %+v", report.Lines)
 	}
 	if containsLine(report.Lines, "Manual self-update for source/user-local") {
@@ -342,4 +493,24 @@ func (r *sourceUpdateRunner) Run(name string, args ...string) CommandResult {
 	default:
 		return CommandResult{Stdout: "ok\n"}
 	}
+}
+
+// homebrewAdoptionRunner answers `brew --prefix` with brewPrefix (empty ==>
+// non-zero exit so the backend falls back to executable inference) and defers
+// everything else to the embedded sourceUpdateRunner, so it drives the shared
+// install.sh --update adoption path. calls are recorded on the embedded runner.
+type homebrewAdoptionRunner struct {
+	sourceUpdateRunner
+	brewPrefix string
+}
+
+func (r *homebrewAdoptionRunner) Run(name string, args ...string) CommandResult {
+	if name == "brew" && len(args) == 1 && args[0] == "--prefix" {
+		r.calls = append(r.calls, "brew --prefix")
+		if r.brewPrefix == "" {
+			return CommandResult{Err: errors.New("exit status 1")}
+		}
+		return CommandResult{Stdout: r.brewPrefix + "\n"}
+	}
+	return r.sourceUpdateRunner.Run(name, args...)
 }

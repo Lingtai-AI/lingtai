@@ -212,6 +212,53 @@ release_asset_url() {
   return 1
 }
 
+# --- checksum verification ---------------------------------------------------
+
+# sha256_of prints the lowercase hex SHA-256 of a file using whichever portable
+# tool is available (shasum -a 256 on macOS/BSD, sha256sum on GNU). Prints
+# nothing and returns non-zero when no tool is available.
+sha256_of() {
+  local file="$1"
+  if command -v shasum &>/dev/null; then
+    shasum -a 256 "$file" 2>/dev/null | awk '{print $1}'
+    return 0
+  fi
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$file" 2>/dev/null | awk '{print $1}'
+    return 0
+  fi
+  return 1
+}
+
+# expected_sha_from_file extracts the expected hex digest from a `.sha256` file
+# in `shasum`/`sha256sum` format (`<hex>  <name>`), tolerating a bare digest.
+expected_sha_from_file() {
+  local sha_file="$1"
+  awk 'NR==1 {print $1}' "$sha_file" 2>/dev/null
+}
+
+# verify_sha256_file checks $file against the digest recorded in $sha_file.
+# Returns 0 on match, 1 on mismatch or when the digest cannot be computed/read.
+# On mismatch it warns loudly; the caller decides how to recover.
+verify_sha256_file() {
+  local file="$1" sha_file="$2" expected actual
+  expected="$(expected_sha_from_file "$sha_file")"
+  if [[ -z "$expected" ]]; then
+    warn "checksum file $sha_file was empty or unreadable"
+    return 1
+  fi
+  if ! actual="$(sha256_of "$file")" || [[ -z "$actual" ]]; then
+    warn "no SHA-256 tool available (need shasum or sha256sum); cannot verify $file"
+    return 1
+  fi
+  # Compare case-insensitively; both tools emit lowercase but be defensive.
+  if [[ "$(printf '%s' "$expected" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$actual" | tr 'A-Z' 'a-z')" ]]; then
+    warn "checksum MISMATCH for $(basename "$file"): expected $expected, got $actual"
+    return 1
+  fi
+  return 0
+}
+
 # --- git checkout version helpers (used by source build + tests) -------------
 
 is_exact_checkout_tag() {
@@ -738,6 +785,28 @@ try_release_asset() {
     warn "download failed for $url; will build from source."
     return 1
   fi
+
+  # Verify the tarball against its published .sha256 sibling asset when the
+  # release exposes one. A missing checksum (older releases) is tolerated with a
+  # warning; a present-but-mismatched or unverifiable checksum forces the source
+  # fallback rather than trusting an unverified prebuilt binary.
+  local sha_name sha_url sha_file
+  sha_name="${name}.sha256"
+  if sha_url="$(release_asset_url "$tag" "$sha_name")"; then
+    sha_file="$BUILD_DIR/$sha_name"
+    if ! curl -fsSL --max-time 30 -o "$sha_file" "$sha_url"; then
+      warn "could not download checksum $sha_name; will build from source instead of trusting the unverified asset."
+      return 1
+    fi
+    if ! verify_sha256_file "$tarball" "$sha_file"; then
+      warn "prebuilt asset $name failed checksum verification; will build from source."
+      return 1
+    fi
+    note "Verified $name against $sha_name (SHA-256 OK)."
+  else
+    warn "release $tag has no $sha_name checksum asset; installing the prebuilt binary unverified (older release)."
+  fi
+
   if ! tar -xzf "$tarball" -C "$extract_dir"; then
     warn "could not extract $tarball; will build from source."
     return 1

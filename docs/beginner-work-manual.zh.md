@@ -153,9 +153,10 @@ lingtai-tui
 ### 2.5 以后怎么升级？
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui self-update
 ```
+
+`self-update` 会拉取最新 GitHub Release。Homebrew 安装第一次运行时会转成 GitHub-Release-managed；以后升级不再依赖 `brew`。如果要回到 Homebrew 管理，运行 `brew reinstall lingtai-tui`。
 
 升级后要**重启 TUI**。如果你只是升级了却没重启，看起来可能还是旧行为。
 
@@ -572,18 +573,17 @@ find .lingtai -name agent.log -maxdepth 3 -print
 
 记住两层：
 
-- Homebrew 升级的是 `lingtai-tui`；
+- `lingtai-tui self-update` 升级的是 Go TUI 二进制，并以 GitHub Release 为准；
 - TUI 还会管理 Python runtime。
 
 做：
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui self-update
 lingtai-tui doctor
 ```
 
-然后重启 TUI。
+然后重启 TUI。Homebrew 安装第一次 self-update 会转成 GitHub-Release-managed；如需回到 Homebrew 管理，可运行 `brew reinstall lingtai-tui`。
 
 ### 12.4 技能、命令或工具不见了
 

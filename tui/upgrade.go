@@ -37,7 +37,6 @@ type startupTUIUpgradeOptions struct {
 	GlobalDir           string
 	SourceInstallScript string
 
-	CheckTUIUpgrade                 func(string) string
 	FindOtherTUIProcesses           func() []runningTUIProcess
 	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) error
 }
@@ -54,9 +53,6 @@ func (o *startupTUIUpgradeOptions) setDefaults() {
 	}
 	if o.Runner == nil {
 		o.Runner = streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr}
-	}
-	if o.CheckTUIUpgrade == nil {
-		o.CheckTUIUpgrade = config.CheckTUIUpgrade
 	}
 	if o.FindOtherTUIProcesses == nil {
 		o.FindOtherTUIProcesses = findOtherTUIProcesses
@@ -82,6 +78,10 @@ func handleTUIUpgradeWithOptions(install config.TUIInstallInfo, version, latestV
 
 func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
 	fmt.Fprintf(opts.Output, "lingtai-tui %s (latest: %s)\n", version, latestVersion)
+	fmt.Fprintln(opts.Output, "  Homebrew install detected.")
+	fmt.Fprintln(opts.Output, "  Updating will convert this install from Homebrew-managed to GitHub-Release-managed")
+	fmt.Fprintln(opts.Output, "  (the source installer replaces the binary in your Homebrew prefix; future updates")
+	fmt.Fprintln(opts.Output, "  no longer use brew). Roll back anytime with: brew reinstall lingtai-tui")
 
 	others := opts.FindOtherTUIProcesses()
 	if len(others) > 0 {
@@ -93,52 +93,44 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 				fmt.Fprintf(opts.Output, "    PID %d  %s\n", p.PID, p.Command)
 			}
 		}
-		fmt.Fprintln(opts.Output, "  Upgrading while they keep running can leave old/new Cellar binaries mixed.")
-		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and upgrade now? [y/N] ")
+		fmt.Fprintln(opts.Output, "  Updating while they keep running can leave old/new binaries mixed.")
+		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and convert now? [y/N] ")
 		if !answerYes(readLineLower(opts.Input)) {
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Quit the other TUI windows first, then run:")
-			fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
+			fmt.Fprintln(opts.Output, "  Update skipped. Quit the other TUI windows first, then run:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
 		if err := opts.PrepareOtherTUIProcessesUpgrade(others); err != nil {
 			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for upgrade: %v\n", err)
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Please close them manually and try again.")
+			fmt.Fprintln(opts.Output, "  Update skipped. Please close them manually and try again.")
 			return false
 		}
 	} else {
-		fmt.Fprint(opts.Output, "  Upgrade now? [Y/n] ")
-		answer := readLineLower(opts.Input)
-		if answer == "n" || answer == "no" {
+		fmt.Fprint(opts.Output, "  Convert this Homebrew install to a GitHub-Release-managed install now? [y/N] ")
+		if !answerYes(readLineLower(opts.Input)) {
+			fmt.Fprintln(opts.Output, "  Update skipped. Run manually later:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
 	}
 
-	fmt.Fprintln(opts.Output, "  Upgrading...")
+	fmt.Fprintln(opts.Output, "  Converting to GitHub-Release-managed install...")
 	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
-		LatestVersion: latestVersion,
-		Runner:        opts.Runner,
+		LatestVersion:       latestVersion,
+		GlobalDir:           opts.GlobalDir,
+		Runner:              opts.Runner,
+		Stat:                opts.Stat,
+		SourceInstallScript: opts.SourceInstallScript,
 	})
+	printTUIUpdateLines(opts.Output, update.Lines)
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
-			err = fmt.Errorf("homebrew upgrade failed")
+			err = fmt.Errorf("homebrew adoption failed")
 		}
-		fmt.Fprintf(opts.ErrOutput, "  Upgrade failed: %v\n", err)
+		fmt.Fprintf(opts.ErrOutput, "  Update failed: %v\n", err)
 		return false
 	}
-
-	// Verify the upgrade actually changed the binary by re-checking the
-	// version. Brew returns exit 0 even for "already installed".
-	postUpgrade := opts.CheckTUIUpgrade(version)
-	if postUpgrade != "" {
-		// Still outdated — brew formula not updated yet, don't loop.
-		fmt.Fprintln(opts.Output, "  Brew formula not yet updated. Run manually later:")
-		fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
-		return false
-	}
-
-	fmt.Fprintln(opts.Output, "  Upgraded! Please restart lingtai-tui to use the new version:")
-	fmt.Fprintln(opts.Output, "    lingtai-tui")
 	return true
 }
 

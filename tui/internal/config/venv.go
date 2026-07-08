@@ -604,9 +604,11 @@ func (execCommandRunner) Run(name string, args ...string) CommandResult {
 
 // RunDoctorUpdate force-checks and repairs the two shipped update surfaces:
 // the TUI binary and the managed Python `lingtai` runtime. It detects the TUI
-// install method first; today's automated TUI upgrade path is only Homebrew,
-// while source/user-local and unknown installs get explicit manual guidance.
-// Python runtime upgrades are delegated to uv/pip, then verified afterwards.
+// install method first; supported installs (source/user-local and Homebrew)
+// update through the GitHub Release installer (`install.sh --update`), with
+// Homebrew installs adopted onto GitHub-Release management. Unknown installs
+// get explicit manual guidance. Python runtime upgrades are delegated to
+// uv/pip, then verified afterwards.
 func RunDoctorUpdate(globalDir string, opts DoctorOptions) DoctorReport {
 	report := DoctorReport{Healthy: true}
 	if opts.Runner == nil {
@@ -714,13 +716,12 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		return
 	}
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:         release.TagName,
-		GlobalDir:             globalDir,
-		Runner:                opts.Runner,
-		LookPath:              opts.LookPath,
-		Stat:                  opts.Stat,
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
+		LatestVersion: release.TagName,
+		GlobalDir:     globalDir,
+		Runner:        opts.Runner,
+		LookPath:      opts.LookPath,
+		Stat:          opts.Stat,
+		Executable:    opts.Executable,
 	})
 	for _, line := range update.Lines {
 		r.add(line.Severity, "%s", line.Text)

@@ -76,13 +76,14 @@ sudo apt update
 sudo apt install -y build-essential curl git ca-certificates
 ```
 
-**To upgrade later**, use Homebrew again and restart the TUI so the new binary takes over:
+**To upgrade later**, run the built-in updater and restart the TUI so the new binary takes over:
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui self-update
 lingtai-tui
 ```
+
+`self-update` pulls the latest GitHub Release. If you installed via Homebrew, the first `self-update` converts the install from Homebrew-managed to GitHub-Release-managed (the release binary replaces the one in your Homebrew prefix); future updates no longer go through `brew`. To go back to Homebrew management, run `brew reinstall lingtai-tui`.
 
 **`brew install` fails while building.** A missing compiler toolchain is the usual cause. Install the prerequisites above, run `brew update`, and retry. If Homebrew still fails or is not available on your machine, use the [source build](#from-source) path below.
 
@@ -267,14 +268,13 @@ ResearchClawBench is a useful companion for the LingTai philosophy: LingTai prov
 brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 
-# upgrade later
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+# upgrade later (GitHub Release, not brew)
+lingtai-tui self-update
 ```
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
 
-You can also run `lingtai-tui self-update` to update the TUI binary through the detected install method. It updates Homebrew and source/user-local installs; unknown installs stop with guidance instead of running `brew`.
+`lingtai-tui self-update` is the upgrade path for every install method: it pulls the latest GitHub Release. Homebrew installs are converted to GitHub-Release-managed on the first `self-update` (roll back with `brew reinstall lingtai-tui`); source/user-local installs update in place; unknown installs stop with guidance instead of running `brew`. Homebrew remains an install and rollback channel, not the auto-upgrade path.
 
 First-time install problems (missing `brew`, WSL/Ubuntu/Debian prerequisites, source-build failures) are covered up top in [First-time install troubleshooting](#first-time-install-troubleshooting).
 
@@ -305,7 +305,7 @@ The updater reads `~/.lingtai-tui/install.json`, reruns the source installer for
 ./install.sh --update --prefix <prefix> --version <tag> --non-interactive
 ```
 
-On startup, source/user-local installs also check for newer TUI releases. If one is available, LingTai asks before running the source update. Choosing no leaves the current binary unchanged and prints `lingtai-tui self-update` for later.
+On startup, source/user-local and Homebrew installs also check for newer TUI releases. If one is available, LingTai asks (default No) before updating through the GitHub Release installer. For a Homebrew install the prompt states it will convert the install to GitHub-Release-managed (rollback: `brew reinstall lingtai-tui`). Choosing no leaves the current binary unchanged and prints `lingtai-tui self-update` for later.
 
 ### Kernel dev mode (advanced)
 
@@ -323,7 +323,7 @@ lingtai-tui doctor
 
 `doctor` checks the TUI/kernel/runtime relationship, refreshes shipped utility skills, and reports concrete repair steps. Use it after a failed startup or a stale-looking upgrade.
 
-It also prints the detected TUI install method. If the current binary is not Homebrew-managed, `doctor` leaves the binary alone and points you at the matching release instead of guessing with `brew`.
+It also prints the detected TUI install method. Supported Homebrew and source/user-local installs update through the GitHub Release self-updater; unknown installs stay non-mutating and point you at the curl/GitHub Release installer instead of guessing with `brew`.
 
 ## Architecture
 
@@ -385,7 +385,7 @@ This repo carries two Go binaries:
 
 **A skill or command is missing.** `lingtai-tui bootstrap` (or `/doctor` inside the TUI) re-extracts bundled utilities.
 
-**You upgraded but behavior did not change.** Two layers: the Go TUI binary (Homebrew/source) and the Python runtime (TUI-managed venv). Restart the TUI after upgrading; run `doctor` if the runtime looks stale. Installing the `lingtai` PyPI package into your system Python does not affect projects.
+**You upgraded but behavior did not change.** Two layers: the Go TUI binary (updated via `lingtai-tui self-update` from GitHub Release) and the Python runtime (TUI-managed venv). Restart the TUI after upgrading; run `doctor` if the runtime looks stale. Installing the `lingtai` PyPI package into your system Python does not affect projects.
 
 **You are developing the kernel and your edits are ignored.** See [Kernel dev mode](#kernel-dev-mode-advanced).
 

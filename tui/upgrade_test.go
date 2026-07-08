@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +86,7 @@ func TestStartupSourceUpdateConfirmRoutesThroughSourceUpdater(t *testing.T) {
 	if startupContainsCall(runner.calls, "brew") {
 		t.Fatalf("source startup update must not run brew, got %#v", runner.calls)
 	}
-	if !strings.Contains(out.String(), "Source/user-local TUI update verified") {
+	if !strings.Contains(out.String(), "TUI update verified") {
 		t.Fatalf("missing source update verification output:\n%s", out.String())
 	}
 	if errOut.Len() != 0 {
@@ -93,33 +94,82 @@ func TestStartupSourceUpdateConfirmRoutesThroughSourceUpdater(t *testing.T) {
 	}
 }
 
-func TestStartupHomebrewUpdateKeepsExistingDefaultYesBehavior(t *testing.T) {
+func TestStartupHomebrewUpdateDeclineDoesNotMutate(t *testing.T) {
 	runner := &startupFakeRunner{}
 	var out, errOut bytes.Buffer
 
 	updated := handleTUIUpgradeWithOptions(config.TUIInstallInfo{
 		Method: config.TUIInstallMethodHomebrew,
 	}, "v0.8.0", "v0.8.1", startupTUIUpgradeOptions{
-		Input:     strings.NewReader("\n"),
+		Input:     strings.NewReader("\n"), // default No
 		Output:    &out,
 		ErrOutput: &errOut,
 		Runner:    runner,
-		CheckTUIUpgrade: func(string) string {
-			return ""
+		FindOtherTUIProcesses: func() []runningTUIProcess {
+			return nil
 		},
+	})
+
+	if updated {
+		t.Fatal("declined homebrew adoption should not stop startup")
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("declined homebrew adoption should not run commands, got %#v", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Convert this Homebrew install to a GitHub-Release-managed install now? [y/N]") {
+		t.Fatalf("missing explicit [y/N] adoption prompt:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "brew reinstall lingtai-tui") {
+		t.Fatalf("missing rollback guidance:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "lingtai-tui self-update") {
+		t.Fatalf("missing manual self-update guidance:\n%s", out.String())
+	}
+}
+
+func TestStartupHomebrewUpdateConfirmAdoptsViaInstallSh(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	runner := &startupHomebrewAdoptionRunner{
+		startupSourceUpdateRunner: startupSourceUpdateRunner{
+			t:         t,
+			globalDir: globalDir,
+			prefix:    prefix,
+			binDir:    binDir,
+			latest:    "v0.8.1",
+		},
+		brewPrefix: prefix,
+	}
+
+	var out, errOut bytes.Buffer
+	updated := handleTUIUpgradeWithOptions(config.TUIInstallInfo{
+		Method:       config.TUIInstallMethodHomebrew,
+		MetadataPath: filepath.Join(globalDir, "install.json"),
+	}, "v0.8.0", "v0.8.1", startupTUIUpgradeOptions{
+		Input:               strings.NewReader("y\n"),
+		Output:              &out,
+		ErrOutput:           &errOut,
+		Runner:              runner,
+		GlobalDir:           globalDir,
+		Stat:                statMissingForStartupTest,
+		SourceInstallScript: "/tmp/install.sh",
 		FindOtherTUIProcesses: func() []runningTUIProcess {
 			return nil
 		},
 	})
 
 	if !updated {
-		t.Fatalf("homebrew default-yes startup update should stop startup; stderr=%q output=\n%s", errOut.String(), out.String())
+		t.Fatalf("confirmed homebrew adoption should stop startup; stderr=%q output=\n%s", errOut.String(), out.String())
 	}
-	if len(runner.calls) != 1 || runner.calls[0] != "brew upgrade lingtai-ai/lingtai/lingtai-tui" {
-		t.Fatalf("expected one brew upgrade call, got %#v", runner.calls)
+	if !startupContainsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected install.sh adoption call, got %#v", runner.calls)
 	}
-	if !strings.Contains(out.String(), "Upgrade now? [Y/n]") {
-		t.Fatalf("missing existing Homebrew prompt:\n%s", out.String())
+	if startupContainsCall(runner.calls, "brew upgrade") || startupContainsCall(runner.calls, "brew update") {
+		t.Fatalf("homebrew adoption must not run brew update/upgrade, got %#v", runner.calls)
+	}
+	if !strings.Contains(out.String(), "TUI update verified") {
+		t.Fatalf("missing adoption verification output:\n%s", out.String())
 	}
 }
 
@@ -180,6 +230,25 @@ func (r *startupSourceUpdateRunner) Run(name string, args ...string) config.Comm
 	default:
 		return config.CommandResult{}
 	}
+}
+
+// startupHomebrewAdoptionRunner answers `brew --prefix` (so the adoption backend
+// resolves the prefix) and otherwise drives the shared install.sh --update path
+// through the embedded startupSourceUpdateRunner.
+type startupHomebrewAdoptionRunner struct {
+	startupSourceUpdateRunner
+	brewPrefix string
+}
+
+func (r *startupHomebrewAdoptionRunner) Run(name string, args ...string) config.CommandResult {
+	if name == "brew" && len(args) == 1 && args[0] == "--prefix" {
+		r.calls = append(r.calls, "brew --prefix")
+		if r.brewPrefix == "" {
+			return config.CommandResult{Err: errors.New("brew --prefix failed")}
+		}
+		return config.CommandResult{Stdout: r.brewPrefix + "\n"}
+	}
+	return r.startupSourceUpdateRunner.Run(name, args...)
 }
 
 func writeStartupSourceInstallMetadata(t *testing.T, globalDir, prefix, binDir, version string) string {

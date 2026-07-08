@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
-
-const homebrewTUIFormula = "lingtai-ai/lingtai/lingtai-tui"
 
 // TUIUpdater is the install-method-specific backend for TUI binary updates.
 // It is deliberately narrow: version checks and prompting stay with callers,
@@ -31,15 +28,12 @@ type TUIUpdateOptions struct {
 
 	Install TUIInstallInfo
 
-	// IncludeHomebrewUpdate preserves doctor's existing `brew update` before
-	// `brew upgrade`. Startup leaves this false to keep its current command.
-	IncludeHomebrewUpdate bool
-	// ResolveHomebrewPath preserves doctor's full-path command reporting.
-	// Startup leaves this false so execution still goes through "brew".
-	ResolveHomebrewPath bool
 	// SourceInstallScript overrides the installer source for tests. Production
 	// uses the versioned raw GitHub install.sh URL.
 	SourceInstallScript string
+	// Executable overrides os.Executable for the Homebrew adoption backend so
+	// it can infer the install prefix from the running binary in tests.
+	Executable func() (string, error)
 }
 
 // TUIUpdateResult is the backend result consumed by doctor and startup.
@@ -100,8 +94,13 @@ type ManualTUIUpdateOptions struct {
 }
 
 // RunManualTUIUpdate detects the current install method and runs the matching
-// TUI updater backend. Unlike doctor, source/user-local and unknown installs
-// are command failures because the requested mutation is not implemented yet.
+// TUI updater backend. Source/user-local and Homebrew installs update through
+// the GitHub Release installer (Homebrew installs are adopted onto
+// GitHub-Release management); unknown installs are a command failure that
+// reports non-mutating manual guidance. A source/user-local install already at
+// the latest release short-circuits as a no-op, but a Homebrew install still
+// runs so it can convert to GitHub-Release-managed, and an unknown install
+// still runs so the caller sees the unsupported guidance.
 func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdateResult {
 	result := TUIUpdateResult{Healthy: true}
 	if opts.Executable == nil {
@@ -135,23 +134,27 @@ func RunManualTUIUpdate(globalDir string, opts ManualTUIUpdateOptions) TUIUpdate
 			case releaseNewer(current, release.TagName):
 				result.add(DoctorWarn, "TUI update available: %s -> %s", current, release.TagName)
 			default:
-				// Already at (or ahead of) the latest release: skip the updater
-				// entirely so we don't run Homebrew for a no-op upgrade.
+				// Already at (or ahead of) the latest release. Source/user-local
+				// installs short-circuit as a no-op. Homebrew installs still run
+				// so `self-update` can convert them to GitHub-Release-managed even
+				// when the version already matches; unknown installs still run so
+				// the caller sees the unsupported guidance.
 				result.add(DoctorOK, "TUI is already at the latest version (%s)", release.TagName)
-				return result
+				if install.Method == TUIInstallMethodSource {
+					return result
+				}
 			}
 		}
 	}
 
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:         latestVersion,
-		GlobalDir:             globalDir,
-		Runner:                opts.Runner,
-		LookPath:              opts.LookPath,
-		Stat:                  opts.Stat,
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
-		SourceInstallScript:   opts.SourceInstallScript,
+		LatestVersion:       latestVersion,
+		GlobalDir:           globalDir,
+		Runner:              opts.Runner,
+		LookPath:            opts.LookPath,
+		Stat:                opts.Stat,
+		Executable:          opts.Executable,
+		SourceInstallScript: opts.SourceInstallScript,
 	})
 	result.Lines = append(result.Lines, update.Lines...)
 	result.Updated = update.Updated
@@ -174,44 +177,97 @@ func (homebrewTUIUpdater) InstallMethod() TUIInstallMethod {
 	return TUIInstallMethodHomebrew
 }
 
+// Upgrade adopts a Homebrew install onto the GitHub-Release-managed source
+// updater instead of running `brew update`/`brew upgrade`. It derives the
+// Homebrew prefix, then runs the versioned install.sh --update contract into
+// <prefix>/bin. After adoption, install.json records source metadata for the
+// active <prefix>/bin/lingtai-tui, so future detection reports source, not
+// Homebrew. Rollback is `brew reinstall lingtai-tui`.
 func (homebrewTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 	result := TUIUpdateResult{Healthy: true}
 	if opts.Runner == nil {
 		opts.Runner = execCommandRunner{}
 	}
-	brew := "brew"
-	if opts.ResolveHomebrewPath {
-		lookPath := opts.LookPath
-		if lookPath == nil {
-			lookPath = exec.LookPath
-		}
-		resolved, err := lookPath("brew")
-		if err != nil || resolved == "" {
-			result.Err = errors.New("homebrew not found")
-			result.add(DoctorFail, "Homebrew not found; install/update manually from %s", tuiReleaseURL(opts.LatestVersion))
-			return result
-		}
-		brew = resolved
+	if opts.Stat == nil {
+		opts.Stat = os.Stat
+	}
+	if opts.LatestVersion == "" {
+		result.Err = errors.New("latest TUI release is unknown")
+		result.add(DoctorFail, "Homebrew adoption needs a known release tag; try again when GitHub release lookup succeeds.")
+		return result
 	}
 
-	commands := [][]string{}
-	if opts.IncludeHomebrewUpdate {
-		commands = append(commands, []string{"update"})
+	prefix, detail, err := homebrewAdoptionPrefix(opts)
+	if err != nil {
+		result.Err = err
+		result.add(DoctorFail, "Could not determine a Homebrew prefix to adopt; install/update manually from %s", tuiReleaseURL(opts.LatestVersion))
+		return result
 	}
-	commands = append(commands, []string{"upgrade", homebrewTUIFormula})
-	for _, args := range commands {
-		result.add(DoctorInfo, "Running: %s %s", brew, strings.Join(args, " "))
-		res := opts.Runner.Run(brew, args...)
-		appendCommandOutputToTUIUpdate(&result, res)
-		if res.Err != nil {
-			result.Err = res.Err
-			result.add(DoctorFail, "Command failed: %v", res.Err)
-			return result
+	result.add(DoctorInfo, "Adopting Homebrew install onto GitHub-Release-managed updater (prefix %s, %s).", prefix, detail)
+	result.add(DoctorInfo, "Roll back to Homebrew management with: brew reinstall lingtai-tui")
+
+	runInstallShAdoption(&result, opts, prefix)
+	return result
+}
+
+// homebrewAdoptionPrefix resolves the install prefix to convert a Homebrew
+// install into a GitHub-Release-managed install. It prefers `brew --prefix`
+// (the active Homebrew root) so <prefix>/bin/lingtai-tui replaces the command
+// the user actually runs; it falls back to a prefix inferred from the running
+// executable's common Homebrew path when brew is not on PATH.
+func homebrewAdoptionPrefix(opts TUIUpdateOptions) (string, string, error) {
+	if prefix := strings.TrimSpace(brewPrefixFromRunner(opts.Runner)); prefix != "" {
+		return prefix, "brew --prefix", nil
+	}
+	executable := opts.Executable
+	if executable == nil {
+		executable = os.Executable
+	}
+	exe, err := executable()
+	if err == nil && exe != "" {
+		if resolved, rErr := filepath.EvalSymlinks(exe); rErr == nil && resolved != "" {
+			exe = resolved
+		}
+		if prefix := homebrewPrefixFromExecutable(exe); prefix != "" {
+			return prefix, "inferred from executable path", nil
 		}
 	}
-	result.Updated = true
-	result.add(DoctorWarn, "Brew upgrade finished. Restart lingtai-tui and run `lingtai-tui version` to verify the active binary changed.")
-	return result
+	return "", "", errors.New("no Homebrew prefix available")
+}
+
+// brewPrefixFromRunner runs `brew --prefix` and returns the trimmed output.
+// A non-zero exit or empty output yields "".
+func brewPrefixFromRunner(runner CommandRunner) string {
+	if runner == nil {
+		runner = execCommandRunner{}
+	}
+	res := runner.Run("brew", "--prefix")
+	if res.Err != nil {
+		return ""
+	}
+	return strings.TrimSpace(res.Stdout)
+}
+
+// homebrewPrefixFromExecutable infers the Homebrew prefix from a resolved
+// executable path when it lives under a known Homebrew root. It returns "" when
+// the path does not look Homebrew-managed.
+func homebrewPrefixFromExecutable(exe string) string {
+	clean := filepath.ToSlash(filepath.Clean(exe))
+	// An executable under <prefix>/Cellar/lingtai-tui/<ver>/bin/lingtai-tui
+	// maps back to <prefix>.
+	if idx := strings.Index(clean, "/Cellar/"); idx > 0 {
+		return filepath.Clean(clean[:idx])
+	}
+	for _, prefix := range []string{
+		"/opt/homebrew",
+		"/home/linuxbrew/.linuxbrew",
+		"/usr/local",
+	} {
+		if pathWithin(exe, prefix) {
+			return prefix
+		}
+	}
+	return ""
 }
 
 type sourceTUIUpdater struct{}
@@ -259,58 +315,81 @@ func (sourceTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 		result.add(DoctorFail, "Source install metadata at %s is missing prefix.", metadataPath)
 		return result
 	}
-	binDir := meta.BinDir
-	if binDir == "" {
-		binDir = filepath.Join(meta.Prefix, "bin")
-	}
+
+	runInstallShAdoption(&result, opts, meta.Prefix)
+	return result
+}
+
+// runInstallShAdoption drives the versioned install.sh --update contract for a
+// given prefix and verifies the outcome: the new binary reports the target tag,
+// install.json now records source metadata for <prefix>/bin/lingtai-tui, and
+// (when GlobalDir is set) the Python runtime still imports. Both the source and
+// Homebrew-adoption backends share this so a Homebrew install converts to the
+// same GitHub-Release-managed state a source install already has. On any
+// failure it marks result unhealthy and returns without setting Updated.
+func runInstallShAdoption(result *TUIUpdateResult, opts TUIUpdateOptions, prefix string) {
+	binDir := filepath.Join(prefix, "bin")
 	target := filepath.Join(binDir, "lingtai-tui")
 
-	name, args := sourceInstallCommand(opts.SourceInstallScript, meta.Prefix, opts.LatestVersion)
+	metadataPath := opts.Install.MetadataPath
+	if metadataPath == "" && opts.GlobalDir != "" {
+		metadataPath = filepath.Join(opts.GlobalDir, "install.json")
+	}
+
+	name, args := sourceInstallCommand(opts.SourceInstallScript, prefix, opts.LatestVersion)
 	result.add(DoctorInfo, "Running: %s %s", name, strings.Join(args, " "))
 	res := opts.Runner.Run(name, args...)
-	appendCommandOutputToTUIUpdate(&result, res)
+	appendCommandOutputToTUIUpdate(result, res)
 	if res.Err != nil {
 		result.Err = res.Err
-		result.add(DoctorFail, "Source update command failed: %v", res.Err)
-		return result
+		result.add(DoctorFail, "Install.sh update command failed: %v", res.Err)
+		return
 	}
 
 	versionRes := opts.Runner.Run(target, "version")
-	appendCommandOutputToTUIUpdate(&result, versionRes)
+	appendCommandOutputToTUIUpdate(result, versionRes)
 	if versionRes.Err != nil {
 		result.Err = versionRes.Err
 		result.add(DoctorFail, "Updated lingtai-tui did not run from %s: %v", target, versionRes.Err)
-		return result
+		return
 	}
 	versionOut := strings.TrimSpace(versionRes.Stdout)
 	if versionOut == "" {
 		versionOut = strings.TrimSpace(versionRes.Stderr)
 	}
-	if !strings.Contains(versionOut, opts.LatestVersion) {
+	// Match the tag as a whole whitespace-delimited field (output is like
+	// "lingtai-tui vX.Y.Z"), not a substring, so v1.2.30 does not satisfy an
+	// expected v1.2.3.
+	if !versionOutputHasTag(versionOut, opts.LatestVersion) {
 		err := fmt.Errorf("updated binary reported %q, expected %s", versionOut, opts.LatestVersion)
 		result.Err = err
 		result.add(DoctorFail, "Updated lingtai-tui version verification failed: %v", err)
-		return result
+		return
 	}
 	result.add(DoctorInfo, "Updated TUI binary: %s", versionOut)
 
+	if metadataPath == "" {
+		result.Err = errors.New("install metadata path is unknown")
+		result.add(DoctorFail, "Update ran but no install metadata path was available to verify.")
+		return
+	}
 	postMeta, err := readTUIInstallMetadata(metadataPath)
 	if err != nil {
 		result.Err = err
 		result.add(DoctorFail, "Could not read source install metadata after update at %s: %v", metadataPath, err)
-		return result
+		return
 	}
-	if !isSourceInstallMetadata(postMeta) || postMeta.Prefix != meta.Prefix || !sourceMetadataMatchesExecutable(postMeta, target) {
+	if !isSourceInstallMetadata(postMeta) || postMeta.Prefix != prefix || !sourceMetadataMatchesExecutable(postMeta, target) {
 		err := errors.New("updated source install metadata does not match the target binary")
 		result.Err = err
 		result.add(DoctorFail, "Source install metadata verification failed after update.")
-		return result
+		return
 	}
 	if postMeta.StampedVersion != opts.LatestVersion {
 		err := fmt.Errorf("metadata stamped_version is %s, expected %s", postMeta.StampedVersion, opts.LatestVersion)
 		result.Err = err
 		result.add(DoctorFail, "Source install metadata version verification failed: %v", err)
-		return result
+		return
 	}
 	result.add(DoctorOK, "Source install metadata verified at %s", metadataPath)
 
@@ -320,16 +399,15 @@ func (sourceTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 			result.add(DoctorWarn, "Python runtime venv not present at %s; startup or doctor will create it when needed.", python)
 		} else if runtimeVersion, err := pythonLingtaiVersion(opts.Runner, python); err != nil {
 			result.Err = err
-			result.add(DoctorFail, "Python runtime import failed after source update: %v", err)
-			return result
+			result.add(DoctorFail, "Python runtime import failed after update: %v", err)
+			return
 		} else {
-			result.add(DoctorOK, "Python runtime verified after source update: lingtai %s", runtimeVersion)
+			result.add(DoctorOK, "Python runtime verified after update: lingtai %s", runtimeVersion)
 		}
 	}
 
 	result.Updated = true
-	result.add(DoctorOK, "Source/user-local TUI update verified. Restart lingtai-tui to use %s.", opts.LatestVersion)
-	return result
+	result.add(DoctorOK, "TUI update verified. Restart lingtai-tui to use %s.", opts.LatestVersion)
 }
 
 type unknownTUIUpdater struct{}
@@ -348,6 +426,21 @@ func appendCommandOutputToTUIUpdate(r *TUIUpdateResult, res CommandResult) {
 	for _, line := range interestingCommandLines(res.Stdout, res.Stderr) {
 		r.add(DoctorInfo, "  %s", line)
 	}
+}
+
+// versionOutputHasTag reports whether want appears as a whole whitespace-
+// delimited field in the binary's version output. This is stricter than a
+// substring check: it rejects v1.2.30 when want is v1.2.3.
+func versionOutputHasTag(output, want string) bool {
+	if want == "" {
+		return false
+	}
+	for _, field := range strings.Fields(output) {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }
 
 func tuiReleaseURL(version string) string {

@@ -392,6 +392,45 @@ if verify_tui_binary_version "$fake_tui" "v9.9.9" 2>/dev/null; then
   fail "version verifier accepted mismatched version"
 fi
 
+# --- checksum verification ---------------------------------------------------
+if command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1; then
+  sha_payload="$tmp/asset.tar.gz"
+  printf 'prebuilt-asset-bytes\n' > "$sha_payload"
+  sha_digest="$(sha256_of "$sha_payload")"
+  [[ -n "$sha_digest" ]] || fail "sha256_of produced no digest"
+
+  # shasum/sha256sum-format file ("<hex>  <name>") verifies.
+  good_sha="$tmp/asset.tar.gz.sha256"
+  printf '%s  asset.tar.gz\n' "$sha_digest" > "$good_sha"
+  assert_eq "$sha_digest" "$(expected_sha_from_file "$good_sha")" "expected digest parsed from shasum-format file"
+  if ! verify_sha256_file "$sha_payload" "$good_sha"; then
+    fail "verify_sha256_file rejected a matching checksum"
+  fi
+
+  # A bare-digest checksum file (no filename column) also verifies.
+  bare_sha="$tmp/asset.bare.sha256"
+  printf '%s\n' "$sha_digest" > "$bare_sha"
+  if ! verify_sha256_file "$sha_payload" "$bare_sha"; then
+    fail "verify_sha256_file rejected a bare-digest checksum"
+  fi
+
+  # A mismatched digest fails loudly.
+  bad_sha="$tmp/asset.bad.sha256"
+  printf '%s  asset.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" > "$bad_sha"
+  if verify_sha256_file "$sha_payload" "$bad_sha" 2>/dev/null; then
+    fail "verify_sha256_file accepted a mismatched checksum"
+  fi
+
+  # An empty checksum file fails rather than passing silently.
+  empty_sha="$tmp/asset.empty.sha256"
+  : > "$empty_sha"
+  if verify_sha256_file "$sha_payload" "$empty_sha" 2>/dev/null; then
+    fail "verify_sha256_file accepted an empty checksum file"
+  fi
+else
+  echo "test-install-sh: no shasum/sha256sum available; skipping checksum tests" >&2
+fi
+
 write_install_metadata \
   "$global_dir" \
   "$prefix" \

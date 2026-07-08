@@ -221,13 +221,12 @@ brew install lingtai-ai/lingtai/lingtai-tui
 lingtai-tui
 
 # 之后升级
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+lingtai-tui self-update
 ```
 
-升级完后重启 TUI，让新的二进制接管。Python 运行时由 TUI 在 `~/.lingtai-tui/runtime/venv/` 下统一管理——往系统 Python 里 `pip install lingtai` 不会影响在运行的项目。
+`self-update` 会拉取最新 GitHub Release。Homebrew 安装第一次运行时会从 Homebrew-managed 转成 GitHub-Release-managed（release 二进制会接管 Homebrew prefix 中的命令）；以后升级不再走 `brew`。如果要回到 Homebrew 管理，运行 `brew reinstall lingtai-tui`。
 
-也可以运行 `lingtai-tui self-update`，让 TUI 按检测到的安装方式升级自己的二进制。它会升级 Homebrew 和源码/用户本地安装；未知安装会停下并给出指引，而不会运行 `brew`。
+升级完后重启 TUI，让新的二进制接管。Python 运行时由 TUI 在 `~/.lingtai-tui/runtime/venv/` 下统一管理——往系统 Python 里 `pip install lingtai` 不会影响在运行的项目。未知安装会停下并给出指引，而不会运行 `brew`。
 
 <details>
 <summary><b>首次安装？先装 Homebrew</b></summary>
@@ -370,7 +369,7 @@ lingtai-tui
 curl -L "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${VERSION}.tar.gz" -o lingtai.tar.gz
 ```
 
-如果源码/用户本地版本是通过仓库根目录的 `install.sh` 安装的，后续可以直接运行：
+如果源码/用户本地版本是通过仓库根目录的 `install.sh` 安装的，或 Homebrew 安装已经通过 `self-update` 转成 GitHub-Release-managed，后续可以直接运行：
 
 ```bash
 lingtai-tui self-update
@@ -382,7 +381,7 @@ lingtai-tui self-update
 ./install.sh --update --prefix <prefix> --version <tag> --non-interactive
 ```
 
-启动时，源码/用户本地安装也会检查新的 TUI release。有更新时，灵台会先询问再运行源码更新；选择否会保持当前二进制不变，并提示稍后可运行 `lingtai-tui self-update`。
+启动时，源码/用户本地和 Homebrew 安装也会检查新的 TUI release。有更新时，灵台会先询问（默认否）再通过 GitHub Release installer 更新；Homebrew 安装的提示会说明它将转成 GitHub-Release-managed（可用 `brew reinstall lingtai-tui` 回滚）。选择否会保持当前二进制不变，并提示稍后可运行 `lingtai-tui self-update`。
 
 </details>
 

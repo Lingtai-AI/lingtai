@@ -743,9 +743,15 @@ func (f commandRunnerFunc) Run(name string, args ...string) CommandResult {
 	return f(name, args...)
 }
 
-func TestRunDoctorUpdateTUIOutdatedForceRunsBrewInOrder(t *testing.T) {
-	runner := &fakeRunner{versions: []string{"0.9.7", "0.9.7"}}
-	report := RunDoctorUpdate(t.TempDir(), DoctorOptions{
+func TestRunDoctorUpdateTUIOutdatedForceAdoptsHomebrewViaInstallSh(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	runner := &homebrewAdoptionRunner{
+		sourceUpdateRunner: sourceUpdateRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"},
+		brewPrefix:         prefix,
+	}
+	report := RunDoctorUpdate(globalDir, DoctorOptions{
 		CurrentTUIVersion: "v0.8.0",
 		ForceTUI:          true,
 		ForcePython:       false,
@@ -766,18 +772,16 @@ func TestRunDoctorUpdateTUIOutdatedForceRunsBrewInOrder(t *testing.T) {
 	if !report.Healthy {
 		t.Fatalf("expected healthy report: %+v", report.Lines)
 	}
-	if !containsLine(report.Lines, "Brew upgrade finished") {
-		t.Fatalf("expected brew completion guidance: %+v", report.Lines)
+	if !containsLine(report.Lines, "brew reinstall lingtai-tui") {
+		t.Fatalf("expected rollback guidance: %+v", report.Lines)
 	}
-	want := []string{
-		"/opt/homebrew/bin/brew update",
-		"/opt/homebrew/bin/brew upgrade lingtai-ai/lingtai/lingtai-tui",
+	// The doctor path uses the default versioned install.sh URL; assert the
+	// --update contract into the brew prefix regardless of the script form.
+	if !containsCall(runner.calls, "--update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+		t.Fatalf("expected install.sh adoption call into brew prefix, got %#v", runner.calls)
 	}
-	if !containsCall(runner.calls, want[0]) || !containsCall(runner.calls, want[1]) {
-		t.Fatalf("expected brew calls %v, got %#v", want, runner.calls)
-	}
-	if indexOfCall(runner.calls, want[0]) > indexOfCall(runner.calls, want[1]) {
-		t.Fatalf("expected brew update before brew upgrade, got %#v", runner.calls)
+	if containsCall(runner.calls, "brew upgrade") || containsCall(runner.calls, "brew update lingtai") {
+		t.Fatalf("homebrew adoption must not run brew update/upgrade, got %#v", runner.calls)
 	}
 }
 
@@ -813,7 +817,7 @@ func TestRunDoctorUpdateReportsSourceInstallAndDoesNotRunBrew(t *testing.T) {
 	if !containsLine(report.Lines, "TUI install method: source/user-local") {
 		t.Fatalf("expected source install method report: %+v", report.Lines)
 	}
-	if !containsLine(report.Lines, "Source/user-local TUI update verified") {
+	if !containsLine(report.Lines, "TUI update verified") {
 		t.Fatalf("expected source updater success: %+v", report.Lines)
 	}
 	if containsCall(runner.calls, "brew") {
