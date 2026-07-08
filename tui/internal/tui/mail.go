@@ -142,6 +142,7 @@ type MailModel struct {
 	pendingMessage    string           // full text from editor, sent on Enter
 	pasteContent      string           // actual content of abbreviated paste (sent on Enter)
 	pasteDisplay      string           // abbreviated display form of paste (for change detection)
+	pasteExpanded     bool            // whether abbreviated paste is currently expanded in input
 	globalDir         string           // ~/.lingtai-tui/
 	wasActive         bool             // true if previous refresh was ACTIVE
 	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
@@ -677,6 +678,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		m.pasteContent = ""
 		m.pasteDisplay = ""
+		m.pasteExpanded = false
 		if text == "" {
 			return m, nil
 		}
@@ -736,6 +738,29 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
+		}
+
+		// Toggle paste expand/collapse before palette routing, because
+		// expanded paste content may start with "/" and activate the palette.
+		if msg.String() == "ctrl+e" && m.pasteContent != "" && m.pasteDisplay != "" {
+			text := m.input.Value()
+			if !m.pasteExpanded {
+				if idx := strings.Index(text, m.pasteDisplay); idx >= 0 {
+					m.input.SetValue(text[:idx] + m.pasteContent + text[idx+len(m.pasteDisplay):])
+					m.pasteExpanded = true
+					m.AddSystemMessage("Paste expanded")
+					m.syncViewportHeight()
+					return m, nil
+				}
+			} else {
+				if idx := strings.Index(text, m.pasteContent); idx >= 0 {
+					m.input.SetValue(text[:idx] + m.pasteDisplay + text[idx+len(m.pasteContent):])
+					m.pasteExpanded = false
+					m.AddSystemMessage("Paste collapsed")
+					m.syncViewportHeight()
+					return m, nil
+				}
+			}
 		}
 
 		// If palette is active, route to palette
@@ -885,8 +910,17 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.maybeShowEditorHint()
 		// Abbreviate the pasted segment for cleaner display, preserving text
 		// the user may have typed before the paste.
+		// If the previous paste was expanded, collapse it back first so the
+		// new paste doesn't mix with the old expanded content.
+		if m.pasteExpanded && m.pasteContent != "" && m.pasteDisplay != "" {
+			text := m.input.Value()
+			if idx := strings.Index(text, m.pasteContent); idx >= 0 {
+				m.input.SetValue(text[:idx] + m.pasteDisplay + text[idx+len(m.pasteContent):])
+			}
+		}
 		m.pasteContent = ""
 		m.pasteDisplay = ""
+		m.pasteExpanded = false
 		if abbreviated, ok := abbrevPasteContent(pasteContent); ok {
 			m.pasteContent = pasteContent
 			m.pasteDisplay = abbreviated

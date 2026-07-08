@@ -223,3 +223,111 @@ func TestPasteAbbreviationWithSurroundingText(t *testing.T) {
 		t.Errorf("expanded text = %q, want %q", text, want)
 	}
 }
+
+// ctrlEPress constructs a KeyPressMsg for ctrl+e.
+func ctrlEPress() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}
+}
+
+func TestPasteExpandCollapseToggle(t *testing.T) {
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	content := "/path/to/img1.png\n/path/to/img2.png"
+	m, _ = m.Update(tea.PasteMsg{Content: content})
+
+	// After paste, input shows abbreviated form
+	if m.input.Value() != "[image1][image2]" {
+		t.Fatalf("after paste: input = %q, want %q", m.input.Value(), "[image1][image2]")
+	}
+	if m.pasteExpanded {
+		t.Fatal("pasteExpanded should be false after paste")
+	}
+
+	// Press ctrl+e to expand
+	m, _ = m.Update(ctrlEPress())
+	if !m.pasteExpanded {
+		t.Fatal("pasteExpanded should be true after ctrl+e")
+	}
+	if m.input.Value() != content {
+		t.Errorf("after expand: input = %q, want %q", m.input.Value(), content)
+	}
+
+	// Press ctrl+e again to collapse
+	m, _ = m.Update(ctrlEPress())
+	if m.pasteExpanded {
+		t.Fatal("pasteExpanded should be false after second ctrl+e")
+	}
+	if m.input.Value() != "[image1][image2]" {
+		t.Errorf("after collapse: input = %q, want %q", m.input.Value(), "[image1][image2]")
+	}
+}
+
+func TestPasteExpandCollapseWithSurroundingText(t *testing.T) {
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.input.SetValue("See: ")
+	content := "/path/to/img1.png\n/path/to/img2.png"
+	m, _ = m.Update(tea.PasteMsg{Content: content})
+
+	wantCollapsed := "See: [image1][image2]"
+	if m.input.Value() != wantCollapsed {
+		t.Fatalf("after paste: input = %q, want %q", m.input.Value(), wantCollapsed)
+	}
+
+	// Expand
+	m, _ = m.Update(ctrlEPress())
+	wantExpanded := "See: " + content
+	if m.input.Value() != wantExpanded {
+		t.Errorf("after expand: input = %q, want %q", m.input.Value(), wantExpanded)
+	}
+
+	// Collapse
+	m, _ = m.Update(ctrlEPress())
+	if m.input.Value() != wantCollapsed {
+		t.Errorf("after collapse: input = %q, want %q", m.input.Value(), wantCollapsed)
+	}
+}
+
+func TestCtrlEPassthroughWhenNoAbbreviation(t *testing.T) {
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Type some text (no paste abbreviation active)
+	m.input.SetValue("hello")
+	m, _ = m.Update(ctrlEPress())
+
+	// ctrl+e should pass through to textarea when no abbreviation is active.
+	// The textarea treats ctrl+e as "end of line" (no-op for single-line input),
+	// so the value should remain unchanged.
+	if m.input.Value() != "hello" {
+		t.Errorf("ctrl+e with no abbreviation: input = %q, want %q", m.input.Value(), "hello")
+	}
+}
+
+func TestPasteExpandedResetOnNewPaste(t *testing.T) {
+	m := NewMailModel("", "", "", "", "codex", 10, "", "en", false, 0)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	content1 := "/path/to/img1.png\n/path/to/img2.png"
+	m, _ = m.Update(tea.PasteMsg{Content: content1})
+
+	// Expand the first paste
+	m, _ = m.Update(ctrlEPress())
+	if !m.pasteExpanded {
+		t.Fatal("pasteExpanded should be true after ctrl+e")
+	}
+
+	// Paste something new — old expanded content collapses first,
+	// then the new paste is abbreviated and appended.
+	content2 := "/path/to/other.png"
+	m, _ = m.Update(tea.PasteMsg{Content: content2})
+	if m.pasteExpanded {
+		t.Error("pasteExpanded should be reset to false on new paste")
+	}
+	want := "[image1][image2][image1]"
+	if m.input.Value() != want {
+		t.Errorf("after new paste: input = %q, want %q", m.input.Value(), want)
+	}
+}
