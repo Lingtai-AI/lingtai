@@ -51,18 +51,48 @@ assert_eq '\u0001' "$(json_escape $'\001')" "json generic control-byte escaping"
 assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix")" "bin dir from prefix"
 assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from slash-suffixed prefix"
 
-REF="main"
+REF=""
+VERSION=""
 UPDATE_MODE=0
 INSTALL_PREFIX=""
 NON_INTERACTIVE=0
 parse_args --update --prefix "$tmp/prefix" --version v1.2.3 --non-interactive
 assert_eq "1" "$UPDATE_MODE" "update mode flag"
 assert_eq "$tmp/prefix" "$INSTALL_PREFIX" "update prefix flag"
-assert_eq "v1.2.3" "$REF" "update version flag"
+assert_eq "v1.2.3" "$VERSION" "update version flag"
 assert_eq "1" "$NON_INTERACTIVE" "non-interactive flag"
-REF="main"
+
+# --bin-dir / --from-source / --skip-* flags parse into their globals.
+REF=""
+VERSION=""
 UPDATE_MODE=0
 INSTALL_PREFIX=""
+BIN_DIR_OVERRIDE=""
+FROM_SOURCE=0
+SKIP_PORTAL=0
+SKIP_VENV=0
+NON_INTERACTIVE=0
+parse_args --version v9.9.9 --bin-dir "$tmp/mybin" --from-source --skip-portal --skip-venv
+assert_eq "v9.9.9" "$VERSION" "version flag (install mode)"
+assert_eq "$tmp/mybin" "$BIN_DIR_OVERRIDE" "bin-dir flag"
+assert_eq "1" "$FROM_SOURCE" "from-source flag"
+assert_eq "1" "$SKIP_PORTAL" "skip-portal flag"
+assert_eq "1" "$SKIP_VENV" "skip-venv flag"
+
+# --ref selects a source build ref.
+REF=""
+VERSION=""
+parse_args --ref feature/x
+assert_eq "feature/x" "$REF" "ref flag"
+
+REF=""
+VERSION=""
+UPDATE_MODE=0
+INSTALL_PREFIX=""
+BIN_DIR_OVERRIDE=""
+FROM_SOURCE=0
+SKIP_PORTAL=0
+SKIP_VENV=0
 NON_INTERACTIVE=0
 
 printf 'second\n' >> "$repo/file.txt"
