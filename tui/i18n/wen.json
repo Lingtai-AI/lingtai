@@ -733,5 +733,7 @@
   "mail.apriori_summary_unavailable_label": "★ 已请 summary=true —— 未呈摘要于器灵",
   "mail.apriori_summary_footer": "%s · %s → %s 字符 · 原始之果已存",
   "mail.apriori_summary_footer_unavailable": "%s · 原始 %s 字符 · 原始之果已存（凭 tool_call_id 取之）",
-  "mail.apriori_summary_no_text": "（摘要之文不在事件之录 —— 器灵所见者乃 %s 字符之生成摘要；原始之果按 tool_call_id 而存）"
+  "mail.apriori_summary_no_text": "（摘要之文不在事件之录 —— 器灵所见者乃 %s 字符之生成摘要；原始之果按 tool_call_id 而存）",
+  "palette.to": "择此项目 Email To 所向",
+  "cmd.to": "列此项目诸灵，或择普通输入所寄之灵。用法：/to 列；/to <名或址> 择。不涉跨项目之址。"
 }

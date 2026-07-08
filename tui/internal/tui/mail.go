@@ -66,13 +66,17 @@ func pulseTick() tea.Cmd {
 }
 
 type mailRefreshMsg struct {
-	cache        fs.MailCache // incrementally updated cache
-	alive        bool
-	state        string // active, idle, stuck, asleep, suspended, or ""
-	activity     fs.NetworkActivity
-	orchName     string // agent name from .agent.json (may change at runtime)
-	orchNickname string // nickname from .agent.json
-	initial      bool   // true only for the deferred initial rebuild (clears the loading banner)
+	cache          fs.MailCache // incrementally updated cache
+	alive          bool
+	state          string // active, idle, stuck, asleep, suspended, or ""
+	activity       fs.NetworkActivity
+	orchName       string // agent name from .agent.json (may change at runtime)
+	orchNickname   string // nickname from .agent.json
+	targetAlive    bool
+	targetState    string
+	targetName     string
+	targetNickname string
+	initial        bool // true only for the deferred initial rebuild (clears the loading banner)
 }
 type tickMsg time.Time
 
@@ -120,51 +124,57 @@ var thinkingQuotesMap = map[string][]string{
 }
 
 type MailModel struct {
-	humanDir          string
-	humanAddr         string
-	orchestrator      string // 本我 directory path (full path under .lingtai/)
-	orchAddr          string // 本我 address (from .agent.json)
-	orchName          string // 本我 agent name (true name)
-	orchNickname      string // 本我 nickname (display name override)
-	baseDir           string // .lingtai/ directory
-	verbose           verboseLevel
-	messages          []ChatMessage // derived from cache on each refresh
-	cache             fs.MailCache  // incremental mail cache
-	pageSize          int           // max messages shown (from settings)
-	loadedExtra       int           // additional older messages loaded via ctrl+u
-	viewport          viewport.Model
-	input             InputModel
-	palette           PaletteModel
-	width             int
-	height            int
-	ready             bool
-	pollRate          time.Duration // refresh interval
-	orchAlive         bool
-	orchState         string // agent state from .agent.json
-	networkActivity   fs.NetworkActivity
-	statusFlash       string    // transient status message shown in status bar
-	statusExpiry      time.Time // when to clear the flash
-	lastInputLines    int
-	lastPaletteLines  int
-	lastBannerLines   int
-	lastTelemetryRow  bool             // whether the home telemetry row was reserved last sync
-	pendingMessage    string           // full text from editor, sent on Enter
-	globalDir         string           // ~/.lingtai-tui/
-	wasActive         bool             // true if previous refresh was ACTIVE
-	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
-	pulseTick         int              // pulse animation counter while ACTIVE
-	activeSince       time.Time        // when the agent last entered ACTIVE (zero when not active)
-	inquiryState      string           // "", "sent", "taken" — tracks /btw lifecycle
-	insightPending    bool             // true when waiting for 5s insight delay
-	insightAt         time.Time        // when to fire the auto-insight
-	dismissedInsights map[string]bool  // dismissed insight timestamps
-	showEditorWarn    bool             // one-time vim warning overlay
-	editorWarnText    string           // text to pass to editor after warning
-	insightsEnabled   bool             // from settings — show insight events
-	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
-	sessionCache      *fs.SessionCache // append-only session log
-	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
-	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
+	humanDir           string
+	humanAddr          string
+	orchestrator       string // 本我 directory path (full path under .lingtai/)
+	orchAddr           string // 本我 address (from .agent.json)
+	orchName           string // 本我 agent name (true name)
+	orchNickname       string // 本我 nickname (display name override)
+	baseDir            string // .lingtai/ directory
+	verbose            verboseLevel
+	messages           []ChatMessage // derived from cache on each refresh
+	cache              fs.MailCache  // incremental mail cache
+	pageSize           int           // max messages shown (from settings)
+	loadedExtra        int           // additional older messages loaded via ctrl+u
+	viewport           viewport.Model
+	input              InputModel
+	palette            PaletteModel
+	width              int
+	height             int
+	ready              bool
+	pollRate           time.Duration // refresh interval
+	orchAlive          bool
+	orchState          string // agent state from .agent.json
+	mailTargetDir      string
+	mailTargetAddr     string
+	mailTargetName     string
+	mailTargetNickname string
+	mailTargetState    string
+	mailTargetAlive    bool
+	networkActivity    fs.NetworkActivity
+	statusFlash        string    // transient status message shown in status bar
+	statusExpiry       time.Time // when to clear the flash
+	lastInputLines     int
+	lastPaletteLines   int
+	lastBannerLines    int
+	lastTelemetryRow   bool             // whether the home telemetry row was reserved last sync
+	pendingMessage     string           // full text from editor, sent on Enter
+	globalDir          string           // ~/.lingtai-tui/
+	wasActive          bool             // true if previous refresh was ACTIVE
+	quoteIdx           int              // which quote to show (advances on each ACTIVE transition)
+	pulseTick          int              // pulse animation counter while ACTIVE
+	activeSince        time.Time        // when the agent last entered ACTIVE (zero when not active)
+	inquiryState       string           // "", "sent", "taken" — tracks /btw lifecycle
+	insightPending     bool             // true when waiting for 5s insight delay
+	insightAt          time.Time        // when to fire the auto-insight
+	dismissedInsights  map[string]bool  // dismissed insight timestamps
+	showEditorWarn     bool             // one-time vim warning overlay
+	editorWarnText     string           // text to pass to editor after warning
+	insightsEnabled    bool             // from settings — show insight events
+	toolCallTruncate   int              // from settings — max chars per tool line (0 = no truncation)
+	sessionCache       *fs.SessionCache // append-only session log
+	initialLoading     bool             // true until the deferred initial rebuild's refresh has been applied
+	copyMode           bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
 
 	// Home telemetry is resolved asynchronously off the render/input path (its
 	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
@@ -198,6 +208,9 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		orchestrator:      orchDir,
 		orchAddr:          orchAddr,
 		orchName:          orchName,
+		mailTargetDir:     orchDir,
+		mailTargetAddr:    orchAddr,
+		mailTargetName:    orchName,
 		input:             input,
 		palette:           palette,
 		pollRate:          1 * time.Second,
@@ -435,7 +448,30 @@ func (m MailModel) refreshMail() tea.Msg {
 			state = "suspended"
 		}
 	}
-	return mailRefreshMsg{cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
+
+	targetDir := m.currentMailTargetDir()
+	targetAlive := false
+	targetState := m.currentMailTargetState()
+	targetName := m.currentMailTargetName()
+	targetNickname := ""
+	if targetDir != "" {
+		targetAlive = fs.IsAlive(targetDir, 3.0)
+		if node, err := fs.ReadAgent(targetDir); err == nil {
+			targetState = node.State
+			if node.AgentName != "" {
+				targetName = node.AgentName
+			}
+			targetNickname = node.Nickname
+		}
+		if !targetAlive {
+			if fs.HasRefreshTaken(targetDir) {
+				targetState = "refreshing"
+			} else if !strings.EqualFold(targetState, "ASLEEP") {
+				targetState = "suspended"
+			}
+		}
+	}
+	return mailRefreshMsg{cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname, targetAlive: targetAlive, targetState: targetState, targetName: targetName, targetNickname: targetNickname}
 }
 
 // orchDisplayName returns the nickname if set, otherwise the agent name.
@@ -444,6 +480,194 @@ func (m MailModel) orchDisplayName() string {
 		return m.orchNickname
 	}
 	return m.orchName
+}
+
+func mailTargetAddr(node fs.AgentNode) string {
+	if node.Address != "" {
+		return node.Address
+	}
+	if node.WorkingDir != "" {
+		return node.WorkingDir
+	}
+	return node.AgentName
+}
+
+func mailTargetName(node fs.AgentNode) string {
+	if node.AgentName != "" {
+		return node.AgentName
+	}
+	if node.Address != "" {
+		return filepath.Base(node.Address)
+	}
+	if node.WorkingDir != "" {
+		return filepath.Base(node.WorkingDir)
+	}
+	return i18n.T("state.unknown")
+}
+
+func mailTargetDisplayName(node fs.AgentNode) string {
+	if node.Nickname != "" {
+		return node.Nickname
+	}
+	return mailTargetName(node)
+}
+
+func mailTargetIsAlive(node fs.AgentNode) bool {
+	if node.Alive {
+		return true
+	}
+	if node.WorkingDir != "" {
+		return fs.IsAlive(node.WorkingDir, 3.0)
+	}
+	return false
+}
+
+func (m MailModel) currentMailTargetDir() string {
+	if m.mailTargetDir != "" {
+		return m.mailTargetDir
+	}
+	return m.orchestrator
+}
+
+func (m MailModel) currentMailTargetAddr() string {
+	if m.mailTargetAddr != "" {
+		return m.mailTargetAddr
+	}
+	return m.orchAddr
+}
+
+func (m MailModel) currentMailTargetName() string {
+	if m.mailTargetName != "" {
+		return m.mailTargetName
+	}
+	return m.orchName
+}
+
+func (m MailModel) currentMailTargetDisplayName() string {
+	if m.mailTargetNickname != "" {
+		return m.mailTargetNickname
+	}
+	return m.currentMailTargetName()
+}
+
+func (m MailModel) currentMailTargetState() string {
+	if m.mailTargetState != "" {
+		return m.mailTargetState
+	}
+	return m.orchState
+}
+
+func (m MailModel) currentMailTargetAlive() bool {
+	if m.mailTargetDir == "" || m.mailTargetDir == m.orchestrator {
+		return m.orchAlive
+	}
+	return m.mailTargetAlive
+}
+
+func (m MailModel) currentMailTargetStateLabel() string {
+	state := m.currentMailTargetState()
+	if state == "" {
+		state = "unknown"
+	}
+	return i18n.T("state." + state)
+}
+
+func (m MailModel) currentMailTargetCanReceive() bool {
+	state := strings.ToUpper(m.currentMailTargetState())
+	if state == "" {
+		return true
+	}
+	if state == "SUSPENDED" {
+		return false
+	}
+	if !m.currentMailTargetAlive() && state != "ASLEEP" && state != "REFRESHING" {
+		return false
+	}
+	return true
+}
+
+func mailTargetMatches(node fs.AgentNode, selector string) bool {
+	selector = strings.ToLower(strings.TrimSpace(selector))
+	if selector == "" {
+		return false
+	}
+	candidates := []string{node.Address, node.AgentName, node.Nickname}
+	if node.WorkingDir != "" {
+		candidates = append(candidates, filepath.Base(node.WorkingDir))
+	}
+	for _, candidate := range candidates {
+		if strings.ToLower(strings.TrimSpace(candidate)) == selector {
+			return true
+		}
+	}
+	return false
+}
+
+func describeMailTarget(node fs.AgentNode) string {
+	name := mailTargetDisplayName(node)
+	state := node.State
+	if state == "" {
+		state = "unknown"
+	}
+	if !mailTargetIsAlive(node) && !strings.EqualFold(state, "ASLEEP") {
+		state = "suspended"
+	}
+	return fmt.Sprintf("%s (%s)", name, strings.ToLower(state))
+}
+
+// SetMailTarget selects the current-project agent that normal text input emails.
+// The target is intentionally scoped to fs.DiscoverAgents(projectDir): no global
+// picker and no cross-network addressing are introduced here.
+func (m *MailModel) SetMailTarget(projectDir, selector string) string {
+	nodes, err := fs.DiscoverAgents(projectDir)
+	if err != nil {
+		return fmt.Sprintf("Unable to list current-project email targets: %v", err)
+	}
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		var items []string
+		for _, node := range nodes {
+			if node.IsHuman {
+				continue
+			}
+			items = append(items, describeMailTarget(node))
+		}
+		if len(items) == 0 {
+			return "No current-project agent targets found."
+		}
+		return "Email targets: " + strings.Join(items, ", ") + ". Use /to <agent-name-or-address> to select."
+	}
+	for _, node := range nodes {
+		if node.IsHuman {
+			continue
+		}
+		if !mailTargetMatches(node, selector) {
+			continue
+		}
+		m.mailTargetDir = node.WorkingDir
+		m.mailTargetAddr = mailTargetAddr(node)
+		m.mailTargetName = mailTargetName(node)
+		m.mailTargetNickname = node.Nickname
+		m.mailTargetState = node.State
+		m.mailTargetAlive = mailTargetIsAlive(node)
+		return fmt.Sprintf("Email target set to %s.", describeMailTarget(node))
+	}
+	return fmt.Sprintf("No current-project agent matched %q. Use /to to list available targets.", selector)
+}
+
+func stateGlyphFor(state string, pulseTick int) string {
+	switch strings.ToUpper(state) {
+	case "ACTIVE":
+		return spinnerFrames[pulseTick%len(spinnerFrames)]
+	case "ASLEEP":
+		return "◌"
+	case "SUSPENDED":
+		return "○"
+	case "REFRESHING":
+		return "⟳"
+	default: // IDLE, STUCK, unknown
+		return "◉"
+	}
 }
 
 // buildMessages refreshes the session cache from all sources, then builds
@@ -690,6 +914,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.orchName = msg.orchName
 		}
 		m.orchNickname = msg.orchNickname
+		m.mailTargetAlive = msg.targetAlive
+		m.mailTargetState = msg.targetState
+		if msg.targetName != "" {
+			m.mailTargetName = msg.targetName
+		}
+		m.mailTargetNickname = msg.targetNickname
 		isActive := strings.EqualFold(m.orchState, "ACTIVE")
 		isIdle := strings.EqualFold(m.orchState, "IDLE")
 		if isActive && !m.wasActive {
@@ -732,6 +962,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.inquiryState = ""
 			}
 		}
+
 		if m.ready {
 			atBottom := m.viewport.AtBottom()
 			m.syncViewportHeight()
@@ -802,8 +1033,15 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.syncViewportHeight()
 			return m, func() tea.Msg { return PaletteSelectMsg{Command: cmd, Args: args} }
 		}
-		if m.orchestrator != "" {
-			fs.WriteMail(m.orchestrator, m.humanDir, m.humanAddr, m.orchAddr, "", text)
+		if targetDir := m.currentMailTargetDir(); targetDir != "" {
+			if !m.currentMailTargetCanReceive() {
+				m.statusFlash = fmt.Sprintf("Email target %s is not reachable (%s). Use /to to choose an ACTIVE, IDLE, or ASLEEP agent.", m.currentMailTargetDisplayName(), m.currentMailTargetStateLabel())
+				m.statusExpiry = time.Now().Add(4 * time.Second)
+				m.input.Reset()
+				m.syncViewportHeight()
+				return m, nil
+			}
+			fs.WriteMail(targetDir, m.humanDir, m.humanAddr, m.currentMailTargetAddr(), "", text)
 			// Human sent a real message — allow new insight after next idle
 			os.Remove(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
 			m.input.Reset()
@@ -832,7 +1070,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.input.Reset()
 		m.syncViewportHeight()
 		// Forward to app
-		return m, func() tea.Msg { return PaletteSelectMsg{Command: msg.Command} }
+		return m, func() tea.Msg { return PaletteSelectMsg{Command: msg.Command, Args: msg.Args} }
 
 	case tea.KeyPressMsg:
 		// Editor warning overlay — Enter proceeds, Esc cancels
@@ -1339,6 +1577,9 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
+			if msg.To != "" {
+				name += sepStyle.Render(" → ") + sepStyle.Render(msg.To)
+			}
 			// Short timestamp (HH:MM) with optional delivering indicator.
 			ts := ""
 			if msg.Timestamp != "" {
@@ -1451,18 +1692,7 @@ func (m MailModel) humanName() string {
 // every other state gets a distinct static glyph (color carries the rest of
 // the distinction via StateColor).
 func (m MailModel) stateGlyph() string {
-	switch strings.ToUpper(m.orchState) {
-	case "ACTIVE":
-		return spinnerFrames[m.pulseTick%len(spinnerFrames)]
-	case "ASLEEP":
-		return "◌"
-	case "SUSPENDED":
-		return "○"
-	case "REFRESHING":
-		return "⟳"
-	default: // IDLE, STUCK, unknown
-		return "◉"
-	}
+	return stateGlyphFor(m.orchState, m.pulseTick)
 }
 
 // activeElapsed returns a short " 12s" / " 3m" suffix while the agent is ACTIVE,
@@ -1658,8 +1888,18 @@ func (m MailModel) View() string {
 	// sees the agent's live state (animated spinner + elapsed while ACTIVE) right
 	// where their attention already is. Reuses the header's stateStyle/stateLabel
 	// and is independent of the verbose level.
-	indicator := stateStyle.Render(m.stateGlyph() + " " + stateLabel + m.activeElapsed())
-	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.orchDisplayName()) + "  " + indicator + " "
+	targetStateKey := m.currentMailTargetState()
+	if targetStateKey == "" {
+		targetStateKey = "unknown"
+	}
+	targetStateLabel := i18n.T("state." + targetStateKey)
+	targetStateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(targetStateKey)))
+	targetElapsed := ""
+	if m.currentMailTargetDir() == m.orchestrator {
+		targetElapsed = m.activeElapsed()
+	}
+	indicator := targetStateStyle.Render(stateGlyphFor(targetStateKey, m.pulseTick) + " " + targetStateLabel + targetElapsed)
+	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.currentMailTargetDisplayName()) + "  " + indicator + " "
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
 		sepWidth = 0

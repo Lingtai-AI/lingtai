@@ -733,5 +733,7 @@
   "mail.apriori_summary_unavailable_label": "★ 已请求 summary=true —— 未向智能体展示摘要",
   "mail.apriori_summary_footer": "%s · %s → %s 字符 · 原始结果已保留",
   "mail.apriori_summary_footer_unavailable": "%s · 原始 %s 字符 · 原始结果已保留（凭 tool_call_id 取回）",
-  "mail.apriori_summary_no_text": "（摘要文本不在事件日志中 —— 智能体看到的是 %s 字符的生成摘要；原始结果按 tool_call_id 保留）"
+  "mail.apriori_summary_no_text": "（摘要文本不在事件日志中 —— 智能体看到的是 %s 字符的生成摘要；原始结果按 tool_call_id 保留）",
+  "palette.to": "选择本项目 Email To 目标",
+  "cmd.to": "列出或选择普通输入要发送邮件的本项目 agent。用法：/to 列出目标，/to <agent 名或地址> 选择；不提供跨项目目标。"
 }

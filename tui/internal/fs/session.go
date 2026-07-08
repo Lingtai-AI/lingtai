@@ -341,11 +341,71 @@ func resolveMailFrom(msg MailMessage, humanAddr string) string {
 }
 
 func resolveMailTo(msg MailMessage, humanAddr, orchName string) string {
-	to := fmt.Sprintf("%v", msg.To)
-	if to == humanAddr {
+	recipients := mailRecipients(msg.To)
+	if len(recipients) == 0 {
+		return orchName
+	}
+
+	labels := make([]string, 0, len(recipients))
+	for _, recipient := range recipients {
+		label := resolveMailRecipientLabel(recipient, humanAddr)
+		if label != "" {
+			labels = append(labels, label)
+		}
+	}
+	if len(labels) == 0 {
+		return orchName
+	}
+	return strings.Join(labels, ", ")
+}
+
+func mailRecipients(to interface{}) []string {
+	switch v := to.(type) {
+	case string:
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	case []string:
+		var recipients []string
+		for _, item := range v {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				recipients = append(recipients, item)
+			}
+		}
+		return recipients
+	case []interface{}:
+		var recipients []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					recipients = append(recipients, s)
+				}
+			}
+		}
+		return recipients
+	}
+
+	fallback := strings.TrimSpace(fmt.Sprintf("%v", to))
+	if fallback == "" || fallback == "<nil>" {
+		return nil
+	}
+	return []string{fallback}
+}
+
+func resolveMailRecipientLabel(recipient, humanAddr string) string {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return ""
+	}
+	parts := splitLast(recipient, "/")
+	if recipient == humanAddr || parts == "human" {
 		return "human"
 	}
-	return orchName
+	return parts
 }
 
 func splitLast(s, sep string) string {

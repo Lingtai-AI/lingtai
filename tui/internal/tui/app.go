@@ -724,6 +724,9 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	targetDir := a.orchDir
 	targetName := a.orchName
 	switch command {
+	case "to", "target":
+		addMsg(a.mail.SetMailTarget(a.projectDir, args))
+		return a, nil
 	case "sleep":
 		if args == "all" {
 			agents, _ := fs.DiscoverAgents(a.projectDir)

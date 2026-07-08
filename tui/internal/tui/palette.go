@@ -45,6 +45,7 @@ func NewPaletteModel() PaletteModel {
 func DefaultCommands() []Command {
 	return []Command{
 		{Name: "btw", Description: "palette.btw", Detail: "cmd.btw"},
+		{Name: "to", Description: "palette.to", Detail: "cmd.to"},
 		{Name: "sleep", Description: "palette.sleep", Detail: "cmd.sleep"},
 		{Name: "suspend", Description: "palette.suspend", Detail: "cmd.suspend"},
 		{Name: "cpr", Description: "palette.cpr", Detail: "cmd.cpr"},

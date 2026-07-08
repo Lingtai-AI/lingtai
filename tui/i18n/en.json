@@ -733,5 +733,7 @@
   "mail.apriori_summary_unavailable_label": "★ summary=true requested — no summary shown to agent",
   "mail.apriori_summary_footer": "%s · %s → %s chars · raw preserved",
   "mail.apriori_summary_footer_unavailable": "%s · raw %s chars · raw preserved (retrieve by tool_call_id)",
-  "mail.apriori_summary_no_text": "(summary text is not in the event log — the agent saw a %s-char generated summary; the raw is preserved by tool_call_id)"
+  "mail.apriori_summary_no_text": "(summary text is not in the event log — the agent saw a %s-char generated summary; the raw is preserved by tool_call_id)",
+  "palette.to": "Choose Email To target in this project",
+  "cmd.to": "List or select which current-project agent normal input emails. Usage: /to to list targets, /to <agent-name-or-address> to select. Does not expose cross-project targets."
 }
