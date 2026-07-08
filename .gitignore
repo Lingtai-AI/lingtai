@@ -77,7 +77,6 @@ lingtai-projects
 # Runtime data (agent working dirs, configs)
 .lingtai/
 .chat_history.json
-_telegram_agent/
 
 # Graphify knowledge-graph output (regenerated locally; see docs/graphify.md)
 graphify-out/
