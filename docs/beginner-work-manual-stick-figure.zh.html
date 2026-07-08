@@ -29,7 +29,7 @@ footer{text-align:center;color:var(--muted);padding:20px}.small{font-size:14px;c
 <p>灵台不是只会聊天的网页机器人。它是本地工作台：TUI 负责界面，项目目录保存状态，agent 在里面读文件、跑命令、写报告、发消息。</p>
 </section>
 <section class="grid">
-<div class="card"><h2><span class="num">1</span>安装</h2><p>普通用户安装的是 <code>lingtai-tui</code>，不要先去系统 Python 里 <code>pip install lingtai</code>。</p><pre>brew install lingtai-ai/lingtai/lingtai-tui
+<div class="card"><h2><span class="num">1</span>安装</h2><p>普通用户安装的是 <code>lingtai-tui</code>，不要先去系统 Python 里 <code>pip install lingtai</code>。</p><pre>curl -fsSL https://lingtai.ai/install.sh | bash
 lingtai-tui</pre></div>
 <div class="card"><h2><span class="num">2</span>创建项目</h2><p>一个主题建一个项目。项目里会出现 <code>.lingtai/</code>，agent 的信箱、日志、记忆都在这里。</p></div>
 <div class="card"><h2><span class="num">3</span>/setup</h2><p>第一次启动先跑 <code>/setup</code>。不会选就用默认或 Tutorial 配置，先跑通再调细节。</p></div>
@@ -37,15 +37,19 @@ lingtai-tui</pre></div>
 </section>
 <section class="card">
 <h2>安装最小路径</h2>
-<p class="ok">macOS 最推荐：先确认有 Homebrew，再装 LingTai。</p>
-<pre>brew --version
-brew install lingtai-ai/lingtai/lingtai-tui
+<p class="ok">macOS / Linux / WSL 最推荐：一行安装脚本。</p>
+<pre>curl -fsSL https://lingtai.ai/install.sh | bash
 which lingtai-tui
 lingtai-tui</pre>
-<p class="warn">若提示 <code>command not found: brew</code>，先装 Homebrew：<br><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></p>
+<p class="warn">若提示 <code>command not found: lingtai-tui</code>，把脚本结尾提示的目录加进 <code>PATH</code>，再重开终端。升级：重跑同一行脚本，或 <code>lingtai-tui self-update</code>。</p>
+</section>
+<section class="card">
+<h2>Windows 怎么装</h2>
+<p class="ok">完整能力：装 WSL2 + Ubuntu，再在其中运行 <code>curl -fsSL https://lingtai.ai/install.sh | bash</code>。</p>
+<p class="warn">实验性原生 PowerShell（能力有删减）：<br><code>iwr -useb https://lingtai.ai/install.ps1 | iex</code><br>原生 Windows 下 daemon/分身暂不可用、<code>bash</code> 工具走 cmd.exe、无原生自更新（升级请重跑该命令）。</p>
 </section>
 <section class="grid">
-<div class="card"><h2>大陆网络卡住</h2><p>先试默认安装。若卡在 Homebrew 索引，用清华 TUNA；若卡在 GitHub tap，用 Gitee tap；若 npm 证书报错，先清掉 npm 镜像变量。</p></div>
+<div class="card"><h2>大陆网络卡住</h2><p>多数是网络抖动，先重跑 <code>curl -fsSL https://lingtai.ai/install.sh | bash</code>。脚本会自动为 Go/npm 切镜像。缺 <code>curl</code> 或编译工具时，先 <code>sudo apt install -y curl build-essential git</code> 再重跑；仍失败就把输出存下来求助。</p></div>
 <div class="card"><h2>出问题先 doctor</h2><pre>lingtai-tui doctor</pre><p>TUI 里也可用 <code>/doctor</code>。它会检查 TUI、kernel、runtime 的关系。</p></div>
 <div class="card"><h2>看状态</h2><p><span class="badge">/kanban</span><span class="badge">/help</span><span class="badge">/goal</span><span class="badge">/mcp</span><span class="badge">/viz</span></p><p>先记 <code>/kanban</code> 和 <code>/doctor</code> 即可。</p></div>
 </section>

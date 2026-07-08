@@ -19,11 +19,16 @@ Pushing a `v*` tag triggers the root GitHub Actions workflow at
 `.github/workflows/release.yml`. That workflow has two independent jobs:
 
 - **`release-assets`** — cross-builds `lingtai-tui` + `lingtai-portal` for
-  darwin/linux × amd64/arm64, packages each as
-  `lingtai-<tag>-<os>-<arch>.tar.gz` (+ `.sha256`), creates the GitHub Release
-  if absent, and uploads the tarballs. `install.sh` downloads these for a fast,
-  build-free install; the asset name here MUST stay in sync with
-  `install.sh`'s `asset_name()`.
+  darwin/linux/windows × amd64/arm64. darwin/linux are packaged as
+  `lingtai-<tag>-<os>-<arch>.tar.gz`; windows is cross-compiled from a Linux
+  runner (CGO off) and packaged as `lingtai-<tag>-windows-<arch>.zip` with
+  `.exe` binaries. Each archive ships a `.sha256`. The job creates the GitHub
+  Release if absent and uploads the archives. `install.sh` downloads the
+  darwin/linux tarballs and `install.ps1` downloads the windows zips for a fast,
+  build-free install (`install.ps1` verifies the zip against its `.sha256`
+  before installing, so the checksum asset must ship alongside each zip); the
+  asset names here MUST stay in sync with `install.sh`'s `asset_name()` and
+  `install.ps1`'s asset name.
 - **`update-homebrew`** — computes the source tarball checksum and updates
   `Lingtai-AI/homebrew-lingtai`.
 

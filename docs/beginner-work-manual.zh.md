@@ -40,9 +40,9 @@
 
 推荐顺序：
 
-1. **macOS**：最推荐，直接用 Homebrew 安装。
-2. **Linux**：可用 Homebrew for Linux，或从源码安装。
-3. **Windows**：建议先装 WSL2 + Ubuntu，再按 Linux 路线走。
+1. **macOS**：最推荐，一行安装脚本 `curl -fsSL https://lingtai.ai/install.sh | bash` 即可。
+2. **Linux**：同样用这行安装脚本。
+3. **Windows**：推荐先装 WSL2 + Ubuntu，再按 Linux 路线走（完整能力）。也有**实验性**的原生 PowerShell 安装，能力有删减，见 4.2。
 
 如果你只是想最快体验，优先找一台 macOS。
 
@@ -62,7 +62,7 @@
 
 | 层 | 你看到的名字 | 负责什么 | 普通用户怎么装 |
 |---|---|---|---|
-| TUI | `lingtai-tui` | 终端界面、项目向导、命令、可视化入口、升级/doctor | 用 Homebrew 或源码安装 |
+| TUI | `lingtai-tui` | 终端界面、项目向导、命令、可视化入口、升级/doctor | 用一行安装脚本 `install.sh` 安装 |
 | Kernel | `lingtai` Python 包 | agent 真正运行的内核、工具、上下文、MCP | TUI 自动管理，不要手动装到系统 Python |
 
 一句话：**你安装的是 `lingtai-tui`；Python 内核由 TUI 管。**
@@ -81,56 +81,15 @@
 
 后面的命令都复制到终端里执行。
 
-### 2.2 先检查有没有 Homebrew
-
-输入：
-
-```bash
-brew --version
-```
-
-可能出现两种情况：
-
-- 看到 `Homebrew 4.x.x`：说明已经装好了，跳到 2.4。
-- 看到 `command not found: brew`：说明还没装，继续 2.3。
-
-### 2.3 安装 Homebrew
+### 2.2 一行命令安装
 
 复制执行：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-安装过程中可能会要求输入电脑密码。输入时终端不会显示星号，这是正常的。
-
-装完后，Homebrew 通常会提示你执行两行 `eval "$(... brew shellenv)"`。如果你没看懂，可以先按下面常见路径试：
-
-Apple Silicon（M1/M2/M3）Mac：
-
-```bash
-eval "$(/opt/homebrew/bin/brew shellenv)"
-```
-
-Intel Mac：
-
-```bash
-eval "$(/usr/local/bin/brew shellenv)"
-```
-
-再检查：
-
-```bash
-brew --version
-```
-
-能看到版本号，就可以继续。
-
-### 2.4 安装 LingTai TUI
-
-```bash
-brew install lingtai-ai/lingtai/lingtai-tui
-```
+这行脚本会装好 `lingtai-tui` 和 `lingtai-portal`，并配好 TUI 管理的 Python 运行时——优先用预编译好的 release 二进制，你的平台没有预编译版时再自动回退到源码编译（脚本会自己临时下载 Go / Node）。不需要先装 Homebrew，也不需要自己装 Python。
 
 安装完成后，检查命令是否存在：
 
@@ -138,108 +97,69 @@ brew install lingtai-ai/lingtai/lingtai-tui
 which lingtai-tui
 ```
 
-能看到类似下面的路径即可：
-
-```text
-/opt/homebrew/bin/lingtai-tui
-```
-
-然后启动：
+能看到一个路径（例如 `/usr/local/bin/lingtai-tui` 或 `~/.local/bin/lingtai-tui`）即可。然后启动：
 
 ```bash
 lingtai-tui
 ```
 
-### 2.5 以后怎么升级？
+如果提示 `command not found: lingtai-tui`，脚本结尾会告诉你把哪一个目录加到 `PATH`；照做后重开一个终端即可。
+
+### 2.3 以后怎么升级？
+
+重新运行同一行安装脚本即可：
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-升级后要**重启 TUI**。如果你只是升级了却没重启，看起来可能还是旧行为。
+也可以运行 `lingtai-tui self-update`（按检测到的安装方式升级）。升级后要**重启 TUI**；只升级不重启，看起来可能还是旧行为。
 
 ---
 
 ## 3. 中国大陆网络下的安装办法
 
-大陆网络最常见的问题不是 LingTai 本身，而是 Homebrew 拉 GitHub、Go、npm 资源时卡住。按下面顺序试，不要一上来乱改很多变量。
+大陆网络最常见的问题不是 LingTai 本身，而是安装脚本拉 GitHub、Go、npm 资源时卡住。按下面顺序试，不要一上来乱改很多变量。
 
-### 3.1 第一选择：先直接装
+### 3.1 第一选择：先直接重跑安装脚本
 
-先试最简单命令：
-
-```bash
-brew install lingtai-ai/lingtai/lingtai-tui
-```
-
-如果能装，就不要再改镜像。
-
-### 3.2 如果 Homebrew 更新很慢：先用清华 TUNA 加速 Homebrew 本身
-
-如果卡在 `brew update`、`homebrew-core`、`ghcr.io`，可执行：
+先试最简单命令；很多时候只是某次网络抖动，重跑一次就过了：
 
 ```bash
-cat >> ~/.zprofile <<'EOF'
-export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
-export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
-export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
-EOF
-source ~/.zprofile
-brew update
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-然后再装：
+如果能装上，就不要再折腾镜像。脚本本身会自动探测大陆网络，并在需要时为 Go 模块 / npm / Go 校验库切换到可访问的镜像，通常不需要你手动设置。
+
+### 3.2 如果提示 `curl` 没装
+
+安装脚本需要 `curl`。Ubuntu / Debian / WSL 上先装它，再重跑脚本：
 
 ```bash
-brew install lingtai-ai/lingtai/lingtai-tui
+sudo apt update
+sudo apt install -y curl
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-### 3.3 如果卡在 GitHub tap：改用 Gitee 镜像 tap
+### 3.3 如果回退到源码编译时报缺工具
 
-如果报 TLS、GnuTLS、GitHub 拉取失败，可用：
+脚本通常会自己临时下载 Go 和 Node；极简 Linux / WSL 镜像若缺基础工具，先补齐再重跑：
 
 ```bash
-brew untap lingtai-ai/lingtai 2>/dev/null || true
-brew tap lingtai-ai/lingtai https://gitee.com/huangzesen1997/homebrew-lingtai.git
-brew install lingtai-ai/lingtai/lingtai-tui
+sudo apt update
+sudo apt install -y build-essential curl git
+curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-注意：Gitee 是镜像，可能比 GitHub 慢几个小时。如果版本落后，过一会儿再试，或改回 GitHub tap。
+### 3.4 如果仍然失败：把报错存下来
 
-### 3.4 如果 Go / npm 编译阶段出问题
-
-默认公式会自动判断是否切换镜像。只有在自动判断不灵时，才手动指定：
+重跑一次并把完整输出保存下来，方便求助或排查：
 
 ```bash
-HOMEBREW_GOPROXY="https://goproxy.cn,direct" \
-HOMEBREW_NPM_CONFIG_REGISTRY="https://registry.npmmirror.com" \
-  brew install lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash 2>&1 | tee ~/lingtai-install.log
 ```
 
-如果 npm 镜像证书报错，反而应清掉 npm 镜像：
-
-```bash
-unset HOMEBREW_NPM_CONFIG_REGISTRY
-brew install lingtai-ai/lingtai/lingtai-tui
-```
-
-### 3.5 如果仍然失败
-
-先运行：
-
-```bash
-brew doctor
-brew update
-```
-
-再把报错保存下来。常用信息：
-
-```bash
-brew --version
-brew config
-brew info lingtai-ai/lingtai/lingtai-tui
-```
+装好后也可以运行 `lingtai-tui doctor` 检查运行时是否就绪。
 
 ---
 
@@ -247,11 +167,10 @@ brew info lingtai-ai/lingtai/lingtai-tui
 
 ### 4.1 Linux
 
-Linux 也可以用 Homebrew for Linux：
+和 macOS 一样，用同一行安装脚本：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 lingtai-tui
 ```
 
@@ -264,18 +183,30 @@ sudo apt install -y build-essential curl git
 
 ### 4.2 Windows
 
-Windows 原生终端环境差异很大。推荐路线：
+**推荐（完整能力）：WSL2。** Windows 原生终端环境差异很大，最稳的路线是：
 
 1. 安装 WSL2；
 2. 安装 Ubuntu；
 3. 进入 Ubuntu 终端；
-4. 按 Linux 路线安装。
+4. 按 Linux 路线运行 `curl -fsSL https://lingtai.ai/install.sh | bash`。
 
-不建议小白一开始在 Windows 原生 PowerShell 里折腾源码编译。
+**实验性：原生 PowerShell 安装。** 如果你不想装 WSL，可以在 PowerShell（5.1+）里运行：
+
+```powershell
+iwr -useb https://lingtai.ai/install.ps1 | iex
+```
+
+它会下载预编译的 Windows 二进制、装进每用户目录并加入 `PATH`、用 `uv` 配好运行时。但请知道原生 Windows 现在是**降级能力**：
+
+- daemon / 分身（子 agent）暂不可用；
+- `bash` 工具走的是 `cmd.exe`，不是 bash；
+- 没有原生 PowerShell 自更新——升级请重新运行上面那行 `iwr ... | iex`。
+
+要完整能力，仍建议用 WSL2。
 
 ### 4.3 从源码安装（进阶）
 
-Homebrew 不可用时可从源码装：
+安装脚本默认已经优先用预编译二进制、必要时自动回退源码编译。若你想手动从源码装：
 
 ```bash
 git clone https://github.com/Lingtai-AI/lingtai.git
@@ -284,7 +215,7 @@ cd lingtai
 lingtai-tui
 ```
 
-源码安装更容易遇到 Go / Node / npm 环境问题。小白优先用 Homebrew。
+源码安装更容易遇到 Go / Node / npm 环境问题。小白优先用一行安装脚本。
 
 ---
 
@@ -572,18 +503,17 @@ find .lingtai -name agent.log -maxdepth 3 -print
 
 记住两层：
 
-- Homebrew 升级的是 `lingtai-tui`；
+- 安装脚本升级的是 `lingtai-tui`；
 - TUI 还会管理 Python runtime。
 
-做：
+做（重跑安装脚本，或用自更新）：
 
 ```bash
-brew update
-brew upgrade lingtai-ai/lingtai/lingtai-tui
+curl -fsSL https://lingtai.ai/install.sh | bash
 lingtai-tui doctor
 ```
 
-然后重启 TUI。
+原生 Windows PowerShell 用户改为重跑 `iwr -useb https://lingtai.ai/install.ps1 | iex`。然后重启 TUI。
 
 ### 12.4 技能、命令或工具不见了
 

@@ -9,11 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  # Build prebuilt per-platform binary tarballs and attach them to the GitHub
-  # Release. install.sh downloads these when present; the naming convention here
-  # (lingtai-<tag>-<os>-<arch>.tar.gz, os=darwin|linux, arch=amd64|arm64) MUST
-  # match install.sh's asset_name(). When this job is skipped or fails, install.sh
-  # falls back to building the release source tarball, so releases still install.
+  # Build prebuilt per-platform binary archives and attach them to the GitHub
+  # Release. install.sh downloads the darwin/linux .tar.gz assets when present;
+  # install.ps1 downloads the windows .zip assets. The naming convention here
+  # (lingtai-<tag>-<os>-<arch>.<ext>, os=darwin|linux|windows, arch=amd64|arm64,
+  # ext=tar.gz for darwin/linux and zip for windows) MUST match install.sh's
+  # asset_name() and install.ps1's asset name. When this job is skipped or fails,
+  # install.sh falls back to building the release source tarball, so darwin/linux
+  # releases still install.
   release-assets:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -31,6 +34,14 @@ jobs:
             goarch: amd64
           - os: ubuntu-24.04-arm
             goos: linux
+            goarch: arm64
+          # Windows assets are cross-compiled from a Linux runner (CGO is off, so
+          # no Windows runner is needed). Packaged as .zip for install.ps1.
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: windows
             goarch: arm64
     steps:
       - name: Checkout
@@ -56,13 +67,16 @@ jobs:
           version="${TAG#v}"
           ldflags="-X main.version=${TAG}"
 
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+
           mkdir -p dist
-          CGO_ENABLED=0 go -C tui build -ldflags "$ldflags" -o "$PWD/dist/lingtai-tui" .
+          CGO_ENABLED=0 go -C tui build -ldflags "$ldflags" -o "$PWD/dist/lingtai-tui${ext}" .
 
           (cd portal/web && npm ci && npm run build)
-          CGO_ENABLED=0 go -C portal build -ldflags "$ldflags" -o "$PWD/dist/lingtai-portal" .
+          CGO_ENABLED=0 go -C portal build -ldflags "$ldflags" -o "$PWD/dist/lingtai-portal${ext}" .
 
-      - name: Package tarball
+      - name: Package archive
         id: pkg
         env:
           TAG: ${{ github.ref_name }}
@@ -70,8 +84,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          name="lingtai-${TAG}-${GOOS}-${GOARCH}.tar.gz"
-          tar -C dist -czf "$name" lingtai-tui lingtai-portal
+          if [ "$GOOS" = "windows" ]; then
+            name="lingtai-${TAG}-${GOOS}-${GOARCH}.zip"
+            (cd dist && zip -q "../${name}" lingtai-tui.exe lingtai-portal.exe)
+          else
+            name="lingtai-${TAG}-${GOOS}-${GOARCH}.tar.gz"
+            tar -C dist -czf "$name" lingtai-tui lingtai-portal
+          fi
           echo "asset=$name" >> "$GITHUB_OUTPUT"
           shasum -a 256 "$name" | tee "${name}.sha256"
 

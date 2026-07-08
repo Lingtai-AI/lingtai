@@ -50,7 +50,13 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-> 一行安装脚本支持 macOS、Linux 和 WSL。原生 Windows/PowerShell 支持在计划中，暂未提供。
+> 一行安装脚本支持 macOS、Linux 和 WSL。**在 Windows 上，推荐用 WSL 获得完整能力。**
+>
+> 原生 Windows（PowerShell）现提供**实验性**安装——TUI 和 portal 可用，但原生环境下 daemon/分身不可用，`bash` 工具走的是 `cmd.exe` 而非 bash。在 PowerShell 中执行：
+>
+> ```powershell
+> iwr -useb https://lingtai.ai/install.ps1 | iex
+> ```
 
 > 第一次用 LingTai？先看[小白工作手册](docs/beginner-work-manual.zh.md)（或[单文件 HTML 图解版](docs/beginner-work-manual-stick-figure.zh.html)），再创建第一个项目。
 
@@ -225,7 +231,9 @@ lingtai-tui
 curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`——优先用预编译 release 资源，当你的平台没有预编译二进制时再回退到源码编译。原生 Windows/PowerShell 支持在计划中，暂未提供。
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`——优先用预编译 release 资源，当你的平台没有预编译二进制时再回退到源码编译。
+
+**原生 Windows（PowerShell）——实验性。** 在 PowerShell（5.1+）中执行 `iwr -useb https://lingtai.ai/install.ps1 | iex`。`install.ps1` 会下载预编译的 Windows 二进制，安装到每用户目录（`%LOCALAPPDATA%\Programs\lingtai\bin`）、加入用户 `PATH`，并用 `uv` 装好 Python 运行时 venv。支持 `-Version`、`-BinDir`、`-SkipPortal`、`-SkipVenv`、`-NoModifyPath`、`-DryRun` 参数。原生 Windows 为降级能力：daemon/分身不可用，`bash` 工具走 `cmd.exe`——**要完整能力，请用 WSL2 配合上面的 `install.sh`。** 目前没有原生 PowerShell 自更新（`lingtai-tui self-update` 不管理 PowerShell 安装）；升级请重新执行 `iwr -useb https://lingtai.ai/install.ps1 | iex`。
 
 升级完后重启 TUI，让新的二进制接管。Python 运行时由 TUI 在 `~/.lingtai-tui/runtime/venv/` 下统一管理——往系统 Python 里 `pip install lingtai` 不会影响在运行的项目。
 
@@ -324,7 +332,7 @@ lingtai-tui doctor
 
 | 仓库 | 语言 | 负责 |
 |---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | Go + TypeScript | TUI、portal、Homebrew/源码安装、自带工具技能 |
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai)（本仓库） | Go + TypeScript | TUI、portal、安装器（`install.sh`、实验性 `install.ps1`）、release 资源 / Homebrew tap、自带工具技能 |
 | [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python（+ Rust sidecar） | 智能体运行时、LLM 回合循环、固有工具、会话/上下文/凝蜕管理、MCP 宿主。在 PyPI 上以 `lingtai` 发布 |
 
 Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智能体作为子进程；UI 与智能体之间所有交互都走项目文件系统（`.lingtai/` 信箱、心跳、日志、提示文件、portal 记录）。**这就是为什么状态如此易查、其他工具不靠任何 SDK 就能跟它协作。**
@@ -372,13 +380,13 @@ Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智
 
 ## 排障
 
-**`lingtai-tui` 找不到。** 确认 Homebrew 的 bin 目录在 `PATH`（`brew --prefix`/bin）。如果用 `install.sh` 装的，看 `/usr/local/bin/lingtai-tui` 或 Homebrew 前缀。
+**`lingtai-tui` 找不到。** `install.sh` 结尾会打印一条 PATH 提示——照做后重开终端。二进制通常在 `/usr/local/bin/lingtai-tui` 或 `~/.local/bin/lingtai-tui`；原生 Windows（PowerShell）在 `%LOCALAPPDATA%\Programs\lingtai\bin`。若你是通过 Homebrew 安装（旧/进阶方式），确认 `brew --prefix`/bin 在 `PATH` 上。
 
 **TUI 起来了但助理不响应。** 跑 `lingtai-tui doctor` 和 `lingtai-tui list /path/to/project`，再 `tail -100 /path/to/project/.lingtai/<agent>/logs/agent.log`。
 
 **技能或命令丢了。** `lingtai-tui bootstrap`（或在 TUI 里 `/doctor`）会重新展开自带工具。
 
-**升级了但行为没变。** 两层：Go TUI 二进制（Homebrew/源码）和 Python 运行时（TUI 管理的 venv）。升级后**记得重启 TUI**。运行时看起来旧的话跑 `doctor`。往系统 Python 里 `pip install lingtai` 不会影响项目。
+**升级了但行为没变。** 两层：Go TUI 二进制（安装器/Homebrew）和 Python 运行时（TUI 管理的 venv）。升级后**记得重启 TUI**。运行时看起来旧的话跑 `doctor`。往系统 Python 里 `pip install lingtai` 不会影响项目。
 
 **在改内核但本地修改不生效。** 看 [内核开发模式](#内核开发模式进阶)。
 

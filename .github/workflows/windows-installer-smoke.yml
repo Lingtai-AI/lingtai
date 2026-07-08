@@ -1,0 +1,26 @@
+name: Windows installer smoke test
+
+# Validates install.ps1 without any network or install side effects. The smoke
+# script parses install.ps1, checks its AST, and runs it with
+# -DryRun -SkipVenv -Version 'v0.0.0-test' so nothing is downloaded or written.
+on:
+  pull_request:
+    paths:
+      - 'install.ps1'
+      - 'scripts/test-install-ps1.ps1'
+      - '.github/workflows/windows-installer-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run install.ps1 smoke test (no network / no install)
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/test-install-ps1.ps1

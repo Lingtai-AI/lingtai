@@ -50,7 +50,13 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-> The hosted installer covers macOS, Linux, and WSL. Native Windows/PowerShell support is planned but not available yet.
+> The hosted installer covers macOS, Linux, and WSL. **WSL is the recommended full-parity path on Windows.**
+>
+> Native Windows (PowerShell) is available as an **experimental** install — the TUI and portal work, but daemon/subagents (分身) are unavailable natively and the `bash` tool runs `cmd.exe` rather than bash. In PowerShell:
+>
+> ```powershell
+> iwr -useb https://lingtai.ai/install.ps1 | iex
+> ```
 
 > New to LingTai? Start with the [Beginner work manual](docs/beginner-work-manual.zh.md) or the [single-file illustrated HTML guide](docs/beginner-work-manual-stick-figure.zh.html) to learn the workflow step by step.
 
@@ -260,7 +266,9 @@ lingtai-tui
 curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-The installer works on macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`, preferring prebuilt release assets and falling back to a source build when a prebuilt binary is not available for your platform. Native Windows/PowerShell support is planned but not available yet.
+The installer works on macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`, preferring prebuilt release assets and falling back to a source build when a prebuilt binary is not available for your platform.
+
+**Native Windows (PowerShell) — experimental.** Run `iwr -useb https://lingtai.ai/install.ps1 | iex` in PowerShell (5.1+). `install.ps1` downloads the prebuilt Windows binaries, verifies the release zip against its published `.sha256` checksum, installs them into a per-user directory (`%LOCALAPPDATA%\Programs\lingtai\bin`), adds it to your user `PATH`, and provisions the Python runtime venv with `uv`. It supports `-Version`, `-BinDir`, `-SkipPortal`, `-SkipVenv`, `-NoModifyPath`, and `-DryRun`. Native Windows is reduced-capability: daemon/subagents (分身) are unavailable and the `bash` tool runs `cmd.exe` — **for full parity, use WSL2 with the `install.sh` command above.** There is no native PowerShell self-update yet (`lingtai-tui self-update` does not manage PowerShell installs); to upgrade, re-run `iwr -useb https://lingtai.ai/install.ps1 | iex`.
 
 After upgrading, restart the TUI so the new binary takes over. The TUI manages the Python runtime under `~/.lingtai-tui/runtime/venv/` — installing `lingtai` into your system Python does not affect a running project.
 
@@ -281,7 +289,7 @@ cd lingtai
 lingtai-tui
 ```
 
-`install.sh` builds `lingtai-tui` and (when `npm` is available) `lingtai-portal`, then installs binaries into the Homebrew prefix if `brew` exists, otherwise `/usr/local/bin`.
+`install.sh` builds `lingtai-tui` and (when `npm` is available) `lingtai-portal`, then installs the binaries into `--bin-dir`/`--prefix` if you pass one, else a writable `/usr/local/bin`, else `~/.local/bin` (it does not prefer Homebrew). It also manages the Python runtime venv at `~/.lingtai-tui/runtime/venv`.
 
 Source installs made through `install.sh` can update through the same command:
 
@@ -321,7 +329,7 @@ LingTai is split across two repositories.
 
 | Repository | Language | Owns |
 |---|---|---|
-| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Go + TypeScript | TUI, portal, Homebrew/source install, shipped utility skills. |
+| [`Lingtai-AI/lingtai`](https://github.com/Lingtai-AI/lingtai) (this one) | Go + TypeScript | TUI, portal, installers (`install.sh`, experimental `install.ps1`), release assets / Homebrew tap, shipped utility skills. |
 | [`Lingtai-AI/lingtai-kernel`](https://github.com/Lingtai-AI/lingtai-kernel) | Python (+ Rust sidecar pieces) | Agent runtime, LLM turn loop, intrinsic tools, session/context/molt management, MCP host. Published as the `lingtai` PyPI package. |
 
 The Go TUI does not run the agent mind. It launches and supervises Python kernel agents as subprocesses; everything between UI and agents flows through the project filesystem (`.lingtai/` mailboxes, heartbeats, logs, prompt files, portal records). That is why the state is so easy to inspect — and why other tools can cooperate with it without any SDK.
@@ -369,13 +377,13 @@ This repo carries two Go binaries:
 
 ## Troubleshooting
 
-**`lingtai-tui` is not found.** Make sure Homebrew's bin directory is on `PATH` (`brew --prefix`/bin). If you used `install.sh`, check `/usr/local/bin/lingtai-tui` or the Homebrew prefix.
+**`lingtai-tui` is not found.** `install.sh` prints a PATH note at the end — follow it, then reopen your terminal. The binary is usually in `/usr/local/bin/lingtai-tui` or `~/.local/bin/lingtai-tui`; on native Windows (PowerShell) it is in `%LOCALAPPDATA%\Programs\lingtai\bin`. If you installed through Homebrew (legacy/advanced), ensure `brew --prefix`/bin is on `PATH`.
 
 **The TUI starts but the assistant does not respond.** Run `lingtai-tui doctor` and `lingtai-tui list /path/to/project`, then `tail -100 /path/to/project/.lingtai/<agent>/logs/agent.log`.
 
 **A skill or command is missing.** `lingtai-tui bootstrap` (or `/doctor` inside the TUI) re-extracts bundled utilities.
 
-**You upgraded but behavior did not change.** Two layers: the Go TUI binary (Homebrew/source) and the Python runtime (TUI-managed venv). Restart the TUI after upgrading; run `doctor` if the runtime looks stale. Installing the `lingtai` PyPI package into your system Python does not affect projects.
+**You upgraded but behavior did not change.** Two layers: the Go TUI binary (installer/Homebrew) and the Python runtime (TUI-managed venv). Restart the TUI after upgrading; run `doctor` if the runtime looks stale. Installing the `lingtai` PyPI package into your system Python does not affect projects.
 
 **You are developing the kernel and your edits are ignored.** See [Kernel dev mode](#kernel-dev-mode-advanced).
 

@@ -55,7 +55,15 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-> 一令安装之脚本，通 macOS、Linux 与 WSL；先取预编译之 release，无则退而源码编译。原生 Windows/PowerShell 尚在计划，未及也。
+> 一令安装之脚本，通 macOS、Linux 与 WSL；先取预编译之 release，无则退而源码编译。**於 Windows，宜以 WSL 得其全能。**
+>
+> 原生 Windows（PowerShell）今有**试行**之装法——TUI 与 portal 皆可用，然原生之下 daemon/分身未通，`bash` 之器行乎 `cmd.exe` 而非 bash。於 PowerShell 中运行：
+>
+> ```powershell
+> iwr -useb https://lingtai.ai/install.ps1 | iex
+> ```
+>
+> 原生 PowerShell 尚无自更新之法；欲升级者，重运此令即可。
 
 > 初入 LingTai？先读[小白工作手册](docs/beginner-work-manual.zh.md)（或[单文件 HTML 图解版](docs/beginner-work-manual-stick-figure.zh.html)），再启首个项目。
 
