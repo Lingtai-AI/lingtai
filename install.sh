@@ -551,7 +551,7 @@ ensure_python() {
 ensure_runtime_venv() {
   local bin_dir="$1"
   local venv_dir="$HOME/.lingtai-tui/runtime/venv"
-  local uv py
+  local uv py repair_attempt
 
   if [[ "$SKIP_VENV" == "1" ]]; then
     note "Skipping Python runtime venv (--skip-venv)."
@@ -565,45 +565,96 @@ ensure_runtime_venv() {
     return 0
   fi
 
-  uv="$(find_uv 2>/dev/null || true)"
   mkdir -p "$(dirname "$venv_dir")"
+  repair_attempt=0
 
-  # Create venv only if missing; updates reuse the existing one.
-  if [[ ! -x "$venv_dir/bin/python" && ! -x "$venv_dir/bin/python3" ]]; then
+  while true; do
+    uv="$(find_uv 2>/dev/null || true)"
+    py=""
+    if [[ -x "$venv_dir/bin/python" ]]; then
+      py="$venv_dir/bin/python"
+    elif [[ -x "$venv_dir/bin/python3" ]]; then
+      py="$venv_dir/bin/python3"
+    fi
+
+    local recreate_reason=""
+    if [[ -d "$venv_dir" && -z "$py" ]]; then
+      recreate_reason="runtime venv Python is missing"
+    elif [[ -n "$py" ]] && ! "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+      recreate_reason="runtime venv Python is older than 3.11"
+    fi
+
+    if [[ -n "$recreate_reason" ]]; then
+      if [[ "$repair_attempt" != "0" ]]; then
+        warn "$recreate_reason after recreate; leaving runtime venv repair to the TUI."
+        return 0
+      fi
+      warn "$recreate_reason; recreating runtime venv."
+      rm -rf "$venv_dir"
+      repair_attempt=1
+      py=""
+    fi
+
+    if [[ -z "$py" ]]; then
+      if [[ -n "$uv" ]]; then
+        "$uv" venv --python 3.13 "$venv_dir" || { warn "uv venv failed; falling back to python3 -m venv"; uv=""; }
+      fi
+      if [[ ! -x "$venv_dir/bin/python" && ! -x "$venv_dir/bin/python3" && -z "$uv" ]]; then
+        python3 -m venv "$venv_dir" || { warn "failed to create venv"; return 0; }
+      fi
+      if [[ -x "$venv_dir/bin/python" ]]; then
+        py="$venv_dir/bin/python"
+      elif [[ -x "$venv_dir/bin/python3" ]]; then
+        py="$venv_dir/bin/python3"
+      else
+        warn "venv python not found at $venv_dir; skipping runtime setup."
+        return 0
+      fi
+      # Re-check Python version after creating/recreating the venv.
+      continue
+    fi
+
+    say "Installing/upgrading the lingtai Python package ..."
+    local install_ok=0
     if [[ -n "$uv" ]]; then
-      "$uv" venv --python 3.13 "$venv_dir" || { warn "uv venv failed; falling back to python3 -m venv"; uv=""; }
+      "$uv" pip install --upgrade lingtai -p "$venv_dir" && install_ok=1
+    else
+      if ! "$py" -m pip --version >/dev/null 2>&1; then
+        if [[ "$repair_attempt" == "0" ]]; then
+          warn "runtime venv pip is missing; recreating runtime venv."
+          rm -rf "$venv_dir"
+          repair_attempt=1
+          continue
+        fi
+        warn "runtime venv pip is missing after recreate; TUI will repair it on first launch."
+        return 0
+      fi
+      "$py" -m pip install --upgrade pip >/dev/null 2>&1 || true
+      "$py" -m pip install --upgrade lingtai && install_ok=1
     fi
-    if [[ ! -x "$venv_dir/bin/python" && -z "$uv" ]]; then
-      python3 -m venv "$venv_dir" || { warn "failed to create venv"; return 0; }
+    if [[ "$install_ok" != "1" ]]; then
+      if [[ "$repair_attempt" == "0" ]]; then
+        warn "failed to install lingtai into runtime venv; recreating runtime venv once."
+        rm -rf "$venv_dir"
+        repair_attempt=1
+        continue
+      fi
+      warn "failed to install lingtai into runtime venv after recreate; TUI will repair it on first launch."
+      return 0
     fi
-  fi
 
-  py="$venv_dir/bin/python"
-  [[ -x "$py" ]] || py="$venv_dir/bin/python3"
-  if [[ ! -x "$py" ]]; then
-    warn "venv python not found at $venv_dir; skipping runtime setup."
-    return 0
-  fi
-
-  # Verify Python 3.11+.
-  if ! "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
-    warn "runtime venv Python is older than 3.11; leaving it untouched."
-    return 0
-  fi
-
-  say "Installing/upgrading the lingtai Python package ..."
-  if [[ -n "$uv" ]]; then
-    "$uv" pip install --upgrade lingtai -p "$venv_dir" || { warn "uv pip install lingtai failed"; return 0; }
-  else
-    "$py" -m pip install --upgrade pip >/dev/null 2>&1 || true
-    "$py" -m pip install --upgrade lingtai || { warn "pip install lingtai failed"; return 0; }
-  fi
-
-  # Verify import.
-  if ! "$py" -c 'import lingtai; print("lingtai", getattr(lingtai, "__version__", "?"))'; then
-    warn "lingtai installed but 'import lingtai' failed."
-    return 0
-  fi
+    if ! "$py" -c 'import lingtai; print("lingtai", getattr(lingtai, "__version__", "?"))'; then
+      if [[ "$repair_attempt" == "0" ]]; then
+        warn "runtime venv failed import check; recreating runtime venv once."
+        rm -rf "$venv_dir"
+        repair_attempt=1
+        continue
+      fi
+      warn "runtime venv is still unhealthy after reinstall; TUI will repair it on first launch."
+      return 0
+    fi
+    break
+  done
 
   # Stamp the env marker (best-effort — older kernels may lack the subcommand).
   "$py" -m lingtai.venv_resolve env-marker stamp --venv "$venv_dir" >/dev/null 2>&1 || true
@@ -615,6 +666,7 @@ ensure_runtime_venv() {
   fi
   return 0
 }
+
 
 # --- install flows -----------------------------------------------------------
 
