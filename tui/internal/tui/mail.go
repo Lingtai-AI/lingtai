@@ -140,6 +140,8 @@ type MailModel struct {
 	lastPaletteLines  int
 	lastBannerLines   int
 	pendingMessage    string           // full text from editor, sent on Enter
+	pasteContent      string           // actual content of abbreviated paste (sent on Enter)
+	pasteDisplay      string           // abbreviated display form of paste (for change detection)
 	globalDir         string           // ~/.lingtai-tui/
 	wasActive         bool             // true if previous refresh was ACTIVE
 	quoteIdx          int              // which quote to show (advances on each ACTIVE transition)
@@ -665,7 +667,16 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.pendingMessage = ""
 		} else {
 			text = m.input.Value()
+			// If the input still holds a paste abbreviation, expand it back to
+			// the actual content before sending.
+			if m.pasteContent != "" && m.pasteDisplay != "" {
+				if idx := strings.Index(text, m.pasteDisplay); idx >= 0 {
+					text = text[:idx] + m.pasteContent + text[idx+len(m.pasteDisplay):]
+				}
+			}
 		}
+		m.pasteContent = ""
+		m.pasteDisplay = ""
 		if text == "" {
 			return m, nil
 		}
@@ -864,12 +875,30 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 
 	// Forward all other messages (including textarea paste and cursor blink) to input.
 	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	if _, ok := msg.(tea.PasteMsg); ok {
+	if pasteMsg, ok := msg.(tea.PasteMsg); ok {
+		pasteContent := pasteMsg.Content
+		// Forward full content so viewport/editor-hint logic sees the real size.
+		m.input, cmd = m.input.Update(msg)
 		if m.syncViewportHeight() && m.viewport.AtBottom() {
 			m.viewport.GotoBottom()
 		}
 		m.maybeShowEditorHint()
+		// Abbreviate the pasted segment for cleaner display, preserving text
+		// the user may have typed before the paste.
+		m.pasteContent = ""
+		m.pasteDisplay = ""
+		if abbreviated, ok := abbrevPasteContent(pasteContent); ok {
+			m.pasteContent = pasteContent
+			m.pasteDisplay = abbreviated
+			postPasteValue := m.input.Value()
+			if strings.HasSuffix(postPasteValue, pasteContent) {
+				m.input.SetValue(postPasteValue[:len(postPasteValue)-len(pasteContent)] + abbreviated)
+			} else {
+				m.input.SetValue(abbreviated)
+			}
+		}
+	} else {
+		m.input, cmd = m.input.Update(msg)
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1164,6 +1193,57 @@ func (m *MailModel) maybeShowEditorHint() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// imagePasteExts is the set of image file extensions recognized for paste abbreviation.
+var imagePasteExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".bmp": true, ".tiff": true, ".tif": true,
+	".heic": true, ".heif": true, ".svg": true,
+}
+
+// abbrevPasteContent checks if pasted content should be abbreviated for display.
+// It returns (abbreviated, true) when the content is image paths or long multi-line
+// text, or ("", false) when the content should be shown as-is.
+func abbrevPasteContent(content string) (string, bool) {
+	if content == "" {
+		return "", false
+	}
+	lines := strings.Split(content, "\n")
+	// Drop a single trailing empty element from a trailing newline.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return "", false
+	}
+	// Check whether every non-empty line looks like an image file path.
+	allImages := true
+	imgCount := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(line))
+		if !imagePasteExts[ext] {
+			allImages = false
+			break
+		}
+		imgCount++
+	}
+	if allImages && imgCount > 0 {
+		var b strings.Builder
+		for i := 0; i < imgCount; i++ {
+			fmt.Fprintf(&b, "[image%d]", i+1)
+		}
+		return b.String(), true
+	}
+	// Long multi-line text: summarize as "[pasted ~N lines]".
+	if len(lines) > 3 {
+		return fmt.Sprintf("[pasted ~%d lines]", len(lines)), true
+	}
+	return "", false
 }
 
 // launchEditor creates a temp file and opens $EDITOR (default: vim).
