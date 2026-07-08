@@ -16,16 +16,29 @@ git push origin v0.X.Y
 ```
 
 Pushing a `v*` tag triggers the root GitHub Actions workflow at
-`.github/workflows/release.yml`. That workflow computes the source tarball
-checksum and updates `Lingtai-AI/homebrew-lingtai` automatically.
+`.github/workflows/release.yml`. That workflow has two independent jobs:
+
+- **`release-assets`** — cross-builds `lingtai-tui` + `lingtai-portal` for
+  darwin/linux × amd64/arm64, packages each as
+  `lingtai-<tag>-<os>-<arch>.tar.gz` (+ `.sha256`), creates the GitHub Release
+  if absent, and uploads the tarballs. `install.sh` downloads these for a fast,
+  build-free install; the asset name here MUST stay in sync with
+  `install.sh`'s `asset_name()`.
+- **`update-homebrew`** — computes the source tarball checksum and updates
+  `Lingtai-AI/homebrew-lingtai`.
 
 ### 3. Create the GitHub release
+
+The `release-assets` job creates the release automatically when it runs. To
+create it manually (or to add richer notes), run:
 
 ```bash
 gh release create v0.X.Y --title "v0.X.Y" --notes "release notes here..."
 ```
 
-No binary assets needed — Homebrew builds from source, Linux users build locally.
+Binary assets are attached by the workflow. If the workflow could not run, the
+release still installs — `install.sh` falls back to building from the release
+source tarball.
 
 ### 4. Verify the automated Homebrew tap update
 
@@ -67,6 +80,18 @@ of the release process; GitHub only runs workflows from the repository-root
 release checklist and are not decided here.
 
 ## Installing without Homebrew
+
+The one-shot installer is the Homebrew-free path. It installs the latest
+release (prebuilt asset when available, else a source build) and sets up the
+Python runtime venv:
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash
+# or, direct from the repo:
+curl -fsSL https://raw.githubusercontent.com/Lingtai-AI/lingtai/main/install.sh | bash
+```
+
+Manual source build (if you prefer to build the binaries yourself):
 
 ```bash
 git clone https://github.com/Lingtai-AI/lingtai.git

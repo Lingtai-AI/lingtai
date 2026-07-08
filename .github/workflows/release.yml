@@ -9,6 +9,84 @@ permissions:
   contents: write
 
 jobs:
+  # Build prebuilt per-platform binary tarballs and attach them to the GitHub
+  # Release. install.sh downloads these when present; the naming convention here
+  # (lingtai-<tag>-<os>-<arch>.tar.gz, os=darwin|linux, arch=amd64|arm64) MUST
+  # match install.sh's asset_name(). When this job is skipped or fails, install.sh
+  # falls back to building the release source tarball, so releases still install.
+  release-assets:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build binaries
+        env:
+          TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          ldflags="-X main.version=${TAG}"
+
+          mkdir -p dist
+          CGO_ENABLED=0 go -C tui build -ldflags "$ldflags" -o "$PWD/dist/lingtai-tui" .
+
+          (cd portal/web && npm ci && npm run build)
+          CGO_ENABLED=0 go -C portal build -ldflags "$ldflags" -o "$PWD/dist/lingtai-portal" .
+
+      - name: Package tarball
+        id: pkg
+        env:
+          TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          name="lingtai-${TAG}-${GOOS}-${GOARCH}.tar.gz"
+          tar -C dist -czf "$name" lingtai-tui lingtai-portal
+          echo "asset=$name" >> "$GITHUB_OUTPUT"
+          shasum -a 256 "$name" | tee "${name}.sha256"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          ASSET: ${{ steps.pkg.outputs.asset }}
+        run: |
+          set -euo pipefail
+          # Create the release if it does not exist yet, then attach assets.
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" --notes "Release $TAG"
+          gh release upload "$TAG" "$ASSET" "${ASSET}.sha256" --clobber
+
   update-homebrew:
     runs-on: ubuntu-latest
     steps:
