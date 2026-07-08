@@ -51,6 +51,8 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+> Testing alternative: run the Homebrew-free GitHub Release installer with `curl -fsSL https://lingtai.ai/install.sh | bash`.
+
 > New to LingTai? Start with the [Beginner work manual](docs/beginner-work-manual.zh.md) or the [single-file illustrated HTML guide](docs/beginner-work-manual-stick-figure.zh.html) to learn the workflow step by step.
 
 On first run LingTai creates `.lingtai/`, provisions its own runtime, walks you through model/preset setup, and starts one resident assistant for the project.
