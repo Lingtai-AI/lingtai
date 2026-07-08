@@ -119,7 +119,7 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 
 | Package | LOC | Role |
 |---------|-----|------|
-| `portal/internal/api/` | ~1.5k | HTTP server (`server.go`), handlers (`handlers.go`), and replay endpoint (`replay.go` — 680 lines, the largest single API surface). Listens on a randomly-chosen port (or `--port`), writes the bound port to `.portal/port` so the TUI can find it. |
+| `portal/internal/api/` | ~1.5k | HTTP server (`server.go`), handlers (`handlers.go`), and replay endpoint (`replay.go` — 756 lines, the largest single API surface). Listens on a randomly-chosen port (or `--port`), writes the bound port to `.portal/port` so the TUI can find it. |
 | `portal/internal/fs/` | ~2.2k | Same shape as `tui/internal/fs/` but tailored to portal's needs: agent reading, heartbeat, mail, network/topology reconstruction (`reconstruct.go`, 326 lines), location resolution. |
 | `portal/internal/migrate/` | — | Retained m001–m039 historical source/tests and registry API; Portal production startup does not execute it or advance `.lingtai/meta.json`. See `portal/internal/migrate/ANATOMY.md`. |
 | `portal/web/` | — | React 19 + TypeScript + Vite frontend. Source under `portal/web/src/` (`App.tsx`, `Graph.tsx`, `BottomBar.tsx`, `FilterPanel.tsx`, etc.). Builds to `portal/web/dist/` then `embed.go` (`//go:embed all:web/dist`) compiles it into the Go binary. |
