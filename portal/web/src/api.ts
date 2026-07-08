@@ -28,8 +28,11 @@ export interface ReplayManifest {
 interface FrameDelta {
   nodes?: AgentNode[];
   avatar_edges?: AvatarEdge[];
+  avatar_edges_removed?: [string, string][];
   contact_edges?: ContactEdge[];
+  contact_edges_removed?: [string, string][];
   mail?: MailEdge[];
+  mail_removed?: [string, string][];
   stats?: NetworkStats;
 }
 
@@ -40,6 +43,7 @@ interface ReplayFrame {
 }
 
 export interface ReplayChunk {
+  v?: number;
   start: number;
   end: number;
   keyframe_interval: number;
@@ -89,33 +93,42 @@ export function reconstructFrames(chunk: ReplayChunk): TapeFrame[] {
         }
 
         // Apply avatar edge changes
-        if (rf.d.avatar_edges) {
+        if (rf.d.avatar_edges || rf.d.avatar_edges_removed) {
           const avatarMap = new Map(
             net.avatar_edges.map(e => [`${e.parent}\0${e.child}`, e])
           );
-          for (const e of rf.d.avatar_edges) {
+          for (const [parent, child] of rf.d.avatar_edges_removed ?? []) {
+            avatarMap.delete(`${parent}\0${child}`);
+          }
+          for (const e of rf.d.avatar_edges ?? []) {
             avatarMap.set(`${e.parent}\0${e.child}`, e);
           }
           net.avatar_edges = Array.from(avatarMap.values());
         }
 
         // Apply contact edge changes
-        if (rf.d.contact_edges) {
+        if (rf.d.contact_edges || rf.d.contact_edges_removed) {
           const contactMap = new Map(
             net.contact_edges.map(e => [`${e.owner}\0${e.target}`, e])
           );
-          for (const e of rf.d.contact_edges) {
+          for (const [owner, target] of rf.d.contact_edges_removed ?? []) {
+            contactMap.delete(`${owner}\0${target}`);
+          }
+          for (const e of rf.d.contact_edges ?? []) {
             contactMap.set(`${e.owner}\0${e.target}`, e);
           }
           net.contact_edges = Array.from(contactMap.values());
         }
 
         // Apply mail edge changes
-        if (rf.d.mail) {
+        if (rf.d.mail || rf.d.mail_removed) {
           const mailMap = new Map(
             net.mail_edges.map(e => [`${e.sender}\0${e.recipient}`, e])
           );
-          for (const e of rf.d.mail) {
+          for (const [sender, recipient] of rf.d.mail_removed ?? []) {
+            mailMap.delete(`${sender}\0${recipient}`);
+          }
+          for (const e of rf.d.mail ?? []) {
             mailMap.set(`${e.sender}\0${e.recipient}`, e);
           }
           net.mail_edges = Array.from(mailMap.values());
