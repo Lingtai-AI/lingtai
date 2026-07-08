@@ -502,11 +502,11 @@ ensure_uv() {
   return 0
 }
 
-# python_ok reports whether a python3 with venv support and >=3.11 is present.
+# python_ok reports whether a python3 with venv/ensurepip support and >=3.11 is present.
 python_ok() {
   command -v python3 &>/dev/null || return 1
   python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null || return 1
-  python3 -c 'import venv' 2>/dev/null || return 1
+  python3 -c 'import venv, ensurepip' 2>/dev/null || return 1
   return 0
 }
 

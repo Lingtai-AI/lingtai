@@ -187,6 +187,49 @@ SH
   find_uv >/dev/null 2>&1 || fail "ensure_python should leave a resolvable uv behind"
 )
 
+# --- ensure_python bootstraps uv when ensurepip is unavailable ---------------
+# Some distro Pythons are new enough and expose the venv module, but lack
+# ensurepip/python3-venv. Treating those as adequate makes the bad-venv repair
+# path fall back to `python3 -m venv`, which fails with "ensurepip is not
+# available". In that case ensure_python must bootstrap uv instead.
+(
+  fakebin="$tmp/uv-fakebin-no-ensurepip"
+  fakehome="$tmp/uv-home-no-ensurepip"
+  mkdir -p "$fakebin" "$fakehome/.local/bin"
+  cat > "$fakebin/python3" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"version_info >= (3, 11)"*) exit 0 ;;  # version is adequate
+  *"import venv, ensurepip"*)   exit 1 ;;  # but ensurepip is missing
+  *"import venv"*)              exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/python3"
+  cat > "$fakebin/curl" <<'SH'
+#!/usr/bin/env bash
+out=""; prev=""
+for a in "$@"; do [[ "$prev" == "-o" ]] && out="$a"; prev="$a"; done
+[[ -n "$out" ]] || { echo "fake curl: no -o target" >&2; exit 1; }
+cat > "$out" <<'INSTALLER'
+#!/usr/bin/env sh
+dir="${UV_INSTALL_DIR:?}"; mkdir -p "$dir"
+printf '#!/usr/bin/env bash\necho uv-fake\n' > "$dir/uv"; chmod +x "$dir/uv"
+INSTALLER
+exit 0
+SH
+  chmod +x "$fakebin/curl"
+  export PATH="$fakebin:/usr/bin:/bin"
+  export HOME="$fakehome"
+  export UV_INSTALL_DIR="$fakehome/.local/bin"
+  BUILD_DIR="$tmp/uv-build-no-ensurepip"
+  UV_INSTALLER_URL="https://example.invalid/uv/install.sh"
+
+  if python_ok; then fail "fake python without ensurepip should not be accepted"; fi
+  ensure_python || fail "ensure_python should bootstrap uv when ensurepip is unavailable"
+  find_uv >/dev/null 2>&1 || fail "ensure_python should leave uv available after ensurepip-missing bootstrap"
+)
+
 # --- uv bootstrap idempotency: existing uv is reused, no download ------------
 (
   fakebin="$tmp/uv-existing"
