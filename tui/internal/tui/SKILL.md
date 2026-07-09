@@ -44,13 +44,15 @@ For each candidate model, decide inclusion against this checklist:
 
 ```go
 // In providerModels:
-"codex": {"gpt-5.6", "gpt-5.5", "gpt-5.4", ...}, // newest first
+"codex": {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", ...}, // default first
 
 // In modelHasVision:
-"gpt-5.6":  true,   // verified at https://developers.openai.com/api/docs/models/gpt-5.6
+"gpt-5.6-sol":   true, // keep named routes aligned with the verified GPT-5.6 family
+"gpt-5.6-terra": true,
+"gpt-5.6-luna":  true,
 ```
 
-Order matters in `providerModels` only for the picker UX — left-to-right is the cycle order with ←/→. Putting newest first means a fresh template defaults to the latest. The `templates/codex.json` (built from `preset.go:codexPreset()`) should also have its `llm.model` bumped to the new latest if you want existing built-in users to default to the new model on next clone. Existing saved presets keep whatever model they already declared — that's a feature, not a bug.
+Order matters in `providerModels` only for the picker UX — left-to-right is the cycle order with ←/→. Putting the desired default first keeps fresh templates and the picker aligned. The `templates/codex.json` (built from `preset.go:codexPreset()`) should also have its `llm.model` bumped when you change that default. Existing saved presets keep whatever model they already declared — that's a feature, not a bug.
 
 ## When you remove a retired model
 
@@ -80,9 +82,9 @@ After editing `providerModels["codex"]` / `modelHasVision`:
 
 ## Cross-references
 
-- `preset_editor.go:134` — `providerModels` map
-- `preset_editor.go:149` — `modelHasVision` map
-- `preset_editor.go:120` — `capabilityProviderOptions` (web_search, vision provider routing)
+- `preset_editor.go:120` — `providerModels` map
+- `preset_editor.go:178` — `modelHasVision` map
+- `preset_editor.go:106` — `capabilityProviderOptions` (web_search, vision provider routing)
 - `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
 - `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
 - `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion

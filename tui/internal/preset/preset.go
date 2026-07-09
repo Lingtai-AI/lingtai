@@ -1104,12 +1104,12 @@ func codexPreset() Preset {
 		Description: PresetDescription{Summary: "ChatGPT account — vision + web search + tools"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Keep gpt-5.5 as the default even when newer GPT-5.x
-				// entries are selectable in the editor: current Codex +
-				// ChatGPT-account availability can lag public model names,
-				// and Jason explicitly asked that 5.5 remain default. The
-				// model list is curated in preset_editor.go's providerModels.
-				"provider": "codex", "model": "gpt-5.5",
+				// Use gpt-5.6-sol as the default after successful live testing.
+				// The other named GPT-5.6 routes and the generic GPT-5.6 model
+				// remain selectable for accounts where they are enabled. The
+				// complete curated list lives in preset_editor.go's
+				// providerModels.
+				"provider": "codex", "model": "gpt-5.6-sol",
 				"api_key": nil, "api_key_env": "",
 				"base_url": "https://chatgpt.com/backend-api/codex",
 				// LingTai is the primary brain, so Codex runs at maximum
@@ -1141,11 +1141,11 @@ func codexPoolPreset() Preset {
 		Description: PresetDescription{Summary: "ChatGPT account pool — load-balances across your Codex accounts"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Same gpt-5.5 default and endpoint as the single-account
+				// Same gpt-5.6-sol default and endpoint as the single-account
 				// codex preset; only the provider differs so the kernel routes
 				// through the pool. base_url stays the official Codex endpoint —
 				// the pool selects among token files, not endpoints.
-				"provider": "codex-pool", "model": "gpt-5.5",
+				"provider": "codex-pool", "model": "gpt-5.6-sol",
 				"api_key": nil, "api_key_env": "",
 				"base_url": "https://chatgpt.com/backend-api/codex",
 				"thinking": "xhigh",

@@ -48,7 +48,7 @@ func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
 func testCodexPresetEditorPresetWithThinking(serviceTier interface{}, thinking interface{}) preset.Preset {
 	llm := map[string]interface{}{
 		"provider":    "codex",
-		"model":       "gpt-5.5",
+		"model":       "gpt-5.6-sol",
 		"api_key":     nil,
 		"api_key_env": "",
 		"base_url":    "https://chatgpt.com/backend-api/codex",
@@ -80,27 +80,20 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 		t.Fatalf("deepseek default picker model = %q, want deepseek-v4-pro", got)
 	}
 
+	wantCodexModels := []string{
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2",
+	}
 	for _, provider := range []string{"codex", "codex-pool"} {
 		models := providerModels[provider]
-		if len(models) == 0 {
-			t.Fatalf("%s provider model lineup is empty", provider)
-		}
-		if got := models[0]; got != "gpt-5.5" {
-			t.Fatalf("%s default picker model = %q, want gpt-5.5", provider, got)
-		}
-		found56 := false
-		for _, model := range models {
-			if model == "gpt-5.6" {
-				found56 = true
-				break
-			}
-		}
-		if !found56 {
-			t.Fatalf("%s model lineup should include gpt-5.6 while keeping gpt-5.5 first: %#v", provider, models)
+		if !reflect.DeepEqual(models, wantCodexModels) {
+			t.Fatalf("%s provider models = %#v, want %#v", provider, models, wantCodexModels)
 		}
 	}
-	if !modelHasVision["gpt-5.6"] {
-		t.Fatal("gpt-5.6 should be treated as vision-capable like the rest of the GPT-5.x Codex lineup")
+	for _, model := range wantCodexModels[:4] {
+		if !modelHasVision[model] {
+			t.Fatalf("%s should be treated as vision-capable like the rest of the GPT-5.x Codex lineup", model)
+		}
 	}
 }
 

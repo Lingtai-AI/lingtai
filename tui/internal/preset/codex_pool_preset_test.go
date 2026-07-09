@@ -33,8 +33,8 @@ func TestCodexPoolPresetExists(t *testing.T) {
 	if prov, _ := llm["provider"].(string); prov != "codex-pool" {
 		t.Errorf("codex-pool provider = %q, want %q", prov, "codex-pool")
 	}
-	if model, _ := llm["model"].(string); model == "" {
-		t.Error("codex-pool preset must declare a model")
+	if model, _ := llm["model"].(string); model != "gpt-5.6-sol" {
+		t.Errorf("codex-pool model = %q, want gpt-5.6-sol", model)
 	}
 	// It must pass the same validation gauntlet as any other preset.
 	if errs := p.Validate(); len(errs) != 0 {
@@ -42,19 +42,19 @@ func TestCodexPoolPresetExists(t *testing.T) {
 	}
 }
 
-// TestCodexPresetUnchangedByPool pins that adding codex-pool did NOT alter the
-// existing codex preset: still provider "codex", still its own model/endpoint.
-func TestCodexPresetUnchangedByPool(t *testing.T) {
+// TestCodexPresetUsesRequestedDefault pins the single-account preset's provider,
+// requested model default, and endpoint independently from codex-pool.
+func TestCodexPresetUsesRequestedDefault(t *testing.T) {
 	p, ok := findBuiltin("codex")
 	if !ok {
 		t.Fatal("codex preset should still be a builtin")
 	}
 	llm := llmOf(p)
 	if prov, _ := llm["provider"].(string); prov != "codex" {
-		t.Errorf("codex provider = %q, want %q (unchanged)", prov, "codex")
+		t.Errorf("codex provider = %q, want %q", prov, "codex")
 	}
-	if model, _ := llm["model"].(string); model != "gpt-5.5" {
-		t.Errorf("codex model = %q, want gpt-5.5 (unchanged)", model)
+	if model, _ := llm["model"].(string); model != "gpt-5.6-sol" {
+		t.Errorf("codex model = %q, want gpt-5.6-sol", model)
 	}
 	if base, _ := llm["base_url"].(string); base != "https://chatgpt.com/backend-api/codex" {
 		t.Errorf("codex base_url changed: %q", base)

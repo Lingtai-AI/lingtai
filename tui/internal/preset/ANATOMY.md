@@ -39,19 +39,19 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
-| `Preset` struct | `tui/internal/preset/preset.go:60` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
-| `PresetSource` | `tui/internal/preset/preset.go:74` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
-| `PresetDescription` | `tui/internal/preset/preset.go:98` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
-| `Load(name)` | `tui/internal/preset/preset.go:246` | saved/ first, then templates/; sets `Source` |
-| `List()` | `tui/internal/preset/preset.go:209` | saved (alphabetical) + templates (canonical order); each carries `Source` |
-| `Save(p)` | `tui/internal/preset/preset.go:330` | ALWAYS to `saved/`; never templates |
-| `RefreshTemplates()` | `tui/internal/preset/preset.go:394` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
-| `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1225` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
-| `BuiltinPresets()` | `tui/internal/preset/preset.go:469` | minimax, zhipu, mimo, deepseek, gemini, kimi, nvidia, openrouter, codex, claude-agent-sdk, custom |
-| `IsTemplate(p)` | `tui/internal/preset/preset.go:464` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
-| `RefFor(p)` | `tui/internal/preset/preset.go:473` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
+| `Preset` struct | `tui/internal/preset/preset.go:61` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
+| `PresetSource` | `tui/internal/preset/preset.go:75` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
+| `PresetDescription` | `tui/internal/preset/preset.go:99` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
+| `Load(name)` | `tui/internal/preset/preset.go:257` | saved/ first, then templates/; sets `Source` |
+| `List()` | `tui/internal/preset/preset.go:210` | saved (alphabetical) + templates (canonical order); each carries `Source` |
+| `Save(p)` | `tui/internal/preset/preset.go:373` | ALWAYS to `saved/`; never templates |
+| `RefreshTemplates()` | `tui/internal/preset/preset.go:437` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
+| `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1288` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
+| `BuiltinPresets()` | `tui/internal/preset/preset.go:489` | minimax, zhipu, mimo, deepseek, gemini, kimi, nvidia, openrouter, codex, codex-pool, claude-agent-sdk, custom |
+| `IsTemplate(p)` | `tui/internal/preset/preset.go:540` | canonical "is this read-only?" — prefer over `IsBuiltin(p.Name)` |
+| `RefFor(p)` | `tui/internal/preset/preset.go:549` | `~/.lingtai-tui/presets/{templates\|saved}/<name>.json` |
 | `ResolveRefsWithAuth(refs, keys, auth)` / `ResolveRefs(refs, keys)` | `tui/internal/preset/preset.go` | health-check: Source, Exists, HasKey (+ `CodexAuthRef`) for each preset path; credential validity requires configured `api_key_env`, Codex OAuth, or Claude Code CLI auth for `claude-agent-sdk`. For codex, when `AuthState.CodexAuthDir` is set, validity is judged per-preset against the preset's own `manifest.llm.codex_auth_path` token file (empty → legacy `codex-auth.json` fallback) so multiple Codex accounts are independent; without the dir it falls back to the global `CodexOAuthConfigured` bool |
-| `Validate()` | `tui/internal/preset/preset.go:282` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
+| `Validate()` | `tui/internal/preset/preset.go:324` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
 | `CopyBundle` | `tui/internal/preset/recipe_apply.go:59` | copies `.recipe/` (replace) + recipe skill library sibling (merge) + `.lingtai/` (merge) into project |

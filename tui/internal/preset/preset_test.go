@@ -342,7 +342,7 @@ func writeCodexPresetWithAuthPath(t *testing.T, dir, name, authRef string) strin
 	t.Helper()
 	llm := map[string]interface{}{
 		"provider":    "codex",
-		"model":       "gpt-5.5",
+		"model":       "gpt-5.6-sol",
 		"api_key_env": "",
 	}
 	if authRef != "" {
@@ -490,8 +490,8 @@ func TestBuiltinPresetRequestedDefaultModels(t *testing.T) {
 	}{
 		{"zhipu", zhipuPreset(), "GLM-5.2"},
 		{"deepseek", deepseekPreset(), "deepseek-v4-pro"},
-		{"codex", codexPreset(), "gpt-5.5"},
-		{"codex-pool", codexPoolPreset(), "gpt-5.5"},
+		{"codex", codexPreset(), "gpt-5.6-sol"},
+		{"codex-pool", codexPoolPreset(), "gpt-5.6-sol"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

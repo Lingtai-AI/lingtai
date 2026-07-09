@@ -29,7 +29,7 @@ func withTempCodexHome(t *testing.T) (home, globalDir string) {
 // produces. Source is SourceSaved because Save() always lands in saved/.
 func saveCodexPresetForTest(t *testing.T, name, ref string) {
 	t.Helper()
-	llm := map[string]interface{}{"provider": "codex", "model": "gpt-5.5"}
+	llm := map[string]interface{}{"provider": "codex", "model": "gpt-5.6-sol"}
 	if ref != "" {
 		llm["codex_auth_path"] = ref
 	}
