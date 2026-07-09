@@ -105,6 +105,9 @@ func buildMailboxEntries(agentDir string) []MarkdownEntry {
 	sent := filepath.Join(agentDir, "mailbox", "sent")
 	mails = append(mails, scanInternalMailbox(sent, "sent")...)
 
+	archive := filepath.Join(agentDir, "mailbox", "archive")
+	mails = append(mails, scanInternalMailbox(archive, "archive")...)
+
 	// Sort by time descending (newest first)
 	sort.Slice(mails, func(i, j int) bool {
 		return mails[i].Time.After(mails[j].Time)
@@ -191,6 +194,8 @@ func buildMailboxEntries(agentDir string) []MarkdownEntry {
 				groupLabel = "Inbox"
 			case "sent":
 				groupLabel = "Sent"
+			case "archive":
+				groupLabel = "Archive"
 			default:
 				if strings.HasPrefix(group, "imap:") {
 					groupLabel = "✉ " + group[5:]

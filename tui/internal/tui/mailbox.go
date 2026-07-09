@@ -21,6 +21,17 @@ type MailboxModel struct {
 
 	inner MarkdownViewerModel
 
+	// allEntries is the unfiltered set for the current owner; the viewer is
+	// rebuilt from filterMailboxEntries(allEntries, searchQuery). Keeping the
+	// source of truth here (not inside the viewer) lets search restore the full
+	// list on Esc without rescanning disk.
+	allEntries []MarkdownEntry
+
+	// searchMode is true only while the query is being edited; searchQuery
+	// persists after Enter so a committed filter survives list navigation.
+	searchMode  bool
+	searchQuery string
+
 	pickerOpen bool
 	pickerIdx  int
 	agentNodes []fs.AgentNode // includes the human node
@@ -45,14 +56,65 @@ const (
 // human's mailbox pre-selected.
 func NewMailboxModel(baseDir string) MailboxModel {
 	humanDir := filepath.Join(baseDir, "human")
-	entries := buildMailboxEntries(humanDir)
-	inner := NewMarkdownViewer(entries, mailboxTitleFor(humanDir))
-	inner.FooterHint = i18n.T("hints.props_select")
-	return MailboxModel{
+	m := MailboxModel{
 		baseDir:     baseDir,
 		selectedDir: humanDir,
-		inner:       inner,
+		allEntries:  buildMailboxEntries(humanDir),
 	}
+	m.rebuildInner()
+	return m
+}
+
+// rebuildInner rebuilds the markdown viewer from allEntries filtered by the
+// current searchQuery and refreshes the mailbox footer hint. While a non-empty
+// filter is active it expands every group so a match in any group stays visible;
+// when the query is empty it leaves the shared viewer's default (first group
+// expanded, the rest collapsed) intact, preserving normal idle/reload/
+// agent-switch behavior and keeping a many-group sidebar to one screen.
+// Callers must re-send WindowSizeMsg afterwards (see syncInnerSize) to size
+// the freshly constructed viewer's viewports.
+func (m *MailboxModel) rebuildInner() {
+	entries := filterMailboxEntries(m.allEntries, m.searchQuery)
+	m.inner = NewMarkdownViewer(entries, mailboxTitleFor(m.selectedDir))
+	m.inner.FooterHint = m.mailboxFooterHint()
+	// Only expand every group while a non-empty filter needs to expose matches
+	// across groups; an empty query keeps the shared viewer's first-group-only
+	// default. This is same-package field access rather than a new viewer-level
+	// option: the only caller is here, so an exported ExpandAllGroups seam
+	// would not earn its surface.
+	if strings.TrimSpace(m.searchQuery) != "" {
+		for _, g := range m.inner.groupOrder {
+			m.inner.expanded[g] = true
+		}
+	}
+}
+
+// syncInnerSize re-applies the last known window size to the inner viewer,
+// returning any command it produces. No-op until the first WindowSizeMsg.
+func (m *MailboxModel) syncInnerSize() tea.Cmd {
+	if m.width <= 0 || m.height <= 0 {
+		return nil
+	}
+	var cmd tea.Cmd
+	m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	return cmd
+}
+
+// mailboxFooterHint drives the trailing hint segment the shared viewer renders
+// via its FooterHint seam. It advertises the search key when idle and echoes
+// the live query and match counts while editing or while a filter is applied.
+func (m MailboxModel) mailboxFooterHint() string {
+	query := strings.TrimSpace(m.searchQuery)
+	shown := truncate(query, 28)
+	matched := len(m.inner.entries)
+	total := len(m.allEntries)
+	if m.searchMode {
+		return fmt.Sprintf(i18n.T("mailbox.search_hint"), shown, matched, total)
+	}
+	if query != "" {
+		return fmt.Sprintf(i18n.T("mailbox.filter_hint"), shown, matched, total)
+	}
+	return i18n.T("hints.mailbox")
 }
 
 // mailboxTitleFor returns "<palette.mailbox> — <name>" for the given agent dir.
@@ -82,15 +144,9 @@ func mailboxOwnerName(agentDir string) string {
 }
 
 func (m MailboxModel) reloadInner() (MailboxModel, tea.Cmd) {
-	entries := buildMailboxEntries(m.selectedDir)
-	m.inner = NewMarkdownViewer(entries, mailboxTitleFor(m.selectedDir))
-	m.inner.FooterHint = i18n.T("hints.props_select")
-	if m.width > 0 && m.height > 0 {
-		var cmd tea.Cmd
-		m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-		return m, cmd
-	}
-	return m, nil
+	m.allEntries = buildMailboxEntries(m.selectedDir)
+	m.rebuildInner()
+	return m, m.syncInnerSize()
 }
 
 func (m MailboxModel) loadAgents() tea.Msg {
@@ -146,6 +202,9 @@ func (m MailboxModel) Update(msg tea.Msg) (MailboxModel, tea.Cmd) {
 		if m.pickerOpen {
 			return m.updatePicker(msg)
 		}
+		if m.searchMode {
+			return m.updateSearch(msg)
+		}
 		switch msg.String() {
 		case "ctrl+r":
 			return m.reloadInner()
@@ -163,6 +222,30 @@ func (m MailboxModel) Update(msg tea.Msg) (MailboxModel, tea.Cmd) {
 			}
 			m.syncPicker()
 			return m, nil
+		}
+		// Esc clears an applied filter first; a second Esc then exits /mailbox
+		// via the shared viewer's MarkdownViewerCloseMsg, preserving the old
+		// contract when no filter is active.
+		if msg.String() == "esc" && strings.TrimSpace(m.searchQuery) != "" {
+			m.searchQuery = ""
+			m.rebuildInner()
+			return m, m.syncInnerSize()
+		}
+		// "/" or Ctrl+F opens the mailbox-local search editor.
+		if isMailboxSearchKey(msg) {
+			m.searchMode = true
+			m.inner.FooterHint = m.mailboxFooterHint()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.inner, cmd = m.inner.Update(msg)
+		return m, cmd
+
+	case tea.PasteMsg:
+		if m.searchMode {
+			m.searchQuery += normalizeMailboxSearchText(msg.Content)
+			m.rebuildInner()
+			return m, m.syncInnerSize()
 		}
 		var cmd tea.Cmd
 		m.inner, cmd = m.inner.Update(msg)
@@ -182,6 +265,101 @@ func (m MailboxModel) Update(msg tea.Msg) (MailboxModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.inner, cmd = m.inner.Update(msg)
 	return m, cmd
+}
+
+// updateSearch handles keys while the mailbox search editor is open. The query
+// filters live; Enter commits the current filter (leaving edit mode but keeping
+// the result set), Esc cancels (drops the query and clears the filter).
+func (m MailboxModel) updateSearch(msg tea.KeyPressMsg) (MailboxModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searchQuery = ""
+		m.searchMode = false
+		m.rebuildInner()
+		return m, m.syncInnerSize()
+	case "enter":
+		m.searchMode = false
+		m.inner.FooterHint = m.mailboxFooterHint()
+		return m, nil
+	case "backspace", "ctrl+h":
+		if m.searchQuery == "" {
+			return m, nil
+		}
+		runes := []rune(m.searchQuery)
+		m.searchQuery = string(runes[:len(runes)-1])
+		m.rebuildInner()
+		return m, m.syncInnerSize()
+	case "ctrl+u":
+		if m.searchQuery == "" {
+			return m, nil
+		}
+		m.searchQuery = ""
+		m.rebuildInner()
+		return m, m.syncInnerSize()
+	}
+	if msg.Text != "" {
+		m.searchQuery += normalizeMailboxSearchText(msg.Text)
+		m.rebuildInner()
+		return m, m.syncInnerSize()
+	}
+	return m, nil
+}
+
+// isMailboxSearchKey reports whether a keypress should open the mailbox search
+// editor: "/" (the vim/mail-style search prefix) or Ctrl+F.
+func isMailboxSearchKey(msg tea.KeyPressMsg) bool {
+	if msg.Text == "/" {
+		return true
+	}
+	k := msg.Key()
+	return k.Code == 'f' && k.Mod == tea.ModCtrl
+}
+
+// normalizeMailboxSearchText collapses newlines/tabs to spaces and drops other
+// control bytes so a pasted block can't smuggle non-printable chars into the
+// query or the footer hint.
+func normalizeMailboxSearchText(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		if r < 0x20 {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// filterMailboxEntries returns the entries whose label, description, group,
+// path, or rendered content contain every whitespace-separated term (case
+// insensitive, AND semantics). An empty query returns the input unchanged.
+func filterMailboxEntries(entries []MarkdownEntry, query string) []MarkdownEntry {
+	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	if len(terms) == 0 {
+		return entries
+	}
+	filtered := make([]MarkdownEntry, 0, len(entries))
+	for _, entry := range entries {
+		haystack := strings.ToLower(strings.Join([]string{
+			entry.Label,
+			entry.Description,
+			entry.Group,
+			entry.Content,
+			entry.Path,
+		}, "\n"))
+		matched := true
+		for _, term := range terms {
+			if !strings.Contains(haystack, term) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func (m MailboxModel) updatePicker(msg tea.KeyPressMsg) (MailboxModel, tea.Cmd) {
@@ -207,16 +385,15 @@ func (m MailboxModel) updatePicker(msg tea.KeyPressMsg) (MailboxModel, tea.Cmd) 
 			newDir := m.agentNodes[m.pickerIdx].WorkingDir
 			if newDir != "" && newDir != m.selectedDir {
 				m.selectedDir = newDir
-				entries := buildMailboxEntries(m.selectedDir)
-				m.inner = NewMarkdownViewer(entries, mailboxTitleFor(m.selectedDir))
-				m.inner.FooterHint = i18n.T("hints.props_select")
-				if m.width > 0 && m.height > 0 {
-					var cmd tea.Cmd
-					m.inner, cmd = m.inner.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-					m.pickerOpen = false
-					m.syncPicker()
-					return m, cmd
-				}
+				// Switching owner invalidates any active search: rebuild from a
+				// fresh, unfiltered scan of the new agent's mailbox.
+				m.searchQuery = ""
+				m.searchMode = false
+				m.allEntries = buildMailboxEntries(m.selectedDir)
+				m.rebuildInner()
+				m.pickerOpen = false
+				m.syncPicker()
+				return m, m.syncInnerSize()
 			}
 		}
 		m.pickerOpen = false

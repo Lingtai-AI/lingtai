@@ -186,3 +186,35 @@ func TestBuildMailboxEntries_DateRendersInLocalTime(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildMailboxEntries_ScansArchiveFolder ensures the mailbox lookup surface
+// includes archived internal messages (grouped as "Archive") alongside
+// inbox/sent, so they are reachable by navigation and search.
+func TestBuildMailboxEntries_ScansArchiveFolder(t *testing.T) {
+	dir := t.TempDir()
+	msgDir := filepath.Join(dir, "mailbox", "archive", "20260707T010000-archived")
+	if err := os.MkdirAll(msgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"from":    "human",
+		"to":      []string{"manager"},
+		"subject": "old requirement",
+		"message": "this archived mail should still be searchable",
+		"sent_at": "2026-07-07T01:00:00Z",
+	})
+	if err := os.WriteFile(filepath.Join(msgDir, "message.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := buildMailboxEntries(dir)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Group != "Archive" {
+		t.Errorf("group = %q, want %q", entries[0].Group, "Archive")
+	}
+	if !strings.Contains(entries[0].Content, "old requirement") {
+		t.Errorf("content = %q, want archived message content", entries[0].Content)
+	}
+}
