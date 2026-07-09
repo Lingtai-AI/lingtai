@@ -16,7 +16,7 @@ Base: `origin/main@f976aecb`
 ## Findings
 
 Confirmed and fixed during self-review:
-- Initial TUI behavior would have deleted non-`fast` provider-specific `service_tier` values on unrelated saves. Fixed by preserving non-blank existing values while retaining explicit default-toggle deletion.
+- Initial TUI behavior would have deleted non-`fast` provider-specific `service_tier` values on unrelated saves. Fixed by preserving non-blank existing values while retaining explicit normal-toggle deletion.
 
 Residual risks to mention in PR:
 - Non-standard `service_tier` values are preserved but displayed as normal in the simplified radio strip until the user changes the row.

@@ -1,7 +1,7 @@
 ## Summary
 
 - Add an `API mode` row to the preset editor for `wire_api` (`auto`, `chat_completions`, `responses`).
-- Replace the raw service-tier row with a `service_tier` default/fast control available across providers.
+- Replace the raw service-tier row with a `service_tier` normal/fast control available across providers.
 - Preserve existing non-empty provider-specific `service_tier` values on unrelated saves while still letting the explicit normal toggle remove the field.
 - Update English, Chinese, and wen i18n strings, preset editor tests, and TUI anatomy.
 

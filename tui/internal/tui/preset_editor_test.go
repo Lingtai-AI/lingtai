@@ -522,7 +522,7 @@ func TestPresetEditorServiceTierFastAndDefault(t *testing.T) {
 		t.Fatalf("codex service tier row should be visible")
 	}
 	if got := m.fieldString(feServiceTier); got != "" {
-		t.Fatalf("empty llm.service_tier displays %q, want default", got)
+		t.Fatalf("empty raw llm.service_tier value = %q, want empty string", got)
 	}
 
 	m.cycleFocused(+1)
