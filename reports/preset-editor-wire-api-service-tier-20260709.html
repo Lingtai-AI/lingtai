@@ -12,31 +12,31 @@
 <div class="meta">Local TUI PR prep · branch <code>fix/preset-editor-wire-api-service-tier</code> · commit <code>757c9e54</code> · base <code>origin/main@f976aecb</code></div>
 
 <h2>TL;DR</h2>
-<div class="box"><strong>Conclusion:</strong> this local commit exposes the backend OpenAI-compatible controls in the TUI preset editor: <code>API mode</code> for <code>wire_api</code>, and <code>Fast mode</code> for <code>service_tier="fast"</code>. It also preserves provider-specific non-empty <code>service_tier</code> values when users save unrelated preset edits.</div>
+<div class="box"><strong>Conclusion:</strong> this local commit exposes the backend OpenAI-compatible controls in the TUI preset editor: <code>API mode</code> for <code>wire_api</code>, and <code>service_tier</code> for <code>service_tier="fast"</code>. It also preserves provider-specific non-empty <code>service_tier</code> values when users save unrelated preset edits.</div>
 
 <h2>Baseline</h2>
 <ul>
 <li>Before: users could not select OpenAI-compatible <code>responses</code> vs <code>chat_completions</code> from the preset editor.</li>
-<li>Before: service tier was Codex-shaped in the editor and not presented as a general OpenAI-compatible fast/default control.</li>
+<li>Before: service tier was Codex-shaped in the editor and not presented as a general OpenAI-compatible fast/normal control.</li>
 <li>Repo state used for prep: clean worktree from <code>origin/main@f976aecb</code>; original v0.10.5 dirty patch was preserved as <code>&lt;agent-artifacts&gt;/lingtai-custom-api-pr-prep/tui-custom-api-v0.10.5-20260709.patch</code>.</li>
 </ul>
 
 <h2>What Was Done</h2>
 <div class="grid">
 <div class="box"><h3>API mode</h3><p>Preset editor now renders <code>auto</code>, <code>chat_completions</code>, and <code>responses</code>. Explicit modes persist <code>manifest.llm.wire_api</code>; <code>auto</code> removes it.</p></div>
-<div class="box"><h3>Fast mode</h3><p>Preset editor now renders <code>default</code> and <code>fast</code> for all providers. Selecting <code>fast</code> writes <code>service_tier="fast"</code>; selecting default removes the field.</p></div>
+<div class="box"><h3>service_tier</h3><p>Preset editor now renders <code>normal</code> and <code>fast</code> for all providers. Selecting <code>fast</code> writes <code>service_tier="fast"</code>; selecting normal removes the field.</p></div>
 <div class="box"><h3>Compatibility</h3><p>Legacy response flags display as <code>responses</code> and are cleared when the user chooses an explicit API mode.</p></div>
-<div class="box"><h3>Preservation</h3><p>Existing non-empty provider-specific service tiers are preserved on unrelated commits, even if the simplified radio strip displays default.</p></div>
+<div class="box"><h3>Preservation</h3><p>Existing non-empty provider-specific service tiers are preserved on unrelated commits, even if the simplified radio strip displays normal.</p></div>
 </div>
 
 <h3>Representative Diff Snippets</h3>
 <pre><code>API mode: auto | chat_completions | responses
-Fast mode: default | fast</code></pre>
+service_tier: normal | fast</code></pre>
 <pre><code>setAPIMode("responses")        -> llm.wire_api = "responses"
 setAPIMode("chat_completions") -> llm.wire_api = "chat_completions"
 setAPIMode("auto")             -> delete llm.wire_api</code></pre>
 <pre><code>normalizeServiceTier: preserve non-blank existing values;
-explicit default toggle deletes service_tier.</code></pre>
+explicit normal toggle deletes service_tier.</code></pre>
 
 <h2>Validation</h2>
 <table><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody>
@@ -49,10 +49,10 @@ explicit default toggle deletes service_tier.</code></pre>
 
 <h2>Risks / Decisions</h2>
 <ul>
-<li><span class="warn">Hidden provider-specific tiers:</span> the radio strip only shows default/fast, so an existing non-standard tier is preserved but visually appears as default until the user cycles it.</li>
+<li><span class="warn">Hidden provider-specific tiers:</span> the radio strip only shows normal/fast, so an existing non-standard tier is preserved but visually appears as normal until the user cycles it.</li>
 <li><span class="warn">Explicit auto is omitted:</span> selecting API mode <code>auto</code> deletes <code>wire_api</code> rather than persisting <code>wire_api="auto"</code>. This keeps presets minimal but means explicit auto does not round-trip textually.</li>
 <li><span class="warn">Full test suite:</span> OAuth loopback timing failure remains a residual risk outside the changed preset editor surface.</li>
-<li><span class="ok">Decision:</span> expose only the common fast/default UI, while preserving arbitrary backend-supported tier strings unless the user explicitly changes that row.</li>
+<li><span class="ok">Decision:</span> expose only the common fast/normal UI, while preserving arbitrary backend-supported tier strings unless the user explicitly changes that row.</li>
 </ul>
 
 <h2>Next Steps</h2>
@@ -64,7 +64,7 @@ explicit default toggle deletes service_tier.</code></pre>
 
 <h2>Source Index</h2>
 <ul>
-<li><code>tui/internal/tui/preset_editor.go</code> — API mode/Fast mode rows and persistence behavior.</li>
+<li><code>tui/internal/tui/preset_editor.go</code> — API mode/service_tier rows and persistence behavior.</li>
 <li><code>tui/internal/tui/preset_editor_test.go</code> — UI, cycling, commit, and preservation tests.</li>
 <li><code>tui/i18n/en.json</code>, <code>tui/i18n/zh.json</code>, <code>tui/i18n/wen.json</code> — localized row labels.</li>
 <li><code>tui/internal/tui/ANATOMY.md</code> — preset editor map update.</li>

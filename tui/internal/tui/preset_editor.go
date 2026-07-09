@@ -164,7 +164,7 @@ var providerModels = map[string][]string{
 
 var serviceTierOptions = []string{"", "fast"}
 
-var serviceTierLabels = map[string]string{"": "default"}
+var serviceTierLabels = map[string]string{"": "normal"}
 
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 

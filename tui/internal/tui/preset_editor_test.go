@@ -731,9 +731,9 @@ func TestPresetEditorServiceTierVisibleForNonCodexAndPreservesUnknownTier(t *tes
 	if !m.fieldVisible(feServiceTier) {
 		t.Fatalf("service tier row should be visible for non-codex provider")
 	}
-	for _, text := range []string{"Fast mode", "default", "fast"} {
+	for _, text := range []string{"service_tier", "normal", "fast"} {
 		if !strings.Contains(view, text) {
-			t.Fatalf("non-codex editor should render Fast mode option %q; view:\n%s", text, view)
+			t.Fatalf("non-codex editor should render service_tier option %q; view:\n%s", text, view)
 		}
 	}
 
@@ -763,11 +763,11 @@ func TestPresetEditorServiceTierVisibleForNonCodexAndPreservesUnknownTier(t *tes
 	m.cursor = editorFieldOrderIndex(t, feServiceTier)
 	m.cycleFocused(+1)
 	if got, _ := llm["service_tier"].(string); got != "fast" {
-		t.Fatalf("cycling from unknown/default display should write fast; got %#v", llm["service_tier"])
+		t.Fatalf("cycling from unknown/normal display should write fast; got %#v", llm["service_tier"])
 	}
 	m.cycleFocused(+1)
 	if _, ok := llm["service_tier"]; ok {
-		t.Fatalf("cycling fast -> default should remove service_tier; got %#v", llm["service_tier"])
+		t.Fatalf("cycling fast -> normal should remove service_tier; got %#v", llm["service_tier"])
 	}
 }
 
