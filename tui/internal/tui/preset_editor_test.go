@@ -227,7 +227,7 @@ func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
 	m := NewPresetEditorModel(p, "en", keys, "")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 11; i++ {
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if editorFieldOrder[m.cursor] != feAPIKey {
@@ -298,6 +298,48 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 
 	if m.mode != emInline {
 		t.Fatalf("expected emInline after Enter on editable api_key, got mode=%v", m.mode)
+	}
+}
+
+func TestPresetEditorAPIModeWritesWireAPI(t *testing.T) {
+	p := testPresetEditorPreset()
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	if got := m.fieldString(feAPIMode); got != "auto" {
+		t.Fatalf("missing wire_api should display as auto, got %q", got)
+	}
+
+	m.setAPIMode("chat_completions")
+	llm := m.llmMap()
+	if got := m.fieldString(feAPIMode); got != "chat_completions" {
+		t.Fatalf("chat mode display = %q", got)
+	}
+	if got := llm["wire_api"]; got != "chat_completions" {
+		t.Fatalf("chat mode should persist wire_api=chat_completions, got %#v in %#v", got, llm)
+	}
+
+	m.setAPIMode("auto")
+	llm = m.llmMap()
+	if got := m.fieldString(feAPIMode); got != "auto" {
+		t.Fatalf("auto mode display = %q", got)
+	}
+	if _, ok := llm["wire_api"]; ok {
+		t.Fatalf("auto mode should delete wire_api: %#v", llm)
+	}
+
+	llm["use_responses"] = true
+	llm["force_responses"] = true
+	if got := m.fieldString(feAPIMode); got != "responses" {
+		t.Fatalf("legacy response flags should display as responses, got %q", got)
+	}
+	m.setAPIMode("responses")
+	llm = m.llmMap()
+	if got := llm["wire_api"]; got != "responses" {
+		t.Fatalf("responses mode should persist wire_api=responses, got %#v in %#v", got, llm)
+	}
+	for _, key := range []string{"use_responses", "use_responses_api", "force_responses"} {
+		if _, ok := llm[key]; ok {
+			t.Fatalf("responses mode should not persist low-level %s: %#v", key, llm)
+		}
 	}
 }
 
@@ -472,15 +514,15 @@ func TestSyncCapsToModelLeavesCapsAloneForUnknownModel(t *testing.T) {
 	}
 }
 
-func TestPresetEditorCodexServiceTierFastAndNormal(t *testing.T) {
+func TestPresetEditorServiceTierFastAndDefault(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feServiceTier)
 
 	if !m.fieldVisible(feServiceTier) {
 		t.Fatalf("codex service tier row should be visible")
 	}
-	if got := m.fieldString(feServiceTier); got != "normal" {
-		t.Fatalf("empty llm.service_tier displays %q, want normal", got)
+	if got := m.fieldString(feServiceTier); got != "" {
+		t.Fatalf("empty llm.service_tier displays %q, want default", got)
 	}
 
 	m.cycleFocused(+1)
@@ -513,10 +555,12 @@ func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T)
 		serviceTier interface{}
 		wantDisplay string
 		wantSaved   bool
+		wantValue   string
 	}{
-		{name: "absent", serviceTier: nil, wantDisplay: "normal"},
-		{name: "fast", serviceTier: "fast", wantDisplay: "fast", wantSaved: true},
-		{name: "unknown", serviceTier: "flex", wantDisplay: "normal"},
+		{name: "absent", serviceTier: nil, wantDisplay: ""},
+		{name: "fast", serviceTier: "fast", wantDisplay: "fast", wantSaved: true, wantValue: "fast"},
+		{name: "unknown", serviceTier: "flex", wantDisplay: "", wantSaved: true, wantValue: "flex"},
+		{name: "blank", serviceTier: "  ", wantDisplay: "", wantSaved: false},
 	}
 
 	for _, tc := range cases {
@@ -532,8 +576,8 @@ func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T)
 			if saved != tc.wantSaved {
 				t.Fatalf("committed service_tier saved=%v, want %v; value=%#v", saved, tc.wantSaved, llm["service_tier"])
 			}
-			if saved && got != "fast" {
-				t.Fatalf("committed service_tier=%q, want fast", got)
+			if saved && got != tc.wantValue {
+				t.Fatalf("committed service_tier=%q, want %q", got, tc.wantValue)
 			}
 		})
 	}
@@ -679,25 +723,32 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 	}
 }
 
-func TestPresetEditorServiceTierHiddenForNonCodexAndPreserved(t *testing.T) {
+func TestPresetEditorServiceTierVisibleForNonCodexAndPreservesUnknownTier(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
-	if m.fieldVisible(feServiceTier) {
-		t.Fatalf("service tier row should be hidden for non-codex provider")
+	if !m.fieldVisible(feServiceTier) {
+		t.Fatalf("service tier row should be visible for non-codex provider")
 	}
-	if strings.Contains(view, "service_tier") {
-		t.Fatalf("non-codex editor should not render service_tier row; view:\n%s", view)
+	for _, text := range []string{"Fast mode", "default", "fast"} {
+		if !strings.Contains(view, text) {
+			t.Fatalf("non-codex editor should render Fast mode option %q; view:\n%s", text, view)
+		}
 	}
 
 	m.cursor = editorFieldOrderIndex(t, feModel)
 	m.moveCursor(+1)
-	if editorFieldOrder[m.cursor] == feServiceTier {
-		t.Fatalf("cursor landed on hidden service tier field for non-codex preset")
-	}
 	if editorFieldOrder[m.cursor] != feAPICompat {
 		t.Fatalf("cursor after model = %v, want feAPICompat", editorFieldOrder[m.cursor])
+	}
+	m.moveCursor(+1)
+	if editorFieldOrder[m.cursor] != feAPIMode {
+		t.Fatalf("cursor after api_compat = %v, want feAPIMode", editorFieldOrder[m.cursor])
+	}
+	m.moveCursor(+1)
+	if editorFieldOrder[m.cursor] != feServiceTier {
+		t.Fatalf("cursor after api mode = %v, want feServiceTier", editorFieldOrder[m.cursor])
 	}
 
 	llm := m.working.Manifest["llm"].(map[string]interface{})
@@ -706,7 +757,17 @@ func TestPresetEditorServiceTierHiddenForNonCodexAndPreserved(t *testing.T) {
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
 	if got, _ := committedLLM["service_tier"].(string); got != "provider-specific" {
-		t.Fatalf("non-codex commit should preserve llm.service_tier; got %#v", committedLLM["service_tier"])
+		t.Fatalf("non-fast service_tier should be preserved on commit; got %#v", committedLLM["service_tier"])
+	}
+
+	m.cursor = editorFieldOrderIndex(t, feServiceTier)
+	m.cycleFocused(+1)
+	if got, _ := llm["service_tier"].(string); got != "fast" {
+		t.Fatalf("cycling from unknown/default display should write fast; got %#v", llm["service_tier"])
+	}
+	m.cycleFocused(+1)
+	if _, ok := llm["service_tier"]; ok {
+		t.Fatalf("cycling fast -> default should remove service_tier; got %#v", llm["service_tier"])
 	}
 }
 

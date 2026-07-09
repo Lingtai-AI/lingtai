@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Preset Editor API Mode PR Explainer</title>
+<style>
+:root{color-scheme:light dark;--fg:#172026;--muted:#52616b;--border:#c9d3dc;--bg:#f7f9fb;--panel:#fff;--accent:#175ea8;--code:#102033}body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--fg);background:var(--bg)}main{max-width:1040px;margin:0 auto;padding:32px 24px 56px}h1{font-size:28px;margin:0 0 8px}h2{font-size:20px;margin:28px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px}h3{font-size:16px;margin:18px 0 8px}.meta{color:var(--muted);margin-bottom:24px}.box{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{background:#edf2f7;color:var(--code);padding:12px;border-radius:6px;overflow:auto;border:1px solid var(--border)}ul{padding-left:22px}.ok{color:#116329;font-weight:600}.warn{color:#8a4b00;font-weight:600}table{border-collapse:collapse;width:100%;background:var(--panel)}td,th{border:1px solid var(--border);padding:8px;text-align:left;vertical-align:top}th{background:#edf2f7}@media (prefers-color-scheme:dark){:root{--fg:#e8edf2;--muted:#a9b6c2;--border:#34495e;--bg:#0e151b;--panel:#151f27;--accent:#8bc1ff;--code:#d9e7f5}pre,th{background:#101922;color:var(--code)}}
+</style>
+</head>
+<body><main>
+<h1>Preset Editor API Mode Controls</h1>
+<div class="meta">Local TUI PR prep · branch <code>fix/preset-editor-wire-api-service-tier</code> · commit <code>757c9e54</code> · base <code>origin/main@f976aecb</code></div>
+
+<h2>TL;DR</h2>
+<div class="box"><strong>Conclusion:</strong> this local commit exposes the backend OpenAI-compatible controls in the TUI preset editor: <code>API mode</code> for <code>wire_api</code>, and <code>Fast mode</code> for <code>service_tier="fast"</code>. It also preserves provider-specific non-empty <code>service_tier</code> values when users save unrelated preset edits.</div>
+
+<h2>Baseline</h2>
+<ul>
+<li>Before: users could not select OpenAI-compatible <code>responses</code> vs <code>chat_completions</code> from the preset editor.</li>
+<li>Before: service tier was Codex-shaped in the editor and not presented as a general OpenAI-compatible fast/default control.</li>
+<li>Repo state used for prep: clean worktree from <code>origin/main@f976aecb</code>; original v0.10.5 dirty patch was preserved as <code>&lt;agent-artifacts&gt;/lingtai-custom-api-pr-prep/tui-custom-api-v0.10.5-20260709.patch</code>.</li>
+</ul>
+
+<h2>What Was Done</h2>
+<div class="grid">
+<div class="box"><h3>API mode</h3><p>Preset editor now renders <code>auto</code>, <code>chat_completions</code>, and <code>responses</code>. Explicit modes persist <code>manifest.llm.wire_api</code>; <code>auto</code> removes it.</p></div>
+<div class="box"><h3>Fast mode</h3><p>Preset editor now renders <code>default</code> and <code>fast</code> for all providers. Selecting <code>fast</code> writes <code>service_tier="fast"</code>; selecting default removes the field.</p></div>
+<div class="box"><h3>Compatibility</h3><p>Legacy response flags display as <code>responses</code> and are cleared when the user chooses an explicit API mode.</p></div>
+<div class="box"><h3>Preservation</h3><p>Existing non-empty provider-specific service tiers are preserved on unrelated commits, even if the simplified radio strip displays default.</p></div>
+</div>
+
+<h3>Representative Diff Snippets</h3>
+<pre><code>API mode: auto | chat_completions | responses
+Fast mode: default | fast</code></pre>
+<pre><code>setAPIMode("responses")        -> llm.wire_api = "responses"
+setAPIMode("chat_completions") -> llm.wire_api = "chat_completions"
+setAPIMode("auto")             -> delete llm.wire_api</code></pre>
+<pre><code>normalizeServiceTier: preserve non-blank existing values;
+explicit default toggle deletes service_tier.</code></pre>
+
+<h2>Validation</h2>
+<table><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>git diff --check</code></td><td class="ok">passed</td></tr>
+<tr><td><code>go test ./internal/tui -run 'TestPresetEditor'</code></td><td class="ok">passed</td></tr>
+<tr><td><code>make build</code> in <code>tui/</code></td><td class="ok">passed; binary reports <code>lingtai-tui v0.10.5-21-gf976aecb</code></td></tr>
+<tr><td><code>go test ./...</code> in <code>tui/</code></td><td class="warn">failed only at <code>TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow</code>: timed out waiting 3s for OAuth session message. Same failure was observed on earlier v0.10.5 test pass; focused preset-editor suite passed.</td></tr>
+<tr><td>Local self-review</td><td class="ok">completed; found and fixed service-tier preservation issue before freezing commit.</td></tr>
+</tbody></table>
+
+<h2>Risks / Decisions</h2>
+<ul>
+<li><span class="warn">Hidden provider-specific tiers:</span> the radio strip only shows default/fast, so an existing non-standard tier is preserved but visually appears as default until the user cycles it.</li>
+<li><span class="warn">Explicit auto is omitted:</span> selecting API mode <code>auto</code> deletes <code>wire_api</code> rather than persisting <code>wire_api="auto"</code>. This keeps presets minimal but means explicit auto does not round-trip textually.</li>
+<li><span class="warn">Full test suite:</span> OAuth loopback timing failure remains a residual risk outside the changed preset editor surface.</li>
+<li><span class="ok">Decision:</span> expose only the common fast/default UI, while preserving arbitrary backend-supported tier strings unless the user explicitly changes that row.</li>
+</ul>
+
+<h2>Next Steps</h2>
+<ol>
+<li>Pair this TUI PR with the kernel PR that implements <code>wire_api</code> and <code>service_tier</code>.</li>
+<li>File/link issue if desired, then replace <code>TBD</code> in the PR body draft.</li>
+<li>Push/open PR only after explicit authorization.</li>
+</ol>
+
+<h2>Source Index</h2>
+<ul>
+<li><code>tui/internal/tui/preset_editor.go</code> — API mode/Fast mode rows and persistence behavior.</li>
+<li><code>tui/internal/tui/preset_editor_test.go</code> — UI, cycling, commit, and preservation tests.</li>
+<li><code>tui/i18n/en.json</code>, <code>tui/i18n/zh.json</code>, <code>tui/i18n/wen.json</code> — localized row labels.</li>
+<li><code>tui/internal/tui/ANATOMY.md</code> — preset editor map update.</li>
+</ul>
+</main></body></html>

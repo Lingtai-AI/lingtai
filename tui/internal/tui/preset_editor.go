@@ -47,9 +47,10 @@ const (
 	feLoses
 	feProvider
 	feModel
+	feAPICompat
+	feAPIMode
 	feServiceTier
 	feThinking
-	feAPICompat
 	feBaseURL
 	feAPIKey
 	feCapFile
@@ -77,7 +78,7 @@ var capFieldNames = map[editorField]string{
 // optional/provider-conditional capabilities appear as editable rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feBaseURL, feAPIKey,
+	feProvider, feModel, feAPICompat, feAPIMode, feServiceTier, feThinking, feBaseURL, feAPIKey,
 	feCapWebSearch, feCapVision,
 	feSave,
 }
@@ -161,7 +162,9 @@ var providerModels = map[string][]string{
 	"claude_agent_sdk": {"opus", "sonnet", "haiku"},
 }
 
-var codexServiceTierOptions = []string{"normal", "fast"}
+var serviceTierOptions = []string{"", "fast"}
+
+var serviceTierLabels = map[string]string{"": "default"}
 
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 
@@ -634,7 +637,9 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.input.Focus()
 			m.mode = emInline
 		}
-	case feServiceTier, feThinking:
+	case feServiceTier, feAPIMode:
+		m.cycleFocused(+1)
+	case feThinking:
 		if m.isCodexProvider() {
 			m.cycleFocused(+1)
 		}
@@ -932,17 +937,17 @@ func (m PresetEditorModel) codexBoundAccountLabel() (string, bool) {
 	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), valid
 }
 
-func (m PresetEditorModel) codexServiceTier() string {
+func (m PresetEditorModel) serviceTier() string {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	if asString(llm["service_tier"]) == "fast" {
 		return "fast"
 	}
-	return "normal"
+	return ""
 }
 
-func (m *PresetEditorModel) setCodexServiceTier(tier string) {
+func (m *PresetEditorModel) setServiceTier(tier string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" || tier != "fast" {
+	if tier != "fast" {
 		delete(llm, "service_tier")
 		return
 	}
@@ -982,10 +987,10 @@ func (m *PresetEditorModel) setCodexThinking(effort string) {
 
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
-	if llm == nil || asString(llm["provider"]) != "codex" {
+	if llm == nil {
 		return
 	}
-	if asString(llm["service_tier"]) == "fast" {
+	if strings.TrimSpace(asString(llm["service_tier"])) != "" {
 		return
 	}
 	delete(llm, "service_tier")
@@ -1112,10 +1117,10 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
+	case feAPIMode:
+		m.setAPIMode(cycleString([]string{"auto", "chat_completions", "responses"}, m.fieldString(f), dir))
 	case feServiceTier:
-		if m.isCodexProvider() {
-			m.setCodexServiceTier(cycleString(codexServiceTierOptions, m.codexServiceTier(), dir))
-		}
+		m.setServiceTier(cycleString(serviceTierOptions, m.fieldString(f), dir))
 	case feThinking:
 		if m.isCodexProvider() {
 			m.setCodexThinking(cycleString(codexThinkingOptions, m.codexThinking(), dir))
@@ -1299,12 +1304,14 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		s, _ := llm["model"].(string)
 		return s
 	case feServiceTier:
-		return m.codexServiceTier()
+		return m.serviceTier()
 	case feThinking:
 		return m.codexThinking()
 	case feAPICompat:
 		s, _ := llm["api_compat"].(string)
 		return s
+	case feAPIMode:
+		return apiModeDisplay(llm)
 	case feBaseURL:
 		s, _ := llm["base_url"].(string)
 		return s
@@ -1465,13 +1472,12 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	rows = append(rows, row(feProvider, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4)))
 	rows = append(rows, row(feModel, m.row(feModel, lbl("model"), asString(llm["model"]), width-4)))
-	if m.fieldVisible(feServiceTier) {
-		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.codexServiceTier(), width-4)))
-	}
+	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
+	rows = append(rows, row(feAPIMode, m.row(feAPIMode, lbl("api_mode"), m.fieldString(feAPIMode), width-4)))
+	rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.fieldString(feServiceTier), width-4)))
 	if m.fieldVisible(feThinking) {
 		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.codexThinking(), width-4)))
 	}
-	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
@@ -1521,10 +1527,11 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 			return marker + keyStyle.Render(key) + strip
 		}
 	}
+	if f == feAPIMode {
+		return marker + keyStyle.Render(key) + m.apiModeRadioStrip(focused, valStyle)
+	}
 	if f == feServiceTier {
-		if strip := m.serviceTierRadioStrip(focused, valStyle); strip != "" {
-			return marker + keyStyle.Render(key) + strip
-		}
+		return marker + keyStyle.Render(key) + m.serviceTierRadioStrip(focused, valStyle)
 	}
 	if f == feThinking {
 		if strip := m.thinkingRadioStrip(focused, valStyle); strip != "" {
@@ -1695,25 +1702,33 @@ func (m PresetEditorModel) modelRadioStrip(focused bool, valStyle lipgloss.Style
 	return strings.Join(parts, "  ")
 }
 
-func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	if !m.isCodexProvider() {
-		return ""
-	}
-	current := m.codexServiceTier()
+func (m PresetEditorModel) optionStrip(opts []string, current string, labels map[string]string, focused bool, valStyle lipgloss.Style) string {
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	parts := make([]string, 0, len(codexServiceTierOptions))
-	for _, tier := range codexServiceTierOptions {
-		if tier == current {
+	parts := make([]string, 0, len(opts))
+	for _, opt := range opts {
+		label := opt
+		if labels != nil && labels[opt] != "" {
+			label = labels[opt]
+		}
+		if opt == current {
 			if focused {
-				parts = append(parts, valStyle.Render("● "+tier))
+				parts = append(parts, valStyle.Render("● "+label))
 			} else {
-				parts = append(parts, "● "+tier)
+				parts = append(parts, "● "+label)
 			}
 		} else {
-			parts = append(parts, subtle.Render("○ "+tier))
+			parts = append(parts, subtle.Render("○ "+label))
 		}
 	}
 	return strings.Join(parts, "  ")
+}
+
+func (m PresetEditorModel) apiModeRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	return m.optionStrip([]string{"auto", "chat_completions", "responses"}, m.fieldString(feAPIMode), nil, focused, valStyle)
+}
+
+func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	return m.optionStrip(serviceTierOptions, m.fieldString(feServiceTier), serviceTierLabels, focused, valStyle)
 }
 
 func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.Style) string {
@@ -1770,9 +1785,9 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 // inline-edit-only and we shouldn't suggest cycling.
 func (m PresetEditorModel) isCyclable(f editorField) bool {
 	switch f {
-	case feProvider, feAPICompat, feTier:
+	case feProvider, feAPICompat, feAPIMode, feServiceTier, feTier:
 		return true
-	case feServiceTier, feThinking:
+	case feThinking:
 		return m.isCodexProvider()
 	case feAPIKey:
 		// For codex, the "API key" row is an account selector: ←/→ binds the
@@ -1913,7 +1928,7 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
-	case feServiceTier, feThinking:
+	case feThinking:
 		return m.isCodexProvider()
 	default:
 		return true
@@ -2148,6 +2163,29 @@ func clonePresetForEditor(p preset.Preset) preset.Preset {
 		return p
 	}
 	return out
+}
+
+func apiModeDisplay(llm map[string]interface{}) string {
+	mode := asString(llm["wire_api"])
+	if mode == "responses" || mode == "chat_completions" || mode == "auto" {
+		return mode
+	}
+	if asBool(llm["use_responses"]) || asBool(llm["use_responses_api"]) {
+		return "responses"
+	}
+	return "auto"
+}
+
+func (m *PresetEditorModel) setAPIMode(mode string) {
+	llm := m.llmMap()
+	delete(llm, "use_responses")
+	delete(llm, "use_responses_api")
+	delete(llm, "force_responses")
+	if mode == "responses" || mode == "chat_completions" {
+		llm["wire_api"] = mode
+		return
+	}
+	delete(llm, "wire_api")
 }
 
 func asBool(v interface{}) bool {
