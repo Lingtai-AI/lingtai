@@ -1864,14 +1864,14 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 		}
 		for _, key := range []string{"default", "active"} {
 			presetRef, _ := presetBlock[key].(string)
-			if presetRef == "" || !strings.Contains(presetRef, "codex") {
+			if presetRef == "" {
 				continue
 			}
-			// Resolve the preset's bound account (#415) and validate just that
-			// file; warn (localized, #412) naming the agent only when its own
-			// bound account is missing — a different account staying invalid
-			// no longer condemns this agent.
-			if !codexPresetRefAuthValid(globalDir, presetRef) {
+			// Identify Codex presets by their declared provider, not their file
+			// name. Custom OpenAI-compatible presets may legitimately include
+			// "codex" in the name, while a true Codex preset may not.
+			usesCodex, authValid := codexPresetRefAuthStatus(globalDir, presetRef)
+			if usesCodex && !authValid {
 				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}
@@ -1879,28 +1879,31 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	return ""
 }
 
-// codexPresetRefAuthValid loads the preset file at presetRef and validates the
-// Codex OAuth account it binds to (manifest.llm.codex_auth_path, empty →
-// legacy fallback). When the preset file can't be read (e.g. a transient path),
-// it falls back to validating the legacy account so a missing preset file
-// doesn't spuriously fail an agent that may still resolve at launch.
-func codexPresetRefAuthValid(globalDir, presetRef string) bool {
+// codexPresetRefAuthStatus reports whether presetRef declares a Codex OAuth
+// provider and, when it does, whether its bound account is valid.
+func codexPresetRefAuthStatus(globalDir, presetRef string) (usesCodex, authValid bool) {
 	abs := presetRef
 	if strings.HasPrefix(abs, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			abs = filepath.Join(home, abs[2:])
 		}
 	}
-	ref := ""
-	if data, err := os.ReadFile(abs); err == nil {
-		var p map[string]interface{}
-		if json.Unmarshal(data, &p) == nil {
-			if manifest, ok := p["manifest"].(map[string]interface{}); ok {
-				if llm, ok := manifest["llm"].(map[string]interface{}); ok {
-					ref, _ = llm["codex_auth_path"].(string)
-				}
-			}
-		}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return false, true
 	}
-	return codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
+	var p map[string]interface{}
+	if json.Unmarshal(data, &p) != nil {
+		return false, true
+	}
+	manifest, _ := p["manifest"].(map[string]interface{})
+	llm, _ := manifest["llm"].(map[string]interface{})
+	provider, _ := llm["provider"].(string)
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "codex", "codex-pool", "codex_pool":
+		ref, _ := llm["codex_auth_path"].(string)
+		return true, codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
+	default:
+		return false, true
+	}
 }

@@ -1,10 +1,68 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+func writeAgentPresetFixture(t *testing.T, projectDir, presetName, provider string) {
+	t.Helper()
+	presetDir := filepath.Join(projectDir, "presets")
+	if err := os.MkdirAll(presetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	presetPath := filepath.Join(presetDir, presetName+".json")
+	presetDoc := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"llm": map[string]interface{}{"provider": provider},
+		},
+	}
+	presetRaw, _ := json.Marshal(presetDoc)
+	if err := os.WriteFile(presetPath, presetRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	agentDir := filepath.Join(projectDir, "test-agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initDoc := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"preset": map[string]interface{}{
+				"active":  presetPath,
+				"default": presetPath,
+			},
+		},
+	}
+	initRaw, _ := json.Marshal(initDoc)
+	if err := os.WriteFile(filepath.Join(agentDir, "init.json"), initRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateCodexAuthForAgentsIgnoresCustomPresetNamedCodex(t *testing.T) {
+	projectDir := t.TempDir()
+	writeAgentPresetFixture(t, projectDir, "codex-pro", "custom")
+
+	if got := validateCodexAuthForAgents(t.TempDir(), projectDir); got != "" {
+		t.Fatalf("custom preset named codex-pro produced OAuth warning: %q", got)
+	}
+}
+
+func TestValidateCodexAuthForAgentsChecksProviderNotPresetName(t *testing.T) {
+	projectDir := t.TempDir()
+	writeAgentPresetFixture(t, projectDir, "subscription", "codex")
+
+	got := validateCodexAuthForAgents(t.TempDir(), projectDir)
+	if !strings.Contains(got, "test-agent") {
+		t.Fatalf("true Codex provider with non-codex name warning = %q", got)
+	}
+}
 
 // runCmd executes a tea.Cmd and returns the message it produces (nil for a nil
 // cmd). Used to inspect what command an Update returned without running a full
