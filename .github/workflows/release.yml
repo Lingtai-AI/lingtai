@@ -118,7 +118,7 @@ jobs:
             desc "Terminal UI for the Lingtai AI agent framework"
             homepage "https://github.com/Lingtai-AI/lingtai"
             version "${VERSION}"
-            license "MIT"
+            license "Apache-2.0"
 
             url "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
             sha256 "${SHA}"
