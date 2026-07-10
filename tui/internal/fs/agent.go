@@ -685,6 +685,176 @@ func storeMoltSessionTokenLedger(path string, info os.FileInfo, currentSince, la
 	}
 }
 
+// MoltSessionToolCalls holds lifecycle type='tool_call' event counts for the
+// current and immediately previous molt-session windows. Unlike
+// SessionTokenStats (sourced from the token ledger), these counts come from
+// the events store, so freshness is keyed on authoritative events.jsonl (with
+// a derived-sidecar fallback), NOT on the token-ledger file: an events-only
+// append must invalidate the count even when the ledger is unchanged. Tool
+// results are never counted here.
+type MoltSessionToolCalls struct {
+	Current int64
+	Last    int64
+}
+
+// SumMoltSessionToolCalls counts lifecycle type='tool_call' events in the same
+// current and previous molt-session windows SumMoltSessionTokenLedger uses for
+// the API rows. It prefers bounded SQLite queries. If the sidecar/window query
+// is unavailable, one authoritative JSONL pass rolls the current/last counters
+// at each valid psyche_molt boundary instead of scanning the file once for
+// bounds and again for counts. Unchanged event stores return from cache before
+// any query or scan.
+func SumMoltSessionToolCalls(agentDir string) MoltSessionToolCalls {
+	eventsPath := filepath.Join(agentDir, "logs", "events.jsonl")
+	freshnessPath, info := eventsStoreFreshness(agentDir)
+	if info == nil {
+		return MoltSessionToolCalls{}
+	}
+	if cached, ok := cachedMoltSessionToolCalls(freshnessPath, info); ok {
+		return cached
+	}
+	stale, hasStale := lastMoltSessionToolCalls(freshnessPath)
+
+	currentSince, lastSince, lastBefore, ok, err := sqlitelog.QueryMoltSessionWindows(agentDir)
+	if err != nil || !ok {
+		stats := countMoltSessionToolCallsByMoltJSONL(eventsPath)
+		storeMoltSessionToolCalls(freshnessPath, info, stats)
+		return stats
+	}
+	stats, ok := queryMoltSessionToolCalls(agentDir, currentSince, lastSince, lastBefore)
+	if !ok {
+		// A live sidecar count can exceed its UI-thread deadline on a cold page
+		// cache. Do not turn that bounded miss into a multi-second full JSONL scan;
+		// keep the last value (or zero on first load) and retry on the next tick.
+		if hasStale {
+			return stale
+		}
+		return MoltSessionToolCalls{}
+	}
+	storeMoltSessionToolCalls(freshnessPath, info, stats)
+	return stats
+}
+
+func queryMoltSessionToolCalls(agentDir string, currentSince, lastSince, lastBefore time.Time) (MoltSessionToolCalls, bool) {
+	cur, last, ok, _ := sqlitelog.QueryMoltSessionToolCallCounts(agentDir, currentSince, lastSince, lastBefore)
+	return MoltSessionToolCalls{Current: cur, Last: last}, ok
+}
+
+// countMoltSessionToolCallsByMoltJSONL is the single-pass fallback when SQLite
+// cannot resolve the window at all. events.jsonl is append-ordered, so each
+// valid psyche_molt promotes the just-finished current count to Last and starts
+// a new current bucket. With no molt, all tool calls remain Current; with one
+// molt, pre-molt calls form Last, matching the existing JSONL window semantics.
+func countMoltSessionToolCallsByMoltJSONL(eventsPath string) MoltSessionToolCalls {
+	var stats MoltSessionToolCalls
+	var currentSince, lastSince, lastBefore time.Time
+	_ = forEachJSONLLine(eventsPath, func(line []byte) {
+		var evt struct {
+			Type string  `json:"type"`
+			TS   float64 `json:"ts"`
+		}
+		if err := json.Unmarshal(line, &evt); err != nil {
+			return
+		}
+		switch evt.Type {
+		case "tool_call":
+			t := unixFloatTime(evt.TS)
+			if timeWithinBounds(t, currentSince, time.Time{}) {
+				stats.Current++
+			}
+			if !lastBefore.IsZero() && timeWithinBounds(t, lastSince, lastBefore) {
+				stats.Last++
+			}
+		case "psyche_molt":
+			if evt.TS > 0 {
+				// The just-finished current bucket becomes Last. Then advance
+				// the explicit bounds so later rows are bucketed by timestamp,
+				// matching moltSessionWindows even if an old row appears late.
+				stats.Last = stats.Current
+				stats.Current = 0
+				lastSince = currentSince
+				lastBefore = unixFloatTime(evt.TS)
+				currentSince = lastBefore
+			}
+		}
+	})
+	return stats
+}
+
+// timeWithinBounds mirrors ledgerEntryWithinBounds on an already-parsed event
+// time: a zero since and zero before select everything; otherwise the event
+// must be at or after since and (when before is set) strictly before before.
+func timeWithinBounds(t, since, before time.Time) bool {
+	if since.IsZero() && before.IsZero() {
+		return true
+	}
+	if !since.IsZero() && t.Before(since) {
+		return false
+	}
+	if !before.IsZero() && !t.Before(before) {
+		return false
+	}
+	return true
+}
+
+// eventsStoreFreshness returns a freshness sentinel for lifecycle events. Prefer
+// events.jsonl because it is the authoritative source and changes even when a
+// live SQLite write is still in WAL or a SQLite query has to fall back to JSONL.
+// The derived sidecar is only a last-resort sentinel for SQLite-only fixtures or
+// incomplete/offline agent directories. A nil FileInfo means no events store
+// exists, so there is nothing to count.
+func eventsStoreFreshness(agentDir string) (string, os.FileInfo) {
+	events := filepath.Join(agentDir, "logs", "events.jsonl")
+	if info, err := os.Stat(events); err == nil && !info.IsDir() {
+		return events, info
+	}
+	if info, err := os.Stat(sqlitelog.DBPath(agentDir)); err == nil && !info.IsDir() {
+		return sqlitelog.DBPath(agentDir), info
+	}
+	return "", nil
+}
+
+type moltSessionToolCallsCacheEntry struct {
+	storeSize    int64
+	storeModTime time.Time
+	stats        MoltSessionToolCalls
+}
+
+var moltSessionToolCallsCache = struct {
+	sync.Mutex
+	byPath map[string]moltSessionToolCallsCacheEntry
+}{byPath: map[string]moltSessionToolCallsCacheEntry{}}
+
+func cachedMoltSessionToolCalls(path string, info os.FileInfo) (MoltSessionToolCalls, bool) {
+	key := filepath.Clean(path)
+	moltSessionToolCallsCache.Lock()
+	defer moltSessionToolCallsCache.Unlock()
+	entry, ok := moltSessionToolCallsCache.byPath[key]
+	if !ok || entry.storeSize != info.Size() || !entry.storeModTime.Equal(info.ModTime()) {
+		return MoltSessionToolCalls{}, false
+	}
+	return entry.stats, true
+}
+
+func lastMoltSessionToolCalls(path string) (MoltSessionToolCalls, bool) {
+	key := filepath.Clean(path)
+	moltSessionToolCallsCache.Lock()
+	defer moltSessionToolCallsCache.Unlock()
+	entry, ok := moltSessionToolCallsCache.byPath[key]
+	return entry.stats, ok
+}
+
+func storeMoltSessionToolCalls(path string, info os.FileInfo, stats MoltSessionToolCalls) {
+	key := filepath.Clean(path)
+	moltSessionToolCallsCache.Lock()
+	defer moltSessionToolCallsCache.Unlock()
+	moltSessionToolCallsCache.byPath[key] = moltSessionToolCallsCacheEntry{
+		storeSize:    info.Size(),
+		storeModTime: info.ModTime(),
+		stats:        stats,
+	}
+}
+
 // SumSessionTokenLedgerSince reads a token_ledger.jsonl file and sums
 // non-daemon entries at or after the supplied cutoff. Rows with malformed
 // timestamps are skipped when a cutoff is present so stale historical rows
