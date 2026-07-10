@@ -1565,7 +1565,7 @@ func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenSt
 	lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
 		valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
 	lines = append(lines, "    "+labelStyle.Render("tool_calls/api_call:       ")+
-		valueStyle.Render(fmt.Sprintf("%.1f", float64(toolCalls)/float64(stats.APICalls))))
+		valueStyle.Render(fmt.Sprintf("%.2f", float64(toolCalls)/float64(stats.APICalls))))
 	if stats.HasCodexTransferMode {
 		lines = append(lines, "    "+labelStyle.Render("transfer full / incremental: ")+
 			valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexFull, stats.CodexIncremental)))
