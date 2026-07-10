@@ -422,6 +422,39 @@ func TestPropsHeaderShowsCtrlDHint(t *testing.T) {
 	}
 }
 
+func TestPropsDetailShowsCurrentAndLastSessionToolCallStats(t *testing.T) {
+	// Tool-call counts and tool_calls/api_call averages render inside the same
+	// Current/Last session API blocks as api_calls, sourced from lifecycle
+	// tool_call events in the matching molt windows (not retained-context
+	// ContextStats.ToolCalls). Tool-call averages stay decimal because their
+	// small ratios make integer rounding misleading: 5 / 2 = 2.50, 2 / 1 = 2.00.
+	m := PropsModel{
+		detailCurrentSessionStats: fs.SessionTokenStats{
+			TokenTotals: fs.TokenTotals{Input: 100, Output: 20, Thinking: 10, Cached: 40, APICalls: 2},
+		},
+		detailCurrentSessionToolCalls: 5,
+		detailLastSessionStats: fs.SessionTokenStats{
+			TokenTotals: fs.TokenTotals{Input: 45, Output: 5, Cached: 9, APICalls: 1},
+		},
+		detailLastSessionToolCalls: 2,
+	}
+	out := ansi.Strip(m.renderDetail())
+	for _, want := range []string{
+		"Current session API",
+		"api_calls:                 2",
+		"tool_calls:                5",
+		"tool_calls/api_call:       2.50",
+		"Last session API",
+		"api_calls:                 1",
+		"tool_calls:                2",
+		"tool_calls/api_call:       2.00",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderDetail missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestPropsDetailShowsCurrentAndLastSessionAPIStats(t *testing.T) {
 	m := PropsModel{
 		detailCurrentSessionStats: fs.SessionTokenStats{

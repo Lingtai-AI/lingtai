@@ -63,7 +63,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `SumTokenLedger(path)` | `tui/internal/fs/agent.go:469` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
 | `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:582` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
 | `SumMoltSessionTokenLedger` | `tui/internal/fs/agent.go:622` | uses `logs/log.sqlite` `psyche_molt` boundaries when available (JSONL fallback), then sums cached non-daemon token-ledger windows for `/kanban` Ctrl+D current and last session API/cache stats, including Codex `codex_request_mode` counts (`ws_full` / `ws_incremental`) |
-| `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:696` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
+| `SumMoltSessionToolCalls` | `tui/internal/fs/agent.go:707` | counts lifecycle `tool_call` events in the SAME current/previous molt windows as `SumMoltSessionTokenLedger` (via `sqlitelog.QueryMoltSessionToolCallCounts`, JSONL fallback) for the `/kanban` Ctrl+D `tool_calls` + `tool_calls/api_call` rows; tool results are not counted. Freshness is keyed on authoritative `events.jsonl` (derived `log.sqlite` only when JSONL is absent), NOT the token-ledger cache, so event-only changes invalidate the count and SQLite fallback cannot pin a stale result |
+| `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:876` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
 | **rebuild_marker.go** | | |
 | `RecentRebuildTimes(agentDir, limit)` | `tui/internal/fs/rebuild_marker.go` | best-effort newest-first `psyche_molt` (molt) timestamps for `/kanban` Ctrl+D ledger separators; prefers `logs/log.sqlite` LIMIT query (`sqlitelog.QueryRecentMoltTimes`), falls back to tailing the last `tailScanLines` (1000) lines of `logs/events.jsonl` via `tailEventTimes`; missing/malformed logs yield no markers |
 | `RecentRefreshCompleteTimes(agentDir, limit)` | `tui/internal/fs/rebuild_marker.go` | same contract as `RecentRebuildTimes` but for `refresh_complete` (/refresh context reconstruction) events (`sqlitelog.QueryRecentRefreshCompleteTimes` + tail fallback); rendered as the separate `context rebuilt` separator label |
@@ -71,7 +72,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `forEachJSONLLine(path, fn)` | `tui/internal/fs/jsonl.go:16` | streams JSONL files one line at a time without `ReadFile`/`strings.Split`, avoiding duplicate buffers and Scanner token limits for ledger/history hot paths |
 | **daemon_ledger.go** | | |
 | `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:40` | aggregates recent per-call token ledgers from `daemons/<run_id>/logs/token_ledger.jsonl`, newest first, tagged with daemon run id/handle/state for kanban Ctrl+D split lanes |
-| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:804` | maps endpoint host / model prefix → canonical provider name |
+| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:980` | maps endpoint host / model prefix → canonical provider name |
 | **heartbeat.go** | | |
 | `IsAlive(dir, thresholdSec)` | `tui/internal/fs/heartbeat.go:11` | reads `.agent.heartbeat` unix timestamp, returns `age < threshold` |
 | `IsAliveHuman()` | `tui/internal/fs/heartbeat.go:24` | always `true` |

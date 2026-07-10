@@ -63,11 +63,18 @@ type PropsModel struct {
 	detailDaemonRecent        []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
 	detailCurrentSessionStats fs.SessionTokenStats
 	detailLastSessionStats    fs.SessionTokenStats
-	detailContextStats        fs.ContextStats
-	detailDaemonCounts        fs.DaemonCounts
-	detailMCPNames            []string
-	detailRebuilds            []time.Time // psyche_molt times, newest first; rendered as molt separators
-	detailRefreshes           []time.Time // refresh_complete times, newest first; rendered as context-rebuilt separators
+	// detailCurrentSessionToolCalls / detailLastSessionToolCalls hold lifecycle
+	// tool_call counts for the same molt windows as the session API stats.
+	// They are sourced from the events store (fs.SumMoltSessionToolCalls) and
+	// overlaid onto the detail view independently of the token-ledger cache, so
+	// an events-only append invalidates the count even when the ledger is unchanged.
+	detailCurrentSessionToolCalls int64
+	detailLastSessionToolCalls    int64
+	detailContextStats            fs.ContextStats
+	detailDaemonCounts            fs.DaemonCounts
+	detailMCPNames                []string
+	detailRebuilds                []time.Time // psyche_molt times, newest first; rendered as molt separators
+	detailRefreshes               []time.Time // refresh_complete times, newest first; rendered as context-rebuilt separators
 }
 
 // detailRecentCalls is the number of recent token-ledger calls shown in each
@@ -249,6 +256,13 @@ func (m *PropsModel) loadDetail() {
 	sessionStats := fs.SumMoltSessionTokenLedger(m.selectedDir)
 	m.detailCurrentSessionStats = sessionStats.Current
 	m.detailLastSessionStats = sessionStats.Last
+	// Tool-call counts come from the events store, not the token ledger, so
+	// they are fetched with their own (events-keyed) freshness and overlaid
+	// onto the session stats here. The windows are resolved identically to
+	// SumMoltSessionTokenLedger, so the counts align with the API rows.
+	toolCounts := fs.SumMoltSessionToolCalls(m.selectedDir)
+	m.detailCurrentSessionToolCalls = toolCounts.Current
+	m.detailLastSessionToolCalls = toolCounts.Last
 	// Daemon calls are scoped to the selected agent's own daemon run dirs
 	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
 	// network. Missing ledgers render an empty lane.
@@ -959,8 +973,8 @@ func (m PropsModel) renderDetail() string {
 	}
 
 	// Molt-session API/cache statistics.
-	lines = appendSessionAPIStats(lines, "Current session API", m.detailCurrentSessionStats, sectionStyle, labelStyle, valueStyle)
-	lines = appendSessionAPIStats(lines, "Last session API", m.detailLastSessionStats, sectionStyle, labelStyle, valueStyle)
+	lines = appendSessionAPIStats(lines, "Current session API", m.detailCurrentSessionStats, m.detailCurrentSessionToolCalls, sectionStyle, labelStyle, valueStyle)
+	lines = appendSessionAPIStats(lines, "Last session API", m.detailLastSessionStats, m.detailLastSessionToolCalls, sectionStyle, labelStyle, valueStyle)
 
 	// Current retained context statistics.
 	if m.detailContextStats.Entries > 0 {
@@ -1529,7 +1543,7 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", minutes)
 }
 
-func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenStats, sectionStyle, labelStyle, valueStyle lipgloss.Style) []string {
+func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenStats, toolCalls int64, sectionStyle, labelStyle, valueStyle lipgloss.Style) []string {
 	if stats.APICalls <= 0 {
 		return lines
 	}
@@ -1538,6 +1552,8 @@ func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenSt
 	lines = append(lines, "")
 	lines = append(lines, "    "+labelStyle.Render("api_calls:                 ")+
 		valueStyle.Render(fmt.Sprintf("%d", stats.APICalls)))
+	lines = append(lines, "    "+labelStyle.Render("tool_calls:                ")+
+		valueStyle.Render(fmt.Sprintf("%d", toolCalls)))
 	lines = append(lines, "    "+labelStyle.Render("tokens:                    ")+
 		valueStyle.Render(formatComma(tokens)))
 	lines = append(lines, "    "+labelStyle.Render("input / output / thinking: ")+
@@ -1548,6 +1564,8 @@ func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenSt
 		valueStyle.Render(formatCacheRate(stats.Cached, stats.Input)))
 	lines = append(lines, "    "+labelStyle.Render("tokens/api_call:           ")+
 		valueStyle.Render(formatComma(avgPerCall(tokens, stats.APICalls))))
+	lines = append(lines, "    "+labelStyle.Render("tool_calls/api_call:       ")+
+		valueStyle.Render(fmt.Sprintf("%.2f", float64(toolCalls)/float64(stats.APICalls))))
 	if stats.HasCodexTransferMode {
 		lines = append(lines, "    "+labelStyle.Render("transfer full / incremental: ")+
 			valueStyle.Render(fmt.Sprintf("%d / %d", stats.CodexFull, stats.CodexIncremental)))

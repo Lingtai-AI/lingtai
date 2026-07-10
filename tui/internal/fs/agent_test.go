@@ -547,6 +547,97 @@ func TestSumMoltSessionTokenLedgerSplitsCurrentAndLastMoltWindows(t *testing.T) 
 	}
 }
 
+func TestSumMoltSessionToolCallsCountsCurrentAndLastWindows(t *testing.T) {
+	agentDir := filepath.Join(t.TempDir(), "agent")
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previousMolt := time.Date(2026, 6, 20, 3, 0, 0, 0, time.UTC)
+	latestMolt := time.Date(2026, 6, 20, 4, 0, 0, 0, time.UTC)
+	// No sqlite sidecar: windows and counts both resolve from events.jsonl.
+	writeLines(t, filepath.Join(logsDir, "events.jsonl"), []string{
+		fmt.Sprintf(`{"type":"psyche_molt","ts":%d}`, previousMolt.Unix()),
+		// tool_call before the previous molt -> neither window.
+		fmt.Sprintf(`{"type":"tool_call","ts":%d,"name":"old"}`, previousMolt.Add(-time.Minute).Unix()),
+		// last window [previousMolt, latestMolt): two tool_calls, boundaries inclusive of the lower bound.
+		fmt.Sprintf(`{"type":"tool_call","ts":%d,"name":"last-boundary"}`, previousMolt.Unix()),
+		fmt.Sprintf(`{"type":"tool_call","ts":%d,"name":"last"}`, previousMolt.Add(time.Minute).Unix()),
+		// a tool_result in the last window must be ignored.
+		fmt.Sprintf(`{"type":"tool_result","ts":%d}`, previousMolt.Add(2*time.Minute).Unix()),
+		fmt.Sprintf(`{"type":"psyche_molt","ts":%d}`, latestMolt.Unix()),
+		// current window [latestMolt, inf): two tool_calls.
+		fmt.Sprintf(`{"type":"tool_call","ts":%d,"name":"current-boundary"}`, latestMolt.Unix()),
+		fmt.Sprintf(`{"type":"tool_call","ts":%d,"name":"current"}`, latestMolt.Add(time.Minute).Unix()),
+	})
+
+	stats := SumMoltSessionToolCalls(agentDir)
+	if stats.Current != 2 {
+		t.Fatalf("current tool_call count = %d, want 2", stats.Current)
+	}
+	if stats.Last != 2 {
+		t.Fatalf("last tool_call count = %d, want 2", stats.Last)
+	}
+}
+
+// TestSumMoltSessionToolCallsCacheInvalidatesOnEventsChange proves the tool-call
+// count cache is keyed on the EVENTS store, not the token ledger: appending a
+// tool_call event (and nothing to the ledger) must refresh the count, so a
+// ledger-only freshness change can never serve a stale tool count.
+func TestSumMoltSessionToolCallsCacheInvalidatesOnEventsChange(t *testing.T) {
+	agentDir := filepath.Join(t.TempDir(), "agent")
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	molt := time.Unix(4000, 0).UTC()
+	eventsPath := filepath.Join(logsDir, "events.jsonl")
+	writeLines(t, eventsPath, []string{
+		fmt.Sprintf(`{"type":"psyche_molt","ts":%d}`, molt.Unix()),
+		fmt.Sprintf(`{"type":"tool_call","ts":%d}`, molt.Add(time.Minute).Unix()),
+	})
+	// Keep an invalid derived sidecar present so SQLite queries fall back to the
+	// authoritative JSONL. The cache must still key on events.jsonl; keying on
+	// the merely-present sidecar would make the second result stale.
+	if err := os.WriteFile(filepath.Join(logsDir, "log.sqlite"), []byte("not sqlite"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A token ledger is intentionally present but left UNCHANGED while only the
+	// events store grows, to prove the tool-count cache does not key on it.
+	if err := os.WriteFile(filepath.Join(logsDir, "token_ledger.jsonl"),
+		[]byte(fmt.Sprintf(`{"ts":%q,"input":1,"output":1}`+"\n", molt.Add(time.Minute).Format(time.RFC3339))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := SumMoltSessionToolCalls(agentDir)
+	if stats.Current != 1 {
+		t.Fatalf("initial current tool_call count = %d, want 1", stats.Current)
+	}
+	// Second call is a cache hit (events store unchanged) -> same result.
+	stats = SumMoltSessionToolCalls(agentDir)
+	if stats.Current != 1 {
+		t.Fatalf("cached current tool_call count = %d, want 1", stats.Current)
+	}
+
+	// Append a new tool_call to the events store ONLY (ledger untouched).
+	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(fmt.Sprintf(`{"type":"tool_call","ts":%d}`+"\n", molt.Add(2*time.Minute).Unix())); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stats = SumMoltSessionToolCalls(agentDir)
+	if stats.Current != 2 {
+		t.Fatalf("after events-only append, current tool_call count = %d, want 2 (events-keyed cache must invalidate)", stats.Current)
+	}
+}
+
 func TestSumMoltSessionTokenLedgerCacheInvalidatesOnLedgerChange(t *testing.T) {
 	agentDir := filepath.Join(t.TempDir(), "agent")
 	logsDir := filepath.Join(agentDir, "logs")

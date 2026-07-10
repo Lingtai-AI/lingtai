@@ -231,6 +231,104 @@ func storeMoltWindow(agentDir string, w moltWindow) {
 	moltWindowCache.byDir[agentDir] = w
 }
 
+// QueryMoltSessionToolCallCounts counts lifecycle type='tool_call' events in
+// the same current and previous molt-session windows QueryMoltSessionWindows
+// resolves. currentSince is the current window lower bound (open-ended); when
+// a previous session exists (lastBefore non-zero) the previous window is
+// [lastSince, lastBefore). A zero currentSince (no psyche_molt yet) counts
+// every tool_call event as current, matching the token-ledger "current = all"
+// semantics. tool_result events are never counted.
+//
+// It runs a single bounded COUNT pass over tool_call rows at/after the oldest
+// relevant window lower bound, under the same conservative deadline and sqlite
+// busy_timeout as the molt-window query. Ctrl+D detail refresh reaches this from
+// the Bubble Tea update path (never View rendering), so the deadline caps the
+// synchronous wait. It returns ok=false on a missing sidecar/binary, timeout, or
+// query error so the caller falls back to events.jsonl.
+func QueryMoltSessionToolCallCounts(agentDir string, currentSince, lastSince, lastBefore time.Time) (current, last int64, ok bool, err error) {
+	db := DBPath(agentDir)
+	if _, err := os.Stat(db); err != nil {
+		return 0, 0, false, fmt.Errorf("sqlite sidecar not found: %s", db)
+	}
+	bin, err := findSQLite3()
+	if err != nil {
+		return 0, 0, false, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), moltSessionWindowQueryTimeout)
+	defer cancel()
+
+	cs := unixFloatSeconds(currentSince)
+	ls := unixFloatSeconds(lastSince)
+	lb := unixFloatSeconds(lastBefore)
+	// Scan only tool_call rows at/after the oldest relevant lower bound. The
+	// previous window only exists when lastBefore is set; until then its lower
+	// bound is irrelevant and the scan starts at the current bound (or 0 when
+	// there has been no molt at all, which makes the current bucket count every
+	// tool_call row, matching the ledger).
+	scanLower := cs
+	if !lastBefore.IsZero() {
+		scanLower = ls
+	}
+	// COUNT(CASE WHEN ... THEN 1 END) yields 0 (not NULL) for an empty bucket,
+	// so a window with no tool_call rows reports 0 without a COALESCE. The
+	// previous bucket's conditions are gated on lastBefore > 0 so they collapse
+	// to a never-true predicate when there is no previous session. Rebuilt
+	// sidecars may also contain daemon event logs; exclude those so these counts
+	// match the main-agent-only token-ledger API rows. NULL scope/source_kind is
+	// kept for compatibility with older sidecars that predate trace metadata.
+	const mainAgentToolCallFilter = `type='tool_call' ` +
+		`AND (scope IS NULL OR scope != 'daemon') ` +
+		`AND (source_kind IS NULL OR source_kind != 'daemon_events')`
+	sql := fmt.Sprintf(
+		`SELECT COUNT(CASE WHEN ts >= %s THEN 1 END), `+
+			`COUNT(CASE WHEN %s > 0 AND ts >= %s AND ts < %s THEN 1 END) `+
+			`FROM events WHERE %s AND ts >= %s`,
+		cs, lb, ls, lb, mainAgentToolCallFilter, scanLower,
+	)
+	out, err := exec.CommandContext(ctx, bin,
+		"-separator", "\x1f",
+		"-cmd", fmt.Sprintf(".timeout %d", moltSessionWindowBusyTimeoutMS),
+		db, sql,
+	).Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return 0, 0, false, fmt.Errorf("sqlite3 tool-call count query timed out after %s", moltSessionWindowQueryTimeout)
+		}
+		if ee, ok := err.(*exec.ExitError); ok {
+			if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+				return 0, 0, false, fmt.Errorf("sqlite3: %s", msg)
+			}
+		}
+		return 0, 0, false, fmt.Errorf("sqlite3 tool-call count query failed: %w", err)
+	}
+
+	row := strings.Split(strings.TrimSpace(string(out)), "\x1f")
+	if len(row) < 2 {
+		return 0, 0, false, fmt.Errorf("sqlite3 tool-call count: unexpected output %q", strings.TrimSpace(string(out)))
+	}
+	current, perr := strconv.ParseInt(strings.TrimSpace(row[0]), 10, 64)
+	if perr != nil {
+		return 0, 0, false, fmt.Errorf("sqlite3 tool-call current count %q: %w", row[0], perr)
+	}
+	last, perr = strconv.ParseInt(strings.TrimSpace(row[1]), 10, 64)
+	if perr != nil {
+		return 0, 0, false, fmt.Errorf("sqlite3 tool-call last count %q: %w", row[1], perr)
+	}
+	return current, last, true, nil
+}
+
+// unixFloatSeconds renders a molt-window bound as a decimal seconds literal for
+// interpolation into a COUNT query's ts comparison. FormatFloat with precision
+// -1 preserves the float64 representation of the time's nanosecond value without
+// imposing an arbitrary decimal precision. A zero time renders as "0".
+func unixFloatSeconds(t time.Time) string {
+	if t.IsZero() {
+		return "0"
+	}
+	return strconv.FormatFloat(float64(t.UnixNano())/1e9, 'f', -1, 64)
+}
+
 // QueryRecentMoltTimes fetches the most recent psyche_molt (context rebuild)
 // timestamps from the sqlite sidecar, newest first, capped at limit. It is a
 // targeted, LIMIT-bounded query — never a full table scan. Used to mark
