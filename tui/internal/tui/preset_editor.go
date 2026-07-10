@@ -882,6 +882,22 @@ func (m PresetEditorModel) isCodexProvider() bool {
 	return asString(m.llmMap()["provider"]) == "codex"
 }
 
+func (m PresetEditorModel) isOpenAICompat() bool {
+	return asString(m.llmMap()["api_compat"]) == "openai"
+}
+
+func (m PresetEditorModel) supportsOpenAIControls() bool {
+	if !m.isOpenAICompat() {
+		return false
+	}
+	switch asString(m.llmMap()["provider"]) {
+	case "openai", "custom", "grok", "qwen", "kimi", "nvidia":
+		return true
+	default:
+		return false
+	}
+}
+
 // codexAccountRefs returns the selectable codex_auth_path values for the
 // account picker on the feAPIKey row: "" (legacy/default account) first, then
 // each per-account file's home-shortened ref. Order is stable so ←/→ cycling
@@ -996,6 +1012,16 @@ func normalizeServiceTier(manifest map[string]interface{}) {
 	delete(llm, "service_tier")
 }
 
+func normalizeOpenAIControls(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil || llmSupportsOpenAIControls(llm) {
+		return
+	}
+	for _, key := range openAIControlKeys {
+		delete(llm, key)
+	}
+}
+
 func normalizeThinking(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil {
@@ -1017,6 +1043,7 @@ func normalizeThinking(manifest map[string]interface{}) {
 }
 
 func normalizeLLMForCommit(manifest map[string]interface{}) {
+	normalizeOpenAIControls(manifest)
 	normalizeServiceTier(manifest)
 	normalizeThinking(manifest)
 }
@@ -1069,6 +1096,9 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "custom"}
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
+		if !m.supportsOpenAIControls() {
+			m.clearOpenAIControls()
+		}
 		if newProvider != "codex" {
 			delete(m.llmMap(), "thinking")
 		}
@@ -1116,7 +1146,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		}
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
-		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
+		m.setAPICompat(cycleString(opts, m.fieldString(f), dir))
 	case feAPIMode:
 		m.setAPIMode(cycleString([]string{"auto", "chat_completions", "responses"}, m.fieldString(f), dir))
 	case feServiceTier:
@@ -1473,8 +1503,12 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feProvider, m.row(feProvider, lbl("provider"), asString(llm["provider"]), width-4)))
 	rows = append(rows, row(feModel, m.row(feModel, lbl("model"), asString(llm["model"]), width-4)))
 	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
-	rows = append(rows, row(feAPIMode, m.row(feAPIMode, lbl("api_mode"), m.fieldString(feAPIMode), width-4)))
-	rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.fieldString(feServiceTier), width-4)))
+	if m.fieldVisible(feAPIMode) {
+		rows = append(rows, row(feAPIMode, m.row(feAPIMode, lbl("api_mode"), m.fieldString(feAPIMode), width-4)))
+	}
+	if m.fieldVisible(feServiceTier) {
+		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.fieldString(feServiceTier), width-4)))
+	}
 	if m.fieldVisible(feThinking) {
 		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.codexThinking(), width-4)))
 	}
@@ -1928,6 +1962,10 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
+	case feAPIMode:
+		return m.supportsOpenAIControls()
+	case feServiceTier:
+		return m.supportsOpenAIControls()
 	case feThinking:
 		return m.isCodexProvider()
 	default:
@@ -2174,6 +2212,42 @@ func apiModeDisplay(llm map[string]interface{}) string {
 		return "responses"
 	}
 	return "auto"
+}
+
+func (m *PresetEditorModel) setAPICompat(compat string) {
+	llm := m.llmMap()
+	llm["api_compat"] = compat
+	if m.supportsOpenAIControls() {
+		return
+	}
+	m.clearOpenAIControls()
+}
+
+func (m *PresetEditorModel) clearOpenAIControls() {
+	llm := m.llmMap()
+	for _, key := range openAIControlKeys {
+		delete(llm, key)
+	}
+}
+
+func llmSupportsOpenAIControls(llm map[string]interface{}) bool {
+	if asString(llm["api_compat"]) != "openai" {
+		return false
+	}
+	switch asString(llm["provider"]) {
+	case "openai", "custom", "grok", "qwen", "kimi", "nvidia":
+		return true
+	default:
+		return false
+	}
+}
+
+var openAIControlKeys = []string{
+	"wire_api",
+	"service_tier",
+	"use_responses",
+	"use_responses_api",
+	"force_responses",
 }
 
 func (m *PresetEditorModel) setAPIMode(mode string) {

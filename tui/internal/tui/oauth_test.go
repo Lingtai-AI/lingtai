@@ -327,7 +327,7 @@ func drainSession(t *testing.T, session *codexOAuthSession, timeout time.Duratio
 func TestStartOAuthFlow_Cancellable(t *testing.T) {
 	const epoch uint64 = 42
 	ctx, cancel := context.WithCancel(context.Background())
-	session := startOAuthFlow(ctx, epoch, false)
+	session := startOAuthFlowWithDeps(ctx, epoch, false, func(string) {}, "http://127.0.0.1/unused")
 
 	// Give the goroutine a moment to bind the listener, then cancel.
 	go func() {
@@ -369,7 +369,16 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := startOAuthFlow(ctx, epoch, false)
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"local-access","refresh_token":"local-refresh","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	opened := make(chan string, 1)
+	session := startOAuthFlowWithDeps(ctx, epoch, false, func(authURL string) {
+		opened <- authURL
+	}, tokenServer.URL)
 	first := drainSession(t, session, 3*time.Second)
 	urlMsg, ok := first.(CodexOAuthURLMsg)
 	if !ok {
@@ -386,6 +395,14 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 	state := authURL.Query().Get("state")
 	if state == "" {
 		t.Fatal("AuthURL did not include state")
+	}
+	select {
+	case got := <-opened:
+		if got != urlMsg.AuthURL {
+			t.Fatalf("browser opener URL = %q, want %q", got, urlMsg.AuthURL)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("browser opener was not called")
 	}
 
 	resp, err := http.Get(urlMsg.RedirectURI + "?code=browser-code&state=" + url.QueryEscape(state))
@@ -405,8 +422,11 @@ func TestStartOAuthFlow_LoopbackCallbackCompletesLegacyBrowserFlow(t *testing.T)
 		raw := drainSession(t, session, 3*time.Second)
 		switch msg := raw.(type) {
 		case CodexOAuthDoneMsg:
-			if msg.Err == nil && msg.Tokens == nil {
-				t.Fatalf("terminal message had neither tokens nor error: %#v", msg)
+			if msg.Err != nil {
+				t.Fatalf("loopback flow failed: %v", msg.Err)
+			}
+			if msg.Tokens == nil || msg.Tokens.AccessToken != "local-access" {
+				t.Fatalf("loopback flow tokens = %#v, want local token response", msg.Tokens)
 			}
 			return
 		case CodexOAuthURLMsg:
@@ -434,7 +454,7 @@ func TestStartOAuthFlow_EpochEchoed(t *testing.T) {
 	defer l2.Close()
 
 	const epoch uint64 = 7
-	session := startOAuthFlow(context.Background(), epoch, false)
+	session := startOAuthFlowWithDeps(context.Background(), epoch, false, func(string) {}, "http://127.0.0.1/unused")
 	raw := drainSession(t, session, 2*time.Second)
 	msg, ok := raw.(CodexOAuthDoneMsg)
 	if !ok {

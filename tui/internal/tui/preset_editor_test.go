@@ -41,6 +41,17 @@ func testPresetEditorPreset() preset.Preset {
 	}
 }
 
+func testOpenAICompatCustomPreset() preset.Preset {
+	p := testPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["provider"] = "custom"
+	llm["model"] = "gpt-test"
+	llm["api_compat"] = "openai"
+	llm["base_url"] = "https://example.test/v1"
+	llm["api_key_env"] = "CUSTOM_API_KEY"
+	return p
+}
+
 func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
 	return testCodexPresetEditorPresetWithThinking(serviceTier, nil)
 }
@@ -227,9 +238,7 @@ func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
 	m := NewPresetEditorModel(p, "en", keys, "")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	for i := 0; i < 11; i++ {
-		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
+	m.cursor = editorFieldOrderIndex(t, feAPIKey)
 	if editorFieldOrder[m.cursor] != feAPIKey {
 		t.Fatalf("expected cursor on feAPIKey, got %v", editorFieldOrder[m.cursor])
 	}
@@ -302,7 +311,7 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 }
 
 func TestPresetEditorAPIModeWritesWireAPI(t *testing.T) {
-	p := testPresetEditorPreset()
+	p := testOpenAICompatCustomPreset()
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	if got := m.fieldString(feAPIMode); got != "auto" {
 		t.Fatalf("missing wire_api should display as auto, got %q", got)
@@ -340,6 +349,141 @@ func TestPresetEditorAPIModeWritesWireAPI(t *testing.T) {
 		if _, ok := llm[key]; ok {
 			t.Fatalf("responses mode should not persist low-level %s: %#v", key, llm)
 		}
+	}
+}
+
+func TestPresetEditorOpenAIControlsFollowAPICompat(t *testing.T) {
+	tests := []struct {
+		name    string
+		compat  string
+		visible bool
+	}{
+		{name: "openai", compat: "openai", visible: true},
+		{name: "anthropic", compat: "anthropic", visible: false},
+		{name: "unset", visible: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := testOpenAICompatCustomPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			if tc.compat == "" {
+				delete(llm, "api_compat")
+			} else {
+				llm["api_compat"] = tc.compat
+			}
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+			for _, field := range []editorField{feAPIMode, feServiceTier} {
+				if got := m.fieldVisible(field); got != tc.visible {
+					t.Fatalf("field %v visibility = %v, want %v for api_compat=%q", field, got, tc.visible, tc.compat)
+				}
+				found := false
+				for _, row := range m.formRows(m.width) {
+					if row.hasField && row.field == field {
+						found = true
+						break
+					}
+				}
+				if found != tc.visible {
+					t.Fatalf("field %v rendered = %v, want %v for api_compat=%q", field, found, tc.visible, tc.compat)
+				}
+			}
+		})
+	}
+}
+
+func TestPresetEditorOpenAIControlsSupportedProviders(t *testing.T) {
+	for _, provider := range []string{"openai", "custom", "grok", "qwen", "kimi", "nvidia"} {
+		t.Run(provider, func(t *testing.T) {
+			p := testOpenAICompatCustomPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = provider
+			llm["api_compat"] = "openai"
+
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+			for _, field := range []editorField{feAPIMode, feServiceTier} {
+				if !m.fieldVisible(field) {
+					t.Fatalf("field %v should be visible for provider=%q with api_compat=openai", field, provider)
+				}
+			}
+		})
+	}
+}
+
+func TestPresetEditorOpenAIControlsRequireSupportedProvider(t *testing.T) {
+	for _, provider := range []string{"minimax", "deepseek", "zhipu", "mimo", "openrouter", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			p := testOpenAICompatCustomPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = provider
+			llm["wire_api"] = "responses"
+			llm["service_tier"] = "fast"
+
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+			for _, field := range []editorField{feAPIMode, feServiceTier} {
+				if m.fieldVisible(field) {
+					t.Fatalf("field %v should be hidden for provider=%q despite api_compat=openai", field, provider)
+				}
+			}
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+			for _, key := range openAIControlKeys {
+				if _, ok := committedLLM[key]; ok {
+					t.Fatalf("unsupported provider=%q commit should drop %s: %#v", provider, key, committedLLM)
+				}
+			}
+		})
+	}
+}
+
+func TestPresetEditorSwitchingAwayFromOpenAIClearsAndSkipsOpenAIControls(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        int
+		wantCompat string
+	}{
+		{name: "anthropic", dir: +1, wantCompat: "anthropic"},
+		{name: "unset", dir: -1, wantCompat: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPresetEditorModelWithBuiltinFlag(testOpenAICompatCustomPreset(), "en", nil, "", false)
+			llm := m.llmMap()
+			llm["wire_api"] = "responses"
+			llm["service_tier"] = "fast"
+			llm["use_responses"] = true
+			llm["use_responses_api"] = true
+			llm["force_responses"] = true
+			m.cursor = editorFieldOrderIndex(t, feAPICompat)
+
+			m.cycleFocused(tc.dir)
+			if got := m.fieldString(feAPICompat); got != tc.wantCompat {
+				t.Fatalf("api_compat after cycling = %q, want %q", got, tc.wantCompat)
+			}
+			for _, key := range []string{
+				"wire_api",
+				"service_tier",
+				"use_responses",
+				"use_responses_api",
+				"force_responses",
+			} {
+				if _, ok := llm[key]; ok {
+					t.Fatalf("switching to api_compat=%q should remove OpenAI-only %s: %#v", tc.wantCompat, key, llm)
+				}
+			}
+			m.moveCursor(+1)
+			if got := editorFieldOrder[m.cursor]; got != feBaseURL {
+				t.Fatalf("cursor after api_compat=%q = %v, want feBaseURL", tc.wantCompat, got)
+			}
+		})
 	}
 }
 
@@ -515,11 +659,11 @@ func TestSyncCapsToModelLeavesCapsAloneForUnknownModel(t *testing.T) {
 }
 
 func TestPresetEditorServiceTierFastAndDefault(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAICompatCustomPreset(), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feServiceTier)
 
 	if !m.fieldVisible(feServiceTier) {
-		t.Fatalf("codex service tier row should be visible")
+		t.Fatalf("OpenAI-compatible service tier row should be visible")
 	}
 	if got := m.fieldString(feServiceTier); got != "" {
 		t.Fatalf("empty raw llm.service_tier value = %q, want empty string", got)
@@ -549,35 +693,39 @@ func TestPresetEditorServiceTierFastAndDefault(t *testing.T) {
 	}
 }
 
-func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T) {
+func TestPresetEditorCodexHidesAndDropsOpenAIControls(t *testing.T) {
 	cases := []struct {
 		name        string
 		serviceTier interface{}
-		wantDisplay string
-		wantSaved   bool
-		wantValue   string
 	}{
-		{name: "absent", serviceTier: nil, wantDisplay: ""},
-		{name: "fast", serviceTier: "fast", wantDisplay: "fast", wantSaved: true, wantValue: "fast"},
-		{name: "unknown", serviceTier: "flex", wantDisplay: "", wantSaved: true, wantValue: "flex"},
-		{name: "blank", serviceTier: "  ", wantDisplay: "", wantSaved: false},
+		{name: "absent", serviceTier: nil},
+		{name: "fast", serviceTier: "fast"},
+		{name: "unknown", serviceTier: "flex"},
+		{name: "blank", serviceTier: "  "},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(tc.serviceTier), "en", nil, "", false)
-			if got := m.fieldString(feServiceTier); got != tc.wantDisplay {
-				t.Fatalf("service tier display = %q, want %q", got, tc.wantDisplay)
+			llm := m.llmMap()
+			llm["wire_api"] = "responses"
+			llm["use_responses"] = true
+			llm["use_responses_api"] = true
+			llm["force_responses"] = true
+
+			if m.fieldVisible(feAPIMode) {
+				t.Fatalf("direct codex API mode row should require api_compat=openai")
+			}
+			if m.fieldVisible(feServiceTier) {
+				t.Fatalf("direct codex service tier row should require api_compat=openai")
 			}
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
-			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
-			got, saved := llm["service_tier"].(string)
-			if saved != tc.wantSaved {
-				t.Fatalf("committed service_tier saved=%v, want %v; value=%#v", saved, tc.wantSaved, llm["service_tier"])
-			}
-			if saved && got != tc.wantValue {
-				t.Fatalf("committed service_tier=%q, want %q", got, tc.wantValue)
+			committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
+			for _, key := range openAIControlKeys {
+				if _, ok := committedLLM[key]; ok {
+					t.Fatalf("codex commit should drop hidden OpenAI-only %s: %#v", key, committedLLM)
+				}
 			}
 		})
 	}
@@ -723,17 +871,17 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 	}
 }
 
-func TestPresetEditorServiceTierVisibleForNonCodexAndPreservesUnknownTier(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+func TestPresetEditorServiceTierVisibleForOpenAICompatAndPreservesUnknownTier(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testOpenAICompatCustomPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
 	if !m.fieldVisible(feServiceTier) {
-		t.Fatalf("service tier row should be visible for non-codex provider")
+		t.Fatalf("service tier row should be visible for OpenAI-compatible provider")
 	}
 	for _, text := range []string{"service_tier", "normal", "fast"} {
 		if !strings.Contains(view, text) {
-			t.Fatalf("non-codex editor should render service_tier option %q; view:\n%s", text, view)
+			t.Fatalf("OpenAI-compatible editor should render service_tier option %q; view:\n%s", text, view)
 		}
 	}
 
@@ -771,7 +919,7 @@ func TestPresetEditorServiceTierVisibleForNonCodexAndPreservesUnknownTier(t *tes
 	}
 }
 
-func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
+func TestPresetEditorProviderSwitchDropsHiddenServiceTier(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset("fast"), "en", nil, "", false)
 	m.cursor = editorFieldOrderIndex(t, feProvider)
 
@@ -780,15 +928,15 @@ func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
 	if got := llm["provider"]; got != "custom" {
 		t.Fatalf("provider after cycling from codex = %#v, want custom", got)
 	}
-	if got, _ := llm["service_tier"].(string); got != "fast" {
-		t.Fatalf("provider switch should preserve existing service_tier; got %#v", llm["service_tier"])
+	if _, ok := llm["service_tier"]; ok {
+		t.Fatalf("provider switch should clear hidden service_tier before commit; got %#v", llm["service_tier"])
 	}
 
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
-	if got, _ := committedLLM["service_tier"].(string); got != "fast" {
-		t.Fatalf("non-codex commit after provider switch should preserve service_tier; got %#v", committedLLM["service_tier"])
+	if _, ok := committedLLM["service_tier"]; ok {
+		t.Fatalf("non-openai commit after provider switch should drop hidden service_tier; got %#v", committedLLM["service_tier"])
 	}
 }
 

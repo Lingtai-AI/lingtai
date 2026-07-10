@@ -167,6 +167,20 @@ func generateState() string {
 // reusing the active session), false for first/bootstrap login and existing-
 // account re-auth.
 func startOAuthFlow(ctx context.Context, epoch uint64, forceLogin bool) *codexOAuthSession {
+	return startOAuthFlowWithDeps(ctx, epoch, forceLogin, openBrowser, codexTokenURL)
+}
+
+// startOAuthFlowWithDeps keeps browser launch and token exchange replaceable in
+// tests. Production callers use startOAuthFlow above; tests supply a no-op
+// opener and a local token endpoint so the suite has no desktop or network
+// side effects.
+func startOAuthFlowWithDeps(
+	ctx context.Context,
+	epoch uint64,
+	forceLogin bool,
+	openAuthURL func(string),
+	tokenURL string,
+) *codexOAuthSession {
 	ch := make(chan interface{}, 2)
 
 	go func() {
@@ -271,7 +285,9 @@ func startOAuthFlow(ctx context.Context, epoch uint64, forceLogin bool) *codexOA
 		authURL := buildAuthorizeURL(redirectURI, challenge, state, forceLogin)
 
 		ch <- CodexOAuthURLMsg{AuthURL: authURL, RedirectURI: redirectURI, Epoch: epoch}
-		openBrowser(authURL)
+		if openAuthURL != nil {
+			openAuthURL(authURL)
+		}
 
 		// Wait for browser callback, server error, timeout, or cancellation.
 		timer := time.NewTimer(oauthTimeout)
@@ -301,7 +317,7 @@ func startOAuthFlow(ctx context.Context, epoch uint64, forceLogin bool) *codexOA
 			return
 		default:
 		}
-		tokens, err := exchangeCodeForTokens(codexTokenURL, code, verifier, redirectURI)
+		tokens, err := exchangeCodeForTokens(tokenURL, code, verifier, redirectURI)
 		if err != nil {
 			emitDone(CodexOAuthDoneMsg{Err: fmt.Errorf("token exchange: %w", err)})
 			return
