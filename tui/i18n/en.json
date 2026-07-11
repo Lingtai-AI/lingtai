@@ -629,7 +629,7 @@
   "recipe.local_found": "✓ Found .recipe/ — auto-selected Custom",
   "recipe.imported": "Imported",
   "recipe.agora": "From Agora",
-  "cmd.btw": "Ask the agent a side question (delivered as an insight inquiry — the agent reflects and responds without interrupting its current work)",
+  "cmd.btw": "Ask a mirrored copy of the agent a side question — a one-shot, non-binding reflection that does not steer, task, or interrupt the active agent (send a normal message for that)",
   "cmd.help": "Open the help browser — an overview of how slash commands work plus a per-command reference page for every command",
   "cmd.sleep": "Put agent to sleep (/sleep all for all agents). Sleeping agents preserve state and can be woken with /cpr",
   "cmd.suspend": "Suspend agent — freeze the process entirely (/suspend all for all agents). Must be revived with /cpr to resume",

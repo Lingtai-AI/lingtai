@@ -31,7 +31,7 @@ Use `/help` as the canonical human-facing markdown reference for slash commands.
 
 | Context | Suggest |
 |---------|---------|
-| Human asks a side question unrelated to the main task | `/btw` |
+| Human wants a quick reflective take from a mirrored copy of you while your current work keeps running | `/btw` — one-shot, no tools, cannot act on it; NOT a way to steer you, add a requirement, queue a task, set a reminder, or be remembered. For those, tell the human to send a normal message. |
 | Human says they're done or going away | `/sleep` or `/suspend all` |
 | Agent is unresponsive or stuck | `/refresh` (preferred) or `/cpr` |
 | Conversation has grown long and confused | `/clear` |

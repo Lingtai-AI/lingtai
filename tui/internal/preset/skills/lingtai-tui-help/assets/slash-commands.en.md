@@ -75,14 +75,22 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 
 ## Command reference
 
-### `/btw` — ask the agent a side question
+### `/btw` — ask a mirrored copy of the agent a side question
 **Usage:** `/btw <your question>`
 
-Delivers your question as an *insight inquiry*. The agent reflects and responds
-without interrupting the work it is currently doing — so you can probe its
-thinking mid-task without derailing it. Reach for it when you want the agent's
-take on something tangential and don't want to break its focus the way a normal
-message would.
+**`/btw` is not a way to steer the agent.** It launches a one-shot inquiry to a
+*separate mirror* of the agent: a copy with the conversation's text and thinking
+but no tools, which cannot act. The mirror answers on its own while the active
+agent keeps doing its current work, untouched. The answer may later reach the
+active agent as clearly-labeled context marked "not a direct new instruction" —
+so the agent may read it, but it is under no obligation to act on it.
+
+Because of that, `/btw` does **not** change the agent's direction, assign work,
+queue a side task, set a reminder, establish memory, or require any follow-up. If
+you want the agent to do something, take on a new requirement, remember or track
+something, or follow up, **send a normal message instead** — that is how you
+directly instruct the active agent. Reach for `/btw` only when you want a quick
+reflective take from the mirror and are content for it to be non-binding.
 
 ### `/insights` — request an insight now
 **Usage:** `/insights`
