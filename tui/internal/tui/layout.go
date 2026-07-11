@@ -40,7 +40,7 @@ func (b LayoutBudget) ChildWindowSize() tea.WindowSizeMsg {
 
 // topChromeRows reports how many rows the root reserves at the top: one for the
 // startup banner when non-empty, plus one for the global select-mode indicator
-// when select mode is on (any non-mail view). They stack when both are present.
+// when select mode is on (any non-mail view). They stack when present.
 func (a App) topChromeRows() int {
 	rows := 0
 	if a.startupBanner != "" {
@@ -90,8 +90,8 @@ func (a App) layoutBudget() LayoutBudget {
 // topChrome renders the root-owned top chrome (the rows counted by
 // topChromeRows). Returns "" when there is no top chrome. The returned string,
 // when non-empty, is exactly topChromeRows() rows tall and is composed ABOVE
-// the child content in View(). The startup banner and the select-mode indicator
-// stack (banner first) when both are present.
+// the child content in View(). The startup banner and select-mode indicator
+// stack in that order when present.
 func (a App) topChrome() string {
 	var rows []string
 	if a.startupBanner != "" {

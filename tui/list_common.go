@@ -10,8 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
-	"github.com/anthropics/lingtai-tui/internal/processscan"
-	uitui "github.com/anthropics/lingtai-tui/internal/tui"
+	"github.com/anthropics/lingtai-tui/internal/inventory"
 )
 
 type listOptions struct {
@@ -19,27 +18,6 @@ type listOptions struct {
 	Detailed  bool
 	Admin     bool
 	JSON      bool
-}
-
-type listProc struct {
-	PID     string
-	Uptime  string
-	Agent   string
-	Project string
-	Dir     string
-	Info    listAgentInfo
-}
-
-type listAgentInfo struct {
-	Address        string
-	AgentName      string
-	Nickname       string
-	State          string
-	IsHuman        bool
-	IsOrchestrator bool
-	AdminSummary   string
-	IMHandles      string
-	ReadError      string
 }
 
 type listJSONOutput struct {
@@ -64,54 +42,6 @@ type listJSONProc struct {
 	ReadError  string             `json:"read_error,omitempty"`
 	Heartbeat  fs.HeartbeatStatus `json:"heartbeat"`
 	LockExists bool               `json:"lock_exists"`
-}
-
-func listProcsFromAgentProcesses(found []processscan.AgentProcess, filterDir string, selfPID int) []listProc {
-	procs := make([]listProc, 0, len(found))
-	for _, proc := range found {
-		if proc.PID == selfPID {
-			continue
-		}
-		agentDir := proc.AgentDir
-		if agentDir == "" {
-			var ok bool
-			agentDir, ok = processscan.ExtractAgentDir(proc.Command)
-			if !ok {
-				continue
-			}
-		}
-		if !agentDirInFilter(agentDir, filterDir) {
-			continue
-		}
-		procs = append(procs, listProc{
-			PID:     fmt.Sprint(proc.PID),
-			Uptime:  proc.Uptime,
-			Agent:   filepath.Base(agentDir),
-			Project: projectFromAgentDir(agentDir),
-			Dir:     agentDir,
-		})
-	}
-	return procs
-}
-
-func agentDirInFilter(agentDir, filterDir string) bool {
-	if filterDir == "" {
-		return true
-	}
-	lingtaiDir := filepath.Join(filterDir, ".lingtai")
-	if strings.HasPrefix(agentDir, lingtaiDir+string(filepath.Separator)) {
-		return true
-	}
-	return strings.HasPrefix(filepath.ToSlash(agentDir), filepath.ToSlash(lingtaiDir)+"/")
-}
-
-func projectFromAgentDir(agentDir string) string {
-	slashDir := filepath.ToSlash(agentDir)
-	idx := strings.Index(slashDir, "/.lingtai/")
-	if idx < 0 {
-		return ""
-	}
-	return agentDir[:idx]
 }
 
 func parseListArgs(args []string) (listOptions, error) {
@@ -144,187 +74,7 @@ func parseListArgs(args []string) (listOptions, error) {
 	return opts, nil
 }
 
-func loadListAgentInfo(agentDir, fallbackAgent string) listAgentInfo {
-	info := listAgentInfo{Address: fallbackAgent, AgentName: fallbackAgent, AdminSummary: "unknown"}
-
-	node, err := fs.ReadAgent(agentDir)
-	if err == nil {
-		info.Address = firstNonEmpty(node.Address, fallbackAgent)
-		info.AgentName = firstNonEmpty(node.AgentName, fallbackAgent)
-		info.Nickname = node.Nickname
-		info.State = node.State
-		info.IsHuman = node.IsHuman
-	} else {
-		info.ReadError = err.Error()
-	}
-
-	raw, err := fs.ReadAgentRaw(agentDir)
-	if err != nil {
-		if info.ReadError == "" {
-			info.ReadError = err.Error()
-		}
-		return info
-	}
-	info.IsOrchestrator = uitui.IsOrchestrator(raw)
-	info.AdminSummary = summarizeAdmin(raw["admin"])
-	if info.IsOrchestrator {
-		info.IsHuman = false
-	}
-	info.IMHandles = summarizeIMIdentities(agentDir)
-	return info
-}
-
-func summarizeIMIdentities(agentDir string) string {
-	identityDir := filepath.Join(agentDir, "system", "mcp_identities")
-	entries, err := os.ReadDir(identityDir)
-	if err != nil {
-		return ""
-	}
-	var parts []string
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		mcp := strings.TrimSuffix(entry.Name(), ".json")
-		data, err := os.ReadFile(filepath.Join(identityDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var doc map[string]interface{}
-		if json.Unmarshal(data, &doc) != nil {
-			continue
-		}
-		if docMCP, ok := doc["mcp"].(string); ok && docMCP != "" {
-			mcp = docMCP
-		}
-		accounts, _ := doc["accounts"].([]interface{})
-		if len(accounts) == 0 {
-			continue
-		}
-		var handles []string
-		for _, account := range accounts {
-			accountMap, ok := account.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if handle := publicHandle(accountMap); handle != "" {
-				handles = append(handles, handle)
-			}
-		}
-		if len(handles) > 0 {
-			parts = append(parts, fmt.Sprintf("%s:%s", mcp, strings.Join(handles, "/")))
-		}
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, ";")
-}
-
-func publicHandle(account map[string]interface{}) string {
-	preferred := []string{"bot_username", "username", "handle", "open_id", "user_id", "union_id", "chat_id", "email", "bot_id", "alias"}
-	for _, key := range preferred {
-		if value, ok := account[key]; ok {
-			if s := publicScalar(value); s != "" {
-				if key == "bot_username" || key == "username" {
-					return "@" + strings.TrimPrefix(s, "@")
-				}
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func publicScalar(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	case float64:
-		return fmt.Sprintf("%.0f", v)
-	}
-	return ""
-}
-
-func summarizeAdmin(adminRaw interface{}) string {
-	if adminRaw == nil {
-		return "admin=null"
-	}
-	adminMap, ok := adminRaw.(map[string]interface{})
-	if !ok {
-		return fmt.Sprintf("admin=%T", adminRaw)
-	}
-	if len(adminMap) == 0 {
-		return "admin={}"
-	}
-	keys := make([]string, 0, len(adminMap))
-	for k := range adminMap {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, adminMap[k]))
-	}
-	return strings.Join(parts, ",")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func roleLabel(info listAgentInfo) string {
-	switch {
-	case info.IsOrchestrator:
-		return "MAIN"
-	case info.IsHuman:
-		return "HUMAN"
-	case info.ReadError != "":
-		return "?"
-	default:
-		return "AGENT"
-	}
-}
-
-func annotateListProcs(procs []listProc) {
-	for i := range procs {
-		procs[i].Info = loadListAgentInfo(procs[i].Dir, procs[i].Agent)
-	}
-}
-
-func collapseListProcsByAgentDir(procs []listProc) []listProc {
-	if len(procs) < 2 {
-		return procs
-	}
-	out := make([]listProc, 0, len(procs))
-	indexByDir := map[string]int{}
-	for _, p := range procs {
-		if p.Dir == "" {
-			out = append(out, p)
-			continue
-		}
-		idx, ok := indexByDir[p.Dir]
-		if !ok {
-			indexByDir[p.Dir] = len(out)
-			out = append(out, p)
-			continue
-		}
-		status := fs.ReadStatus(p.Dir)
-		statusPID := ""
-		if status.Runtime.PID != 0 {
-			statusPID = fmt.Sprint(status.Runtime.PID)
-		}
-		if statusPID != "" && p.PID == statusPID {
-			out[idx] = p
-		}
-	}
-	return out
-}
-
-func printList(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts listOptions, showUptime bool) {
+func printList(w io.Writer, records []inventory.Record, opts listOptions, showUptime bool) {
 	if opts.Admin {
 		if showUptime {
 			fmt.Fprintf(w, "%-8s %-12s %-6s %-24s %-24s %-24s %-10s %-28s %-40s %s\n", "PID", "UPTIME", "ROLE", "ADMIN", "ADDRESS", "NAME", "STATE", "IM_HANDLES", "PROJECT", "AGENT_DIR")
@@ -345,75 +95,69 @@ func printList(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts 
 		}
 	}
 
-	for _, p := range procs {
-		project := p.Project
-		imHandles := firstNonEmpty(p.Info.IMHandles, "-")
-		if phantomDirs[p.Project] {
+	for _, r := range records {
+		project := r.Project
+		if r.Phantom {
 			project += " [PHANTOM]"
 		}
-		role := roleLabel(p.Info)
-		name := firstNonEmpty(p.Info.AgentName, p.Agent)
-		address := firstNonEmpty(p.Info.Address, p.Agent)
-		state := firstNonEmpty(p.Info.State, "unknown")
+		imHandles := firstNonEmpty(r.IMHandles, "-")
+		name := firstNonEmpty(r.AgentName, r.Agent)
+		address := firstNonEmpty(r.Address, r.Agent)
+		state := firstNonEmpty(r.State, "unknown")
+		role := string(r.Role)
+		pid := fmt.Sprint(r.PID)
 		if opts.Admin {
-			admin := p.Info.AdminSummary
-			if p.Info.ReadError != "" {
+			admin := r.AdminSummary
+			if r.ReadError != "" {
 				admin = "manifest unreadable"
 			}
 			if showUptime {
-				fmt.Fprintf(w, "%-8s %-12s %-6s %-24s %-24s %-24s %-10s %-28s %-40s %s\n", p.PID, p.Uptime, role, admin, address, name, state, imHandles, project, p.Dir)
+				fmt.Fprintf(w, "%-8s %-12s %-6s %-24s %-24s %-24s %-10s %-28s %-40s %s\n", pid, r.Uptime, role, admin, address, name, state, imHandles, project, r.AgentDir)
 			} else {
-				fmt.Fprintf(w, "%-8s %-6s %-24s %-24s %-24s %-10s %-28s %-40s %s\n", p.PID, role, admin, address, name, state, imHandles, project, p.Dir)
+				fmt.Fprintf(w, "%-8s %-6s %-24s %-24s %-24s %-10s %-28s %-40s %s\n", pid, role, admin, address, name, state, imHandles, project, r.AgentDir)
 			}
 		} else if opts.Detailed {
 			if showUptime {
-				fmt.Fprintf(w, "%-8s %-12s %-6s %-10s %-24s %-24s %-18s %-28s %-40s %s\n", p.PID, p.Uptime, role, state, address, name, p.Info.Nickname, imHandles, project, p.Dir)
+				fmt.Fprintf(w, "%-8s %-12s %-6s %-10s %-24s %-24s %-18s %-28s %-40s %s\n", pid, r.Uptime, role, state, address, name, r.Nickname, imHandles, project, r.AgentDir)
 			} else {
-				fmt.Fprintf(w, "%-8s %-6s %-10s %-24s %-24s %-18s %-28s %-40s %s\n", p.PID, role, state, address, name, p.Info.Nickname, imHandles, project, p.Dir)
+				fmt.Fprintf(w, "%-8s %-6s %-10s %-24s %-24s %-18s %-28s %-40s %s\n", pid, role, state, address, name, r.Nickname, imHandles, project, r.AgentDir)
 			}
 		} else {
 			if showUptime {
-				fmt.Fprintf(w, "%-8s %-12s %-6s %-30s %s\n", p.PID, p.Uptime, role, p.Agent, project)
+				fmt.Fprintf(w, "%-8s %-12s %-6s %-30s %s\n", pid, r.Uptime, role, r.Agent, project)
 			} else {
-				fmt.Fprintf(w, "%-8s %-6s %-30s %s\n", p.PID, role, p.Agent, project)
+				fmt.Fprintf(w, "%-8s %-6s %-30s %s\n", pid, role, r.Agent, project)
 			}
 		}
 	}
 }
 
-func printListJSON(w io.Writer, procs []listProc, phantomDirs map[string]bool, opts listOptions) {
-	phantoms := make([]string, 0, len(phantomDirs))
-	for dir := range phantomDirs {
-		phantoms = append(phantoms, dir)
-	}
+func printListJSON(w io.Writer, snap inventory.Snapshot, opts listOptions) {
+	phantoms := append([]string(nil), snap.PhantomDirs...)
 	sort.Strings(phantoms)
 
 	out := listJSONOutput{
 		Status:      "ok",
-		Count:       len(procs),
+		Count:       len(snap.Records),
 		FilterDir:   opts.FilterDir,
-		Processes:   make([]listJSONProc, 0, len(procs)),
+		Processes:   make([]listJSONProc, 0, len(snap.Records)),
 		PhantomDirs: phantoms,
 	}
-	for _, p := range procs {
-		role := roleLabel(p.Info)
-		address := firstNonEmpty(p.Info.Address, p.Agent)
-		name := firstNonEmpty(p.Info.AgentName, p.Agent)
-		state := firstNonEmpty(p.Info.State, "unknown")
+	for _, r := range snap.Records {
 		out.Processes = append(out.Processes, listJSONProc{
-			PID:        p.PID,
-			Uptime:     p.Uptime,
-			Role:       role,
-			Agent:      p.Agent,
-			Project:    p.Project,
-			AgentDir:   p.Dir,
-			Address:    address,
-			AgentName:  name,
-			Nickname:   p.Info.Nickname,
-			State:      state,
-			ReadError:  p.Info.ReadError,
-			Heartbeat:  fs.ReadHeartbeat(p.Dir, fs.AgentAliveThresholdSec),
-			LockExists: fileExists(filepath.Join(p.Dir, ".agent.lock")),
+			PID:        fmt.Sprint(r.PID),
+			Uptime:     r.Uptime,
+			Role:       string(r.Role),
+			Agent:      r.Agent,
+			Project:    r.Project,
+			AgentDir:   r.AgentDir,
+			Address:    firstNonEmpty(r.Address, r.Agent),
+			AgentName:  firstNonEmpty(r.AgentName, r.Agent),
+			Nickname:   r.Nickname,
+			State:      firstNonEmpty(r.State, "unknown"),
+			ReadError:  r.ReadError,
+			Heartbeat:  r.Heartbeat,
+			LockExists: r.LockExists,
 		})
 	}
 	enc := json.NewEncoder(w)
@@ -421,22 +165,12 @@ func printListJSON(w io.Writer, procs []listProc, phantomDirs map[string]bool, o
 	_ = enc.Encode(out)
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func printListWarnings(w io.Writer, phantomDirs map[string]bool, filterDir string) {
+func printListWarnings(w io.Writer, phantomDirs []string, filterDir string) {
 	if len(phantomDirs) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
-	dirs := make([]string, 0, len(phantomDirs))
-	for dir := range phantomDirs {
-		dirs = append(dirs, dir)
-	}
-	sort.Strings(dirs)
-	for _, dir := range dirs {
+	for _, dir := range phantomDirs {
 		fmt.Fprintf(w, "WARNING: %s/.lingtai/ no longer exists — processes are phantoms.\n", dir)
 	}
 	if filterDir != "" {
@@ -444,6 +178,15 @@ func printListWarnings(w io.Writer, phantomDirs map[string]bool, filterDir strin
 	} else {
 		fmt.Fprintln(w, "Run 'lingtai-tui purge <dir>' to kill phantoms in a specific directory.")
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func listUsageError(err error) {

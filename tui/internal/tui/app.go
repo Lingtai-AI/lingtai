@@ -43,6 +43,10 @@ const (
 	appViewHelp
 )
 
+const doubleEscReturnWindow = 600 * time.Millisecond
+
+var appNow = time.Now
+
 // App is the root Bubble Tea model. Routes between views via slash commands.
 type App struct {
 	currentView   appView
@@ -90,10 +94,60 @@ type App struct {
 	// own copyMode (see mail.go) and never sets this flag; entering mail resets
 	// it so the two badges can't both show.
 	selectMode bool
+
+	mailGeneration       uint64
+	projectsActivationID uint64
+
+	visiting                bool
+	visitOriginalProjectDir string
+	visitOriginalOrchDir    string
+	visitOriginalOrchName   string
+	visitOriginalMail       MailModel
+	visitOriginalProjects   ProjectsModel
+	visitOriginalView       appView
+	visitTargetProjectDir   string
+	visitTargetAgentDir     string
+	visitTargetAgentName    string
+	doubleEscArmed          bool
+	doubleEscFirstAt        time.Time
 }
 
 func humanAddr(projectDir string) string {
 	return "human"
+}
+
+func (a *App) installMailModel(m MailModel) {
+	a.mailGeneration++
+	m.generation = a.mailGeneration
+	a.mail = m
+}
+
+func (a *App) newMailForCurrentContext() MailModel {
+	humanDir := filepath.Join(a.projectDir, "human")
+	addr := humanAddr(a.projectDir)
+	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+}
+
+func (a App) projectsContext() ProjectsContext {
+	ctx := ProjectsContext{
+		FocusedAgentDir: a.orchDir,
+		Visiting:        a.visiting,
+	}
+	if a.visiting {
+		ctx.OriginalProjectDir = a.visitOriginalProjectDir
+		ctx.OriginalAgentDir = a.visitOriginalOrchDir
+	}
+	return ctx
+}
+
+func (a App) openProjectsView() (App, tea.Cmd) {
+	a.currentView = appViewProjects
+	a.projectsActivationID++
+	if a.projectsActivationID == 0 {
+		a.projectsActivationID = 1
+	}
+	a.projects = NewProjectsModelWithActivation(a.globalDir, a.projectDir, a.projectsContext(), a.projectsActivationID)
+	return a, tea.Batch(a.projects.Init(), a.sendSize())
 }
 
 // NewApp creates the root app model.
@@ -181,7 +235,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 		app.currentView = appViewMail
 		humanDir := filepath.Join(projectDir, "human")
 		addr := humanAddr(projectDir)
-		app.mail = NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights, tuiCfg.ToolCallTruncate)
+		app.installMailModel(NewMailModel(humanDir, addr, projectDir, app.orchDir, app.orchName, tuiCfg.MailPageSize, globalDir, tuiCfg.Language, tuiCfg.Insights, tuiCfg.ToolCallTruncate))
 
 		// Validate codex-auth.json if any agent uses a codex preset.
 		if warn := validateCodexAuthForAgents(globalDir, projectDir); warn != "" {
@@ -229,56 +283,16 @@ func (a App) startAutoRefresh() (App, tea.Cmd) {
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case childWindowSizeMsg:
+		return a.updateChildWindowSize(msg.WindowSizeMsg)
+
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
 		// Reserve rows for root chrome first, then forward the *reduced*
 		// child window size — never the raw terminal height. See
 		// layout.go (LayoutBudget) for the contract.
-		msg = a.layoutBudget().ChildWindowSize()
-		// Forward to current view so it can resize
-		var cmd tea.Cmd
-		switch a.currentView {
-		case appViewMail:
-			a.mail, cmd = a.mail.Update(msg)
-		case appViewSettings:
-			a.settings, cmd = a.settings.Update(msg)
-		case appViewProps:
-			a.props, cmd = a.props.Update(msg)
-		case appViewAddon:
-			a.addon, cmd = a.addon.Update(msg)
-		case appViewDoctor:
-			a.doctor, cmd = a.doctor.Update(msg)
-		case appViewUpdate:
-			a.update, cmd = a.update.Update(msg)
-		case appViewUpdateTUI:
-			a.updateTUI, cmd = a.updateTUI.Update(msg)
-		case appViewNirvana:
-			a.nirvana, cmd = a.nirvana.Update(msg)
-		case appViewLibrary:
-			a.library, cmd = a.library.Update(msg)
-		case appViewProjects:
-			a.projects, cmd = a.projects.Update(msg)
-		case appViewFirstRun:
-			a.firstRun, cmd = a.firstRun.Update(msg)
-		case appViewLogin:
-			a.login, cmd = a.login.Update(msg)
-		case appViewKnowledge:
-			a.knowledge, cmd = a.knowledge.Update(msg)
-		case appViewMailbox:
-			a.mailbox, cmd = a.mailbox.Update(msg)
-		case appViewSystem:
-			a.system, cmd = a.system.Update(msg)
-		case appViewPresets:
-			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
-		case appViewDaemons:
-			a.daemons, cmd = a.daemons.Update(msg)
-		case appViewNotification:
-			a.notification, cmd = a.notification.Update(msg)
-		case appViewHelp:
-			a.help, cmd = a.help.Update(msg)
-		}
-		return a, cmd
+		return a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
 
 	case tea.FocusMsg:
 		ApplyTerminalBG()
@@ -299,7 +313,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Likewise clear any global select mode left on by the view we came from
 		// (mail owns its own copyMode; the two must never both be active).
 		a.selectMode = false
-		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize())
+		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize())
 
 	case doctorResultMsg:
 		if a.currentView == appViewDoctor {
@@ -360,6 +374,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case refreshDoneMsg:
+		if msg.generation != 0 && msg.generation != a.mail.generation {
+			return a, nil
+		}
 		if msg.err != nil {
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", firstLine(msg.err)))
 		} else {
@@ -374,6 +391,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case clearDoneMsg:
+		if msg.generation != 0 && msg.generation != a.mail.generation {
+			return a, nil
+		}
 		if msg.err != nil {
 			a.mail.AddSystemMessage(i18n.TF("mail.clear_failed", firstLine(msg.err)))
 		} else if msg.completed {
@@ -384,6 +404,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.mail.refreshMail
 
 	case refreshAllDoneMsg:
+		if msg.generation != 0 && msg.generation != a.mail.generation {
+			return a, nil
+		}
 		if len(msg.failures) > 0 {
 			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all_with_failures", msg.count-len(msg.failures), len(msg.failures), strings.Join(msg.failures, ", ")))
 		} else {
@@ -393,6 +416,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PaletteSelectMsg:
 		return a.handlePaletteCommand(msg.Command, msg.Args)
+
+	case ProjectsAgentSelectedMsg:
+		if a.currentView != appViewProjects || msg.ActivationID != a.projects.activationID || msg.RequestSeq != a.projects.requestSeq {
+			return a, nil
+		}
+		return a.enterVisitedAgent(msg)
 
 	case FirstRunDoneMsg:
 		// First-run complete: launch agent and switch to mail.
@@ -413,7 +442,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.mail = NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, "", "", a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
 			a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
 			return a, tea.Batch(a.mail.Init(), a.sendSize())
 		}
@@ -461,7 +490,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentView = appViewMail
 				humanDir := filepath.Join(a.projectDir, "human")
 				addr := humanAddr(a.projectDir)
-				a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+				a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
 				a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: i18n.TF("mail.recipe_reapply_failed", err), Type: "mail"})
 				return a, tea.Batch(a.mail.Init(), a.sendSize())
 			}
@@ -479,7 +508,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -532,7 +561,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = appViewMail
 			humanDir := filepath.Join(a.projectDir, "human")
 			addr := humanAddr(a.projectDir)
-			a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+			a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
 			if a.lingtaiCmd != "" {
 				if _, err := process.LaunchAgent(a.lingtaiCmd, a.orchDir); err != nil {
 					a.mail.AddSystemMessage(i18n.TF("mail.launch_failed", err))
@@ -576,7 +605,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentView = appViewMail
 		humanDir := filepath.Join(a.projectDir, "human")
 		addr := humanAddr(a.projectDir)
-		a.mail = NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+		a.installMailModel(NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate))
 
 		if launchErr != "" {
 			a.mail.messages = append(a.mail.messages, ChatMessage{From: i18n.T("mail.system_sender"), Body: launchErr, Type: "mail"})
@@ -600,6 +629,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// === Global keys ===
 
 	case tea.KeyPressMsg:
+		if updated, cmd, handled := a.maybeHandleVisitEsc(msg); handled {
+			return updated, cmd
+		} else {
+			a = updated
+		}
 		// Global select-text mode (ctrl+y). The mail view keeps owning its own
 		// copyMode via mail.go's handler, so only intercept ctrl+y here for every
 		// OTHER view; in mail we fall through and let the mail model toggle. esc
@@ -804,9 +838,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("mail.clearing"))
 			lingtaiCmd := a.lingtaiCmd
 			dir := targetDir
+			generation := a.mail.generation
 			return a, func() tea.Msg {
 				completed, err := requestClearContext(lingtaiCmd, dir)
-				return clearDoneMsg{completed: completed, err: err}
+				return clearDoneMsg{generation: generation, completed: completed, err: err}
 			}
 		}
 		return a, nil
@@ -815,6 +850,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("mail.refreshing_all"))
 			lingtaiCmd := a.lingtaiCmd
 			projectDir := a.projectDir
+			generation := a.mail.generation
 			return a, func() tea.Msg {
 				agents, _ := fs.DiscoverAgents(projectDir)
 				count := 0
@@ -828,7 +864,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
 					}
 				}
-				return refreshAllDoneMsg{count: count, failures: failures}
+				return refreshAllDoneMsg{generation: generation, count: count, failures: failures}
 			}
 		} else if args != "" && targetDir != "" && a.lingtaiCmd != "" {
 			// `/refresh <preset>` — switch to a named preset and
@@ -845,15 +881,17 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				strings.TrimSuffix(filepath.Base(resolved), ".json")))
 			lingtaiCmd := a.lingtaiCmd
 			dir := targetDir
+			generation := a.mail.generation
 			return a, func() tea.Msg {
-				return refreshDoneMsg{err: hardRefreshDirWithPreset(lingtaiCmd, dir, resolved)}
+				return refreshDoneMsg{generation: generation, err: hardRefreshDirWithPreset(lingtaiCmd, dir, resolved)}
 			}
 		} else if targetDir != "" && a.lingtaiCmd != "" {
 			addMsg(i18n.T("mail.refreshing"))
 			lingtaiCmd := a.lingtaiCmd
 			dir := targetDir
+			generation := a.mail.generation
 			return a, func() tea.Msg {
-				return refreshDoneMsg{err: hardRefreshDir(lingtaiCmd, dir)}
+				return refreshDoneMsg{generation: generation, err: hardRefreshDir(lingtaiCmd, dir)}
 			}
 		}
 		return a, nil
@@ -952,9 +990,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.library = NewLibraryModel(a.projectDir, a.orchDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "projects":
-		a.currentView = appViewProjects
-		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		return a.openProjectsView()
 	case "knowledge", "library", "codex":
 		a.currentView = appViewKnowledge
 		a.knowledge = NewKnowledgeModel(a.projectDir, a.orchDir)
@@ -1316,6 +1352,55 @@ func setActivePreset(dir, presetPath string) error {
 	return os.WriteFile(initPath, out, 0o644)
 }
 
+type childWindowSizeMsg struct {
+	tea.WindowSizeMsg
+}
+
+func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
+	var cmd tea.Cmd
+	switch a.currentView {
+	case appViewMail:
+		a.mail, cmd = a.mail.Update(msg)
+	case appViewSettings:
+		a.settings, cmd = a.settings.Update(msg)
+	case appViewProps:
+		a.props, cmd = a.props.Update(msg)
+	case appViewAddon:
+		a.addon, cmd = a.addon.Update(msg)
+	case appViewDoctor:
+		a.doctor, cmd = a.doctor.Update(msg)
+	case appViewUpdate:
+		a.update, cmd = a.update.Update(msg)
+	case appViewUpdateTUI:
+		a.updateTUI, cmd = a.updateTUI.Update(msg)
+	case appViewNirvana:
+		a.nirvana, cmd = a.nirvana.Update(msg)
+	case appViewLibrary:
+		a.library, cmd = a.library.Update(msg)
+	case appViewProjects:
+		a.projects, cmd = a.projects.Update(msg)
+	case appViewFirstRun:
+		a.firstRun, cmd = a.firstRun.Update(msg)
+	case appViewLogin:
+		a.login, cmd = a.login.Update(msg)
+	case appViewKnowledge:
+		a.knowledge, cmd = a.knowledge.Update(msg)
+	case appViewMailbox:
+		a.mailbox, cmd = a.mailbox.Update(msg)
+	case appViewSystem:
+		a.system, cmd = a.system.Update(msg)
+	case appViewPresets:
+		a.presetLibrary, cmd = a.presetLibrary.Update(msg)
+	case appViewDaemons:
+		a.daemons, cmd = a.daemons.Update(msg)
+	case appViewNotification:
+		a.notification, cmd = a.notification.Update(msg)
+	case appViewHelp:
+		a.help, cmd = a.help.Update(msg)
+	}
+	return a, cmd
+}
+
 // hardRefreshDirWithPreset is the `/refresh <preset>` cousin of
 // hardRefreshDir. Sequence is identical (suspend → lock-clear → kill →
 // signal sweep → relaunch) except that step 5 writes
@@ -1409,7 +1494,104 @@ func firstLine(err error) string {
 // and a resized view agree on their height.
 func (a App) sendSize() tea.Cmd {
 	cs := a.layoutBudget().ChildWindowSize()
-	return func() tea.Msg { return cs }
+	return func() tea.Msg { return childWindowSizeMsg{WindowSizeMsg: cs} }
+}
+
+func (a App) enterVisitedAgent(msg ProjectsAgentSelectedMsg) (App, tea.Cmd) {
+	r := msg.Record
+	if !r.Enterable {
+		a.mail.AddSystemMessage(enterabilityText(r))
+		return a, nil
+	}
+	if !a.visiting {
+		a.visiting = true
+		a.visitOriginalProjectDir = a.projectDir
+		a.visitOriginalOrchDir = a.orchDir
+		a.visitOriginalOrchName = a.orchName
+		a.visitOriginalMail = a.mail
+		a.visitOriginalProjects = a.projects
+		a.visitOriginalView = a.currentView
+	}
+	a.projectDir = filepath.Join(r.Project, ".lingtai")
+	a.orchDir = r.AgentDir
+	a.orchName = firstNonEmpty(r.AgentName, r.Agent)
+	a.visitTargetProjectDir = a.projectDir
+	a.visitTargetAgentDir = a.orchDir
+	a.visitTargetAgentName = a.orchName
+	a.currentView = appViewMail
+	a.selectMode = false
+	a.doubleEscArmed = false
+	a.installMailModel(a.newMailForCurrentContext())
+	a.mail.visitExitHint = true
+	return a, tea.Batch(a.mail.Init(), a.sendSize())
+}
+
+func (a App) returnFromVisit() (App, tea.Cmd) {
+	if !a.visiting {
+		return a, nil
+	}
+	restored := a.visitOriginalMail
+	restored.copyMode = false
+	restored.visitExitHint = false
+	a.projectDir = a.visitOriginalProjectDir
+	a.orchDir = a.visitOriginalOrchDir
+	a.orchName = a.visitOriginalOrchName
+	a.currentView = a.visitOriginalView
+	a.selectMode = false
+	a.visiting = false
+	a.visitOriginalProjectDir = ""
+	a.visitOriginalOrchDir = ""
+	a.visitOriginalOrchName = ""
+	a.visitOriginalView = appViewMail
+	a.visitTargetProjectDir = ""
+	a.visitTargetAgentDir = ""
+	a.visitTargetAgentName = ""
+	a.doubleEscArmed = false
+	resumeCmd := a.resumeMailModel(restored)
+	if a.currentView == appViewProjects {
+		a.projects = a.visitOriginalProjects
+		a.visitOriginalProjects = ProjectsModel{}
+		return a, resumeCmd
+	}
+	a.visitOriginalProjects = ProjectsModel{}
+	a.currentView = appViewMail
+	return a, resumeCmd
+}
+
+func (a *App) resumeMailModel(restored MailModel) tea.Cmd {
+	a.installMailModel(restored)
+	a.mail.homeTelemetryInFlight = false
+	refreshCmd := a.mail.refreshMail
+	if a.mail.initialLoading {
+		refreshCmd = a.mail.initialRebuild
+	}
+	return tea.Batch(refreshCmd, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize())
+}
+
+func (a App) maybeHandleVisitEsc(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
+	if msg.String() != "esc" {
+		a.doubleEscArmed = false
+		return a, nil, false
+	}
+	if !a.visitEscEligible() {
+		a.doubleEscArmed = false
+		return a, nil, false
+	}
+	now := appNow()
+	if a.doubleEscArmed && now.Sub(a.doubleEscFirstAt) <= doubleEscReturnWindow {
+		updated, cmd := a.returnFromVisit()
+		return updated, cmd, true
+	}
+	a.doubleEscArmed = true
+	a.doubleEscFirstAt = now
+	return a, nil, true
+}
+
+func (a App) visitEscEligible() bool {
+	if !a.visiting || a.selectMode || a.currentView != appViewMail {
+		return false
+	}
+	return !a.mail.copyMode && !a.mail.showEditorWarn && !a.mail.input.IsPaletteActive()
 }
 
 // RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
@@ -1421,10 +1603,14 @@ type RecipeFreshStartMsg struct {
 	CustomDir string
 }
 
-type refreshDoneMsg struct{ err error }
+type refreshDoneMsg struct {
+	generation uint64
+	err        error
+}
 type refreshAllDoneMsg struct {
-	count    int
-	failures []string
+	generation uint64
+	count      int
+	failures   []string
 }
 
 func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
@@ -1456,7 +1642,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		// taken when leaving /settings, where auto refresh may have just been
 		// toggled back on. startAutoRefresh is a no-op if it is already armed.
 		a, arCmd := a.startAutoRefresh()
-		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate), pulseTick(), a.sendSize(), arCmd)
+		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize(), arCmd)
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
@@ -1517,9 +1703,7 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(a.presetLibrary.Init(), a.sendSize())
 	case "projects":
-		a.currentView = appViewProjects
-		a.projects = NewProjectsModel(a.globalDir, a.projectDir)
-		return a, tea.Batch(a.projects.Init(), a.sendSize())
+		return a.openProjectsView()
 	case "mcp":
 		if a.orchDir != "" {
 			a.currentView = appViewAddon
