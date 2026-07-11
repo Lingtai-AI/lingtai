@@ -721,9 +721,12 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 		}
 		display := firstNonEmpty(r.Nickname, r.AgentName, r.Address, r.Agent)
 		heartbeat := localizedHeartbeatLabel(r.Heartbeat)
-		summary := fmt.Sprintf("%s  %s  pid %d  %s", r.Role, valueOrDash(r.State), r.PID, heartbeat)
-		if r.Uptime != "" {
-			summary += "  " + r.Uptime
+		// The overview row answers who/role/live-state/heartbeat and, when
+		// authoritative context exists and there is room, compact context
+		// pressure. Operational details (PID, process uptime) live in Details.
+		summary := fmt.Sprintf("%s  %s  %s", r.Role, valueOrDash(r.State), heartbeat)
+		if r.ContextAvailable && maxW >= projectsOverviewContextMinWidth {
+			summary += fmt.Sprintf("  %.0f%%", r.ContextUsagePct)
 		}
 		if !r.Enterable {
 			summary += "  !"
@@ -774,19 +777,22 @@ func (m ProjectsModel) renderInventoryRight(maxW int) string {
 	}
 
 	var lines []string
+
+	// Identity header: display name, then the address/agent identity as a
+	// dim line — never a labeled Address: row, and dropped when it would only
+	// echo the header. The header fallback order matches the left overview row
+	// (Nickname, AgentName, Address, Agent) so address-only records never fall
+	// through to a blank or internal-agent name.
+	header := firstNonEmpty(r.Nickname, r.AgentName, r.Address, r.Agent)
 	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(firstNonEmpty(r.Nickname, r.AgentName, r.Agent)))
-	lines = appendSection(lines, "projects.section_status")
-	lines = appendField(lines, i18n.T("projects.role"), valueOrDash(string(r.Role)))
-	lines = appendField(lines, i18n.T("projects.address"), valueOrDash(firstNonEmpty(r.Address, r.Agent)))
-	lines = appendField(lines, i18n.T("projects.state"), valueOrDash(r.State)+" · "+heartbeatDetail(r.Heartbeat))
-	lines = appendField(lines, "PID", fmt.Sprint(r.PID))
-	if r.IMHandles != "" {
-		lines = appendField(lines, i18n.T("projects.im"), r.IMHandles)
+	lines = append(lines, "  "+sectionStyle.Render(header))
+	identity := firstNonEmpty(r.Address, r.Agent)
+	if identity != "" && identity != header {
+		lines = append(lines, "  "+labelStyle.Render(identity))
 	}
-	if r.LockExists {
-		lines = appendField(lines, i18n.T("projects.lock"), i18n.T("projects.lock_present"))
-	}
+
+	// Validation state sits directly under the header so warnings/disabled/
+	// phantom reasons are the first thing read, not buried below sections.
 	if r.Phantom {
 		lines = append(lines, "", "  "+errorStyle.Render(i18n.T("projects.phantom_detail")))
 	}
@@ -797,30 +803,41 @@ func (m ProjectsModel) renderInventoryRight(maxW int) string {
 		lines = append(lines, "", "  "+errorStyle.Render(m.status))
 	}
 
-	createdAt := projectsUnavailable
-	if r.CreatedAt != "" {
-		createdAt = formatKanbanTimestamp(r.CreatedAt)
-	}
+	// Lifecycle: created + lifetime fold onto one line; uptime and molt count
+	// stay distinct.
 	moltCount := projectsUnavailable
 	if r.MoltCountAvailable {
 		moltCount = fmt.Sprint(r.MoltCount)
 	}
 	lines = appendSection(lines, "projects.section_lifecycle")
-	lines = appendField(lines, i18n.T("projects.created_at"), createdAt)
-	lines = appendField(lines, i18n.T("projects.lifetime"), formatAgentLifetime(r.CreatedAt, time.Now()))
+	lines = appendField(lines, i18n.T("projects.created_at"), lifecycleCreatedLine(r))
 	lines = appendField(lines, i18n.T("projects.process_uptime"), valueOrDash(r.Uptime))
 	lines = appendField(lines, i18n.T("projects.molt_count"), moltCount)
 
+	// Network: project and orchestrator on their own lines; the two live
+	// counts fold into one readable line.
 	lines = appendSection(lines, "projects.section_network")
 	lines = appendField(lines, i18n.T("projects.project"), valueOrDash(projectLabel(r.Project)))
 	lines = appendField(lines, i18n.T("projects.orchestrator"), valueOrDash(topology.orchestrator))
-	lines = appendField(lines, i18n.T("projects.live_members"), fmt.Sprint(topology.members))
-	lines = appendField(lines, i18n.T("projects.live_admins"), fmt.Sprint(topology.admins))
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.live_members")+": ")+valueStyle.Render(fmt.Sprint(topology.members))+
+		labelStyle.Render(" · "+i18n.T("projects.live_admins")+": ")+valueStyle.Render(fmt.Sprint(topology.admins)))
 
+	// Runtime: PID plus exact authoritative context (with a small meter when
+	// legible), and optional IM/lock connections.
+	lines = appendSection(lines, "projects.section_runtime")
+	lines = appendField(lines, "PID", fmt.Sprint(r.PID))
 	if r.ContextAvailable {
-		lines = appendSection(lines, "projects.section_context")
 		usage := fmt.Sprintf("%s / %s (%.1f%%)", formatComma(int64(r.ContextTotalTokens)), formatComma(int64(r.ContextWindowSize)), r.ContextUsagePct)
 		lines = appendField(lines, i18n.T("projects.context_usage"), usage)
+		if meter := contextMeter(r.ContextUsagePct, maxW); meter != "" {
+			lines = append(lines, "  "+meter)
+		}
+	}
+	if r.IMHandles != "" {
+		lines = appendField(lines, i18n.T("projects.im"), r.IMHandles)
+	}
+	if r.LockExists {
+		lines = appendField(lines, i18n.T("projects.lock"), i18n.T("projects.lock_present"))
 	}
 
 	if r.Enterable {
@@ -830,7 +847,66 @@ func (m ProjectsModel) renderInventoryRight(maxW int) string {
 	return strings.Join(lines, "\n")
 }
 
+// lifecycleCreatedLine folds the creation timestamp and derived lifetime into a
+// single readable value ("<ts> · <lifetime>"), degrading honestly to a dash
+// when the creation time is unknown.
+func lifecycleCreatedLine(r inventory.Record) string {
+	if r.CreatedAt == "" {
+		return projectsUnavailable
+	}
+	created := formatKanbanTimestamp(r.CreatedAt)
+	lifetime := formatAgentLifetime(r.CreatedAt, time.Now())
+	if lifetime == projectsUnavailable {
+		return created
+	}
+	return created + " · " + lifetime
+}
+
+// contextMeter renders a small text progress meter for authoritative context
+// pressure. It is dropped when the Details pane is too narrow to keep the exact
+// usage line legible alongside it, and — to avoid contradicting the exact
+// numeric text — also when the quantized bar would show zero filled cells (a
+// low nonzero percentage that a 12-cell bar cannot represent). The exact
+// "total / window (pct)" line always renders; only the meter is suppressed.
+func contextMeter(pct float64, maxW int) string {
+	if maxW < projectsOverviewContextMinWidth {
+		return ""
+	}
+	if shareBarFilledCells(pct, projectsContextMeterCells) == 0 {
+		return ""
+	}
+	return renderShareBar(pct, projectsContextMeterCells)
+}
+
+// shareBarFilledCells reports how many cells renderShareBar would fill for pct
+// over width cells, using the same truncating quantization (never rounding up),
+// so the Projects meter and its suppression decision stay in lockstep with the
+// shared bar renderer without duplicating its styling.
+func shareBarFilledCells(pct float64, width int) int {
+	if width < 1 {
+		width = 1
+	}
+	filled := int((pct / 100.0) * float64(width))
+	if filled < 0 {
+		return 0
+	}
+	if filled > width {
+		return width
+	}
+	return filled
+}
+
 const projectsUnavailable = "—"
+
+// projectsOverviewContextMinWidth is the left-pane width below which the compact
+// context percentage is dropped from an overview row so the who/role/state/
+// heartbeat core never clips.
+const projectsOverviewContextMinWidth = 40
+
+// projectsContextMeterCells is the width of the Runtime context meter. Kept
+// small so the meter plus the exact "total / window (pct)" line stays legible
+// at the 100-column supported width.
+const projectsContextMeterCells = 12
 
 type projectTopology struct {
 	orchestrator string
@@ -930,14 +1006,6 @@ func localizedHeartbeatLabel(h fs.HeartbeatStatus) string {
 	default:
 		return i18n.T("projects.heartbeat_missing")
 	}
-}
-
-func heartbeatDetail(h fs.HeartbeatStatus) string {
-	label := localizedHeartbeatLabel(h)
-	if h.AgeSeconds > 0 {
-		return fmt.Sprintf("%s (%.0fs)", label, h.AgeSeconds)
-	}
-	return label
 }
 
 func (m ProjectsModel) renderLeft(maxW int) string {

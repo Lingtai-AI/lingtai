@@ -73,9 +73,25 @@ func TestProjectsModelGroupedRowsMarkersAndEnter(t *testing.T) {
 		t.Fatalf("cursor = %d, want first agent row", m.cursor)
 	}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"other", "Agent B", "[visiting]", "pid 100", "1m 0s"} {
+	for _, want := range []string{"other", "Agent B", "[visiting]"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+	// The overview row carries live state/heartbeat but not operational
+	// process details; PID and process uptime belong to Details only.
+	leftRow := agentRowLine(view, "Agent B")
+	if leftRow == "" {
+		t.Fatalf("could not isolate Agent B overview row:\n%s", view)
+	}
+	for _, present := range []string{"AGENT", "IDLE"} {
+		if !strings.Contains(leftRow, present) {
+			t.Fatalf("overview row missing %q: %q", present, leftRow)
+		}
+	}
+	for _, absent := range []string{"pid ", "100", "1m 0s"} {
+		if strings.Contains(leftRow, absent) {
+			t.Fatalf("overview row leaked operational detail %q: %q", absent, leftRow)
 		}
 	}
 	withProjectsScan(t, func(inventory.Options) (inventory.Snapshot, error) {
@@ -102,13 +118,9 @@ func TestProjectsModelGroupedRowsMarkersAndEnter(t *testing.T) {
 	}
 }
 
-func TestProjectsRegistryDetailsShowCuratedKanbanSubset(t *testing.T) {
-	t.Cleanup(func() { _ = i18n.SetLang("en") })
-	if err := i18n.SetLang("en"); err != nil {
-		t.Fatal(err)
-	}
-	project := filepath.Join(t.TempDir(), "network-alpha")
+func adminSnapshotRecord(project string) inventory.Record {
 	admin := projectRecord(project, "admin", "Admin One", true)
+	admin.Address = "alpha-admin"
 	admin.Role = inventory.RoleMain
 	admin.IsOrchestrator = true
 	admin.State = "ACTIVE"
@@ -121,6 +133,60 @@ func TestProjectsRegistryDetailsShowCuratedKanbanSubset(t *testing.T) {
 	admin.ContextUsagePct = 4.938
 	admin.ContextAvailable = true
 	admin.Uptime = "1h 2m"
+	admin.PID = 4242
+	admin.IMHandles = "telegram:@bot"
+	admin.LockExists = true
+	return admin
+}
+
+// TestProjectsOverviewRowCarriesLiveStateNotOperationalDetail asserts the left
+// Kanban row answers who/role/state/heartbeat and, when authoritative, context
+// pressure — but never operational details (PID, process uptime) which belong
+// to Details.
+func TestProjectsOverviewRowCarriesLiveStateNotOperationalDetail(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := adminSnapshotRecord(project)
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{admin},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{admin}}},
+	}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	view := ansi.Strip(m.View())
+	row := agentRowLine(view, "Admin One")
+	if row == "" {
+		t.Fatalf("could not isolate Admin One overview row:\n%s", view)
+	}
+	for _, want := range []string{"MAIN", "ACTIVE", "fresh", "5%"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("overview row missing %q: %q", want, row)
+		}
+	}
+	for _, absent := range []string{"pid ", "4242", "1h 2m"} {
+		if strings.Contains(row, absent) {
+			t.Fatalf("overview row leaked operational detail %q: %q", absent, row)
+		}
+	}
+}
+
+// TestProjectsDetailsOwnOperationalDataWithoutStatusDuplication pins the Details
+// pane contract: an identity header (no redundant Address: row), a Lifecycle
+// section with created/lifetime/uptime/molt, a Network section, and a Runtime
+// section carrying PID and exact context — with no generic Status block and no
+// Role:/State:/Address: rows repeating what the overview already shows.
+func TestProjectsDetailsOwnOperationalDataWithoutStatusDuplication(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := adminSnapshotRecord(project)
 	worker := projectRecord(project, "worker", "Worker", false)
 	worker.EnterReason = inventory.EnterReasonNonAdmin
 	outsider := projectRecord(filepath.Join(t.TempDir(), "other-network"), "other-admin", "Other Admin", true)
@@ -133,14 +199,13 @@ func TestProjectsRegistryDetailsShowCuratedKanbanSubset(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 	m, _ = m.Update(projectsInventoryForModel(m, snap))
 
-	view := ansi.Strip(m.View())
+	right := detailPane(ansi.Strip(m.View()))
 	for _, want := range []string{
-		"Status",
+		"Admin One",   // identity header (display name)
+		"alpha-admin", // identity line (address), not a labeled Address: row
 		"Lifecycle",
 		"Network",
-		"Context",
-		"Role: MAIN",
-		"State: ACTIVE · fresh (2s)",
+		"Runtime",
 		"Created at: " + formatKanbanTimestamp(admin.CreatedAt),
 		"Process uptime: 1h 2m",
 		"Molt count: 7",
@@ -148,16 +213,149 @@ func TestProjectsRegistryDetailsShowCuratedKanbanSubset(t *testing.T) {
 		"Orchestrator: Admin One",
 		"Live members: 2",
 		"Live admins: 1",
-		"Usage: 12,345 / 250,000 (4.9%)",
+		"PID: 4242",
+		"12,345 / 250,000 (4.9%)",
+		"telegram:@bot", // IM in Runtime
 	} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("view missing %q:\n%s", want, view)
+		if !strings.Contains(right, want) {
+			t.Fatalf("details missing %q:\n%s", want, right)
 		}
 	}
-	for _, unwanted := range []string{project, admin.AgentDir, "Agent dir:"} {
-		if strings.Contains(view, unwanted) {
-			t.Fatalf("view leaked raw path/detail %q:\n%s", unwanted, view)
+	// No generic Status block, and no rows restating overview state.
+	for _, unwanted := range []string{
+		i18n.T("projects.section_status"),
+		"Role:",
+		"State:",
+		"Address:",
+	} {
+		if strings.Contains(right, unwanted) {
+			t.Fatalf("details duplicated overview data %q:\n%s", unwanted, right)
 		}
+	}
+	// No raw project or agent-dir paths anywhere in the view.
+	full := ansi.Strip(m.View())
+	for _, leaked := range []string{project, admin.AgentDir, "Agent dir:"} {
+		if strings.Contains(full, leaked) {
+			t.Fatalf("view leaked raw path/detail %q:\n%s", leaked, full)
+		}
+	}
+}
+
+// TestProjectsContextMeterSuppressedWhenBarWouldBeAllEmpty pins the parent-review
+// fix: a low nonzero context (4.9%) that a 12-cell bar quantizes to zero filled
+// cells must NOT render an all-empty meter contradicting the exact numeric line;
+// the exact "total / window (pct)" text still renders.
+func TestProjectsContextMeterSuppressedWhenBarWouldBeAllEmpty(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := adminSnapshotRecord(project) // ContextUsagePct = 4.938
+	snap := inventory.Snapshot{Records: []inventory.Record{admin}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{admin}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	right := detailPane(ansi.Strip(m.View()))
+	if !strings.Contains(right, "12,345 / 250,000 (4.9%)") {
+		t.Fatalf("exact context line must still render:\n%s", right)
+	}
+	if line := meterLine(right); line != "" {
+		t.Fatalf("low-pct meter should be suppressed, got meter line %q:\n%s", line, right)
+	}
+}
+
+// TestProjectsContextMeterRendersMixedForMeaningfulPct pins the other half: a
+// meaningful percentage (50%) still renders a meter with both filled and empty
+// cells, so suppression never hides real pressure.
+func TestProjectsContextMeterRendersMixedForMeaningfulPct(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	rec := projectRecord(project, "agent", "Agent", true)
+	rec.ContextTotalTokens = 125000
+	rec.ContextWindowSize = 250000
+	rec.ContextUsagePct = 50.0
+	rec.ContextAvailable = true
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	right := detailPane(ansi.Strip(m.View()))
+	if !strings.Contains(right, "125,000 / 250,000 (50.0%)") {
+		t.Fatalf("exact context line must render:\n%s", right)
+	}
+	line := meterLine(right)
+	if line == "" {
+		t.Fatalf("meaningful pct should render a meter:\n%s", right)
+	}
+	if !strings.Contains(line, "█") || !strings.Contains(line, "░") {
+		t.Fatalf("50%% meter must show filled and empty cells, got %q", line)
+	}
+}
+
+// TestProjectsDetailsHeaderFallbackMatchesOverview pins the identity-consistency
+// fix: an address-only record (no nickname/agent-name) uses the address as the
+// display header — the same fallback the left overview row uses — and does not
+// then repeat it as a separate identity line.
+func TestProjectsDetailsHeaderFallbackMatchesOverview(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	rec := projectRecord(project, "agent-dir-name", "", true)
+	rec.Nickname = ""
+	rec.AgentName = ""
+	rec.Address = "addr-only-1"
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	right := detailPane(ansi.Strip(m.View()))
+	if !strings.Contains(right, "addr-only-1") {
+		t.Fatalf("address-only record should surface the address as header:\n%s", right)
+	}
+	// The address must appear exactly once (as the header) — not echoed as a
+	// separate identity line.
+	if n := strings.Count(right, "addr-only-1"); n != 1 {
+		t.Fatalf("address should render once (header only), got %d occurrences:\n%s", n, right)
+	}
+	// The agent-dir basename must never be the visible display fallback.
+	if strings.Contains(right, "agent-dir-name") {
+		t.Fatalf("agent-dir basename leaked as display fallback:\n%s", right)
+	}
+}
+
+// TestProjectsDetailsShowWarningsImmediatelyAfterHeader keeps validation state
+// (disabled/phantom/status) visible right below the identity header rather than
+// buried under later sections.
+func TestProjectsDetailsShowWarningsImmediatelyAfterHeader(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	rec := projectRecord(project, "worker", "Worker", false)
+	rec.EnterReason = inventory.EnterReasonNonAdmin
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	right := detailPane(ansi.Strip(m.View()))
+	warnIdx := strings.Index(right, i18n.T("projects.enter_reason_non_admin"))
+	lifecycleIdx := strings.Index(right, i18n.T("projects.section_lifecycle"))
+	if warnIdx < 0 {
+		t.Fatalf("details missing disabled reason:\n%s", right)
+	}
+	if lifecycleIdx >= 0 && warnIdx > lifecycleIdx {
+		t.Fatalf("warning must appear before Lifecycle section:\n%s", right)
 	}
 }
 
@@ -173,14 +371,19 @@ func TestProjectsRegistryDetailsRenderMissingValuesAsDash(t *testing.T) {
 	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 	m, _ = m.Update(projectsInventoryForModel(m, snap))
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"Created at: —", "Lifetime: —", "Process uptime: —", "Molt count: —", "Orchestrator: —"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("view missing unavailable value %q:\n%s", want, view)
+	right := detailPane(ansi.Strip(m.View()))
+	for _, want := range []string{"Created at: —", "Process uptime: —", "Molt count: —", "Orchestrator: —"} {
+		if !strings.Contains(right, want) {
+			t.Fatalf("details missing unavailable value %q:\n%s", want, right)
 		}
 	}
-	if strings.Contains(view, "Context") {
-		t.Fatalf("context section should be omitted without authoritative status data:\n%s", view)
+	// Context is authoritative-only: absent status means no Context/usage line
+	// and no meter — but the Runtime section (PID) still renders.
+	if strings.Contains(right, "/ ") && strings.Contains(right, "%)") {
+		t.Fatalf("context usage should be omitted without authoritative status data:\n%s", right)
+	}
+	if !strings.Contains(right, "PID:") {
+		t.Fatalf("Runtime PID line should render even without context data:\n%s", right)
 	}
 }
 
@@ -198,7 +401,7 @@ func TestProjectsRegistryDetailSectionsRenderInEachLocale(t *testing.T) {
 			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 			m, _ = m.Update(projectsInventoryForModel(m, snap))
 			view := ansi.Strip(m.View())
-			for _, key := range []string{"projects.section_status", "projects.section_lifecycle", "projects.section_network", "projects.created_at", "projects.live_members"} {
+			for _, key := range []string{"projects.section_lifecycle", "projects.section_network", "projects.section_runtime", "projects.created_at", "projects.live_members"} {
 				want := i18n.TIn(lang, key)
 				if want == key || !strings.Contains(view, want) {
 					t.Fatalf("%s view missing localized %s=%q:\n%s", lang, key, want, view)
@@ -225,6 +428,38 @@ func TestProjectsRegistryNarrowWidthFallsBackToList(t *testing.T) {
 	}
 	if strings.Contains(view, i18n.T("projects.section_lifecycle")) || strings.Contains(view, "│") {
 		t.Fatalf("narrow fallback should omit details and separator:\n%s", view)
+	}
+}
+
+// TestProjectsRegistryLayoutUsefulAtSupportedWidths guards that both the 100
+// and 140 column widths render a two-pane layout whose Details include the
+// curated Lifecycle/Network/Runtime sections in the first viewport.
+func TestProjectsRegistryLayoutUsefulAtSupportedWidths(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := adminSnapshotRecord(project)
+	snap := inventory.Snapshot{Records: []inventory.Record{admin}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{admin}}}}
+	for _, width := range []int{100, 140} {
+		t.Run(fmt.Sprintf("w%d", width), func(t *testing.T) {
+			m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 28})
+			m, _ = m.Update(projectsInventoryForModel(m, snap))
+			view := ansi.Strip(m.View())
+			if !strings.Contains(view, "│") {
+				t.Fatalf("width %d should render a two-pane separator:\n%s", width, view)
+			}
+			for _, key := range []string{"projects.section_lifecycle", "projects.section_network", "projects.section_runtime"} {
+				if !strings.Contains(view, i18n.T(key)) {
+					t.Fatalf("width %d details missing %s:\n%s", width, key, view)
+				}
+			}
+			if !strings.Contains(view, "12,345 / 250,000") {
+				t.Fatalf("width %d details missing exact context:\n%s", width, view)
+			}
+		})
 	}
 }
 
@@ -518,6 +753,54 @@ func TestProjectsModelKeepsCursorVisible(t *testing.T) {
 	if m.cursor != 1 {
 		t.Fatalf("cursor after shrink = %d, want first agent row 1", m.cursor)
 	}
+}
+
+// leftOf returns the portion of a rendered line before the two-pane separator,
+// or the whole line when there is no separator (narrow list-only layout).
+func leftOf(line string) string {
+	if i := strings.Index(line, "│"); i >= 0 {
+		return line[:i]
+	}
+	return line
+}
+
+// agentRowLine returns the left-pane text of the first rendered line whose left
+// side contains name — the overview row for that agent, isolated from the
+// Details pane sharing the same terminal line.
+func agentRowLine(view, name string) string {
+	for _, line := range strings.Split(view, "\n") {
+		left := leftOf(line)
+		if strings.Contains(left, name) {
+			return left
+		}
+	}
+	return ""
+}
+
+// detailPane returns the Details (right) pane text joined across lines, with the
+// left overview column stripped so assertions never accidentally match content
+// that lives in the left Kanban column.
+func detailPane(view string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(view, "\n") {
+		if i := strings.Index(line, "│"); i >= 0 {
+			b.WriteString(line[i+len("│"):])
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// meterLine returns the trimmed content of the first line containing a context
+// meter cell (filled "█" or empty "░"), or "" when no meter line is present.
+// Callers pass ANSI-stripped text so the rune check is not fooled by styling.
+func meterLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.ContainsAny(line, "█░") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 func assertProjectsCursorVisible(t *testing.T, m ProjectsModel) {

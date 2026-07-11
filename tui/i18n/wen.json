@@ -610,6 +610,7 @@
   "projects.section_lifecycle": "生涯",
   "projects.section_network": "云",
   "projects.section_context": "文脉",
+  "projects.section_runtime": "运行",
   "projects.created_at": "创建于",
   "projects.lifetime": "存续久",
   "projects.process_uptime": "进程运行久",
