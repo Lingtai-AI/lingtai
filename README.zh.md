@@ -90,17 +90,17 @@ lingtai-tui
 
 Go 写的 TUI **不**承担智能体心智，它启动并监管 Python 内核智能体作为子进程；UI 与智能体之间所有交互都走项目文件系统（`.lingtai/` 信箱、心跳、日志、提示文件、portal 记录）。这就是为什么状态如此易查、其他工具不靠任何 SDK 就能跟它协作。
 
-想看有源可查的仓库地图，从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。想按知识图谱导航，见 [`docs/graphify.md`](docs/graphify.md)。
+想看有源可查的仓库地图，从 [`ANATOMY.md`](ANATOMY.md) 看起，再下到 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。想知道每一层的接口与预期的 agent 行为承诺什么，读 [`CONTRACT.md`](CONTRACT.md)。想按知识图谱导航，见 [`docs/graphify.md`](docs/graphify.md)。
 
 ## 开发与贡献
 
 编译 TUI：`cd tui && make build`；编译 portal：`cd portal && make build`。需要 Go 1.26+、`make`，以及（portal 用的）Node.js/npm。
 
-灵台的贡献讲求**有源可查、按既有流程走**：
+灵台的贡献讲求**有源可查、按既有流程走**。任何开发工作之前，先找到并阅读本仓库的本地开发指南——仓库根目录的 [`dev-guide-skill`](dev-guide-skill/SKILL.md)；它把每个任务引导到基线、分布式的 [`ANATOMY.md`](ANATOMY.md) 与 [`CONTRACT.md`](CONTRACT.md) 两套系统、验证以及 PR 关卡，而不重复它们的内容：
 
-1. 先读相关 anatomy——根目录 [`ANATOMY.md`](ANATOMY.md)，再下到 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
+1. 先读相关 anatomy——根目录 [`ANATOMY.md`](ANATOMY.md)，再下到 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`；改动接口或预期行为时，读配对的 [`CONTRACT.md`](CONTRACT.md)。
 2. 在 `origin/main` 上开分支或 worktree；改动保持收敛。
-3. 跑对应的验证；结构性改动同步更新 anatomy / 文档。
+3. 跑对应的验证。结构/导航改动，同步更新 [`ANATOMY.md`](ANATOMY.md)；接口或预期行为改动，同步更新 [`CONTRACT.md`](CONTRACT.md) 及其一致性测试；两者都变时才两者都更新。
 4. PR 里说清楚：改了什么、为什么、怎么验证的。
 
 ```bash

@@ -1,5 +1,9 @@
 ---
 related_files:
+  - CONTRACT.md
+  - dev-guide-skill/SKILL.md
+  - tui/architecture_documents_test.go
+  - tui/architecture_documents_fixtures_test.go
   - tui/ANATOMY.md
   - portal/ANATOMY.md
   - docs/ANATOMY.md
@@ -19,25 +23,56 @@ related_files:
   - portal/go.mod
   - portal/Makefile
 maintenance: |
-  Keep related_files as repo-relative paths to real files. Include neighboring
-  ANATOMY.md files so the anatomy graph stays connected rather than isolated;
-  anatomy links must be bidirectional. If you create a new ANATOMY.md, copy this
-  maintenance field. If you notice drift between this anatomy and the code,
-  report it. See lingtai-dev-guide for details.
+  This file is both the repository-root anatomy and the normative
+  anatomy-of-anatomy for the distributed code navigation system across the two
+  binaries (lingtai-tui, lingtai-portal) and the install pipeline. Keep
+  related_files repo-relative, duplicate-free, and linked to real files. Keep
+  the root CONTRACT.md reciprocal and update the paired conventions together
+  when their boundary changes. Code is the structural source of truth: repair
+  stale navigation in the same change that moves files, symbols, connections,
+  composition, or state. Preserve the child template and its maintenance rule;
+  validate the distributed graph before merge. See dev-guide-skill/SKILL.md for
+  the workflow.
 ---
 
 # lingtai
 
-> **Maintenance:** see the `lingtai-tui-anatomy` skill (at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`, ships to `~/.lingtai-tui/utilities/lingtai-tui-anatomy/`). **Coding agents** update this file in the same commit as code changes. **LingTai agents** report drift as issues (mail or `discussions/<name>-patch.md`); do not silently fix.
+> **Maintenance:** this file and its `## Maintenance` section below are the
+> normative convention. **Coding agents** update the relevant anatomy in the
+> same commit as code changes. **LingTai agents** report drift as issues (mail
+> or `discussions/<name>-patch.md`); do not silently fix.
 
-This repo is the Go-side of the LingTai project: two binary targets (`lingtai-tui` and `lingtai-portal`) plus the canonical install pipeline. All Python code (kernel runtime + `lingtai` PyPI package) lives in the sibling repo `lingtai-kernel`. The TUI launches Python agents as subprocesses and observes them via the filesystem; neither binary has a runtime Python dependency.
+## Purpose
 
-> **What is an `ANATOMY.md`?** See the canonical convention at `tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md` for this Go monorepo, or `lingtai-kernel/src/lingtai/intrinsic_skills/lingtai-kernel-anatomy/SKILL.md` for the Python kernel. Both follow the same 6-section template; the TUI skill covers the two-binary-symmetry contract that the kernel skill doesn't have.
+**ANATOMY is the distributed code navigation system**, and this root file is
+both its top-level map and its normative anatomy-of-anatomy. Each architectural
+layer keeps an `ANATOMY.md` beside the code it maps, and those local maps link
+into a graph an agent descends from this repository root to the exact code that
+answers a structural question. Anatomy owns structure (code is the source of
+truth); [`CONTRACT.md`](CONTRACT.md) is the paired system defining what each
+layer promises. `## Components` below is the repository map — **start there**;
+`## Anatomy convention` after it owns the schema and link rules.
+
+This repo is the Go side of LingTai: `lingtai-tui`, `lingtai-portal`, and the
+install pipeline. The Python kernel (`lingtai` on PyPI) lives in the sibling
+`lingtai-kernel`. Only the TUI launches Python agents (as subprocesses); both
+binaries observe them via the filesystem, and neither has a runtime Python
+dependency.
+
+> **What is an `ANATOMY.md`?** This root file defines the convention (see
+> `## Anatomy convention`). The bundled `lingtai-tui-anatomy` skill
+> (`tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`) is a legacy
+> citation-navigation aid for the existing per-package anatomies; it predates
+> this root/paired convention and awaits a separate alignment, so where the two
+> disagree this file governs.
 
 ## Components
 
 The repo root holds two binary trees plus shared infrastructure. Each binary is a self-contained Go module; they communicate with running agents purely through the agent's working directory (`.lingtai/<agent>/`).
 
+- **`ANATOMY.md` / `CONTRACT.md`** — the two normative distributed-system roots. This file is the code-navigation map and anatomy-of-anatomy; `CONTRACT.md` is the code-interface/Behavior definition root and contract-of-contract. They list each other in `related_files`.
+- **`dev-guide-skill/`** — the repository-local agent dev kit. Its `SKILL.md` routes agents into the Anatomy and Contract systems and the change/validation workflow, and may grow focused scripts, references, templates, or assets as real workflows recur. Distinct from the bundled `lingtai-dev-guide` skill under `tui/internal/preset/skills/`, which ships to agents and owns deeper per-topic procedures.
+- **`tui/architecture_documents_test.go` / `tui/architecture_documents_fixtures_test.go`** — the architecture-document validator in the existing TUI module (`cd tui && go test ./...`). The first file holds the strict-frontmatter parser and `validateRepository`, which checks the current root pair/graph/routing (exact root frontmatter, repo-contained related_files, the reciprocal root Anatomy/Contract pair, required routing edges, the root heading skeletons) and **asserts zero governed children** via a fail-closed sentinel; the second holds the data-driven fixtures that exercise those invariants. The repository has no governed children today, so there is no child gate: the first governed-child PR must add paired-child validation before adding its root `CONTRACT.md` edge. The root documents belong to neither binary; the test that guards them lives in the TUI module rather than a third module.
 - **`tui/`** — Terminal UI binary (`lingtai-tui`). Bubble Tea v2 + lipgloss v2. Single-binary launcher, agent monitor, first-run wizard, mail viewer, preset editor. Builds to `tui/bin/lingtai-tui`. The flat `tui/main.go` wires subcommands (`purge`, `list`, `clean`, `suspend`, `postman`, `bootstrap`, `presets`, `spawn`, `self-update`, `doctor`) and the interactive entry; everything substantive is under `tui/internal/`. See the per-package summary below.
 - **`portal/`** — Web portal binary (`lingtai-portal`). Go HTTP server with an embedded React frontend served from a single binary via `embed.FS`. Reads the same `.lingtai/` filesystem the TUI does, surfaces a network visualisation, mail/replay UI, and topology recorder. Builds to `portal/bin/lingtai-portal`. Per-package layout under `portal/internal/`.
 - **`install.sh`** — One-shot installer (`curl -fsSL https://lingtai.ai/install.sh | bash`), Homebrew-free. Defaults to the latest GitHub Release: downloads a prebuilt per-platform tarball (`lingtai-<tag>-<os>-<arch>.tar.gz`, produced by `.github/workflows/release.yml`) when the release exposes one, otherwise falls back to building the release source tarball with Go/npm — this fallback is what makes asset-less releases (e.g. current `v0.10.5`) installable. Installs into `--bin-dir`/`--prefix`, else a writable `/usr/local/bin`, else `~/.local/bin` (never prefers Homebrew). Then one-shot-creates/updates the Python runtime venv at `~/.lingtai-tui/runtime/venv`, installs/upgrades the `lingtai` package there, verifies `import lingtai`, stamps the env marker, and symlinks `lingtai-agent`. On WSL/Debian/Ubuntu it can `apt-get install` missing Go/Python/git when interactive with sudo; non-interactive mode prints the exact command instead. Stamps exact `vX.Y.Z` release installs as that tag and writes `install.json` (`install_method: "source"`, plus additive `install_kind: release-asset|source-build`) so the TUI source updater can re-run this script for newer tags. Auto-detects CN-restricted networks and falls back to mirrors for Go modules / `npm` / Go checksum DB. Helper functions are unit-tested via `scripts/test-install-sh.sh`.
@@ -148,3 +183,116 @@ This repo depends on `lingtai-kernel` only at runtime (the Python agent it launc
 - **Authorization gate.** `manifest.preset.allowed` is the explicit list of preset paths the agent may swap to at runtime. The kernel refuses any swap not in `allowed`. `default` and `active` MUST both appear in `allowed`; `init_schema.validate_init` enforces this. m029 was the migration that introduced this declarative form.
 - **Three-locale rule.** Adding an i18n key means updating en.json, zh.json, AND wen.json in BOTH `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations show as the raw key on screen — they don't fall back. Procedural / dev-only strings can stay English-only with a comment noting why.
 - **Filesystem-only IPC.** The TUI and portal never open a socket or RPC channel to a running agent. All communication is via files: agent manifests, heartbeats, signal files, mailbox folders, `.notification/` sidecars, and read-only `logs/log.sqlite` event traces. This is the same boundary the kernel-side documents in `lingtai-kernel/src/lingtai/kernel/ANATOMY.md` "Notifications". Anything you'd want to add here that needs cross-process communication should follow the same pattern: write a file, let the other side poll or read the persisted event log.
+
+## Anatomy convention
+
+This root is the normative anatomy-of-anatomy; the map above is the payload,
+these rules are how the navigation graph is shaped. Governance of *behavior*
+lives in [`CONTRACT.md`](CONTRACT.md); the change/validation *workflow* lives in
+[`dev-guide-skill/SKILL.md`](dev-guide-skill/SKILL.md). This section owns only
+the structural schema and link rules, and does not restate either.
+
+**Navigation model.** Navigation is distributed: the root defines the system and
+enumerates the two binary trees; each component's anatomy maps only the layer it
+owns; parent/child and `related_files` links connect them. Do not copy local
+facts into this root. For a structural question, descend the graph (this file →
+the relevant tree or component anatomy → cited code); for enumeration (every
+callsite, every matching file), use search. A folder earns an anatomy when an
+agent can reason about it as an architectural unit without reading all its
+siblings; pure helpers and trivial leaves do not. Legacy per-package anatomies
+keep their current shape until they migrate; a component enters the paired
+governed system only when its co-located `CONTRACT.md` is linked from the root
+contract, and from that point the schema and link rules here apply.
+
+The governed-child frontmatter, body, and link/pairing rules below are the
+**normative target** for that first governed child, not machinery the validator
+runs today. The repository has zero governed children, so the validator ships no
+child gate; its zero-child sentinel instead **rejects** a root contract edge to a
+non-root `CONTRACT.md` until the first governed-child PR adds the paired-child
+validation these rules describe. Read the rest of this section as the design that
+PR must implement and enforce.
+
+**Frontmatter.** A root-governed component anatomy has exactly two YAML keys, in
+order: `related_files` (a non-empty, duplicate-free list of repo-relative
+regular files — the paired `CONTRACT.md`, the parent and direct-child anatomies,
+and the code files it maps) and `maintenance` (a non-empty statement; use the
+Template's text, or a root-specific one here because this file also governs the
+system). Paths MUST be repo-relative, resolve to files, use `/`, and contain no
+`.`/`..` segments.
+
+**Body.** A root-governed component anatomy opens with one paragraph naming the
+layer, then uses these five `##` sections once, in order: `## Components` (files,
+symbols, or child components with verified `file:line` citations),
+`## Connections`, `## Composition`, `## State`, `## Notes`. It SHOULD stay near
+80 lines — a larger map suggests smaller components — with no empty stubs. This
+root file is the sole exception to that body/size shape: it also carries this
+meta-convention and the repository-wide map above.
+
+**Link and pairing.**
+
+1. This root anatomy and root contract list each other in `related_files`.
+2. A root-governed component's co-located `ANATOMY.md` and `CONTRACT.md` list
+   each other exactly once.
+3. Parent/child anatomy links are reciprocal so navigation can descend and
+   return. Cross-binary references are narrative, not enumerated call-graph
+   edges.
+4. The contract owns interface behavior; the anatomy owns structure. Cross-link
+   instead of copying a rule into both.
+5. Orphans, missing targets, duplicate links, one-way pair links, and unpaired
+   governed components are defects and MUST fail validation.
+
+## Maintenance
+
+Maintenance is part of reading:
+
+- If code and anatomy disagree structurally, code is normally the current fact;
+  repair the anatomy before leaving the change. If the code move itself is a
+  defect, report or fix the code and keep the mismatch visible until resolved.
+- If code and contract disagree behaviorally, do **not** rewrite the contract to
+  match accidental behavior. Treat the implementation as defective unless an
+  authorized contract change updates the Port, adapters, version, and tests.
+- Verify every touched citation after moves, renames, splits, or ownership
+  changes. The anatomy drift checker catches missing/out-of-range citation
+  targets, not semantic misdescription.
+- Keep parent/child and Anatomy/Contract pair links reciprocal, and keep the
+  two-binary facts compatible across `tui/ANATOMY.md` and `portal/ANATOMY.md`.
+  When this system's convention itself changes, update this root, its validator
+  (`tui/architecture_documents_test.go` and its fixtures in
+  `tui/architecture_documents_fixtures_test.go`), the repository-local dev guide,
+  and the README entries together. The bundled `lingtai-tui-anatomy` skill is a legacy
+  citation-navigation aid that predates this convention; aligning it is separate,
+  owner-gated work, not part of every change here.
+
+## Template
+
+```markdown
+---
+related_files:
+  - <repo-relative paired CONTRACT.md>
+  - <repo-relative parent ANATOMY.md>
+  - <repo-relative direct-child ANATOMY.md, when any>
+  - <repo-relative mapped code file>
+maintenance: |
+  Keep related_files repo-relative, duplicate-free, and linked to real files.
+  Keep this component's ANATOMY.md and CONTRACT.md reciprocal and keep
+  parent/child anatomy links bidirectional. Code is the structural source of
+  truth: update this anatomy in the same change that moves files, symbols,
+  connections, composition, or state. Verify every changed citation and run the
+  architecture-document validation before merge.
+---
+# <Component Name> Anatomy
+
+<One paragraph defining the architectural layer this folder embodies.>
+
+## Components
+
+- `<symbol>` — purpose (`repo/relative/file.go:line-line`).
+
+## Connections
+
+## Composition
+
+## State
+
+## Notes
+```

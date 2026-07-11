@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Before any development work
+
+Find and read this repository's local dev guide — the repository-root [`dev-guide-skill`](dev-guide-skill/SKILL.md) — before changing code, architecture documents, tests, or docs. It owns the workflow and routes each task through the exact baseline, the two distributed systems, focused validation, and the PR/side-effect gate without duplicating them:
+
+- **Where is the code and how is it connected?** The distributed code-navigation system, rooted at [`ANATOMY.md`](ANATOMY.md) (descend into `tui/ANATOMY.md` / `portal/ANATOMY.md`).
+- **What do interfaces and expected agent behavior promise?** The distributed interface/Behavior system, rooted at [`CONTRACT.md`](CONTRACT.md).
+
+Read the dev guide first, then the paths it routes to, before editing.
+
 ## Clarify human intent before coding
 
 When a human gives conceptual, corrective, or ambiguous feedback — especially phrases like "stop and think," "you overcomplicated this," or corrections that map to multiple implementations:

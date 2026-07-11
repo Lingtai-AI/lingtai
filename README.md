@@ -90,17 +90,17 @@ LingTai is split across two repositories.
 
 The Go TUI does not run the agent mind. It launches and supervises Python kernel agents as subprocesses; everything between UI and agents flows through the project filesystem (`.lingtai/` mailboxes, heartbeats, logs, prompt files, portal records). That is why the state is so easy to inspect — and why other tools can cooperate with it without any SDK.
 
-For the source-grounded repo map, start at [`ANATOMY.md`](ANATOMY.md), then descend into [`tui/ANATOMY.md`](tui/ANATOMY.md) or [`portal/ANATOMY.md`](portal/ANATOMY.md). To navigate by knowledge graph, see [`docs/graphify.md`](docs/graphify.md).
+For the source-grounded repo map, start at [`ANATOMY.md`](ANATOMY.md), then descend into [`tui/ANATOMY.md`](tui/ANATOMY.md) or [`portal/ANATOMY.md`](portal/ANATOMY.md). For what each layer's interfaces and expected agent behavior promise, read [`CONTRACT.md`](CONTRACT.md). To navigate by knowledge graph, see [`docs/graphify.md`](docs/graphify.md).
 
 ## Development & contributing
 
 Build the TUI with `cd tui && make build`; build the portal with `cd portal && make build`. You need Go 1.26+, `make`, and (for the portal) Node.js/npm.
 
-Contributions are source-grounded and workflow-aware:
+Contributions are source-grounded and workflow-aware. Before any development work, find and read this repository's local dev guide — the repository-root [`dev-guide-skill`](dev-guide-skill/SKILL.md); it routes each task through the baseline, the distributed [`ANATOMY.md`](ANATOMY.md) and [`CONTRACT.md`](CONTRACT.md) systems, validation, and the PR gate without duplicating them.
 
-1. Read the relevant anatomy first — root [`ANATOMY.md`](ANATOMY.md), then `tui/ANATOMY.md` or `portal/ANATOMY.md`.
+1. Read the relevant anatomy first — root [`ANATOMY.md`](ANATOMY.md), then `tui/ANATOMY.md` or `portal/ANATOMY.md` — and the paired [`CONTRACT.md`](CONTRACT.md) when changing an interface or expected behavior.
 2. Work in a branch or worktree off `origin/main`; keep the change scoped.
-3. Run the relevant validation and update anatomy/docs when structural behavior changes.
+3. Run the relevant validation. Update [`ANATOMY.md`](ANATOMY.md) for structural/navigation changes; update [`CONTRACT.md`](CONTRACT.md) and its conformance tests for interface or expected-behavior changes; update both only when both change.
 4. Open a PR that says what changed, why, and how you validated it.
 
 ```bash

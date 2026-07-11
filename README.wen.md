@@ -95,17 +95,17 @@ lingtai-tui
 
 Go 之 TUI **不**承器灵之心，但启并监 Python 内核器灵为子进程；面与器灵之间，凡交皆经项目文件系统（`.lingtai/` 信匣、心跳、日志、提示之文、portal 之记）。此所以其状易考、他器不假 SDK 而能与之协也。
 
-欲观有源可考之仓图，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。欲循知识图谱而行，见 [`docs/graphify.md`](docs/graphify.md)。
+欲观有源可考之仓图，自 [`ANATOMY.md`](ANATOMY.md) 入，而后下至 [`tui/ANATOMY.md`](tui/ANATOMY.md) 或 [`portal/ANATOMY.md`](portal/ANATOMY.md)。欲知每层之接口与所期 agent 行为何所许，读 [`CONTRACT.md`](CONTRACT.md)。欲循知识图谱而行，见 [`docs/graphify.md`](docs/graphify.md)。
 
 ## 开发与贡献
 
 编 TUI：`cd tui && make build`；编 portal：`cd portal && make build`。需 Go 1.26+、`make`，及（portal 所用之）Node.js/npm。
 
-灵台之贡献，贵有源可考、循既定之流：
+灵台之贡献，贵有源可考、循既定之流。凡开发之先，必觅而读本仓之本地开发指南——仓根之 [`dev-guide-skill`](dev-guide-skill/SKILL.md)；其引每务至基线、分布式之 [`ANATOMY.md`](ANATOMY.md) 与 [`CONTRACT.md`](CONTRACT.md) 二系、验证及 PR 之关，而不复述其文：
 
-1. 先读相关 anatomy——根之 [`ANATOMY.md`](ANATOMY.md)，而后下至 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`。
+1. 先读相关 anatomy——根之 [`ANATOMY.md`](ANATOMY.md)，而后下至 `tui/ANATOMY.md` 或 `portal/ANATOMY.md`；改接口或所期行为者，读配对之 [`CONTRACT.md`](CONTRACT.md)。
 2. 于 `origin/main` 上开分支或 worktree；改动务收敛。
-3. 行对应之验证；凡结构性之改，同步更新 anatomy 与文档。
+3. 行对应之验证。凡结构、导览之变，同步更新 [`ANATOMY.md`](ANATOMY.md)；凡接口或所期行为之变，同步更新 [`CONTRACT.md`](CONTRACT.md) 及其一致之测；二者俱变，乃俱更之。
 4. PR 中明言：何所改、何以改、何以验之。
 
 ```bash
