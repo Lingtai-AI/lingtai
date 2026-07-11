@@ -139,6 +139,7 @@ type MailModel struct {
 	orchName          string // 本我 agent name (true name)
 	orchNickname      string // 本我 nickname (display name override)
 	baseDir           string // .lingtai/ directory
+	visitExitHint     bool   // append subtle Esc-Esc return hint to the title row
 	verbose           verboseLevel
 	messages          []ChatMessage // derived from cache on each refresh
 	cache             fs.MailCache  // incremental mail cache
@@ -1634,6 +1635,9 @@ func (m MailModel) View() string {
 	// Build header: left = app title, center = thinking quote, right = agent [state]
 	brand := i18n.T("app.brand")
 	titleLeft := StyleTitle.Render("  " + brand)
+	if m.visitExitHint {
+		titleLeft += " " + StyleSubtle.Render(i18n.T("mail.visit_exit_hint"))
+	}
 
 	// State badge with color
 	stateKey := m.orchState

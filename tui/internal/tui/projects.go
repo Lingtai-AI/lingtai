@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -616,6 +617,9 @@ func (m ProjectsModel) renderBody() string {
 }
 
 func (m ProjectsModel) renderInventoryBody() string {
+	if m.width < 90 {
+		return m.renderInventoryLeft(max(0, m.width))
+	}
 	leftW := m.width / 2
 	if leftW < 42 {
 		leftW = 42
@@ -716,8 +720,8 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 			style = disabledStyle
 		}
 		display := firstNonEmpty(r.Nickname, r.AgentName, r.Address, r.Agent)
-		heartbeat := inventory.HeartbeatLabel(r.Heartbeat)
-		summary := fmt.Sprintf("%s  %s  pid %d  %s", r.Role, firstNonEmpty(r.State, "unknown"), r.PID, heartbeat)
+		heartbeat := localizedHeartbeatLabel(r.Heartbeat)
+		summary := fmt.Sprintf("%s  %s  pid %d  %s", r.Role, valueOrDash(r.State), r.PID, heartbeat)
 		if r.Uptime != "" {
 			summary += "  " + r.Uptime
 		}
@@ -761,48 +765,114 @@ func (m ProjectsModel) renderInventoryRight(maxW int) string {
 		return ""
 	}
 	r := row.record
+	topology := topologyForProject(m.snapshot, r.Project)
+	appendField := func(lines []string, label, value string) []string {
+		return append(lines, "  "+labelStyle.Render(label+": ")+valueStyle.Render(value))
+	}
+	appendSection := func(lines []string, key string) []string {
+		return append(lines, "", "  "+sectionStyle.Render(i18n.T(key)))
+	}
+
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, "  "+sectionStyle.Render(firstNonEmpty(r.Nickname, r.AgentName, r.Agent)))
-	lines = append(lines, "")
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.role")+": ")+valueStyle.Render(string(r.Role)))
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.address")+": ")+valueStyle.Render(firstNonEmpty(r.Address, r.Agent)))
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.state")+": ")+valueStyle.Render(firstNonEmpty(r.State, "unknown")))
-	lines = append(lines, "  "+labelStyle.Render("PID: ")+valueStyle.Render(fmt.Sprint(r.PID)))
-	if r.Uptime != "" {
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.uptime")+": ")+valueStyle.Render(r.Uptime))
-	}
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.heartbeat")+": ")+valueStyle.Render(heartbeatDetail(r.Heartbeat)))
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.admin")+": ")+valueStyle.Render(firstNonEmpty(r.AdminSummary, "unknown")))
+	lines = appendSection(lines, "projects.section_status")
+	lines = appendField(lines, i18n.T("projects.role"), valueOrDash(string(r.Role)))
+	lines = appendField(lines, i18n.T("projects.address"), valueOrDash(firstNonEmpty(r.Address, r.Agent)))
+	lines = appendField(lines, i18n.T("projects.state"), valueOrDash(r.State)+" · "+heartbeatDetail(r.Heartbeat))
+	lines = appendField(lines, "PID", fmt.Sprint(r.PID))
 	if r.IMHandles != "" {
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.im")+": ")+valueStyle.Render(r.IMHandles))
+		lines = appendField(lines, i18n.T("projects.im"), r.IMHandles)
 	}
-	lines = append(lines, "")
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.path")+": ")+valueStyle.Render(r.Project))
-	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.agent_dir")+": ")+valueStyle.Render(r.AgentDir))
 	if r.LockExists {
-		lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.lock")+": ")+valueStyle.Render(i18n.T("projects.lock_present")))
+		lines = appendField(lines, i18n.T("projects.lock"), i18n.T("projects.lock_present"))
 	}
 	if r.Phantom {
-		lines = append(lines, "  "+errorStyle.Render(i18n.T("projects.phantom_detail")))
+		lines = append(lines, "", "  "+errorStyle.Render(i18n.T("projects.phantom_detail")))
 	}
 	if !r.Enterable {
-		lines = append(lines, "")
-		lines = append(lines, "  "+errorStyle.Render(i18n.T("projects.not_enterable")+": "+enterabilityText(r)))
-	} else {
-		lines = append(lines, "")
-		lines = append(lines, "  "+StyleFaint.Render(i18n.T("projects.enter_hint")))
+		lines = append(lines, "", "  "+errorStyle.Render(i18n.T("projects.not_enterable")+": "+enterabilityText(r)))
 	}
 	if m.status != "" {
+		lines = append(lines, "", "  "+errorStyle.Render(m.status))
+	}
+
+	createdAt := projectsUnavailable
+	if r.CreatedAt != "" {
+		createdAt = formatKanbanTimestamp(r.CreatedAt)
+	}
+	moltCount := projectsUnavailable
+	if r.MoltCountAvailable {
+		moltCount = fmt.Sprint(r.MoltCount)
+	}
+	lines = appendSection(lines, "projects.section_lifecycle")
+	lines = appendField(lines, i18n.T("projects.created_at"), createdAt)
+	lines = appendField(lines, i18n.T("projects.lifetime"), formatAgentLifetime(r.CreatedAt, time.Now()))
+	lines = appendField(lines, i18n.T("projects.process_uptime"), valueOrDash(r.Uptime))
+	lines = appendField(lines, i18n.T("projects.molt_count"), moltCount)
+
+	lines = appendSection(lines, "projects.section_network")
+	lines = appendField(lines, i18n.T("projects.project"), valueOrDash(projectLabel(r.Project)))
+	lines = appendField(lines, i18n.T("projects.orchestrator"), valueOrDash(topology.orchestrator))
+	lines = appendField(lines, i18n.T("projects.live_members"), fmt.Sprint(topology.members))
+	lines = appendField(lines, i18n.T("projects.live_admins"), fmt.Sprint(topology.admins))
+
+	if r.ContextAvailable {
+		lines = appendSection(lines, "projects.section_context")
+		usage := fmt.Sprintf("%s / %s (%.1f%%)", formatComma(int64(r.ContextTotalTokens)), formatComma(int64(r.ContextWindowSize)), r.ContextUsagePct)
+		lines = appendField(lines, i18n.T("projects.context_usage"), usage)
+	}
+
+	if r.Enterable {
 		lines = append(lines, "")
-		lines = append(lines, "  "+errorStyle.Render(m.status))
+		lines = append(lines, "  "+StyleFaint.Render(i18n.T("projects.enter_hint")))
 	}
 	return strings.Join(lines, "\n")
 }
 
+const projectsUnavailable = "—"
+
+type projectTopology struct {
+	orchestrator string
+	members      int
+	admins       int
+}
+
+func topologyForProject(snapshot inventory.Snapshot, project string) projectTopology {
+	var topology projectTopology
+	for _, record := range snapshot.Records {
+		if record.Project != project {
+			continue
+		}
+		topology.members++
+		if record.IsOrchestrator {
+			topology.admins++
+			if topology.orchestrator == "" {
+				topology.orchestrator = firstNonEmpty(record.Nickname, record.AgentName, record.Address, record.Agent)
+			}
+		}
+	}
+	return topology
+}
+
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return projectsUnavailable
+	}
+	return value
+}
+
+func formatAgentLifetime(createdAt string, now time.Time) string {
+	created, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil || now.Before(created) {
+		return projectsUnavailable
+	}
+	return formatDuration(now.Sub(created))
+}
+
 func projectLabel(project string) string {
 	if project == "" {
-		return "(unknown project)"
+		return projectsUnavailable
 	}
 	return filepath.Base(project)
 }
@@ -851,13 +921,21 @@ func sanitizedProjectDetail(detail string) string {
 	return detail
 }
 
+func localizedHeartbeatLabel(h fs.HeartbeatStatus) string {
+	switch {
+	case h.Fresh:
+		return i18n.T("projects.heartbeat_fresh")
+	case h.Exists:
+		return i18n.T("projects.heartbeat_stale")
+	default:
+		return i18n.T("projects.heartbeat_missing")
+	}
+}
+
 func heartbeatDetail(h fs.HeartbeatStatus) string {
-	label := inventory.HeartbeatLabel(h)
+	label := localizedHeartbeatLabel(h)
 	if h.AgeSeconds > 0 {
 		return fmt.Sprintf("%s (%.0fs)", label, h.AgeSeconds)
-	}
-	if h.Error != "" && !h.Exists {
-		return label + " (" + h.Error + ")"
 	}
 	return label
 }

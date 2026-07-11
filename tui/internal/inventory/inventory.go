@@ -82,6 +82,14 @@ type Record struct {
 	IMHandles      string
 	ReadError      string
 
+	CreatedAt          string
+	MoltCount          int
+	MoltCountAvailable bool
+	ContextTotalTokens int
+	ContextWindowSize  int
+	ContextUsagePct    float64
+	ContextAvailable   bool
+
 	Heartbeat  fs.HeartbeatStatus
 	LockExists bool
 	Phantom    bool
@@ -238,6 +246,16 @@ func enrichRecord(r *Record) {
 			r.IsHuman = false
 		}
 		r.IMHandles = SummarizeIMIdentities(r.AgentDir)
+		r.CreatedAt = rawString(raw, "created_at")
+		r.MoltCount, r.MoltCountAvailable = rawInt(raw, "molt_count")
+	}
+	status := fs.ReadStatus(r.AgentDir)
+	ctx := status.Tokens.Context
+	if ctx.WindowSize > 0 {
+		r.ContextTotalTokens = ctx.TotalTokens
+		r.ContextWindowSize = ctx.WindowSize
+		r.ContextUsagePct = ctx.UsagePct
+		r.ContextAvailable = true
 	}
 	r.Role = RoleFor(*r)
 	r.Heartbeat = fs.ReadHeartbeat(r.AgentDir, fs.AgentAliveThresholdSec)
@@ -394,6 +412,30 @@ func containsString(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func rawString(raw map[string]interface{}, key string) string {
+	value, _ := raw[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func rawInt(raw map[string]interface{}, key string) (int, bool) {
+	value, ok := raw[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := value.(type) {
+	case float64:
+		whole := int(n)
+		if n < 0 || n != float64(whole) {
+			return 0, false
+		}
+		return whole, true
+	case int:
+		return n, n >= 0
+	default:
+		return 0, false
+	}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -32,17 +32,17 @@ maintenance: |
 
 | Component | File | Purpose |
 |---|---|---|
-| `Options`, `Snapshot`, `Group`, `Record`, `EnterabilityReason`, `AgentIdentity` | `tui/internal/inventory/inventory.go:31` | Public typed API for process-visible running agents, grouped by project and carrying role/admin/heartbeat/lock/typed enterability data plus stable agent identity. |
-| `Scan` / `FromProcesses` | `tui/internal/inventory/inventory.go:96` | Scan the process table or convert supplied process rows into enriched, duplicate-collapsed, sorted inventory. `FromProcesses` is the deterministic test seam. |
-| `NormalizePath`, `IdentityFor`, `AgentDirInFilter`, `ProjectFromAgentDir` | `tui/internal/inventory/inventory.go:160` | Shared lexical path normalization, stable identity, filtering, and process-to-project derivation. Agent directories with spaces are treated as normal paths. |
-| `enrichRecord`, `RoleFor`, `enterability` | `tui/internal/inventory/inventory.go:211` | Read `.agent.json`, derive role/admin/IM/heartbeat/lock state, and mark unreadable, human, phantom, pathless, or non-admin records as non-enterable with a typed reason and optional detail; only valid orchestrator/admin records are enterable. |
-| `collapseByAgentDir` | `tui/internal/inventory/inventory.go:276` | Collapses duplicate visible processes for the same agent dir, preferring the PID currently advertised in `.status.json` when available. |
-| `sortRecords` / `groupRecords` | `tui/internal/inventory/inventory.go:325` | Deterministic project, role, display-name, path, PID sorting and project grouping. |
-| `SummarizeIMIdentities`, `SummarizeAdmin`, `HumanUptimeFromEtime`, `HeartbeatLabel` | `tui/internal/inventory/inventory.go:410` | Small rendering helpers shared by CLI and TUI callers without importing either package. |
+| `Options`, `Snapshot`, `Group`, `Record`, `EnterabilityReason`, `AgentIdentity` | `tui/internal/inventory/inventory.go:31-100` | Public typed API for process-visible running agents, grouped by project and carrying role/admin/heartbeat/lock/typed enterability plus lifecycle, molt, and authoritative live-context fields for consumers. |
+| `Scan` / `FromProcesses` | `tui/internal/inventory/inventory.go:105-167` | Scan the process table or convert supplied process rows into enriched, duplicate-collapsed, sorted inventory. `FromProcesses` is the deterministic test seam. |
+| `NormalizePath`, `IdentityFor`, `AgentDirInFilter`, `ProjectFromAgentDir` | `tui/internal/inventory/inventory.go:169-212` | Shared lexical path normalization, stable identity, filtering, and process-to-project derivation. Agent directories with spaces are treated as normal paths. |
+| `enrichRecord`, `RoleFor`, `enterability` | `tui/internal/inventory/inventory.go:220-295` | Read `.agent.json` and `.status.json`, derive role/admin/IM/heartbeat/lock plus lifecycle/molt/live-context state, and mark unreadable, human, phantom, pathless, or non-admin records as non-enterable with a typed reason and optional detail; only valid orchestrator/admin records are enterable. |
+| `collapseByAgentDir` | `tui/internal/inventory/inventory.go:297-320` | Collapses duplicate visible processes for the same agent dir, preferring the PID currently advertised in `.status.json` when available. |
+| `sortRecords` / `groupRecords` | `tui/internal/inventory/inventory.go:346-397` | Deterministic project, role, display-name, path, PID sorting and project grouping. |
+| `SummarizeIMIdentities`, `SummarizeAdmin`, `HumanUptimeFromEtime`, `HeartbeatLabel` | `tui/internal/inventory/inventory.go:455-602` | Small rendering helpers shared by CLI and TUI callers without importing either package. |
 
 ## Connections
 
-- **Called from:** `lingtai-tui list` after platform process scanning (`tui/list_unix.go:19-27`, `tui/list_windows.go:19-24`), `/projects` via `ProjectsModel.loadDataMsg` (`tui/internal/tui/projects.go:194-221`), and purge filtering through `AgentDirInFilter`.
+- **Called from:** `lingtai-tui list` after platform process scanning (`tui/list_unix.go:19-27`, `tui/list_windows.go:19-24`), `/projects` via `ProjectsModel.loadDataMsg` (`tui/internal/tui/projects.go:197-223`), and purge filtering through `AgentDirInFilter`.
 - **Calls out:** `internal/processscan` for visible process rows when using `Scan`, and `internal/fs` for `.agent.json`, `.agent.heartbeat`, `.status.json`, `.agent.lock`, and MCP identity metadata.
 - **Does not call:** package `main`, `internal/tui`, or any root Bubble Tea model. Keep this package below both the CLI and TUI to avoid import cycles.
 

@@ -95,6 +95,52 @@ func TestFromProcessesEnrichesSortsGroupsAndFilters(t *testing.T) {
 	}
 }
 
+func TestFromProcessesEnrichesLifecycleAndLiveContext(t *testing.T) {
+	project := t.TempDir()
+	agentDir := filepath.Join(project, ".lingtai", "agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"address":"agent","agent_name":"agent","state":"ACTIVE","admin":{"karma":true},"created_at":"2026-07-01T10:30:00Z","started_at":"2026-07-10T08:00:00Z","molt_count":7}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status := `{"tokens":{"context":{"total_tokens":12345,"window_size":250000,"usage_pct":4.938}},"runtime":{"pid":77,"running":true}}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := FromProcesses([]processscan.AgentProcess{{PID: 77, Uptime: "01:02:03", AgentDir: agentDir}}, Options{})
+	if len(snap.Records) != 1 {
+		t.Fatalf("records = %+v", snap.Records)
+	}
+	r := snap.Records[0]
+	if r.CreatedAt != "2026-07-01T10:30:00Z" {
+		t.Fatalf("creation timestamp not enriched: %+v", r)
+	}
+	if !r.MoltCountAvailable || r.MoltCount != 7 {
+		t.Fatalf("molt count not enriched: %+v", r)
+	}
+	if !r.ContextAvailable || r.ContextTotalTokens != 12345 || r.ContextWindowSize != 250000 || r.ContextUsagePct != 4.938 {
+		t.Fatalf("live context not enriched from status: %+v", r)
+	}
+}
+
+func TestFromProcessesLeavesMissingKanbanDetailsUnavailable(t *testing.T) {
+	project := t.TempDir()
+	agentDir := filepath.Join(project, ".lingtai", "agent")
+	writeAgentJSON(t, agentDir, "agent", "IDLE", `{}`)
+
+	snap := FromProcesses([]processscan.AgentProcess{{PID: 7, AgentDir: agentDir}}, Options{})
+	if len(snap.Records) != 1 {
+		t.Fatalf("records = %+v", snap.Records)
+	}
+	r := snap.Records[0]
+	if r.CreatedAt != "" || r.MoltCountAvailable || r.ContextAvailable {
+		t.Fatalf("missing details must remain unavailable, not fabricated: %+v", r)
+	}
+}
+
 func TestDuplicateProcessPrefersRuntimePID(t *testing.T) {
 	project := t.TempDir()
 	agentDir := filepath.Join(project, ".lingtai", "agent")

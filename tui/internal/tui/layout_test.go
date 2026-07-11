@@ -105,10 +105,11 @@ func TestSendSizeForwardsReducedHeight(t *testing.T) {
 	a.height = 24
 
 	msg := runCmd(a.sendSize())
-	ws, ok := msg.(tea.WindowSizeMsg)
+	childSize, ok := msg.(childWindowSizeMsg)
 	if !ok {
-		t.Fatalf("sendSize produced %T, want tea.WindowSizeMsg", msg)
+		t.Fatalf("sendSize produced %T, want childWindowSizeMsg", msg)
 	}
+	ws := childSize.WindowSizeMsg
 	if ws.Width != 80 || ws.Height != 23 {
 		t.Fatalf("sendSize forwarded %dx%d, want 80x23 (reduced by 1 banner row)", ws.Width, ws.Height)
 	}
@@ -122,9 +123,49 @@ func TestSendSizeNoChromeForwardsFullHeight(t *testing.T) {
 	a.height = 24
 
 	msg := runCmd(a.sendSize())
-	ws := msg.(tea.WindowSizeMsg)
+	ws := msg.(childWindowSizeMsg).WindowSizeMsg
 	if ws.Width != 80 || ws.Height != 24 {
 		t.Fatalf("sendSize forwarded %dx%d, want 80x24 (no chrome)", ws.Width, ws.Height)
+	}
+}
+
+func TestSendSizeDoesNotOverwriteRawTerminalHeight(t *testing.T) {
+	a := budgetApp(t, "root chrome")
+
+	model, _ := a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a = model.(App)
+	if a.height != 24 || a.help.inner.height != 23 {
+		t.Fatalf("initial size: app=%d child=%d, want app 24 child 23", a.height, a.help.inner.height)
+	}
+
+	first := runCmd(a.sendSize())
+	model, _ = a.Update(first)
+	a = model.(App)
+	if a.height != 24 || a.help.inner.height != 23 {
+		t.Fatalf("after first synthetic size: app=%d child=%d, want stable app 24 child 23", a.height, a.help.inner.height)
+	}
+
+	second := runCmd(a.sendSize())
+	model, _ = a.Update(second)
+	a = model.(App)
+	if a.height != 24 || a.help.inner.height != 23 {
+		t.Fatalf("after second synthetic size: app=%d child=%d, want stable app 24 child 23", a.height, a.help.inner.height)
+	}
+}
+
+func TestVisitingDoesNotReserveRootChrome(t *testing.T) {
+	a := budgetApp(t, "")
+	a.visiting = true
+	a.width = 80
+	a.height = 24
+
+	b := a.layoutBudget()
+
+	if b.TopChromeRows != 0 {
+		t.Fatalf("visiting TopChromeRows = %d, want 0", b.TopChromeRows)
+	}
+	if b.ChildHeight != 24 {
+		t.Fatalf("visiting ChildHeight = %d, want full height 24", b.ChildHeight)
 	}
 }
 

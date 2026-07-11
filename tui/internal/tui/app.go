@@ -103,6 +103,7 @@ type App struct {
 	visitOriginalOrchDir    string
 	visitOriginalOrchName   string
 	visitOriginalMail       MailModel
+	visitOriginalProjects   ProjectsModel
 	visitOriginalView       appView
 	visitTargetProjectDir   string
 	visitTargetAgentDir     string
@@ -282,56 +283,16 @@ func (a App) startAutoRefresh() (App, tea.Cmd) {
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case childWindowSizeMsg:
+		return a.updateChildWindowSize(msg.WindowSizeMsg)
+
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
 		// Reserve rows for root chrome first, then forward the *reduced*
 		// child window size — never the raw terminal height. See
 		// layout.go (LayoutBudget) for the contract.
-		msg = a.layoutBudget().ChildWindowSize()
-		// Forward to current view so it can resize
-		var cmd tea.Cmd
-		switch a.currentView {
-		case appViewMail:
-			a.mail, cmd = a.mail.Update(msg)
-		case appViewSettings:
-			a.settings, cmd = a.settings.Update(msg)
-		case appViewProps:
-			a.props, cmd = a.props.Update(msg)
-		case appViewAddon:
-			a.addon, cmd = a.addon.Update(msg)
-		case appViewDoctor:
-			a.doctor, cmd = a.doctor.Update(msg)
-		case appViewUpdate:
-			a.update, cmd = a.update.Update(msg)
-		case appViewUpdateTUI:
-			a.updateTUI, cmd = a.updateTUI.Update(msg)
-		case appViewNirvana:
-			a.nirvana, cmd = a.nirvana.Update(msg)
-		case appViewLibrary:
-			a.library, cmd = a.library.Update(msg)
-		case appViewProjects:
-			a.projects, cmd = a.projects.Update(msg)
-		case appViewFirstRun:
-			a.firstRun, cmd = a.firstRun.Update(msg)
-		case appViewLogin:
-			a.login, cmd = a.login.Update(msg)
-		case appViewKnowledge:
-			a.knowledge, cmd = a.knowledge.Update(msg)
-		case appViewMailbox:
-			a.mailbox, cmd = a.mailbox.Update(msg)
-		case appViewSystem:
-			a.system, cmd = a.system.Update(msg)
-		case appViewPresets:
-			a.presetLibrary, cmd = a.presetLibrary.Update(msg)
-		case appViewDaemons:
-			a.daemons, cmd = a.daemons.Update(msg)
-		case appViewNotification:
-			a.notification, cmd = a.notification.Update(msg)
-		case appViewHelp:
-			a.help, cmd = a.help.Update(msg)
-		}
-		return a, cmd
+		return a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
 
 	case tea.FocusMsg:
 		ApplyTerminalBG()
@@ -1391,6 +1352,55 @@ func setActivePreset(dir, presetPath string) error {
 	return os.WriteFile(initPath, out, 0o644)
 }
 
+type childWindowSizeMsg struct {
+	tea.WindowSizeMsg
+}
+
+func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
+	var cmd tea.Cmd
+	switch a.currentView {
+	case appViewMail:
+		a.mail, cmd = a.mail.Update(msg)
+	case appViewSettings:
+		a.settings, cmd = a.settings.Update(msg)
+	case appViewProps:
+		a.props, cmd = a.props.Update(msg)
+	case appViewAddon:
+		a.addon, cmd = a.addon.Update(msg)
+	case appViewDoctor:
+		a.doctor, cmd = a.doctor.Update(msg)
+	case appViewUpdate:
+		a.update, cmd = a.update.Update(msg)
+	case appViewUpdateTUI:
+		a.updateTUI, cmd = a.updateTUI.Update(msg)
+	case appViewNirvana:
+		a.nirvana, cmd = a.nirvana.Update(msg)
+	case appViewLibrary:
+		a.library, cmd = a.library.Update(msg)
+	case appViewProjects:
+		a.projects, cmd = a.projects.Update(msg)
+	case appViewFirstRun:
+		a.firstRun, cmd = a.firstRun.Update(msg)
+	case appViewLogin:
+		a.login, cmd = a.login.Update(msg)
+	case appViewKnowledge:
+		a.knowledge, cmd = a.knowledge.Update(msg)
+	case appViewMailbox:
+		a.mailbox, cmd = a.mailbox.Update(msg)
+	case appViewSystem:
+		a.system, cmd = a.system.Update(msg)
+	case appViewPresets:
+		a.presetLibrary, cmd = a.presetLibrary.Update(msg)
+	case appViewDaemons:
+		a.daemons, cmd = a.daemons.Update(msg)
+	case appViewNotification:
+		a.notification, cmd = a.notification.Update(msg)
+	case appViewHelp:
+		a.help, cmd = a.help.Update(msg)
+	}
+	return a, cmd
+}
+
 // hardRefreshDirWithPreset is the `/refresh <preset>` cousin of
 // hardRefreshDir. Sequence is identical (suspend → lock-clear → kill →
 // signal sweep → relaunch) except that step 5 writes
@@ -1484,7 +1494,7 @@ func firstLine(err error) string {
 // and a resized view agree on their height.
 func (a App) sendSize() tea.Cmd {
 	cs := a.layoutBudget().ChildWindowSize()
-	return func() tea.Msg { return cs }
+	return func() tea.Msg { return childWindowSizeMsg{WindowSizeMsg: cs} }
 }
 
 func (a App) enterVisitedAgent(msg ProjectsAgentSelectedMsg) (App, tea.Cmd) {
@@ -1499,7 +1509,8 @@ func (a App) enterVisitedAgent(msg ProjectsAgentSelectedMsg) (App, tea.Cmd) {
 		a.visitOriginalOrchDir = a.orchDir
 		a.visitOriginalOrchName = a.orchName
 		a.visitOriginalMail = a.mail
-		a.visitOriginalView = appViewMail
+		a.visitOriginalProjects = a.projects
+		a.visitOriginalView = a.currentView
 	}
 	a.projectDir = filepath.Join(r.Project, ".lingtai")
 	a.orchDir = r.AgentDir
@@ -1511,6 +1522,7 @@ func (a App) enterVisitedAgent(msg ProjectsAgentSelectedMsg) (App, tea.Cmd) {
 	a.selectMode = false
 	a.doubleEscArmed = false
 	a.installMailModel(a.newMailForCurrentContext())
+	a.mail.visitExitHint = true
 	return a, tea.Batch(a.mail.Init(), a.sendSize())
 }
 
@@ -1520,20 +1532,30 @@ func (a App) returnFromVisit() (App, tea.Cmd) {
 	}
 	restored := a.visitOriginalMail
 	restored.copyMode = false
+	restored.visitExitHint = false
 	a.projectDir = a.visitOriginalProjectDir
 	a.orchDir = a.visitOriginalOrchDir
 	a.orchName = a.visitOriginalOrchName
-	a.currentView = appViewMail
+	a.currentView = a.visitOriginalView
 	a.selectMode = false
 	a.visiting = false
 	a.visitOriginalProjectDir = ""
 	a.visitOriginalOrchDir = ""
 	a.visitOriginalOrchName = ""
+	a.visitOriginalView = appViewMail
 	a.visitTargetProjectDir = ""
 	a.visitTargetAgentDir = ""
 	a.visitTargetAgentName = ""
 	a.doubleEscArmed = false
-	return a, a.resumeMailModel(restored)
+	resumeCmd := a.resumeMailModel(restored)
+	if a.currentView == appViewProjects {
+		a.projects = a.visitOriginalProjects
+		a.visitOriginalProjects = ProjectsModel{}
+		return a, resumeCmd
+	}
+	a.visitOriginalProjects = ProjectsModel{}
+	a.currentView = appViewMail
+	return a, resumeCmd
 }
 
 func (a *App) resumeMailModel(restored MailModel) tea.Cmd {

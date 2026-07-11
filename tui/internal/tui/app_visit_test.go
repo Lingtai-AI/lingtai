@@ -2,10 +2,12 @@ package tui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
@@ -67,8 +69,16 @@ func TestAppEnterVisitedAgentTransition(t *testing.T) {
 	if updated.currentView != appViewMail {
 		t.Fatalf("currentView = %v, want mail", updated.currentView)
 	}
-	if updated.topChromeRows() != 1 {
-		t.Fatalf("visiting banner should reserve one row, got %d", updated.topChromeRows())
+	if updated.topChromeRows() != 0 {
+		t.Fatalf("visiting should not reserve root chrome rows, got %d", updated.topChromeRows())
+	}
+	if !updated.mail.visitExitHint {
+		t.Fatal("visited target mail should carry inline exit hint")
+	}
+	model, _ := updated.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := ansi.Strip(model.(App).View().Content)
+	if n := strings.Count(view, "esc-esc to exit"); n != 1 {
+		t.Fatalf("visited mail title should include one inline exit hint, got %d:\n%s", n, view)
 	}
 }
 
@@ -85,6 +95,9 @@ func TestRepeatedVisitedSwitchPreservesFirstOriginal(t *testing.T) {
 	}
 	if second.orchName != "B" {
 		t.Fatalf("target should update to second selection, got %q", second.orchName)
+	}
+	if !second.mail.visitExitHint {
+		t.Fatal("repeated visited switch should set hint on the new target mail")
 	}
 }
 
@@ -105,6 +118,9 @@ func TestReturnFromVisitRestoresOriginalContextAndBumpsGeneration(t *testing.T) 
 	}
 	if restored.mail.generation == origGen || restored.mail.generation == visited.mail.generation {
 		t.Fatalf("mail generation should bump on restore, got %d (orig %d visited %d)", restored.mail.generation, origGen, visited.mail.generation)
+	}
+	if restored.mail.visitExitHint {
+		t.Fatal("restored original mail should not keep target visit hint")
 	}
 }
 
@@ -148,6 +164,69 @@ func TestDoubleEscFastSlowAndDisarm(t *testing.T) {
 	model, _ = disarm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if !model.(App).visiting {
 		t.Fatal("non-esc input should disarm double esc")
+	}
+}
+
+func TestDoubleEscFromVisitedMailReturnsToPreservedProjectsFirst(t *testing.T) {
+	oldNow := appNow
+	t.Cleanup(func() { appNow = oldNow })
+	base := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	appNow = func() time.Time { return base }
+
+	a := visitTestApp(t)
+	origProject := a.projectDir
+	origAgent := a.orchDir
+	origMailGeneration := a.mail.generation
+
+	opened, _ := a.openProjectsView()
+	a = opened
+	a.projects.rows = []projectRow{
+		{kind: projectRowGroup, project: filepath.Dir(origProject)},
+		{kind: projectRowAgent, project: filepath.Dir(origProject), record: visitRecord(filepath.Dir(origProject), "orig", "Orig")},
+		{kind: projectRowAgent, project: filepath.Join(filepath.Dir(filepath.Dir(origProject)), "target"), record: visitRecord(filepath.Join(filepath.Dir(filepath.Dir(origProject)), "target"), "worker", "Worker")},
+	}
+	a.projects.cursor = 2
+	a.projects.status = "preserved status"
+
+	visited, _ := a.enterVisitedAgent(ProjectsAgentSelectedMsg{Record: a.projects.rows[2].record})
+	if visited.currentView != appViewMail || !visited.visiting {
+		t.Fatalf("precondition: enter should open visited mail, view=%v visiting=%v", visited.currentView, visited.visiting)
+	}
+
+	model, _ := visited.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	first := model.(App)
+	appNow = func() time.Time { return base.Add(100 * time.Millisecond) }
+	model, _ = first.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	got := model.(App)
+
+	if got.currentView != appViewProjects {
+		t.Fatalf("double Esc returned to view %v, want /projects", got.currentView)
+	}
+	if got.visiting || got.topChromeRows() != 0 {
+		t.Fatalf("visit state not cleared: visiting=%v topChromeRows=%d", got.visiting, got.topChromeRows())
+	}
+	if got.projectDir != origProject || got.orchDir != origAgent {
+		t.Fatalf("restored context = (%q,%q), want (%q,%q)", got.projectDir, got.orchDir, origProject, origAgent)
+	}
+	if got.mail.generation == origMailGeneration || got.mail.baseDir != origProject || got.mail.orchestrator != origAgent {
+		t.Fatalf("original mail not resumed with restored context: gen=%d origGen=%d project=%q orch=%q", got.mail.generation, origMailGeneration, got.mail.baseDir, got.mail.orchestrator)
+	}
+	if got.mail.visitExitHint {
+		t.Fatal("preserved original mail should not keep target visit hint")
+	}
+	if got.projects.cursor != 2 || got.projects.status != "preserved status" || len(got.projects.rows) != 3 {
+		t.Fatalf("projects model was not preserved: cursor=%d status=%q rows=%d", got.projects.cursor, got.projects.status, len(got.projects.rows))
+	}
+
+	model, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	cmdMsg := runCmd(cmd)
+	msg, ok := cmdMsg.(ViewChangeMsg)
+	if !ok || msg.View != "mail" {
+		t.Fatalf("subsequent Esc from preserved /projects produced %T %#v, want ViewChangeMsg mail", cmdMsg, cmdMsg)
+	}
+	model, _ = model.(App).Update(msg)
+	if model.(App).currentView != appViewMail {
+		t.Fatalf("subsequent Esc from preserved /projects routed to view %v, want mail", model.(App).currentView)
 	}
 }
 

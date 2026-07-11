@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 )
 
@@ -97,6 +99,143 @@ func TestProjectsModelGroupedRowsMarkersAndEnter(t *testing.T) {
 	}
 	if msg.RequestSeq != m.requestSeq {
 		t.Fatalf("selection request = %d, want %d", msg.RequestSeq, m.requestSeq)
+	}
+}
+
+func TestProjectsRegistryDetailsShowCuratedKanbanSubset(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := projectRecord(project, "admin", "Admin One", true)
+	admin.Role = inventory.RoleMain
+	admin.IsOrchestrator = true
+	admin.State = "ACTIVE"
+	admin.Heartbeat = fs.HeartbeatStatus{Exists: true, Fresh: true, AgeSeconds: 2}
+	admin.CreatedAt = "2026-07-01T10:30:00Z"
+	admin.MoltCount = 7
+	admin.MoltCountAvailable = true
+	admin.ContextTotalTokens = 12345
+	admin.ContextWindowSize = 250000
+	admin.ContextUsagePct = 4.938
+	admin.ContextAvailable = true
+	admin.Uptime = "1h 2m"
+	worker := projectRecord(project, "worker", "Worker", false)
+	worker.EnterReason = inventory.EnterReasonNonAdmin
+	outsider := projectRecord(filepath.Join(t.TempDir(), "other-network"), "other-admin", "Other Admin", true)
+	outsider.IsOrchestrator = true
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{admin, worker, outsider},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{admin, worker}}},
+	}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"Status",
+		"Lifecycle",
+		"Network",
+		"Context",
+		"Role: MAIN",
+		"State: ACTIVE · fresh (2s)",
+		"Created at: " + formatKanbanTimestamp(admin.CreatedAt),
+		"Process uptime: 1h 2m",
+		"Molt count: 7",
+		"Project: network-alpha",
+		"Orchestrator: Admin One",
+		"Live members: 2",
+		"Live admins: 1",
+		"Usage: 12,345 / 250,000 (4.9%)",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{project, admin.AgentDir, "Agent dir:"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("view leaked raw path/detail %q:\n%s", unwanted, view)
+		}
+	}
+}
+
+func TestProjectsRegistryDetailsRenderMissingValuesAsDash(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	rec := projectRecord(project, "agent", "Agent", true)
+	rec.Uptime = ""
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Created at: —", "Lifetime: —", "Process uptime: —", "Molt count: —", "Orchestrator: —"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing unavailable value %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Context") {
+		t.Fatalf("context section should be omitted without authoritative status data:\n%s", view)
+	}
+}
+
+func TestProjectsRegistryDetailSectionsRenderInEachLocale(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	project := t.TempDir()
+	rec := projectRecord(project, "agent", "Agent", true)
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	for _, lang := range []string{"en", "zh", "wen"} {
+		t.Run(lang, func(t *testing.T) {
+			if err := i18n.SetLang(lang); err != nil {
+				t.Fatal(err)
+			}
+			m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+			m, _ = m.Update(projectsInventoryForModel(m, snap))
+			view := ansi.Strip(m.View())
+			for _, key := range []string{"projects.section_status", "projects.section_lifecycle", "projects.section_network", "projects.created_at", "projects.live_members"} {
+				want := i18n.TIn(lang, key)
+				if want == key || !strings.Contains(view, want) {
+					t.Fatalf("%s view missing localized %s=%q:\n%s", lang, key, want, view)
+				}
+			}
+		})
+	}
+}
+
+func TestProjectsRegistryNarrowWidthFallsBackToList(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	rec := projectRecord(project, "agent", "Agent", true)
+	snap := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Agent") {
+		t.Fatalf("narrow fallback lost selectable list:\n%s", view)
+	}
+	if strings.Contains(view, i18n.T("projects.section_lifecycle")) || strings.Contains(view, "│") {
+		t.Fatalf("narrow fallback should omit details and separator:\n%s", view)
+	}
+}
+
+func TestAgentLifetimeUsesCreationTimeNotProcessUptime(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	created := now.Add(-(26*time.Hour + 30*time.Minute)).Format(time.RFC3339)
+	if got, want := formatAgentLifetime(created, now), "1d 2h 30m"; got != want {
+		t.Fatalf("formatAgentLifetime = %q, want %q", got, want)
+	}
+	if got := formatAgentLifetime("", now); got != "—" {
+		t.Fatalf("missing creation time lifetime = %q, want dash", got)
 	}
 }
 
