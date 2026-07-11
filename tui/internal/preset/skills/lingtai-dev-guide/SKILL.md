@@ -8,16 +8,24 @@ description: >
   publication-bound release workflow, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.6.1
-last_changed_at: "2026-07-03T08:05:00Z"
+version: 2.6.2
+last_changed_at: "2026-07-11T19:05:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai Developer Guide
 
-This skill is the developer router for LingTai. Start here, choose exactly the
-reference you need, then read that nested file before touching code. The root
-stays short on purpose; the detailed procedures live under `reference/<topic>/`.
+This skill is the cross-repository developer router for LingTai. The root stays
+short on purpose; detailed procedures live under `reference/<topic>/`.
+
+## Repository-local developer guidance takes precedence
+
+Before using this guide, look for developer guidance maintained by the current
+repository and read it first. When it exists, follow it for repository-specific
+rules; it takes precedence over this global guide. Use this guide afterward — or
+when the local guide routes here — to select the deeper cross-repository topic
+you need, then read that nested reference before touching code. Do not substitute
+generic procedures here for local guidance or restate local rules from memory.
 
 ## Non-negotiable rules
 
