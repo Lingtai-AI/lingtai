@@ -143,6 +143,19 @@ func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
 	}
 }
 
+func TestAppAutoRefreshSkipsPropsLoadWhenInFlight(t *testing.T) {
+	dir := t.TempDir()
+	a := App{currentView: appViewProps, props: NewPropsModel(dir, dir, dir), tuiConfig: config.DefaultTUIConfig()}
+	a.props.loadInFlight = true
+	updated, cmd := a.autoRefreshActiveView()
+	if cmd != nil {
+		t.Fatal("auto-refresh should not queue overlapping props load while one is in flight")
+	}
+	if updated.props.loadSkippedTicks != 1 {
+		t.Fatalf("loadSkippedTicks = %d, want 1", updated.props.loadSkippedTicks)
+	}
+}
+
 func TestAppAutoRefreshTickDisabledDropsAndUnarms(t *testing.T) {
 	cfg := config.DefaultTUIConfig()
 	cfg.AutoRefreshOff = true

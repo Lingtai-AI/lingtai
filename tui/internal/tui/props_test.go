@@ -13,6 +13,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestPropsReloadStatusHintShowsStaleAndSlow(t *testing.T) {
+	m := PropsModel{
+		loadInFlight:       true,
+		loadSkippedTicks:   2,
+		loadLastDuration:   time.Second,
+		detailOpen:         true,
+		detailInFlight:     true,
+		detailSkippedTicks: 1,
+		detailLastDuration: time.Second,
+	}
+	hint := m.reloadStatusHint()
+	for _, want := range []string{"loading", "stale:2", "slow:1s", "detail loading", "detail stale:1", "detail slow:1s"} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("reloadStatusHint() missing %q in %q", want, hint)
+		}
+	}
+}
+
 func TestKanbanTimestampRendersLocalOffset(t *testing.T) {
 	origLocal := time.Local
 	t.Cleanup(func() { time.Local = origLocal })

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mailboxIDPattern matches the short mailbox id shape produced by
@@ -316,6 +317,94 @@ func TestMailCache_FlipsDeliveredOnOutboxToSentTransition(t *testing.T) {
 	}
 	if !cache.Messages[0].Delivered {
 		t.Errorf("after transition: Delivered = false, want true")
+	}
+}
+
+func TestMailCache_FlipsPendingSentIDWithoutFullSentScan(t *testing.T) {
+	humanDir := t.TempDir()
+	oldInterval := mailCacheFullSentScanInterval
+	mailCacheFullSentScanInterval = time.Hour
+	t.Cleanup(func() { mailCacheFullSentScanInterval = oldInterval })
+
+	outboxMsgDir := filepath.Join(humanDir, "mailbox", "outbox", "msg-transit-budgeted")
+	if err := os.MkdirAll(outboxMsgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	msg := MailMessage{
+		ID: "msg-transit-budgeted", MailboxID: "msg-transit-budgeted",
+		From: "human", To: []string{"alice"}, Subject: "in-transit", Message: "hi",
+		Type: "normal", ReceivedAt: "2026-04-21T10:00:00.000Z",
+	}
+	data, _ := json.Marshal(msg)
+	if err := os.WriteFile(filepath.Join(outboxMsgDir, "message.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewMailCache(humanDir).Refresh()
+	if len(cache.Messages) != 1 || cache.Messages[0].Delivered {
+		t.Fatalf("first refresh = %#v, want one pending outbox message", cache.Messages)
+	}
+
+	// Add unrelated sent history after the initial full scan. If the next refresh
+	// still full-scans sent/ despite the budget, this message would appear.
+	historyDir := filepath.Join(humanDir, "mailbox", "sent", "sent-history-after-scan")
+	if err := os.MkdirAll(historyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	history := MailMessage{ID: "sent-history-after-scan", MailboxID: "sent-history-after-scan", From: "human", To: []string{"bob"}, ReceivedAt: "2026-04-21T10:01:00.000Z"}
+	historyData, _ := json.Marshal(history)
+	if err := os.WriteFile(filepath.Join(historyDir, "message.json"), historyData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate recipient pickup of the pending outbox message.
+	transitSentDir := filepath.Join(humanDir, "mailbox", "sent", "msg-transit-budgeted")
+	if err := os.Rename(outboxMsgDir, transitSentDir); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	cache = cache.Refresh()
+	if len(cache.Messages) != 1 {
+		t.Fatalf("after budgeted refresh len = %d, want 1 (unrelated sent history should wait for full scan)", len(cache.Messages))
+	}
+	if !cache.Messages[0].Delivered {
+		t.Fatalf("pending sent-id exact check did not flip Delivered")
+	}
+}
+
+func TestMailCache_PeriodicFullSentScanDiscoversHistory(t *testing.T) {
+	humanDir := t.TempDir()
+	oldInterval := mailCacheFullSentScanInterval
+	mailCacheFullSentScanInterval = time.Hour
+	t.Cleanup(func() { mailCacheFullSentScanInterval = oldInterval })
+
+	cache := NewMailCache(humanDir).Refresh()
+	if len(cache.Messages) != 0 {
+		t.Fatalf("initial len = %d, want 0", len(cache.Messages))
+	}
+
+	sentDir := filepath.Join(humanDir, "mailbox", "sent", "sent-later")
+	if err := os.MkdirAll(sentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	msg := MailMessage{ID: "sent-later", MailboxID: "sent-later", From: "human", To: []string{"alice"}, ReceivedAt: "2026-04-21T09:30:00.000Z"}
+	data, _ := json.Marshal(msg)
+	if err := os.WriteFile(filepath.Join(sentDir, "message.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cache = cache.Refresh()
+	if len(cache.Messages) != 0 {
+		t.Fatalf("budgeted refresh discovered sent history early: len = %d, want 0", len(cache.Messages))
+	}
+
+	cache.lastFullSentScan = time.Now().Add(-2 * time.Hour)
+	cache = cache.Refresh()
+	if len(cache.Messages) != 1 {
+		t.Fatalf("after interval len = %d, want 1", len(cache.Messages))
+	}
+	if !cache.Messages[0].Delivered {
+		t.Fatalf("sent history Delivered = false, want true")
 	}
 }
 
