@@ -49,6 +49,7 @@ const (
 	EnterReasonPhantomProject     EnterabilityReason = "phantom_project"
 	EnterReasonManifestUnreadable EnterabilityReason = "manifest_unreadable"
 	EnterReasonHuman              EnterabilityReason = "human_target"
+	EnterReasonNonAdmin           EnterabilityReason = "non_admin_target"
 	EnterReasonAgentDirMissing    EnterabilityReason = "agent_dir_missing"
 )
 
@@ -268,6 +269,8 @@ func enterability(r Record) (bool, EnterabilityReason, string) {
 		return false, EnterReasonManifestUnreadable, r.ReadError
 	case r.IsHuman:
 		return false, EnterReasonHuman, ""
+	case !r.IsOrchestrator:
+		return false, EnterReasonNonAdmin, ""
 	default:
 		return true, EnterReasonNone, ""
 	}

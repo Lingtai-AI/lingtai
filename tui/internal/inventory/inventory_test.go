@@ -81,11 +81,17 @@ func TestFromProcessesEnrichesSortsGroupsAndFilters(t *testing.T) {
 	if !main.Heartbeat.Fresh {
 		t.Fatalf("main heartbeat should be fresh: %+v", main.Heartbeat)
 	}
+	if !main.Enterable || main.EnterReason != EnterReasonNone {
+		t.Fatalf("admin/orchestrator should be enterable: %+v", main)
+	}
 	if worker.AgentDir != workerDir || worker.Role != RoleAgent || worker.IMHandles != "telegram:@workerbot" {
 		t.Fatalf("worker enrichment wrong: %+v", worker)
 	}
 	if worker.Heartbeat.Fresh || !worker.Heartbeat.Exists {
 		t.Fatalf("worker heartbeat should be stale and visible: %+v", worker.Heartbeat)
+	}
+	if worker.Enterable || worker.EnterReason != EnterReasonNonAdmin {
+		t.Fatalf("non-admin member should remain visible but not enterable: %+v", worker)
 	}
 }
 

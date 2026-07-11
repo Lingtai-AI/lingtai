@@ -54,7 +54,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 
 ### Network & sharing
 - `/mailbox` — browse all mailbox messages and attachments.
-- `/projects` — switch into another running agent's project/mail context.
+- `/projects` — switch into another running admin agent's project/mail context.
 - `/export` — export a reusable recipe for sharing.
 - `/viz` — open the network visualization in the browser.
 
@@ -225,13 +225,14 @@ body and inline attachment rendering. Use it for the complete mail record for an
 agent, including external IMAP mail and attachments, rather than the live chat
 stream.
 
-### `/projects` — switch to a running agent
+### `/projects` — switch to a running admin agent
 **Usage:** `/projects`
 
-Lists process-visible, non-human running agents grouped by project. Select an
-agent and press Enter to visit that project, focus that agent, and open its mail.
-While visiting, a root banner shows the target and original context; press
-`Esc` twice quickly from mail to return to the original.
+Lists process-visible, non-human running agents grouped by project. Only
+admin/orchestrator rows can be entered; member rows remain visible for network
+context. Select an admin agent and press Enter to visit that project, focus that
+agent, and open its mail. While visiting, a root banner shows the target and
+original context; press `Esc` twice quickly from mail to return to the original.
 
 ### `/export` — export a reusable recipe
 **Usage:** `/export` · `/export recipe` (explicit form)

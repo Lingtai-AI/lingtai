@@ -607,6 +607,7 @@
   "projects.enter_reason_phantom": "Project .lingtai directory is missing",
   "projects.enter_reason_manifest": "Manifest unreadable",
   "projects.enter_reason_human": "Human mailbox is not a running agent target",
+  "projects.enter_reason_non_admin": "Only admin agents can be entered",
   "projects.enter_reason_agent_dir": "Agent directory is missing",
   "projects.section_agents": "Agents",
   "projects.section_network": "Network",

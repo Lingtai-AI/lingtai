@@ -602,6 +602,7 @@
   "projects.enter_reason_phantom": "项目 .lingtai 目录已亡",
   "projects.enter_reason_manifest": "清单不可读",
   "projects.enter_reason_human": "人类邮箱非可入之运行灵",
+  "projects.enter_reason_non_admin": "惟 admin 之灵可入",
   "projects.enter_reason_agent_dir": "灵目录缺失",
   "projects.section_agents": "器灵",
   "projects.section_network": "云",

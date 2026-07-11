@@ -602,6 +602,7 @@
   "projects.enter_reason_phantom": "项目 .lingtai 目录已不存在",
   "projects.enter_reason_manifest": "清单不可读取",
   "projects.enter_reason_human": "人类邮箱不是可进入的运行中智能体目标",
+  "projects.enter_reason_non_admin": "只有 admin 智能体可进入",
   "projects.enter_reason_agent_dir": "智能体目录缺失",
   "projects.section_agents": "器灵",
   "projects.section_network": "网络",

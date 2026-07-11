@@ -828,6 +828,8 @@ func enterabilityReasonText(reason inventory.EnterabilityReason) string {
 		return i18n.T("projects.enter_reason_manifest")
 	case inventory.EnterReasonHuman:
 		return i18n.T("projects.enter_reason_human")
+	case inventory.EnterReasonNonAdmin:
+		return i18n.T("projects.enter_reason_non_admin")
 	case inventory.EnterReasonAgentDirMissing:
 		return i18n.T("projects.enter_reason_agent_dir")
 	default:

@@ -150,6 +150,39 @@ func TestProjectsDisabledReasonRendersInEachLocale(t *testing.T) {
 	}
 }
 
+func TestProjectsNonAdminReasonRendersInEachLocale(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	project := t.TempDir()
+	rec := projectRecord(project, "worker", "Worker", false)
+	rec.EnterReason = inventory.EnterReasonNonAdmin
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{rec},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{rec}}},
+	}
+	for _, lang := range []string{"en", "zh", "wen"} {
+		t.Run(lang, func(t *testing.T) {
+			if err := i18n.SetLang(lang); err != nil {
+				t.Fatal(err)
+			}
+			m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 24})
+			m, _ = m.Update(projectsInventoryForModel(m, snap))
+			view := ansi.Strip(m.View())
+			want := i18n.TIn(lang, "projects.enter_reason_non_admin")
+			if !strings.Contains(view, want) {
+				t.Fatalf("view missing localized non-admin reason %q:\n%s", want, view)
+			}
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if cmd != nil {
+				t.Fatal("non-admin row should not emit a selection command")
+			}
+			if !strings.Contains(m.status, want) {
+				t.Fatalf("status = %q, want localized non-admin reason %q", m.status, want)
+			}
+		})
+	}
+}
+
 func TestProjectsModelRefreshKeysReturnLoadCommand(t *testing.T) {
 	m := NewProjectsModel(t.TempDir(), t.TempDir(), ProjectsContext{})
 	if _, cmd := m.Update(ctrlR()); cmd == nil {
