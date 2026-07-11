@@ -610,6 +610,7 @@
   "projects.section_lifecycle": "生命周期",
   "projects.section_network": "网络",
   "projects.section_context": "上下文",
+  "projects.section_runtime": "运行时",
   "projects.created_at": "创建时间",
   "projects.lifetime": "存续时间",
   "projects.process_uptime": "进程运行时间",

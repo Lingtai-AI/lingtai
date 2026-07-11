@@ -615,6 +615,7 @@
   "projects.section_lifecycle": "Lifecycle",
   "projects.section_network": "Network",
   "projects.section_context": "Context",
+  "projects.section_runtime": "Runtime",
   "projects.created_at": "Created at",
   "projects.lifetime": "Lifetime",
   "projects.process_uptime": "Process uptime",
