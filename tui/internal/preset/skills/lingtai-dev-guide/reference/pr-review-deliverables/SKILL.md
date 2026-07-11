@@ -6,8 +6,8 @@ description: >
   HTML explainers, PR body hygiene and gh pr edit troubleshooting,
   source-labeled deliverables with syntax/validation checks, and maintainer
   authorization boundaries for opening, editing, and merging PRs.
-version: 1.0.0
-last_changed_at: "2026-06-13T23:25:20-07:00"
+version: 1.1.0
+last_changed_at: "2026-07-11T14:20:00-07:00"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -19,9 +19,8 @@ review gates before asking for a merge.
 
 This consolidates the PR-review-gate, HTML-explainer, deliverable-template, and
 release-style-audit practices. It covers *preparing and reviewing* PRs and their
-human deliverables; for release-specific publishing (tags, PyPI, Homebrew,
-website release log/blog) cross-link to `reference/release-workflow/SKILL.md`
-instead of duplicating it here.
+human deliverables. Release publication is outside this bundled guide; use the
+dedicated release owner available in the maintainer's environment.
 
 ## Core principle
 
@@ -46,7 +45,7 @@ Before requesting review, confirm:
 
 Known repo pitfalls to not trip over:
 
-- `tui/internal/tui/stars.csv` may use CRLF intentionally — do not "normalize" it.
+- `docs/stars/stars.csv` may use CRLF intentionally — do not "normalize" it.
 - Portal tests may need frontend assets built first (`npm --prefix portal/web run build`).
 
 ## 2. Independent review passes (gates, not permission)
@@ -127,17 +126,14 @@ effect:
 Generating diffs, running read-only reviews, and writing local explainers are
 always allowed. When approval wording is ambiguous, show the maintainer the final
 candidate refs/diff and ask before mutating GitHub state. For consequential
-releases (tagging, publishing to PyPI/Homebrew, website release log/blog), the
-publishing boundaries and authorization rules live in
-`reference/release-workflow/SKILL.md` — follow that reference rather than
-re-deriving release permissions here.
+releases (tagging, publishing to PyPI/Homebrew, website release archive/blog),
+use the maintainer environment's dedicated release owner;
+this PR-review reference grants no publication authority.
 
 ## Related references
 
 - `reference/contributing/SKILL.md` — issue → worktree → PR → merge loop, daemon
   decomposition, and the canonical HTML-explainer requirement.
-- `reference/release-workflow/SKILL.md` — release-specific gates, publishing
-  boundaries, and the release blog/style-audit workflow.
 - `reference/skill-stewardship/SKILL.md` — PR-ready cleanup when the change adds
   or edits a skill.
 - `skills-manual` — generic skill authoring (when the deliverable is a skill).

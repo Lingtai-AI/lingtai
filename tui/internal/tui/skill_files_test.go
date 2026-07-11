@@ -373,11 +373,8 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 		"- name: dev-guide-setup",
 		"- name: dev-guide-contributing",
 		"- name: dev-guide-gotchas",
-		"- name: dev-guide-releasing",
-		"- name: dev-guide-release-workflow",
 		"- name: dev-guide-debug-troubleshoot",
 		"- name: dev-guide-security-audit",
-		"- name: dev-guide-network-governance",
 		"- name: dev-guide-runtime-self-check",
 		"- name: dev-guide-pr-review-deliverables",
 		"- name: dev-guide-skill-stewardship",
@@ -386,11 +383,8 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 		"reference/setup/SKILL.md",
 		"reference/contributing/SKILL.md",
 		"reference/gotchas/SKILL.md",
-		"reference/releasing/SKILL.md",
-		"reference/release-workflow/SKILL.md",
 		"reference/debug-troubleshoot/SKILL.md",
 		"reference/security-audit/SKILL.md",
-		"reference/network-governance/SKILL.md",
 		"reference/runtime-self-check/SKILL.md",
 		"reference/pr-review-deliverables/SKILL.md",
 		"reference/skill-stewardship/SKILL.md",
@@ -410,16 +404,11 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 		"setup/SKILL.md",
 		"contributing/SKILL.md",
 		"gotchas/SKILL.md",
-		"releasing/SKILL.md",
-		"release-workflow/SKILL.md",
-		"release-workflow/assets/release-blog-template.md",
 		"debug-troubleshoot/SKILL.md",
 		"security-audit/SKILL.md",
-		"network-governance/SKILL.md",
 		"runtime-self-check/SKILL.md",
 		"pr-review-deliverables/SKILL.md",
 		"skill-stewardship/SKILL.md",
-		"release-html-log-template.html",
 	} {
 		e, ok := labels[want]
 		if !ok {
@@ -436,24 +425,6 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 	}
 	if !strings.Contains(string(childBodyBytes), "Nested lingtai-dev-guide reference") {
 		t.Error("nested architecture child should identify itself as a nested lingtai-dev-guide reference")
-	}
-
-	releaseWorkflowBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "release-workflow", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	releaseWorkflowBody := string(releaseWorkflowBytes)
-	for _, want := range []string{
-		"Nested lingtai-dev-guide reference",
-		"assets/release-blog-template.md",
-		"strict post-tag delta",
-		"real release surfaces",
-		"ReleaseDetail.astro",
-		"GitHub Releases",
-	} {
-		if !strings.Contains(releaseWorkflowBody, want) {
-			t.Errorf("release workflow child missing %q", want)
-		}
 	}
 
 	// The three consolidated dev-guide references must each identify themselves
@@ -486,7 +457,6 @@ func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 		"git diff --check",
 		"explainer",
 		"Maintainer authorization boundaries",
-		"reference/release-workflow/SKILL.md",
 	} {
 		if !strings.Contains(prReviewBody, want) {
 			t.Errorf("pr-review-deliverables child missing %q", want)

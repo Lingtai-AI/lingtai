@@ -1,9 +1,9 @@
 ---
 name: dev-guide-contributing
 description: >
-  Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, stale-worktree cleanup, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
-version: 1.1.0
-last_changed_at: "2026-06-24T12:37:00-07:00"
+  Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, worktree inventory and exact-object approval gates, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
+version: 1.2.0
+last_changed_at: "2026-07-11T14:20:00-07:00"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -78,23 +78,24 @@ Skipping the sweep is how you end up duplicating in-flight work, stomping on som
 
 ### 6. Self-operate GitHub via `GH_TOKEN` when the human provides one
 
-For any of the `gh` invocations above — issue triage, PR creation, the portfolio sweep — if the human pastes a GitHub token into the session and you have bash, use it directly: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste and don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then ask explicit per-action consent before any mutation (issue creation, PR open/merge, comments). Never echo, log, or persist the token; let it live only in the env of the single command. The full protocol lives in `procedures.md` under "Self-Operating GitHub via GH_TOKEN".
+For any of the `gh` invocations above — issue triage, PR creation, the portfolio sweep — if the human pastes a GitHub token into the session and you have bash, use it directly: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste and don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then ask explicit per-action consent before any mutation (issue creation, PR open/merge, comments). Never echo, log, or persist the token; let it live only in the env of the single command.
 
-## Worktree hygiene: cleaning stale local worktrees
+## Worktree hygiene: inventory first, exact-object approval before cleanup
 
-Every merged PR leaves a worktree behind unless someone removes it, and with
-multiple agents/daemons running in parallel, `.worktrees/` fills up fast. Run
-this cleanup periodically (or when a sweep shows worktrees piling up). The
-discipline is **audit first, remove conservatively, record everything**.
+Worktrees accumulate, so inventory them periodically. An audit can establish
+eligibility; it **never authorizes deletion**. A merged, clean, generated-only,
+empty, temporary, or self-created worktree still requires the human or owning
+maintainer to approve the exact worktree path. Branch deletion, force removal,
+and metadata pruning are separate destructive objects/actions and are not implied.
 
-### 1. Audit first — never remove on sight
+### 1. Build a read-only inventory
 
-Fetch with prune so remote-branch existence checks are accurate, then list
-every worktree with its merge/dirt/remote status:
+Use the refs already present locally; do not run `fetch --prune` as part of a
+read-only audit because it mutates local remote-tracking refs. If freshness is
+unknown, label it unknown or use a separately authorized/expected fetch first.
 
 ```bash
 cd <repo-primary-checkout>
-git fetch --prune origin
 
 git worktree list --porcelain | awk '/^worktree /{print $2}' | tail -n +2 |
 while read -r wt; do
@@ -102,66 +103,50 @@ while read -r wt; do
   head=$(git -C "$wt" rev-parse HEAD)
   if git merge-base --is-ancestor "$head" origin/main; then merged=yes; else merged=no; fi
   if [ -n "$branch" ] && git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-    remote=exists; else remote=gone; fi
+    remote=exists; else remote=gone_or_unknown; fi
   dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
-  echo "$wt | branch=${branch:-DETACHED} | merged=$merged | remote=$remote | dirty_files=$dirty"
+  echo "$wt | branch=${branch:-DETACHED} | head=$head | merged=$merged | remote=$remote | dirty_files=$dirty"
 done
 ```
 
-(`tail -n +2` skips the first entry, which is the primary checkout.) For any
-dirty worktree, inspect `git -C "$wt" status --porcelain` by hand to see
-*what* is dirty before deciding anything.
+For every candidate, inspect `git -C "$wt" status --porcelain` and check whether
+any running process, PATH/symlink, built binary, report, or other agent still
+references it. Never treat another agent's workspace as yours to clean.
 
-### 2. Removal criteria — all must hold
+### 2. Prepare a proposal; do not remove yet
 
-Remove a worktree only when **every** condition is true:
+A conservative candidate is secondary, fully merged into the observed main,
+remote-gone or detached, clean, and unreferenced. Those facts are only evidence.
+Before any cleanup, send the human/owner:
 
-- It is a **secondary** worktree (never the primary checkout).
-- Its HEAD is an **ancestor of `origin/main`** (`git merge-base --is-ancestor`
-  succeeded — the work is fully merged).
-- Its **remote branch is gone** (deleted after merge) or it is on a detached
-  HEAD. A remote branch that still exists may back an in-flight PR.
-- It is **clean**, or dirty only with **generated artifacts** — `logs/`,
-  `artifacts/`, review-tool outputs (Claude/GLM review files), build
-  droppings. Generated-only dirt may be force-removed; anything that looks
-  like source edits may not.
+- the **exact worktree path**, branch (if any), and full HEAD SHA;
+- merge/remote/dirt/dependency evidence and why removal is proposed;
+- the exact commands/actions requested, including whether branch removal,
+  `--force`, or metadata pruning would be involved;
+- impact and recovery route.
 
-### 3. Keep/skip list — when in doubt, skip
+Wait for an imperative approval that names each exact object. A category such as
+"merged worktrees", generated-only dirt, or permission to remove one worktree
+does not authorize another worktree, its branch, or a broad prune.
 
-- **Primary checkout** — never a removal candidate.
-- **Live/protected worktrees** — anything currently serving a purpose, e.g. a
-  release worktree that a deployed binary was built from and still resolves to
-  (such as `release-vX.Y.Z-<date>`). Check `which`/symlinks before touching
-  anything release-shaped.
-- **Unmerged branches** — HEAD not an ancestor of `origin/main`. That is
-  in-flight or abandoned-but-undecided work; not yours to delete.
-- **Remote branch still exists** — likely an open PR; skip.
-- **Source-dirty worktrees** — uncommitted edits to tracked source files mean
-  skip, *even if the branch is merged*. Someone may have WIP there.
-- **Other agents' worktrees** — directories under another agent's project or
-  working area are out of scope unless the human explicitly included them.
+### 3. Execute only the approved objects
 
-### 4. Remove
+After exact approval, substitute only the approved literal values:
 
 ```bash
-git worktree remove .worktrees/<slug>            # clean worktree
-git worktree remove --force .worktrees/<slug>    # ONLY for generated-only dirt (step 2)
-git worktree prune                               # drop metadata for already-deleted dirs
-git branch -d <branch>                           # -d (not -D): refuses unmerged branches
+git worktree remove -- <exact-approved-worktree-path>
+git branch -d -- <exact-approved-branch>  # only when that branch was also approved
 ```
 
-Stick with `git branch -d` — its refusal on an unmerged branch is a safety
-net, not an obstacle. If `-d` refuses, re-check your audit instead of
-escalating to `-D`.
+Do not escalate to `--force`, `-D`, `git worktree prune`, filesystem removal, or
+a wildcard/glob unless the approval explicitly covers that exact object/action.
+If any observed state changed after approval, stop and ask again.
 
-### 5. Record and report
+### 4. Record and report
 
-Write down what was removed (worktree path, branch, HEAD SHA) and what was
-skipped with the reason (e.g. `~/path/to/.worktrees/<slug> — skipped:
-source-dirty`), save it as a small report file, and tell the human what was
-cleaned. The SHA list is the recovery path: a merged branch's commits remain
-reachable from `origin/main`, and even unmerged SHAs stay in the reflog for a
-while.
+Record each approved action with worktree path, branch, HEAD SHA, authorization
+receipt, command result, and recovery route. Report skipped candidates and why;
+do not convert a refusal or uncertainty into cleanup pressure.
 
 ## Changing the TUI (`tui/`)
 
@@ -262,7 +247,7 @@ in-situ probe. See `reference/runtime-self-check/SKILL.md` for the checklist.
 
 ### Auto-upgrader gotcha
 
-The TUI's auto-upgrader (`tui/main.go:283`, `config.CheckUpgrade`) compares `lingtai.__version__` to PyPI's latest. If your local source's `pyproject.toml` version is **lower** than PyPI's, the upgrader replaces the editable install with the PyPI wheel — silently undoing dev mode.
+The TUI's auto-upgrader (`tui/internal/config/venv.go:428-437`, `config.CheckUpgrade`; invoked by `ensureRuntimeWithOptions` at `tui/internal/config/venv.go:462-477`) compares `lingtai.__version__` to PyPI's latest. If your local source's `pyproject.toml` version is **lower** than PyPI's, the upgrader replaces the editable install with the PyPI wheel — silently undoing dev mode.
 
 **Prevention:** Ensure `lingtai-kernel/pyproject.toml` `version` is `>=` PyPI's latest. After a release bump, pull the kernel repo so your local source matches.
 

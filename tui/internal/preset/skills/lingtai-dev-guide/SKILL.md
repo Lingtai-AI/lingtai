@@ -3,13 +3,12 @@ name: lingtai-dev-guide
 description: >
   Router for contributing to the LingTai project. Use this when you are about
   to change LingTai code or docs, set up a dev environment, navigate the Go
-  TUI/portal repo or Python kernel, develop MCP addons, prepare a release,
-  troubleshoot a running network, audit security, govern avatars, prepare a
-  publication-bound release workflow, run a runtime self-check, get a PR
+  TUI/portal repo or Python kernel, develop MCP addons, troubleshoot a
+  running network, audit security, run a runtime self-check, get a PR
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
-version: 2.6.2
-last_changed_at: "2026-07-11T19:05:00Z"
+version: 2.7.0
+last_changed_at: "2026-07-11T14:20:00-07:00"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -106,26 +105,12 @@ drill-down files, not standalone top-level skills.
   description: |
     Contribution workflows for TUI, portal, kernel, addons, bundled utilities,
     skill changes, tests, PR preparation, review discipline, and local
-    worktree hygiene (auditing and cleaning stale git worktrees).
+    worktree hygiene (read-only inventory plus exact-object approval gates).
 - name: dev-guide-gotchas
   location: reference/gotchas/SKILL.md
   description: |
     Known pitfalls and footguns while coding LingTai: runtime venv assumptions,
     prompt/system behavior, packaging, state files, and stale-doc hazards.
-- name: dev-guide-releasing
-  location: reference/releasing/SKILL.md
-  description: |
-    Compact release overview: when a release applies, the maintainer-authorization
-    boundary, and the version scheme. Routes to release-workflow for the full
-    command-level checklist. Start here, then go to release-workflow.
-- name: dev-guide-release-workflow
-  location: reference/release-workflow/SKILL.md
-  description: |
-    Full command-level release checklist for paired TUI/Portal + kernel releases:
-    scope/candidate heads, clean worktrees, the parent/daemon division of labor
-    for large windows, release-window pitfalls, validation gates,
-    GitHub/PyPI/Homebrew publishing, the required self-contained HTML release log,
-    and website release-log/blog drafting with the reusable release blog template.
 - name: dev-guide-debug-troubleshoot
   location: reference/debug-troubleshoot/SKILL.md
   description: |
@@ -136,11 +121,6 @@ drill-down files, not standalone top-level skills.
   description: |
     Security auditing for secrets, permissions, MCP/addon config, channels,
     data exposure, and safe reporting of findings.
-- name: dev-guide-network-governance
-  location: reference/network-governance/SKILL.md
-  description: |
-    Operating avatar networks over time: delegation, collaboration, durable
-    knowledge, stewardship norms, and long-running network maintenance.
 - name: dev-guide-runtime-self-check
   location: reference/runtime-self-check/SKILL.md
   description: |
@@ -156,8 +136,7 @@ drill-down files, not standalone top-level skills.
     Getting a PR review-ready: readiness gates, multi-model/daemon/Claude
     read-only review passes, self-contained local HTML explainers, PR body
     hygiene, source-labeled deliverables with validation/syntax checks, and
-    maintainer authorization boundaries. Cross-links release-workflow for
-    release-specific publishing.
+    maintainer authorization boundaries.
 - name: dev-guide-skill-stewardship
   location: reference/skill-stewardship/SKILL.md
   description: |
@@ -191,10 +170,8 @@ drill-down files, not standalone top-level skills.
 | Set up a local development environment | `reference/setup/SKILL.md` |
 | Make a contribution in TUI, portal, kernel, addons, or skills | `reference/contributing/SKILL.md` |
 | Avoid common footguns while coding | `reference/gotchas/SKILL.md` |
-| Ship a TUI/portal or kernel release | Start at `reference/releasing/SKILL.md` for the overview and authorization boundary, then `reference/release-workflow/SKILL.md` for the full checklist (publishing, HTML release log, release blog) |
 | Diagnose a stuck, errored, or misbehaving LingTai network | `reference/debug-troubleshoot/SKILL.md` |
 | Audit secrets, permissions, MCP config, channels, or data exposure | `reference/security-audit/SKILL.md` |
-| Operate an avatar network over time | `reference/network-governance/SKILL.md` |
 | Verify which runtime/binary is actually running after a refresh or rebuild, or why a fix that's on disk still serves stale behaviour (a long-lived service/adapter/cache that didn't rebuild) | `reference/runtime-self-check/SKILL.md` |
 | Get a PR review-ready: review gates, HTML explainer, PR hygiene | `reference/pr-review-deliverables/SKILL.md` |
 | Turn experience into a durable, de-privatized, PR-ready skill | `reference/skill-stewardship/SKILL.md` |
@@ -234,13 +211,12 @@ drill-down files, not standalone top-level skills.
   `lingtai-kernel-anatomy` → relevant kernel anatomy/code → kernel tests.
 - **"An agent is quiet or unreachable"** → `reference/debug-troubleshoot/SKILL.md`
   → `lingtai-doctor` if local health surfaces disagree.
-- **"I am preparing a release"** → `reference/releasing/SKILL.md` for the overview and authorization boundary, then `reference/release-workflow/SKILL.md` for the full publishing checklist, the required HTML release log, and the website release-blog template documented there.
 - **"This broad dev task needs triage"** → run the read-only portfolio sweep in
   `reference/contributing/SKILL.md`, then ask for authorization before mutating
   GitHub state.
 - **"Local worktrees are piling up"** → the "Worktree hygiene" section in
-  `reference/contributing/SKILL.md`: audit first, remove only merged + clean
-  secondary worktrees, record what was removed.
+  `reference/contributing/SKILL.md`: inventory read-only, propose exact objects,
+  and remove only after the human or owning maintainer approves them.
 
 ## Skill layout
 
@@ -252,13 +228,8 @@ lingtai-dev-guide/
     ├── setup/SKILL.md
     ├── contributing/SKILL.md
     ├── gotchas/SKILL.md
-    ├── releasing/SKILL.md
-    ├── release-html-log-template.html
-    ├── release-workflow/SKILL.md
-    ├── release-workflow assets directory (release-blog-template.md)
     ├── debug-troubleshoot/SKILL.md
     ├── security-audit/SKILL.md
-    ├── network-governance/SKILL.md
     ├── runtime-self-check/SKILL.md
     ├── pr-review-deliverables/SKILL.md
     ├── skill-stewardship/SKILL.md

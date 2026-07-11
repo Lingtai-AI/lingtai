@@ -10,8 +10,8 @@ description: >
   agent workdir, a project root, or a single ledger file. Use when asked how
   effective prompt caching has been recently, or to diagnose a cache-hit-rate
   drop after a refresh/affinity/cache-key change.
-version: 1.0.0
-last_changed_at: "2026-06-21T20:24:21-05:00"
+version: 1.0.1
+last_changed_at: "2026-07-11T14:20:00-07:00"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -60,7 +60,7 @@ writing, so the metric below is **provider-agnostic** (verified across
 `gpt-5.5`, `mimo-v2.5-pro`, `deepseek-v4-pro`, and the Anthropic adapters).
 
 Key invariant, confirmed in the adapters (`lingtai/llm/anthropic/adapter.py`,
-`lingtai/llm/claude_agent_sdk/adapter.py`) and empirically over a full ledger:
+`lingtai/llm/claude_code/adapter.py`) and empirically over a full ledger:
 `0 <= cached <= input`. So the hit rate is always in `[0, 1]`.
 
 ## Formula
@@ -91,7 +91,7 @@ hit_rate(W) = sum(cached) / sum(input)
 
 The native streaming/non-streaming adapters set `cached = cache_read` only
 (cache *writes* are billed into `input` but are **not** counted as cached). One
-path differs: CLI-backed daemon runs (`lingtai/core/daemon/run_dir.py`) document
+path differs: CLI-backed daemon runs (`lingtai/tools/daemon/run_dir.py`) document
 `cached` as `cache_read + cache_creation` because the CLI backend only exposes an
 aggregate. So for CLI-backed entries the rate leans slightly optimistic (it
 treats first-write tokens as "cached"). The `cached <= input` bound still holds,

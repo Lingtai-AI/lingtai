@@ -150,11 +150,8 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 		"reference/setup/SKILL.md",
 		"reference/contributing/SKILL.md",
 		"reference/gotchas/SKILL.md",
-		"reference/releasing/SKILL.md",
-		"reference/release-html-log-template.html",
 		"reference/debug-troubleshoot/SKILL.md",
 		"reference/security-audit/SKILL.md",
-		"reference/network-governance/SKILL.md",
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, rel)); err != nil {
 			t.Fatalf("expected bundled lingtai-dev-guide file %s to be extracted: %v", rel, err)
@@ -169,7 +166,6 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 		"```yaml",
 		"- name: dev-guide-architecture",
 		"location: reference/architecture/SKILL.md",
-		"- name: dev-guide-network-governance",
 		"Routing table",
 	} {
 		if !strings.Contains(string(rootBody), want) {
@@ -182,10 +178,8 @@ func TestPopulateBundledLibrary_DevGuideNestedReferences(t *testing.T) {
 		"reference/setup.md",
 		"reference/contributing.md",
 		"reference/gotchas.md",
-		"reference/releasing.md",
 		"reference/debug-troubleshoot.md",
 		"reference/security-audit.md",
-		"reference/network-governance.md",
 	} {
 		if _, err := os.Stat(filepath.Join(utilitiesDir, old)); !os.IsNotExist(err) {
 			t.Fatalf("old lingtai-dev-guide flat reference path %s should not be extracted (err=%v)", old, err)
