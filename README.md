@@ -2,9 +2,9 @@
 
 # LingTai
 
-**Build an AI organization inside your project — not just another agent.**
+**The self-evolving Digital Scientist — a lifelong agent that grows with you and your work.**
 
-Local-first · resident agents · soul-flow proactiveness · mailboxes · lifecycle · multi-agent networks
+Digital Scientist · lifelong agent · self-growing memory · durable knowledge & skills · local-first · multi-agent networks
 
 [English](README.md) · [中文](README.zh.md) · [文言](README.wen.md) · [Website](https://lingtai.ai) · [Tutorial](https://lingtai.ai/en/tutorial/) · [Releases](https://lingtai.ai/releases/)
 
@@ -17,25 +17,58 @@ Local-first · resident agents · soul-flow proactiveness · mailboxes · lifecy
 
 ---
 
-Most agent tools give you a better worker. **LingTai gives you the substrate for an AI organization** — long-lived agents that live in your project's filesystem, with home directories, inbox/outbox mailboxes, durable memory, lifecycle controls, self-reflection, and peers they can spawn or call when the work gets bigger than one mind.
+Most agent tools give you a better one-shot worker: a chat window that forgets, or a coding agent that closes with the terminal. **LingTai is different — it is a Digital Scientist that lives in your project and gets better over time.** It holds a question or a codebase for weeks, works with evidence and tools, records what it learns as durable knowledge and reusable skills, forms its own operating style, and delegates deep sub-problems to specialists it spawns. The work you do together becomes state the next session starts from.
 
-It is **filesystem-native, not a chat window**. Every agent has a home under `.lingtai/`; all state — mail, memory, logs, heartbeats — is plain files you can read with `ls`, `cat`, `jq`, your editor, or another coding agent. Close the terminal and the organization persists: it can be inspected, restarted, taught, and recovered.
+It is **filesystem-native, not a chat window.** Every agent has a home under `.lingtai/`; its durable state — mail, memory, knowledge, skills, logs, heartbeats — lives in local files and directories you can inspect with standard tools, your editor, or another coding agent. Close the terminal and the scientist persists: it can be inspected, restarted, taught, and recovered.
+
+<div align="center">
+
+<img src="docs/assets/network-demo.gif" alt="LingTai portal showing a live local network of long-lived project agents" width="100%">
+
+</div>
+
+## A day (and a month) with a Digital Scientist
 
 ```text
 You
-  "Watch the repo overnight. If a PR breaks, inspect it, draft a fix,
-   and send me a morning brief."
+  "Hold this research question for me: does our solar-wind classifier
+   drift across instruments? Read the literature and our data, run
+   experiments, and keep me posted."
 
 LingTai
-  wakes from its mailbox → reads durable project memory
-  → runs shell / web / file / coding-agent tools
-  → reflects via soul flow when idle or stuck
-  → writes notes, reports, patches, or schedules
-  → asks a specialist avatar or daemon when parallel work helps
-  → replies on Telegram / TUI / email with the artifacts
+  reads the literature with web search and research tools
+  → inspects the datasets and the classifier code in the repo
+  → runs experiments, verifies every claim against evidence
+  → records findings in its durable knowledge library
+  → spawns a specialist avatar to go deep on one instrument's calibration
+  → over weeks, refines its own operating style and reusable skills
+  → sends you a brief on Telegram / TUI / email with the artifacts
 ```
 
-Coding tools such as **Claude Code**, **Codex**, **OpenClaw**, and **Hermes** are capable hands. LingTai is the organizational layer around those hands: it uses them as workers while owning the roles, memory, communication, supervision, and recovery that let an agent network keep operating after a single chat or terminal session ends.
+Nothing above is a one-off. The literature notes, the verified findings, the calibration specialist, the working style it settled on — all of it is durable. When you come back next week, the scientist resumes from that accumulated state instead of starting cold. The same loop serves engineering just as well: hold a codebase, reproduce a bug with evidence, patch it, and remember why.
+
+## Why a lifelong, self-evolving scientist?
+
+A good scientist is defined not only by results, but by the practice that produces them: **evidence over assumption, tools mastered deliberately, experiments recorded, findings reviewed and iterated.** LingTai turns that practice into a growth loop, backed by real files on disk:
+
+- **Work produces experience.** Tasks use real tools when action is needed — shell, file I/O, web search, vision, coding-agent hands — and every assertion is expected to rest on evidence, not guesswork.
+- **Experience is distilled into durable state.** When the context window fills, the agent *molts* (凝蜕 — "crystallize the essence, shed the chaff"): it saves what matters and resets the window. Across molts, that experience accumulates as four inspectable forms of growth —
+  - **Knowledge** — its private library of accumulated research, findings, and notes.
+  - **Skills** — reusable procedures it can invoke on demand and share with peers.
+  - **Character** — its evolving operating style, expertise, and goals.
+  - **Avatars** — persistent specialist agents it spawned to master one sub-problem, recorded in an append-only ledger.
+- **Future work starts from that state.** The next session reloads character, knowledge, and skills — so the scientist is a little sharper each time, in a direction you can inspect and steer.
+
+This is growth you can read and audit, not a black box. The loop is explicit, inspectable, and steerable; **you stay in charge of direction**, and external side effects (sending mail, filing issues) are treated as real actions that respect your authorization.
+
+## Capabilities, as outcomes
+
+- **Keeps a long-running question or project** — durable memory and goals survive sessions, restarts, and closing the terminal.
+- **Works like a scientist** — evidence-first tool use, experiments, verified findings, and durable records you can review.
+- **Grows its own toolkit** — distills what it learns into reusable skills and a private knowledge library.
+- **Scales beyond one mind** — spawns persistent specialist *avatars* for deep sub-problems and lightweight *daemons* for temporary parallel work.
+- **Reaches you where you are** — you talk to the same scientist through the TUI and external channels like Telegram, Feishu, WeChat, WhatsApp, and email, while the portal shows the network and history.
+- **Stays inspectable and recoverable** — durable project state lives locally under `.lingtai/` as inspectable files, rather than trapped in a hosted chat transcript.
 
 ## Quick start
 
@@ -45,41 +78,35 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-The installer covers macOS, Linux, and WSL (native Windows/PowerShell is planned). It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident assistant for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+The installer covers macOS, Linux, and WSL (native Windows/PowerShell is planned). It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
 
 > **New here?** Follow the step-by-step [tutorial at lingtai.ai](https://lingtai.ai/en/tutorial/) — install, first task, channels, memory, and lifecycle, walked through end to end.
 
 > Homebrew (`brew install lingtai-ai/lingtai/lingtai-tui`) still works for existing users, but the one-line installer is the recommended path for new installs. The `lingtai` PyPI package is the Python runtime the TUI manages for you — reach for `pip` only when developing or diagnosing the kernel itself.
 
-## Interfaces
+## Ways to work with it
 
-**TUI — `lingtai-tui`** is the main human surface: setup, model/preset configuration, chat and mail, agent status (token/context + heartbeat), avatar and daemon visibility, a slash-command palette, and upgrade/doctor flows. Type `/help` inside the TUI for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
+**TUI — `lingtai-tui`** is the main human surface: setup, model/preset configuration, chat and mail, scientist status (token/context + heartbeat), and views into the durable state — `/knowledge` for its library, `/skills` for its skill catalog, `/system` for its character and covenant, `/daemons` for background runs, `/goal` to set a long-running goal. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.
 
-**Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one assistant or when you want to see how the work evolved.
+**Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one agent or when you want to see how the work evolved.
 
-**External channels** bridge the *same* assistant to the platforms you already use — memory, tools, and history are shared across them, and they are doors into one assistant, not separate bots. Configure from the TUI's `/mcp` panel or declare them in `init.json`. Credentials live in local `.secrets/` files (never in Git); external side effects (sending messages, filing issues) are treated as real actions, and unknown senders do not auto-receive replies.
+**External channels** bridge the *same* scientist to the platforms you already use — memory, tools, and history are shared across them, and they are doors into one assistant, not separate bots. Configure from the TUI's `/mcp` panel or declare them in `init.json`. Credentials live in local `.secrets/` files (never in Git); external side effects are treated as real actions, and unknown senders do not auto-receive replies.
 
 | Addon | Use it for |
 |---|---|
-| `telegram` | Talk to your assistant from Telegram (DMs, optional allowlist, voice/file passthrough). |
-| `feishu` | Feishu/Lark — WebSocket long connection, no public IP required. |
+| `telegram` | Talk to your scientist from Telegram (DMs, optional allowlist, voice/file passthrough). |
+| `feishu` | Feishu/Lark — WebSocket long connection, no public IP or webhook required. |
 | `wechat` | WeChat through an iLink/gewechat-style bridge. |
 | `whatsapp` | WhatsApp through the curated LingTai bridge. |
 | `imap` | Real email through IMAP/SMTP — multi-account, with safety defaults for unknown senders. |
 
-**Coding agents as hands.** LingTai assistants live in the filesystem, so any coding agent can drive them — as daemon backends for focused implementation jobs, or as peers through the shared `.lingtai/human/` mailbox. LingTai owns the long-running plan, memory, and coordination; the coding agent does the precise, reviewable work.
+**Coding agents as hands.** Coding CLIs are capable hands for precise implementation, and LingTai is the mind around those hands — it owns the long-running plan, memory, and coordination. Supported coding CLIs (such as **Claude Code** and **Codex**) can run as daemon backends for focused implementation jobs; other agents can collaborate as peers through the shared `.lingtai/human/` mailbox protocol.
 
 - **Claude Code** — `claude plugin add Lingtai-AI/claude-code-plugin`
 - **OpenAI Codex CLI** — `git clone https://github.com/Lingtai-AI/codex-plugin.git && cd codex-plugin && ./install.sh`
 - **Other agents** (OpenCode, OpenClaw, Hermes, …) — vendor the [`lingtai-skill`](https://github.com/Lingtai-AI/lingtai-skill) protocol skill under your tool's skills directory.
 
-<div align="center">
-
-<img src="docs/assets/network-demo.gif" alt="LingTai portal showing a live local network of long-lived project agents" width="100%">
-
-</div>
-
-## Architecture
+## Inspectable architecture
 
 LingTai is split across two repositories.
 
