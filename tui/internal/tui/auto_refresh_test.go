@@ -124,7 +124,7 @@ func TestAutoRefreshActiveViewOnlyReloadsKanban(t *testing.T) {
 	// second: doing so can reset scroll or selection while the human is navigating
 	// with the keyboard. They retain explicit Ctrl+R refresh only.
 	blocked := []App{
-		{currentView: appViewProjects, projects: NewProjectsModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
+		{currentView: appViewProjects, projects: NewProjectsModel(dir, dir, ProjectsContext{}), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewDaemons, daemons: NewDaemonsModel(dir, dir), tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewDoctor, doctor: DoctorModel{orchDir: dir, globalDir: dir}, tuiConfig: config.DefaultTUIConfig()},
 		{currentView: appViewMailbox, mailbox: NewMailboxModel(dir), tuiConfig: config.DefaultTUIConfig()},

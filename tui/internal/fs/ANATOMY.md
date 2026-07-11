@@ -2,6 +2,7 @@
 related_files:
   - tui/ANATOMY.md
   - tui/internal/tui/ANATOMY.md
+  - tui/internal/inventory/ANATOMY.md
   - tui/internal/preset/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - portal/internal/fs/ANATOMY.md
@@ -50,21 +51,22 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | Symbol | Citation | Purpose |
 |--------|----------|---------|
 | **agent.go** | | |
-| `ReadAgent(dir)` | `tui/internal/fs/agent.go:26` | reads `.agent.json` → `AgentNode` (address, name, state, is_human, capabilities, location) |
-| `ParseCapabilities(raw)` | `tui/internal/fs/agent.go:56` | handles `[]string` and `[["name", {}], ...]` tuple formats |
-| `CapabilitiesForDisplay(manifest)` | `tui/internal/fs/agent.go:90` | prepends intrinsic caps (`system, soul, email, psyche`) to manifest caps, deduped, for operator display (kanban/props) |
-| `ReadInitManifest(dir)` | `tui/internal/fs/agent.go:112` | prefers `system/manifest.resolved.json`, falls back to `init.json`, and flattens `llm.*` + `soul.delay` |
-| `WritePrompt` | `tui/internal/fs/agent.go:205` | writes `.prompt` signal file (TUI→agent injection) |
-| `WriteInquiry` | `tui/internal/fs/agent.go:211` | writes `.inquiry` signal file; no-op if `.inquiry` or `.inquiry.taken` exists |
-| `DiscoverAgents(baseDir)` | `tui/internal/fs/agent.go:240` | scans for all subdirectories with `.agent.json` |
-| `ReadStatus(dir)` | `tui/internal/fs/agent.go:303` | reads `.status.json` → `AgentStatus` (tokens, runtime) |
-| `ReadContextStats(dir)` | `tui/internal/fs/agent.go:320` | summarizes retained `history/chat_history.jsonl`: entries, role counts, text input/output, tool calls/results, and per-tool distribution |
-| `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:452` | sums `TokenTotals` across multiple agent ledgers |
-| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:469` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
-| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:582` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
-| `SumMoltSessionTokenLedger` | `tui/internal/fs/agent.go:622` | uses `logs/log.sqlite` `psyche_molt` boundaries when available (JSONL fallback), then sums cached non-daemon token-ledger windows for `/kanban` Ctrl+D current and last session API/cache stats, including Codex `codex_request_mode` counts (`ws_full` / `ws_incremental`) |
-| `SumMoltSessionToolCalls` | `tui/internal/fs/agent.go:707` | counts lifecycle `tool_call` events in the SAME current/previous molt windows as `SumMoltSessionTokenLedger` (via `sqlitelog.QueryMoltSessionToolCallCounts`, JSONL fallback) for the `/kanban` Ctrl+D `tool_calls` + `tool_calls/api_call` rows; tool results are not counted. Freshness is keyed on authoritative `events.jsonl` (derived `log.sqlite` only when JSONL is absent), NOT the token-ledger cache, so event-only changes invalidate the count and SQLite fallback cannot pin a stale result |
-| `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:876` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
+| `ReadAgent(dir)` | `tui/internal/fs/agent.go:32` | reads `.agent.json` → `AgentNode` (address, name, state, is_human, capabilities, location) |
+| `ParseCapabilities(raw)` | `tui/internal/fs/agent.go:62` | handles `[]string` and `[["name", {}], ...]` tuple formats |
+| `CapabilitiesForDisplay(manifest)` | `tui/internal/fs/agent.go:99` | prepends intrinsic caps (`system, soul, email, psyche`) to manifest caps, deduped, for operator display (kanban/props) |
+| `ReadInitManifest(dir)` | `tui/internal/fs/agent.go:123` | prefers `system/manifest.resolved.json`, falls back to `init.json`, and flattens `llm.*` + `soul.delay` |
+| `WritePrompt` | `tui/internal/fs/agent.go:212` | writes `.prompt` signal file (TUI→agent injection) |
+| `WriteInquiry` | `tui/internal/fs/agent.go:219` | writes `.inquiry` signal file; no-op if `.inquiry` or `.inquiry.taken` exists |
+| `IsOrchestratorManifest(manifest)` | `tui/internal/fs/agent.go:248` | lower-level orchestrator role detector shared by TUI display logic and running-agent inventory |
+| `DiscoverAgents(baseDir)` | `tui/internal/fs/agent.go:266` | scans for all subdirectories with `.agent.json` |
+| `ReadStatus(dir)` | `tui/internal/fs/agent.go:331` | reads `.status.json` → `AgentStatus` (tokens, runtime) |
+| `ReadContextStats(dir)` | `tui/internal/fs/agent.go:344` | summarizes retained `history/chat_history.jsonl`: entries, role counts, text input/output, tool calls/results, and per-tool distribution |
+| `AggregateTokens(dirs)` | `tui/internal/fs/agent.go:473` | sums `TokenTotals` across multiple agent ledgers |
+| `SumTokenLedger(path)` | `tui/internal/fs/agent.go:490` | sums a single main-agent `token_ledger.jsonl` → `TokenTotals`, skipping historical daemon-mirrored rows (`source=daemon`, `em_id`, or `run_id`) |
+| `SumTokenLedgerByProvider` | `tui/internal/fs/agent.go:604` | groups main-agent ledger entries by derived provider name + recent N entries, skipping daemon-mirrored rows so `/kanban` main detail stays separate from daemon detail |
+| `SumMoltSessionTokenLedger` | `tui/internal/fs/agent.go:644` | uses `logs/log.sqlite` `psyche_molt` boundaries when available (JSONL fallback), then sums cached non-daemon token-ledger windows for `/kanban` Ctrl+D current and last session API/cache stats, including Codex `codex_request_mode` counts (`ws_full` / `ws_incremental`) |
+| `SumMoltSessionToolCalls` | `tui/internal/fs/agent.go:727` | counts lifecycle `tool_call` events in the SAME current/previous molt windows as `SumMoltSessionTokenLedger` (via `sqlitelog.QueryMoltSessionToolCallCounts`, JSONL fallback) for the `/kanban` Ctrl+D `tool_calls` + `tool_calls/api_call` rows; tool results are not counted. Freshness is keyed on authoritative `events.jsonl` (derived `log.sqlite` only when JSONL is absent), NOT the token-ledger cache, so event-only changes invalidate the count and SQLite fallback cannot pin a stale result |
+| `SumSessionTokenLedgerBetween` | `tui/internal/fs/agent.go:888` | reusable `[since, before)` ledger-window summation helper used by molt-session stats and since-cutoff callers |
 | **rebuild_marker.go** | | |
 | `RecentRebuildTimes(agentDir, limit)` | `tui/internal/fs/rebuild_marker.go` | best-effort newest-first `psyche_molt` (molt) timestamps for `/kanban` Ctrl+D ledger separators; prefers `logs/log.sqlite` LIMIT query (`sqlitelog.QueryRecentMoltTimes`), falls back to tailing the last `tailScanLines` (1000) lines of `logs/events.jsonl` via `tailEventTimes`; missing/malformed logs yield no markers |
 | `RecentRefreshCompleteTimes(agentDir, limit)` | `tui/internal/fs/rebuild_marker.go` | same contract as `RecentRebuildTimes` but for `refresh_complete` (/refresh context reconstruction) events (`sqlitelog.QueryRecentRefreshCompleteTimes` + tail fallback); rendered as the separate `context rebuilt` separator label |
@@ -72,7 +74,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `forEachJSONLLine(path, fn)` | `tui/internal/fs/jsonl.go:16` | streams JSONL files one line at a time without `ReadFile`/`strings.Split`, avoiding duplicate buffers and Scanner token limits for ledger/history hot paths |
 | **daemon_ledger.go** | | |
 | `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:40` | aggregates recent per-call token ledgers from `daemons/<run_id>/logs/token_ledger.jsonl`, newest first, tagged with daemon run id/handle/state for kanban Ctrl+D split lanes |
-| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:980` | maps endpoint host / model prefix → canonical provider name |
+| `DeriveLedgerProvider` | `tui/internal/fs/agent.go:992` | maps endpoint host / model prefix → canonical provider name |
 | **heartbeat.go** | | |
 | `IsAlive(dir, thresholdSec)` | `tui/internal/fs/heartbeat.go:11` | reads `.agent.heartbeat` unix timestamp, returns `age < threshold` |
 | `IsAliveHuman()` | `tui/internal/fs/heartbeat.go:24` | always `true` |
@@ -125,6 +127,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 ## Connections
 
 - **Called by `tui/internal/tui/`** — every Bubble Tea screen reads agent state through this package (network home, agent detail, mail viewer, kanban, session log).
+- **Called by `tui/internal/inventory/`** — running-agent inventory enriches process rows with `.agent.json`, heartbeat, status PID, lock, admin, IM identity, and orchestrator-role metadata.
 - **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/log.sqlite` (indexed event replay when coverage is safe), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
 - **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<mailbox-id>/`.

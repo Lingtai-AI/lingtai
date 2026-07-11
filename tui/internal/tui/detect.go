@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
 // DetectOrchestrators scans baseDir for .agent.json files with admin privileges.
@@ -140,18 +142,5 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 // admin must be a map[string]interface{} (not nil, not absent) with at least one
 // value that is true (bool).
 func IsOrchestrator(manifest map[string]interface{}) bool {
-	adminRaw, ok := manifest["admin"]
-	if !ok || adminRaw == nil {
-		return false
-	}
-	adminMap, ok := adminRaw.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	for _, v := range adminMap {
-		if b, ok := v.(bool); ok && b {
-			return true
-		}
-	}
-	return false
+	return fs.IsOrchestratorManifest(manifest)
 }

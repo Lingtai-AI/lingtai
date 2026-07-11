@@ -5,6 +5,7 @@ related_files:
   - tui/internal/tui/ANATOMY.md
   - tui/internal/config/ANATOMY.md
   - tui/internal/fs/ANATOMY.md
+  - tui/internal/inventory/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/preset/ANATOMY.md
   - tui/internal/processscan/ANATOMY.md
@@ -15,6 +16,8 @@ related_files:
   - tui/i18n/en.json
   - tui/i18n/zh.json
   - tui/i18n/wen.json
+  - tui/internal/inventory/inventory.go
+  - tui/internal/inventory/inventory_test.go
   - tui/list_common.go
   - tui/list_common_test.go
   - tui/list_unix.go
@@ -47,14 +50,14 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 - **`tui/main.go:33-1138`** — single-file `package main`. The version stamp (`tui/main.go:31`, set via `-ldflags`), welcome/help text, Rust toolchain startup guidance (`tui/main.go:688-756`), and interactive entry (`tui/main.go:33-96`). After parsing subcommands, it runs global migrations, checks invariants (init.json all-or-nothing, exactly-one-orchestrator), handles upgrade prompts and first-run wizard routing, then launches Bubble Tea.
 - **`tui/main.go:35-96`** — subcommand dispatch. Each subcommand returns early; the fallthrough path starts the interactive TUI.
-- **`list_common.go` / `list_unix.go` / `list_windows.go`** — `lingtai-tui list` process discovery and decentralized contact-book-style rendering. Platform files call shared `processscan` discovery and fail loud with a nonzero exit when the scan command itself fails (`tui/list_unix.go:16-27`, `tui/list_windows.go:13-24`); `list_common.go` parses `--detailed` / `--admin`, converts processscan records into display rows (`tui/list_common.go:69-115`), reads each agent's `.agent.json` for role/name/state/admin metadata, and prints simple/detailed/admin tables without writing a central address book. Treat this command as the progressive-disclosure entry point for finding local companions or running-agent inventory before resorting to filesystem scans.
+- **`list_common.go` / `list_unix.go` / `list_windows.go`** — `lingtai-tui list` process discovery and decentralized running-agent inventory rendering. Platform files call shared `processscan` discovery and fail loud with a nonzero exit when the scan command itself fails (`tui/list_unix.go:19-24`, `tui/list_windows.go:19-24`); `internal/inventory` converts process rows into typed, enriched, grouped records (`tui/internal/inventory/inventory.go:96-157`), and `list_common.go` keeps CLI parsing plus table/JSON rendering (`tui/list_common.go:47-181`). `--admin` is a detail mode that adds admin, IM, and state columns; it is not an admin-only filter.
 - **`upgrade.go`** — startup TUI binary upgrade flow: after install-method routing (`tui/main.go:113-119`), Homebrew installs keep the existing prompt that detects other running TUI windows, puts affected agents to sleep, stops old TUI processes, and runs `brew upgrade` before asking the user to relaunch; source/user-local installs get a separate explicit `[y/N]` prompt that routes through the source updater backend (`install.sh --update`). Unknown installs are not mutated at startup (version-only).
 - **`tui/main.go:688-756`** — `maybePromptRustToolchain` / `markRustPromptSeen`: one-time optional Rust/Cargo startup prompt. Only prompts on an interactive TTY when the managed runtime is on the Python file-search fallback and no `cargo` is on PATH. Writes the `~/.lingtai-tui/runtime/rust-toolchain-prompted` marker on decline/install/skip — including when the probe errors or reports an unsupported runtime — so the Python probe never re-spawns on every launch.
 - **`tui/main.go:824-972`** — `cleanMain`/`cleanProject`: suspend agents in `.lingtai/` (10s timeout), then `os.RemoveAll`. Refuses to delete while any agent heartbeat is still fresh after the timeout, when agents cannot be listed, or when an agent appeared during the wait (re-discovered before deleting) — unless `--force` is given (issue #488).
 - **`tui/main.go:974-1022`** — `postmanMain`: parse `--port`, collect watch directories, call `postman.Run`.
 - **`tui/purge_common.go:9-39` / `tui/purge_unix.go:17-80`** — `purgeMain` (unix): shared processscan-to-purge-target filtering, then SIGTERM → SIGKILL survivors. Build tag `!windows`.
 - **`purge_windows.go`** — `purgeMain` (windows): equivalent via Windows process enumeration.
-- **`tui/list_unix.go:16-124`** — `listMain` (unix): enumerate running agents with human-readable uptime derived from ps etime, phantom detection (`.lingtai/` deleted but process still running). Build tag `!windows`.
+- **`tui/list_unix.go:13-57`** — `listMain` (unix): enumerate running agents with human-readable uptime derived from ps etime, phantom detection (`.lingtai/` deleted but process still running). Build tag `!windows`.
 - **`list_windows.go`** — `listMain` (windows): equivalent.
 - **`tui/suspend_unix.go:14-86`** — `suspendMain` (unix): discover agents via `.agent.json`, write `.suspend` files, wait 5s. Build tag `!windows`.
 - **`suspend_windows.go`** — `suspendMain` (windows): equivalent.
@@ -69,7 +72,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 ## Connections
 
 - **Called from:** the shell (`lingtai-tui`), Homebrew tap (`lingtai-ai/lingtai/lingtai-tui`), `install.sh`.
-- **Calls out:** `tui/internal/tui` (Bubble Tea app), `tui/internal/sqlitelog` (sqlite3-backed `logs/log.sqlite` query helpers for notification events, session boundaries, session replay rows, doctor errors, and clear completion checks), `tui/internal/migrate` (per-project migrations), `tui/internal/globalmigrate` (per-machine migrations), `tui/internal/preset` (bootstrap + utility skill population), `tui/internal/process` (agent launch), `tui/internal/processscan` (shared ps-based agent-process detection), `tui/internal/config` (global config, venv, upgrade checks, install-method-routed TUI updater), `tui/internal/postman` (mail relay daemon).
+- **Calls out:** `tui/internal/tui` (Bubble Tea app), `tui/internal/sqlitelog` (sqlite3-backed `logs/log.sqlite` query helpers for notification events, session boundaries, session replay rows, doctor errors, and clear completion checks), `tui/internal/migrate` (per-project migrations), `tui/internal/globalmigrate` (per-machine migrations), `tui/internal/preset` (bootstrap + utility skill population), `tui/internal/process` (agent launch), `tui/internal/processscan` (shared ps-based agent-process detection), `tui/internal/inventory` (typed running-agent inventory shared by CLI list and `/projects`), `tui/internal/config` (global config, venv, upgrade checks, install-method-routed TUI updater), `tui/internal/postman` (mail relay daemon).
 - **Locale resolution** (`tui/main.go:132-134`): immediately after `globalDir` is known, the TUI runs `config.MigrateLegacyLanguage` → `config.LoadTUIConfig` → `i18n.SetLang(tuiCfg.Language)` so every user-visible startup string (codex banner, welcome, agent-count reminder) renders in the configured locale rather than the i18n default. `tuiCfg` is reused for the rest of bootstrap.
 - **Bootstrap sequence** (`tui/main.go:218-288`): on every launch, the TUI initializes project-local `.lingtai/` state with `process.InitProject`, registers the project, and explicitly refreshes user-level utility skills via `preset.PopulateBundledLibrary(globalDir)` before returning-user runtime/bootstrap work. Returning users then run `config.NeedsVenv` (for setup banner) → `config.EnsureRuntime` (create/repair venv if needed, then always run the non-blocking `CheckUpgrade`) → `preset.Bootstrap` → `tui.ExportCommandsJSON` → `maybePromptRustToolchain` (one-time optional Rust/Cargo prompt only when file search is on Python fallback and no cargo is on PATH). `CheckUpgrade` auto-upgrades the `lingtai` meta-package from PyPI, which bundles `lingtai-kernel` + all addon MCPs. See `tui/internal/config/ANATOMY.md`.
 - **`lingtai-tui doctor` subcommand** (`tui/main.go:980-1020`): runs `config.RunDoctorUpdate` (`tui/main.go:992`) with both `ForceTUI=true` and `ForcePython=true`, then refreshes presets, utility skills, and `commands.json`. The report includes native file-search sidecar / Rust toolchain diagnostics (`config.checkFileSearchNative`). Designed to be usable when the TUI cannot start (broken venv, missing migrations) — it never touches `.lingtai/`. Exit nonzero only on unrecoverable failures.
@@ -92,6 +95,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
   - `tui/internal/config/` — bootstrap, venv, global config (`tui/internal/config/ANATOMY.md`)
   - `tui/internal/process/` — subprocess launcher
   - `tui/internal/processscan/` — shared ps-based `lingtai run <agentDir>` process detection used by launch and migrations
+  - `tui/internal/inventory/` — typed running-agent inventory built from processscan rows plus `.agent.json`/heartbeat/status enrichment (`tui/internal/inventory/ANATOMY.md`)
   - `tui/internal/headless/` — JSON-emitting non-interactive CLI surface (`bootstrap`, `presets`, `spawn` subcommands)
   - `tui/internal/postman/` — UDP cross-internet mail relay
   - `tui/i18n/` — en/zh/wen locale tables
@@ -108,7 +112,7 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
 
 ## Notes
 
-- **Finding companions / local agent inventory:** use `lingtai-tui list --detailed [dir]` as the first stop before hand-walking `.lingtai/` trees.  `--admin` adds admin flags when the decision depends on karma/nirvana privileges.  The command surface is owned by `tui/list_common.go:117-145`, live metadata comes from `.agent.json` via `tui/list_common.go:147-174`, platform process discovery is in `tui/list_unix.go:16-55` and `tui/list_windows.go:13-49`, and the rendered simple/detailed/admin tables are built in `tui/list_common.go:327-421`.
+- **Finding companions / local agent inventory:** use `lingtai-tui list --detailed [dir]` or `/projects` as the first stop before hand-walking `.lingtai/` trees. `--admin` is a detail/rendering mode, not a filter. The shared inventory conversion/enrichment is owned by `tui/internal/inventory/inventory.go:76-139`; platform process discovery is in `tui/list_unix.go:19-27` and `tui/list_windows.go:19-24`; CLI parsing/table/JSON rendering is in `tui/list_common.go:52-177`; `/projects` renders the same typed snapshot as selectable project-grouped rows in `tui/internal/tui/projects.go:143-177` and `tui/internal/tui/projects.go:441-623`.
 - **Binary naming is `lingtai-tui`, never `lingtai`.** `lingtai` is the Python agent CLI inside the runtime venv.
 - **`main.go` is intentionally flat** — every subcommand's `*Main()` function is defined inline in `main.go` or platform-specific `*_unix.go`/`*_windows.go` files. Don't refactor subcommands into `internal/` packages; the flat `main.go` is the contract.
 - **Platform shims follow the `//go:build !windows` pattern.** Unix is the primary target; Windows files mirror the same function signatures. Every subcommand (`purge`, `list`, `suspend`) plus `countRunningAgents` and TUI-process upgrade helpers have paired platform files.

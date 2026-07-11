@@ -54,7 +54,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 
 ### Network & sharing
 - `/mailbox` — browse all mailbox messages and attachments.
-- `/projects` — browse registered projects and their networks.
+- `/projects` — switch into another running agent's project/mail context.
 - `/export` — export a reusable recipe for sharing.
 - `/viz` — open the network visualization in the browser.
 
@@ -225,11 +225,13 @@ body and inline attachment rendering. Use it for the complete mail record for an
 agent, including external IMAP mail and attachments, rather than the live chat
 stream.
 
-### `/projects` — browse registered projects
+### `/projects` — switch to a running agent
 **Usage:** `/projects`
 
-Lists registered projects and their agent networks. Use it when you work across
-several LingTai projects and want to see them and their networks in one place.
+Lists process-visible, non-human running agents grouped by project. Select an
+agent and press Enter to visit that project, focus that agent, and open its mail.
+While visiting, a root banner shows the target and original context; press
+`Esc` twice quickly from mail to return to the original.
 
 ### `/export` — export a reusable recipe
 **Usage:** `/export` · `/export recipe` (explicit form)

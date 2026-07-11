@@ -17,8 +17,9 @@ import (
 const clearSourceTUI = "tui"
 
 type clearDoneMsg struct {
-	completed bool
-	err       error
+	generation uint64
+	completed  bool
+	err        error
 }
 
 type clearWaitConfig struct {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -39,11 +40,15 @@ func (b LayoutBudget) ChildWindowSize() tea.WindowSizeMsg {
 }
 
 // topChromeRows reports how many rows the root reserves at the top: one for the
-// startup banner when non-empty, plus one for the global select-mode indicator
-// when select mode is on (any non-mail view). They stack when both are present.
+// startup banner when non-empty, one when visiting another agent, plus one for
+// the global select-mode indicator when select mode is on (any non-mail view).
+// They stack when present.
 func (a App) topChromeRows() int {
 	rows := 0
 	if a.startupBanner != "" {
+		rows++
+	}
+	if a.visiting {
 		rows++
 	}
 	if a.selectModeIndicatorActive() {
@@ -90,12 +95,15 @@ func (a App) layoutBudget() LayoutBudget {
 // topChrome renders the root-owned top chrome (the rows counted by
 // topChromeRows). Returns "" when there is no top chrome. The returned string,
 // when non-empty, is exactly topChromeRows() rows tall and is composed ABOVE
-// the child content in View(). The startup banner and the select-mode indicator
-// stack (banner first) when both are present.
+// the child content in View(). The startup banner, visit banner, and select-mode
+// indicator stack in that order when present.
 func (a App) topChrome() string {
 	var rows []string
 	if a.startupBanner != "" {
 		rows = append(rows, "  "+lipgloss.NewStyle().Foreground(ColorStuck).Render(a.startupBanner))
+	}
+	if a.visiting {
+		rows = append(rows, a.visitBanner())
 	}
 	if a.selectModeIndicatorActive() {
 		rows = append(rows, a.selectModeIndicator())
@@ -104,6 +112,20 @@ func (a App) topChrome() string {
 		return ""
 	}
 	return strings.Join(rows, "\n")
+}
+
+func (a App) visitBanner() string {
+	target := firstNonEmpty(a.visitTargetAgentName, filepath.Base(a.orchDir), "?")
+	targetProject := filepath.Base(filepath.Dir(a.projectDir))
+	original := firstNonEmpty(a.visitOriginalOrchName, filepath.Base(a.visitOriginalOrchDir), "?")
+	originalProject := filepath.Base(filepath.Dir(a.visitOriginalProjectDir))
+	text := i18n.TF("projects.visit_banner", target, targetProject, original, originalProject)
+	if a.width > 0 {
+		text = ansi.Truncate("  "+text, a.width-1, "…")
+	} else {
+		text = "  " + text
+	}
+	return lipgloss.NewStyle().Foreground(ColorAccent).Render(text)
 }
 
 // selectModeIndicator renders the one-row global select-mode badge. It reuses

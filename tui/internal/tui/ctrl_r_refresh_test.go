@@ -60,7 +60,7 @@ func TestDoctorCtrlRRerunsDiagnostic(t *testing.T) {
 //     add ctrl+r alias. No bare-`r` handler is removed. ---
 
 func TestProjectsCtrlRAndBareRBothReload(t *testing.T) {
-	m := NewProjectsModel(t.TempDir(), t.TempDir())
+	m := NewProjectsModel(t.TempDir(), t.TempDir(), ProjectsContext{})
 	if _, cmd := m.Update(ctrlR()); cmd == nil {
 		t.Fatal("ProjectsModel ctrl+r returned nil cmd; expected reload")
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 
+	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/processscan"
 )
 
@@ -26,7 +27,7 @@ func purgeProcsFromAgentProcesses(found []processscan.AgentProcess, filterDir st
 				continue
 			}
 		}
-		if !agentDirInFilter(agentDir, filterDir) {
+		if !inventory.AgentDirInFilter(agentDir, filterDir) {
 			continue
 		}
 		procs = append(procs, purgeProc{

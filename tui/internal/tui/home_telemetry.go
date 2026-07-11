@@ -90,7 +90,8 @@ const homeTelemetryTTL = 1 * time.Second
 // homeTelemetryMsg carries a freshly-gathered telemetry snapshot from the
 // background fetch back into the model on the Update path.
 type homeTelemetryMsg struct {
-	t homeTelemetry
+	generation uint64
+	t          homeTelemetry
 }
 
 // fetchHomeTelemetry is the background worker: it performs all telemetry I/O
@@ -99,7 +100,7 @@ type homeTelemetryMsg struct {
 // path + session cache) exactly like refreshMail/initialRebuild — the running
 // command never touches live model state.
 func (m MailModel) fetchHomeTelemetry() tea.Msg {
-	return homeTelemetryMsg{t: m.gatherHomeTelemetry()}
+	return homeTelemetryMsg{generation: m.generation, t: m.gatherHomeTelemetry()}
 }
 
 // maybeScheduleHomeTelemetry returns a fetchHomeTelemetry command when a new

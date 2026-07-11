@@ -59,13 +59,19 @@ type ViewChangeMsg struct {
 	View string
 }
 
-type pulseTickMsg time.Time
+type pulseTickMsg struct {
+	generation uint64
+	at         time.Time
+}
 
-func pulseTick() tea.Cmd {
-	return tea.Every(250*time.Millisecond, func(t time.Time) tea.Msg { return pulseTickMsg(t) })
+func pulseTick(generation uint64) tea.Cmd {
+	return tea.Every(250*time.Millisecond, func(t time.Time) tea.Msg {
+		return pulseTickMsg{generation: generation, at: t}
+	})
 }
 
 type mailRefreshMsg struct {
+	generation   uint64
 	cache        fs.MailCache // incrementally updated cache
 	alive        bool
 	state        string // active, idle, stuck, asleep, suspended, or ""
@@ -74,15 +80,21 @@ type mailRefreshMsg struct {
 	orchNickname string // nickname from .agent.json
 	initial      bool   // true only for the deferred initial rebuild (clears the loading banner)
 }
-type tickMsg time.Time
+type tickMsg struct {
+	generation uint64
+	at         time.Time
+}
 
 // EditorDoneMsg carries the final text from the external editor.
 type EditorDoneMsg struct {
-	Text string
+	Text       string
+	Generation uint64
 }
 
-func tickEvery(d time.Duration) tea.Cmd {
-	return tea.Every(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tickEvery(d time.Duration, generation uint64) tea.Cmd {
+	return tea.Every(d, func(t time.Time) tea.Msg {
+		return tickMsg{generation: generation, at: t}
+	})
 }
 
 // MailModel is the main chat view — a single chronological stream.
@@ -165,6 +177,7 @@ type MailModel struct {
 	sessionCache      *fs.SessionCache // append-only session log
 	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
 	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
+	generation        uint64           // activation token; stale async messages are ignored without rescheduling
 
 	// Home telemetry is resolved asynchronously off the render/input path (its
 	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
@@ -249,6 +262,7 @@ func (m MailModel) initialRebuild() tea.Msg {
 	msg := m.refreshMail()
 	if rm, ok := msg.(mailRefreshMsg); ok {
 		rm.initial = true
+		rm.generation = m.generation
 		return rm
 	}
 	return msg
@@ -435,7 +449,7 @@ func (m MailModel) refreshMail() tea.Msg {
 			state = "suspended"
 		}
 	}
-	return mailRefreshMsg{cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
+	return mailRefreshMsg{generation: m.generation, cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
 }
 
 // orchDisplayName returns the nickname if set, otherwise the agent name.
@@ -622,8 +636,8 @@ func (m MailModel) Init() tea.Cmd {
 		// view once history is loaded. The periodic tick below then keeps it
 		// current via the incremental Refresh path.
 		m.initialRebuild,
-		tickEvery(m.pollRate),
-		pulseTick(),
+		tickEvery(m.pollRate, m.generation),
+		pulseTick(m.generation),
 	)
 }
 
@@ -677,6 +691,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailRefreshMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		if msg.initial {
 			// The deferred initial rebuild has landed — history is now built, so
 			// drop the loading banner. Periodic refreshes leave this untouched.
@@ -750,22 +767,31 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case pulseTickMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		if strings.EqualFold(m.orchState, "ACTIVE") {
 			m.pulseTick++
 		}
-		return m, pulseTick()
+		return m, pulseTick(m.generation)
 
 	case tickMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		// Steady-state driver: alongside the incremental mail refresh, schedule a
 		// background telemetry fetch (debounced by in-flight + TTL). All telemetry
 		// I/O funnels through maybeScheduleHomeTelemetry — the UI path never gathers.
-		cmds = append(cmds, m.refreshMail, tickEvery(m.pollRate))
+		cmds = append(cmds, m.refreshMail, tickEvery(m.pollRate, m.generation))
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
 
 	case homeTelemetryMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
 		// A background telemetry fetch completed. Land the snapshot; only re-sync
 		// the viewport height when the row's visibility flipped (data ⇄ no-data),
 		// so ordinary numeric updates don't thrash the layout.
@@ -819,6 +845,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case EditorDoneMsg:
+		if msg.Generation != m.generation {
+			return m, nil
+		}
 		m.pendingMessage = msg.Text
 		m.input.SetValue(msg.Text)
 		m.syncViewportHeight()
@@ -1511,6 +1540,7 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 	if err != nil {
 		return nil
 	}
+	generation := m.generation
 	tmpFile.WriteString(text)
 	tmpFile.Close()
 	editor := os.Getenv("EDITOR")
@@ -1525,7 +1555,7 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 		}
 		content, _ := os.ReadFile(tmpFile.Name())
 		os.Remove(tmpFile.Name())
-		return EditorDoneMsg{Text: string(content)}
+		return EditorDoneMsg{Text: string(content), Generation: generation}
 	})
 }
 

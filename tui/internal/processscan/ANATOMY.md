@@ -1,6 +1,7 @@
 ---
 related_files:
   - tui/ANATOMY.md
+  - tui/internal/inventory/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/processscan/check.go
   - tui/list_common.go
@@ -41,7 +42,7 @@ maintenance: |
 
 ## Composition
 
-- **Upstream callers:** `tui/internal/process/check.go` re-exports this package for launch/refresh callers; `tui/internal/migrate/m036_sqlite_log_backfill.go` calls it directly to skip running agents before attempting offline SQLite rebuilds; `lingtai-tui list` and `purge` consume all-process scans via `tui/list_common.go:69-115` and `tui/purge_common.go:15-39`.
+- **Upstream callers:** `tui/internal/process/check.go` re-exports this package for launch/refresh callers; `tui/internal/migrate/m036_sqlite_log_backfill.go` calls it directly to skip running agents before attempting offline SQLite rebuilds; `internal/inventory` consumes all-process scans for `lingtai-tui list` and `/projects` (`tui/internal/inventory/inventory.go:76-139`); `purge` uses the same agent-dir filtering boundary through inventory helpers.
 - **External dependency:** host `ps -eo pid=,command=` for one-dir checks, `ps -eo pid=,etime=,command=` for all-process list/purge, and WMIC/PowerShell on Windows. One-dir check errors fail closed to “no match” (advisory boundary); all-process scan errors are returned from `FindAllAgentProcesses` so `list`/`purge` fail loud instead of reporting an empty process table. The kernel workdir lock remains the authoritative safety gate for SQLite rebuilds.
 
 ## Invariants

@@ -242,6 +242,26 @@ func ReadAgentRaw(dir string) (map[string]interface{}, error) {
 	return raw, nil
 }
 
+// IsOrchestratorManifest reports whether a .agent.json manifest grants any
+// admin privilege. Humans have admin:null (or no admin field), ordinary agents
+// have admin:{}, and orchestrators have at least one truthy admin flag.
+func IsOrchestratorManifest(manifest map[string]interface{}) bool {
+	adminRaw, ok := manifest["admin"]
+	if !ok || adminRaw == nil {
+		return false
+	}
+	adminMap, ok := adminRaw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, v := range adminMap {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	return false
+}
+
 // DiscoverAgents scans baseDir for subdirectories with .agent.json manifests.
 func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 	entries, err := os.ReadDir(baseDir)
