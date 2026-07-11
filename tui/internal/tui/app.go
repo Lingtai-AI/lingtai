@@ -2030,12 +2030,10 @@ func codexOAuthConfigured(globalDir string) bool {
 }
 
 // validateCodexAuthForAgents scans all agent directories under projectDir for
-// init.json files whose active/default preset is codex, and validates the
-// SPECIFIC Codex account each such preset binds to (manifest.llm.codex_auth_path,
-// falling back to the legacy file). If any agent's bound account is missing or
-// invalid, returns a warning naming that agent. A different, validly-bound
-// account never suppresses (or triggers) the warning. Returns "" when all
-// codex-using agents have a usable bound account.
+// init.json files whose active/default preset declares a Codex provider. The
+// codex provider validates its bound account; codex-pool requires any valid
+// stored account. Returns a warning naming the first agent without usable
+// Codex credentials.
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	entries, _ := os.ReadDir(projectDir)
 	for _, e := range entries {
@@ -2061,14 +2059,14 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 		}
 		for _, key := range []string{"default", "active"} {
 			presetRef, _ := presetBlock[key].(string)
-			if presetRef == "" || !strings.Contains(presetRef, "codex") {
+			if presetRef == "" {
 				continue
 			}
-			// Resolve the preset's bound account (#415) and validate just that
-			// file; warn (localized, #412) naming the agent only when its own
-			// bound account is missing — a different account staying invalid
-			// no longer condemns this agent.
-			if !codexPresetRefAuthValid(globalDir, presetRef) {
+			// Identify Codex presets by their declared provider, not their file
+			// name. Custom OpenAI-compatible presets may legitimately include
+			// "codex" in the name, while a true Codex preset may not.
+			usesCodex, authValid := codexPresetRefAuthStatus(globalDir, presetRef)
+			if usesCodex && !authValid {
 				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}
@@ -2076,28 +2074,33 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	return ""
 }
 
-// codexPresetRefAuthValid loads the preset file at presetRef and validates the
-// Codex OAuth account it binds to (manifest.llm.codex_auth_path, empty →
-// legacy fallback). When the preset file can't be read (e.g. a transient path),
-// it falls back to validating the legacy account so a missing preset file
-// doesn't spuriously fail an agent that may still resolve at launch.
-func codexPresetRefAuthValid(globalDir, presetRef string) bool {
+// codexPresetRefAuthStatus reports whether presetRef declares a Codex OAuth
+// provider and, when it does, whether its credentials are valid.
+func codexPresetRefAuthStatus(globalDir, presetRef string) (usesCodex, authValid bool) {
 	abs := presetRef
 	if strings.HasPrefix(abs, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			abs = filepath.Join(home, abs[2:])
 		}
 	}
-	ref := ""
-	if data, err := os.ReadFile(abs); err == nil {
-		var p map[string]interface{}
-		if json.Unmarshal(data, &p) == nil {
-			if manifest, ok := p["manifest"].(map[string]interface{}); ok {
-				if llm, ok := manifest["llm"].(map[string]interface{}); ok {
-					ref, _ = llm["codex_auth_path"].(string)
-				}
-			}
-		}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return false, true
 	}
-	return codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
+	var p map[string]interface{}
+	if json.Unmarshal(data, &p) != nil {
+		return false, true
+	}
+	manifest, _ := p["manifest"].(map[string]interface{})
+	llm, _ := manifest["llm"].(map[string]interface{})
+	provider, _ := llm["provider"].(string)
+	switch provider {
+	case "codex":
+		ref, _ := llm["codex_auth_path"].(string)
+		return true, codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
+	case "codex-pool", "codex_pool":
+		return true, hasAnyCodexAccount(globalDir)
+	default:
+		return false, true
+	}
 }
