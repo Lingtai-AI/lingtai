@@ -21,7 +21,10 @@ related_files:
   - tui/internal/fs/network_test.go
   - tui/internal/fs/session.go
   - tui/internal/fs/session_rebuild_test.go
+  - tui/internal/fs/session_rebuild_offsets_test.go
   - tui/internal/fs/session_tail_test.go
+  - tui/internal/sqlitelog/event.go
+  - tui/internal/sqlitelog/query_test.go
   - tui/internal/fs/signal.go
   - tui/internal/fs/signal_test.go
   - tui/internal/fs/resolve.go
@@ -44,7 +47,7 @@ maintenance: |
 
 ## What this is
 
-The TUI's read-only window into an agent working directory (`<project>/.lingtai/<agent>/`). All agent state — manifest, heartbeat, mail, token ledger, location, network topology, chat history — is read through this package. The kernel writes; the TUI never writes agent-owned files (except signal files and human outbox mail).
+The TUI's filesystem window into an agent working directory (`<project>/.lingtai/<agent>/`). Agent state — manifest, heartbeat, mail, token ledger, location, network topology, chat history — is read through this package. The kernel owns agent state; the TUI's narrow writes are signal files, human outbox/location, and its derived human `logs/session.jsonl` replay cache.
 
 ## Components
 
@@ -109,10 +112,11 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 | `CleanSignals(dir)` | `tui/internal/fs/signal.go:32` | remove all signal + refresh handshake files |
 | `SuspendAndWait` | `tui/internal/fs/signal.go:43` | touch `.suspend`, poll heartbeat until dead or timeout |
 | **session.go** | | |
-| `SessionCache` | `tui/internal/fs/session.go:36` | append-only cache backed by `session.jsonl`; tails mail + events + inquiries |
-| `NewSessionCache` | `tui/internal/fs/session.go:99` | creates cache, calls `RebuildFromSources` after construction |
-| `RebuildFromSources` | `tui/internal/fs/session.go:115` | full ingest from mail cache + SQLite/JSONL event replay + soul_inquiry.jsonl + soul_flow.jsonl |
-| `Refresh` | `tui/internal/fs/session.go:1089` | incremental poll of all three sources |
+| `SessionCache` | `tui/internal/fs/session.go:108-136` | mutex-protected derived replay cache backed by human `logs/session.jsonl`; tracks parser-proven offsets for mail/events/inquiries/soul flow |
+| `NewSessionCache` | `tui/internal/fs/session.go:147-155` | pure in-memory construction; creates no file or directory |
+| `RebuildFromSources` / `RebuildFromSourcesInMemory` | `tui/internal/fs/session.go:157-228` | authoritative full ingest; write-through for accepted callers or detached/no-persist for generation-gated Mail work |
+| `Persist` | `tui/internal/fs/session.go:230-235` | writes an accepted detached snapshot, creating the derived cache parent directory at the write boundary |
+| `Refresh` | `tui/internal/fs/session.go:1370-1380` | incremental poll from each source's last complete consumed record |
 | **project_hash.go** | | |
 | `ProjectHash(projectPath)` | `tui/internal/fs/project_hash.go:9` | SHA-256 first 12 hex chars — used as the registry key for each project |
 | **contacts.go** | | |
@@ -130,7 +134,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 - **Called by `tui/internal/inventory/`** — running-agent inventory enriches process rows with `.agent.json`, heartbeat, status PID, lock, admin, IM identity, and orchestrator-role metadata.
 - **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/log.sqlite` (indexed event replay when coverage is safe), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
-- **Writes human outbox mail** — `WriteMail` for human (pseudo-agent) writes to `human/mailbox/outbox/<mailbox-id>/`.
+- **Writes human-owned/derived state** — `WriteMail` writes `human/mailbox/outbox/<mailbox-id>/`; accepted `SessionCache` persistence/appends write `human/logs/session.jsonl` (`tui/internal/fs/session.go:230-280`).
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
 
 ## Composition
@@ -141,8 +145,8 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 
 ## State
 
-- **Reads (never writes)**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/log.sqlite` (additive index), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
-- **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field.
+- **Reads**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/log.sqlite` (additive index), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
+- **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field, and the TUI-derived human `logs/session.jsonl` replay cache only on accepted persist/append paths.
 
 ## Notes
 
@@ -150,7 +154,7 @@ The TUI's read-only window into an agent working directory (`<project>/.lingtai/
 - **Mailbox id shape.** `WriteMail` allocates short, human-scannable ids of the form `YYYYMMDDTHHMMSS-xxxx` (20 chars, UTC, 4 hex chars of UUID4 entropy) via `newMailboxID`. This matches the kernel's `_new_mailbox_id` in `lingtai-kernel/src/lingtai/kernel/intrinsics/email/primitives.py` and the portal's mirror in `portal/internal/fs/mail.go`, so directory names, `id`, and `_mailbox_id` look identical regardless of which side wrote the message. The directory name IS the id — `prepareMailDirs` uses `os.Mkdir` (not `MkdirAll`) on each leaf so collisions in any target folder surface as `fs.ErrExist` and trigger up to 8 regenerations without overwriting existing mail.
 - **`Delivered` is transient.** `MailMessage.Delivered` is `json:"-"` — set by `MailCache.Refresh()` based on which folder the message was found in. Outbox → false; inbox/sent → true.
 - **`MailCache` is copy-on-refresh.** `Refresh()` returns a new `MailCache`; the receiver is not mutated. Safe for goroutine use.
-- **Session cache reconstruction.** `RebuildFromSources` is idempotent — it re-ingests all mail + events + inquiries from offset 0, sorts by timestamp, and rewrites `session.jsonl`. It prefers `logs/log.sqlite` for session-relevant event rows when the index covers the whole JSONL, or uses a hybrid prefix-JSONL + SQLite tail when the index starts mid-file but reaches near EOF; otherwise it falls back to authoritative `logs/events.jsonl`. JSONL remains the source of truth; the SQLite/hybrid path is a best-effort acceleration and may omit a few rows if the additive index missed individual JSONL entries. Incremental `Refresh` still tails JSONL from EOF offsets.
-- **`parseEvent` event-type allow-list.** Only certain `events.jsonl` / `log.sqlite` types become `SessionEntry`s: `thinking`, `diary`, `text_input`, `text_output`, `tool_call`, `tool_result`, `insight`, `soul_flow`, `notification`, `aed`, and `apriori_summary`. Four kernel-side rename/promotion rules at ingest: `consultation_fire → soul_flow` (carries `fire_id` for voice-index inflation against `logs/soul_flow.jsonl`); `notification_pair_injected → notification` (carries `sources []string` and prefers the kernel-logged `summary` string for body, **plus an optional `meta *NotificationMeta`** with `current_time`, `context.{system_tokens,history_tokens,usage}`, and `injection_seq` — the kernel's `build_meta` snapshot at injection time, rendered as a faint footer line by `mail.go`; nil for events written before issue #40); `aed_attempt`/`aed_exhausted`/`aed_timeout → aed` (subtype written to `Source`, body recovered from raw `type` plus per-subtype fields — `attempt`/`error`, `attempts`/`error`, `seconds`); and `apriori_summary_generated`/`apriori_summary_cap_refused`/`apriori_summary_failed`/`apriori_summary_empty`/`apriori_summary_no_summarizer → apriori_summary` (summary metadata and generated text preserved for Ctrl+O rendering). To surface a new event type in the chat replay: extend the rename map (if needed), the allow-list in `parseEvent` (`tui/internal/fs/session.go:670+`) and `sqlitelog` session-event filter (`tui/internal/sqlitelog/event.go:102`), `extractSessionEventText`, and the renderer in `tui/internal/tui/mail.go`.
+- **Session cache reconstruction.** `RebuildFromSources` is idempotent — it re-ingests all mail + events + inquiries from offset 0, sorts by timestamp, and rewrites `session.jsonl`; `RebuildFromSourcesInMemory` performs the same read/merge without filesystem writes for detached generation-gated work. It prefers `logs/log.sqlite` only when coverage and rows prove the exact canonical root `logs/events.jsonl` source identity (`source_kind=agent_events`, `scope=agent`), otherwise it falls back to authoritative JSONL. Coverage and streaming share one captured `MaxOffset`; rows above that horizon remain JSONL work, and a non-positive indexed boundary rejects SQLite before any rows are appended (`tui/internal/sqlitelog/event.go:137-210`, `tui/internal/fs/session.go:421-468`, `tui/internal/fs/session.go:574-617`). Every path retains the last complete-record boundary it actually consumed, so trailing partial records and concurrent appends are retried by `Refresh` rather than leaked, duplicated, or skipped.
+- **`parseEvent` event-type allow-list.** Only certain `events.jsonl` / `log.sqlite` types become `SessionEntry`s: `thinking`, `diary`, `text_input`, `text_output`, `tool_call`, `tool_result`, `insight`, `soul_flow`, `notification`, `aed`, and `apriori_summary`. Four kernel-side rename/promotion rules at ingest: `consultation_fire → soul_flow` (carries `fire_id` for voice-index inflation against `logs/soul_flow.jsonl`); `notification_pair_injected → notification` (carries `sources []string` and prefers the kernel-logged `summary` string for body, **plus an optional `meta *NotificationMeta`** with `current_time`, `context.{system_tokens,history_tokens,usage}`, and `injection_seq` — the kernel's `build_meta` snapshot at injection time, rendered as a faint footer line by `mail.go`; nil for events written before issue #40); `aed_attempt`/`aed_exhausted`/`aed_timeout → aed` (subtype written to `Source`, body recovered from raw `type` plus per-subtype fields — `attempt`/`error`, `attempts`/`error`, `seconds`); and `apriori_summary_generated`/`apriori_summary_cap_refused`/`apriori_summary_failed`/`apriori_summary_empty`/`apriori_summary_no_summarizer → apriori_summary` (summary metadata and generated text preserved for Ctrl+O rendering). To surface a new event type in the chat replay: extend the rename map (if needed), the allow-list in `parseEvent` (`tui/internal/fs/session.go:730+`) and `sqlitelog` session-event filter (`tui/internal/sqlitelog/event.go:102`), `extractSessionEventText`, and the renderer in `tui/internal/tui/mail.go`.
 - **Provider derivation.** `DeriveLedgerProvider` uses endpoint host substring matching first, then model prefix fallback. Unknown endpoints surface the hostname so the UI still shows a breakdown.
 - **Location is cached for 1 hour.** `UpdateHumanLocation` checks `LocationStale` with a 1-hour maxAge before calling `ipinfo.io`.

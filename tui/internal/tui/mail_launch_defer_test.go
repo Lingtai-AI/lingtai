@@ -64,11 +64,16 @@ func TestMailInitRunsRebuild(t *testing.T) {
 	if msg == nil {
 		t.Fatal("initialRebuild returned nil msg")
 	}
-	if got := m.sessionCache.Len(); got == 0 {
-		t.Fatalf("initialRebuild did not populate the session cache; got %d entries", got)
+	if got := m.sessionCache.Len(); got != 0 {
+		t.Fatalf("initialRebuild mutated the installed session cache before acceptance; got %d entries", got)
+	}
+	rm, ok := msg.(mailRefreshMsg)
+	if !ok || rm.sessionCache == nil || rm.sessionCache.Len() == 0 {
+		t.Fatalf("initialRebuild did not return a populated command-local session cache: %#v", rm.sessionCache)
 	}
 
-	// Feed the resulting message through Update — the view should now build.
+	// Feed the resulting message through Update — acceptance installs the rebuilt
+	// cache and the view should now build.
 	updated, _ := m.Update(msg)
 	found := false
 	for _, cm := range updated.messages {

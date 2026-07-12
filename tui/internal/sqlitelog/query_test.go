@@ -30,6 +30,12 @@ func makeTestDB(t *testing.T, extraSQL ...string) string {
 	}
 	db := filepath.Join(logsDir, "log.sqlite")
 
+	resolvedLogs, err := filepath.EvalSymlinks(logsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootEventsSQL := strings.ReplaceAll(filepath.Join(resolvedLogs, "events.jsonl"), "'", "''")
+
 	sql := `CREATE TABLE events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		ts REAL NOT NULL,
@@ -45,7 +51,7 @@ func makeTestDB(t *testing.T, extraSQL ...string) string {
 		inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 	);`
 	for _, s := range extraSQL {
-		sql += "\n" + s
+		sql += "\n" + strings.ReplaceAll(s, "{{ROOT_EVENTS}}", rootEventsSQL)
 	}
 
 	out, err := exec.Command(bin, db, sql).CombinedOutput()
@@ -646,21 +652,30 @@ func TestQueryMoltSessionWindowsEmpty(t *testing.T) {
 	}
 }
 
-func TestStreamSessionEventsFiltersRelevantRows(t *testing.T) {
+func TestStreamSessionEventsFiltersRelevantRootRowsWithinCoverage(t *testing.T) {
 	agentDir := makeTestDB(t, `
-		INSERT INTO events (ts, type, fields_json) VALUES
-			(1.0, 'heartbeat', '{}'),
-			(2.0, 'text_input', '{"message":"hello"}'),
-			(3.0, 'notification_pair_injected', '{"message":"note"}'),
-			(4.0, 'aed_attempt', '{"error":"boom"}'),
-			(5.0, 'apriori_summary_generated', '{"tool_name":"bash","tool_call_id":"call_sum","generated_summary":"ok"}'),
-			(6.0, 'apriori_summary_cap_refused', '{"tool_name":"bash","tool_call_id":"call_cap","message":"too large"}'),
-			(7.0, 'apriori_summary_failed', '{"tool_name":"bash","tool_call_id":"call_fail","error":"boom"}'),
-			(8.0, 'apriori_summary_empty', '{"tool_name":"bash","tool_call_id":"call_empty"}'),
-			(9.0, 'apriori_summary_no_summarizer', '{"tool_name":"bash","tool_call_id":"call_no"}');
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'heartbeat', '{}', '{{ROOT_EVENTS}}', 0, 'agent_events', 'agent'),
+			(2.0, 'text_input', '{"message":"hello"}', '{{ROOT_EVENTS}}', 1, 'agent_events', 'agent'),
+			(3.0, 'notification_pair_injected', '{"message":"note"}', '{{ROOT_EVENTS}}', 2, 'agent_events', 'agent'),
+			(4.0, 'aed_attempt', '{"error":"boom"}', '{{ROOT_EVENTS}}', 3, 'agent_events', 'agent'),
+			(5.0, 'apriori_summary_generated', '{"tool_name":"bash","tool_call_id":"call_sum","generated_summary":"ok"}', '{{ROOT_EVENTS}}', 4, 'agent_events', 'agent'),
+			(6.0, 'apriori_summary_cap_refused', '{"tool_name":"bash","tool_call_id":"call_cap","message":"too large"}', '{{ROOT_EVENTS}}', 5, 'agent_events', 'agent'),
+			(7.0, 'apriori_summary_failed', '{"tool_name":"bash","tool_call_id":"call_fail","error":"boom"}', '{{ROOT_EVENTS}}', 6, 'agent_events', 'agent'),
+			(8.0, 'apriori_summary_empty', '{"tool_name":"bash","tool_call_id":"call_empty"}', '{{ROOT_EVENTS}}', 7, 'agent_events', 'agent'),
+			(9.0, 'apriori_summary_no_summarizer', '{"tool_name":"bash","tool_call_id":"call_no"}', '{{ROOT_EVENTS}}', 8, 'agent_events', 'agent'),
+			(10.0, 'text_output', '{"text":"daemon"}', '/tmp/daemon/events.jsonl', 2, 'daemon_events', 'daemon');
 	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
 	var rows []SessionEventRow
-	err := StreamSessionEvents(agentDir, func(row SessionEventRow) error {
+	err = StreamSessionEvents(agentDir, coverage, func(row SessionEventRow) error {
 		rows = append(rows, row)
 		return nil
 	})
@@ -678,7 +693,7 @@ func TestStreamSessionEventsFiltersRelevantRows(t *testing.T) {
 		"apriori_summary_no_summarizer",
 	}
 	if len(rows) != len(wantTypes) {
-		t.Fatalf("expected %d relevant rows, got %d", len(wantTypes), len(rows))
+		t.Fatalf("expected %d relevant root rows, got %d: %#v", len(wantTypes), len(rows), rows)
 	}
 	for i, want := range wantTypes {
 		if rows[i].Type != want {
@@ -732,9 +747,9 @@ func TestHasTUIClearCompletionEventUsesOffsetAndSource(t *testing.T) {
 
 func TestEventsIndexCoversJSONLRequiresFullCoverage(t *testing.T) {
 	agentDir := makeTestDB(t, `
-		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
-			(1.0, 'text_input', '{"message":"early"}', 0),
-			(2.0, 'text_output', '{"message":"late"}', 20);
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_input', '{"message":"early"}', '{{ROOT_EVENTS}}', 0, 'agent_events', 'agent'),
+			(2.0, 'text_output', '{"message":"late"}', '{{ROOT_EVENTS}}', 20, 'agent_events', 'agent');
 	`)
 	logsDir := filepath.Join(agentDir, "logs")
 	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)), 0o644); err != nil {
@@ -749,8 +764,8 @@ func TestEventsIndexCoversJSONLRequiresFullCoverage(t *testing.T) {
 	}
 
 	agentDir = makeTestDB(t, `
-		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
-			(1.0, 'text_input', '{"message":"late only"}', 8192);
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_input', '{"message":"late only"}', '{{ROOT_EVENTS}}', 8192, 'agent_events', 'agent');
 	`)
 	logsDir = filepath.Join(agentDir, "logs")
 	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 16384)), 0o644); err != nil {
@@ -767,8 +782,8 @@ func TestEventsIndexCoversJSONLRequiresFullCoverage(t *testing.T) {
 
 func TestEventsIndexCoversJSONLDetectsSmallFileTailGap(t *testing.T) {
 	agentDir := makeTestDB(t, `
-		INSERT INTO events (ts, type, fields_json, source_offset) VALUES
-			(1.0, 'text_input', '{"message":"early only"}', 0);
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_input', '{"message":"early only"}', '{{ROOT_EVENTS}}', 0, 'agent_events', 'agent');
 	`)
 	logsDir := filepath.Join(agentDir, "logs")
 	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 1024*1024)), 0o644); err != nil {

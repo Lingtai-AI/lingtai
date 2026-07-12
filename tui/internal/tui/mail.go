@@ -72,7 +72,8 @@ func pulseTick(generation uint64) tea.Cmd {
 
 type mailRefreshMsg struct {
 	generation   uint64
-	cache        fs.MailCache // incrementally updated cache
+	cache        fs.MailCache     // incrementally updated cache
+	sessionCache *fs.SessionCache // command-local authoritative rebuild; installed only after generation acceptance
 	alive        bool
 	state        string // active, idle, stuck, asleep, suspended, or ""
 	activity     fs.NetworkActivity
@@ -179,6 +180,7 @@ type MailModel struct {
 	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
 	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
 	generation        uint64           // activation token; stale async messages are ignored without rescheduling
+	beforeRebuild     func()           // optional deterministic test hook before deferred rebuild I/O
 
 	// Home telemetry is resolved asynchronously off the render/input path (its
 	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
@@ -245,17 +247,20 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 // session.jsonl from all sources (mail + events.jsonl + soul_inquiry.jsonl +
 // soul_flow.jsonl), merging and sorting chronologically. This is the heavy work
 // that used to run in NewMailModel; running it as a tea.Cmd keeps the first
-// frame instant. It returns a mailRefreshMsg so the standard refresh handler
-// builds the view from the now-populated cache. sessionCache is a pointer, so
-// the rebuild mutates the model's shared cache; the returned cache is installed
-// by the mailRefreshMsg handler.
+// frame instant. It returns a mailRefreshMsg carrying command-local mail and
+// session caches. The live model installs and persists them only after accepting
+// the message's generation, so a late rebuild cannot mutate a newer activation.
 func (m MailModel) initialRebuild() tea.Msg {
+	if m.beforeRebuild != nil {
+		m.beforeRebuild()
+	}
 	// Refresh mail cache before session rebuild so mail entries are included.
 	cache := m.cache.Refresh()
-	// Always rebuild session.jsonl from authoritative sources on launch. This
-	// avoids the entire class of dedup bugs that come from trying to patch an
-	// existing file across restarts.
-	m.sessionCache.RebuildFromSources(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
+	// Always rebuild from authoritative sources on launch. Keep both the in-memory
+	// snapshot and its session.jsonl write command-local until Update accepts this
+	// generation; stale work must have no effect on the installed cache.
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+	sessionCache.RebuildFromSourcesInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
 	m.cache = cache
 	// Tag the resulting refresh as the initial one so the handler can clear the
 	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
@@ -264,6 +269,7 @@ func (m MailModel) initialRebuild() tea.Msg {
 	if rm, ok := msg.(mailRefreshMsg); ok {
 		rm.initial = true
 		rm.generation = m.generation
+		rm.sessionCache = sessionCache
 		return rm
 	}
 	return msg
@@ -418,10 +424,8 @@ func (m MailModel) showChatTailHint() bool {
 }
 
 func (m MailModel) refreshMail() tea.Msg {
-	// Refresh human location (no-op if cache is <1h old)
-	go fs.UpdateHumanLocation(m.humanDir)
-
-	// Incremental cache refresh — only reads new messages from disk
+	// Incremental cache refresh — only reads new messages from disk. Human
+	// location refresh is launched by Update only after generation acceptance.
 	cache := m.cache.Refresh()
 
 	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
@@ -692,8 +696,18 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailRefreshMsg:
+		// Accept the activation before touching any model/cache state. In
+		// particular, stale initial rebuilds carry detached SessionCaches that must
+		// never replace or persist over the current generation.
 		if msg.generation != m.generation {
 			return m, nil
+		}
+		// The detached command is read-only. Launch this best-effort network/cache
+		// refresh only after the generation gate; it remains off the Update path.
+		go fs.UpdateHumanLocation(m.humanDir)
+		if msg.sessionCache != nil {
+			m.sessionCache = msg.sessionCache
+			m.sessionCache.Persist()
 		}
 		if msg.initial {
 			// The deferred initial rebuild has landed — history is now built, so

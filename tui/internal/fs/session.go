@@ -108,25 +108,26 @@ type AprioriSummary struct {
 // SessionCache is an append-only cache backed by session.jsonl.
 // It incrementally tails three data sources and appends new entries.
 //
-// Concurrency: the launch path defers the authoritative RebuildFromSources
-// into a Bubble Tea Cmd goroutine while the periodic mail tick keeps calling
-// Refresh on the main goroutine (see internal/tui/mail.go). Both mutate the
-// same *SessionCache, so every public entry point that touches mutable state
-// (RebuildFromSources, Refresh, IngestMail, Entries, Len) holds mu. The
-// unexported helpers (ingestMail, IngestEvents, IngestInquiries, append,
-// rewriteFile) assume the caller already holds mu and never lock themselves —
-// that keeps the lock non-reentrant and avoids deadlock.
+// Concurrency: every public entry point that touches mutable state
+// (RebuildFromSources, RebuildFromSourcesInMemory, Persist, Refresh, IngestMail,
+// Entries, Len) holds mu. The unexported helpers (ingestMail, IngestEvents,
+// IngestInquiries, append, rewriteFile) assume the caller already holds mu and
+// never lock themselves — that keeps the lock non-reentrant and avoids deadlock.
+// The TUI's deferred initial rebuild uses a command-local SessionCache and only
+// installs and persists it after accepting the command's generation.
 type SessionCache struct {
-	mu          sync.Mutex     // guards all fields below; see type doc for the locking discipline
-	path        string         // human/logs/session.jsonl
-	entries     []SessionEntry // in-memory mirror of all entries
-	lastMailTs  string         // highest mail ReceivedAt ingested (watermark for live-session dedup)
-	eventsOff   int64          // byte offset in events.jsonl
-	inquiryOff  int64          // byte offset in soul_inquiry.jsonl
-	soulFlowOff int64          // byte offset in soul_flow.jsonl (voice index source)
-	projectPath string         // absolute path of the project directory (parent of .lingtai/)
-	lastHour    time.Time      // hour (truncated) of the most recent entry
-	rebuilding  bool           // true during RebuildFromSources — suppress file writes
+	mu                  sync.Mutex     // guards all fields below; see type doc for the locking discipline
+	path                string         // human/logs/session.jsonl
+	entries             []SessionEntry // in-memory mirror of all entries
+	lastMailTs          string         // highest mail ReceivedAt ingested (watermark for live-session dedup)
+	eventsOff           int64          // byte offset in events.jsonl
+	inquiryOff          int64          // byte offset in soul_inquiry.jsonl
+	soulFlowOff         int64          // byte offset in soul_flow.jsonl (voice index source)
+	projectPath         string         // absolute path of the project directory (parent of .lingtai/)
+	lastHour            time.Time      // hour (truncated) of the most recent entry
+	rebuilding          bool           // true during RebuildFromSources — suppress file writes
+	afterRebuildIngest  func()         // optional deterministic test hook after authoritative reads
+	afterSQLiteCoverage func()         // optional deterministic test hook after SQLite coverage capture
 
 	// soulVoices indexes voices by fire_id, populated by tailing
 	// soul_flow.jsonl. Used to inflate soul_flow SessionEntry bodies that
@@ -143,25 +144,31 @@ type soulVoiceRecord struct {
 	Voice  string
 }
 
-// NewSessionCache opens (or creates) session.jsonl. Call RebuildFromSources
-// after construction to populate the cache from authoritative sources.
+// NewSessionCache constructs an in-memory cache without touching the filesystem.
+// Parent directories are created only by accepted persistence/append writes.
 func NewSessionCache(humanDir string, projectPath string) *SessionCache {
-	logsDir := filepath.Join(humanDir, "logs")
-	os.MkdirAll(logsDir, 0o755)
-	path := filepath.Join(logsDir, "session.jsonl")
-
-	sc := &SessionCache{
-		path:        path,
+	return &SessionCache{
+		path:        filepath.Join(humanDir, "logs", "session.jsonl"),
 		projectPath: projectPath,
 		soulVoices:  make(map[string][]soulVoiceRecord),
 	}
-	return sc
 }
 
-// RebuildFromSources reads all three data sources from scratch, merges and
-// sorts them chronologically, writes session.jsonl, and sets offsets to EOF
-// so subsequent Refresh calls only append new entries.
+// RebuildFromSources reads all data sources from scratch, merges and sorts them
+// chronologically, writes session.jsonl, and retains each source's last complete
+// consumed-record boundary for subsequent Refresh calls.
 func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string) {
+	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, true)
+}
+
+// RebuildFromSourcesInMemory performs the same authoritative rebuild without
+// writing session.jsonl. It is used for command-local work whose generation must
+// be accepted before it can affect the installed cache or its persisted mirror.
+func (sc *SessionCache) RebuildFromSourcesInMemory(cache MailCache, humanAddr, orchDir, orchName string) {
+	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false)
+}
+
+func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string, persist bool) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -181,6 +188,9 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 		sc.IngestEvents(orchDir)
 	}
 	sc.IngestInquiries(orchDir)
+	if sc.afterRebuildIngest != nil {
+		sc.afterRebuildIngest()
+	}
 
 	sc.rebuilding = false
 
@@ -189,15 +199,16 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 		return tsToUnix(sc.entries[i].Ts) < tsToUnix(sc.entries[j].Ts)
 	})
 
-	// Write sorted session.jsonl in one shot.
-	sc.rewriteFile()
-
-	// Set offsets to EOF so Refresh only tails new entries.
-	if orchDir != "" {
-		sc.eventsOff = fileSize(filepath.Join(orchDir, "logs", "events.jsonl"))
-		sc.inquiryOff = fileSize(filepath.Join(orchDir, "logs", "soul_inquiry.jsonl"))
-		sc.soulFlowOff = fileSize(filepath.Join(orchDir, "logs", "soul_flow.jsonl"))
+	// Write sorted session.jsonl in one shot only for an already-accepted cache.
+	// Deferred commands build in memory and call Persist after generation checks.
+	if persist {
+		sc.rewriteFile()
 	}
+
+	// Each ingestion path leaves its offset at the last complete record it
+	// actually consumed. Never replace those parser-proven boundaries with a later
+	// raw file size: a trailing partial line or concurrent append must be retried by
+	// the next Refresh.
 
 	// Set lastHour from the final entry.
 	if len(sc.entries) > 0 {
@@ -216,8 +227,19 @@ func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	}
 }
 
+// Persist writes the accepted in-memory snapshot to session.jsonl.
+func (sc *SessionCache) Persist() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.rewriteFile()
+}
+
 // rewriteFile overwrites session.jsonl with the current in-memory entries.
+// The caller must hold sc.mu.
 func (sc *SessionCache) rewriteFile() {
+	if err := os.MkdirAll(filepath.Dir(sc.path), 0o755); err != nil {
+		return
+	}
 	f, err := os.Create(sc.path)
 	if err != nil {
 		return
@@ -243,7 +265,11 @@ func (sc *SessionCache) append(entries ...SessionEntry) {
 		return
 	}
 
-	// Append to file.
+	// Append to file. Construction is pure, so the first accepted append owns
+	// creation of the derived cache's parent directory.
+	if err := os.MkdirAll(filepath.Dir(sc.path), 0o755); err != nil {
+		return
+	}
 	f, err := os.OpenFile(sc.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
@@ -400,15 +426,25 @@ func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
 	if err != nil || !coverage.HasRows() || !coverage.TailNearEOF() {
 		return false
 	}
+	// Resume immediately after the highest-offset record proven present in this
+	// SQLite snapshot. Coverage and streaming use the same canonical source and
+	// captured MaxOffset horizon; later index rows belong to the next JSONL Refresh.
+	eventsPath := coverage.SourceFile
+	eventsBoundary := indexedJSONLBoundary(eventsPath, coverage.MaxOffset, coverage.FileSize)
+	if eventsBoundary <= 0 {
+		return false
+	}
+	if sc.afterSQLiteCoverage != nil {
+		sc.afterSQLiteCoverage()
+	}
 	sc.ingestSoulFlowVoices(orchDir)
 	newEntries := make([]SessionEntry, 0)
 	if !coverage.StartsAtBeginning() {
-		eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
 		prefixEntries, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
 		newEntries = append(newEntries, prefixEntries...)
 	}
 	seenRows := 0
-	err = sqlitelog.StreamSessionEvents(orchDir, func(row sqlitelog.SessionEventRow) error {
+	err = sqlitelog.StreamSessionEvents(orchDir, coverage, func(row sqlitelog.SessionEventRow) error {
 		seenRows++
 		if entry := parseSQLiteEvent(row); entry != nil {
 			newEntries = append(newEntries, *entry)
@@ -428,6 +464,7 @@ func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
 		sc.maybeInflateSoulFlow(&sc.entries[i])
 	}
 	sc.append(newEntries...)
+	sc.eventsOff = eventsBoundary
 	return true
 }
 
@@ -532,6 +569,52 @@ func (sc *SessionCache) maybeInflateSoulFlow(e *SessionEntry) {
 	if len(lines) > 0 {
 		e.Body = strings.Join(lines, "\n")
 	}
+}
+
+// indexedJSONLBoundary returns the byte immediately after the complete JSONL
+// record beginning at sourceOffset, bounded by the file-size snapshot used for
+// SQLite coverage. That record is the highest one proven represented by the
+// index; later bytes remain authoritative JSONL work for Refresh.
+func indexedJSONLBoundary(path string, sourceOffset, snapshotEnd int64) int64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+	if snapshotEnd > info.Size() {
+		snapshotEnd = info.Size()
+	}
+	if sourceOffset < 0 || sourceOffset >= snapshotEnd {
+		return 0
+	}
+	if _, err := f.Seek(sourceOffset, io.SeekStart); err != nil {
+		return 0
+	}
+	const chunkSize int64 = 4096
+	buf := make([]byte, chunkSize)
+	pos := sourceOffset
+	for pos < snapshotEnd {
+		want := snapshotEnd - pos
+		if want > chunkSize {
+			want = chunkSize
+		}
+		n, readErr := f.Read(buf[:want])
+		if n == 0 {
+			return 0
+		}
+		if idx := bytes.IndexByte(buf[:n], '\n'); idx >= 0 {
+			return pos + int64(idx) + 1
+		}
+		pos += int64(n)
+		if readErr != nil {
+			return 0
+		}
+	}
+	return 0
 }
 
 // tailJSONL reads a JSONL file from the given byte offset, calls parseFn on each

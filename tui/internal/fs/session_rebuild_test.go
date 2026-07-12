@@ -2,9 +2,11 @@ package fs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,22 +112,143 @@ func TestIngestMailWatermarkSkipsOldMail(t *testing.T) {
 }
 
 func TestRefreshDoesNotReingestSQLiteHistory(t *testing.T) {
-	sqliteBin, err := exec.LookPath("sqlite3")
-	if err != nil {
-		t.Skip("sqlite3 not available")
-	}
+	sqliteBin := requireSessionSQLite(t)
 	tmp := t.TempDir()
 	humanDir := filepath.Join(tmp, "human")
-	orchDir := filepath.Join(tmp, "orch")
+	// The apostrophe exercises SQL literal escaping for the canonical source path.
+	orchDir := filepath.Join(tmp, "orch's root")
 	logsDir := filepath.Join(orchDir, "logs")
-	if err := os.MkdirAll(logsDir, 0o755); err != nil {
-		t.Fatal(err)
+	eventsPath := filepath.Join(logsDir, "events.jsonl")
+	firstLine := `{"type":"text_input","ts":1.0,"text":"hello from sqlite"}` + "\n"
+	writeSessionTestFile(t, eventsPath, firstLine)
+	rootSource := canonicalSessionTestPath(t, eventsPath)
+	createSessionSQLite(t, sqliteBin, orchDir,
+		sessionSQLiteInsert(1.0, "text_input", "hello from sqlite", rootSource, 0, "agent_events", "agent"),
+	)
+
+	sc := NewSessionCache(humanDir, tmp)
+	cache := NewMailCache(humanDir).Refresh()
+	sc.afterRebuildIngest = func() {
+		appendSessionTestFile(t, eventsPath,
+			`{"type":"text_output","ts":2.0,"text":"appended during sqlite rebuild"}`+"\n")
 	}
-	eventLine := []byte(`{"type":"text_input","ts":1.0,"text":"hello from sqlite"}` + "\n")
-	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), eventLine, 0o644); err != nil {
-		t.Fatal(err)
+	sc.RebuildFromSources(cache, "human", orchDir, "orch")
+	sc.afterRebuildIngest = nil
+	assertSessionBodiesExactly(t, sc.Entries(), "hello from sqlite")
+
+	sc.Refresh(cache, "human", orchDir, "orch")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries(), "hello from sqlite", "appended during sqlite rebuild")
+}
+
+func TestSQLiteReplayScopesRowsToCanonicalRootSource(t *testing.T) {
+	sqliteBin := requireSessionSQLite(t)
+
+	t.Run("daemon offset beyond root EOF cannot leak or reset replay", func(t *testing.T) {
+		root, humanDir, orchDir := newSessionTestDirs(t)
+		eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+		firstLine := `{"type":"text_input","ts":1.0,"text":"root indexed"}` + "\n"
+		tailLine := `{"type":"text_output","ts":2.0,"text":"root tail"}` + "\n"
+		writeSessionTestFile(t, eventsPath, firstLine+tailLine)
+		rootSource := canonicalSessionTestPath(t, eventsPath)
+		daemonSource := filepath.Join(orchDir, "daemons", "em-test", "logs", "events.jsonl")
+		createSessionSQLite(t, sqliteBin, orchDir,
+			sessionSQLiteInsert(1.0, "text_input", "root indexed", rootSource, 0, "agent_events", "agent")+
+				sessionSQLiteInsert(1.5, "text_output", "daemon leaked", daemonSource, int64(len(firstLine+tailLine)+100), "daemon_events", "daemon"),
+		)
+
+		sc := NewSessionCache(humanDir, root)
+		cache := NewMailCache(humanDir).Refresh()
+		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed")
+		sc.Refresh(cache, "human", orchDir, "orch")
+		sc.Refresh(cache, "human", orchDir, "orch")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root tail")
+	})
+
+	t.Run("foreign offset inside root JSONL cannot leak or skip tail", func(t *testing.T) {
+		root, humanDir, orchDir := newSessionTestDirs(t)
+		eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+		firstLine := `{"type":"text_input","ts":1.0,"text":"root indexed"}` + "\n"
+		tailLine := `{"type":"text_output","ts":2.0,"text":"root must not be skipped"}` + "\n"
+		writeSessionTestFile(t, eventsPath, firstLine+tailLine)
+		rootSource := canonicalSessionTestPath(t, eventsPath)
+		foreignSource := filepath.Join(orchDir, "elsewhere", "events.jsonl")
+		foreignOffset := int64(len(firstLine) + 8)
+		createSessionSQLite(t, sqliteBin, orchDir,
+			sessionSQLiteInsert(1.0, "text_input", "root indexed", rootSource, 0, "agent_events", "agent")+
+				sessionSQLiteInsert(1.5, "text_output", "foreign leaked", foreignSource, foreignOffset, "agent_events", "agent"),
+		)
+
+		sc := NewSessionCache(humanDir, root)
+		cache := NewMailCache(humanDir).Refresh()
+		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed")
+		sc.Refresh(cache, "human", orchDir, "orch")
+		sc.Refresh(cache, "human", orchDir, "orch")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root must not be skipped")
+	})
+}
+
+func TestSQLiteReplayUsesCapturedCoverageHorizon(t *testing.T) {
+	sqliteBin := requireSessionSQLite(t)
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	firstLine := `{"type":"text_input","ts":1.0,"text":"covered before query"}` + "\n"
+	secondLine := `{"type":"text_output","ts":2.0,"text":"indexed after coverage"}` + "\n"
+	writeSessionTestFile(t, eventsPath, firstLine+secondLine)
+	rootSource := canonicalSessionTestPath(t, eventsPath)
+	createSessionSQLite(t, sqliteBin, orchDir,
+		sessionSQLiteInsert(1.0, "text_input", "covered before query", rootSource, 0, "agent_events", "agent"),
+	)
+
+	sc := NewSessionCache(humanDir, root)
+	cache := NewMailCache(humanDir).Refresh()
+	sc.afterSQLiteCoverage = func() {
+		runSessionSQLiteSQL(t, sqliteBin, orchDir,
+			sessionSQLiteInsert(2.0, "text_output", "indexed after coverage", rootSource, int64(len(firstLine)), "agent_events", "agent"),
+		)
 	}
-	createSQL := `
+	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
+	sc.afterSQLiteCoverage = nil
+	assertSessionBodiesExactly(t, sc.Entries(), "covered before query")
+
+	sc.Refresh(cache, "human", orchDir, "orch")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries(), "covered before query", "indexed after coverage")
+}
+
+func TestSQLiteReplayRejectsInvalidNoNewlineBoundary(t *testing.T) {
+	sqliteBin := requireSessionSQLite(t)
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	line := `{"type":"text_input","ts":1.0,"text":"complete only after newline"}`
+	writeSessionTestFile(t, eventsPath, line)
+	rootSource := canonicalSessionTestPath(t, eventsPath)
+	createSessionSQLite(t, sqliteBin, orchDir,
+		sessionSQLiteInsert(1.0, "text_input", "complete only after newline", rootSource, 0, "agent_events", "agent"),
+	)
+
+	sc := NewSessionCache(humanDir, root)
+	cache := NewMailCache(humanDir).Refresh()
+	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries())
+
+	appendSessionTestFile(t, eventsPath, "\n")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries(), "complete only after newline")
+}
+
+func TestSQLiteReplayFallsBackWhenRootIdentityCannotBeProven(t *testing.T) {
+	sqliteBin := requireSessionSQLite(t)
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	writeSessionTestFile(t, eventsPath,
+		`{"type":"text_input","ts":1.0,"text":"authoritative first"}`+"\n"+
+			`{"type":"text_output","ts":2.0,"text":"authoritative second"}`+"\n",
+	)
+	oldSchema := `
 		CREATE TABLE events (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			ts REAL NOT NULL,
@@ -134,22 +257,103 @@ func TestRefreshDoesNotReingestSQLiteHistory(t *testing.T) {
 			source_offset INTEGER
 		);
 		INSERT INTO events (ts, type, fields_json, source_offset)
-		VALUES (1.0, 'text_input', '{"text":"hello from sqlite"}', 0);
+		VALUES (1.0, 'text_input', '{"text":"unclassified sidecar"}', 0);
 	`
-	cmd := exec.Command(sqliteBin, filepath.Join(logsDir, "log.sqlite"), createSQL)
+	runSessionSQLiteSQL(t, sqliteBin, orchDir, oldSchema)
+
+	sc := NewSessionCache(humanDir, root)
+	cache := NewMailCache(humanDir).Refresh()
+	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
+	sc.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries(), "authoritative first", "authoritative second")
+}
+
+func requireSessionSQLite(t *testing.T) string {
+	t.Helper()
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	return sqliteBin
+}
+
+func createSessionSQLite(t *testing.T, sqliteBin, orchDir, inserts string) {
+	t.Helper()
+	createSQL := `
+		CREATE TABLE events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts REAL NOT NULL,
+			type TEXT NOT NULL,
+			agent_address TEXT,
+			agent_name_snapshot TEXT,
+			fields_json TEXT NOT NULL,
+			source_file TEXT,
+			source_offset INTEGER,
+			source_line INTEGER,
+			source_kind TEXT,
+			scope TEXT,
+			run_id TEXT,
+			inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+	` + inserts
+	runSessionSQLiteSQL(t, sqliteBin, orchDir, createSQL)
+}
+
+func runSessionSQLiteSQL(t *testing.T, sqliteBin, orchDir, sql string) {
+	t.Helper()
+	dbPath := filepath.Join(orchDir, "logs", "log.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(sqliteBin, dbPath, sql)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("sqlite3 setup failed: %v\n%s", err, out)
 	}
+}
 
-	sc := NewSessionCache(humanDir, tmp)
-	cache := NewMailCache(humanDir).Refresh()
-	sc.RebuildFromSources(cache, "human", orchDir, "orch")
-	if got := sc.Len(); got != 1 {
-		t.Fatalf("after rebuild: expected 1 entry, got %d", got)
+func sessionSQLiteInsert(ts float64, eventType, body, sourceFile string, sourceOffset int64, sourceKind, scope string) string {
+	fields := fmt.Sprintf(`{"text":%q}`, body)
+	return fmt.Sprintf(
+		"INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_line, source_kind, scope) VALUES (%g, %s, %s, %s, %d, 1, %s, %s);\n",
+		ts,
+		sessionSQLLiteral(eventType),
+		sessionSQLLiteral(fields),
+		sessionSQLLiteral(sourceFile),
+		sourceOffset,
+		sessionSQLLiteral(sourceKind),
+		sessionSQLLiteral(scope),
+	)
+}
+
+func sessionSQLLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func canonicalSessionTestPath(t *testing.T, path string) string {
+	t.Helper()
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sc.Refresh(cache, "human", orchDir, "orch")
-	sc.Refresh(cache, "human", orchDir, "orch")
-	if got := sc.Len(); got != 1 {
-		t.Fatalf("refresh duplicated SQLite history: expected 1 entry, got %d", got)
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Clean(resolved)
+}
+
+func assertSessionBodiesExactly(t *testing.T, entries []SessionEntry, want ...string) {
+	t.Helper()
+	got := make([]string, len(entries))
+	for i := range entries {
+		got[i] = entries[i].Body
+	}
+	if len(got) != len(want) {
+		t.Fatalf("session bodies = %#v (%d entries), want %#v (%d entries)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session bodies = %#v, want %#v", got, want)
+		}
 	}
 }

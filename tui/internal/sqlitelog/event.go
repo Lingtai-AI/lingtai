@@ -102,14 +102,15 @@ func querySQLiteRows(agentDir, sql string, expectedColumns int) ([][]string, err
 const sessionEventFilterSQL = "(type IN ('thinking','diary','text_input','text_output','tool_call','tool_result','llm_call','llm_response','insight','consultation_fire','notification_pair_injected','apriori_summary_generated','apriori_summary_cap_refused','apriori_summary_failed','apriori_summary_empty','apriori_summary_no_summarizer') OR type IN ('aed_attempt','aed_exhausted','aed_timeout'))"
 
 type EventsIndexCoverage struct {
-	FileSize  int64
-	MinOffset int64
-	MaxOffset int64
-	Count     int64
+	SourceFile string
+	FileSize   int64
+	MinOffset  int64
+	MaxOffset  int64
+	Count      int64
 }
 
 func (c EventsIndexCoverage) HasRows() bool {
-	return c.Count > 0 && c.MinOffset >= 0 && c.MaxOffset >= 0
+	return c.SourceFile != "" && c.Count > 0 && c.MinOffset >= 0 && c.MaxOffset >= 0
 }
 
 func (c EventsIndexCoverage) StartsAtBeginning() bool {
@@ -133,19 +134,47 @@ func (c EventsIndexCoverage) TailNearEOF() bool {
 	return c.MaxOffset >= c.FileSize-tailSlack
 }
 
+func canonicalEventsSource(agentDir string) (string, error) {
+	source, err := filepath.Abs(filepath.Join(agentDir, "logs", "events.jsonl"))
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func sqliteStringLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func rootEventsPredicate(sourceFile string) string {
+	return "source_file = " + sqliteStringLiteral(sourceFile) + " AND source_kind = 'agent_events' AND scope = 'agent'"
+}
+
 // QueryEventsIndexCoverage reports the source_offset range currently represented
-// in the SQLite events index for the agent's events.jsonl file.
+// for the canonical root logs/events.jsonl coordinate. Missing identity columns,
+// unclassified rows, and path mismatches return no usable coverage so callers can
+// fall back to authoritative JSONL.
 func QueryEventsIndexCoverage(agentDir string) (EventsIndexCoverage, error) {
 	coverage := EventsIndexCoverage{MinOffset: -1, MaxOffset: -1}
-	info, err := os.Stat(filepath.Join(agentDir, "logs", "events.jsonl"))
+	sourceFile, err := canonicalEventsSource(agentDir)
 	if err != nil {
 		return coverage, err
 	}
+	info, err := os.Stat(sourceFile)
+	if err != nil {
+		return coverage, err
+	}
+	coverage.SourceFile = sourceFile
 	coverage.FileSize = info.Size()
 	if info.Size() == 0 {
 		return coverage, nil
 	}
-	rows, err := querySQLiteRows(agentDir, "SELECT COALESCE(MIN(source_offset), -1), COALESCE(MAX(source_offset), -1), COUNT(source_offset) FROM events", 3)
+	sql := "SELECT COALESCE(MIN(source_offset), -1), COALESCE(MAX(source_offset), -1), COUNT(source_offset) FROM events WHERE " + rootEventsPredicate(sourceFile)
+	rows, err := querySQLiteRows(agentDir, sql, 3)
 	if err != nil {
 		return coverage, err
 	}
@@ -158,12 +187,22 @@ func QueryEventsIndexCoverage(agentDir string) (EventsIndexCoverage, error) {
 	return coverage, nil
 }
 
-// StreamSessionEvents streams session-relevant events from logs/log.sqlite in
-// event order. Callers should fall back to events.jsonl if this returns an
-// error, because the SQLite index is additive and may be absent on older
-// runtimes.
-func StreamSessionEvents(agentDir string, handle func(SessionEventRow) error) error {
-	sql := "SELECT ts, type, fields_json FROM events WHERE " + sessionEventFilterSQL + " ORDER BY id ASC"
+// StreamSessionEvents streams session-relevant root events from logs/log.sqlite
+// in event order, bounded by the MaxOffset captured with coverage. Callers should
+// fall back to events.jsonl if this returns an error, because the SQLite index is
+// additive and may be absent or lack provable source identity on older runtimes.
+func StreamSessionEvents(agentDir string, coverage EventsIndexCoverage, handle func(SessionEventRow) error) error {
+	sourceFile, err := canonicalEventsSource(agentDir)
+	if err != nil {
+		return err
+	}
+	if !coverage.HasRows() || sourceFile != coverage.SourceFile {
+		return fmt.Errorf("sqlite events coverage does not identify canonical root source")
+	}
+	sql := fmt.Sprintf(
+		"SELECT ts, type, fields_json FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY id ASC",
+		rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL,
+	)
 	return streamSQLiteRows(agentDir, sql, 3, func(cols []string) error {
 		ts, _ := strconv.ParseFloat(cols[0], 64)
 		return handle(SessionEventRow{TS: ts, Type: cols[1], FieldsJSON: cols[2]})
