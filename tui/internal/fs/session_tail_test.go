@@ -673,6 +673,18 @@ func TestParseEventToolResultHidesMetaBlocksBehindNotificationHint(t *testing.T)
 			t.Fatalf("Body missing %q:\n%s", want, e.Body)
 		}
 	}
+	wantBody := strings.Join([]string{
+		"bash → ok 42ms",
+		i18n.T("mail.meta_hidden_hint"),
+		"result: {",
+		`  "status": "ok",`,
+		`  "stderr": "",`,
+		`  "stdout": "done"`,
+		"}",
+	}, "\n")
+	if e.Body != wantBody {
+		t.Fatalf("Body changed formatting:\ngot:\n%s\nwant:\n%s", e.Body, wantBody)
+	}
 	// None of the expanded meta blocks should leak into the replay body.
 	for _, notWant := range []string{
 		"_tool:",

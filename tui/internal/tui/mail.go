@@ -81,6 +81,16 @@ type mailRefreshMsg struct {
 	orchNickname string // nickname from .agent.json
 	initial      bool   // true only for the deferred initial rebuild (clears the loading banner)
 }
+
+// mailPersistMsg is the second, post-frame phase of an accepted authoritative
+// rebuild. The command that emits it performs no I/O; Update re-checks both the
+// activation generation and installed cache identity before writing, so an old
+// rebuild cannot race a newer activation's canonical session cache.
+type mailPersistMsg struct {
+	generation   uint64
+	sessionCache *fs.SessionCache
+}
+
 type tickMsg struct {
 	generation uint64
 	at         time.Time
@@ -705,9 +715,14 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// The detached command is read-only. Launch this best-effort network/cache
 		// refresh only after the generation gate; it remains off the Update path.
 		go fs.UpdateHumanLocation(m.humanDir)
+		var persistCmd tea.Cmd
 		if msg.sessionCache != nil {
 			m.sessionCache = msg.sessionCache
-			m.sessionCache.Persist()
+			generation := msg.generation
+			sessionCache := msg.sessionCache
+			persistCmd = func() tea.Msg {
+				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
+			}
 		}
 		if msg.initial {
 			// The deferred initial rebuild has landed — history is now built, so
@@ -772,10 +787,28 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.viewport.GotoBottom()
 			}
 		}
+		// Let Bubble Tea paint the accepted history before the derived-cache write.
+		// The command itself performs no I/O; mailPersistMsg re-enters Update for a
+		// second generation/cache-identity gate and serialized persistence.
+		if persistCmd != nil {
+			return m, persistCmd
+		}
 		// Kick off the first background telemetry fetch as soon as a refresh has
-		// landed (including the deferred initial rebuild), so the row can appear on
-		// first load without waiting a full poll tick. Debounced by the same
-		// in-flight/TTL gate, so this and the tick driver never double-fetch.
+		// landed (including ordinary refreshes), so the row can appear without
+		// waiting a full poll tick. Initial rebuilds schedule it after persistence.
+		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
+			return m, cmd
+		}
+		return m, nil
+
+	case mailPersistMsg:
+		// Persist only the cache still installed for this activation. This runs on
+		// the serialized Update path after the accepted history has been painted,
+		// so no stale or concurrent writer can overtake a newer generation.
+		if msg.generation != m.generation || msg.sessionCache == nil || msg.sessionCache != m.sessionCache {
+			return m, nil
+		}
+		msg.sessionCache.Persist()
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			return m, cmd
 		}

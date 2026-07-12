@@ -300,10 +300,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// === Cross-view messages ===
 
-	case mailRefreshMsg, homeTelemetryMsg:
-		// Mail refresh/rebuild and the telemetry completion it can schedule outlive
-		// the view that launched them. Route both at the root so Projects/Help cannot
-		// drop Mail's state machine; MailModel owns generation acceptance.
+	case mailRefreshMsg, mailPersistMsg, homeTelemetryMsg:
+		// Mail refresh/rebuild, its post-frame persistence phase, and telemetry can
+		// outlive the view that launched them. Route all at the root so Projects/Help
+		// cannot drop Mail's state machine; MailModel owns generation acceptance.
 		var cmd tea.Cmd
 		a.mail, cmd = a.mail.Update(msg)
 		return a, cmd

@@ -702,6 +702,59 @@ func TestStreamSessionEventsFiltersRelevantRootRowsWithinCoverage(t *testing.T) 
 	}
 }
 
+func TestStreamSessionEventsProjectsOnlyVisibleToolResultFields(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'tool_result', '{"api_call_id":"api-1","tool_name":"bash","status":"ok","elapsed_ms":42,"tool_args":{"ignored":"large"},"kernel_runtime":{"ignored":true},"kernel_runtime_stamp":"stamp","kernel_version":"version","result":{"status":"ok","stdout":"done","_runtime_pending":{"current_time":"hidden"},"_runtime":{"state":{"usage":0.5}},"_runtime_guidance":"hidden","notifications":{"email":1},"_notification_guidance":"hidden","_tool":{"id":"hidden"}}}', '{{ROOT_EVENTS}}', 0, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	var rows []SessionEventRow
+	if err := StreamSessionEvents(agentDir, coverage, func(row SessionEventRow) error {
+		rows = append(rows, row)
+		return nil
+	}); err != nil {
+		t.Fatalf("StreamSessionEvents error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one tool_result row, got %d: %#v", len(rows), rows)
+	}
+	got := rows[0].FieldsJSON
+	for _, hidden := range []string{
+		`"tool_args"`,
+		`"kernel_runtime"`,
+		`"kernel_runtime_stamp"`,
+		`"kernel_version"`,
+		`"_runtime_pending"`,
+		`"_runtime"`,
+		`"_runtime_guidance"`,
+		`"notifications"`,
+		`"_notification_guidance"`,
+		`"_tool"`,
+	} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("projected FieldsJSON still contains hidden/unused key %s: %s", hidden, got)
+		}
+	}
+	for _, visible := range []string{
+		`"api_call_id":"api-1"`,
+		`"tool_name":"bash"`,
+		`"status":"ok"`,
+		`"elapsed_ms":42`,
+		`"stdout":"done"`,
+	} {
+		if !strings.Contains(got, visible) {
+			t.Fatalf("projected FieldsJSON lost visible field %s: %s", visible, got)
+		}
+	}
+}
+
 func TestQueryErrorEventsNewestFirst(t *testing.T) {
 	agentDir := makeTestDB(t, `
 		INSERT INTO events (ts, type, fields_json) VALUES

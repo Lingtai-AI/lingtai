@@ -101,6 +101,25 @@ func querySQLiteRows(agentDir, sql string, expectedColumns int) ([][]string, err
 
 const sessionEventFilterSQL = "(type IN ('thinking','diary','text_input','text_output','tool_call','tool_result','llm_call','llm_response','insight','consultation_fire','notification_pair_injected','apriori_summary_generated','apriori_summary_cap_refused','apriori_summary_failed','apriori_summary_empty','apriori_summary_no_summarizer') OR type IN ('aed_attempt','aed_exhausted','aed_timeout'))"
 
+// sessionEventFieldsSQL avoids sending tool-result fields that the session parser
+// deliberately ignores or hides. On large histories these fields account for tens
+// of megabytes of SQLite transport and substantially more Go JSON allocations.
+// json_remove preserves every visible result field; formatToolResultEvent still
+// emits its standard metadata hint from the synthesized tool identity block.
+const sessionEventFieldsSQL = `CASE WHEN type = 'tool_result' THEN json_remove(
+	fields_json,
+	'$.tool_args',
+	'$.kernel_runtime',
+	'$.kernel_runtime_stamp',
+	'$.kernel_version',
+	'$.result._runtime_pending',
+	'$.result._runtime',
+	'$.result._runtime_guidance',
+	'$.result.notifications',
+	'$.result._notification_guidance',
+	'$.result._tool'
+) ELSE fields_json END`
+
 type EventsIndexCoverage struct {
 	SourceFile string
 	FileSize   int64
@@ -200,8 +219,8 @@ func StreamSessionEvents(agentDir string, coverage EventsIndexCoverage, handle f
 		return fmt.Errorf("sqlite events coverage does not identify canonical root source")
 	}
 	sql := fmt.Sprintf(
-		"SELECT ts, type, fields_json FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY id ASC",
-		rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL,
+		"SELECT ts, type, %s FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY id ASC",
+		sessionEventFieldsSQL, rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL,
 	)
 	return streamSQLiteRows(agentDir, sql, 3, func(cols []string) error {
 		ts, _ := strconv.ParseFloat(cols[0], 64)

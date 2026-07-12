@@ -1149,14 +1149,42 @@ func formatToolResultEvent(entry map[string]interface{}) string {
 		return strings.Join(lines, "\n")
 	}
 	result = displayToolResultValue(result)
-	if result != nil {
-		if resultText := formatToolResultValue(result); resultText != "" {
-			// Keep the parsed session entry complete. Mail-view verbosity and the
-			// user's tool_truncate preference apply render-time truncation.
-			lines = append(lines, "result: "+resultText)
+	if result == nil {
+		return strings.Join(lines, "\n")
+	}
+
+	// Build the result body once. The former format-to-string, prefix, and final
+	// strings.Join sequence copied large tool results several times during every
+	// full history rebuild. Keep the exact MarshalIndent output while writing its
+	// bytes directly into the final builder.
+	var resultText string
+	var resultJSON []byte
+	switch v := result.(type) {
+	case string:
+		resultText = v
+	default:
+		data, err := json.MarshalIndent(v, "", "  ")
+		if err == nil {
+			resultJSON = data
+		} else {
+			resultText = fmt.Sprint(v)
 		}
 	}
-	return strings.Join(lines, "\n")
+	if resultText == "" && len(resultJSON) == 0 {
+		return strings.Join(lines, "\n")
+	}
+
+	prefix := strings.Join(lines, "\n")
+	var body strings.Builder
+	body.Grow(len(prefix) + len(resultText) + len(resultJSON) + len("\nresult: "))
+	body.WriteString(prefix)
+	body.WriteString("\nresult: ")
+	if len(resultJSON) > 0 {
+		body.Write(resultJSON)
+	} else {
+		body.WriteString(resultText)
+	}
+	return body.String()
 }
 
 // appendToolResultMetaBlocks decides whether a tool_result carries any of the
@@ -1300,21 +1328,6 @@ func stringifyToolResultList(value interface{}) []string {
 		}
 	}
 	return out
-}
-
-func formatToolResultValue(value interface{}) string {
-	switch v := value.(type) {
-	case nil:
-		return "null"
-	case string:
-		return v
-	default:
-		data, err := json.MarshalIndent(v, "", "  ")
-		if err == nil {
-			return string(data)
-		}
-		return fmt.Sprint(v)
-	}
 }
 
 // ---------------------------------------------------------------------------
