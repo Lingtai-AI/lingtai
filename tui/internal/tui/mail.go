@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -584,21 +585,15 @@ func (m MailModel) orchDisplayName() string {
 
 // buildMessages refreshes the session cache from all sources, then builds
 // the display message list filtered by verbose level and insights settings.
-// Delivered flags are overlaid from the live MailCache so outbox→sent
-// transitions update the render without requiring session.jsonl rewrites.
+// Mail is projected exactly once from the live MailCache instead of from the
+// derived session entries, so real mailbox messages cannot disappear behind a
+// partial event window or be rendered twice.
 func (m *MailModel) buildMessages() {
 	// Ingest new entries from all sources into session.jsonl.
 	m.sessionCache.Refresh(m.cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
 	if m.historyCountLoaded {
 		// Refresh incrementally advances the accepted exact metadata at EOF.
 		m.historyStats = m.sessionCache.HistoryStats()
-	}
-
-	// Build a timestamp → Delivered overlay from the live cache. Mail entries
-	// use ReceivedAt as their session Ts, so this matching is stable.
-	deliveredByTs := make(map[string]bool, len(m.cache.Messages))
-	for _, mm := range m.cache.Messages {
-		deliveredByTs[mm.ReceivedAt] = mm.Delivered
 	}
 
 	// Build filtered view from the session cache.
@@ -633,6 +628,12 @@ func (m *MailModel) buildMessages() {
 				e.ApiCallID = currentApiCallID
 			}
 		}
+		// Session mail is a derived copy of MailCache. The live mailbox below is
+		// the sole display source for mail; skipping this copy prevents duplicate
+		// rendering while leaving every non-mail event path unchanged.
+		if e.Type == "mail" {
+			continue
+		}
 		if !m.shouldShow(e) {
 			continue
 		}
@@ -649,16 +650,15 @@ func (m *MailModel) buildMessages() {
 			}
 		}
 		cm := sessionEntryToChatMessage(e, m.humanAddr)
-		// Overlay fresh Delivered from the live cache (only for mail entries).
-		if e.Type == "mail" {
-			if d, ok := deliveredByTs[e.Ts]; ok {
-				cm.Delivered = d
-			} else {
-				cm.Delivered = true
-			}
-		}
 		chatMsgs = append(chatMsgs, cm)
 	}
+	for _, msg := range m.cache.Messages {
+		chatMsgs = append(chatMsgs, mailMessageToChatMessage(msg, m.humanAddr, m.orchDisplayName()))
+		m.auxiliaryMessages++
+	}
+	sort.SliceStable(chatMsgs, func(i, j int) bool {
+		return chatMsgs[i].Timestamp < chatMsgs[j].Timestamp
+	})
 
 	// Restore dismissed state for insights.
 	for i := range chatMsgs {
@@ -773,6 +773,40 @@ func sessionEntryToChatMessage(e fs.SessionEntry, humanAddr string) ChatMessage 
 		cm.IsFromOrch = !cm.IsFromMe
 	}
 	return cm
+}
+
+// mailMessageToChatMessage preserves the existing Mail presentation while
+// changing only its source from the derived SessionCache entry to MailCache.
+func mailMessageToChatMessage(msg fs.MailMessage, humanAddr, orchName string) ChatMessage {
+	from := msg.From
+	if i := strings.LastIndex(from, "/"); i >= 0 {
+		from = from[i+1:]
+	}
+	if msg.From == humanAddr || from == "human" {
+		from = "human"
+	} else if nick, ok := msg.Identity["nickname"].(string); ok && nick != "" {
+		from = nick
+	} else if name, ok := msg.Identity["agent_name"].(string); ok && name != "" {
+		from = name
+	}
+
+	to := orchName
+	if fmt.Sprintf("%v", msg.To) == humanAddr {
+		to = "human"
+	}
+	isFromMe := from == "human"
+	return ChatMessage{
+		From:        from,
+		To:          to,
+		Subject:     msg.Subject,
+		Body:        msg.Message,
+		Timestamp:   msg.ReceivedAt,
+		IsFromMe:    isFromMe,
+		IsFromOrch:  !isFromMe,
+		Type:        "mail",
+		Attachments: msg.Attachments,
+		Delivered:   msg.Delivered,
+	}
 }
 
 func (m MailModel) Init() tea.Cmd {
