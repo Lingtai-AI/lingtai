@@ -76,7 +76,9 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | **jsonl.go** | | |
 | `forEachJSONLLine(path, fn)` | `tui/internal/fs/jsonl.go:16` | streams JSONL files one line at a time without `ReadFile`/`strings.Split`, avoiding duplicate buffers and Scanner token limits for ledger/history hot paths |
 | **daemon_ledger.go** | | |
-| `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:40` | aggregates recent per-call token ledgers from `daemons/<run_id>/logs/token_ledger.jsonl`, newest first, tagged with daemon run id/handle/state for kanban Ctrl+D split lanes |
+| `DaemonLedgerSummary(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:69` | single traversal returning both provider/backend totals (`map[string]TokenTotals`) and most-recent tagged per-call rows (`[]DaemonLedgerEntry`); one daemon.json read per run (typed `daemonCard` includes `cli_tokens`/`tokens` sub-structs), per-run ledgers authoritative, CLI/legacy snapshots filled from the same parsed `daemonCard` with `daemonFallbackProvider` attribution |
+| `DaemonRecentLedger(agentDir, recentN)` | `tui/internal/fs/daemon_ledger.go:160` | convenience wrapper — returns only the recent-rows half of `DaemonLedgerSummary` |
+| `daemonFallbackProvider` | `tui/internal/fs/daemon_ledger.go:202` | derives a provider/backend label for runs with no per-call ledger: preset_provider → non-lingtai backend → model derivation → raw backend/model → "daemon" |
 | `DeriveLedgerProvider` | `tui/internal/fs/agent.go:992` | maps endpoint host / model prefix → canonical provider name |
 | **heartbeat.go** | | |
 | `IsAlive(dir, thresholdSec)` | `tui/internal/fs/heartbeat.go:11` | reads `.agent.heartbeat` unix timestamp, returns `age < threshold` |

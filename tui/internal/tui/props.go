@@ -59,8 +59,9 @@ type PropsModel struct {
 	// with Ctrl+D. Esc closes detail and returns to the summary.
 	detailOpen                bool
 	detailByProvider          map[string]fs.TokenTotals
-	detailRecent              []fs.LedgerEntry       // selected main agent recent calls (newest first)
-	detailDaemonRecent        []fs.DaemonLedgerEntry // all daemon calls, newest first, tagged by run
+	detailDaemonByProvider    map[string]fs.TokenTotals // daemon token usage by provider/backend
+	detailRecent              []fs.LedgerEntry          // selected main agent recent calls (newest first)
+	detailDaemonRecent        []fs.DaemonLedgerEntry    // all daemon calls, newest first, tagged by run
 	detailCurrentSessionStats fs.SessionTokenStats
 	detailLastSessionStats    fs.SessionTokenStats
 	// detailCurrentSessionToolCalls / detailLastSessionToolCalls hold lifecycle
@@ -263,10 +264,12 @@ func (m *PropsModel) loadDetail() {
 	toolCounts := fs.SumMoltSessionToolCalls(m.selectedDir)
 	m.detailCurrentSessionToolCalls = toolCounts.Current
 	m.detailLastSessionToolCalls = toolCounts.Last
-	// Daemon calls are scoped to the selected agent's own daemon run dirs
-	// (agentDir/daemons/<run_id>/logs/token_ledger.jsonl), not the whole
-	// network. Missing ledgers render an empty lane.
-	m.detailDaemonRecent = fs.DaemonRecentLedger(m.selectedDir, detailRecentCalls)
+	// Single daemon traversal returns both provider/backend totals and
+	// recent tagged rows from daemons/<run_id>/logs/token_ledger.jsonl.
+	// Per-run ledgers are authoritative; CLI/legacy snapshots from
+	// daemon.json fill in when a run has no per-call ledger and are
+	// attributed by preset_provider → backend → model derivation.
+	m.detailDaemonByProvider, m.detailDaemonRecent = fs.DaemonLedgerSummary(m.selectedDir, detailRecentCalls)
 	m.detailContextStats = fs.ReadContextStats(m.selectedDir)
 	// Boundary timestamps to mark in the main-agent ledger lane. Best-effort:
 	// empty when no markers are available. Molt and /refresh reconstructions
@@ -890,72 +893,40 @@ func (m PropsModel) renderDetail() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_tokens_by_provider")))
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_main_tokens_by_provider")))
 	lines = append(lines, "")
+	lines = appendProviderRows(lines, m.detailByProvider, labelStyle, valueStyle, subtleStyle)
 
-	// Compute total tokens (input+output+thinking) across providers so
-	// each provider's bar shows its share. Cached are excluded from the
-	// share denominator — they're a discount, not consumption.
-	var grandSpend int64
-	for _, t := range m.detailByProvider {
-		grandSpend += t.Input + t.Output + t.Thinking
-	}
+	lines = append(lines, "")
+	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_daemon_tokens_by_provider")))
+	lines = append(lines, "")
+	lines = appendProviderRows(lines, m.detailDaemonByProvider, labelStyle, valueStyle, subtleStyle)
 
-	// Stable order: highest spend first.
-	type provLine struct {
-		name  string
-		t     fs.TokenTotals
-		spend int64
-	}
-	var rows []provLine
+	// Combined totals: arithmetic sum of main-provider and daemon provider/backend rows.
+	combined := make(map[string]fs.TokenTotals)
 	for name, t := range m.detailByProvider {
-		rows = append(rows, provLine{name, t, t.Input + t.Output + t.Thinking})
+		combined[name] = t
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].spend != rows[j].spend {
-			return rows[i].spend > rows[j].spend
-		}
-		return rows[i].name < rows[j].name
-	})
-
-	if len(rows) == 0 {
-		lines = append(lines, "  "+subtleStyle.Render(i18n.T("props.detail_no_tokens")))
+	for name, t := range m.detailDaemonByProvider {
+		c := combined[name]
+		c.Input += t.Input
+		c.Output += t.Output
+		c.Thinking += t.Thinking
+		c.Cached += t.Cached
+		c.APICalls += t.APICalls
+		combined[name] = c
 	}
-	for _, r := range rows {
-		pct := 0.0
-		if grandSpend > 0 {
-			pct = 100.0 * float64(r.spend) / float64(grandSpend)
-		}
-		bar := renderShareBar(pct, 20)
-		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-		header := fmt.Sprintf("  %-14s %s %5.1f%%",
-			nameStyle.Render(r.name), bar, pct)
-		lines = append(lines, header)
-		lines = append(lines, "    "+labelStyle.Render("input:    ")+valueStyle.Render(formatComma(r.t.Input))+
-			labelStyle.Render("    output:    ")+valueStyle.Render(formatComma(r.t.Output)))
-		lines = append(lines, "    "+labelStyle.Render("thinking: ")+valueStyle.Render(formatComma(r.t.Thinking))+
-			labelStyle.Render("    cached:    ")+valueStyle.Render(formatComma(r.t.Cached)))
-		hitStr := ""
-		if r.t.Input > 0 {
-			hitStr = fmt.Sprintf("    cache hit: %.1f%%", 100.0*float64(r.t.Cached)/float64(r.t.Input))
-		}
-		lines = append(lines, "    "+labelStyle.Render("api_calls: ")+valueStyle.Render(fmt.Sprintf("%d", r.t.APICalls))+
-			labelStyle.Render("    miss:      ")+valueStyle.Render(formatComma(cacheMiss(r.t.Cached, r.t.Input)))+
-			labelStyle.Render(hitStr))
+	if len(combined) > 0 {
 		lines = append(lines, "")
-	}
-
-	// Totals.
-	if len(rows) > 0 {
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_totals")))
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.detail_combined_totals")))
 		lines = append(lines, "")
 		var tot fs.TokenTotals
-		for _, r := range rows {
-			tot.Input += r.t.Input
-			tot.Output += r.t.Output
-			tot.Thinking += r.t.Thinking
-			tot.Cached += r.t.Cached
-			tot.APICalls += r.t.APICalls
+		for _, t := range combined {
+			tot.Input += t.Input
+			tot.Output += t.Output
+			tot.Thinking += t.Thinking
+			tot.Cached += t.Cached
+			tot.APICalls += t.APICalls
 		}
 		lines = append(lines, "    "+labelStyle.Render("input + output + thinking: ")+
 			valueStyle.Render(formatComma(tot.Input+tot.Output+tot.Thinking)))
@@ -1541,6 +1512,62 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+// appendProviderRows renders a per-provider/backend token usage table for the
+// given byProvider map. Returns the lines slice with rows appended. Used for
+// both main-agent and daemon provider/backend breakdowns.
+func appendProviderRows(lines []string, byProvider map[string]fs.TokenTotals, labelStyle, valueStyle, subtleStyle lipgloss.Style) []string {
+	// Compute total spend across providers for the share bar.
+	var grandSpend int64
+	for _, t := range byProvider {
+		grandSpend += t.Input + t.Output + t.Thinking
+	}
+
+	// Stable order: highest spend first.
+	type provLine struct {
+		name  string
+		t     fs.TokenTotals
+		spend int64
+	}
+	var rows []provLine
+	for name, t := range byProvider {
+		rows = append(rows, provLine{name, t, t.Input + t.Output + t.Thinking})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].spend != rows[j].spend {
+			return rows[i].spend > rows[j].spend
+		}
+		return rows[i].name < rows[j].name
+	})
+
+	if len(rows) == 0 {
+		return append(lines, "  "+subtleStyle.Render(i18n.T("props.detail_no_tokens")))
+	}
+	for _, r := range rows {
+		pct := 0.0
+		if grandSpend > 0 {
+			pct = 100.0 * float64(r.spend) / float64(grandSpend)
+		}
+		bar := renderShareBar(pct, 20)
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+		header := fmt.Sprintf("  %-14s %s %5.1f%%",
+			nameStyle.Render(r.name), bar, pct)
+		lines = append(lines, header)
+		lines = append(lines, "    "+labelStyle.Render("input:    ")+valueStyle.Render(formatComma(r.t.Input))+
+			labelStyle.Render("    output:    ")+valueStyle.Render(formatComma(r.t.Output)))
+		lines = append(lines, "    "+labelStyle.Render("thinking: ")+valueStyle.Render(formatComma(r.t.Thinking))+
+			labelStyle.Render("    cached:    ")+valueStyle.Render(formatComma(r.t.Cached)))
+		hitStr := ""
+		if r.t.Input > 0 {
+			hitStr = fmt.Sprintf("    cache hit: %.1f%%", 100.0*float64(r.t.Cached)/float64(r.t.Input))
+		}
+		lines = append(lines, "    "+labelStyle.Render("api_calls: ")+valueStyle.Render(fmt.Sprintf("%d", r.t.APICalls))+
+			labelStyle.Render("    miss:      ")+valueStyle.Render(formatComma(cacheMiss(r.t.Cached, r.t.Input)))+
+			labelStyle.Render(hitStr))
+		lines = append(lines, "")
+	}
+	return lines
 }
 
 func appendSessionAPIStats(lines []string, title string, stats fs.SessionTokenStats, toolCalls int64, sectionStyle, labelStyle, valueStyle lipgloss.Style) []string {

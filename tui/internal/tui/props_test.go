@@ -493,3 +493,105 @@ func TestPropsDetailShowsCurrentAndLastSessionAPIStats(t *testing.T) {
 		}
 	}
 }
+
+func TestPropsRenderDetailShowsMainAndDaemonProviderSections(t *testing.T) {
+	m := PropsModel{
+		detailByProvider: map[string]fs.TokenTotals{
+			"zhipu":    {Input: 100, Output: 20, Thinking: 10, Cached: 40, APICalls: 3},
+			"deepseek": {Input: 50, Output: 10, Cached: 5, APICalls: 2},
+		},
+		detailDaemonByProvider: map[string]fs.TokenTotals{
+			"claude-p": {Input: 30, Output: 5, Cached: 10, APICalls: 1},
+			"deepseek": {Input: 20, Output: 4, Cached: 3, APICalls: 1},
+		},
+	}
+	out := ansi.Strip(m.renderDetail())
+	// Main section.
+	if !strings.Contains(out, i18n.T("props.detail_main_tokens_by_provider")) {
+		t.Fatalf("missing main-agent provider section:\n%s", out)
+	}
+	// Daemon section.
+	if !strings.Contains(out, i18n.T("props.detail_daemon_tokens_by_provider")) {
+		t.Fatalf("missing daemon provider section:\n%s", out)
+	}
+	// Combined totals section.
+	if !strings.Contains(out, i18n.T("props.detail_combined_totals")) {
+		t.Fatalf("missing combined totals section:\n%s", out)
+	}
+	// Main section shows zhipu and deepseek.
+	for _, w := range []string{"zhipu", "deepseek"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("main section missing provider %q", w)
+		}
+	}
+	// Combined totals arithmetic: main zhipu+deepseek + daemon claude-p+deepseek.
+	// Total input+output+thinking: (100+20+10)+(50+10+0)+(30+5+0)+(20+4+0) = 249.
+	if !strings.Contains(out, "input + output + thinking: 249") {
+		t.Errorf("combined totals missing combined spend 249:\n%s", out)
+	}
+	if !strings.Contains(out, "api_calls:                 7") {
+		t.Errorf("combined totals missing api_calls 7:\n%s", out)
+	}
+}
+
+func TestPropsRenderDetailEmptyDaemonProviderSection(t *testing.T) {
+	m := PropsModel{
+		detailByProvider: map[string]fs.TokenTotals{
+			"zhipu": {Input: 100, Output: 20, APICalls: 3},
+		},
+		detailDaemonByProvider: map[string]fs.TokenTotals{},
+	}
+	out := ansi.Strip(m.renderDetail())
+	// Daemon section header must appear, with empty state beneath.
+	if !strings.Contains(out, i18n.T("props.detail_daemon_tokens_by_provider")) {
+		t.Fatalf("missing daemon provider section header:\n%s", out)
+	}
+	if !strings.Contains(out, i18n.T("props.detail_no_tokens")) {
+		t.Fatalf("missing empty daemon provider state:\n%s", out)
+	}
+	// Combined totals should still appear (only main agent data).
+	if !strings.Contains(out, i18n.T("props.detail_combined_totals")) {
+		t.Fatalf("missing combined totals when daemon section is empty:\n%s", out)
+	}
+	// Combined = main only: input+output+thinking = 100+20+0 = 120.
+	if !strings.Contains(out, "input + output + thinking: 120") {
+		t.Errorf("combined totals missing combined spend 120:\n%s", out)
+	}
+}
+
+func TestPropsRenderDetailCombinedMath(t *testing.T) {
+	// Same provider in both main and daemon must be summed correctly.
+	m := PropsModel{
+		detailByProvider: map[string]fs.TokenTotals{
+			"deepseek": {Input: 50, Output: 10, Thinking: 3, Cached: 20, APICalls: 2},
+		},
+		detailDaemonByProvider: map[string]fs.TokenTotals{
+			"deepseek": {Input: 30, Output: 5, Thinking: 1, Cached: 10, APICalls: 1},
+		},
+	}
+	out := ansi.Strip(m.renderDetail())
+	// Both sections show deepseek.
+	if strings.Count(out, "deepseek") < 2 {
+		t.Errorf("expected deepseek in both main and daemon sections:\n%s", out)
+	}
+	// Combined: input 50+30=80; output 10+5=15; cached 20+10=30; calls 2+1=3.
+	if !strings.Contains(out, "api_calls:                 3") {
+		t.Errorf("combined api_calls should be 3:\n%s", out)
+	}
+}
+
+func TestPropsRenderDetailNoProviderData(t *testing.T) {
+	m := PropsModel{
+		detailByProvider:       map[string]fs.TokenTotals{},
+		detailDaemonByProvider: map[string]fs.TokenTotals{},
+	}
+	out := ansi.Strip(m.renderDetail())
+	// Both sections should say "no tokens".
+	if strings.Count(out, i18n.T("props.detail_no_tokens")) < 2 {
+		t.Errorf("expected two empty states, got:\n%s", out)
+	}
+	// No combined totals when nothing was recorded.
+	if strings.Contains(out, i18n.T("props.detail_combined_totals")) {
+		t.Errorf("should not show combined totals when no data:\n%s", out)
+	}
+}
