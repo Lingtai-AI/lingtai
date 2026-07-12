@@ -88,10 +88,10 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	pageSizeOptions := []string{"100", "200", "500", "1000", "infinite"}
-	pageSizeCurrent := 1 // default to 200
+	pageSizeOptions := []string{"100", "200", "500", "1000", "2000", "infinite"}
+	pageSizeCurrent := 4 // default to 2000 (the newest-window default)
 	if tuiCfg.MailPageSize <= 0 {
-		pageSizeCurrent = 4 // infinite
+		pageSizeCurrent = len(pageSizeOptions) - 1 // infinite
 	} else {
 		pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
 		for i, p := range pageSizeOptions {
@@ -309,7 +309,7 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		if val == "infinite" {
 			m.tuiConfig.MailPageSize = 0
 		} else {
-			size := 200
+			size := config.DefaultTUIConfig().MailPageSize
 			fmt.Sscanf(val, "%d", &size)
 			m.tuiConfig.MailPageSize = size
 		}

@@ -125,7 +125,12 @@ type EventsIndexCoverage struct {
 	FileSize   int64
 	MinOffset  int64
 	MaxOffset  int64
-	Count      int64
+	// Count is a row-presence sentinel: 1 means at least one canonical
+	// indexed row exists (HasRows()==true); 0 means none exist. It is NOT
+	// an exact row count — the endpoint-lookup query avoids a full-table
+	// COUNT(*) aggregate that would scan all rows. Callers that need an
+	// exact count must issue their own query.
+	Count int64
 }
 
 func (c EventsIndexCoverage) HasRows() bool {
@@ -177,6 +182,14 @@ func rootEventsPredicate(sourceFile string) string {
 // for the canonical root logs/events.jsonl coordinate. Missing identity columns,
 // unclassified rows, and path mismatches return no usable coverage so callers can
 // fall back to authoritative JSONL.
+//
+// The query uses indexed endpoint lookups (ORDER BY source_offset ASC/DESC
+// LIMIT 1) instead of a full-table MIN/MAX/COUNT aggregate. The extra
+// `source_offset IS NOT NULL` predicate allows SQLite to use the partial unique
+// index idx_events_source_offset (source_file, source_offset), turning each
+// endpoint into an O(1) index seek rather than a full scan of all canonical
+// rows. Count is a row-presence sentinel (1 or 0), not an exact row count —
+// see the EventsIndexCoverage.Count doc comment.
 func QueryEventsIndexCoverage(agentDir string) (EventsIndexCoverage, error) {
 	coverage := EventsIndexCoverage{MinOffset: -1, MaxOffset: -1}
 	sourceFile, err := canonicalEventsSource(agentDir)
@@ -192,7 +205,11 @@ func QueryEventsIndexCoverage(agentDir string) (EventsIndexCoverage, error) {
 	if info.Size() == 0 {
 		return coverage, nil
 	}
-	sql := "SELECT COALESCE(MIN(source_offset), -1), COALESCE(MAX(source_offset), -1), COUNT(source_offset) FROM events WHERE " + rootEventsPredicate(sourceFile)
+	pred := rootEventsPredicate(sourceFile) + " AND source_offset IS NOT NULL"
+	sql := "SELECT " +
+		"COALESCE((SELECT source_offset FROM events WHERE " + pred + " ORDER BY source_offset ASC LIMIT 1), -1), " +
+		"COALESCE((SELECT source_offset FROM events WHERE " + pred + " ORDER BY source_offset DESC LIMIT 1), -1), " +
+		"CASE WHEN EXISTS(SELECT 1 FROM events WHERE " + pred + " LIMIT 1) THEN 1 ELSE 0 END"
 	rows, err := querySQLiteRows(agentDir, sql, 3)
 	if err != nil {
 		return coverage, err
@@ -221,6 +238,143 @@ func StreamSessionEvents(agentDir string, coverage EventsIndexCoverage, handle f
 	sql := fmt.Sprintf(
 		"SELECT ts, type, %s FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY id ASC",
 		sessionEventFieldsSQL, rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL,
+	)
+	return streamSQLiteRows(agentDir, sql, 3, func(cols []string) error {
+		ts, _ := strconv.ParseFloat(cols[0], 64)
+		return handle(SessionEventRow{TS: ts, Type: cols[1], FieldsJSON: cols[2]})
+	})
+}
+
+// StreamSessionEventsWindow streams only the newest `limit` session-relevant
+// root events (by id) in ASCENDING id order — the same order and projection as
+// StreamSessionEvents, but bounded to a window so the first Mail frame does not
+// scan the entire history. A non-positive limit means "no window" and behaves
+// exactly like StreamSessionEvents. Callers fall back to events.jsonl on error.
+//
+// The window is the newest rows. The inner subquery selects them with
+// `ORDER BY source_offset DESC LIMIT limit` and the outer query re-sorts them
+// ascending for stream-order ingestion. Ordering on source_offset (not id) is
+// what makes this O(limit): the unique index idx_events_source_offset
+// (source_file, source_offset) lets SQLite walk backward from the horizon and
+// stop after `limit` matching rows, instead of materializing and sorting every
+// row for this source into a temp b-tree (which an id-ordered window forces,
+// because row selection is already driven by the source_offset index). For a
+// single canonical source file source_offset is monotonic with append/id order,
+// so "newest by source_offset" equals "newest by id" and ascending source_offset
+// is the same chronological stream order StreamSessionEvents produces with id.
+// Every row is bounded by the captured MaxOffset horizon, so a window never
+// reaches past the coverage snapshot into rows the JSONL Refresh boundary owns.
+func StreamSessionEventsWindow(agentDir string, coverage EventsIndexCoverage, limit int, handle func(SessionEventRow) error) error {
+	if limit <= 0 {
+		return StreamSessionEvents(agentDir, coverage, handle)
+	}
+	sourceFile, err := canonicalEventsSource(agentDir)
+	if err != nil {
+		return err
+	}
+	if !coverage.HasRows() || sourceFile != coverage.SourceFile {
+		return fmt.Errorf("sqlite events coverage does not identify canonical root source")
+	}
+	sql := fmt.Sprintf(
+		"SELECT ts, type, %s FROM (SELECT * FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY source_offset DESC LIMIT %d) ORDER BY source_offset ASC",
+		sessionEventFieldsSQL, rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL, limit,
+	)
+	return streamSQLiteRows(agentDir, sql, 3, func(cols []string) error {
+		ts, _ := strconv.ParseFloat(cols[0], 64)
+		return handle(SessionEventRow{TS: ts, Type: cols[1], FieldsJSON: cols[2]})
+	})
+}
+
+// legacyGroupBoundaryTypes are the hidden markers buildMessages uses to derive
+// api-call grouping for legacy events that carry no explicit api_call_id: an
+// llm_response opens a group, an llm_call resets (no active group).
+const legacyGroupBoundaryTypes = "('llm_response','llm_call')"
+
+// WindowGroupBoundary describes what a newest-`limit` session window needs in
+// order to preserve legacy api-call grouping across its lower cut. WindowLower is
+// the smallest source_offset among the windowed rows. BoundaryOffset/BoundaryType
+// identify the nearest grouping marker strictly OLDER than the window; HasBoundary
+// is false when none precedes the window.
+type WindowGroupBoundary struct {
+	WindowLower    int64
+	HasBoundary    bool
+	BoundaryOffset int64
+	BoundaryType   string
+}
+
+// QueryWindowGroupBoundary reports the lower edge of the newest-`limit` session
+// window and the nearest legacy grouping marker (llm_response / llm_call) that
+// sits just below it. It is used to decide whether a windowed first frame must
+// reach back to an llm_response header so the window's leading legacy tool
+// entries derive the same group id the full-history render would give them (a
+// preceding llm_call means the group was reset, so no extension is warranted).
+// A non-positive limit has no lower cut, so it returns HasBoundary=false.
+func QueryWindowGroupBoundary(agentDir string, coverage EventsIndexCoverage, limit int) (WindowGroupBoundary, error) {
+	var out WindowGroupBoundary
+	if limit <= 0 {
+		return out, nil
+	}
+	sourceFile, err := canonicalEventsSource(agentDir)
+	if err != nil {
+		return out, err
+	}
+	if !coverage.HasRows() || sourceFile != coverage.SourceFile {
+		return out, fmt.Errorf("sqlite events coverage does not identify canonical root source")
+	}
+	// Lower edge of the newest-`limit` session window (same selection as
+	// StreamSessionEventsWindow, reduced to MIN(source_offset)).
+	lowerSQL := fmt.Sprintf(
+		"SELECT COALESCE(MIN(source_offset), -1) FROM (SELECT source_offset FROM events WHERE %s AND source_offset <= %d AND %s ORDER BY source_offset DESC LIMIT %d)",
+		rootEventsPredicate(sourceFile), coverage.MaxOffset, sessionEventFilterSQL, limit,
+	)
+	lowerRows, err := querySQLiteRows(agentDir, lowerSQL, 1)
+	if err != nil {
+		return out, err
+	}
+	if len(lowerRows) == 0 {
+		return out, nil
+	}
+	out.WindowLower, _ = strconv.ParseInt(lowerRows[0][0], 10, 64)
+	if out.WindowLower < 0 {
+		return out, nil // empty window
+	}
+	// Nearest grouping marker strictly below the window's lower edge.
+	boundarySQL := fmt.Sprintf(
+		"SELECT source_offset, type FROM events WHERE %s AND source_offset < %d AND type IN %s ORDER BY source_offset DESC LIMIT 1",
+		rootEventsPredicate(sourceFile), out.WindowLower, legacyGroupBoundaryTypes,
+	)
+	boundaryRows, err := querySQLiteRows(agentDir, boundarySQL, 2)
+	if err != nil {
+		return out, err
+	}
+	if len(boundaryRows) == 0 {
+		return out, nil
+	}
+	out.HasBoundary = true
+	out.BoundaryOffset, _ = strconv.ParseInt(boundaryRows[0][0], 10, 64)
+	out.BoundaryType = boundaryRows[0][1]
+	return out, nil
+}
+
+// StreamSessionEventsOffsetRange streams session-relevant root events whose
+// source_offset lies in [lower, upper) in ascending source_offset order, using
+// the same projection and predicates as StreamSessionEventsWindow. It is used to
+// prepend the small back-extension that carries a legacy group's llm_response
+// header into a windowed first frame.
+func StreamSessionEventsOffsetRange(agentDir string, coverage EventsIndexCoverage, lower, upper int64, handle func(SessionEventRow) error) error {
+	sourceFile, err := canonicalEventsSource(agentDir)
+	if err != nil {
+		return err
+	}
+	if !coverage.HasRows() || sourceFile != coverage.SourceFile {
+		return fmt.Errorf("sqlite events coverage does not identify canonical root source")
+	}
+	if lower >= upper {
+		return nil
+	}
+	sql := fmt.Sprintf(
+		"SELECT ts, type, %s FROM events WHERE %s AND source_offset >= %d AND source_offset < %d AND %s ORDER BY source_offset ASC",
+		sessionEventFieldsSQL, rootEventsPredicate(sourceFile), lower, upper, sessionEventFilterSQL,
 	)
 	return streamSQLiteRows(agentDir, sql, 3, func(cols []string) error {
 		ts, _ := strconv.ParseFloat(cols[0], 64)

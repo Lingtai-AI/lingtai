@@ -126,6 +126,7 @@ type SessionCache struct {
 	projectPath         string         // absolute path of the project directory (parent of .lingtai/)
 	lastHour            time.Time      // hour (truncated) of the most recent entry
 	rebuilding          bool           // true during RebuildFromSources — suppress file writes
+	complete            bool           // true when the cache holds the full history; false after a windowed rebuild truncated older events
 	afterRebuildIngest  func()         // optional deterministic test hook after authoritative reads
 	afterSQLiteCoverage func()         // optional deterministic test hook after SQLite coverage capture
 
@@ -151,6 +152,13 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 		path:        filepath.Join(humanDir, "logs", "session.jsonl"),
 		projectPath: projectPath,
 		soulVoices:  make(map[string][]soulVoiceRecord),
+		// Complete-from-zero: a fresh cache holds nothing, which trivially IS the
+		// full (empty) history. A plain NewSessionCache + full Refresh + Persist
+		// (no windowed rebuild) therefore still writes session.jsonl, matching the
+		// pre-windowing Persist contract. Only a windowed rebuild that PROVES it
+		// truncated older events flips this false; the JSONL fallback and every
+		// full rebuild keep it true.
+		complete: true,
 	}
 }
 
@@ -158,17 +166,42 @@ func NewSessionCache(humanDir string, projectPath string) *SessionCache {
 // chronologically, writes session.jsonl, and retains each source's last complete
 // consumed-record boundary for subsequent Refresh calls.
 func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string) {
-	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, true)
+	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, true, 0)
 }
 
 // RebuildFromSourcesInMemory performs the same authoritative rebuild without
 // writing session.jsonl. It is used for command-local work whose generation must
 // be accepted before it can affect the installed cache or its persisted mirror.
 func (sc *SessionCache) RebuildFromSourcesInMemory(cache MailCache, humanAddr, orchDir, orchName string) {
-	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false)
+	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false, 0)
 }
 
-func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string, persist bool) {
+// RebuildFromSourcesWindowedInMemory is the O(window) first-frame variant: it
+// ingests only the newest `window` session events from the indexed source while
+// still loading all mail and inquiries, then merges and sorts chronologically.
+// It never writes session.jsonl. When the window truncates older events the cache
+// is left partial (Complete() == false), so the caller must NOT persist it as if
+// complete. A window <= 0 is a full, complete rebuild.
+//
+// Correctness: even when the event stream is windowed, eventsOff is advanced to
+// the true EOF complete-record boundary, so a later Refresh resumes from EOF and
+// never re-ingests the excluded older window. The JSONL fallback cannot window by
+// count, so a huge history with no usable index rebuilds fully (slower) — that
+// slowness is confined to the non-indexed fallback, never the indexed first frame.
+func (sc *SessionCache) RebuildFromSourcesWindowedInMemory(cache MailCache, humanAddr, orchDir, orchName string, window int) {
+	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false, window)
+}
+
+// Complete reports whether the cache currently holds the full history. A windowed
+// rebuild that truncated older events leaves this false; a full rebuild, or a
+// windowed rebuild whose window covered the entire history, leaves it true.
+func (sc *SessionCache) Complete() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.complete
+}
+
+func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string, persist bool, window int) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -180,11 +213,15 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	sc.soulFlowOff = 0
 	sc.soulVoices = make(map[string][]soulVoiceRecord)
 	sc.rebuilding = true
+	// Assume complete until a windowed indexed ingest proves it truncated older
+	// events. The JSONL fallback always reads the full file, so it stays complete.
+	sc.complete = true
 
-	// Ingest everything from offset 0. Uses the unlocked helpers — we already
-	// hold sc.mu and the helpers must not re-lock (non-reentrant mutex).
+	// Ingest everything (or, for a windowed rebuild, the newest `window` events)
+	// from offset 0. Uses the unlocked helpers — we already hold sc.mu and the
+	// helpers must not re-lock (non-reentrant mutex).
 	sc.ingestMail(cache, humanAddr, orchDir, orchName)
-	if !sc.ingestEventsFromSQLite(orchDir) {
+	if !sc.ingestEventsFromSQLiteWindowed(orchDir, window) {
 		sc.IngestEvents(orchDir)
 	}
 	sc.IngestInquiries(orchDir)
@@ -227,10 +264,17 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	}
 }
 
-// Persist writes the accepted in-memory snapshot to session.jsonl.
+// Persist writes the accepted in-memory snapshot to session.jsonl — but ONLY
+// when the cache is proven complete. A partial (windowed) cache holds just the
+// newest slice of history; rewriting session.jsonl from it would truncate the
+// operator's complete derived replay file. In that case Persist is a no-op and
+// the existing complete session.jsonl (if any) is left untouched.
 func (sc *SessionCache) Persist() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	if !sc.complete {
+		return
+	}
 	sc.rewriteFile()
 }
 
@@ -418,7 +462,22 @@ func (sc *SessionCache) IngestEvents(orchDir string) {
 	sc.append(newEntries...)
 }
 
+// ingestEventsFromSQLite replays the whole covered history from the SQLite index
+// (window 0). It is the unbounded entry point retained for the real-history probe
+// and for full/complete rebuilds; windowed first frames call
+// ingestEventsFromSQLiteWindowed directly.
 func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
+	return sc.ingestEventsFromSQLiteWindowed(orchDir, 0)
+}
+
+// ingestEventsFromSQLiteWindowed replays session events from the additive SQLite
+// index. A positive window bounds the replay to the newest `window` session rows
+// for an O(window) first frame; window <= 0 replays the whole covered history.
+// Regardless of windowing, eventsOff is advanced to the full EOF complete-record
+// boundary so Refresh resumes from EOF and never re-ingests the excluded older
+// window. When a window truncates older events, sc.complete is set false so a
+// partial cache is never persisted as if complete.
+func (sc *SessionCache) ingestEventsFromSQLiteWindowed(orchDir string, window int) bool {
 	if orchDir == "" {
 		return false
 	}
@@ -439,12 +498,14 @@ func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
 	}
 	sc.ingestSoulFlowVoices(orchDir)
 	newEntries := make([]SessionEntry, 0)
-	if !coverage.StartsAtBeginning() {
-		prefixEntries, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
-		newEntries = append(newEntries, prefixEntries...)
-	}
+	// Stream the newest indexed rows first (up to `window` for a positive window;
+	// the whole covered history for window <= 0). The pre-index JSONL prefix is
+	// the OLDEST slice of history and is stitched only when needed (below), so the
+	// ordinary fully-indexed first frame never scans it. Final chronological order
+	// is established by the timestamp sort in rebuildFromSources, so appending the
+	// (older) prefix after the (newer) indexed rows is safe.
 	seenRows := 0
-	err = sqlitelog.StreamSessionEvents(orchDir, coverage, func(row sqlitelog.SessionEventRow) error {
+	err = sqlitelog.StreamSessionEventsWindow(orchDir, coverage, window, func(row sqlitelog.SessionEventRow) error {
 		seenRows++
 		if entry := parseSQLiteEvent(row); entry != nil {
 			newEntries = append(newEntries, *entry)
@@ -457,6 +518,78 @@ func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
 	if seenRows == 0 && fileSize(filepath.Join(orchDir, "logs", "events.jsonl")) > 0 {
 		return false
 	}
+
+	// Legacy api-call-group boundary: a positive window can cut INTO a legacy
+	// group whose only grouping signal is a hidden llm_response header. If the
+	// oldest loaded entry is a legacy grouped entry with no explicit api_call_id,
+	// its header was excluded, and buildMessages would fall back to the
+	// tool_result→tool_call heuristic and render a spurious separator the
+	// full-history view never shows. Reach back JUST to the nearest llm_response
+	// header (an llm_call means the group was reset — leave it), pulling only the
+	// small [boundaryOffset, windowLower) extension so the leading entries derive
+	// the same group id. Never runs when the window starts at a header, when the
+	// oldest entry already carries an explicit api_call_id, or when the window did
+	// not fill (seenRows < window ⇒ we already loaded from the first indexed row).
+	if window > 0 && seenRows == window && len(newEntries) > 0 && needsGroupBackExtension(newEntries[0]) {
+		if boundary, bErr := sqlitelog.QueryWindowGroupBoundary(orchDir, coverage, window); bErr == nil &&
+			boundary.HasBoundary && boundary.BoundaryType == "llm_response" && boundary.BoundaryOffset < boundary.WindowLower {
+			extension := make([]SessionEntry, 0)
+			_ = sqlitelog.StreamSessionEventsOffsetRange(orchDir, coverage, boundary.BoundaryOffset, boundary.WindowLower, func(row sqlitelog.SessionEventRow) error {
+				if entry := parseSQLiteEvent(row); entry != nil {
+					extension = append(extension, *entry)
+				}
+				return nil
+			})
+			// Prepend the extension; the timestamp sort in rebuildFromSources
+			// re-establishes final chronological order regardless of append order.
+			newEntries = append(extension, newEntries...)
+		}
+	}
+
+	// Pre-index JSONL prefix [0, MinOffset): rows on disk that the additive index
+	// does not represent (a tail-only index, or an index that starts a few rows
+	// in). It is scanned ONLY when the indexed rows do not already satisfy the
+	// request — never on the ordinary fully-indexed first-frame path:
+	//   - window <= 0 (full/complete rebuild): stitch the ENTIRE prefix so the
+	//     cache stays byte-complete, exactly as before.
+	//   - window > 0 but the index held fewer than `window` session rows
+	//     (seenRows < window): the indexed window is exhausted and the caller is
+	//     reaching for older history (an explicit larger older-page request, or a
+	//     history smaller than the window). Stitch the NEWEST (window-seenRows)
+	//     prefix events so older history becomes reachable instead of being
+	//     permanently stranded below the index.
+	// A positive window that filled to capacity (seenRows == window) leaves the
+	// prefix untouched — older events remain, so the cache is partial and the next
+	// larger request resolves it.
+	stitchedWholePrefix := true // true when no older-than-loaded events remain
+	if window <= 0 {
+		if !coverage.StartsAtBeginning() {
+			prefixEntries, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
+			newEntries = append(newEntries, prefixEntries...)
+		}
+	} else if seenRows < window {
+		prefixAll, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
+		take := window - seenRows
+		if take >= len(prefixAll) {
+			take = len(prefixAll)
+		} else {
+			// Only the newest `take` prefix events fit the window; older prefix
+			// events remain on disk, so the cache is still partial.
+			stitchedWholePrefix = false
+		}
+		newEntries = append(newEntries, prefixAll[len(prefixAll)-take:]...)
+	} else {
+		// Window filled by indexed rows alone; older events (indexed and/or in the
+		// prefix) remain unloaded.
+		stitchedWholePrefix = false
+	}
+
+	// Completeness for a positive window: partial unless we have reached the very
+	// beginning of history — i.e., the window did not fill with indexed rows AND
+	// the entire pre-index prefix was stitched. window <= 0 stays complete.
+	if window > 0 && !stitchedWholePrefix {
+		sc.complete = false
+	}
 	for i := range newEntries {
 		sc.maybeInflateSoulFlow(&newEntries[i])
 	}
@@ -466,6 +599,23 @@ func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
 	sc.append(newEntries...)
 	sc.eventsOff = eventsBoundary
 	return true
+}
+
+// needsGroupBackExtension reports whether the oldest loaded windowed entry is a
+// legacy api-grouped entry with no explicit api_call_id — the case where a
+// window that cut off the group's hidden llm_response header must reach back to
+// that header so grouping (and the separator suppression it drives) survives.
+// Entries that already carry an explicit api_call_id, and non-grouped types,
+// need no back-extension.
+func needsGroupBackExtension(e SessionEntry) bool {
+	if e.ApiCallID != "" {
+		return false
+	}
+	switch e.Type {
+	case "thinking", "diary", "text_input", "text_output", "tool_call", "tool_result":
+		return true
+	}
+	return false
 }
 
 // ingestSoulFlowVoices tails soul_flow.jsonl from the last-read offset

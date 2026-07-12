@@ -21,12 +21,13 @@ func pageSizeField(t *testing.T, m SettingsModel) SettingField {
 func TestSettingsMailPageSizeOptionsAndDefault(t *testing.T) {
 	m := NewSettingsModel(t.TempDir(), t.TempDir(), t.TempDir(), config.DefaultTUIConfig())
 	f := pageSizeField(t, m)
-	wantOptions := []string{"100", "200", "500", "1000", "infinite"}
+	wantOptions := []string{"100", "200", "500", "1000", "2000", "infinite"}
 	if !reflect.DeepEqual(f.Options, wantOptions) {
 		t.Fatalf("mail_page_size options = %#v, want %#v", f.Options, wantOptions)
 	}
-	if f.Current != 1 {
-		t.Fatalf("mail_page_size default current = %d (%q), want 1 (%q)", f.Current, f.Options[f.Current], wantOptions[1])
+	// The newest-window default (2000) must be pre-selected.
+	if got := f.Options[f.Current]; got != "2000" {
+		t.Fatalf("mail_page_size default current = %d (%q), want the 2000 option", f.Current, got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package sqlitelog
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -702,6 +703,154 @@ func TestStreamSessionEventsFiltersRelevantRootRowsWithinCoverage(t *testing.T) 
 	}
 }
 
+func TestStreamSessionEventsWindowReturnsNewestLimitInAscendingOrder(t *testing.T) {
+	// Six session-relevant rows plus a non-session heartbeat. A window of 3 must
+	// return the newest three session rows (ids 5,6,7 → text 4,5,6) in ASCENDING
+	// id order, never the oldest three, and never scan the heartbeat.
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_output', '{"text":"1"}', '{{ROOT_EVENTS}}', 0,  'agent_events', 'agent'),
+			(2.0, 'text_output', '{"text":"2"}', '{{ROOT_EVENTS}}', 10, 'agent_events', 'agent'),
+			(3.0, 'heartbeat',   '{}',           '{{ROOT_EVENTS}}', 20, 'agent_events', 'agent'),
+			(4.0, 'text_output', '{"text":"3"}', '{{ROOT_EVENTS}}', 30, 'agent_events', 'agent'),
+			(5.0, 'text_output', '{"text":"4"}', '{{ROOT_EVENTS}}', 40, 'agent_events', 'agent'),
+			(6.0, 'text_output', '{"text":"5"}', '{{ROOT_EVENTS}}', 50, 'agent_events', 'agent'),
+			(7.0, 'text_output', '{"text":"6"}', '{{ROOT_EVENTS}}', 60, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 128)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	var texts []string
+	err = StreamSessionEventsWindow(agentDir, coverage, 3, func(row SessionEventRow) error {
+		var f map[string]interface{}
+		_ = json.Unmarshal([]byte(row.FieldsJSON), &f)
+		txt, _ := f["text"].(string)
+		texts = append(texts, txt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamSessionEventsWindow error: %v", err)
+	}
+	want := []string{"4", "5", "6"}
+	if len(texts) != len(want) {
+		t.Fatalf("window=3 returned %d rows %#v, want %#v", len(texts), texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Fatalf("window rows = %#v, want %#v (must be newest-N in ascending id order)", texts, want)
+		}
+	}
+}
+
+func TestStreamSessionEventsWindowNonPositiveLimitReturnsAll(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_output', '{"text":"a"}', '{{ROOT_EVENTS}}', 0,  'agent_events', 'agent'),
+			(2.0, 'text_output', '{"text":"b"}', '{{ROOT_EVENTS}}', 10, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	count := 0
+	if err := StreamSessionEventsWindow(agentDir, coverage, 0, func(row SessionEventRow) error {
+		count++
+		return nil
+	}); err != nil {
+		t.Fatalf("StreamSessionEventsWindow error: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("limit<=0 returned %d rows, want all 2 (parity with StreamSessionEvents)", count)
+	}
+}
+
+func TestQueryWindowGroupBoundaryFindsNearestLlmResponse(t *testing.T) {
+	// Legacy stream: llm_response header (offset 0) opens a group of tool rows.
+	// A window of 2 selects the newest two (offsets 30,40); the nearest grouping
+	// marker below offset 30 is the llm_response at offset 0.
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'llm_response', '{}',              '{{ROOT_EVENTS}}', 0,  'agent_events', 'agent'),
+			(2.0, 'tool_call',    '{"tool_name":"a"}','{{ROOT_EVENTS}}', 10, 'agent_events', 'agent'),
+			(3.0, 'tool_result',  '{"tool_name":"a"}','{{ROOT_EVENTS}}', 20, 'agent_events', 'agent'),
+			(4.0, 'tool_call',    '{"tool_name":"b"}','{{ROOT_EVENTS}}', 30, 'agent_events', 'agent'),
+			(5.0, 'tool_result',  '{"tool_name":"b"}','{{ROOT_EVENTS}}', 40, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 128)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	boundary, err := QueryWindowGroupBoundary(agentDir, coverage, 2)
+	if err != nil {
+		t.Fatalf("QueryWindowGroupBoundary error: %v", err)
+	}
+	if boundary.WindowLower != 30 {
+		t.Fatalf("window lower = %d, want 30", boundary.WindowLower)
+	}
+	if !boundary.HasBoundary || boundary.BoundaryType != "llm_response" || boundary.BoundaryOffset != 0 {
+		t.Fatalf("boundary = %+v, want llm_response at offset 0", boundary)
+	}
+
+	// The back-extension [0,30) must carry the header plus the earlier group rows
+	// in ascending order.
+	var types []string
+	if err := StreamSessionEventsOffsetRange(agentDir, coverage, boundary.BoundaryOffset, boundary.WindowLower, func(row SessionEventRow) error {
+		types = append(types, row.Type)
+		return nil
+	}); err != nil {
+		t.Fatalf("StreamSessionEventsOffsetRange error: %v", err)
+	}
+	want := []string{"llm_response", "tool_call", "tool_result"}
+	if len(types) != len(want) {
+		t.Fatalf("extension types = %#v, want %#v", types, want)
+	}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("extension types = %#v, want %#v (ascending)", types, want)
+		}
+	}
+}
+
+func TestQueryWindowGroupBoundaryLlmCallResetHasNoLlmResponse(t *testing.T) {
+	// An llm_call (reset) sits just below the window: there is no active group to
+	// reach back to, so a windowed first frame must NOT extend.
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'llm_call',    '{"model":"m"}',    '{{ROOT_EVENTS}}', 0,  'agent_events', 'agent'),
+			(2.0, 'tool_call',   '{"tool_name":"a"}','{{ROOT_EVENTS}}', 10, 'agent_events', 'agent'),
+			(3.0, 'tool_result', '{"tool_name":"a"}','{{ROOT_EVENTS}}', 20, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 128)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	boundary, err := QueryWindowGroupBoundary(agentDir, coverage, 1)
+	if err != nil {
+		t.Fatalf("QueryWindowGroupBoundary error: %v", err)
+	}
+	// Window of 1 selects offset 20; nearest marker below is the llm_call at 0.
+	if !boundary.HasBoundary || boundary.BoundaryType != "llm_call" {
+		t.Fatalf("boundary = %+v, want llm_call marker", boundary)
+	}
+}
+
 func TestStreamSessionEventsProjectsOnlyVisibleToolResultFields(t *testing.T) {
 	agentDir := makeTestDB(t, `
 		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
@@ -830,6 +979,102 @@ func TestEventsIndexCoversJSONLRequiresFullCoverage(t *testing.T) {
 	}
 	if coverage.StartsAtBeginning() && coverage.TailNearEOF() {
 		t.Fatalf("did not expect partial tail-only coverage: %#v", coverage)
+	}
+}
+
+// TestQueryEventsIndexCoverageEndpointsProvesSentinelSemantics rejects a full
+// COUNT contract: the Count field is a row-presence sentinel (0 or 1), NOT an
+// exact row count. This test inserts 5 canonical rows and asserts Count==1 (not
+// 5). If someone restores COUNT(*), this test fails immediately.
+func TestQueryEventsIndexCoverageEndpointsProvesSentinelSemantics(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_input',  '{"m":"a"}', '{{ROOT_EVENTS}}', 100, 'agent_events', 'agent'),
+			(2.0, 'text_output', '{"m":"b"}', '{{ROOT_EVENTS}}', 200, 'agent_events', 'agent'),
+			(3.0, 'heartbeat',   '{}',        '{{ROOT_EVENTS}}', 300, 'agent_events', 'agent'),
+			(4.0, 'text_output', '{"m":"c"}', '{{ROOT_EVENTS}}', 400, 'agent_events', 'agent'),
+			(5.0, 'text_input',  '{"m":"d"}', '{{ROOT_EVENTS}}', 500, 'agent_events', 'agent'),
+			(6.0, 'text_output', '{"m":"x"}', '/tmp/other/events.jsonl', 10, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 1024)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	// HasRows must be true for a nonempty canonical source.
+	if !coverage.HasRows() {
+		t.Fatalf("expected HasRows() true, got false: %+v", coverage)
+	}
+	// Count is a presence sentinel, NOT an exact row count.
+	// Five canonical rows exist but Count must be 1 (sentinel).
+	if coverage.Count != 1 {
+		t.Fatalf("Count = %d, want 1 (sentinel); exact COUNT(*) would return 5 — this test rejects that contract", coverage.Count)
+	}
+	// MinOffset and MaxOffset are exact endpoints from the index.
+	if coverage.MinOffset != 100 {
+		t.Fatalf("MinOffset = %d, want 100", coverage.MinOffset)
+	}
+	if coverage.MaxOffset != 500 {
+		t.Fatalf("MaxOffset = %d, want 500", coverage.MaxOffset)
+	}
+}
+
+// TestQueryEventsIndexCoverageEndpointsEmpty verifies the empty-table contract:
+// MinOffset=-1, MaxOffset=-1, Count=0, HasRows=false.
+func TestQueryEventsIndexCoverageEndpointsEmpty(t *testing.T) {
+	agentDir := makeTestDB(t)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 64)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	if coverage.HasRows() {
+		t.Fatalf("expected HasRows() false for empty table, got true: %+v", coverage)
+	}
+	if coverage.Count != 0 {
+		t.Fatalf("Count = %d, want 0 for empty table", coverage.Count)
+	}
+	if coverage.MinOffset != -1 || coverage.MaxOffset != -1 {
+		t.Fatalf("expected MinOffset=-1 MaxOffset=-1, got %d %d", coverage.MinOffset, coverage.MaxOffset)
+	}
+}
+
+// TestQueryEventsIndexCoverageEndpointsMixedSources verifies the endpoint
+// sentinel only considers canonical source_file rows.
+func TestQueryEventsIndexCoverageEndpointsMixedSources(t *testing.T) {
+	agentDir := makeTestDB(t, `
+		INSERT INTO events (ts, type, fields_json, source_file, source_offset, source_kind, scope) VALUES
+			(1.0, 'text_output', '{"m":"x"}', '/tmp/other/events.jsonl', 10, 'agent_events', 'agent'),
+			(2.0, 'text_input',  '{"m":"a"}', '{{ROOT_EVENTS}}', 500, 'agent_events', 'agent'),
+			(3.0, 'text_input',  '{"m":"b"}', '{{ROOT_EVENTS}}', 700, 'agent_events', 'agent'),
+			(4.0, 'text_output', '{"m":"y"}', '/tmp/other/events.jsonl', 9999, 'agent_events', 'agent');
+	`)
+	logsDir := filepath.Join(agentDir, "logs")
+	if err := os.WriteFile(filepath.Join(logsDir, "events.jsonl"), []byte(strings.Repeat("x", 1024)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := QueryEventsIndexCoverage(agentDir)
+	if err != nil {
+		t.Fatalf("QueryEventsIndexCoverage error: %v", err)
+	}
+	if !coverage.HasRows() {
+		t.Fatalf("expected HasRows() true, got false: %+v", coverage)
+	}
+	// Only the ROOT_EVENTS source should be considered.
+	if coverage.MinOffset != 500 {
+		t.Fatalf("MinOffset = %d, want 500 (canonical only)", coverage.MinOffset)
+	}
+	if coverage.MaxOffset != 700 {
+		t.Fatalf("MaxOffset = %d, want 700 (canonical only)", coverage.MaxOffset)
+	}
+	if coverage.Count != 1 {
+		t.Fatalf("Count = %d, want 1 (sentinel)", coverage.Count)
 	}
 }
 

@@ -103,8 +103,12 @@ func (tc TUIConfig) AutoRefreshEnabled() bool { return !tc.AutoRefreshOff }
 // DefaultTUIConfig returns sensible defaults.
 func DefaultTUIConfig() TUIConfig {
 	return TUIConfig{
-		Language:     "en",
-		MailPageSize: 200,
+		Language: "en",
+		// Newest-window default: the first Mail frame loads only the newest 2000
+		// session entries (Jason's latency contract). mail_page_size owns both the
+		// initial load window and the render/Ctrl+U page size; "infinite" (0) opts
+		// back into loading the whole history.
+		MailPageSize: 2000,
 		Insights:     false,
 	}
 }
@@ -123,7 +127,9 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 		tc.Language = "en"
 	}
 	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
-		tc.MailPageSize = 200 // migrate old values below minimum
+		// Bump only degenerate tiny values to the sane default. Explicit finite
+		// values >= 100 (e.g. 100, 200, 500) and infinite (0) are preserved.
+		tc.MailPageSize = DefaultTUIConfig().MailPageSize
 	}
 	// Insights defaults to false when absent from JSON.
 	// No override needed — zero value of bool is false.

@@ -91,6 +91,18 @@ type mailPersistMsg struct {
 	sessionCache *fs.SessionCache
 }
 
+// mailOlderPageMsg carries an async older-history page: a command-local session
+// cache rebuilt with a larger window (pageSize * windowPages). Like the initial
+// rebuild it is generation-gated — a stale page (from a superseded activation)
+// must never replace the installed cache. It is only produced by explicit upward
+// navigation (Ctrl+U / top paging), never on the first-frame critical path.
+type mailOlderPageMsg struct {
+	generation   uint64
+	sessionCache *fs.SessionCache
+	windowPages  int  // the page count this rebuild loaded
+	complete     bool // whether the larger window covered the whole history
+}
+
 type tickMsg struct {
 	generation uint64
 	at         time.Time
@@ -188,6 +200,8 @@ type MailModel struct {
 	toolCallTruncate  int              // from settings — max chars per tool line (0 = no truncation)
 	sessionCache      *fs.SessionCache // append-only session log
 	initialLoading    bool             // true until the deferred initial rebuild's refresh has been applied
+	windowPages       int              // pages of newest history the cache holds (0 = complete/unbounded; >=1 = windowed, window = pageSize*windowPages)
+	olderLoadInFlight bool             // true while an async older-page rebuild is running (debounce + generation gate)
 	copyMode          bool             // chat-only: disables mouse capture so the terminal can select/copy visible text
 	generation        uint64           // activation token; stale async messages are ignored without rescheduling
 	beforeRebuild     func()           // optional deterministic test hook before deferred rebuild I/O
@@ -269,8 +283,14 @@ func (m MailModel) initialRebuild() tea.Msg {
 	// Always rebuild from authoritative sources on launch. Keep both the in-memory
 	// snapshot and its session.jsonl write command-local until Update accepts this
 	// generation; stale work must have no effect on the installed cache.
+	//
+	// First-frame window: load only the newest `pageSize` session events off the
+	// indexed path so a content-heavy project no longer scans its whole history on
+	// launch. `pageSize` is the user-owned mail_page_size setting (also the render
+	// window and Ctrl+U page size). "infinite" (unlimitedPageSize) means load
+	// everything — a complete rebuild — preserving the explicit unbounded choice.
 	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
-	sessionCache.RebuildFromSourcesInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
+	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.firstFrameWindow())
 	m.cache = cache
 	// Tag the resulting refresh as the initial one so the handler can clear the
 	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
@@ -283,6 +303,58 @@ func (m MailModel) initialRebuild() tea.Msg {
 		return rm
 	}
 	return msg
+}
+
+// requestOlderPage starts an asynchronous load of the next older page of history.
+// It is invoked only by explicit upward navigation (Ctrl+U at the top of a
+// partial windowed cache) — never on the first-frame path. It marks a load
+// in-flight (debounce) and returns a generation-tagged command that rebuilds the
+// session cache with a window one page larger; the result is applied only after
+// the mailOlderPageMsg passes the generation + in-flight gate in Update. Returns
+// (m, nil) with no state change when there is nothing to load or a load is
+// already running.
+func (m MailModel) requestOlderPage() (MailModel, tea.Cmd) {
+	if m.olderLoadInFlight || !m.cacheIsPartial() {
+		return m, nil
+	}
+	m.olderLoadInFlight = true
+	nextPages := m.windowPages + 1
+	generation := m.generation
+	return m, func() tea.Msg { return m.olderPageCmd(nextPages, generation) }
+}
+
+// olderPageCmd performs the off-path windowed rebuild for an older page. It reuses
+// the same authoritative merge/sort/dedup/api-grouping path as the initial
+// rebuild, just with a larger window (pageSize * pages), so older pages stay
+// chronologically ordered, duplicate-free across the enlarged boundary, and
+// api-call-group consistent. The rebuilt cache is command-local until Update
+// accepts this generation.
+func (m MailModel) olderPageCmd(pages int, generation uint64) tea.Msg {
+	cache := m.cache.Refresh()
+	window := m.pageSize * pages
+	if m.pageSize <= 0 || m.pageSize >= unlimitedPageSize {
+		window = 0 // unbounded — should not happen for a partial cache, but stay safe
+	}
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
+	return mailOlderPageMsg{
+		generation:   generation,
+		sessionCache: sessionCache,
+		windowPages:  pages,
+		complete:     sessionCache.Complete(),
+	}
+}
+
+// firstFrameWindow returns the number of newest session events the deferred
+// initial rebuild loads. It is the user-owned mail_page_size (m.pageSize), which
+// also drives render windowing and Ctrl+U page size. The "infinite" sentinel
+// (unlimitedPageSize) maps to 0 = unbounded, so an explicit infinite setting
+// still performs a complete rebuild rather than a truncated window.
+func (m MailModel) firstFrameWindow() int {
+	if m.pageSize <= 0 || m.pageSize >= unlimitedPageSize {
+		return 0
+	}
+	return m.pageSize
 }
 
 func adaptiveInputMaxHeight(windowHeight int) int {
@@ -395,9 +467,23 @@ func (m *MailModel) bannerLineCount() int {
 	return n
 }
 
-// hasMoreOlder returns true when there are messages beyond the visible window.
+// hasMoreOlder returns true when there is older history to reveal — either
+// already-loaded messages above the visible render window, OR (for a partial
+// windowed cache) older history still on disk that an older-page load would
+// fetch. The partial-cache case is what makes Ctrl+U meaningful after the
+// newest-window first frame, where the loaded set and the render window match.
 func (m *MailModel) hasMoreOlder() bool {
-	return len(m.messages) > m.pageSize+m.loadedExtra
+	if len(m.messages) > m.pageSize+m.loadedExtra {
+		return true
+	}
+	return m.cacheIsPartial()
+}
+
+// cacheIsPartial reports whether the installed session cache holds only a window
+// of the newest history (older pages remain on disk), so an older-page load can
+// fetch more.
+func (m *MailModel) cacheIsPartial() bool {
+	return m.sessionCache != nil && m.windowPages >= 1 && !m.sessionCache.Complete()
 }
 
 // olderCount returns how many messages are hidden above the visible window.
@@ -718,6 +804,19 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		var persistCmd tea.Cmd
 		if msg.sessionCache != nil {
 			m.sessionCache = msg.sessionCache
+			// Track how many pages of history this first frame loaded. A partial
+			// (windowed) cache holds one page and offers Ctrl+U for older pages; a
+			// complete cache (infinite setting or history smaller than the window)
+			// holds everything, so windowPages is 0 (no older pages remain).
+			if msg.sessionCache.Complete() {
+				m.windowPages = 0
+			} else {
+				m.windowPages = 1
+			}
+			// A superseding first frame cancels any older-page load and resets the
+			// revealed-extra window; the fresh cache defines what is loaded.
+			m.olderLoadInFlight = false
+			m.loadedExtra = 0
 			generation := msg.generation
 			sessionCache := msg.sessionCache
 			persistCmd = func() tea.Msg {
@@ -811,6 +910,39 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		msg.sessionCache.Persist()
 		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
 			return m, cmd
+		}
+		return m, nil
+
+	case mailOlderPageMsg:
+		// An explicit older-page rebuild completed. Gate on generation and on a
+		// load actually being in flight, so a superseded activation (view switch,
+		// visit, or a fresh first frame) cannot install a stale enlarged cache.
+		if msg.generation != m.generation || !m.olderLoadInFlight || msg.sessionCache == nil {
+			return m, nil
+		}
+		m.olderLoadInFlight = false
+		// Reveal the newly-loaded older page by growing the render window in
+		// lockstep with the ingest window (one page = pageSize messages).
+		m.loadedExtra += m.pageSize
+		m.windowPages = msg.windowPages
+		m.sessionCache = msg.sessionCache
+		m.buildMessages()
+		if m.ready {
+			m.syncViewportHeight()
+			m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+			// Keep the reveal anchored near the top so the user sees the older
+			// content they asked for rather than jumping to the tail.
+			m.viewport.GotoTop()
+		}
+		// When the enlarged window has covered the whole history the cache is now
+		// complete and may be persisted as the authoritative derived file, exactly
+		// like an accepted initial rebuild.
+		if msg.complete {
+			generation := msg.generation
+			sessionCache := msg.sessionCache
+			return m, func() tea.Msg {
+				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
+			}
 		}
 		return m, nil
 
@@ -1015,11 +1147,24 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			return m, m.refreshMail
 
 		case "ctrl+u":
-			if m.ready && m.viewport.AtTop() && m.hasMoreOlder() {
-				m.loadedExtra += m.pageSize
-				m.syncViewportHeight()
-				m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
-				return m, nil
+			if m.ready && m.viewport.AtTop() {
+				// First reveal any already-loaded older messages above the render
+				// window (cheap, synchronous). Only when the loaded set is exhausted
+				// and the cache is partial do we fetch the next older page from disk
+				// asynchronously — older history never loads on the first-frame path.
+				if len(m.messages) > m.pageSize+m.loadedExtra {
+					m.loadedExtra += m.pageSize
+					m.syncViewportHeight()
+					m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
+					return m, nil
+				}
+				if m.cacheIsPartial() {
+					var cmd tea.Cmd
+					m, cmd = m.requestOlderPage()
+					if cmd != nil {
+						return m, cmd
+					}
+				}
 			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)

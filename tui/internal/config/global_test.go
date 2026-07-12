@@ -218,8 +218,8 @@ func TestDefaultTUIConfig_NoToolCallTruncation(t *testing.T) {
 
 func TestDefaultTUIConfig_MailPageSize(t *testing.T) {
 	cfg := DefaultTUIConfig()
-	if cfg.MailPageSize != 200 {
-		t.Fatalf("DefaultTUIConfig().MailPageSize = %d, want 200", cfg.MailPageSize)
+	if cfg.MailPageSize != 2000 {
+		t.Fatalf("DefaultTUIConfig().MailPageSize = %d, want 2000 (newest-window default)", cfg.MailPageSize)
 	}
 }
 
@@ -229,8 +229,8 @@ func TestLoadTUIConfig_MigratesLegacySmallMailPageSizeToDefault(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
 		t.Fatalf("write tui_config.json: %v", err)
 	}
-	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
-		t.Fatalf("legacy small mail_page_size loaded as %d, want 200", cfg.MailPageSize)
+	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 2000 {
+		t.Fatalf("legacy small mail_page_size loaded as %d, want 2000 (the sane default)", cfg.MailPageSize)
 	}
 }
 
@@ -241,7 +241,33 @@ func TestLoadTUIConfig_PreservesHundredMailPageSize(t *testing.T) {
 		t.Fatalf("write tui_config.json: %v", err)
 	}
 	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 100 {
-		t.Fatalf("mail_page_size=100 loaded as %d, want 100", cfg.MailPageSize)
+		t.Fatalf("mail_page_size=100 loaded as %d, want 100 (explicit finite value preserved)", cfg.MailPageSize)
+	}
+}
+
+// TestLoadTUIConfig_PreservesExplicitTwoHundred proves the default bump does not
+// rewrite a stored 200 (an explicit user choice from the previous default era).
+func TestLoadTUIConfig_PreservesExplicitTwoHundred(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte(`{"language":"en","mail_page_size":200}`)
+	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 200 {
+		t.Fatalf("explicit mail_page_size=200 loaded as %d, want 200 (must not migrate to 2000)", cfg.MailPageSize)
+	}
+}
+
+// TestLoadTUIConfig_PreservesInfiniteMailPageSize proves an explicit infinite
+// (stored as 0) survives load — the unbounded choice is not overwritten.
+func TestLoadTUIConfig_PreservesInfiniteMailPageSize(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte(`{"language":"en","mail_page_size":0}`)
+	if err := os.WriteFile(filepath.Join(dir, "tui_config.json"), payload, 0o644); err != nil {
+		t.Fatalf("write tui_config.json: %v", err)
+	}
+	if cfg := LoadTUIConfig(dir); cfg.MailPageSize != 0 {
+		t.Fatalf("explicit infinite mail_page_size=0 loaded as %d, want 0 (unbounded preserved)", cfg.MailPageSize)
 	}
 }
 
