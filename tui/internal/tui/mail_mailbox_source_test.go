@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
@@ -47,6 +49,15 @@ func TestMailProjectionUsesMailboxExactlyOnceBeyondEventWindow(t *testing.T) {
 	}
 	if matches != 1 {
 		t.Fatalf("mailbox-backed mail appeared %d times, want exactly once; messages=%d", matches, len(m.messages))
+	}
+
+	received, err := time.Parse(time.RFC3339, "1960-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTimestamp := received.Local().Format("2006-01-02 15:04 MST")
+	if rendered := m.renderMessages(m.messages); !strings.Contains(rendered, wantTimestamp) {
+		t.Fatalf("default mailbox projection omitted full local timestamp %q; rendered=%q", wantTimestamp, rendered)
 	}
 }
 

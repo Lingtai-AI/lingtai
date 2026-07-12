@@ -1727,11 +1727,16 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
-			// Short timestamp (HH:MM) with optional delivering indicator.
+			// Default mailbox mail carries a full local timestamp so it is useful
+			// outside the event timeline; verbose event layers keep the compact label.
 			ts := ""
 			if msg.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, msg.Timestamp); err == nil {
-					ts = StyleFaint.Render(" " + t.Local().Format("15:04"))
+					format := "15:04"
+					if m.verbose == verboseOff {
+						format = "2006-01-02 15:04 MST"
+					}
+					ts = StyleFaint.Render(" " + t.Local().Format(format))
 				}
 			}
 			if msg.IsFromMe && !msg.Delivered {
