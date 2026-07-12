@@ -629,6 +629,8 @@
   "projects.path": "径",
   "projects.agent_dir": "灵目录",
   "projects.current": "[此]",
+  "projects.current_agent": "今灵",
+  "projects.current_agent_unavailable": "进程无踪",
   "projects.current_project": "[此事]",
   "projects.original": "[本来]",
   "projects.original_project": "[本事]",

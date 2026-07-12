@@ -755,6 +755,300 @@ func TestProjectsModelKeepsCursorVisible(t *testing.T) {
 	}
 }
 
+// leftPane returns the left (overview) pane text joined across lines, keeping
+// only the portion before the two-pane separator (or the whole line in the
+// narrow list-only layout), so assertions never match content that lives in the
+// Details column.
+func leftPane(view string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(view, "\n") {
+		b.WriteString(leftOf(line))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// TestProjectsCurrentAgentBlockNamesAppContextNotCursor pins the core
+// separation: the dedicated current-agent summary is keyed on the App context
+// (FocusedAgentDir / CurrentAgentName), so moving the cursor onto a different
+// agent never makes that agent read as the current one. The current agent's row
+// keeps its own distinct marker; the cursor row keeps the ">" selection marker.
+func TestProjectsCurrentAgentBlockNamesAppContextNotCursor(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	current := adminSnapshotRecord(project) // Admin One, ACTIVE, fresh heartbeat
+	other := projectRecord(project, "worker", "Worker Two", true)
+	other.State = "IDLE"
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{current, other},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{current, other}}},
+	}
+	// App context: current agent is Admin One (NOT the row the cursor lands on).
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{
+		FocusedAgentDir:  current.AgentDir,
+		CurrentAgentName: "Admin One",
+	})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	// Move the cursor onto the OTHER agent (Worker Two).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if row, ok := m.selectedAgentRow(); !ok || row.record.AgentName != "Worker Two" {
+		t.Fatalf("cursor should be on Worker Two, got %+v ok=%v", row, ok)
+	}
+
+	left := leftPane(ansi.Strip(m.View()))
+	header := i18n.T("projects.current_agent")
+	hi := strings.Index(left, header)
+	if hi < 0 {
+		t.Fatalf("left pane missing %q current-agent block:\n%s", header, left)
+	}
+	// The current-agent block identifies Admin One with its live state/heartbeat,
+	// and does so above the running-agents list.
+	block := left[hi:]
+	listIdx := strings.Index(block, i18n.T("projects.running_agents"))
+	if listIdx < 0 {
+		t.Fatalf("running-agents section should follow the current-agent block:\n%s", left)
+	}
+	blockText := block[:listIdx]
+	for _, want := range []string{"Admin One", "ACTIVE", i18n.T("projects.heartbeat_fresh")} {
+		if !strings.Contains(blockText, want) {
+			t.Fatalf("current-agent block missing %q:\n%s", want, blockText)
+		}
+	}
+	// The block must NOT name the cursor's agent — cursor selection cannot
+	// masquerade as current identity.
+	if strings.Contains(blockText, "Worker Two") {
+		t.Fatalf("current-agent block leaked cursor agent Worker Two:\n%s", blockText)
+	}
+
+	// Distinct markers: the current agent's row carries the current marker, the
+	// cursor row carries ">". They must be different rows.
+	currentRow := agentRowLine(ansi.Strip(m.View()), "Admin One")
+	cursorRow := agentRowLine(ansi.Strip(m.View()), "Worker Two")
+	if !strings.Contains(currentRow, projectsCurrentMarker) {
+		t.Fatalf("current agent row missing current marker %q: %q", projectsCurrentMarker, currentRow)
+	}
+	if !strings.Contains(cursorRow, ">") {
+		t.Fatalf("cursor row missing selection marker: %q", cursorRow)
+	}
+	if strings.Contains(cursorRow, projectsCurrentMarker) {
+		t.Fatalf("cursor row must not carry the current marker: %q", cursorRow)
+	}
+}
+
+// TestProjectsCurrentAgentBlockDegradesWhenNotProcessVisible pins honest
+// degradation: when the App's current agent has no process-visible record, the
+// block still names it (from context) and shows a localized unavailable status
+// instead of inventing a lifecycle state.
+func TestProjectsCurrentAgentBlockDegradesWhenNotProcessVisible(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	// Snapshot contains only some OTHER agent; the current agent is absent.
+	other := projectRecord(project, "worker", "Worker Two", true)
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{other},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{other}}},
+	}
+	missingDir := filepath.Join(project, ".lingtai", "ghost")
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{
+		FocusedAgentDir:  missingDir,
+		CurrentAgentName: "Ghost Admin",
+	})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+
+	left := leftPane(ansi.Strip(m.View()))
+	hi := strings.Index(left, i18n.T("projects.current_agent"))
+	if hi < 0 {
+		t.Fatalf("left pane missing current-agent block:\n%s", left)
+	}
+	blockText := left[hi:]
+	if listIdx := strings.Index(blockText, i18n.T("projects.running_agents")); listIdx >= 0 {
+		blockText = blockText[:listIdx]
+	}
+	if !strings.Contains(blockText, "Ghost Admin") {
+		t.Fatalf("unavailable current-agent block should still name the agent:\n%s", blockText)
+	}
+	if !strings.Contains(blockText, i18n.T("projects.current_agent_unavailable")) {
+		t.Fatalf("missing record should show localized unavailable status:\n%s", blockText)
+	}
+	// No invented lifecycle state — the honest-status block never claims a live
+	// state string for an agent it cannot see.
+	for _, invented := range []string{"ACTIVE", "IDLE", "ASLEEP", "STUCK", "SUSPENDED"} {
+		if strings.Contains(blockText, invented) {
+			t.Fatalf("unavailable block invented lifecycle state %q:\n%s", invented, blockText)
+		}
+	}
+}
+
+// TestProjectsCurrentAgentBlockRendersInEachLocale keeps the current-agent block
+// header and unavailable status localized across all three locales.
+func TestProjectsCurrentAgentBlockRendersInEachLocale(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	other := projectRecord(project, "worker", "Worker", true)
+	snap := inventory.Snapshot{Records: []inventory.Record{other}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{other}}}}
+	for _, lang := range []string{"en", "zh", "wen"} {
+		t.Run(lang, func(t *testing.T) {
+			if err := i18n.SetLang(lang); err != nil {
+				t.Fatal(err)
+			}
+			m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{
+				FocusedAgentDir:  filepath.Join(project, ".lingtai", "ghost"),
+				CurrentAgentName: "Ghost",
+			})
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+			m, _ = m.Update(projectsInventoryForModel(m, snap))
+			view := ansi.Strip(m.View())
+			for _, key := range []string{"projects.current_agent", "projects.current_agent_unavailable"} {
+				want := i18n.TIn(lang, key)
+				if want == key || !strings.Contains(view, want) {
+					t.Fatalf("%s view missing localized %s=%q:\n%s", lang, key, want, view)
+				}
+			}
+		})
+	}
+}
+
+// TestProjectsCurrentAgentBlockSurvivesNarrowWidth keeps the current-agent
+// identity and status visible in the narrow list-only layout, distinguishable
+// from the selected row.
+func TestProjectsCurrentAgentBlockSurvivesNarrowWidth(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	current := adminSnapshotRecord(project)
+	other := projectRecord(project, "worker", "Worker Two", true)
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{current, other},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{current, other}}},
+	}
+	m := NewProjectsModel("", filepath.Join(project, ".lingtai"), ProjectsContext{
+		FocusedAgentDir:  current.AgentDir,
+		CurrentAgentName: "Admin One",
+	})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
+	m, _ = m.Update(projectsInventoryForModel(m, snap))
+	// Cursor on the other agent.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "│") {
+		t.Fatalf("width 70 should be list-only (no separator):\n%s", view)
+	}
+	if !strings.Contains(view, i18n.T("projects.current_agent")) {
+		t.Fatalf("narrow layout dropped the current-agent block:\n%s", view)
+	}
+	if !strings.Contains(view, "Admin One") || !strings.Contains(view, "ACTIVE") {
+		t.Fatalf("narrow current-agent block missing identity/state:\n%s", view)
+	}
+	// The current marker still distinguishes the current row from the ">" cursor.
+	currentRow := agentRowLine(view, "Admin One")
+	cursorRow := agentRowLine(view, "Worker Two")
+	if !strings.Contains(currentRow, projectsCurrentMarker) {
+		t.Fatalf("narrow current row missing current marker: %q", currentRow)
+	}
+	if strings.Contains(cursorRow, projectsCurrentMarker) || !strings.Contains(cursorRow, ">") {
+		t.Fatalf("narrow cursor row markers wrong: %q", cursorRow)
+	}
+}
+
+// bodyLineIndexOf returns the index of the single viewport-body line whose left
+// (overview) column contains needle, or -1. It reads the model's actual rendered
+// body — the same content selectedRenderedLine() indexes into — so it is an
+// independent oracle for the row's true position, not a re-derivation of the
+// registryListTopLines formula. Callers pass a needle that appears in exactly one
+// list row (a non-current agent name, which the current-agent block never repeats).
+func bodyLineIndexOf(t *testing.T, m ProjectsModel, needle string) int {
+	t.Helper()
+	found := -1
+	for i, line := range strings.Split(ansi.Strip(m.renderBody()), "\n") {
+		if strings.Contains(leftOf(line), needle) {
+			if found >= 0 {
+				t.Fatalf("needle %q appears on multiple body lines (%d and %d); pick a unique row", needle, found, i)
+			}
+			found = i
+		}
+	}
+	return found
+}
+
+// TestProjectsSelectedRenderedLineMatchesActualRowWithBlock pins that
+// selectedRenderedLine() reports the true body-line index of the selected list
+// row once the current-agent block is prepended — the scroll-to-cursor invariant.
+// It selects a NON-current agent (so its name is not duplicated in the block) and
+// compares selectedRenderedLine() to the row's actual rendered position derived
+// independently from renderBody(). It covers both a visible current-agent block
+// (taller: header + name + state/heartbeat line) and an unavailable one (shorter:
+// header + name + status), proving the offset tracks the real block height. This
+// fails on a len(block)+1+projectsListTopLines off-by-one.
+func TestProjectsSelectedRenderedLineMatchesActualRowWithBlock(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLang("en") })
+	if err := i18n.SetLang("en"); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(t.TempDir(), "network-alpha")
+	admin := adminSnapshotRecord(project) // Admin One, process-visible
+	other := projectRecord(project, "worker", "Worker Two", true)
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{admin, other},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{admin, other}}},
+	}
+
+	cases := []struct {
+		name    string
+		ctx     ProjectsContext
+		visible bool // whether the current-agent block resolves a process record
+	}{
+		{
+			name:    "visible current-agent block",
+			ctx:     ProjectsContext{FocusedAgentDir: admin.AgentDir, CurrentAgentName: "Admin One"},
+			visible: true,
+		},
+		{
+			name:    "unavailable current-agent block",
+			ctx:     ProjectsContext{FocusedAgentDir: filepath.Join(project, ".lingtai", "ghost"), CurrentAgentName: "Ghost"},
+			visible: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewProjectsModel("", filepath.Join(project, ".lingtai"), tc.ctx)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+			m, _ = m.Update(projectsInventoryForModel(m, snap))
+			// Select "Worker Two": always non-current in both cases, so its name is
+			// unique to its list row (never echoed by the current-agent block).
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+			row, ok := m.selectedAgentRow()
+			if !ok || row.record.AgentName != "Worker Two" {
+				t.Fatalf("cursor should be on Worker Two, got %+v ok=%v", row, ok)
+			}
+
+			got, ok := m.selectedRenderedLine()
+			if !ok {
+				t.Fatalf("selectedRenderedLine reported no line")
+			}
+			want := bodyLineIndexOf(t, m, "Worker Two")
+			if want < 0 {
+				t.Fatalf("could not locate Worker Two row in rendered body:\n%s", ansi.Strip(m.renderBody()))
+			}
+			if got != want {
+				t.Fatalf("selectedRenderedLine() = %d, actual rendered row line = %d (block visible=%v)", got, want, tc.visible)
+			}
+		})
+	}
+}
+
 // leftOf returns the portion of a rendered line before the two-pane separator,
 // or the whole line when there is no separator (narrow list-only layout).
 func leftOf(line string) string {
@@ -764,12 +1058,23 @@ func leftOf(line string) string {
 	return line
 }
 
-// agentRowLine returns the left-pane text of the first rendered line whose left
-// side contains name — the overview row for that agent, isolated from the
-// Details pane sharing the same terminal line.
+// agentRowLine returns the left-pane text of the first list row whose left side
+// contains name — the overview row for that agent, isolated from the Details
+// pane sharing the same terminal line. It skips the dedicated current-agent
+// block (which also renders the current agent's name) by only searching lines at
+// or below the running-agents section header, so per-row assertions target the
+// list rows, not the summary block.
 func agentRowLine(view, name string) string {
+	header := i18n.T("projects.running_agents")
+	inList := false
 	for _, line := range strings.Split(view, "\n") {
 		left := leftOf(line)
+		if !inList {
+			if strings.Contains(left, header) {
+				inList = true
+			}
+			continue
+		}
 		if strings.Contains(left, name) {
 			return left
 		}

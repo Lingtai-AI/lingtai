@@ -634,6 +634,8 @@
   "projects.path": "Path",
   "projects.agent_dir": "Agent dir",
   "projects.current": "[current]",
+  "projects.current_agent": "Current agent",
+  "projects.current_agent_unavailable": "not process-visible",
   "projects.current_project": "[current project]",
   "projects.original": "[original]",
   "projects.original_project": "[original project]",

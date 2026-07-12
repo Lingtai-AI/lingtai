@@ -55,8 +55,17 @@ type ProjectsModel struct {
 	ready    bool
 }
 
+// ProjectsContext carries the App's authoritative current identity into the
+// Projects view. FocusedAgentDir and CurrentAgentName are the app's current
+// agent (a.orchDir / a.orchName) — never inferred from process state, role,
+// PID, row order, or cursor. When Visiting is true they name the visited agent
+// (see enterVisitedAgent); OriginalAgentDir/OriginalProjectDir then name the
+// context the visit came from. The Projects view resolves live runtime state by
+// matching FocusedAgentDir against the process-visible snapshot; when no record
+// matches, it shows an honest unavailable status rather than inventing one.
 type ProjectsContext struct {
 	FocusedAgentDir    string
+	CurrentAgentName   string
 	OriginalProjectDir string
 	OriginalAgentDir   string
 	Visiting           bool
@@ -500,7 +509,22 @@ func (m ProjectsModel) selectedRenderedLine() (int, bool) {
 	if !m.rowSelectable(m.cursor) {
 		return 0, false
 	}
-	return projectsListTopLines + m.cursor, true
+	return m.registryListTopLines() + m.cursor, true
+}
+
+// registryListTopLines is the number of rendered lines before agent row 0 in
+// the registry overview pane: the (variable-height) current-agent block followed
+// by the three-line running-agents header (blank, section title, blank) that
+// projectsListTopLines counts. renderInventoryLeft appends exactly those three
+// lines after the block, so row 0 begins at len(block) + projectsListTopLines;
+// there is no fourth separator line to count. Keeping this in lockstep with
+// renderInventoryLeft makes scroll-to-cursor land on the right row.
+func (m ProjectsModel) registryListTopLines() int {
+	block := m.renderCurrentAgentBlock()
+	if len(block) == 0 {
+		return projectsListTopLines
+	}
+	return len(block) + projectsListTopLines
 }
 
 func rowsFromSnapshot(s inventory.Snapshot) []projectRow {
@@ -672,9 +696,16 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 	disabledStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
 	markerStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	currentStyle := lipgloss.NewStyle().Foreground(ColorAccent)
 	errorStyle := lipgloss.NewStyle().Foreground(ColorStuck)
 
 	var lines []string
+	// The dedicated current-agent block anchors the authoritative current
+	// identity and its live state/heartbeat at the top of the pane, so it stays
+	// visible and unambiguous even when the cursor roams onto other agents. It is
+	// keyed on the App context (FocusedAgentDir/CurrentAgentName), never on
+	// cursor, role, PID, or row order.
+	lines = append(lines, m.renderCurrentAgentBlock()...)
 	lines = append(lines, "")
 	lines = append(lines, "  "+sectionStyle.Render(i18n.T("projects.running_agents")))
 	lines = append(lines, "")
@@ -711,14 +742,26 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 		}
 
 		r := row.record
-		prefix := "    "
+		// The row prefix carries two independent signals in fixed columns so
+		// cursor selection and current-agent identity never collapse into one:
+		// column 0 is the current-agent marker, column 2 is the cursor marker.
+		// A row can be current, selected, both, or neither — each reads distinctly.
+		isCurrent := m.isCurrentAgentRow(r)
+		currentCol := " "
+		if isCurrent {
+			currentCol = projectsCurrentMarker
+		}
+		cursorCol := " "
 		style := nameStyle
 		if i == m.cursor {
-			prefix = "  > "
+			cursorCol = ">"
 			style = selectedStyle
+		} else if isCurrent {
+			style = currentStyle
 		} else if !r.Enterable {
 			style = disabledStyle
 		}
+		prefix := currentCol + " " + cursorCol + " "
 		display := firstNonEmpty(r.Nickname, r.AgentName, r.Address, r.Agent)
 		heartbeat := localizedHeartbeatLabel(r.Heartbeat)
 		// The overview row answers who/role/live-state/heartbeat and, when
@@ -731,15 +774,14 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 		if !r.Enterable {
 			summary += "  !"
 		}
+		// The current/visiting identity is carried by the column-0 marker and the
+		// dedicated block above, not an inline tag. Only the [visiting] refinement
+		// and the [original] origin marker remain as inline tags.
 		var tags []string
-		if r.AgentDir == m.ctx.FocusedAgentDir {
-			if m.ctx.Visiting {
-				tags = append(tags, i18n.T("projects.visiting"))
-			} else {
-				tags = append(tags, i18n.T("projects.current"))
-			}
+		if isCurrent && m.ctx.Visiting {
+			tags = append(tags, i18n.T("projects.visiting"))
 		}
-		if m.ctx.OriginalAgentDir != "" && r.AgentDir == m.ctx.OriginalAgentDir {
+		if m.ctx.OriginalAgentDir != "" && m.agentDirMatches(r.AgentDir, m.ctx.OriginalAgentDir) {
 			tags = append(tags, i18n.T("projects.original"))
 		}
 		if len(tags) > 0 {
@@ -749,6 +791,124 @@ func (m ProjectsModel) renderInventoryLeft(maxW int) string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// projectsCurrentMarker flags the authoritative current agent in the overview
+// list and block. It is deliberately distinct from the ">" cursor marker so the
+// current-agent identity and the keyboard selection never read as the same
+// concept (product contract: identity ≠ cursor).
+const projectsCurrentMarker = "◆"
+
+// agentDirMatches compares two agent-directory strings by normalized absolute
+// path (inventory.NormalizePath: filepath.Clean then filepath.Abs), so an
+// un-cleaned or relative context dir still matches the snapshot's cleaned
+// AgentDir. It does not expand "~/" — callers pass already-resolved paths
+// (a.orchDir and inventory AgentDir come from the same conventions). Empty
+// inputs never match.
+func (m ProjectsModel) agentDirMatches(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return inventory.NormalizePath(a) == inventory.NormalizePath(b)
+}
+
+// isCurrentAgentRow reports whether a record is the App's authoritative current
+// agent, matched by directory identity from context — never by role, PID, state,
+// or row order.
+func (m ProjectsModel) isCurrentAgentRow(r inventory.Record) bool {
+	return m.agentDirMatches(r.AgentDir, m.ctx.FocusedAgentDir)
+}
+
+// currentAgentRecord returns the process-visible record for the App's current
+// agent, if any. The second result is false when the current agent has no record
+// in the snapshot (stopped, never-booted, or otherwise not process-visible) — in
+// which case the caller degrades to an honest unavailable status rather than
+// inventing a lifecycle state.
+func (m ProjectsModel) currentAgentRecord() (inventory.Record, bool) {
+	if m.ctx.FocusedAgentDir == "" {
+		return inventory.Record{}, false
+	}
+	for _, row := range m.rows {
+		if row.kind != projectRowAgent {
+			continue
+		}
+		if m.isCurrentAgentRow(row.record) {
+			return row.record, true
+		}
+	}
+	return inventory.Record{}, false
+}
+
+// renderCurrentAgentBlock renders the dedicated current-agent summary at the top
+// of the overview pane. It names the App's authoritative current agent and, when
+// that agent is process-visible, surfaces its live runtime state (colored by
+// StateColor) and heartbeat as prominent, separately-labeled fields. When the
+// current agent is absent from the snapshot it shows a localized unavailable
+// status instead — honest degradation, never a fabricated lifecycle state. When
+// there is no current agent at all (no App context), the block renders nothing.
+func (m ProjectsModel) renderCurrentAgentBlock() []string {
+	if m.ctx.FocusedAgentDir == "" && strings.TrimSpace(m.ctx.CurrentAgentName) == "" {
+		return nil
+	}
+	sectionStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	nameStyle := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	markerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+
+	header := i18n.T("projects.current_agent")
+	if m.ctx.Visiting {
+		header += " " + markerStyle.Render(i18n.T("projects.visiting"))
+	}
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+sectionStyle.Render(header))
+
+	rec, visible := m.currentAgentRecord()
+	// Prefer the process-visible display name; fall back to the App-context name
+	// so a not-visible current agent is still identified rather than blank.
+	name := ""
+	if visible {
+		name = firstNonEmpty(rec.Nickname, rec.AgentName, rec.Address, rec.Agent)
+	}
+	name = firstNonEmpty(name, m.ctx.CurrentAgentName)
+	if name == "" {
+		name = projectsUnavailable
+	}
+	lines = append(lines, "  "+projectsCurrentMarker+" "+nameStyle.Render(name))
+
+	if !visible {
+		// Honest degradation: no process record → no lifecycle state. Say so.
+		lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.current_agent_unavailable")))
+		return lines
+	}
+
+	// Live runtime state and heartbeat are the prominent, separately-labeled core
+	// of the block — colored by StateColor so ACTIVE/IDLE/ASLEEP read at a glance.
+	state := valueOrDash(rec.State)
+	stateStyled := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(rec.State))).Bold(true).Render(state)
+	heartbeat := heartbeatStyled(rec.Heartbeat)
+	lines = append(lines, "  "+labelStyle.Render(i18n.T("projects.state")+": ")+stateStyled+
+		labelStyle.Render("   "+i18n.T("projects.heartbeat")+": ")+heartbeat)
+	return lines
+}
+
+// heartbeatStyled renders the localized heartbeat label colored by freshness:
+// active green when fresh, suspended amber when stale, dim when missing — so the
+// current-agent block's health reads without cross-referencing the label text.
+func heartbeatStyled(h fs.HeartbeatStatus) string {
+	label := localizedHeartbeatLabel(h)
+	switch {
+	case h.Fresh:
+		return lipgloss.NewStyle().Foreground(ColorActive).Render(label)
+	case h.Exists:
+		return lipgloss.NewStyle().Foreground(ColorSuspended).Render(label)
+	default:
+		return lipgloss.NewStyle().Foreground(ColorTextDim).Render(label)
+	}
 }
 
 func (m ProjectsModel) renderInventoryRight(maxW int) string {

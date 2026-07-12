@@ -130,8 +130,9 @@ func (a *App) newMailForCurrentContext() MailModel {
 
 func (a App) projectsContext() ProjectsContext {
 	ctx := ProjectsContext{
-		FocusedAgentDir: a.orchDir,
-		Visiting:        a.visiting,
+		FocusedAgentDir:  a.orchDir,
+		CurrentAgentName: a.orchName,
+		Visiting:         a.visiting,
 	}
 	if a.visiting {
 		ctx.OriginalProjectDir = a.visitOriginalProjectDir

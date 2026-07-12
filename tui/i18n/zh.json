@@ -629,6 +629,8 @@
   "projects.path": "路径",
   "projects.agent_dir": "智能体目录",
   "projects.current": "[当前]",
+  "projects.current_agent": "当前智能体",
+  "projects.current_agent_unavailable": "进程不可见",
   "projects.current_project": "[当前项目]",
   "projects.original": "[原上下文]",
   "projects.original_project": "[原项目]",
