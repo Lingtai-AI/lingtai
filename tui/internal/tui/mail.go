@@ -1435,7 +1435,6 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 	systemStyle := lipgloss.NewStyle().Foreground(ColorSystem).Bold(true)
 	thinkingStyle := lipgloss.NewStyle().Foreground(ColorThinking)
 	toolStyle := lipgloss.NewStyle().Foreground(ColorTool)
-	sepStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
 
 	// glamour.NewTermRenderer is heavyweight (it parses a style and builds an
 	// ANSI renderer), so constructing one per agent/insight message — as this
@@ -1706,16 +1705,6 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 			b.WriteString(barStyle.Render("  "+strings.Repeat("─", max(fullBar, 1))) + "\n")
 
 		default: // "mail"
-			if m.verbose != verboseOff {
-				header := StyleFaint.Render("  "+RuneBullet+" ") +
-					humanStyle.Render(msg.From) + sepStyle.Render(" → ") + sepStyle.Render(msg.To)
-				if msg.Subject != "" {
-					header += sepStyle.Render(" │ " + i18n.T("mail.subject_label") + " " + msg.Subject)
-				}
-				header += sepStyle.Render(" │ " + msg.Timestamp)
-				b.WriteString(header + "\n")
-			}
-
 			var nameStyle lipgloss.Style
 			if msg.IsFromMe {
 				nameStyle = humanStyle
@@ -1727,16 +1716,12 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
-			// Default mailbox mail carries a full local timestamp so it is useful
-			// outside the event timeline; verbose event layers keep the compact label.
+			// Mail is projected from the same live mailbox source in every layer, so
+			// keep its row renderer identical when Ctrl+O adds event history around it.
 			ts := ""
 			if msg.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, msg.Timestamp); err == nil {
-					format := "15:04"
-					if m.verbose == verboseOff {
-						format = "2006-01-02 15:04 MST"
-					}
-					ts = StyleFaint.Render(" " + t.Local().Format(format))
+					ts = StyleFaint.Render(" " + t.Local().Format("2006-01-02 15:04 MST"))
 				}
 			}
 			if msg.IsFromMe && !msg.Delivered {

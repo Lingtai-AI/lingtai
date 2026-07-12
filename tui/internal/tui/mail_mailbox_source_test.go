@@ -91,4 +91,17 @@ func TestMailProjectionKeepsExpandedEventHistoryWhileMailStaysSingleSource(t *te
 	if eventCount != 3 {
 		t.Fatalf("expanded projection kept %d event entries, want 3", eventCount)
 	}
+
+	received, err := time.Parse(time.RFC3339, "2026-07-12T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTimestamp := received.Local().Format("2006-01-02 15:04 MST")
+	rendered := m.renderMessages(m.messages)
+	if !strings.Contains(rendered, wantTimestamp) {
+		t.Fatalf("expanded mailbox projection omitted default full local timestamp %q; rendered=%q", wantTimestamp, rendered)
+	}
+	if strings.Contains(rendered, "2026-07-12T00:00:00Z") {
+		t.Fatalf("expanded mailbox projection leaked its raw RFC3339 header timestamp; rendered=%q", rendered)
+	}
 }
