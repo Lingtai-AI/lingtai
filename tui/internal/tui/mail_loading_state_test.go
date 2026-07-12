@@ -72,7 +72,7 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", unlimitedPageSize, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
 	m.verbose = verboseThinking
 	m = sizeMail(t, m)
 
@@ -97,8 +97,8 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 		t.Fatal("initialLoading should be false after the initial rebuild message is applied")
 	}
 	view := m.View()
-	if strings.Contains(view, loadingBannerFragment) {
-		t.Fatal("loading banner should be gone after the initial rebuild was applied")
+	if !m.historyCountLoading || !strings.Contains(view, loadingBannerFragment) {
+		t.Fatal("content should paint under a neutral loading banner until exact count metadata arrives")
 	}
 
 	found := false
@@ -109,6 +109,10 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected rebuilt history after initial rebuild; got %d messages", len(m.messages))
+	}
+	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
+	if strings.Contains(m.View(), loadingBannerFragment) {
+		t.Fatal("neutral loading banner should clear after exact count metadata is accepted")
 	}
 }
 
@@ -124,6 +128,10 @@ func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	m, _ = m.Update(m.initialRebuild())
 	if m.initialLoading {
 		t.Fatal("loading should be cleared by the initial rebuild")
+	}
+	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
+	if m.historyCountLoading {
+		t.Fatal("exact-count loading should clear after metadata acceptance")
 	}
 
 	// A periodic refresh (untagged) must leave loading cleared.

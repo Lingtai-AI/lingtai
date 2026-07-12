@@ -2,6 +2,7 @@
 package fs
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,30 +107,44 @@ type AprioriSummary struct {
 	Unavailable          bool   `json:"unavailable,omitempty"`            // cap-refusal or fail-closed error (no summary text)
 }
 
+// SessionHistoryStats is count-only metadata for renderable canonical event
+// history. Mail and inquiry entries are loaded separately and are not included.
+type SessionHistoryStats struct {
+	Detailed int // renderable non-insight event entries (verboseThinking/Extended)
+	Insights int // renderable event insight entries (when insights are enabled)
+}
+
+type sessionHistoryCountPlan struct {
+	identity string
+	path     string
+	upper    int64
+}
+
 // SessionCache is an append-only cache backed by session.jsonl.
 // It incrementally tails three data sources and appends new entries.
 //
 // Concurrency: every public entry point that touches mutable state
 // (RebuildFromSources, RebuildFromSourcesInMemory, Persist, Refresh, IngestMail,
-// Entries, Len) holds mu. The unexported helpers (ingestMail, IngestEvents,
+// Entries, Len, HistoryStats) holds mu. The unexported helpers (ingestMail, IngestEvents,
 // IngestInquiries, append, rewriteFile) assume the caller already holds mu and
 // never lock themselves — that keeps the lock non-reentrant and avoids deadlock.
 // The TUI's deferred initial rebuild uses a command-local SessionCache and only
 // installs and persists it after accepting the command's generation.
 type SessionCache struct {
-	mu                  sync.Mutex     // guards all fields below; see type doc for the locking discipline
-	path                string         // human/logs/session.jsonl
-	entries             []SessionEntry // in-memory mirror of all entries
-	lastMailTs          string         // highest mail ReceivedAt ingested (watermark for live-session dedup)
-	eventsOff           int64          // byte offset in events.jsonl
-	inquiryOff          int64          // byte offset in soul_inquiry.jsonl
-	soulFlowOff         int64          // byte offset in soul_flow.jsonl (voice index source)
-	projectPath         string         // absolute path of the project directory (parent of .lingtai/)
-	lastHour            time.Time      // hour (truncated) of the most recent entry
-	rebuilding          bool           // true during RebuildFromSources — suppress file writes
-	complete            bool           // true when the cache holds the full history; false after a windowed rebuild truncated older events
-	afterRebuildIngest  func()         // optional deterministic test hook after authoritative reads
-	afterSQLiteCoverage func()         // optional deterministic test hook after SQLite coverage capture
+	mu                 sync.Mutex              // guards all fields below; see type doc for the locking discipline
+	path               string                  // human/logs/session.jsonl
+	entries            []SessionEntry          // in-memory mirror of loaded entries
+	historyStats       SessionHistoryStats     // accepted exact count plus incremental EOF additions
+	historyCountPlan   sessionHistoryCountPlan // canonical source/horizon captured by the bounded content rebuild
+	lastMailTs         string                  // highest mail ReceivedAt ingested (watermark for live-session dedup)
+	eventsOff          int64                   // byte offset in events.jsonl
+	inquiryOff         int64                   // byte offset in soul_inquiry.jsonl
+	soulFlowOff        int64                   // byte offset in soul_flow.jsonl (voice index source)
+	projectPath        string                  // absolute path of the project directory (parent of .lingtai/)
+	lastHour           time.Time               // hour (truncated) of the most recent entry
+	rebuilding         bool                    // true during RebuildFromSources — suppress file writes
+	complete           bool                    // true when the cache holds the full history; false after a windowed rebuild truncated older events
+	afterRebuildIngest func()                  // optional deterministic test hook after authoritative reads
 
 	// soulVoices indexes voices by fire_id, populated by tailing
 	// soul_flow.jsonl. Used to inflate soul_flow SessionEntry bodies that
@@ -176,18 +192,19 @@ func (sc *SessionCache) RebuildFromSourcesInMemory(cache MailCache, humanAddr, o
 	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false, 0)
 }
 
-// RebuildFromSourcesWindowedInMemory is the O(window) first-frame variant: it
-// ingests only the newest `window` session events from the indexed source while
-// still loading all mail and inquiries, then merges and sorts chronologically.
+// RebuildFromSourcesWindowedInMemory is the bounded first-content variant: it
+// ingests only the newest `window` session events by reading authoritative JSONL
+// backward from EOF, while still loading all mail and inquiries,
+// then merges and sorts chronologically.
 // It never writes session.jsonl. When the window truncates older events the cache
 // is left partial (Complete() == false), so the caller must NOT persist it as if
 // complete. A window <= 0 is a full, complete rebuild.
 //
 // Correctness: even when the event stream is windowed, eventsOff is advanced to
 // the true EOF complete-record boundary, so a later Refresh resumes from EOF and
-// never re-ingests the excluded older window. The JSONL fallback cannot window by
-// count, so a huge history with no usable index rebuilds fully (slower) — that
-// slowness is confined to the non-indexed fallback, never the indexed first frame.
+// never re-ingests the excluded older window. The rebuild captures a canonical
+// source/horizon count plan but does not execute it; ExactHistoryStats performs
+// that metadata-only work asynchronously without caching excluded bodies.
 func (sc *SessionCache) RebuildFromSourcesWindowedInMemory(cache MailCache, humanAddr, orchDir, orchName string, window int) {
 	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false, window)
 }
@@ -208,21 +225,37 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	// Clear any prior state and suppress file writes during ingest
 	// (we'll write the sorted result in one shot at the end).
 	sc.entries = nil
+	sc.historyStats = SessionHistoryStats{}
+	sc.historyCountPlan = sessionHistoryCountPlan{}
 	sc.eventsOff = 0
 	sc.inquiryOff = 0
 	sc.soulFlowOff = 0
 	sc.soulVoices = make(map[string][]soulVoiceRecord)
 	sc.rebuilding = true
-	// Assume complete until a windowed indexed ingest proves it truncated older
-	// events. The JSONL fallback always reads the full file, so it stays complete.
+	// Assume complete until a positive-window canonical JSONL scan proves that
+	// older session events remain outside the requested content window.
 	sc.complete = true
 
 	// Ingest everything (or, for a windowed rebuild, the newest `window` events)
 	// from offset 0. Uses the unlocked helpers — we already hold sc.mu and the
 	// helpers must not re-lock (non-reentrant mutex).
 	sc.ingestMail(cache, humanAddr, orchDir, orchName)
-	if !sc.ingestEventsFromSQLiteWindowed(orchDir, window) {
+	// events.jsonl is authoritative. The SQLite log is an additive index and its
+	// endpoint range cannot prove that interior source offsets are continuous.
+	// Windowed reads therefore scan canonical JSONL backward, while full rebuilds
+	// consume it forward. Both paths remain body-bounded for the requested window
+	// and can prove completeness without trusting a sparse index.
+	if !(window > 0 && sc.ingestEventsFromJSONLWindowed(orchDir, window)) {
 		sc.IngestEvents(orchDir)
+	}
+	if sc.historyCountPlan.identity == "" {
+		eventsPath, _ := filepath.Abs(filepath.Join(orchDir, "logs", "events.jsonl"))
+		eventsPath = filepath.Clean(eventsPath)
+		sc.historyCountPlan = sessionHistoryCountPlan{
+			identity: fmt.Sprintf("jsonl:%s:%d", eventsPath, sc.eventsOff),
+			path:     eventsPath,
+			upper:    sc.eventsOff,
+		}
 	}
 	sc.IngestInquiries(orchDir)
 	if sc.afterRebuildIngest != nil {
@@ -303,9 +336,10 @@ func (sc *SessionCache) append(entries ...SessionEntry) {
 
 	sc.entries = append(sc.entries, entries...)
 
-	// During RebuildFromSources, skip file writes —
-	// we'll write the sorted result in one shot at the end.
-	if sc.rebuilding {
+	// Rebuilds write a proven-complete sorted snapshot in one shot. A bounded
+	// cache is intentionally incomplete, so its incremental EOF additions must
+	// remain memory-only rather than create or extend a misleading session.jsonl.
+	if sc.rebuilding || !sc.complete {
 		return
 	}
 
@@ -344,6 +378,44 @@ func (sc *SessionCache) Len() int {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	return len(sc.entries)
+}
+
+// HistoryStats returns count-only metadata for the full canonical event history,
+// including entries whose bodies are outside a partial content window.
+func (sc *SessionCache) HistoryStats() SessionHistoryStats {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.historyStats
+}
+
+// HistoryCountIdentity identifies the canonical event source and captured horizon
+// whose exact metadata count may be computed asynchronously.
+func (sc *SessionCache) HistoryCountIdentity() string {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.historyCountPlan.identity
+}
+
+// ExactHistoryStats performs the full-history metadata work for the source/horizon
+// captured by the bounded content rebuild. Callers run this asynchronously and
+// identity-gate the result; content bodies outside the cache are never retained.
+func (sc *SessionCache) ExactHistoryStats() (SessionHistoryStats, string, error) {
+	sc.mu.Lock()
+	plan := sc.historyCountPlan
+	sc.mu.Unlock()
+	if plan.identity == "" {
+		return SessionHistoryStats{}, "", fmt.Errorf("session history count plan unavailable")
+	}
+	stats, err := countSessionEventMetadataRange(plan.path, plan.upper)
+	return stats, plan.identity, err
+}
+
+// SetHistoryStats installs an already identity-gated exact count on a rebuilt
+// content cache so later EOF Refresh calls can increment it without recounting.
+func (sc *SessionCache) SetHistoryStats(stats SessionHistoryStats) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.historyStats = stats
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +524,7 @@ func (sc *SessionCache) IngestEvents(orchDir string) {
 	sc.eventsOff = newOff
 	for i := range newEntries {
 		sc.maybeInflateSoulFlow(&newEntries[i])
+		sc.addEventHistoryEntry(newEntries[i])
 	}
 	// Inflate any pre-existing entries (those parsed in earlier polls
 	// before their voices landed in soul_flow.jsonl, e.g. on initial
@@ -462,143 +535,765 @@ func (sc *SessionCache) IngestEvents(orchDir string) {
 	sc.append(newEntries...)
 }
 
-// ingestEventsFromSQLite replays the whole covered history from the SQLite index
-// (window 0). It is the unbounded entry point retained for the real-history probe
-// and for full/complete rebuilds; windowed first frames call
-// ingestEventsFromSQLiteWindowed directly.
-func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
-	return sc.ingestEventsFromSQLiteWindowed(orchDir, 0)
+type sessionJSONLWindowLine struct {
+	start int64
+	end   int64
 }
 
-// ingestEventsFromSQLiteWindowed replays session events from the additive SQLite
-// index. A positive window bounds the replay to the newest `window` session rows
-// for an O(window) first frame; window <= 0 replays the whole covered history.
-// Regardless of windowing, eventsOff is advanced to the full EOF complete-record
-// boundary so Refresh resumes from EOF and never re-ingests the excluded older
-// window. When a window truncates older events, sc.complete is set false so a
-// partial cache is never persisted as if complete.
-func (sc *SessionCache) ingestEventsFromSQLiteWindowed(orchDir string, window int) bool {
-	if orchDir == "" {
-		return false
+// readPreviousJSONLLine retains only a fixed prefix for compatibility with the
+// range finder callers; metadata classification itself structurally scans the
+// entire range via readSessionEventMetadataRange.
+const sessionCountPrefixLimit = 128 * 1024
+
+func lastCompleteJSONLOffset(f *os.File) int64 {
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return 0
 	}
-	coverage, err := sqlitelog.QueryEventsIndexCoverage(orchDir)
-	if err != nil || !coverage.HasRows() || !coverage.TailNearEOF() {
-		return false
+	size := info.Size()
+	var one [1]byte
+	if _, err := f.ReadAt(one[:], size-1); err == nil && one[0] == '\n' {
+		return size
 	}
-	// Resume immediately after the highest-offset record proven present in this
-	// SQLite snapshot. Coverage and streaming use the same canonical source and
-	// captured MaxOffset horizon; later index rows belong to the next JSONL Refresh.
-	eventsPath := coverage.SourceFile
-	eventsBoundary := indexedJSONLBoundary(eventsPath, coverage.MaxOffset, coverage.FileSize)
-	if eventsBoundary <= 0 {
-		return false
-	}
-	if sc.afterSQLiteCoverage != nil {
-		sc.afterSQLiteCoverage()
-	}
-	sc.ingestSoulFlowVoices(orchDir)
-	newEntries := make([]SessionEntry, 0)
-	// Stream the newest indexed rows first (up to `window` for a positive window;
-	// the whole covered history for window <= 0). The pre-index JSONL prefix is
-	// the OLDEST slice of history and is stitched only when needed (below), so the
-	// ordinary fully-indexed first frame never scans it. Final chronological order
-	// is established by the timestamp sort in rebuildFromSources, so appending the
-	// (older) prefix after the (newer) indexed rows is safe.
-	seenRows := 0
-	err = sqlitelog.StreamSessionEventsWindow(orchDir, coverage, window, func(row sqlitelog.SessionEventRow) error {
-		seenRows++
-		if entry := parseSQLiteEvent(row); entry != nil {
-			newEntries = append(newEntries, *entry)
+	for pos := size - 1; pos >= 0; {
+		start := pos - 64*1024 + 1
+		if start < 0 {
+			start = 0
 		}
-		return nil
-	})
+		buf := make([]byte, pos-start+1)
+		if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+			return 0
+		}
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+			return start + int64(i) + 1
+		}
+		if start == 0 {
+			return 0
+		}
+		pos = start - 1
+	}
+	return 0
+}
+
+func readPreviousJSONLLine(f *os.File, end int64) (sessionJSONLWindowLine, []byte, bool, bool) {
+	if end <= 0 {
+		return sessionJSONLWindowLine{}, nil, false, false
+	}
+	contentEnd := end
+	var one [1]byte
+	if _, err := f.ReadAt(one[:], end-1); err != nil {
+		return sessionJSONLWindowLine{}, nil, false, false
+	}
+	if one[0] == '\n' {
+		contentEnd--
+	}
+	start := int64(0)
+	for pos := contentEnd - 1; pos >= 0; {
+		blockStart := pos - 64*1024 + 1
+		if blockStart < 0 {
+			blockStart = 0
+		}
+		buf := make([]byte, pos-blockStart+1)
+		if _, err := f.ReadAt(buf, blockStart); err != nil && err != io.EOF {
+			return sessionJSONLWindowLine{}, nil, false, false
+		}
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+			start = blockStart + int64(i) + 1
+			break
+		}
+		if blockStart == 0 {
+			break
+		}
+		pos = blockStart - 1
+	}
+	lineLen := contentEnd - start
+	readLen := lineLen
+	if readLen > sessionCountPrefixLimit {
+		readLen = sessionCountPrefixLimit
+	}
+	line := make([]byte, readLen)
+	if len(line) > 0 {
+		if _, err := f.ReadAt(line, start); err != nil && err != io.EOF {
+			return sessionJSONLWindowLine{}, nil, false, false
+		}
+	}
+	return sessionJSONLWindowLine{start: start, end: end}, bytes.TrimSpace(line), lineLen > readLen, true
+}
+
+// ingestEventsFromJSONLWindowed reads backward from the parser-proven EOF and
+// materializes only the newest requested session records. Older prefix bodies are
+// never parsed on the content path. If the cut lands inside a legacy API group,
+// only its nearest hidden llm_response boundary is retained.
+func (sc *SessionCache) ingestEventsFromJSONLWindowed(orchDir string, window int) bool {
+	if orchDir == "" || window <= 0 {
+		return false
+	}
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	f, err := os.Open(eventsPath)
 	if err != nil {
 		return false
 	}
-	if seenRows == 0 && fileSize(filepath.Join(orchDir, "logs", "events.jsonl")) > 0 {
+	defer f.Close()
+
+	completeOff := lastCompleteJSONLOffset(f)
+	if completeOff == 0 {
+		info, statErr := f.Stat()
+		if statErr != nil || info.Size() != 0 {
+			return false
+		}
+		sc.eventsOff = 0
+		abs, _ := filepath.Abs(eventsPath)
+		sc.historyCountPlan = sessionHistoryCountPlan{identity: fmt.Sprintf("jsonl:%s:%d", filepath.Clean(abs), 0), path: filepath.Clean(abs), upper: 0}
+		return true
+	}
+
+	selectedNewest := make([]sessionJSONLWindowLine, 0, window)
+	scanEnd := completeOff
+	for scanEnd > 0 && len(selectedNewest) < window {
+		rng, _, _, ok := readPreviousJSONLLine(f, scanEnd)
+		if !ok {
+			return false
+		}
+		scanEnd = rng.start
+		meta, valid := readSessionEventMetadataRange(f, rng.start, rng.end-rng.start)
+		if valid && isSessionEventMetadataContent(meta) {
+			selectedNewest = append(selectedNewest, rng)
+		}
+	}
+	selected := make([]sessionJSONLWindowLine, len(selectedNewest))
+	for i := range selectedNewest {
+		selected[len(selectedNewest)-1-i] = selectedNewest[i]
+	}
+	parseRanges := func(ranges []sessionJSONLWindowLine) ([]SessionEntry, bool) {
+		entries := make([]SessionEntry, 0, len(ranges))
+		for _, rng := range ranges {
+			line := make([]byte, rng.end-rng.start)
+			n, err := f.ReadAt(line, rng.start)
+			if err != nil && err != io.EOF || n != len(line) {
+				return nil, false
+			}
+			if entry := parseEvent(bytes.TrimRight(line, "\r\n")); entry != nil {
+				entries = append(entries, *entry)
+			}
+		}
+		return entries, true
+	}
+	newEntries, ok := parseRanges(selected)
+	if !ok {
 		return false
 	}
-
-	// Legacy api-call-group boundary: a positive window can cut INTO a legacy
-	// group whose only grouping signal is a hidden llm_response header. If the
-	// oldest loaded entry is a legacy grouped entry with no explicit api_call_id,
-	// its header was excluded, and buildMessages would fall back to the
-	// tool_result→tool_call heuristic and render a spurious separator the
-	// full-history view never shows. Reach back JUST to the nearest llm_response
-	// header (an llm_call means the group was reset — leave it), pulling only the
-	// small [boundaryOffset, windowLower) extension so the leading entries derive
-	// the same group id. Never runs when the window starts at a header, when the
-	// oldest entry already carries an explicit api_call_id, or when the window did
-	// not fill (seenRows < window ⇒ we already loaded from the first indexed row).
-	if window > 0 && seenRows == window && len(newEntries) > 0 && needsGroupBackExtension(newEntries[0]) {
-		if boundary, bErr := sqlitelog.QueryWindowGroupBoundary(orchDir, coverage, window); bErr == nil &&
-			boundary.HasBoundary && boundary.BoundaryType == "llm_response" && boundary.BoundaryOffset < boundary.WindowLower {
-			extension := make([]SessionEntry, 0)
-			_ = sqlitelog.StreamSessionEventsOffsetRange(orchDir, coverage, boundary.BoundaryOffset, boundary.WindowLower, func(row sqlitelog.SessionEventRow) error {
-				if entry := parseSQLiteEvent(row); entry != nil {
-					extension = append(extension, *entry)
+	if len(newEntries) > 0 && needsGroupBackExtension(newEntries[0]) && len(selected) > 0 {
+		for boundaryEnd := selected[0].start; boundaryEnd > 0; {
+			rng, _, _, ok := readPreviousJSONLLine(f, boundaryEnd)
+			if !ok {
+				return false
+			}
+			boundaryEnd = rng.start
+			meta, valid := readSessionEventMetadataRange(f, rng.start, rng.end-rng.start)
+			if !valid {
+				continue
+			}
+			if meta.Type == "llm_call" {
+				break
+			}
+			if meta.Type == "llm_response" {
+				boundary, ok := parseRanges([]sessionJSONLWindowLine{rng})
+				if !ok {
+					return false
 				}
-				return nil
-			})
-			// Prepend the extension; the timestamp sort in rebuildFromSources
-			// re-establishes final chronological order regardless of append order.
-			newEntries = append(extension, newEntries...)
+				if len(boundary) == 1 {
+					boundary[0].TokenUsage = nil // grouping marker only; never an extra visible body
+					newEntries = append(boundary, newEntries...)
+				}
+				break
+			}
 		}
 	}
 
-	// Pre-index JSONL prefix [0, MinOffset): rows on disk that the additive index
-	// does not represent (a tail-only index, or an index that starts a few rows
-	// in). It is scanned ONLY when the indexed rows do not already satisfy the
-	// request — never on the ordinary fully-indexed first-frame path:
-	//   - window <= 0 (full/complete rebuild): stitch the ENTIRE prefix so the
-	//     cache stays byte-complete, exactly as before.
-	//   - window > 0 but the index held fewer than `window` session rows
-	//     (seenRows < window): the indexed window is exhausted and the caller is
-	//     reaching for older history (an explicit larger older-page request, or a
-	//     history smaller than the window). Stitch the NEWEST (window-seenRows)
-	//     prefix events so older history becomes reachable instead of being
-	//     permanently stranded below the index.
-	// A positive window that filled to capacity (seenRows == window) leaves the
-	// prefix untouched — older events remain, so the cache is partial and the next
-	// larger request resolves it.
-	stitchedWholePrefix := true // true when no older-than-loaded events remain
-	if window <= 0 {
-		if !coverage.StartsAtBeginning() {
-			prefixEntries, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
-			newEntries = append(newEntries, prefixEntries...)
-		}
-	} else if seenRows < window {
-		prefixAll, _ := sc.tailJSONLRange(eventsPath, 0, coverage.MinOffset, parseEvent)
-		take := window - seenRows
-		if take >= len(prefixAll) {
-			take = len(prefixAll)
-		} else {
-			// Only the newest `take` prefix events fit the window; older prefix
-			// events remain on disk, so the cache is still partial.
-			stitchedWholePrefix = false
-		}
-		newEntries = append(newEntries, prefixAll[len(prefixAll)-take:]...)
-	} else {
-		// Window filled by indexed rows alone; older events (indexed and/or in the
-		// prefix) remain unloaded.
-		stitchedWholePrefix = false
-	}
-
-	// Completeness for a positive window: partial unless we have reached the very
-	// beginning of history — i.e., the window did not fill with indexed rows AND
-	// the entire pre-index prefix was stitched. window <= 0 stays complete.
-	if window > 0 && !stitchedWholePrefix {
-		sc.complete = false
-	}
+	sc.ingestSoulFlowVoices(orchDir)
 	for i := range newEntries {
 		sc.maybeInflateSoulFlow(&newEntries[i])
 	}
 	for i := range sc.entries {
 		sc.maybeInflateSoulFlow(&sc.entries[i])
 	}
+	if scanEnd > 0 {
+		sc.complete = false
+	}
+	abs, _ := filepath.Abs(eventsPath)
+	abs = filepath.Clean(abs)
+	sc.historyCountPlan = sessionHistoryCountPlan{identity: fmt.Sprintf("jsonl:%s:%d", abs, completeOff), path: abs, upper: completeOff}
 	sc.append(newEntries...)
-	sc.eventsOff = eventsBoundary
+	sc.eventsOff = completeOff
 	return true
+}
+
+// ingestEventsFromSQLite is retained for the opt-in diagnostic probe. It declines
+// SQLite replay because endpoint coverage cannot establish interior continuity.
+func (sc *SessionCache) ingestEventsFromSQLite(orchDir string) bool {
+	return sc.ingestEventsFromSQLiteWindowed(orchDir, 0)
+}
+
+// ingestEventsFromSQLiteWindowed is the single gate for the disabled optimization.
+// Keeping the rejection here prevents any caller from mistaking sparse endpoint
+// coverage for complete canonical history.
+func (sc *SessionCache) ingestEventsFromSQLiteWindowed(orchDir string, window int) bool {
+	// QueryEventsIndexCoverage proves identity and endpoints, not interior
+	// continuity. Decline this optimization until the index can supply a sound
+	// continuity proof; callers fall back to canonical JSONL, whose backward scan
+	// remains bounded to the requested content window.
+	return false
+}
+
+func (sc *SessionCache) addEventHistoryEntry(e SessionEntry) {
+	switch e.Type {
+	case "insight":
+		sc.historyStats.Insights++
+	case "llm_call":
+		// Hidden grouping reset, never a rendered Mail entry.
+	case "llm_response":
+		if e.TokenUsage != nil {
+			sc.historyStats.Detailed++
+		}
+	default:
+		sc.historyStats.Detailed++
+	}
+}
+
+type nonEmptyJSONString bool
+
+type nonZeroJSONNumber bool
+
+type sessionEventCountMetadata struct {
+	Type         string
+	Text         nonEmptyJSONString
+	InputTokens  nonZeroJSONNumber
+	OutputTokens nonZeroJSONNumber
+	CachedTokens nonZeroJSONNumber
+}
+
+// metadataJSONScanner validates and walks one JSON value without retaining
+// unrelated values. In particular, arbitrarily large nested strings are consumed
+// byte-by-byte rather than materialized merely to discover a later top-level key.
+type metadataJSONScanner struct {
+	r *bufio.Reader
+}
+
+func (s *metadataJSONScanner) readNonSpace() (byte, error) {
+	for {
+		b, err := s.r.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		switch b {
+		case ' ', '\t', '\r', '\n':
+			continue
+		default:
+			return b, nil
+		}
+	}
+}
+
+func (s *metadataJSONScanner) expectBytes(want string) bool {
+	for i := 0; i < len(want); i++ {
+		b, err := s.r.ReadByte()
+		if err != nil || b != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// scanString consumes a JSON string after its opening quote. Captured includes
+// quotes and is suitable for bounded json.Unmarshal; once limit is exceeded, scanning
+// continues without growing memory. nonEmpty reflects the decoded string's
+// emptiness (any valid byte or escape between quotes decodes to content).
+func (s *metadataJSONScanner) scanString(limit int) (captured string, nonEmpty, overflow, ok bool) {
+	buf := make([]byte, 0, min(limit, 64))
+	if limit > 0 {
+		buf = append(buf, '"')
+	}
+	appendByte := func(b byte) {
+		if limit <= 0 || overflow {
+			return
+		}
+		if len(buf) >= limit {
+			overflow = true
+			buf = nil
+			return
+		}
+		buf = append(buf, b)
+	}
+	for {
+		b, err := s.r.ReadByte()
+		if err != nil {
+			return "", false, overflow, false
+		}
+		if b == '"' {
+			appendByte(b)
+			if limit > 0 && !overflow {
+				captured = string(buf)
+			}
+			return captured, nonEmpty, overflow, true
+		}
+		if b < 0x20 {
+			return "", false, overflow, false
+		}
+		nonEmpty = true
+		appendByte(b)
+		if b != '\\' {
+			continue
+		}
+		esc, err := s.r.ReadByte()
+		if err != nil {
+			return "", false, overflow, false
+		}
+		appendByte(esc)
+		switch esc {
+		case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		case 'u':
+			for i := 0; i < 4; i++ {
+				h, err := s.r.ReadByte()
+				if err != nil || !((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F')) {
+					return "", false, overflow, false
+				}
+				appendByte(h)
+			}
+		default:
+			return "", false, overflow, false
+		}
+	}
+}
+
+func isJSONNumberByte(b byte) bool {
+	return b == '-' || b == '+' || b == '.' || b == 'e' || b == 'E' || b >= '0' && b <= '9'
+}
+
+func validJSONNumber(number string) bool {
+	if number == "" {
+		return false
+	}
+	i := 0
+	if number[i] == '-' {
+		i++
+		if i == len(number) {
+			return false
+		}
+	}
+	if number[i] == '0' {
+		i++
+	} else if number[i] >= '1' && number[i] <= '9' {
+		for i < len(number) && number[i] >= '0' && number[i] <= '9' {
+			i++
+		}
+	} else {
+		return false
+	}
+	if i < len(number) && number[i] == '.' {
+		i++
+		start := i
+		for i < len(number) && number[i] >= '0' && number[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+	}
+	if i < len(number) && (number[i] == 'e' || number[i] == 'E') {
+		i++
+		if i < len(number) && (number[i] == '+' || number[i] == '-') {
+			i++
+		}
+		start := i
+		for i < len(number) && number[i] >= '0' && number[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+	}
+	return i == len(number)
+}
+
+func (s *metadataJSONScanner) scanNumber(first byte, capture bool) (string, bool) {
+	const maxNumberBytes = 1024
+	buf := make([]byte, 0, 32)
+	overflow := false
+	add := func(b byte) {
+		if !capture || overflow {
+			return
+		}
+		if len(buf) == maxNumberBytes {
+			overflow = true
+			buf = nil
+			return
+		}
+		buf = append(buf, b)
+	}
+	add(first)
+	for {
+		peek, err := s.r.Peek(1)
+		if err != nil || !isJSONNumberByte(peek[0]) {
+			break
+		}
+		b, _ := s.r.ReadByte()
+		add(b)
+	}
+	if overflow {
+		return "", false
+	}
+	if !capture {
+		return "", true
+	}
+	number := string(buf)
+	return number, validJSONNumber(number)
+}
+
+func (s *metadataJSONScanner) skipValue(first byte, depth int) bool {
+	switch first {
+	case '"':
+		_, _, _, ok := s.scanString(0)
+		return ok
+	case '{':
+		if depth >= 10000 {
+			return false
+		}
+		b, err := s.readNonSpace()
+		if err != nil {
+			return false
+		}
+		if b == '}' {
+			return true
+		}
+		for {
+			if b != '"' {
+				return false
+			}
+			if _, _, _, ok := s.scanString(0); !ok {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil || b != ':' {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil || !s.skipValue(b, depth+1) {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil {
+				return false
+			}
+			if b == '}' {
+				return true
+			}
+			if b != ',' {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil {
+				return false
+			}
+		}
+	case '[':
+		if depth >= 10000 {
+			return false
+		}
+		b, err := s.readNonSpace()
+		if err != nil {
+			return false
+		}
+		if b == ']' {
+			return true
+		}
+		for {
+			if !s.skipValue(b, depth+1) {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil {
+				return false
+			}
+			if b == ']' {
+				return true
+			}
+			if b != ',' {
+				return false
+			}
+			b, err = s.readNonSpace()
+			if err != nil {
+				return false
+			}
+		}
+	case 't':
+		return s.expectBytes("rue")
+	case 'f':
+		return s.expectBytes("alse")
+	case 'n':
+		return s.expectBytes("ull")
+	default:
+		if first != '-' && (first < '0' || first > '9') {
+			return false
+		}
+		number, ok := s.scanNumber(first, true)
+		if !ok {
+			return false
+		}
+		// encoding/json decodes every untyped JSON number as float64, even in
+		// unrelated fields. Match its range check so an overflowing decoy value
+		// cannot make metadata accept a record the canonical parser rejects.
+		_, err := strconv.ParseFloat(number, 64)
+		return err == nil
+	}
+}
+
+func (s *metadataJSONScanner) scanMetadata() (sessionEventCountMetadata, bool) {
+	var meta sessionEventCountMetadata
+	first, err := s.readNonSpace()
+	if err != nil || first != '{' {
+		return meta, false
+	}
+	b, err := s.readNonSpace()
+	if err != nil {
+		return meta, false
+	}
+	if b == '}' {
+		return meta, s.onlyWhitespaceRemains()
+	}
+	for {
+		if b != '"' {
+			return meta, false
+		}
+		rawKey, _, overflow, ok := s.scanString(256)
+		if !ok {
+			return meta, false
+		}
+		key := ""
+		if !overflow {
+			if err = json.Unmarshal([]byte(rawKey), &key); err != nil {
+				return meta, false
+			}
+		}
+		b, err = s.readNonSpace()
+		if err != nil || b != ':' {
+			return meta, false
+		}
+		b, err = s.readNonSpace()
+		if err != nil {
+			return meta, false
+		}
+		switch key {
+		case "type":
+			meta.Type = ""
+			if b == '"' {
+				raw, _, overflow, ok := s.scanString(256)
+				if !ok {
+					return meta, false
+				}
+				if !overflow {
+					if err = json.Unmarshal([]byte(raw), &meta.Type); err != nil {
+						return meta, false
+					}
+				}
+			} else if !s.skipValue(b, 1) {
+				return meta, false
+			}
+		case "text":
+			meta.Text = false
+			if b == '"' {
+				_, nonEmpty, _, ok := s.scanString(0)
+				if !ok {
+					return meta, false
+				}
+				meta.Text = nonEmptyJSONString(nonEmpty)
+			} else if !s.skipValue(b, 1) {
+				return meta, false
+			}
+		case "input_tokens", "output_tokens", "cached_tokens":
+			var dst *nonZeroJSONNumber
+			switch key {
+			case "input_tokens":
+				dst = &meta.InputTokens
+			case "output_tokens":
+				dst = &meta.OutputTokens
+			default:
+				dst = &meta.CachedTokens
+			}
+			*dst = false
+			if b == '-' || b >= '0' && b <= '9' {
+				number, ok := s.scanNumber(b, true)
+				if !ok {
+					return meta, false
+				}
+				value, err := strconv.ParseFloat(number, 64)
+				if err != nil {
+					return meta, false
+				}
+				*dst = nonZeroJSONNumber(int64(value) != 0)
+			} else if !s.skipValue(b, 1) {
+				return meta, false
+			}
+		default:
+			if !s.skipValue(b, 1) {
+				return meta, false
+			}
+		}
+		b, err = s.readNonSpace()
+		if err != nil {
+			return meta, false
+		}
+		if b == '}' {
+			return meta, s.onlyWhitespaceRemains()
+		}
+		if b != ',' {
+			return meta, false
+		}
+		b, err = s.readNonSpace()
+		if err != nil {
+			return meta, false
+		}
+	}
+}
+
+func (s *metadataJSONScanner) onlyWhitespaceRemains() bool {
+	for {
+		b, err := s.r.ReadByte()
+		if err == io.EOF {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+		if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+			return false
+		}
+	}
+}
+
+func readSessionEventMetadata(r io.Reader) (sessionEventCountMetadata, bool) {
+	s := metadataJSONScanner{r: bufio.NewReaderSize(r, 32*1024)}
+	return s.scanMetadata()
+}
+
+func canonicalSessionEventMetadata(data []byte) (sessionEventCountMetadata, bool) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return sessionEventCountMetadata{}, false
+	}
+	var meta sessionEventCountMetadata
+	meta.Type, _ = raw["type"].(string)
+	if text, ok := raw["text"].(string); ok {
+		meta.Text = nonEmptyJSONString(text != "")
+	}
+	for key, dst := range map[string]*nonZeroJSONNumber{
+		"input_tokens":  &meta.InputTokens,
+		"output_tokens": &meta.OutputTokens,
+		"cached_tokens": &meta.CachedTokens,
+	} {
+		if value, ok := raw[key].(float64); ok {
+			*dst = nonZeroJSONNumber(int64(value) != 0)
+		}
+	}
+	return meta, true
+}
+
+func readSessionEventMetadataRange(f *os.File, start, length int64) (sessionEventCountMetadata, bool) {
+	if length < 0 {
+		return sessionEventCountMetadata{}, false
+	}
+	if meta, ok := readSessionEventMetadata(io.NewSectionReader(f, start, length)); ok {
+		return meta, true
+	}
+	// The streaming fast path deliberately caps captured key/type/number
+	// lexemes. Fall back to the canonical decoder for the one physical record
+	// whenever that bounded parser declines it. This preserves exact
+	// encoding/json acceptance, duplicate-key, and float64 number semantics
+	// without ever retaining more than one historical record at a time.
+	bufferLen := int(length)
+	if int64(bufferLen) != length {
+		return sessionEventCountMetadata{}, false
+	}
+	data := make([]byte, bufferLen)
+	if n, err := f.ReadAt(data, start); n != len(data) || err != nil {
+		return sessionEventCountMetadata{}, false
+	}
+	return canonicalSessionEventMetadata(data)
+}
+
+// countSessionEventMetadataRange scans [0, upper) without retaining historical
+// bodies. Physical records are discovered with a fixed-size reader and then
+// structurally scanned from the file, so memory is bounded even when relevant
+// top-level fields follow multi-megabyte nested or scalar payloads.
+func countSessionEventMetadataRange(path string, upper int64) (SessionHistoryStats, error) {
+	var out SessionHistoryStats
+	if upper <= 0 {
+		return out, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return out, err
+	}
+	defer f.Close()
+	reader := bufio.NewReaderSize(io.LimitReader(f, upper), 64*1024)
+	var recordStart, consumed int64
+	for {
+		fragment, readErr := reader.ReadSlice('\n')
+		consumed += int64(len(fragment))
+		if len(fragment) > 0 && fragment[len(fragment)-1] == '\n' {
+			if meta, ok := readSessionEventMetadataRange(f, recordStart, consumed-recordStart); ok {
+				entryStats := statsForSessionEventMetadata(meta)
+				out.Detailed += entryStats.Detailed
+				out.Insights += entryStats.Insights
+			}
+			recordStart = consumed
+		}
+		if readErr == bufio.ErrBufferFull {
+			continue
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return out, readErr
+		}
+	}
+	return out, nil
+}
+
+// isSessionEventMetadataContent mirrors parseEventMap's entry membership for a
+// bounded content window. Hidden legacy grouping carriers still consume slots:
+// buildMessages needs llm_call/llm_response even when they add no visible count.
+func isSessionEventMetadataContent(meta sessionEventCountMetadata) bool {
+	if meta.Type == "llm_call" || meta.Type == "llm_response" {
+		return true
+	}
+	stats := statsForSessionEventMetadata(meta)
+	return stats.Detailed > 0 || stats.Insights > 0
+}
+
+func statsForSessionEventMetadata(meta sessionEventCountMetadata) SessionHistoryStats {
+	switch meta.Type {
+	case "thinking", "diary", "text_input", "text_output":
+		if bool(meta.Text) {
+			return SessionHistoryStats{Detailed: 1}
+		}
+	case "insight":
+		if bool(meta.Text) {
+			return SessionHistoryStats{Insights: 1}
+		}
+	case "llm_call":
+		return SessionHistoryStats{}
+	case "llm_response":
+		if bool(meta.InputTokens) || bool(meta.OutputTokens) || bool(meta.CachedTokens) {
+			return SessionHistoryStats{Detailed: 1}
+		}
+	case "tool_call", "tool_result", "soul_flow", "notification", "aed", "apriori_summary",
+		"consultation_fire", "notification_pair_injected", "aed_attempt", "aed_exhausted", "aed_timeout", "apriori_summary_generated",
+		"apriori_summary_cap_refused", "apriori_summary_failed", "apriori_summary_empty",
+		"apriori_summary_no_summarizer":
+		return SessionHistoryStats{Detailed: 1}
+	}
+	return SessionHistoryStats{}
 }
 
 // needsGroupBackExtension reports whether the oldest loaded windowed entry is a

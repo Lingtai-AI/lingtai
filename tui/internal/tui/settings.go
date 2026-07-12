@@ -88,17 +88,17 @@ func NewSettingsModel(globalDir, projectDir, orchDir string, tuiCfg config.TUICo
 		}
 	}
 
-	pageSizeOptions := []string{"100", "200", "500", "1000", "2000", "infinite"}
-	pageSizeCurrent := 4 // default to 2000 (the newest-window default)
-	if tuiCfg.MailPageSize <= 0 {
-		pageSizeCurrent = len(pageSizeOptions) - 1 // infinite
-	} else {
-		pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
-		for i, p := range pageSizeOptions {
-			if p == pageSizeStr {
-				pageSizeCurrent = i
-				break
-			}
+	pageSizeOptions := make([]string, len(config.AllowedMailPageSizes))
+	for i, size := range config.AllowedMailPageSizes {
+		pageSizeOptions[i] = fmt.Sprintf("%d", size)
+	}
+	tuiCfg.MailPageSize = config.NormalizeMailPageSize(tuiCfg.MailPageSize)
+	pageSizeCurrent := 1 // default to the finite 200-item UI/content batch
+	pageSizeStr := fmt.Sprintf("%d", tuiCfg.MailPageSize)
+	for i, p := range pageSizeOptions {
+		if p == pageSizeStr {
+			pageSizeCurrent = i
+			break
 		}
 	}
 
@@ -306,13 +306,9 @@ func (m *SettingsModel) applyField(f *SettingField) tea.Cmd {
 		m.tuiConfig.Language = val
 		i18n.SetLang(val)
 	case "mail_page_size":
-		if val == "infinite" {
-			m.tuiConfig.MailPageSize = 0
-		} else {
-			size := config.DefaultTUIConfig().MailPageSize
-			fmt.Sscanf(val, "%d", &size)
-			m.tuiConfig.MailPageSize = size
-		}
+		size := config.DefaultTUIConfig().MailPageSize
+		fmt.Sscanf(val, "%d", &size)
+		m.tuiConfig.MailPageSize = size
 	case "insights":
 		m.tuiConfig.Insights = val == "on"
 	case "auto_refresh":
@@ -459,7 +455,7 @@ func (m SettingsModel) View() string {
 
 		// Show display-friendly value
 		displayVal := value
-		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "mail_page_size" && value == "infinite") || (f.Key == "tool_truncate" && value == "off") {
+		if f.Key == "insights" || f.Key == "auto_refresh" || (f.Key == "tool_truncate" && value == "off") {
 			displayVal = i18n.T("settings." + value)
 		} else if f.Key == "theme" {
 			displayVal = i18n.T("theme." + value)

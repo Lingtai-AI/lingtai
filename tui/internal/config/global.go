@@ -100,15 +100,28 @@ type TUIConfig struct {
 // (auto_refresh_off=true) turns it off.
 func (tc TUIConfig) AutoRefreshEnabled() bool { return !tc.AutoRefreshOff }
 
+const DefaultMailPageSize = 200
+
+// AllowedMailPageSizes is the complete finite domain accepted by mail_page_size.
+// Keep the settings picker and constructor normalization on this single source.
+var AllowedMailPageSizes = [...]int{100, 200, 500, 1000, 2000}
+
+// NormalizeMailPageSize returns the configured finite page/content-window size,
+// or the default for legacy, hand-written, or otherwise unsupported values.
+func NormalizeMailPageSize(size int) int {
+	for _, allowed := range AllowedMailPageSizes {
+		if size == allowed {
+			return size
+		}
+	}
+	return DefaultMailPageSize
+}
+
 // DefaultTUIConfig returns sensible defaults.
 func DefaultTUIConfig() TUIConfig {
 	return TUIConfig{
-		Language: "en",
-		// Newest-window default: the first Mail frame loads only the newest 2000
-		// session entries (Jason's latency contract). mail_page_size owns both the
-		// initial load window and the render/Ctrl+U page size; "infinite" (0) opts
-		// back into loading the whole history.
-		MailPageSize: 2000,
+		Language:     "en",
+		MailPageSize: DefaultMailPageSize,
 		Insights:     false,
 	}
 }
@@ -126,11 +139,7 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 	if tc.Language == "" {
 		tc.Language = "en"
 	}
-	if tc.MailPageSize > 0 && tc.MailPageSize < 100 {
-		// Bump only degenerate tiny values to the sane default. Explicit finite
-		// values >= 100 (e.g. 100, 200, 500) and infinite (0) are preserved.
-		tc.MailPageSize = DefaultTUIConfig().MailPageSize
-	}
+	tc.MailPageSize = NormalizeMailPageSize(tc.MailPageSize)
 	// Insights defaults to false when absent from JSON.
 	// No override needed — zero value of bool is false.
 	return tc
@@ -138,6 +147,7 @@ func LoadTUIConfig(globalDir string) TUIConfig {
 
 // SaveTUIConfig writes ~/.lingtai-tui/tui_config.json.
 func SaveTUIConfig(globalDir string, tc TUIConfig) error {
+	tc.MailPageSize = NormalizeMailPageSize(tc.MailPageSize)
 	data, err := json.MarshalIndent(tc, "", "  ")
 	if err != nil {
 		return err

@@ -141,7 +141,7 @@ func TestRefreshDoesNotReingestSQLiteHistory(t *testing.T) {
 	assertSessionBodiesExactly(t, sc.Entries(), "hello from sqlite", "appended during sqlite rebuild")
 }
 
-func TestSQLiteReplayScopesRowsToCanonicalRootSource(t *testing.T) {
+func TestCanonicalJSONLRebuildIgnoresForeignSQLiteRows(t *testing.T) {
 	sqliteBin := requireSessionSQLite(t)
 
 	t.Run("daemon offset beyond root EOF cannot leak or reset replay", func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestSQLiteReplayScopesRowsToCanonicalRootSource(t *testing.T) {
 		sc := NewSessionCache(humanDir, root)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
-		assertSessionBodiesExactly(t, sc.Entries(), "root indexed")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root tail")
 		sc.Refresh(cache, "human", orchDir, "orch")
 		sc.Refresh(cache, "human", orchDir, "orch")
 		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root tail")
@@ -183,19 +183,19 @@ func TestSQLiteReplayScopesRowsToCanonicalRootSource(t *testing.T) {
 		sc := NewSessionCache(humanDir, root)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
-		assertSessionBodiesExactly(t, sc.Entries(), "root indexed")
+		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root must not be skipped")
 		sc.Refresh(cache, "human", orchDir, "orch")
 		sc.Refresh(cache, "human", orchDir, "orch")
 		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root must not be skipped")
 	})
 }
 
-func TestSQLiteReplayUsesCapturedCoverageHorizon(t *testing.T) {
+func TestCanonicalJSONLRebuildIncludesRowsMissingFromSQLite(t *testing.T) {
 	sqliteBin := requireSessionSQLite(t)
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
 	firstLine := `{"type":"text_input","ts":1.0,"text":"covered before query"}` + "\n"
-	secondLine := `{"type":"text_output","ts":2.0,"text":"indexed after coverage"}` + "\n"
+	secondLine := `{"type":"text_output","ts":2.0,"text":"missing from sqlite"}` + "\n"
 	writeSessionTestFile(t, eventsPath, firstLine+secondLine)
 	rootSource := canonicalSessionTestPath(t, eventsPath)
 	createSessionSQLite(t, sqliteBin, orchDir,
@@ -204,18 +204,12 @@ func TestSQLiteReplayUsesCapturedCoverageHorizon(t *testing.T) {
 
 	sc := NewSessionCache(humanDir, root)
 	cache := NewMailCache(humanDir).Refresh()
-	sc.afterSQLiteCoverage = func() {
-		runSessionSQLiteSQL(t, sqliteBin, orchDir,
-			sessionSQLiteInsert(2.0, "text_output", "indexed after coverage", rootSource, int64(len(firstLine)), "agent_events", "agent"),
-		)
-	}
 	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
-	sc.afterSQLiteCoverage = nil
-	assertSessionBodiesExactly(t, sc.Entries(), "covered before query")
+	assertSessionBodiesExactly(t, sc.Entries(), "covered before query", "missing from sqlite")
 
 	sc.Refresh(cache, "human", orchDir, "orch")
 	sc.Refresh(cache, "human", orchDir, "orch")
-	assertSessionBodiesExactly(t, sc.Entries(), "covered before query", "indexed after coverage")
+	assertSessionBodiesExactly(t, sc.Entries(), "covered before query", "missing from sqlite")
 }
 
 func TestSQLiteReplayRejectsInvalidNoNewlineBoundary(t *testing.T) {

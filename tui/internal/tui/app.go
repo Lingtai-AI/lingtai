@@ -300,9 +300,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// === Cross-view messages ===
 
-	case mailRefreshMsg, mailPersistMsg, homeTelemetryMsg:
-		// Mail refresh/rebuild, its post-frame persistence phase, and telemetry can
-		// outlive the view that launched them. Route all at the root so Projects/Help
+	case mailRefreshMsg, mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg:
+		// Mail content/count rebuilds, older pages, post-frame persistence, and
+		// telemetry can outlive the view that launched them. Route all at the root so Projects/Help
 		// cannot drop Mail's state machine; MailModel owns generation acceptance.
 		var cmd tea.Cmd
 		a.mail, cmd = a.mail.Update(msg)
@@ -1636,21 +1636,29 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.mail.copyMode = false
 		// Reload config in case settings changed it
 		a.tuiConfig = config.LoadTUIConfig(a.globalDir)
-		ps := a.tuiConfig.MailPageSize
-		if ps <= 0 {
-			ps = unlimitedPageSize
-		}
+		ps := config.NormalizeMailPageSize(a.tuiConfig.MailPageSize)
+		pageSizeChanged := ps != a.mail.pageSize
 		a.mail.pageSize = ps
 		a.mail.insightsEnabled = a.tuiConfig.Insights
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
+		mailCmd := a.mail.refreshMail
+		if pageSizeChanged {
+			// The page size owns both visible batching and the bounded content
+			// snapshot. A preserved cache built with the previous setting cannot be
+			// relabelled in place: start a fresh generation and rebuild exactly one
+			// new page so old count/older-page completions are rejected.
+			a.mail.initialLoading = true
+			a.installMailModel(a.mail)
+			mailCmd = a.mail.initialRebuild
+		}
 		// Restart mail tick + refresh + pulse (ticks die when another view is active).
 		// Also (re)start the app-level auto-refresh ticker: this is the path
 		// taken when leaving /settings, where auto refresh may have just been
 		// toggled back on. startAutoRefresh is a no-op if it is already armed.
 		a, arCmd := a.startAutoRefresh()
-		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize(), arCmd)
+		return a, tea.Batch(mailCmd, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize(), arCmd)
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)

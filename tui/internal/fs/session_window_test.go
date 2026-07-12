@@ -1,8 +1,10 @@
 package fs
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -184,26 +186,25 @@ func TestWindowedRebuildTailIndexReachesJSONLPrefixOnOlderLoad(t *testing.T) {
 	}
 }
 
-// TestWindowedExactEqualWindowResolvesToCompleteOnNextRequest proves finding D:
-// a window that exactly equals the (fully indexed) history is conservatively
-// reported partial (we cannot cheaply tell that no older row exists once the
-// window fills), but the NEXT larger request must resolve to complete — never an
-// endlessly-partial cache.
-func TestWindowedExactEqualWindowResolvesToCompleteOnNextRequest(t *testing.T) {
+// TestWindowedExactEqualWindowIsComplete proves that the authoritative backward
+// JSONL scan can distinguish an exactly-full window from a truncated one: after
+// selecting the oldest record its scan boundary is zero, so completeness is
+// proven immediately.
+func TestWindowedExactEqualWindowIsComplete(t *testing.T) {
 	sqliteBin := requireSessionSQLite(t)
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	buildWindowSQLiteEvents(t, sqliteBin, orchDir, 4) // history is exactly 4 events
 	cache := NewMailCache(humanDir).Refresh()
 
-	// Window exactly equal to history: fills to capacity → conservatively partial.
+	// Window exactly equal to history reaches byte offset zero and is complete.
 	scEqual := NewSessionCache(humanDir, root)
 	scEqual.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 4)
 	assertSessionBodiesExactly(t, scEqual.Entries(), "e0", "e1", "e2", "e3")
-	if scEqual.Complete() {
-		t.Fatal("a window that exactly fills is conservatively partial (cannot prove no older row)")
+	if !scEqual.Complete() {
+		t.Fatal("an exact authoritative window reaching offset zero must be complete")
 	}
 
-	// The next larger request (one page bigger) must resolve to complete.
+	// A larger request remains complete and stable.
 	scNext := NewSessionCache(humanDir, root)
 	scNext.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 8)
 	assertSessionBodiesExactly(t, scNext.Entries(), "e0", "e1", "e2", "e3")
@@ -237,6 +238,299 @@ func TestWindowedRebuildKeepsOnlyNewestEventsButFullEOFOffset(t *testing.T) {
 	appendSessionTestFile(t, eventsPath, sessionEventJSONL(11.0, "text_output", "e10"))
 	sc.Refresh(cache, "human", orchDir, "orch")
 	assertSessionBodiesExactly(t, sc.Entries(), "e7", "e8", "e9", "e10")
+}
+
+func TestWindowedRebuildWithoutSQLitePreservesLegacyGroupBoundary(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	content := "" +
+		`{"type":"llm_response","ts":1,"model":"m"}` + "\n" +
+		`{"type":"tool_call","ts":2,"tool_name":"read","tool_args":"{}"}` + "\n" +
+		`{"type":"tool_result","ts":3,"tool_name":"read","status":"ok"}` + "\n" +
+		`{"type":"tool_call","ts":4,"tool_name":"grep","tool_args":"{}"}` + "\n" +
+		`{"type":"tool_result","ts":5,"tool_name":"grep","status":"ok"}` + "\n"
+	writeSessionTestFile(t, eventsPath, content)
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 3)
+	entries := sc.Entries()
+	if len(entries) != 4 || entries[0].Type != "llm_response" {
+		t.Fatalf("no-index group extension = %#v, want one hidden boundary plus newest 3 bodies", entries)
+	}
+	if entries[1].Type != "tool_result" || entries[2].Type != "tool_call" || entries[3].Type != "tool_result" {
+		t.Fatalf("no-index window retained older group bodies: %#v", entries)
+	}
+	if sc.Complete() {
+		t.Fatal("group back-extension must not falsely mark a newest-3 window complete")
+	}
+}
+
+func TestWindowedRebuildWithoutSQLiteRetainsOnlyNewestContentAndCountsAll(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	var content string
+	for i := 0; i < 10; i++ {
+		content += sessionEventJSONL(float64(i+1), "text_output", bodyForIndex(i))
+	}
+	writeSessionTestFile(t, eventsPath, content)
+	cache := NewMailCache(humanDir).Refresh()
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
+	assertSessionBodiesExactly(t, sc.Entries(), "e7", "e8", "e9")
+	if sc.Complete() {
+		t.Fatal("no-index newest-3 content window over 10 events must be partial")
+	}
+	if stats := sc.HistoryStats(); stats != (SessionHistoryStats{}) {
+		t.Fatalf("content path synchronously installed count metadata: %+v", stats)
+	}
+	stats, identity, err := sc.ExactHistoryStats()
+	if err != nil || identity == "" || stats.Detailed != 10 || stats.Insights != 0 {
+		t.Fatalf("async exact stats = %+v identity=%q err=%v, want Detailed=10", stats, identity, err)
+	}
+	sc.SetHistoryStats(stats)
+
+	// The bounded content scan leaves the parser-proven EOF boundary, so incremental
+	// Refresh sees only a new tail record rather than re-ingesting excluded rows.
+	appendSessionTestFile(t, eventsPath, sessionEventJSONL(11, "text_output", "e10"))
+	sc.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, sc.Entries(), "e7", "e8", "e9", "e10")
+	if stats := sc.HistoryStats(); stats.Detailed != 11 {
+		t.Fatalf("stats after tail refresh = %+v, want Detailed=11", stats)
+	}
+
+	complete := NewSessionCache(humanDir, root)
+	complete.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 20)
+	if !complete.Complete() || complete.Len() != 11 {
+		t.Fatalf("larger no-index window = complete %v len %d, want true/11", complete.Complete(), complete.Len())
+	}
+}
+
+func TestJSONLWindowSkipsHugeOlderBodyAndCountsItFromBoundedMetadata(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	huge := strings.Repeat("x", 2*1024*1024)
+	content := `{"type":"tool_result","ts":1,"tool_name":"read","result":"` + huge + `"}` + "\n" +
+		sessionEventJSONL(2, "text_output", "e1") +
+		sessionEventJSONL(3, "text_output", "e2") +
+		sessionEventJSONL(4, "text_output", "e3")
+	writeSessionTestFile(t, eventsPath, content)
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 2)
+	assertSessionBodiesExactly(t, sc.Entries(), "e2", "e3")
+	stats, _, err := sc.ExactHistoryStats()
+	if err != nil || stats.Detailed != 4 {
+		t.Fatalf("bounded exact count = %+v err=%v, want four renderable entries", stats, err)
+	}
+}
+
+func TestWindowedRebuildSparseInteriorIndexUsesCanonicalJSONL(t *testing.T) {
+	sqliteBin := requireSessionSQLite(t)
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	var content string
+	offsets := make([]int64, 10)
+	var off int64
+	for i := 0; i < 10; i++ {
+		offsets[i] = off
+		line := sessionEventJSONL(float64(i+1), "text_output", bodyForIndex(i))
+		content += line
+		off += int64(len(line))
+	}
+	writeSessionTestFile(t, eventsPath, content)
+	rootSource := canonicalSessionTestPath(t, eventsPath)
+	var inserts string
+	for i := 0; i < 10; i++ {
+		// Leave two canonical, renderable rows absent inside the accepted endpoint
+		// range. Endpoint-only SQLite coverage must not hide e4 or e7.
+		if i != 4 && i != 7 {
+			inserts += sessionSQLiteInsert(float64(i+1), "text_output", bodyForIndex(i), rootSource, offsets[i], "agent_events", "agent")
+		}
+	}
+	createSessionSQLite(t, sqliteBin, orchDir, inserts)
+	cache := NewMailCache(humanDir).Refresh()
+
+	newest := NewSessionCache(humanDir, root)
+	newest.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
+	assertSessionBodiesExactly(t, newest.Entries(), "e7", "e8", "e9")
+	if newest.Complete() {
+		t.Fatal("newest sparse-index window must remain partial while older canonical rows remain")
+	}
+	stats, _, err := newest.ExactHistoryStats()
+	if err != nil || stats != (SessionHistoryStats{Detailed: 10}) {
+		t.Fatalf("canonical sparse-index stats = %+v err=%v, want 10 detailed", stats, err)
+	}
+
+	older := NewSessionCache(humanDir, root)
+	older.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 6)
+	assertSessionBodiesExactly(t, older.Entries(), "e4", "e5", "e6", "e7", "e8", "e9")
+	if older.Complete() {
+		t.Fatal("interior holes are incorporated, but older canonical history still remains")
+	}
+
+	all := NewSessionCache(humanDir, root)
+	all.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 10)
+	assertSessionBodiesExactly(t, all.Entries(), "e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9")
+	if !all.Complete() {
+		t.Fatal("cache becomes complete only after every canonical row, including interior holes, is loaded")
+	}
+}
+
+func TestSessionMetadataStructuralLateKeysAndNestedDecoys(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	huge := strings.Repeat("x", 256*1024)
+	content := `{"nested":{"type":"insight","text":"nested decoy","input_tokens":99},"padding":"` + huge + `","text":"late text","ts":1,"type":"text_output"}` + "\n" +
+		`{"nested":{"type":"text_output","text":"nested decoy","cached_tokens":77},"padding":"` + huge + `","ts":2,"type":"llm_response","input_tokens":2,"output_tokens":3,"cached_tokens":1}` + "\n" +
+		`{"nested":{"type":"text_output","text":"nested only","input_tokens":5},"padding":"` + huge + `","type":"not_session","ts":3}` + "\n"
+	writeSessionTestFile(t, eventsPath, content)
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
+	entries := sc.Entries()
+	if len(entries) != 2 || entries[0].Type != "text_output" || entries[0].Body != "late text" || entries[1].Type != "llm_response" {
+		t.Fatalf("late top-level metadata / nested decoys produced %#v", entries)
+	}
+	if entries[1].TokenUsage == nil || entries[1].TokenUsage.Input != 2 || entries[1].TokenUsage.Output != 3 || entries[1].TokenUsage.Cached != 1 {
+		t.Fatalf("late top-level token metadata = %#v, want input=2 output=3 cached=1", entries[1].TokenUsage)
+	}
+	stats, _, err := sc.ExactHistoryStats()
+	if err != nil || stats != (SessionHistoryStats{Detailed: 2}) {
+		t.Fatalf("late-key exact stats = %+v err=%v, want two detailed and no nested decoys", stats, err)
+	}
+}
+
+func TestWindowedRebuildSkipsNonRenderableTextMetadata(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	content := strings.Join([]string{
+		`{"ts":1,"type":"text_output","text":"old"}`,
+		`{"ts":2,"type":"text_output"}`,
+		`{"ts":3,"type":"llm_call","model":"m"}`,
+		`{"ts":4,"type":"text_output","text":7}`,
+		`{"ts":5,"type":"text_output","text":"middle"}`,
+		`{"ts":6,"type":"insight","text":""}`,
+		`{"ts":7,"type":"llm_response","input_tokens":0,"output_tokens":0,"cached_tokens":0}`,
+		`{"ts":8,"type":"insight","text":"idea"}`,
+		`{"ts":9,"type":"text_output","text":""}`,
+		`{"ts":10,"type":"text_output","text":"new"}`,
+	}, "\n") + "\n"
+	writeSessionTestFile(t, eventsPath, content)
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 5)
+	entries := sc.Entries()
+	wantTypes := []string{"llm_call", "text_output", "llm_response", "insight", "text_output"}
+	if len(entries) != len(wantTypes) {
+		t.Fatalf("window contains %d parser-produced entries, want exactly %d: %#v", len(entries), len(wantTypes), entries)
+	}
+	for i, want := range wantTypes {
+		if entries[i].Type != want {
+			t.Fatalf("entry[%d].Type = %q, want %q; entries=%#v", i, entries[i].Type, want, entries)
+		}
+	}
+	if entries[1].Body != "middle" || entries[3].Body != "idea" || entries[4].Body != "new" {
+		t.Fatalf("renderable text order = %q / %q / %q, want middle / idea / new", entries[1].Body, entries[3].Body, entries[4].Body)
+	}
+	if sc.Complete() {
+		t.Fatal("five-entry window must remain partial while one older renderable entry remains")
+	}
+	stats, _, err := sc.ExactHistoryStats()
+	if err != nil || stats != (SessionHistoryStats{Detailed: 3, Insights: 1}) {
+		t.Fatalf("parser-equivalent exact stats = %+v err=%v, want three detailed plus one insight", stats, err)
+	}
+}
+
+func TestSessionMetadataCanonicalNumericFallback(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	longFiniteExponent := "1e" + strings.Repeat("0", 2000) + "1"
+	finiteIgnored := `{"junk":` + longFiniteExponent + `,"type":"text_output","text":"finite ignored number"}` + "\n"
+	overflowIgnored := `{"junk":1e999,"type":"text_output","text":"canonical decoder rejects this record"}` + "\n"
+	finiteTarget := `{"type":"llm_response","input_tokens":` + longFiniteExponent + `}` + "\n"
+	writeSessionTestFile(t, eventsPath, finiteIgnored+overflowIgnored+finiteTarget)
+
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cases := []struct {
+		name  string
+		start int64
+		line  string
+		ok    bool
+		want  sessionEventCountMetadata
+	}{
+		{name: "long finite irrelevant number", line: finiteIgnored, ok: true, want: sessionEventCountMetadata{Type: "text_output", Text: true}},
+		{name: "overflowing irrelevant number", start: int64(len(finiteIgnored)), line: overflowIgnored, ok: false},
+		{name: "long finite target number", start: int64(len(finiteIgnored) + len(overflowIgnored)), line: finiteTarget, ok: true, want: sessionEventCountMetadata{Type: "llm_response", InputTokens: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := readSessionEventMetadataRange(f, tc.start, int64(len(tc.line)))
+			if ok != tc.ok || ok && got != tc.want {
+				t.Fatalf("metadata = %+v ok=%v, want %+v ok=%v", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
+	entries := sc.Entries()
+	if len(entries) != 2 || entries[0].Body != "finite ignored number" || entries[1].Type != "llm_response" {
+		t.Fatalf("canonical numeric fallback entries = %#v, want text_output plus llm_response", entries)
+	}
+	if entries[1].TokenUsage == nil || entries[1].TokenUsage.Input != 10 {
+		t.Fatalf("long finite target token usage = %#v, want input=10", entries[1].TokenUsage)
+	}
+	stats, _, err := sc.ExactHistoryStats()
+	if err != nil || stats != (SessionHistoryStats{Detailed: 2}) {
+		t.Fatalf("canonical numeric fallback stats = %+v err=%v, want two detailed", stats, err)
+	}
+}
+
+func TestSessionMetadataCanonicalDepthLimit(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	lineAtDepth := func(nestedArrays int, text string) string {
+		return `{"junk":` + strings.Repeat("[", nestedArrays) + "0" + strings.Repeat("]", nestedArrays) +
+			`,"type":"text_output","text":"` + text + `"}` + "\n"
+	}
+	valid := lineAtDepth(9999, "root plus 9999 arrays")
+	invalid := lineAtDepth(10000, "root plus 10000 arrays")
+	var canonical map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(valid)), &canonical); err != nil {
+		t.Fatalf("canonical decoder rejected valid depth boundary: %v", err)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(invalid)), &canonical); err == nil {
+		t.Fatal("canonical decoder accepted a container beyond its depth limit")
+	}
+	writeSessionTestFile(t, eventsPath, valid+invalid)
+
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if got, ok := readSessionEventMetadataRange(f, 0, int64(len(valid))); !ok || got != (sessionEventCountMetadata{Type: "text_output", Text: true}) {
+		t.Fatalf("valid depth-boundary metadata = %+v ok=%v", got, ok)
+	}
+	if got, ok := readSessionEventMetadataRange(f, int64(len(valid)), int64(len(invalid))); ok {
+		t.Fatalf("over-depth metadata unexpectedly accepted: %+v", got)
+	}
+
+	sc := NewSessionCache(humanDir, root)
+	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
+	entries := sc.Entries()
+	if len(entries) != 1 || entries[0].Body != "root plus 9999 arrays" {
+		t.Fatalf("depth-boundary entries = %#v, want only canonical valid row", entries)
+	}
+	stats, _, err := sc.ExactHistoryStats()
+	if err != nil || stats != (SessionHistoryStats{Detailed: 1}) {
+		t.Fatalf("depth-boundary exact stats = %+v err=%v, want one detailed", stats, err)
+	}
 }
 
 // TestWindowedRebuildLargerThanHistoryIsComplete proves that when the window is
@@ -273,6 +567,47 @@ func TestPersistRefusesPartialWindowedCache(t *testing.T) {
 
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
 		t.Fatalf("partial windowed Persist must not create/overwrite session.jsonl; stat err = %v", err)
+	}
+}
+
+func TestPartialWindowRefreshDoesNotAppendSessionFile(t *testing.T) {
+	root, humanDir, orchDir := newSessionTestDirs(t)
+	eventsPath := filepath.Join(orchDir, "logs", "events.jsonl")
+	writeSessionTestFile(t, eventsPath,
+		sessionEventJSONL(1, "text_output", "e0")+
+			sessionEventJSONL(2, "text_output", "e1")+
+			sessionEventJSONL(3, "text_output", "e2")+
+			sessionEventJSONL(4, "text_output", "e3"))
+	cache := NewMailCache(humanDir).Refresh()
+	sessionPath := filepath.Join(humanDir, "logs", "session.jsonl")
+
+	partial := NewSessionCache(humanDir, root)
+	partial.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 2)
+	if partial.Complete() {
+		t.Fatal("two-entry window over four events must be partial")
+	}
+	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(sessionEventJSONL(5, "text_output", "e4")); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	partial.Refresh(cache, "human", orchDir, "orch")
+	assertSessionBodiesExactly(t, partial.Entries(), "e2", "e3", "e4")
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("partial EOF refresh must leave session.jsonl absent; stat err = %v", err)
+	}
+
+	complete := NewSessionCache(humanDir, root)
+	complete.Refresh(cache, "human", orchDir, "orch")
+	complete.Persist()
+	if data, err := os.ReadFile(sessionPath); err != nil || len(data) == 0 {
+		t.Fatalf("complete cache acceptance/persistence must write session.jsonl: bytes=%d err=%v", len(data), err)
 	}
 }
 

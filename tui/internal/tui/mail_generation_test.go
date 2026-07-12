@@ -10,6 +10,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func runMailPersistCmd(t *testing.T, cmd tea.Cmd) mailPersistMsg {
+	t.Helper()
+	msg := runCmd(cmd)
+	if persist, ok := msg.(mailPersistMsg); ok {
+		return persist
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, child := range batch {
+			if persist, ok := runCmd(child).(mailPersistMsg); ok {
+				return persist
+			}
+		}
+	}
+	t.Fatalf("post-frame command produced %T without mailPersistMsg", msg)
+	return mailPersistMsg{}
+}
+
 func TestMailModelIgnoresOldGenerationAsyncMessages(t *testing.T) {
 	m := NewMailModel("", "", "", "", "agent", 10, "", "en", false, 0)
 	m.generation = 2
@@ -198,10 +215,7 @@ func TestBlockedInitialRebuildDoesNotBlockRootInteraction(t *testing.T) {
 	if persistCmd == nil || got.mail.homeTelemetryInFlight {
 		t.Fatal("accepted hidden-mail completion did not defer persistence before telemetry")
 	}
-	persistMsg := runCmd(persistCmd)
-	if _, ok := persistMsg.(mailPersistMsg); !ok {
-		t.Fatalf("hidden-mail command produced %T, want mailPersistMsg", persistMsg)
-	}
+	persistMsg := runMailPersistCmd(t, persistCmd)
 	model, telemetryCmd := got.Update(persistMsg)
 	got = model.(App)
 	if telemetryCmd == nil || !got.mail.homeTelemetryInFlight {
@@ -242,7 +256,7 @@ func TestInitialRebuildDoesNotMutateInstalledCacheBeforeAcceptance(t *testing.T)
 	orchDir := filepath.Join(root, "orch")
 	writeMailGenerationEvent(t, orchDir, "command-local history")
 
-	m := NewMailModel(humanDir, "human", root, orchDir, "agent", unlimitedPageSize, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 2000, "", "en", false, 0)
 	installed := m.sessionCache
 	msg := m.initialRebuild()
 
@@ -266,10 +280,7 @@ func TestInitialRebuildDoesNotMutateInstalledCacheBeforeAcceptance(t *testing.T)
 	if persistCmd == nil {
 		t.Fatal("accepted initial rebuild did not schedule post-frame persistence")
 	}
-	persistMsg := runCmd(persistCmd)
-	if _, ok := persistMsg.(mailPersistMsg); !ok {
-		t.Fatalf("post-frame command produced %T, want mailPersistMsg", persistMsg)
-	}
+	persistMsg := runMailPersistCmd(t, persistCmd)
 	updated, _ = updated.Update(persistMsg)
 	if _, err := os.Stat(sessionPath); err != nil {
 		t.Fatalf("accepted post-frame persistence did not write derived cache: %v", err)
@@ -280,9 +291,9 @@ func TestMailPersistRejectsReplacedCacheWithinGeneration(t *testing.T) {
 	root := t.TempDir()
 	staleHumanDir := filepath.Join(root, "stale-human")
 	currentHumanDir := filepath.Join(root, "current-human")
-	m := NewMailModel(staleHumanDir, "human", root, "", "agent", unlimitedPageSize, "", "en", false, 0)
+	m := NewMailModel(staleHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
 	staleCache := m.sessionCache
-	current := NewMailModel(currentHumanDir, "human", root, "", "agent", unlimitedPageSize, "", "en", false, 0)
+	current := NewMailModel(currentHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
 	m.sessionCache = current.sessionCache
 
 	updated, cmd := m.Update(mailPersistMsg{generation: m.generation, sessionCache: staleCache})
@@ -349,10 +360,7 @@ func TestAppRoutesInitialMailCompletionWhileProjectsActive(t *testing.T) {
 	if persistCmd == nil || got.mail.homeTelemetryInFlight {
 		t.Fatal("projects-time mail completion did not defer persistence before telemetry")
 	}
-	persistMsg := runCmd(persistCmd)
-	if _, ok := persistMsg.(mailPersistMsg); !ok {
-		t.Fatalf("projects-time mail command produced %T, want mailPersistMsg", persistMsg)
-	}
+	persistMsg := runMailPersistCmd(t, persistCmd)
 	model, telemetryCmd := got.Update(persistMsg)
 	got = model.(App)
 	if telemetryCmd == nil || !got.mail.homeTelemetryInFlight {
@@ -411,7 +419,7 @@ func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
 	writeMailGenerationEvent(t, orchDir, "generation B")
 
 	a := App{currentView: appViewMail}
-	a.installMailModel(NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", unlimitedPageSize, "", "en", false, 0))
+	a.installMailModel(NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0))
 	a.mail.verbose = verboseThinking
 	lateA := a.mail.initialRebuild
 
@@ -424,10 +432,7 @@ func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
 	if persistCmd == nil {
 		t.Fatal("generation B initial rebuild did not schedule persistence")
 	}
-	persistMsg := runCmd(persistCmd)
-	if _, ok := persistMsg.(mailPersistMsg); !ok {
-		t.Fatalf("generation B command produced %T, want mailPersistMsg", persistMsg)
-	}
+	persistMsg := runMailPersistCmd(t, persistCmd)
 	model, _ = a.Update(persistMsg)
 	a = model.(App)
 	beforeEntries := a.mail.sessionCache.Entries()

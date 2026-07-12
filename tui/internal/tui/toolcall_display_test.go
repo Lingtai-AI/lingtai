@@ -301,7 +301,7 @@ func TestBuildMessagesAssignsApiCallIDToTextOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", unlimitedPageSize, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
 	m.verbose = verboseThinking
 	m.buildMessages()
 
@@ -380,7 +380,7 @@ func TestBuildMessagesAssignsApiCallIDToDiaryThinkingAndTextInput(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", unlimitedPageSize, "", "en", false, 0)
+	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0)
 	m.verbose = verboseThinking
 	m.buildMessages()
 
