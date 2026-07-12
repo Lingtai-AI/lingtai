@@ -297,6 +297,45 @@ func TestDaemonLedgerSummaryTwoCLIRunsSameBackendAggregateToOneBucket(t *testing
 	}
 }
 
+func TestDaemonLedgerSummaryCLITokensNormalizeDisjointCachedInput(t *testing.T) {
+	agentDir := t.TempDir()
+	const (
+		rawInput = int64(406_915)
+		cached   = int64(136_061_317)
+		total    = int64(136_468_232)
+	)
+	writeDaemonState(t, agentDir, "em-claude-cache", map[string]interface{}{
+		"backend": "claude-p",
+		"cli_tokens": map[string]interface{}{
+			"input": rawInput, "output": 1_063_675, "cached": cached, "calls": 53,
+		},
+	})
+
+	totals, recent := DaemonLedgerSummary(agentDir, 100)
+	claude, ok := totals["claude-p"]
+	if !ok {
+		t.Fatalf("expected claude-p bucket, got: %v", totals)
+	}
+	if claude.Input != total || claude.Cached != cached {
+		t.Fatalf("canonical input/cached = %d/%d, want %d/%d", claude.Input, claude.Cached, total, cached)
+	}
+	if claude.Cached > claude.Input {
+		t.Fatalf("cached input %d exceeds canonical input %d", claude.Cached, claude.Input)
+	}
+	if miss := claude.Input - claude.Cached; miss != rawInput {
+		t.Fatalf("cache miss = %d, want raw input %d", miss, rawInput)
+	}
+	if rate := 100 * float64(claude.Cached) / float64(claude.Input); rate < 99.6 || rate > 99.8 {
+		t.Fatalf("cache hit rate = %.3f%%, want about 99.7%%", rate)
+	}
+	if claude.Output != 1_063_675 || claude.APICalls != 53 {
+		t.Fatalf("output/calls changed during normalization: %+v", claude)
+	}
+	if len(recent) != 0 {
+		t.Fatalf("CLI snapshot should not create recent ledger rows, got %d", len(recent))
+	}
+}
+
 func TestDaemonLedgerSummaryPresetProviderPrecedence(t *testing.T) {
 	agentDir := t.TempDir()
 	// preset_provider is set; backend is also set but preset_provider wins.

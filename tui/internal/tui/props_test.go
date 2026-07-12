@@ -534,6 +534,33 @@ func TestPropsRenderDetailShowsMainAndDaemonProviderSections(t *testing.T) {
 	}
 }
 
+func TestPropsRenderDetailDaemonCacheRateUsesCanonicalInput(t *testing.T) {
+	m := PropsModel{
+		detailDaemonByProvider: map[string]fs.TokenTotals{
+			"claude-p": {
+				Input: 136_468_232, Output: 1_063_675, Cached: 136_061_317, APICalls: 53,
+			},
+		},
+	}
+	out := ansi.Strip(m.renderDetail())
+	for _, want := range []string{
+		"input:    136,468,232",
+		"cached:    136,061,317",
+		"cache hit: 99.7%",
+		"miss:      406,915",
+		"input + output + thinking: 137,531,907",
+		"cache hit rate:            99.7%",
+		"api_calls:                 53",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderDetail missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "33437.3%") {
+		t.Fatalf("renderDetail leaked the pre-normalization impossible cache rate:\n%s", out)
+	}
+}
+
 func TestPropsRenderDetailEmptyDaemonProviderSection(t *testing.T) {
 	m := PropsModel{
 		detailByProvider: map[string]fs.TokenTotals{

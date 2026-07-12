@@ -118,7 +118,10 @@ func DaemonLedgerSummary(agentDir string, recentN int) (map[string]TokenTotals, 
 		var fbInput, fbOutput, fbThinking, fbCached, fbCalls int64
 		if cli := card.CLITokens; cli != nil &&
 			(cli.Input+cli.Output+cli.Thinking+cli.Cached != 0 || cli.Calls != 0) {
-			fbInput = cli.Input
+			// cli_tokens keeps raw/non-cached input and cached input as
+			// disjoint counters. TokenTotals.Input is total input, so fold the
+			// cached subset into the canonical denominator at this boundary.
+			fbInput = cli.Input + cli.Cached
 			fbOutput = cli.Output
 			fbThinking = cli.Thinking
 			fbCached = cli.Cached
