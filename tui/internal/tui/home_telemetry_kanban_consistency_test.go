@@ -47,7 +47,7 @@ func newTelemetryModel(t *testing.T, dir, orchDir string) MailModel {
 		t.Fatal(err)
 	}
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
-	m, _ = m.Update(acceptedInitialMailRefresh(m))
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 	return m
 }
 

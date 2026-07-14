@@ -56,7 +56,7 @@ func TestMailShowsInitialLoadingBanner(t *testing.T) {
 }
 
 // TestMailLoadingBannerClearsAfterInitialRebuild verifies the banner is a
-// one-time intermediate state: once the deferred initial rebuild's mailRefreshMsg
+// one-time intermediate state: once the deferred initial rebuild's mailRefreshPayload
 // is applied, the loading banner disappears and the rebuilt history is shown.
 func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	humanDir := t.TempDir()
@@ -82,13 +82,13 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	}
 
 	// Run the deferred rebuild and apply its (initial-tagged) message.
-	msg := acceptedInitialMailRefresh(m)
-	rm, ok := msg.(mailRefreshMsg)
+	msg := acceptedInitialMailRefresh(t, &m)
+	rm, ok := msg.(mailRefreshPayload)
 	if !ok {
-		t.Fatalf("store initial refresh returned %T; expected mailRefreshMsg", msg)
+		t.Fatalf("store initial refresh returned %T; expected mailRefreshPayload", msg)
 	}
 	if !rm.initial {
-		t.Fatal("initialRebuild's mailRefreshMsg must be tagged initial=true")
+		t.Fatal("initialRebuild's mailRefreshPayload must be tagged initial=true")
 	}
 
 	m, _ = m.Update(msg)
@@ -110,14 +110,14 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	if !found {
 		t.Fatalf("expected rebuilt history after initial rebuild; got %d messages", len(m.messages))
 	}
-	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
+	m, _ = m.Update(m.historyCountCmd(m.historyCountCache)())
 	if strings.Contains(m.View(), loadingBannerFragment) {
 		t.Fatal("neutral loading banner should clear after exact count metadata is accepted")
 	}
 }
 
 // TestMailPeriodicRefreshDoesNotReshowLoading guards against stale/re-shown
-// loading state: a periodic (untagged) mailRefreshMsg must not turn the loading
+// loading state: a periodic (untagged) mailRefreshPayload must not turn the loading
 // banner back on after the initial rebuild has already cleared it.
 func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	dir := t.TempDir()
@@ -125,18 +125,18 @@ func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	m = sizeMail(t, m)
 
 	// Apply the initial rebuild to clear loading.
-	m, _ = m.Update(acceptedInitialMailRefresh(m))
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 	if m.initialLoading {
 		t.Fatal("loading should be cleared by the initial rebuild")
 	}
-	m, _ = m.Update(m.historyCountCmd(m.historyCountCache, m.generation)())
+	m, _ = m.Update(m.historyCountCmd(m.historyCountCache)())
 	if m.historyCountLoading {
 		t.Fatal("exact-count loading should clear after metadata acceptance")
 	}
 
 	// A periodic refresh (untagged) must leave loading cleared.
-	periodic := acceptedSteadyMailRefresh(m)
-	if rm, ok := periodic.(mailRefreshMsg); ok && rm.initial {
+	periodic := acceptedSteadyMailRefresh(t, &m)
+	if rm, ok := periodic.(mailRefreshPayload); ok && rm.initial {
 		t.Fatal("periodic refreshMail must not produce an initial-tagged message")
 	}
 	m, _ = m.Update(periodic)

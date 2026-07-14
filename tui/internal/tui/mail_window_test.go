@@ -108,7 +108,7 @@ func appendWindowedIndexedEvent(t *testing.T, orchDir, text string) {
 
 func installInitialWindow(t *testing.T, m MailModel) MailModel {
 	t.Helper()
-	rm, ok := acceptedInitialMailRefresh(m).(mailRefreshMsg)
+	rm, ok := acceptedInitialMailRefresh(t, &m).(mailRefreshPayload)
 	if !ok {
 		t.Fatalf("store initial refresh returned %T", rm)
 	}
@@ -127,7 +127,7 @@ func acceptExactCount(t *testing.T, m MailModel) MailModel {
 	if !m.historyCountLoading || m.historyCountCache == nil {
 		t.Fatal("initial content did not start one async exact-count task")
 	}
-	msg := m.historyCountCmd(m.historyCountCache, m.generation)()
+	msg := m.historyCountCmd(m.historyCountCache)()
 	m, _ = m.Update(msg)
 	if !m.historyCountLoaded || m.historyCountLoading {
 		t.Fatal("exact-count result was not accepted")
@@ -141,7 +141,7 @@ func TestInitialContentWindowEqualsConfiguredPageSize(t *testing.T) {
 	orchDir := buildWindowedAgentDir(t, 405)
 	m := NewMailModel(t.TempDir(), "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
 	m.verbose = verboseThinking
-	rm := acceptedInitialMailRefresh(m).(mailRefreshMsg)
+	rm := acceptedInitialMailRefresh(t, &m).(mailRefreshPayload)
 	if got := rm.sessionCache.Len(); got != 200 {
 		t.Fatalf("initial content cache = %d, want configured page size 200", got)
 	}
@@ -207,22 +207,67 @@ func TestCtrlULoadsOneConfiguredBatchPerRealKey(t *testing.T) {
 	}
 }
 
+func TestOlderPageExactStaleCompletionSettlesDebounceWithoutPublishing(t *testing.T) {
+	orchDir := buildWindowedAgentDir(t, 250)
+	m := NewMailModel(t.TempDir(), "human", t.TempDir(), orchDir, "agent", 100, "", "en", false, 0)
+	m.verbose = verboseThinking
+	m = installInitialWindow(t, m)
+	beforeCache := m.sessionCache
+	beforeWindow := m.ingestWindow
+	beforeLoadedExtra := m.loadedExtra
+	beforeMessages := len(m.messages)
+
+	m.viewport.GotoTop()
+	var cmd tea.Cmd
+	m, cmd = m.Update(ctrlU())
+	if cmd == nil || !m.olderLoadInFlight {
+		t.Fatal("Ctrl+U did not start one older-page load")
+	}
+	page, ok := cmd().(mailOlderPageMsg)
+	if !ok {
+		t.Fatalf("older-page command returned %T", cmd())
+	}
+	if page.envelope.storeVersion != m.asyncStoreVersion {
+		t.Fatalf("captured store version = %d, want current %d", page.envelope.storeVersion, m.asyncStoreVersion)
+	}
+
+	// Model the next accepted steady refresh installing while this exact physical
+	// older-page rebuild is still running. Its result is no longer publishable,
+	// but completion must release the debounce slot so the user can retry.
+	m.asyncStoreVersion++
+	got, next := m.Update(page)
+	if next != nil {
+		t.Fatalf("stale older-page completion scheduled %T", next())
+	}
+	if got.olderLoadInFlight {
+		t.Fatal("exact stale older-page completion left the debounce slot engaged")
+	}
+	if got.sessionCache != beforeCache || got.ingestWindow != beforeWindow || got.loadedExtra != beforeLoadedExtra || len(got.messages) != beforeMessages {
+		t.Fatalf("stale older-page completion published state: cacheChanged=%v window=%d extra=%d messages=%d", got.sessionCache != beforeCache, got.ingestWindow, got.loadedExtra, len(got.messages))
+	}
+
+	retry, retryCmd := got.requestOlderPage()
+	if retryCmd == nil || !retry.olderLoadInFlight {
+		t.Fatal("settled stale older-page completion did not permit one retry")
+	}
+}
+
 func TestHistoryCountMessageGenerationAndCacheIdentityGates(t *testing.T) {
 	m := NewMailModel(t.TempDir(), "human", t.TempDir(), buildWindowedAgentDir(t, 250), "agent", 100, "", "en", false, 0)
 	m.generation = 9
 	m.verbose = verboseThinking
 	m = installInitialWindow(t, m)
-	valid := m.historyCountCmd(m.historyCountCache, m.generation)().(mailHistoryCountMsg)
+	valid := m.historyCountCmd(m.historyCountCache)().(mailHistoryCountMsg)
 
 	staleGeneration := valid
-	staleGeneration.generation--
+	staleGeneration.envelope.generation.thread--
 	got, _ := m.Update(staleGeneration)
 	if got.historyCountLoaded {
 		t.Fatal("stale-generation count result was accepted")
 	}
 
 	staleCache := valid
-	staleCache.cache = NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", 100, "", "en", false, 0).sessionCache
+	staleCache.envelope.source.cache = NewMailModel(t.TempDir(), "human", t.TempDir(), "", "agent", 100, "", "en", false, 0).sessionCache
 	got, _ = m.Update(staleCache)
 	if got.historyCountLoaded {
 		t.Fatal("wrong-cache count result was accepted")
@@ -240,7 +285,7 @@ func TestHistoryCountUsesCurrentCacheTailDeltaAfterCtrlU(t *testing.T) {
 	m.verbose = verboseThinking
 	m = installInitialWindow(t, m)
 	originCache := m.historyCountCache
-	valid := m.historyCountCmd(originCache, m.generation)().(mailHistoryCountMsg)
+	valid := m.historyCountCmd(originCache)().(mailHistoryCountMsg)
 
 	m.viewport.GotoTop()
 	var cmd tea.Cmd
@@ -250,7 +295,7 @@ func TestHistoryCountUsesCurrentCacheTailDeltaAfterCtrlU(t *testing.T) {
 	}
 	older := cmd().(mailOlderPageMsg)
 	m, _ = m.Update(older)
-	if m.sessionCache == originCache || m.sessionCache.HistoryCountIdentity() != valid.identity {
+	if m.sessionCache == originCache || m.sessionCache.HistoryCountIdentity() != valid.envelope.source.identity {
 		t.Fatal("Ctrl+U did not install a distinct cache for the same count horizon")
 	}
 
@@ -279,7 +324,7 @@ func TestOlderPageNewHorizonSupersedesAsyncCountOnce(t *testing.T) {
 	m = installInitialWindow(t, m)
 	oldCache := m.historyCountCache
 	oldIdentity := m.historyCountIdentity
-	stale := m.historyCountCmd(oldCache, m.generation)().(mailHistoryCountMsg)
+	stale := m.historyCountCmd(oldCache)().(mailHistoryCountMsg)
 
 	appendWindowedIndexedEvent(t, orchDir, "new horizon before Ctrl+U")
 	m.viewport.GotoTop()

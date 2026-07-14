@@ -400,75 +400,7 @@ func runCreatedProject(result tui.LauncherResult) {
 	// config.json exists, so needsFirstRun would otherwise be false) would
 	// reach NewApp with no orchestrator to launch.
 	needsFirstRun := len(orchestrators) == 0
-	needsRecovery := false
-
-	if !needsFirstRun {
-		// Returning user — ensure runtime + assets (fast no-ops if already exist).
-		// EnsureRuntime always runs the non-blocking upgrade check after a
-		// successful ensure so repaired/recreated venvs do not wait until the
-		// next launch to pick up a newer lingtai CLI.
-		if config.NeedsVenv(globalDir) {
-			fmt.Println("Setting up Python environment...")
-		}
-		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		} else if upgraded {
-			fmt.Println("Upgraded lingtai to latest version.")
-		}
-		if err := preset.Bootstrap(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
-			os.Exit(1)
-		}
-		tui.ExportCommandsJSON(globalDir)
-		maybePromptRustToolchain(globalDir)
-
-		// Recipe reconciliation: if the project carries a recipe bundle at
-		// its root (.recipe/) and the contents differ from the last-applied
-		// snapshot under .lingtai/.tui-asset/.recipe/, re-apply so each
-		// agent's .prompt, library.paths, and snapshot stay in sync with
-		// the currently-selected recipe. No-op when .recipe/ is absent
-		// (pre-redesign projects, or projects that haven't gone through
-		// /setup yet) or when the snapshot already matches.
-		//
-		// Greet substitution intentionally uses the startup humanDir/addr/
-		// lang/soulDelay defaults; a proper re-apply via /setup gives the
-		// user full control over those fields. This path is just the "you
-		// edited .recipe/<layer>/<layer>.md by hand, we'll redo the
-		// .prompt" convenience.
-		projectRoot := filepath.Dir(lingtaiDir)
-		if preset.RecipeNeedsApply(projectRoot) {
-			humanDir := filepath.Join(lingtaiDir, "human")
-			humanAddr := "human"
-			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
-				humanAddr = humanNode.Address
-			}
-			lang := tuiCfg.Language
-			if lang == "" {
-				lang = "en"
-			}
-			subst := func(tmpl string) string {
-				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, "120")
-			}
-			if _, err := preset.ApplyRecipe(projectRoot, lang, subst); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: recipe reconcile failed: %v\n", err)
-			}
-		}
-	}
-	// If needsFirstRun: welcome page goroutine handles everything
-
-	// Do NOT auto-relaunch stopped agents on TUI startup. The TUI's job is
-	// to attach to whatever state the agent is in, not to second-guess why
-	// it's stopped. Causes of stopped-at-rest are externally indistinguishable
-	// (deliberate /suspend, crash, kill -9, machine reboot mid-run, …) and
-	// auto-revival overrides the user's last explicit decision (typically
-	// /suspend) without their consent. Users wake stopped agents explicitly
-	// via /cpr or /refresh from inside the TUI. The only place we launch on
-	// startup is the FirstRunDoneMsg handler in app.go, which fires when the
-	// user creates a new agent through the first-run wizard.
-
-	// Launch TUI
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, "", "")
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, orchestrators, tuiCfg, "", "")
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1722,9 +1654,6 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 				}
 			}
 		}
-		// Resolve human location in background (ipinfo.io, cached 1h)
-		humanDir := filepath.Join(lingtaiDir, "human")
-		go fs.UpdateHumanLocation(humanDir)
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 

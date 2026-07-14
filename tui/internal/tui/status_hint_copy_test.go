@@ -36,7 +36,7 @@ func newEnglishHomeModel(t *testing.T, w, h int) MailModel {
 	}
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m, _ = m.Update(acceptedInitialMailRefresh(m))
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 	return m
 }
 
