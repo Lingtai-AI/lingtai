@@ -58,6 +58,46 @@ func Register(globalDir, projectDir string) error {
 	return nil
 }
 
+// RegisteredProject is one read-only row from registry.jsonl, annotated
+// with liveness so a caller can render a disabled/stale row without
+// mutating the registry. Unlike LoadAndPrune, ListRegisteredProjects never
+// rewrites registry.jsonl, never removes an entry, and never touches the
+// filesystem beyond the read-only Stat used to compute Alive/StaleReason —
+// it is safe to call from a zero-write context such as the no-project
+// launcher's "Open Existing" catalog.
+type RegisteredProject struct {
+	Path        string // parent of .lingtai/, e.g. /home/user/my-project
+	Alive       bool   // true when <Path>/.lingtai exists and is a directory
+	StaleReason string // non-empty, localized-by-caller reason when !Alive
+}
+
+// ListRegisteredProjects reads registry.jsonl and returns every entry
+// as-is, annotated with a read-only liveness check. It does NOT prune,
+// repair, rewrite, or delete anything — that remains LoadAndPrune's job,
+// called only from normal (already-decided) startup paths. Callers that
+// want a browsable "registered projects" catalog without side effects
+// (the no-project launcher's Open Existing picker) must use this instead
+// of LoadAndPrune.
+func ListRegisteredProjects(globalDir string) []RegisteredProject {
+	regPath := filepath.Join(globalDir, "registry.jsonl")
+	entries := readRegistry(regPath)
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]RegisteredProject, 0, len(entries))
+	for _, e := range entries {
+		rp := RegisteredProject{Path: e.Path}
+		lingtaiDir := filepath.Join(e.Path, ".lingtai")
+		if info, err := os.Stat(lingtaiDir); err == nil && info.IsDir() {
+			rp.Alive = true
+		} else {
+			rp.StaleReason = "missing_dir"
+		}
+		out = append(out, rp)
+	}
+	return out
+}
+
 // LoadAndPrune reads registry.jsonl, removes entries whose .lingtai/ no longer
 // exists, rewrites the file, and returns the surviving paths.
 func LoadAndPrune(globalDir string) []string {

@@ -331,3 +331,40 @@ func TestLoadTUIConfig_MissingOrAbsentInsightsDisablesInsights(t *testing.T) {
 		t.Fatal("tui_config.json without insights enabled insights; want false")
 	}
 }
+
+// TestLoadConfigReadOnlyPreservesModeWhileLoadConfigTightensMalformed proves
+// the draft loader differs only by the permission mutation and that the normal
+// loader preserves its historical chmod-before-unmarshal ordering even when
+// config.json is malformed.
+func TestLoadConfigReadOnlyPreservesModeWhileLoadConfigTightensMalformed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("seed malformed config: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("force seed mode: %v", err)
+	}
+
+	if _, err := LoadConfigReadOnly(dir); err == nil {
+		t.Fatal("LoadConfigReadOnly unexpectedly accepted malformed JSON")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after read-only load: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("LoadConfigReadOnly changed mode to %o, want 0644", got)
+	}
+
+	if _, err := LoadConfig(dir); err == nil {
+		t.Fatal("LoadConfig unexpectedly accepted malformed JSON")
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after mutating load: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("LoadConfig mode = %o, want historical 0600 migration", got)
+	}
+}

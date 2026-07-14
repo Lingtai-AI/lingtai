@@ -198,19 +198,75 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-func GlobalDir() (string, error) {
+// GlobalDirPath is the pure path resolver for the global TUI directory
+// (~/.lingtai-tui). It resolves the user's home directory and joins
+// GlobalDirName, but performs NO filesystem mutation — no MkdirAll, no
+// stat, no write. Callers that only need to know *where* the global dir
+// would live (e.g. a read-only launcher probe deciding whether to enter
+// the no-project flow) must use this instead of GlobalDir, which
+// unconditionally creates the directory as a side effect.
+//
+// See EnsureGlobalDir for the explicit mutating counterpart, and GlobalDir
+// for the historical combined helper kept for existing callers that always
+// wanted both path resolution and directory creation together.
+func GlobalDirPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, GlobalDirName)
+	return filepath.Join(home, GlobalDirName), nil
+}
+
+// EnsureGlobalDir resolves the global TUI directory path and creates it
+// (MkdirAll) if missing. This is the explicit, intentional mutation half of
+// the former combined GlobalDir behavior — call it only at a point where
+// creating ~/.lingtai-tui is an intended side effect (normal startup,
+// subcommands that need it, post-commit project creation), never from a
+// pure read-only probe.
+func EnsureGlobalDir() (string, error) {
+	dir, err := GlobalDirPath()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
 }
 
+// GlobalDir resolves and creates ~/.lingtai-tui in one step. Kept for the
+// many existing callers (subcommands, headless CLI, doctor, etc.) that
+// always wanted both path resolution and directory creation together. New
+// code that needs to distinguish "where is it" from "make sure it exists"
+// should use GlobalDirPath / EnsureGlobalDir directly — most notably the
+// no-project launcher's pure startup probe, which must not create
+// ~/.lingtai-tui merely by asking where it is.
+func GlobalDir() (string, error) {
+	return EnsureGlobalDir()
+}
+
 func LoadConfig(dir string) (Config, error) {
+	return loadConfig(dir, true)
+}
+
+// LoadConfigReadOnly reads and parses ~/.lingtai-tui/config.json exactly
+// like LoadConfig (including the in-memory legacy-provider-key-name
+// migration via migrateLegacyProviderKeys), but performs NO filesystem
+// write of any kind — in particular it never chmods config.json, unlike
+// LoadConfig. Use this from any read-only/pure context, most notably the
+// no-project launcher's draft-mode FirstRunModel construction (see
+// NewDraftFirstRunModel), which must not touch ~/.lingtai-tui at all before
+// the user explicitly confirms project creation.
+func LoadConfigReadOnly(dir string) (Config, error) {
+	return loadConfig(dir, false)
+}
+
+// loadConfig keeps LoadConfig and LoadConfigReadOnly on one parse/migration
+// path while preserving the historical ordering: the mutating loader tightens
+// an existing readable config.json before JSON parsing, so even malformed
+// legacy files receive the original 0600 permission migration. The read-only
+// loader skips only that chmod.
+func loadConfig(dir string, tightenPermissions bool) (Config, error) {
 	configPath := filepath.Join(dir, "config.json")
 	data, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
@@ -219,9 +275,11 @@ func LoadConfig(dir string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	// Tighten permissions on existing config.json (migration from 0o644)
-	if info, statErr := os.Stat(configPath); statErr == nil && info.Mode().Perm() != 0o600 {
-		_ = os.Chmod(configPath, 0o600)
+	if tightenPermissions {
+		// Tighten permissions on existing config.json (migration from 0o644).
+		if info, statErr := os.Stat(configPath); statErr == nil && info.Mode().Perm() != 0o600 {
+			_ = os.Chmod(configPath, 0o600)
+		}
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
