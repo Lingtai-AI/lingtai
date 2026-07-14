@@ -82,9 +82,6 @@ func TestMailModelRemoteSendFailurePreservesRetryState(t *testing.T) {
 			if tc.editor && got.pendingMessage != text {
 				t.Fatalf("pending message = %q, want retryable editor text %q", got.pendingMessage, text)
 			}
-			if got.cache.Messages != nil {
-				t.Fatalf("mail cache changed on failed send: %#v", got.cache.Messages)
-			}
 			if _, err := os.Stat(marker); err != nil {
 				t.Fatalf("insight marker was not preserved: %v", err)
 			}

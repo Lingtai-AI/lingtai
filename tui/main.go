@@ -1645,9 +1645,6 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 				}
 			}
 		}
-		// Resolve human location in background (ipinfo.io, cached 1h)
-		humanDir := filepath.Join(lingtaiDir, "human")
-		go fs.UpdateHumanLocation(humanDir)
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 

@@ -7,14 +7,14 @@ import (
 )
 
 // Auto-refresh: a single, app-level 1s tick that periodically asks the active
-// view to reload its on-disk data. This generalizes the mail view's existing
-// poll loop (mail.go: tickEvery/tickMsg) to the other reloadable views so the
-// human sees fresh network/agent state without pressing Ctrl+R.
+// non-mail view to reload its own on-disk data. Project mailbox refresh is NOT
+// part of this loop: ProjectMailStore is the sole mailbox cache/scan/tick owner.
+// Do not add mail refresh routing here or a second mailbox polling chain will
+// exist beside project_mail_store.go.
 //
 // Design notes:
-//   - One ticker lives on the App, not per-view. The App routes the tick to
-//     whichever view is current. Views never start their own auto tick (mail
-//     is the historical exception and keeps its own loop).
+//   - One view-refresh ticker lives on the App, not per-view. It is independent
+//     from the root-owned ProjectMailStore ticker and must never scan mail.
 //   - Each participating view reuses the same reload path as Ctrl+R. Views opt
 //     out for an individual tick when reloading would interrupt the user
 //     (picker open, drill-in/detail/editor open, or in-flight doctor run).
@@ -22,12 +22,12 @@ import (
 //     calls the same reload path on a timer.
 
 // autoRefreshInterval is the cadence for the app-level auto-refresh tick. It
-// matches the mail view's poll rate (mail.go: pollRate = 1s) so all reloadable
+// matches the ProjectMailStore poll rate so all reloadable
 // views feel equally live.
 const autoRefreshInterval = 1 * time.Second
 
 // autoRefreshTickMsg is delivered every autoRefreshInterval while auto refresh
-// is enabled. It is distinct from mail's tickMsg so the two loops never alias.
+// is enabled. It is distinct from projectMailTickMsg so the loops never alias.
 type autoRefreshTickMsg time.Time
 
 // autoRefreshTick schedules the next auto-refresh tick.
