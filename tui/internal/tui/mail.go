@@ -261,7 +261,7 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		insightsEnabled:   insights,
 		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
-		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
+		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir), fs.MainAggregateWriter),
 		// The authoritative session rebuild is deferred to initialRebuild() (see
 		// below), so the first frames render before history is loaded. Show a
 		// loading banner at the top of the stream until that rebuild's refresh
@@ -299,7 +299,7 @@ func (m MailModel) initialRebuild() tea.Msg {
 	// mail_page_size directly owns both the initial newest content window and the
 	// visible/reveal batch. Exact full-history metadata is launched separately
 	// after this bounded content result is accepted.
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
 	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.pageSize)
 	m.cache = cache
 	// Tag the resulting refresh as the initial one so the handler can clear the
@@ -341,7 +341,7 @@ func (m MailModel) requestOlderPage() (MailModel, tea.Cmd) {
 // accepts this generation.
 func (m MailModel) olderPageCmd(window int, generation uint64) tea.Msg {
 	cache := m.cache.Refresh()
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
 	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
 	return mailOlderPageMsg{
 		generation:   generation,
