@@ -15,9 +15,10 @@ import (
 // identity card is missing).
 type DaemonLedgerEntry struct {
 	LedgerEntry
-	RunID  string // daemons/<run_id> directory name
-	Handle string // daemon.json "handle" (e.g. "em-1"); empty when no card
-	State  string // daemon.json "state" (running/done/failed/...); empty when no card
+	RunID   string // daemons/<run_id> directory name
+	Handle  string // daemon.json "handle" (e.g. "em-1"); empty when no card
+	State   string // daemon.json "state" (running/done/failed/...); empty when no card
+	Backend string `json:"-"` // daemon.json "backend"; in-memory display dimension only
 }
 
 // daemonCard is the typed subset of daemon.json fields the daemon-ledger
@@ -108,6 +109,7 @@ func DaemonLedgerSummary(agentDir string, recentN int) (map[string]TokenTotals, 
 					RunID:       card.RunID,
 					Handle:      card.Handle,
 					State:       card.State,
+					Backend:     card.Backend,
 				})
 			}
 			continue

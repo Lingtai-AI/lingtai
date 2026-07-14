@@ -82,6 +82,33 @@ func TestDaemonRecentLedgerTagsIdentity(t *testing.T) {
 	}
 }
 
+func TestDaemonRecentLedgerPreservesBackendIndependently(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "em-1-backend", map[string]interface{}{
+		"handle":  "em-1",
+		"state":   "done",
+		"backend": "claude-p",
+	})
+	writeDaemonLedger(t, agentDir, "em-1-backend", []string{
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+	})
+
+	entries := DaemonRecentLedger(agentDir, 100)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.Backend != "claude-p" {
+		t.Fatalf("Backend = %q, want claude-p", entry.Backend)
+	}
+	if got := DeriveLedgerProvider(entry.Endpoint, entry.Model); got != "zhipu" {
+		t.Fatalf("provider = %q, want zhipu", got)
+	}
+	if entry.Model != "glm-4.6" {
+		t.Fatalf("Model = %q, want glm-4.6", entry.Model)
+	}
+}
+
 func TestDaemonRecentLedgerAggregatesAndSortsNewestFirst(t *testing.T) {
 	agentDir := t.TempDir()
 	// Two daemons, interleaved timestamps. The result must be globally sorted
