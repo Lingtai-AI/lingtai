@@ -386,8 +386,8 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // cancelAndQuit records the zero-write cancel decision and quits the
-// launcher's tea.Program. Reachable from the welcome page (Esc/q/Ctrl+C)
-// and the choose/picker pages (q/Ctrl+C) — Esc on those pages goes BACK one
+// launcher's tea.Program. Reachable from Welcome (Esc/q/Ctrl+C) and from
+// Choose, Picker, and Staging (q/Ctrl+C); Esc on those pages goes BACK one
 // page instead, so leaving is always deliberate and never a mis-keyed Esc.
 func (m LauncherRootModel) cancelAndQuit() (tea.Model, tea.Cmd) {
 	m.result = LauncherResult{Kind: DecisionCancel}
@@ -543,10 +543,10 @@ func buildLauncherProjectRows(registered []config.RegisteredProject, snap invent
 
 func (m LauncherRootModel) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "q":
+	case "esc":
 		m.view = launcherViewChoose
 		return m, nil
-	case "ctrl+c":
+	case "q", "ctrl+c":
 		return m.cancelAndQuit()
 	case "up", "k":
 		if m.pickerCursor > 0 {
@@ -643,6 +643,8 @@ func (m LauncherRootModel) updateUnfinishedStaging(msg tea.KeyPressMsg) (tea.Mod
 	case "esc":
 		m.view = launcherViewChoose
 		return m, nil
+	case "q", "ctrl+c":
+		return m.cancelAndQuit()
 	case "r":
 		// Resume is intentionally NOT implemented in this vertical slice
 		// (see design doc Invariant 5 scoping note in the implementation
@@ -714,7 +716,11 @@ func (m LauncherRootModel) viewContent() string {
 	case launcherViewCreate:
 		out := m.firstRun.View()
 		if m.createErr != "" {
-			out += "\n  " + lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended).Render(i18n.TF("launcher.create.failed", m.createErr)) + "\n"
+			failed := i18n.TF("launcher.create.failed", m.createErr)
+			for _, line := range wrapToWidth(failed, launcherTextWidth(m.width, 2)) {
+				out += "\n  " + lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended).Render(line)
+			}
+			out += "\n"
 		}
 		return out
 	}
@@ -729,36 +735,85 @@ func (m LauncherRootModel) viewContent() string {
 // selector, and keyboard hints. Everything here is an in-memory preview;
 // the page states so explicitly.
 func (m LauncherRootModel) viewWelcome() string {
-	var content strings.Builder
-	content.WriteString(renderWelcomeBrand(m.width))
+	width := launcherTextWidth(m.width, 4)
+	compact := m.height > 0 && m.height <= 24
+	var lines []string
+	lines = append(lines, strings.Split(strings.TrimSuffix(launcherWelcomeBrand(m.width, m.height), "\n"), "\n")...)
+	if !compact {
+		lines = append(lines, "")
+	}
 
-	explainStyle := StyleSubtle
-	content.WriteString(centerText(explainStyle.Render(i18n.T("launcher.welcome.explain1")), m.width) + "\n")
-	content.WriteString(centerText(explainStyle.Render(i18n.TF("launcher.welcome.explain2", abbreviateHomePath(m.projectRoot))), m.width) + "\n\n")
+	appendCenteredWrapped := func(text string, style lipgloss.Style) {
+		for _, line := range wrapToWidth(text, width) {
+			lines = append(lines, centerText(style.Render(line), m.width))
+		}
+	}
+	appendCenteredWrapped(i18n.T("launcher.welcome.explain1"), StyleSubtle)
+	if !compact {
+		lines = append(lines, "")
+	}
+	displayRoot := truncatePathToWidth(abbreviateHomePath(m.projectRoot), launcherTextWidth(m.width, 20))
+	appendCenteredWrapped(i18n.TF("launcher.welcome.explain2", displayRoot), StyleSubtle)
 
+	if !compact {
+		lines = append(lines, "")
+	}
 	for i, label := range launcherLangLabels {
 		style := lipgloss.NewStyle().Foreground(ColorText)
-		var line string
+		line := " " + style.Render(label) + " "
 		if i == m.langIdx {
 			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 			line = style.Render("[" + label + "]")
-		} else {
-			line = " " + style.Render(label) + " "
 		}
-		content.WriteString(centerText(line, m.width) + "\n")
+		lines = append(lines, centerText(line, m.width))
 	}
-
-	content.WriteString("\n")
-	content.WriteString(centerText(lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.zero_write_status")), m.width) + "\n")
-
-	content.WriteString("\n")
-	hints := StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") +
+	if !compact {
+		lines = append(lines, "")
+	}
+	appendCenteredWrapped(i18n.T("launcher.zero_write_status"), lipgloss.NewStyle().Foreground(ColorActive))
+	if !compact {
+		lines = append(lines, "")
+	}
+	hints := "↑↓ " + i18n.T("welcome.select_lang") +
 		"  [Enter] " + i18n.T("launcher.welcome.continue") +
 		"  [Ctrl+T] " + i18n.T("settings.theme") +
-		"  [Esc] " + i18n.T("launcher.hint_quit"))
-	content.WriteString(centerText(hints, m.width) + "\n")
+		"  [Esc/q/Ctrl+C] " + i18n.T("launcher.hint_quit")
+	for _, line := range wrapToWidth(hints, width) {
+		lines = append(lines, centerText(StyleFaint.Render(line), m.width))
+	}
 
-	return verticallyCentered(content.String(), m.height)
+	return verticallyCentered(strings.Join(lines, "\n")+"\n", m.height)
+}
+
+// launcherWelcomeBrand keeps the shared welcome identity while reducing its
+// fixed-height logo/blank block when the launcher has a small terminal. The
+// language, safety statement, and key hints are never dropped.
+func launcherWelcomeBrand(width, height int) string {
+	brand := strings.TrimRight(renderWelcomeBrand(width), "\n")
+	if height <= 0 || height > 24 {
+		return brand + "\n"
+	}
+	nonBlank := make([]string, 0)
+	for _, line := range strings.Split(brand, "\n") {
+		if strings.TrimSpace(line) != "" {
+			nonBlank = append(nonBlank, line)
+		}
+	}
+	logoRows := 4
+	if height < 20 {
+		logoRows = 0
+	} else if height < 24 {
+		logoRows = 2
+	}
+	if len(nonBlank) < 3 {
+		return brand + "\n"
+	}
+	if logoRows > len(nonBlank)-3 {
+		logoRows = len(nonBlank) - 3
+	}
+	selected := append([]string{}, nonBlank[:logoRows]...)
+	selected = append(selected, nonBlank[len(nonBlank)-3:]...)
+	return strings.Join(selected, "\n") + "\n"
 }
 
 // viewChoose renders the explicit start-here / open-existing decision as a
@@ -770,7 +825,8 @@ func (m LauncherRootModel) viewChoose() string {
 	var lines []string
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 	lines = append(lines, titleStyle.Render(i18n.T("launcher.choose.title")))
-	lines = append(lines, StyleSubtle.Render(i18n.TF("launcher.choose.cwd", abbreviateHomePath(m.projectRoot))))
+	cwd := truncatePathToWidth(abbreviateHomePath(m.projectRoot), launcherTextWidth(m.width, 12))
+	lines = append(lines, StyleSubtle.Render(i18n.TF("launcher.choose.cwd", cwd)))
 	lines = append(lines, "")
 
 	options := []struct{ label, desc string }{
@@ -784,7 +840,8 @@ func (m LauncherRootModel) viewChoose() string {
 			cursor = "> "
 			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 		}
-		lines = append(lines, cursor+style.Render(opt.label))
+		label := truncatePathToWidth(opt.label, launcherTextWidth(m.width, lipgloss.Width(cursor)+2))
+		lines = append(lines, cursor+style.Render(label))
 		for _, dl := range wrapToWidth(opt.desc, chooseDescWidth(m.width)) {
 			lines = append(lines, "    "+StyleFaint.Render(dl))
 		}
@@ -796,24 +853,36 @@ func (m LauncherRootModel) viewChoose() string {
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.zero_write_status")))
 	lines = append(lines, "")
-	lines = append(lines, StyleFaint.Render("↑↓ "+i18n.T("welcome.select_lang")+
-		"  [Enter] "+i18n.T("welcome.confirm")+
-		"  [Esc] "+i18n.T("launcher.hint_back")+
-		"  [q] "+i18n.T("launcher.hint_quit")))
+	hint := "↑↓ " + i18n.T("welcome.select_lang") +
+		"  [Enter] " + i18n.T("welcome.confirm") +
+		"  [Esc] " + i18n.T("launcher.hint_back") +
+		"  [q/Ctrl+C] " + i18n.T("launcher.hint_quit")
+	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
+		lines = append(lines, StyleFaint.Render(line))
+	}
 
 	return verticallyCentered(centerBlock(lines, m.width), m.height)
 }
 
+// launcherTextWidth returns a bounded text column for a terminal width. A
+// positive margin reserves the fixed indentation that the caller adds after
+// wrapping; an unknown width gets a conservative test/display width.
+func launcherTextWidth(width, margin int) int {
+	if width <= 0 {
+		return 80
+	}
+	if width-margin < 1 {
+		return 1
+	}
+	return width - margin
+}
+
 // chooseDescWidth bounds the option-description wrap width so the choose
-// block stays a readable column instead of one screen-wide line, degrading
-// gracefully on narrow terminals.
+// block stays a readable column instead of one screen-wide line.
 func chooseDescWidth(width int) int {
-	w := width - 12
+	w := launcherTextWidth(width, 4)
 	if w > 64 {
 		w = 64
-	}
-	if w < 20 {
-		w = 20
 	}
 	return w
 }
@@ -826,16 +895,17 @@ func chooseDescWidth(width int) int {
 // other list screen in the TUI, with a title bar, a scrollable body
 // windowed around the cursor, and a persistent keyboard-help footer.
 func (m LauncherRootModel) viewPicker() string {
-	title := StyleTitle.Render("  "+i18n.T("launcher.picker.title")) + "\n" + strings.Repeat("─", max(0, m.width))
+	title := StyleTitle.Render("  "+truncatePathToWidth(i18n.T("launcher.picker.title"), launcherTextWidth(m.width, 2))) + "\n" + strings.Repeat("─", max(0, m.width))
 
 	body, cursorLine := m.renderPickerBody()
 	bodyLines := strings.Split(body, "\n")
+	footerLines := m.pickerFooterLines()
 
-	// Window the body around the cursor when it exceeds the available
-	// height (title/rule above, rule/hints/status below).
-	avail := m.height - 5
-	if avail < 3 {
-		avail = 3
+	// Window the body around the cursor while reserving every physical footer
+	// line, including wrapped scan/status text.
+	avail := m.height - 2 - len(footerLines)
+	if avail < 1 {
+		avail = 1
 	}
 	if len(bodyLines) > avail {
 		start := 0
@@ -854,22 +924,38 @@ func (m LauncherRootModel) viewPicker() string {
 		bodyLines = append(bodyLines, "")
 	}
 
+	return title + "\n" + strings.Join(bodyLines, "\n") + "\n" + strings.Join(footerLines, "\n")
+}
+
+func (m LauncherRootModel) pickerFooterLines() []string {
+	lines := []string{strings.Repeat("─", max(0, m.width))}
+	hint := "  ↑↓ " + i18n.T("welcome.select_lang") +
+		"  [Enter] " + i18n.T("launcher.hint_open") +
+		"  [r] " + i18n.T("launcher.hint_rescan") +
+		"  [Esc] " + i18n.T("launcher.hint_back") +
+		"  [q/Ctrl+C] " + i18n.T("launcher.hint_quit")
+	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
+		lines = append(lines, StyleFaint.Render(line))
+	}
 	status := ""
 	switch {
 	case m.pickerStatus != "":
-		status = " " + RuneBullet + " " + lipgloss.NewStyle().Foreground(ColorStuck).Render(m.pickerStatus)
+		status = RuneBullet + " " + m.pickerStatus
 	case m.pickerScanning:
-		status = " " + RuneBullet + " " + StyleFaint.Render(i18n.T("launcher.picker.scanning"))
+		status = RuneBullet + " " + i18n.T("launcher.picker.scanning")
 	case m.pickerScanErr != "":
-		status = " " + RuneBullet + " " + lipgloss.NewStyle().Foreground(ColorStuck).Render(i18n.T("launcher.picker.scan_error"))
+		status = RuneBullet + " " + i18n.T("launcher.picker.scan_error")
 	}
-	footer := strings.Repeat("─", max(0, m.width)) + "\n" +
-		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+
-			"  [Enter] "+i18n.T("launcher.hint_open")+
-			"  [r] "+i18n.T("launcher.hint_rescan")+
-			"  [Esc] "+i18n.T("launcher.hint_back")) + status
-
-	return title + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
+	if status != "" {
+		style := StyleFaint
+		if m.pickerStatus != "" || m.pickerScanErr != "" {
+			style = lipgloss.NewStyle().Foreground(ColorStuck)
+		}
+		for _, line := range wrapToWidth(status, launcherTextWidth(m.width, 2)) {
+			lines = append(lines, "  "+style.Render(line))
+		}
+	}
+	return lines
 }
 
 // renderPickerBody renders the grouped rows and reports which rendered line
@@ -924,26 +1010,36 @@ func (m LauncherRootModel) renderPickerBody() (string, int) {
 			}
 		}
 
-		var badges []string
+		var badgeText []string
+		var badgeStyles []lipgloss.Style
 		if row.Running && row.AgentCount > 0 {
 			label := i18n.TF("launcher.picker.agents", row.AgentCount)
 			if row.AgentCount == 1 {
 				label = i18n.T("launcher.picker.agents_one")
 			}
-			badges = append(badges, runningStyle.Render("● "+label))
+			badgeText = append(badgeText, "● "+label)
+			badgeStyles = append(badgeStyles, runningStyle)
 		}
 		if row.Missing {
-			badges = append(badges, missingStyle.Render(i18n.T("launcher.picker.missing")))
+			badgeText = append(badgeText, i18n.T("launcher.picker.missing"))
+			badgeStyles = append(badgeStyles, missingStyle)
 		}
-		nameLine := "  " + cursor + style.Render(row.Name)
-		if len(badges) > 0 {
-			nameLine += "  " + strings.Join(badges, "  ")
+		namePrefix := "  " + cursor
+		badgeSuffix := ""
+		if len(badgeText) > 0 {
+			badgeSuffix = "  " + strings.Join(badgeText, "  ")
+		}
+		nameWidth := launcherTextWidth(m.width, lipgloss.Width(namePrefix)+lipgloss.Width(badgeSuffix))
+		nameLine := namePrefix + style.Render(truncatePathToWidth(row.Name, nameWidth))
+		for j, badge := range badgeText {
+			nameLine += "  " + badgeStyles[j].Render(badge)
 		}
 		if i == m.pickerCursor {
 			cursorLine = len(lines)
 		}
 		lines = append(lines, nameLine)
-		lines = append(lines, "      "+pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), m.width-8)))
+		pathPrefix := "      "
+		lines = append(lines, pathPrefix+pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), launcherTextWidth(m.width, lipgloss.Width(pathPrefix)))))
 	}
 
 	// Honest empty-group notes: when one source has entries and the other
@@ -958,13 +1054,14 @@ func (m LauncherRootModel) renderPickerBody() (string, int) {
 }
 
 func (m LauncherRootModel) viewUnfinishedStaging() string {
-	var b strings.Builder
+	var lines []string
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
-	b.WriteString("\n  " + titleStyle.Render(i18n.T("launcher.staging.title")) + "\n\n")
-	for _, hl := range wrapToWidth(i18n.T("launcher.staging.hint"), max(20, m.width-4)) {
-		b.WriteString("  " + hl + "\n")
+	lines = append(lines, "  "+titleStyle.Render(truncatePathToWidth(i18n.T("launcher.staging.title"), launcherTextWidth(m.width, 2))))
+	lines = append(lines, "")
+	for _, hl := range wrapToWidth(i18n.T("launcher.staging.hint"), launcherTextWidth(m.width, 2)) {
+		lines = append(lines, "  "+hl)
 	}
-	b.WriteString("\n")
+	lines = append(lines, "")
 	for i, dir := range m.unfinishedStaging {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(ColorText)
@@ -972,16 +1069,24 @@ func (m LauncherRootModel) viewUnfinishedStaging() string {
 			cursor = "> "
 			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 		}
-		b.WriteString(cursor + style.Render(dir) + "\n")
+		lines = append(lines, cursor+style.Render(truncatePathToWidth(dir, launcherTextWidth(m.width, lipgloss.Width(cursor)))))
 	}
 	if m.unfinishedDiscardStatus != "" {
-		b.WriteString("\n  " + m.unfinishedDiscardStatus + "\n")
+		lines = append(lines, "")
+		for _, status := range wrapToWidth(m.unfinishedDiscardStatus, launcherTextWidth(m.width, 2)) {
+			lines = append(lines, "  "+status)
+		}
 	}
-	b.WriteString("\n" + StyleFaint.Render("  [d] "+i18n.T("launcher.staging.discard")+
-		"  [r] "+i18n.T("launcher.staging.resume")+
-		"  [c] "+i18n.T("launcher.staging.continue")+
-		"  [Esc] "+i18n.T("launcher.hint_back")) + "\n")
-	return b.String()
+	lines = append(lines, "")
+	hint := "[d] " + i18n.T("launcher.staging.discard") +
+		"  [r] " + i18n.T("launcher.staging.resume") +
+		"  [c] " + i18n.T("launcher.staging.continue") +
+		"  [Esc] " + i18n.T("launcher.hint_back") +
+		"  [q/Ctrl+C] " + i18n.T("launcher.hint_quit")
+	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
+		lines = append(lines, "  "+StyleFaint.Render(line))
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // verticallyCentered pads content with leading newlines so its block sits
@@ -1098,14 +1203,21 @@ func splitAtDisplayWidth(s string, w int) (string, string) {
 // tail (the discriminating part of a filesystem path) and prefixing an
 // ellipsis.
 func truncatePathToWidth(p string, width int) string {
-	if width < 8 {
-		width = 8
+	if width <= 0 {
+		return ""
 	}
 	if lipgloss.Width(p) <= width {
 		return p
 	}
-	target := width - 1
-	// Trim runes off the front until the remainder fits.
+	if width == 1 {
+		return "…"
+	}
+	target := width - lipgloss.Width("…")
+	if target <= 0 {
+		return "…"
+	}
+	// Keep the tail, which is the useful/discriminating part of a path or
+	// project name, while measuring display columns rather than bytes.
 	runes := []rune(p)
 	for len(runes) > 0 && lipgloss.Width(string(runes)) > target {
 		runes = runes[1:]

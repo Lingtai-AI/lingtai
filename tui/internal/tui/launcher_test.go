@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
@@ -1707,5 +1709,180 @@ func TestDraftFirstRun_ClearingPendingKeyRestoresSharedBaseline(t *testing.T) {
 	}
 	if got := cfg.Keys[envName]; got != "shared-baseline" {
 		t.Fatalf("shared key changed to %q", got)
+	}
+}
+
+// TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible exercises the actual
+// root model View after a WindowSizeMsg rather than a helper-only renderer. The
+// normal terminal size must show the full prelude (all language choices,
+// zero-write boundary, and an actionable escape/quit hint) without any line
+// exceeding the terminal width.
+func TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
+	})
+	t.Setenv("HOME", t.TempDir())
+	projectRoot := filepath.Join(t.TempDir(), strings.Repeat("long-project-segment-", 8))
+	m := NewLauncherRootModel(projectRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(LauncherRootModel)
+	if m.view != launcherViewWelcome {
+		t.Fatalf("expected initial root view to be Welcome, got %v", m.view)
+	}
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{
+		"English",
+		"现代汉语",
+		"文言",
+		i18n.T("launcher.zero_write_status"),
+		i18n.T("launcher.welcome.continue"),
+		"Esc/q/Ctrl+C",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("80x24 welcome screen missing %q:\n%s", want, content)
+		}
+	}
+	assertLauncherScreenWidth(t, content, 80)
+	if got := len(strings.Split(strings.TrimSuffix(content, "\n"), "\n")); got > 24 {
+		t.Fatalf("80x24 welcome rendered %d physical lines; mandatory onboarding would be clipped", got)
+	}
+}
+
+// TestLauncherScreens_LongValuesStayBounded covers the realistic compact and
+// normal sizes with externally supplied cwd, project, staging, and status
+// values. It also checks that picker name truncation reserves both the cursor
+// and running/missing badges, preserving the two-physical-lines-per-row
+// accounting used by the scroll window.
+func TestLauncherScreens_LongValuesStayBounded(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
+	})
+	t.Setenv("HOME", t.TempDir())
+	longRoot := filepath.Join(t.TempDir(), strings.Repeat("cwd-segment-", 20))
+	longName := strings.Repeat("project-name-", 16)
+	longPath := filepath.Join(t.TempDir(), strings.Repeat("staging-segment-", 20), longName)
+	for _, tc := range []struct {
+		width, height int
+		name          string
+	}{
+		{60, 16, "compact"},
+		{80, 24, "normal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewLauncherRootModel(longRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
+			m.width, m.height = tc.width, tc.height
+
+			m.view = launcherViewWelcome
+			welcome := ansi.Strip(m.View().Content)
+			assertLauncherScreenWidth(t, welcome, tc.width)
+			if got := len(strings.Split(strings.TrimSuffix(welcome, "\n"), "\n")); got > tc.height {
+				t.Errorf("%dx%d welcome rendered %d physical lines", tc.width, tc.height, got)
+			}
+			m.view = launcherViewChoose
+			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
+
+			m.view = launcherViewPicker
+			m.pickerRows = []launcherProjectRow{{
+				Name:       longName,
+				Path:       longPath,
+				Running:    true,
+				AgentCount: 999,
+				Registered: true,
+				Missing:    true,
+			}}
+			m.pickerCursor = 0
+			body, cursorLine := m.renderPickerBody()
+			bodyLines := strings.Split(body, "\n")
+			if cursorLine < 0 || cursorLine+1 >= len(bodyLines) {
+				t.Fatalf("picker row lost its physical name/path pair: cursorLine=%d body=%q", cursorLine, body)
+			}
+			if cursorLine+2 != len(bodyLines) {
+				t.Fatalf("long picker row changed physical row accounting: cursorLine=%d bodyLines=%d body=%q", cursorLine, len(bodyLines), body)
+			}
+			m.pickerStatus = strings.Repeat("status-value-", 20)
+			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
+
+			m.view = launcherViewStaging
+			m.unfinishedStaging = []string{longPath}
+			m.unfinishedDiscardStatus = strings.Repeat("discard-error-", 20)
+			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
+		})
+	}
+}
+
+func assertLauncherScreenWidth(t *testing.T, content string, width int) {
+	t.Helper()
+	for i, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("rendered line %d is %d columns wide, terminal width is %d: %q", i+1, got, width, line)
+		}
+	}
+}
+
+// TestLauncherKeyboardContract_ThroughRootUpdate proves the launcher-level
+// contract at the production dispatcher boundary: Esc backs one level,
+// while q and Ctrl+C cancel from every launcher-owned browsing screen.
+func TestLauncherKeyboardContract_ThroughRootUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	newRoot := func() LauncherRootModel {
+		m := NewLauncherRootModel(t.TempDir(), filepath.Join(t.TempDir(), ".lingtai-tui"), "")
+		m.width, m.height = 80, 24
+		return m
+	}
+	assertCancel := func(t *testing.T, m LauncherRootModel, key tea.KeyPressMsg) {
+		t.Helper()
+		updated, cmd := m.Update(key)
+		got := updated.(LauncherRootModel)
+		if !got.done || got.result.Kind != DecisionCancel || cmd == nil {
+			t.Fatalf("key %q did not cancel through LauncherRootModel.Update: done=%v result=%v cmd=%T", key.String(), got.done, got.result.Kind, cmd)
+		}
+	}
+
+	for _, key := range []tea.KeyPressMsg{{Text: "q"}, {Text: "ctrl+c"}} {
+		assertCancel(t, newRoot(), key) // Welcome may cancel.
+	}
+
+	m := newRoot()
+	m.view = launcherViewChoose
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if got := updated.(LauncherRootModel); got.view != launcherViewWelcome {
+		t.Fatalf("Choose Esc view=%v, want Welcome", got.view)
+	}
+	for _, key := range []tea.KeyPressMsg{{Text: "q"}, {Text: "ctrl+c"}} {
+		m = newRoot()
+		m.view = launcherViewChoose
+		assertCancel(t, m, key)
+	}
+
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Text: "q"}, {Text: "ctrl+c"}} {
+		m = newRoot()
+		m.view = launcherViewPicker
+		m.pickerRows = []launcherProjectRow{{Name: "project", Path: t.TempDir()}}
+		updated, cmd := m.Update(key)
+		got := updated.(LauncherRootModel)
+		if key.Code == tea.KeyEscape {
+			if got.view != launcherViewChoose || cmd != nil {
+				t.Fatalf("Picker Esc view=%v cmd=%T, want Choose/no command", got.view, cmd)
+			}
+		} else if !got.done || got.result.Kind != DecisionCancel || cmd == nil {
+			t.Fatalf("Picker key %q did not cancel through root Update: done=%v result=%v cmd=%T", key.String(), got.done, got.result.Kind, cmd)
+		}
+	}
+
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Text: "q"}, {Text: "ctrl+c"}} {
+		m = newRoot()
+		m.view = launcherViewStaging
+		m.unfinishedStaging = []string{filepath.Join(t.TempDir(), ".lingtai.create-long")}
+		updated, cmd := m.Update(key)
+		got := updated.(LauncherRootModel)
+		if key.Code == tea.KeyEscape {
+			if got.view != launcherViewChoose || cmd != nil {
+				t.Fatalf("Staging Esc view=%v cmd=%T, want Choose/no command", got.view, cmd)
+			}
+		} else if !got.done || got.result.Kind != DecisionCancel || cmd == nil {
+			t.Fatalf("Staging key %q did not cancel through root Update: done=%v result=%v cmd=%T", key.String(), got.done, got.result.Kind, cmd)
+		}
 	}
 }
