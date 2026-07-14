@@ -94,7 +94,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 
 ### Root layout budget (`layout.go`)
 
-- **`layout.go`** — the root-owned layout-ownership contract (issue #308). `LayoutBudget{Width, Height, TopChromeRows, BottomChromeRows, ChildHeight}` describes how the terminal is split between root chrome and the child screen. `App.layoutBudget()` reserves `topChromeRows()` (startup banner and global select-mode indicator as needed; visiting reserves zero root rows) plus `bottomChromeRows()` (always zero — an inert hook for a future status area) and clamps `ChildHeight` to `>= 0` (`tui/internal/tui/layout.go:41-87`). `LayoutBudget.ChildWindowSize()` is the reduced `tea.WindowSizeMsg` payload forwarded to children by raw terminal resize handling and by the root-internal `App.sendSize()` command.
+- **`tui/internal/tui/layout.go:13-132`** — the root-owned vertical and horizontal layout contract. `LayoutBudget` names full terminal width, child content width, rail width/visibility, minimum chat width, root chrome rows, and child height. `resolveHorizontalLayout` clamps terminal width, hides disallowed or non-fitting rails without consuming columns, and performs the one allowed horizontal subtraction; `App.layoutBudget()` currently requests a formal zero-width rail so every view remains pixel-equivalent. `LayoutBudget.ChildWindowSize()` is the one content rectangle consumed by raw and root-synthesized resize paths; future rail rendering and mouse X hit-testing read the same budget rather than recreating child width arithmetic.
 
 ### Screens
 

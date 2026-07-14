@@ -10,32 +10,37 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-// LayoutBudget is the root-owned layout contract. The root App reserves rows
-// for persistent chrome (top status banners, and — in the future — a bottom
-// status area) BEFORE the child screen sizes itself, then forwards the reduced
-// height to the child via a WindowSizeMsg. View() composes root chrome around
-// the child content, so chrome never gets appended after a child has already
+const minimumChatWidth = 60
+
+// LayoutBudget is the root-owned vertical and horizontal layout contract. The
+// root App reserves rows for persistent chrome and columns for the mail-only
+// Agent rail BEFORE the child screen sizes itself, then forwards the resulting
+// content rectangle via a WindowSizeMsg. View() composes root chrome around the
+// child content, so chrome never gets appended after a child has already
 // rendered at full terminal height.
 //
-// This is the foundation a future persistent status line / chrome consumer
-// plugs into: declare its rows in layoutBudget(), render them in the chrome
-// helpers, and the child automatically yields the space. Today the only
-// consumer is the startup banner (one top row, shown only when non-empty).
+// RailWidth is intentionally zero until the first visible rail PR. Naming the
+// horizontal geometry here lets that future render and mouse hit-testing share
+// the same source without changing today's pixels or narrowing non-mail views.
 type LayoutBudget struct {
-	Width  int
-	Height int // full terminal height
+	TerminalWidth int // full terminal width, clamped >= 0
+	Height        int // full terminal height
+	ContentWidth  int // width handed to the child screen, clamped >= 0
+	RailWidth     int // root-owned mail rail width (0 until the rail exists)
+	MinChatWidth  int // minimum usable content width when a rail is requested
+	RailVisible   bool
 
 	TopChromeRows    int // rows reserved at the top for root chrome
 	BottomChromeRows int // rows reserved at the bottom for root chrome (0 today)
 	ChildHeight      int // height handed to the child screen (clamped >= 0)
 }
 
-// ChildWindowSize is the WindowSizeMsg the child screen should receive: full
-// width, reduced height. Both Update's incoming-WindowSizeMsg handler and
-// sendSize() forward this so the child never sizes to the full terminal height
-// when root chrome is present.
+// ChildWindowSize is the WindowSizeMsg the child screen should receive: the
+// budgeted content width and reduced height. Both Update's incoming raw resize
+// handler and sendSize's root-synthesized path call this method, so viewport,
+// composer, header, and footer all receive the same geometry.
 func (b LayoutBudget) ChildWindowSize() tea.WindowSizeMsg {
-	return tea.WindowSizeMsg{Width: b.Width, Height: b.ChildHeight}
+	return tea.WindowSizeMsg{Width: b.ContentWidth, Height: b.ChildHeight}
 }
 
 // topChromeRows reports how many rows the root reserves at the top: one for the
@@ -67,10 +72,30 @@ func (a App) bottomChromeRows() int {
 	return 0
 }
 
+// resolveHorizontalLayout applies the root's one horizontal subtraction. A rail
+// is visible only in an allowed view and only when the requested width leaves at
+// least minChatWidth columns for content. Hidden rails consume zero columns.
+func resolveHorizontalLayout(terminalWidth, requestedRailWidth, minChatWidth int, railAllowed bool) (int, int, int, bool) {
+	if terminalWidth < 0 {
+		terminalWidth = 0
+	}
+	if minChatWidth < 0 {
+		minChatWidth = 0
+	}
+
+	railVisible := railAllowed && requestedRailWidth > 0 &&
+		terminalWidth-requestedRailWidth >= minChatWidth
+	if !railVisible {
+		return terminalWidth, terminalWidth, 0, false
+	}
+	return terminalWidth, terminalWidth - requestedRailWidth, requestedRailWidth, true
+}
+
 // layoutBudget computes the current root layout budget from terminal size and
-// the rows reserved by root chrome. ChildHeight is clamped to >= 0 so a
-// terminal too short to fit the chrome never forwards a negative height
-// (screens re-clamp to their own minimums internally).
+// root-owned chrome. Horizontal dimensions are clamped before subtraction, and
+// content width is reduced exactly once only when a non-zero mail rail fits
+// beside the minimum chat width. The requested rail is formally zero in this
+// foundation PR, so all current views retain the full terminal width.
 func (a App) layoutBudget() LayoutBudget {
 	top := a.topChromeRows()
 	bottom := a.bottomChromeRows()
@@ -78,9 +103,22 @@ func (a App) layoutBudget() LayoutBudget {
 	if child < 0 {
 		child = 0
 	}
+
+	requestedRailWidth := 0
+	terminalWidth, contentWidth, railWidth, railVisible := resolveHorizontalLayout(
+		a.width,
+		requestedRailWidth,
+		minimumChatWidth,
+		a.currentView == appViewMail,
+	)
+
 	return LayoutBudget{
-		Width:            a.width,
+		TerminalWidth:    terminalWidth,
 		Height:           a.height,
+		ContentWidth:     contentWidth,
+		RailWidth:        railWidth,
+		MinChatWidth:     minimumChatWidth,
+		RailVisible:      railVisible,
 		TopChromeRows:    top,
 		BottomChromeRows: bottom,
 		ChildHeight:      child,
