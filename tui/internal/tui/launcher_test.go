@@ -1812,6 +1812,134 @@ func TestLauncherScreens_LongValuesStayBounded(t *testing.T) {
 	}
 }
 
+// TestLauncherPickerRootViewKeepsProjectPairs exercises the production root
+// View at every picker cursor position. The viewport may omit headers while
+// centering a selection, but no visible project name/path pair may be split at
+// either edge, including when the footer and status both wrap.
+func TestLauncherPickerRootViewKeepsProjectPairs(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
+	})
+	t.Setenv("HOME", t.TempDir())
+	projectRoot := t.TempDir()
+	rows := make([]launcherProjectRow, 0, 12)
+	for i := 0; i < 12; i++ {
+		rows = append(rows, launcherProjectRow{
+			Name:       fmt.Sprintf("TERRA-ROW-%02d", i),
+			Path:       filepath.Join(projectRoot, fmt.Sprintf("TERRA-PATH-%02d", i)),
+			Running:    i < 6,
+			Registered: i >= 6,
+			AgentCount: i + 1,
+		})
+	}
+
+	for _, tc := range []struct {
+		width, height int
+		wrapped       bool
+	}{
+		{width: 60, height: 16},
+		{width: 60, height: 16, wrapped: true},
+		{width: 80, height: 24},
+		{width: 80, height: 24, wrapped: true},
+	} {
+		t.Run(fmt.Sprintf("%dx%d-wrapped=%v", tc.width, tc.height, tc.wrapped), func(t *testing.T) {
+			for cursor := range rows {
+				m := NewLauncherRootModel(projectRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
+				m.view = launcherViewPicker
+				m.pickerRows = rows
+				m.pickerCursor = cursor
+				if tc.wrapped {
+					m.pickerStatus = strings.Repeat("wrapped-status-", 20)
+				}
+				updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+				m = updated.(LauncherRootModel)
+				content := ansi.Strip(m.View().Content)
+				lines := renderedLauncherLines(content)
+				if len(lines) > tc.height {
+					t.Fatalf("cursor %d rendered %d physical lines at %dx%d:\n%s", cursor, len(lines), tc.width, tc.height, content)
+				}
+				assertLauncherScreenWidth(t, content, tc.width)
+				selectedName := fmt.Sprintf("TERRA-ROW-%02d", cursor)
+				selectedPath := fmt.Sprintf("TERRA-PATH-%02d", cursor)
+				if !strings.Contains(content, selectedName) || !strings.Contains(content, selectedPath) {
+					t.Fatalf("cursor %d selected pair %s/%s is outside its viewport at %dx%d:\n%s", cursor, selectedName, selectedPath, tc.width, tc.height, content)
+				}
+				if tc.wrapped && !strings.Contains(content, "wrapped-status-") {
+					t.Fatalf("wrapped picker status disappeared at cursor %d:\n%s", cursor, content)
+				}
+				for i := range rows {
+					nameToken := fmt.Sprintf("TERRA-ROW-%02d", i)
+					pathToken := fmt.Sprintf("TERRA-PATH-%02d", i)
+					nameLine, pathLine := -1, -1
+					for lineNo, line := range lines {
+						if strings.Contains(line, nameToken) {
+							nameLine = lineNo
+						}
+						if strings.Contains(line, pathToken) {
+							pathLine = lineNo
+						}
+					}
+					if (nameLine < 0) != (pathLine < 0) {
+						t.Fatalf("cursor %d split visible pair %s/%s at %dx%d:\n%s", cursor, nameToken, pathToken, tc.width, tc.height, content)
+					}
+					if nameLine >= 0 {
+						if pathLine != nameLine+1 {
+							t.Fatalf("cursor %d rendered name %s without its immediate path %s at %dx%d (name=%d path=%d):\n%s", cursor, nameToken, pathToken, tc.width, tc.height, nameLine, pathLine, content)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLauncherStagingRootViewReservesFooter exercises the production root View
+// with a long Unicode staging path and a reachable long discard error. The
+// variable body may be windowed, but the title and actionable footer must
+// remain inside both supported terminal heights and every rendered line must
+// stay within the terminal width.
+func TestLauncherStagingRootViewReservesFooter(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
+	})
+	t.Setenv("HOME", t.TempDir())
+	stagingRoot := t.TempDir()
+	longPath := filepath.Join(stagingRoot, strings.Repeat("路径-", 24)+"e\u0301-final")
+	longError := strings.Repeat("discard-error-", 24) + "权限 denied"
+
+	for _, tc := range []struct{ width, height int }{{60, 16}, {80, 24}} {
+		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
+			m := NewLauncherRootModel(stagingRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
+			m.view = launcherViewStaging
+			m.unfinishedStaging = []string{longPath}
+			m.unfinishedDiscardStatus = longError
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			m = updated.(LauncherRootModel)
+			content := ansi.Strip(m.View().Content)
+			lines := renderedLauncherLines(content)
+			if len(lines) > tc.height {
+				t.Fatalf("staging rendered %d physical lines at %dx%d:\n%s", len(lines), tc.width, tc.height, content)
+			}
+			assertLauncherScreenWidth(t, content, tc.width)
+			for _, want := range []string{"[d]", "[Esc]", "[q/Ctrl+C]", "discard-error-"} {
+				if !strings.Contains(content, want) {
+					t.Fatalf("staging %dx%d lost required %q:\n%s", tc.width, tc.height, want, content)
+				}
+			}
+		})
+	}
+}
+
+func renderedLauncherLines(content string) []string {
+	content = strings.TrimSuffix(content, "\n")
+	if content == "" {
+		return nil
+	}
+	return strings.Split(content, "\n")
+}
+
 func assertLauncherScreenWidth(t *testing.T, content string, width int) {
 	t.Helper()
 	for i, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {

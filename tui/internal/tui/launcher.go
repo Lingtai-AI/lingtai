@@ -97,6 +97,16 @@ type launcherProjectRow struct {
 	Missing    bool   // root's .lingtai is gone (stale registry row or phantom process)
 }
 
+// pickerViewportUnit is the smallest unit the picker may put in or take out
+// of its viewport. A project unit owns both its name and path lines; a header
+// is a separate unit so scrolling can omit it without ever splitting a
+// project pair. The rendered lines already include their display styles.
+type pickerViewportUnit struct {
+	lines         []string
+	isProject     bool
+	isGroupHeader bool
+}
+
 // launcherScanMsg delivers one async inventory scan result to the picker.
 // seq must match the picker's current scan sequence or the result is
 // dropped — same staleness rule ProjectsModel uses for its catalog, kept
@@ -895,36 +905,35 @@ func chooseDescWidth(width int) int {
 // other list screen in the TUI, with a title bar, a scrollable body
 // windowed around the cursor, and a persistent keyboard-help footer.
 func (m LauncherRootModel) viewPicker() string {
-	title := StyleTitle.Render("  "+truncatePathToWidth(i18n.T("launcher.picker.title"), launcherTextWidth(m.width, 2))) + "\n" + strings.Repeat("─", max(0, m.width))
-
-	body, cursorLine := m.renderPickerBody()
-	bodyLines := strings.Split(body, "\n")
+	titleLines := []string{
+		StyleTitle.Render("  " + truncatePathToWidth(i18n.T("launcher.picker.title"), launcherTextWidth(m.width, 2))),
+		strings.Repeat("─", max(0, m.width)),
+	}
+	units, selectedUnit := m.pickerViewportUnits()
 	footerLines := m.pickerFooterLines()
 
-	// Window the body around the cursor while reserving every physical footer
-	// line, including wrapped scan/status text.
-	avail := m.height - 2 - len(footerLines)
+	// Reserve the title and every physically wrapped footer/status line before
+	// selecting the body window. The body is selected as whole units, never as
+	// a slice of physical lines.
+	avail := m.height - len(titleLines) - len(footerLines)
 	if avail < 1 {
 		avail = 1
 	}
+	window := selectPickerViewportUnits(units, selectedUnit, avail)
+	bodyLines := flattenPickerUnits(window)
 	if len(bodyLines) > avail {
-		start := 0
-		if cursorLine >= 0 {
-			start = cursorLine - avail/2
-		}
-		if start > len(bodyLines)-avail {
-			start = len(bodyLines) - avail
-		}
-		if start < 0 {
-			start = 0
-		}
-		bodyLines = bodyLines[start : start+avail]
+		// This only occurs below the supported smallest terminal sizes, where a
+		// two-line project unit cannot physically fit. Normal terminal sizes
+		// always retain the selected pair atomically.
+		bodyLines = bodyLines[:avail]
 	}
 	for len(bodyLines) < avail {
 		bodyLines = append(bodyLines, "")
 	}
 
-	return title + "\n" + strings.Join(bodyLines, "\n") + "\n" + strings.Join(footerLines, "\n")
+	lines := append(append([]string{}, titleLines...), bodyLines...)
+	lines = append(lines, footerLines...)
+	return strings.Join(lines, "\n")
 }
 
 func (m LauncherRootModel) pickerFooterLines() []string {
@@ -958,10 +967,10 @@ func (m LauncherRootModel) pickerFooterLines() []string {
 	return lines
 }
 
-// renderPickerBody renders the grouped rows and reports which rendered line
-// the cursor's name-line landed on (for scroll windowing); -1 when the list
-// is empty.
-func (m LauncherRootModel) renderPickerBody() (string, int) {
+// pickerViewportUnits projects the catalog into atomic viewport units. Header
+// units may be omitted when the viewport is tight, but a project unit always
+// contains the name and path together.
+func (m LauncherRootModel) pickerViewportUnits() ([]pickerViewportUnit, int) {
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 	nameStyle := lipgloss.NewStyle().Foreground(ColorText)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
@@ -969,31 +978,34 @@ func (m LauncherRootModel) renderPickerBody() (string, int) {
 	pathStyle := StyleFaint
 	runningStyle := lipgloss.NewStyle().Foreground(ColorActive)
 
-	var lines []string
-	cursorLine := -1
-
+	units := make([]pickerViewportUnit, 0, len(m.pickerRows)*2+2)
+	selectedUnit := -1
+	appendHeader := func(text string) {
+		units = append(units, pickerViewportUnit{
+			lines:         []string{"  " + sectionStyle.Render(text)},
+			isGroupHeader: true,
+		})
+	}
 	if len(m.pickerRows) == 0 {
-		lines = append(lines, "")
+		lines := []string{""}
 		if m.pickerScanning {
 			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.scanning")))
 		} else {
 			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty")))
 			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty_hint")))
 		}
-		return strings.Join(lines, "\n"), cursorLine
+		return []pickerViewportUnit{{lines: lines}}, -1
 	}
 
 	renderedRunningHeader := false
 	renderedRegisteredHeader := false
 	for i, row := range m.pickerRows {
 		if row.Running && !renderedRunningHeader {
-			lines = append(lines, "")
-			lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.running")))
+			appendHeader(i18n.T("launcher.picker.running"))
 			renderedRunningHeader = true
 		}
 		if !row.Running && !renderedRegisteredHeader {
-			lines = append(lines, "")
-			lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.registered")))
+			appendHeader(i18n.T("launcher.picker.registered"))
 			renderedRegisteredHeader = true
 		}
 
@@ -1034,50 +1046,116 @@ func (m LauncherRootModel) renderPickerBody() (string, int) {
 		for j, badge := range badgeText {
 			nameLine += "  " + badgeStyles[j].Render(badge)
 		}
-		if i == m.pickerCursor {
-			cursorLine = len(lines)
-		}
-		lines = append(lines, nameLine)
 		pathPrefix := "      "
-		lines = append(lines, pathPrefix+pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), launcherTextWidth(m.width, lipgloss.Width(pathPrefix)))))
+		projectUnit := pickerViewportUnit{
+			lines: []string{
+				nameLine,
+				pathPrefix + pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), launcherTextWidth(m.width, lipgloss.Width(pathPrefix)))),
+			},
+			isProject: true,
+		}
+		if i == m.pickerCursor {
+			selectedUnit = len(units)
+		}
+		units = append(units, projectUnit)
 	}
 
 	// Honest empty-group notes: when one source has entries and the other
 	// has none, say so rather than leaving an unexplained gap.
 	if !renderedRunningHeader && !m.pickerScanning && m.pickerScanErr == "" {
-		lines = append(lines, "")
-		lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.running")))
-		lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.none_running")))
+		appendHeader(i18n.T("launcher.picker.running"))
+		units = append(units, pickerViewportUnit{lines: []string{"  " + StyleFaint.Render(i18n.T("launcher.picker.none_running"))}})
 	}
+	return units, selectedUnit
+}
 
+func flattenPickerUnits(units []pickerViewportUnit) []string {
+	var lines []string
+	for _, unit := range units {
+		lines = append(lines, unit.lines...)
+	}
+	return lines
+}
+
+// selectPickerViewportUnits chooses a contiguous group-aligned unit window
+// around the selected project. It maximizes visible project rows first, then
+// physical use of the reserved body, while preferring a balanced window and
+// retaining headers where there is room.
+func selectPickerViewportUnits(units []pickerViewportUnit, selected, avail int) []pickerViewportUnit {
+	if len(units) == 0 {
+		return nil
+	}
+	if selected < 0 || selected >= len(units) {
+		selected = 0
+		for i, unit := range units {
+			if unit.isProject {
+				selected = i
+				break
+			}
+		}
+	}
+	bestStart, bestEnd := -1, -1
+	bestProjects, bestLines, bestImbalance, bestHeaders := -1, -1, 0, -1
+	for start := 0; start <= selected; start++ {
+		used := 0
+		for end := start; end < len(units); end++ {
+			used += len(units[end].lines)
+			if used > avail {
+				break
+			}
+			if selected < start || selected >= end+1 {
+				continue
+			}
+			projects, headers := 0, 0
+			for _, unit := range units[start : end+1] {
+				if unit.isProject {
+					projects++
+				}
+				if unit.isGroupHeader {
+					headers++
+				}
+			}
+			left, right := selected-start, end-selected
+			imbalance := left - right
+			if imbalance < 0 {
+				imbalance = -imbalance
+			}
+			if projects > bestProjects ||
+				(projects == bestProjects && used > bestLines) ||
+				(projects == bestProjects && used == bestLines && imbalance < bestImbalance) ||
+				(projects == bestProjects && used == bestLines && imbalance == bestImbalance && headers > bestHeaders) {
+				bestStart, bestEnd = start, end+1
+				bestProjects, bestLines, bestImbalance, bestHeaders = projects, used, imbalance, headers
+			}
+		}
+	}
+	if bestStart >= 0 {
+		return units[bestStart:bestEnd]
+	}
+	// Only a pathological body budget can be smaller than one unit. Keep the
+	// selected unit as the honest fallback; viewPicker applies the final hard
+	// clip only for such unsupported terminal sizes.
+	return units[selected : selected+1]
+}
+
+// renderPickerBody renders the complete grouped body and reports which
+// physical line the cursor's name line occupies. Viewport selection itself is
+// unit-based in viewPicker; this helper remains useful to tests and diagnostics.
+func (m LauncherRootModel) renderPickerBody() (string, int) {
+	units, selected := m.pickerViewportUnits()
+	lines := flattenPickerUnits(units)
+	cursorLine := -1
+	if selected >= 0 {
+		cursorLine = 0
+		for i := 0; i < selected; i++ {
+			cursorLine += len(units[i].lines)
+		}
+	}
 	return strings.Join(lines, "\n"), cursorLine
 }
 
-func (m LauncherRootModel) viewUnfinishedStaging() string {
-	var lines []string
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
-	lines = append(lines, "  "+titleStyle.Render(truncatePathToWidth(i18n.T("launcher.staging.title"), launcherTextWidth(m.width, 2))))
-	lines = append(lines, "")
-	for _, hl := range wrapToWidth(i18n.T("launcher.staging.hint"), launcherTextWidth(m.width, 2)) {
-		lines = append(lines, "  "+hl)
-	}
-	lines = append(lines, "")
-	for i, dir := range m.unfinishedStaging {
-		cursor := "  "
-		style := lipgloss.NewStyle().Foreground(ColorText)
-		if i == m.unfinishedCursor {
-			cursor = "> "
-			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-		}
-		lines = append(lines, cursor+style.Render(truncatePathToWidth(dir, launcherTextWidth(m.width, lipgloss.Width(cursor)))))
-	}
-	if m.unfinishedDiscardStatus != "" {
-		lines = append(lines, "")
-		for _, status := range wrapToWidth(m.unfinishedDiscardStatus, launcherTextWidth(m.width, 2)) {
-			lines = append(lines, "  "+status)
-		}
-	}
-	lines = append(lines, "")
+func (m LauncherRootModel) stagingFooterLines() []string {
+	lines := []string{strings.Repeat("─", max(0, m.width))}
 	hint := "[d] " + i18n.T("launcher.staging.discard") +
 		"  [r] " + i18n.T("launcher.staging.resume") +
 		"  [c] " + i18n.T("launcher.staging.continue") +
@@ -1086,7 +1164,83 @@ func (m LauncherRootModel) viewUnfinishedStaging() string {
 	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
 		lines = append(lines, "  "+StyleFaint.Render(line))
 	}
-	return strings.Join(lines, "\n") + "\n"
+	return lines
+}
+
+func (m LauncherRootModel) stagingBodyLines() ([]string, int, int) {
+	var lines []string
+	for _, hl := range wrapToWidth(i18n.T("launcher.staging.hint"), launcherTextWidth(m.width, 2)) {
+		lines = append(lines, "  "+hl)
+	}
+	lines = append(lines, "")
+	selectedLine := -1
+	for i, dir := range m.unfinishedStaging {
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		if i == m.unfinishedCursor {
+			cursor = "> "
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		}
+		if i == m.unfinishedCursor {
+			selectedLine = len(lines)
+		}
+		lines = append(lines, cursor+style.Render(truncatePathToWidth(dir, launcherTextWidth(m.width, lipgloss.Width(cursor)))))
+	}
+	statusLine := -1
+	if m.unfinishedDiscardStatus != "" {
+		lines = append(lines, "")
+		statusLine = len(lines)
+		// The first physical line carries the status meaning (including the
+		// discard error prefix). Bound it horizontally and keep it as one
+		// body line so a long error cannot consume the actionable footer.
+		status := truncateTextToWidth(m.unfinishedDiscardStatus, launcherTextWidth(m.width, 2))
+		lines = append(lines, "  "+status)
+	}
+	return lines, selectedLine, statusLine
+}
+
+func (m LauncherRootModel) viewUnfinishedStaging() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
+	titleLines := []string{"  " + titleStyle.Render(truncatePathToWidth(i18n.T("launcher.staging.title"), launcherTextWidth(m.width, 2)))}
+	footerLines := m.stagingFooterLines()
+	bodyLines, selectedLine, statusLine := m.stagingBodyLines()
+
+	// Reserve the title and actionable footer first. The explanation, staging
+	// paths, and status are a variable region; when it is too tall, window it
+	// around the selected path and status rather than pushing the footer below
+	// the terminal viewport.
+	avail := m.height - len(titleLines) - len(footerLines)
+	if avail < 1 {
+		avail = 1
+	}
+	if len(bodyLines) > avail {
+		target := selectedLine
+		if target < 0 {
+			target = 0
+		}
+		if statusLine >= 0 {
+			if target < 0 || statusLine < target {
+				target = statusLine
+			} else {
+				target = (target + statusLine) / 2
+			}
+		}
+		start := target - avail/2
+		if start > len(bodyLines)-avail {
+			start = len(bodyLines) - avail
+		}
+		if start < 0 {
+			start = 0
+		}
+		bodyLines = bodyLines[start : start+avail]
+	}
+	for len(bodyLines) < avail {
+		bodyLines = append(bodyLines, "")
+	}
+
+	lines := append(append([]string{}, titleLines...), bodyLines...)
+	lines = append(lines, footerLines...)
+	return strings.Join(lines, "\n")
 }
 
 // verticallyCentered pads content with leading newlines so its block sits
@@ -1223,6 +1377,22 @@ func truncatePathToWidth(p string, width int) string {
 		runes = runes[1:]
 	}
 	return "…" + string(runes)
+}
+
+// truncateTextToWidth keeps the beginning of explanatory/status text so its
+// marker and meaning remain visible when a body budget is tight.
+func truncateTextToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	head, _ := splitAtDisplayWidth(s, width-lipgloss.Width("…"))
+	return head + "…"
 }
 
 // abbreviateHomePath renders the user's home directory as "~" for display.
