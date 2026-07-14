@@ -88,6 +88,66 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Record the running binary version so /doctor can report it and
+	// detect TUI↔kernel version drift. Pure in-memory — safe before the
+	// no-project gate.
+	tui.SetTUIVersion(version)
+
+	// Always start in current directory. Resolved with plain os.Getwd +
+	// filepath.Abs only — no filesystem mutation.
+	projectDir, _ := os.Getwd()
+	projectDir, _ = filepath.Abs(projectDir)
+
+	// ---- No-project decision gate (design doc: "no-project-launcher") ----
+	//
+	// Before ANY of: config.GlobalDir() (which os.MkdirAll's
+	// ~/.lingtai-tui), globalmigrate.Run, MigrateLegacyLanguage/
+	// LoadTUIConfig's write paths, ValidateCodexAuthOnStartup, showWelcome,
+	// maybeShowAgentCount, process.InitProject, config.Register,
+	// preset.PopulateBundledLibrary, or EnsureRuntime/preset.Bootstrap —
+	// do a PURE, read-only check: does <projectDir>/.lingtai exist? Uses
+	// os.Lstat (never Stat) so a symlink there counts as "exists" without
+	// being followed or created through.
+	//
+	// If it's missing, branch into the no-project launcher, which itself
+	// performs zero filesystem writes until the user explicitly confirms
+	// either "Open Existing" (hands a chosen project root to the SAME
+	// existing pipeline below, exactly as if the user had cd'd there) or
+	// "Start project" (runs the atomic staging→validate→rename commit in
+	// project_create.go, then falls through to construct the real App).
+	//
+	// ProbeNoProjectPure now fails CLOSED: any Lstat error other than
+	// "absent" (permission denied on a parent dir, I/O error, ...) is
+	// surfaced and exits here, before config.GlobalDir()/any write below.
+	// The previous version folded every such error into "project exists",
+	// which silently fell through to the normal (write-heavy) startup path
+	// without the launcher ever making a real decision — exactly the
+	// eager-write bug this gate exists to prevent.
+	noProject, probeErr := tui.ProbeNoProjectPure(projectDir)
+	if probeErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", probeErr)
+		os.Exit(1)
+	}
+	if noProject {
+		result, ok := runNoProjectLauncher(projectDir)
+		if !ok {
+			// User cancelled (Esc/q/Ctrl+C) — zero writes occurred, exit
+			// exactly like a normal TUI quit.
+			return
+		}
+		switch result.Kind {
+		case tui.DecisionOpenExisting:
+			projectDir = result.ProjectRoot
+			// Fall through to the normal startup pipeline below, using
+			// the launcher-selected root instead of the original cwd.
+		case tui.DecisionCreate:
+			runCreatedProject(result)
+			return
+		default:
+			return
+		}
+	}
+
 	// Print version and check for updates (3s timeout).
 	// Skip upgrade check for dev builds (version contains '-' suffix like v0.4.31-4-gabcdef).
 	globalDir, err := config.GlobalDir()
@@ -113,14 +173,6 @@ func main() {
 	} else {
 		fmt.Println("lingtai-tui " + version)
 	}
-
-	// Record the running binary version so /doctor can report it and
-	// detect TUI↔kernel version drift.
-	tui.SetTUIVersion(version)
-
-	// Always start in current directory
-	projectDir, _ := os.Getwd()
-	projectDir, _ = filepath.Abs(projectDir)
 
 	// Global per-machine migrations (versioned in ~/.lingtai-tui/meta.json).
 	// Best-effort housekeeping — failures don't abort startup.
@@ -331,6 +383,91 @@ func main() {
 
 	// Launch TUI
 	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
+	p := tea.NewProgram(app)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runNoProjectLauncher runs the no-project launcher as its OWN tea.Program
+// (deliberately separate from the real App's — see launcher.go's doc
+// comment on why this repo does not construct a fake/empty-path App to
+// host it). It performs a pure, non-mutating global-dir path resolution
+// (config.GlobalDirPath, never config.GlobalDir/EnsureGlobalDir) so
+// launching the picker itself cannot create ~/.lingtai-tui.
+//
+// lingtaiCmd is resolved via a best-effort PURE read of whatever venv might
+// already exist (config.LingtaiCmd only stats a path, it does not create
+// anything). An empty result is intentionally allowed: after a successful
+// atomic project publication, project_create.go always runs EnsureRuntime,
+// resolves the command again, and only then bootstraps/launches. Those
+// post-commit steps are best-effort and never roll back project creation.
+//
+// Returns (result, true) when the launcher reached a terminal decision, or
+// (zero, false) when the bubbletea program itself failed to run (treated
+// as "cancel" by the caller — never partially apply a decision that never
+// happened).
+func runNoProjectLauncher(projectDir string) (tui.LauncherResult, bool) {
+	globalDirPath, err := config.GlobalDirPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	lingtaiCmd := config.LingtaiCmd(globalDirPath)
+	model := tui.NewLauncherRootModel(projectDir, globalDirPath, lingtaiCmd)
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	lm, ok := finalModel.(tui.LauncherRootModel)
+	if !ok || !lm.Done() {
+		return tui.LauncherResult{Kind: tui.DecisionCancel}, false
+	}
+	return lm.Result(), true
+}
+
+// runCreatedProject handles the DecisionCreate outcome: RunProjectCreate
+// already ran (inside the launcher's own program, on ProjectDraftConfirmedMsg)
+// and — since main.go only reaches this function when result.Kind ==
+// DecisionCreate — successfully committed the rename. This function's job
+// is exactly what the normal returning-user path already does once a
+// project exists: report post-commit warnings honestly (never silently
+// swallow a "created, but ..." state), then construct and run the real App
+// for the newly created project.
+func runCreatedProject(result tui.LauncherResult) {
+	globalDir, err := config.GlobalDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	// Resolve the configured locale BEFORE printing anything — this must
+	// happen before the post-commit warning block below, mirroring how the
+	// normal (non-launcher) startup path resolves i18n.SetLang before its
+	// own first user-visible print (showWelcome/maybeShowAgentCount). A
+	// parent review found this function's i18n.SetLang call used to run
+	// AFTER two hardcoded-English fmt.Println/Printf calls — moving it
+	// earlier is necessary (not just routing the strings through i18n.T)
+	// because calling i18n.T before SetLang runs would still render in
+	// whatever the DEFAULT locale is, not the user's configured one.
+	tuiCfg := config.LoadTUIConfig(globalDir)
+	if err := i18n.SetLang(tuiCfg.Language); err != nil {
+		tuiCfg.Language = i18n.Lang()
+	}
+	if result.CreateResult != nil && len(result.CreateResult.PostCommitWarnings) > 0 {
+		fmt.Println(i18n.T("launcher.postcommit.incomplete_header"))
+		for _, w := range result.CreateResult.PostCommitWarnings {
+			fmt.Printf("  - %s\n", w)
+		}
+		fmt.Println(i18n.T("launcher.postcommit.retryable_notice"))
+	}
+
+	lingtaiDir := filepath.Join(result.ProjectRoot, ".lingtai")
+	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+	needsFirstRun := len(orchestrators) == 0
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, orchestrators, tuiCfg, "", "")
 	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
