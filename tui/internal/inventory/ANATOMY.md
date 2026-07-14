@@ -42,7 +42,7 @@ maintenance: |
 
 ## Connections
 
-- **Called from:** `lingtai-tui list` after platform process scanning (`tui/list_unix.go:19-27`, `tui/list_windows.go:19-24`), `/projects` via `ProjectsModel.loadDataMsg` (`tui/internal/tui/projects.go:197-223`), and purge filtering through `AgentDirInFilter`.
+- **Called from:** `lingtai-tui list` after platform process scanning (`tui/list_unix.go:19-27`, `tui/list_windows.go:19-24`), `/projects` via `ProjectsModel.loadDataMsg` (`tui/internal/tui/projects.go:247-318`), and purge filtering through `AgentDirInFilter`.
 - **Calls out:** `internal/processscan` for visible process rows when using `Scan`, and `internal/fs` for `.agent.json`, `.agent.heartbeat`, `.status.json`, `.agent.lock`, and MCP identity metadata.
 - **Does not call:** package `main`, `internal/tui`, or any root Bubble Tea model. Keep this package below both the CLI and TUI to avoid import cycles.
 
