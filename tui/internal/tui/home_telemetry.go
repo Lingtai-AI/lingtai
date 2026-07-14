@@ -81,7 +81,7 @@ type homeTelemetry struct {
 
 // homeTelemetryTTL is the minimum wall-clock interval between two completed
 // background telemetry fetches. It is deliberately close to the mail poll cadence
-// (m.pollRate, ~1s): the underlying data (token ledger, .status.json) is rewritten
+// (ProjectMailStore.pollRate, ~1s): the underlying data (token ledger, .status.json) is rewritten
 // by the kernel on a similar cadence, so fetching faster only burns I/O without
 // showing newer numbers. Repeated render/keypress within the TTL reuses the cached
 // snapshot with no I/O at all.
@@ -97,7 +97,7 @@ type homeTelemetryMsg struct {
 // fetchHomeTelemetry is the background worker: it performs all telemetry I/O
 // (sqlite/ledger/status/manifest) off the UI thread and returns a homeTelemetryMsg.
 // It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
-// path + session cache) exactly like refreshMail/initialRebuild — the running
+// path + session cache) independently of the project mail refresh — the running
 // command never touches live model state.
 func (m MailModel) fetchHomeTelemetry() tea.Msg {
 	return homeTelemetryMsg{generation: m.generation, t: m.gatherHomeTelemetry()}

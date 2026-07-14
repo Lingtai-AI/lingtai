@@ -198,10 +198,8 @@ func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay 
 			if len(parts) > 0 {
 				loc = strings.Join(parts, ", ")
 			}
-			// Also persist it to human's .agent.json so next time it's cached
-			if humanDir != "" {
-				go fs.UpdateHumanLocation(humanDir)
-			}
+			// ProjectMailStore owns publishing human location on its accepted
+			// refresh cadence; recipe substitution only consumes this resolved value.
 		}
 	}
 	out = strings.ReplaceAll(out, "{{location}}", loc)

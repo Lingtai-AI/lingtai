@@ -108,9 +108,9 @@ func appendWindowedIndexedEvent(t *testing.T, orchDir, text string) {
 
 func installInitialWindow(t *testing.T, m MailModel) MailModel {
 	t.Helper()
-	rm, ok := m.initialRebuild().(mailRefreshMsg)
+	rm, ok := acceptedInitialMailRefresh(m).(mailRefreshMsg)
 	if !ok {
-		t.Fatalf("initialRebuild returned %T", rm)
+		t.Fatalf("store initial refresh returned %T", rm)
 	}
 	var cmd tea.Cmd
 	m, cmd = m.Update(rm)
@@ -141,7 +141,7 @@ func TestInitialContentWindowEqualsConfiguredPageSize(t *testing.T) {
 	orchDir := buildWindowedAgentDir(t, 405)
 	m := NewMailModel(t.TempDir(), "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
 	m.verbose = verboseThinking
-	rm := m.initialRebuild().(mailRefreshMsg)
+	rm := acceptedInitialMailRefresh(m).(mailRefreshMsg)
 	if got := rm.sessionCache.Len(); got != 200 {
 		t.Fatalf("initial content cache = %d, want configured page size 200", got)
 	}

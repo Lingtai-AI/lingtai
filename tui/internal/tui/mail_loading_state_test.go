@@ -82,10 +82,10 @@ func TestMailLoadingBannerClearsAfterInitialRebuild(t *testing.T) {
 	}
 
 	// Run the deferred rebuild and apply its (initial-tagged) message.
-	msg := m.initialRebuild()
+	msg := acceptedInitialMailRefresh(m)
 	rm, ok := msg.(mailRefreshMsg)
 	if !ok {
-		t.Fatalf("initialRebuild returned %T; expected mailRefreshMsg", msg)
+		t.Fatalf("store initial refresh returned %T; expected mailRefreshMsg", msg)
 	}
 	if !rm.initial {
 		t.Fatal("initialRebuild's mailRefreshMsg must be tagged initial=true")
@@ -125,7 +125,7 @@ func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	m = sizeMail(t, m)
 
 	// Apply the initial rebuild to clear loading.
-	m, _ = m.Update(m.initialRebuild())
+	m, _ = m.Update(acceptedInitialMailRefresh(m))
 	if m.initialLoading {
 		t.Fatal("loading should be cleared by the initial rebuild")
 	}
@@ -135,7 +135,7 @@ func TestMailPeriodicRefreshDoesNotReshowLoading(t *testing.T) {
 	}
 
 	// A periodic refresh (untagged) must leave loading cleared.
-	periodic := m.refreshMail()
+	periodic := acceptedSteadyMailRefresh(m)
 	if rm, ok := periodic.(mailRefreshMsg); ok && rm.initial {
 		t.Fatal("periodic refreshMail must not produce an initial-tagged message")
 	}

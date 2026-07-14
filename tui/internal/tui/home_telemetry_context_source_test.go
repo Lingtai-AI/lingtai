@@ -82,7 +82,7 @@ func TestHomeTelemetryContextVisibleWithoutCtrlO(t *testing.T) {
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
 	// Drive the deferred initial rebuild so the session cache is populated from
 	// events.jsonl — exactly the normal launch path, no Ctrl+O.
-	msg := m.initialRebuild()
+	msg := acceptedInitialMailRefresh(m)
 	m, _ = m.Update(msg)
 
 	if m.verbose != verboseOff {
@@ -150,7 +150,7 @@ func TestHomeTelemetryContextStableAcrossVerbose(t *testing.T) {
 	}
 
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
-	m, _ = m.Update(m.initialRebuild())
+	m, _ = m.Update(acceptedInitialMailRefresh(m))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 
 	atOff := m.gatherHomeTelemetry().contextUsage
