@@ -72,27 +72,27 @@ func TestActiveElapsed(t *testing.T) {
 // TestActiveSinceLifecycle verifies the activeSince timestamp is set on entry to
 // ACTIVE, preserved while staying ACTIVE, and cleared on any non-ACTIVE refresh
 // (including the synthesized suspended/refreshing states, which arrive as
-// non-ACTIVE through the same mailRefreshMsg path).
+// non-ACTIVE through the same mailRefreshPayload path).
 func TestActiveSinceLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
 	m = sizeMail(t, m)
 
 	// Enter ACTIVE → timer starts.
-	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true})
+	m, _ = m.Update(mailRefreshPayload{state: "active", alive: true})
 	if m.activeSince.IsZero() {
 		t.Fatal("activeSince should be set on entering ACTIVE")
 	}
 	first := m.activeSince
 
 	// Stay ACTIVE → timestamp preserved (not reset each refresh).
-	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true})
+	m, _ = m.Update(mailRefreshPayload{state: "active", alive: true})
 	if !m.activeSince.Equal(first) {
 		t.Errorf("activeSince should be preserved while staying ACTIVE; was %v, now %v", first, m.activeSince)
 	}
 
 	// Leave ACTIVE → timer cleared so the badge drops the elapsed suffix.
-	m, _ = m.Update(mailRefreshMsg{state: "idle", alive: true})
+	m, _ = m.Update(mailRefreshPayload{state: "idle", alive: true})
 	if !m.activeSince.IsZero() {
 		t.Error("activeSince should be cleared when leaving ACTIVE")
 	}

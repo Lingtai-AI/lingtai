@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-	"unsafe"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -18,43 +16,56 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// installationEnvelope reads the future unexported envelope field without a
-// compile-time reference to that field. The unsafe operation is deliberately
-// confined to this reflection bridge: reflect does not permit Interface on an
-// unexported field, even from a same-package test. Missing/unexpected fields are
-// ordinary testing failures, so the unwired tree remains a valid assertion RED.
+// installationEnvelope and installationWithEnvelope use direct typed access now
+// that every production message has the contract field. The pre-wiring
+// reflection/unsafe bridge is intentionally gone from the final test fixture.
 func installationEnvelope[T any](t *testing.T, msg *T) asyncEnvelope {
 	t.Helper()
-	field := installationEnvelopeField(t, msg)
-	return *(*asyncEnvelope)(unsafe.Pointer(field.UnsafeAddr()))
-}
-
-func installationEnvelopeField[T any](t *testing.T, msg *T) reflect.Value {
-	t.Helper()
-	value := reflect.ValueOf(msg)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		t.Fatalf("message type %T is not an addressable value", msg)
+	switch typed := any(msg).(type) {
+	case *projectMailRefreshMsg:
+		return typed.envelope
+	case *mailPersistMsg:
+		return typed.envelope
+	case *mailOlderPageMsg:
+		return typed.envelope
+	case *mailHistoryCountMsg:
+		return typed.envelope
+	case *projectMailTickMsg:
+		return typed.envelope
+	case *pulseTickMsg:
+		return typed.envelope
+	case *EditorDoneMsg:
+		return typed.envelope
+	case *projectMailRefreshRequestMsg:
+		return typed.envelope
+	default:
+		t.Fatalf("message type %T is not an async-envelope carrier", msg)
+		return asyncEnvelope{}
 	}
-	field := value.Elem().FieldByName("envelope")
-	if !field.IsValid() {
-		var zero T
-		t.Fatalf("message type %T has no asyncEnvelope field named envelope", zero)
-	}
-	if field.Type() != reflect.TypeOf(asyncEnvelope{}) {
-		var zero T
-		t.Fatalf("message type %T envelope field has type %v, want asyncEnvelope", zero, field.Type())
-	}
-	if !field.CanAddr() {
-		var zero T
-		t.Fatalf("message type %T envelope field is not addressable", zero)
-	}
-	return field
 }
 
 func installationWithEnvelope[T any](t *testing.T, msg T, envelope asyncEnvelope) T {
 	t.Helper()
-	field := installationEnvelopeField(t, &msg)
-	*(*asyncEnvelope)(unsafe.Pointer(field.UnsafeAddr())) = envelope
+	switch typed := any(&msg).(type) {
+	case *projectMailRefreshMsg:
+		typed.envelope = envelope
+	case *mailPersistMsg:
+		typed.envelope = envelope
+	case *mailOlderPageMsg:
+		typed.envelope = envelope
+	case *mailHistoryCountMsg:
+		typed.envelope = envelope
+	case *projectMailTickMsg:
+		typed.envelope = envelope
+	case *pulseTickMsg:
+		typed.envelope = envelope
+	case *EditorDoneMsg:
+		typed.envelope = envelope
+	case *projectMailRefreshRequestMsg:
+		typed.envelope = envelope
+	default:
+		t.Fatalf("message type %T is not an async-envelope carrier", msg)
+	}
 	return msg
 }
 
@@ -347,7 +358,7 @@ func installationHistoryFixture(t *testing.T) (App, mailHistoryCountMsg) {
 	if app.mail.historyCountCache == nil || !app.mail.historyCountLoading {
 		t.Fatal("real initial refresh did not start an exact-count task")
 	}
-	msg, ok := app.mail.historyCountCmd(app.mail.historyCountCache, app.mail.generation)().(mailHistoryCountMsg)
+	msg, ok := app.mail.historyCountCmd(app.mail.historyCountCache)().(mailHistoryCountMsg)
 	if !ok {
 		t.Fatal("real count command did not return mailHistoryCountMsg")
 	}
@@ -410,7 +421,6 @@ func installationVisitedApp(t *testing.T, eventCount int) (App, *installationScr
 	// cache/version/snapshot state.
 	visited.mailStore.refreshInFlight = false
 	visited.mailStore.refreshInitial = false
-	visited.mailStore.refreshGeneration = 0
 	visited.mailStore.initialRefreshPending = false
 
 	scanner := &installationScriptedScanner{messages: []fs.MailMessage{{
@@ -1016,6 +1026,9 @@ func TestEditorDoneCarriesAndValidatesTargetIdentityAddress(t *testing.T) {
 func TestAsyncInventoryDisappearanceRejectsInstallForVisitedTarget(t *testing.T) {
 	installationTestStart(t)
 	gateApp, _, _ := installationVisitedApp(t, 3)
+	gateLaunchEnvelope := captureAsync(asyncInitialRebuild, gateApp.asyncCurrent())
+	probeResolver := &installationInventoryResolver{record: installationExactResolvedTarget(gateLaunchEnvelope)}
+	installationInjectResolver(t, &gateApp, probeResolver.resolve)
 	gateRefresh := installationRefreshResult(t, &gateApp, true)
 	gateEnvelope := installationProducedEnvelope(t, &gateRefresh, asyncInitialRebuild)
 	if !gateEnvelope.target.inventoryBound {
@@ -1023,19 +1036,20 @@ func TestAsyncInventoryDisappearanceRejectsInstallForVisitedTarget(t *testing.T)
 	}
 
 	// Fail transparently until the real App/store resolver injection exists. This
-	// is intentionally not replaced by a test-side acceptAsync wrapper.
-	probeResolver := &installationInventoryResolver{record: installationExactResolvedTarget(gateEnvelope)}
-	installationInjectResolver(t, &gateApp, probeResolver.resolve)
+	// is intentionally not replaced by a test-side acceptAsync wrapper. The fake
+	// now allows the real launch gate as well as the later installation gate.
 
 	for _, scenario := range []string{"disappeared", "changed_project", "became_ineligible", "changed_address", "nickname_only"} {
 		wantAccept := scenario == "nickname_only"
 		t.Run(scenario, func(t *testing.T) {
 			t.Run("refresh_install", func(t *testing.T) {
 				app, _, locations := installationVisitedApp(t, 3)
-				refresh := installationRefreshResult(t, &app, true)
-				envelope := installationProducedEnvelope(t, &refresh, asyncInitialRebuild)
-				resolver := &installationInventoryResolver{record: installationExactResolvedTarget(envelope)}
+				launchEnvelope := captureAsync(asyncInitialRebuild, app.asyncCurrent())
+				resolver := &installationInventoryResolver{record: installationExactResolvedTarget(launchEnvelope)}
 				installationInjectResolver(t, &app, resolver.resolve)
+				refresh := installationRefreshResult(t, &app, true)
+				_ = installationProducedEnvelope(t, &refresh, asyncInitialRebuild)
+				resolver.calls.Store(0)
 				resolver.record = installationApplyResolverScenario(resolver.record, scenario)
 				before := installationSnapshot(app, locations)
 
@@ -1061,12 +1075,13 @@ func TestAsyncInventoryDisappearanceRejectsInstallForVisitedTarget(t *testing.T)
 
 			t.Run("history_count_install", func(t *testing.T) {
 				app, _, _ := installationVisitedApp(t, 405)
-				initial := installationRefreshResult(t, &app, true)
-				envelope := installationProducedEnvelope(t, &initial, asyncInitialRebuild)
-				resolver := &installationInventoryResolver{record: installationExactResolvedTarget(envelope)}
+				launchEnvelope := captureAsync(asyncInitialRebuild, app.asyncCurrent())
+				resolver := &installationInventoryResolver{record: installationExactResolvedTarget(launchEnvelope)}
 				installationInjectResolver(t, &app, resolver.resolve)
+				initial := installationRefreshResult(t, &app, true)
+				_ = installationProducedEnvelope(t, &initial, asyncInitialRebuild)
 				app, _ = installationDeliverApp(t, app, initial)
-				count := app.mail.historyCountCmd(app.mail.historyCountCache, app.mail.generation)().(mailHistoryCountMsg)
+				count := app.mail.historyCountCmd(app.mail.historyCountCache)().(mailHistoryCountMsg)
 				_ = installationProducedEnvelope(t, &count, asyncExactHistoryCount)
 				resolver.record = installationApplyResolverScenario(resolver.record, scenario)
 				callsBefore := resolver.calls.Load()

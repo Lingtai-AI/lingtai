@@ -9,12 +9,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/inventory"
 )
 
 // ProjectMailSnapshot is an immutable, accepted view of one project's human
-// mailbox. A refresh result becomes visible only after ProjectMailStore accepts
-// its store identity, activation, and source version. The cache remains private
-// so callers cannot turn a snapshot into a second refresh owner.
+// mailbox. A refresh result becomes visible only after its async envelope is
+// accepted. The cache remains private so callers cannot turn a snapshot into a
+// second refresh owner.
 type ProjectMailSnapshot struct {
 	version uint64
 	cache   fs.MailCache
@@ -40,24 +41,19 @@ func (filesystemProjectMailScanner) Refresh(cache fs.MailCache) fs.MailCache {
 type projectMailLocationUpdater func(string)
 
 type projectMailRefreshMsg struct {
-	storeID       uint64
-	projectID     string
-	activation    uint64
-	sourceVersion uint64
-	cache         fs.MailCache
-	mail          mailRefreshMsg
+	envelope asyncEnvelope
+	cache    fs.MailCache
+	mail     mailRefreshPayload
 }
 
 type projectMailTickMsg struct {
-	storeID    uint64
-	activation uint64
-	chain      uint64
-	at         time.Time
+	envelope asyncEnvelope
+	at       time.Time
 }
 
 type projectMailRefreshRequestMsg struct {
-	generation uint64
-	initial    bool
+	envelope asyncEnvelope
+	initial  bool
 }
 
 var projectMailStoreSequence atomic.Uint64
@@ -68,40 +64,60 @@ var projectMailStoreSequence atomic.Uint64
 // parallel. The gate owns no project data, accepted state, or tick lifecycle.
 var projectMailScanSingleflight sync.Mutex
 
-// projectMailRuntimeGate is shared by value copies of one store. It lets a
-// delayed side-effect command re-check the live activation/version at execution
-// time even though Bubble Tea returns App values by copy.
-type projectMailRuntimeGate struct {
-	active     atomic.Bool
-	activation atomic.Uint64
-	version    atomic.Uint64
+// projectMailAsyncState is the atomic/current binding seam used only by delayed
+// side effects. Permission still comes from acceptAsync; this holder merely lets
+// a command load the current coordinates after App value copies have moved on.
+type projectMailAsyncState struct {
+	mu      sync.RWMutex
+	current asyncCurrent
+}
+
+func (s *projectMailAsyncState) load() asyncCurrent {
+	if s == nil {
+		return asyncCurrent{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.current
+}
+
+func (s *projectMailAsyncState) store(current asyncCurrent) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.current = current
+	s.mu.Unlock()
 }
 
 // ProjectMailStore is the root-owned project-lifetime mailbox owner. It owns
 // exactly one MailCache, one accepted-snapshot sequence, one refresh pipeline,
 // and one invalidatable polling chain. Bubble Tea serializes its mutations on
-// App.Update; background commands receive detached cache values and can only
-// publish through the identity/version acceptance gate below.
+// App.Update; background commands receive detached values and can publish only
+// after the root's shared async-envelope acceptance.
 type ProjectMailStore struct {
-	id                    uint64
-	projectID             string
-	projectDir            string
-	humanDir              string
-	cache                 fs.MailCache
-	snapshot              *ProjectMailSnapshot
-	version               uint64
-	activation            uint64
-	tickChain             uint64
-	active                bool
-	tickRunning           bool
-	refreshInFlight       bool
-	refreshInitial        bool
-	refreshGeneration     uint64
-	initialRefreshPending bool
-	pollRate              time.Duration
-	scanner               projectMailScanner
-	updateLocation        projectMailLocationUpdater
-	runtime               *projectMailRuntimeGate
+	id                      uint64
+	projectID               string
+	projectDir              string
+	humanDir                string
+	cache                   fs.MailCache
+	snapshot                *ProjectMailSnapshot
+	version                 uint64
+	activation              uint64
+	tickChain               uint64
+	active                  bool
+	tickRunning             bool
+	refreshInFlight         bool
+	refreshInitial          bool
+	refreshInFlightEnvelope asyncEnvelope
+	initialRefreshPending   bool
+	pollRate                time.Duration
+	scanner                 projectMailScanner
+	updateLocation          projectMailLocationUpdater
+	binding                 asyncBinding
+	revalidateTarget        func(asyncOwner, asyncTarget) bool
+	asyncState              *projectMailAsyncState
+	locationSourceVersion   uint64
 }
 
 func canonicalProjectMailIdentity(projectDir string) string {
@@ -127,32 +143,99 @@ func newProjectMailStoreWithDeps(projectDir, humanDir string, scanner projectMai
 		updateLocation = func(string) {}
 	}
 	store := ProjectMailStore{
-		id:             projectMailStoreSequence.Add(1),
-		projectID:      canonicalProjectMailIdentity(projectDir),
-		projectDir:     projectDir,
-		humanDir:       humanDir,
-		cache:          fs.NewMailCache(humanDir),
-		activation:     1,
-		active:         true,
-		pollRate:       time.Second,
-		scanner:        scanner,
-		updateLocation: updateLocation,
-		runtime:        &projectMailRuntimeGate{},
+		id:                    projectMailStoreSequence.Add(1),
+		projectID:             canonicalProjectMailIdentity(projectDir),
+		projectDir:            projectDir,
+		humanDir:              humanDir,
+		cache:                 fs.NewMailCache(humanDir),
+		activation:            1,
+		active:                true,
+		pollRate:              time.Second,
+		scanner:               scanner,
+		updateLocation:        updateLocation,
+		revalidateTarget:      revalidateInventoryTarget,
+		asyncState:            &projectMailAsyncState{},
+		locationSourceVersion: 0,
 	}
-	store.syncRuntime()
+	store.syncAsyncState()
 	return store
 }
 
-func (s *ProjectMailStore) syncRuntime() {
-	if s == nil || s.id == 0 {
+// revalidateInventoryTarget performs one fresh inventory scan for substantive
+// work on a target that was activated from inventory. Display-only nickname
+// changes are intentionally irrelevant to target identity.
+func revalidateInventoryTarget(owner asyncOwner, target asyncTarget) bool {
+	snapshot, err := inventory.Scan(inventory.Options{FilterDir: filepath.Dir(owner.projectID)})
+	if err != nil {
+		return false
+	}
+	for _, record := range snapshot.Records {
+		if inventory.NormalizePath(record.AgentDir) != target.directory {
+			continue
+		}
+		return record.Enterable &&
+			canonicalProjectMailIdentity(filepath.Join(record.Project, ".lingtai")) == owner.projectID &&
+			fs.AddressFingerprint(record.Address) == target.addressFingerprint
+	}
+	return false
+}
+
+func (s *ProjectMailStore) setAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
+	if s == nil {
 		return
 	}
-	if s.runtime == nil {
-		s.runtime = &projectMailRuntimeGate{}
+	if revalidate == nil {
+		revalidate = revalidateInventoryTarget
 	}
-	s.runtime.active.Store(s.active)
-	s.runtime.activation.Store(s.activation)
-	s.runtime.version.Store(s.version)
+	s.revalidateTarget = revalidate
+	s.syncAsyncState()
+}
+
+func (s *ProjectMailStore) bindMailModel(mail *MailModel, inventoryBound bool) {
+	if s == nil || mail == nil || s.id == 0 {
+		return
+	}
+	binding := asyncBinding{
+		owner: asyncOwner{
+			projectID:  s.projectID,
+			storeID:    s.id,
+			activation: s.activation,
+		},
+		target: asyncTarget{
+			directory:          inventory.NormalizePath(mail.orchestrator),
+			addressFingerprint: fs.AddressFingerprint(mail.orchAddr),
+			inventoryBound:     inventoryBound,
+		},
+		generation: mail.generation,
+	}
+	s.binding = binding
+	s.locationSourceVersion = s.version
+	mail.asyncBinding = binding
+	mail.asyncStoreVersion = s.version
+	mail.asyncTickEpoch = s.tickChain
+	mail.revalidateTarget = s.revalidateTarget
+	if mail.pulseEpoch == 0 {
+		mail.pulseEpoch = 1
+	}
+	s.syncAsyncState()
+}
+
+func (s ProjectMailStore) asyncCurrent() asyncCurrent {
+	return asyncCurrent{
+		binding:          s.binding,
+		storeVersion:     s.version,
+		tickEpoch:        s.tickChain,
+		revalidateTarget: s.revalidateTarget,
+	}
+}
+
+func (s *ProjectMailStore) syncAsyncState() {
+	if s == nil || s.asyncState == nil {
+		return
+	}
+	current := s.asyncCurrent()
+	current.storeVersion = s.locationSourceVersion
+	s.asyncState.store(current)
 }
 
 func (s ProjectMailStore) matches(projectDir, humanDir string) bool {
@@ -168,11 +251,12 @@ func (s *ProjectMailStore) suspend() {
 	s.pauseTick()
 	s.active = false
 	s.activation++
+	s.binding.owner.activation = s.activation
 	s.refreshInFlight = false
 	s.refreshInitial = false
-	s.refreshGeneration = 0
+	s.refreshInFlightEnvelope = asyncEnvelope{}
 	s.initialRefreshPending = false
-	s.syncRuntime()
+	s.syncAsyncState()
 }
 
 func (s *ProjectMailStore) activate() {
@@ -181,22 +265,25 @@ func (s *ProjectMailStore) activate() {
 	}
 	s.active = true
 	s.activation++
+	s.binding.owner.activation = s.activation
 	s.refreshInFlight = false
 	s.refreshInitial = false
-	s.refreshGeneration = 0
+	s.refreshInFlightEnvelope = asyncEnvelope{}
 	s.initialRefreshPending = false
 	s.tickRunning = false
-	s.syncRuntime()
+	s.locationSourceVersion = s.version
+	s.syncAsyncState()
 }
 
-// pauseTick invalidates the outstanding chain even if its tea.Every command
-// has already fired. A late message therefore cannot pass acceptTick and re-arm.
+// pauseTick invalidates the outstanding chain even if its tea.Every command has
+// already fired. A late message therefore cannot pass shared acceptance and re-arm.
 func (s *ProjectMailStore) pauseTick() {
 	if s == nil || s.id == 0 {
 		return
 	}
 	s.tickChain++
 	s.tickRunning = false
+	s.syncAsyncState()
 }
 
 // resumeTick creates at most one chain for the current activation.
@@ -206,30 +293,34 @@ func (s *ProjectMailStore) resumeTick() tea.Cmd {
 	}
 	s.tickChain++
 	s.tickRunning = true
-	return projectMailTickEvery(s.pollRate, s.id, s.activation, s.tickChain)
+	s.syncAsyncState()
+	return projectMailTickEvery(s.pollRate, s.asyncCurrent())
 }
 
-func projectMailTickEvery(d time.Duration, storeID, activation, chain uint64) tea.Cmd {
+func projectMailTickEvery(d time.Duration, current asyncCurrent) tea.Cmd {
+	envelope := captureAsync(asyncRefreshTick, current)
 	return tea.Every(d, func(t time.Time) tea.Msg {
-		return projectMailTickMsg{storeID: storeID, activation: activation, chain: chain, at: t}
+		return projectMailTickMsg{envelope: envelope, at: t}
 	})
-}
-
-func (s ProjectMailStore) acceptsTick(msg projectMailTickMsg) bool {
-	return s.id != 0 && s.active && s.tickRunning &&
-		msg.storeID == s.id && msg.activation == s.activation && msg.chain == s.tickChain
 }
 
 func (s ProjectMailStore) nextTick() tea.Cmd {
 	if !s.active || !s.tickRunning {
 		return nil
 	}
-	return projectMailTickEvery(s.pollRate, s.id, s.activation, s.tickChain)
+	return projectMailTickEvery(s.pollRate, s.asyncCurrent())
+}
+
+func refreshAsyncKind(initial bool) asyncKind {
+	if initial {
+		return asyncInitialRebuild
+	}
+	return asyncSteadyRefresh
 }
 
 // beginRefresh coalesces every project-mail refresh path onto the one active
 // store pipeline. The command works on detached cache/session values; only
-// acceptRefresh can install its result.
+// acceptAsync in App.Update can authorize publication.
 func (s *ProjectMailStore) beginRefresh(mail MailModel, initial bool) tea.Cmd {
 	if s == nil || s.id == 0 || !s.active {
 		return nil
@@ -238,18 +329,17 @@ func (s *ProjectMailStore) beginRefresh(mail MailModel, initial bool) tea.Cmd {
 		// A steady scan may be reused only as a cache warm-up. An initial scan
 		// satisfies only the MailModel generation that launched it; a replacement
 		// generation still needs its own authoritative session rebuild.
-		if initial && (!s.refreshInitial || s.refreshGeneration != mail.generation) {
+		if initial && (!s.refreshInitial || s.refreshInFlightEnvelope.generation.thread != mail.generation) {
 			s.initialRefreshPending = true
 		}
 		return nil
 	}
+	current := s.asyncCurrent()
+	current.storeVersion = s.version
+	envelope := captureAsync(refreshAsyncKind(initial), current)
 	s.refreshInFlight = true
 	s.refreshInitial = initial
-	s.refreshGeneration = mail.generation
-	storeID := s.id
-	projectID := s.projectID
-	activation := s.activation
-	sourceVersion := s.version
+	s.refreshInFlightEnvelope = envelope
 	cache := s.cache
 	scanner := s.scanner
 	return func() tea.Msg {
@@ -263,73 +353,75 @@ func (s *ProjectMailStore) beginRefresh(mail MailModel, initial bool) tea.Cmd {
 		}
 		refreshed := scanner.Refresh(cache)
 		refresh := mail.collectRefreshState()
-		refresh.generation = mail.generation
 		refresh.initial = initial
 		if initial {
 			refresh.sessionCache = mail.rebuildSession(refreshed)
 		}
 		return projectMailRefreshMsg{
-			storeID:       storeID,
-			projectID:     projectID,
-			activation:    activation,
-			sourceVersion: sourceVersion,
-			cache:         refreshed,
-			mail:          refresh,
+			envelope: envelope,
+			cache:    refreshed,
+			mail:     refresh,
 		}
 	}
 }
 
-// acceptRefresh distinguishes physical completion from publication. A result
-// for the current store/source releases the one in-flight slot even when its
-// MailModel generation was superseded, but only the current generation may
-// replace root cache/version/snapshot state.
-func (s *ProjectMailStore) acceptRefresh(msg projectMailRefreshMsg, generation uint64) (*ProjectMailSnapshot, bool, bool) {
-	if s == nil || s.id == 0 || !s.active ||
-		msg.storeID != s.id || msg.projectID != s.projectID ||
-		msg.activation != s.activation || msg.sourceVersion != s.version {
-		return nil, false, false
+// settleRefreshWork performs non-publishing execution bookkeeping. Only the
+// exact captured physical work token may release the slot; it never installs a
+// cache, snapshot, model field, or location update.
+func (s *ProjectMailStore) settleRefreshWork(envelope asyncEnvelope) bool {
+	if s == nil || !s.refreshInFlight || envelope != s.refreshInFlightEnvelope {
+		return false
 	}
 	s.refreshInFlight = false
 	s.refreshInitial = false
-	s.refreshGeneration = 0
-	if msg.mail.generation != generation {
-		return nil, false, true
+	s.refreshInFlightEnvelope = asyncEnvelope{}
+	return true
+}
+
+// installRefresh publishes a result only after App.Update has accepted its
+// envelope and settled its exact physical work token.
+func (s *ProjectMailStore) installRefresh(msg projectMailRefreshMsg) *ProjectMailSnapshot {
+	if s == nil {
+		return nil
 	}
 	s.cache = msg.cache
 	s.version++
 	s.snapshot = &ProjectMailSnapshot{version: s.version, cache: msg.cache}
-	s.syncRuntime()
-	return s.snapshot, true, true
+	// A delayed location command reuses the accepted result's source coordinate.
+	// A newer accepted refresh replaces this coordinate and rejects the old command.
+	s.locationSourceVersion = msg.envelope.storeVersion
+	s.syncAsyncState()
+	return s.snapshot
 }
 
 // beginPendingInitialRefresh starts the authoritative rebuild deferred behind
-// an older steady scan. The completed steady result may itself be rejected for
-// a superseded MailModel generation; the pending current initial still starts
-// after that exact physical slot is released.
+// older work. A completed-but-rejected exact token may release the slot, but the
+// queued current initial must still pass fresh shared acceptance before launch;
+// it never inherits permission from the old result.
 func (s *ProjectMailStore) beginPendingInitialRefresh(mail MailModel) tea.Cmd {
 	if s == nil || !s.active || !s.initialRefreshPending || s.refreshInFlight {
 		return nil
 	}
 	s.initialRefreshPending = false
+	current := s.asyncCurrent()
+	current.storeVersion = s.version
+	envelope := captureAsync(asyncInitialRebuild, current)
+	if !acceptAsync(current, envelope) {
+		return nil
+	}
 	return s.beginRefresh(mail, true)
 }
 
-func (s ProjectMailStore) locationUpdateCmd() tea.Cmd {
-	if s.id == 0 || !s.active || s.updateLocation == nil || s.runtime == nil {
+func (s ProjectMailStore) locationUpdateCmd(envelope asyncEnvelope) tea.Cmd {
+	if s.id == 0 || !s.active || s.updateLocation == nil || s.asyncState == nil {
 		return nil
 	}
 	humanDir := s.humanDir
 	update := s.updateLocation
-	runtime := s.runtime
-	activation := s.activation
-	version := s.version
+	state := s.asyncState
 	return func() tea.Msg {
-		// The command may execute after a visit switch, store suspension, or a
-		// newer accepted snapshot. Re-check the shared live token immediately
-		// before the side effect so only the current accepted owner may update.
-		if !runtime.active.Load() ||
-			runtime.activation.Load() != activation ||
-			runtime.version.Load() != version {
+		current := state.load()
+		if !acceptAsync(current, envelope) {
 			return nil
 		}
 		update(humanDir)

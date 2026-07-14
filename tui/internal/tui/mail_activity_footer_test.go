@@ -31,7 +31,7 @@ func TestFooterShowsActivityIndicatorWhenActive(t *testing.T) {
 	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
 	m = sizeMail(t, m)
 
-	m, _ = m.Update(mailRefreshMsg{state: "active", alive: true})
+	m, _ = m.Update(mailRefreshPayload{state: "active", alive: true})
 
 	footer := emailToLine(m.View())
 	if footer == "" {
@@ -52,7 +52,7 @@ func TestFooterIndicatorIdleHasNoTimer(t *testing.T) {
 	m := NewMailModel(dir, "human", dir, dir, "orch", 20, dir, "en", false, 0)
 	m = sizeMail(t, m)
 
-	m, _ = m.Update(mailRefreshMsg{state: "idle", alive: true})
+	m, _ = m.Update(mailRefreshPayload{state: "idle", alive: true})
 
 	footer := emailToLine(m.View())
 	if footer == "" {

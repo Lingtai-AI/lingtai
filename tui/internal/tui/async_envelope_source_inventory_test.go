@@ -177,6 +177,15 @@ func TestAsyncEnvelopeSourceInventoryEveryConsumerCallsSharedPredicate(t *testin
 	}
 }
 
+func TestAsyncEnvelopeSourceInventoryRefreshSettlementIsNonPublishing(t *testing.T) {
+	inv := loadAsyncSourceInventory(t)
+	issues := append(inv.refreshSettlementIssues(), inv.refreshSettlementOrderingIssues()...)
+	if len(issues) != 0 {
+		sort.Strings(issues)
+		t.Fatalf("refresh settlement escaped its exact-token, non-publishing boundary:\n  - %s", strings.Join(issues, "\n  - "))
+	}
+}
+
 func TestAsyncEnvelopeSourceInventoryForbidsLegacyIdentityPolicies(t *testing.T) {
 	inv := loadAsyncSourceInventory(t)
 	var surviving []string
@@ -573,6 +582,156 @@ func (inv *asyncSourceInventory) consumerIssues(owner, message string) []string 
 		}
 	}
 	return nil
+}
+
+func (inv *asyncSourceInventory) refreshSettlementIssues() []string {
+	const owner = "ProjectMailStore.settleRefreshWork"
+	fn := inv.findFunction(owner)
+	if fn == nil {
+		return []string{owner + ": exact-token non-publishing settlement function missing"}
+	}
+
+	var issues []string
+	if len(fn.Body.List) == 0 {
+		return []string{owner + ": empty function cannot settle the exact physical token"}
+	}
+	guard, ok := fn.Body.List[0].(*ast.IfStmt)
+	if !ok || guard.Init != nil || guard.Else != nil || countExactEnvelopeComparisons(guard.Cond) != 1 || !blockReturnsBoolean(guard.Body, "false") {
+		issues = append(issues, owner+": first statement must be a fail-closed guard containing exactly one envelope != s.refreshInFlightEnvelope comparison")
+	}
+
+	allowedWrites := map[string]bool{
+		"refreshInFlight":         true,
+		"refreshInitial":          true,
+		"refreshInFlightEnvelope": true,
+	}
+	writeCounts := make(map[string]int, len(allowedWrites))
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.IncDecStmt:
+			issues = append(issues, owner+": increment/decrement mutation is forbidden; settlement may only clear the three exact in-flight bookkeeping fields")
+		case *ast.AssignStmt:
+			if len(node.Lhs) != len(node.Rhs) {
+				issues = append(issues, owner+": settlement assignments must pair each bookkeeping field with its explicit zero value")
+			}
+			for i, lhs := range node.Lhs {
+				selector, ok := lhs.(*ast.SelectorExpr)
+				if !ok || !isNamedSelector(selector, "s", selector.Sel.Name) || !allowedWrites[selector.Sel.Name] {
+					issues = append(issues, owner+": assignment outside s.refreshInFlight, s.refreshInitial, or s.refreshInFlightEnvelope is forbidden")
+					continue
+				}
+				writeCounts[selector.Sel.Name]++
+				if i >= len(node.Rhs) || !isSettlementZeroValue(selector.Sel.Name, node.Rhs[i]) {
+					issues = append(issues, fmt.Sprintf("%s: s.%s must be assigned its explicit zero value", owner, selector.Sel.Name))
+				}
+			}
+		}
+		return true
+	})
+	for field := range allowedWrites {
+		if writeCounts[field] != 1 {
+			issues = append(issues, fmt.Sprintf("%s: s.%s must be cleared exactly once; got %d writes", owner, field, writeCounts[field]))
+		}
+	}
+	if calls := calledNames(fn.Body); len(calls) != 0 {
+		issues = append(issues, fmt.Sprintf("%s: helper/side-effect calls are forbidden (including installRefresh and the location updater); got %v", owner, calls))
+	}
+	if !blockReturnsBoolean(fn.Body, "true") {
+		issues = append(issues, owner+": successful exact settlement must end by returning true")
+	}
+	return issues
+}
+
+func (inv *asyncSourceInventory) refreshSettlementOrderingIssues() []string {
+	const owner = "App.Update"
+	const message = "projectMailRefreshMsg"
+	fn := inv.findFunction(owner)
+	if fn == nil {
+		return []string{owner + ": refresh-result consumer missing"}
+	}
+	clauses := typeSwitchClauses(fn, message)
+	if len(clauses) != 1 {
+		return []string{fmt.Sprintf("%s case %s: got %d clauses, want exactly 1", owner, message, len(clauses))}
+	}
+	clause := clauses[0]
+	guardIndex := -1
+	for i, statement := range clause.Body {
+		ifStmt, ok := statement.(*ast.IfStmt)
+		if ok && countCalls(ifStmt.Cond, "acceptAsync") == 1 {
+			guardIndex = i
+			break
+		}
+	}
+	if guardIndex != 1 {
+		return []string{fmt.Sprintf("%s case %s: settleRefreshWork assignment must be the sole statement before acceptAsync; guard index is %d", owner, message, guardIndex)}
+	}
+
+	assignment, ok := clause.Body[0].(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+		return []string{owner + " case " + message + ": sole pre-accept statement must be settled := a.mailStore.settleRefreshWork(msg.envelope)"}
+	}
+	settled, ok := assignment.Lhs[0].(*ast.Ident)
+	call, callOK := assignment.Rhs[0].(*ast.CallExpr)
+	if !ok || settled.Name != "settled" || !callOK || !isMethodCallOnSelector(call, "a", "mailStore", "settleRefreshWork") || len(call.Args) != 1 || !isNamedSelector(call.Args[0], "msg", "envelope") {
+		return []string{owner + " case " + message + ": sole pre-accept statement must bind only a.mailStore.settleRefreshWork(msg.envelope)"}
+	}
+	return nil
+}
+
+func countExactEnvelopeComparisons(node ast.Node) int {
+	count := 0
+	ast.Inspect(node, func(child ast.Node) bool {
+		comparison, ok := child.(*ast.BinaryExpr)
+		if !ok || comparison.Op != token.NEQ {
+			return true
+		}
+		leftEnvelope, leftToken := isNamedIdentifier(comparison.X, "envelope"), isNamedSelector(comparison.X, "s", "refreshInFlightEnvelope")
+		rightEnvelope, rightToken := isNamedIdentifier(comparison.Y, "envelope"), isNamedSelector(comparison.Y, "s", "refreshInFlightEnvelope")
+		if (leftEnvelope && rightToken) || (leftToken && rightEnvelope) {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+func isNamedIdentifier(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+func isNamedSelector(expr ast.Expr, receiver, field string) bool {
+	selector, ok := expr.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == field && isNamedIdentifier(selector.X, receiver)
+}
+
+func isMethodCallOnSelector(call *ast.CallExpr, root, receiver, method string) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == method && isNamedSelector(selector.X, root, receiver)
+}
+
+func isSettlementZeroValue(field string, expr ast.Expr) bool {
+	switch field {
+	case "refreshInFlight", "refreshInitial":
+		return isNamedIdentifier(expr, "false")
+	case "refreshInFlightEnvelope":
+		literal, ok := expr.(*ast.CompositeLit)
+		return ok && expressionName(literal.Type) == "asyncEnvelope" && len(literal.Elts) == 0
+	default:
+		return false
+	}
+}
+
+func blockReturnsBoolean(block *ast.BlockStmt, value string) bool {
+	if block == nil || len(block.List) == 0 {
+		return false
+	}
+	result, ok := block.List[len(block.List)-1].(*ast.ReturnStmt)
+	if !ok || len(result.Results) != 1 {
+		return false
+	}
+	ident, ok := result.Results[0].(*ast.Ident)
+	return ok && ident.Name == value
 }
 
 func typeSwitchClauses(fn *ast.FuncDecl, message string) []*ast.CaseClause {

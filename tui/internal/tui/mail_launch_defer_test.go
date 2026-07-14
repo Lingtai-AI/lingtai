@@ -60,14 +60,14 @@ func TestProjectMailStoreRunsRebuild(t *testing.T) {
 	m.verbose = verboseThinking
 
 	// Run the initial rebuild command (the deferred heavy work).
-	msg := acceptedInitialMailRefresh(m)
+	msg := acceptedInitialMailRefresh(t, &m)
 	if msg == nil {
 		t.Fatal("project store initial refresh returned nil msg")
 	}
 	if got := m.sessionCache.Len(); got != 0 {
 		t.Fatalf("project store rebuild mutated the installed session cache before acceptance; got %d entries", got)
 	}
-	rm, ok := msg.(mailRefreshMsg)
+	rm, ok := msg.(mailRefreshPayload)
 	if !ok || rm.sessionCache == nil || rm.sessionCache.Len() == 0 {
 		t.Fatalf("project store rebuild did not return a populated command-local session cache: %#v", rm.sessionCache)
 	}

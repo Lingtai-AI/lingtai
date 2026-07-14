@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -48,8 +49,11 @@ func TestSettingsMailPageSizeHundredOption(t *testing.T) {
 
 func TestReturningToMailAfterPageSizeChangeRebuildsExactWindow(t *testing.T) {
 	globalDir := t.TempDir()
-	projectDir := t.TempDir()
 	orchDir := buildWindowedAgentDir(t, 250)
+	// Keep the synthetic agent under its canonical project owner so the shared
+	// launch predicate exercises the page-size behavior rather than rejecting an
+	// impossible cross-project target fixture.
+	projectDir := filepath.Dir(orchDir)
 
 	cfg := config.DefaultTUIConfig()
 	cfg.MailPageSize = 100
@@ -65,7 +69,7 @@ func TestReturningToMailAfterPageSizeChangeRebuildsExactWindow(t *testing.T) {
 		orchName:    "agent",
 	}
 	a.installMailModel(NewMailModel(t.TempDir(), "human", projectDir, orchDir, "agent", 200, globalDir, "en", false, 0))
-	initial := acceptedInitialMailRefresh(a.mail).(mailRefreshMsg)
+	initial := acceptedInitialMailRefresh(t, &a.mail).(mailRefreshPayload)
 	a.mail, _ = a.mail.Update(initial)
 	if a.mail.sessionCache.Len() != 200 {
 		t.Fatalf("precondition cache = %d, want 200", a.mail.sessionCache.Len())

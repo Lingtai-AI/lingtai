@@ -139,7 +139,28 @@ func (a *App) installMailModel(m MailModel) {
 	a.mailGeneration++
 	m.generation = a.mailGeneration
 	m.acceptedSnapshot = a.mailStore.snapshot
+	a.mailStore.bindMailModel(&m, a.visiting)
 	a.mail = m
+}
+
+func (a *App) setAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
+	if a == nil {
+		return
+	}
+	a.mailStore.setAsyncTargetRevalidator(revalidate)
+	a.mail.revalidateTarget = a.mailStore.revalidateTarget
+	if a.suspendedHomeMailStore != nil {
+		a.suspendedHomeMailStore.setAsyncTargetRevalidator(revalidate)
+	}
+}
+
+func (a App) asyncCurrent() asyncCurrent {
+	current := a.mail.asyncCurrent()
+	current.binding = a.mailStore.binding
+	current.storeVersion = a.mailStore.version
+	current.tickEpoch = a.mailStore.tickChain
+	current.revalidateTarget = a.mailStore.revalidateTarget
+	return current
 }
 
 func (a *App) newMailForCurrentContext() MailModel {
@@ -309,13 +330,22 @@ func (a *App) beginProjectMailRefresh(initial bool) tea.Cmd {
 	if a == nil || a.mail.generation == 0 {
 		return nil
 	}
+	current := a.asyncCurrent()
+	envelope := captureAsync(refreshAsyncKind(initial), current)
+	if !acceptAsync(current, envelope) {
+		return nil
+	}
 	return a.mailStore.beginRefresh(a.mail, initial)
 }
 
 func (a *App) resumeProjectMail(initial bool) tea.Cmd {
 	refreshCmd := a.beginProjectMailRefresh(initial)
 	tickCmd := a.mailStore.resumeTick()
-	return tea.Batch(refreshCmd, tickCmd, pulseTick(a.mail.generation), a.sendSize())
+	a.mail.pulseEpoch++
+	if a.mail.pulseEpoch == 0 {
+		a.mail.pulseEpoch = 1
+	}
+	return tea.Batch(refreshCmd, tickCmd, a.mail.asyncPulseCmd(), a.sendSize())
 }
 
 func (a *App) initProjectMail() tea.Cmd {
@@ -324,6 +354,25 @@ func (a *App) initProjectMail() tea.Cmd {
 
 func (a *App) pauseProjectMail() {
 	a.mailStore.pauseTick()
+}
+
+// invalidateProjectMailForReset synchronously retires every owner and local
+// coordinate from the project lifetime that is about to be destroyed. It must
+// run on the root event loop before filesystem cleanup starts; background cleanup
+// must never race a still-current refresh, persist, older-page, or location result.
+func (a *App) invalidateProjectMailForReset() {
+	a.mailStore.suspend()
+	if a.suspendedHomeMailStore != nil {
+		a.suspendedHomeMailStore.suspend()
+	}
+	a.mail.invalidateAsync()
+	a.mailStore = ProjectMailStore{}
+	a.suspendedHomeMailStore = nil
+	a.visiting = false
+	a.visitReturn = nil
+	a.visitTargetProjectDir = ""
+	a.visitTargetAgentDir = ""
+	a.visitTargetAgentName = ""
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -345,43 +394,51 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// === Cross-view messages ===
 	case projectMailRefreshRequestMsg:
-		if msg.generation != a.mail.generation || !a.mailStore.active || a.currentView != appViewMail {
+		if !acceptAsync(a.asyncCurrent(), msg.envelope) {
 			return a, nil
 		}
-		return a, tea.Batch(a.beginProjectMailRefresh(msg.initial), a.mailStore.resumeTick())
+		if !a.mailStore.active || a.currentView != appViewMail {
+			return a, nil
+		}
+		return a, tea.Batch(a.mailStore.beginRefresh(a.mail, msg.initial), a.mailStore.resumeTick())
 
 	case projectMailRefreshMsg:
-		snapshot, accepted, completed := a.mailStore.acceptRefresh(msg, a.mail.generation)
-		if !completed {
+		settled := a.mailStore.settleRefreshWork(msg.envelope)
+		if !acceptAsync(a.asyncCurrent(), msg.envelope) {
+			if settled {
+				return a, a.mailStore.beginPendingInitialRefresh(a.mail)
+			}
 			return a, nil
 		}
-		// A physically completed old-generation result releases the slot but
-		// publishes nothing. Preserve and start any queued authoritative initial
-		// for the current generation.
-		if !accepted {
-			return a, a.mailStore.beginPendingInitialRefresh(a.mail)
+		if !settled {
+			return a, nil
 		}
+		snapshot := a.mailStore.installRefresh(msg)
 		msg.mail.snapshot = snapshot
+		a.mail.asyncStoreVersion = snapshot.Version()
 		var mailCmd tea.Cmd
 		a.mail, mailCmd = a.mail.Update(msg.mail)
 		// Capture the accepted target/status state in the deferred authoritative
 		// rebuild rather than the pre-refresh model snapshot.
 		pendingInitialCmd := a.mailStore.beginPendingInitialRefresh(a.mail)
-		return a, tea.Batch(mailCmd, pendingInitialCmd, a.mailStore.locationUpdateCmd())
+		return a, tea.Batch(mailCmd, pendingInitialCmd, a.mailStore.locationUpdateCmd(msg.envelope))
 
 	case projectMailTickMsg:
-		if !a.mailStore.acceptsTick(msg) || a.currentView != appViewMail {
+		if !acceptAsync(a.asyncCurrent(), msg.envelope) {
 			return a, nil
 		}
-		refreshCmd := a.beginProjectMailRefresh(false)
+		if !a.mailStore.active || !a.mailStore.tickRunning || a.currentView != appViewMail {
+			return a, nil
+		}
+		refreshCmd := a.mailStore.beginRefresh(a.mail, false)
 		nextTick := a.mailStore.nextTick()
 		telemetryCmd := a.mail.maybeScheduleHomeTelemetry(time.Now())
 		return a, tea.Batch(refreshCmd, nextTick, telemetryCmd)
 
-	case mailRefreshMsg, mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg:
+	case mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg:
 		// Mail content/count rebuilds, older pages, post-frame persistence, and
 		// telemetry can outlive the view that launched them. Route all at the root so Projects/Help
-		// cannot drop Mail's state machine; MailModel owns generation acceptance.
+		// cannot drop Mail's state machine; MailModel owns shared envelope acceptance.
 		var cmd tea.Cmd
 		a.mail, cmd = a.mail.Update(msg)
 		return a, cmd
@@ -609,12 +666,31 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
 
+	case nirvanaCleanStartMsg:
+		if a.currentView != appViewNirvana || !a.nirvana.cleaning || a.nirvana.cleanupStarted || a.nirvana.done {
+			return a, nil
+		}
+		// Confirmation is the destructive lifetime boundary. Consume this
+		// handoff exactly once, then retire every project-mail owner synchronously
+		// before the returned command can remove the filesystem; the completed
+		// screen may remain open indefinitely.
+		a.nirvana.cleanupStarted = true
+		a.invalidateProjectMailForReset()
+		return a, a.nirvana.doClean()
+
 	case NirvanaDoneMsg:
-		// Nirvana complete: .lingtai/ wiped, go to first-run.
-		// Re-init project to recreate the human folder so agents can
-		// deliver mail once the new orchestrator starts.
-		a.mailStore.suspend()
-		a.mailStore = ProjectMailStore{}
+		if a.currentView != appViewNirvana || !a.nirvana.done {
+			return a, nil
+		}
+		// Nirvana complete: .lingtai/ wiped, go to first-run. Permanently
+		// invalidate every retained project-mail owner and the Mail-local binding
+		// before recreating the filesystem; late root-routed continuations from the
+		// destroyed lifetime must fail closed against the fresh project.
+		a.invalidateProjectMailForReset()
+		a.doubleEscArmed = false
+		a.doubleEscFirstAt = time.Time{}
+		// Re-init project to recreate the human folder so agents can deliver mail
+		// once the new orchestrator starts.
 		process.InitProject(a.projectDir)
 		a.orchDir = ""
 		a.orchName = ""

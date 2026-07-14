@@ -39,7 +39,7 @@ func TestMailProjectionUsesMailboxExactlyOnceBeyondEventWindow(t *testing.T) {
 	})
 
 	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 200, "", "en", false, 0)
-	m, _ = m.Update(acceptedInitialMailRefresh(m))
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 
 	matches := 0
 	for _, message := range m.messages {
@@ -72,7 +72,7 @@ func TestMailProjectionKeepsExpandedEventHistoryWhileMailStaysSingleSource(t *te
 	})
 
 	m := NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 100, "", "en", false, 0)
-	m, _ = m.Update(acceptedInitialMailRefresh(m))
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 	m.verbose = verboseThinking
 	m.buildMessages()
 

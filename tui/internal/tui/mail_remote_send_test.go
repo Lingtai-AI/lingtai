@@ -50,12 +50,13 @@ func TestMailModelRemoteSendFailurePreservesRetryState(t *testing.T) {
 			}
 
 			m := NewMailModel(humanDir, "human", baseDir, orchDir, "orch", 20, "", "en", false, 0)
+			bindMailModelForAsyncTest(t, &m, 1)
 			if m.orchAddr != remoteAddr {
 				t.Fatalf("orchAddr = %q, want %q", m.orchAddr, remoteAddr)
 			}
 			if tc.editor {
 				var editorCmd tea.Cmd
-				m, editorCmd = m.Update(EditorDoneMsg{Text: text, Generation: m.generation})
+				m, editorCmd = m.Update(EditorDoneMsg{envelope: captureAsync(asyncEditorDone, m.asyncCurrent()), Text: text})
 				if editorCmd == nil {
 					t.Fatal("editor completion did not schedule its repaint/refresh")
 				}
@@ -66,7 +67,12 @@ func TestMailModelRemoteSendFailurePreservesRetryState(t *testing.T) {
 				m.input.SetValue(text)
 			}
 
-			got, cmd := m.Update(SendMsg{})
+			after, cmd := m.Update(SendMsg{})
+			if cmd == nil {
+				t.Fatal("SendMsg did not schedule the bound-send request")
+			}
+			requestMsg := cmd()
+			got, cmd := after.Update(requestMsg)
 			if cmd != nil {
 				t.Fatalf("failed remote send returned success/refresh command %T", cmd)
 			}
@@ -82,8 +88,8 @@ func TestMailModelRemoteSendFailurePreservesRetryState(t *testing.T) {
 			if tc.editor && got.pendingMessage != text {
 				t.Fatalf("pending message = %q, want retryable editor text %q", got.pendingMessage, text)
 			}
-			if got.cache.Messages != nil {
-				t.Fatalf("mail cache changed on failed send: %#v", got.cache.Messages)
+			if cache := got.snapshotCache(); cache.Messages != nil {
+				t.Fatalf("mail cache changed on failed send: %#v", cache.Messages)
 			}
 			if _, err := os.Stat(marker); err != nil {
 				t.Fatalf("insight marker was not preserved: %v", err)
