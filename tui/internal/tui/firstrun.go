@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,38 @@ type FirstRunDoneMsg struct {
 	OrchDir  string // full path to orchestrator directory
 	OrchName string // agent name
 }
+
+// ProjectDraftConfirmedMsg is emitted from stepReview (draftMode only) when
+// the user presses Enter on "Start project". It carries the completed
+// ProjectDraft out of FirstRunModel to whichever root model hosts it (the
+// no-project launcher's create flow, see launcher.go) so the staging
+// finalizer in project_create.go can run. FirstRunModel itself never stages,
+// validates, or renames — it only ever produces a ProjectDraft.
+type ProjectDraftConfirmedMsg struct {
+	Draft *ProjectDraft
+}
+
+// ProjectDraftCancelledMsg is emitted when the user backs all the way out
+// of the draft-mode create wizard — Esc/q/Ctrl+C at stepWelcome, the
+// wizard's own first/entry step (draftMode only; every OTHER step's Esc
+// already goes BACKWARD to a prior wizard step via the existing
+// step-transition handlers, never out of the wizard entirely, so Welcome is
+// the sole exit point a cancel signal needs to fire from). It carries no
+// payload: the hosting root model (LauncherRootModel, see launcher.go) is
+// responsible for discarding its old *ProjectDraft and returning to the
+// landing page, so a subsequent "Create new project" starts a genuinely
+// fresh draft rather than resuming a half-filled one.
+//
+// A parent review found draftMode's Welcome step had NO typed cancel
+// path at all: plain Esc (not m.welcomeOnly, which is a DIFFERENT
+// entry — the /settings language-only flow) fell through to a bare
+// `return m, nil` (silently stuck — nothing happened), and Ctrl+C did an
+// unconditional `return m, tea.Quit`, which — because the launcher runs
+// FirstRunModel inside its OWN tea.Program (see launcher.go's doc
+// comment on why) — would have killed that WHOLE program abruptly,
+// bypassing LauncherRootModel's own done/result bookkeeping entirely
+// rather than routing back to its landing page as a proper decision.
+type ProjectDraftCancelledMsg struct{}
 
 // SetupSavedMsg is emitted when /setup rewrites the current agent's init.json.
 type SetupSavedMsg struct{}
@@ -72,6 +105,7 @@ const (
 	stepAgentNameDir
 	stepRecipe            // picks a bundled/agora/custom recipe (adaptive, greeter, plain, tutorial, custom)
 	stepRecipeSwapConfirm // mid-life only — confirms recipe change (Task 9 wires this)
+	stepReview            // draftMode only — final "Start project" confirmation before staging/commit
 	stepPropagate         // rehydration only — runs after orchestrator save, before launch
 	stepLaunching
 )
@@ -134,10 +168,28 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 
 // FirstRunModel orchestrates the first-run experience.
 type FirstRunModel struct {
-	step       firstRunStep
-	setup      SetupModel
-	presets    []preset.Preset
-	cursor     int
+	step    firstRunStep
+	setup   SetupModel
+	presets []preset.Preset
+	cursor  int
+	// draftEditedPresetIdx is the m.presets index the preset editor last
+	// committed an edit for (draftMode only), or -1 if no edit has been
+	// committed yet in this draft session. enterReviewStep always resolves
+	// DraftPreset afresh from the CURRENT cursor; it compares this index only
+	// to decide whether that selected preset is dirty and therefore needs the
+	// post-commit preset.Save. This separation prevents both stale-preset
+	// carryover and stale Back/reselect state.
+	draftEditedPresetIdx int
+	// draftPendingAPIKeys keeps every in-memory key edit associated with its
+	// api_key_env during draft navigation. enterReviewStep copies only the key
+	// for the preset currently under review onto ProjectDraft, so editing A,
+	// selecting B, and later returning to A neither persists A accidentally
+	// with B nor loses A's pending value. draftBaselineKeys snapshots the
+	// shared key map at draft construction so clearing a session-local override
+	// can restore the original value without deleting or rereading shared state.
+	draftPendingAPIKeys map[string]secretString
+	draftBaselineKeys   map[string]string
+
 	nameInput  textinput.Model
 	dirInput   textinput.Model
 	agentName  string
@@ -324,9 +376,107 @@ type FirstRunModel struct {
 	pendingRecipeName string
 	pendingCustomDir  string
 	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
+
+	// purpose is the typed discriminator visible to Update/Init. Normal and
+	// draft flows pass their purpose directly into the shared constructor;
+	// purposeDraft is therefore known before the read-only-vs-mutating config
+	// choice or auth probing. The legacy setup/rehydrate wrappers intentionally
+	// preserve their old normal-construction side effects, then retag the model
+	// before Update/Init. draftMode is a cached view of purposeDraft kept for
+	// the existing credential/persistence branches; withPurpose updates both.
+	purpose   firstRunPurpose
+	draftMode bool
+	draft     *ProjectDraft
 }
 
+// firstRunPurpose is the typed "what is this FirstRunModel for" answer.
+// It does not replace setupMode/rehydrateMode — those existing flags and their
+// construction-time behavior remain unchanged. Its safety-critical role is
+// making purposeDraft a typed source of truth that reaches the shared
+// constructor before any operation whose draft behavior differs.
+type firstRunPurpose int
+
+const (
+	purposeNormal    firstRunPurpose = iota
+	purposeSetup                     // NewSetupModeModel — setupMode's existing persist-immediately behavior
+	purposeRehydrate                 // NewRehydrateModel — rehydrateMode's existing persist-immediately behavior
+	purposeDraft                     // NewDraftFirstRunModel — the no-project launcher's Create-new-project flow
+)
+
+// withPurpose returns m with purpose and its derived draftMode cache kept in
+// sync. The shared constructor calls it immediately for normal/draft flows;
+// the legacy setup/rehydrate wrappers retag before the model is returned to a
+// caller, without changing their pre-existing construction behavior.
+//
+// When purpose == purposeDraft, every step that would otherwise persist to
+// disk immediately (Welcome's theme/language save, the preset editor's
+// SaveConfig/preset.Save, stepPresetKey's SaveConfig, Codex OAuth token
+// write/delete, and stepPickPreset's saved-preset Delete) instead writes
+// into `draft` (or, for Delete, is blocked entirely — see the delete-key
+// handler) and returns without touching the filesystem. purposeSetup and
+// purposeRehydrate are unaffected by this — their existing
+// persist-immediately behavior is unchanged. stepRecipe's Enter handler is
+// redirected to enterReviewStep instead of
+// performRecipeSave/performSetupSaveOnly when purpose == purposeDraft,
+// landing on stepReview instead of generating the project directly.
+func (m FirstRunModel) withPurpose(p firstRunPurpose) FirstRunModel {
+	m.purpose = p
+	m.draftMode = p == purposeDraft
+	return m
+}
+
+// clearDraftPendingAPIKey removes only a key override entered during this
+// draft session, then restores the construction-time shared value (if any).
+// It never writes, rereads, or deletes global credential state.
+func (m *FirstRunModel) clearDraftPendingAPIKey(envName string) bool {
+	if !m.draftMode || envName == "" || m.draftPendingAPIKeys == nil {
+		return false
+	}
+	if _, ok := m.draftPendingAPIKeys[envName]; !ok {
+		return false
+	}
+	delete(m.draftPendingAPIKeys, envName)
+	if baseline, ok := m.draftBaselineKeys[envName]; ok {
+		m.existingKeys[envName] = baseline
+	} else {
+		delete(m.existingKeys, envName)
+	}
+	if m.draft != nil {
+		m.draft.ExistingKeys = redactedKeyPresence(m.existingKeys)
+	}
+	return true
+}
+
+// NewFirstRunModel constructs a normal (purposeNormal) first-run model —
+// this is the public entry point every existing caller uses and its
+// behavior is unchanged. It delegates to the purpose-aware shared body so
+// purposeNormal callers keep their exact existing signature.
 func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
+	return newFirstRunModelForPurpose(purposeNormal, baseDir, globalDir, hasPresets, preselectedRecipe)
+}
+
+// newFirstRunModelForPurpose is the shared constructor body for all four
+// purposes. purpose is known and applied via withPurpose BEFORE either of
+// this function's two side-effectful reads run:
+//   - config.LoadConfig(globalDir), which chmods config.json to 0600 as a
+//     migration side effect if it isn't already — purposeDraft MUST use
+//     config.LoadConfigReadOnly instead, which performs the identical
+//     read+parse+legacy-key-migration but never chmods.
+//   - refreshClaudeCodeAuth, which shells out to `claude auth status
+//     --json` — unnecessary for purposeDraft: that auth row is already
+//     hidden in the UI (see tui/internal/tui/ANATOMY.md's login.go entry,
+//     "The Claude Code auth row... is hidden for now"), so probing it
+//     during a draft session that may never commit is pure waste, not a
+//     zero-write violation by itself (it's a subprocess exec, not a
+//     filesystem write) but avoidable work the design doc's "the launcher
+//     touches nothing except explicit read-only calls" spirit argues for
+//     skipping.
+//
+// refreshCodexAuth (also called below) is NOT skipped for purposeDraft: it
+// only reads existing ~/.lingtai-tui/codex-auth*.json files (no writes, no
+// subprocess) and IS needed so the draft wizard's own Codex credential row
+// correctly reflects "already authed" state.
+func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir string, hasPresets bool, preselectedRecipe string) FirstRunModel {
 	ti := textinput.New()
 	ti.CharLimit = 64
 	ti.SetWidth(40)
@@ -390,11 +540,29 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	rci.SetWidth(50)
 	rci.Placeholder = ".recipe/ or absolute path"
 
-	// Load existing keys from Config.Keys
-	cfg, _ := config.LoadConfig(globalDir)
+	// Load existing keys from Config.Keys. purposeDraft uses
+	// LoadConfigReadOnly — identical read+parse+legacy-migration behavior,
+	// but never chmods config.json (LoadConfig's 0600 permission-tightening
+	// migration is an intentional filesystem write that must not run before
+	// the user has confirmed project creation). All other purposes keep
+	// using LoadConfig exactly as before — this branch changes ZERO
+	// existing behavior for purposeNormal/purposeSetup/purposeRehydrate.
+	var cfg config.Config
+	if purpose == purposeDraft {
+		cfg, _ = config.LoadConfigReadOnly(globalDir)
+	} else {
+		cfg, _ = config.LoadConfig(globalDir)
+	}
 	existingKeys := cfg.Keys
 	if existingKeys == nil {
 		existingKeys = make(map[string]string)
+	}
+	var draftBaselineKeys map[string]string
+	if purpose == purposeDraft {
+		draftBaselineKeys = make(map[string]string, len(existingKeys))
+		for envName, value := range existingKeys {
+			draftBaselineKeys[envName] = value
+		}
 	}
 
 	// Pre-set language cursor from TUI config
@@ -409,28 +577,32 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	}
 
 	m := FirstRunModel{
-		step:              stepWelcome,
-		baseDir:           baseDir,
-		globalDir:         globalDir,
-		nameInput:         ti,
-		dirInput:          di,
-		hasPresets:        hasPresets,
-		langCursor:        langCursor,
-		presetKeyInput:    pki,
-		existingKeys:      existingKeys,
-		ctxLimitInput:     ci,
-		soulDelayInput:    sdi,
-		maxRpmInput:       mri,
-		maxAedInput:       mai,
-		covenantInput:     covi,
-		principleInput:    prini,
-		soulFlowInput:     sfli,
-		commentInput:      comi,
-		nirvanaIdx:        1, // default false (1=false)
-		progressCh:        make(chan string, 4),
-		recipeCustomInput: rci,
-		preselectedRecipe: preselectedRecipe,
+		step:                 stepWelcome,
+		baseDir:              baseDir,
+		globalDir:            globalDir,
+		nameInput:            ti,
+		dirInput:             di,
+		hasPresets:           hasPresets,
+		langCursor:           langCursor,
+		presetKeyInput:       pki,
+		existingKeys:         existingKeys,
+		ctxLimitInput:        ci,
+		soulDelayInput:       sdi,
+		maxRpmInput:          mri,
+		maxAedInput:          mai,
+		covenantInput:        covi,
+		principleInput:       prini,
+		soulFlowInput:        sfli,
+		commentInput:         comi,
+		nirvanaIdx:           1, // default false (1=false)
+		progressCh:           make(chan string, 4),
+		recipeCustomInput:    rci,
+		preselectedRecipe:    preselectedRecipe,
+		draftEditedPresetIdx: -1,
+		draftPendingAPIKeys:  make(map[string]secretString),
+		draftBaselineKeys:    draftBaselineKeys,
 	}
+	m = m.withPurpose(purpose)
 
 	// Detect project-local .recipe/ directory.
 	// The projectDir is one level up from baseDir (.lingtai/).
@@ -455,10 +627,18 @@ func NewFirstRunModel(baseDir, globalDir string, hasPresets bool, preselectedRec
 	// bootstrapDoneMsg handler re-runs discoverRecipes once bootstrap finishes.
 	m.discoverRecipes()
 
-	// Load OAuth / CLI auth status. Codex is local-file based; Claude
-	// Agent SDK uses the existing Claude Code CLI login.
+	// Load OAuth / CLI auth status. Codex is local-file based (a read-only
+	// check of existing ~/.lingtai-tui/codex-auth*.json files — needed even
+	// in purposeDraft so the draft wizard's own Codex row reflects
+	// "already authed" state correctly). Claude Agent SDK auth uses a
+	// subprocess exec (`claude auth status --json`) to probe the existing
+	// Claude Code CLI login — that auth row is hidden in the UI already
+	// (unsupported for now), so purposeDraft skips this probe entirely as
+	// unnecessary work during a session that may never commit.
 	m.refreshCodexAuth()
-	m.refreshClaudeCodeAuth()
+	if purpose != purposeDraft {
+		m.refreshClaudeCodeAuth()
+	}
 
 	// Default to imported recipe if detected and no explicit preselection
 	if m.importedRecipe != nil && preselectedRecipe == "" {
@@ -488,10 +668,52 @@ func (m *FirstRunModel) discoverRecipes() {
 	}
 }
 
+// NewDraftFirstRunModel creates a FirstRunModel for the no-project
+// launcher's Create-new-project flow. It behaves exactly like a fresh
+// NewFirstRunModel EXCEPT every step that would otherwise persist
+// immediately is redirected into draft (see withPurpose's doc comment).
+// baseDir/globalDir are still passed through unchanged — they are used only
+// for READS (loading existing config/presets/recipes to populate pickers),
+// never writes, while purpose is purposeDraft. hasPresets should reflect
+// whatever the caller already knows about the global presets directory (a
+// pure read, same as normal first-run construction).
+//
+// Calls newFirstRunModelForPurpose directly (NOT the public
+// NewFirstRunModel) with purposeDraft, so purpose is known from the very
+// first line of construction — before config.LoadConfigReadOnly (not
+// LoadConfig: this is what actually skips the config.json chmod) and before
+// refreshClaudeCodeAuth is skipped. Going through NewFirstRunModel first and
+// patching draftMode on afterward (the prior shape of this function) would
+// have been too late: NewFirstRunModel's body would already have run
+// LoadConfig's chmod and the unnecessary Claude Code CLI probe before this
+// function got a chance to react.
+func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *ProjectDraft) FirstRunModel {
+	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets, "")
+	m.draft = draft
+	if draft != nil {
+		if draft.AgentName != "" {
+			m.nameInput.SetValue(draft.AgentName)
+			m.agentName = draft.AgentName
+		}
+		if draft.AgentDirName != "" {
+			m.dirInput.SetValue(draft.AgentDirName)
+			m.agentDir = draft.AgentDirName
+		}
+		// draft.ExistingKeys is a REDACTED presence-only mirror (see its doc
+		// comment on ProjectDraft) — it must never be copied back into
+		// m.existingKeys, which needs real values for prefill/masking within
+		// this live model instance. The shared purpose-aware constructor loaded
+		// the real existingKeys from disk (config.LoadConfigReadOnly), which is the
+		// correct source of truth; do not overwrite it here.
+	}
+	return m
+}
+
 // NewSetupModeModel creates a FirstRunModel for /setup — skips welcome/bootstrap/tutorial,
 // starts at preset selection with presets preloaded, and overwrites the current agent on completion.
 func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunModel {
 	m := NewFirstRunModel(baseDir, globalDir, true, "")
+	m = m.withPurpose(purposeSetup)
 	m.setupMode = true
 	m.setupOrchDir = orchDir
 	m.setupOrchName = orchName
@@ -595,6 +817,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 // and orchName is the agent_name read from that directory's .agent.json.
 func NewRehydrateModel(baseDir, globalDir, orchDir, orchName string, hasPresets bool) FirstRunModel {
 	m := NewFirstRunModel(baseDir, globalDir, hasPresets, "")
+	m = m.withPurpose(purposeRehydrate)
 	m.rehydrateMode = true
 	m.rehydrateOrchDir = orchDir
 	m.rehydrateOrchName = orchName
@@ -635,6 +858,16 @@ func (m FirstRunModel) Init() tea.Cmd {
 	}
 	if m.welcomeOnly {
 		// Already bootstrapped — immediately signal done
+		return func() tea.Msg { return bootstrapDoneMsg{} }
+	}
+	if m.draftMode {
+		// The no-project launcher's Create flow runs entirely pre-commit:
+		// no venv creation, no preset.Bootstrap, no filesystem writes at
+		// all. Real bootstrap happens post-commit (see project_create.go's
+		// finalizer), after the staged .lingtai/ has been renamed into
+		// place. Report done immediately so the wizard pages are
+		// interactive right away instead of blocking on a bootstrap run
+		// that would violate the zero-write invariant.
 		return func() tea.Msg { return bootstrapDoneMsg{} }
 	}
 	return tea.Batch(
@@ -756,24 +989,85 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.existingKeys = map[string]string{}
 					}
 					if msg.APIKey == "" {
-						delete(m.existingKeys, envName)
+						if m.draftMode {
+							if m.clearDraftPendingAPIKey(envName) {
+								m.message = i18n.T("firstrun.preset_pick.draft_key_override_cleared")
+							} else {
+								m.message = i18n.T("firstrun.preset_pick.draft_key_delete_blocked")
+							}
+						} else {
+							delete(m.existingKeys, envName)
+						}
 					} else {
 						m.existingKeys[envName] = msg.APIKey
+						if m.draftMode {
+							if m.draftPendingAPIKeys == nil {
+								m.draftPendingAPIKeys = make(map[string]secretString)
+							}
+							m.draftPendingAPIKeys[envName] = secretString(msg.APIKey)
+						}
 					}
-					cfg, err := config.LoadConfig(m.globalDir)
-					if err != nil {
-						m.message = fmt.Sprintf("Failed to save API key: %v", err)
-						m.step = stepPickPreset
-						return m, nil
-					}
-					cfg.Keys = m.existingKeys
-					if err := config.SaveConfig(m.globalDir, cfg); err != nil {
-						m.message = fmt.Sprintf("Failed to save API key: %v", err)
-						m.step = stepPickPreset
-						return m, nil
+					if m.draftMode {
+						// Draft only: no disk write. The selected slot is copied
+						// from draftPendingAPIKeys when Review is entered.
+						if m.draft != nil {
+							m.draft.ExistingKeys = redactedKeyPresence(m.existingKeys)
+						}
+					} else {
+						cfg, err := config.LoadConfig(m.globalDir)
+						if err != nil {
+							m.message = fmt.Sprintf("Failed to save API key: %v", err)
+							m.step = stepPickPreset
+							return m, nil
+						}
+						cfg.Keys = m.existingKeys
+						if err := config.SaveConfig(m.globalDir, cfg); err != nil {
+							m.message = fmt.Sprintf("Failed to save API key: %v", err)
+							m.step = stepPickPreset
+							return m, nil
+						}
 					}
 				}
 			}
+		}
+		if m.draftMode {
+			// Draft only: hold the edited preset in memory. preset.Save
+			// (which writes presets/saved/<name>.json) runs strictly AFTER
+			// the atomic rename, in the finalizer's post-commit phase, not
+			// here and not during staging — see ProjectDraft.DraftPreset's
+			// doc comment for why the write is deferred that late. This
+			// captures the CURRENT cursor's edit; if the user later
+			// navigates away to a different, unedited preset before
+			// reaching Review, enterReviewStep re-resolves fresh from the
+			// cursor rather than keeping this stale edit (see its own doc
+			// comment). Splice the draft preset into the in-memory picker
+			// list (replacing an entry of the same name, or appending) so
+			// the rest of the wizard sees it exactly as if it had been
+			// saved.
+			if m.draft != nil {
+				p := toSave
+				m.draft.DraftPreset = &p
+				m.draft.DraftPresetDirty = true
+			}
+			replaced := false
+			for i, p := range m.presets {
+				if p.Name == toSave.Name {
+					m.presets[i] = toSave
+					m.cursor = i
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				m.presets = append(m.presets, toSave)
+				m.cursor = len(m.presets) - 1
+			}
+			// Record WHICH index now holds the edit so enterReviewStep can
+			// tell whether the cursor still points at it later (see
+			// draftEditedPresetIdx's doc comment).
+			m.draftEditedPresetIdx = m.cursor
+			m.step = stepPickPreset
+			return m, nil
 		}
 		if err := preset.Save(toSave); err != nil {
 			m.message = "save preset: " + err.Error()
@@ -873,12 +1167,27 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		// First-run manages the primary (legacy) account; additional
 		// accounts are added from Setup → Credentials. Token material is
 		// secret: written 0600, never logged.
-		authPath := legacyCodexAuthPath(m.globalDir)
 		data, err := json.MarshalIndent(msg.Tokens, "", "  ")
 		if err != nil {
 			m.message = fmt.Sprintf("Failed to encode tokens: %v", err)
 			return m, nil
 		}
+		if m.draftMode {
+			// Draft only: hold the completed OAuth bundle in memory as
+			// secretBytes. The real codex-auth.json write happens during
+			// the finalizer's post-commit phase (project_create.go), never
+			// here. m.codexAuth is still updated in-memory (below, via
+			// refreshCodexAuth) purely so the wizard's UI reflects "logged
+			// in" without touching disk.
+			if m.draft != nil {
+				m.draft.DraftCodexTokens = secretBytes(data)
+			}
+			m.codexAuth.valid = true
+			m.codexAuth.email = msg.Tokens.Email
+			m.codexAuth.label = codexAccountName(codexAccount{Email: msg.Tokens.Email, Legacy: true})
+			return m, nil
+		}
+		authPath := legacyCodexAuthPath(m.globalDir)
 		if err := os.WriteFile(authPath, data, 0o600); err != nil {
 			m.message = fmt.Sprintf("Failed to save tokens: %v", err)
 			return m, nil
@@ -990,6 +1299,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				names := ThemeNames()
 				tuiCfg := config.LoadTUIConfig(m.globalDir)
 				current := tuiCfg.Theme
+				if m.draftMode && m.draft != nil && m.draft.Theme != "" {
+					current = m.draft.Theme
+				}
 				if current == "" {
 					current = DefaultThemeName
 				}
@@ -1000,8 +1312,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						break
 					}
 				}
+				SetThemeByName(next) // in-memory render only — safe in draft mode
+				if m.draftMode {
+					// Draft only: hold the choice in memory, do not persist
+					// to ~/.lingtai-tui/tui_config.json until commit.
+					if m.draft != nil {
+						m.draft.Theme = next
+					}
+					return m, nil
+				}
 				tuiCfg.Theme = next
-				SetThemeByName(next)
 				config.SaveTUIConfig(m.globalDir, tuiCfg)
 				return m, nil
 			case "up":
@@ -1019,6 +1339,21 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil // blocked — still installing or failed
 				}
 				lang := langs[m.langCursor]
+				if m.draftMode {
+					// Draft only: hold the language choice in memory. Do not
+					// call config.SaveTUIConfig, do not reload keys from
+					// disk (existingKeys already reflects the draft),
+					// and do not check preset.HasAny()/preset.List() disk
+					// state as a gate — the draft flow always proceeds
+					// through the picker so the user can create/select a
+					// preset draft regardless of what's on disk yet.
+					if m.draft != nil {
+						m.draft.Language = lang
+					}
+					m.step = stepPickPreset
+					m.presets, _ = preset.List() // read-only: list existing on-disk presets to offer as a starting point
+					return m, nil
+				}
 				// Save language to TUI config
 				tuiCfg := config.LoadTUIConfig(m.globalDir)
 				tuiCfg.Language = lang
@@ -1050,7 +1385,23 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					i18n.SetLang(tuiCfg.Language)
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 				}
+				if m.draftMode {
+					// Back out of the create wizard entirely — no writes
+					// occurred (this is stepWelcome, the wizard's entry
+					// step), so there is nothing to undo, only the in-memory
+					// draft to discard. See ProjectDraftCancelledMsg's doc
+					// comment for why this fires here and not elsewhere.
+					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
+				}
 			case "ctrl+c":
+				if m.draftMode {
+					// Same cancel path as Esc — MUST route through
+					// LauncherRootModel's own done/result handling rather
+					// than a bare tea.Quit, which would kill the launcher's
+					// entire tea.Program abruptly (see
+					// ProjectDraftCancelledMsg's doc comment).
+					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
+				}
 				return m, tea.Quit
 			}
 			return m, nil
@@ -1261,15 +1612,58 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						m.message = i18n.T("firstrun.preset_pick.codex_cancelled")
 						return m, nil
 					case m.codexAuth.valid && !m.codexLogoutArmed:
+						// draftMode with an EMPTY DraftCodexTokens means
+						// m.codexAuth.valid reflects real PRE-EXISTING disk
+						// auth (refreshCodexAuth reads the real
+						// codex-auth.json unconditionally, even in draft —
+						// see newFirstRunModelForPurpose's doc comment) that
+						// this draft session never touched. A parent review
+						// found the old code let the second Del press "log
+						// out" of that state anyway: nothing was actually
+						// removed from disk, but the UI claimed it was — a
+						// lie, and the opposite of the strict draft
+						// invariant (zero writes, zero false state) this
+						// launcher exists to guarantee. Block the action
+						// entirely here rather than let it arm toward a
+						// logout that would either lie (draft) or need to
+						// delete real credentials before the user ever
+						// presses "Start project" (also wrong). If the user
+						// instead logged in DURING this draft session
+						// (DraftCodexTokens non-empty — never written to
+						// disk in the first place), clearing that in-memory
+						// bundle is safe and honest, so that path is
+						// unaffected below.
+						if m.draftMode && m.draft != nil && m.draft.DraftCodexTokens.Empty() {
+							m.message = i18n.T("firstrun.preset_pick.draft_codex_logout_blocked")
+							return m, nil
+						}
 						m.codexLogoutArmed = true
 						m.codexReloginArmed = false
 						m.message = i18n.T("firstrun.preset_pick.codex_logout_confirm")
 						return m, nil
 					case m.codexAuth.valid && m.codexLogoutArmed:
 						m.codexLogoutArmed = false
-						authPath := legacyCodexAuthPath(m.globalDir)
-						_ = os.Remove(authPath)
-						m.refreshCodexAuth()
+						if m.draftMode {
+							// Reachable only when DraftCodexTokens is
+							// non-empty (a login completed during THIS
+							// draft session) — the arm above already
+							// blocked the pre-existing-disk-auth case
+							// before m.codexLogoutArmed could ever become
+							// true. Clearing the in-memory bundle here is
+							// accurate: nothing was ever written to
+							// codex-auth.json, so there is nothing to
+							// remove from disk.
+							if m.draft != nil {
+								m.draft.DraftCodexTokens = nil
+							}
+							m.codexAuth.valid = false
+							m.codexAuth.email = ""
+							m.codexAuth.label = ""
+						} else {
+							authPath := legacyCodexAuthPath(m.globalDir)
+							_ = os.Remove(authPath)
+							m.refreshCodexAuth()
+						}
 						m.message = i18n.T("firstrun.preset_pick.codex_logged_out")
 						return m, nil
 					}
@@ -1280,6 +1674,29 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// — robust against a saved preset whose name happens to
 				// match a template (e.g. saved/codex.json shadowing
 				// templates/codex.json).
+				//
+				// draftMode MUST refuse this entirely — preset.Delete is a
+				// real filesystem mutation against ~/.lingtai-tui/presets/
+				// saved/<name>.json, unconditional and with no confirmation
+				// gate (unlike the Codex logout branch above it). A parent
+				// review found this branch had NO draftMode guard at all:
+				// a user browsing the picker during a new-project draft
+				// session — one that may never even commit — could
+				// permanently delete one of their own saved presets before
+				// ever confirming "Start project". Every other
+				// disk-mutating action in this step (theme, language,
+				// preset editor commit, preset key save, Codex OAuth
+				// write/delete) already redirects into `draft` when
+				// draftMode is true; deletion has no draft-shaped
+				// equivalent (there is nothing to "undo later" — a
+				// filesystem delete is immediate and irreversible), so the
+				// correct draft-mode behavior is to no-op with an
+				// explanatory status message, not to defer or simulate the
+				// delete.
+				if m.draftMode {
+					m.message = i18n.T("firstrun.preset_pick.draft_delete_blocked")
+					return m, nil
+				}
 				if p, ok := m.presetAtVisibleIdx(m.cursor); ok && !preset.IsTemplate(p) {
 					if err := preset.Delete(p.Name); err == nil {
 						// Refresh the list; clamp visible cursor.
@@ -1474,17 +1891,32 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, m.enterCapabilities()
 				}
 				key := strings.TrimSpace(m.presetKeyInput.Value())
+				if key == "" && m.clearDraftPendingAPIKey(envName) {
+					m.message = i18n.T("firstrun.preset_pick.draft_key_override_cleared")
+				}
 				if key != "" {
 					m.existingKeys[envName] = key
-					cfg, err := config.LoadConfig(m.globalDir)
-					if err != nil {
-						m.message = fmt.Sprintf("Failed to save API key: %v", err)
-						return m, nil
-					}
-					cfg.Keys = m.existingKeys
-					if err := config.SaveConfig(m.globalDir, cfg); err != nil {
-						m.message = fmt.Sprintf("Failed to save API key: %v", err)
-						return m, nil
+					if m.draftMode {
+						// Draft only: keep the key associated with its env slot.
+						// Review selects which pending key reaches the finalizer.
+						if m.draftPendingAPIKeys == nil {
+							m.draftPendingAPIKeys = make(map[string]secretString)
+						}
+						m.draftPendingAPIKeys[envName] = secretString(key)
+						if m.draft != nil {
+							m.draft.ExistingKeys = redactedKeyPresence(m.existingKeys)
+						}
+					} else {
+						cfg, err := config.LoadConfig(m.globalDir)
+						if err != nil {
+							m.message = fmt.Sprintf("Failed to save API key: %v", err)
+							return m, nil
+						}
+						cfg.Keys = m.existingKeys
+						if err := config.SaveConfig(m.globalDir, cfg); err != nil {
+							m.message = fmt.Sprintf("Failed to save API key: %v", err)
+							return m, nil
+						}
 					}
 				} else if m.existingKeys[envName] == "" {
 					return m, nil
@@ -1495,6 +1927,25 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+e":
 				// Open external editor for paste-friendly key entry.
+				//
+				// draftMode MUST refuse this: os.CreateTemp + tea.ExecProcess
+				// (which shells out to $EDITOR) are real filesystem writes and
+				// a subprocess exec, unconditional and with no draft-shaped
+				// equivalent (there is nothing to stage in memory — the
+				// editor process itself needs a real file to open). Every
+				// other disk-mutating action on this step already redirects
+				// into `draft` when draftMode is true; a parent review found
+				// this branch had NO draftMode guard at all, breaking the
+				// launcher's zero-write-before-commit contract the moment a
+				// user pressed ctrl+e while filling in an API key during a
+				// draft session that might never even commit. Pasting
+				// directly into the textarea (the non-ctrl+e path) remains
+				// fully available in draft mode — only the external-editor
+				// escape hatch is blocked.
+				if m.draftMode {
+					m.message = i18n.T("firstrun.preset_key.draft_editor_blocked")
+					return m, nil
+				}
 				currentVal := m.presetKeyInput.Value()
 				tmpFile, err := os.CreateTemp("", "lingtai-field-*.txt")
 				if err != nil {
@@ -2046,6 +2497,16 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						return m, nil
 					}
 				}
+				if m.draftMode {
+					// New-project draft flow: stage the recipe choice into
+					// the in-memory draft and move to the review step
+					// instead of writing init.json/.recipe/.prompt now.
+					// copyRecipeBundle/GenerateInitJSONWithOpts/applyRecipe
+					// all run later, against a STAGING directory, from the
+					// finalizer's build phase (project_create.go) — never
+					// here, and never against the real project root.
+					return m.enterReviewStep(recipeName, customDir)
+				}
 				if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
 					m.pendingRecipeName = recipeName
 					m.pendingCustomDir = customDir
@@ -2150,6 +2611,30 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			return m, nil
 
+		case stepReview:
+			// draftMode only. Esc goes back to the recipe picker (still no
+			// writes); Enter emits ProjectDraftConfirmedMsg so the hosting
+			// launcher model (not FirstRunModel) drives the staging
+			// finalizer in project_create.go. FirstRunModel never performs
+			// the staging/validate/rename sequence itself — see the
+			// ownership table in the design doc: this model only ever
+			// produces a complete ProjectDraft.
+			switch msg.String() {
+			case "esc":
+				m.step = stepRecipe
+				m.message = ""
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			case "enter":
+				if m.draft == nil {
+					return m, nil
+				}
+				draft := m.draft
+				return m, func() tea.Msg { return ProjectDraftConfirmedMsg{Draft: draft} }
+			}
+			return m, nil
+
 		case stepPropagate:
 			// Only Enter (to advance after result) or ctrl+c are valid.
 			// Ignore Enter until rehydrateDoneMsg has arrived.
@@ -2225,7 +2710,11 @@ func (m FirstRunModel) View() string {
 
 	switch m.step {
 	case stepWelcome:
-		return m.viewWelcome()
+		out := m.viewWelcome()
+		if line := m.viewDraftStatusLine(); line != "" {
+			out += "\n" + line + "\n"
+		}
+		return out
 	default:
 		// non-welcome steps: show standard title bar
 	}
@@ -2234,6 +2723,16 @@ func (m FirstRunModel) View() string {
 	title := StyleTitle.Render("  " + i18n.T("firstrun.welcome"))
 	b.WriteString(title + "\n")
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
+	// Persistent "draft only" status — every draft-mode page carries this,
+	// not just the final review page, so cancelling anywhere is never a
+	// surprise. stepReview renders its own copy inline (below the review
+	// content, right above the footer) so it is skipped here to avoid a
+	// duplicate line.
+	if m.draftMode && m.step != stepReview {
+		if line := m.viewDraftStatusLine(); line != "" {
+			b.WriteString(line + "\n\n")
+		}
+	}
 
 	switch m.step {
 	case stepAPIKey:
@@ -2848,6 +3347,9 @@ func (m FirstRunModel) View() string {
 
 	case stepRecipeSwapConfirm:
 		return m.viewRecipeSwapConfirm()
+
+	case stepReview:
+		return m.viewReview()
 
 	case stepPropagate:
 		// Rehydration: we've written the orchestrator's init.json and are
@@ -4180,6 +4682,110 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 	return b.String()
 }
 
+// presetModelName reads the truthful manifest.llm.model value straight off
+// the preset that will actually be applied — the same field
+// Preset.Validate() requires to be non-empty and the same location every
+// other read site in this file (e.g. codexPresetAuthValid,
+// currentPresetKeyEnv) already reads llm from. Returns "" if somehow
+// missing rather than guessing or hardcoding a default; the caller's row()
+// helper renders "—" for an empty value rather than fabricating one.
+func presetModelName(p preset.Preset) string {
+	llm, ok := p.Manifest["llm"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	model, _ := llm["model"].(string)
+	return model
+}
+
+// presetCapabilitiesSummary lists the capability names actually configured
+// in the preset's manifest.capabilities object — the same location
+// Preset.Validate() type-checks and initCapProviders reads from — as a
+// short, comma-joined, alphabetically sorted row for the Review page. This
+// reflects whatever the preset (template or user-edited) actually declares,
+// never a placeholder or the full AllCapabilities list: a preset that
+// configures none of them truthfully shows "—" (via the caller's row()
+// helper on an empty string), not a fabricated "none available".
+func presetCapabilitiesSummary(p preset.Preset) string {
+	caps, ok := p.Manifest["capabilities"].(map[string]interface{})
+	if !ok || len(caps) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(caps))
+	for name := range caps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// viewReview renders the draft-mode-only final confirmation page — the
+// single place before "Start project" where the user sees the complete set
+// of choices gathered across the wizard. Every draft page (not just this
+// one) also shows the persistent "draft only" status string via
+// viewDraftStatusLine, so cancelling anywhere is never a surprise.
+func (m FirstRunModel) viewReview() string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
+	b.WriteString("\n  " + titleStyle.Render(i18n.T("firstrun.review.title")) + "\n\n")
+	b.WriteString("  " + i18n.T("firstrun.review.hint") + "\n\n")
+
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	row := func(label, value string) {
+		if value == "" {
+			value = "—"
+		}
+		b.WriteString("  " + labelStyle.Render(label+":") + " " + value + "\n")
+	}
+
+	projectRoot := "."
+	presetName := ""
+	agentName := m.agentName
+	recipeName := ""
+	modelName := ""
+	capabilitiesSummary := ""
+	if m.draft != nil {
+		if m.draft.ProjectRoot != "" {
+			projectRoot = m.draft.ProjectRoot
+		}
+		if m.draft.DraftPreset != nil {
+			presetName = m.draft.DraftPreset.Name
+			modelName = presetModelName(*m.draft.DraftPreset)
+			capabilitiesSummary = presetCapabilitiesSummary(*m.draft.DraftPreset)
+		}
+		if m.draft.AgentName != "" {
+			agentName = m.draft.AgentName
+		}
+		recipeName = m.draft.RecipeName
+	}
+
+	row(i18n.T("firstrun.review.folder"), projectRoot)
+	row(i18n.T("firstrun.review.agent"), agentName)
+	row(i18n.T("firstrun.review.preset"), presetName)
+	row(i18n.T("firstrun.review.model"), modelName)
+	row(i18n.T("firstrun.review.recipe"), recipeName)
+	row(i18n.T("firstrun.review.capabilities"), capabilitiesSummary)
+
+	b.WriteString("\n  " + lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("> "+i18n.T("firstrun.review.start")) + "\n")
+
+	b.WriteString("\n" + m.viewDraftStatusLine() + "\n")
+	b.WriteString(StyleFaint.Render(
+		"  [Enter] "+i18n.T("firstrun.review.start")+
+			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+	return b.String()
+}
+
+// viewDraftStatusLine renders the persistent "draft only, nothing written"
+// status string shown on every draft-mode page (design doc UX requirement:
+// not just the final review page). Empty string outside draftMode.
+func (m FirstRunModel) viewDraftStatusLine() string {
+	if !m.draftMode {
+		return ""
+	}
+	return "  " + lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("firstrun.draft_status"))
+}
+
 func (m FirstRunModel) viewRecipe() string {
 	var b strings.Builder
 
@@ -4517,4 +5123,59 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 			OrchName: m.agentName,
 		}
 	}
+}
+
+// enterReviewStep stages the recipe choice (and everything gathered so far
+// — theme/language, preset, API key, agent name/dir/opts) into m.draft and
+// moves to stepReview. It performs NO filesystem writes: copyRecipeBundle,
+// GenerateInitJSONWithOpts, and applyRecipe are deferred to the finalizer's
+// staging build phase (project_create.go), which runs only after the user
+// confirms "Start project" on the review page and only against a sibling
+// staging directory — never here, and never against the real project root.
+//
+// Preset capture ALWAYS reflects the CURRENT cursor selection, never a
+// stale prior Review value. The preset editor splices its committed copy into
+// m.presets, so this function can resolve fresh on every entry (including
+// Back/reselect navigation) and use draftEditedPresetIdx only to decide whether
+// the selected row is dirty enough to require preset.Save after commit.
+func (m FirstRunModel) enterReviewStep(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
+	if m.draft != nil {
+		m.draft.RecipeName = recipeName
+		m.draft.RecipeCustomDir = customDir
+		m.draft.AgentName = m.agentName
+		m.draft.AgentDirName = m.pendingDirName
+		m.draft.AgentOpts = m.pendingAgentOpts
+		m.draft.ExistingKeys = redactedKeyPresence(m.existingKeys)
+		// Always resolve the preset fresh from the current cursor. Edited
+		// presets are already spliced into m.presets, so the index is needed
+		// only to decide whether preset.Save must run after commit. Keeping a
+		// previously resolved DraftPreset here breaks Back/reselect navigation
+		// and can silently finalize a different row.
+		if p, ok := m.presetAtVisibleIdx(m.cursor); ok {
+			pCopy := p
+			m.draft.DraftPreset = &pCopy
+			m.draft.DraftPresetDirty = m.cursor == m.draftEditedPresetIdx
+		} else {
+			m.draft.DraftPreset = nil
+			m.draft.DraftPresetDirty = false
+		}
+
+		// Bind credential persistence to the preset actually shown in Review,
+		// not whichever preset happened to be edited most recently. Pending
+		// values for other presets remain only in this live model so Back/
+		// reselect navigation can recover them without any pre-Start write.
+		m.draft.DraftAPIKeyEnv = ""
+		m.draft.DraftAPIKey = secretString("")
+		if m.draft.DraftPreset != nil {
+			if envName, _ := llmStringField(*m.draft.DraftPreset, "api_key_env"); envName != "" {
+				if key, ok := m.draftPendingAPIKeys[envName]; ok && !key.Empty() {
+					m.draft.DraftAPIKeyEnv = envName
+					m.draft.DraftAPIKey = key
+				}
+			}
+		}
+	}
+	m.step = stepReview
+	m.message = ""
+	return m, nil
 }
