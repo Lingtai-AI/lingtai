@@ -43,6 +43,19 @@ type ProjectsModel struct {
 	width        int
 	height       int
 
+	// launcherMode, when true, changes ONLY the message emitted on a
+	// validated Enter selection: LauncherProjectSelectedMsg instead of
+	// ProjectsAgentSelectedMsg. Everything else — catalog loading, the
+	// activation/request freshness guard, rendering, row
+	// enterability/disabled reasons — is byte-identical to the normal
+	// /projects visit-mode path, so the no-project launcher's "Open
+	// Existing" picker inherits that behavior verbatim rather than
+	// re-implementing it. Set only by NewLauncherProjectsModel; the
+	// existing App-owned visit flow never sets this, so
+	// TestProjectsSelectionRequiresActiveProjectsViewActivationAndRequest
+	// and friends keep emitting ProjectsAgentSelectedMsg unchanged.
+	launcherMode bool
+
 	projects []projectEntry
 	snapshot inventory.Snapshot
 	rows     []projectRow
@@ -93,6 +106,26 @@ type ProjectsAgentSelectedMsg struct {
 	Record       inventory.Record
 }
 
+// LauncherProjectSelectedMsg is the no-project launcher's typed analogue of
+// ProjectsAgentSelectedMsg. It is emitted ONLY by a ProjectsModel
+// constructed via NewLauncherProjectsModel (launcherMode=true), from the
+// exact same validated-selection code path as ProjectsAgentSelectedMsg —
+// same freshness guard, same re-validation against a live rescan, same
+// enterability check. It deliberately carries the project ROOT (not an
+// agent identity to visit) because selecting a project in the launcher
+// means "hand this root to the normal startup pipeline and construct a
+// real App for it", never App's visit machinery
+// (enterVisitedAgent/returnFromVisit). Keeping this a distinct type — not a
+// shared struct with a mode flag — is what lets
+// TestProjectsSelectionRequiresActiveProjectsViewActivationAndRequest and
+// the rest of app_visit_test.go assert ProjectsAgentSelectedMsg's visit
+// contract without ever observing a launcher selection.
+type LauncherProjectSelectedMsg struct {
+	ActivationID uint64
+	RequestSeq   uint64
+	ProjectRoot  string
+}
+
 func NewProjectsModel(globalDir, projectDir string, ctx ProjectsContext) ProjectsModel {
 	return NewProjectsModelWithActivation(globalDir, projectDir, ctx, 0)
 }
@@ -106,6 +139,21 @@ func NewProjectsModelWithActivation(globalDir, projectDir string, ctx ProjectsCo
 		activationID: activationID,
 		requestSeq:   1,
 	}
+}
+
+// NewLauncherProjectsModel creates a ProjectsModel for the no-project
+// launcher's "Open Existing" picker. It reuses the exact registry-source
+// (running-inventory) catalog, freshness guard, and rendering as the
+// normal /projects visit flow, but a validated selection emits
+// LauncherProjectSelectedMsg instead of ProjectsAgentSelectedMsg — see the
+// launcherMode field comment. ctx is typically the zero value: the launcher
+// has no current agent/project identity yet (that's the whole point of
+// needing a launcher), so there is nothing authoritative to mark as
+// "current" in the catalog.
+func NewLauncherProjectsModel(globalDir string, ctx ProjectsContext) ProjectsModel {
+	m := NewProjectsModelWithActivation(globalDir, "", ctx, 1)
+	m.launcherMode = true
+	return m
 }
 
 // NewAgoraProjectsModel creates a ProjectsModel that scans ~/lingtai-agora/networks/.
@@ -320,6 +368,12 @@ func (m ProjectsModel) Update(msg tea.Msg) (ProjectsModel, tea.Cmd) {
 			rec := msg.record
 			activationID := m.activationID
 			requestSeq := msg.requestSeq
+			if m.launcherMode {
+				root := rec.Project
+				return m, func() tea.Msg {
+					return LauncherProjectSelectedMsg{ActivationID: activationID, RequestSeq: requestSeq, ProjectRoot: root}
+				}
+			}
 			return m, func() tea.Msg {
 				return ProjectsAgentSelectedMsg{ActivationID: activationID, RequestSeq: requestSeq, Record: rec}
 			}
