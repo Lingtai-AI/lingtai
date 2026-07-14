@@ -278,6 +278,39 @@ func TestPropsLoadDetailPopulatesDaemonRecent(t *testing.T) {
 	}
 }
 
+func TestPropsRenderDaemonRowsUsesUnknownBackendForTypeInvalidCard(t *testing.T) {
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "daemons", "em-1-x")
+	if err := os.MkdirAll(filepath.Join(runDir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "daemon.json"),
+		[]byte(`{"backend":"claude-p","state":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "logs", "token_ledger.jsonl"),
+		[]byte(`{"ts":"2026-06-13T03:00:05Z","input":9,"output":2,"model":"glm-4.6","endpoint":"https://z.ai/api"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := PropsModel{selectedDir: dir}
+	m.loadDetail()
+	if len(m.detailDaemonRecent) != 1 {
+		t.Fatalf("detailDaemonRecent len = %d, want 1", len(m.detailDaemonRecent))
+	}
+	if got := m.detailDaemonRecent[0].Backend; got != "" {
+		t.Fatalf("type-invalid card backend = %q, want empty", got)
+	}
+
+	rows := ansi.Strip(strings.Join(m.renderDaemonCallRows(), "\n"))
+	if !strings.Contains(rows, "backend") || !strings.Contains(rows, "—") {
+		t.Fatalf("invalid card should render an honest unknown backend column:\n%s", rows)
+	}
+	if strings.Contains(rows, "claude-p") {
+		t.Fatalf("invalid card backend leaked into rendered rows:\n%s", rows)
+	}
+}
+
 func TestPropsRenderDaemonRowsKeepsBackendSeparateFromProviderAndModel(t *testing.T) {
 	m := PropsModel{
 		width: 140,

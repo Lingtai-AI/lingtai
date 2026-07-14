@@ -167,27 +167,27 @@ func DaemonRecentLedger(agentDir string, recentN int) []DaemonLedgerEntry {
 	return recent
 }
 
-// readDaemonCard reads the typed subset of daemon.json.  Missing or
-// malformed files yield a zero card — the caller fills run_id from the
-// directory name.
+// readDaemonCard reads daemon.json; missing or malformed files yield a zero card.
 func readDaemonCard(path string) daemonCard {
 	var card daemonCard
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return card
 	}
-	json.Unmarshal(data, &card)
+	if err := json.Unmarshal(data, &card); err != nil {
+		return daemonCard{}
+	}
 	return card
 }
 
-// readLedgerEntries parses every well-formed line of a token_ledger.jsonl
+// readLedgerEntries parses every well-formed object line of a token_ledger.jsonl
 // file into LedgerEntry values (file order preserved).  Missing file or
 // malformed lines are skipped silently.
 func readLedgerEntries(path string) []LedgerEntry {
 	var out []LedgerEntry
 	_ = forEachJSONLLine(path, func(line []byte) {
 		var e LedgerEntry
-		if err := json.Unmarshal(line, &e); err != nil {
+		if line[0] != '{' || json.Unmarshal(line, &e) != nil {
 			return
 		}
 		out = append(out, e)
