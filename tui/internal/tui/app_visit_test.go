@@ -90,8 +90,8 @@ func TestRepeatedVisitedSwitchPreservesFirstOriginal(t *testing.T) {
 	first, _ := a.enterVisitedAgent(ProjectsAgentSelectedMsg{Record: visitRecord(filepath.Join(filepath.Dir(filepath.Dir(a.projectDir)), "target1"), "a", "A")})
 	second, _ := first.enterVisitedAgent(ProjectsAgentSelectedMsg{Record: visitRecord(filepath.Join(filepath.Dir(filepath.Dir(a.projectDir)), "target2"), "b", "B")})
 
-	if second.visitOriginalProjectDir != originalProject || second.visitOriginalOrchDir != originalAgent {
-		t.Fatalf("original changed after repeated switch: project=%q agent=%q", second.visitOriginalProjectDir, second.visitOriginalOrchDir)
+	if second.visitReturn == nil || second.visitReturn.projectDir != originalProject || second.visitReturn.orchDir != originalAgent {
+		t.Fatalf("original changed after repeated switch: return=%+v", second.visitReturn)
 	}
 	if second.orchName != "B" {
 		t.Fatalf("target should update to second selection, got %q", second.orchName)
