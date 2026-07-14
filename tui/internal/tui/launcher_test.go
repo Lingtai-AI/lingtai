@@ -240,10 +240,10 @@ func TestLauncherRootModel_CreateEntryDoesNotTouchExistingConfigFile(t *testing.
 	before := dirSnapshot(t, home)
 
 	m := NewLauncherRootModel(projectRoot, globalDir, "")
-	updated, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter}) // landingCursor defaults to 0 = "Create new project"
+	updated, _ := m.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter}) // chooseCursor defaults to 0 = "Start a new project in this folder"
 	lm := updated.(LauncherRootModel)
 	if lm.view != launcherViewCreate || !lm.firstRunOn {
-		t.Fatalf("expected landing Enter to enter the create flow, got view=%v firstRunOn=%v", lm.view, lm.firstRunOn)
+		t.Fatalf("expected choose Enter to enter the create flow, got view=%v firstRunOn=%v", lm.view, lm.firstRunOn)
 	}
 	// Init() itself — proves the constructor's config.LoadConfigReadOnly
 	// branch (not just "some code ran without visibly changing content")
@@ -290,22 +290,50 @@ func buildDraftModel(t *testing.T) (FirstRunModel, string, string) {
 	return m, home, projectRoot
 }
 
-// TestDraftFirstRun_ThemeLanguageDoNotPersist proves the Welcome step's
-// theme-cycle (ctrl+t) and language-confirm (enter) in draftMode hold their
-// choice only in the ProjectDraft, never touching tui_config.json.
-func TestDraftFirstRun_ThemeLanguageDoNotPersist(t *testing.T) {
-	m, home, _ := buildDraftModel(t)
+// TestLauncherPrelude_ThemeLanguageDoNotPersist proves the launcher's
+// welcome prelude — which now owns theme (ctrl+t) and language (↑↓)
+// selection for the no-project flow — holds both choices in memory only,
+// never touching tui_config.json (or anything else under HOME), and seeds
+// them onto the ProjectDraft when the user proceeds into Create.
+func TestLauncherPrelude_ThemeLanguageDoNotPersist(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
+	})
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+	globalDir := filepath.Join(home, ".lingtai-tui")
+
+	m := NewLauncherRootModel(projectRoot, globalDir, "")
 	before := dirSnapshot(t, home)
 
-	m, _ = m.Update(tea.KeyPressMsg{Text: "ctrl+t"})
-	m.setupDone = true
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ := m.updateWelcome(tea.KeyPressMsg{Text: "ctrl+t"})
+	lm := updated.(LauncherRootModel)
+	updated, _ = lm.updateWelcome(tea.KeyPressMsg{Code: tea.KeyDown}) // en -> zh, live i18n preview
+	lm = updated.(LauncherRootModel)
+	updated, _ = lm.updateWelcome(tea.KeyPressMsg{Code: tea.KeyEnter})
+	lm = updated.(LauncherRootModel)
+	if lm.view != launcherViewChoose {
+		t.Fatalf("expected welcome Enter to reach the choose page, got view=%v", lm.view)
+	}
+	updated, _ = lm.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = start here
+	lm = updated.(LauncherRootModel)
 
 	after := dirSnapshot(t, home)
-	assertSnapshotsEqual(t, "draft theme/language", before, after)
+	assertSnapshotsEqual(t, "launcher prelude theme/language", before, after)
 
-	if m.draft == nil || m.draft.Theme == "" {
-		t.Fatalf("expected theme choice captured in draft, got %+v", m.draft)
+	if lm.draft == nil {
+		t.Fatal("expected Create entry to build a draft")
+	}
+	if lm.draft.Theme != "xuan-paper" {
+		t.Fatalf("expected the prelude's cycled theme seeded on the draft, got %q", lm.draft.Theme)
+	}
+	if lm.draft.Language != "zh" {
+		t.Fatalf("expected the prelude's selected language seeded on the draft, got %q", lm.draft.Language)
+	}
+	if i18n.Lang() != "zh" {
+		t.Fatalf("expected the language preview applied in-memory, got %q", i18n.Lang())
 	}
 }
 
@@ -854,12 +882,13 @@ func TestDraftFirstRun_PurityWalkAcrossSteps(t *testing.T) {
 	m.setupDone = true
 	before := dirSnapshot(t, home)
 
-	// Welcome -> pick preset through the real Enter path.
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// Draft models start at stepPickPreset — the launcher's welcome prelude
+	// owns language/theme, so the wizard's own Welcome step is not part of
+	// the draft flow at all.
 	if m.step != stepPickPreset {
-		t.Fatalf("expected Welcome Enter to reach stepPickPreset, got %v", m.step)
+		t.Fatalf("expected draft model to start at stepPickPreset, got %v", m.step)
 	}
-	assertSnapshotsEqual(t, "after welcome enter", before, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "after draft construction", before, dirSnapshot(t, home))
 
 	// Stage the values gathered by the intervening preset/agent pages, then
 	// exercise the production recipe -> Review transition. Dedicated tests
@@ -891,101 +920,128 @@ func TestDraftFirstRun_PurityWalkAcrossSteps(t *testing.T) {
 	}
 	assertSnapshotsEqual(t, "after esc from recipe", before, dirSnapshot(t, home))
 
-	// The typed cancel path itself also remains pure.
-	m.step = stepWelcome
+	// The typed cancel path itself also remains pure: Esc at the draft
+	// entry step (stepPickPreset) leaves the wizard via the typed cancel.
+	m.step = stepPickPreset
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd == nil {
-		t.Fatal("expected Welcome Esc to emit a typed cancel command")
+		t.Fatal("expected entry-step Esc to emit a typed cancel command")
 	}
 	if _, ok := runCmd(cmd).(ProjectDraftCancelledMsg); !ok {
-		t.Fatal("expected ProjectDraftCancelledMsg from Welcome Esc")
+		t.Fatal("expected ProjectDraftCancelledMsg from entry-step Esc")
 	}
 	assertSnapshotsEqual(t, "after typed draft cancel", before, dirSnapshot(t, home))
 }
 
 // --- Invariant 6: draft cancel semantics via the REAL key path -------------
 
-// TestDraftFirstRun_EscAtWelcomeEmitsCancelMsg drives the ACTUAL "esc"
-// keypress at stepWelcome (draftMode's entry step) and proves it emits
-// ProjectDraftCancelledMsg — not a bare unhandled no-op, which is what a
-// parent review found: plain Esc (distinct from m.welcomeOnly's /settings
-// language-only flow) fell through to a silent `return m, nil`.
-func TestDraftFirstRun_EscAtWelcomeEmitsCancelMsg(t *testing.T) {
+// TestDraftFirstRun_EscAtEntryStepEmitsCancelMsg drives the ACTUAL "esc"
+// keypress at stepPickPreset — the draft wizard's entry step now that the
+// launcher's welcome prelude owns language/theme — and proves it emits
+// ProjectDraftCancelledMsg rather than navigating "back" to the wizard's
+// own stepWelcome (which would show a second, duplicate welcome page the
+// draft flow deliberately skips). This is the same class of defect a
+// parent review found at the old entry step: an entry-step Esc with no
+// typed cancel path leaves the launcher stuck.
+func TestDraftFirstRun_EscAtEntryStepEmitsCancelMsg(t *testing.T) {
 	m, home, _ := buildDraftModel(t)
-	if m.step != stepWelcome {
-		t.Fatalf("expected draft model to start at stepWelcome, got %v", m.step)
+	if m.step != stepPickPreset {
+		t.Fatalf("expected draft model to start at stepPickPreset, got %v", m.step)
 	}
 	before := dirSnapshot(t, home)
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd == nil {
-		t.Fatal("expected esc at draft Welcome to return a command")
+		t.Fatal("expected esc at the draft entry step to return a command")
 	}
 	msg := runCmd(cmd)
 	if _, ok := msg.(ProjectDraftCancelledMsg); !ok {
-		t.Fatalf("expected ProjectDraftCancelledMsg from esc at draft Welcome, got %T (%v)", msg, msg)
+		t.Fatalf("expected ProjectDraftCancelledMsg from esc at the draft entry step, got %T (%v)", msg, msg)
 	}
 
-	assertSnapshotsEqual(t, "esc at draft Welcome", before, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "esc at draft entry step", before, dirSnapshot(t, home))
 }
 
-// TestDraftFirstRun_CtrlCAtWelcomeEmitsCancelMsgNotTeaQuit drives the ACTUAL
-// "ctrl+c" keypress at stepWelcome and proves it ALSO emits
+// TestDraftFirstRun_CtrlCAtEntryStepEmitsCancelMsgNotTeaQuit drives the
+// ACTUAL "ctrl+c" keypress at stepPickPreset and proves it ALSO emits
 // ProjectDraftCancelledMsg rather than a bare tea.Quit. A parent review
-// found the prior unconditional `case "ctrl+c": return m, tea.Quit` would,
-// because the launcher runs FirstRunModel inside its OWN tea.Program (see
-// launcher.go), kill that whole program abruptly — bypassing
-// LauncherRootModel's done/result bookkeeping (m.done would stay false) —
-// instead of routing back through a proper decision the same way Esc does.
-func TestDraftFirstRun_CtrlCAtWelcomeEmitsCancelMsgNotTeaQuit(t *testing.T) {
+// found the equivalent defect at the old draft entry step: an
+// unconditional `case "ctrl+c": return m, tea.Quit` would, because the
+// launcher runs FirstRunModel inside its OWN tea.Program (see launcher.go),
+// kill that whole program abruptly — bypassing LauncherRootModel's
+// done/result bookkeeping (m.done would stay false) — instead of routing
+// back through a proper decision the same way Esc does.
+func TestDraftFirstRun_CtrlCAtEntryStepEmitsCancelMsgNotTeaQuit(t *testing.T) {
 	m, home, _ := buildDraftModel(t)
 	before := dirSnapshot(t, home)
 
 	_, cmd := m.Update(tea.KeyPressMsg{Text: "ctrl+c"})
 	if cmd == nil {
-		t.Fatal("expected ctrl+c at draft Welcome to return a command")
+		t.Fatal("expected ctrl+c at the draft entry step to return a command")
 	}
 	msg := runCmd(cmd)
 	if _, ok := msg.(ProjectDraftCancelledMsg); !ok {
-		t.Fatalf("expected ProjectDraftCancelledMsg from ctrl+c at draft Welcome, got %T (%v) — a bare tea.Quit here would bypass LauncherRootModel entirely", msg, msg)
+		t.Fatalf("expected ProjectDraftCancelledMsg from ctrl+c at the draft entry step, got %T (%v) — a bare tea.Quit here would bypass LauncherRootModel entirely", msg, msg)
 	}
 
-	assertSnapshotsEqual(t, "ctrl+c at draft Welcome", before, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "ctrl+c at draft entry step", before, dirSnapshot(t, home))
 }
 
-// TestLauncherRootModel_CancelReturnsToLandingAndDiscardsDraft drives the
-// launcher root model through the REAL key path — landing Enter on "Create
-// new project" (entering enterCreate/NewDraftFirstRunModel), a real "esc"
-// keypress inside the hosted FirstRunModel that produces
+// TestDraftFirstRun_BackButtonAtEntryStepEmitsCancelMsg drives the Back
+// footer button (cursor parked on Back, Enter) at stepPickPreset in draft
+// mode and proves it exits via the same typed cancel as Esc — never
+// `m.step = stepWelcome`, the non-draft behavior.
+func TestDraftFirstRun_BackButtonAtEntryStepEmitsCancelMsg(t *testing.T) {
+	m, _, _ := buildDraftModel(t)
+	m.cursor = m.visiblePresetCount() + 1 // pickBackIdx
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if updated.step == stepWelcome {
+		t.Fatal("draft Back button must not navigate to the wizard's own stepWelcome")
+	}
+	if cmd == nil {
+		t.Fatal("expected Back at the draft entry step to return a command")
+	}
+	if _, ok := runCmd(cmd).(ProjectDraftCancelledMsg); !ok {
+		t.Fatal("expected ProjectDraftCancelledMsg from the draft Back button")
+	}
+}
+
+// TestLauncherRootModel_CancelReturnsToChooseAndDiscardsDraft drives the
+// launcher root model through the REAL key path — choose Enter on "Start a
+// new project in this folder" (entering enterCreate/NewDraftFirstRunModel),
+// a real "esc" keypress inside the hosted FirstRunModel that produces
 // ProjectDraftCancelledMsg, feeding that message back into
 // LauncherRootModel.Update — and proves the model returns to
-// launcherViewLanding with the old draft/firstRun state discarded, not
-// merely hidden. This is item 6's exact requirement: "Esc at draft Welcome
-// must emit a typed cancel/back result to LauncherRoot, return to landing,
-// and discard/reset the old draft."
-func TestLauncherRootModel_CancelReturnsToLandingAndDiscardsDraft(t *testing.T) {
+// launcherViewChoose with the old draft/firstRun state discarded, not
+// merely hidden. This is item 6's exact requirement: "Esc at the draft
+// entry step must emit a typed cancel/back result to LauncherRoot, return
+// to the decision page, and discard/reset the old draft."
+func TestLauncherRootModel_CancelReturnsToChooseAndDiscardsDraft(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 
 	m := NewLauncherRootModel(projectRoot, globalDir, "")
-	updated, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = Create new
+	updated, _ := m.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = start here
 	lm := updated.(LauncherRootModel)
 	if lm.view != launcherViewCreate || !lm.firstRunOn || lm.draft == nil {
 		t.Fatalf("expected Create entry to be live, got view=%v firstRunOn=%v draft=%v", lm.view, lm.firstRunOn, lm.draft)
+	}
+	if lm.firstRun.step != stepPickPreset {
+		t.Fatalf("expected the draft wizard to start at stepPickPreset (the launcher prelude owns welcome), got %v", lm.firstRun.step)
 	}
 	firstDraft := lm.draft
 	// Mark the draft dirty so a later "resume" bug (reusing the same draft
 	// pointer after cancel) would be observable, not silently identical by
 	// coincidence of both being freshly zero-valued.
-	firstDraft.Theme = "some-theme-from-the-cancelled-attempt"
+	firstDraft.AgentName = "agent-from-the-cancelled-attempt"
 
-	// Drive the REAL key path inside the hosted model: esc at stepWelcome.
+	// Drive the REAL key path inside the hosted model: esc at the entry step.
 	updatedFirstRun, cmd := lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	lm.firstRun = updatedFirstRun
 	if cmd == nil {
-		t.Fatal("expected a command from esc at draft Welcome")
+		t.Fatal("expected a command from esc at the draft entry step")
 	}
 	msg := runCmd(cmd)
 	cancelMsg, ok := msg.(ProjectDraftCancelledMsg)
@@ -996,8 +1052,8 @@ func TestLauncherRootModel_CancelReturnsToLandingAndDiscardsDraft(t *testing.T) 
 	updated, _ = lm.Update(cancelMsg)
 	lm = updated.(LauncherRootModel)
 
-	if lm.view != launcherViewLanding {
-		t.Fatalf("expected cancel to return to launcherViewLanding, got %v", lm.view)
+	if lm.view != launcherViewChoose {
+		t.Fatalf("expected cancel to return to launcherViewChoose, got %v", lm.view)
 	}
 	if lm.draft != nil {
 		t.Fatal("expected cancel to discard the old draft (lm.draft == nil), not merely leave the view")
@@ -1009,7 +1065,7 @@ func TestLauncherRootModel_CancelReturnsToLandingAndDiscardsDraft(t *testing.T) 
 	// Subsequent Create must start a genuinely FRESH draft, not resume the
 	// cancelled one — item 6's exact "subsequent Create starts a fresh
 	// draft" requirement.
-	updated, _ = lm.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = lm.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter})
 	lm2 := updated.(LauncherRootModel)
 	if lm2.draft == nil {
 		t.Fatal("expected a second Create entry to build a new draft")
@@ -1017,31 +1073,33 @@ func TestLauncherRootModel_CancelReturnsToLandingAndDiscardsDraft(t *testing.T) 
 	if lm2.draft == firstDraft {
 		t.Fatal("expected a second Create entry to allocate a NEW *ProjectDraft, not reuse the cancelled one's pointer")
 	}
-	if lm2.draft.Theme == "some-theme-from-the-cancelled-attempt" {
+	if lm2.draft.AgentName == "agent-from-the-cancelled-attempt" {
 		t.Fatal("second Create entry's draft carries state from the cancelled attempt — must start fresh")
 	}
 }
 
-// TestLauncherRootModel_CancelRestoresThemeAndLanguageBaseline drives the
-// REAL theme-cycle (ctrl+t) and language-selection (down + enter) keys at
-// draft Welcome, then the REAL Esc cancel path, and proves the process-wide
-// in-memory theme/language (ActiveTheme()/i18n.Lang()) end up back at the
-// PERSISTED baseline — not wherever the cancelled draft last previewed. A
-// parent review found SetThemeByName/i18n.SetLang mutate genuinely global
-// state regardless of draftMode, and the old ProjectDraftCancelledMsg
-// handler discarded the draft pointer without ever restoring either one, so
-// the landing page (and the NEXT fresh draft) stayed stuck showing the
-// cancelled attempt's preview.
-func TestLauncherRootModel_CancelRestoresThemeAndLanguageBaseline(t *testing.T) {
+// TestLauncherRootModel_AppliesPersistedThemeAndLanguageAndKeepsPreludeChoiceOnCancel
+// proves two halves of the redesigned theme/language ownership model:
+//
+//  1. Construction applies the PERSISTED tui_config.json theme/language
+//     in-memory (pure read + SetThemeByName/i18n.SetLang) — the exact
+//     "theme is wrong" defect of the previous launcher, which rendered the
+//     compiled-in defaults regardless of configuration.
+//  2. The launcher's welcome prelude now OWNS theme/language selection for
+//     the no-project flow, so cancelling a create draft keeps the PRELUDE
+//     selection (the launcher-level baseline captured by enterCreate) —
+//     the wizard itself no longer previews either, and a cancel must not
+//     snap the UI back to the persisted values the user already changed
+//     away from at the prelude.
+//
+// Persisted config stays byte-identical throughout: every application is
+// in-memory only.
+func TestLauncherRootModel_AppliesPersistedThemeAndLanguageAndKeepsPreludeChoiceOnCancel(t *testing.T) {
 	// ActiveTheme()/i18n.Lang() are genuinely global, process-wide package
 	// state (exactly the thing this test is exercising) — restore both to
 	// the repo-wide test convention's neutral default on exit, matching
 	// every other test in this package that calls i18n.SetLang with a
 	// non-"en" value (see e.g. projects_test.go, status_hint_copy_test.go).
-	// Omitting this bled "wen" into later tests in the same `go test`
-	// binary (e.g. TestLoginModel_EmptyViewShowsAddRow expecting English
-	// strings) the first time this test was added — caught by running the
-	// full package suite, not just this test in isolation.
 	t.Cleanup(func() {
 		SetThemeByName(DefaultThemeName)
 		_ = i18n.SetLang("en")
@@ -1055,212 +1113,274 @@ func TestLauncherRootModel_CancelRestoresThemeAndLanguageBaseline(t *testing.T) 
 		t.Fatalf("mkdir globalDir: %v", err)
 	}
 
-	// Seed a KNOWN, non-default persisted baseline distinct from whatever
-	// the preview keys below will select, so "restored to baseline" is a
-	// meaningful assertion rather than trivially true from zero values.
-	baseline := config.TUIConfig{Theme: "xuan-paper", Language: "wen", MailPageSize: config.DefaultMailPageSize}
-	if err := config.SaveTUIConfig(globalDir, baseline); err != nil {
-		t.Fatalf("seed baseline tui_config.json: %v", err)
+	// Seed a KNOWN, non-default persisted config so "constructor applied
+	// the persisted values" is a meaningful assertion.
+	persisted := config.TUIConfig{Theme: "xuan-paper", Language: "wen", MailPageSize: config.DefaultMailPageSize}
+	if err := config.SaveTUIConfig(globalDir, persisted); err != nil {
+		t.Fatalf("seed persisted tui_config.json: %v", err)
 	}
-	SetThemeByName(baseline.Theme)
-	if err := i18n.SetLang(baseline.Language); err != nil {
-		t.Fatalf("seed baseline language: %v", err)
-	}
+	// Deliberately desync the in-memory state first, so the constructor's
+	// application is observable.
+	SetThemeByName("ink-dark")
+	_ = i18n.SetLang("en")
 
 	m := NewLauncherRootModel(projectRoot, globalDir, "")
-	updated, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = Create new
+	want := ThemeByName(persisted.Theme)
+	if got := ActiveTheme(); got.BG != want.BG || got.Text != want.Text {
+		t.Fatalf("expected construction to apply the persisted theme %q in-memory", persisted.Theme)
+	}
+	if i18n.Lang() != persisted.Language {
+		t.Fatalf("expected construction to apply the persisted language %q, got %q", persisted.Language, i18n.Lang())
+	}
+	if m.themeName != persisted.Theme || launcherLangs[m.langIdx] != persisted.Language {
+		t.Fatalf("expected prelude state seeded from persisted config, got theme=%q langIdx=%d", m.themeName, m.langIdx)
+	}
+
+	// Prelude: real "up" moves wen -> zh (live preview); real ctrl+t cycles
+	// xuan-paper -> ink-dark (ThemeNames is sorted; xuan-paper wraps).
+	updated, _ := m.updateWelcome(tea.KeyPressMsg{Code: tea.KeyUp})
 	lm := updated.(LauncherRootModel)
-	if lm.preDraftTheme != baseline.Theme || lm.preDraftLanguage != baseline.Language {
-		t.Fatalf("expected enterCreate to capture the persisted baseline, got theme=%q lang=%q", lm.preDraftTheme, lm.preDraftLanguage)
+	updated, _ = lm.updateWelcome(tea.KeyPressMsg{Text: "ctrl+t"})
+	lm = updated.(LauncherRootModel)
+	if lm.themeName != "ink-dark" || launcherLangs[lm.langIdx] != "zh" {
+		t.Fatalf("prelude selection = (%q, %q), want (ink-dark, zh)", lm.themeName, launcherLangs[lm.langIdx])
 	}
-
-	// Real ctrl+t: cycles ThemeNames() from "xuan-paper" — alphabetically
-	// sorted, so this wraps to "ink-dark", a DIFFERENT theme than baseline.
-	lm.firstRun.setupDone = true
-	updatedFirstRun, _ := lm.firstRun.Update(tea.KeyPressMsg{Text: "ctrl+t"})
-	lm.firstRun = updatedFirstRun
-	if lm.firstRun.draft.Theme == "" || lm.firstRun.draft.Theme == baseline.Theme {
-		t.Fatalf("expected ctrl+t to preview a DIFFERENT theme than baseline in the draft, got %q", lm.firstRun.draft.Theme)
-	}
-
-	// Real "up" then "enter": the constructor prefills langCursor from the
-	// PERSISTED baseline ("wen", the last of {en,zh,wen}), so "up" is the
-	// key that actually moves the selection to a different language
-	// ("zh") and previews it via i18n.SetLang before advancing.
-	updatedFirstRun, _ = lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	lm.firstRun = updatedFirstRun
-	updatedFirstRun, _ = lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	lm.firstRun = updatedFirstRun
-
-	if ActiveTheme().Text == ThemeByName(baseline.Theme).Text && ActiveTheme().BG == ThemeByName(baseline.Theme).BG {
-		t.Fatal("expected the in-memory ActiveTheme to have changed away from baseline after ctrl+t preview")
-	}
-	if i18n.Lang() == baseline.Language {
-		t.Fatalf("expected the in-memory i18n language to have changed away from baseline %q after selection, got %q", baseline.Language, i18n.Lang())
-	}
-
-	// Real Esc back at Welcome (now on stepPickPreset after the language
-	// enter above advanced the wizard — back up to Welcome first via the
-	// wizard's own step field is out of scope here; instead cancel directly
-	// from whatever step Esc reaches, since the RESTORE behavior lives in
-	// LauncherRootModel's ProjectDraftCancelledMsg handler regardless of
-	// which step emitted it). Drive Esc from stepPickPreset's own "esc"
-	// case, which returns to stepWelcome first — send Esc twice to reach
-	// the actual cancel-emitting step.
-	updatedFirstRun, cmd := lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	lm.firstRun = updatedFirstRun
-	if lm.firstRun.step != stepWelcome {
-		t.Fatalf("expected first esc (from stepPickPreset) to return to stepWelcome, got %v", lm.firstRun.step)
-	}
-	updatedFirstRun, cmd = lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	lm.firstRun = updatedFirstRun
-	if cmd == nil {
-		t.Fatal("expected the second esc (from stepWelcome) to return a command")
-	}
-	msg := runCmd(cmd)
-	cancelMsg, ok := msg.(ProjectDraftCancelledMsg)
-	if !ok {
-		t.Fatalf("expected ProjectDraftCancelledMsg, got %T", msg)
-	}
-
-	updated, _ = lm.Update(cancelMsg)
+	updated, _ = lm.updateWelcome(tea.KeyPressMsg{Code: tea.KeyEnter})
+	lm = updated.(LauncherRootModel)
+	updated, _ = lm.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter}) // cursor 0 = start here
 	lm = updated.(LauncherRootModel)
 
-	if lm.view != launcherViewLanding {
-		t.Fatalf("expected cancel to return to launcherViewLanding, got %v", lm.view)
+	// enterCreate captures the PRELUDE selection as the cancel baseline
+	// and seeds it onto the draft.
+	if lm.preDraftTheme != "ink-dark" || lm.preDraftLanguage != "zh" {
+		t.Fatalf("expected enterCreate to capture the prelude baseline, got theme=%q lang=%q", lm.preDraftTheme, lm.preDraftLanguage)
 	}
-	if lm.draft != nil {
-		t.Fatal("expected cancel to discard the draft")
-	}
-
-	// The authoritative assertions: process-wide in-memory state restored
-	// to the PERSISTED baseline, not the cancelled preview.
-	restored := ActiveTheme()
-	want := ThemeByName(baseline.Theme)
-	if restored.BG != want.BG || restored.Text != want.Text {
-		t.Fatalf("expected ActiveTheme restored to baseline %q after cancel, got a different theme", baseline.Theme)
-	}
-	if i18n.Lang() != baseline.Language {
-		t.Fatalf("expected i18n.Lang() restored to baseline %q after cancel, got %q", baseline.Language, i18n.Lang())
+	if lm.draft.Theme != "ink-dark" || lm.draft.Language != "zh" {
+		t.Fatalf("expected the draft seeded with the prelude selection, got theme=%q lang=%q", lm.draft.Theme, lm.draft.Language)
 	}
 
-	// Persisted config/home snapshot must be untouched — restoration is
-	// in-memory only (SetThemeByName/i18n.SetLang), never a write.
+	// Real Esc at the wizard's entry step -> typed cancel -> launcher.
+	updatedFirstRun, cmd := lm.firstRun.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	lm.firstRun = updatedFirstRun
+	if cmd == nil {
+		t.Fatal("expected a command from esc at the draft entry step")
+	}
+	cancelMsg, ok := runCmd(cmd).(ProjectDraftCancelledMsg)
+	if !ok {
+		t.Fatal("expected ProjectDraftCancelledMsg")
+	}
+	updated, _ = lm.Update(cancelMsg)
+	lm = updated.(LauncherRootModel)
+	if lm.view != launcherViewChoose {
+		t.Fatalf("expected cancel to return to launcherViewChoose, got %v", lm.view)
+	}
+
+	// The authoritative assertions: the PRELUDE selection survives cancel —
+	// not the persisted values the user already navigated away from.
+	wantPrelude := ThemeByName("ink-dark")
+	if got := ActiveTheme(); got.BG != wantPrelude.BG || got.Text != wantPrelude.Text {
+		t.Fatal("expected the prelude theme to survive a draft cancel")
+	}
+	if i18n.Lang() != "zh" {
+		t.Fatalf("expected the prelude language to survive a draft cancel, got %q", i18n.Lang())
+	}
+
+	// Persisted config must be untouched — everything above is in-memory.
 	tuiCfgAfter := config.LoadTUIConfig(globalDir)
-	if tuiCfgAfter.Theme != baseline.Theme || tuiCfgAfter.Language != baseline.Language {
+	if tuiCfgAfter.Theme != persisted.Theme || tuiCfgAfter.Language != persisted.Language {
 		t.Fatalf("expected persisted tui_config.json unchanged, got theme=%q lang=%q", tuiCfgAfter.Theme, tuiCfgAfter.Language)
 	}
 
-	// A fresh draft started after cancel must begin its preview from the
-	// SAME restored baseline, not the just-cancelled preview.
-	updated, _ = lm.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// A fresh draft started after cancel begins from the SAME prelude
+	// baseline.
+	updated, _ = lm.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter})
 	lm2 := updated.(LauncherRootModel)
-	if lm2.preDraftTheme != baseline.Theme || lm2.preDraftLanguage != baseline.Language {
-		t.Fatalf("expected a fresh draft's captured baseline to still be %q/%q after a prior cancel, got %q/%q",
-			baseline.Theme, baseline.Language, lm2.preDraftTheme, lm2.preDraftLanguage)
+	if lm2.preDraftTheme != "ink-dark" || lm2.preDraftLanguage != "zh" {
+		t.Fatalf("expected a fresh draft's baseline to still be the prelude selection, got %q/%q",
+			lm2.preDraftTheme, lm2.preDraftLanguage)
 	}
 }
 
-// --- Invariant 2/7: typed launcher selection is NOT ProjectsAgentSelectedMsg ---
+// --- Invariant 2/7: the redesigned project-level picker ---------------------
 
-// TestLauncherProjectsModel_EmitsTypedSelectionNotVisitMsg proves a
-// NewLauncherProjectsModel selection emits LauncherProjectSelectedMsg, never
-// ProjectsAgentSelectedMsg — the exact "typed result, not App visit
-// semantics" requirement. Mirrors TestProjectsModelGroupedRowsMarkersAndEnter's
-// setup but asserts the launcher-mode message type.
-func TestLauncherProjectsModel_EmitsTypedSelectionNotVisitMsg(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "other")
-	rec := projectRecord(project, "agent-b", "Agent B", true)
-	snap := inventory.Snapshot{
-		Records: []inventory.Record{rec},
-		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{rec}}},
+// TestLauncherPicker_MergesAndDedupesRegisteredAndRunning proves the picker
+// builds ONE project-level list from its two read-only sources: a project
+// that is both running and registered appears exactly once (running row,
+// Registered flag set), a running-only project carries its agent count, a
+// stale registry row stays visible but Missing, and the whole entry+scan
+// sequence performs zero writes under HOME.
+func TestLauncherPicker_MergesAndDedupesRegisteredAndRunning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".lingtai-tui")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 
-	m := NewLauncherProjectsModel("", ProjectsContext{})
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m, _ = m.Update(projectsInventoryForModel(m, snap))
+	both := t.TempDir()
+	runningOnly := t.TempDir()
+	for _, p := range []string{both, runningOnly} {
+		if err := os.MkdirAll(filepath.Join(p, ".lingtai"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := filepath.Join(t.TempDir(), "gone")
+	if err := config.Register(globalDir, both); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Register(globalDir, stale); err != nil {
+		t.Fatal(err)
+	}
 
+	recA := projectRecord(both, "a", "A", true)
+	recB := projectRecord(runningOnly, "b", "B", true)
+	recB2 := projectRecord(runningOnly, "b2", "B2", true)
+	snap := inventory.Snapshot{
+		Records: []inventory.Record{recA, recB, recB2},
+		Groups: []inventory.Group{
+			{Project: both, Records: []inventory.Record{recA}},
+			{Project: runningOnly, Records: []inventory.Record{recB, recB2}},
+		},
+	}
 	withProjectsScan(t, func(inventory.Options) (inventory.Snapshot, error) {
 		return snap, nil
 	})
 
-	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected a validation command from Enter on an enterable row")
-	}
-	msg := runCmd(cmd)
-	validationMsg, ok := msg.(projectsValidationMsg)
-	if !ok {
-		t.Fatalf("expected projectsValidationMsg from validateSelection, got %T", msg)
-	}
-	m, cmd = m.Update(validationMsg)
-	if cmd == nil {
-		t.Fatal("expected a selection command after successful validation")
-	}
-	final := runCmd(cmd)
+	lm := NewLauncherRootModel(t.TempDir(), globalDir, "")
+	before := dirSnapshot(t, home)
 
-	if _, isVisit := final.(ProjectsAgentSelectedMsg); isVisit {
-		t.Fatal("launcher-mode selection must NEVER emit ProjectsAgentSelectedMsg (visit semantics)")
+	updated, cmd := lm.enterPicker()
+	lm = updated.(LauncherRootModel)
+	if cmd == nil {
+		t.Fatal("expected enterPicker to schedule an inventory scan")
 	}
-	sel, ok := final.(LauncherProjectSelectedMsg)
-	if !ok {
-		t.Fatalf("expected LauncherProjectSelectedMsg, got %T", final)
+	scanMsg := runCmd(cmd)
+	updated2, _ := lm.Update(scanMsg)
+	lm = updated2.(LauncherRootModel)
+
+	assertSnapshotsEqual(t, "picker entry + scan", before, dirSnapshot(t, home))
+
+	rows := lm.pickerRows
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 deduplicated rows, got %d: %+v", len(rows), rows)
 	}
-	if sel.ProjectRoot != project {
-		t.Fatalf("ProjectRoot = %q, want %q", sel.ProjectRoot, project)
+	if rows[0].Path != both || !rows[0].Running || !rows[0].Registered || rows[0].AgentCount != 1 {
+		t.Fatalf("row 0 (running+registered) = %+v", rows[0])
+	}
+	if rows[1].Path != runningOnly || !rows[1].Running || rows[1].Registered || rows[1].AgentCount != 2 {
+		t.Fatalf("row 1 (running only, 2 agents) = %+v", rows[1])
+	}
+	if rows[2].Path != stale || rows[2].Running || !rows[2].Registered || !rows[2].Missing {
+		t.Fatalf("row 2 (stale registered) = %+v", rows[2])
 	}
 }
 
-// TestLauncherProjectsModel_ReusesFreshnessGuard proves the launcher-mode
-// model drops a stale (out-of-order) inventory result exactly like the
-// normal visit-mode model does — same acceptsRequest gate, no
-// reimplementation. Mirrors TestProjectsModelDropsOutOfOrderInventoryResults.
-func TestLauncherProjectsModel_ReusesFreshnessGuard(t *testing.T) {
-	m := NewLauncherProjectsModel("", ProjectsContext{})
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-
-	fresh := inventory.Snapshot{Records: []inventory.Record{projectRecord("/fresh", "a", "A", true)}}
-	stale := inventory.Snapshot{Records: []inventory.Record{projectRecord("/stale", "b", "B", true)}}
-
-	// Bump requestSeq once (simulating a refresh) before the stale result
-	// arrives, so it carries an old requestSeq.
-	staleSeq := m.requestSeq
-	m.requestSeq++
-
-	m, _ = m.Update(projectsInventoryMsg{activationID: m.activationID, requestSeq: m.requestSeq, snapshot: fresh})
-	m, _ = m.Update(projectsInventoryMsg{activationID: m.activationID, requestSeq: staleSeq, snapshot: stale})
-
-	if len(m.snapshot.Records) != 1 || m.snapshot.Records[0].Project != "/fresh" {
-		t.Fatalf("stale result was not dropped: %+v", m.snapshot.Records)
-	}
-}
-
-// TestLauncherProjectsModel_ValidationRejectsStaleTargets proves launcher
-// mode reuses the exact same re-validation-before-selection path as visit
-// mode — a target that stopped between listing and Enter must not emit a
-// selection message. Mirrors TestProjectsModelValidationRejectsStaleTargets.
-func TestLauncherProjectsModel_ValidationRejectsStaleTargets(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	rec := projectRecord(project, "agent", "Agent", true)
-	initial := inventory.Snapshot{Records: []inventory.Record{rec}, Groups: []inventory.Group{{Project: project, Records: []inventory.Record{rec}}}}
-
+// TestLauncherPicker_DropsStaleScanResults proves an out-of-order scan
+// result from a superseded request is dropped: after a rescan bumps the
+// sequence, a message carrying the OLD sequence must not overwrite the
+// catalog.
+func TestLauncherPicker_DropsStaleScanResults(t *testing.T) {
+	globalDir := t.TempDir()
 	withProjectsScan(t, func(inventory.Options) (inventory.Snapshot, error) {
-		return inventory.Snapshot{}, nil // target vanished between list and Enter
+		return inventory.Snapshot{}, nil
 	})
 
-	m := NewLauncherProjectsModel("", ProjectsContext{})
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	m, _ = m.Update(projectsInventoryForModel(m, initial))
+	lm := NewLauncherRootModel(t.TempDir(), globalDir, "")
+	updated, _ := lm.enterPicker()
+	lm = updated.(LauncherRootModel)
+	staleSeq := lm.pickerScanSeq
 
-	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m, cmd = m.Update(runCmd(cmd))
-	if cmd != nil {
-		t.Fatal("stale target must not emit a selection command in launcher mode either")
+	// A rescan supersedes the first request.
+	updated2, _ := lm.updatePicker(tea.KeyPressMsg{Text: "r"})
+	lm = updated2.(LauncherRootModel)
+
+	staleRoot := t.TempDir()
+	staleSnap := inventory.Snapshot{Groups: []inventory.Group{{Project: staleRoot, Records: []inventory.Record{projectRecord(staleRoot, "s", "S", true)}}}}
+	updated3, _ := lm.Update(launcherScanMsg{seq: staleSeq, snapshot: staleSnap})
+	lm = updated3.(LauncherRootModel)
+	if len(lm.pickerRows) != 0 || !lm.pickerScanning {
+		t.Fatalf("stale scan result was applied: rows=%+v scanning=%v", lm.pickerRows, lm.pickerScanning)
 	}
-	if !strings.Contains(m.status, "Target stopped or changed") {
-		t.Fatalf("status = %q, want stale-target message", m.status)
+
+	freshRoot := t.TempDir()
+	freshSnap := inventory.Snapshot{Groups: []inventory.Group{{Project: freshRoot, Records: []inventory.Record{projectRecord(freshRoot, "f", "F", true)}}}}
+	updated4, _ := lm.Update(launcherScanMsg{seq: lm.pickerScanSeq, snapshot: freshSnap})
+	lm = updated4.(LauncherRootModel)
+	if len(lm.pickerRows) != 1 || lm.pickerRows[0].Path != freshRoot {
+		t.Fatalf("fresh scan result was not applied: %+v", lm.pickerRows)
+	}
+}
+
+// TestLauncherPicker_EnterOpensValidatedRoot proves Enter on a live row
+// revalidates the root at the decision boundary (existingProjectRoot) and
+// produces the typed DecisionOpenExisting result carrying the clean
+// absolute project root.
+func TestLauncherPicker_EnterOpensValidatedRoot(t *testing.T) {
+	validRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(validRoot, ".lingtai"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+	lm.view = launcherViewPicker
+	lm.pickerRows = []launcherProjectRow{{Name: filepath.Base(validRoot), Path: validRoot, Registered: true}}
+
+	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(LauncherRootModel)
+	if !got.done || cmd == nil {
+		t.Fatalf("valid selection was not accepted: done=%v cmd=%T", got.done, cmd)
+	}
+	wantRoot, err := filepath.Abs(validRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.result.Kind != DecisionOpenExisting || got.result.ProjectRoot != filepath.Clean(wantRoot) {
+		t.Fatalf("result = (%v, %q), want (%v, %q)", got.result.Kind, got.result.ProjectRoot, DecisionOpenExisting, filepath.Clean(wantRoot))
+	}
+}
+
+// TestLauncherPicker_EnterOnVanishedRootDisablesRow proves a row that was
+// live when the catalog loaded cannot route a now-missing .lingtai path
+// into the normal write-capable startup pipeline: Enter revalidates, marks
+// the row Missing, and explains — never done=true.
+func TestLauncherPicker_EnterOnVanishedRootDisablesRow(t *testing.T) {
+	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+	lm.view = launcherViewPicker
+	lm.pickerRows = []launcherProjectRow{{
+		Name: "vanished",
+		Path: filepath.Join(t.TempDir(), "vanished"), // .lingtai never existed
+		// Deliberately stale opening-time state: listed as live.
+		Registered: true,
+	}}
+
+	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(LauncherRootModel)
+	if got.done || cmd != nil {
+		t.Fatalf("stale row was accepted: done=%v cmd=%T", got.done, cmd)
+	}
+	if !got.pickerRows[0].Missing {
+		t.Fatalf("stale row not disabled after revalidation: %+v", got.pickerRows[0])
+	}
+	if got.pickerStatus != i18n.T("launcher.picker.gone") {
+		t.Fatalf("status = %q, want the localized gone message", got.pickerStatus)
+	}
+}
+
+// TestLauncherPicker_MissingRowExplainsInsteadOfOpening proves an
+// already-Missing row is selectable (so its reason is discoverable) but
+// never activatable.
+func TestLauncherPicker_MissingRowExplainsInsteadOfOpening(t *testing.T) {
+	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+	lm.view = launcherViewPicker
+	lm.pickerRows = []launcherProjectRow{{Name: "gone", Path: "/nonexistent", Registered: true, Missing: true}}
+
+	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(LauncherRootModel)
+	if got.done || cmd != nil {
+		t.Fatalf("missing row was accepted: done=%v cmd=%T", got.done, cmd)
+	}
+	if got.pickerStatus != i18n.T("launcher.picker.missing_blocked") {
+		t.Fatalf("status = %q, want the localized missing-blocked message", got.pickerStatus)
 	}
 }
 
@@ -1273,10 +1393,11 @@ func TestLauncherProjectsModel_ValidationRejectsStaleTargets(t *testing.T) {
 // exact bug a parent review found: DetectUnfinishedStaging used to run
 // inside Init(), whose tea.Cmd-only return signature has no way to hand an
 // updated model back to the framework, so m.unfinishedStaging was always nil
-// by the time the landing page checked it and the entire Resume/Discard UI
-// was unreachable dead code). This drives the real key path (landing Enter
-// on "Create new") rather than reading the field directly, so it also proves
-// updateLanding's `len(m.unfinishedStaging) > 0` branch fires.
+// by the time the choose page checked it and the entire Resume/Discard UI
+// was unreachable dead code). This drives the real key path (choose Enter
+// on "Start a new project in this folder") rather than reading the field
+// directly, so it also proves updateChoose's
+// `len(m.unfinishedStaging) > 0` branch fires.
 func TestLauncherRootModel_UnfinishedStagingVisibleAfterConstruction(t *testing.T) {
 	root := t.TempDir()
 	stagingDir, err := os.MkdirTemp(root, ".lingtai.create-*")
@@ -1293,17 +1414,14 @@ func TestLauncherRootModel_UnfinishedStagingVisibleAfterConstruction(t *testing.
 		t.Fatalf("expected constructor to populate unfinishedStaging with %q, got %v", stagingDir, m.unfinishedStaging)
 	}
 
-	// Drive the actual key path: landing Enter on "Create new" (cursor 0)
+	// Drive the actual key path: choose Enter on "Start here" (cursor 0)
 	// must route to the unfinished-staging screen instead of straight into
 	// enterCreate, because len(m.unfinishedStaging) > 0.
-	m.landingCursor = 0
-	updated, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.chooseCursor = 0
+	updated, _ := m.updateChoose(tea.KeyPressMsg{Code: tea.KeyEnter})
 	lm := updated.(LauncherRootModel)
-	if !lm.showUnfinishedStaging {
-		t.Fatal("expected landing Enter on Create to route to the unfinished-staging screen when unfinishedStaging is non-empty")
-	}
-	if lm.view != launcherViewOpenExisting {
-		t.Fatalf("expected showUnfinishedStaging to reuse launcherViewOpenExisting's key surface, got view=%v", lm.view)
+	if lm.view != launcherViewStaging {
+		t.Fatalf("expected choose Enter on Create to route to launcherViewStaging when unfinishedStaging is non-empty, got view=%v", lm.view)
 	}
 }
 
@@ -1454,81 +1572,87 @@ func TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities(t *testin
 	}
 }
 
-// TestLauncherRoot_RevalidatesAsyncTypedSelection proves the launcher root
-// applies the same activation/request freshness guard as App and validates
-// the project again at the final Open Existing decision boundary.
-func TestLauncherRoot_RevalidatesAsyncTypedSelection(t *testing.T) {
-	validRoot := t.TempDir()
-	if err := os.Mkdir(filepath.Join(validRoot, ".lingtai"), 0o755); err != nil {
-		t.Fatalf("create valid project: %v", err)
-	}
+// --- Redesigned launcher views: rendering contracts -------------------------
 
-	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
-	lm.view = launcherViewOpenExisting
-	lm.projects = NewLauncherProjectsModel(lm.globalDirPath, ProjectsContext{})
-	lm.projects.activationID = 7
-	lm.projects.requestSeq = 9
-
-	updated, cmd := lm.Update(LauncherProjectSelectedMsg{
-		ActivationID: 7,
-		RequestSeq:   8, // stale
-		ProjectRoot:  validRoot,
+// TestLauncherViews_RenderWelcomeChooseAndPickerCoherently proves each of
+// the three redesigned screens carries its load-bearing content: the
+// welcome prelude renders the SHARED brand block (product title), the
+// explanation, all three language options, the zero-write status, and its
+// key hints; the choose page renders the question, the cwd, both options
+// with their consequence copy, and the zero-write status; the picker
+// renders its title, grouped section headers without duplicating a
+// project that is both running and registered, a missing-row reason, an
+// honest empty state, and visible keyboard help.
+func TestLauncherViews_RenderWelcomeChooseAndPickerCoherently(t *testing.T) {
+	t.Cleanup(func() {
+		SetThemeByName(DefaultThemeName)
+		_ = i18n.SetLang("en")
 	})
-	got := updated.(LauncherRootModel)
-	if got.done || cmd != nil {
-		t.Fatalf("stale typed selection was accepted: done=%v cmd=%T", got.done, cmd)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+	globalDir := filepath.Join(home, ".lingtai-tui")
+
+	m := NewLauncherRootModel(projectRoot, globalDir, "")
+	m.width, m.height = 100, 32
+
+	welcome := m.viewWelcome()
+	for _, want := range []string{
+		i18n.T("welcome.title"),
+		i18n.T("launcher.welcome.explain1"),
+		"English", "现代汉语", "文言",
+		i18n.T("launcher.zero_write_status"),
+		i18n.T("launcher.welcome.continue"),
+	} {
+		if !strings.Contains(welcome, want) {
+			t.Errorf("welcome view missing %q", want)
+		}
 	}
 
-	updated, cmd = got.Update(LauncherProjectSelectedMsg{
-		ActivationID: 7,
-		RequestSeq:   9,
-		ProjectRoot:  filepath.Join(t.TempDir(), "missing-project"),
-	})
-	got = updated.(LauncherRootModel)
-	if got.done || cmd != nil {
-		t.Fatalf("missing project selection was accepted: done=%v cmd=%T", got.done, cmd)
-	}
-	if got.projects.status != i18n.T("projects.target_changed") {
-		t.Fatalf("missing project status = %q, want target-changed message", got.projects.status)
+	choose := m.viewChoose()
+	for _, want := range []string{
+		i18n.T("launcher.choose.title"),
+		i18n.T("launcher.choose.here"),
+		i18n.T("launcher.choose.open"),
+		i18n.T("launcher.zero_write_status"),
+	} {
+		if !strings.Contains(choose, want) {
+			t.Errorf("choose view missing %q", want)
+		}
 	}
 
-	updated, cmd = got.Update(LauncherProjectSelectedMsg{
-		ActivationID: 7,
-		RequestSeq:   9,
-		ProjectRoot:  validRoot,
-	})
-	got = updated.(LauncherRootModel)
-	if !got.done || cmd == nil {
-		t.Fatalf("fresh valid selection was not accepted: done=%v cmd=%T", got.done, cmd)
+	// Picker with a merged catalog: one running+registered project, one
+	// missing registered project. The row Name is deliberately distinct
+	// from its Path so the exactly-once assertion below counts the name
+	// line alone, not the dim path line under it.
+	m.view = launcherViewPicker
+	m.pickerRows = []launcherProjectRow{
+		{Name: "distinct-row-name", Path: t.TempDir(), Running: true, Registered: true, AgentCount: 2},
+		{Name: "gone", Path: "/nonexistent/gone-dir", Registered: true, Missing: true},
 	}
-	wantRoot, err := filepath.Abs(validRoot)
-	if err != nil {
-		t.Fatalf("abs valid root: %v", err)
+	picker := m.viewPicker()
+	for _, want := range []string{
+		i18n.T("launcher.picker.title"),
+		i18n.T("launcher.picker.running"),
+		i18n.T("launcher.picker.registered"),
+		i18n.T("launcher.picker.missing"),
+		i18n.T("launcher.hint_open"),
+		i18n.T("launcher.hint_rescan"),
+	} {
+		if !strings.Contains(picker, want) {
+			t.Errorf("picker view missing %q", want)
+		}
 	}
-	if got.result.Kind != DecisionOpenExisting || got.result.ProjectRoot != filepath.Clean(wantRoot) {
-		t.Fatalf("result = (%v, %q), want (%v, %q)", got.result.Kind, got.result.ProjectRoot, DecisionOpenExisting, filepath.Clean(wantRoot))
+	if strings.Count(picker, "distinct-row-name") != 1 {
+		t.Errorf("running+registered project must render exactly once, got:\n%s", picker)
 	}
-}
 
-// TestLauncherRegisteredSelection_RevalidatesLiveness proves a row that was
-// Alive when the catalog loaded cannot route a now-missing .lingtai path into
-// the normal write-capable startup pipeline.
-func TestLauncherRegisteredSelection_RevalidatesLiveness(t *testing.T) {
-	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
-	lm.view = launcherViewOpenExisting
-	lm.openExistingRegistered = []config.RegisteredProject{{
-		Path:  filepath.Join(t.TempDir(), "vanished"),
-		Alive: true, // deliberately stale opening-time snapshot
-	}}
-
-	updated, cmd := lm.updateOpenExisting(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := updated.(LauncherRootModel)
-	if got.done || cmd != nil {
-		t.Fatalf("stale registered row was accepted: done=%v cmd=%T", got.done, cmd)
-	}
-	row := got.openExistingRegistered[0]
-	if row.Alive || row.StaleReason != "missing_dir" {
-		t.Fatalf("stale row not disabled after revalidation: %+v", row)
+	// Empty picker: honest empty state plus the go-back hint.
+	m.pickerRows = nil
+	m.pickerScanning = false
+	empty := m.viewPicker()
+	if !strings.Contains(empty, i18n.T("launcher.picker.empty")) || !strings.Contains(empty, i18n.T("launcher.picker.empty_hint")) {
+		t.Errorf("empty picker view missing empty-state copy:\n%s", empty)
 	}
 }
 

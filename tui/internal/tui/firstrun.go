@@ -40,25 +40,26 @@ type ProjectDraftConfirmedMsg struct {
 }
 
 // ProjectDraftCancelledMsg is emitted when the user backs all the way out
-// of the draft-mode create wizard — Esc/q/Ctrl+C at stepWelcome, the
-// wizard's own first/entry step (draftMode only; every OTHER step's Esc
-// already goes BACKWARD to a prior wizard step via the existing
-// step-transition handlers, never out of the wizard entirely, so Welcome is
-// the sole exit point a cancel signal needs to fire from). It carries no
-// payload: the hosting root model (LauncherRootModel, see launcher.go) is
-// responsible for discarding its old *ProjectDraft and returning to the
-// landing page, so a subsequent "Create new project" starts a genuinely
-// fresh draft rather than resuming a half-filled one.
+// of the draft-mode create wizard — Esc/Back/Ctrl+C at stepPickPreset, the
+// wizard's entry step in draft mode (the launcher's welcome prelude owns
+// language/theme now, so the draft wizard starts PAST stepWelcome; every
+// OTHER step's Esc already goes BACKWARD to a prior wizard step via the
+// existing step-transition handlers, never out of the wizard entirely, so
+// the entry step is the sole exit point a cancel signal needs to fire
+// from). It carries no payload: the hosting root model (LauncherRootModel,
+// see launcher.go) is responsible for discarding its old *ProjectDraft and
+// returning to its choose page, so a subsequent "Start a new project"
+// starts a genuinely fresh draft rather than resuming a half-filled one.
 //
-// A parent review found draftMode's Welcome step had NO typed cancel
-// path at all: plain Esc (not m.welcomeOnly, which is a DIFFERENT
-// entry — the /settings language-only flow) fell through to a bare
-// `return m, nil` (silently stuck — nothing happened), and Ctrl+C did an
-// unconditional `return m, tea.Quit`, which — because the launcher runs
-// FirstRunModel inside its OWN tea.Program (see launcher.go's doc
-// comment on why) — would have killed that WHOLE program abruptly,
-// bypassing LauncherRootModel's own done/result bookkeeping entirely
-// rather than routing back to its landing page as a proper decision.
+// History: a parent review found the draft entry step originally had NO
+// typed cancel path at all — plain Esc fell through to a bare
+// `return m, nil` (silently stuck) and Ctrl+C did an unconditional
+// `return m, tea.Quit`, which — because the launcher runs FirstRunModel
+// inside its OWN tea.Program (see launcher.go's doc comment on why) —
+// would have killed that WHOLE program abruptly, bypassing
+// LauncherRootModel's own done/result bookkeeping entirely rather than
+// routing back as a proper decision. The same rule now guards
+// stepPickPreset's Esc/Back/Ctrl+C in draft mode.
 type ProjectDraftCancelledMsg struct{}
 
 // SetupSavedMsg is emitted when /setup rewrites the current agent's init.json.
@@ -130,6 +131,10 @@ type capInfo struct {
 // pick-list and the runtime page: the pick-list is now a pure library
 // manager (edit / new / continue) and stepAgentPresets is where the user
 // commits to a default + the set of presets the agent may swap to.
+//
+// Draft mode (the no-project launcher's create flow) never runs stepAPIKey
+// — its callers pass hasPresets||draftMode so the picker honestly reads
+// "Step 1/4" even on a machine with no presets yet.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
 	if setupMode {
 		total = 4 // library → presets-config → details → recipe
@@ -687,10 +692,29 @@ func (m *FirstRunModel) discoverRecipes() {
 // have been too late: NewFirstRunModel's body would already have run
 // LoadConfig's chmod and the unnecessary Claude Code CLI probe before this
 // function got a chance to react.
+//
+// The wizard starts at stepPickPreset, not stepWelcome: the launcher's own
+// welcome prelude (launcher.go) already collected language and theme and
+// seeded them onto the draft, so repeating the welcome page here would ask
+// the user the same question twice. langCursor is synced from the seeded
+// draft.Language so any step that consults it agrees with the prelude.
+// preset.List() is a pure read (lists existing on-disk presets to offer as
+// a starting point); the draft flow always proceeds through the picker so
+// the user can create/select a preset draft regardless of what's on disk
+// yet — it never detours through stepAPIKey. Esc/Back/Ctrl+C at
+// stepPickPreset emit ProjectDraftCancelledMsg (see its doc comment).
 func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *ProjectDraft) FirstRunModel {
 	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets, "")
 	m.draft = draft
+	m.step = stepPickPreset
+	m.presets, _ = preset.List()
 	if draft != nil {
+		for i, l := range []string{"en", "zh", "wen"} {
+			if l == draft.Language {
+				m.langCursor = i
+				break
+			}
+		}
 		if draft.AgentName != "" {
 			m.nameInput.SetValue(draft.AgentName)
 			m.agentName = draft.AgentName
@@ -1295,13 +1319,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			langs := []string{"en", "zh", "wen"}
 			switch msg.String() {
 			case "ctrl+t":
-				// Cycle through registered themes
+				// Cycle through registered themes. Draft mode never reaches
+				// this step (NewDraftFirstRunModel starts at stepPickPreset;
+				// the launcher's welcome prelude owns theme/language), so
+				// this save is always a real, wanted persist.
 				names := ThemeNames()
 				tuiCfg := config.LoadTUIConfig(m.globalDir)
 				current := tuiCfg.Theme
-				if m.draftMode && m.draft != nil && m.draft.Theme != "" {
-					current = m.draft.Theme
-				}
 				if current == "" {
 					current = DefaultThemeName
 				}
@@ -1312,15 +1336,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						break
 					}
 				}
-				SetThemeByName(next) // in-memory render only — safe in draft mode
-				if m.draftMode {
-					// Draft only: hold the choice in memory, do not persist
-					// to ~/.lingtai-tui/tui_config.json until commit.
-					if m.draft != nil {
-						m.draft.Theme = next
-					}
-					return m, nil
-				}
+				SetThemeByName(next)
 				tuiCfg.Theme = next
 				config.SaveTUIConfig(m.globalDir, tuiCfg)
 				return m, nil
@@ -1339,22 +1355,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					return m, nil // blocked — still installing or failed
 				}
 				lang := langs[m.langCursor]
-				if m.draftMode {
-					// Draft only: hold the language choice in memory. Do not
-					// call config.SaveTUIConfig, do not reload keys from
-					// disk (existingKeys already reflects the draft),
-					// and do not check preset.HasAny()/preset.List() disk
-					// state as a gate — the draft flow always proceeds
-					// through the picker so the user can create/select a
-					// preset draft regardless of what's on disk yet.
-					if m.draft != nil {
-						m.draft.Language = lang
-					}
-					m.step = stepPickPreset
-					m.presets, _ = preset.List() // read-only: list existing on-disk presets to offer as a starting point
-					return m, nil
-				}
-				// Save language to TUI config
+				// Save language to TUI config. Draft mode never reaches this
+				// step (see NewDraftFirstRunModel), so this persist is
+				// always outside the launcher's zero-write boundary.
 				tuiCfg := config.LoadTUIConfig(m.globalDir)
 				tuiCfg.Language = lang
 				config.SaveTUIConfig(m.globalDir, tuiCfg)
@@ -1385,23 +1388,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					i18n.SetLang(tuiCfg.Language)
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 				}
-				if m.draftMode {
-					// Back out of the create wizard entirely — no writes
-					// occurred (this is stepWelcome, the wizard's entry
-					// step), so there is nothing to undo, only the in-memory
-					// draft to discard. See ProjectDraftCancelledMsg's doc
-					// comment for why this fires here and not elsewhere.
-					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
-				}
 			case "ctrl+c":
-				if m.draftMode {
-					// Same cancel path as Esc — MUST route through
-					// LauncherRootModel's own done/result handling rather
-					// than a bare tea.Quit, which would kill the launcher's
-					// entire tea.Program abruptly (see
-					// ProjectDraftCancelledMsg's doc comment).
-					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
-				}
 				return m, tea.Quit
 			}
 			return m, nil
@@ -1507,6 +1494,14 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.cursor == pickBackIdx {
 					if m.setupMode {
 						return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
+					}
+					if m.draftMode {
+						// stepPickPreset is the draft wizard's ENTRY step
+						// (the launcher's welcome prelude owns language/
+						// theme), so Back leaves the wizard entirely via
+						// the typed cancel — see
+						// ProjectDraftCancelledMsg's doc comment.
+						return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
 					}
 					m.step = stepWelcome
 					return m, nil
@@ -1741,9 +1736,24 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if m.setupMode {
 					return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 				}
+				if m.draftMode {
+					// Entry-step Esc leaves the draft wizard via the typed
+					// cancel (see ProjectDraftCancelledMsg's doc comment) —
+					// the wizard's own stepWelcome is not part of the draft
+					// flow, so going "back" there would show a second,
+					// duplicate welcome page.
+					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
+				}
 				m.step = stepWelcome
 				return m, nil
 			case "ctrl+c":
+				if m.draftMode {
+					// MUST route through LauncherRootModel's own
+					// done/result handling rather than a bare tea.Quit,
+					// which would kill the launcher's entire tea.Program
+					// abruptly (see ProjectDraftCancelledMsg's doc comment).
+					return m, func() tea.Msg { return ProjectDraftCancelledMsg{} }
+				}
 				return m, tea.Quit
 			}
 			return m, nil
@@ -2736,13 +2746,13 @@ func (m FirstRunModel) View() string {
 
 	switch m.step {
 	case stepAPIKey:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d", stepNum, total)) + "\n\n")
 		b.WriteString("  " + i18n.T("firstrun.no_presets") + "\n\n")
 		b.WriteString(m.setup.View())
 
 	case stepPickPreset:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		header := i18n.T("firstrun.pick_preset")
 		if m.setupMode {
 			header = i18n.T("setup.pick_default_preset")
@@ -2923,7 +2933,7 @@ func (m FirstRunModel) View() string {
 		return m.presetEditor.View()
 
 	case stepAgentPresets:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		header := i18n.T("firstrun.preset_cfg.title")
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+header, stepNum, total)) + "\n\n")
 		b.WriteString("  " + StyleFaint.Render(i18n.T("firstrun.preset_cfg.help")) + "\n\n")
@@ -3035,7 +3045,7 @@ func (m FirstRunModel) View() string {
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
 
 	case stepCapabilities:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)+i18n.T("firstrun.select_addons")) + "\n\n")
 
 		if m.setupMode {
@@ -3222,7 +3232,7 @@ func (m FirstRunModel) View() string {
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 
 	case stepAgentNameDir:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: "+i18n.T("firstrun.enter_name_dir"), stepNum, total)) + "\n")
 
 		if m.setupMode {
@@ -3369,7 +3379,7 @@ func (m FirstRunModel) View() string {
 		}
 
 	case stepLaunching:
-		stepNum, total := stepProgress(m.step, m.hasPresets, m.setupMode)
+		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
 		b.WriteString("\n  " + StyleSubtle.Render(fmt.Sprintf("Step %d/%d: ", stepNum, total)) + i18n.T("firstrun.launching") + "\n\n")
 		if m.message != "" {
 			b.WriteString("  " + m.message + "\n")
@@ -3379,14 +3389,13 @@ func (m FirstRunModel) View() string {
 	return b.String()
 }
 
-// viewWelcome renders the welcome/language selection page.
-func (m FirstRunModel) viewWelcome() string {
-	langLabels := []string{"English", "现代汉语", "文言"}
-
-	// Build content lines (without vertical centering first)
+// renderWelcomeBrand renders the shared brand block — braille logo (𢘐 —
+// U+22610), product name, and the two poem lines, all centered — used by
+// BOTH the first-run welcome page below and the no-project launcher's
+// welcome prelude (launcher.go), so the two entrances into LingTai can
+// never drift apart visually.
+func renderWelcomeBrand(width int) string {
 	var content strings.Builder
-
-	// Braille logo (𢘐 — U+22610)
 	logoLines := []string{
 		"⠀⠀⠀⠀⠀⠀⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
 		"⠀⠀⠀⠀⠀⠀⣿⡟⠁⠀⠀⠀⠀⠀⠀⢀⣾⡿⢯⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
@@ -3402,19 +3411,28 @@ func (m FirstRunModel) viewWelcome() string {
 	}
 	logoStyle := lipgloss.NewStyle().Foreground(ColorAgent)
 	for _, line := range logoLines {
-		content.WriteString(centerText(logoStyle.Render(line), m.width) + "\n")
+		content.WriteString(centerText(logoStyle.Render(line), width) + "\n")
 	}
 	content.WriteString("\n")
 
 	// Product name
-	titleText := i18n.T("welcome.title")
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	content.WriteString(centerText(titleStyle.Render(titleText), m.width) + "\n\n")
+	content.WriteString(centerText(titleStyle.Render(i18n.T("welcome.title")), width) + "\n\n")
 
 	// Poem (two lines)
 	poemStyle := StyleSubtle
-	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line1")), m.width) + "\n")
-	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line2")), m.width) + "\n\n\n")
+	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line1")), width) + "\n")
+	content.WriteString(centerText(poemStyle.Render(i18n.T("welcome.poem_line2")), width) + "\n\n\n")
+	return content.String()
+}
+
+// viewWelcome renders the welcome/language selection page.
+func (m FirstRunModel) viewWelcome() string {
+	langLabels := []string{"English", "现代汉语", "文言"}
+
+	// Build content lines (without vertical centering first)
+	var content strings.Builder
+	content.WriteString(renderWelcomeBrand(m.width))
 
 	// Imported network banner (rehydration mode only)
 	if m.rehydrateMode {

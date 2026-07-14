@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -29,7 +30,7 @@ const (
 // DecisionCreate (already staged/committed by RunProjectCreate before this
 // result is produced — see LauncherRootModel.Update's ProjectDraftConfirmedMsg
 // handling). DecisionCancel means the user backed out entirely (Esc/q/
-// Ctrl+C at the landing page) — zero filesystem writes occurred.
+// Ctrl+C at the welcome or choose page) — zero filesystem writes occurred.
 type LauncherResult struct {
 	Kind        LauncherDecisionKind
 	ProjectRoot string
@@ -53,22 +54,67 @@ type LauncherDoneMsg struct {
 	Result LauncherResult
 }
 
+// launcherView is the launcher's own tiny navigation graph:
+//
+//	Welcome ⇄ Choose ⇄ (Picker | Staging | Create)
+//
+// Welcome is always first (Jason's redesign direction: a no-project user
+// meets LingTai through the SAME welcome visual language as first-run —
+// brand, explanation, language — BEFORE being asked to decide anything).
+// Choose is the explicit create-here / open-existing decision. Picker is
+// the redesigned project-level "open existing" catalog. Staging is the
+// unfinished-creation recovery screen (its own view, no longer borrowing
+// the picker's identity). Create hosts the draft-purpose FirstRunModel.
 type launcherView int
 
 const (
-	launcherViewLanding launcherView = iota
-	launcherViewOpenExisting
+	launcherViewWelcome launcherView = iota
+	launcherViewChoose
+	launcherViewPicker
+	launcherViewStaging
 	launcherViewCreate
 )
+
+// launcherLangs mirrors the first-run welcome selector's order and labels —
+// the launcher prelude IS the welcome page for the no-project flow, so the
+// two must never diverge.
+var launcherLangs = []string{"en", "zh", "wen"}
+var launcherLangLabels = []string{"English", "现代汉语", "文言"}
+
+// launcherProjectRow is one project-level row of the redesigned "open an
+// existing project" picker. The unit of choice on that page is a PROJECT
+// (a root the normal startup pipeline can be handed), never an agent —
+// which is why the picker no longer embeds the agent-level ProjectsModel.
+// Rows are merged from two read-only sources and deduplicated by
+// normalized root path: the running-agent inventory snapshot and
+// registry.jsonl (config.ListRegisteredProjects — never LoadAndPrune).
+type launcherProjectRow struct {
+	Name       string // basename of the project root
+	Path       string // project root (parent of .lingtai/)
+	Running    bool   // present in the process-table inventory snapshot
+	AgentCount int    // running agent count (Running rows only)
+	Registered bool   // present in registry.jsonl
+	Missing    bool   // root's .lingtai is gone (stale registry row or phantom process)
+}
+
+// launcherScanMsg delivers one async inventory scan result to the picker.
+// seq must match the picker's current scan sequence or the result is
+// dropped — same staleness rule ProjectsModel uses for its catalog, kept
+// here in miniature since the launcher owns its own (much smaller) list.
+type launcherScanMsg struct {
+	seq      uint64
+	snapshot inventory.Snapshot
+	err      string
+}
 
 // LauncherRootModel is the pre-App root Bubble Tea model for the no-project
 // case (design doc Invariant 2/6): it owns ONLY view state, a read-only
 // project catalog, and (during Create) a *ProjectDraft. It never runs
 // migration/bootstrap and never touches the filesystem except through
-// explicit read-only calls (config.ListRegisteredProjects, the embedded
-// ProjectsModel's inventory scan) until the user reaches stepReview and
-// presses "Start project", at which point RunProjectCreate performs the
-// single staging→validate→rename commit.
+// explicit read-only calls (config.LoadTUIConfig, config.ListRegisteredProjects,
+// inventory.Scan) until the user reaches stepReview and presses
+// "Start project", at which point RunProjectCreate performs the single
+// staging→validate→rename commit.
 //
 // main.go constructs this, runs it via its OWN tea.Program (separate from
 // the real App's), and inspects Result() after the program exits — it does
@@ -80,38 +126,43 @@ type LauncherRootModel struct {
 	width, height int
 
 	view launcherView
-	// cursor on the landing page: 0 = Create new, 1 = Open existing
-	landingCursor int
 
-	// Open Existing: reuses ProjectsModel's catalog/rendering/freshness
-	// guard for RUNNING projects. Stopped registered projects are listed
-	// separately above it (openExistingRegistered) since ProjectsModel's
-	// registry source is inventory-only (see projects.go's
-	// projectSourceRegistry doc comment) — merging that catalog inside
-	// ProjectsModel itself is out of scope for this vertical slice; see
-	// the implementation report for the explicit scoping note.
-	openExistingRegistered []config.RegisteredProject
-	openExistingSection    int // 0 = registered list, 1 = running ProjectsModel
-	openExistingCursor     int
-	projects               ProjectsModel
+	// Welcome prelude state. langIdx indexes launcherLangs; themeName is
+	// the currently previewed theme. Both are initialized from a PURE
+	// config.LoadTUIConfig read at construction and only ever applied
+	// in-memory (i18n.SetLang / SetThemeByName) — persisting them is the
+	// create-flow finalizer's job (ProjectDraft.applyToConfig), and only
+	// after the user confirms "Start project".
+	langIdx   int
+	themeName string
+
+	// cursor on the choose page: 0 = start here, 1 = open existing.
+	chooseCursor int
+
+	// Picker state (see launcherProjectRow). pickerScanSeq guards stale
+	// async scan results; pickerStatus is a transient localized feedback
+	// line (missing row activated, project vanished, scan error detail).
+	pickerRegistered []config.RegisteredProject
+	pickerRows       []launcherProjectRow
+	pickerCursor     int
+	pickerScanSeq    uint64
+	pickerScanning   bool
+	pickerScanErr    string
+	pickerStatus     string
 
 	// Create: hosts a draft-purpose FirstRunModel plus its ProjectDraft.
 	draft      *ProjectDraft
 	firstRun   FirstRunModel
-	firstRunOn bool // true once firstRun has been constructed/Init'd
+	firstRunOn bool
 
-	// preDraftTheme/preDraftLanguage snapshot the persisted (baseline)
-	// theme/language at the moment enterCreate constructs a new draft —
-	// BEFORE the draft wizard's Welcome step can preview either one via
-	// SetThemeByName/i18n.SetLang, both of which mutate genuinely global,
-	// process-wide in-memory state regardless of draftMode. A parent
-	// review found that ProjectDraftCancelledMsg discarded the draft
-	// pointer but never restored this global state, so cancelling out of
-	// the wizard after previewing a theme/language left the process (and
-	// any freshly started NEXT draft) stuck showing the cancelled
-	// preview — the opposite of a true reset. Captured once per
-	// enterCreate call (never touched again until the next
-	// enterCreate/cancel cycle) via the pure config.LoadTUIConfig read.
+	// preDraftTheme/preDraftLanguage snapshot the launcher's own prelude
+	// selection at the moment enterCreate constructs a new draft. The
+	// draft wizard starts PAST its welcome step now (the launcher prelude
+	// owns language/theme), so the wizard has no remaining path that
+	// mutates the process-wide theme/language state — but the cancel
+	// handler still restores to this baseline as defense-in-depth, so a
+	// future wizard step that previews either one can never leave a
+	// cancelled attempt's preview stuck on the choose page.
 	preDraftTheme    string
 	preDraftLanguage string
 
@@ -119,7 +170,6 @@ type LauncherRootModel struct {
 	// choice; Resume is a documented stub, Discard is fully functional).
 	unfinishedStaging       []string
 	unfinishedCursor        int
-	showUnfinishedStaging   bool
 	unfinishedDiscardArmed  bool
 	unfinishedDiscardStatus string
 
@@ -146,6 +196,15 @@ type LauncherRootModel struct {
 // suppress host discovery inject CreateOptions runtime/resolution seams at the
 // finalizer boundary rather than relying on an empty string.
 //
+// The constructor applies the PERSISTED theme and language (in-memory only:
+// SetThemeByName / i18n.SetLang, from a pure config.LoadTUIConfig read that
+// never writes) before the first frame renders. This mirrors the normal
+// startup path's early i18n.SetLang(tuiCfg.Language) so a returning user
+// who happens to cd into an empty directory sees the launcher in THEIR
+// palette and locale, not the compiled-in defaults — the exact "theme is
+// wrong" defect of the previous launcher, which rendered ink-dark/English
+// regardless of configuration.
+//
 // Unfinished-staging detection (design doc Invariant 5) is populated HERE,
 // not in Init(). tea.Model's Init() tea.Cmd signature has no way to return
 // an updated model — the framework only applies the returned tea.Cmd, so a
@@ -154,17 +213,35 @@ type LauncherRootModel struct {
 // prior version of this constructor left DetectUnfinishedStaging inside
 // Init() for exactly that (mistaken) reason and the crash-recovery
 // Resume/Discard UI was silently unreachable — m.unfinishedStaging was
-// always nil by the time updateLanding/updateUnfinishedStaging read it.
+// always nil by the time the choose page read it.
 // DetectUnfinishedStaging is a pure directory listing (os.ReadDir plus a
 // marker-file os.Stat, no writes), so running it during construction keeps
 // the same "constructor performs only reads" contract Init() itself would
 // have needed to honor.
 func NewLauncherRootModel(projectRoot, globalDirPath, lingtaiCmd string) LauncherRootModel {
+	baseline := config.LoadTUIConfig(globalDirPath) // pure read; defaults when absent
+	themeName := baseline.Theme
+	if themeName == "" {
+		themeName = DefaultThemeName
+	}
+	SetThemeByName(themeName)
+	langIdx := 0
+	if err := i18n.SetLang(baseline.Language); err != nil {
+		_ = i18n.SetLang("en")
+	}
+	for i, l := range launcherLangs {
+		if l == i18n.Lang() {
+			langIdx = i
+			break
+		}
+	}
 	return LauncherRootModel{
 		globalDirPath:     globalDirPath,
 		projectRoot:       projectRoot,
 		lingtaiCmd:        lingtaiCmd,
-		view:              launcherViewLanding,
+		view:              launcherViewWelcome,
+		langIdx:           langIdx,
+		themeName:         themeName,
 		unfinishedStaging: DetectUnfinishedStaging(projectRoot),
 	}
 }
@@ -186,11 +263,6 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		if m.view == launcherViewOpenExisting {
-			updated, cmd := m.projects.Update(msg)
-			m.projects = updated
-			return m, cmd
-		}
 		if m.view == launcherViewCreate && m.firstRunOn {
 			updated, cmd := m.firstRun.Update(msg)
 			m.firstRun = updated
@@ -198,20 +270,23 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case LauncherProjectSelectedMsg:
-		if m.view != launcherViewOpenExisting ||
-			msg.ActivationID != m.projects.activationID ||
-			msg.RequestSeq != m.projects.requestSeq {
-			return m, nil
+	case launcherScanMsg:
+		if msg.seq != m.pickerScanSeq {
+			return m, nil // stale scan result from a superseded request
 		}
-		root, ok := existingProjectRoot(msg.ProjectRoot)
-		if !ok {
-			m.projects.status = i18n.T("projects.target_changed")
-			return m, nil
+		m.pickerScanning = false
+		m.pickerScanErr = msg.err
+		if msg.err == "" {
+			m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, msg.snapshot)
+		} else {
+			// Scan failed: the registered catalog is still honest on its
+			// own — show it, plus the error, rather than a blank page.
+			m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
 		}
-		m.result = LauncherResult{Kind: DecisionOpenExisting, ProjectRoot: root}
-		m.done = true
-		return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
+		if m.pickerCursor >= len(m.pickerRows) {
+			m.pickerCursor = max(0, len(m.pickerRows)-1)
+		}
+		return m, nil
 
 	case ProjectDraftCancelledMsg:
 		if m.view != launcherViewCreate {
@@ -219,25 +294,21 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Back out of the create wizard entirely — no writes occurred (see
 		// ProjectDraftCancelledMsg's doc comment), so the only thing to do
-		// is discard the old draft/FirstRunModel and return to landing.
-		// Discarding (not merely hiding) the old draft/firstRun is the
-		// point: a subsequent "Create new project" must construct a
+		// is discard the old draft/FirstRunModel and return to the choose
+		// page. Discarding (not merely hiding) the old draft/firstRun is
+		// the point: a subsequent "Start a new project" must construct a
 		// genuinely FRESH ProjectDraft via enterCreate, never resume a
 		// half-filled one — a parent review's exact "subsequent Create
 		// starts a fresh draft" requirement.
 		//
-		// Restore theme/language to the pre-draft baseline BEFORE
-		// discarding the draft. stepWelcome's theme cycle (ctrl+t) and
-		// language selection (up/down) both mutate genuinely global,
-		// process-wide in-memory state (styles.SetThemeByName,
-		// i18n.SetLang) purely for live preview, entirely independent of
-		// draftMode — a parent review found Cancel discarded the draft
-		// pointer but left that preview mutation in place, so the landing
-		// page (and a subsequent fresh draft) stayed stuck showing
-		// whatever the cancelled attempt had last previewed instead of
-		// reverting to what was actually persisted. This performs no
-		// writes (SetThemeByName/i18n.SetLang are in-memory only) and
-		// only reads back what enterCreate already captured.
+		// Restore theme/language to the launcher's own prelude baseline
+		// BEFORE discarding the draft. The draft wizard now starts past
+		// its welcome step (the launcher prelude owns language/theme), so
+		// no wizard path currently previews either — this restore is
+		// defense-in-depth so a future wizard preview could never leave
+		// the choose page stuck showing a cancelled attempt's state. It
+		// performs no writes (SetThemeByName/i18n.SetLang are in-memory
+		// only).
 		restoreTheme := m.preDraftTheme
 		if restoreTheme == "" {
 			restoreTheme = DefaultThemeName
@@ -253,7 +324,7 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.firstRunOn = false
 		m.createErr = ""
 		m.createResult = nil
-		m.view = launcherViewLanding
+		m.view = launcherViewChoose
 		return m, nil
 
 	case ProjectDraftConfirmedMsg:
@@ -288,13 +359,14 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		switch m.view {
-		case launcherViewLanding:
-			return m.updateLanding(msg)
-		case launcherViewOpenExisting:
-			if m.showUnfinishedStaging {
-				return m.updateUnfinishedStaging(msg)
-			}
-			return m.updateOpenExisting(msg)
+		case launcherViewWelcome:
+			return m.updateWelcome(msg)
+		case launcherViewChoose:
+			return m.updateChoose(msg)
+		case launcherViewPicker:
+			return m.updatePicker(msg)
+		case launcherViewStaging:
+			return m.updateUnfinishedStaging(msg)
 		case launcherViewCreate:
 			updated, cmd := m.firstRun.Update(msg)
 			m.firstRun = updated
@@ -304,59 +376,224 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Forward everything else (mouse wheel, paste, sub-model async
-	// messages) to whichever sub-model owns the active view.
-	switch m.view {
-	case launcherViewOpenExisting:
-		updated, cmd := m.projects.Update(msg)
-		m.projects = updated
+	// messages) to the create wizard when it owns the active view.
+	if m.view == launcherViewCreate && m.firstRunOn {
+		updated, cmd := m.firstRun.Update(msg)
+		m.firstRun = updated
 		return m, cmd
-	case launcherViewCreate:
-		if m.firstRunOn {
-			updated, cmd := m.firstRun.Update(msg)
-			m.firstRun = updated
-			return m, cmd
-		}
 	}
 	return m, nil
 }
 
-func (m LauncherRootModel) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+// cancelAndQuit records the zero-write cancel decision and quits the
+// launcher's tea.Program. Reachable from the welcome page (Esc/q/Ctrl+C)
+// and the choose/picker pages (q/Ctrl+C) — Esc on those pages goes BACK one
+// page instead, so leaving is always deliberate and never a mis-keyed Esc.
+func (m LauncherRootModel) cancelAndQuit() (tea.Model, tea.Cmd) {
+	m.result = LauncherResult{Kind: DecisionCancel}
+	m.done = true
+	return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
+}
+
+func (m LauncherRootModel) updateWelcome(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up":
+		if m.langIdx > 0 {
+			m.langIdx--
+			_ = i18n.SetLang(launcherLangs[m.langIdx])
+		}
+	case "down":
+		if m.langIdx < len(launcherLangs)-1 {
+			m.langIdx++
+			_ = i18n.SetLang(launcherLangs[m.langIdx])
+		}
+	case "ctrl+t":
+		// Cycle through registered themes — in-memory preview only; the
+		// choice is persisted (via ProjectDraft.applyToConfig) only if the
+		// user later confirms creating a project.
+		names := ThemeNames()
+		next := names[0]
+		for i, n := range names {
+			if n == m.themeName {
+				next = names[(i+1)%len(names)]
+				break
+			}
+		}
+		m.themeName = next
+		SetThemeByName(next)
+	case "enter":
+		m.view = launcherViewChoose
+	case "esc", "q", "ctrl+c":
+		return m.cancelAndQuit()
+	}
+	return m, nil
+}
+
+func (m LauncherRootModel) updateChoose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
-		if m.landingCursor > 0 {
-			m.landingCursor--
+		if m.chooseCursor > 0 {
+			m.chooseCursor--
 		}
 	case "down", "j":
-		if m.landingCursor < 1 {
-			m.landingCursor++
+		if m.chooseCursor < 1 {
+			m.chooseCursor++
 		}
-	case "esc", "q", "ctrl+c":
-		m.result = LauncherResult{Kind: DecisionCancel}
-		m.done = true
-		return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
+	case "esc":
+		m.view = launcherViewWelcome
+	case "q", "ctrl+c":
+		return m.cancelAndQuit()
 	case "enter":
-		if m.landingCursor == 1 {
-			// Open Existing: read-only catalog load.
-			m.view = launcherViewOpenExisting
-			m.openExistingRegistered = config.ListRegisteredProjects(m.globalDirPath)
-			m.projects = NewLauncherProjectsModel(m.globalDirPath, ProjectsContext{})
-			cmd := m.projects.Init()
-			var sizeCmd tea.Cmd
-			if m.width > 0 {
-				updated, c := m.projects.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-				m.projects = updated
-				sizeCmd = c
-			}
-			return m, tea.Batch(cmd, sizeCmd)
+		if m.chooseCursor == 1 {
+			return m.enterPicker()
 		}
-		// Create new project.
-		if len(m.unfinishedStaging) > 0 && !m.showUnfinishedStaging {
-			m.view = launcherViewOpenExisting // reuse the same key handling surface
-			m.showUnfinishedStaging = true
+		// Start a new project here.
+		if len(m.unfinishedStaging) > 0 {
+			m.view = launcherViewStaging
 			m.unfinishedCursor = 0
+			m.unfinishedDiscardArmed = false
+			m.unfinishedDiscardStatus = ""
 			return m, nil
 		}
 		return m.enterCreate()
+	}
+	return m, nil
+}
+
+// enterPicker loads the read-only project catalog: registry.jsonl rows
+// immediately (config.ListRegisteredProjects — never LoadAndPrune, which
+// rewrites the file), plus an async process-table inventory scan for
+// running projects. Both are pure reads; the picker stays inside the
+// zero-write contract.
+func (m LauncherRootModel) enterPicker() (tea.Model, tea.Cmd) {
+	m.view = launcherViewPicker
+	m.pickerStatus = ""
+	m.pickerScanErr = ""
+	m.pickerCursor = 0
+	m.pickerRegistered = config.ListRegisteredProjects(m.globalDirPath)
+	m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
+	m.pickerScanning = true
+	m.pickerScanSeq++
+	return m, m.scanRunningProjects(m.pickerScanSeq)
+}
+
+// scanRunningProjects runs the shared inventory scan (same
+// projectsScanInventory seam ProjectsModel uses, so tests inject fakes the
+// same way) off the Update loop and reports back with the request's seq.
+func (m LauncherRootModel) scanRunningProjects(seq uint64) tea.Cmd {
+	return func() tea.Msg {
+		snap, err := projectsScanInventory(inventory.Options{SelfPID: os.Getpid()})
+		if err != nil {
+			return launcherScanMsg{seq: seq, err: err.Error()}
+		}
+		return launcherScanMsg{seq: seq, snapshot: snap}
+	}
+}
+
+// buildLauncherProjectRows merges the running-project inventory snapshot
+// with the registered-project catalog into ONE deduplicated project-level
+// list: running projects first (in snapshot order, carrying their agent
+// count and, when also registered, the Registered flag), then registered
+// projects that are not currently running (registry order), with rows whose
+// .lingtai is gone marked Missing rather than hidden — the registry is
+// never pruned here, so hiding them would misreport what's on disk.
+// Deduplication is by inventory.NormalizePath so a relative or uncleaned
+// registry path still matches its running snapshot twin.
+func buildLauncherProjectRows(registered []config.RegisteredProject, snap inventory.Snapshot) []launcherProjectRow {
+	seen := map[string]int{}
+	var rows []launcherProjectRow
+	for _, g := range snap.Groups {
+		if g.Project == "" {
+			continue
+		}
+		key := inventory.NormalizePath(g.Project)
+		if idx, ok := seen[key]; ok {
+			rows[idx].AgentCount += len(g.Records)
+			continue
+		}
+		seen[key] = len(rows)
+		rows = append(rows, launcherProjectRow{
+			Name:       filepath.Base(g.Project),
+			Path:       g.Project,
+			Running:    true,
+			AgentCount: len(g.Records),
+			// A phantom group means processes claim a project whose
+			// .lingtai no longer resolves — honest state: running AND
+			// missing, disabled with the same reason as a stale
+			// registry row.
+			Missing: g.Phantom,
+		})
+	}
+	for _, rp := range registered {
+		key := inventory.NormalizePath(rp.Path)
+		if idx, ok := seen[key]; ok {
+			rows[idx].Registered = true
+			continue
+		}
+		seen[key] = len(rows)
+		rows = append(rows, launcherProjectRow{
+			Name:       filepath.Base(rp.Path),
+			Path:       rp.Path,
+			Registered: true,
+			Missing:    !rp.Alive,
+		})
+	}
+	return rows
+}
+
+func (m LauncherRootModel) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.view = launcherViewChoose
+		return m, nil
+	case "ctrl+c":
+		return m.cancelAndQuit()
+	case "up", "k":
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+			m.pickerStatus = ""
+		}
+		return m, nil
+	case "down", "j":
+		if m.pickerCursor < len(m.pickerRows)-1 {
+			m.pickerCursor++
+			m.pickerStatus = ""
+		}
+		return m, nil
+	case "r", "ctrl+r":
+		m.pickerStatus = ""
+		m.pickerScanErr = ""
+		m.pickerRegistered = config.ListRegisteredProjects(m.globalDirPath)
+		m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
+		if m.pickerCursor >= len(m.pickerRows) {
+			m.pickerCursor = max(0, len(m.pickerRows)-1)
+		}
+		m.pickerScanning = true
+		m.pickerScanSeq++
+		return m, m.scanRunningProjects(m.pickerScanSeq)
+	case "enter":
+		if m.pickerCursor >= len(m.pickerRows) {
+			return m, nil
+		}
+		row := m.pickerRows[m.pickerCursor]
+		if row.Missing {
+			m.pickerStatus = i18n.T("launcher.picker.missing_blocked")
+			return m, nil
+		}
+		// Revalidate at the decision boundary instead of trusting the
+		// snapshot captured when the picker opened (or last rescanned). A
+		// project can disappear while the launcher is visible; falling
+		// through with a stale root would hand a now-missing .lingtai
+		// path to the normal, write-capable startup pipeline.
+		root, ok := existingProjectRoot(row.Path)
+		if !ok {
+			m.pickerRows[m.pickerCursor].Missing = true
+			m.pickerStatus = i18n.T("launcher.picker.gone")
+			return m, nil
+		}
+		m.result = LauncherResult{Kind: DecisionOpenExisting, ProjectRoot: root}
+		m.done = true
+		return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
 	}
 	return m, nil
 }
@@ -365,18 +602,20 @@ func (m LauncherRootModel) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cm
 // pure read (preset.HasAny stats ~/.lingtai-tui/presets/, creating
 // nothing) so it stays inside the zero-write contract.
 //
-// Captures preDraftTheme/preDraftLanguage from the persisted TUI config
-// BEFORE constructing firstRun — config.LoadTUIConfig is a pure read (falls
-// back to defaults if tui_config.json doesn't exist yet, never writes) —
-// so a subsequent ProjectDraftCancelledMsg can restore exactly this
-// baseline regardless of what the wizard's Welcome step previewed
-// in-memory afterward.
+// The launcher's welcome prelude already collected language and theme, so
+// the draft is seeded with both BEFORE the wizard is constructed —
+// NewDraftFirstRunModel starts the wizard at its preset-pick step (its own
+// welcome step would duplicate the prelude) and the finalizer persists the
+// seeded values via ProjectDraft.applyToConfig only after the user confirms
+// "Start project". preDraftTheme/preDraftLanguage capture the same prelude
+// baseline for the cancel handler's defense-in-depth restore.
 func (m LauncherRootModel) enterCreate() (tea.Model, tea.Cmd) {
 	m.draft = NewProjectDraft(m.projectRoot)
+	m.draft.Language = launcherLangs[m.langIdx]
+	m.draft.Theme = m.themeName
+	m.preDraftTheme = m.themeName
+	m.preDraftLanguage = m.draft.Language
 	m.view = launcherViewCreate
-	baseline := config.LoadTUIConfig(m.globalDirPath)
-	m.preDraftTheme = baseline.Theme
-	m.preDraftLanguage = baseline.Language
 	baseDir := filepath.Join(m.projectRoot, ".lingtai") // never created — passed only for read-oriented helpers that expect a path shape
 	m.firstRun = NewDraftFirstRunModel(baseDir, m.globalDirPath, preset.HasAny(), m.draft)
 	m.firstRunOn = true
@@ -402,8 +641,7 @@ func (m LauncherRootModel) updateUnfinishedStaging(msg tea.KeyPressMsg) (tea.Mod
 		}
 		m.unfinishedDiscardArmed = false
 	case "esc":
-		m.showUnfinishedStaging = false
-		m.view = launcherViewLanding
+		m.view = launcherViewChoose
 		return m, nil
 	case "r":
 		// Resume is intentionally NOT implemented in this vertical slice
@@ -432,76 +670,15 @@ func (m LauncherRootModel) updateUnfinishedStaging(msg tea.KeyPressMsg) (tea.Mod
 		}
 		m.unfinishedDiscardArmed = false
 		if len(m.unfinishedStaging) == 0 {
-			m.showUnfinishedStaging = false
 			return m.enterCreate()
 		}
 		return m, nil
 	case "c":
 		// Continue to Create anyway, leaving the leftover staging in
 		// place untouched.
-		m.showUnfinishedStaging = false
 		return m.enterCreate()
 	}
 	return m, nil
-}
-
-func (m LauncherRootModel) updateOpenExisting(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		if m.openExistingSection == 1 {
-			// Let the embedded ProjectsModel's own esc/q return path run
-			// first if it's mid-interaction; otherwise fall through to
-			// landing. ProjectsModel's Update returns a ViewChangeMsg
-			// command on esc/q, which this model doesn't route anywhere
-			// (it isn't part of App's view graph) — so intercept directly
-			// here instead of forwarding.
-		}
-		m.view = launcherViewLanding
-		return m, nil
-	case "tab":
-		if m.openExistingSection == 0 && len(m.openExistingRegistered) > 0 {
-			m.openExistingSection = 1
-		} else {
-			m.openExistingSection = 0
-		}
-		return m, nil
-	}
-	if m.openExistingSection == 0 && len(m.openExistingRegistered) > 0 {
-		switch msg.String() {
-		case "up", "k":
-			if m.openExistingCursor > 0 {
-				m.openExistingCursor--
-			}
-			return m, nil
-		case "down", "j":
-			if m.openExistingCursor < len(m.openExistingRegistered)-1 {
-				m.openExistingCursor++
-			}
-			return m, nil
-		case "enter":
-			row := m.openExistingRegistered[m.openExistingCursor]
-			if !row.Alive {
-				return m, nil // stale/missing — disabled, not selectable
-			}
-			// Revalidate at the decision boundary instead of trusting the
-			// liveness snapshot captured when the picker opened. A project can
-			// disappear while the launcher is visible; falling through with a
-			// stale root would hand a now-missing .lingtai path to the normal,
-			// write-capable startup pipeline.
-			root, ok := existingProjectRoot(row.Path)
-			if !ok {
-				m.openExistingRegistered[m.openExistingCursor].Alive = false
-				m.openExistingRegistered[m.openExistingCursor].StaleReason = "missing_dir"
-				return m, nil
-			}
-			m.result = LauncherResult{Kind: DecisionOpenExisting, ProjectRoot: root}
-			m.done = true
-			return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
-		}
-	}
-	updated, cmd := m.projects.Update(msg)
-	m.projects = updated
-	return m, cmd
 }
 
 // View implements tea.Model for the root launcher program (main.go runs
@@ -526,13 +703,14 @@ func (m LauncherRootModel) View() tea.View {
 
 func (m LauncherRootModel) viewContent() string {
 	switch m.view {
-	case launcherViewLanding:
-		return m.viewLanding()
-	case launcherViewOpenExisting:
-		if m.showUnfinishedStaging {
-			return m.viewUnfinishedStaging()
-		}
-		return m.viewOpenExisting()
+	case launcherViewWelcome:
+		return m.viewWelcome()
+	case launcherViewChoose:
+		return m.viewChoose()
+	case launcherViewPicker:
+		return m.viewPicker()
+	case launcherViewStaging:
+		return m.viewUnfinishedStaging()
 	case launcherViewCreate:
 		out := m.firstRun.View()
 		if m.createErr != "" {
@@ -543,69 +721,250 @@ func (m LauncherRootModel) viewContent() string {
 	return ""
 }
 
-func (m LauncherRootModel) viewLanding() string {
-	var b strings.Builder
+// viewWelcome renders the launcher's prelude in the SAME visual language as
+// the first-run welcome page (renderWelcomeBrand: braille logo, product
+// name, poem — single-sourced with firstrun.go's viewWelcome so the two
+// cannot drift), followed by a short explanation of what LingTai is and
+// what this launcher will (not) do, the standard centered language
+// selector, and keyboard hints. Everything here is an in-memory preview;
+// the page states so explicitly.
+func (m LauncherRootModel) viewWelcome() string {
+	var content strings.Builder
+	content.WriteString(renderWelcomeBrand(m.width))
+
+	explainStyle := StyleSubtle
+	content.WriteString(centerText(explainStyle.Render(i18n.T("launcher.welcome.explain1")), m.width) + "\n")
+	content.WriteString(centerText(explainStyle.Render(i18n.TF("launcher.welcome.explain2", abbreviateHomePath(m.projectRoot))), m.width) + "\n\n")
+
+	for i, label := range launcherLangLabels {
+		style := lipgloss.NewStyle().Foreground(ColorText)
+		var line string
+		if i == m.langIdx {
+			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+			line = style.Render("[" + label + "]")
+		} else {
+			line = " " + style.Render(label) + " "
+		}
+		content.WriteString(centerText(line, m.width) + "\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString(centerText(lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.zero_write_status")), m.width) + "\n")
+
+	content.WriteString("\n")
+	hints := StyleFaint.Render("↑↓ " + i18n.T("welcome.select_lang") +
+		"  [Enter] " + i18n.T("launcher.welcome.continue") +
+		"  [Ctrl+T] " + i18n.T("settings.theme") +
+		"  [Esc] " + i18n.T("launcher.hint_quit"))
+	content.WriteString(centerText(hints, m.width) + "\n")
+
+	return verticallyCentered(content.String(), m.height)
+}
+
+// viewChoose renders the explicit start-here / open-existing decision as a
+// centered block in the welcome page's visual family. Option copy states
+// consequences (what will and will not be written, and when), not UI
+// mechanics; the zero-write status line stays visible until a real
+// decision is made.
+func (m LauncherRootModel) viewChoose() string {
+	var lines []string
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	b.WriteString("\n  " + titleStyle.Render(i18n.T("launcher.landing.title")) + "\n")
-	b.WriteString("  " + StyleFaint.Render(i18n.T("launcher.landing.subtitle")) + "\n\n")
-	b.WriteString("  " + i18n.T("launcher.landing.question") + "\n\n")
+	lines = append(lines, titleStyle.Render(i18n.T("launcher.choose.title")))
+	lines = append(lines, StyleSubtle.Render(i18n.TF("launcher.choose.cwd", abbreviateHomePath(m.projectRoot))))
+	lines = append(lines, "")
 
 	options := []struct{ label, desc string }{
-		{i18n.T("launcher.landing.create"), i18n.T("launcher.landing.create_desc")},
-		{i18n.T("launcher.landing.open"), i18n.T("launcher.landing.open_desc")},
+		{i18n.T("launcher.choose.here"), i18n.T("launcher.choose.here_desc")},
+		{i18n.T("launcher.choose.open"), i18n.T("launcher.choose.open_desc")},
 	}
 	for i, opt := range options {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(ColorText)
-		if i == m.landingCursor {
+		if i == m.chooseCursor {
 			cursor = "> "
 			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 		}
-		b.WriteString(cursor + style.Render(opt.label) + "\n")
-		b.WriteString("    " + StyleFaint.Render(opt.desc) + "\n")
+		lines = append(lines, cursor+style.Render(opt.label))
+		for _, dl := range wrapToWidth(opt.desc, chooseDescWidth(m.width)) {
+			lines = append(lines, "    "+StyleFaint.Render(dl))
+		}
+		if i == 0 {
+			lines = append(lines, "")
+		}
 	}
 
-	b.WriteString("\n  " + lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.landing.status")) + "\n")
-	b.WriteString(StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+"  [Enter] "+i18n.T("welcome.confirm")+"  [Esc] "+i18n.T("firstrun.back")) + "\n")
-	return b.String()
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.zero_write_status")))
+	lines = append(lines, "")
+	lines = append(lines, StyleFaint.Render("↑↓ "+i18n.T("welcome.select_lang")+
+		"  [Enter] "+i18n.T("welcome.confirm")+
+		"  [Esc] "+i18n.T("launcher.hint_back")+
+		"  [q] "+i18n.T("launcher.hint_quit")))
+
+	return verticallyCentered(centerBlock(lines, m.width), m.height)
 }
 
-func (m LauncherRootModel) viewOpenExisting() string {
-	var b strings.Builder
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	b.WriteString("\n  " + titleStyle.Render(i18n.T("launcher.open_existing.title")) + "\n\n")
+// chooseDescWidth bounds the option-description wrap width so the choose
+// block stays a readable column instead of one screen-wide line, degrading
+// gracefully on narrow terminals.
+func chooseDescWidth(width int) int {
+	w := width - 12
+	if w > 64 {
+		w = 64
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
 
-	if len(m.openExistingRegistered) > 0 {
-		b.WriteString("  " + StyleFaint.Render(i18n.T("launcher.open_existing.registered_header")) + "\n")
-		for i, row := range m.openExistingRegistered {
-			cursor := "  "
-			style := lipgloss.NewStyle().Foreground(ColorText)
-			if m.openExistingSection == 0 && i == m.openExistingCursor {
-				cursor = "> "
-				style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-			line := row.Path
-			if !row.Alive {
-				style = lipgloss.NewStyle().Foreground(ColorTextFaint)
-				line += "  (" + i18n.T("launcher.open_existing.disabled_"+row.StaleReason) + ")"
-			}
-			b.WriteString(cursor + style.Render(line) + "\n")
+// viewPicker renders the redesigned "open an existing project" catalog:
+// one deduplicated project-level list under two grouped section headers
+// (running first, then registered-but-stopped), each row a name line with
+// status and a dim path line beneath it. Missing rows stay visible but
+// disabled with an explicit reason. The page is top-aligned like every
+// other list screen in the TUI, with a title bar, a scrollable body
+// windowed around the cursor, and a persistent keyboard-help footer.
+func (m LauncherRootModel) viewPicker() string {
+	title := StyleTitle.Render("  "+i18n.T("launcher.picker.title")) + "\n" + strings.Repeat("─", max(0, m.width))
+
+	body, cursorLine := m.renderPickerBody()
+	bodyLines := strings.Split(body, "\n")
+
+	// Window the body around the cursor when it exceeds the available
+	// height (title/rule above, rule/hints/status below).
+	avail := m.height - 5
+	if avail < 3 {
+		avail = 3
+	}
+	if len(bodyLines) > avail {
+		start := 0
+		if cursorLine >= 0 {
+			start = cursorLine - avail/2
 		}
-		b.WriteString("\n")
+		if start > len(bodyLines)-avail {
+			start = len(bodyLines) - avail
+		}
+		if start < 0 {
+			start = 0
+		}
+		bodyLines = bodyLines[start : start+avail]
+	}
+	for len(bodyLines) < avail {
+		bodyLines = append(bodyLines, "")
 	}
 
-	b.WriteString("  " + StyleFaint.Render(i18n.T("launcher.open_existing.running_header")) + "\n")
-	b.WriteString(m.projects.View())
+	status := ""
+	switch {
+	case m.pickerStatus != "":
+		status = " " + RuneBullet + " " + lipgloss.NewStyle().Foreground(ColorStuck).Render(m.pickerStatus)
+	case m.pickerScanning:
+		status = " " + RuneBullet + " " + StyleFaint.Render(i18n.T("launcher.picker.scanning"))
+	case m.pickerScanErr != "":
+		status = " " + RuneBullet + " " + lipgloss.NewStyle().Foreground(ColorStuck).Render(i18n.T("launcher.picker.scan_error"))
+	}
+	footer := strings.Repeat("─", max(0, m.width)) + "\n" +
+		StyleFaint.Render("  ↑↓ "+i18n.T("welcome.select_lang")+
+			"  [Enter] "+i18n.T("launcher.hint_open")+
+			"  [r] "+i18n.T("launcher.hint_rescan")+
+			"  [Esc] "+i18n.T("launcher.hint_back")) + status
 
-	b.WriteString("\n  " + lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.landing.status")) + "\n")
-	return b.String()
+	return title + "\n" + strings.Join(bodyLines, "\n") + "\n" + footer
+}
+
+// renderPickerBody renders the grouped rows and reports which rendered line
+// the cursor's name-line landed on (for scroll windowing); -1 when the list
+// is empty.
+func (m LauncherRootModel) renderPickerBody() (string, int) {
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+	nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+	missingStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
+	pathStyle := StyleFaint
+	runningStyle := lipgloss.NewStyle().Foreground(ColorActive)
+
+	var lines []string
+	cursorLine := -1
+
+	if len(m.pickerRows) == 0 {
+		lines = append(lines, "")
+		if m.pickerScanning {
+			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.scanning")))
+		} else {
+			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty")))
+			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty_hint")))
+		}
+		return strings.Join(lines, "\n"), cursorLine
+	}
+
+	renderedRunningHeader := false
+	renderedRegisteredHeader := false
+	for i, row := range m.pickerRows {
+		if row.Running && !renderedRunningHeader {
+			lines = append(lines, "")
+			lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.running")))
+			renderedRunningHeader = true
+		}
+		if !row.Running && !renderedRegisteredHeader {
+			lines = append(lines, "")
+			lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.registered")))
+			renderedRegisteredHeader = true
+		}
+
+		cursor := "  "
+		style := nameStyle
+		if i == m.pickerCursor {
+			cursor = "> "
+			style = selectedStyle
+		}
+		if row.Missing {
+			style = missingStyle
+			if i == m.pickerCursor {
+				style = missingStyle.Bold(true)
+			}
+		}
+
+		var badges []string
+		if row.Running && row.AgentCount > 0 {
+			label := i18n.TF("launcher.picker.agents", row.AgentCount)
+			if row.AgentCount == 1 {
+				label = i18n.T("launcher.picker.agents_one")
+			}
+			badges = append(badges, runningStyle.Render("● "+label))
+		}
+		if row.Missing {
+			badges = append(badges, missingStyle.Render(i18n.T("launcher.picker.missing")))
+		}
+		nameLine := "  " + cursor + style.Render(row.Name)
+		if len(badges) > 0 {
+			nameLine += "  " + strings.Join(badges, "  ")
+		}
+		if i == m.pickerCursor {
+			cursorLine = len(lines)
+		}
+		lines = append(lines, nameLine)
+		lines = append(lines, "      "+pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), m.width-8)))
+	}
+
+	// Honest empty-group notes: when one source has entries and the other
+	// has none, say so rather than leaving an unexplained gap.
+	if !renderedRunningHeader && !m.pickerScanning && m.pickerScanErr == "" {
+		lines = append(lines, "")
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("launcher.picker.running")))
+		lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.none_running")))
+	}
+
+	return strings.Join(lines, "\n"), cursorLine
 }
 
 func (m LauncherRootModel) viewUnfinishedStaging() string {
 	var b strings.Builder
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
 	b.WriteString("\n  " + titleStyle.Render(i18n.T("launcher.staging.title")) + "\n\n")
-	b.WriteString("  " + i18n.T("launcher.staging.hint") + "\n\n")
+	for _, hl := range wrapToWidth(i18n.T("launcher.staging.hint"), max(20, m.width-4)) {
+		b.WriteString("  " + hl + "\n")
+	}
+	b.WriteString("\n")
 	for i, dir := range m.unfinishedStaging {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(ColorText)
@@ -621,8 +980,153 @@ func (m LauncherRootModel) viewUnfinishedStaging() string {
 	b.WriteString("\n" + StyleFaint.Render("  [d] "+i18n.T("launcher.staging.discard")+
 		"  [r] "+i18n.T("launcher.staging.resume")+
 		"  [c] "+i18n.T("launcher.staging.continue")+
-		"  [Esc] "+i18n.T("firstrun.back")) + "\n")
+		"  [Esc] "+i18n.T("launcher.hint_back")) + "\n")
 	return b.String()
+}
+
+// verticallyCentered pads content with leading newlines so its block sits
+// vertically centered — the same rule firstrun.go's welcome page uses.
+func verticallyCentered(content string, height int) string {
+	contentLines := strings.Count(content, "\n")
+	topPad := (height - contentLines) / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+	return strings.Repeat("\n", topPad) + content
+}
+
+// centerBlock left-aligns the given lines against each other, then centers
+// the whole block horizontally — a readable middle ground between fully
+// centered text (welcome page) and a hard left margin (wizard pages).
+func centerBlock(lines []string, width int) string {
+	maxW := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > maxW {
+			maxW = w
+		}
+	}
+	pad := 0
+	if width > maxW {
+		pad = (width - maxW) / 2
+	}
+	prefix := strings.Repeat(" ", pad)
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(prefix + l + "\n")
+	}
+	return b.String()
+}
+
+// wrapToWidth is a small display-width-aware greedy word wrapper for
+// option/hint copy. CJK text (no spaces) falls back to rune-width chunking
+// so zh/wen descriptions still wrap instead of overflowing.
+func wrapToWidth(s string, width int) []string {
+	if width < 4 {
+		width = 4
+	}
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		words := strings.Fields(para)
+		if len(words) == 0 {
+			out = append(out, "")
+			continue
+		}
+		line := ""
+		flush := func() {
+			if line != "" {
+				out = append(out, line)
+				line = ""
+			}
+		}
+		for _, w := range words {
+			for lipgloss.Width(w) > width {
+				// Single overlong token (typical for CJK, which has no
+				// spaces): split at display width.
+				head, tail := splitAtDisplayWidth(w, width-lipgloss.Width(line)-boolToInt(line != ""))
+				if head == "" {
+					flush()
+					head, tail = splitAtDisplayWidth(w, width)
+				}
+				if line != "" {
+					line += " "
+				}
+				line += head
+				flush()
+				w = tail
+			}
+			if w == "" {
+				continue
+			}
+			if line == "" {
+				line = w
+			} else if lipgloss.Width(line)+1+lipgloss.Width(w) <= width {
+				line += " " + w
+			} else {
+				flush()
+				line = w
+			}
+		}
+		flush()
+	}
+	return out
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// splitAtDisplayWidth splits s so the head's display width is at most w.
+func splitAtDisplayWidth(s string, w int) (string, string) {
+	if w <= 0 {
+		return "", s
+	}
+	used := 0
+	for i, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > w {
+			return s[:i], s[i:]
+		}
+		used += rw
+	}
+	return s, ""
+}
+
+// truncatePathToWidth shortens a display path to fit width, keeping the
+// tail (the discriminating part of a filesystem path) and prefixing an
+// ellipsis.
+func truncatePathToWidth(p string, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	if lipgloss.Width(p) <= width {
+		return p
+	}
+	target := width - 1
+	// Trim runes off the front until the remainder fits.
+	runes := []rune(p)
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > target {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
+}
+
+// abbreviateHomePath renders the user's home directory as "~" for display.
+// Display-only — decisions and results always carry the full path.
+func abbreviateHomePath(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if strings.HasPrefix(p, home+string(filepath.Separator)) {
+		return "~" + p[len(home):]
+	}
+	return p
 }
 
 // existingProjectRoot performs the final pure validation for an Open
