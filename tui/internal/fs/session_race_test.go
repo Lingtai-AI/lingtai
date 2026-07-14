@@ -42,7 +42,7 @@ func TestSessionCacheConcurrentRebuildAndRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sc := NewSessionCache(humanDir, tmp)
+	sc := NewSessionCache(humanDir, tmp, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 
 	var wg sync.WaitGroup
