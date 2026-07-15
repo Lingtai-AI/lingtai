@@ -92,9 +92,9 @@ func TestPR5Stage4RejectedOrdinaryCompletionsCannotPublishOrAdvanceUnread(t *tes
 				refresh := installationRefreshResult(t, &guarded, false)
 				var cmd tea.Cmd
 				guarded, cmd = installationDeliverApp(t, guarded, refresh)
-				if guarded.mailStore.version <= oldVersion || guarded.mail.asyncStoreVersion != guarded.mailStore.version ||
-					guarded.currentThread.acceptedSnapshotVersion != guarded.mailStore.version || !guarded.mail.initialLoading {
-					t.Fatalf("accepted root advance did not retain loading A at its new exact version: versions=%d/%d/%d old=%d loading=%v",
+				if guarded.mailStore.version <= oldVersion || guarded.mail.asyncStoreVersion != oldVersion ||
+					guarded.currentThread.acceptedSnapshotVersion != oldVersion || !guarded.mail.initialLoading {
+					t.Fatalf("accepted root advance did not stage loading A on its published version: versions=%d/%d/%d old=%d loading=%v",
 						guarded.mailStore.version, guarded.mail.asyncStoreVersion,
 						guarded.currentThread.acceptedSnapshotVersion, oldVersion, guarded.mail.initialLoading)
 				}
