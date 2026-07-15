@@ -19,6 +19,7 @@ related_files:
   - tui/internal/preset/preset_agent_json_merge_test.go
   - tui/internal/preset/skills/lingtai-dev-guide/SKILL.md
   - tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md
+  - tui/internal/preset/skills/lingtai-update/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/minimax/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/zhipu/SKILL.md

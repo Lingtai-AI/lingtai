@@ -310,6 +310,9 @@ auto-restarts the running TUI. If the install method is unsupported (unknown/
 other), it reports that and makes no changes. The confirmation is mandatory:
 `/update-tui` never installs on a single keystroke.
 
+For install-method detection, source-build failures, Homebrew tap details, or
+mainland-China connectivity, open the bundled `lingtai-update` skill.
+
 ### `/login` — check and manage credentials
 **Usage:** `/login`
 

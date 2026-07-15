@@ -88,6 +88,8 @@ lingtai-tui
 
 > Homebrew（`brew install lingtai-ai/lingtai/lingtai-tui`）于旧用者犹可用；然新装宜用一令之脚本。PyPI 之 `lingtai` 包者，乃 TUI 代管之 Python 运行时——唯开发或诊断内核时，方用 `pip`。
 
+欲知 TUI/portal 之深更新、安法辨识、Homebrew 与中原构建之路，读内置 [`lingtai-update` 技能](tui/internal/preset/skills/lingtai-update/SKILL.md)。
+
 ## 与之协作之数途
 
 **TUI——`lingtai-tui`** 者，人所主用之面也：项目初始、模型/配方之设、对话与信匣、器灵之状（token + 上下文 + 心跳），及通往久存之状之诸视——`/knowledge` 观其知识库，`/skills` 观其技能之录，`/system` 观其性格与契约，`/daemons` 观后台之运，`/goal` 立一长线之志。入 `/help` 可观斜杠命令之全录（其权威之目，乃内置 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.wen.md)，此 README 不复述之）。升级之后若有不谐，行 `lingtai-tui doctor`。

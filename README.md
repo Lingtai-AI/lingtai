@@ -84,6 +84,8 @@ The installer covers macOS, Linux, and WSL (native Windows/PowerShell is planned
 
 > Homebrew (`brew install lingtai-ai/lingtai/lingtai-tui`) still works for existing users, but the one-line installer is the recommended path for new installs. The `lingtai` PyPI package is the Python runtime the TUI manages for you — reach for `pip` only when developing or diagnosing the kernel itself.
 
+For deeper TUI/portal update operations, install-method detection, Homebrew, and mainland-China build routing, see the bundled [`lingtai-update` skill](tui/internal/preset/skills/lingtai-update/SKILL.md).
+
 ## Ways to work with it
 
 **TUI — `lingtai-tui`** is the main human surface: setup, model/preset configuration, chat and mail, scientist status (token/context + heartbeat), and views into the durable state — `/knowledge` for its library, `/skills` for its skill catalog, `/system` for its character and covenant, `/daemons` for background runs, `/goal` to set a long-running goal. Type `/help` for the complete slash-command reference (the canonical catalog is the bundled [`lingtai-tui-help` skill](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.en.md); this README does not duplicate it). Run `lingtai-tui doctor` if anything looks broken after an upgrade.

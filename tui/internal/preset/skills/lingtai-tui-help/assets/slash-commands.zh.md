@@ -250,7 +250,7 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 ### `/update-tui` — 更新 TUI 二进制
 **用法：** `/update-tui`
 
-检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后**仅**升级 TUI 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。
+检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后**仅**升级 TUI 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
 
 ### `/login` — 查看与管理凭证
 **用法：** `/login`

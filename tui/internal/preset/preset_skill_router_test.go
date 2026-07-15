@@ -435,7 +435,7 @@ func TestCodexPoolManualDocumentsClassifiedContract(t *testing.T) {
 	}
 }
 
-// TestBundledSkillsHaveMaintenance verifies all 63 SKILL.md files have the
+// TestBundledSkillsHaveMaintenance verifies all 70 SKILL.md files have the
 // exact canonical maintenance sentence.
 func TestBundledSkillsHaveMaintenance(t *testing.T) {
 	count := 0
@@ -477,7 +477,7 @@ func TestBundledSkillsHaveMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 63 {
-		t.Fatalf("checked %d bundled skill SKILL.md files, want 63", count)
+	if count != 70 {
+		t.Fatalf("checked %d bundled skill SKILL.md files, want 70", count)
 	}
 }

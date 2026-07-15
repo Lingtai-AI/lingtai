@@ -1,0 +1,59 @@
+---
+name: lingtai-update
+description: >
+  Use when updating, installing, building, or debugging lingtai-tui or
+  lingtai-portal, including /update-tui, install-method detection, Homebrew,
+  source builds, tap inspection, or mainland-China connectivity.
+version: 1.0.0
+last_changed_at: "2026-07-15T12:00:00-07:00"
+maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
+---
+
+# LingTai TUI update
+
+This is the TUI-owned operational router for the two Go deliverables shipped by
+this repository: `lingtai-tui` and `lingtai-portal`. Read only the focused
+reference that matches the problem; code, tests, `ANATOMY.md`, and the current
+installer remain the source of truth.
+
+This skill documents existing paths. It does not add update machinery. The
+Python runtime and kernel install/update/nudge behavior belongs to the kernel's
+`system-manual` runtime/kernel update manual; use that manual for kernel work,
+then return here for the TUI or portal binary boundary.
+
+## Nested reference catalog
+
+```yaml
+- name: lingtai-update-install
+  location: reference/install/SKILL.md
+  description: Public installer, release assets, source fallback, and manual builds for both Go binaries.
+- name: lingtai-update-command
+  location: reference/update-tui/SKILL.md
+  description: /update-tui and self-update semantics, confirmation, restart, and ownership boundaries.
+- name: lingtai-update-detection
+  location: reference/detection/SKILL.md
+  description: Native install.json, source/user-local, Homebrew, symlink, and unknown-install detection.
+- name: lingtai-update-diagnosis
+  location: reference/diagnosis/SKILL.md
+  description: Failure triage for updater, installer, binary, portal, and runtime symptoms.
+- name: lingtai-update-homebrew
+  location: reference/homebrew/SKILL.md
+  description: Supported formula use and safe exploration of the Lingtai Homebrew tap and generated build logic.
+- name: lingtai-update-mainland
+  location: reference/mainland-china/SKILL.md
+  description: Mainland-China build/connectivity routing for Go, npm, GitHub, and Gitee without mirror guarantees.
+```
+
+## Routing table
+
+| Need | Read |
+|---|---|
+| Install or build `lingtai-tui` and `lingtai-portal` | `reference/install/SKILL.md` |
+| Understand `/update-tui` or `lingtai-tui self-update` | `reference/update-tui/SKILL.md` |
+| Explain why the TUI chose source, Homebrew, or unknown | `reference/detection/SKILL.md` |
+| Diagnose a failed or partial update | `reference/diagnosis/SKILL.md` |
+| Inspect Homebrew formula/tap behavior | `reference/homebrew/SKILL.md` |
+| Build or fetch from mainland China | `reference/mainland-china/SKILL.md` |
+
+The concise `/help` command entry remains in `lingtai-tui-help`; it routes deep
+questions here rather than duplicating these procedures.

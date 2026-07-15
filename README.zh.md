@@ -83,6 +83,8 @@ lingtai-tui
 
 > Homebrew（`brew install lingtai-ai/lingtai/lingtai-tui`）对老用户依然可用，但新安装推荐用一行安装脚本。PyPI 上的 `lingtai` 包是 TUI 代你管理的 Python 运行时——只有在开发或诊断内核本身时才需要动 `pip`。
 
+更深入的 TUI/portal 更新、安装方式检测、Homebrew 与中国大陆构建路由，见内置的 [`lingtai-update` 技能](tui/internal/preset/skills/lingtai-update/SKILL.md)。
+
 ## 与它协作的几种方式
 
 **TUI——`lingtai-tui`** 是主交互界面：项目初始化、模型/预设配置、对话与信箱、助理状态（token + 上下文 + 心跳），以及通往持久状态的各个视图——`/knowledge` 看它的知识库，`/skills` 看它的技能目录，`/system` 看它的性格与契约，`/daemons` 看后台运行，`/goal` 设一个长线目标。输入 `/help` 查看完整斜杠命令参考（权威目录是内置的 [`lingtai-tui-help` 技能](tui/internal/preset/skills/lingtai-tui-help/assets/slash-commands.zh.md)，本 README 不再重复）。升级后哪里不对劲，跑 `lingtai-tui doctor`。

@@ -49,7 +49,7 @@ func TestBundledSkillsHaveLastChangedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 63 {
-		t.Fatalf("checked %d bundled skill SKILL.md files, want 63", count)
+	if count != 70 {
+		t.Fatalf("checked %d bundled skill SKILL.md files, want 70", count)
 	}
 }
