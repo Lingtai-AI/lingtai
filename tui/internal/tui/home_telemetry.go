@@ -39,8 +39,9 @@ import (
 // session in view. And <limit> was read from manifest["llm"]["context_limit"],
 // a key that does not exist (context_limit sits at the manifest TOP LEVEL), so
 // the "/ limit" half silently never rendered. This version reads current-session
-// stats from the same source the molt-session stats panel uses
-// (fs.SumMoltSessionTokenLedger().Current, props.go) and reads context usage +
+// stats from the process-free canonical-event variant of the source the
+// molt-session stats panel uses (fs.SumMoltSessionTokenLedgerFromEvents().Current)
+// and reads context usage +
 // window from the SAME live `.status.json` snapshot /kanban's context section
 // uses (fs.ReadStatus().Tokens.Context, props.go:518-535) so the two never
 // disagree. When no data is available the row is omitted entirely.
@@ -59,10 +60,11 @@ type homeTelemetry struct {
 
 // --- Async scheduling ------------------------------------------------------
 //
-// gatherHomeTelemetry does real I/O: it reaches fs.SumMoltSessionTokenLedger
-// (an incremental in-process read of canonical events.jsonl plus the token
-// ledger; derived SQLite is only a compatibility fallback when events.jsonl is
-// absent) and fs.ReadStatus/ReadInitManifest. On a slow volume that work can
+// gatherHomeTelemetry does real I/O: it reaches
+// fs.SumMoltSessionTokenLedgerFromEvents (an incremental in-process read of
+// canonical events.jsonl plus the token ledger that degrades to empty when the
+// event log is unavailable) and fs.ReadStatus/ReadInitManifest. On a slow volume
+// that work can
 // still take time. It therefore MUST NOT run on the Bubble Tea render
 // (View) or input (Update/syncViewportHeight) paths — a stall there freezes the
 // whole TUI.
@@ -75,10 +77,11 @@ type homeTelemetry struct {
 //
 // Fetches are debounced by two model flags checked in maybeScheduleHomeTelemetry:
 //   - homeTelemetryInFlight: at most one background fetch runs at a time, so a
-//     burst of keypresses/renders cannot spawn a pile of sqlite subprocesses.
+//     burst of keypresses/renders cannot overlap event/ledger/status reads.
 //   - homeTelemetryLastFetch + homeTelemetryTTL: after a completed fetch we skip
 //     re-fetching until the TTL elapses, so the steady-state 1s poll doesn't
-//     hammer the sidecar and rapid typing costs nothing.
+//     reread hot telemetry files faster than they change and rapid typing costs
+//     nothing.
 
 // homeTelemetryTTL is the minimum wall-clock interval between two completed
 // background telemetry fetches. It is deliberately close to the mail poll cadence
