@@ -90,27 +90,44 @@ func (s *RailUnreadStore) SyncTargets(targets []DirectTarget, snapshot []MailMes
 			current[key] = target
 		}
 	}
-	changed := false
-	for key := range s.state.Targets {
+	changed := len(current) != len(s.state.Targets)
+	if !changed {
+		for key, target := range current {
+			state, exists := s.state.Targets[key]
+			if !exists || state.AddressFingerprint != AddressFingerprint(target.Address) {
+				changed = true
+				break
+			}
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	nextTargets := make(map[string]unreadTargetState, len(s.state.Targets))
+	for key, state := range s.state.Targets {
+		nextTargets[key] = state
+	}
+	next := railUnreadState{Version: s.state.Version, Targets: nextTargets}
+	for key := range next.Targets {
 		if _, exists := current[key]; !exists {
-			delete(s.state.Targets, key)
-			changed = true
+			delete(next.Targets, key)
 		}
 	}
 	for key, target := range current {
 		fingerprint := AddressFingerprint(target.Address)
-		state, exists := s.state.Targets[key]
+		state, exists := next.Targets[key]
 		if !exists || state.AddressFingerprint != fingerprint {
-			s.state.Targets[key] = unreadTargetState{
+			next.Targets[key] = unreadTargetState{
 				AddressFingerprint: fingerprint,
 				LastSeen:           incomingBoundary(snapshot, humanAddress, target.Address),
 			}
-			changed = true
 		}
 	}
-	if changed {
-		return s.write()
+	if err := s.writeState(next); err != nil {
+		return err
 	}
+	s.state = next
 	return nil
 }
 
