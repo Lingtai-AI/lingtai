@@ -32,6 +32,8 @@ type AgentRailState struct {
 
 type mailPaneFocus uint8
 
+const agentRailHeaderRows = 2 // localized title, then one blank line
+
 const (
 	mailFocusChat mailPaneFocus = iota
 	mailFocusRail
@@ -132,7 +134,12 @@ func (a App) handleMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd, bool) {
 	}
 	if _, ok := budget.RailLocalX(msg.X); ok {
 		a.focusMailRail()
-		return a, nil, true
+		row, ok := a.agentRail.selectRowAtLocalY(msg.Y - budget.TopChromeRows)
+		if !ok || row.originalMain || row.target.policy != asyncTargetHomeAgentRail {
+			return a, nil, true
+		}
+		updated, cmd := a.activateOrdinaryRailRow(row)
+		return updated, cmd, true
 	}
 	return a, nil, true
 }
@@ -169,6 +176,18 @@ func (s AgentRailState) selectedRow() (railRow, bool) {
 		return railRow{}, false
 	}
 	return s.rows[s.cursor], true
+}
+
+func (s *AgentRailState) selectRowAtLocalY(localY int) (railRow, bool) {
+	if s == nil {
+		return railRow{}, false
+	}
+	index := localY - agentRailHeaderRows
+	if index < 0 || index >= len(s.rows) {
+		return railRow{}, false
+	}
+	s.cursor = index
+	return s.rows[index], true
 }
 
 func sameRailRowIdentity(a, b railRow) bool {
