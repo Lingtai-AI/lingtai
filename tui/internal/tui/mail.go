@@ -357,8 +357,24 @@ func (m MailModel) requestOlderPage() (MailModel, tea.Cmd) {
 func (m MailModel) olderPageCmd(window int) tea.Msg {
 	envelope := captureAsync(asyncOlderPage, m.asyncCurrent())
 	cache := m.snapshotCache()
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
-	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
+	persistenceRole := fs.MainAggregateWriter
+	if m.asyncBinding.target.policy == asyncTargetHomeAgentRail {
+		persistenceRole = fs.NoPersist
+	}
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), persistenceRole)
+	if m.asyncBinding.target.policy == asyncTargetHomeAgentRail {
+		sessionCache.RebuildDirectThreadWindowedInMemory(
+			cache.Messages,
+			m.humanAddr,
+			m.orchAddr,
+			m.orchestrator,
+			m.orchDisplayName(),
+			window,
+			window,
+		)
+	} else {
+		sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
+	}
 	return mailOlderPageMsg{
 		envelope:     envelope,
 		sessionCache: sessionCache,

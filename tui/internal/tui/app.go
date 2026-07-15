@@ -480,6 +480,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.mail.sessionCache = state.sessionCache
 			a.mail.acceptedSnapshot = a.mailStore.snapshot
 			a.mail.asyncStoreVersion = state.acceptedSnapshotVersion
+			if state.sessionCache.Complete() {
+				a.mail.ingestWindow = 0
+			} else {
+				a.mail.ingestWindow = state.ingestWindow
+			}
 			a.mail.initialLoading = false
 			a.mail.buildMessages()
 		}

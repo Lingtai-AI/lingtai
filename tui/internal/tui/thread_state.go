@@ -16,6 +16,7 @@ type ThreadState struct {
 	generation              uint64
 	acceptedSnapshotVersion uint64
 	sessionCache            *fs.SessionCache
+	ingestWindow            int
 }
 
 func newColdThreadState(target asyncTarget, generation, acceptedSnapshotVersion uint64, sessionCache *fs.SessionCache) ThreadState {
@@ -46,6 +47,7 @@ type threadLoadRequest struct {
 type threadLoadResultMsg struct {
 	envelope     asyncEnvelope
 	sessionCache *fs.SessionCache
+	eventWindow  int
 	err          error
 }
 
@@ -136,10 +138,15 @@ func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 	worker := c.worker
 	return func() tea.Msg {
 		if worker == nil {
-			return threadLoadResultMsg{envelope: envelope}
+			return threadLoadResultMsg{envelope: envelope, eventWindow: request.eventWindow}
 		}
 		sessionCache, err := worker.Load(request)
-		return threadLoadResultMsg{envelope: envelope, sessionCache: sessionCache, err: err}
+		return threadLoadResultMsg{
+			envelope:     envelope,
+			sessionCache: sessionCache,
+			eventWindow:  request.eventWindow,
+			err:          err,
+		}
 	}
 }
 
@@ -163,6 +170,7 @@ func (c *ThreadLoadCoordinator) settle(current asyncCurrent, msg threadLoadResul
 			msg.envelope.storeVersion,
 			msg.sessionCache,
 		)
+		candidate.ingestWindow = msg.eventWindow
 		state = &candidate
 	}
 
