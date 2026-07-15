@@ -13,21 +13,27 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 )
 
-// railRow is display-only rail state. Its target is an immutable value copy of
-// the activation coordinates; the row intentionally owns no MailModel,
-// ProjectMailStore, MailCache, scanner, tick, or thread projection.
+// railRow is display-only rail state. Its targets are immutable value copies of
+// the accepted activation and direct-mail coordinates; the row intentionally
+// owns no MailModel, ProjectMailStore, MailCache, scanner, tick, or thread
+// projection.
 type railRow struct {
 	label        string
 	originalMain bool
 	target       asyncTarget
+	directTarget fs.DirectTarget
 }
 
 // AgentRailState is the root-owned display projection for the home Agent rail.
 // Inventory-backed ordinary rows are installed into this projection separately;
-// rendering never scans the filesystem or process table.
+// rendering never scans the filesystem or process table. The accepted inventory
+// owner/readiness pair prevents temporary or stale rows from becoming an
+// authoritative unread target set.
 type AgentRailState struct {
-	rows   []railRow
-	cursor int
+	rows                   []railRow
+	cursor                 int
+	acceptedInventoryOwner asyncOwner
+	acceptedInventoryReady bool
 }
 
 type mailPaneFocus uint8
@@ -214,8 +220,10 @@ func (s *AgentRailState) installInventory(owner asyncOwner, snapshot inventory.S
 	main := railRow{label: "Main", originalMain: true}
 	for _, row := range s.rows {
 		if row.originalMain {
-			if label := strings.TrimSpace(row.label); label != "" {
-				main.label = label
+			main = row
+			main.originalMain = true
+			if strings.TrimSpace(main.label) == "" {
+				main.label = "Main"
 			}
 			break
 		}
@@ -236,10 +244,16 @@ func (s *AgentRailState) installInventory(owner asyncOwner, snapshot inventory.S
 		rows = append(rows, railRow{
 			label:  railInventoryLabel(record, target),
 			target: target,
+			directTarget: fs.DirectTarget{
+				Directory: target.directory,
+				Address:   record.Address,
+			},
 		})
 	}
 
 	s.rows = rows
+	s.acceptedInventoryOwner = owner
+	s.acceptedInventoryReady = true
 	s.cursor = oldCursor
 	if hadSelection {
 		for i, row := range s.rows {
@@ -252,7 +266,29 @@ func (s *AgentRailState) installInventory(owner asyncOwner, snapshot inventory.S
 	s.clampCursor()
 }
 
-func (s *AgentRailState) installMain(label string) {
+func (s AgentRailState) acceptedDirectTargets(owner asyncOwner) ([]fs.DirectTarget, bool) {
+	if !s.acceptedInventoryReady || s.acceptedInventoryOwner != owner || len(s.rows) == 0 {
+		return nil, false
+	}
+	targets := make([]fs.DirectTarget, 0, len(s.rows))
+	for _, row := range s.rows {
+		if strings.TrimSpace(row.directTarget.Directory) == "" || strings.TrimSpace(row.directTarget.Address) == "" {
+			return nil, false
+		}
+		targets = append(targets, row.directTarget)
+	}
+	return targets, true
+}
+
+func (s *AgentRailState) clearInventoryAcceptance() {
+	if s == nil {
+		return
+	}
+	s.acceptedInventoryOwner = asyncOwner{}
+	s.acceptedInventoryReady = false
+}
+
+func (s *AgentRailState) installMain(label string, directTarget fs.DirectTarget) {
 	if s == nil {
 		return
 	}
@@ -263,6 +299,7 @@ func (s *AgentRailState) installMain(label string) {
 	for i := range s.rows {
 		if s.rows[i].originalMain {
 			s.rows[i].label = label
+			s.rows[i].directTarget = directTarget
 			s.clampCursor()
 			return
 		}
@@ -270,7 +307,7 @@ func (s *AgentRailState) installMain(label string) {
 	if len(s.rows) > 0 && s.cursor >= 0 && s.cursor < len(s.rows) {
 		s.cursor++
 	}
-	s.rows = append([]railRow{{label: label, originalMain: true}}, s.rows...)
+	s.rows = append([]railRow{{label: label, originalMain: true, directTarget: directTarget}}, s.rows...)
 	s.clampCursor()
 }
 
@@ -285,7 +322,7 @@ func (s AgentRailState) rowsForView(mainLabel string) []railRow {
 		}
 	}
 	fallback := AgentRailState{}
-	fallback.installMain(mainLabel)
+	fallback.installMain(mainLabel, fs.DirectTarget{})
 	return append(fallback.rows, rows...)
 }
 

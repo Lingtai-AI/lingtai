@@ -189,6 +189,9 @@ type App struct {
 	mailGeneration              uint64
 	projectsActivationID        uint64
 	mailStore                   ProjectMailStore
+	railUnreadStore             *fs.RailUnreadStore
+	railUnreadProjectID         string
+	railUnreadSnapshotOwner     asyncOwner
 	agentRailInventoryLifecycle *agentRailInventoryLifecycleState
 	suspendedHomeMailStore      *ProjectMailStore
 	currentThread               ThreadState
@@ -254,8 +257,65 @@ func (a App) scheduleAgentRailInventoryScan() tea.Cmd {
 	}
 }
 
+func (a *App) resetRailUnreadHome() {
+	if a == nil {
+		return
+	}
+	a.railUnreadStore = nil
+	a.railUnreadProjectID = ""
+	a.railUnreadSnapshotOwner = asyncOwner{}
+	a.agentRail.clearInventoryAcceptance()
+}
+
+func (a *App) bindRailUnreadHome(projectDir string) {
+	if a == nil || a.visiting {
+		return
+	}
+	projectID := canonicalProjectMailIdentity(projectDir)
+	if projectID == "" {
+		return
+	}
+	if a.railUnreadProjectID != "" && a.railUnreadProjectID != projectID {
+		a.resetRailUnreadHome()
+	}
+	if a.railUnreadProjectID == "" {
+		a.railUnreadProjectID = projectID
+	}
+}
+
+// reconcileRailUnread joins only root-accepted values: the exact current home
+// owner inventory and an accepted ProjectMailSnapshot from that same owner
+// lifetime. It performs no mailbox scan and is called only from Update after the
+// inventory lifecycle mutex has been released or after snapshot publication.
+func (a *App) reconcileRailUnread() {
+	if a == nil || a.visiting || !a.mailStore.active || a.mailStore.snapshot == nil {
+		return
+	}
+	owner := a.mailStore.binding.owner
+	if !validAsyncOwner(owner) || owner != a.railUnreadSnapshotOwner ||
+		a.railUnreadProjectID != owner.projectID || canonicalProjectMailIdentity(a.projectDir) != owner.projectID {
+		return
+	}
+	targets, ready := a.agentRail.acceptedDirectTargets(owner)
+	if !ready || strings.TrimSpace(a.mail.humanAddr) == "" {
+		return
+	}
+
+	messages := a.mailStore.snapshot.cache.Messages
+	if a.railUnreadStore == nil {
+		store, err := fs.OpenRailUnreadStore(filepath.Dir(a.projectDir), targets, messages, a.mail.humanAddr)
+		if err != nil {
+			return
+		}
+		a.railUnreadStore = store
+		return
+	}
+	_ = a.railUnreadStore.SyncTargets(targets, messages, a.mail.humanAddr)
+}
+
 func (a *App) installMailModel(m MailModel) {
 	inventoryLifecycle := a.ensureAgentRailInventoryLifecycle()
+	a.bindRailUnreadHome(m.baseDir)
 	if !a.mailStore.matches(m.baseDir, m.humanDir) {
 		// Invalidate the shared execution token before discarding a current
 		// store so any delayed location command becomes a no-op.
@@ -273,7 +333,10 @@ func (a *App) installMailModel(m MailModel) {
 	policy, pid := a.currentMailTargetPolicy()
 	a.mailStore.bindMailModel(&m, policy, pid)
 	if policy == asyncTargetHomeMain {
-		a.agentRail.installMain(m.orchDisplayName())
+		a.agentRail.installMain(m.orchDisplayName(), fs.DirectTarget{
+			Directory: m.orchestrator,
+			Address:   m.orchAddr,
+		})
 	}
 	a.mail = m
 	if policy == asyncTargetHomeMain && a.currentView == appViewMail && a.layoutBudget().RailVisible && a.mailFocus == mailFocusRail {
@@ -597,6 +660,7 @@ func (a *App) invalidateProjectMailForReset() {
 	if a.agentRailInventoryLifecycle != nil {
 		a.agentRailInventoryLifecycle.invalidate()
 	}
+	a.resetRailUnreadHome()
 	a.mailStore.suspend()
 	if a.suspendedHomeMailStore != nil {
 		a.suspendedHomeMailStore.suspend()
@@ -621,11 +685,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.visiting || state == nil || !validAsyncOwner(currentOwner) || msg.owner != currentOwner {
 			return a, nil
 		}
+		installed := false
 		state.acceptLatest(msg.requestSequence, func() {
 			if msg.err == nil {
 				a.agentRail.installInventory(msg.owner, msg.snapshot)
+				installed = true
 			}
 		})
+		if installed {
+			a.reconcileRailUnread()
+		}
 		return a, nil
 
 	case childWindowSizeMsg:
@@ -666,11 +735,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		snapshot := a.mailStore.installRefresh(msg)
+		if !a.visiting {
+			a.railUnreadSnapshotOwner = a.mailStore.binding.owner
+		}
 		msg.mail.snapshot = snapshot
 		a.mail.asyncStoreVersion = snapshot.Version()
 		var mailCmd tea.Cmd
 		a.mail, mailCmd = a.mail.Update(msg.mail)
 		a.syncCurrentThreadFromMail()
+		a.reconcileRailUnread()
 		// Capture the accepted target/status state in the deferred authoritative
 		// rebuild rather than the pre-refresh model snapshot.
 		pendingInitialCmd := a.mailStore.beginPendingInitialRefresh(a.mail)
