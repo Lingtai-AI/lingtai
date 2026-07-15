@@ -2720,11 +2720,7 @@ func (m FirstRunModel) View() string {
 
 	switch m.step {
 	case stepWelcome:
-		out := m.viewWelcome()
-		if line := m.viewDraftStatusLine(); line != "" {
-			out += "\n" + line + "\n"
-		}
-		return out
+		return m.viewWelcome()
 	default:
 		// non-welcome steps: show standard title bar
 	}
@@ -2733,17 +2729,6 @@ func (m FirstRunModel) View() string {
 	title := StyleTitle.Render("  " + i18n.T("firstrun.welcome"))
 	b.WriteString(title + "\n")
 	b.WriteString(strings.Repeat("─", m.width) + "\n\n")
-	// Persistent "draft only" status — every draft-mode page carries this,
-	// not just the final review page, so cancelling anywhere is never a
-	// surprise. stepReview renders its own copy inline (below the review
-	// content, right above the footer) so it is skipped here to avoid a
-	// duplicate line.
-	if m.draftMode && m.step != stepReview {
-		if line := m.viewDraftStatusLine(); line != "" {
-			b.WriteString(line + "\n\n")
-		}
-	}
-
 	switch m.step {
 	case stepAPIKey:
 		stepNum, total := stepProgress(m.step, m.hasPresets || m.draftMode, m.setupMode)
@@ -4740,8 +4725,8 @@ func presetCapabilitiesSummary(p preset.Preset) string {
 // viewReview renders the draft-mode-only final confirmation page — the
 // single place before "Start project" where the user sees the complete set
 // of choices gathered across the wizard. Every draft page (not just this
-// one) also shows the persistent "draft only" status string via
-// viewDraftStatusLine, so cancelling anywhere is never a surprise.
+// one) remains draft-only until the user confirms "Start project", so
+// cancelling anywhere is still a no-write action.
 func (m FirstRunModel) viewReview() string {
 	var b strings.Builder
 
@@ -4787,21 +4772,10 @@ func (m FirstRunModel) viewReview() string {
 
 	b.WriteString("\n  " + lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render("> "+i18n.T("firstrun.review.start")) + "\n")
 
-	b.WriteString("\n" + m.viewDraftStatusLine() + "\n")
 	b.WriteString(StyleFaint.Render(
 		"  [Enter] "+i18n.T("firstrun.review.start")+
 			"  [Esc] "+i18n.T("firstrun.back")) + "\n")
 	return b.String()
-}
-
-// viewDraftStatusLine renders the persistent "draft only, nothing written"
-// status string shown on every draft-mode page (design doc UX requirement:
-// not just the final review page). Empty string outside draftMode.
-func (m FirstRunModel) viewDraftStatusLine() string {
-	if !m.draftMode {
-		return ""
-	}
-	return "  " + lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("firstrun.draft_status"))
 }
 
 func (m FirstRunModel) viewRecipe() string {
