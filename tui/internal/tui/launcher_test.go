@@ -1203,186 +1203,130 @@ func TestLauncherRootModel_AppliesPersistedThemeAndLanguageAndKeepsPreludeChoice
 	}
 }
 
-// --- Invariant 2/7: the redesigned project-level picker ---------------------
+// --- Open Existing reuses the established /projects model ------------------
 
-// TestLauncherPicker_MergesAndDedupesRegisteredAndRunning proves the picker
-// builds ONE project-level list from its two read-only sources: a project
-// that is both running and registered appears exactly once (running row,
-// Registered flag set), a running-only project carries its agent count, a
-// stale registry row stays visible but Missing, and the whole entry+scan
-// sequence performs zero writes under HOME.
-func TestLauncherPicker_MergesAndDedupesRegisteredAndRunning(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	globalDir := filepath.Join(home, ".lingtai-tui")
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	both := t.TempDir()
-	runningOnly := t.TempDir()
-	for _, p := range []string{both, runningOnly} {
-		if err := os.MkdirAll(filepath.Join(p, ".lingtai"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stale := filepath.Join(t.TempDir(), "gone")
-	if err := config.Register(globalDir, both); err != nil {
-		t.Fatal(err)
-	}
-	if err := config.Register(globalDir, stale); err != nil {
-		t.Fatal(err)
-	}
-
-	recA := projectRecord(both, "a", "A", true)
-	recB := projectRecord(runningOnly, "b", "B", true)
-	recB2 := projectRecord(runningOnly, "b2", "B2", true)
-	snap := inventory.Snapshot{
-		Records: []inventory.Record{recA, recB, recB2},
-		Groups: []inventory.Group{
-			{Project: both, Records: []inventory.Record{recA}},
-			{Project: runningOnly, Records: []inventory.Record{recB, recB2}},
-		},
+func TestLauncherOpenExistingReusesProjectsModelAndMapsValidatedRoot(t *testing.T) {
+	project := t.TempDir()
+	record := projectRecord(project, "admin", "Admin", true)
+	snapshot := inventory.Snapshot{
+		Records: []inventory.Record{record},
+		Groups:  []inventory.Group{{Project: project, Records: []inventory.Record{record}}},
 	}
 	withProjectsScan(t, func(inventory.Options) (inventory.Snapshot, error) {
-		return snap, nil
+		return snapshot, nil
 	})
 
-	lm := NewLauncherRootModel(t.TempDir(), globalDir, "")
-	before := dirSnapshot(t, home)
+	m := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+	updated, cmd := m.enterPicker()
+	lm := updated.(LauncherRootModel)
+	if lm.view != launcherViewPicker {
+		t.Fatalf("enterPicker view = %v, want picker", lm.view)
+	}
+	if lm.projects.source != projectSourceRegistry {
+		t.Fatalf("launcher picker source = %v, want established registry ProjectsModel", lm.projects.source)
+	}
+	if cmd == nil {
+		t.Fatal("enterPicker did not initialize ProjectsModel")
+	}
 
-	updated, cmd := lm.enterPicker()
+	// The child owns the inventory load and selection validation. Feed its
+	// messages through LauncherRootModel rather than constructing launcher rows.
+	updated, _ = lm.Update(runCmd(cmd))
+	lm = updated.(LauncherRootModel)
+	updated, cmd = lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
 	lm = updated.(LauncherRootModel)
 	if cmd == nil {
-		t.Fatal("expected enterPicker to schedule an inventory scan")
+		t.Fatal("ProjectsModel Enter did not request validated selection")
 	}
-	scanMsg := runCmd(cmd)
-	updated2, _ := lm.Update(scanMsg)
-	lm = updated2.(LauncherRootModel)
-
-	assertSnapshotsEqual(t, "picker entry + scan", before, dirSnapshot(t, home))
-
-	rows := lm.pickerRows
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 deduplicated rows, got %d: %+v", len(rows), rows)
-	}
-	if rows[0].Path != both || !rows[0].Running || !rows[0].Registered || rows[0].AgentCount != 1 {
-		t.Fatalf("row 0 (running+registered) = %+v", rows[0])
-	}
-	if rows[1].Path != runningOnly || !rows[1].Running || rows[1].Registered || rows[1].AgentCount != 2 {
-		t.Fatalf("row 1 (running only, 2 agents) = %+v", rows[1])
-	}
-	if rows[2].Path != stale || rows[2].Running || !rows[2].Registered || !rows[2].Missing {
-		t.Fatalf("row 2 (stale registered) = %+v", rows[2])
-	}
-}
-
-// TestLauncherPicker_DropsStaleScanResults proves an out-of-order scan
-// result from a superseded request is dropped: after a rescan bumps the
-// sequence, a message carrying the OLD sequence must not overwrite the
-// catalog.
-func TestLauncherPicker_DropsStaleScanResults(t *testing.T) {
-	globalDir := t.TempDir()
-	withProjectsScan(t, func(inventory.Options) (inventory.Snapshot, error) {
-		return inventory.Snapshot{}, nil
-	})
-
-	lm := NewLauncherRootModel(t.TempDir(), globalDir, "")
-	updated, _ := lm.enterPicker()
+	updated, cmd = lm.Update(runCmd(cmd))
 	lm = updated.(LauncherRootModel)
-	staleSeq := lm.pickerScanSeq
-
-	// A rescan supersedes the first request.
-	updated2, _ := lm.updatePicker(tea.KeyPressMsg{Text: "r"})
-	lm = updated2.(LauncherRootModel)
-
-	staleRoot := t.TempDir()
-	staleSnap := inventory.Snapshot{Groups: []inventory.Group{{Project: staleRoot, Records: []inventory.Record{projectRecord(staleRoot, "s", "S", true)}}}}
-	updated3, _ := lm.Update(launcherScanMsg{seq: staleSeq, snapshot: staleSnap})
-	lm = updated3.(LauncherRootModel)
-	if len(lm.pickerRows) != 0 || !lm.pickerScanning {
-		t.Fatalf("stale scan result was applied: rows=%+v scanning=%v", lm.pickerRows, lm.pickerScanning)
+	if cmd == nil {
+		t.Fatal("validated ProjectsModel selection did not emit ProjectsAgentSelectedMsg")
 	}
-
-	freshRoot := t.TempDir()
-	freshSnap := inventory.Snapshot{Groups: []inventory.Group{{Project: freshRoot, Records: []inventory.Record{projectRecord(freshRoot, "f", "F", true)}}}}
-	updated4, _ := lm.Update(launcherScanMsg{seq: lm.pickerScanSeq, snapshot: freshSnap})
-	lm = updated4.(LauncherRootModel)
-	if len(lm.pickerRows) != 1 || lm.pickerRows[0].Path != freshRoot {
-		t.Fatalf("fresh scan result was not applied: %+v", lm.pickerRows)
+	updated, cmd = lm.Update(runCmd(cmd))
+	lm = updated.(LauncherRootModel)
+	if !lm.done || cmd == nil {
+		t.Fatalf("validated selection did not finish launcher: done=%v cmd=%T", lm.done, cmd)
+	}
+	if lm.result.Kind != DecisionOpenExisting || lm.result.ProjectRoot != project {
+		t.Fatalf("result = (%v, %q), want (%v, %q)", lm.result.Kind, lm.result.ProjectRoot, DecisionOpenExisting, project)
 	}
 }
 
-// TestLauncherPicker_EnterOpensValidatedRoot proves Enter on a live row
-// revalidates the root at the decision boundary (existingProjectRoot) and
-// produces the typed DecisionOpenExisting result carrying the clean
-// absolute project root.
-func TestLauncherPicker_EnterOpensValidatedRoot(t *testing.T) {
-	validRoot := t.TempDir()
-	if err := os.Mkdir(filepath.Join(validRoot, ".lingtai"), 0o755); err != nil {
-		t.Fatal(err)
+func TestLauncherOpenExistingIgnoresStaleActivationAndRequest(t *testing.T) {
+	project := t.TempDir()
+	record := projectRecord(project, "admin", "Admin", true)
+	m := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+
+	updated, _ := m.enterPicker()
+	m = updated.(LauncherRootModel)
+	firstActivation := m.projectsActivationID
+	firstRequest := m.projects.requestSeq
+
+	// Leave and re-enter Open Existing. The embedded model is replaced and
+	// the launcher-owned activation must advance before its messages are
+	// allowed to select a project.
+	updated, _ = m.Update(ViewChangeMsg{View: "mail"})
+	m = updated.(LauncherRootModel)
+	updated, _ = m.enterPicker()
+	m = updated.(LauncherRootModel)
+	if m.projectsActivationID != firstActivation+1 {
+		t.Fatalf("projects activation = %d, want %d after re-entry", m.projectsActivationID, firstActivation+1)
 	}
 
-	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
-	lm.view = launcherViewPicker
-	lm.pickerRows = []launcherProjectRow{{Name: filepath.Base(validRoot), Path: validRoot, Registered: true}}
+	updated, cmd := m.Update(ProjectsAgentSelectedMsg{
+		ActivationID: firstActivation,
+		RequestSeq:   firstRequest,
+		Record:       record,
+	})
+	m = updated.(LauncherRootModel)
+	if m.done || cmd != nil {
+		t.Fatalf("stale old-activation selection was accepted: done=%v cmd=%T", m.done, cmd)
+	}
 
-	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := updated.(LauncherRootModel)
-	if !got.done || cmd == nil {
-		t.Fatalf("valid selection was not accepted: done=%v cmd=%T", got.done, cmd)
+	staleRequest := m.projects.requestSeq
+	m.projects.nextRequestSeq()
+	updated, cmd = m.Update(ProjectsAgentSelectedMsg{
+		ActivationID: m.projectsActivationID,
+		RequestSeq:   staleRequest,
+		Record:       record,
+	})
+	m = updated.(LauncherRootModel)
+	if m.done || cmd != nil {
+		t.Fatalf("stale request selection was accepted: done=%v cmd=%T", m.done, cmd)
 	}
-	wantRoot, err := filepath.Abs(validRoot)
-	if err != nil {
-		t.Fatal(err)
+
+	updated, cmd = m.Update(ProjectsAgentSelectedMsg{
+		ActivationID: m.projectsActivationID,
+		RequestSeq:   m.projects.requestSeq,
+		Record:       record,
+	})
+	m = updated.(LauncherRootModel)
+	if !m.done || cmd == nil {
+		t.Fatalf("current validated selection did not finish launcher: done=%v cmd=%T", m.done, cmd)
 	}
-	if got.result.Kind != DecisionOpenExisting || got.result.ProjectRoot != filepath.Clean(wantRoot) {
-		t.Fatalf("result = (%v, %q), want (%v, %q)", got.result.Kind, got.result.ProjectRoot, DecisionOpenExisting, filepath.Clean(wantRoot))
+	if m.result.Kind != DecisionOpenExisting || m.result.ProjectRoot != project {
+		t.Fatalf("result = (%v, %q), want (%v, %q)", m.result.Kind, m.result.ProjectRoot, DecisionOpenExisting, project)
 	}
 }
 
-// TestLauncherPicker_EnterOnVanishedRootDisablesRow proves a row that was
-// live when the catalog loaded cannot route a now-missing .lingtai path
-// into the normal write-capable startup pipeline: Enter revalidates, marks
-// the row Missing, and explains — never done=true.
-func TestLauncherPicker_EnterOnVanishedRootDisablesRow(t *testing.T) {
-	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
-	lm.view = launcherViewPicker
-	lm.pickerRows = []launcherProjectRow{{
-		Name: "vanished",
-		Path: filepath.Join(t.TempDir(), "vanished"), // .lingtai never existed
-		// Deliberately stale opening-time state: listed as live.
-		Registered: true,
-	}}
-
-	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := updated.(LauncherRootModel)
-	if got.done || cmd != nil {
-		t.Fatalf("stale row was accepted: done=%v cmd=%T", got.done, cmd)
+func TestLauncherOpenExistingProjectsBackReturnsToChoose(t *testing.T) {
+	m := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
+	m.view = launcherViewPicker
+	m.projects = NewProjectsModel(t.TempDir(), filepath.Join(t.TempDir(), ".lingtai"), ProjectsContext{})
+	updated, cmd := m.updatePicker(tea.KeyPressMsg{Code: tea.KeyEscape})
+	lm := updated.(LauncherRootModel)
+	if cmd == nil {
+		t.Fatal("ProjectsModel Esc did not emit its back message")
 	}
-	if !got.pickerRows[0].Missing {
-		t.Fatalf("stale row not disabled after revalidation: %+v", got.pickerRows[0])
+	back, ok := runCmd(cmd).(ViewChangeMsg)
+	if !ok || back.View != "mail" {
+		t.Fatalf("ProjectsModel Esc emitted %T %#v, want ViewChangeMsg{View:mail}", runCmd(cmd), back)
 	}
-	if got.pickerStatus != i18n.T("launcher.picker.gone") {
-		t.Fatalf("status = %q, want the localized gone message", got.pickerStatus)
-	}
-}
-
-// TestLauncherPicker_MissingRowExplainsInsteadOfOpening proves an
-// already-Missing row is selectable (so its reason is discoverable) but
-// never activatable.
-func TestLauncherPicker_MissingRowExplainsInsteadOfOpening(t *testing.T) {
-	lm := NewLauncherRootModel(t.TempDir(), t.TempDir(), "")
-	lm.view = launcherViewPicker
-	lm.pickerRows = []launcherProjectRow{{Name: "gone", Path: "/nonexistent", Registered: true, Missing: true}}
-
-	updated, cmd := lm.updatePicker(tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := updated.(LauncherRootModel)
-	if got.done || cmd != nil {
-		t.Fatalf("missing row was accepted: done=%v cmd=%T", got.done, cmd)
-	}
-	if got.pickerStatus != i18n.T("launcher.picker.missing_blocked") {
-		t.Fatalf("status = %q, want the localized missing-blocked message", got.pickerStatus)
+	updated, _ = lm.Update(back)
+	lm = updated.(LauncherRootModel)
+	if lm.view != launcherViewChoose {
+		t.Fatalf("launcher view after ProjectsModel back = %v, want choose", lm.view)
 	}
 }
 
@@ -1574,90 +1518,6 @@ func TestViewReview_ShowsPlaceholderWhenPresetHasNoModelOrCapabilities(t *testin
 	}
 }
 
-// --- Redesigned launcher views: rendering contracts -------------------------
-
-// TestLauncherViews_RenderWelcomeChooseAndPickerCoherently proves each of
-// the three redesigned screens carries its load-bearing content: the
-// welcome prelude renders the SHARED brand block (product title), the
-// explanation, all three language options, the zero-write status, and its
-// key hints; the choose page renders the question, the cwd, both options
-// with their consequence copy, and the zero-write status; the picker
-// renders its title, grouped section headers without duplicating a
-// project that is both running and registered, a missing-row reason, an
-// honest empty state, and visible keyboard help.
-func TestLauncherViews_RenderWelcomeChooseAndPickerCoherently(t *testing.T) {
-	t.Cleanup(func() {
-		SetThemeByName(DefaultThemeName)
-		_ = i18n.SetLang("en")
-	})
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	projectRoot := t.TempDir()
-	globalDir := filepath.Join(home, ".lingtai-tui")
-
-	m := NewLauncherRootModel(projectRoot, globalDir, "")
-	m.width, m.height = 100, 32
-
-	welcome := m.viewWelcome()
-	for _, want := range []string{
-		i18n.T("welcome.title"),
-		i18n.T("launcher.welcome.explain1"),
-		"English", "现代汉语", "文言",
-		i18n.T("launcher.zero_write_status"),
-		i18n.T("launcher.welcome.continue"),
-	} {
-		if !strings.Contains(welcome, want) {
-			t.Errorf("welcome view missing %q", want)
-		}
-	}
-
-	choose := m.viewChoose()
-	for _, want := range []string{
-		i18n.T("launcher.choose.title"),
-		i18n.T("launcher.choose.here"),
-		i18n.T("launcher.choose.open"),
-		i18n.T("launcher.zero_write_status"),
-	} {
-		if !strings.Contains(choose, want) {
-			t.Errorf("choose view missing %q", want)
-		}
-	}
-
-	// Picker with a merged catalog: one running+registered project, one
-	// missing registered project. The row Name is deliberately distinct
-	// from its Path so the exactly-once assertion below counts the name
-	// line alone, not the dim path line under it.
-	m.view = launcherViewPicker
-	m.pickerRows = []launcherProjectRow{
-		{Name: "distinct-row-name", Path: t.TempDir(), Running: true, Registered: true, AgentCount: 2},
-		{Name: "gone", Path: "/nonexistent/gone-dir", Registered: true, Missing: true},
-	}
-	picker := m.viewPicker()
-	for _, want := range []string{
-		i18n.T("launcher.picker.title"),
-		i18n.T("launcher.picker.running"),
-		i18n.T("launcher.picker.registered"),
-		i18n.T("launcher.picker.missing"),
-		i18n.T("launcher.hint_open"),
-		i18n.T("launcher.hint_rescan"),
-	} {
-		if !strings.Contains(picker, want) {
-			t.Errorf("picker view missing %q", want)
-		}
-	}
-	if strings.Count(picker, "distinct-row-name") != 1 {
-		t.Errorf("running+registered project must render exactly once, got:\n%s", picker)
-	}
-
-	// Empty picker: honest empty state plus the go-back hint.
-	m.pickerRows = nil
-	m.pickerScanning = false
-	empty := m.viewPicker()
-	if !strings.Contains(empty, i18n.T("launcher.picker.empty")) || !strings.Contains(empty, i18n.T("launcher.picker.empty_hint")) {
-		t.Errorf("empty picker view missing empty-state copy:\n%s", empty)
-	}
-}
-
 // TestDraftFirstRun_ClearingPendingKeyRestoresSharedBaseline proves an empty
 // second editor commit clears only the key entered during this draft. It must
 // neither leave that stale pending secret active nor delete the shared key that
@@ -1735,7 +1595,7 @@ func TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible(t *testing.T) {
 		"English",
 		"现代汉语",
 		"文言",
-		i18n.T("launcher.zero_write_status"),
+		"nothing is created or changed until you say so.",
 		i18n.T("launcher.welcome.continue"),
 		"Esc/q/Ctrl+C",
 	} {
@@ -1746,151 +1606,6 @@ func TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible(t *testing.T) {
 	assertLauncherScreenWidth(t, content, 80)
 	if got := len(strings.Split(strings.TrimSuffix(content, "\n"), "\n")); got > 24 {
 		t.Fatalf("80x24 welcome rendered %d physical lines; mandatory onboarding would be clipped", got)
-	}
-}
-
-// TestLauncherScreens_LongValuesStayBounded covers the realistic compact and
-// normal sizes with externally supplied cwd, project, staging, and status
-// values. It also checks that picker name truncation reserves both the cursor
-// and running/missing badges, preserving the two-physical-lines-per-row
-// accounting used by the scroll window.
-func TestLauncherScreens_LongValuesStayBounded(t *testing.T) {
-	t.Cleanup(func() {
-		SetThemeByName(DefaultThemeName)
-		_ = i18n.SetLang("en")
-	})
-	t.Setenv("HOME", t.TempDir())
-	longRoot := filepath.Join(t.TempDir(), strings.Repeat("cwd-segment-", 20))
-	longName := strings.Repeat("project-name-", 16)
-	longPath := filepath.Join(t.TempDir(), strings.Repeat("staging-segment-", 20), longName)
-	for _, tc := range []struct {
-		width, height int
-		name          string
-	}{
-		{60, 16, "compact"},
-		{80, 24, "normal"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := NewLauncherRootModel(longRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
-			m.width, m.height = tc.width, tc.height
-
-			m.view = launcherViewWelcome
-			welcome := ansi.Strip(m.View().Content)
-			assertLauncherScreenWidth(t, welcome, tc.width)
-			if got := len(strings.Split(strings.TrimSuffix(welcome, "\n"), "\n")); got > tc.height {
-				t.Errorf("%dx%d welcome rendered %d physical lines", tc.width, tc.height, got)
-			}
-			m.view = launcherViewChoose
-			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
-
-			m.view = launcherViewPicker
-			m.pickerRows = []launcherProjectRow{{
-				Name:       longName,
-				Path:       longPath,
-				Running:    true,
-				AgentCount: 999,
-				Registered: true,
-				Missing:    true,
-			}}
-			m.pickerCursor = 0
-			body, cursorLine := m.renderPickerBody()
-			bodyLines := strings.Split(body, "\n")
-			if cursorLine < 0 || cursorLine+1 >= len(bodyLines) {
-				t.Fatalf("picker row lost its physical name/path pair: cursorLine=%d body=%q", cursorLine, body)
-			}
-			if cursorLine+2 != len(bodyLines) {
-				t.Fatalf("long picker row changed physical row accounting: cursorLine=%d bodyLines=%d body=%q", cursorLine, len(bodyLines), body)
-			}
-			m.pickerStatus = strings.Repeat("status-value-", 20)
-			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
-
-			m.view = launcherViewStaging
-			m.unfinishedStaging = []string{longPath}
-			m.unfinishedDiscardStatus = strings.Repeat("discard-error-", 20)
-			assertLauncherScreenWidth(t, ansi.Strip(m.View().Content), tc.width)
-		})
-	}
-}
-
-// TestLauncherPickerRootViewKeepsProjectPairs exercises the production root
-// View at every picker cursor position. The viewport may omit headers while
-// centering a selection, but no visible project name/path pair may be split at
-// either edge, including when the footer and status both wrap.
-func TestLauncherPickerRootViewKeepsProjectPairs(t *testing.T) {
-	t.Cleanup(func() {
-		SetThemeByName(DefaultThemeName)
-		_ = i18n.SetLang("en")
-	})
-	t.Setenv("HOME", t.TempDir())
-	projectRoot := t.TempDir()
-	rows := make([]launcherProjectRow, 0, 12)
-	for i := 0; i < 12; i++ {
-		rows = append(rows, launcherProjectRow{
-			Name:       fmt.Sprintf("TERRA-ROW-%02d", i),
-			Path:       filepath.Join(projectRoot, fmt.Sprintf("TERRA-PATH-%02d", i)),
-			Running:    i < 6,
-			Registered: i >= 6,
-			AgentCount: i + 1,
-		})
-	}
-
-	for _, tc := range []struct {
-		width, height int
-		wrapped       bool
-	}{
-		{width: 60, height: 16},
-		{width: 60, height: 16, wrapped: true},
-		{width: 80, height: 24},
-		{width: 80, height: 24, wrapped: true},
-	} {
-		t.Run(fmt.Sprintf("%dx%d-wrapped=%v", tc.width, tc.height, tc.wrapped), func(t *testing.T) {
-			for cursor := range rows {
-				m := NewLauncherRootModel(projectRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
-				m.view = launcherViewPicker
-				m.pickerRows = rows
-				m.pickerCursor = cursor
-				if tc.wrapped {
-					m.pickerStatus = strings.Repeat("wrapped-status-", 20)
-				}
-				updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
-				m = updated.(LauncherRootModel)
-				content := ansi.Strip(m.View().Content)
-				lines := renderedLauncherLines(content)
-				if len(lines) > tc.height {
-					t.Fatalf("cursor %d rendered %d physical lines at %dx%d:\n%s", cursor, len(lines), tc.width, tc.height, content)
-				}
-				assertLauncherScreenWidth(t, content, tc.width)
-				selectedName := fmt.Sprintf("TERRA-ROW-%02d", cursor)
-				selectedPath := fmt.Sprintf("TERRA-PATH-%02d", cursor)
-				if !strings.Contains(content, selectedName) || !strings.Contains(content, selectedPath) {
-					t.Fatalf("cursor %d selected pair %s/%s is outside its viewport at %dx%d:\n%s", cursor, selectedName, selectedPath, tc.width, tc.height, content)
-				}
-				if tc.wrapped && !strings.Contains(content, "wrapped-status-") {
-					t.Fatalf("wrapped picker status disappeared at cursor %d:\n%s", cursor, content)
-				}
-				for i := range rows {
-					nameToken := fmt.Sprintf("TERRA-ROW-%02d", i)
-					pathToken := fmt.Sprintf("TERRA-PATH-%02d", i)
-					nameLine, pathLine := -1, -1
-					for lineNo, line := range lines {
-						if strings.Contains(line, nameToken) {
-							nameLine = lineNo
-						}
-						if strings.Contains(line, pathToken) {
-							pathLine = lineNo
-						}
-					}
-					if (nameLine < 0) != (pathLine < 0) {
-						t.Fatalf("cursor %d split visible pair %s/%s at %dx%d:\n%s", cursor, nameToken, pathToken, tc.width, tc.height, content)
-					}
-					if nameLine >= 0 {
-						if pathLine != nameLine+1 {
-							t.Fatalf("cursor %d rendered name %s without its immediate path %s at %dx%d (name=%d path=%d):\n%s", cursor, nameToken, pathToken, tc.width, tc.height, nameLine, pathLine, content)
-						}
-					}
-				}
-			}
-		})
 	}
 }
 
@@ -1984,19 +1699,32 @@ func TestLauncherKeyboardContract_ThroughRootUpdate(t *testing.T) {
 		assertCancel(t, m, key)
 	}
 
-	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Text: "q"}, {Text: "ctrl+c"}} {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Text: "q"}} {
 		m = newRoot()
 		m.view = launcherViewPicker
-		m.pickerRows = []launcherProjectRow{{Name: "project", Path: t.TempDir()}}
+		m.projects = NewProjectsModel(t.TempDir(), filepath.Join(t.TempDir(), ".lingtai"), ProjectsContext{})
 		updated, cmd := m.Update(key)
 		got := updated.(LauncherRootModel)
-		if key.Code == tea.KeyEscape {
-			if got.view != launcherViewChoose || cmd != nil {
-				t.Fatalf("Picker Esc view=%v cmd=%T, want Choose/no command", got.view, cmd)
-			}
-		} else if !got.done || got.result.Kind != DecisionCancel || cmd == nil {
-			t.Fatalf("Picker key %q did not cancel through root Update: done=%v result=%v cmd=%T", key.String(), got.done, got.result.Kind, cmd)
+		if cmd == nil {
+			t.Fatalf("ProjectsModel key %q did not emit its back message", key.String())
 		}
+		back, ok := runCmd(cmd).(ViewChangeMsg)
+		if !ok || back.View != "mail" {
+			t.Fatalf("ProjectsModel key %q emitted %T %#v, want ViewChangeMsg{View:mail}", key.String(), runCmd(cmd), back)
+		}
+		updated, _ = got.Update(back)
+		got = updated.(LauncherRootModel)
+		if got.view != launcherViewChoose {
+			t.Fatalf("ProjectsModel key %q did not return to Choose: view=%v", key.String(), got.view)
+		}
+	}
+	m = newRoot()
+	m.view = launcherViewPicker
+	m.projects = NewProjectsModel(t.TempDir(), filepath.Join(t.TempDir(), ".lingtai"), ProjectsContext{})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "ctrl+c"})
+	got := updated.(LauncherRootModel)
+	if !got.done || got.result.Kind != DecisionCancel || cmd == nil {
+		t.Fatalf("picker Ctrl+C did not cancel through root Update: done=%v result=%v cmd=%T", got.done, got.result.Kind, cmd)
 	}
 
 	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Text: "q"}, {Text: "ctrl+c"}} {

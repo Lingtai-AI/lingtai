@@ -11,7 +11,6 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
-	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -81,49 +80,14 @@ const (
 var launcherLangs = []string{"en", "zh", "wen"}
 var launcherLangLabels = []string{"English", "现代汉语", "文言"}
 
-// launcherProjectRow is one project-level row of the redesigned "open an
-// existing project" picker. The unit of choice on that page is a PROJECT
-// (a root the normal startup pipeline can be handed), never an agent —
-// which is why the picker no longer embeds the agent-level ProjectsModel.
-// Rows are merged from two read-only sources and deduplicated by
-// normalized root path: the running-agent inventory snapshot and
-// registry.jsonl (config.ListRegisteredProjects — never LoadAndPrune).
-type launcherProjectRow struct {
-	Name       string // basename of the project root
-	Path       string // project root (parent of .lingtai/)
-	Running    bool   // present in the process-table inventory snapshot
-	AgentCount int    // running agent count (Running rows only)
-	Registered bool   // present in registry.jsonl
-	Missing    bool   // root's .lingtai is gone (stale registry row or phantom process)
-}
-
-// pickerViewportUnit is the smallest unit the picker may put in or take out
-// of its viewport. A project unit owns both its name and path lines; a header
-// is a separate unit so scrolling can omit it without ever splitting a
-// project pair. The rendered lines already include their display styles.
-type pickerViewportUnit struct {
-	lines         []string
-	isProject     bool
-	isGroupHeader bool
-}
-
-// launcherScanMsg delivers one async inventory scan result to the picker.
-// seq must match the picker's current scan sequence or the result is
-// dropped — same staleness rule ProjectsModel uses for its catalog, kept
-// here in miniature since the launcher owns its own (much smaller) list.
-type launcherScanMsg struct {
-	seq      uint64
-	snapshot inventory.Snapshot
-	err      string
-}
-
 // LauncherRootModel is the pre-App root Bubble Tea model for the no-project
-// case (design doc Invariant 2/6): it owns ONLY view state, a read-only
-// project catalog, and (during Create) a *ProjectDraft. It never runs
-// migration/bootstrap and never touches the filesystem except through
-// explicit read-only calls (config.LoadTUIConfig, config.ListRegisteredProjects,
-// inventory.Scan) until the user reaches stepReview and presses
-// "Start project", at which point RunProjectCreate performs the single
+// case (design doc Invariant 2/6): it owns ONLY view state, the embedded
+// ProjectsModel used by Open Existing, and (during Create) a *ProjectDraft.
+// It never runs migration/bootstrap. Open Existing forwards the embedded
+// ProjectsModel's messages, including back and validated selections; the
+// child owns inventory loading and selection validation. The launcher reaches
+// its single real filesystem commit only when the user reaches stepReview and
+// presses "Start project", at which point RunProjectCreate performs the
 // staging→validate→rename commit.
 //
 // main.go constructs this, runs it via its OWN tea.Program (separate from
@@ -149,16 +113,11 @@ type LauncherRootModel struct {
 	// cursor on the choose page: 0 = start here, 1 = open existing.
 	chooseCursor int
 
-	// Picker state (see launcherProjectRow). pickerScanSeq guards stale
-	// async scan results; pickerStatus is a transient localized feedback
-	// line (missing row activated, project vanished, scan error detail).
-	pickerRegistered []config.RegisteredProject
-	pickerRows       []launcherProjectRow
-	pickerCursor     int
-	pickerScanSeq    uint64
-	pickerScanning   bool
-	pickerScanErr    string
-	pickerStatus     string
+	// Open Existing embeds the established /projects model directly. Its
+	// activation is owned by the launcher so delayed child messages from a
+	// previous entry cannot select a project in the current view.
+	projects             ProjectsModel
+	projectsActivationID uint64
 
 	// Create: hosts a draft-purpose FirstRunModel plus its ProjectDraft.
 	draft      *ProjectDraft
@@ -278,23 +237,29 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.firstRun = updated
 			return m, cmd
 		}
+		if m.view == launcherViewPicker {
+			updated, cmd := m.projects.Update(msg)
+			m.projects = updated
+			return m, cmd
+		}
 		return m, nil
 
-	case launcherScanMsg:
-		if msg.seq != m.pickerScanSeq {
-			return m, nil // stale scan result from a superseded request
+	case ProjectsAgentSelectedMsg:
+		// ProjectsModel has already re-scanned and validated this record.
+		// The launcher needs the project altitude, not the agent visit
+		// transition used by App. Both the child activation and its latest
+		// validation request must still be current in this launcher view.
+		if m.view == launcherViewPicker && msg.ActivationID == m.projectsActivationID && msg.RequestSeq == m.projects.requestSeq && msg.Record.Enterable && msg.Record.Project != "" {
+			m.result = LauncherResult{Kind: DecisionOpenExisting, ProjectRoot: msg.Record.Project}
+			m.done = true
+			return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
 		}
-		m.pickerScanning = false
-		m.pickerScanErr = msg.err
-		if msg.err == "" {
-			m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, msg.snapshot)
-		} else {
-			// Scan failed: the registered catalog is still honest on its
-			// own — show it, plus the error, rather than a blank page.
-			m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
-		}
-		if m.pickerCursor >= len(m.pickerRows) {
-			m.pickerCursor = max(0, len(m.pickerRows)-1)
+		return m, nil
+
+	case ViewChangeMsg:
+		if m.view == launcherViewPicker && msg.View == "mail" {
+			m.view = launcherViewChoose
+			return m, nil
 		}
 		return m, nil
 
@@ -386,10 +351,15 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Forward everything else (mouse wheel, paste, sub-model async
-	// messages) to the create wizard when it owns the active view.
+	// messages) to the active child model.
 	if m.view == launcherViewCreate && m.firstRunOn {
 		updated, cmd := m.firstRun.Update(msg)
 		m.firstRun = updated
+		return m, cmd
+	}
+	if m.view == launcherViewPicker {
+		updated, cmd := m.projects.Update(msg)
+		m.projects = updated
 		return m, cmd
 	}
 	return m, nil
@@ -470,142 +440,29 @@ func (m LauncherRootModel) updateChoose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-// enterPicker loads the read-only project catalog: registry.jsonl rows
-// immediately (config.ListRegisteredProjects — never LoadAndPrune, which
-// rewrites the file), plus an async process-table inventory scan for
-// running projects. Both are pure reads; the picker stays inside the
-// zero-write contract.
+// enterPicker embeds the established /projects model. The child owns the
+// inventory scan, cursor, validation, and rendering; the launcher only maps
+// its validated selection/back messages to launcher decisions/navigation.
 func (m LauncherRootModel) enterPicker() (tea.Model, tea.Cmd) {
 	m.view = launcherViewPicker
-	m.pickerStatus = ""
-	m.pickerScanErr = ""
-	m.pickerCursor = 0
-	m.pickerRegistered = config.ListRegisteredProjects(m.globalDirPath)
-	m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
-	m.pickerScanning = true
-	m.pickerScanSeq++
-	return m, m.scanRunningProjects(m.pickerScanSeq)
-}
-
-// scanRunningProjects runs the shared inventory scan (same
-// projectsScanInventory seam ProjectsModel uses, so tests inject fakes the
-// same way) off the Update loop and reports back with the request's seq.
-func (m LauncherRootModel) scanRunningProjects(seq uint64) tea.Cmd {
-	return func() tea.Msg {
-		snap, err := projectsScanInventory(inventory.Options{SelfPID: os.Getpid()})
-		if err != nil {
-			return launcherScanMsg{seq: seq, err: err.Error()}
-		}
-		return launcherScanMsg{seq: seq, snapshot: snap}
+	m.projectsActivationID++
+	if m.projectsActivationID == 0 {
+		m.projectsActivationID = 1
 	}
-}
-
-// buildLauncherProjectRows merges the running-project inventory snapshot
-// with the registered-project catalog into ONE deduplicated project-level
-// list: running projects first (in snapshot order, carrying their agent
-// count and, when also registered, the Registered flag), then registered
-// projects that are not currently running (registry order), with rows whose
-// .lingtai is gone marked Missing rather than hidden — the registry is
-// never pruned here, so hiding them would misreport what's on disk.
-// Deduplication is by inventory.NormalizePath so a relative or uncleaned
-// registry path still matches its running snapshot twin.
-func buildLauncherProjectRows(registered []config.RegisteredProject, snap inventory.Snapshot) []launcherProjectRow {
-	seen := map[string]int{}
-	var rows []launcherProjectRow
-	for _, g := range snap.Groups {
-		if g.Project == "" {
-			continue
-		}
-		key := inventory.NormalizePath(g.Project)
-		if idx, ok := seen[key]; ok {
-			rows[idx].AgentCount += len(g.Records)
-			continue
-		}
-		seen[key] = len(rows)
-		rows = append(rows, launcherProjectRow{
-			Name:       filepath.Base(g.Project),
-			Path:       g.Project,
-			Running:    true,
-			AgentCount: len(g.Records),
-			// A phantom group means processes claim a project whose
-			// .lingtai no longer resolves — honest state: running AND
-			// missing, disabled with the same reason as a stale
-			// registry row.
-			Missing: g.Phantom,
-		})
+	m.projects = NewProjectsModelWithActivation(m.globalDirPath, filepath.Join(m.projectRoot, ".lingtai"), ProjectsContext{}, m.projectsActivationID)
+	if m.width > 0 || m.height > 0 {
+		m.projects.SetSize(m.width, m.height)
 	}
-	for _, rp := range registered {
-		key := inventory.NormalizePath(rp.Path)
-		if idx, ok := seen[key]; ok {
-			rows[idx].Registered = true
-			continue
-		}
-		seen[key] = len(rows)
-		rows = append(rows, launcherProjectRow{
-			Name:       filepath.Base(rp.Path),
-			Path:       rp.Path,
-			Registered: true,
-			Missing:    !rp.Alive,
-		})
-	}
-	return rows
+	return m, m.projects.Init()
 }
 
 func (m LauncherRootModel) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.view = launcherViewChoose
-		return m, nil
-	case "q", "ctrl+c":
+	if msg.String() == "ctrl+c" {
 		return m.cancelAndQuit()
-	case "up", "k":
-		if m.pickerCursor > 0 {
-			m.pickerCursor--
-			m.pickerStatus = ""
-		}
-		return m, nil
-	case "down", "j":
-		if m.pickerCursor < len(m.pickerRows)-1 {
-			m.pickerCursor++
-			m.pickerStatus = ""
-		}
-		return m, nil
-	case "r", "ctrl+r":
-		m.pickerStatus = ""
-		m.pickerScanErr = ""
-		m.pickerRegistered = config.ListRegisteredProjects(m.globalDirPath)
-		m.pickerRows = buildLauncherProjectRows(m.pickerRegistered, inventory.Snapshot{})
-		if m.pickerCursor >= len(m.pickerRows) {
-			m.pickerCursor = max(0, len(m.pickerRows)-1)
-		}
-		m.pickerScanning = true
-		m.pickerScanSeq++
-		return m, m.scanRunningProjects(m.pickerScanSeq)
-	case "enter":
-		if m.pickerCursor >= len(m.pickerRows) {
-			return m, nil
-		}
-		row := m.pickerRows[m.pickerCursor]
-		if row.Missing {
-			m.pickerStatus = i18n.T("launcher.picker.missing_blocked")
-			return m, nil
-		}
-		// Revalidate at the decision boundary instead of trusting the
-		// snapshot captured when the picker opened (or last rescanned). A
-		// project can disappear while the launcher is visible; falling
-		// through with a stale root would hand a now-missing .lingtai
-		// path to the normal, write-capable startup pipeline.
-		root, ok := existingProjectRoot(row.Path)
-		if !ok {
-			m.pickerRows[m.pickerCursor].Missing = true
-			m.pickerStatus = i18n.T("launcher.picker.gone")
-			return m, nil
-		}
-		m.result = LauncherResult{Kind: DecisionOpenExisting, ProjectRoot: root}
-		m.done = true
-		return m, tea.Sequence(func() tea.Msg { return LauncherDoneMsg{Result: m.result} }, tea.Quit)
 	}
-	return m, nil
+	updated, cmd := m.projects.Update(msg)
+	m.projects = updated
+	return m, cmd
 }
 
 // enterCreate constructs the draft-purpose FirstRunModel. hasPresets is a
@@ -720,7 +577,7 @@ func (m LauncherRootModel) viewContent() string {
 	case launcherViewChoose:
 		return m.viewChoose()
 	case launcherViewPicker:
-		return m.viewPicker()
+		return m.projects.View()
 	case launcherViewStaging:
 		return m.viewUnfinishedStaging()
 	case launcherViewCreate:
@@ -737,13 +594,8 @@ func (m LauncherRootModel) viewContent() string {
 	return ""
 }
 
-// viewWelcome renders the launcher's prelude in the SAME visual language as
-// the first-run welcome page (renderWelcomeBrand: braille logo, product
-// name, poem — single-sourced with firstrun.go's viewWelcome so the two
-// cannot drift), followed by a short explanation of what LingTai is and
-// what this launcher will (not) do, the standard centered language
-// selector, and keyboard hints. Everything here is an in-memory preview;
-// the page states so explicitly.
+// viewWelcome keeps the no-project prelude minimal: the shared brand, the
+// required dynamic no-project sentence, language/theme controls, and hints.
 func (m LauncherRootModel) viewWelcome() string {
 	width := launcherTextWidth(m.width, 4)
 	compact := m.height > 0 && m.height <= 24
@@ -752,19 +604,10 @@ func (m LauncherRootModel) viewWelcome() string {
 	if !compact {
 		lines = append(lines, "")
 	}
-
-	appendCenteredWrapped := func(text string, style lipgloss.Style) {
-		for _, line := range wrapToWidth(text, width) {
-			lines = append(lines, centerText(style.Render(line), m.width))
-		}
+	displayRoot := abbreviateHomePath(m.projectRoot)
+	for _, line := range wrapToWidth(i18n.TF("launcher.welcome.explain2", displayRoot), width) {
+		lines = append(lines, centerText(StyleSubtle.Render(line), m.width))
 	}
-	appendCenteredWrapped(i18n.T("launcher.welcome.explain1"), StyleSubtle)
-	if !compact {
-		lines = append(lines, "")
-	}
-	displayRoot := truncatePathToWidth(abbreviateHomePath(m.projectRoot), launcherTextWidth(m.width, 20))
-	appendCenteredWrapped(i18n.TF("launcher.welcome.explain2", displayRoot), StyleSubtle)
-
 	if !compact {
 		lines = append(lines, "")
 	}
@@ -780,10 +623,6 @@ func (m LauncherRootModel) viewWelcome() string {
 	if !compact {
 		lines = append(lines, "")
 	}
-	appendCenteredWrapped(i18n.T("launcher.zero_write_status"), lipgloss.NewStyle().Foreground(ColorActive))
-	if !compact {
-		lines = append(lines, "")
-	}
 	hints := "↑↓ " + i18n.T("welcome.select_lang") +
 		"  [Enter] " + i18n.T("launcher.welcome.continue") +
 		"  [Ctrl+T] " + i18n.T("settings.theme") +
@@ -791,7 +630,6 @@ func (m LauncherRootModel) viewWelcome() string {
 	for _, line := range wrapToWidth(hints, width) {
 		lines = append(lines, centerText(StyleFaint.Render(line), m.width))
 	}
-
 	return verticallyCentered(strings.Join(lines, "\n")+"\n", m.height)
 }
 
@@ -826,42 +664,25 @@ func launcherWelcomeBrand(width, height int) string {
 	return strings.Join(selected, "\n") + "\n"
 }
 
-// viewChoose renders the explicit start-here / open-existing decision as a
-// centered block in the welcome page's visual family. Option copy states
-// consequences (what will and will not be written, and when), not UI
-// mechanics; the zero-write status line stays visible until a real
-// decision is made.
+// viewChoose renders only the functional create/open choices and navigation.
 func (m LauncherRootModel) viewChoose() string {
 	var lines []string
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 	lines = append(lines, titleStyle.Render(i18n.T("launcher.choose.title")))
-	cwd := truncatePathToWidth(abbreviateHomePath(m.projectRoot), launcherTextWidth(m.width, 12))
-	lines = append(lines, StyleSubtle.Render(i18n.TF("launcher.choose.cwd", cwd)))
 	lines = append(lines, "")
-
-	options := []struct{ label, desc string }{
-		{i18n.T("launcher.choose.here"), i18n.T("launcher.choose.here_desc")},
-		{i18n.T("launcher.choose.open"), i18n.T("launcher.choose.open_desc")},
-	}
-	for i, opt := range options {
+	options := []string{i18n.T("launcher.choose.here"), i18n.T("launcher.choose.open")}
+	for i, label := range options {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(ColorText)
 		if i == m.chooseCursor {
 			cursor = "> "
 			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 		}
-		label := truncatePathToWidth(opt.label, launcherTextWidth(m.width, lipgloss.Width(cursor)+2))
-		lines = append(lines, cursor+style.Render(label))
-		for _, dl := range wrapToWidth(opt.desc, chooseDescWidth(m.width)) {
-			lines = append(lines, "    "+StyleFaint.Render(dl))
-		}
+		lines = append(lines, cursor+style.Render(truncatePathToWidth(label, launcherTextWidth(m.width, lipgloss.Width(cursor)+2))))
 		if i == 0 {
 			lines = append(lines, "")
 		}
 	}
-
-	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("launcher.zero_write_status")))
 	lines = append(lines, "")
 	hint := "↑↓ " + i18n.T("welcome.select_lang") +
 		"  [Enter] " + i18n.T("welcome.confirm") +
@@ -870,7 +691,6 @@ func (m LauncherRootModel) viewChoose() string {
 	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
 		lines = append(lines, StyleFaint.Render(line))
 	}
-
 	return verticallyCentered(centerBlock(lines, m.width), m.height)
 }
 
@@ -885,273 +705,6 @@ func launcherTextWidth(width, margin int) int {
 		return 1
 	}
 	return width - margin
-}
-
-// chooseDescWidth bounds the option-description wrap width so the choose
-// block stays a readable column instead of one screen-wide line.
-func chooseDescWidth(width int) int {
-	w := launcherTextWidth(width, 4)
-	if w > 64 {
-		w = 64
-	}
-	return w
-}
-
-// viewPicker renders the redesigned "open an existing project" catalog:
-// one deduplicated project-level list under two grouped section headers
-// (running first, then registered-but-stopped), each row a name line with
-// status and a dim path line beneath it. Missing rows stay visible but
-// disabled with an explicit reason. The page is top-aligned like every
-// other list screen in the TUI, with a title bar, a scrollable body
-// windowed around the cursor, and a persistent keyboard-help footer.
-func (m LauncherRootModel) viewPicker() string {
-	titleLines := []string{
-		StyleTitle.Render("  " + truncatePathToWidth(i18n.T("launcher.picker.title"), launcherTextWidth(m.width, 2))),
-		strings.Repeat("─", max(0, m.width)),
-	}
-	units, selectedUnit := m.pickerViewportUnits()
-	footerLines := m.pickerFooterLines()
-
-	// Reserve the title and every physically wrapped footer/status line before
-	// selecting the body window. The body is selected as whole units, never as
-	// a slice of physical lines.
-	avail := m.height - len(titleLines) - len(footerLines)
-	if avail < 1 {
-		avail = 1
-	}
-	window := selectPickerViewportUnits(units, selectedUnit, avail)
-	bodyLines := flattenPickerUnits(window)
-	if len(bodyLines) > avail {
-		// This only occurs below the supported smallest terminal sizes, where a
-		// two-line project unit cannot physically fit. Normal terminal sizes
-		// always retain the selected pair atomically.
-		bodyLines = bodyLines[:avail]
-	}
-	for len(bodyLines) < avail {
-		bodyLines = append(bodyLines, "")
-	}
-
-	lines := append(append([]string{}, titleLines...), bodyLines...)
-	lines = append(lines, footerLines...)
-	return strings.Join(lines, "\n")
-}
-
-func (m LauncherRootModel) pickerFooterLines() []string {
-	lines := []string{strings.Repeat("─", max(0, m.width))}
-	hint := "  ↑↓ " + i18n.T("welcome.select_lang") +
-		"  [Enter] " + i18n.T("launcher.hint_open") +
-		"  [r] " + i18n.T("launcher.hint_rescan") +
-		"  [Esc] " + i18n.T("launcher.hint_back") +
-		"  [q/Ctrl+C] " + i18n.T("launcher.hint_quit")
-	for _, line := range wrapToWidth(hint, launcherTextWidth(m.width, 2)) {
-		lines = append(lines, StyleFaint.Render(line))
-	}
-	status := ""
-	switch {
-	case m.pickerStatus != "":
-		status = RuneBullet + " " + m.pickerStatus
-	case m.pickerScanning:
-		status = RuneBullet + " " + i18n.T("launcher.picker.scanning")
-	case m.pickerScanErr != "":
-		status = RuneBullet + " " + i18n.T("launcher.picker.scan_error")
-	}
-	if status != "" {
-		style := StyleFaint
-		if m.pickerStatus != "" || m.pickerScanErr != "" {
-			style = lipgloss.NewStyle().Foreground(ColorStuck)
-		}
-		for _, line := range wrapToWidth(status, launcherTextWidth(m.width, 2)) {
-			lines = append(lines, "  "+style.Render(line))
-		}
-	}
-	return lines
-}
-
-// pickerViewportUnits projects the catalog into atomic viewport units. Header
-// units may be omitted when the viewport is tight, but a project unit always
-// contains the name and path together.
-func (m LauncherRootModel) pickerViewportUnits() ([]pickerViewportUnit, int) {
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	nameStyle := lipgloss.NewStyle().Foreground(ColorText)
-	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	missingStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
-	pathStyle := StyleFaint
-	runningStyle := lipgloss.NewStyle().Foreground(ColorActive)
-
-	units := make([]pickerViewportUnit, 0, len(m.pickerRows)*2+2)
-	selectedUnit := -1
-	appendHeader := func(text string) {
-		units = append(units, pickerViewportUnit{
-			lines:         []string{"  " + sectionStyle.Render(text)},
-			isGroupHeader: true,
-		})
-	}
-	if len(m.pickerRows) == 0 {
-		lines := []string{""}
-		if m.pickerScanning {
-			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.scanning")))
-		} else {
-			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty")))
-			lines = append(lines, "  "+StyleFaint.Render(i18n.T("launcher.picker.empty_hint")))
-		}
-		return []pickerViewportUnit{{lines: lines}}, -1
-	}
-
-	renderedRunningHeader := false
-	renderedRegisteredHeader := false
-	for i, row := range m.pickerRows {
-		if row.Running && !renderedRunningHeader {
-			appendHeader(i18n.T("launcher.picker.running"))
-			renderedRunningHeader = true
-		}
-		if !row.Running && !renderedRegisteredHeader {
-			appendHeader(i18n.T("launcher.picker.registered"))
-			renderedRegisteredHeader = true
-		}
-
-		cursor := "  "
-		style := nameStyle
-		if i == m.pickerCursor {
-			cursor = "> "
-			style = selectedStyle
-		}
-		if row.Missing {
-			style = missingStyle
-			if i == m.pickerCursor {
-				style = missingStyle.Bold(true)
-			}
-		}
-
-		var badgeText []string
-		var badgeStyles []lipgloss.Style
-		if row.Running && row.AgentCount > 0 {
-			label := i18n.TF("launcher.picker.agents", row.AgentCount)
-			if row.AgentCount == 1 {
-				label = i18n.T("launcher.picker.agents_one")
-			}
-			badgeText = append(badgeText, "● "+label)
-			badgeStyles = append(badgeStyles, runningStyle)
-		}
-		if row.Missing {
-			badgeText = append(badgeText, i18n.T("launcher.picker.missing"))
-			badgeStyles = append(badgeStyles, missingStyle)
-		}
-		namePrefix := "  " + cursor
-		badgeSuffix := ""
-		if len(badgeText) > 0 {
-			badgeSuffix = "  " + strings.Join(badgeText, "  ")
-		}
-		nameWidth := launcherTextWidth(m.width, lipgloss.Width(namePrefix)+lipgloss.Width(badgeSuffix))
-		nameLine := namePrefix + style.Render(truncatePathToWidth(row.Name, nameWidth))
-		for j, badge := range badgeText {
-			nameLine += "  " + badgeStyles[j].Render(badge)
-		}
-		pathPrefix := "      "
-		projectUnit := pickerViewportUnit{
-			lines: []string{
-				nameLine,
-				pathPrefix + pathStyle.Render(truncatePathToWidth(abbreviateHomePath(row.Path), launcherTextWidth(m.width, lipgloss.Width(pathPrefix)))),
-			},
-			isProject: true,
-		}
-		if i == m.pickerCursor {
-			selectedUnit = len(units)
-		}
-		units = append(units, projectUnit)
-	}
-
-	// Honest empty-group notes: when one source has entries and the other
-	// has none, say so rather than leaving an unexplained gap.
-	if !renderedRunningHeader && !m.pickerScanning && m.pickerScanErr == "" {
-		appendHeader(i18n.T("launcher.picker.running"))
-		units = append(units, pickerViewportUnit{lines: []string{"  " + StyleFaint.Render(i18n.T("launcher.picker.none_running"))}})
-	}
-	return units, selectedUnit
-}
-
-func flattenPickerUnits(units []pickerViewportUnit) []string {
-	var lines []string
-	for _, unit := range units {
-		lines = append(lines, unit.lines...)
-	}
-	return lines
-}
-
-// selectPickerViewportUnits chooses a contiguous group-aligned unit window
-// around the selected project. It maximizes visible project rows first, then
-// physical use of the reserved body, while preferring a balanced window and
-// retaining headers where there is room.
-func selectPickerViewportUnits(units []pickerViewportUnit, selected, avail int) []pickerViewportUnit {
-	if len(units) == 0 {
-		return nil
-	}
-	if selected < 0 || selected >= len(units) {
-		selected = 0
-		for i, unit := range units {
-			if unit.isProject {
-				selected = i
-				break
-			}
-		}
-	}
-	bestStart, bestEnd := -1, -1
-	bestProjects, bestLines, bestImbalance, bestHeaders := -1, -1, 0, -1
-	for start := 0; start <= selected; start++ {
-		used := 0
-		for end := start; end < len(units); end++ {
-			used += len(units[end].lines)
-			if used > avail {
-				break
-			}
-			if selected < start || selected >= end+1 {
-				continue
-			}
-			projects, headers := 0, 0
-			for _, unit := range units[start : end+1] {
-				if unit.isProject {
-					projects++
-				}
-				if unit.isGroupHeader {
-					headers++
-				}
-			}
-			left, right := selected-start, end-selected
-			imbalance := left - right
-			if imbalance < 0 {
-				imbalance = -imbalance
-			}
-			if projects > bestProjects ||
-				(projects == bestProjects && used > bestLines) ||
-				(projects == bestProjects && used == bestLines && imbalance < bestImbalance) ||
-				(projects == bestProjects && used == bestLines && imbalance == bestImbalance && headers > bestHeaders) {
-				bestStart, bestEnd = start, end+1
-				bestProjects, bestLines, bestImbalance, bestHeaders = projects, used, imbalance, headers
-			}
-		}
-	}
-	if bestStart >= 0 {
-		return units[bestStart:bestEnd]
-	}
-	// Only a pathological body budget can be smaller than one unit. Keep the
-	// selected unit as the honest fallback; viewPicker applies the final hard
-	// clip only for such unsupported terminal sizes.
-	return units[selected : selected+1]
-}
-
-// renderPickerBody renders the complete grouped body and reports which
-// physical line the cursor's name line occupies. Viewport selection itself is
-// unit-based in viewPicker; this helper remains useful to tests and diagnostics.
-func (m LauncherRootModel) renderPickerBody() (string, int) {
-	units, selected := m.pickerViewportUnits()
-	lines := flattenPickerUnits(units)
-	cursorLine := -1
-	if selected >= 0 {
-		cursorLine = 0
-		for i := 0; i < selected; i++ {
-			cursorLine += len(units[i].lines)
-		}
-	}
-	return strings.Join(lines, "\n"), cursorLine
 }
 
 func (m LauncherRootModel) stagingFooterLines() []string {
@@ -1409,26 +962,6 @@ func abbreviateHomePath(p string) string {
 		return "~" + p[len(home):]
 	}
 	return p
-}
-
-// existingProjectRoot performs the final pure validation for an Open
-// Existing decision. It returns a clean absolute project root only while
-// <root>/.lingtai still resolves to a directory; no mutation, pruning, or
-// migration is allowed at this boundary.
-func existingProjectRoot(root string) (string, bool) {
-	if strings.TrimSpace(root) == "" {
-		return "", false
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", false
-	}
-	abs = filepath.Clean(abs)
-	info, err := os.Stat(filepath.Join(abs, ".lingtai"))
-	if err != nil || !info.IsDir() {
-		return "", false
-	}
-	return abs, true
 }
 
 // ProbeNoProjectPure is the pure, non-mutating check main.go uses to decide
