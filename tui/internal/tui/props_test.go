@@ -311,7 +311,7 @@ func TestPropsRenderDaemonRowsUsesUnknownBackendForTypeInvalidCard(t *testing.T)
 	}
 }
 
-func TestPropsRenderDaemonRowsKeepsBackendSeparateFromProviderAndModel(t *testing.T) {
+func TestPropsRenderDaemonRowsUsesFocusedColumnContract(t *testing.T) {
 	m := PropsModel{
 		width: 140,
 		detailDaemonRecent: []fs.DaemonLedgerEntry{
@@ -330,13 +330,21 @@ func TestPropsRenderDaemonRowsKeepsBackendSeparateFromProviderAndModel(t *testin
 	}
 
 	rows := ansi.Strip(strings.Join(m.renderDaemonCallRows(), "\n"))
-	for _, want := range []string{"provider", "backend", "model", "zhipu", "claude-p", "glm-4.6"} {
+	header := strings.Fields(strings.Split(rows, "\n")[0])
+	wantHeader := []string{"time", "daemon", "state", "backend", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint"}
+	if got := strings.Join(header, " "); got != strings.Join(wantHeader, " ") {
+		t.Fatalf("daemon header = %q, want %q", got, strings.Join(wantHeader, " "))
+	}
+	for _, want := range []string{"time", "daemon", "state", "backend", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint", "em-1", "done", "claude-p", "glm-4.6", "https://z.ai/api"} {
 		if !strings.Contains(rows, want) {
 			t.Fatalf("daemon rows missing %q:\n%s", want, rows)
 		}
 	}
-	if providerIdx, backendIdx, modelIdx := strings.Index(rows, "zhipu"), strings.Index(rows, "claude-p"), strings.Index(rows, "glm-4.6"); !(providerIdx < backendIdx && backendIdx < modelIdx) {
-		t.Fatalf("daemon row should keep provider/backend/model independent and ordered:\n%s", rows)
+	if strings.Contains(rows, "provider") || strings.Contains(rows, "zhipu") {
+		t.Fatalf("daemon rows should omit provider columns and derived provider values:\n%s", rows)
+	}
+	if strings.Contains(rows, "run") {
+		t.Fatalf("daemon rows should omit the run column:\n%s", rows)
 	}
 }
 
@@ -388,10 +396,13 @@ func TestPropsRecentLanesDoNotTruncateDiagnosticFields(t *testing.T) {
 		},
 	}
 	out := ansi.Strip(strings.Join(m.renderRecentCallLanes(), "\n"))
-	for _, want := range []string{longModel, longEndpoint, "provider", "daemon", "em-1", "run", "em-1-very-long-run-id", "state", "done", "miss", "cache%"} {
+	for _, want := range []string{longModel, longEndpoint, "daemon", "em-1", "state", "done", "backend", "model", "miss", "cache%"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("single-column ledger missing untruncated field %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "em-1-very-long-run-id") {
+		t.Fatalf("daemon rows should omit the run id:\n%s", out)
 	}
 	for _, notWant := range []string{"provider:", "daemon:", "run:", "state:"} {
 		if strings.Contains(out, notWant) {
