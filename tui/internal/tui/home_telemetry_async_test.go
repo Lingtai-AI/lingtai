@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// The home telemetry row is resolved asynchronously: gathering it does sqlite +
+// The home telemetry row is resolved asynchronously: gathering it does event-log +
 // token-ledger + .status.json I/O that must never run on the Bubble Tea render
 // (View) or input (syncViewportHeight) path. These tests pin the scheduling and
 // state machine that keeps that I/O off the UI thread — debounce (in-flight),
@@ -44,7 +44,7 @@ func TestMaybeScheduleFirstFetch(t *testing.T) {
 }
 
 // While a fetch is in flight, no new fetch may be scheduled — a burst of
-// keypresses/renders must not spawn a pile of sqlite subprocesses.
+// keypresses/renders must not spawn duplicate background readers.
 func TestMaybeScheduleDebouncesInFlight(t *testing.T) {
 	m := MailModel{homeTelemetryInFlight: true}
 	if cmd := m.maybeScheduleHomeTelemetry(time.Unix(1000, 0)); cmd != nil {

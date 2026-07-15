@@ -60,9 +60,10 @@ type homeTelemetry struct {
 // --- Async scheduling ------------------------------------------------------
 //
 // gatherHomeTelemetry does real I/O: it reaches fs.SumMoltSessionTokenLedger
-// (sqlite sidecar via /usr/bin/sqlite3, plus a possible events.jsonl parse) and
-// fs.ReadStatus/ReadInitManifest. On a locked or slow-volume sidecar that work
-// can stall for seconds. It therefore MUST NOT run on the Bubble Tea render
+// (an incremental in-process read of canonical events.jsonl plus the token
+// ledger; derived SQLite is only a compatibility fallback when events.jsonl is
+// absent) and fs.ReadStatus/ReadInitManifest. On a slow volume that work can
+// still take time. It therefore MUST NOT run on the Bubble Tea render
 // (View) or input (Update/syncViewportHeight) paths — a stall there freezes the
 // whole TUI.
 //
@@ -95,7 +96,7 @@ type homeTelemetryMsg struct {
 }
 
 // fetchHomeTelemetry is the background worker: it performs all telemetry I/O
-// (sqlite/ledger/status/manifest) off the UI thread and returns a homeTelemetryMsg.
+// (event log/ledger/status/manifest) off the UI thread and returns a homeTelemetryMsg.
 // It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
 // path + session cache) exactly like refreshMail/initialRebuild — the running
 // command never touches live model state.

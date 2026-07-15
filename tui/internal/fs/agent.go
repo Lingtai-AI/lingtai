@@ -4,7 +4,6 @@ package fs
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -642,10 +641,18 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 // usage for the current molt session (since the latest psyche_molt event) and
 // the immediately previous session (the window before that latest molt).
 func SumMoltSessionTokenLedger(agentDir string) MoltSessionTokenStats {
-	ledgerPath := filepath.Join(agentDir, "logs", "token_ledger.jsonl")
-	currentSince, lastSince, lastBefore, ok, err := sqlitelog.QueryMoltSessionWindows(agentDir)
-	if err != nil || !ok {
-		currentSince, lastSince, lastBefore = moltSessionWindows(filepath.Join(agentDir, "logs", "events.jsonl"))
+	logsDir := filepath.Join(agentDir, "logs")
+	ledgerPath := filepath.Join(logsDir, "token_ledger.jsonl")
+	currentSince, lastSince, lastBefore, ok := canonicalMoltSessionWindows(filepath.Join(logsDir, "events.jsonl"))
+	if !ok {
+		// Compatibility fallback for older/incomplete agent directories that only
+		// retained the derived SQLite sidecar. Normal live agents always use the
+		// canonical append-only event log above, so home telemetry never forks.
+		var err error
+		currentSince, lastSince, lastBefore, ok, err = sqlitelog.QueryMoltSessionWindows(agentDir)
+		if err != nil || !ok {
+			currentSince, lastSince, lastBefore = time.Time{}, time.Time{}, time.Time{}
+		}
 	}
 	return sumMoltSessionTokenLedgerBetween(ledgerPath, currentSince, lastSince, lastBefore)
 }
@@ -934,39 +941,6 @@ func addLedgerEntryToSessionStats(stats *SessionTokenStats, entry LedgerEntry) {
 	case "":
 		// Non-Codex rows.
 	}
-}
-
-// moltSessionWindows returns the current lower bound, previous lower bound, and
-// previous upper bound from logs/events.jsonl psyche_molt rows. Missing bounds
-// are returned as zero times, which makes the first current session start at the
-// beginning of the ledger while suppressing a nonexistent previous session.
-func moltSessionWindows(eventsPath string) (currentSince, lastSince, lastBefore time.Time) {
-	f, err := os.Open(eventsPath)
-	if err != nil {
-		return time.Time{}, time.Time{}, time.Time{}
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	for {
-		var evt struct {
-			Type string  `json:"type"`
-			TS   float64 `json:"ts"`
-		}
-		if err := dec.Decode(&evt); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return currentSince, lastSince, lastBefore
-		}
-		if evt.Type != "psyche_molt" || evt.TS <= 0 {
-			continue
-		}
-		lastSince = currentSince
-		lastBefore = unixFloatTime(evt.TS)
-		currentSince = lastBefore
-	}
-	return currentSince, lastSince, lastBefore
 }
 
 func unixFloatTime(ts float64) time.Time {
