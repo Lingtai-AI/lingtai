@@ -142,7 +142,7 @@ func main() {
 			return
 		}
 		if startup.kind == startupFallback {
-			runPreparedApp(startup.projectDir)
+			runPreparedApp(startup.projectDir, startup.upgraded)
 			return
 		}
 		if startup.kind == startupUpgradeExit || startup.kind == startupCanceled {
@@ -157,7 +157,7 @@ func main() {
 		return
 	}
 
-	runPreparedApp(projectDir)
+	runPreparedApp(projectDir, false)
 
 }
 
@@ -178,18 +178,20 @@ type startupResult struct {
 	projectDir string
 	app        tui.App
 	err        error
+	upgraded   bool
 }
 
 type startupReadyMsg struct{ result startupResult }
 
 type noProjectProgramModel struct {
-	launcher tui.LauncherRootModel
-	app      tui.App
-	appReady bool
-	loading  bool
-	startup  startupResult
-	width    int
-	height   int
+	launcher        tui.LauncherRootModel
+	app             tui.App
+	appReady        bool
+	loading         bool
+	cancelRequested bool
+	startup         startupResult
+	width           int
+	height          int
 }
 
 func (m noProjectProgramModel) Init() tea.Cmd { return m.launcher.Init() }
@@ -200,7 +202,9 @@ func (m noProjectProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.WindowSizeMsg:
 			m.width, m.height = msg.Width, msg.Height
 		case startupReadyMsg:
-			if msg.result.kind == startupCanceled {
+			if m.cancelRequested {
+				m.loading = false
+				m.startup = startupResult{kind: startupCanceled, projectDir: msg.result.projectDir}
 				return m, tea.Quit
 			}
 			m.loading = false
@@ -215,8 +219,8 @@ func (m noProjectProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(sizeCmd, m.app.Init())
 		case tea.KeyPressMsg:
 			if msg.String() == "ctrl+c" {
-				m.startup = startupResult{kind: startupCanceled}
-				return m, tea.Quit
+				m.cancelRequested = true
+				return m, nil
 			}
 		}
 		return m, nil
@@ -1195,7 +1199,7 @@ func spawnMain() {
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
 
-func runPreparedApp(projectDir string) {
+func runPreparedApp(projectDir string, runtimeUpgraded bool) {
 	result := prepareApp(projectDir, false)
 	if result.kind == startupUpgradeExit || result.kind == startupCanceled {
 		return
@@ -1206,6 +1210,9 @@ func runPreparedApp(projectDir string) {
 		}
 		fmt.Fprintln(os.Stderr, result.err)
 		os.Exit(1)
+	}
+	if runtimeUpgraded {
+		fmt.Println("Upgraded lingtai to latest version.")
 	}
 	p := tea.NewProgram(result.app)
 	if _, err := p.Run(); err != nil {
@@ -1524,7 +1531,7 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 			if !inProgram {
 				fmt.Println("Upgraded lingtai to latest version.")
 			} else {
-				return startupResult{kind: startupFallback, projectDir: projectDir}
+				return startupResult{kind: startupFallback, projectDir: projectDir, upgraded: true}
 			}
 		}
 		if err := preset.Bootstrap(globalDir); err != nil {
@@ -1551,6 +1558,9 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 		// .prompt" convenience.
 		projectRoot := filepath.Dir(lingtaiDir)
 		if preset.RecipeNeedsApply(projectRoot) {
+			if inProgram {
+				return startupResult{kind: startupFallback, projectDir: projectDir}
+			}
 			humanDir := filepath.Join(lingtaiDir, "human")
 			humanAddr := "human"
 			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {

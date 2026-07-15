@@ -43,13 +43,9 @@ type LauncherResult struct {
 }
 
 // LauncherDoneMsg is emitted by the launcher root model when it has reached
-// a terminal decision. main.go's tea.Program wrapper for the launcher
-// watches for this (the launcher is a SEPARATE tea.Program run from the
-// real App's — see main.go's gate wiring) — practically, main.go runs the
-// launcher via p.Run() and inspects the final model's Result() after Quit,
-// rather than needing a message at all; LauncherDoneMsg exists for
-// programmatic/test callers that want to observe the decision without
-// tearing down the whole bubbletea run loop.
+// a terminal decision. main.go inspects the final root model's Result() after
+// the handoff program quits; the message remains for programmatic/test
+// callers that want to observe the decision without needing that wrapper.
 type LauncherDoneMsg struct {
 	Result LauncherResult
 }
@@ -90,10 +86,10 @@ var launcherLangs = []string{"en", "zh", "wen"}
 // presses "Start project", at which point RunProjectCreate performs the
 // staging→validate→rename commit.
 //
-// main.go constructs this, runs it via its OWN tea.Program (separate from
-// the real App's), and inspects Result() after the program exits — it does
-// NOT construct a fake/empty-path App to host this (design doc: "why not
-// just fake an empty-project App").
+// main.go constructs this as the initial root of the handoff program and
+// inspects Result() after the program exits. Open Existing later replaces
+// this model with the prepared App; it does not construct a fake/empty-path
+// App to host the launcher.
 type LauncherRootModel struct {
 	globalDirPath string // pure path, may not exist on disk yet
 	projectRoot   string // cwd — where Create would build, if chosen
@@ -554,13 +550,9 @@ func (m LauncherRootModel) updateUnfinishedStaging(msg tea.KeyPressMsg) (tea.Mod
 	return m, nil
 }
 
-// View implements tea.Model for the root launcher program (main.go runs
-// this in its own tea.Program, separate from the real App's). Bubble Tea
-// v2's root Model.View returns tea.View; content composition mirrors
-// App.View's structure (plain string content wrapped into a tea.View with
-// alt-screen + mouse mode) without reusing App itself, since the launcher
-// intentionally has no project/orchestrator context to construct an App
-// with yet.
+// View implements the launcher phase of the root handoff program. Bubble Tea
+// v2's root Model.View returns tea.View; composition mirrors App.View's
+// structure without constructing a fake App before a project is selected.
 func (m LauncherRootModel) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = true

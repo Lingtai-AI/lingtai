@@ -970,7 +970,7 @@ func TestDraftFirstRun_EscAtEntryStepEmitsCancelMsg(t *testing.T) {
 // ProjectDraftCancelledMsg rather than a bare tea.Quit. A parent review
 // found the equivalent defect at the old draft entry step: an
 // unconditional `case "ctrl+c": return m, tea.Quit` would, because the
-// launcher runs FirstRunModel inside its OWN tea.Program (see launcher.go),
+// launcher hosts FirstRunModel inside the handoff root (see launcher.go),
 // kill that whole program abruptly — bypassing LauncherRootModel's
 // done/result bookkeeping (m.done would stay false) — instead of routing
 // back through a proper decision the same way Esc does.

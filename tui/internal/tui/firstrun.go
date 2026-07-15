@@ -54,9 +54,8 @@ type ProjectDraftConfirmedMsg struct {
 // History: a parent review found the draft entry step originally had NO
 // typed cancel path at all — plain Esc fell through to a bare
 // `return m, nil` (silently stuck) and Ctrl+C did an unconditional
-// `return m, tea.Quit`, which — because the launcher runs FirstRunModel
-// inside its OWN tea.Program (see launcher.go's doc comment on why) —
-// would have killed that WHOLE program abruptly, bypassing
+// `return m, tea.Quit`, which would have killed the launcher handoff abruptly,
+// bypassing
 // LauncherRootModel's own done/result bookkeeping entirely rather than
 // routing back as a proper decision. The same rule now guards
 // stepPickPreset's Esc/Back/Ctrl+C in draft mode.

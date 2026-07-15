@@ -22,14 +22,32 @@ func TestNoProjectProgramLoadingKeepsOneAltScreenLifecycle(t *testing.T) {
 		t.Fatal("handoff loading view did not contain the canonical Bodhi leaf")
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Text: "ctrl+c"})
-	if cmd == nil {
-		t.Fatal("Ctrl+C during handoff loading did not return a quit command")
+	if cmd != nil {
+		t.Fatal("Ctrl+C during handoff loading quit before preparation returned")
 	}
+	loading := updated.(noProjectProgramModel)
+	if !loading.cancelRequested || !loading.loading {
+		t.Fatalf("loading Ctrl+C state = cancelRequested:%v loading:%v", loading.cancelRequested, loading.loading)
+	}
+}
+
+func TestNoProjectProgramCancelDiscardsLateStartup(t *testing.T) {
+	m := noProjectProgramModel{loading: true, width: 80, height: 24}
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "ctrl+c"})
+	if cmd != nil {
+		t.Fatal("cancel request returned a quit command")
+	}
+	m = updated.(noProjectProgramModel)
+	updated, cmd = m.Update(startupReadyMsg{result: startupResult{
+		kind:       startupReady,
+		projectDir: "/selected/project",
+	}})
 	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Fatalf("Ctrl+C command produced %T, want tea.QuitMsg", cmd())
+		t.Fatalf("late startup command = %T, want tea.QuitMsg", cmd())
 	}
-	if _, ok := updated.(noProjectProgramModel); !ok {
-		t.Fatalf("handoff Ctrl+C returned %T", updated)
+	got := updated.(noProjectProgramModel)
+	if got.startup.kind != startupCanceled || got.appReady || got.loading {
+		t.Fatalf("late cancel state = kind:%v appReady:%v loading:%v", got.startup.kind, got.appReady, got.loading)
 	}
 }
 
@@ -46,35 +64,59 @@ func TestStartupUpgradeOutcomeNeverRetriesOrCreatesApp(t *testing.T) {
 }
 
 func TestAgentCountPromptPredictionHonorsFreshMarker(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, ".last_agent_check")
-	if err := os.WriteFile(marker, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now()
-	countCalls := 0
-	count := func() int { countCalls++; return 9 }
-	if got := agentCountPromptNeeded(dir, now, os.Stat, count, os.MkdirAll, os.WriteFile, os.Chtimes); got {
-		t.Fatal("fresh marker predicted a second startup prompt")
+	testCase := func(t *testing.T, fresh bool, count int, wantFallback, wantWrite bool, write func(string, []byte, os.FileMode) error) {
+		t.Helper()
+		dir := t.TempDir()
+		marker := filepath.Join(dir, ".last_agent_check")
+		if fresh {
+			if err := os.WriteFile(marker, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(marker, nil, 0o644); err == nil {
+			old := now.Add(-agentCheckInterval - time.Second)
+			if err := os.Chtimes(marker, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writes := 0
+		if write == nil {
+			write = func(path string, data []byte, mode os.FileMode) error {
+				writes++
+				return os.WriteFile(path, data, mode)
+			}
+		}
+		got := agentCountPromptNeeded(dir, now, os.Stat, func() int { return count }, os.MkdirAll, write, os.Chtimes)
+		if got != wantFallback {
+			t.Fatalf("fallback = %v, want %v", got, wantFallback)
+		}
+		if write != nil && !wantWrite && writes != 0 {
+			t.Fatalf("writes = %d, want zero", writes)
+		}
 	}
-	if countCalls != 0 {
-		t.Fatalf("fresh marker scanned processes %d times", countCalls)
+	testCase(t, true, 9, false, false, nil)
+	testCase(t, false, 0, false, true, nil)
+	testCase(t, false, 9, true, false, nil)
+	testCase(t, false, 0, false, true, nil)
+	testCase(t, false, 0, true, false, func(string, []byte, os.FileMode) error {
+		return errors.New("write denied")
+	})
+	if got := agentCountPromptNeeded(t.TempDir(), now, func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}, func() int { return 0 }, os.MkdirAll, os.WriteFile, os.Chtimes); got {
+		t.Fatal("missing marker with zero agents unexpectedly fell back")
 	}
-	old := now.Add(-agentCheckInterval - time.Second)
-	if err := os.Chtimes(marker, old, old); err != nil {
-		t.Fatal(err)
+	missingN := t.TempDir()
+	writes := 0
+	if !agentCountPromptNeeded(missingN, now, os.Stat, func() int { return 9 }, os.MkdirAll,
+		func(string, []byte, os.FileMode) error {
+			writes++
+			return os.WriteFile(filepath.Join(missingN, ".last_agent_check"), nil, 0o644)
+		}, os.Chtimes) {
+		t.Fatal("missing marker with agents did not request outside prompt")
 	}
-	if got := agentCountPromptNeeded(dir, now, os.Stat, count, os.MkdirAll, os.WriteFile, os.Chtimes); !got {
-		t.Fatal("stale marker did not predict the gated agent-count check")
-	}
-	if got := agentCountPromptNeeded(dir, now, os.Stat, func() int { return 0 }, os.MkdirAll, os.WriteFile, os.Chtimes); got {
-		t.Fatal("stale marker with zero agents predicted a prompt")
-	}
-	if got := agentCountPromptNeeded(t.TempDir(), now, os.Stat, func() int { return 0 }, os.MkdirAll, os.WriteFile, os.Chtimes); got {
-		t.Fatal("missing marker with zero agents predicted a prompt")
-	}
-	if got := agentCountPromptNeeded(t.TempDir(), now, os.Stat, func() int { return 4 }, os.MkdirAll, os.WriteFile, os.Chtimes); !got {
-		t.Fatal("missing marker with agents did not predict a prompt")
+	if writes != 0 {
+		t.Fatalf("missing marker positive count wrote marker %d times", writes)
 	}
 }
 
