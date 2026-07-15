@@ -603,6 +603,24 @@ func (m MailModel) snapshotCache() fs.MailCache {
 	return m.acceptedSnapshot.cache
 }
 
+// projectedSnapshotCache borrows the one accepted root snapshot and narrows only
+// the detached message slice for an ordinary home Agent. It never refreshes or
+// retains another MailCache, and Main keeps the aggregate root projection.
+func (m MailModel) projectedSnapshotCache() fs.MailCache {
+	cache := m.snapshotCache()
+	if m.asyncBinding.target.policy != asyncTargetHomeAgentRail {
+		return cache
+	}
+	direct := make([]fs.MailMessage, 0, len(cache.Messages))
+	for _, message := range cache.Messages {
+		if fs.IsDirectMail(message, m.humanAddr, m.orchAddr) {
+			direct = append(direct, message)
+		}
+	}
+	cache.Messages = direct
+	return cache
+}
+
 // orchDisplayName returns the nickname if set, otherwise the agent name.
 func (m MailModel) orchDisplayName() string {
 	if m.orchNickname != "" {
@@ -618,7 +636,7 @@ func (m MailModel) orchDisplayName() string {
 // partial event window or be rendered twice.
 func (m *MailModel) buildMessages() {
 	// Ingest new entries from all sources into session.jsonl.
-	cache := m.snapshotCache()
+	cache := m.projectedSnapshotCache()
 	m.sessionCache.Refresh(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
 	if m.historyCountLoaded {
 		// Refresh incrementally advances the accepted exact metadata at EOF.

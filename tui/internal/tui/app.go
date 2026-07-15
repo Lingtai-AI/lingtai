@@ -474,6 +474,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if settled && state != nil {
 			a.currentThread = *state
+			// Install the accepted cold direct state into the active Mail projection.
+			// The snapshot remains the root store's single immutable accepted view;
+			// Mail borrows and filters it without becoming another refresh owner.
+			a.mail.sessionCache = state.sessionCache
+			a.mail.acceptedSnapshot = a.mailStore.snapshot
+			a.mail.asyncStoreVersion = state.acceptedSnapshotVersion
+			a.mail.initialLoading = false
+			a.mail.buildMessages()
 		}
 		return a, cmd
 

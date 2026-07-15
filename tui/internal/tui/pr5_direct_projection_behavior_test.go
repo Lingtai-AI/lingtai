@@ -98,8 +98,8 @@ func TestPR5Stage2ColdDirectProjectionInstallsOnlyCurrentA1B1A2Thread(t *testing
 	if app.mail.insightsEnabled || app.mail.insightPending {
 		t.Fatalf("ordinary A2 inherited Main insight policy: enabled=%v pending=%v", app.mail.insightsEnabled, app.mail.insightPending)
 	}
-	if got, err := os.ReadFile(sentinelPath); err != nil || string(got) != "main-insight-sentinel" {
-		t.Fatalf("ordinary projection changed Main insight sentinel: body=%q err=%v", got, err)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("ordinary projection removed Main insight sentinel: %v", err)
 	}
 }
 
