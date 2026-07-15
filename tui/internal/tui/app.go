@@ -283,22 +283,26 @@ func (a *App) bindRailUnreadHome(projectDir string) {
 	}
 }
 
-func (a *App) visibleMainRailUnreadRow(snapshot *ProjectMailSnapshot) *railRow {
+func (a *App) visibleRailUnreadRow(snapshot *ProjectMailSnapshot) *railRow {
 	if a == nil || snapshot == nil || a.visiting || a.currentView != appViewMail ||
 		!a.mail.ready || a.mail.initialLoading {
 		return nil
 	}
 	binding := a.mailStore.binding
-	if binding.target.policy != asyncTargetHomeMain || a.mail.asyncBinding != binding ||
-		a.mail.generation != binding.generation || a.currentThread.target != binding.target ||
-		a.currentThread.generation != binding.generation || a.mail.acceptedSnapshot != snapshot ||
-		a.mail.asyncStoreVersion != snapshot.Version() ||
+	if (binding.target.policy != asyncTargetHomeMain && binding.target.policy != asyncTargetHomeAgentRail) ||
+		a.mail.asyncBinding != binding || a.mail.generation != binding.generation ||
+		a.currentThread.target != binding.target || a.currentThread.generation != binding.generation ||
+		a.mail.acceptedSnapshot != snapshot || a.mail.asyncStoreVersion != snapshot.Version() ||
 		a.currentThread.acceptedSnapshotVersion != snapshot.Version() {
 		return nil
 	}
 	for i := range a.agentRail.rows {
 		row := &a.agentRail.rows[i]
-		if !row.originalMain {
+		if binding.target.policy == asyncTargetHomeMain {
+			if !row.originalMain {
+				continue
+			}
+		} else if row.originalMain || row.target != binding.target {
 			continue
 		}
 		if inventory.NormalizePath(row.directTarget.Directory) != binding.target.directory ||
@@ -344,15 +348,15 @@ func (a *App) reconcileRailUnread() {
 		row := &a.agentRail.rows[i]
 		row.unread = a.railUnreadStore.UnreadCount(row.directTarget, messages, a.mail.humanAddr)
 	}
-	mainRow := a.visibleMainRailUnreadRow(a.mailStore.snapshot)
-	if mainRow == nil || mainRow.unread == 0 {
+	activeRow := a.visibleRailUnreadRow(a.mailStore.snapshot)
+	if activeRow == nil || activeRow.unread == 0 {
 		return
 	}
-	if err := a.railUnreadStore.MarkSeen(mainRow.directTarget, messages, a.mail.humanAddr); err != nil {
+	if err := a.railUnreadStore.MarkSeen(activeRow.directTarget, messages, a.mail.humanAddr); err != nil {
 		a.mail.AddSystemMessage(fmt.Sprintf("Unread status unavailable: %v", err))
 		return
 	}
-	mainRow.unread = a.railUnreadStore.UnreadCount(mainRow.directTarget, messages, a.mail.humanAddr)
+	activeRow.unread = a.railUnreadStore.UnreadCount(activeRow.directTarget, messages, a.mail.humanAddr)
 }
 
 func (a *App) installMailModel(m MailModel) {
@@ -833,6 +837,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.mail.initialLoading = false
 			a.mail.buildMessages()
+			a.reconcileRailUnread()
 		}
 		return a, cmd
 
