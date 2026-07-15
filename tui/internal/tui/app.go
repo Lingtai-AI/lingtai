@@ -67,6 +67,9 @@ type agentRailInventoryLifecycleState struct {
 	mu                    sync.Mutex
 	scanner               func(inventory.Options) (inventory.Snapshot, error)
 	latestRequestSequence uint64
+	acceptedOwner         asyncOwner
+	acceptedRecords       []inventory.Record
+	acceptedReady         bool
 }
 
 func newAgentRailInventoryLifecycleState() *agentRailInventoryLifecycleState {
@@ -111,11 +114,19 @@ func (s *agentRailInventoryLifecycleState) invalidate() {
 	}
 	s.mu.Lock()
 	s.nextRequestSequenceLocked()
+	s.acceptedOwner = asyncOwner{}
+	s.acceptedRecords = nil
+	s.acceptedReady = false
 	s.mu.Unlock()
 }
 
-func (s *agentRailInventoryLifecycleState) acceptLatest(requestSequence uint64, install func()) bool {
-	if s == nil || requestSequence == 0 {
+func (s *agentRailInventoryLifecycleState) acceptLatest(
+	requestSequence uint64,
+	owner asyncOwner,
+	records []inventory.Record,
+	install func(),
+) bool {
+	if s == nil || requestSequence == 0 || !validAsyncOwner(owner) {
 		return false
 	}
 	s.mu.Lock()
@@ -123,10 +134,38 @@ func (s *agentRailInventoryLifecycleState) acceptLatest(requestSequence uint64, 
 	if requestSequence != s.latestRequestSequence {
 		return false
 	}
+	s.acceptedOwner = owner
+	s.acceptedRecords = append([]inventory.Record(nil), records...)
+	s.acceptedReady = true
 	if install != nil {
 		install()
 	}
 	return true
+}
+
+func (s *agentRailInventoryLifecycleState) revalidateTarget(owner asyncOwner, target asyncTarget) bool {
+	switch target.policy {
+	case asyncTargetProjectVisit:
+		return revalidateProjectVisitTarget(owner, target)
+	case asyncTargetHomeAgentRail:
+		if s == nil || !validAsyncOwner(owner) || !validAsyncTarget(owner, target) {
+			return false
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !s.acceptedReady || s.acceptedOwner != owner {
+			return false
+		}
+		for _, record := range s.acceptedRecords {
+			if inventory.NormalizePath(record.AgentDir) != target.directory {
+				continue
+			}
+			return ordinaryRailRecordEligible(owner, target, record)
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 type agentRailInventoryResultMsg struct {
@@ -373,6 +412,7 @@ func (a *App) installMailModel(m MailModel) {
 		}
 		a.mailStore = newProjectMailStore(m.baseDir, m.humanDir)
 	}
+	a.mailStore.bindAsyncTargetRevalidator(inventoryLifecycle.revalidateTarget)
 	a.mailGeneration++
 	m.generation = a.mailGeneration
 	m.acceptedSnapshot = a.mailStore.snapshot
@@ -742,12 +782,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.visiting || state == nil || !validAsyncOwner(currentOwner) || msg.owner != currentOwner {
 			return a, nil
 		}
-		installed := false
-		state.acceptLatest(msg.requestSequence, func() {
-			if msg.err == nil {
-				a.agentRail.installInventory(msg.owner, msg.snapshot)
-				installed = true
-			}
+		if msg.err != nil {
+			return a, nil
+		}
+		installed := state.acceptLatest(msg.requestSequence, msg.owner, msg.snapshot.Records, func() {
+			a.agentRail.installInventory(msg.owner, msg.snapshot)
 		})
 		if installed {
 			a.reconcileRailUnread()

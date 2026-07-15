@@ -96,28 +96,29 @@ func (s *projectMailAsyncState) store(current asyncCurrent) {
 // App.Update; background commands receive detached values and can publish only
 // after the root's shared async-envelope acceptance.
 type ProjectMailStore struct {
-	id                      uint64
-	projectID               string
-	projectDir              string
-	humanDir                string
-	cache                   fs.MailCache
-	snapshot                *ProjectMailSnapshot
-	version                 uint64
-	activation              uint64
-	tickChain               uint64
-	active                  bool
-	tickRunning             bool
-	refreshInFlight         bool
-	refreshInitial          bool
-	refreshInFlightEnvelope asyncEnvelope
-	initialRefreshPending   bool
-	pollRate                time.Duration
-	scanner                 projectMailScanner
-	updateLocation          projectMailLocationUpdater
-	binding                 asyncBinding
-	revalidateTarget        func(asyncOwner, asyncTarget) bool
-	asyncState              *projectMailAsyncState
-	locationSourceVersion   uint64
+	id                       uint64
+	projectID                string
+	projectDir               string
+	humanDir                 string
+	cache                    fs.MailCache
+	snapshot                 *ProjectMailSnapshot
+	version                  uint64
+	activation               uint64
+	tickChain                uint64
+	active                   bool
+	tickRunning              bool
+	refreshInFlight          bool
+	refreshInitial           bool
+	refreshInFlightEnvelope  asyncEnvelope
+	initialRefreshPending    bool
+	pollRate                 time.Duration
+	scanner                  projectMailScanner
+	updateLocation           projectMailLocationUpdater
+	binding                  asyncBinding
+	revalidateTarget         func(asyncOwner, asyncTarget) bool
+	revalidateTargetExplicit bool
+	asyncState               *projectMailAsyncState
+	locationSourceVersion    uint64
 }
 
 func canonicalProjectMailIdentity(projectDir string) string {
@@ -231,10 +232,22 @@ func revalidateOrdinaryRailTarget(owner asyncOwner, target asyncTarget) bool {
 	return false
 }
 
+func (s *ProjectMailStore) bindAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
+	if s == nil || s.revalidateTargetExplicit {
+		return
+	}
+	if revalidate == nil {
+		revalidate = revalidateInventoryTarget
+	}
+	s.revalidateTarget = revalidate
+	s.syncAsyncState()
+}
+
 func (s *ProjectMailStore) setAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
 	if s == nil {
 		return
 	}
+	s.revalidateTargetExplicit = revalidate != nil
 	if revalidate == nil {
 		revalidate = revalidateInventoryTarget
 	}
