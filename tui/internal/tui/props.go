@@ -1189,8 +1189,8 @@ func rebuildSeparatorLine(width int, labelKey string) string {
 }
 
 // renderDaemonCallRows renders all daemon per-call ledger entries (newest
-// first), each row retaining daemon handle/run id/state plus provider/model /
-// endpoint data without truncation.
+// first), each row retaining daemon handle/run id/state plus independent
+// provider/backend/model/endpoint dimensions without truncation.
 func (m PropsModel) renderDaemonCallRows() []string {
 	subtleStyle := lipgloss.NewStyle().Foreground(ColorTextFaint)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
@@ -1201,11 +1201,15 @@ func (m PropsModel) renderDaemonCallRows() []string {
 	}
 
 	lines := []string{
-		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
-			"time", "daemon", "run", "state", "provider", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")),
+		"  " + labelStyle.Render(fmt.Sprintf("%-24s  %-10s  %-24s  %-8s  %-10s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
+			"time", "daemon", "run", "state", "provider", "backend", "model", "input", "output", "thinking", "cached", "miss", "cache%", "endpoint")),
 	}
 	for _, e := range m.detailDaemonRecent {
 		provider := fs.DeriveLedgerProvider(e.Endpoint, e.Model)
+		backend := e.Backend
+		if backend == "" {
+			backend = "—"
+		}
 		model := e.Model
 		if model == "" {
 			model = "—"
@@ -1226,12 +1230,13 @@ func (m PropsModel) renderDaemonCallRows() []string {
 		if state == "" {
 			state = "—"
 		}
-		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %-8s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
+		line := fmt.Sprintf("  %-24s  %-10s  %-24s  %-8s  %-10s  %-10s  %-24s  %10s  %10s  %10s  %10s  %10s  %7s  %s",
 			shortTS(e.TS),
 			handle,
 			runID,
 			state,
 			provider,
+			backend,
 			model,
 			formatComma(e.Input),
 			formatComma(e.Output),

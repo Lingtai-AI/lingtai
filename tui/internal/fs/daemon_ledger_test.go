@@ -82,6 +82,33 @@ func TestDaemonRecentLedgerTagsIdentity(t *testing.T) {
 	}
 }
 
+func TestDaemonRecentLedgerPreservesBackendIndependently(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "em-1-backend", map[string]interface{}{
+		"handle":  "em-1",
+		"state":   "done",
+		"backend": "claude-p",
+	})
+	writeDaemonLedger(t, agentDir, "em-1-backend", []string{
+		`{"ts":"2026-01-01T00:00:01","input":10,"output":5,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+	})
+
+	entries := DaemonRecentLedger(agentDir, 100)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.Backend != "claude-p" {
+		t.Fatalf("Backend = %q, want claude-p", entry.Backend)
+	}
+	if got := DeriveLedgerProvider(entry.Endpoint, entry.Model); got != "zhipu" {
+		t.Fatalf("provider = %q, want zhipu", got)
+	}
+	if entry.Model != "glm-4.6" {
+		t.Fatalf("Model = %q, want glm-4.6", entry.Model)
+	}
+}
+
 func TestDaemonRecentLedgerAggregatesAndSortsNewestFirst(t *testing.T) {
 	agentDir := t.TempDir()
 	// Two daemons, interleaved timestamps. The result must be globally sorted
@@ -149,6 +176,64 @@ func TestDaemonRecentLedgerSkipsMalformed(t *testing.T) {
 	}
 	if entries[0].Input != 7 {
 		t.Errorf("input = %d, want 7", entries[0].Input)
+	}
+}
+
+func TestDaemonRecentLedgerSkipsNonObjectRowsPreservesSparseObjects(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "em-1-x", map[string]interface{}{
+		"handle":  "em-1",
+		"state":   "done",
+		"backend": "claude-p",
+	})
+	writeDaemonLedger(t, agentDir, "em-1-x", []string{
+		`null`,
+		`[]`,
+		`{}`,
+		`{"ts":"2026-01-01T00:00:01","input":7}`,
+	})
+
+	entries := DaemonRecentLedger(agentDir, 100)
+	if len(entries) != 2 {
+		t.Fatalf("expected sparse object and valid row only, got %d entries: %+v", len(entries), entries)
+	}
+	var sawSparse, sawValid bool
+	for _, entry := range entries {
+		if entry.Backend != "claude-p" {
+			t.Errorf("object row backend = %q, want claude-p", entry.Backend)
+		}
+		switch entry.Input {
+		case 0:
+			if entry.TS != "" {
+				t.Errorf("sparse object timestamp = %q, want empty", entry.TS)
+			}
+			sawSparse = true
+		case 7:
+			sawValid = true
+		}
+	}
+	if !sawSparse || !sawValid {
+		t.Fatalf("expected both sparse and valid object rows, got %+v", entries)
+	}
+}
+
+func TestDaemonRecentLedgerRejectsTypeInvalidDaemonCard(t *testing.T) {
+	agentDir := t.TempDir()
+	writeDaemonState(t, agentDir, "em-1-x", map[string]interface{}{
+		"handle":  "em-1",
+		"state":   1,
+		"backend": "claude-p",
+	})
+	writeDaemonLedger(t, agentDir, "em-1-x", []string{
+		`{"ts":"2026-01-01T00:00:01","input":7,"model":"glm-4.6","endpoint":"https://z.ai/api"}`,
+	})
+
+	entries := DaemonRecentLedger(agentDir, 100)
+	if len(entries) != 1 {
+		t.Fatalf("expected valid ledger row, got %d entries", len(entries))
+	}
+	if entries[0].Backend != "" || entries[0].Handle != "" || entries[0].State != "" {
+		t.Fatalf("type-invalid daemon card leaked fields: %+v", entries[0])
 	}
 }
 

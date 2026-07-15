@@ -251,7 +251,7 @@ func TestPropsLoadDetailPopulatesDaemonRecent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "daemons", "em-1-x", "daemon.json"),
-		[]byte(`{"handle":"em-1","state":"running"}`), 0o644); err != nil {
+		[]byte(`{"handle":"em-1","state":"running","backend":"claude-p"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(runDir, "token_ledger.jsonl"),
@@ -272,6 +272,71 @@ func TestPropsLoadDetailPopulatesDaemonRecent(t *testing.T) {
 	}
 	if got := m.detailDaemonRecent[0].State; got != "running" {
 		t.Fatalf("daemon state = %q, want running", got)
+	}
+	if got := m.detailDaemonRecent[0].Backend; got != "claude-p" {
+		t.Fatalf("daemon backend = %q, want claude-p", got)
+	}
+}
+
+func TestPropsRenderDaemonRowsUsesUnknownBackendForTypeInvalidCard(t *testing.T) {
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "daemons", "em-1-x")
+	if err := os.MkdirAll(filepath.Join(runDir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "daemon.json"),
+		[]byte(`{"backend":"claude-p","state":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "logs", "token_ledger.jsonl"),
+		[]byte(`{"ts":"2026-06-13T03:00:05Z","input":9,"output":2,"model":"glm-4.6","endpoint":"https://z.ai/api"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := PropsModel{selectedDir: dir}
+	m.loadDetail()
+	if len(m.detailDaemonRecent) != 1 {
+		t.Fatalf("detailDaemonRecent len = %d, want 1", len(m.detailDaemonRecent))
+	}
+	if got := m.detailDaemonRecent[0].Backend; got != "" {
+		t.Fatalf("type-invalid card backend = %q, want empty", got)
+	}
+
+	rows := ansi.Strip(strings.Join(m.renderDaemonCallRows(), "\n"))
+	if !strings.Contains(rows, "backend") || !strings.Contains(rows, "—") {
+		t.Fatalf("invalid card should render an honest unknown backend column:\n%s", rows)
+	}
+	if strings.Contains(rows, "claude-p") {
+		t.Fatalf("invalid card backend leaked into rendered rows:\n%s", rows)
+	}
+}
+
+func TestPropsRenderDaemonRowsKeepsBackendSeparateFromProviderAndModel(t *testing.T) {
+	m := PropsModel{
+		width: 140,
+		detailDaemonRecent: []fs.DaemonLedgerEntry{
+			{
+				LedgerEntry: fs.LedgerEntry{
+					TS:       "2026-06-13T03:00:05Z",
+					Input:    9,
+					Model:    "glm-4.6",
+					Endpoint: "https://z.ai/api",
+				},
+				Handle:  "em-1",
+				State:   "done",
+				Backend: "claude-p",
+			},
+		},
+	}
+
+	rows := ansi.Strip(strings.Join(m.renderDaemonCallRows(), "\n"))
+	for _, want := range []string{"provider", "backend", "model", "zhipu", "claude-p", "glm-4.6"} {
+		if !strings.Contains(rows, want) {
+			t.Fatalf("daemon rows missing %q:\n%s", want, rows)
+		}
+	}
+	if providerIdx, backendIdx, modelIdx := strings.Index(rows, "zhipu"), strings.Index(rows, "claude-p"), strings.Index(rows, "glm-4.6"); !(providerIdx < backendIdx && backendIdx < modelIdx) {
+		t.Fatalf("daemon row should keep provider/backend/model independent and ordered:\n%s", rows)
 	}
 }
 
