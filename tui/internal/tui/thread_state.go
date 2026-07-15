@@ -42,7 +42,7 @@ type threadLoadRequest struct {
 }
 
 // threadLoadResultMsg is the exact-envelope completion carrier for one physical
-// direct load. The surface is inert until the typed physical-loader RED exists.
+// direct load. App settles its physical token before the shared publication gate.
 type threadLoadResultMsg struct {
 	envelope     asyncEnvelope
 	sessionCache *fs.SessionCache
@@ -50,7 +50,7 @@ type threadLoadResultMsg struct {
 }
 
 // threadLoadWorker is the internal physical-work seam used by deterministic
-// tests and the eventual filesystem implementation. It is never exported.
+// tests and the production filesystem implementation. It is never exported.
 type threadLoadWorker interface {
 	Load(threadLoadRequest) (*fs.SessionCache, error)
 }
@@ -86,17 +86,27 @@ type ThreadLoadCounters struct {
 	StaleDropped  uint64
 }
 
-// ThreadLoadCoordinator is the App-owned resource-accounting surface for the
-// forthcoming behavioral cold loader. This compiling seam intentionally does
-// not call the worker, coalesce, publish, or increment counters; those behaviors
-// follow their own typed assertion REDs.
+type threadLoadTargetKey struct {
+	owner  asyncOwner
+	target asyncTarget
+}
+
+// ThreadLoadCoordinator owns only physical in-flight tokens and at most one
+// latest logical rerun per stable owner+target identity. It does not retain an
+// inactive ThreadState or any project/mailbox owner.
 type ThreadLoadCoordinator struct {
-	worker   threadLoadWorker
-	counters ThreadLoadCounters
+	worker      threadLoadWorker
+	counters    ThreadLoadCounters
+	inFlight    map[threadLoadTargetKey]asyncEnvelope
+	latestRerun map[threadLoadTargetKey]threadLoadRequest
 }
 
 func newThreadLoadCoordinator(worker threadLoadWorker) ThreadLoadCoordinator {
-	return ThreadLoadCoordinator{worker: worker}
+	return ThreadLoadCoordinator{
+		worker:      worker,
+		inFlight:    make(map[threadLoadTargetKey]asyncEnvelope),
+		latestRerun: make(map[threadLoadTargetKey]threadLoadRequest),
+	}
 }
 
 func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
@@ -114,6 +124,15 @@ func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 	envelope := captureAsync(asyncColdThreadLoad, current)
 	request.envelope = envelope
 	request.acceptedMessages = append([]fs.MailMessage(nil), request.acceptedMessages...)
+	key := threadLoadKey(envelope)
+	c.ensureBookkeeping()
+	if _, exists := c.inFlight[key]; exists {
+		c.latestRerun[key] = request
+		c.counters.Coalesced++
+		return nil
+	}
+	c.inFlight[key] = envelope
+	c.counters.Started++
 	worker := c.worker
 	return func() tea.Msg {
 		if worker == nil {
@@ -124,10 +143,54 @@ func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 	}
 }
 
-func (c *ThreadLoadCoordinator) settle(asyncCurrent, threadLoadResultMsg) (*ThreadState, tea.Cmd, bool) {
-	// Intentionally non-publishing until the physical-loader and coordinator
-	// behavior tests exist. In particular, counters remain honest zeros.
-	return nil, nil, false
+// settle releases only the exact physical token, records its return, and may
+// launch one still-current latest rerun. It constructs a candidate ThreadState
+// but never installs it; App's single shared acceptAsync guard owns publication.
+func (c *ThreadLoadCoordinator) settle(current asyncCurrent, msg threadLoadResultMsg) (*ThreadState, tea.Cmd, bool) {
+	key := threadLoadKey(msg.envelope)
+	inFlight, exists := c.inFlight[key]
+	if !exists || inFlight != msg.envelope {
+		return nil, nil, false
+	}
+	delete(c.inFlight, key)
+	c.counters.Completed++
+
+	var state *ThreadState
+	if msg.err == nil && msg.sessionCache != nil {
+		candidate := newColdThreadState(
+			msg.envelope.target,
+			msg.envelope.generation.thread,
+			msg.envelope.storeVersion,
+			msg.sessionCache,
+		)
+		state = &candidate
+	}
+
+	var rerun tea.Cmd
+	if request, pending := c.latestRerun[key]; pending {
+		delete(c.latestRerun, key)
+		if acceptAsync(current, request.envelope) {
+			rerun = c.request(request)
+		}
+	}
+	return state, rerun, true
+}
+
+func (c *ThreadLoadCoordinator) recordStaleDrop() {
+	c.counters.StaleDropped++
+}
+
+func (c *ThreadLoadCoordinator) ensureBookkeeping() {
+	if c.inFlight == nil {
+		c.inFlight = make(map[threadLoadTargetKey]asyncEnvelope)
+	}
+	if c.latestRerun == nil {
+		c.latestRerun = make(map[threadLoadTargetKey]threadLoadRequest)
+	}
+}
+
+func threadLoadKey(envelope asyncEnvelope) threadLoadTargetKey {
+	return threadLoadTargetKey{owner: envelope.owner, target: envelope.target}
 }
 
 func (c ThreadLoadCoordinator) Counters() ThreadLoadCounters {

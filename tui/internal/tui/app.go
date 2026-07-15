@@ -462,11 +462,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case threadLoadResultMsg:
 		current := a.asyncCurrent()
+		// Release exact physical bookkeeping before publication acceptance so a
+		// stale completion can drain its target slot and launch one current latest
+		// rerun. Settlement itself is non-publishing.
+		state, cmd, settled := a.threadLoads.settle(current, msg)
 		if !acceptAsync(current, msg.envelope) {
-			return a, nil
+			if settled {
+				a.threadLoads.recordStaleDrop()
+			}
+			return a, cmd
 		}
-		state, cmd, publish := a.threadLoads.settle(current, msg)
-		if publish && state != nil {
+		if settled && state != nil {
 			a.currentThread = *state
 		}
 		return a, cmd
