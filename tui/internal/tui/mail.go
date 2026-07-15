@@ -200,6 +200,7 @@ type MailModel struct {
 	dismissedInsights    map[string]bool        // dismissed insight timestamps
 	showEditorWarn       bool                   // one-time vim warning overlay
 	editorWarnText       string                 // text to pass to editor after warning
+	editorWarnEnvelope   asyncEnvelope          // accepted request identity retained through launch
 	insightsEnabled      bool                   // from settings — show insight events
 	toolCallTruncate     int                    // from settings — max chars per tool line (0 = no truncation)
 	sessionCache         *fs.SessionCache       // append-only session log
@@ -338,6 +339,16 @@ func (m MailModel) requestMailRefresh(initial bool) tea.Cmd {
 	return func() tea.Msg {
 		return projectMailRefreshRequestMsg{envelope: envelope, initial: initial}
 	}
+}
+
+// requestEditor captures the active Mail binding before the Ctrl+E request is
+// deferred back through the root state machine.
+func (m MailModel) requestEditor() tea.Cmd {
+	request := OpenEditorMsg{
+		envelope: captureAsync(asyncEditorRequest, m.asyncCurrent()),
+		Text:     m.input.Value(),
+	}
+	return func() tea.Msg { return request }
 }
 
 // requestOlderPage starts an asynchronous load of the next older page of history.
@@ -1263,9 +1274,14 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case OpenEditorMsg:
-		// Show editor intro page before launching
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
+			return m, nil
+		}
+		// Show the editor intro page only for the exact captured target, and retain
+		// that request identity for a second check immediately before launch.
 		m.showEditorWarn = true
 		m.editorWarnText = msg.Text
+		m.editorWarnEnvelope = msg.envelope
 		return m, nil
 
 	case EditorDoneMsg:
@@ -1292,10 +1308,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if m.showEditorWarn {
 			switch msg.String() {
 			case "enter":
-				m.showEditorWarn = false
-				return m, m.launchEditor(m.editorWarnText)
+				request := m.editorWarnEnvelope
+				text := m.editorWarnText
+				m.clearEditorRequest()
+				return m, m.launchEditor(request, text)
 			case "esc", "ctrl+c":
-				m.showEditorWarn = false
+				m.clearEditorRequest()
 				return m, nil
 			}
 			return m, nil
@@ -1313,6 +1331,10 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if m.copyMode && msg.String() == "esc" {
 			m.copyMode = false
 			return m, nil
+		}
+
+		if msg.String() == "ctrl+e" {
+			return m, m.requestEditor()
 		}
 
 		// If palette is active, route to palette
@@ -1963,8 +1985,19 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// launchEditor creates a temp file and opens $EDITOR (default: vim).
-func (m MailModel) launchEditor(text string) tea.Cmd {
+func (m *MailModel) clearEditorRequest() {
+	m.showEditorWarn = false
+	m.editorWarnText = ""
+	m.editorWarnEnvelope = asyncEnvelope{}
+}
+
+// launchEditor creates a temp file and opens $EDITOR (default: vim). The same
+// request accepted before the warning must still own the current target at this
+// last boundary before any temp-file or process side effect.
+func (m MailModel) launchEditor(request asyncEnvelope, text string) tea.Cmd {
+	if !acceptAsync(m.asyncCurrent(), request) {
+		return nil
+	}
 	tmpFile, err := os.CreateTemp("", "lingtai-input-*.txt")
 	if err != nil {
 		return nil

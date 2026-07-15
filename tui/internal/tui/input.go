@@ -16,9 +16,11 @@ import (
 // SendMsg is emitted when the user presses Enter in the input box.
 type SendMsg struct{}
 
-// OpenEditorMsg is emitted when user presses Ctrl+E to open external editor.
+// OpenEditorMsg defers an external-editor request to the root-routed Mail state
+// machine. Its envelope binds the request text to the originating target.
 type OpenEditorMsg struct {
-	Text string
+	envelope asyncEnvelope
+	Text     string
 }
 
 const defaultInputMaxHeight = 6
@@ -139,11 +141,6 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 				m.textarea.SetValue("")
 			}
 			return m, nil
-		case "ctrl+e":
-			// Open external editor with current text
-			return m, func() tea.Msg {
-				return OpenEditorMsg{Text: m.textarea.Value()}
-			}
 		}
 		// Forward to textarea for all other keys (including ctrl+j / shift+enter for newline)
 		var cmd tea.Cmd

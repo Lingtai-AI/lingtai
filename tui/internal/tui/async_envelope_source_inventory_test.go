@@ -29,6 +29,7 @@ var asyncSourceLogicalPaths = []asyncSourceLogicalPath{
 	{label: "exact history count", kind: "asyncExactHistoryCount", completion: "mailHistoryCountMsg"},
 	{label: "refresh tick", kind: "asyncRefreshTick", completion: "projectMailTickMsg"},
 	{label: "liveness pulse", kind: "asyncLivenessPulse", completion: "pulseTickMsg"},
+	{label: "external editor request", kind: "asyncEditorRequest", completion: "OpenEditorMsg"},
 	{label: "external editor completion", kind: "asyncEditorDone", completion: "EditorDoneMsg"},
 	{label: "cold ordinary thread load", kind: "asyncColdThreadLoad", completion: "threadLoadResultMsg"},
 	{label: "bound mail send", kind: "asyncBoundSend", completion: "boundSendRequestMsg"},
@@ -41,6 +42,7 @@ var asyncSourceCompletionProducers = map[string][]string{
 	"mailHistoryCountMsg":   {"MailModel.historyCountCmd"},
 	"projectMailTickMsg":    {"projectMailTickEvery"},
 	"pulseTickMsg":          {"pulseTick"},
+	"OpenEditorMsg":         {"MailModel.requestEditor"},
 	"EditorDoneMsg":         {"MailModel.launchEditor"},
 	"threadLoadResultMsg":   {"ThreadLoadCoordinator.request"},
 	"boundSendRequestMsg":   {"MailModel.Update"},
@@ -58,6 +60,7 @@ var asyncSourceConsumers = []asyncSourceConsumerContract{
 	{message: "mailOlderPageMsg", owner: "MailModel.Update"},
 	{message: "mailHistoryCountMsg", owner: "MailModel.Update"},
 	{message: "pulseTickMsg", owner: "MailModel.Update"},
+	{message: "OpenEditorMsg", owner: "MailModel.Update"},
 	{message: "EditorDoneMsg", owner: "MailModel.Update"},
 	{message: "threadLoadResultMsg", owner: "App.Update"},
 	{message: "boundSendRequestMsg", owner: "MailModel.Update"},
@@ -124,10 +127,10 @@ func loadAsyncSourceInventory(t *testing.T) *asyncSourceInventory {
 	return inv
 }
 
-func TestAsyncEnvelopeSourceInventoryHasExactlyTenLogicalKinds(t *testing.T) {
+func TestAsyncEnvelopeSourceInventoryHasExactlyElevenLogicalKinds(t *testing.T) {
 	inv := loadAsyncSourceInventory(t)
 	if _, ok := inv.files["async_envelope.go"]; !ok {
-		t.Fatalf("async_envelope.go missing: want one shared protocol defining the exact ten target-mail logical kinds")
+		t.Fatalf("async_envelope.go missing: want one shared protocol defining the exact eleven target-mail logical kinds")
 	}
 	if _, ok := inv.types["asyncKind"]; !ok {
 		t.Fatalf("async_envelope.go: asyncKind type missing")
@@ -139,7 +142,7 @@ func TestAsyncEnvelopeSourceInventoryHasExactlyTenLogicalKinds(t *testing.T) {
 	}
 	got := inv.constantsOfType("asyncKind")
 	if missing, unexpected := setDifference(want, got), setDifference(got, want); len(missing) != 0 || len(unexpected) != 0 {
-		t.Fatalf("asyncKind inventory mismatch: got %v; missing %v; unexpected %v; want exactly the issue's ten logical paths", got, missing, unexpected)
+		t.Fatalf("asyncKind inventory mismatch: got %v; missing %v; unexpected %v; want exactly the issue's eleven logical paths", got, missing, unexpected)
 	}
 }
 
@@ -149,6 +152,7 @@ func TestAsyncEnvelopeSourceInventoryEveryCompletionCarriesEnvelope(t *testing.T
 		assertExactNamedField(t, inv, name, "envelope", "asyncEnvelope")
 	}
 
+	assertExactNamedField(t, inv, "OpenEditorMsg", "Text", "string")
 	assertExactNamedField(t, inv, "EditorDoneMsg", "Text", "string")
 	if got := inv.namedFieldTypes("EditorDoneMsg", "Generation"); len(got) != 0 {
 		t.Errorf("EditorDoneMsg.Generation is a forbidden generation-only identity; target/address/generation must be carried only by envelope asyncEnvelope")
@@ -236,8 +240,8 @@ func TestAsyncEnvelopeSourceInventoryScopesNonMilestoneAsyncMessagesExplicitly(t
 	for _, completion := range asyncCompletionNames() {
 		completionSet[completion] = true
 	}
-	if len(asyncSourceLogicalPaths) != 10 || len(completionSet) != 9 {
-		t.Fatalf("invalid test contract: ten logical paths must map to nine completion structs; got %d paths and %d structs", len(asyncSourceLogicalPaths), len(completionSet))
+	if len(asyncSourceLogicalPaths) != 11 || len(completionSet) != 10 {
+		t.Fatalf("invalid test contract: eleven logical paths must map to ten completion structs; got %d paths and %d structs", len(asyncSourceLogicalPaths), len(completionSet))
 	}
 
 	for _, exclusion := range asyncSourceExclusions {
@@ -248,14 +252,14 @@ func TestAsyncEnvelopeSourceInventoryScopesNonMilestoneAsyncMessagesExplicitly(t
 			issues = append(issues, exclusion.message+": documented non-milestone async type missing; update the explicit scope inventory if it was intentionally renamed or removed")
 		}
 		if completionSet[exclusion.message] {
-			issues = append(issues, exclusion.message+": explicit exclusion was accidentally added to the nine target-mail completion structs")
+			issues = append(issues, exclusion.message+": explicit exclusion was accidentally added to the ten target-mail completion structs")
 		}
 		if got := inv.namedFieldTypes(exclusion.message, "envelope"); len(got) != 0 {
 			issues = append(issues, exclusion.message+": explicit PR4 exclusion unexpectedly carries the target-mail envelope")
 		}
 	}
 
-	// The refresh request is coordination, not an eleventh logical path. It must
+	// The refresh request is coordination, not a twelfth logical path. It must
 	// still carry/capture an initial-or-steady envelope and be accepted before work starts.
 	if completionSet["projectMailRefreshRequestMsg"] {
 		issues = append(issues, "projectMailRefreshRequestMsg: request must not become an additional completion kind")
@@ -265,8 +269,8 @@ func TestAsyncEnvelopeSourceInventoryScopesNonMilestoneAsyncMessagesExplicitly(t
 	issues = append(issues, inv.refreshKindCaptureIssues("MailModel.requestMailRefresh")...)
 	issues = append(issues, inv.consumerIssues("App.Update", "projectMailRefreshRequestMsg")...)
 
-	// The delayed human-location write is a post-accept side effect, not a ninth
-	// message kind. It captures the accepted refresh envelope and re-runs the same
+	// The delayed human-location write is a post-accept side effect, not an
+	// additional message kind. It captures the accepted refresh envelope and re-runs the same
 	// predicate immediately before the side effect.
 	location := inv.findFunction("ProjectMailStore.locationUpdateCmd")
 	if location == nil {
