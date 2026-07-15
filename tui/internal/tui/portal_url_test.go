@@ -90,9 +90,13 @@ func TestPortalURLTimeoutKillsChild(t *testing.T) {
 		t.Skip("process-alive probe via signal 0 is Unix-only")
 	}
 
-	// Fake portal on PATH; it records its pid to pidFile before blocking.
+	// Fake portal on PATH; it records its pid to pidFile before blocking. Seed
+	// a hostile inherited helper pid path: the Unix wrapper must clear it so
+	// the pre-exec wrapper remains the only pid-file writer.
 	binDir := t.TempDir()
 	pidFile := filepath.Join(t.TempDir(), "portal.pid")
+	inheritedPIDFile := filepath.Join(t.TempDir(), "inherited-helper.pid")
+	t.Setenv("GO_FAKE_PORTAL_PID_FILE", inheritedPIDFile)
 	writeFakePortal(t, binDir, pidFile)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -133,6 +137,11 @@ func TestPortalURLTimeoutKillsChild(t *testing.T) {
 	}
 	if processAlive(pid) {
 		t.Fatalf("portal pid %d still alive after timeout; it should have been killed", pid)
+	}
+	if _, err := os.Stat(inheritedPIDFile); err == nil {
+		t.Fatalf("Unix helper wrote inherited pid path %q; wrapper must clear GO_FAKE_PORTAL_PID_FILE", inheritedPIDFile)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat inherited helper pid path: %v", err)
 	}
 }
 
