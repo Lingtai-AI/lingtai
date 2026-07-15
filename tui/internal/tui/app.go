@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 )
@@ -59,6 +61,79 @@ type visitReturnState struct {
 	mail       MailModel
 	projects   ProjectsModel
 	view       appView
+}
+
+type agentRailInventoryLifecycleState struct {
+	mu                    sync.Mutex
+	scanner               func(inventory.Options) (inventory.Snapshot, error)
+	latestRequestSequence uint64
+}
+
+func newAgentRailInventoryLifecycleState() *agentRailInventoryLifecycleState {
+	return &agentRailInventoryLifecycleState{scanner: inventory.Scan}
+}
+
+func (s *agentRailInventoryLifecycleState) nextRequestSequenceLocked() uint64 {
+	s.latestRequestSequence++
+	if s.latestRequestSequence == 0 {
+		s.latestRequestSequence = 1
+	}
+	return s.latestRequestSequence
+}
+
+func (s *agentRailInventoryLifecycleState) schedule() (func(inventory.Options) (inventory.Snapshot, error), uint64) {
+	if s == nil {
+		return nil, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scanner == nil {
+		s.scanner = inventory.Scan
+	}
+	return s.scanner, s.nextRequestSequenceLocked()
+}
+
+func (s *agentRailInventoryLifecycleState) setScanner(scanner func(inventory.Options) (inventory.Snapshot, error)) {
+	if s == nil {
+		return
+	}
+	if scanner == nil {
+		scanner = inventory.Scan
+	}
+	s.mu.Lock()
+	s.scanner = scanner
+	s.mu.Unlock()
+}
+
+func (s *agentRailInventoryLifecycleState) invalidate() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.nextRequestSequenceLocked()
+	s.mu.Unlock()
+}
+
+func (s *agentRailInventoryLifecycleState) acceptLatest(requestSequence uint64, install func()) bool {
+	if s == nil || requestSequence == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if requestSequence != s.latestRequestSequence {
+		return false
+	}
+	if install != nil {
+		install()
+	}
+	return true
+}
+
+type agentRailInventoryResultMsg struct {
+	owner           asyncOwner
+	requestSequence uint64
+	snapshot        inventory.Snapshot
+	err             error
 }
 
 // App is the root Bubble Tea model. Routes between views via slash commands.
@@ -111,12 +186,13 @@ type App struct {
 	// it so the two badges can't both show.
 	selectMode bool
 
-	mailGeneration         uint64
-	projectsActivationID   uint64
-	mailStore              ProjectMailStore
-	suspendedHomeMailStore *ProjectMailStore
-	currentThread          ThreadState
-	threadLoads            ThreadLoadCoordinator
+	mailGeneration              uint64
+	projectsActivationID        uint64
+	mailStore                   ProjectMailStore
+	agentRailInventoryLifecycle *agentRailInventoryLifecycleState
+	suspendedHomeMailStore      *ProjectMailStore
+	currentThread               ThreadState
+	threadLoads                 ThreadLoadCoordinator
 
 	visiting              bool
 	visitReturn           *visitReturnState
@@ -139,12 +215,55 @@ func (a App) currentMailTargetPolicy() (asyncTargetPolicy, int) {
 	return asyncTargetHomeMain, 0
 }
 
+func (a *App) ensureAgentRailInventoryLifecycle() *agentRailInventoryLifecycleState {
+	if a == nil {
+		return nil
+	}
+	if a.agentRailInventoryLifecycle == nil {
+		a.agentRailInventoryLifecycle = newAgentRailInventoryLifecycleState()
+	}
+	return a.agentRailInventoryLifecycle
+}
+
+func (a *App) setAgentRailInventoryScanner(scanner func(inventory.Options) (inventory.Snapshot, error)) {
+	if a == nil {
+		return
+	}
+	a.ensureAgentRailInventoryLifecycle().setScanner(scanner)
+}
+
+func (a App) scheduleAgentRailInventoryScan() tea.Cmd {
+	state := a.agentRailInventoryLifecycle
+	owner := a.mailStore.binding.owner
+	if a.visiting || state == nil || !validAsyncOwner(owner) {
+		return nil
+	}
+	scanner, requestSequence := state.schedule()
+	if scanner == nil || requestSequence == 0 {
+		return nil
+	}
+	options := inventory.Options{FilterDir: filepath.Dir(owner.projectID)}
+	return func() tea.Msg {
+		snapshot, err := scanner(options)
+		return agentRailInventoryResultMsg{
+			owner:           owner,
+			requestSequence: requestSequence,
+			snapshot:        snapshot,
+			err:             err,
+		}
+	}
+}
+
 func (a *App) installMailModel(m MailModel) {
+	inventoryLifecycle := a.ensureAgentRailInventoryLifecycle()
 	if !a.mailStore.matches(m.baseDir, m.humanDir) {
 		// Invalidate the shared execution token before discarding a current
 		// store so any delayed location command becomes a no-op.
-		if a.mailStore.id != 0 && a.mailStore.active {
-			a.mailStore.suspend()
+		if a.mailStore.id != 0 {
+			inventoryLifecycle.invalidate()
+			if a.mailStore.active {
+				a.mailStore.suspend()
+			}
 		}
 		a.mailStore = newProjectMailStore(m.baseDir, m.humanDir)
 	}
@@ -417,6 +536,9 @@ func (a App) Init() tea.Cmd {
 		// because no ticker exists yet at startup.
 		cmds = append(cmds, autoRefreshTick())
 	}
+	if a.currentView == appViewMail {
+		cmds = append(cmds, a.scheduleAgentRailInventoryScan())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -452,7 +574,11 @@ func (a *App) resumeProjectMail(initial bool) tea.Cmd {
 	if a.mail.pulseEpoch == 0 {
 		a.mail.pulseEpoch = 1
 	}
-	return tea.Batch(refreshCmd, tickCmd, a.mail.asyncPulseCmd(), a.sendSize())
+	cmds := []tea.Cmd{refreshCmd, tickCmd, a.mail.asyncPulseCmd(), a.sendSize()}
+	if !a.visiting {
+		cmds = append(cmds, a.scheduleAgentRailInventoryScan())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a *App) initProjectMail() tea.Cmd {
@@ -468,6 +594,9 @@ func (a *App) pauseProjectMail() {
 // run on the root event loop before filesystem cleanup starts; background cleanup
 // must never race a still-current refresh, persist, older-page, or location result.
 func (a *App) invalidateProjectMailForReset() {
+	if a.agentRailInventoryLifecycle != nil {
+		a.agentRailInventoryLifecycle.invalidate()
+	}
 	a.mailStore.suspend()
 	if a.suspendedHomeMailStore != nil {
 		a.suspendedHomeMailStore.suspend()
@@ -486,6 +615,19 @@ func (a *App) invalidateProjectMailForReset() {
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case agentRailInventoryResultMsg:
+		state := a.agentRailInventoryLifecycle
+		currentOwner := a.mailStore.binding.owner
+		if a.visiting || state == nil || !validAsyncOwner(currentOwner) || msg.owner != currentOwner {
+			return a, nil
+		}
+		state.acceptLatest(msg.requestSequence, func() {
+			if msg.err == nil {
+				a.agentRail.installInventory(msg.owner, msg.snapshot)
+			}
+		})
+		return a, nil
+
 	case childWindowSizeMsg:
 		return a.updateMailChildWindowSize(msg.WindowSizeMsg)
 
