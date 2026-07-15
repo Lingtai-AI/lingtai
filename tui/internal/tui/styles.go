@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 )
@@ -290,6 +291,20 @@ func rebuildStyles() {
 	StyleSubtle = lipgloss.NewStyle().Foreground(ColorTextDim)
 	StyleFaint = lipgloss.NewStyle().Foreground(ColorTextFaint)
 	StyleAccent = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+}
+
+// ApplyThemeToView applies the active theme's page-level palette to a root
+// Bubble Tea view. App, launcher, and transitional pages use this shared hook
+// so a theme switch changes the whole page rather than isolated elements.
+func ApplyThemeToView(v *tea.View) {
+	if v == nil {
+		return
+	}
+	t := ActiveTheme()
+	if t.PaintBG {
+		v.BackgroundColor = t.BG
+		v.ForegroundColor = t.Text
+	}
 }
 
 // inTmux is true when the process is running inside a tmux session.

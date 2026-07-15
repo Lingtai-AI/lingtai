@@ -265,6 +265,7 @@ func (m noProjectProgramModel) View() tea.View {
 		v := tea.NewView(tui.StartupLoadingView(m.width, m.height))
 		v.AltScreen = true
 		v.MouseMode = tea.MouseModeCellMotion
+		tui.ApplyThemeToView(&v)
 		v.ReportFocus = true
 		return v
 	}

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"image/color"
 	"os"
 	"time"
 
@@ -149,12 +148,12 @@ func (m NirvanaModel) viewProgress() string {
 	if m.done {
 		statusText = i18n.T("nirvana.done")
 	}
-	return m.viewLeafProgress(statusText, m.done, ColorAgent)
+	return m.viewLeafProgress(statusText, m.done)
 }
 
-func (m NirvanaModel) viewLeafProgress(statusText string, done bool, foreground color.Color) string {
-	leafStyle := lipgloss.NewStyle().Foreground(foreground)
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(foreground)
+func (m NirvanaModel) viewLeafProgress(statusText string, done bool) string {
+	leafStyle := lipgloss.NewStyle().Foreground(ColorAgent)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 
 	leaf := leafStyle.Render(bodhiLeaf)
 	statusText = titleStyle.Render(statusText)
@@ -183,7 +182,7 @@ func (m NirvanaModel) viewLeafProgress(statusText string, done bool, foreground 
 // Keeping the composition here prevents the handoff from growing a second
 // loading renderer or a near-copy of the established screen.
 func StartupLoadingView(width, height int) string {
-	return (NirvanaModel{width: width, height: height}).viewLeafProgress(i18n.T("app.loading"), false, ColorAccent)
+	return (NirvanaModel{width: width, height: height}).viewLeafProgress(i18n.T("app.loading"), false)
 }
 
 func (m NirvanaModel) viewConfirm() string {

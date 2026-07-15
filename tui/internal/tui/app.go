@@ -1798,11 +1798,7 @@ func (a App) View() tea.View {
 	if (a.currentView == appViewMail && a.mail.copyMode) || (a.currentView != appViewMail && a.selectMode) {
 		v.MouseMode = tea.MouseModeNone
 	}
-	t := ActiveTheme()
-	if t.PaintBG {
-		v.BackgroundColor = t.BG
-		v.ForegroundColor = t.Text
-	}
+	ApplyThemeToView(&v)
 	v.ReportFocus = true
 	return v
 }

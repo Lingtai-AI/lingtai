@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,21 @@ func TestLauncherHandoffProjectIncludesSuccessfulCreate(t *testing.T) {
 	}
 	if got, ok := launcherHandoffProject(tui.LauncherResult{Kind: tui.DecisionCancel}); ok || got != "" {
 		t.Fatalf("cancel handoff = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
+
+func TestNoProjectProgramLoadingUsesActiveThemePagePalette(t *testing.T) {
+	original := tui.ActiveTheme()
+	t.Cleanup(func() { tui.SetTheme(original) })
+	tui.SetThemeByName("xuan-paper")
+
+	v := (noProjectProgramModel{loading: true, width: 80, height: 24}).View()
+	active := tui.ActiveTheme()
+	if !reflect.DeepEqual(v.BackgroundColor, active.BG) {
+		t.Fatalf("loading page background = %v, want active theme %v", v.BackgroundColor, active.BG)
+	}
+	if !reflect.DeepEqual(v.ForegroundColor, active.Text) {
+		t.Fatalf("loading page foreground = %v, want active theme %v", v.ForegroundColor, active.Text)
 	}
 }
 

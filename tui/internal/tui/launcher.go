@@ -557,11 +557,7 @@ func (m LauncherRootModel) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	t := ActiveTheme()
-	if t.PaintBG {
-		v.BackgroundColor = t.BG
-		v.ForegroundColor = t.Text
-	}
+	ApplyThemeToView(&v)
 	v.ReportFocus = true
 	return v
 }
