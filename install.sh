@@ -115,6 +115,7 @@ KERNEL_BUNDLE_ID=""
 KERNEL_VERSION_INSTALLED=""
 KERNEL_PROVIDER=""
 KERNEL_MANIFEST_PROVIDER=""  # set by fetch_kernel_manifest(); which provider actually served the kernel manifest
+KERNEL_MANIFEST_JSON=""      # set by fetch_kernel_manifest() in the same shell as the provider
 BUNDLE_MANIFEST_KERNEL_TAG=""
 BUNDLE_MANIFEST_KERNEL_VERSION=""
 BUNDLE_MANIFEST_KERNEL_FILENAME=""
@@ -1141,18 +1142,19 @@ kernel_manifest_url_for_provider() {
 # fetch_kernel_manifest resolves the pinned kernel tag/manifest for the
 # CURRENT BUNDLE_PROVIDER + the bundle's kernel_tag. Falls back to the other
 # provider for the SAME kernel tag only (same-bundle-fallback contract).
-# Echoes the manifest JSON body on stdout; returns nonzero if unavailable on
-# either provider.
+# Populates KERNEL_MANIFEST_JSON and KERNEL_MANIFEST_PROVIDER in this shell;
+# returns nonzero if unavailable on either provider.
 fetch_kernel_manifest() {
   local kernel_tag="$1" provider="$BUNDLE_PROVIDER" url body other
+  KERNEL_MANIFEST_PROVIDER=""
+  KERNEL_MANIFEST_JSON=""
 
   url="$(kernel_manifest_url_for_provider "$provider" "$kernel_tag" || true)"
   if [[ -z "$url" ]]; then
     other="github"
     [[ "$provider" == "github" ]] && other="gitee"
-    # stderr, not note()/stdout: this function's stdout is captured as pure
-    # JSON by the caller (kernel_manifest="$(fetch_kernel_manifest ...)"), so
-    # progress text must never share that stream.
+    # Keep fallback diagnostics on stderr; stdout remains reserved for normal
+    # installer output while the manifest is returned through explicit state.
     echo "    $provider has no kernel manifest for $kernel_tag; trying $other for the SAME kernel tag." >&2
     url="$(kernel_manifest_url_for_provider "$other" "$kernel_tag" || true)"
     [[ -n "$url" ]] || return 1
@@ -1167,23 +1169,71 @@ fetch_kernel_manifest() {
   fi
 
   KERNEL_MANIFEST_PROVIDER="$provider"
-  printf '%s' "$body"
+  KERNEL_MANIFEST_JSON="$body"
 }
 
-# python_platform_tags asks the venv's own Python (via the `packaging`
-# library pip vendors, so no extra dependency) for its compatible wheel tags,
-# one per line, most-specific first. This MUST run against the venv
-# interpreter — not the installer's bootstrap Python — because tag
-# compatibility depends on the exact interpreter that will import the wheel.
+# python_platform_tags asks the venv's own Python for compatible wheel tags,
+# one per line, most-specific first. Fresh `uv venv` environments intentionally
+# contain neither packaging nor pip, so use their implementations when present
+# and otherwise emit a conservative dependency-free CPython/OS/arch set for the
+# platform wheels this release pipeline publishes. The installer still lets uv
+# enforce final wheel compatibility during installation.
 python_platform_tags() {
   local py="$1"
   "$py" - <<'PY' 2>/dev/null
+import platform
+import sys
+
+sys_tags = None
 try:
     from packaging.tags import sys_tags
 except ModuleNotFoundError:
-    from pip._vendor.packaging.tags import sys_tags  # type: ignore
-for tag in sys_tags():
-    print(f"{tag.interpreter}-{tag.abi}-{tag.platform}")
+    try:
+        from pip._vendor.packaging.tags import sys_tags  # type: ignore
+    except ModuleNotFoundError:
+        pass
+
+if sys_tags is not None:
+    for tag in sys_tags():
+        print(f"{tag.interpreter}-{tag.abi}-{tag.platform}")
+    raise SystemExit(0)
+
+interpreter = f"cp{sys.version_info.major}{sys.version_info.minor}"
+abi = interpreter
+machine = platform.machine().lower()
+
+def emit(platform_tag):
+    print(f"{interpreter}-{abi}-{platform_tag}")
+
+if sys.platform == "darwin":
+    arch = "arm64" if machine in {"arm64", "aarch64"} else "x86_64"
+    version = platform.mac_ver()[0]
+    try:
+        major, minor = (int(part) for part in version.split(".")[:2])
+    except (TypeError, ValueError):
+        major, minor = (11, 0) if arch == "arm64" else (10, 13)
+    if major >= 11:
+        for compatible_major in range(major, 10, -1):
+            emit(f"macosx_{compatible_major}_0_{arch}")
+        minor = 16
+    if arch == "x86_64" and major >= 10:
+        for compatible_minor in range(min(minor, 16), 8, -1):
+            emit(f"macosx_10_{compatible_minor}_x86_64")
+elif sys.platform.startswith("linux"):
+    arch = "aarch64" if machine in {"arm64", "aarch64"} else "x86_64"
+    libc_name, libc_version = platform.libc_ver()
+    try:
+        libc_major, libc_minor = (int(part) for part in libc_version.split(".")[:2])
+    except (TypeError, ValueError):
+        libc_major, libc_minor = 0, 0
+    if libc_name == "glibc" and libc_major == 2 and libc_minor >= 17:
+        for compatible_minor in range(libc_minor, 16, -1):
+            tag = f"manylinux_2_{compatible_minor}_{arch}"
+            if compatible_minor == 17:
+                tag += f".manylinux2014_{arch}"
+            emit(tag)
+elif sys.platform == "win32":
+    emit("win_amd64" if machine in {"amd64", "x86_64"} else "win_arm64")
 PY
 }
 
@@ -1282,9 +1332,13 @@ install_kernel_from_bundle() {
   kernel_tag="$(bundle_manifest_field kernel_tag)"
   [[ -n "$kernel_tag" ]] || return 1
 
-  KERNEL_MANIFEST_PROVIDER=""
-  kernel_manifest="$(fetch_kernel_manifest "$kernel_tag")" || {
+  if ! fetch_kernel_manifest "$kernel_tag"; then
     note "Could not fetch the pinned kernel release manifest ($kernel_tag) from GitHub or Gitee."
+    return 1
+  fi
+  kernel_manifest="$KERNEL_MANIFEST_JSON"
+  [[ -n "$kernel_manifest" && -n "$KERNEL_MANIFEST_PROVIDER" ]] || {
+    note "Kernel manifest resolution returned incomplete provider state."
     return 1
   }
 

@@ -4,15 +4,15 @@
 # release.yml's release-assets/publish-bundle jobs. Never rebuilds anything.
 #
 # Safety: every mutating action requires --execute. Without it (the default)
-# this script only prints its plan and exits 0. release.yml never passes
-# --execute — actual Gitee publication requires a separate authorized run.
+# this script only prints its plan and exits 0. Callers must pass --execute only
+# for an explicitly authorized Gitee publication.
 #
 # Auth: GITEE_ACCESS_TOKEN env var, never echoed/logged. If unset, this script
 # prints why it is skipping and exits 0 (not a failure — Gitee credentials are
 # a separate authorization step from shipping the GitHub release).
 #
 # Gitee v5 REST contract used:
-#   GET  /v5/repos/{owner}/{repo}/tags/{tag}                (verify sync)
+#   GET  /v5/repos/{owner}/{repo}/tags?per_page=N&page=N     (verify sync)
 #   GET  /v5/repos/{owner}/{repo}/releases/tags/{tag}        (find release)
 #   POST /v5/repos/{owner}/{repo}/releases                   (create release)
 #   GET  /v5/repos/{owner}/{repo}/releases/{id}               (list attachments)
@@ -99,23 +99,66 @@ fi
 # --- Gitee v5 helpers -------------------------------------------------------
 
 gitee_get() {
-  local path="$1"
-  curl -fsSL --max-time 15 "${GITEE_API_BASE}${path}?access_token=${GITEE_ACCESS_TOKEN}"
+  local path="$1" separator="?"
+  [[ "$path" == *"?"* ]] && separator="&"
+  curl -fsSL --max-time 15 "${GITEE_API_BASE}${path}${separator}access_token=${GITEE_ACCESS_TOKEN}"
+}
+
+manifest_tui_commit() {
+  python3 -c "import json; print(json.load(open('$MANIFEST'))['tui_commit'])"
 }
 
 # Fail loud unless Gitee's tag already points at the exact commit the bundle
-# was built from. Never force-pushes or otherwise mutates the Gitee git repo —
-# synchronizing the mirror is an out-of-band precondition this script checks.
+# was built from. Gitee v5 exposes tags as a paginated list rather than a
+# working /tags/{tag} endpoint. Never force-pushes or mutates the Gitee repo.
 verify_tag_synchronized() {
-  local expected_commit body sha
-  expected_commit="$(python3 -c "import json; print(json.load(open('$MANIFEST'))['tui_commit'])")"
-  if ! body="$(gitee_get "/repos/${GITEE_OWNER}/${GITEE_REPO}/tags/${TAG}")"; then
-    echo "error: Gitee tag ${TAG} not found on ${GITEE_OWNER}/${GITEE_REPO} (or lookup failed)." >&2
-    echo "       The TUI Gitee mirror must be synchronized to commit ${expected_commit} and tag ${TAG}" >&2
-    echo "       before publishing there. This script will not push or force-sync the mirror." >&2
+  local expected_commit body parsed page page_size line kind value sha
+  local -a matches=()
+  expected_commit="$(manifest_tui_commit)"
+  page=1
+  while :; do
+    if ! body="$(gitee_get "/repos/${GITEE_OWNER}/${GITEE_REPO}/tags?per_page=100&page=${page}")"; then
+      echo "error: Gitee tag-list lookup failed on ${GITEE_OWNER}/${GITEE_REPO}." >&2
+      echo "       The TUI Gitee mirror must contain commit ${expected_commit} and tag ${TAG}" >&2
+      echo "       before publishing there. This script will not push or force-sync the mirror." >&2
+      return 1
+    fi
+    if ! parsed="$(printf '%s' "$body" | python3 -c 'import json,sys
+
+tag = sys.argv[1]
+items = json.load(sys.stdin)
+if not isinstance(items, list):
+    raise SystemExit("tag-list response is not a JSON array")
+print(f"SIZE\t{len(items)}")
+for item in items:
+    if isinstance(item, dict) and item.get("name") == tag:
+        commit = item.get("commit")
+        sha = commit.get("sha", "") if isinstance(commit, dict) else ""
+        print(f"MATCH\t{sha}")' "$TAG")"; then
+      echo "error: Gitee tag-list response is malformed for ${GITEE_OWNER}/${GITEE_REPO}." >&2
+      return 1
+    fi
+    page_size=""
+    while IFS=$'\t' read -r kind value; do
+      case "$kind" in
+        SIZE) page_size="$value" ;;
+        MATCH) matches+=("$value") ;;
+        *) echo "error: unexpected parsed Gitee tag-list row" >&2; return 1 ;;
+      esac
+    done <<< "$parsed"
+    [[ "$page_size" =~ ^[0-9]+$ ]] || { echo "error: Gitee tag-list page size is invalid" >&2; return 1; }
+    (( page_size < 100 )) && break
+    page=$((page + 1))
+  done
+  if (( ${#matches[@]} == 0 )); then
+    echo "error: Gitee tag ${TAG} not found on ${GITEE_OWNER}/${GITEE_REPO}." >&2
     return 1
   fi
-  sha="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("commit",{}).get("sha",""))' 2>/dev/null || true)"
+  if (( ${#matches[@]} > 1 )); then
+    echo "error: Gitee tag-list contains duplicate entries for ${TAG}; refusing ambiguous publish." >&2
+    return 1
+  fi
+  sha="${matches[0]}"
   if [[ "$sha" != "$expected_commit" ]]; then
     echo "error: Gitee tag ${TAG} points at commit ${sha:-<unknown>}, expected ${expected_commit}." >&2
     echo "       Refusing to publish assets against a mismatched tag." >&2
@@ -165,9 +208,10 @@ PY
 if [[ -z "$release_id" ]]; then
   echo "[gitee] release ${TAG} does not exist yet"
   if [[ "$EXECUTE" == "1" ]]; then
+    expected_commit="$(manifest_tui_commit)"
     body="$(curl -fsSL --max-time 15 -X POST \
       -H 'Content-Type: application/json;charset=UTF-8' \
-      -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"body\":\"Release ${TAG}\",\"prerelease\":false}" \
+      -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"body\":\"Release ${TAG}\",\"target_commitish\":\"${expected_commit}\",\"prerelease\":false}" \
       "${GITEE_API_BASE}/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?access_token=${GITEE_ACCESS_TOKEN}")"
     release_id="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
   else
@@ -186,7 +230,7 @@ for f in "${files_to_upload[@]}"; do
       echo "error: could not allocate a unique retained comparison path for $name" >&2
       exit 1
     fi
-    if ! curl -fsSL --max-time 60 -o "$remote" "$attachment_url"; then
+    if ! curl -fsSL --max-time 300 -o "$remote" "$attachment_url"; then
       echo "error: could not download existing Gitee attachment $name for byte verification" >&2
       exit 1
     fi
@@ -204,7 +248,7 @@ for f in "${files_to_upload[@]}"; do
     exit 1
   fi
   if [[ "$EXECUTE" == "1" ]]; then
-    curl -fsSL --max-time 60 -X POST \
+    curl -fsSL --max-time 300 -X POST \
       -F "file=@${f}" \
       "${GITEE_API_BASE}/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/${release_id}/attach_files?access_token=${GITEE_ACCESS_TOKEN}" \
       -o /dev/null

@@ -369,7 +369,62 @@ register_response_text() {
   fi
 )
 
+# --- kernel manifest handoff survives provider selection in the same shell ---
+
+(
+  BUNDLE_PROVIDER="gitee"
+  KERNEL_MANIFEST_PROVIDER=""
+  KERNEL_MANIFEST_JSON=""
+  kernel_manifest_url_for_provider() {
+    [[ "$1" == "gitee" ]] && printf 'https://example.invalid/%s/manifest.json' "$2"
+  }
+  curl() {
+    printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[]}'
+  }
+
+  fetch_kernel_manifest v0.16.4 || fail "fetch_kernel_manifest should populate explicit state"
+  assert_eq "gitee" "$KERNEL_MANIFEST_PROVIDER" "kernel manifest provider survives fetch"
+  [[ "$KERNEL_MANIFEST_JSON" == *'"kernel_version":"0.16.4"'* ]] ||
+    fail "kernel manifest JSON survives fetch"
+)
+
 # --- select_kernel_wheel: exact match preferred, no match -> empty ----------
+
+(
+  # A real fresh uv venv has neither packaging nor pip. The dependency-free
+  # fallback must still emit at least one usable CPython platform tag.
+  no_pip_venv="$tmp/no-pip-venv"
+  python3 -m venv --without-pip "$no_pip_venv"
+  tags="$(python_platform_tags "$no_pip_venv/bin/python")"
+  [[ -n "$tags" ]] || fail "python_platform_tags should work without packaging or pip"
+  first_tag="$(printf '%s\n' "$tags" | sed -n '1p')"
+  python_tag="${first_tag%%-*}"
+  remainder="${first_tag#*-}"
+  abi_tag="${remainder%%-*}"
+  platform_tag="${remainder#*-}"
+  kernel_manifest="$(python3 - "$python_tag" "$abi_tag" "$platform_tag" <<'PY'
+import json, sys
+python_tag, abi_tag, platform_tag = sys.argv[1:]
+filename = f"lingtai-0.16.4-{python_tag}-{abi_tag}-{platform_tag}.whl"
+print(json.dumps({
+    "schema": "lingtai.kernel.release/v1",
+    "artifacts": [{
+        "filename": filename,
+        "sha256": "fallbacksha",
+        "kind": "wheel",
+        "python_tag": python_tag,
+        "abi_tag": abi_tag,
+        "platform_tag": platform_tag,
+    }],
+    "sdist_fallback": "",
+}))
+PY
+)"
+  hit="$(select_kernel_wheel "$kernel_manifest" "$no_pip_venv/bin/python")" ||
+    fail "select_kernel_wheel should use the dependency-free fresh-venv tags"
+  assert_eq "lingtai-0.16.4-${first_tag}.whl fallbacksha" "$hit" \
+    "fresh-venv fallback selects the compatible wheel"
+)
 
 (
   kernel_manifest='{"schema":"lingtai.kernel.release/v1","artifacts":[
@@ -415,7 +470,7 @@ PYEOF
   assert_eq "lingtai-0.16.4.tar.gz cccc" "$fallback" "kernel_sdist_fallback returns the declared sdist artifact"
 )
 
-# --- install_kernel_from_bundle: checksum mismatch fails loud, installs nothing ---
+# --- install_kernel_from_bundle: checksum mismatch fails loud and retains evidence ---
 
 (
   fakebin="$tmp/install-checksum-fail-fakebin"
@@ -457,8 +512,8 @@ PYEOF
     fail "install_kernel_from_bundle must fail loud on checksum mismatch, not succeed"
   fi
   assert_eq "" "$KERNEL_SOURCE" "KERNEL_SOURCE must stay unset when install_kernel_from_bundle fails"
-  if [[ -f "$BUILD_DIR/kernel-artifact/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" ]]; then
-    fail "the tampered/mismatched artifact must be removed after a checksum failure, not left on disk"
+  if [[ ! -f "$BUILD_DIR/kernel-artifact/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" ]]; then
+    fail "the tampered/mismatched artifact must be retained for diagnosis after checksum failure"
   fi
 )
 
@@ -478,8 +533,11 @@ PYEOF
   BUNDLE_MANIFEST_JSON=""
   SKIP_VENV=0
   BUNDLE_PROVIDER="github"
-  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"
-  rc=$?
+  if out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
   if [[ "$rc" -eq 0 ]]; then
     fail "ensure_runtime_venv must fail loud (nonzero) when BUNDLE_REQUIRED=1 and no bundle was resolved, got rc=0: $out"
   fi
@@ -509,8 +567,11 @@ PYEOF
   BUNDLE_REQUIRED=0
   BUNDLE_MANIFEST_JSON=""
   SKIP_VENV=0
-  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"
-  rc=$?
+  if out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
   if [[ "$rc" -eq 0 ]]; then
     fail "ensure_runtime_venv must fail loud for a --ref build with no bundle, got rc=0: $out"
   fi
@@ -539,7 +600,7 @@ PYEOF
 # regression guard — it fails loud if a future edit reintroduces
 # `pip install lingtai` / `uv pip install --upgrade lingtai` anywhere.
 (
-  matches="$(grep -nE '(pip install|pip3 install)[^|&;]*[[:space:]]lingtai([[:space:]]|$)' "$ROOT_DIR/install.sh" | grep -v '^[0-9]*:#' || true)"
+  matches="$(grep -nE '(pip install|pip3 install)[^|&;]*[[:space:]]lingtai([[:space:]]|$)' "$ROOT_DIR/install.sh" | grep -vE '^[0-9]*:[[:space:]]*#' || true)"
   if [[ -n "$matches" ]]; then
     fail "install.sh must never install the 'lingtai' package by name from an index; found:
 $matches"

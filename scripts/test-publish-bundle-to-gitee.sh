@@ -116,4 +116,17 @@ if grep -Fq '.remote-${name}-$$' "$SCRIPT"; then
   fail "publisher must not reuse a predictable PID-based comparison path"
 fi
 
+# --- real Gitee v5 contract regressions found by the authorized live sync ----
+
+grep -Fq '/tags?per_page=100&page=${page}' "$SCRIPT" ||
+  fail "publisher must verify tags through the real paginated tag-list endpoint"
+if grep -Fq 'gitee_get "/repos/${GITEE_OWNER}/${GITEE_REPO}/tags/${TAG}"' "$SCRIPT"; then
+  fail "publisher must not call the nonexistent Gitee /tags/{tag} endpoint"
+fi
+grep -Fq '\"target_commitish\":\"${expected_commit}\"' "$SCRIPT" ||
+  fail "publisher must create a release against the exact manifest TUI commit"
+transfer_timeouts="$(grep -Fc -- '--max-time 300' "$SCRIPT")"
+[[ "$transfer_timeouts" -eq 2 ]] ||
+  fail "publisher must use the long transfer timeout for both remote hashing and upload"
+
 echo "publish_bundle_to_gitee.sh tests passed"
