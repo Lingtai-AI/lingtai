@@ -144,20 +144,22 @@ func (m NirvanaModel) View() string {
 }
 
 func (m NirvanaModel) viewProgress() string {
+	statusText := i18n.T("nirvana.cleaning")
+	if m.done {
+		statusText = i18n.T("nirvana.done")
+	}
+	return m.viewLeafProgress(statusText, m.done)
+}
+
+func (m NirvanaModel) viewLeafProgress(statusText string, done bool) string {
 	leafStyle := lipgloss.NewStyle().Foreground(ColorAgent)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 
 	leaf := leafStyle.Render(bodhiLeaf)
-
-	var statusText string
-	if m.done {
-		statusText = titleStyle.Render(i18n.T("nirvana.done"))
-	} else {
-		statusText = titleStyle.Render(i18n.T("nirvana.cleaning"))
-	}
+	statusText = titleStyle.Render(statusText)
 
 	var block string
-	if m.done {
+	if done {
 		hint := StyleFaint.Render("[Enter]")
 		block = lipgloss.JoinVertical(lipgloss.Center, leaf, "", statusText, "", hint)
 	} else {
@@ -173,6 +175,14 @@ func (m NirvanaModel) viewProgress() string {
 		h = 24
 	}
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, block)
+}
+
+// StartupLoadingView reuses Nirvana's canonical Bodhi-leaf progress screen
+// for the short transition into the real App after a project is selected.
+// Keeping the composition here prevents the handoff from growing a second
+// loading renderer or a near-copy of the established screen.
+func StartupLoadingView(width, height int) string {
+	return (NirvanaModel{width: width, height: height}).viewLeafProgress(i18n.T("app.loading"), false)
 }
 
 func (m NirvanaModel) viewConfirm() string {

@@ -129,271 +129,139 @@ func main() {
 		os.Exit(1)
 	}
 	if noProject {
-		result, ok := runNoProjectLauncher(projectDir)
+		result, ok, startup := runNoProjectLauncher(projectDir)
 		if !ok {
-			// User cancelled (Esc/q/Ctrl+C) — zero writes occurred, exit
-			// exactly like a normal TUI quit.
-			return
-		}
-		switch result.Kind {
-		case tui.DecisionOpenExisting:
-			projectDir = result.ProjectRoot
-			// Fall through to the normal startup pipeline below, using
-			// the launcher-selected root instead of the original cwd.
-		case tui.DecisionCreate:
-			runCreatedProject(result)
-			return
-		default:
-			return
-		}
-	}
-
-	// Print version and check for updates (3s timeout).
-	// Skip upgrade check for dev builds (version contains '-' suffix like v0.4.31-4-gabcdef).
-	globalDir, err := config.GlobalDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	isDev := strings.Contains(version, "-")
-	latestVersion := ""
-	if !isDev {
-		latestVersion = config.CheckTUIUpgrade(version)
-	}
-	if latestVersion != "" {
-		install := config.DetectCurrentTUIInstall(globalDir)
-		switch install.Method {
-		case config.TUIInstallMethodHomebrew, config.TUIInstallMethodSource:
-			if handleTUIUpgrade(install, version, latestVersion, globalDir) {
-				return
-			}
-		default:
-			fmt.Println("lingtai-tui " + version)
-		}
-	} else {
-		fmt.Println("lingtai-tui " + version)
-	}
-
-	// Global per-machine migrations (versioned in ~/.lingtai-tui/meta.json).
-	// Best-effort housekeeping — failures don't abort startup.
-	globalmigrate.Run(globalDir)
-
-	// Resolve the UI language early so every user-visible startup string
-	// (codex banner, welcome, agent-count reminder) renders in the configured
-	// locale rather than the i18n default. tuiCfg is reused below.
-	config.MigrateLegacyLanguage(globalDir)
-	tuiCfg := config.LoadTUIConfig(globalDir)
-	if err := i18n.SetLang(tuiCfg.Language); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: invalid configured language %q: %v; continuing with %q\n", tuiCfg.Language, err, i18n.Lang())
-		tuiCfg.Language = i18n.Lang()
-	}
-
-	// Test Codex OAuth validity on every launch across ALL stored accounts
-	// (legacy ~/.lingtai-tui/codex-auth.json plus per-account files under
-	// codex-auth/). For each account whose access token is expired (or
-	// near-expired), this round-trips the refresh token through
-	// auth.openai.com and writes the refreshed bundle back atomically. A
-	// 401/403 response means that account's grant was revoked server-side
-	// (password changed, "log out everywhere", etc.) — surface that as a
-	// startup banner naming the account so the user re-OAuths via /setup.
-	// Transient errors (offline, 5xx) leave local tokens untouched and stay
-	// silent.
-	codexBanner := tui.ValidateCodexAuthOnStartup(globalDir)
-	if codexBanner != "" {
-		fmt.Println(codexBanner)
-	}
-
-	// First-time welcome — show once, write .firstrun sentinel
-	showWelcome(globalDir)
-
-	// Periodic running-agent reminder (every 4 hours, gated by marker file).
-	maybeShowAgentCount(globalDir)
-
-	lingtaiDir := filepath.Join(projectDir, ".lingtai")
-
-	// If .lingtai/ doesn't exist, check for phantom processes before creating it
-	if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
-		self, _ := os.Executable()
-		out, _ := exec.Command(self, "list", projectDir).Output()
-		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
-			fmt.Print(string(out))
-			os.Exit(1)
-		}
-	}
-
-	// Rehydration state: set below if the network needs rehydration (cloned
-	// agora network with no init.json files but an intact .agent.json blueprint).
-	var needsRehydration bool
-	var rehydrateOrchDir, rehydrateOrchName string
-
-	// If .lingtai/ exists, run migrations before anything else
-	if _, err := os.Stat(lingtaiDir); err == nil {
-		if err := migrate.Run(lingtaiDir); err != nil {
-			fmt.Fprintf(os.Stderr, "migration error: %v\n", err)
-			os.Exit(1)
-		}
-		// Sanity checks: init.json all-or-nothing, and exactly one orchestrator.
-		// Both refuse to launch on failure rather than limp along with a
-		// broken network. Run before any mutation so the on-disk state is
-		// preserved exactly as the user left it.
-		nr, err := checkInitJSONInvariant(lingtaiDir)
-		if err != nil {
-			fmt.Fprint(os.Stderr, err.Error())
-			os.Exit(1)
-		}
-		needsRehydration = nr
-		if err := checkOrchestratorInvariant(lingtaiDir); err != nil {
-			fmt.Fprint(os.Stderr, err.Error())
-			os.Exit(1)
-		}
-		// If the network needs rehydration, find the orchestrator's dir and
-		// name from its .agent.json blueprint so the wizard can prefill them.
-		if needsRehydration {
-			rehydrateOrchDir, rehydrateOrchName = findOrchestratorBlueprint(lingtaiDir)
-			if rehydrateOrchDir == "" {
-				fmt.Fprintln(os.Stderr, "error: rehydration needed but could not locate orchestrator")
+			if startup.kind == startupFatal {
+				fmt.Fprintln(os.Stderr, startup.err)
 				os.Exit(1)
 			}
+			return
 		}
-		// One-time check: warn about legacy addon-instruction blocks in
-		// agent comment.md files (left over from older TUI versions before
-		// the skill system replaced WriteAddonComment). The check runs
-		// once per project and self-suppresses via meta.json.
-		notifyLegacyAddonComments(lingtaiDir)
-	}
-
-	// Init project (create human dir)
-	if err := process.InitProject(lingtaiDir); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	// Register this project in the global registry for /projects discovery.
-	// Non-fatal: TUI works even if registration fails.
-	if err := config.Register(globalDir, projectDir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to register project: %v\n", err)
-	}
-	// TUI utility skills — extracted to <globalDir>/utilities/ on every
-	// startup. Agents reach these via the library.paths default in init.json.
-	preset.PopulateBundledLibrary(globalDir)
-
-	// First run = no config.json in ~/.lingtai-tui/
-	configPath := filepath.Join(globalDir, "config.json")
-	_, configErr := os.Stat(configPath)
-	needsFirstRun := os.IsNotExist(configErr)
-
-	// Rehydration forces us into the first-run wizard regardless of whether
-	// the user has a global config.json — cloned networks always need to be
-	// walked through setup before they can launch.
-	if needsRehydration {
-		needsFirstRun = true
-	}
-
-	// tuiCfg and the UI language were loaded earlier (right after globalDir is
-	// resolved) so startup banners render in the configured locale.
-
-	orchestrators := tui.DetectOrchestrators(lingtaiDir)
-
-	// Reconcile needsFirstRun with actual orchestrator state.
-	// If there are zero orchestrators, force first-run. This catches the
-	// "user ran `lingtai-tui clean` and relaunched in the same folder"
-	// case: clean removed .lingtai/, so the invariant checks at the top
-	// of main() were skipped (they only run if .lingtai/ already exists),
-	// but process.InitProject then recreated an empty .lingtai/ with only
-	// human/ inside. Without this fallback, a returning user (global
-	// config.json exists, so needsFirstRun would otherwise be false) would
-	// reach NewApp with no orchestrator to launch.
-	needsRecovery := false
-	if len(orchestrators) == 0 {
-		needsFirstRun = true
-	} else if needsFirstRun && !needsRehydration {
-		// Existing orchestrators found in .lingtai/ but global config is
-		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real
-		// and must not be duplicated — show setup for API keys only.
-		needsFirstRun = false
-		needsRecovery = true
-	}
-
-	if !needsFirstRun {
-		// Returning user — ensure runtime + assets (fast no-ops if already exist).
-		// EnsureRuntime always runs the non-blocking upgrade check after a
-		// successful ensure so repaired/recreated venvs do not wait until the
-		// next launch to pick up a newer lingtai CLI.
-		if config.NeedsVenv(globalDir) {
-			fmt.Println("Setting up Python environment...")
+		if result.Kind == tui.DecisionCreate {
+			runCreatedProject(result)
+			return
 		}
-		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		} else if upgraded {
-			fmt.Println("Upgraded lingtai to latest version.")
+		if startup.kind == startupFallback {
+			runPreparedApp(startup.projectDir)
+			return
 		}
-		if err := preset.Bootstrap(globalDir); err != nil {
-			fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
+		if startup.kind == startupUpgradeExit || startup.kind == startupCanceled {
+			return
+		}
+		if startup.kind == startupFatal {
+			fmt.Fprintln(os.Stderr, startup.err)
 			os.Exit(1)
 		}
-		tui.ExportCommandsJSON(globalDir)
-		maybePromptRustToolchain(globalDir)
-
-		// Recipe reconciliation: if the project carries a recipe bundle at
-		// its root (.recipe/) and the contents differ from the last-applied
-		// snapshot under .lingtai/.tui-asset/.recipe/, re-apply so each
-		// agent's .prompt, library.paths, and snapshot stay in sync with
-		// the currently-selected recipe. No-op when .recipe/ is absent
-		// (pre-redesign projects, or projects that haven't gone through
-		// /setup yet) or when the snapshot already matches.
-		//
-		// Greet substitution intentionally uses the startup humanDir/addr/
-		// lang/soulDelay defaults; a proper re-apply via /setup gives the
-		// user full control over those fields. This path is just the "you
-		// edited .recipe/<layer>/<layer>.md by hand, we'll redo the
-		// .prompt" convenience.
-		projectRoot := filepath.Dir(lingtaiDir)
-		if preset.RecipeNeedsApply(projectRoot) {
-			humanDir := filepath.Join(lingtaiDir, "human")
-			humanAddr := "human"
-			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
-				humanAddr = humanNode.Address
-			}
-			lang := tuiCfg.Language
-			if lang == "" {
-				lang = "en"
-			}
-			subst := func(tmpl string) string {
-				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, "120")
-			}
-			if _, err := preset.ApplyRecipe(projectRoot, lang, subst); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: recipe reconcile failed: %v\n", err)
-			}
-		}
-		// Resolve human location in background (ipinfo.io, cached 1h)
-		humanDir := filepath.Join(lingtaiDir, "human")
-		go fs.UpdateHumanLocation(humanDir)
+		// Open Existing is already running (and exits) inside the same
+		// Bubble Tea program as the launcher; no second program is started.
+		return
 	}
-	// If needsFirstRun: welcome page goroutine handles everything
 
-	// Do NOT auto-relaunch stopped agents on TUI startup. The TUI's job is
-	// to attach to whatever state the agent is in, not to second-guess why
-	// it's stopped. Causes of stopped-at-rest are externally indistinguishable
-	// (deliberate /suspend, crash, kill -9, machine reboot mid-run, …) and
-	// auto-revival overrides the user's last explicit decision (typically
-	// /suspend) without their consent. Users wake stopped agents explicitly
-	// via /cpr or /refresh from inside the TUI. The only place we launch on
-	// startup is the FirstRunDoneMsg handler in app.go, which fires when the
-	// user creates a new agent through the first-run wizard.
+	runPreparedApp(projectDir)
 
-	// Launch TUI
-	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
-	p := tea.NewProgram(app)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
 }
 
-// runNoProjectLauncher runs the no-project launcher as its OWN tea.Program
-// (deliberately separate from the real App's — see launcher.go's doc
-// comment on why this repo does not construct a fake/empty-path App to
-// host it). It performs a pure, non-mutating global-dir path resolution
+// startupReadyMsg carries the fully prepared App back to the single
+// launcher/handoff Bubble Tea program.
+type startupKind uint8
+
+const (
+	startupCanceled startupKind = iota
+	startupReady
+	startupFallback
+	startupUpgradeExit
+	startupFatal
+)
+
+type startupResult struct {
+	kind       startupKind
+	projectDir string
+	app        tui.App
+	err        error
+}
+
+type startupReadyMsg struct{ result startupResult }
+
+type noProjectProgramModel struct {
+	launcher tui.LauncherRootModel
+	app      tui.App
+	appReady bool
+	loading  bool
+	startup  startupResult
+	width    int
+	height   int
+}
+
+func (m noProjectProgramModel) Init() tea.Cmd { return m.launcher.Init() }
+
+func (m noProjectProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.loading {
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.width, m.height = msg.Width, msg.Height
+		case startupReadyMsg:
+			if msg.result.kind == startupCanceled {
+				return m, tea.Quit
+			}
+			m.loading = false
+			m.startup = msg.result
+			if msg.result.kind != startupReady {
+				return m, tea.Quit
+			}
+			m.app = msg.result.app
+			m.appReady = true
+			updated, sizeCmd := m.app.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+			m.app = updated.(tui.App)
+			return m, tea.Batch(sizeCmd, m.app.Init())
+		case tea.KeyPressMsg:
+			if msg.String() == "ctrl+c" {
+				m.startup = startupResult{kind: startupCanceled}
+				return m, tea.Quit
+			}
+		}
+		return m, nil
+	}
+
+	if m.appReady {
+		updated, cmd := m.app.Update(msg)
+		m.app = updated.(tui.App)
+		return m, cmd
+	}
+
+	updated, cmd := m.launcher.Update(msg)
+	m.launcher = updated.(tui.LauncherRootModel)
+	if m.launcher.Done() {
+		result := m.launcher.Result()
+		if result.Kind == tui.DecisionOpenExisting {
+			m.loading = true
+			return m, func() tea.Msg {
+				startup := prepareApp(result.ProjectRoot, true)
+				startup.projectDir = result.ProjectRoot
+				return startupReadyMsg{result: startup}
+			}
+		}
+	}
+	return m, cmd
+}
+
+func (m noProjectProgramModel) View() tea.View {
+	if m.appReady {
+		return m.app.View()
+	}
+	if m.loading {
+		v := tea.NewView(tui.StartupLoadingView(m.width, m.height))
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		v.ReportFocus = true
+		return v
+	}
+	return m.launcher.View()
+}
+
+// runNoProjectLauncher keeps Open Existing, the canonical loading screen, and
+// the real App in one Bubble Tea program. This prevents the first program's
+// alternate-screen teardown from exposing the shell during startup.
+// It performs a pure, non-mutating global-dir path resolution
 // (config.GlobalDirPath, never config.GlobalDir/EnsureGlobalDir) so
 // launching the picker itself cannot create ~/.lingtai-tui.
 //
@@ -405,28 +273,35 @@ func main() {
 // post-commit steps are best-effort and never roll back project creation.
 //
 // Returns (result, true) when the launcher reached a terminal decision, or
-// (zero, false) when the bubbletea program itself failed to run (treated
-// as "cancel" by the caller — never partially apply a decision that never
-// happened).
-func runNoProjectLauncher(projectDir string) (tui.LauncherResult, bool) {
+// (zero, false) when the Bubble Tea program itself failed. The third return
+// preserves that failure as startupFatal; only an actual user cancellation is
+// a clean zero-write return.
+func runNoProjectLauncher(projectDir string) (tui.LauncherResult, bool, startupResult) {
 	globalDirPath, err := config.GlobalDirPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return tui.LauncherResult{Kind: tui.DecisionCancel}, false, startupResult{kind: startupFatal, err: err}
 	}
 	lingtaiCmd := config.LingtaiCmd(globalDirPath)
-	model := tui.NewLauncherRootModel(projectDir, globalDirPath, lingtaiCmd)
+	model := noProjectProgramModel{launcher: tui.NewLauncherRootModel(projectDir, globalDirPath, lingtaiCmd)}
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return tui.LauncherResult{Kind: tui.DecisionCancel}, false, startupResult{kind: startupFatal, err: err}
 	}
-	lm, ok := finalModel.(tui.LauncherRootModel)
-	if !ok || !lm.Done() {
-		return tui.LauncherResult{Kind: tui.DecisionCancel}, false
+	pm, ok := finalModel.(noProjectProgramModel)
+	if !ok {
+		return tui.LauncherResult{Kind: tui.DecisionCancel}, false, startupResult{kind: startupFatal, err: errors.New("launcher returned an unexpected model")}
 	}
-	return lm.Result(), true
+	if pm.appReady {
+		return tui.LauncherResult{Kind: tui.DecisionOpenExisting}, true, pm.startup
+	}
+	if pm.startup.kind != startupReady {
+		return tui.LauncherResult{Kind: tui.DecisionOpenExisting, ProjectRoot: pm.startup.projectDir}, true, pm.startup
+	}
+	if !pm.launcher.Done() {
+		return tui.LauncherResult{Kind: tui.DecisionCancel}, false, startupResult{kind: startupCanceled}
+	}
+	return pm.launcher.Result(), true, startupResult{kind: startupReady}
 }
 
 // runCreatedProject handles the DecisionCreate outcome: RunProjectCreate
@@ -910,21 +785,10 @@ const agentCheckInterval = 4 * time.Hour
 // exits, so it's worth making sure the human sees the count before diving
 // back into the interface.
 func maybeShowAgentCount(globalDir string) {
-	marker := filepath.Join(globalDir, ".last_agent_check")
-	if info, err := os.Stat(marker); err == nil {
-		if time.Since(info.ModTime()) < agentCheckInterval {
-			return // checked recently, stay quiet
-		}
-	}
-
-	n := countRunningAgents()
-
-	// Refresh marker regardless of count, so we don't rescan for another
-	// interval even when nothing is running.
-	os.MkdirAll(globalDir, 0o755)
-	now := time.Now()
-	if err := os.WriteFile(marker, nil, 0o644); err == nil {
-		os.Chtimes(marker, now, now)
+	n, scanned := scanAgentCount(globalDir, time.Now(), os.Stat, countRunningAgents,
+		os.MkdirAll, os.WriteFile, os.Chtimes)
+	if !scanned {
+		return
 	}
 
 	if n == 0 {
@@ -1330,3 +1194,399 @@ func spawnMain() {
 }
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
+
+func runPreparedApp(projectDir string) {
+	result := prepareApp(projectDir, false)
+	if result.kind == startupUpgradeExit || result.kind == startupCanceled {
+		return
+	}
+	if result.kind != startupReady {
+		if result.err == nil {
+			result.err = errors.New("startup did not produce an App")
+		}
+		fmt.Fprintln(os.Stderr, result.err)
+		os.Exit(1)
+	}
+	p := tea.NewProgram(result.app)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func startupPromptNeeded(globalDir, lingtaiDir string) bool {
+	if _, err := os.Stat(filepath.Join(globalDir, ".firstrun")); os.IsNotExist(err) {
+		return true
+	}
+	if agentCountPromptNeeded(globalDir, time.Now(), os.Stat, countRunningAgents,
+		os.MkdirAll, os.WriteFile, os.Chtimes) {
+		return true
+	}
+	return legacyAddonPromptNeeded(lingtaiDir)
+}
+
+// scanAgentCount belongs to the outside-program prompt. It refreshes the
+// marker before maybeShowAgentCount renders its Enter prompt.
+func scanAgentCount(globalDir string, now time.Time,
+	stat func(string) (os.FileInfo, error), count func() int,
+	mkdirAll func(string, os.FileMode) error,
+	writeFile func(string, []byte, os.FileMode) error,
+	chtimes func(string, time.Time, time.Time) error) (int, bool) {
+	marker := filepath.Join(globalDir, ".last_agent_check")
+	info, err := stat(filepath.Join(globalDir, ".last_agent_check"))
+	if err == nil && info != nil && now.Sub(info.ModTime()) < agentCheckInterval {
+		return 0, false
+	}
+	n := count()
+	_ = mkdirAll(globalDir, 0o755)
+	if err := writeFile(marker, nil, 0o644); err == nil {
+		_ = chtimes(marker, now, now)
+	}
+	return n, true
+}
+
+// agentCountPromptNeeded is the in-program preflight. A positive scan result
+// deliberately leaves the marker untouched so the outside maybeShowAgentCount
+// remains the sole owner of refreshing it and reading Enter. A zero result
+// refreshes it here; if that refresh cannot complete, fallback is safer than
+// allowing an interactive prompt to run inside a tea.Cmd.
+func agentCountPromptNeeded(globalDir string, now time.Time,
+	stat func(string) (os.FileInfo, error), count func() int,
+	mkdirAll func(string, os.FileMode) error,
+	writeFile func(string, []byte, os.FileMode) error,
+	chtimes func(string, time.Time, time.Time) error) bool {
+	marker := filepath.Join(globalDir, ".last_agent_check")
+	info, err := stat(marker)
+	if err == nil && info != nil && now.Sub(info.ModTime()) < agentCheckInterval {
+		return false
+	}
+	if count() > 0 {
+		return true
+	}
+	if err := mkdirAll(globalDir, 0o755); err != nil {
+		return true
+	}
+	if err := writeFile(marker, nil, 0o644); err != nil {
+		return true
+	}
+	if err := chtimes(marker, now, now); err != nil {
+		return true
+	}
+	return false
+}
+
+func startupKindAfterTUIUpgrade(inProgram, upgraded bool) startupKind {
+	if !upgraded {
+		return startupReady
+	}
+	if inProgram {
+		return startupFallback
+	}
+	return startupUpgradeExit
+}
+
+func legacyAddonPromptNeeded(lingtaiDir string) bool {
+	notified, err := migrate.IsAddonCommentNotified(lingtaiDir)
+	if err != nil || notified {
+		return false
+	}
+	matches, err := migrate.CheckAddonComment(lingtaiDir)
+	return err == nil && len(matches) > 0
+}
+
+func rustToolchainPromptNeeded(globalDir string) bool {
+	if os.Getenv("LINGTAI_SKIP_RUST_PROMPT") == "1" {
+		return false
+	}
+	info, err := os.Stdin.Stat()
+	if err != nil || (info.Mode()&os.ModeCharDevice) == 0 {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(globalDir, "runtime", "rust-toolchain-prompted")); err == nil {
+		return false
+	}
+	status, err := config.FileSearchNativeStatus(globalDir, nil)
+	if err != nil || status.Unsupported || status.SidecarPath != "" || status.Backend == "RustFileIOBackend" {
+		return false
+	}
+	_, err = exec.LookPath("cargo")
+	return err != nil
+}
+
+// prepareApp runs the normal post-decision startup pipeline and returns the
+// real App without starting a second Bubble Tea program. When inProgram is
+// true, terminal-coupled prompts and fatal paths become typed outcomes for
+// the caller to handle after Bubble Tea has released the terminal.
+func prepareApp(projectDir string, inProgram bool) startupResult {
+	// Print version and check for updates (3s timeout).
+	// Skip upgrade check for dev builds (version contains '-' suffix like v0.4.31-4-gabcdef).
+	globalDir, err := config.GlobalDir()
+	if err != nil {
+		return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
+	}
+	isDev := strings.Contains(version, "-")
+	latestVersion := ""
+	if !isDev {
+		latestVersion = config.CheckTUIUpgrade(version)
+	}
+	if latestVersion != "" {
+		install := config.DetectCurrentTUIInstall(globalDir)
+		switch install.Method {
+		case config.TUIInstallMethodHomebrew, config.TUIInstallMethodSource:
+			if inProgram {
+				return startupResult{kind: startupFallback}
+			}
+			if handleTUIUpgrade(install, version, latestVersion, globalDir) {
+				// A successful self-upgrade has always told the user to restart
+				// and returned from main. Never construct or run an App here.
+				return startupResult{kind: startupKindAfterTUIUpgrade(false, true)}
+			}
+		default:
+			if !inProgram {
+				fmt.Println("lingtai-tui " + version)
+			}
+		}
+	} else {
+		if !inProgram {
+			fmt.Println("lingtai-tui " + version)
+		}
+	}
+
+	// Global per-machine migrations (versioned in ~/.lingtai-tui/meta.json).
+	// Best-effort housekeeping — failures don't abort startup.
+	globalmigrate.Run(globalDir)
+
+	// Resolve the UI language early so every user-visible startup string
+	// (codex banner, welcome, agent-count reminder) renders in the configured
+	// locale rather than the i18n default. tuiCfg is reused below.
+	config.MigrateLegacyLanguage(globalDir)
+	tuiCfg := config.LoadTUIConfig(globalDir)
+	if err := i18n.SetLang(tuiCfg.Language); err != nil {
+		if !inProgram {
+			fmt.Fprintf(os.Stderr, "warning: invalid configured language %q: %v; continuing with %q\n", tuiCfg.Language, err, i18n.Lang())
+		} else {
+			return startupResult{kind: startupFallback, projectDir: projectDir}
+		}
+		tuiCfg.Language = i18n.Lang()
+	}
+
+	// Test Codex OAuth validity on every launch across ALL stored accounts
+	// (legacy ~/.lingtai-tui/codex-auth.json plus per-account files under
+	// codex-auth/). For each account whose access token is expired (or
+	// near-expired), this round-trips the refresh token through
+	// auth.openai.com and writes the refreshed bundle back atomically. A
+	// 401/403 response means that account's grant was revoked server-side
+	// (password changed, "log out everywhere", etc.) — surface that as a
+	// startup banner naming the account so the user re-OAuths via /setup.
+	// Transient errors (offline, 5xx) leave local tokens untouched and stay
+	// silent.
+	codexBanner := tui.ValidateCodexAuthOnStartup(globalDir)
+	if codexBanner != "" {
+		if inProgram {
+			return startupResult{kind: startupFallback, projectDir: projectDir}
+		}
+		fmt.Println(codexBanner)
+	}
+
+	lingtaiDir := filepath.Join(projectDir, ".lingtai")
+
+	// Welcome, running-agent, and legacy-addon notices own stdin. Let the
+	// renderer shut down before the original outside-Program path handles any
+	// of them.
+	if inProgram && startupPromptNeeded(globalDir, lingtaiDir) {
+		return startupResult{kind: startupFallback}
+	}
+
+	// First-time welcome — show once, write .firstrun sentinel
+	showWelcome(globalDir)
+
+	// Periodic running-agent reminder (every 4 hours, gated by marker file).
+	maybeShowAgentCount(globalDir)
+
+	// If .lingtai/ doesn't exist, check for phantom processes before creating it
+	if _, err := os.Stat(lingtaiDir); os.IsNotExist(err) {
+		self, _ := os.Executable()
+		out, _ := exec.Command(self, "list", projectDir).Output()
+		if len(out) > 0 && strings.Contains(string(out), "[PHANTOM]") {
+			return startupResult{kind: startupFatal, err: errors.New(string(out))}
+		}
+	}
+
+	// Rehydration state: set below if the network needs rehydration (cloned
+	// agora network with no init.json files but an intact .agent.json blueprint).
+	var needsRehydration bool
+	var rehydrateOrchDir, rehydrateOrchName string
+
+	// If .lingtai/ exists, run migrations before anything else
+	if _, err := os.Stat(lingtaiDir); err == nil {
+		if inProgram && legacyAddonPromptNeeded(lingtaiDir) {
+			return startupResult{kind: startupFallback}
+		}
+		if err := migrate.Run(lingtaiDir); err != nil {
+			return startupResult{kind: startupFatal, err: fmt.Errorf("migration error: %w", err)}
+		}
+		// Sanity checks: init.json all-or-nothing, and exactly one orchestrator.
+		// Both refuse to launch on failure rather than limp along with a
+		// broken network. Run before any mutation so the on-disk state is
+		// preserved exactly as the user left it.
+		nr, err := checkInitJSONInvariant(lingtaiDir)
+		if err != nil {
+			return startupResult{kind: startupFatal, err: err}
+		}
+		needsRehydration = nr
+		if err := checkOrchestratorInvariant(lingtaiDir); err != nil {
+			return startupResult{kind: startupFatal, err: err}
+		}
+		// If the network needs rehydration, find the orchestrator's dir and
+		// name from its .agent.json blueprint so the wizard can prefill them.
+		if needsRehydration {
+			rehydrateOrchDir, rehydrateOrchName = findOrchestratorBlueprint(lingtaiDir)
+			if rehydrateOrchDir == "" {
+				return startupResult{kind: startupFatal, err: errors.New("error: rehydration needed but could not locate orchestrator")}
+			}
+		}
+		// One-time check: warn about legacy addon-instruction blocks in
+		// agent comment.md files (left over from older TUI versions before
+		// the skill system replaced WriteAddonComment). The check runs
+		// once per project and self-suppresses via meta.json.
+		notifyLegacyAddonComments(lingtaiDir)
+	}
+
+	// Init project (create human dir)
+	if err := process.InitProject(lingtaiDir); err != nil {
+		return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
+	}
+	// Register this project in the global registry for /projects discovery.
+	// Non-fatal: TUI works even if registration fails.
+	if err := config.Register(globalDir, projectDir); err != nil {
+		if !inProgram {
+			fmt.Fprintf(os.Stderr, "warning: failed to register project: %v\n", err)
+		} else {
+			return startupResult{kind: startupFallback, projectDir: projectDir}
+		}
+	}
+	// TUI utility skills — extracted to <globalDir>/utilities/ on every
+	// startup. Agents reach these via the library.paths default in init.json.
+	preset.PopulateBundledLibrary(globalDir)
+
+	// First run = no config.json in ~/.lingtai-tui/
+	configPath := filepath.Join(globalDir, "config.json")
+	_, configErr := os.Stat(configPath)
+	needsFirstRun := os.IsNotExist(configErr)
+
+	// Rehydration forces us into the first-run wizard regardless of whether
+	// the user has a global config.json — cloned networks always need to be
+	// walked through setup before they can launch.
+	if needsRehydration {
+		needsFirstRun = true
+	}
+
+	// tuiCfg and the UI language were loaded earlier (right after globalDir is
+	// resolved) so startup banners render in the configured locale.
+
+	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+
+	// Reconcile needsFirstRun with actual orchestrator state.
+	// If there are zero orchestrators, force first-run. This catches the
+	// "user ran `lingtai-tui clean` and relaunched in the same folder"
+	// case: clean removed .lingtai/, so the invariant checks at the top
+	// of main() were skipped (they only run if .lingtai/ already exists),
+	// but process.InitProject then recreated an empty .lingtai/ with only
+	// human/ inside. Without this fallback, a returning user (global
+	// config.json exists, so needsFirstRun would otherwise be false) would
+	// reach NewApp with no orchestrator to launch.
+	needsRecovery := false
+	if len(orchestrators) == 0 {
+		needsFirstRun = true
+	} else if needsFirstRun && !needsRehydration {
+		// Existing orchestrators found in .lingtai/ but global config is
+		// missing (e.g. user deleted ~/.lingtai-tui). The agents are real
+		// and must not be duplicated — show setup for API keys only.
+		needsFirstRun = false
+		needsRecovery = true
+	}
+
+	if !needsFirstRun {
+		// Returning user — ensure runtime + assets (fast no-ops if already exist).
+		// EnsureRuntime always runs the non-blocking upgrade check after a
+		// successful ensure so repaired/recreated venvs do not wait until the
+		// next launch to pick up a newer lingtai CLI.
+		if config.NeedsVenv(globalDir) {
+			if !inProgram {
+				fmt.Println("Setting up Python environment...")
+			} else {
+				return startupResult{kind: startupFallback, projectDir: projectDir}
+			}
+		}
+		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
+			return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
+		} else if upgraded {
+			if !inProgram {
+				fmt.Println("Upgraded lingtai to latest version.")
+			} else {
+				return startupResult{kind: startupFallback, projectDir: projectDir}
+			}
+		}
+		if err := preset.Bootstrap(globalDir); err != nil {
+			return startupResult{kind: startupFatal, err: fmt.Errorf("bootstrap error: %w", err)}
+		}
+		tui.ExportCommandsJSON(globalDir)
+		if inProgram && rustToolchainPromptNeeded(globalDir) {
+			return startupResult{kind: startupFallback}
+		}
+		maybePromptRustToolchain(globalDir)
+
+		// Recipe reconciliation: if the project carries a recipe bundle at
+		// its root (.recipe/) and the contents differ from the last-applied
+		// snapshot under .lingtai/.tui-asset/.recipe/, re-apply so each
+		// agent's .prompt, library.paths, and snapshot stay in sync with
+		// the currently-selected recipe. No-op when .recipe/ is absent
+		// (pre-redesign projects, or projects that haven't gone through
+		// /setup yet) or when the snapshot already matches.
+		//
+		// Greet substitution intentionally uses the startup humanDir/addr/
+		// lang/soulDelay defaults; a proper re-apply via /setup gives the
+		// user full control over those fields. This path is just the "you
+		// edited .recipe/<layer>/<layer>.md by hand, we'll redo the
+		// .prompt" convenience.
+		projectRoot := filepath.Dir(lingtaiDir)
+		if preset.RecipeNeedsApply(projectRoot) {
+			humanDir := filepath.Join(lingtaiDir, "human")
+			humanAddr := "human"
+			if humanNode, err := fs.ReadAgent(humanDir); err == nil && humanNode.Address != "" {
+				humanAddr = humanNode.Address
+			}
+			lang := tuiCfg.Language
+			if lang == "" {
+				lang = "en"
+			}
+			subst := func(tmpl string) string {
+				return tui.SubstituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, "120")
+			}
+			if _, err := preset.ApplyRecipe(projectRoot, lang, subst); err != nil {
+				if !inProgram {
+					fmt.Fprintf(os.Stderr, "warning: recipe reconcile failed: %v\n", err)
+				} else {
+					return startupResult{kind: startupFallback, projectDir: projectDir}
+				}
+			}
+		}
+		// Resolve human location in background (ipinfo.io, cached 1h)
+		humanDir := filepath.Join(lingtaiDir, "human")
+		go fs.UpdateHumanLocation(humanDir)
+	}
+	// If needsFirstRun: welcome page goroutine handles everything
+
+	// Do NOT auto-relaunch stopped agents on TUI startup. The TUI's job is
+	// to attach to whatever state the agent is in, not to second-guess why
+	// it's stopped. Causes of stopped-at-rest are externally indistinguishable
+	// (deliberate /suspend, crash, kill -9, machine reboot mid-run, …) and
+	// auto-revival overrides the user's last explicit decision (typically
+	// /suspend) without their consent. Users wake stopped agents explicitly
+	// via /cpr or /refresh from inside the TUI. The only place we launch on
+	// startup is the FirstRunDoneMsg handler in app.go, which fires when the
+	// user creates a new agent through the first-run wizard.
+
+	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, needsRecovery, orchestrators, tuiCfg, rehydrateOrchDir, rehydrateOrchName)
+	return startupResult{kind: startupReady, app: app}
+}
