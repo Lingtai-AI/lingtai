@@ -90,15 +90,18 @@ def ensure_telegram_init(init_path: Path) -> None:
         mcp = {}
     if not isinstance(mcp, dict):
         raise SystemExit(f"{init_path}: top-level mcp exists but is not an object")
-    mcp.setdefault(
+    telegram = mcp.setdefault(
         "telegram",
         {
             "type": "stdio",
             "command": runtime_python(),
-            "args": ["-m", "lingtai_telegram"],
+            "args": ["-m", "lingtai.mcp_servers.telegram"],
             "env": {"LINGTAI_TELEGRAM_CONFIG": ".secrets/telegram.json"},
         },
     )
+    if not isinstance(telegram, dict):
+        raise SystemExit(f"{init_path}: mcp.telegram exists but is not an object")
+    telegram["args"] = ["-m", "lingtai.mcp_servers.telegram"]
     init["mcp"] = mcp
 
     write_json(init_path, init)

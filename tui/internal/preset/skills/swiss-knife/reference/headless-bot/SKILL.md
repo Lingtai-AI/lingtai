@@ -9,7 +9,7 @@ description: >
   the Telegram MCP case.
 version: 1.1.0
 tags: [utilities, bot, telegram, mcp, headless, bootstrap]
-last_changed_at: "2026-06-01T02:00:30-07:00"
+last_changed_at: "2026-07-15T22:54:37Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -83,7 +83,8 @@ The helper:
 2. Writes `<agent_dir>/.secrets/telegram.json` with mode `0600`.
 3. Adds `telegram` to top-level `addons`.
 4. Adds top-level `mcp.telegram` using the local LingTai runtime Python and
-   `LINGTAI_TELEGRAM_CONFIG=.secrets/telegram.json`.
+   invokes `lingtai.mcp_servers.telegram` with `args: ["-m", "lingtai.mcp_servers.telegram"]`;
+   it passes `LINGTAI_TELEGRAM_CONFIG=.secrets/telegram.json`.
 5. Optionally copies `manifest.preset` from `--preset-policy-from` into the new
    agent's `init.json` without copying any preset JSON files.
 6. Touches `<agent_dir>/.refresh` so a running agent reloads the updated config.
@@ -200,7 +201,7 @@ Patch `<agent_dir>/init.json` so these top-level keys exist:
     "telegram": {
       "type": "stdio",
       "command": "~/.lingtai-tui/runtime/venv/bin/python",
-      "args": ["-m", "lingtai_telegram"],
+      "args": ["-m", "lingtai.mcp_servers.telegram"],
       "env": {
         "LINGTAI_TELEGRAM_CONFIG": ".secrets/telegram.json"
       }

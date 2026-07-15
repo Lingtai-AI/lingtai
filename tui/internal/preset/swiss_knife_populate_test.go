@@ -84,6 +84,30 @@ func TestPopulateBundledLibrary_SwissKnifeNestedReferences(t *testing.T) {
 	}
 }
 
+func TestPopulateBundledLibrary_HeadlessBotTelegramModule(t *testing.T) {
+	globalDir := t.TempDir()
+	PopulateBundledLibrary(globalDir)
+
+	utilitiesDir := filepath.Join(globalDir, "utilities", "swiss-knife", "reference", "headless-bot")
+	wantArgs := `"args": ["-m", "lingtai.mcp_servers.telegram"]`
+	for _, rel := range []string{
+		"SKILL.md",
+		"scripts/create_telegram_bot_project.py",
+	} {
+		body, err := os.ReadFile(filepath.Join(utilitiesDir, rel))
+		if err != nil {
+			t.Fatalf("read bundled headless-bot file %s: %v", rel, err)
+		}
+		text := string(body)
+		if strings.Contains(text, "lingtai_telegram") {
+			t.Errorf("bundled headless-bot file %s contains stale Telegram module path", rel)
+		}
+		if !strings.Contains(text, wantArgs) {
+			t.Errorf("bundled headless-bot file %s missing mcp.telegram args %q", rel, wantArgs)
+		}
+	}
+}
+
 func TestPopulateBundledLibrary_MinimaxCliCanonicalReference(t *testing.T) {
 	globalDir := t.TempDir()
 	PopulateBundledLibrary(globalDir)
