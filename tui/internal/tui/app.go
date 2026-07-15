@@ -349,6 +349,7 @@ func (a *App) reconcileRailUnread() {
 		return
 	}
 	if err := a.railUnreadStore.MarkSeen(mainRow.directTarget, messages, a.mail.humanAddr); err != nil {
+		a.mail.AddSystemMessage(fmt.Sprintf("Unread status unavailable: %v", err))
 		return
 	}
 	mainRow.unread = a.railUnreadStore.UnreadCount(mainRow.directTarget, messages, a.mail.humanAddr)
