@@ -97,6 +97,13 @@ func (a App) handleMailFocusKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		case "down", "j":
 			a.agentRail.moveCursor(1)
 			return a, nil, true
+		case "enter":
+			row, ok := a.agentRail.selectedRow()
+			if !ok || row.originalMain || row.target.policy != asyncTargetHomeAgentRail {
+				return a, nil, true
+			}
+			updated, cmd := a.activateOrdinaryRailRow(row)
+			return updated, cmd, true
 		}
 		if key != copyModeToggleKey {
 			return a, nil, true

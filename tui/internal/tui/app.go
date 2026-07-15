@@ -201,6 +201,80 @@ func (a *App) newMailForCurrentContext() MailModel {
 	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 }
 
+// activateOrdinaryRailRow installs one fresh cold direct-thread projection while
+// retaining the root project's sole mail store, accepted snapshot, and refresh
+// owner. The prospective cold-load envelope must pass before any App/store/tick
+// coordinate is changed.
+func (a App) activateOrdinaryRailRow(row railRow) (App, tea.Cmd) {
+	if row.originalMain || row.target.policy != asyncTargetHomeAgentRail || a.mailStore.snapshot == nil {
+		return a, nil
+	}
+
+	nextGeneration := a.mailGeneration + 1
+	if nextGeneration == 0 || nextGeneration <= a.mailStore.binding.generation {
+		return a, nil
+	}
+	prospective := asyncCurrent{
+		binding: asyncBinding{
+			owner:      a.mailStore.binding.owner,
+			target:     row.target,
+			generation: nextGeneration,
+		},
+		storeVersion:     a.mailStore.version,
+		revalidateTarget: a.mailStore.revalidateTarget,
+	}
+	if !acceptAsync(prospective, captureAsync(asyncColdThreadLoad, prospective)) {
+		return a, nil
+	}
+
+	node, err := fs.ReadAgent(row.target.directory)
+	if err != nil || fs.AddressFingerprint(node.Address) != row.target.addressFingerprint {
+		return a, nil
+	}
+	name := firstNonEmpty(node.AgentName, row.label, filepath.Base(row.target.directory))
+	mail := NewMailModel(
+		a.mailStore.humanDir,
+		a.mail.humanAddr,
+		a.projectDir,
+		row.target.directory,
+		name,
+		a.mail.pageSize,
+		a.globalDir,
+		a.tuiConfig.Language,
+		false,
+		a.tuiConfig.ToolCallTruncate,
+	)
+	mail.orchAddr = node.Address
+	mail.orchName = name
+	mail.orchNickname = node.Nickname
+	mail.generation = nextGeneration
+	mail.acceptedSnapshot = a.mailStore.snapshot
+	mail.sessionCache = fs.NewSessionCache(mail.humanDir, filepath.Dir(mail.baseDir), fs.NoPersist)
+	mail.input.Blur()
+
+	rootSnapshot := a.mailStore.snapshot
+	a.mailStore.pauseTick()
+	a.mailGeneration = nextGeneration
+	a.mailStore.bindMailModel(&mail, asyncTargetHomeAgentRail, row.target.pid)
+	a.mail = mail
+	a.currentThread = newColdThreadState(row.target, nextGeneration, rootSnapshot.Version(), mail.sessionCache)
+	tickCmd := a.mailStore.resumeTick()
+
+	window := mail.firstFrameWindow()
+	request := threadLoadRequest{
+		envelope:          captureAsync(asyncColdThreadLoad, a.asyncCurrent()),
+		humanDir:          mail.humanDir,
+		humanAddress:      mail.humanAddr,
+		targetAddress:     mail.orchAddr,
+		targetDisplayName: mail.orchDisplayName(),
+		acceptedMessages:  append([]fs.MailMessage(nil), rootSnapshot.cache.Messages...),
+		eventWindow:       window,
+		inquiryWindow:     window,
+	}
+	loadCmd := a.threadLoads.request(request)
+	return a, tea.Batch(tickCmd, loadCmd)
+}
+
 func (a App) projectsContext() ProjectsContext {
 	ctx := ProjectsContext{
 		FocusedAgentDir:  a.orchDir,
