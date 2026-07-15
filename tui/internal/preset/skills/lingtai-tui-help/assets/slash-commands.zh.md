@@ -58,7 +58,7 @@
 - `/mcp` — 外部服务桥接的 MCP 控制面板。
 - `/doctor` — 诊断连接问题。
 - `/update` — 更新 Python 内核（需确认）。
-- `/update-tui` — 更新 TUI 二进制（需确认）。
+- `/update-tui` — 更新 TUI，可能同时更新共装的 portal 二进制（需确认）。
 - `/login` — 查看与管理已保存的凭证。
 
 ### 本视图与退出
@@ -247,10 +247,10 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 
 对比已安装的 Python `lingtai` 内核与 PyPI 最新版本（只读），显示 `当前 → 最新`，并在执行任何操作前请你确认。确认后仅通过 uv/pip 升级内核——不执行 Homebrew TUI 升级，不重新引导预设，也不触碰文件搜索。若检测到可编辑的开发安装，则保持不动。当你只想专注更新内核、而不想触发 `/doctor` 的其他副作用时使用。
 
-### `/update-tui` — 更新 TUI 二进制
+### `/update-tui` — 更新 TUI 与 portal 二进制
 **用法：** `/update-tui`
 
-检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后**仅**升级 TUI 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
+检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后升级 TUI 二进制，并可能同时刷新共装的 portal 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
 
 ### `/login` — 查看与管理凭证
 **用法：** `/login`

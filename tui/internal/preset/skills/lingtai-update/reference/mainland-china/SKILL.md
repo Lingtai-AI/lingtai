@@ -2,7 +2,7 @@
 name: lingtai-update-mainland
 description: Use when building or fetching TUI/portal releases from mainland China.
 version: 1.0.0
-last_changed_at: "2026-07-15T12:00:00-07:00"
+last_changed_at: "2026-07-15T01:50:00-07:00"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -10,8 +10,10 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 Nested `lingtai-update` reference. This is troubleshooting guidance, not a
 promise that any mirror is reachable. `install.sh` probes
-`https://proxy.golang.org/github.com/golang/go/@latest` for three seconds only
-when building from source and only fills unset variables. On failure it sets:
+`https://proxy.golang.org/github.com/golang/go/@latest` for three seconds before
+selecting the install flow, when `curl` is available, `GOPROXY` is unset, and
+the probe fails. On failure it exports all three variables below, including
+overwriting existing `GOSUMDB` or `NPM_CONFIG_REGISTRY` values:
 
 ```bash
 export GOPROXY="https://goproxy.cn,direct"

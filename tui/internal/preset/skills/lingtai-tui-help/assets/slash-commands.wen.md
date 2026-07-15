@@ -58,7 +58,7 @@
 - `/mcp` — 外服桥接之 MCP 控制台。
 - `/doctor` — 诊连接之患。
 - `/update` — 更 Python 核（须允）。
-- `/update-tui` — 更 TUI 器（须允）。
+- `/update-tui` — 更 TUI 器，或并刷新共装之 portal 器（须允）。
 - `/login` — 察并理已存之凭。
 
 ### 此视与退出
@@ -237,10 +237,10 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 
 较已安之 Python `lingtai` 核与 PyPI 之新（但览而不改），示 `今 → 新`，凡有所为，必先俟尔之允。允而后独以 uv/pip 升其核——不行 Homebrew 之 TUI 升，不重引预设，亦不触文件之搜。若察可编之开发安，则置而不动。尔但欲专更其核、而不欲牵 `/doctor` 诸余之效者用之。
 
-### `/update-tui` — 更 TUI 器
+### `/update-tui` — 更 TUI 与 portal 器
 **用：** `/update-tui`
 
-察 `lingtai-tui` 器之安法（brew 或源码/本地），允而后**独**升其器——不触 Python 核。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
+察 `lingtai-tui` 器之安法（brew 或源码/本地），允而后更其器，或并刷新共装之 portal 器——不触 Python 核。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
 
 ### `/login` — 察并理凭
 **用：** `/login`

@@ -64,7 +64,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 - `/mcp` — MCP control panel for external-service bridges.
 - `/doctor` — diagnose connection issues.
 - `/update` — update the Python kernel (confirm-gated).
-- `/update-tui` — update the TUI binary (confirm-gated).
+- `/update-tui` — update the TUI and possibly the co-installed portal binaries (confirm-gated).
 - `/login` — check and manage saved credentials.
 
 ### This view & exit
@@ -300,12 +300,13 @@ kernel is already current or is an editable dev checkout, it reports that and
 makes no changes. The confirmation is mandatory: `/update` never installs on a
 single keystroke.
 
-### `/update-tui` — update the TUI binary
+### `/update-tui` — update the TUI and portal binaries
 **Usage:** `/update-tui`
 
 Detects how the `lingtai-tui` binary was installed (Homebrew or source/user-local)
-and, after you confirm, upgrades **only** the TUI binary — the Python kernel is
-untouched. After a successful update it shows a restart prompt; it never
+and, after you confirm, upgrades the TUI binary and may refresh the co-installed
+portal binary — the Python kernel is untouched. After a successful update it
+shows a restart prompt; it never
 auto-restarts the running TUI. If the install method is unsupported (unknown/
 other), it reports that and makes no changes. The confirmation is mandatory:
 `/update-tui` never installs on a single keystroke.
