@@ -429,6 +429,25 @@ func (a *App) newMailForCurrentContext() MailModel {
 	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
 }
 
+func (a *App) requestCurrentOrdinaryThreadLoad() tea.Cmd {
+	if a == nil || a.mailStore.snapshot == nil ||
+		a.mailStore.binding.target.policy != asyncTargetHomeAgentRail {
+		return nil
+	}
+	snapshot := a.mailStore.snapshot
+	window := a.mail.firstFrameWindow()
+	return a.threadLoads.request(threadLoadRequest{
+		envelope:          captureAsync(asyncColdThreadLoad, a.asyncCurrent()),
+		humanDir:          a.mail.humanDir,
+		humanAddress:      a.mail.humanAddr,
+		targetAddress:     a.mail.orchAddr,
+		targetDisplayName: a.mail.orchDisplayName(),
+		acceptedMessages:  append([]fs.MailMessage(nil), snapshot.cache.Messages...),
+		eventWindow:       window,
+		inquiryWindow:     window,
+	})
+}
+
 // activateOrdinaryRailRow installs one fresh cold direct-thread projection while
 // retaining the root project's sole mail store, accepted snapshot, and refresh
 // owner. The prospective cold-load envelope must pass before any App/store/tick
@@ -491,18 +510,7 @@ func (a App) activateOrdinaryRailRow(row railRow) (App, tea.Cmd) {
 	a.currentThread = newColdThreadState(row.target, nextGeneration, rootSnapshot.Version(), mail.sessionCache)
 	tickCmd := a.mailStore.resumeTick()
 
-	window := mail.firstFrameWindow()
-	request := threadLoadRequest{
-		envelope:          captureAsync(asyncColdThreadLoad, a.asyncCurrent()),
-		humanDir:          mail.humanDir,
-		humanAddress:      mail.humanAddr,
-		targetAddress:     mail.orchAddr,
-		targetDisplayName: mail.orchDisplayName(),
-		acceptedMessages:  append([]fs.MailMessage(nil), rootSnapshot.cache.Messages...),
-		eventWindow:       window,
-		inquiryWindow:     window,
-	}
-	loadCmd := a.threadLoads.request(request)
+	loadCmd := a.requestCurrentOrdinaryThreadLoad()
 	return a, tea.Batch(tickCmd, loadCmd)
 }
 
@@ -792,11 +800,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var mailCmd tea.Cmd
 		a.mail, mailCmd = a.mail.Update(msg.mail)
 		a.syncCurrentThreadFromMail()
+		threadLoadCmd := a.requestCurrentOrdinaryThreadLoad()
 		a.reconcileRailUnread()
 		// Capture the accepted target/status state in the deferred authoritative
 		// rebuild rather than the pre-refresh model snapshot.
 		pendingInitialCmd := a.mailStore.beginPendingInitialRefresh(a.mail)
-		return a, tea.Batch(mailCmd, pendingInitialCmd, a.mailStore.locationUpdateCmd(msg.envelope))
+		return a, tea.Batch(mailCmd, threadLoadCmd, pendingInitialCmd, a.mailStore.locationUpdateCmd(msg.envelope))
 
 	case projectMailTickMsg:
 		if !acceptAsync(a.asyncCurrent(), msg.envelope) {
