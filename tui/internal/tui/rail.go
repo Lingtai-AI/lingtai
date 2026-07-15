@@ -109,10 +109,10 @@ func (a App) handleMailFocusKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			return a, nil, true
 		case "enter":
 			row, ok := a.agentRail.selectedRow()
-			if !ok || row.originalMain || row.target.policy != asyncTargetHomeAgentRail {
+			if !ok {
 				return a, nil, true
 			}
-			updated, cmd := a.activateOrdinaryRailRow(row)
+			updated, cmd := a.activateRailRow(row)
 			return updated, cmd, true
 		}
 		if key != copyModeToggleKey {
@@ -143,10 +143,10 @@ func (a App) handleMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd, bool) {
 	if _, ok := budget.RailLocalX(msg.X); ok {
 		a.focusMailRail()
 		row, ok := a.agentRail.selectRowAtLocalY(msg.Y - budget.TopChromeRows)
-		if !ok || row.originalMain || row.target.policy != asyncTargetHomeAgentRail {
+		if !ok {
 			return a, nil, true
 		}
-		updated, cmd := a.activateOrdinaryRailRow(row)
+		updated, cmd := a.activateRailRow(row)
 		return updated, cmd, true
 	}
 	return a, nil, true

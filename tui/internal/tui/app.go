@@ -505,6 +505,69 @@ func (a *App) requestCurrentOrdinaryThreadLoad() tea.Cmd {
 	})
 }
 
+func (a App) activateRailRow(row railRow) (App, tea.Cmd) {
+	if row.originalMain {
+		return a.activateMainRailRow(row)
+	}
+	return a.activateOrdinaryRailRow(row)
+}
+
+// activateMainRailRow replaces the active direct projection with a fresh
+// aggregate projection over the root store's already-accepted snapshot. Main is
+// not retained as a second inactive Mail model or cache while an ordinary target
+// is active.
+func (a App) activateMainRailRow(row railRow) (App, tea.Cmd) {
+	if !row.originalMain || a.mailStore.snapshot == nil ||
+		a.mailStore.binding.target.policy == asyncTargetHomeMain {
+		return a, nil
+	}
+
+	nextGeneration := a.mailGeneration + 1
+	if nextGeneration == 0 || nextGeneration <= a.mailStore.binding.generation {
+		return a, nil
+	}
+
+	mail := NewMailModel(
+		a.mailStore.humanDir,
+		a.mail.humanAddr,
+		a.projectDir,
+		a.orchDir,
+		a.orchName,
+		a.mail.pageSize,
+		a.globalDir,
+		a.tuiConfig.Language,
+		a.tuiConfig.Insights,
+		a.tuiConfig.ToolCallTruncate,
+	)
+	if node, err := fs.ReadAgent(a.orchDir); err == nil {
+		mail.orchAddr = firstNonEmpty(node.Address, row.directTarget.Address, mail.orchAddr)
+		mail.orchName = firstNonEmpty(node.AgentName, a.orchName, row.label)
+		mail.orchNickname = node.Nickname
+	}
+	mail.generation = nextGeneration
+	mail.acceptedSnapshot = a.mailStore.snapshot
+	mail.sessionCache = mail.rebuildSession(a.mailStore.snapshot.cache)
+	mail.initialLoading = false
+	if childSize := a.layoutBudget().ChildWindowSize(); childSize.Width > 0 && childSize.Height > 0 {
+		mail, _ = mail.Update(childSize)
+	}
+	mail.input.Blur()
+
+	rootSnapshot := a.mailStore.snapshot
+	a.mailStore.pauseTick()
+	a.mailGeneration = nextGeneration
+	a.mailStore.bindMailModel(&mail, asyncTargetHomeMain, 0)
+	mail.buildMessages()
+	mail.syncViewportHeight()
+	mail.viewport.SetContent(mail.renderMessages(mail.visibleMessages()))
+	mail.viewport.GotoBottom()
+	a.mail = mail
+	a.currentThread = newColdThreadState(a.mailStore.binding.target, nextGeneration, rootSnapshot.Version(), mail.sessionCache)
+	tickCmd := a.mailStore.resumeTick()
+	a.reconcileRailUnread()
+	return a, tickCmd
+}
+
 // activateOrdinaryRailRow installs one fresh cold direct-thread projection while
 // retaining the root project's sole mail store, accepted snapshot, and refresh
 // owner. The prospective cold-load envelope must pass before any App/store/tick
