@@ -853,6 +853,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.mail.initialLoading = false
 			a.mail.buildMessages()
+			atBottom := a.mail.viewport.AtBottom()
+			a.mail.syncViewportHeight()
+			a.mail.viewport.SetContent(a.mail.renderMessages(a.mail.visibleMessages()))
+			if atBottom {
+				a.mail.viewport.GotoBottom()
+			}
 			a.reconcileRailUnread()
 		}
 		return a, cmd
