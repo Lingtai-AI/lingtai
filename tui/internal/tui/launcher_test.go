@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1572,12 +1573,12 @@ func TestDraftFirstRun_ClearingPendingKeyRestoresSharedBaseline(t *testing.T) {
 	}
 }
 
-// TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible exercises the actual
+// TestLauncherWelcomeScreen_MatchesCanonicalFirstRunWelcome exercises the actual
 // root model View after a WindowSizeMsg rather than a helper-only renderer. The
-// normal terminal size must show the full prelude (all language choices,
-// zero-write boundary, and an actionable escape/quit hint) without any line
-// exceeding the terminal width.
-func TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible(t *testing.T) {
+// launcher Welcome must exactly match the canonical welcome-only FirstRunModel
+// presentation at the same size and language cursor; the existing dynamic
+// project sentence belongs on Choose instead.
+func TestLauncherWelcomeScreen_MatchesCanonicalFirstRunWelcome(t *testing.T) {
 	t.Cleanup(func() {
 		SetThemeByName(DefaultThemeName)
 		_ = i18n.SetLang("en")
@@ -1590,23 +1591,66 @@ func TestLauncherWelcomeScreen_80x24KeepsOnboardingVisible(t *testing.T) {
 	if m.view != launcherViewWelcome {
 		t.Fatalf("expected initial root view to be Welcome, got %v", m.view)
 	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(LauncherRootModel)
+	if m.langIdx != 1 {
+		t.Fatalf("Welcome language cursor = %d, want 1 after one Down", m.langIdx)
+	}
 	content := ansi.Strip(m.View().Content)
-	for _, want := range []string{
-		"English",
-		"现代汉语",
-		"文言",
-		"nothing is created or changed until you say so.",
-		i18n.T("launcher.welcome.continue"),
-		"Esc/q/Ctrl+C",
-	} {
+	canonical := ansi.Strip((FirstRunModel{
+		width:       m.width,
+		height:      m.height,
+		langCursor:  m.langIdx,
+		welcomeOnly: true,
+	}).viewWelcome())
+	if content != canonical {
+		t.Fatalf("launcher Welcome differs from the canonical welcome-only FirstRunModel:\n--- launcher ---\n%s\n--- canonical ---\n%s", content, canonical)
+	}
+	for _, want := range []string{"English", "现代汉语", "文言"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("80x24 welcome screen missing %q:\n%s", want, content)
 		}
 	}
-	assertLauncherScreenWidth(t, content, 80)
-	if got := len(strings.Split(strings.TrimSuffix(content, "\n"), "\n")); got > 24 {
-		t.Fatalf("80x24 welcome rendered %d physical lines; mandatory onboarding would be clipped", got)
+	compact := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return -1
+			}
+			return r
+		}, s)
 	}
+	dynamicSentence := compact(i18n.TF("launcher.welcome.explain2", abbreviateHomePath(projectRoot)))
+	compactContent := compact(content)
+	if strings.Contains(compactContent, dynamicSentence) {
+		t.Fatalf("Welcome rendered the dynamic project sentence:\n%s", content)
+	}
+	for _, unwanted := range []string{
+		i18n.T("launcher.welcome.continue"),
+		"Esc/q/Ctrl+C",
+		i18n.T("launcher.hint_quit"),
+	} {
+		if strings.Contains(compactContent, compact(unwanted)) {
+			t.Fatalf("Welcome rendered launcher-only copy %q:\n%s", unwanted, content)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(LauncherRootModel)
+	if m.view != launcherViewChoose {
+		t.Fatalf("Welcome Enter did not reach Choose, got %v", m.view)
+	}
+	chooseContent := ansi.Strip(m.View().Content)
+	compactChoose := compact(chooseContent)
+	sentenceAt := strings.Index(compactChoose, dynamicSentence)
+	if sentenceAt < 0 {
+		t.Fatalf("Choose omitted the dynamic project sentence:\n%s", chooseContent)
+	}
+	hereAt := strings.Index(compactChoose, compact(i18n.T("launcher.choose.here")))
+	openAt := strings.Index(compactChoose, compact(i18n.T("launcher.choose.open")))
+	if hereAt < 0 || openAt < 0 || sentenceAt >= hereAt || sentenceAt >= openAt {
+		t.Fatalf("Choose did not place the dynamic sentence above both decisions:\n%s", chooseContent)
+	}
+	assertLauncherScreenWidth(t, content, 80)
 }
 
 // TestLauncherStagingRootViewReservesFooter exercises the production root View
@@ -1662,6 +1706,47 @@ func assertLauncherScreenWidth(t *testing.T, content string, width int) {
 			t.Errorf("rendered line %d is %d columns wide, terminal width is %d: %q", i+1, got, width, line)
 		}
 	}
+}
+
+// TestLauncherRootModel_CreateReviewCtrlCRecordsCancel drives the actual root
+// dispatcher into the advanced draft review step, then proves Ctrl+C records a
+// root-owned DecisionCancel instead of returning FirstRunModel's bare tea.Quit.
+// Executing the returned command and snapshotting both HOME and the project
+// root preserve the no-write guarantee while covering the real handoff.
+func TestLauncherRootModel_CreateReviewCtrlCRecordsCancel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+	globalDir := filepath.Join(home, ".lingtai-tui")
+
+	m := NewLauncherRootModel(projectRoot, globalDir, "")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(LauncherRootModel)
+	if m.view != launcherViewChoose {
+		t.Fatalf("expected Welcome Enter to reach Choose, got %v", m.view)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(LauncherRootModel)
+	if m.view != launcherViewCreate || !m.firstRunOn {
+		t.Fatalf("expected Choose Enter to reach Create, got view=%v firstRunOn=%v", m.view, m.firstRunOn)
+	}
+	m.firstRun.step = stepReview
+
+	homeBefore := dirSnapshot(t, home)
+	projectBefore := dirSnapshot(t, projectRoot)
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "ctrl+c"})
+	got := updated.(LauncherRootModel)
+	if !got.done || got.result.Kind != DecisionCancel {
+		t.Fatalf("Create review Ctrl+C did not record root cancellation: done=%v result=%v", got.done, got.result.Kind)
+	}
+	if cmd == nil {
+		t.Fatal("Create review Ctrl+C did not return the root quit command")
+	}
+	if runCmd(cmd) == nil {
+		t.Fatal("Create review Ctrl+C returned a command with no message")
+	}
+	assertSnapshotsEqual(t, "Create review Ctrl+C HOME", homeBefore, dirSnapshot(t, home))
+	assertSnapshotsEqual(t, "Create review Ctrl+C project root", projectBefore, dirSnapshot(t, projectRoot))
 }
 
 // TestLauncherKeyboardContract_ThroughRootUpdate proves the launcher-level

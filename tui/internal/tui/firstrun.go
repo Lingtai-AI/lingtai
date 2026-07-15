@@ -4725,8 +4725,8 @@ func presetCapabilitiesSummary(p preset.Preset) string {
 // viewReview renders the draft-mode-only final confirmation page — the
 // single place before "Start project" where the user sees the complete set
 // of choices gathered across the wizard. Every draft page (not just this
-// one) also shows the persistent "draft only" status string via
-// viewDraftStatusLine, so cancelling anywhere is never a surprise.
+// one) remains draft-only until the user confirms "Start project", so
+// cancelling anywhere is still a no-write action.
 func (m FirstRunModel) viewReview() string {
 	var b strings.Builder
 

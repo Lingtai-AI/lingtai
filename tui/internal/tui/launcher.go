@@ -28,8 +28,9 @@ const (
 // exits. ProjectRoot is set for both successful decisions; Draft is set for
 // DecisionCreate (already staged/committed by RunProjectCreate before this
 // result is produced — see LauncherRootModel.Update's ProjectDraftConfirmedMsg
-// handling). DecisionCancel means the user backed out entirely (Esc/q/
-// Ctrl+C at the welcome or choose page) — zero filesystem writes occurred.
+// handling). DecisionCancel means the user backed out entirely: Esc/q/Ctrl+C at
+// Welcome or Choose, q/Ctrl+C on Picker or Staging, and Ctrl+C during Create;
+// zero filesystem writes occurred.
 type LauncherResult struct {
 	Kind        LauncherDecisionKind
 	ProjectRoot string
@@ -59,9 +60,9 @@ type LauncherDoneMsg struct {
 //
 // Welcome is always first (Jason's redesign direction: a no-project user
 // meets LingTai through the SAME welcome visual language as first-run —
-// brand, explanation, language — BEFORE being asked to decide anything).
+// brand, language, theme — BEFORE being asked to decide anything).
 // Choose is the explicit create-here / open-existing decision. Picker is
-// the redesigned project-level "open existing" catalog. Staging is the
+// the existing project-level "open existing" view. Staging is the
 // unfinished-creation recovery screen (its own view, no longer borrowing
 // the picker's identity). Create hosts the draft-purpose FirstRunModel.
 type launcherView int
@@ -78,7 +79,6 @@ const (
 // the launcher prelude IS the welcome page for the no-project flow, so the
 // two must never diverge.
 var launcherLangs = []string{"en", "zh", "wen"}
-var launcherLangLabels = []string{"English", "现代汉语", "文言"}
 
 // LauncherRootModel is the pre-App root Bubble Tea model for the no-project
 // case (design doc Invariant 2/6): it owns ONLY view state, the embedded
@@ -343,6 +343,9 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case launcherViewStaging:
 			return m.updateUnfinishedStaging(msg)
 		case launcherViewCreate:
+			if msg.String() == "ctrl+c" {
+				return m.cancelAndQuit()
+			}
 			updated, cmd := m.firstRun.Update(msg)
 			m.firstRun = updated
 			return m, cmd
@@ -366,9 +369,10 @@ func (m LauncherRootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // cancelAndQuit records the zero-write cancel decision and quits the
-// launcher's tea.Program. Reachable from Welcome (Esc/q/Ctrl+C) and from
-// Choose, Picker, and Staging (q/Ctrl+C); Esc on those pages goes BACK one
-// page instead, so leaving is always deliberate and never a mis-keyed Esc.
+// launcher's tea.Program. Reachable from Welcome (Esc/q/Ctrl+C), Choose,
+// Picker, and Staging (q/Ctrl+C), and Create (Ctrl+C); Esc on those pages
+// goes BACK one page instead, so leaving is always deliberate and never a
+// mis-keyed Esc.
 func (m LauncherRootModel) cancelAndQuit() (tea.Model, tea.Cmd) {
 	m.result = LauncherResult{Kind: DecisionCancel}
 	m.done = true
@@ -594,81 +598,31 @@ func (m LauncherRootModel) viewContent() string {
 	return ""
 }
 
-// viewWelcome keeps the no-project prelude minimal: the shared brand, the
-// required dynamic no-project sentence, language/theme controls, and hints.
+// viewWelcome reuses the canonical FirstRunModel Welcome presentation. This
+// view-only value deliberately enables welcome-only mode (and no rehydration)
+// so the launcher shares the existing layout and footer without constructing a
+// second renderer; the root still owns launcher navigation and quit handling.
 func (m LauncherRootModel) viewWelcome() string {
-	width := launcherTextWidth(m.width, 4)
-	compact := m.height > 0 && m.height <= 24
-	var lines []string
-	lines = append(lines, strings.Split(strings.TrimSuffix(launcherWelcomeBrand(m.width, m.height), "\n"), "\n")...)
-	if !compact {
-		lines = append(lines, "")
-	}
-	displayRoot := abbreviateHomePath(m.projectRoot)
-	for _, line := range wrapToWidth(i18n.TF("launcher.welcome.explain2", displayRoot), width) {
-		lines = append(lines, centerText(StyleSubtle.Render(line), m.width))
-	}
-	if !compact {
-		lines = append(lines, "")
-	}
-	for i, label := range launcherLangLabels {
-		style := lipgloss.NewStyle().Foreground(ColorText)
-		line := " " + style.Render(label) + " "
-		if i == m.langIdx {
-			style = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			line = style.Render("[" + label + "]")
-		}
-		lines = append(lines, centerText(line, m.width))
-	}
-	if !compact {
-		lines = append(lines, "")
-	}
-	hints := "↑↓ " + i18n.T("welcome.select_lang") +
-		"  [Enter] " + i18n.T("launcher.welcome.continue") +
-		"  [Ctrl+T] " + i18n.T("settings.theme") +
-		"  [Esc/q/Ctrl+C] " + i18n.T("launcher.hint_quit")
-	for _, line := range wrapToWidth(hints, width) {
-		lines = append(lines, centerText(StyleFaint.Render(line), m.width))
-	}
-	return verticallyCentered(strings.Join(lines, "\n")+"\n", m.height)
+	return (FirstRunModel{
+		width:         m.width,
+		height:        m.height,
+		langCursor:    m.langIdx,
+		welcomeOnly:   true,
+		rehydrateMode: false,
+	}).viewWelcome()
 }
 
-// launcherWelcomeBrand keeps the shared welcome identity while reducing its
-// fixed-height logo/blank block when the launcher has a small terminal. The
-// language, safety statement, and key hints are never dropped.
-func launcherWelcomeBrand(width, height int) string {
-	brand := strings.TrimRight(renderWelcomeBrand(width), "\n")
-	if height <= 0 || height > 24 {
-		return brand + "\n"
-	}
-	nonBlank := make([]string, 0)
-	for _, line := range strings.Split(brand, "\n") {
-		if strings.TrimSpace(line) != "" {
-			nonBlank = append(nonBlank, line)
-		}
-	}
-	logoRows := 4
-	if height < 20 {
-		logoRows = 0
-	} else if height < 24 {
-		logoRows = 2
-	}
-	if len(nonBlank) < 3 {
-		return brand + "\n"
-	}
-	if logoRows > len(nonBlank)-3 {
-		logoRows = len(nonBlank) - 3
-	}
-	selected := append([]string{}, nonBlank[:logoRows]...)
-	selected = append(selected, nonBlank[len(nonBlank)-3:]...)
-	return strings.Join(selected, "\n") + "\n"
-}
-
-// viewChoose renders only the functional create/open choices and navigation.
+// viewChoose renders the existing project-status sentence above the
+// functional create/open choices and navigation.
 func (m LauncherRootModel) viewChoose() string {
 	var lines []string
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 	lines = append(lines, titleStyle.Render(i18n.T("launcher.choose.title")))
+	lines = append(lines, "")
+	displayRoot := abbreviateHomePath(m.projectRoot)
+	for _, line := range wrapToWidth(i18n.TF("launcher.welcome.explain2", displayRoot), launcherTextWidth(m.width, 2)) {
+		lines = append(lines, StyleSubtle.Render(line))
+	}
 	lines = append(lines, "")
 	options := []string{i18n.T("launcher.choose.here"), i18n.T("launcher.choose.open")}
 	for i, label := range options {
