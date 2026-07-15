@@ -305,12 +305,15 @@ func (a *App) reconcileRailUnread() {
 	if a.railUnreadStore == nil {
 		store, err := fs.OpenRailUnreadStore(filepath.Dir(a.projectDir), targets, messages, a.mail.humanAddr)
 		if err != nil {
+			a.mail.AddSystemMessage(fmt.Sprintf("Unread status unavailable: %v", err))
 			return
 		}
 		a.railUnreadStore = store
 		return
 	}
-	_ = a.railUnreadStore.SyncTargets(targets, messages, a.mail.humanAddr)
+	if err := a.railUnreadStore.SyncTargets(targets, messages, a.mail.humanAddr); err != nil {
+		a.mail.AddSystemMessage(fmt.Sprintf("Unread status unavailable: %v", err))
+	}
 }
 
 func (a *App) installMailModel(m MailModel) {
