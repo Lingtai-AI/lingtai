@@ -85,7 +85,21 @@ jobs:
           # Create the release if it does not exist yet, then attach assets.
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --title "$TAG" --notes "Release $TAG"
-          gh release upload "$TAG" "$ASSET" "${ASSET}.sha256" --clobber
+          ensure_asset() {
+            local name="$1" remote local_sha remote_sha
+            if gh release view "$TAG" --json assets | python3 -c 'import json,sys; n=sys.argv[1]; print(any(a.get("name") == n for a in json.load(sys.stdin)["assets"]))' "$name" | grep -qx true; then
+              remote="$(mktemp "${TMPDIR:-/tmp}/lingtai-release-${name}.XXXXXX")"
+              gh release download "$TAG" --pattern "$name" --output "$remote"
+              local_sha="$(sha256sum "$name" | cut -d' ' -f1)"
+              remote_sha="$(sha256sum "$remote" | cut -d' ' -f1)"
+              [[ "$local_sha" == "$remote_sha" ]] || { echo "error: existing GitHub asset $name differs; refusing replacement" >&2; exit 1; }
+              echo "GitHub asset $name already has identical bytes; skipping"
+            else
+              gh release upload "$TAG" "$name"
+            fi
+          }
+          ensure_asset "$ASSET"
+          ensure_asset "${ASSET}.sha256"
 
   # Serial by design: waits for every release-assets matrix leg so it only ever
   # references archives that are already uploaded — it never independently
@@ -213,7 +227,16 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh release upload "$TAG" lingtai-bundle-manifest.json --clobber
+          if gh release view "$TAG" --json assets | python3 -c 'import json,sys; print(any(a.get("name") == "lingtai-bundle-manifest.json" for a in json.load(sys.stdin)["assets"]))' | grep -qx true; then
+            remote="$(mktemp "${TMPDIR:-/tmp}/lingtai-bundle-manifest.XXXXXX")"
+            gh release download "$TAG" --pattern lingtai-bundle-manifest.json --output "$remote"
+            local_sha="$(sha256sum lingtai-bundle-manifest.json | cut -d' ' -f1)"
+            remote_sha="$(sha256sum "$remote" | cut -d' ' -f1)"
+            [[ "$local_sha" == "$remote_sha" ]] || { echo "error: existing GitHub asset lingtai-bundle-manifest.json differs; refusing replacement" >&2; exit 1; }
+            echo "GitHub asset lingtai-bundle-manifest.json already has identical bytes; skipping"
+          else
+            gh release upload "$TAG" lingtai-bundle-manifest.json
+          fi
 
       - name: Assemble bundle directory for Gitee publish
         env:

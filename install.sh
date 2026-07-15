@@ -74,6 +74,7 @@ GITEE_KERNEL_REPO="${LINGTAI_GITEE_KERNEL_REPO:-lingtai-kernel}"
 GITEE_API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
 GITEE_KERNEL_API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_KERNEL_REPO}"
 KERNEL_GH_API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai-kernel"
+BUNDLE_TUI_ARCHIVE_SHA=""
 
 # Country-detection endpoints for auto source selection. Two independent,
 # unauthenticated, no-signup providers so one outage doesn't force a GitHub
@@ -114,6 +115,10 @@ KERNEL_BUNDLE_ID=""
 KERNEL_VERSION_INSTALLED=""
 KERNEL_PROVIDER=""
 KERNEL_MANIFEST_PROVIDER=""  # set by fetch_kernel_manifest(); which provider actually served the kernel manifest
+BUNDLE_MANIFEST_KERNEL_TAG=""
+BUNDLE_MANIFEST_KERNEL_VERSION=""
+BUNDLE_MANIFEST_KERNEL_FILENAME=""
+BUNDLE_MANIFEST_BUNDLE_ID=""
 
 usage() {
   cat <<'EOF'
@@ -383,13 +388,14 @@ gitee_release_asset_url() {
   command -v curl &>/dev/null || return 1
   body="$(curl -fsSL --max-time 15 "${GITEE_API_BASE}/releases/tags/$tag" 2>/dev/null || true)"
   [[ -n "$body" ]] || return 1
-  # attach_files is an array of {name, browser_download_url, ...}; scope the
+  # attach_files is an array of {name, browserDownloadUrl/browser_download_url,
+  # ...}; scope the
   # match to the object containing our target name, then pull the URL out of
   # that same fragment so we don't grab an unrelated asset's URL.
   local fragment
   fragment="$(printf '%s' "$body" | grep -o "{[^{}]*\"name\"[[:space:]]*:[[:space:]]*\"$name\"[^{}]*}" | head -1)"
   [[ -n "$fragment" ]] || return 1
-  url="$(printf '%s' "$fragment" | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+  url="$(printf '%s' "$fragment" | sed -n -E 's/.*"browserDownloadUrl"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p; s/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' | head -1)"
   [[ -n "$url" && "$url" != "$fragment" ]] || return 1
   printf '%s' "$url"
 }
@@ -442,8 +448,8 @@ fetch_bundle_manifest() {
 
   body="$(curl -fsSL --max-time 30 "$url" 2>/dev/null || true)"
   [[ -n "$body" ]] || return 1
-  if ! printf '%s' "$body" | grep -q '"schema"[[:space:]]*:[[:space:]]*"lingtai.tui.bundle/v1"'; then
-    echo "error: bundle manifest at $url has an unexpected schema" >&2
+  if ! load_bundle_manifest "$body" "$tag"; then
+    echo "error: bundle manifest at $url failed strict validation" >&2
     return 1
   fi
 
@@ -452,10 +458,91 @@ fetch_bundle_manifest() {
   return 0
 }
 
-# bundle_manifest_field extracts a top-level string field from the already
-# fetched BUNDLE_MANIFEST_JSON.
+# Validate the complete bundle contract at the trust boundary and print the
+# canonical digest for this host's one exact archive.
+parse_bundle_manifest() {
+  local body="$1" expected_tag="$2"
+  BODY="$body" python3 - "$expected_tag" "$(detect_os)" "$(detect_arch)" <<'PY'
+import datetime, json, os, re, sys
+expected_tag, os_name, arch = sys.argv[1:]
+def pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+def exact(value, keys, label):
+    if not isinstance(value, dict) or set(value) != set(keys):
+        raise ValueError(f"{label} has the wrong object shape")
+def string(value, label):
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a nonempty string")
+    return value
+try:
+    data = json.loads(os.environ["BODY"], object_pairs_hook=pairs)
+    exact(data, ("schema", "bundle_id", "tui_tag", "tui_commit", "generated_at", "kernel_tag", "kernel_version", "kernel_manifest_filename", "archives", "providers"), "manifest")
+    if data["schema"] != "lingtai.tui.bundle/v1": raise ValueError("unexpected schema")
+    for key in ("bundle_id", "tui_tag", "tui_commit", "kernel_tag", "kernel_version", "kernel_manifest_filename"): string(data[key], key)
+    if data["bundle_id"] != data["tui_tag"] or data["tui_tag"] != expected_tag: raise ValueError("bundle_id/tui_tag does not equal resolved tag")
+    if not re.fullmatch(r"[0-9a-f]{40}", data["tui_commit"]): raise ValueError("tui_commit must be a 40-character lowercase commit SHA")
+    generated_at = data["generated_at"]
+    if not isinstance(generated_at, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", generated_at): raise ValueError("generated_at must be YYYY-MM-DDTHH:MM:SSZ")
+    datetime.datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ")
+    if not isinstance(data["archives"], list) or not data["archives"]: raise ValueError("archives must be a nonempty array")
+    names = set()
+    for archive in data["archives"]:
+        exact(archive, ("filename", "sha256"), "archive entry")
+        name = string(archive["filename"], "archive filename")
+        if name in names: raise ValueError("archives contains duplicate filenames")
+        names.add(name)
+        if not re.fullmatch(r"lingtai-[^/]+-(?:darwin|linux)-(?:amd64|arm64)\.tar\.gz", name): raise ValueError("archive filename is invalid")
+        if not isinstance(archive["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", archive["sha256"]): raise ValueError("archive sha256 must be lowercase 64-hex")
+    target = f"lingtai-{expected_tag}-{os_name}-{arch}.tar.gz"
+    hits = [archive for archive in data["archives"] if archive["filename"] == target]
+    if len(hits) != 1: raise ValueError(f"expected exactly one archive for {target}, found {len(hits)}")
+    exact(data["providers"], ("github", "gitee"), "providers")
+    exact(data["providers"]["github"], ("repo",), "github provider")
+    exact(data["providers"]["gitee"], ("owner", "repo"), "gitee provider")
+    string(data["providers"]["github"]["repo"], "github repo")
+    string(data["providers"]["gitee"]["owner"], "gitee owner")
+    string(data["providers"]["gitee"]["repo"], "gitee repo")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", data["providers"]["github"]["repo"]): raise ValueError("github repo is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", data["providers"]["gitee"]["owner"]): raise ValueError("gitee owner is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", data["providers"]["gitee"]["repo"]): raise ValueError("gitee repo is invalid")
+except (ValueError, TypeError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"invalid strict bundle manifest: {exc}")
+print(hits[0]["sha256"])
+print(data["kernel_tag"])
+print(data["kernel_version"])
+print(data["kernel_manifest_filename"])
+print(data["bundle_id"])
+PY
+}
+
+validate_bundle_manifest() { parse_bundle_manifest "$1" "$2" | sed -n '1p'; }
+
+load_bundle_manifest() {
+  local body="$1" expected_tag="$2" fields=() field
+  while IFS= read -r field; do fields+=("$field"); done < <(parse_bundle_manifest "$body" "$expected_tag")
+  [[ "${#fields[@]}" == 5 ]] || return 1
+  BUNDLE_TUI_ARCHIVE_SHA="${fields[0]}"
+  BUNDLE_MANIFEST_KERNEL_TAG="${fields[1]}"
+  BUNDLE_MANIFEST_KERNEL_VERSION="${fields[2]}"
+  BUNDLE_MANIFEST_KERNEL_FILENAME="${fields[3]}"
+  BUNDLE_MANIFEST_BUNDLE_ID="${fields[4]}"
+}
+
+# bundle_manifest_field returns values populated by the strict parser; it
+# never reparses raw manifest text.
 bundle_manifest_field() {
-  printf '%s' "$BUNDLE_MANIFEST_JSON" | json_string_field "$1"
+  case "$1" in
+    bundle_id) printf '%s\n' "$BUNDLE_MANIFEST_BUNDLE_ID" ;;
+    kernel_tag) printf '%s\n' "$BUNDLE_MANIFEST_KERNEL_TAG" ;;
+    kernel_version) printf '%s\n' "$BUNDLE_MANIFEST_KERNEL_VERSION" ;;
+    kernel_manifest_filename) printf '%s\n' "$BUNDLE_MANIFEST_KERNEL_FILENAME" ;;
+    *) return 1 ;;
+  esac
 }
 
 # verify_sha256 checks a file against an expected lowercase hex digest using
@@ -654,6 +741,7 @@ write_install_metadata() {
   if [[ "$KERNEL_SOURCE" == "bundle" ]]; then
     bundle_json="$(printf ',\n  "kernel_source": "bundle",\n  "kernel_bundle_id": "%s",\n  "kernel_version": "%s",\n  "kernel_provider": "%s"' \
       "$(json_escape "$KERNEL_BUNDLE_ID")" "$(json_escape "$KERNEL_VERSION_INSTALLED")" "$(json_escape "$KERNEL_PROVIDER")")"
+    bundle_json="$(printf '%s,\n  "bundle_provider": "%s"' "$bundle_json" "$(json_escape "$BUNDLE_PROVIDER")")"
   fi
 
   metadata_path="$global_dir/install.json"
@@ -911,8 +999,8 @@ ensure_runtime_venv() {
         warn "$recreate_reason after recreate; leaving runtime venv repair to the TUI."
         return 0
       fi
-      warn "$recreate_reason; recreating runtime venv."
-      rm -rf "$venv_dir"
+      warn "$recreate_reason; retaining it and provisioning a new runtime venv path."
+      venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
       repair_attempt=1
       py=""
     fi
@@ -953,8 +1041,8 @@ ensure_runtime_venv() {
 
     if ! "$py" -m pip --version >/dev/null 2>&1 && [[ -z "$uv" ]]; then
       if [[ "$repair_attempt" == "0" ]]; then
-        warn "runtime venv pip is missing; recreating runtime venv."
-        rm -rf "$venv_dir"
+        warn "runtime venv pip is missing; retaining it and provisioning a new runtime venv path."
+        venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
         repair_attempt=1
         continue
       fi
@@ -975,8 +1063,8 @@ ensure_runtime_venv() {
     fi
     if [[ "$install_ok" != "1" ]]; then
       if [[ "$repair_attempt" == "0" ]]; then
-        warn "failed to install the pinned kernel bundle artifact into the runtime venv; recreating runtime venv once."
-        rm -rf "$venv_dir"
+        warn "failed to install the pinned kernel bundle artifact; retaining the venv and provisioning a new runtime venv path."
+        venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
         repair_attempt=1
         continue
       fi
@@ -990,8 +1078,8 @@ ensure_runtime_venv() {
 
     if ! "$py" -c 'import lingtai; print("lingtai", getattr(lingtai, "__version__", "?"))'; then
       if [[ "$repair_attempt" == "0" ]]; then
-        warn "runtime venv failed import check; recreating runtime venv once."
-        rm -rf "$venv_dir"
+        warn "runtime venv failed import check; retaining it and provisioning a new runtime venv path."
+        venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
         repair_attempt=1
         continue
       fi
@@ -1135,11 +1223,9 @@ PY
 )"
     if [[ -n "$hit" ]]; then
       printf '%s' "$hit"
-      rm -f "$manifest_file"
       return 0
     fi
   done <<<"$tags"
-  rm -f "$manifest_file"
   return 1
 }
 
@@ -1158,7 +1244,6 @@ for art in data.get("artifacts", []):
         print(f"{art['filename']} {art['sha256']}")
         break
 PY
-  rm -f "$manifest_file"
 }
 
 # kernel_artifact_download_url echoes the download URL for a named kernel
@@ -1224,7 +1309,7 @@ install_kernel_from_bundle() {
   fi
   if ! verify_sha256 "$dest" "$sha"; then
     echo "error: checksum mismatch for $fname — refusing to install an unverified kernel artifact." >&2
-    rm -f "$dest"
+    echo "       retained mismatched artifact for diagnosis: $dest" >&2
     return 1
   fi
   note "Verified SHA256 for $fname."
@@ -1292,6 +1377,18 @@ try_release_asset() {
   command -v curl &>/dev/null || { note "curl unavailable; will build from source."; return 1; }
 
   name="$(asset_name "$tag" "$os" "$arch")"
+  if [[ -z "$BUNDLE_MANIFEST_JSON" ]] || [[ "$BUNDLE_TAG" != "$tag" ]]; then
+    warn "no validated bundle manifest is bound to TUI tag $tag; refusing the release asset."
+    return 1
+  fi
+  if ! load_bundle_manifest "$BUNDLE_MANIFEST_JSON" "$tag"; then
+    warn "validated bundle manifest could not be loaded for $name; refusing the release asset."
+    return 1
+  fi
+  if [[ ! "$BUNDLE_TUI_ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+    warn "validated bundle manifest has no usable digest for $name; refusing the release asset."
+    return 1
+  fi
   provider="${BUNDLE_PROVIDER:-github}"
   if [[ "$provider" == "gitee" ]]; then
     url="$(gitee_release_asset_url "$tag" "$name" || true)"
@@ -1325,13 +1422,17 @@ try_release_asset() {
   local sha_url sha_expected
   sha_url="${url}.sha256"
   sha_expected="$(curl -fsSL --max-time 30 "$sha_url" 2>/dev/null | cut -d' ' -f1 || true)"
-  if [[ -z "$sha_expected" ]]; then
+  if [[ ! "$sha_expected" =~ ^[0-9a-f]{64}$ ]]; then
     warn "could not fetch checksum sidecar for $name; will build from source rather than install unverified bytes."
     return 1
   fi
-  if ! verify_sha256 "$tarball" "$sha_expected"; then
-    warn "checksum mismatch for $name; will build from source rather than install unverified bytes."
-    return 1
+  if [[ "$sha_expected" != "$BUNDLE_TUI_ARCHIVE_SHA" ]]; then
+    warn "provider checksum sidecar disagrees with bundle manifest for $name; refusing mixed provenance."
+    return 2
+  fi
+  if ! verify_sha256 "$tarball" "$BUNDLE_TUI_ARCHIVE_SHA"; then
+    echo "error: downloaded bytes for $name disagree with the bundle manifest; refusing this tag." >&2
+    return 2
   fi
   note "Verified SHA256 for $name."
 
@@ -1745,7 +1846,7 @@ fi
 # installed from a package index by name, so if no bundle manifest can be
 # resolved, ensure_runtime_venv below fails loud instead of silently
 # installing from PyPI — see BUNDLE_REQUIRED.
-if [[ "$UPDATE_MODE" != "1" && -z "$REF" ]]; then
+if [[ -z "$REF" ]]; then
   BUNDLE_REQUIRED=1
   if fetch_bundle_manifest; then
     note "Resolved bundle $BUNDLE_TAG via $BUNDLE_PROVIDER (kernel $(bundle_manifest_field kernel_tag))."
@@ -1762,10 +1863,19 @@ fi
 if [[ "$UPDATE_MODE" == "1" ]]; then
   # The TUI source updater expects a source-compatible update. Try the prebuilt
   # asset first (fast), then fall back to building the tag from source.
-  if [[ "$FROM_SOURCE" != "1" ]] && try_release_asset "$VERSION"; then
-    :
+  TARGET_TAG="${VERSION:-$BUNDLE_TAG}"
+  [[ -n "$TARGET_TAG" ]] || { echo "error: --update could not resolve a release tag" >&2; exit 1; }
+  VERSION="$TARGET_TAG"
+  if [[ "$FROM_SOURCE" != "1" ]]; then
+    if try_release_asset "$TARGET_TAG"; then
+      :
+    else
+      asset_rc=$?
+      [[ "$asset_rc" != "2" ]] || exit 1
+      build_from_source "$TARGET_TAG"
+    fi
   else
-    build_from_source "$VERSION"
+    build_from_source "$TARGET_TAG"
   fi
 elif [[ -n "$REF" ]]; then
   build_from_source "$REF"
@@ -1798,14 +1908,31 @@ else
   if [[ -z "$(release_tag_name "$TARGET_TAG")" ]]; then
     warn "'$TARGET_TAG' is not a vX.Y.Z release tag; treating it as a source ref."
     build_from_source "$TARGET_TAG"
-  elif [[ "$FROM_SOURCE" != "1" ]] && try_release_asset "$TARGET_TAG"; then
-    :
+  elif [[ "$FROM_SOURCE" != "1" ]]; then
+    if try_release_asset "$TARGET_TAG"; then
+      :
+    else
+      asset_rc=$?
+      [[ "$asset_rc" != "2" ]] || exit 1
+      build_from_source "$TARGET_TAG"
+    fi
   else
     build_from_source "$TARGET_TAG"
   fi
 fi
 
-# Record install metadata for the TUI source updater.
+# Provision the pinned runtime before recording install metadata. This makes
+# kernel_source and its bundle fields a postcondition of verified provisioning,
+# never a claim about a partially completed install.
+if ! ensure_runtime_venv "$BIN_DIR"; then
+  echo "error: LingTai install incomplete — the TUI/portal binaries installed, but the" >&2
+  echo "       Python runtime could not be provisioned from a verified pinned bundle." >&2
+  echo "       See the error above. Re-run, or pass --skip-python if TUI-only is intended." >&2
+  exit 1
+fi
+
+# Record install metadata for the TUI source updater only after the runtime
+# gate above succeeds (or --skip-python explicitly opted out).
 GLOBAL_DIR="$HOME/.lingtai-tui"
 PREFIX="$(prefix_for_bin_dir "$BIN_DIR")"
 REQUESTED_REF="${REF:-${VERSION:-main}}"
@@ -1821,24 +1948,6 @@ write_install_metadata \
   "$BIN_DIR/lingtai-tui" \
   "$PORTAL_PATH"
 say "Wrote install metadata to $GLOBAL_DIR/install.json"
-
-# One-shot Python runtime venv (skipped for --update to keep the updater fast;
-# the TUI verifies/creates the venv itself after a source update). A failure
-# here is fatal to the overall install: LingTai's Python runtime is only ever
-# installed from a verified pinned bundle artifact, never silently from
-# PyPI/an index by package name, so a bundle/kernel-install failure must be
-# reported as an install failure rather than a quiet partial success. The
-# TUI/portal binaries above are already on disk and install.json already
-# written (without kernel_source, since no verified kernel install happened)
-# — --skip-python remains the explicit, honest way to get TUI-only binaries.
-if [[ "$UPDATE_MODE" != "1" ]]; then
-  if ! ensure_runtime_venv "$BIN_DIR"; then
-    echo "error: LingTai install incomplete — the TUI/portal binaries installed, but the" >&2
-    echo "       Python runtime could not be provisioned from a verified pinned bundle." >&2
-    echo "       See the error above. Re-run, or pass --skip-python if TUI-only is intended." >&2
-    exit 1
-  fi
-fi
 
 say "Done. $("$BIN_DIR/lingtai-tui" version 2>&1 || echo "$VERSION")"
 

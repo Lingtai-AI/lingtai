@@ -68,6 +68,8 @@ data = json.loads(Path(manifest_path).read_text())
 if data.get("schema") != "lingtai.tui.bundle/v1":
     sys.exit(f"error: unexpected bundle manifest schema: {data.get('schema')!r}")
 for archive in data.get("archives", []):
+    if not isinstance(archive, dict) or not archive.get("filename") or not archive.get("sha256"):
+        sys.exit("error: malformed archive entry")
     path = bundle_dir / archive["filename"]
     if not path.is_file():
         sys.exit(f"error: archive listed in bundle manifest is missing on disk: {path}")
@@ -77,6 +79,12 @@ for archive in data.get("archives", []):
             f"error: {archive['filename']} sha256 mismatch: "
             f"manifest={archive['sha256']} on-disk={h}"
         )
+    sidecar = bundle_dir / (archive["filename"] + ".sha256")
+    if not sidecar.is_file():
+        sys.exit(f"error: archive sidecar is missing on disk: {sidecar}")
+    parts = sidecar.read_text().split()
+    if not parts or parts[0] != h:
+        sys.exit(f"error: {sidecar.name} disagrees with archive bytes")
 print(f"local assets OK: {len(data.get('archives', []))} archive(s) match the bundle manifest")
 PY
 }
@@ -127,13 +135,14 @@ except Exception:
     print("")' 2>/dev/null || echo ""
 }
 
-existing_attachment_names() {
+existing_attachments() {
   local release_id="$1" body
   body="$(gitee_get "/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/${release_id}")"
   printf '%s' "$body" | python3 -c 'import json,sys
 data = json.load(sys.stdin)
 for a in data.get("attach_files", []):
-    print(a.get("name",""))'
+    url = a.get("browserDownloadUrl") or a.get("browser_download_url") or ""
+    print(f"{a.get('name', '')}\t{url}")'
 }
 
 # --- plan --------------------------------------------------------------------
@@ -143,7 +152,15 @@ verify_tag_synchronized
 
 release_id="$(find_release_id)"
 files_to_upload=("$MANIFEST")
-while IFS= read -r -d '' f; do files_to_upload+=("$f"); done < <(find "$BUNDLE_DIR" -maxdepth 1 -name '*.tar.gz' -o -name '*.sha256' -print0)
+while IFS= read -r name; do
+  files_to_upload+=("$BUNDLE_DIR/$name" "$BUNDLE_DIR/$name.sha256")
+done < <(python3 - "$MANIFEST" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+for archive in data["archives"]:
+    print(archive["filename"])
+PY
+)
 
 if [[ -z "$release_id" ]]; then
   echo "[gitee] release ${TAG} does not exist yet"
@@ -160,12 +177,31 @@ if [[ -z "$release_id" ]]; then
   fi
 fi
 
-existing="$(existing_attachment_names "$release_id")"
+existing="$(existing_attachments "$release_id")"
 for f in "${files_to_upload[@]}"; do
   name="$(basename "$f")"
-  if printf '%s\n' "$existing" | grep -qxF "$name"; then
-    echo "[gitee] ${name}: already attached to ${TAG}; skipping (idempotent, no delete-and-replace)"
+  attachment_url="$(printf '%s\n' "$existing" | awk -F '\t' -v name="$name" '$1 == name {print $2; exit}')"
+  if [[ -n "$attachment_url" ]]; then
+    if ! remote="$(mktemp "${BUNDLE_DIR}/.remote-${name}.XXXXXXXX")"; then
+      echo "error: could not allocate a unique retained comparison path for $name" >&2
+      exit 1
+    fi
+    if ! curl -fsSL --max-time 60 -o "$remote" "$attachment_url"; then
+      echo "error: could not download existing Gitee attachment $name for byte verification" >&2
+      exit 1
+    fi
+    local_sha="$(sha256sum "$f" | cut -d' ' -f1)"
+    remote_sha="$(sha256sum "$remote" | cut -d' ' -f1)"
+    if [[ "$local_sha" != "$remote_sha" ]]; then
+      echo "error: existing Gitee attachment $name has different bytes; refusing clobber" >&2
+      exit 1
+    fi
+    echo "[gitee] ${name}: existing bytes match; skipping (idempotent, no delete-and-replace)"
     continue
+  fi
+  if printf '%s\n' "$existing" | awk -F '\t' -v name="$name" '$1 == name {found=1} END {exit !found}'; then
+    echo "error: existing Gitee attachment $name has no usable download URL; refusing unverified skip" >&2
+    exit 1
   fi
   if [[ "$EXECUTE" == "1" ]]; then
     curl -fsSL --max-time 60 -X POST \

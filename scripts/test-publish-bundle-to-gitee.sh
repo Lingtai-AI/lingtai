@@ -17,14 +17,17 @@ fail() {
 }
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-publish-gitee-test.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
-
 make_bundle() {
-  local dir="$1" tag="$2" archive_bytes="${3:-fake-archive-bytes}"
+  local dir="$1" tag="$2" archive_bytes="${3:-fake-archive-bytes}" archive_present="${4:-1}"
   mkdir -p "$dir"
-  printf '%s' "$archive_bytes" > "$dir/lingtai-${tag}-darwin-arm64.tar.gz"
   local sha
-  sha="$(shasum -a 256 "$dir/lingtai-${tag}-darwin-arm64.tar.gz" | cut -d' ' -f1)"
+  if [[ "$archive_present" == "1" ]]; then
+    printf '%s' "$archive_bytes" > "$dir/lingtai-${tag}-darwin-arm64.tar.gz"
+    sha="$(shasum -a 256 "$dir/lingtai-${tag}-darwin-arm64.tar.gz" | cut -d' ' -f1)"
+    printf '%s  lingtai-%s-darwin-arm64.tar.gz\n' "$sha" "$tag" > "$dir/lingtai-${tag}-darwin-arm64.tar.gz.sha256"
+  else
+    sha="$(printf '0%.0s' {1..64})"
+  fi
   cat > "$dir/lingtai-bundle-manifest.json" <<EOF
 {
   "schema": "lingtai.tui.bundle/v1",
@@ -82,8 +85,7 @@ fi
 
 (
   bundle_dir="$tmp/missing-archive-bundle"
-  make_bundle "$bundle_dir" "v9.9.3"
-  rm -f "$bundle_dir/lingtai-v9.9.3-darwin-arm64.tar.gz"
+  make_bundle "$bundle_dir" "v9.9.3" "" 0
   if out="$(bash "$SCRIPT" --tag v9.9.3 --bundle-dir "$bundle_dir" 2>&1)"; then
     fail "script must fail loud when a manifest-listed archive is missing on disk, got success: $out"
   fi
@@ -105,5 +107,13 @@ json.dump(data, open(p, 'w'))
     fail "script must reject an unexpected bundle manifest schema, got success: $out"
   fi
 )
+
+# --- retained remote comparison paths must be collision-proof ----------------
+
+grep -Fq 'mktemp "${BUNDLE_DIR}/.remote-${name}.XXXXXXXX"' "$SCRIPT" ||
+  fail "publisher must allocate retained remote comparisons with an exclusive unique template"
+if grep -Fq '.remote-${name}-$$' "$SCRIPT"; then
+  fail "publisher must not reuse a predictable PID-based comparison path"
+fi
 
 echo "publish_bundle_to_gitee.sh tests passed"

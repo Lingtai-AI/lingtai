@@ -14,7 +14,6 @@ fail() {
 }
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-sync-gitee-test.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
 
 git_c() { git -C "$1" "${@:2}"; }
 

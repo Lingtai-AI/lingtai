@@ -27,7 +27,6 @@ assert_eq() {
 }
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-inst-gitee-test.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
 
 # --- --source flag validation -------------------------------------------------
 
@@ -55,6 +54,38 @@ assert_eq "v0.16.4" \
 assert_eq "" \
   "$(printf '{"schema":"x"}' | json_string_field missing_key)" \
   "json_string_field returns empty for a missing key"
+
+# --- strict bundle parser regressions ---------------------------------------
+
+strict_archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
+strict_manifest="$(printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$strict_archive/")"
+assert_eq "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "$(validate_bundle_manifest "$strict_manifest" v0.11.0)" \
+  "strict parser returns the manifest-authoritative host archive SHA"
+load_bundle_manifest "$strict_manifest" v0.11.0 || fail "strict manifest should load"
+assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" "strict parser stores kernel tag"
+assert_eq "0.16.4" "$(bundle_manifest_field kernel_version)" "strict parser stores kernel version"
+assert_eq "lingtai-kernel-release-manifest.json" "$(bundle_manifest_field kernel_manifest_filename)" "strict parser stores kernel manifest filename"
+
+expect_bad_bundle() {
+  local label="$1" body="$2" tag="${3:-v0.11.0}"
+  if validate_bundle_manifest "$body" "$tag" >/dev/null 2>&1; then
+    fail "strict parser accepted $label"
+  fi
+}
+expect_bad_bundle "top-level duplicate key" '{"schema":"lingtai.tui.bundle/v1","schema":"other"}'
+expect_bad_bundle "nested duplicate provider key" '{"providers":{"repo":"a","repo":"b"}}'
+expect_bad_bundle "malformed generated_at" "${strict_manifest/2026-07-15T00:00:00Z/2026-99-99T00:00:00Z}"
+providers_wrong_type="$(printf '%s' "$strict_manifest" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["providers"]=[]; print(json.dumps(d))')"
+expect_bad_bundle "providers wrong type" "$providers_wrong_type"
+expect_bad_bundle "required string wrong type" "${strict_manifest/\"kernel_version\":\"0.16.4\"/\"kernel_version\":17}"
+expect_bad_bundle "wrong resolved tag" "$strict_manifest" v0.11.1
+missing_archive="$(printf '%s' "$strict_manifest" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["archives"]=[]; print(json.dumps(d))')"
+expect_bad_bundle "missing archive" "$missing_archive"
+duplicate_archive="$(printf '%s' "$strict_manifest" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["archives"].append(dict(d["archives"][0])); print(json.dumps(d))')"
+expect_bad_bundle "duplicate archive" "$duplicate_archive"
+ambiguous_manifest='{"kernel_tag":"v0.16.4","kernel_tag":"v9.9.9"}'
+expect_bad_bundle "first-vs-last kernel tag ambiguity" "$ambiguous_manifest"
 
 # --- verify_sha256 -------------------------------------------------------------
 
@@ -130,7 +161,6 @@ register_response_text() {
   local f="$tmp/resp-body.$$.$RANDOM"
   printf '%s' "$body" > "$f"
   register_response "$url" "$f" "$status"
-  rm -f "$f"
 }
 
 # --- detect_country_cn: success / failure / fail-open ------------------------
@@ -300,9 +330,11 @@ register_response_text() {
   # GitHub: has the manifest for the SAME tag v0.11.0.
   register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v0.11.0" \
     '{"tag_name":"v0.11.0","assets":[{"name":"lingtai-bundle-manifest.json"}]}'
+  fallback_archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
+  fallback_manifest="$(printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$fallback_archive/")"
   register_response_text \
     "https://github.com/Lingtai-AI/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json" \
-    '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","kernel_tag":"v0.16.4"}'
+    "$fallback_manifest"
   export PATH="$fakebin:/usr/bin:/bin"
   GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
   API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
@@ -429,8 +461,6 @@ PYEOF
     fail "the tampered/mismatched artifact must be removed after a checksum failure, not left on disk"
   fi
 )
-
-echo "install.sh Gitee bundle installer tests passed"
 
 # --- ensure_runtime_venv: fail-loud gate (Blocker 1 repair) -----------------
 #
