@@ -283,10 +283,56 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 // rebuildSession builds the target/session portion of an initial project-store
 // refresh. The ProjectMailStore owns and supplies the detached mailbox cache;
 // this helper never scans mailbox directories itself.
+//
+// Bridge owner: PR5's root Main projection. Reason: Main still renders the
+// accepted project-wide aggregate while ordinary rail targets use NoPersist
+// direct projections. Expires: PR6, when Aggregate Main is removed.
 func (m MailModel) rebuildSession(cache fs.MailCache) *fs.SessionCache {
 	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
 	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.pageSize)
 	return sessionCache
+}
+
+// rebindOrdinaryProjection reuses the one active Mail presentation surface for
+// a cold direct target. Stable widgets and geometry remain allocated, while all
+// target-local content, async, history, telemetry, editor, and draft state is
+// reset before App installs the authoritative ThreadState coordinates.
+func (m *MailModel) rebindOrdinaryProjection(orchestrator, address, name, nickname string, snapshot *ProjectMailSnapshot, sessionCache *fs.SessionCache) {
+	if m == nil {
+		return
+	}
+
+	input := m.input
+	input.SetValue("")
+	input.Blur()
+	viewport := m.viewport
+	viewport.SetContent("")
+	viewport.GotoBottom()
+
+	*m = MailModel{
+		humanDir:          m.humanDir,
+		humanAddr:         m.humanAddr,
+		orchestrator:      orchestrator,
+		orchAddr:          address,
+		orchName:          name,
+		orchNickname:      nickname,
+		baseDir:           m.baseDir,
+		acceptedSnapshot:  snapshot,
+		pageSize:          m.pageSize,
+		viewport:          viewport,
+		input:             input,
+		palette:           NewPaletteModel(),
+		width:             m.width,
+		height:            m.height,
+		ready:             m.ready,
+		globalDir:         m.globalDir,
+		quoteIdx:          -1,
+		insightsEnabled:   false,
+		toolCallTruncate:  m.toolCallTruncate,
+		dismissedInsights: make(map[string]bool),
+		sessionCache:      sessionCache,
+		initialLoading:    true,
+	}
 }
 
 func (m *MailModel) invalidateAsync() {

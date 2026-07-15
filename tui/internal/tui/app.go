@@ -451,15 +451,6 @@ func (a *App) installMailModel(m MailModel) {
 	a.currentThread = newColdThreadState(a.mailStore.binding.target, m.generation, a.mailStore.version, m.sessionCache)
 }
 
-func (a *App) syncCurrentThreadFromMail() {
-	if a == nil || a.currentThread.generation != a.mail.generation ||
-		a.currentThread.target != a.mail.asyncBinding.target {
-		return
-	}
-	a.currentThread.acceptedSnapshotVersion = a.mail.asyncStoreVersion
-	a.currentThread.sessionCache = a.mail.sessionCache
-}
-
 func (a *App) setAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
 	if a == nil {
 		return
@@ -484,6 +475,27 @@ func (a *App) newMailForCurrentContext() MailModel {
 	humanDir := filepath.Join(a.projectDir, "human")
 	addr := humanAddr(a.projectDir)
 	return NewMailModel(humanDir, addr, a.projectDir, a.orchDir, a.orchName, a.tuiConfig.MailPageSize, a.globalDir, a.tuiConfig.Language, a.tuiConfig.Insights, a.tuiConfig.ToolCallTruncate)
+}
+
+// installOrdinaryThreadProjection binds the reusable Mail presentation to one
+// authoritative cold ThreadState. The root ProjectMailStore, accepted snapshot,
+// scanner, tick, and inventory lifecycle stay owned by App.
+func (a *App) installOrdinaryThreadProjection(row railRow, address, name, nickname string, generation uint64) {
+	if a == nil || a.mailStore.snapshot == nil {
+		return
+	}
+	snapshot := a.mailStore.snapshot
+	sessionCache := fs.NewSessionCache(a.mail.humanDir, filepath.Dir(a.mail.baseDir), fs.NoPersist)
+	a.mail.rebindOrdinaryProjection(row.target.directory, address, name, nickname, snapshot, sessionCache)
+	a.mail.generation = generation
+	if childSize := a.layoutBudget().ChildWindowSize(); childSize.Width > 0 && childSize.Height > 0 {
+		a.mail, _ = a.mail.Update(childSize)
+	}
+	a.mail.input.Blur()
+
+	a.mailGeneration = generation
+	a.mailStore.bindMailModel(&a.mail, asyncTargetHomeAgentRail, row.target.pid)
+	a.currentThread = newColdThreadState(row.target, generation, snapshot.Version(), sessionCache)
 }
 
 func (a *App) requestCurrentOrdinaryThreadLoad() tea.Cmd {
@@ -527,6 +539,9 @@ func (a App) activateMainRailRow(row railRow) (App, tea.Cmd) {
 		return a, nil
 	}
 
+	// Bridge owner: PR5's Main rail activation. Reason: Main remains the
+	// project-wide aggregate projection while ordinary targets share the active
+	// Mail presentation. Expires: PR6, with Aggregate Main removal.
 	mail := NewMailModel(
 		a.mailStore.humanDir,
 		a.mail.humanAddr,
@@ -599,35 +614,8 @@ func (a App) activateOrdinaryRailRow(row railRow) (App, tea.Cmd) {
 		return a, a.scheduleStaleAgentRailInventoryScan()
 	}
 	name := firstNonEmpty(node.AgentName, row.label, filepath.Base(row.target.directory))
-	mail := NewMailModel(
-		a.mailStore.humanDir,
-		a.mail.humanAddr,
-		a.projectDir,
-		row.target.directory,
-		name,
-		a.mail.pageSize,
-		a.globalDir,
-		a.tuiConfig.Language,
-		false,
-		a.tuiConfig.ToolCallTruncate,
-	)
-	mail.orchAddr = node.Address
-	mail.orchName = name
-	mail.orchNickname = node.Nickname
-	mail.generation = nextGeneration
-	mail.acceptedSnapshot = a.mailStore.snapshot
-	mail.sessionCache = fs.NewSessionCache(mail.humanDir, filepath.Dir(mail.baseDir), fs.NoPersist)
-	if childSize := a.layoutBudget().ChildWindowSize(); childSize.Width > 0 && childSize.Height > 0 {
-		mail, _ = mail.Update(childSize)
-	}
-	mail.input.Blur()
-
-	rootSnapshot := a.mailStore.snapshot
 	a.mailStore.pauseTick()
-	a.mailGeneration = nextGeneration
-	a.mailStore.bindMailModel(&mail, asyncTargetHomeAgentRail, row.target.pid)
-	a.mail = mail
-	a.currentThread = newColdThreadState(row.target, nextGeneration, rootSnapshot.Version(), mail.sessionCache)
+	a.installOrdinaryThreadProjection(row, node.Address, name, node.Nickname, nextGeneration)
 	tickCmd := a.mailStore.resumeTick()
 
 	loadCmd := a.requestCurrentOrdinaryThreadLoad()
@@ -926,8 +914,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var mailCmd tea.Cmd
 		a.mail, mailCmd = a.mail.Update(msg.mail)
-		if !stageVisibleOrdinary {
-			a.syncCurrentThreadFromMail()
+		if !stageVisibleOrdinary && a.currentThread.generation == a.mail.generation &&
+			a.currentThread.target == a.mail.asyncBinding.target {
+			// This accepted root publication is the owning seam for both the
+			// presentation projection and its active ThreadState coordinates.
+			a.currentThread.acceptedSnapshotVersion = snapshot.Version()
+			a.currentThread.sessionCache = a.mail.sessionCache
+			a.currentThread.ingestWindow = a.mail.ingestWindow
 		}
 		threadLoadCmd := a.requestCurrentOrdinaryThreadLoad()
 		a.reconcileRailUnread()
@@ -992,7 +985,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// shared envelope acceptance.
 		var cmd tea.Cmd
 		a.mail, cmd = a.mail.Update(msg)
-		a.syncCurrentThreadFromMail()
+		if _, olderPage := msg.(mailOlderPageMsg); olderPage &&
+			a.currentThread.generation == a.mail.generation &&
+			a.currentThread.target == a.mail.asyncBinding.target {
+			// Older-page acceptance is the only routed Mail completion here that
+			// replaces the active cache/window projection.
+			a.currentThread.sessionCache = a.mail.sessionCache
+			a.currentThread.ingestWindow = a.mail.ingestWindow
+		}
 		return a, cmd
 
 	case ViewChangeMsg:

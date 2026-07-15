@@ -469,12 +469,37 @@ func installationInstallSameGenerationTarget(t *testing.T, app App, targetDir, t
 	if generation == 0 {
 		t.Fatal("same-generation target fixture requires a non-zero generation")
 	}
+	if app.mailStore.snapshot == nil {
+		app.mailStore.snapshot = &ProjectMailSnapshot{version: app.mailStore.version, cache: app.mailStore.cache}
+	}
+	node, err := fs.ReadAgent(targetDir)
+	if err != nil {
+		t.Fatalf("read same-generation target: %v", err)
+	}
+	target := asyncTarget{
+		policy:             asyncTargetHomeAgentRail,
+		directory:          targetDir,
+		addressFingerprint: fs.AddressFingerprint(node.Address),
+		pid:                1,
+	}
+	row := railRow{
+		label:        targetName,
+		target:       target,
+		directTarget: fs.DirectTarget{Directory: targetDir, Address: node.Address},
+	}
+	owner := app.mailStore.binding.owner
+	app.setAsyncTargetRevalidator(func(gotOwner asyncOwner, gotTarget asyncTarget) bool {
+		if gotOwner != owner || gotTarget != target {
+			return false
+		}
+		current, readErr := fs.ReadAgent(gotTarget.directory)
+		return readErr == nil && fs.AddressFingerprint(current.Address) == gotTarget.addressFingerprint
+	})
 	app.orchDir = targetDir
 	app.orchName = targetName
-	app.mailGeneration = generation - 1
-	app.installMailModel(NewMailModel(app.mail.humanDir, "human", app.projectDir, targetDir, targetName, 200, app.globalDir, "en", false, 0))
-	if app.mail.generation != generation {
-		t.Fatalf("same-generation target fixture installed generation %d, want %d", app.mail.generation, generation)
+	app.installOrdinaryThreadProjection(row, node.Address, targetName, node.Nickname, generation)
+	if app.mail.generation != generation || app.currentThread.generation != generation {
+		t.Fatalf("same-generation target fixture installed mail/thread generation %d/%d, want %d", app.mail.generation, app.currentThread.generation, generation)
 	}
 	return app
 }

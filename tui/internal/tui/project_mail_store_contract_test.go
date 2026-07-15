@@ -58,8 +58,8 @@ func waitProjectMailSignal(t *testing.T, ch <-chan struct{}, label string) {
 }
 
 // TestProjectMailStoreOwnsTheOnlyGlobalCache is the structural and scanner
-// ownership contract. Constructing N target models keeps one root store, and
-// coalesced refresh requests perform one mailbox scan.
+// ownership contract. Activating N cold target-local ThreadStates keeps one root
+// store, and coalesced refresh requests perform one mailbox scan.
 func TestProjectMailStoreOwnsTheOnlyGlobalCache(t *testing.T) {
 	mailCacheType := reflect.TypeOf(fs.MailCache{})
 	mailModelType := reflect.TypeOf(MailModel{})
@@ -73,11 +73,22 @@ func TestProjectMailStoreOwnsTheOnlyGlobalCache(t *testing.T) {
 	a := visitTestApp(t)
 	scanner := &countingProjectMailScanner{}
 	a.mailStore = newProjectMailStoreWithDeps(a.projectDir, a.mail.humanDir, scanner, func(string) {})
+	a.installMailModel(a.mail)
 	storeID := a.mailStore.id
 	for i := 0; i < 8; i++ {
-		a.installMailModel(NewMailModel(a.mail.humanDir, "human", a.projectDir, a.orchDir, "target", 20, a.globalDir, "en", false, 0))
+		target := asyncTarget{
+			policy:    asyncTargetHomeAgentRail,
+			directory: filepath.Join(a.projectDir, "target"),
+			pid:       i + 1,
+		}
+		a.currentThread = newColdThreadState(
+			target,
+			uint64(i+1),
+			a.mailStore.version,
+			fs.NewSessionCache(a.mail.humanDir, filepath.Dir(a.projectDir), fs.NoPersist),
+		)
 		if a.mailStore.id != storeID {
-			t.Fatalf("target construction %d replaced project store: got %d want %d", i, a.mailStore.id, storeID)
+			t.Fatalf("cold ThreadState activation %d replaced project store: got %d want %d", i, a.mailStore.id, storeID)
 		}
 	}
 	first := a.beginProjectMailRefresh(false)

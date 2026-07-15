@@ -129,10 +129,10 @@ func loadAsyncSourceInventory(t *testing.T) *asyncSourceInventory {
 	return inv
 }
 
-func TestAsyncEnvelopeSourceInventoryHasExactlyTwelveLogicalKinds(t *testing.T) {
+func TestAsyncEnvelopeSourceInventoryMatchesNamedLogicalKinds(t *testing.T) {
 	inv := loadAsyncSourceInventory(t)
 	if _, ok := inv.files["async_envelope.go"]; !ok {
-		t.Fatalf("async_envelope.go missing: want one shared protocol defining the exact twelve target-mail logical kinds")
+		t.Fatalf("async_envelope.go missing: want one shared protocol defining the named target-mail logical kinds")
 	}
 	if _, ok := inv.types["asyncKind"]; !ok {
 		t.Fatalf("async_envelope.go: asyncKind type missing")
@@ -144,7 +144,7 @@ func TestAsyncEnvelopeSourceInventoryHasExactlyTwelveLogicalKinds(t *testing.T) 
 	}
 	got := inv.constantsOfType("asyncKind")
 	if missing, unexpected := setDifference(want, got), setDifference(got, want); len(missing) != 0 || len(unexpected) != 0 {
-		t.Fatalf("asyncKind inventory mismatch: got %v; missing %v; unexpected %v; want exactly the issue's twelve logical paths", got, missing, unexpected)
+		t.Fatalf("asyncKind inventory mismatch: got %v; missing %v; unexpected %v; want exactly the named logical paths", got, missing, unexpected)
 	}
 }
 
@@ -243,10 +243,6 @@ func TestAsyncEnvelopeSourceInventoryScopesNonMilestoneAsyncMessagesExplicitly(t
 	for _, completion := range asyncCompletionNames() {
 		completionSet[completion] = true
 	}
-	if len(asyncSourceLogicalPaths) != 12 || len(completionSet) != 11 {
-		t.Fatalf("invalid test contract: twelve logical paths must map to eleven completion structs; got %d paths and %d structs", len(asyncSourceLogicalPaths), len(completionSet))
-	}
-
 	for _, exclusion := range asyncSourceExclusions {
 		if exclusion.reason == "" {
 			issues = append(issues, exclusion.message+": exclusion reason missing")
@@ -255,14 +251,14 @@ func TestAsyncEnvelopeSourceInventoryScopesNonMilestoneAsyncMessagesExplicitly(t
 			issues = append(issues, exclusion.message+": documented non-milestone async type missing; update the explicit scope inventory if it was intentionally renamed or removed")
 		}
 		if completionSet[exclusion.message] {
-			issues = append(issues, exclusion.message+": explicit exclusion was accidentally added to the eleven target-mail completion structs")
+			issues = append(issues, exclusion.message+": explicit exclusion was accidentally added to the named target-mail completion structs")
 		}
 		if got := inv.namedFieldTypes(exclusion.message, "envelope"); len(got) != 0 {
 			issues = append(issues, exclusion.message+": explicit exclusion unexpectedly carries the target-mail envelope")
 		}
 	}
 
-	// The refresh request is coordination, not a thirteenth logical path. It must
+	// The refresh request is coordination, not another logical path. It must
 	// still carry/capture an initial-or-steady envelope and be accepted before work starts.
 	if completionSet["projectMailRefreshRequestMsg"] {
 		issues = append(issues, "projectMailRefreshRequestMsg: request must not become an additional completion kind")

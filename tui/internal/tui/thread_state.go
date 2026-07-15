@@ -29,7 +29,7 @@ func newColdThreadState(target asyncTarget, generation, acceptedSnapshotVersion 
 }
 
 // threadLoadRequest carries detached accepted mailbox data and only the local
-// coordinates needed by the future direct cold loader. It deliberately does not
+// coordinates needed by the direct cold loader. It deliberately does not
 // retain ProjectMailSnapshot, MailCache, MailModel, or another global owner.
 type threadLoadRequest struct {
 	envelope          asyncEnvelope
@@ -112,6 +112,11 @@ func newThreadLoadCoordinator(worker threadLoadWorker) ThreadLoadCoordinator {
 }
 
 func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
+	if c == nil || c.worker == nil {
+		// A coordinator without physical work cannot publish a success-shaped
+		// completion. Production and every contract fixture install a real worker.
+		return nil
+	}
 	// Re-capture the completion envelope from the request's exact coordinates so
 	// the shared protocol, rather than a manually assembled result, owns presence
 	// bits and kind identity.
@@ -137,9 +142,6 @@ func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 	c.counters.Started++
 	worker := c.worker
 	return func() tea.Msg {
-		if worker == nil {
-			return threadLoadResultMsg{envelope: envelope, eventWindow: request.eventWindow}
-		}
 		sessionCache, err := worker.Load(request)
 		return threadLoadResultMsg{
 			envelope:     envelope,
