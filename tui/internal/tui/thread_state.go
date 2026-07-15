@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"path/filepath"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
@@ -53,6 +55,26 @@ type threadLoadWorker interface {
 	Load(threadLoadRequest) (*fs.SessionCache, error)
 }
 
+// directThreadLoadWorker is the fieldless production implementation. It owns no
+// mailbox, snapshot, scanner, tick, or retained ThreadState; every input arrives
+// detached on the request and every output is one target-local NoPersist cache.
+type directThreadLoadWorker struct{}
+
+func (directThreadLoadWorker) Load(request threadLoadRequest) (*fs.SessionCache, error) {
+	projectPath := filepath.Dir(filepath.Dir(request.humanDir))
+	session := fs.NewSessionCache(request.humanDir, projectPath, fs.NoPersist)
+	session.RebuildDirectThreadWindowedInMemory(
+		request.acceptedMessages,
+		request.humanAddress,
+		request.targetAddress,
+		request.envelope.target.directory,
+		request.targetDisplayName,
+		request.eventWindow,
+		request.inquiryWindow,
+	)
+	return session, nil
+}
+
 // ThreadLoadCounters classifies physical and logical cold-load work without
 // calling completed filesystem work cancellation. TrueCancelled remains zero in
 // this slice because no cancellation reaches the filesystem loops.
@@ -80,7 +102,7 @@ func newThreadLoadCoordinator(worker threadLoadWorker) ThreadLoadCoordinator {
 func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 	// Re-capture the completion envelope from the request's exact coordinates so
 	// the shared protocol, rather than a manually assembled result, owns presence
-	// bits and kind identity. The worker remains deliberately inert in this slice.
+	// bits and kind identity.
 	current := asyncCurrent{
 		binding: asyncBinding{
 			owner:      request.envelope.owner,
@@ -90,8 +112,15 @@ func (c *ThreadLoadCoordinator) request(request threadLoadRequest) tea.Cmd {
 		storeVersion: request.envelope.storeVersion,
 	}
 	envelope := captureAsync(asyncColdThreadLoad, current)
+	request.envelope = envelope
+	request.acceptedMessages = append([]fs.MailMessage(nil), request.acceptedMessages...)
+	worker := c.worker
 	return func() tea.Msg {
-		return threadLoadResultMsg{envelope: envelope}
+		if worker == nil {
+			return threadLoadResultMsg{envelope: envelope}
+		}
+		sessionCache, err := worker.Load(request)
+		return threadLoadResultMsg{envelope: envelope, sessionCache: sessionCache, err: err}
 	}
 }
 

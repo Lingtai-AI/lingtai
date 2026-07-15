@@ -236,6 +236,7 @@ func NewApp(globalDir, projectDir string, needsFirstRun, needsRecovery bool, orc
 		lingtaiCmd:       lingtaiCmd,
 		tuiConfig:        tuiCfg,
 		autoRefreshArmed: tuiCfg.AutoRefreshEnabled(),
+		threadLoads:      newThreadLoadCoordinator(directThreadLoadWorker{}),
 	}
 
 	if needsRecovery && len(orchestrators) > 0 {

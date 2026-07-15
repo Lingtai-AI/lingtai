@@ -18,18 +18,7 @@ type pr5DirectThreadTestWorker struct {
 func (w *pr5DirectThreadTestWorker) Load(request threadLoadRequest) (*fs.SessionCache, error) {
 	w.calls++
 	w.received = append([]fs.MailMessage(nil), request.acceptedMessages...)
-	projectPath := filepath.Dir(filepath.Dir(request.humanDir))
-	session := fs.NewSessionCache(request.humanDir, projectPath, fs.NoPersist)
-	session.RebuildDirectThreadWindowedInMemory(
-		request.acceptedMessages,
-		request.humanAddress,
-		request.targetAddress,
-		request.envelope.target.directory,
-		request.targetDisplayName,
-		request.eventWindow,
-		request.inquiryWindow,
-	)
-	return session, nil
+	return (directThreadLoadWorker{}).Load(request)
 }
 
 func TestPR5Stage1ColdLoaderUsesAcceptedSliceWithoutGlobalRescan(t *testing.T) {

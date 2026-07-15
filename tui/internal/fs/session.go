@@ -220,10 +220,10 @@ func (sc *SessionCache) RebuildFromSourcesWindowedInMemory(cache MailCache, huma
 	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, false, window)
 }
 
-// RebuildDirectThreadWindowedInMemory is the compiling production seam for an
-// ordinary Agent's direct NoPersist session. It intentionally remains inert
-// until the accepted-message, bounded-event, and bounded-inquiry behavior tests
-// are written against this exact signature.
+// RebuildDirectThreadWindowedInMemory builds one ordinary Agent's direct,
+// target-local session from an already accepted project mailbox snapshot and
+// bounded local event/inquiry tails. It never refreshes a MailCache and never
+// writes session.jsonl; the caller must construct this cache with NoPersist.
 func (sc *SessionCache) RebuildDirectThreadWindowedInMemory(
 	acceptedMessages []MailMessage,
 	humanAddress string,
@@ -233,11 +233,66 @@ func (sc *SessionCache) RebuildDirectThreadWindowedInMemory(
 	eventWindow int,
 	inquiryWindow int,
 ) {
+	directMessages := make([]MailMessage, 0, len(acceptedMessages))
+	for _, message := range acceptedMessages {
+		if IsDirectMail(message, humanAddress, targetAddress) {
+			directMessages = append(directMessages, message)
+		}
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	sc.entries = nil
+	sc.historyStats = SessionHistoryStats{}
+	sc.historyCountPlan = sessionHistoryCountPlan{}
+	sc.eventsOff = 0
+	sc.inquiryOff = 0
+	sc.soulFlowOff = 0
+	sc.soulVoices = make(map[string][]soulVoiceRecord)
+	sc.rebuilding = true
+	sc.complete = true
+
+	sc.ingestMailMessages(directMessages, humanAddress, targetDir, targetDisplayName)
+	if !(eventWindow > 0 && sc.ingestEventsFromJSONLWindowed(targetDir, eventWindow)) {
+		sc.IngestEvents(targetDir)
+	}
+	if sc.historyCountPlan.identity == "" {
+		eventsPath, _ := filepath.Abs(filepath.Join(targetDir, "logs", "events.jsonl"))
+		eventsPath = filepath.Clean(eventsPath)
+		sc.historyCountPlan = sessionHistoryCountPlan{
+			identity: fmt.Sprintf("jsonl:%s:%d", eventsPath, sc.eventsOff),
+			path:     eventsPath,
+			upper:    sc.eventsOff,
+		}
+	}
+	if !(inquiryWindow > 0 && sc.ingestInquiriesFromJSONLWindowed(targetDir, inquiryWindow)) {
+		sc.IngestInquiries(targetDir)
+	}
+	if sc.afterRebuildIngest != nil {
+		sc.afterRebuildIngest()
+	}
+	sc.rebuilding = false
+
+	sort.SliceStable(sc.entries, func(i, j int) bool {
+		return tsToUnix(sc.entries[i].Ts) < tsToUnix(sc.entries[j].Ts)
+	})
+	if len(sc.entries) > 0 {
+		if t, err := time.Parse(time.RFC3339Nano, sc.entries[len(sc.entries)-1].Ts); err == nil {
+			sc.lastHour = t.Truncate(time.Hour)
+		}
+	}
+	sc.lastMailTs = ""
+	for _, entry := range sc.entries {
+		if entry.Type == "mail" && entry.Ts > sc.lastMailTs {
+			sc.lastMailTs = entry.Ts
+		}
+	}
 }
 
 // Complete reports whether the cache currently holds the full history. A windowed
-// rebuild that truncated older events leaves this false; a full rebuild, or a
-// windowed rebuild whose window covered the entire history, leaves it true.
+// rebuild that truncated older events or direct-thread inquiries leaves this
+// false; a full rebuild, or windows covering all relevant history, leaves it true.
 func (sc *SessionCache) Complete() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -465,10 +520,17 @@ func (sc *SessionCache) IngestMail(cache MailCache, humanAddr, orchDir, orchName
 	sc.ingestMail(cache, humanAddr, orchDir, orchName)
 }
 
-// ingestMail is the unlocked body of IngestMail. The caller must hold sc.mu.
+// ingestMail is the unlocked MailCache adapter used by the aggregate owner. The
+// caller must hold sc.mu.
 func (sc *SessionCache) ingestMail(cache MailCache, humanAddr, orchDir, orchName string) {
+	sc.ingestMailMessages(cache.Messages, humanAddr, orchDir, orchName)
+}
+
+// ingestMailMessages consumes an already accepted immutable message slice. It is
+// shared by the sole aggregate MailCache owner and direct target-local rebuilds.
+func (sc *SessionCache) ingestMailMessages(messages []MailMessage, humanAddr, orchDir, orchName string) {
 	var newEntries []SessionEntry
-	for _, msg := range cache.Messages {
+	for _, msg := range messages {
 		// Skip mail at or below the watermark — already ingested either in this
 		// session or in a prior rebuild. During RebuildFromSources the watermark
 		// is empty so this admits every mail.
@@ -2222,6 +2284,60 @@ func (sc *SessionCache) IngestInquiries(orchDir string) {
 	newEntries, newOff := sc.tailJSONL(inquiryPath, sc.inquiryOff, parseInquiry)
 	sc.inquiryOff = newOff
 	sc.append(newEntries...)
+}
+
+// ingestInquiriesFromJSONLWindowed materializes only the newest requested valid
+// human/insight inquiry bodies while retaining the true complete-record EOF for
+// later Refresh. It returns false when the caller should use forward ingestion.
+func (sc *SessionCache) ingestInquiriesFromJSONLWindowed(orchDir string, window int) bool {
+	if orchDir == "" || window <= 0 {
+		return false
+	}
+	inquiryPath := filepath.Join(orchDir, "logs", "soul_inquiry.jsonl")
+	f, err := os.Open(inquiryPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	completeOff := lastCompleteJSONLOffset(f)
+	if completeOff == 0 {
+		info, statErr := f.Stat()
+		if statErr != nil || info.Size() != 0 {
+			return false
+		}
+		sc.inquiryOff = 0
+		return true
+	}
+
+	selectedNewest := make([]SessionEntry, 0, window)
+	scanEnd := completeOff
+	for scanEnd > 0 && len(selectedNewest) < window {
+		rng, _, _, ok := readPreviousJSONLLine(f, scanEnd)
+		if !ok {
+			return false
+		}
+		scanEnd = rng.start
+		line := make([]byte, rng.end-rng.start)
+		n, readErr := f.ReadAt(line, rng.start)
+		if readErr != nil && readErr != io.EOF || n != len(line) {
+			return false
+		}
+		if entry := parseInquiry(bytes.TrimRight(line, "\r\n")); entry != nil {
+			selectedNewest = append(selectedNewest, *entry)
+		}
+	}
+
+	selected := make([]SessionEntry, len(selectedNewest))
+	for i := range selectedNewest {
+		selected[len(selectedNewest)-1-i] = selectedNewest[i]
+	}
+	if scanEnd > 0 {
+		sc.complete = false
+	}
+	sc.append(selected...)
+	sc.inquiryOff = completeOff
+	return true
 }
 
 func parseInquiry(line []byte) *SessionEntry {
