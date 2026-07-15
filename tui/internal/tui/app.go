@@ -168,9 +168,17 @@ func (s *agentRailInventoryLifecycleState) revalidateTarget(owner asyncOwner, ta
 	}
 }
 
+type agentRailInventoryRequestPurpose uint8
+
+const (
+	agentRailInventoryForDisplay agentRailInventoryRequestPurpose = iota
+	agentRailInventoryForStaleActivation
+)
+
 type agentRailInventoryResultMsg struct {
 	owner           asyncOwner
 	requestSequence uint64
+	purpose         agentRailInventoryRequestPurpose
 	snapshot        inventory.Snapshot
 	err             error
 }
@@ -275,6 +283,14 @@ func (a *App) setAgentRailInventoryScanner(scanner func(inventory.Options) (inve
 }
 
 func (a App) scheduleAgentRailInventoryScan() tea.Cmd {
+	return a.scheduleAgentRailInventoryScanFor(agentRailInventoryForDisplay)
+}
+
+func (a App) scheduleStaleAgentRailInventoryScan() tea.Cmd {
+	return a.scheduleAgentRailInventoryScanFor(agentRailInventoryForStaleActivation)
+}
+
+func (a App) scheduleAgentRailInventoryScanFor(purpose agentRailInventoryRequestPurpose) tea.Cmd {
 	state := a.agentRailInventoryLifecycle
 	owner := a.mailStore.binding.owner
 	if a.visiting || state == nil || !validAsyncOwner(owner) {
@@ -290,6 +306,7 @@ func (a App) scheduleAgentRailInventoryScan() tea.Cmd {
 		return agentRailInventoryResultMsg{
 			owner:           owner,
 			requestSequence: requestSequence,
+			purpose:         purpose,
 			snapshot:        snapshot,
 			err:             err,
 		}
@@ -511,12 +528,12 @@ func (a App) activateOrdinaryRailRow(row railRow) (App, tea.Cmd) {
 		revalidateTarget: a.mailStore.revalidateTarget,
 	}
 	if !acceptAsync(prospective, captureAsync(asyncColdThreadLoad, prospective)) {
-		return a, nil
+		return a, a.scheduleStaleAgentRailInventoryScan()
 	}
 
 	node, err := fs.ReadAgent(row.target.directory)
 	if err != nil || fs.AddressFingerprint(node.Address) != row.target.addressFingerprint {
-		return a, nil
+		return a, a.scheduleStaleAgentRailInventoryScan()
 	}
 	name := firstNonEmpty(node.AgentName, row.label, filepath.Base(row.target.directory))
 	mail := NewMailModel(
@@ -790,6 +807,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		if installed {
 			a.reconcileRailUnread()
+			if msg.purpose == agentRailInventoryForStaleActivation {
+				a.mail.AddSystemMessage(i18n.T("projects.target_changed"))
+			}
 		}
 		return a, nil
 
