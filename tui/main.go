@@ -152,8 +152,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, startup.err)
 			os.Exit(1)
 		}
-		// Open Existing is already running (and exits) inside the same
-		// Bubble Tea program as the launcher; no second program is started.
+		// Open Existing and a successfully created project already run (and
+		// exit) inside the launcher's Bubble Tea program; no second program starts.
 		return
 	}
 
@@ -192,6 +192,15 @@ type noProjectProgramModel struct {
 	startup         startupResult
 	width           int
 	height          int
+}
+
+func launcherHandoffProject(result tui.LauncherResult) (string, bool) {
+	switch result.Kind {
+	case tui.DecisionOpenExisting, tui.DecisionCreate:
+		return result.ProjectRoot, true
+	default:
+		return "", false
+	}
 }
 
 func (m noProjectProgramModel) Init() tea.Cmd { return m.launcher.Init() }
@@ -236,11 +245,11 @@ func (m noProjectProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.launcher = updated.(tui.LauncherRootModel)
 	if m.launcher.Done() {
 		result := m.launcher.Result()
-		if result.Kind == tui.DecisionOpenExisting {
+		if projectRoot, ok := launcherHandoffProject(result); ok {
 			m.loading = true
 			return m, func() tea.Msg {
-				startup := prepareApp(result.ProjectRoot, true)
-				startup.projectDir = result.ProjectRoot
+				startup := prepareApp(projectRoot, true)
+				startup.projectDir = projectRoot
 				return startupReadyMsg{result: startup}
 			}
 		}
@@ -262,9 +271,10 @@ func (m noProjectProgramModel) View() tea.View {
 	return m.launcher.View()
 }
 
-// runNoProjectLauncher keeps Open Existing, the canonical loading screen, and
-// the real App in one Bubble Tea program. This prevents the first program's
-// alternate-screen teardown from exposing the shell during startup.
+// runNoProjectLauncher keeps Open Existing or a successful Create, the
+// canonical loading screen, and the real App in one Bubble Tea program. This
+// prevents the first program's alternate-screen teardown from exposing the shell
+// during startup.
 // It performs a pure, non-mutating global-dir path resolution
 // (config.GlobalDirPath, never config.GlobalDir/EnsureGlobalDir) so
 // launching the picker itself cannot create ~/.lingtai-tui.

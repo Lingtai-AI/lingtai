@@ -10,7 +10,22 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/anthropics/lingtai-tui/internal/tui"
 )
+
+func TestLauncherHandoffProjectIncludesSuccessfulCreate(t *testing.T) {
+	const projectRoot = "/created/project"
+	for _, kind := range []tui.LauncherDecisionKind{tui.DecisionOpenExisting, tui.DecisionCreate} {
+		got, ok := launcherHandoffProject(tui.LauncherResult{Kind: kind, ProjectRoot: projectRoot})
+		if !ok || got != projectRoot {
+			t.Fatalf("kind %v handoff = (%q, %v), want (%q, true)", kind, got, ok, projectRoot)
+		}
+	}
+	if got, ok := launcherHandoffProject(tui.LauncherResult{Kind: tui.DecisionCancel}); ok || got != "" {
+		t.Fatalf("cancel handoff = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
 
 func TestNoProjectProgramLoadingKeepsOneAltScreenLifecycle(t *testing.T) {
 	m := noProjectProgramModel{loading: true, width: 80, height: 24}
