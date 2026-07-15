@@ -995,16 +995,20 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// This nested value is synchronous presentation payload, not another gate.
 		var persistCmd tea.Cmd
 		var countCmd tea.Cmd
+		if msg.initial {
+			// A superseding first frame owns activation-local pagination and count
+			// state even when its root aggregate payload is staged for an ordinary
+			// direct projection. Never retain a discarded pre-visit completion latch.
+			m.historyCountLoading = false
+			m.historyCountLoaded = false
+			m.historyCountCache = nil
+			m.historyCountIdentity = ""
+			m.historyStats = fs.SessionHistoryStats{}
+			m.olderLoadInFlight = false
+			m.olderLoadEnvelope = asyncEnvelope{}
+			m.loadedExtra = 0
+		}
 		if msg.sessionCache != nil && !msg.stageProjection {
-			if msg.initial {
-				// A new activation owns one fresh source/horizon count task. Never
-				// carry accepted metadata across an authoritative initial snapshot.
-				m.historyCountLoading = false
-				m.historyCountLoaded = false
-				m.historyCountCache = nil
-				m.historyCountIdentity = ""
-				m.historyStats = fs.SessionHistoryStats{}
-			}
 			m.sessionCache = msg.sessionCache
 			// The same configured page owns initial content and visible reveal.
 			// A complete cache needs no further ingest expansion.
@@ -1013,11 +1017,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			} else {
 				m.ingestWindow = m.pageSize
 			}
-			// A superseding first frame cancels any older-page load and resets the
-			// revealed-extra window; the fresh cache defines what is loaded.
-			m.olderLoadInFlight = false
-			m.olderLoadEnvelope = asyncEnvelope{}
-			m.loadedExtra = 0
 			sessionCache := msg.sessionCache
 			persistEnvelope := captureAsync(asyncSessionPersist, m.asyncCurrent())
 			persistCmd = func() tea.Msg {

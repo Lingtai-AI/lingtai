@@ -307,7 +307,7 @@ func TestPR5Stage5VisitReturnStagedRefreshClearsDiscardedOlderPageLatch(t *testi
 	app, _, _ := installationNewApp(t, 0)
 	targetA := filepath.Join(app.projectDir, "agent-a")
 	installationWriteAgent(t, targetA, "agent-a", "Agent A", "Agent A")
-	installationWriteEvents(t, targetA, 150, "event-a")
+	installationWriteEvents(t, targetA, 250, "event-a")
 
 	initial := installationRefreshResult(t, &app, true)
 	app, _ = installationDeliverApp(t, app, initial)
