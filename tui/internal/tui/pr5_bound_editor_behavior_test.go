@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -78,5 +79,48 @@ func TestPR5Stage2StaleA1EditorRequestCannotRetargetColdA2(t *testing.T) {
 			afterDone.mail.input.LineCount(),
 			afterDone.mail.viewport.Height(),
 		)
+	}
+}
+
+func TestPR5Stage2AcceptedEditorRequestRevalidatesBeforeLaunch(t *testing.T) {
+	app, _ := pr5OrdinarySendApp(t, "agent-a", "Agent A", 4101, 1)
+	app.mail.input.SetValue("A1 editor draft")
+
+	a1, cmd := installationDeliverApp(t, app, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("A1 Ctrl+E returned no deferred editor request command")
+	}
+	produced := runCmd(cmd)
+	request, ok := produced.(OpenEditorMsg)
+	if !ok {
+		t.Fatalf("A1 Ctrl+E produced %T, want OpenEditorMsg", produced)
+	}
+	warned, effect := installationDeliverApp(t, a1, request)
+	if effect != nil {
+		t.Fatalf("accepted A1 editor request returned unexpected effect %T", runCmd(effect))
+	}
+	if !warned.mail.showEditorWarn || warned.mail.editorWarnText != "A1 editor draft" {
+		t.Fatalf("accepted A1 editor request did not retain its warning: visible=%v text=%q", warned.mail.showEditorWarn, warned.mail.editorWarnText)
+	}
+
+	// Model inventory disappearance after receipt while the warning is open. Enter
+	// must revalidate the accepted request before even creating a temp file; the
+	// returned tea.Cmd is deliberately never executed, so no editor process starts.
+	warned.mail.revalidateTarget = func(asyncOwner, asyncTarget) bool { return false }
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+	got, launch := installationDeliverApp(t, warned, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if launch != nil {
+		t.Fatalf("accepted editor request launched after its target disappeared: command=%T", launch)
+	}
+	if got.mail.showEditorWarn || got.mail.editorWarnText != "" {
+		t.Fatalf("rejected editor launch retained warning state: visible=%v text=%q", got.mail.showEditorWarn, got.mail.editorWarnText)
+	}
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected editor launch created %d temp files before revalidation", len(entries))
 	}
 }
