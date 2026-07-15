@@ -80,18 +80,27 @@ func applyRecipe(
 	if err != nil {
 		return err
 	}
+	return applyRecipeBundle(projectRoot, lingtaiDir, humanDir, humanAddr, recipeName, customDir, lang, soulDelay)
+}
 
+// applyRecipeBundle materializes an already-copied project-root recipe into
+// the supplied LingTai directory. Keeping the two paths explicit lets Advanced
+// Create finish the future .lingtai tree in its sibling staging directory.
+func applyRecipeBundle(
+	projectRoot, lingtaiDir, humanDir, humanAddr string,
+	recipeName, customDir, lang, soulDelay string,
+) error {
 	greetSubst := func(tmpl string) string {
 		return substituteGreetPlaceholders(tmpl, humanAddr, humanDir, lang, soulDelay)
 	}
-	if _, err := preset.ApplyRecipe(projectRoot, lang, greetSubst); err != nil {
+	if _, err := preset.ApplyRecipeToLingTaiDir(projectRoot, lingtaiDir, lang, greetSubst); err != nil {
 		return fmt.Errorf("applyRecipe: %w", err)
 	}
 
 	// Persist the picker selection (type + custom path) so /setup can
 	// redisplay the last choice. The authoritative "what's applied" is
 	// the directory snapshot at .lingtai/.tui-asset/.recipe/ which
-	// ApplyRecipe already wrote; this JSON file is purely UI state.
+	// ApplyRecipeToLingTaiDir already wrote; this JSON file is purely UI state.
 	state := preset.RecipeState{Recipe: recipeName}
 	if recipeUsesCustomDir(recipeName) {
 		state.CustomDir = customDir
@@ -199,4 +208,3 @@ func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay 
 
 	return out
 }
-

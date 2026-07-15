@@ -90,6 +90,69 @@ func TestRunProjectCreate_Success(t *testing.T) {
 	}
 }
 
+func TestRunProjectCreate_AppliesRecipeInsideStagingBeforeRename(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	recipeRoot := t.TempDir()
+	writeRecipeFile(t, filepath.Join(recipeRoot, ".recipe", "recipe.json"),
+		`{"id":"staged","name":"Staged Recipe","description":"d","library_name":null}`)
+	writeRecipeFile(t, filepath.Join(recipeRoot, ".recipe", "greet", "greet.md"), "hello {{addr}}")
+	draft.RecipeName = preset.RecipeCustom
+	draft.RecipeCustomDir = recipeRoot
+
+	var checkedBeforeRename bool
+	opts.InjectFailure = func(phase CreatePhase) error {
+		if phase != PhaseRename {
+			return nil
+		}
+		checkedBeforeRename = true
+		finalDir := filepath.Join(root, ".lingtai")
+		if _, err := os.Lstat(finalDir); !os.IsNotExist(err) {
+			t.Fatalf("final .lingtai existed before atomic rename: %v", err)
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stagingDir string
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), ".lingtai.create-") {
+				stagingDir = filepath.Join(root, entry.Name())
+				break
+			}
+		}
+		if stagingDir == "" {
+			t.Fatal("staging directory missing before rename")
+		}
+		prompt, err := os.ReadFile(filepath.Join(stagingDir, "orchestrator", ".prompt"))
+		if err != nil {
+			t.Fatalf("staged recipe prompt missing: %v", err)
+		}
+		if string(prompt) != "hello human" {
+			t.Fatalf("staged prompt = %q, want %q", prompt, "hello human")
+		}
+		if _, err := os.Stat(filepath.Join(stagingDir, ".tui-asset", ".recipe", "recipe.json")); err != nil {
+			t.Fatalf("staged recipe snapshot missing: %v", err)
+		}
+		return nil
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Err != nil || !res.Committed {
+		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
+	}
+	if !checkedBeforeRename {
+		t.Fatal("rename boundary was not checked")
+	}
+	finalDir := filepath.Join(root, ".lingtai")
+	if _, err := os.Stat(filepath.Join(finalDir, "orchestrator", ".prompt")); err != nil {
+		t.Fatalf("published recipe prompt missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(finalDir, ".tui-asset", ".recipe", "recipe.json")); err != nil {
+		t.Fatalf("published recipe snapshot missing: %v", err)
+	}
+}
+
 func TestRunProjectCreate_EnsuresRuntimeWhenCommandWasInitiallyUnknown(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)

@@ -492,7 +492,7 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		if agentOpts.SoulDelay != nil {
 			soulDelayStr = formatNumber(*agentOpts.SoulDelay)
 		}
-		if err := applyRecipe(stagingDir, orchDir, opts.GlobalDir, humanDir, humanAddr, draft.RecipeName, draft.RecipeCustomDir, lang, soulDelayStr); err != nil {
+		if err := applyRecipeBundle(stagedProjectRoot, stagingDir, humanDir, humanAddr, draft.RecipeName, draft.RecipeCustomDir, lang, soulDelayStr); err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("apply staged recipe: %w", err))
 		}

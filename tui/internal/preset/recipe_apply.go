@@ -180,7 +180,20 @@ func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string
 	if projectRoot == "" {
 		return 0, fmt.Errorf("ApplyRecipe: empty projectRoot")
 	}
-	bundleDir := projectRoot
+	return ApplyRecipeToLingTaiDir(projectRoot, filepath.Join(projectRoot, ".lingtai"), lang, greetSubstitutor)
+}
+
+// ApplyRecipeToLingTaiDir materializes the recipe in bundleDir across agents
+// in an explicit LingTai directory. Advanced project creation uses this while
+// the future <project>/.lingtai tree still lives in a sibling staging directory;
+// ordinary callers should use ApplyRecipe.
+func ApplyRecipeToLingTaiDir(bundleDir, lingtaiDir, lang string, greetSubstitutor func(template string) string) (applied int, err error) {
+	if bundleDir == "" {
+		return 0, fmt.Errorf("ApplyRecipe: empty bundleDir")
+	}
+	if lingtaiDir == "" {
+		return 0, fmt.Errorf("ApplyRecipe: empty lingtaiDir")
+	}
 	info, err := LoadRecipeInfo(bundleDir, lang)
 	if err != nil {
 		return 0, fmt.Errorf("ApplyRecipe: invalid recipe in %s: %w", bundleDir, err)
@@ -201,7 +214,6 @@ func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string
 		libPathEntry = LibraryPathForInitJSON(bundleDir, lang)
 	}
 
-	lingtaiDir := filepath.Join(projectRoot, ".lingtai")
 	entries, err := os.ReadDir(lingtaiDir)
 	if err != nil {
 		return 0, fmt.Errorf("ApplyRecipe: read .lingtai: %w", err)
@@ -243,7 +255,7 @@ func ApplyRecipe(projectRoot, lang string, greetSubstitutor func(template string
 
 	// Snapshot the applied recipe so future RecipeNeedsApply calls can
 	// detect change vs the then-current .recipe/.
-	snapshot := filepath.Join(projectRoot, ".lingtai", AppliedRecipeSubpath)
+	snapshot := filepath.Join(lingtaiDir, AppliedRecipeSubpath)
 	_ = os.RemoveAll(snapshot) // best-effort; fresh copy on each apply
 	if err := copyTree(filepath.Join(bundleDir, RecipeDotDir), snapshot); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("ApplyRecipe: snapshot applied recipe: %w", err)
