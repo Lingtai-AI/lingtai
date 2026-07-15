@@ -689,7 +689,7 @@ func TestSupersededMailGenerationCannotInstallRootRefresh(t *testing.T) {
 	a.mailStore = newProjectMailStoreWithDeps(a.projectDir, a.mail.humanDir, filesystemProjectMailScanner{}, func(string) {
 		locations.Add(1)
 	})
-	policy, pid := a.currentMailTargetPolicy()
+	policy, pid := a.currentMailTargetPolicy(a.mail)
 	a.mailStore.bindMailModel(&a.mail, policy, pid)
 	a.mail.acceptedSnapshot = nil
 

@@ -154,7 +154,7 @@ func newProjectMailStoreWithDeps(projectDir, humanDir string, scanner projectMai
 		pollRate:              time.Second,
 		scanner:               scanner,
 		updateLocation:        updateLocation,
-		revalidateTarget:      revalidateInventoryTarget,
+		revalidateTarget:      rejectUnboundAsyncTarget,
 		asyncState:            &projectMailAsyncState{},
 		locationSourceVersion: 0,
 	}
@@ -162,18 +162,12 @@ func newProjectMailStoreWithDeps(projectDir, humanDir string, scanner projectMai
 	return store
 }
 
-// revalidateInventoryTarget performs one fresh inventory scan for substantive
-// work on a process-backed target. Display-only nickname changes are
-// intentionally irrelevant to target identity.
-func revalidateInventoryTarget(owner asyncOwner, target asyncTarget) bool {
-	switch target.policy {
-	case asyncTargetProjectVisit:
-		return revalidateProjectVisitTarget(owner, target)
-	case asyncTargetHomeAgentRail:
-		return revalidateOrdinaryRailTarget(owner, target)
-	default:
-		return false
-	}
+// rejectUnboundAsyncTarget keeps a ProjectMailStore fail-closed until App binds
+// its one owner-aware lifecycle revalidator. Home ordinary targets are checked
+// against the accepted root inventory; project visits retain their explicit
+// bridge below. No store-level fallback may launch a second inventory scan.
+func rejectUnboundAsyncTarget(asyncOwner, asyncTarget) bool {
+	return false
 }
 
 // revalidateProjectVisitTarget is the PR2 visit-policy bridge. It deliberately
@@ -213,31 +207,12 @@ func ordinaryRailRecordEligible(owner asyncOwner, target asyncTarget, record inv
 		fs.AddressFingerprint(record.Address) == target.addressFingerprint
 }
 
-// revalidateOrdinaryRailTarget performs the fresh process/manifest check used by
-// ordinary rail activation and later substantive async acceptance. It does not
-// consult the global project-visit Enterable flag.
-func revalidateOrdinaryRailTarget(owner asyncOwner, target asyncTarget) bool {
-	if target.policy != asyncTargetHomeAgentRail || !validAsyncOwner(owner) || !validAsyncTarget(owner, target) {
-		return false
-	}
-	snapshot, err := inventory.Scan(inventory.Options{FilterDir: filepath.Dir(owner.projectID)})
-	if err != nil {
-		return false
-	}
-	for _, record := range snapshot.Records {
-		if inventory.NormalizePath(record.AgentDir) == target.directory {
-			return ordinaryRailRecordEligible(owner, target, record)
-		}
-	}
-	return false
-}
-
 func (s *ProjectMailStore) bindAsyncTargetRevalidator(revalidate func(asyncOwner, asyncTarget) bool) {
 	if s == nil || s.revalidateTargetExplicit {
 		return
 	}
 	if revalidate == nil {
-		revalidate = revalidateInventoryTarget
+		revalidate = rejectUnboundAsyncTarget
 	}
 	s.revalidateTarget = revalidate
 	s.syncAsyncState()
@@ -249,7 +224,7 @@ func (s *ProjectMailStore) setAsyncTargetRevalidator(revalidate func(asyncOwner,
 	}
 	s.revalidateTargetExplicit = revalidate != nil
 	if revalidate == nil {
-		revalidate = revalidateInventoryTarget
+		revalidate = rejectUnboundAsyncTarget
 	}
 	s.revalidateTarget = revalidate
 	s.syncAsyncState()

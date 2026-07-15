@@ -100,8 +100,8 @@ func TestPR5Stage4VisibleOrdinaryRerunsLatestAcceptedSnapshotBeforeUnreadAdvance
 	}
 	beforeColdMailCache := loading.mail.sessionCache
 	beforeColdThreadCache := loading.currentThread.sessionCache
-	beforeColdEntries := append([]fs.SessionEntry(nil), loading.mail.sessionCache.Entries()...)
-	beforeColdMessages := append([]ChatMessage(nil), loading.mail.messages...)
+	beforeColdEntries := append([]fs.SessionEntry{}, loading.mail.sessionCache.Entries()...)
+	beforeColdMessages := append([]ChatMessage{}, loading.mail.messages...)
 	beforeColdMailIngest := loading.mail.ingestWindow
 	beforeColdThreadIngest := loading.currentThread.ingestWindow
 
@@ -119,19 +119,19 @@ func TestPR5Stage4VisibleOrdinaryRerunsLatestAcceptedSnapshotBeforeUnreadAdvance
 	rootNPlusOne := advanced.mailStore.snapshot
 	acceptedNPlusOne := rootNPlusOne.cache.Messages
 	if rootNPlusOne == nil || rootNPlusOne == rootN || rootNPlusOne.Version() <= rootN.Version() ||
-		advanced.mail.acceptedSnapshot != rootNPlusOne || advanced.mail.asyncStoreVersion != rootN.Version() ||
+		advanced.mail.acceptedSnapshot != rootN || advanced.mail.asyncStoreVersion != rootN.Version() ||
 		advanced.currentThread.acceptedSnapshotVersion != rootN.Version() || !advanced.mail.initialLoading {
 		t.Fatalf(
 			"staged N+1 while A@N loads: root=%p N=%p versions=%d/%d mailRoot=%v mailVersion=%d threadVersion=%d loading=%v",
 			rootNPlusOne, rootN, rootNPlusOne.Version(), rootN.Version(),
-			advanced.mail.acceptedSnapshot == rootNPlusOne, advanced.mail.asyncStoreVersion,
+			advanced.mail.acceptedSnapshot == rootN, advanced.mail.asyncStoreVersion,
 			advanced.currentThread.acceptedSnapshotVersion, advanced.mail.initialLoading,
 		)
 	}
 	if advanced.mail.sessionCache != beforeColdMailCache ||
 		advanced.currentThread.sessionCache != beforeColdThreadCache ||
-		!reflect.DeepEqual(advanced.mail.sessionCache.Entries(), beforeColdEntries) ||
-		!reflect.DeepEqual(advanced.mail.messages, beforeColdMessages) ||
+		!reflect.DeepEqual(append([]fs.SessionEntry{}, advanced.mail.sessionCache.Entries()...), beforeColdEntries) ||
+		!reflect.DeepEqual(append([]ChatMessage{}, advanced.mail.messages...), beforeColdMessages) ||
 		!reflect.DeepEqual(advanced.mail.ingestWindow, beforeColdMailIngest) ||
 		!reflect.DeepEqual(advanced.currentThread.ingestWindow, beforeColdThreadIngest) {
 		t.Fatalf(
@@ -170,12 +170,12 @@ func TestPR5Stage4VisibleOrdinaryRerunsLatestAcceptedSnapshotBeforeUnreadAdvance
 	beforeRejectedCache := advanced.currentThread.sessionCache
 	settled, rerunCmd := installationDeliverApp(t, advanced, a1Result)
 	if settled.currentThread.sessionCache != beforeRejectedCache || !settled.mail.initialLoading ||
-		settled.mail.acceptedSnapshot != rootNPlusOne || settled.mail.asyncStoreVersion != rootN.Version() ||
+		settled.mail.acceptedSnapshot != rootN || settled.mail.asyncStoreVersion != rootN.Version() ||
 		settled.currentThread.acceptedSnapshotVersion != rootN.Version() {
 		t.Fatalf(
 			"stale A@N settlement published: cacheChanged=%v loading=%v sameNPlusOne=%v mailVersion=%d threadVersion=%d want-staged=%d",
 			settled.currentThread.sessionCache != beforeRejectedCache, settled.mail.initialLoading,
-			settled.mail.acceptedSnapshot == rootNPlusOne, settled.mail.asyncStoreVersion,
+			settled.mail.acceptedSnapshot == rootN, settled.mail.asyncStoreVersion,
 			settled.currentThread.acceptedSnapshotVersion, rootN.Version(),
 		)
 	}

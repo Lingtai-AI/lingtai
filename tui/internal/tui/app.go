@@ -258,9 +258,20 @@ func humanAddr(projectDir string) string {
 	return "human"
 }
 
-func (a App) currentMailTargetPolicy() (asyncTargetPolicy, int) {
+func (a App) currentMailTargetPolicy(mail MailModel) (asyncTargetPolicy, int) {
 	if a.visiting {
 		return asyncTargetProjectVisit, a.visitTargetPID
+	}
+	// installMailModel normally creates Main. The one exception is a suspended
+	// home store returning from a cross-project visit: if its exact ordinary
+	// target still matches the preserved MailModel, keep the rail policy/PID.
+	// This avoids rebinding that ordinary target as synthetic Main while still
+	// failing closed to Main for a mismatched or newly-created store.
+	target := a.mailStore.binding.target
+	if target.policy == asyncTargetHomeAgentRail &&
+		target.directory == inventory.NormalizePath(mail.orchestrator) &&
+		target.addressFingerprint == fs.AddressFingerprint(mail.orchAddr) {
+		return asyncTargetHomeAgentRail, target.pid
 	}
 	return asyncTargetHomeMain, 0
 }
@@ -433,7 +444,7 @@ func (a *App) installMailModel(m MailModel) {
 	a.mailGeneration++
 	m.generation = a.mailGeneration
 	m.acceptedSnapshot = a.mailStore.snapshot
-	policy, pid := a.currentMailTargetPolicy()
+	policy, pid := a.currentMailTargetPolicy(m)
 	a.mailStore.bindMailModel(&m, policy, pid)
 	if policy == asyncTargetHomeMain {
 		a.agentRail.installMain(m.orchDisplayName(), fs.DirectTarget{
@@ -901,20 +912,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !settled {
 			return a, nil
 		}
-		stageVisibleOrdinary := a.mailStore.binding.target.policy == asyncTargetHomeAgentRail &&
-			a.visibleRailUnreadRow(a.mailStore.snapshot) != nil
+		stageOrdinaryProjection := a.mailStore.binding.target.policy == asyncTargetHomeAgentRail &&
+			(a.mail.initialLoading || a.visibleRailUnreadRow(a.mailStore.snapshot) != nil)
 		snapshot := a.mailStore.installRefresh(msg)
 		if !a.visiting {
 			a.railUnreadSnapshotOwner = a.mailStore.binding.owner
 		}
 		msg.mail.snapshot = snapshot
-		msg.mail.stageProjection = stageVisibleOrdinary
-		if !stageVisibleOrdinary {
+		msg.mail.stageProjection = stageOrdinaryProjection
+		if !stageOrdinaryProjection {
 			a.mail.asyncStoreVersion = snapshot.Version()
 		}
 		var mailCmd tea.Cmd
 		a.mail, mailCmd = a.mail.Update(msg.mail)
-		if !stageVisibleOrdinary && a.currentThread.generation == a.mail.generation &&
+		if !stageOrdinaryProjection && a.currentThread.generation == a.mail.generation &&
 			a.currentThread.target == a.mail.asyncBinding.target {
 			// This accepted root publication is the owning seam for both the
 			// presentation projection and its active ThreadState coordinates.
