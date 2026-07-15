@@ -100,8 +100,8 @@ func TestM028ConvertsImapWithConfigRef(t *testing.T) {
 		t.Errorf("mcp.imap.type = %v, want stdio", imap["type"])
 	}
 	args, _ := imap["args"].([]interface{})
-	if len(args) != 2 || args[0] != "-m" || args[1] != "lingtai_imap" {
-		t.Errorf("mcp.imap.args = %v, want [\"-m\", \"lingtai_imap\"]", args)
+	if len(args) != 2 || args[0] != "-m" || args[1] != "lingtai.mcp_servers.imap" {
+		t.Errorf("mcp.imap.args = %v, want [\"-m\", \"lingtai.mcp_servers.imap\"]", args)
 	}
 	env, _ := imap["env"].(map[string]interface{})
 	if env["LINGTAI_IMAP_CONFIG"] != ".secrets/imap.json" {
@@ -364,8 +364,8 @@ func TestM028WechatPointsAtConfigJSON(t *testing.T) {
 		t.Errorf("env.LINGTAI_WECHAT_CONFIG = %v, want %s", env["LINGTAI_WECHAT_CONFIG"], want)
 	}
 	args, _ := wc["args"].([]interface{})
-	if len(args) != 2 || args[1] != "lingtai_wechat" {
-		t.Errorf("wechat args = %v, want [\"-m\", \"lingtai_wechat\"]", args)
+	if len(args) != 2 || args[0] != "-m" || args[1] != "lingtai.mcp_servers.wechat" {
+		t.Errorf("wechat args = %v, want [\"-m\", \"lingtai.mcp_servers.wechat\"]", args)
 	}
 }
 
@@ -376,13 +376,24 @@ func TestM028WechatPointsAtConfigJSON(t *testing.T) {
 func TestM028HandlesMultipleAddons(t *testing.T) {
 	tmp := t.TempDir()
 	lingtaiDir := filepath.Join(tmp, ".lingtai")
+	wantSpecs := map[string]struct {
+		module string
+		envVar string
+		config string
+	}{
+		"imap":     {"lingtai.mcp_servers.imap", "LINGTAI_IMAP_CONFIG", ".secrets/imap.json"},
+		"telegram": {"lingtai.mcp_servers.telegram", "LINGTAI_TELEGRAM_CONFIG", ".secrets/telegram.json"},
+		"feishu":   {"lingtai.mcp_servers.feishu", "LINGTAI_FEISHU_CONFIG", ".secrets/feishu.json"},
+		"wechat":   {"lingtai.mcp_servers.wechat", "LINGTAI_WECHAT_CONFIG", ".secrets/wechat/config.json"},
+		"whatsapp": {"lingtai.mcp_servers.whatsapp", "LINGTAI_WHATSAPP_CONFIG", ".secrets/whatsapp.json"},
+	}
+	legacyAddons := map[string]interface{}{}
+	for name, want := range wantSpecs {
+		legacyAddons[name] = map[string]interface{}{"config": want.config}
+	}
 	initPath := writeM028Init(t, lingtaiDir, "alice", map[string]interface{}{
 		"manifest": map[string]interface{}{"agent_name": "alice"},
-		"addons": map[string]interface{}{
-			"imap":     map[string]interface{}{"config": ".secrets/imap.json"},
-			"telegram": map[string]interface{}{"config": ".secrets/telegram.json"},
-			"feishu":   map[string]interface{}{"config": ".secrets/feishu.json"},
-		},
+		"addons":   legacyAddons,
 	})
 
 	if err := migrateAddonsToMCP(lingtaiDir); err != nil {
@@ -390,21 +401,45 @@ func TestM028HandlesMultipleAddons(t *testing.T) {
 	}
 
 	got := readM028Init(t, initPath)
-	addons, _ := got["addons"].([]interface{})
+	addons, ok := got["addons"].([]interface{})
+	if !ok {
+		t.Fatalf("addons not a list: %T", got["addons"])
+	}
 	names := map[string]bool{}
 	for _, a := range addons {
-		names[a.(string)] = true
+		name, ok := a.(string)
+		if !ok {
+			t.Errorf("addon entry has type %T, want string", a)
+			continue
+		}
+		names[name] = true
 	}
-	for _, want := range []string{"imap", "telegram", "feishu"} {
-		if !names[want] {
-			t.Errorf("missing addon %s in addons list (got %v)", want, addons)
+	if len(names) != len(wantSpecs) {
+		t.Errorf("addons list = %v, want exactly %d curated addons", addons, len(wantSpecs))
+	}
+	for name := range wantSpecs {
+		if !names[name] {
+			t.Errorf("missing addon %s in addons list (got %v)", name, addons)
 		}
 	}
 
-	mcp, _ := got["mcp"].(map[string]interface{})
-	for _, want := range []string{"imap", "telegram", "feishu"} {
-		if _, ok := mcp[want]; !ok {
-			t.Errorf("missing mcp.%s entry", want)
+	mcp, ok := got["mcp"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mcp not a map: %T", got["mcp"])
+	}
+	for name, want := range wantSpecs {
+		entry, ok := mcp[name].(map[string]interface{})
+		if !ok {
+			t.Errorf("mcp.%s missing or wrong type: %T", name, mcp[name])
+			continue
+		}
+		args, _ := entry["args"].([]interface{})
+		if len(args) != 2 || args[0] != "-m" || args[1] != want.module {
+			t.Errorf("mcp.%s.args = %v, want [-m %s]", name, args, want.module)
+		}
+		env, _ := entry["env"].(map[string]interface{})
+		if env[want.envVar] != want.config {
+			t.Errorf("mcp.%s.env[%s] = %v, want %q", name, want.envVar, env[want.envVar], want.config)
 		}
 	}
 }

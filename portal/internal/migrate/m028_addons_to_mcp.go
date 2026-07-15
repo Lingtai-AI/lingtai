@@ -26,7 +26,7 @@ import (
 //	    "imap": {
 //	      "type": "stdio",
 //	      "command": "/Users/.../runtime/venv/bin/python",
-//	      "args": ["-m", "lingtai_imap"],
+//	      "args": ["-m", "lingtai.mcp_servers.imap"],
 //	      "env": {"LINGTAI_IMAP_CONFIG": ".secrets/imap.json"}
 //	    }
 //	  }
@@ -85,11 +85,11 @@ type addonSpec struct {
 }
 
 var addonSpecs = map[string]addonSpec{
-	"imap":     {module: "lingtai_imap", envVarName: "LINGTAI_IMAP_CONFIG", defaultRel: ".secrets/imap.json"},
-	"telegram": {module: "lingtai_telegram", envVarName: "LINGTAI_TELEGRAM_CONFIG", defaultRel: ".secrets/telegram.json"},
-	"feishu":   {module: "lingtai_feishu", envVarName: "LINGTAI_FEISHU_CONFIG", defaultRel: ".secrets/feishu.json"},
-	"wechat":   {module: "lingtai_wechat", envVarName: "LINGTAI_WECHAT_CONFIG", defaultRel: ".secrets/wechat/config.json"},
-	"whatsapp": {module: "lingtai_whatsapp", envVarName: "LINGTAI_WHATSAPP_CONFIG", defaultRel: ".secrets/whatsapp.json"},
+	"imap":     {module: "lingtai.mcp_servers.imap", envVarName: "LINGTAI_IMAP_CONFIG", defaultRel: ".secrets/imap.json"},
+	"telegram": {module: "lingtai.mcp_servers.telegram", envVarName: "LINGTAI_TELEGRAM_CONFIG", defaultRel: ".secrets/telegram.json"},
+	"feishu":   {module: "lingtai.mcp_servers.feishu", envVarName: "LINGTAI_FEISHU_CONFIG", defaultRel: ".secrets/feishu.json"},
+	"wechat":   {module: "lingtai.mcp_servers.wechat", envVarName: "LINGTAI_WECHAT_CONFIG", defaultRel: ".secrets/wechat/config.json"},
+	"whatsapp": {module: "lingtai.mcp_servers.whatsapp", envVarName: "LINGTAI_WHATSAPP_CONFIG", defaultRel: ".secrets/whatsapp.json"},
 }
 
 // convertAddonsInInitFile is the per-init.json workhorse. A returned error

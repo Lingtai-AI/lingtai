@@ -1384,15 +1384,15 @@ func AddonSecretsPathFromAgent(addon string) string {
 func defaultMCPSpec(name string) (module, envVar, configRel string, supported bool) {
 	switch name {
 	case "imap":
-		return "lingtai_imap", "LINGTAI_IMAP_CONFIG", filepath.Join(".secrets", "imap.json"), true
+		return "lingtai.mcp_servers.imap", "LINGTAI_IMAP_CONFIG", filepath.Join(".secrets", "imap.json"), true
 	case "telegram":
-		return "lingtai_telegram", "LINGTAI_TELEGRAM_CONFIG", filepath.Join(".secrets", "telegram.json"), true
+		return "lingtai.mcp_servers.telegram", "LINGTAI_TELEGRAM_CONFIG", filepath.Join(".secrets", "telegram.json"), true
 	case "feishu":
-		return "lingtai_feishu", "LINGTAI_FEISHU_CONFIG", filepath.Join(".secrets", "feishu.json"), true
+		return "lingtai.mcp_servers.feishu", "LINGTAI_FEISHU_CONFIG", filepath.Join(".secrets", "feishu.json"), true
 	case "wechat":
-		return "lingtai_wechat", "LINGTAI_WECHAT_CONFIG", filepath.Join(".secrets", "wechat", "config.json"), true
+		return "lingtai.mcp_servers.wechat", "LINGTAI_WECHAT_CONFIG", filepath.Join(".secrets", "wechat", "config.json"), true
 	case "whatsapp":
-		return "lingtai_whatsapp", "LINGTAI_WHATSAPP_CONFIG", filepath.Join(".secrets", "whatsapp.json"), true
+		return "lingtai.mcp_servers.whatsapp", "LINGTAI_WHATSAPP_CONFIG", filepath.Join(".secrets", "whatsapp.json"), true
 	}
 	return "", "", "", false
 }

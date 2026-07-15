@@ -230,7 +230,14 @@ VENV_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
 # Where do addon/MCP modules import from? (sources only, never env values)
 "$VENV_PY" - <<'PY'
 import importlib.util, json
-mods = ["lingtai_imap", "lingtai_telegram", "lingtai_feishu", "lingtai_wechat"]
+mods = [
+    "lingtai.mcp_servers.imap",
+    "lingtai.mcp_servers.telegram",
+    "lingtai.mcp_servers.feishu",
+    "lingtai.mcp_servers.wechat",
+    "lingtai.mcp_servers.whatsapp",
+    "lingtai.mcp_servers.cloud_mail",
+]
 out = {}
 for m in mods:
     spec = importlib.util.find_spec(m)

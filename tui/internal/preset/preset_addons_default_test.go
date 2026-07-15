@@ -1,11 +1,11 @@
 // Verifies that GenerateInitJSONWithOpts writes the new list-shape addons +
 // matching mcp activation entries pointing at the local venv Python.
 //
-// This is the wire that satisfies "default include four addons; activation
+// This is the wire that satisfies "default include five addons; activation
 // points to local installation, not remote". When this test passes, brand-new
 // agents created by the TUI wizard (or rehydrated from setup mode) ship with
-// all four curated MCPs registered + activated against the local venv where
-// `pip install lingtai` placed lingtai_imap / lingtai_telegram / etc.
+// all five curated MCPs registered + activated against the local venv where
+// `pip install lingtai` placed the curated lingtai.mcp_servers modules.
 package preset
 
 import (
@@ -64,12 +64,25 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 		t.Errorf("missing addon names: %v", wantNames)
 	}
 
-	// mcp section must exist with one entry per addon.
+	// mcp section must exist with one entry per addon and exact module/env
+	// wiring. In particular, generated args must never regress to the removed
+	// top-level compatibility wrappers.
 	mcp, ok := got["mcp"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("mcp not a dict: %T (%v)", got["mcp"], got["mcp"])
 	}
-	for _, name := range []string{"imap", "telegram", "feishu", "wechat", "whatsapp"} {
+	wantSpecs := map[string]struct {
+		module string
+		envVar string
+		config string
+	}{
+		"imap":     {"lingtai.mcp_servers.imap", "LINGTAI_IMAP_CONFIG", filepath.Join(".secrets", "imap.json")},
+		"telegram": {"lingtai.mcp_servers.telegram", "LINGTAI_TELEGRAM_CONFIG", filepath.Join(".secrets", "telegram.json")},
+		"feishu":   {"lingtai.mcp_servers.feishu", "LINGTAI_FEISHU_CONFIG", filepath.Join(".secrets", "feishu.json")},
+		"wechat":   {"lingtai.mcp_servers.wechat", "LINGTAI_WECHAT_CONFIG", filepath.Join(".secrets", "wechat", "config.json")},
+		"whatsapp": {"lingtai.mcp_servers.whatsapp", "LINGTAI_WHATSAPP_CONFIG", filepath.Join(".secrets", "whatsapp.json")},
+	}
+	for name, want := range wantSpecs {
 		entry, ok := mcp[name].(map[string]interface{})
 		if !ok {
 			t.Errorf("mcp.%s missing or wrong type: %T", name, mcp[name])
@@ -84,16 +97,13 @@ func TestGenerateInitJSONWritesNewShapeWithLocalVenv(t *testing.T) {
 		if !strings.HasPrefix(cmd, expectedVenvFragment) {
 			t.Errorf("mcp.%s.command = %q, want path under %q", name, cmd, expectedVenvFragment)
 		}
-		// args must invoke the right module.
 		args, _ := entry["args"].([]interface{})
-		if len(args) != 2 || args[0] != "-m" || args[1] != "lingtai_"+name {
-			t.Errorf("mcp.%s.args = %v, want [-m lingtai_%s]", name, args, name)
+		if len(args) != 2 || args[0] != "-m" || args[1] != want.module {
+			t.Errorf("mcp.%s.args = %v, want [-m %s]", name, args, want.module)
 		}
-		// env must declare the canonical config-path env var.
 		env, _ := entry["env"].(map[string]interface{})
-		envVar := "LINGTAI_" + strings.ToUpper(name) + "_CONFIG"
-		if _, ok := env[envVar]; !ok {
-			t.Errorf("mcp.%s.env missing %s (got %v)", name, envVar, env)
+		if env[want.envVar] != want.config {
+			t.Errorf("mcp.%s.env[%s] = %v, want %q", name, want.envVar, env[want.envVar], want.config)
 		}
 	}
 

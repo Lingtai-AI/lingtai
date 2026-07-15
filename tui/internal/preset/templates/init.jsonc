@@ -173,10 +173,9 @@
   // =============================================================
   // Addons — curated MCP server integrations
   // =============================================================
-  // As of v0.7.3, addons are MCP servers that ship as separate PyPI
-  // packages (lingtai-imap, lingtai-telegram, lingtai-feishu, lingtai-wechat),
-  // installed alongside the kernel by `pip install lingtai`. The TUI
-  // wires them up in two halves:
+  // Curated addons are MCP servers bundled in the `lingtai` wheel under
+  // `lingtai.mcp_servers.*`. The TUI installs that wheel in its local runtime
+  // venv and wires the selected addons up in two halves:
   //
   // 1. The `addons:` list below — names of curated MCPs the agent
   //    should "register" on boot. The kernel's `mcp` capability looks
@@ -191,16 +190,17 @@
   //
   // Default for new agents (auto-populated by the TUI wizard):
   //
-  //   "addons": ["imap", "telegram", "feishu", "wechat"],
+  //   "addons": ["imap", "telegram", "feishu", "wechat", "whatsapp"],
   //   "mcp": {
   //     "imap":     { "type": "stdio", "command": "<venv>/bin/python",
-  //                   "args": ["-m", "lingtai_imap"],
+  //                   "args": ["-m", "lingtai.mcp_servers.imap"],
   //                   "env": { "LINGTAI_IMAP_CONFIG": ".secrets/imap.json" } },
-  //     "telegram": { ... }, "feishu": { ... }, "wechat": { ... }
+  //     "telegram": { ... }, "feishu": { ... }, "wechat": { ... },
+  //     "whatsapp": { ... }
   //   }
   //
-  // The `command` always points at the local venv Python where pip
-  // installed the MCP packages — no remote fetch at runtime.
+  // The `command` always points at the local venv Python where the `lingtai`
+  // wheel installed its bundled MCP modules — no remote fetch at runtime.
   //
   // Per-MCP secrets live in <agent>/.secrets/<name>.json — plaintext JSON
   // (no *_env indirection in the new MCP shape). Each MCP's README
