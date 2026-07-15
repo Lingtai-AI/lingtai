@@ -61,7 +61,7 @@ type homeTelemetry struct {
 // --- Async scheduling ------------------------------------------------------
 //
 // gatherHomeTelemetry does real I/O: it reaches
-// fs.SumMoltSessionTokenLedgerFromEvents (an incremental in-process read of
+// fs.SumMoltSessionTokenLedgerFromEvents (a stateless in-process reverse scan of
 // canonical events.jsonl plus the token ledger that degrades to empty when the
 // event log is unavailable) and fs.ReadStatus/ReadInitManifest. On a slow volume
 // that work can

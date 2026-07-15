@@ -1,6 +1,8 @@
 package fs
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +10,7 @@ import (
 	"time"
 )
 
-func TestCanonicalMoltSessionWindowsTracksOnlyAppendedEvents(t *testing.T) {
+func TestCanonicalMoltSessionWindowsFindsLatestBoundariesAfterAppends(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
 	write := func(flags int, body string) {
 		t.Helper()
@@ -34,7 +36,7 @@ func TestCanonicalMoltSessionWindowsTracksOnlyAppendedEvents(t *testing.T) {
 	assertMoltWindow(t, current, last, before, ok, 2000, 1000)
 
 	// Ordinary tool traffic grows events.jsonl every telemetry tick. It must not
-	// move the session boundary or force a full-history rescan.
+	// move the session boundary.
 	write(os.O_WRONLY|os.O_APPEND, `{"type":"tool_call","ts":2001}`+"\n")
 	current, last, before, ok = canonicalMoltSessionWindows(eventsPath)
 	assertMoltWindow(t, current, last, before, ok, 2000, 1000)
@@ -81,8 +83,8 @@ func TestCanonicalMoltSessionWindowsRetriesPartialTailAndRecoversTruncation(t *t
 	current, last, before, ok = canonicalMoltSessionWindows(eventsPath)
 	assertMoltWindow(t, current, last, before, ok, 2000, 1000)
 
-	// Log rotation/truncation discards old boundaries instead of retaining stale
-	// cache state from the previous file horizon.
+	// Log rotation/truncation discards old boundaries and reads the replacement
+	// history as authoritative.
 	if err := os.WriteFile(eventsPath, []byte(`{"type":"psyche_molt","ts":4000}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +92,53 @@ func TestCanonicalMoltSessionWindowsRetriesPartialTailAndRecoversTruncation(t *t
 	assertMoltWindow(t, current, last, before, ok, 4000, 0)
 }
 
+func TestCanonicalMoltSessionWindowsScansReverseAcrossChunks(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	body := `{"type":"psyche_molt","ts":1000}` + "\n" +
+		`{"type":"psyche_molt","ts":2000}` + "\n" +
+		`{"type":"tool_call","ts":2001,"text":"` + strings.Repeat("x", int(canonicalMoltWindowChunkSize)+1024) + `"}` + "\n" +
+		"not-json\n" +
+		`{"type":"psyche_molt","ts":3000}`
+	if err := os.WriteFile(eventsPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The latest valid boundary has no final newline. Finding the previous one
+	// requires crossing a multi-chunk row and skipping a complete malformed row.
+	current, last, before, ok := canonicalMoltSessionWindows(eventsPath)
+	assertMoltWindow(t, current, last, before, ok, 3000, 2000)
+}
+
+func TestReverseScanCanonicalMoltWindowStopsAfterTwoTailBoundaries(t *testing.T) {
+	prefix := `{"type":"tool_call","ts":1000,"text":"` + strings.Repeat("x", int(3*canonicalMoltWindowChunkSize)) + `"}` + "\n"
+	tail := `{"type":"psyche_molt","ts":2000}` + "\n" +
+		`{"type":"tool_call","ts":2001}` + "\n" +
+		`{"type":"psyche_molt","ts":3000}` + "\n"
+	body := []byte(prefix + tail)
+	reader := &countingReaderAt{ReaderAt: bytes.NewReader(body)}
+
+	current, last, err := reverseScanCanonicalMoltWindow(reader, int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unixOrZero(current); got != 3000 {
+		t.Fatalf("current = %d, want 3000", got)
+	}
+	if got := unixOrZero(last); got != 2000 {
+		t.Fatalf("last = %d, want 2000", got)
+	}
+	if reader.calls != 1 || reader.bytesRead != int(canonicalMoltWindowChunkSize) {
+		t.Fatalf("tail scan reads = %d calls/%d bytes, want 1 call/%d bytes", reader.calls, reader.bytesRead, canonicalMoltWindowChunkSize)
+	}
+}
+
 func TestCanonicalMoltSessionWindowsRecoversSameInodeTruncateAndRegrow(t *testing.T) {
 	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	const preservedTailSize = 4096
+	stableTail := `{"type":"tool_call","ts":2001,"text":"` + strings.Repeat("x", preservedTailSize+1024) + `"}` + "\n"
 	initial := `{"type":"psyche_molt","ts":1000}` + "\n" +
-		`{"type":"tool_call","ts":1001,"text":"` + strings.Repeat("x", 512) + `"}` + "\n" +
-		`{"type":"psyche_molt","ts":2000}` + "\n"
+		`{"type":"psyche_molt","ts":2000}` + "\n" +
+		stableTail
 	if err := os.WriteFile(eventsPath, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -106,12 +150,18 @@ func TestCanonicalMoltSessionWindowsRecoversSameInodeTruncateAndRegrow(t *testin
 	current, last, before, ok := canonicalMoltSessionWindows(eventsPath)
 	assertMoltWindow(t, current, last, before, ok, 2000, 1000)
 
-	// A writer can truncate and regrow the same inode past the cached horizon
-	// between telemetry polls. The cache must recognize that the previous prefix
-	// changed rather than starting in the middle of the replacement history.
+	// A writer can truncate and regrow the same inode past the prior read horizon
+	// between telemetry polls while preserving every byte in a bounded tail sample.
+	// Only the earlier, equal-length molt rows change; the long tail through the
+	// old horizon remains identical and one ordinary event grows the new file.
 	replacement := `{"type":"psyche_molt","ts":4000}` + "\n" +
 		`{"type":"psyche_molt","ts":5000}` + "\n" +
-		`{"type":"tool_call","ts":5001,"text":"` + strings.Repeat("y", len(initial)*2) + `"}` + "\n"
+		stableTail +
+		`{"type":"tool_call","ts":5001}` + "\n"
+	tailStart := len(initial) - preservedTailSize
+	if got, want := replacement[tailStart:len(initial)], initial[tailStart:]; got != want {
+		t.Fatal("fixture changed the bounded tail sample; want identical bytes through the old horizon")
+	}
 	f, err := os.OpenFile(eventsPath, os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +193,9 @@ func TestCanonicalMoltSessionWindowsAvailability(t *testing.T) {
 	if _, _, _, ok := canonicalMoltSessionWindows(missing); ok {
 		t.Fatal("missing canonical event log reported available")
 	}
+	if _, _, _, ok := canonicalMoltSessionWindows(t.TempDir()); ok {
+		t.Fatal("non-regular canonical event log reported available")
+	}
 
 	empty := filepath.Join(t.TempDir(), "events.jsonl")
 	if err := os.WriteFile(empty, nil, 0o644); err != nil {
@@ -152,6 +205,27 @@ func TestCanonicalMoltSessionWindowsAvailability(t *testing.T) {
 	if !ok || !current.IsZero() || !last.IsZero() || !before.IsZero() {
 		t.Fatalf("empty canonical log = (%v, %v, %v, ok=%v), want zero window with ok=true", current, last, before, ok)
 	}
+
+	if err := os.WriteFile(empty, []byte(`{"type":"tool_call","ts":1000}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, last, before, ok = canonicalMoltSessionWindows(empty)
+	if !ok || !current.IsZero() || !last.IsZero() || !before.IsZero() {
+		t.Fatalf("no-molt canonical log = (%v, %v, %v, ok=%v), want zero window with ok=true", current, last, before, ok)
+	}
+}
+
+type countingReaderAt struct {
+	io.ReaderAt
+	calls     int
+	bytesRead int
+}
+
+func (r *countingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	r.calls++
+	n, err := r.ReaderAt.ReadAt(p, off)
+	r.bytesRead += n
+	return n, err
 }
 
 func assertMoltWindow(t *testing.T, current, last, before time.Time, ok bool, wantCurrent, wantLast int64) {

@@ -1,191 +1,160 @@
 package fs
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
-	"sync"
 	"time"
 )
 
-// canonicalMoltWindowCache tracks each events.jsonl through its last parsed byte.
-// The event log is append-only in normal operation, so a telemetry refresh only
-// parses newly appended records instead of rescanning the full history. Entries
-// carry their own lock so unrelated agents never serialize behind a large first
-// read on a slow volume.
-var canonicalMoltWindowCache sync.Map // map[clean events path]*canonicalMoltWindowCacheEntry
-
-const canonicalMoltWindowAnchorSize = 4096
-
-type canonicalMoltWindowCacheEntry struct {
-	mu sync.Mutex
-
-	info         os.FileInfo
-	fileSize     int64
-	offset       int64
-	appendAnchor []byte
-
-	currentSince time.Time
-	lastSince    time.Time
-	lastBefore   time.Time
-}
+const canonicalMoltWindowChunkSize int64 = 64 * 1024
 
 // canonicalMoltSessionWindows resolves the latest two valid psyche_molt
-// boundaries directly from the canonical events.jsonl. A successful read is
-// authoritative even when the file contains no molt rows. ok=false is reserved
-// for a missing/unreadable file so callers may use the derived SQLite sidecar as
-// a compatibility fallback.
+// boundaries directly from the canonical events.jsonl. It scans fixed-size
+// chunks from the tail and stops as soon as both boundaries are known, so normal
+// telemetry refreshes remain process-free and usually read only the relevant
+// session tail. Histories with fewer than two boundaries are scanned to byte zero.
+// A successful read is authoritative even when the file contains no molt rows.
+// ok=false is reserved for a missing, non-regular, unreadable, or concurrently
+// changed canonical file so callers may use the derived SQLite sidecar as a
+// compatibility fallback.
 func canonicalMoltSessionWindows(eventsPath string) (currentSince, lastSince, lastBefore time.Time, ok bool) {
-	path := filepath.Clean(eventsPath)
-	value, _ := canonicalMoltWindowCache.LoadOrStore(path, &canonicalMoltWindowCacheEntry{})
-	entry := value.(*canonicalMoltWindowCacheEntry)
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+	pathInfo, err := os.Stat(eventsPath)
+	if err != nil || !pathInfo.Mode().IsRegular() {
 		return time.Time{}, time.Time{}, time.Time{}, false
 	}
 
-	restart := entry.info == nil ||
-		!os.SameFile(entry.info, info) ||
-		info.Size() < entry.fileSize ||
-		(info.Size() == entry.fileSize && !info.ModTime().Equal(entry.info.ModTime()))
-	if !restart && info.Size() > entry.fileSize && entry.offset > 0 {
-		// Size growth alone does not prove append: a writer may truncate and
-		// regrow the same inode past the prior horizon between polls. Verify a
-		// bounded byte anchor immediately before the completed offset before
-		// carrying cached boundaries into the suffix scan.
-		anchor, anchorErr := readCanonicalMoltWindowAnchor(path, entry.offset)
-		restart = anchorErr != nil || !bytes.Equal(anchor, entry.appendAnchor)
-	}
-	if restart {
-		entry.info = nil
-		entry.fileSize = 0
-		entry.offset = 0
-		entry.appendAnchor = nil
-		entry.currentSince = time.Time{}
-		entry.lastSince = time.Time{}
-		entry.lastBefore = time.Time{}
-	}
-
-	// Exact same completed horizon: no file I/O at all. If offset trails the
-	// horizon, the prior read ended on an incomplete JSON record and must retry it.
-	if entry.info != nil && entry.offset == info.Size() && entry.fileSize == info.Size() && entry.info.ModTime().Equal(info.ModTime()) {
-		return entry.currentSince, entry.lastSince, entry.lastBefore, true
-	}
-
-	current, last, before := entry.currentSince, entry.lastSince, entry.lastBefore
-	next, current, last, before, err := scanCanonicalMoltWindow(path, entry.offset, info.Size(), current, last, before)
+	f, err := os.Open(eventsPath)
 	if err != nil {
 		return time.Time{}, time.Time{}, time.Time{}, false
-	}
-
-	appendAnchor, err := readCanonicalMoltWindowAnchor(path, next)
-	if err != nil {
-		return time.Time{}, time.Time{}, time.Time{}, false
-	}
-	entry.info = info
-	entry.fileSize = info.Size()
-	entry.offset = next
-	entry.appendAnchor = appendAnchor
-	entry.currentSince = current
-	entry.lastSince = last
-	entry.lastBefore = before
-	return current, last, before, true
-}
-
-// readCanonicalMoltWindowAnchor returns at most the final 4 KiB of the completed
-// prefix [0,end). Comparing this bounded anchor before a suffix scan distinguishes
-// ordinary append growth from a same-inode truncate-and-regrow without turning
-// every one-second telemetry refresh back into a full-history read.
-func readCanonicalMoltWindowAnchor(path string, end int64) ([]byte, error) {
-	if end <= 0 {
-		return nil, nil
-	}
-	start := end - canonicalMoltWindowAnchorSize
-	if start < 0 {
-		start = 0
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
 	}
 	defer f.Close()
 
-	anchor := make([]byte, end-start)
-	if _, err := io.ReadFull(io.NewSectionReader(f, start, end-start), anchor); err != nil {
-		return nil, err
+	startInfo, err := f.Stat()
+	if err != nil || !startInfo.Mode().IsRegular() || !os.SameFile(pathInfo, startInfo) {
+		return time.Time{}, time.Time{}, time.Time{}, false
 	}
-	return anchor, nil
-}
 
-// scanCanonicalMoltWindow reads exactly [start,end). Complete malformed JSONL
-// records are skipped like the other streaming readers. An invalid unterminated
-// final record is left unread so the next refresh retries it after the writer
-// finishes appending.
-func scanCanonicalMoltWindow(path string, start, end int64, currentSince, lastSince, lastBefore time.Time) (next int64, current, last, before time.Time, err error) {
-	f, err := os.Open(path)
+	current, last, err := reverseScanCanonicalMoltWindow(f, startInfo.Size())
 	if err != nil {
-		return start, currentSince, lastSince, lastBefore, err
+		return time.Time{}, time.Time{}, time.Time{}, false
 	}
-	defer f.Close()
 
-	if start < 0 || start > end {
-		start = 0
-		currentSince, lastSince, lastBefore = time.Time{}, time.Time{}, time.Time{}
+	// Reject a mixed snapshot if the opened file changed while it was scanned, or
+	// if the canonical path was replaced before the result could be published.
+	endInfo, err := f.Stat()
+	if err != nil || !sameCanonicalMoltWindowSnapshot(startInfo, endInfo) {
+		return time.Time{}, time.Time{}, time.Time{}, false
 	}
-	r := bufio.NewReaderSize(io.NewSectionReader(f, start, end-start), jsonlReaderBufferSize)
-	pos := start
-	current, last, before = currentSince, lastSince, lastBefore
-	for {
-		lineStart := pos
-		line, readErr := r.ReadBytes('\n')
-		if readErr == nil {
-			pos += int64(len(line))
-			current, last, before, _ = consumeMoltWindowLine(line, current, last, before)
-			continue
-		}
-		if readErr != io.EOF {
-			return start, currentSince, lastSince, lastBefore, readErr
-		}
-		if len(line) == 0 {
-			return pos, current, last, before, nil
-		}
+	pathInfo, err = os.Stat(eventsPath)
+	if err != nil || !pathInfo.Mode().IsRegular() || !sameCanonicalMoltWindowSnapshot(endInfo, pathInfo) {
+		return time.Time{}, time.Time{}, time.Time{}, false
+	}
 
-		// A valid EOF record is complete even without a final newline. If it is
-		// malformed, retain its starting offset and retry after the next append.
-		var valid bool
-		current, last, before, valid = consumeMoltWindowLine(line, current, last, before)
-		if valid {
-			pos += int64(len(line))
-		} else {
-			pos = lineStart
-		}
-		return pos, current, last, before, nil
+	if current.IsZero() {
+		return time.Time{}, time.Time{}, time.Time{}, true
 	}
+	return current, last, current, true
 }
 
-func consumeMoltWindowLine(line []byte, currentSince, lastSince, lastBefore time.Time) (current, last, before time.Time, valid bool) {
+func sameCanonicalMoltWindowSnapshot(a, b os.FileInfo) bool {
+	return os.SameFile(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
+}
+
+// reverseScanCanonicalMoltWindow reads [0,size) newest-to-oldest. Pending parts
+// retain only the one JSONL record crossing a chunk boundary, so memory is bounded
+// by a fixed chunk plus the longest encountered record. Complete malformed rows
+// are skipped. A valid unterminated EOF row is accepted; an invalid partial row is
+// skipped for this call and naturally retried after a later append completes it.
+func reverseScanCanonicalMoltWindow(f io.ReaderAt, size int64) (current, last time.Time, err error) {
+	if size < 0 {
+		return time.Time{}, time.Time{}, io.ErrUnexpectedEOF
+	}
+
+	var pending [][]byte
+	pendingLen := 0
+	end := size
+	for end > 0 {
+		start := end - canonicalMoltWindowChunkSize
+		if start < 0 {
+			start = 0
+		}
+		chunk := make([]byte, int(end-start))
+		n, readErr := f.ReadAt(chunk, start)
+		if n != len(chunk) {
+			if readErr == nil {
+				readErr = io.ErrUnexpectedEOF
+			}
+			return time.Time{}, time.Time{}, readErr
+		}
+		if readErr != nil && readErr != io.EOF {
+			return time.Time{}, time.Time{}, readErr
+		}
+
+		cursor := len(chunk)
+		for cursor > 0 {
+			newline := bytes.LastIndexByte(chunk[:cursor], '\n')
+			if newline < 0 {
+				part := append([]byte(nil), chunk[:cursor]...)
+				pending = append(pending, part)
+				pendingLen += len(part)
+				break
+			}
+
+			line := assembleReverseJSONLLine(chunk[newline+1:cursor], pending, pendingLen)
+			pending = nil
+			pendingLen = 0
+			if boundary, isMolt := canonicalMoltBoundary(line); isMolt {
+				if current.IsZero() {
+					current = boundary
+				} else {
+					return current, boundary, nil
+				}
+			}
+			cursor = newline
+		}
+		end = start
+	}
+
+	if len(pending) > 0 {
+		line := assembleReverseJSONLLine(nil, pending, pendingLen)
+		if boundary, isMolt := canonicalMoltBoundary(line); isMolt {
+			if current.IsZero() {
+				current = boundary
+			} else {
+				last = boundary
+			}
+		}
+	}
+	return current, last, nil
+}
+
+// assembleReverseJSONLLine joins a prefix from the current chunk to parts found
+// in later chunks. Pending parts are stored in reverse discovery order.
+func assembleReverseJSONLLine(prefix []byte, pending [][]byte, pendingLen int) []byte {
+	if len(pending) == 0 {
+		return prefix
+	}
+	line := make([]byte, len(prefix)+pendingLen)
+	offset := copy(line, prefix)
+	for i := len(pending) - 1; i >= 0; i-- {
+		offset += copy(line[offset:], pending[i])
+	}
+	return line
+}
+
+func canonicalMoltBoundary(line []byte) (time.Time, bool) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
-		return currentSince, lastSince, lastBefore, true
+		return time.Time{}, false
 	}
 	var evt struct {
 		Type string  `json:"type"`
 		TS   float64 `json:"ts"`
 	}
-	if err := json.Unmarshal(line, &evt); err != nil {
-		return currentSince, lastSince, lastBefore, false
+	if err := json.Unmarshal(line, &evt); err != nil || evt.Type != "psyche_molt" || evt.TS <= 0 {
+		return time.Time{}, false
 	}
-	if evt.Type != "psyche_molt" || evt.TS <= 0 {
-		return currentSince, lastSince, lastBefore, true
-	}
-	lastSince = currentSince
-	lastBefore = unixFloatTime(evt.TS)
-	currentSince = lastBefore
-	return currentSince, lastSince, lastBefore, true
+	return unixFloatTime(evt.TS), true
 }
