@@ -282,6 +282,10 @@ SH
   export HOME="$fakehome"
   export UV_INSTALL_DIR="$fake_uv_dir"
   export SKIP_VENV=0
+  # Exercise the venv-creation failure path rather than the new fail-loud
+  # missing-bundle guard; the manifest body is not parsed until after venv setup.
+  export BUNDLE_MANIFEST_JSON='{}'
+  export BUNDLE_REQUIRED=1
 
   out="$(ensure_runtime_venv "$fakehome/bin" 2>&1)"
   case "$out" in

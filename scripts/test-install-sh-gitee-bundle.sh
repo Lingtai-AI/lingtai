@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+# Focused tests for the Gitee-aware bundle installer additions to install.sh:
+# --source override validation, country detection (success/failure/fail-open),
+# Gitee response parsing, same-tag/same-bundle fallback, checksum
+# mismatch fail-loud, bundle/kernel manifest schema handling, and kernel
+# wheel selection. Kept as a separate file from scripts/test-install-sh.sh
+# (which predates this feature) rather than growing that file further.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+export LINGTAI_INSTALL_SH_SOURCE_ONLY=1
+# shellcheck source=../install.sh
+source "$ROOT_DIR/install.sh"
+unset LINGTAI_INSTALL_SH_SOURCE_ONLY
+
+fail() {
+  echo "test-install-sh-gitee-bundle: $*" >&2
+  exit 1
+}
+
+assert_eq() {
+  local want="$1" got="$2" label="$3"
+  if [[ "$got" != "$want" ]]; then
+    fail "$label: got '$got', want '$want'"
+  fi
+}
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/lingtai-inst-gitee-test.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
+
+# --- --source flag validation -------------------------------------------------
+
+(
+  SOURCE_ARG="auto"
+  parse_args --source github
+  assert_eq "github" "$SOURCE_ARG" "--source github is accepted"
+)
+
+(
+  SOURCE_ARG="auto"
+  parse_args --source gitee
+  assert_eq "gitee" "$SOURCE_ARG" "--source gitee is accepted"
+)
+
+if (SOURCE_ARG="auto"; parse_args --source bogus) >/dev/null 2>&1; then
+  fail "--source bogus should be rejected (parse_args should exit non-zero)"
+fi
+
+# --- json_string_field --------------------------------------------------------
+
+assert_eq "v0.16.4" \
+  "$(printf '{"schema":"x","kernel_tag":"v0.16.4","other":1}' | json_string_field kernel_tag)" \
+  "json_string_field extracts a top-level string"
+assert_eq "" \
+  "$(printf '{"schema":"x"}' | json_string_field missing_key)" \
+  "json_string_field returns empty for a missing key"
+
+# --- verify_sha256 -------------------------------------------------------------
+
+(
+  f="$tmp/checksum-target.bin"
+  printf 'hello world' > "$f"
+  expected="$(shasum -a 256 "$f" | cut -d' ' -f1)"
+  verify_sha256 "$f" "$expected" || fail "verify_sha256 should accept a matching digest"
+  if verify_sha256 "$f" "0000000000000000000000000000000000000000000000000000000000000"; then
+    fail "verify_sha256 should reject a mismatched digest"
+  fi
+)
+
+# --- fake-curl harness: dispatch canned responses by URL substring -----------
+#
+# fake_curl_serving writes a fake `curl` into $1 (a directory to prepend to
+# PATH) that reads a URL->response-file mapping from $2 (a directory of files
+# named after a sanitized URL substring key) — see register_response below.
+# Any -o target is honored (file is copied there); otherwise the response is
+# printed to stdout, matching how install.sh's helpers consume curl output.
+FAKE_CURL_DIR=""
+
+setup_fake_curl() {
+  local bindir="$1"
+  mkdir -p "$bindir"
+  FAKE_CURL_DIR="$tmp/fake-curl-responses.$$"
+  mkdir -p "$FAKE_CURL_DIR"
+  cat > "$bindir/curl" <<SH
+#!/usr/bin/env bash
+url=""
+out=""
+prev=""
+for a in "\$@"; do
+  case "\$a" in
+    http://*|https://*) url="\$a" ;;
+  esac
+  [[ "\$prev" == "-o" ]] && out="\$a"
+  prev="\$a"
+done
+key="\$(printf '%s' "\$url" | tr -c 'A-Za-z0-9' '_')"
+resp_file="$FAKE_CURL_DIR/\$key"
+status_file="\$resp_file.status"
+if [[ ! -f "\$resp_file" ]]; then
+  echo "fake curl: no registered response for \$url" >&2
+  exit 22
+fi
+status="0"
+[[ -f "\$status_file" ]] && status="\$(cat "\$status_file")"
+if [[ "\$status" != "0" ]]; then
+  exit "\$status"
+fi
+if [[ -n "\$out" ]]; then
+  cp "\$resp_file" "\$out"
+else
+  cat "\$resp_file"
+fi
+exit 0
+SH
+  chmod +x "$bindir/curl"
+}
+
+# register_response <url> <body-file> [exit_status]
+register_response() {
+  local url="$1" body_file="$2" status="${3:-0}"
+  local key
+  key="$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')"
+  cp "$body_file" "$FAKE_CURL_DIR/$key"
+  printf '%s' "$status" > "$FAKE_CURL_DIR/$key.status"
+}
+
+register_response_text() {
+  local url="$1" body="$2" status="${3:-0}"
+  local f="$tmp/resp-body.$$.$RANDOM"
+  printf '%s' "$body" > "$f"
+  register_response "$url" "$f" "$status"
+  rm -f "$f"
+}
+
+# --- detect_country_cn: success / failure / fail-open ------------------------
+
+(
+  fakebin="$tmp/country-fakebin-cn"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "CN"
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  detect_country_cn || fail "CN response from provider 1 should report country_cn=true"
+)
+
+(
+  fakebin="$tmp/country-fakebin-us"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "US"
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  if detect_country_cn; then
+    fail "US response should report country_cn=false"
+  fi
+)
+
+(
+  # Provider 1 fails outright (nonzero exit); provider 2 succeeds with CN.
+  fakebin="$tmp/country-fakebin-fallback"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "" 22
+  register_response_text "https://ifconfig.co/country-iso" "CN"
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  detect_country_cn || fail "provider-2 fallback should still detect CN"
+)
+
+(
+  # Both providers fail: detect_country_cn must fail OPEN (report false), not error out.
+  fakebin="$tmp/country-fakebin-both-fail"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "" 22
+  register_response_text "https://ifconfig.co/country-iso" "" 22
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  if detect_country_cn; then
+    fail "both providers failing must fail OPEN (report not-CN), never report CN"
+  fi
+)
+
+# --- resolve_source_provider: explicit override bypasses detection ----------
+
+(
+  SOURCE_ARG="github"
+  BUNDLE_PROVIDER=""
+  resolve_source_provider
+  assert_eq "github" "$BUNDLE_PROVIDER" "explicit --source github bypasses detection"
+)
+
+(
+  SOURCE_ARG="gitee"
+  BUNDLE_PROVIDER=""
+  resolve_source_provider
+  assert_eq "gitee" "$BUNDLE_PROVIDER" "explicit --source gitee bypasses detection"
+)
+
+(
+  # auto + CN + gitee reachable -> gitee
+  fakebin="$tmp/resolve-fakebin-cn-reachable"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "CN"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai" "{}"
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  GITEE_OWNER="huangzesen1997"
+  GITEE_REPO="lingtai"
+  SOURCE_ARG="auto"
+  BUNDLE_PROVIDER=""
+  resolve_source_provider
+  assert_eq "gitee" "$BUNDLE_PROVIDER" "auto + CN + Gitee reachable resolves to gitee"
+)
+
+(
+  # auto + CN but gitee UNREACHABLE -> falls open to github
+  fakebin="$tmp/resolve-fakebin-cn-unreachable"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "CN"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai" "" 22
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  GITEE_OWNER="huangzesen1997"
+  GITEE_REPO="lingtai"
+  SOURCE_ARG="auto"
+  BUNDLE_PROVIDER=""
+  resolve_source_provider
+  assert_eq "github" "$BUNDLE_PROVIDER" "auto + CN + Gitee unreachable falls back to github"
+)
+
+(
+  # auto + non-CN -> github, no Gitee probe needed
+  fakebin="$tmp/resolve-fakebin-us"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://ipapi.co/country/" "US"
+  export PATH="$fakebin:/usr/bin:/bin"
+  COUNTRY_DETECT_URL_1="https://ipapi.co/country/"
+  COUNTRY_DETECT_URL_2="https://ifconfig.co/country-iso"
+  SOURCE_ARG="auto"
+  BUNDLE_PROVIDER=""
+  resolve_source_provider
+  assert_eq "github" "$BUNDLE_PROVIDER" "auto + non-CN resolves to github"
+)
+
+# --- gitee_latest_release_tag / gitee_release_asset_url ----------------------
+
+(
+  fakebin="$tmp/gitee-latest-fakebin"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/latest" \
+    '{"tag_name":"v0.11.0","name":"v0.11.0"}'
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  assert_eq "v0.11.0" "$(gitee_latest_release_tag)" "gitee_latest_release_tag parses tag_name"
+)
+
+(
+  # Empty release list (documented current reality) -> nonzero, no output.
+  fakebin="$tmp/gitee-empty-fakebin"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/latest" "" 22
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  if out="$(gitee_latest_release_tag)"; then
+    fail "gitee_latest_release_tag should fail when Gitee has no releases, got '$out'"
+  fi
+)
+
+(
+  fakebin="$tmp/gitee-asset-fakebin"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/tags/v0.11.0" \
+    '{"id":1,"tag_name":"v0.11.0","attach_files":[{"name":"lingtai-v0.11.0-darwin-arm64.tar.gz","browser_download_url":"https://gitee.com/huangzesen1997/lingtai/releases/download/v0.11.0/lingtai-v0.11.0-darwin-arm64.tar.gz"},{"name":"lingtai-bundle-manifest.json","browser_download_url":"https://gitee.com/huangzesen1997/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json"}]}'
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  assert_eq \
+    "https://gitee.com/huangzesen1997/lingtai/releases/download/v0.11.0/lingtai-v0.11.0-darwin-arm64.tar.gz" \
+    "$(gitee_release_asset_url v0.11.0 lingtai-v0.11.0-darwin-arm64.tar.gz)" \
+    "gitee_release_asset_url resolves the matching attachment's URL, not an unrelated one"
+  if out="$(gitee_release_asset_url v0.11.0 does-not-exist.tar.gz)"; then
+    fail "gitee_release_asset_url should fail for a missing attachment name, got '$out'"
+  fi
+)
+
+# --- fetch_bundle_manifest: same-tag fallback, never re-resolves latest -----
+
+(
+  # Preferred provider (gitee) has NO manifest for the resolved tag; GitHub
+  # has it for the SAME tag. Must fall back without re-querying "latest".
+  fakebin="$tmp/bundle-fallback-fakebin"
+  setup_fake_curl "$fakebin"
+  # Gitee: release exists but lacks the bundle-manifest attachment.
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/tags/v0.11.0" \
+    '{"id":1,"tag_name":"v0.11.0","attach_files":[]}'
+  # GitHub: has the manifest for the SAME tag v0.11.0.
+  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v0.11.0" \
+    '{"tag_name":"v0.11.0","assets":[{"name":"lingtai-bundle-manifest.json"}]}'
+  register_response_text \
+    "https://github.com/Lingtai-AI/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json" \
+    '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","kernel_tag":"v0.16.4"}'
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
+  DOWNLOAD_BASE="https://github.com/Lingtai-AI/lingtai/releases/download"
+
+  BUNDLE_PROVIDER="gitee"
+  VERSION="v0.11.0"
+  BUNDLE_TAG=""
+  BUNDLE_MANIFEST_JSON=""
+  fetch_bundle_manifest || fail "fetch_bundle_manifest should succeed via same-tag GitHub fallback"
+  assert_eq "v0.11.0" "$BUNDLE_TAG" "fetch_bundle_manifest resolves the explicit tag, not a re-queried latest"
+  assert_eq "github" "$BUNDLE_PROVIDER" "fetch_bundle_manifest updates BUNDLE_PROVIDER to the provider that actually served the manifest"
+  assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" "bundle_manifest_field reads the fetched manifest"
+)
+
+(
+  # Neither provider has a manifest for the explicit tag -> nonzero, no crash.
+  fakebin="$tmp/bundle-neither-fakebin"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/tags/v9.9.9" "" 22
+  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v9.9.9" "" 22
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
+
+  BUNDLE_PROVIDER="gitee"
+  VERSION="v9.9.9"
+  BUNDLE_TAG=""
+  BUNDLE_MANIFEST_JSON=""
+  if fetch_bundle_manifest; then
+    fail "fetch_bundle_manifest should fail when neither provider has the manifest"
+  fi
+)
+
+# --- select_kernel_wheel: exact match preferred, no match -> empty ----------
+
+(
+  kernel_manifest='{"schema":"lingtai.kernel.release/v1","artifacts":[
+    {"filename":"lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl","sha256":"aaaa","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},
+    {"filename":"lingtai-0.16.4-cp311-cp311-manylinux_2_28_x86_64.whl","sha256":"bbbb","kind":"wheel","python_tag":"cp311","abi_tag":"cp311","platform_tag":"manylinux_2_28_x86_64"},
+    {"filename":"lingtai-0.16.4.tar.gz","sha256":"cccc","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
+  ],"sdist_fallback":"lingtai-0.16.4.tar.gz"}'
+
+  fake_py="$tmp/fake-python-matching"
+  cat > "$fake_py" <<'PYEOF'
+#!/usr/bin/env bash
+cat <<'TAGS'
+cp312-cp312-macosx_11_0_arm64
+cp312-abi3-macosx_11_0_arm64
+TAGS
+PYEOF
+  chmod +x "$fake_py"
+
+  hit="$(select_kernel_wheel "$kernel_manifest" "$fake_py")" || fail "select_kernel_wheel should find the matching cp312 wheel"
+  assert_eq "lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl aaaa" "$hit" "select_kernel_wheel returns filename+sha256 for the matching tag"
+)
+
+(
+  kernel_manifest='{"schema":"lingtai.kernel.release/v1","artifacts":[
+    {"filename":"lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl","sha256":"aaaa","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},
+    {"filename":"lingtai-0.16.4.tar.gz","sha256":"cccc","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
+  ],"sdist_fallback":"lingtai-0.16.4.tar.gz"}'
+
+  fake_py="$tmp/fake-python-nomatch"
+  cat > "$fake_py" <<'PYEOF'
+#!/usr/bin/env bash
+cat <<'TAGS'
+cp313-cp313-win_amd64
+TAGS
+PYEOF
+  chmod +x "$fake_py"
+
+  if hit="$(select_kernel_wheel "$kernel_manifest" "$fake_py")"; then
+    fail "select_kernel_wheel should find nothing for an incompatible interpreter, got '$hit'"
+  fi
+
+  fallback="$(kernel_sdist_fallback "$kernel_manifest")" || fail "kernel_sdist_fallback should succeed"
+  assert_eq "lingtai-0.16.4.tar.gz cccc" "$fallback" "kernel_sdist_fallback returns the declared sdist artifact"
+)
+
+# --- install_kernel_from_bundle: checksum mismatch fails loud, installs nothing ---
+
+(
+  fakebin="$tmp/install-checksum-fail-fakebin"
+  setup_fake_curl "$fakebin"
+
+  kernel_manifest='{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[
+    {"filename":"lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl","sha256":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},
+    {"filename":"lingtai-0.16.4.tar.gz","sha256":"cccc","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
+  ],"sdist_fallback":"lingtai-0.16.4.tar.gz"}'
+
+  register_response_text \
+    "https://api.github.com/repos/Lingtai-AI/lingtai-kernel/releases/tags/v0.16.4" \
+    '{"tag_name":"v0.16.4","assets":[{"name":"lingtai-kernel-release-manifest.json"}]}'
+  register_response_text \
+    "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v0.16.4/lingtai-kernel-release-manifest.json" \
+    "$kernel_manifest"
+  # The wheel download succeeds but its bytes will NOT hash to the manifest's
+  # sha256 above — this is the checksum-mismatch fail-loud path.
+  register_response_text \
+    "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v0.16.4/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" \
+    "not-the-real-wheel-bytes"
+
+  export PATH="$fakebin:/usr/bin:/bin"
+  KERNEL_GH_API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai-kernel"
+
+  fake_py="$tmp/fake-python-checksum-test"
+  cat > "$fake_py" <<'PYEOF'
+#!/usr/bin/env bash
+cat <<'TAGS'
+cp312-cp312-macosx_11_0_arm64
+TAGS
+PYEOF
+  chmod +x "$fake_py"
+
+  BUNDLE_MANIFEST_JSON='{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","kernel_tag":"v0.16.4"}'
+  BUILD_DIR="$tmp/install-checksum-fail-build"
+  KERNEL_SOURCE=""
+  if install_kernel_from_bundle "$fake_py" ""; then
+    fail "install_kernel_from_bundle must fail loud on checksum mismatch, not succeed"
+  fi
+  assert_eq "" "$KERNEL_SOURCE" "KERNEL_SOURCE must stay unset when install_kernel_from_bundle fails"
+  if [[ -f "$BUILD_DIR/kernel-artifact/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" ]]; then
+    fail "the tampered/mismatched artifact must be removed after a checksum failure, not left on disk"
+  fi
+)
+
+echo "install.sh Gitee bundle installer tests passed"
+
+# --- ensure_runtime_venv: fail-loud gate (Blocker 1 repair) -----------------
+#
+# These tests exercise ONLY the early-exit gate at the top of
+# ensure_runtime_venv, which runs before any venv/python provisioning work —
+# so a disposable $HOME is sufficient; no fake python3/uv is needed to reach
+# the assertions below.
+
+(
+  # Default one-command path (BUNDLE_REQUIRED=1), no bundle manifest resolved
+  # -> must fail loud, not silently proceed to any install.
+  export HOME="$tmp/gate-required-no-bundle-home"
+  mkdir -p "$HOME"
+  BUNDLE_REQUIRED=1
+  BUNDLE_MANIFEST_JSON=""
+  SKIP_VENV=0
+  BUNDLE_PROVIDER="github"
+  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"
+  rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fail "ensure_runtime_venv must fail loud (nonzero) when BUNDLE_REQUIRED=1 and no bundle was resolved, got rc=0: $out"
+  fi
+  echo "$out" | grep -q "never installed from PyPI\|never.*from an index\|hard stop" \
+    || fail "expected an explicit never-PyPI/hard-stop message in the fail-loud output, got: $out"
+  echo "$out" | grep -q -- "--skip-python" \
+    || fail "expected the fail-loud message to mention --skip-python as the opt-out, got: $out"
+)
+
+(
+  # Same as above, but --skip-python (SKIP_VENV=1) must skip cleanly (rc=0),
+  # never attempting any install.
+  export HOME="$tmp/gate-required-skip-home"
+  mkdir -p "$HOME"
+  BUNDLE_REQUIRED=1
+  BUNDLE_MANIFEST_JSON=""
+  SKIP_VENV=1
+  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)" || fail "--skip-python must exit 0 even with no bundle resolved: $out"
+  SKIP_VENV=0
+)
+
+(
+  # --ref / source-ref build (BUNDLE_REQUIRED=0), no bundle manifest -> must
+  # ALSO fail loud (a distinct message), never silently reach for PyPI.
+  export HOME="$tmp/gate-ref-no-bundle-home"
+  mkdir -p "$HOME"
+  BUNDLE_REQUIRED=0
+  BUNDLE_MANIFEST_JSON=""
+  SKIP_VENV=0
+  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)"
+  rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fail "ensure_runtime_venv must fail loud for a --ref build with no bundle, got rc=0: $out"
+  fi
+  echo "$out" | grep -q -- "--skip-python" \
+    || fail "expected the --ref fail-loud message to mention --skip-python, got: $out"
+  echo "$out" | grep -q "no pinned kernel release bundle to install from\|never installed from PyPI\|never.*from an index" \
+    || fail "expected an explicit no-bundle-for-source-ref explanation, got: $out"
+)
+
+(
+  # --ref build + --skip-python must skip cleanly.
+  export HOME="$tmp/gate-ref-skip-home"
+  mkdir -p "$HOME"
+  BUNDLE_REQUIRED=0
+  BUNDLE_MANIFEST_JSON=""
+  SKIP_VENV=1
+  out="$(ensure_runtime_venv "$tmp/bin" 2>&1)" || fail "--skip-python must exit 0 for a --ref build too: $out"
+  SKIP_VENV=0
+)
+
+# --- Regression: no new-install path ever runs `pip/uv ... install lingtai` by name ---
+#
+# Static assertion over the shipped script: grep for any install invocation
+# that names the "lingtai" package directly (as opposed to installing an
+# explicit local .whl/.tar.gz path). This is deliberately a text-level
+# regression guard — it fails loud if a future edit reintroduces
+# `pip install lingtai` / `uv pip install --upgrade lingtai` anywhere.
+(
+  matches="$(grep -nE '(pip install|pip3 install)[^|&;]*[[:space:]]lingtai([[:space:]]|$)' "$ROOT_DIR/install.sh" | grep -v '^[0-9]*:#' || true)"
+  if [[ -n "$matches" ]]; then
+    fail "install.sh must never install the 'lingtai' package by name from an index; found:
+$matches"
+  fi
+)
+
+echo "install.sh Gitee bundle installer tests passed"

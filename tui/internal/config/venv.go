@@ -589,6 +589,17 @@ type tuiInstallMetadata struct {
 	ResolvedCommit  string   `json:"resolved_commit"`
 	StampedVersion  string   `json:"stamped_version"`
 	ManagedBinaries []string `json:"managed_binaries"`
+
+	// Bundle provenance (additive; absent on install.json written before this
+	// field existed, which read.go treats identically to KernelSource=="pypi").
+	// Written by install.sh when it installs the Python `lingtai` runtime from
+	// a pinned release-bundle artifact by explicit local file path, rather
+	// than from PyPI. See kernelSourceFromMetadata / the provenance gate in
+	// UpgradePythonRuntime below.
+	KernelSource   string `json:"kernel_source,omitempty"`   // "" | "pypi" | "bundle"
+	KernelBundleID string `json:"kernel_bundle_id,omitempty"` // e.g. "tui-v0.11.0" — the TUI bundle manifest's bundle_id
+	KernelVersion  string `json:"kernel_version,omitempty"`   // the pinned kernel version installed from the bundle
+	KernelProvider string `json:"kernel_provider,omitempty"`  // "github" | "gitee" — which provider served the bundle
 }
 
 type execCommandRunner struct{}
@@ -798,6 +809,29 @@ func isSourceInstallMetadata(meta tuiInstallMetadata) bool {
 	return meta.Schema == sourceInstallMetadataSchema &&
 		meta.SchemaVersion == 1 &&
 		meta.InstallMethod == "source"
+}
+
+func valueOrUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
+// kernelBundleProvenance reads install.json (if present) and reports whether
+// the Python `lingtai` runtime was provisioned by install.sh from a pinned
+// release-bundle artifact (kernel_source=="bundle") rather than a bare `pip
+// install lingtai` against PyPI. Missing install.json, an unparsable file, or
+// any kernel_source value other than "bundle" (including the empty string
+// legacy installs leave it at) all report false — the same fail-open-to-PyPI
+// default as before this field existed.
+func kernelBundleProvenance(globalDir string) (isBundle bool, meta tuiInstallMetadata) {
+	metaPath := filepath.Join(globalDir, "install.json")
+	meta, err := readTUIInstallMetadata(metaPath)
+	if err != nil {
+		return false, tuiInstallMetadata{}
+	}
+	return meta.KernelSource == "bundle", meta
 }
 
 func sourceMetadataMatchesExecutable(meta tuiInstallMetadata, exe string) bool {
@@ -1273,6 +1307,48 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 		return result
 	}
 
+	// Bundle-provenance gate: install.sh's Gitee/GitHub bundle path installs
+	// the Python `lingtai` runtime from a pinned, checksum-verified release
+	// artifact by explicit local file path — LingTai is NEVER installed by
+	// requesting the package name "lingtai" from any index; there is no PyPI
+	// fallback for it (RELEASING.md; see install.sh's
+	// install_kernel_from_bundle). This gate applies to BOTH a routine
+	// upgrade AND a forced one (doctor/`/update --force`): "force" means
+	// "run the upgrade check even if we'd otherwise skip it as up to date,"
+	// not "abandon the compatibility pin and install an arbitrary version
+	// from a package index." A forced check on a bundle-provisioned runtime
+	// reports that the kernel is pinned to the TUI bundle and points at the
+	// bundle-update path (re-run the one-command installer / `--update`)
+	// instead of running any PyPI query or install — unlike the editable-
+	// install gate above, this is not "same behavior, force or not" by
+	// accident; it is the explicit fix for a real defect where force used to
+	// fall through to PyPI here.
+	if isBundle, bundleMeta := kernelBundleProvenance(globalDir); isBundle {
+		if force {
+			result.add(DoctorOK,
+				"Python lingtai is pinned to release bundle %s (kernel %s via %s); a forced update does not override this pin. Re-run the one-command installer (or its --update path) to move to a newer bundle.",
+				valueOrUnknown(bundleMeta.KernelBundleID), valueOrUnknown(bundleMeta.KernelVersion), valueOrUnknown(bundleMeta.KernelProvider))
+		} else {
+			result.add(DoctorOK,
+				"Python lingtai was installed from a pinned release bundle (%s, kernel %s via %s); skipping PyPI upgrade.",
+				valueOrUnknown(bundleMeta.KernelBundleID), valueOrUnknown(bundleMeta.KernelVersion), valueOrUnknown(bundleMeta.KernelProvider))
+		}
+		writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+		return result
+	}
+
+	// Legacy PyPI-compare/upgrade path: reached only for a runtime that is
+	// neither an editable dev install nor bundle-provisioned (no
+	// kernel_source metadata at all — installs that predate install.sh's
+	// bundle path, or that were never upgraded through it). This is
+	// pre-existing migration behavior, kept minimal and unchanged rather than
+	// retracted here: doing so is out of scope for this fix, and PyPI is not
+	// being newly introduced as a source for LingTai by keeping it. It is
+	// NOT the product's canonical install path going forward — every new
+	// install goes through install.sh's mandatory bundle path (RELEASING.md)
+	// and is never reached here (see the bundle-provenance gate above). A
+	// legacy runtime naturally migrates to kernel_source=="bundle" bookkeeping
+	// the next time a human re-runs the one-command installer.
 	latest, err := fetchLatestPyPIVersion(opts.HTTPClient)
 	if err != nil {
 		result.add(DoctorWarn, "Could not check latest Python lingtai on PyPI: %v", err)

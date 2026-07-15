@@ -87,6 +87,181 @@ jobs:
             gh release create "$TAG" --title "$TAG" --notes "Release $TAG"
           gh release upload "$TAG" "$ASSET" "${ASSET}.sha256" --clobber
 
+  # Serial by design: waits for every release-assets matrix leg so it only ever
+  # references archives that are already uploaded — it never independently
+  # rebuilds or re-resolves "latest" for either TUI or kernel. This is what
+  # binds one TUI tag to one exact, repo-pinned kernel release (kernel-release.json)
+  # so the installer can never combine incompatible TUI/kernel versions.
+  publish-bundle:
+    needs: release-assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # sync_gitee_mirror.sh needs the release commit's full history
+          # reachable to push it as a fast-forward; a shallow checkout (the
+          # actions/checkout@v4 default) would break that.
+          fetch-depth: 0
+
+      - name: Read repo-owned kernel pin
+        id: pin
+        run: |
+          set -euo pipefail
+          tag="$(python3 -c 'import json; print(json.load(open("kernel-release.json"))["kernel_tag"])')"
+          echo "kernel_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned kernel release manifest (fail loud if incoherent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_TAG: ${{ steps.pin.outputs.kernel_tag }}
+        run: |
+          set -euo pipefail
+          echo "Verifying kernel release $KERNEL_TAG exists on Lingtai-AI/lingtai-kernel and carries a release manifest..."
+          if ! gh release view "$KERNEL_TAG" --repo Lingtai-AI/lingtai-kernel >/dev/null 2>&1; then
+            echo "error: pinned kernel release $KERNEL_TAG does not exist on Lingtai-AI/lingtai-kernel." >&2
+            echo "       kernel-release.json pins a kernel tag that has not been published yet." >&2
+            echo "       This is a fail-loud stop: publish-bundle refuses to ship a half-bundle." >&2
+            exit 1
+          fi
+          gh release download "$KERNEL_TAG" --repo Lingtai-AI/lingtai-kernel \
+            --pattern 'lingtai-kernel-release-manifest.json' --output kernel-release-manifest.json
+          KERNEL_TAG="$KERNEL_TAG" python3 - <<'PY'
+          import json
+          import os
+
+          expected_tag = os.environ["KERNEL_TAG"]
+          data = json.load(open("kernel-release-manifest.json"))
+          assert data["schema"] == "lingtai.kernel.release/v1", data.get("schema")
+          assert data["kernel_tag"] == expected_tag, (data["kernel_tag"], expected_tag)
+          assert data["artifacts"], "kernel manifest has no artifacts"
+          print(f"kernel manifest OK: {data['kernel_tag']} ({data['commit'][:12]}), {len(data['artifacts'])} artifact(s)")
+          PY
+
+      - name: Download release archives (exact bytes already uploaded)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # gh release download pulls the exact bytes+sidecars that
+          # release-assets already uploaded — this job never rebuilds them.
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "lingtai-${TAG}-*.tar.gz*" --dir bundle-archives
+
+      - name: Build TUI bundle manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          KERNEL_TAG: ${{ steps.pin.outputs.kernel_tag }}
+          COMMIT: ${{ github.sha }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import hashlib
+          from pathlib import Path
+
+          tag = os.environ["TAG"]
+          kernel_tag = os.environ["KERNEL_TAG"]
+          commit = os.environ["COMMIT"]
+          github_repo = os.environ["GITHUB_REPO"]
+
+          kernel_manifest = json.loads(Path("kernel-release-manifest.json").read_text())
+          kernel_version = kernel_manifest["kernel_version"]
+
+          archives_dir = Path("bundle-archives")
+          archives = []
+          for archive_path in sorted(archives_dir.glob(f"lingtai-{tag}-*.tar.gz")):
+              sha_path = archive_path.with_name(archive_path.name + ".sha256")
+              recorded_sha = sha_path.read_text().split()[0]
+              actual_sha = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+              assert actual_sha == recorded_sha, (
+                  f"{archive_path.name}: sidecar sha256 {recorded_sha} != "
+                  f"actual {actual_sha}"
+              )
+              archives.append({"filename": archive_path.name, "sha256": actual_sha})
+
+          assert archives, f"no lingtai-{tag}-*.tar.gz archives found in {archives_dir}"
+
+          manifest = {
+              "schema": "lingtai.tui.bundle/v1",
+              "bundle_id": tag,
+              "tui_tag": tag,
+              "tui_commit": commit,
+              "generated_at": __import__("datetime").datetime.now(
+                  __import__("datetime").timezone.utc
+              ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "kernel_tag": kernel_tag,
+              "kernel_version": kernel_version,
+              "kernel_manifest_filename": "lingtai-kernel-release-manifest.json",
+              "archives": archives,
+              "providers": {
+                  "github": {"repo": github_repo},
+                  "gitee": {"owner": "huangzesen1997", "repo": "lingtai"},
+              },
+          }
+          Path("lingtai-bundle-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Upload bundle manifest to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" lingtai-bundle-manifest.json --clobber
+
+      - name: Assemble bundle directory for Gitee publish
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p gitee-bundle
+          cp lingtai-bundle-manifest.json gitee-bundle/
+          cp bundle-archives/lingtai-"${TAG}"-*.tar.gz* gitee-bundle/
+
+      - name: Non-force synchronize the exact commit/tag to Gitee
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Skips cleanly (exit 0, prints why) when GITEE_ACCESS_TOKEN is
+          # unset — see sync_gitee_mirror.sh. Every push is non-force; a
+          # divergence/existing-tag conflict fails this step loud rather
+          # than silently overwriting the mirror. This IS the tag-push
+          # release path (release.yml only triggers on `v*` tag pushes), so
+          # it always runs --execute when the token is configured.
+          ./scripts/sync_gitee_mirror.sh \
+            --commit "${{ github.sha }}" \
+            --tag "$TAG" \
+            --branch main \
+            --execute
+
+      - name: Publish bundle to Gitee (real publish when GITEE_ACCESS_TOKEN is set)
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # This job runs only on a real `v*` tag push (release.yml's only
+          # trigger) — it IS the authorized release action, not a
+          # shape-check. publish_bundle_to_gitee.sh skips the Gitee leg
+          # internally (prints why, exits 0) when GITEE_ACCESS_TOKEN is
+          # unset; when it IS set, this publishes for real. Idempotent
+          # (skips already-attached same-name assets) and never
+          # force-syncs/deletes.
+          if [[ -n "${GITEE_ACCESS_TOKEN:-}" ]]; then
+            ./scripts/publish_bundle_to_gitee.sh --tag "$TAG" --bundle-dir gitee-bundle --execute
+          else
+            echo "GITEE_ACCESS_TOKEN is not set; running the publish plan in dry-run mode only."
+            ./scripts/publish_bundle_to_gitee.sh --tag "$TAG" --bundle-dir gitee-bundle
+          fi
+
   update-homebrew:
     runs-on: ubuntu-latest
     steps:
