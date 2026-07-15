@@ -28,6 +28,22 @@ func TestLauncherHandoffProjectIncludesSuccessfulCreate(t *testing.T) {
 	}
 }
 
+func TestNoProjectProgramRetainsWindowSizeBeforeHandoff(t *testing.T) {
+	m := noProjectProgramModel{
+		launcher: tui.NewLauncherRootModel(t.TempDir(), t.TempDir(), ""),
+	}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 123, Height: 45})
+	got := updated.(noProjectProgramModel)
+	if got.width != 123 || got.height != 45 {
+		t.Fatalf("root size = %dx%d, want 123x45", got.width, got.height)
+	}
+	got.loading = true
+	content := got.View().Content
+	if lines := strings.Count(content, "\n") + 1; lines != 45 {
+		t.Fatalf("loading page height = %d, want retained 45", lines)
+	}
+}
+
 func TestNoProjectProgramLoadingUsesActiveThemePagePalette(t *testing.T) {
 	original := tui.ActiveTheme()
 	t.Cleanup(func() { tui.SetTheme(original) })

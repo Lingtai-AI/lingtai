@@ -206,10 +206,13 @@ func launcherHandoffProject(result tui.LauncherResult) (string, bool) {
 func (m noProjectProgramModel) Init() tea.Cmd { return m.launcher.Init() }
 
 func (m noProjectProgramModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Window size belongs to the root program across Launcher -> Loading -> App.
+	// Bubble Tea does not resend it merely because this model changes phase.
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = size.Width, size.Height
+	}
 	if m.loading {
 		switch msg := msg.(type) {
-		case tea.WindowSizeMsg:
-			m.width, m.height = msg.Width, msg.Height
 		case startupReadyMsg:
 			if m.cancelRequested {
 				m.loading = false
