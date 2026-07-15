@@ -128,9 +128,9 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `SessionPersistenceRole` / `SessionCache` | `tui/internal/fs/session.go:123-164` | separates the sole `MainAggregateWriter` from `NoPersist`, independently of mutex-protected replay-window completeness and offsets |
 | `NewSessionCache` | `tui/internal/fs/session.go:174-190` | pure in-memory construction with an explicit persistence role; creates no file or directory |
 | `RebuildFromSources` / `RebuildFromSourcesInMemory` | `tui/internal/fs/session.go:192-204` | authoritative full ingest; write-through requests still pass through the cache's persistence role |
-| `RebuildFromSourcesWindowedInMemory` / `Complete` / `ExactHistoryStats` | `tui/internal/fs/session.go:206-230`, `tui/internal/fs/session.go:417-428` | bounded newest-content ingest plus a separately invoked exact metadata count for the captured canonical JSONL source/horizon; completeness prevents partial-file truncation but does not grant write authority |
-| `Persist` / `rewriteFile` / `append` | `tui/internal/fs/session.go:311-378` | both write primitives enforce `MainAggregateWriter`; bounded caches independently remain memory-only until complete |
-| `Refresh` | `tui/internal/fs/session.go:2244-2252` | incremental poll from each source's last complete consumed record; `NoPersist` caches update memory without appending the shared aggregate |
+| `RebuildFromSourcesWindowedInMemory` / `Complete` / `ExactHistoryStats` | `tui/internal/fs/session.go:206-230`, `tui/internal/fs/session.go:293-300`, `tui/internal/fs/session.go:485-497` | bounded newest-content ingest plus a separately invoked exact metadata count for the captured canonical JSONL source/horizon; completeness prevents partial-file truncation but does not grant write authority |
+| `Persist` / `rewriteFile` / `append` | `tui/internal/fs/session.go:381-447` | both write primitives enforce `MainAggregateWriter`; bounded caches independently remain memory-only until complete |
+| `Refresh` | `tui/internal/fs/session.go:2374-2382` | incremental poll from each source's last complete consumed record; `NoPersist` caches update memory without appending the shared aggregate |
 | **project_hash.go** | | |
 | `ProjectHash(projectPath)` | `tui/internal/fs/project_hash.go:9` | SHA-256 first 12 hex chars — used as the registry key for each project |
 | **contacts.go** | | |
@@ -148,7 +148,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 - **Called by `tui/internal/inventory/`** — running-agent inventory enriches process rows with `.agent.json`, heartbeat, status PID, lock, admin, IM identity, and orchestrator-role metadata.
 - **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/log.sqlite` (molt/session-boundary and diagnostic indexes, never canonical session replay authority), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
-- **Writes human-owned/derived state** — local `WriteMail` writes recipient inbox + sender sent, or `human/mailbox/outbox/<mailbox-id>/` for pseudo-agent sends; remote addresses fail before any mailbox write. Only a complete `MainAggregateWriter` changes `human/logs/session.jsonl` (`tui/internal/fs/session.go:311-378`); `RailUnreadStore` atomically writes `.tui-asset/rail-last-seen.json` (`tui/internal/fs/rail_unread.go:192-205`).
+- **Writes human-owned/derived state** — local `WriteMail` writes recipient inbox + sender sent, or `human/mailbox/outbox/<mailbox-id>/` for pseudo-agent sends; remote addresses fail before any mailbox write. Only a complete `MainAggregateWriter` changes `human/logs/session.jsonl` (`tui/internal/fs/session.go:381-447`); `RailUnreadStore` atomically writes `.tui-asset/rail-last-seen.json` (`tui/internal/fs/rail_unread.go:218-234`).
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
 
 ## Composition
