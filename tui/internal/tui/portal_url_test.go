@@ -33,7 +33,7 @@ func TestHelperFakePortal(t *testing.T) {
 // current test binary in TestHelperFakePortal mode. On Unix the wrapper records
 // its own pid before exec so race-instrumented Go startup cannot be killed before
 // the assertion has a pid to inspect. Exec preserves that pid — the same pid
-// portalURL() sees via cmd.Process.Pid and the helper later records to pidFile.
+// portalURL() sees via cmd.Process.Pid. Only Windows asks the helper to write it.
 func writeFakePortal(t *testing.T, dir, pidFile string) {
 	t.Helper()
 	self, err := os.Executable()
@@ -52,7 +52,6 @@ func writeFakePortal(t *testing.T, dir, pidFile string) {
 		script = "#!/bin/sh\n" +
 			"printf '%s' \"$$\" > " + shellQuote(pidFile) + "\n" +
 			"exec env GO_WANT_FAKE_PORTAL=1 " +
-			"GO_FAKE_PORTAL_PID_FILE=" + shellQuote(pidFile) + " " +
 			shellQuote(self) + " -test.run=TestHelperFakePortal\n"
 	}
 	path := filepath.Join(dir, name)
@@ -97,9 +96,10 @@ func TestPortalURLTimeoutKillsChild(t *testing.T) {
 	writeFakePortal(t, binDir, pidFile)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	// Shrink the timeout so the test is fast.
+	// Keep the timeout short while leaving enough startup margin for the
+	// race-instrumented re-exec to run the wrapper before it is killed.
 	oldTimeout, oldPoll := portalReadyTimeout, portalReadyPoll
-	portalReadyTimeout = 400 * time.Millisecond
+	portalReadyTimeout = 2 * time.Second
 	portalReadyPoll = 50 * time.Millisecond
 	t.Cleanup(func() {
 		portalReadyTimeout, portalReadyPoll = oldTimeout, oldPoll
