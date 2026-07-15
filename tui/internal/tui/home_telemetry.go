@@ -145,8 +145,9 @@ func (m *MailModel) applyHomeTelemetry(t homeTelemetry, now time.Time) (visibili
 // gatherHomeTelemetry resolves the telemetry scalars for the orchestrator agent
 // from data the TUI already reads elsewhere:
 //   - current-session token/cache/api stats from logs/token_ledger.jsonl bounded
-//     to the current molt window (fs.SumMoltSessionTokenLedger().Current) — the
-//     SAME source and scope as the molt-session stats panel in props.go
+//     to the canonical events.jsonl molt window
+//     (fs.SumMoltSessionTokenLedgerFromEvents().Current); unlike the detail view,
+//     this once-per-second worker never invokes the SQLite compatibility path
 //   - contextUsage + contextLimit from the live `.status.json` snapshot
 //     (fs.ReadStatus().Tokens.Context) — the SAME source, scope, and gate
 //     (WindowSize > 0) that /kanban's context section uses (props.go:518-535).
@@ -172,7 +173,7 @@ func (m *MailModel) applyHomeTelemetry(t homeTelemetry, now time.Time) (visibili
 func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 	t := homeTelemetry{contextUsage: -1}
 	if m.orchestrator != "" {
-		cur := fs.SumMoltSessionTokenLedger(m.orchestrator).Current
+		cur := fs.SumMoltSessionTokenLedgerFromEvents(m.orchestrator).Current
 		t.apiCalls = cur.APICalls
 		t.sessionTokens = cur.Input + cur.Output + cur.Thinking
 		t.cached = cur.Cached

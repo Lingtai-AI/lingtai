@@ -3,6 +3,7 @@ package fs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,6 +88,54 @@ func TestCanonicalMoltSessionWindowsRetriesPartialTailAndRecoversTruncation(t *t
 	}
 	current, last, before, ok = canonicalMoltSessionWindows(eventsPath)
 	assertMoltWindow(t, current, last, before, ok, 4000, 0)
+}
+
+func TestCanonicalMoltSessionWindowsRecoversSameInodeTruncateAndRegrow(t *testing.T) {
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	initial := `{"type":"psyche_molt","ts":1000}` + "\n" +
+		`{"type":"tool_call","ts":1001,"text":"` + strings.Repeat("x", 512) + `"}` + "\n" +
+		`{"type":"psyche_molt","ts":2000}` + "\n"
+	if err := os.WriteFile(eventsPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	beforeInfo, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	current, last, before, ok := canonicalMoltSessionWindows(eventsPath)
+	assertMoltWindow(t, current, last, before, ok, 2000, 1000)
+
+	// A writer can truncate and regrow the same inode past the cached horizon
+	// between telemetry polls. The cache must recognize that the previous prefix
+	// changed rather than starting in the middle of the replacement history.
+	replacement := `{"type":"psyche_molt","ts":4000}` + "\n" +
+		`{"type":"psyche_molt","ts":5000}` + "\n" +
+		`{"type":"tool_call","ts":5001,"text":"` + strings.Repeat("y", len(initial)*2) + `"}` + "\n"
+	f, err := os.OpenFile(eventsPath, os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(replacement); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	afterInfo, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(beforeInfo, afterInfo) {
+		t.Fatal("fixture replaced the inode; want same-inode truncate and regrow")
+	}
+	if afterInfo.Size() <= beforeInfo.Size() {
+		t.Fatalf("replacement size = %d, want larger than cached size %d", afterInfo.Size(), beforeInfo.Size())
+	}
+
+	current, last, before, ok = canonicalMoltSessionWindows(eventsPath)
+	assertMoltWindow(t, current, last, before, ok, 5000, 4000)
 }
 
 func TestCanonicalMoltSessionWindowsAvailability(t *testing.T) {

@@ -18,12 +18,15 @@ import (
 // read on a slow volume.
 var canonicalMoltWindowCache sync.Map // map[clean events path]*canonicalMoltWindowCacheEntry
 
+const canonicalMoltWindowAnchorSize = 4096
+
 type canonicalMoltWindowCacheEntry struct {
 	mu sync.Mutex
 
-	info     os.FileInfo
-	fileSize int64
-	offset   int64
+	info         os.FileInfo
+	fileSize     int64
+	offset       int64
+	appendAnchor []byte
 
 	currentSince time.Time
 	lastSince    time.Time
@@ -51,10 +54,19 @@ func canonicalMoltSessionWindows(eventsPath string) (currentSince, lastSince, la
 		!os.SameFile(entry.info, info) ||
 		info.Size() < entry.fileSize ||
 		(info.Size() == entry.fileSize && !info.ModTime().Equal(entry.info.ModTime()))
+	if !restart && info.Size() > entry.fileSize && entry.offset > 0 {
+		// Size growth alone does not prove append: a writer may truncate and
+		// regrow the same inode past the prior horizon between polls. Verify a
+		// bounded byte anchor immediately before the completed offset before
+		// carrying cached boundaries into the suffix scan.
+		anchor, anchorErr := readCanonicalMoltWindowAnchor(path, entry.offset)
+		restart = anchorErr != nil || !bytes.Equal(anchor, entry.appendAnchor)
+	}
 	if restart {
 		entry.info = nil
 		entry.fileSize = 0
 		entry.offset = 0
+		entry.appendAnchor = nil
 		entry.currentSince = time.Time{}
 		entry.lastSince = time.Time{}
 		entry.lastBefore = time.Time{}
@@ -72,13 +84,43 @@ func canonicalMoltSessionWindows(eventsPath string) (currentSince, lastSince, la
 		return time.Time{}, time.Time{}, time.Time{}, false
 	}
 
+	appendAnchor, err := readCanonicalMoltWindowAnchor(path, next)
+	if err != nil {
+		return time.Time{}, time.Time{}, time.Time{}, false
+	}
 	entry.info = info
 	entry.fileSize = info.Size()
 	entry.offset = next
+	entry.appendAnchor = appendAnchor
 	entry.currentSince = current
 	entry.lastSince = last
 	entry.lastBefore = before
 	return current, last, before, true
+}
+
+// readCanonicalMoltWindowAnchor returns at most the final 4 KiB of the completed
+// prefix [0,end). Comparing this bounded anchor before a suffix scan distinguishes
+// ordinary append growth from a same-inode truncate-and-regrow without turning
+// every one-second telemetry refresh back into a full-history read.
+func readCanonicalMoltWindowAnchor(path string, end int64) ([]byte, error) {
+	if end <= 0 {
+		return nil, nil
+	}
+	start := end - canonicalMoltWindowAnchorSize
+	if start < 0 {
+		start = 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	anchor := make([]byte, end-start)
+	if _, err := io.ReadFull(io.NewSectionReader(f, start, end-start), anchor); err != nil {
+		return nil, err
+	}
+	return anchor, nil
 }
 
 // scanCanonicalMoltWindow reads exactly [start,end). Complete malformed JSONL

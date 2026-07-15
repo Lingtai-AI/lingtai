@@ -639,15 +639,14 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 
 // SumMoltSessionTokenLedger reads an agent's logs and sums non-daemon token
 // usage for the current molt session (since the latest psyche_molt event) and
-// the immediately previous session (the window before that latest molt).
+// the immediately previous session (the window before that latest molt). Detail
+// views retain a compatibility fallback for old directories whose canonical
+// event log is unavailable but whose derived SQLite sidecar remains.
 func SumMoltSessionTokenLedger(agentDir string) MoltSessionTokenStats {
 	logsDir := filepath.Join(agentDir, "logs")
 	ledgerPath := filepath.Join(logsDir, "token_ledger.jsonl")
 	currentSince, lastSince, lastBefore, ok := canonicalMoltSessionWindows(filepath.Join(logsDir, "events.jsonl"))
 	if !ok {
-		// Compatibility fallback for older/incomplete agent directories that only
-		// retained the derived SQLite sidecar. Normal live agents always use the
-		// canonical append-only event log above, so home telemetry never forks.
 		var err error
 		currentSince, lastSince, lastBefore, ok, err = sqlitelog.QueryMoltSessionWindows(agentDir)
 		if err != nil || !ok {
@@ -655,6 +654,20 @@ func SumMoltSessionTokenLedger(agentDir string) MoltSessionTokenStats {
 		}
 	}
 	return sumMoltSessionTokenLedgerBetween(ledgerPath, currentSince, lastSince, lastBefore)
+}
+
+// SumMoltSessionTokenLedgerFromEvents is the process-free variant for the
+// once-per-second home worker. It never consults the SQLite sidecar: without a
+// readable canonical event log, the session boundary is unknown and the home
+// telemetry fragment degrades to empty rather than forking or showing lifetime
+// ledger totals as the current session.
+func SumMoltSessionTokenLedgerFromEvents(agentDir string) MoltSessionTokenStats {
+	logsDir := filepath.Join(agentDir, "logs")
+	currentSince, lastSince, lastBefore, ok := canonicalMoltSessionWindows(filepath.Join(logsDir, "events.jsonl"))
+	if !ok {
+		return MoltSessionTokenStats{}
+	}
+	return sumMoltSessionTokenLedgerBetween(filepath.Join(logsDir, "token_ledger.jsonl"), currentSince, lastSince, lastBefore)
 }
 
 func sumMoltSessionTokenLedgerBetween(path string, currentSince, lastSince, lastBefore time.Time) MoltSessionTokenStats {
