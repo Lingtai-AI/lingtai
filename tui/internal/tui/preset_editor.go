@@ -330,6 +330,19 @@ type PresetEditorModel struct {
 	apiKey       string
 	apiKeySet    bool
 
+	// Model validity gate. Save (Ctrl+S / the Save button) must not
+	// commit until a real provider call against the EXACT current
+	// (provider, model, credential) tuple has succeeded — see commit()
+	// and checkModelValidityCmd. modelValidityGen increments on every
+	// check dispatched; modelValidityKey is a fingerprint of the tuple
+	// that produced modelValidityStatus, so a result for a since-changed
+	// tuple never counts as validating the current one. A late/stale
+	// modelValidityResultMsg (Generation mismatch) is dropped in Update.
+	modelValidity       modelValidityStatus
+	modelValidityDetail string
+	modelValidityGen    uint64
+	modelValidityKey    string
+
 	// Status
 	saveErr string
 }
@@ -404,6 +417,20 @@ func (m PresetEditorModel) Init() tea.Cmd { return nil }
 
 func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case modelValidityResultMsg:
+		// Drop results from an abandoned check: either a newer check has
+		// since been dispatched (Generation mismatch) or the tuple it
+		// was checking is no longer the current one.
+		if msg.Generation != m.modelValidityGen || m.currentValidityKey() != m.modelValidityKey {
+			return m, nil
+		}
+		m.modelValidity = msg.Status
+		m.modelValidityDetail = msg.Detail
+		if msg.Status == validityValid {
+			m.saveErr = ""
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -1229,6 +1256,27 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		m.saveErr = errs[0].Error()
 		return m, nil
 	}
+	// Real-availability gate: Save must not commit until a live provider
+	// call against the EXACT current (provider, model, credential) tuple
+	// has succeeded. If the tuple changed since the last check (or no
+	// check has run yet), kick one off now and block; if a check for
+	// this exact tuple is already in flight, stay blocked and let its
+	// result land via Update. This is deliberately re-checked on every
+	// Save attempt, not just once, since the user can revisit and edit
+	// again after an earlier successful save of a different tuple.
+	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity != validityValid {
+		if m.currentValidityKey() != m.modelValidityKey {
+			m, cmd := m.startModelValidityCheck()
+			m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
+			return m, cmd
+		}
+		if m.modelValidity == validityInvalid {
+			m.saveErr = i18n.T("preset_editor.model_validity_invalid_save")
+		} else {
+			m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
+		}
+		return m, nil
+	}
 	// Templates (built-ins) are starting points: the user picks one,
 	// edits it, and saves. The save always materializes a *new* file
 	// under an auto-generated name like `mimo-1` so the template stays
@@ -1267,6 +1315,43 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	return m, func() tea.Msg {
 		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}
+}
+
+// currentValidityKey fingerprints the (provider, model, credential)
+// tuple that determines whether a validity check result still applies.
+// Any field that changes what a real provider call would hit — provider,
+// model, the live API key buffer, base_url, api_compat, or (for codex)
+// the bound account — must be part of this fingerprint, or an edit to
+// one of those fields could keep stale validity="valid" state around.
+func (m PresetEditorModel) currentValidityKey() string {
+	llm := m.llmMap()
+	return strings.Join([]string{
+		asString(llm["provider"]),
+		asString(llm["model"]),
+		m.apiKey,
+		asString(llm["base_url"]),
+		asString(llm["api_compat"]),
+		asString(llm["codex_auth_path"]),
+	}, "\x00")
+}
+
+// startModelValidityCheck dispatches a fresh async validity check for
+// the current tuple, marking it "checking" and bumping the generation
+// counter so any earlier in-flight check's result is recognized as
+// stale and dropped in Update.
+func (m PresetEditorModel) startModelValidityCheck() (PresetEditorModel, tea.Cmd) {
+	llm := m.llmMap()
+	m.modelValidityGen++
+	m.modelValidityKey = m.currentValidityKey()
+	m.modelValidity = validityChecking
+	m.modelValidityDetail = ""
+	gen := m.modelValidityGen
+	provider := asString(llm["provider"])
+	model := asString(llm["model"])
+	apiKey := m.apiKey
+	baseURL := asString(llm["base_url"])
+	apiCompat := asString(llm["api_compat"])
+	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
 }
 
 // hasSemanticEdits reports whether the user changed any field whose
@@ -2090,6 +2175,9 @@ func (m PresetEditorModel) renderFooter() string {
 	if m.saveErr != "" {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + m.saveErr)
 	}
+	if line := m.modelValidityLine(); line != "" {
+		return line
+	}
 	switch m.mode {
 	case emInline:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
@@ -2233,6 +2321,30 @@ func (m PresetEditorModel) renderSaveButton() string {
 			Render(label)
 	}
 	return "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(label)
+}
+
+// modelValidityLine renders the pending/valid/invalid status of the last
+// (or in-flight) real-availability check for the current (provider,
+// model, credential) tuple. Empty when no check has ever run for this
+// tuple, so a freshly opened editor doesn't show a stale state before
+// the user has attempted to save.
+func (m PresetEditorModel) modelValidityLine() string {
+	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity == validityUnknown {
+		return ""
+	}
+	switch m.modelValidity {
+	case validityChecking:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  " + i18n.T("preset_editor.model_validity_checking"))
+	case validityValid:
+		return lipgloss.NewStyle().Foreground(ColorActive).Render("  " + i18n.T("preset_editor.model_validity_valid"))
+	case validityInvalid:
+		detail := m.modelValidityDetail
+		if detail == "" {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + i18n.T("preset_editor.model_validity_invalid"))
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + i18n.TF("preset_editor.model_validity_invalid_detail", detail))
+	}
+	return ""
 }
 
 // ───────────────────────────────────────────────────────────────────────────

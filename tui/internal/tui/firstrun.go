@@ -318,6 +318,19 @@ type FirstRunModel struct {
 	// ↑↓ moves between positions; the textarea is focused only at 0.
 	keyFieldIdx      int
 	selectedProvider string // provider of currently selected preset
+	// presetKeyValidity gates stepPresetKey's Next button. The preset's
+	// model was already checked against whatever key existed when
+	// stepEditPreset ran (see PresetEditorModel's own gate); but the
+	// human can then type/paste a DIFFERENT key on this step, which
+	// changes the (provider, model, credential) tuple and invalidates
+	// that earlier check. Next re-validates the exact tuple this step
+	// is about to commit before advancing. Mirrors PresetEditorModel's
+	// modelValidity/modelValidityGen/modelValidityKey trio — see
+	// model_validity.go.
+	presetKeyValidity       modelValidityStatus
+	presetKeyValidityDetail string
+	presetKeyValidityGen    uint64
+	presetKeyValidityKey    string
 	// presetEditor holds the dedicated preset-editor sub-model when the
 	// wizard is on stepEditPreset. The wizard delegates Update/View to
 	// this model and reacts to PresetEditorCommitMsg / CancelMsg.
@@ -990,6 +1003,27 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.principleInput.SetWidth(inputWidth)
 		m.soulFlowInput.SetWidth(inputWidth)
 		m.commentInput.SetWidth(inputWidth)
+		return m, nil
+
+	case modelValidityResultMsg:
+		// This message type is shared with the embedded PresetEditorModel
+		// (see model_validity.go). Route by step so each owner only sees
+		// results for checks it dispatched — stepEditPreset's checks
+		// belong to m.presetEditor; stepPresetKey's checks are handled
+		// here directly against presetKeyValidity*.
+		if m.step == stepEditPreset {
+			updated, cmd := m.presetEditor.Update(msg)
+			m.presetEditor = updated
+			return m, cmd
+		}
+		if msg.Generation != m.presetKeyValidityGen {
+			return m, nil
+		}
+		m.presetKeyValidity = msg.Status
+		m.presetKeyValidityDetail = msg.Detail
+		if msg.Status == validityValid {
+			m.message = ""
+		}
 		return m, nil
 
 	case PresetEditorCommitMsg:
@@ -1903,6 +1937,34 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if key == "" && m.clearDraftPendingAPIKey(envName) {
 					m.message = i18n.T("firstrun.preset_pick.draft_key_override_cleared")
 				}
+				if key == "" && m.existingKeys[envName] == "" {
+					return m, nil
+				}
+				effectiveKey := key
+				if effectiveKey == "" {
+					effectiveKey = m.existingKeys[envName]
+				}
+				// Real-availability gate: the key just typed/pasted here
+				// changes the (provider, model, credential) tuple that
+				// stepEditPreset validated earlier (that check ran
+				// against whatever key existed at the time, which may
+				// differ from this one). Re-check the exact tuple this
+				// step is about to persist before advancing — Next must
+				// not succeed on a stale or unverified credential.
+				validityKey := m.presetKeyValidityKeyFor(effectiveKey)
+				if validityKey != m.presetKeyValidityKey || m.presetKeyValidity != validityValid {
+					if validityKey != m.presetKeyValidityKey {
+						m, cmd := m.startPresetKeyValidityCheck(effectiveKey)
+						m.message = i18n.T("preset_editor.model_validity_pending_save")
+						return m, cmd
+					}
+					if m.presetKeyValidity == validityInvalid {
+						m.message = i18n.T("preset_editor.model_validity_invalid_save")
+					} else {
+						m.message = i18n.T("preset_editor.model_validity_pending_save")
+					}
+					return m, nil
+				}
 				if key != "" {
 					m.existingKeys[envName] = key
 					if m.draftMode {
@@ -1927,8 +1989,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 							return m, nil
 						}
 					}
-				} else if m.existingKeys[envName] == "" {
-					return m, nil
 				}
 				return m, m.enterCapabilities()
 			}
@@ -3015,6 +3075,13 @@ func (m FirstRunModel) View() string {
 		// Single textinput. The editor configured everything else.
 		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
 
+		if line := m.presetKeyValidityLine(); line != "" {
+			b.WriteString("  " + line + "\n\n")
+		}
+		if m.message != "" {
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(m.message) + "\n\n")
+		}
+
 		// Footer buttons: 0 = textarea, 1 = Back, 2 = Next.
 		var keyFocused wizardFooterButton
 		switch m.keyFieldIdx {
@@ -3737,6 +3804,64 @@ func (m FirstRunModel) currentPresetKeyEnv() string {
 	}
 	envName, _ := llmStringField(m.presets[m.cursor], "api_key_env")
 	return envName
+}
+
+// presetKeyValidityKeyFor fingerprints the (provider, model, credential)
+// tuple stepPresetKey is about to commit, so a fresh key typed here (or
+// a return to this step with a different current preset) is recognized
+// as invalidating any earlier check. Mirrors PresetEditorModel's
+// currentValidityKey — see model_validity.go.
+func (m FirstRunModel) presetKeyValidityKeyFor(apiKey string) string {
+	p := m.currentPreset()
+	provider, _ := llmStringField(p, "provider")
+	model, _ := llmStringField(p, "model")
+	baseURL, _ := llmStringField(p, "base_url")
+	apiCompat, _ := llmStringField(p, "api_compat")
+	return strings.Join([]string{provider, model, apiKey, baseURL, apiCompat}, "\x00")
+}
+
+// presetKeyValidityLine renders the pending/valid/invalid status of the
+// last (or in-flight) real-availability check for stepPresetKey's
+// current tuple. Empty when no check has run for the current textarea
+// contents, so the line doesn't show a stale state before Next is
+// pressed.
+func (m FirstRunModel) presetKeyValidityLine() string {
+	key := strings.TrimSpace(m.presetKeyInput.Value())
+	if key == "" {
+		key = m.existingKeys[m.currentPresetKeyEnv()]
+	}
+	if m.presetKeyValidityKeyFor(key) != m.presetKeyValidityKey || m.presetKeyValidity == validityUnknown {
+		return ""
+	}
+	switch m.presetKeyValidity {
+	case validityChecking:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(i18n.T("preset_editor.model_validity_checking"))
+	case validityValid:
+		return lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("preset_editor.model_validity_valid"))
+	case validityInvalid:
+		if m.presetKeyValidityDetail == "" {
+			return lipgloss.NewStyle().Foreground(ColorSuspended).Render(i18n.T("preset_editor.model_validity_invalid"))
+		}
+		return lipgloss.NewStyle().Foreground(ColorSuspended).Render(i18n.TF("preset_editor.model_validity_invalid_detail", m.presetKeyValidityDetail))
+	}
+	return ""
+}
+
+// startPresetKeyValidityCheck dispatches a fresh async validity check
+// for the tuple stepPresetKey is about to commit, using the same
+// checkModelValidityCmd/probeLLM machinery as PresetEditorModel.
+func (m FirstRunModel) startPresetKeyValidityCheck(apiKey string) (FirstRunModel, tea.Cmd) {
+	p := m.currentPreset()
+	provider, _ := llmStringField(p, "provider")
+	model, _ := llmStringField(p, "model")
+	baseURL, _ := llmStringField(p, "base_url")
+	apiCompat, _ := llmStringField(p, "api_compat")
+	m.presetKeyValidityGen++
+	m.presetKeyValidityKey = m.presetKeyValidityKeyFor(apiKey)
+	m.presetKeyValidity = validityChecking
+	m.presetKeyValidityDetail = ""
+	gen := m.presetKeyValidityGen
+	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
 }
 
 // llmStringField returns a string-typed field from a preset's

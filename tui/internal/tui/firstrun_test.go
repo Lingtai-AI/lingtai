@@ -816,6 +816,12 @@ func TestPresetKeyNext_SaveConfigErrorSurfacesAndDoesNotAdvance(t *testing.T) {
 		},
 		presetKeyInput: keyInput,
 	}
+	// Pre-seed the real-availability check as already-passed for this
+	// exact (provider, model, credential) tuple — this test exercises
+	// the save-config-error path downstream of the gate, not the gate
+	// itself (see TestPresetKeyNext_BlocksUntilModelValidated for that).
+	m.presetKeyValidity = validityValid
+	m.presetKeyValidityKey = m.presetKeyValidityKeyFor("sk-test-key")
 
 	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
