@@ -901,15 +901,15 @@ func skillsDefault() map[string]interface{} {
 	}
 }
 
-// openAICompatTextPreset builds the manifest shape shared by the
-// OpenAI-compatible, text-only providers (DeepSeek, Kimi, NVIDIA, ...):
+// openAICompatNoVisionPreset builds the manifest shape shared by
+// OpenAI-compatible built-ins that do not wire a vision capability:
 // an `api_compat: "openai"` LLM with an explicit base_url and a
 // key sourced from api_key_env, plus the default DuckDuckGo web_search
-// and skills capabilities. No vision/media capability — these endpoints
-// are text /chat/completions gateways. Providers that diverge from this
-// shape (vision, regional URLs, native adapters, OAuth) build their
-// Preset literally instead of calling this helper.
-func openAICompatTextPreset(name, summary, model, apiKeyEnv, baseURL string, tier string) Preset {
+// and skills capabilities. Some exact routes are text-only; Kimi Code is
+// evidence-qualified as multimodal, but its coding endpoint/model mapping
+// is not pinned tightly enough to expose built-in vision yet. Providers
+// with a verified direct vision route build their Preset literally instead.
+func openAICompatNoVisionPreset(name, summary, model, apiKeyEnv, baseURL string, tier string) Preset {
 	desc := PresetDescription{Summary: summary}
 	if tier != "" {
 		desc.Tier = tier
@@ -971,7 +971,6 @@ func zhipuPreset() Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"web_search": zp,
-				"vision":     zp,
 				"skills":     skillsDefault(),
 			},
 		},
@@ -980,11 +979,9 @@ func zhipuPreset() Preset {
 
 func mimoPreset() Preset {
 	// mimo-v2.5 is the sweet spot: 1M context, vision-capable, supports tool
-	// calls and thinking mode. Cheaper-but-text-only siblings (mimo-v2.5-pro,
-	// mimo-v2-flash) are documented in the xiaomi-mimo skill — users clone
-	// this preset to switch. Among the models the TUI exposes (v2.5, v2.5-pro,
-	// v2-flash), only v2.5 supports vision; pro/flash will 400 on image input.
-	// Vision uses the first-class MiMoVisionService (kernel: services/vision/mimo.py).
+	// calls and thinking mode. The current text-only sibling is mimo-v2.5-pro;
+	// retired V2 model IDs are not exposed by the TUI picker. Vision uses the
+	// first-class MiMoVisionService (kernel: services/vision/mimo.py).
 	mp := map[string]interface{}{
 		"provider": "mimo",
 		"model":    "mimo-v2.5",
@@ -1012,7 +1009,7 @@ func deepseekPreset() Preset {
 	// analysis (transcription, music critique), use the `listen` skill; for
 	// media creation, register the MiniMax-Media MCP server via the
 	// `mcp-manual` skill (kernel `mcp` capability).
-	return openAICompatTextPreset(
+	return openAICompatNoVisionPreset(
 		"deepseek",
 		"DeepSeek V4 Pro — OpenAI-compatible, 1M context window, tool calls",
 		"deepseek-v4-pro", "DEEPSEEK_API_KEY", "https://api.deepseek.com", "")
@@ -1022,6 +1019,10 @@ func geminiPreset() Preset {
 	// Gemini 3 Flash (Google) — multimodal model with native vision,
 	// tool calling, and streaming. Uses Google's own Gemini adapter in
 	// the kernel (not OpenAI-compat), so no base_url or api_compat.
+	gm := map[string]interface{}{
+		"provider":    "gemini",
+		"api_key_env": "GEMINI_API_KEY",
+	}
 	return Preset{
 		Name:        "gemini",
 		Description: PresetDescription{Summary: "Gemini 3 Flash — Google's multimodal model, tool calls, vision", Tier: "3"},
@@ -1036,6 +1037,7 @@ func geminiPreset() Preset {
 			// MCP server via `mcp-manual`.
 			"capabilities": map[string]interface{}{
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"vision":     gm,
 				"skills":     skillsDefault(),
 			},
 		},
@@ -1047,9 +1049,10 @@ func kimiPreset() Preset {
 	// Subscription-based (no per-token billing); model `kimi-for-coding`.
 	// Tool calling supported. The kernel auto-sets User-Agent
 	// "LingTai-Agent/1.0" for the `kimi` provider per Kimi's ToS — UA
-	// spoofing risks account suspension. Text-only — no media generation;
-	// use the `listen` skill for audio, `mcp-manual` for media creation.
-	return openAICompatTextPreset(
+	// spoofing risks account suspension. The model family has multimodal
+	// evidence, but the exact coding endpoint/model image-input mapping is not
+	// pinned tightly enough to wire a built-in vision capability yet.
+	return openAICompatNoVisionPreset(
 		"kimi",
 		"Kimi Code (Moonshot) — OpenAI-compatible, subscription-based, tool calling",
 		"kimi-for-coding", "KIMI_CODE_API_KEY", "https://api.kimi.com/coding/v1", "3")
@@ -1070,7 +1073,7 @@ func nvidiaPreset() Preset {
 	// NOTE: the kernel must register the "nvidia" provider with
 	// prompt_cache_key disabled — NVIDIA NIM rejects that OpenAI-only field
 	// with HTTP 400. See lingtai-kernel llm/_register.py.
-	return openAICompatTextPreset(
+	return openAICompatNoVisionPreset(
 		"nvidia",
 		"NVIDIA NIM — free OpenAI-compatible catalog (Llama, Qwen, Kimi, GPT-OSS, ...), tool calls",
 		"meta/llama-3.3-70b-instruct", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1", "")

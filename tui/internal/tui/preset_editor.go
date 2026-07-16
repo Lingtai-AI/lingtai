@@ -106,7 +106,7 @@ const (
 // via the kernel's expand_inherit logic.
 var capabilityProviderOptions = map[string][]string{
 	"web_search": {"duckduckgo", "minimax", "zhipu", "codex", "inherit"},
-	"vision":     {"inherit", "minimax", "zhipu", "mimo", "codex"},
+	"vision":     {"inherit", "minimax", "mimo", "gemini", "codex", "codex-pool"},
 }
 
 // providerModels maps a provider name to the canonical model lineup the
@@ -130,7 +130,7 @@ var providerModels = map[string][]string{
 		"MiniMax-M2",
 	},
 	"zhipu":    {"GLM-5.2", "GLM-5.1", "GLM-5-Turbo", "GLM-4.7", "GLM-4.5-Air"},
-	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-flash"},
+	"mimo":     {"mimo-v2.5", "mimo-v2.5-pro"},
 	"deepseek": {"deepseek-v4-pro", "deepseek-v4-flash"},
 	// NVIDIA NIM catalog IDs (build.nvidia.com) served on the free tier.
 	// Default flagship first; the rest are popular open-weight options.
@@ -192,16 +192,16 @@ var modelHasVision = map[string]bool{
 	"MiniMax-M2.1":           false,
 	"MiniMax-M2.1-highspeed": false,
 	"MiniMax-M2":             false,
-	// Zhipu coding-plan models — current generation supports vision.
-	"GLM-5.2":     true,
-	"GLM-5.1":     true,
-	"GLM-5-Turbo": true,
-	"GLM-4.7":     true,
-	"GLM-4.5-Air": true,
-	// Mimo: among the picker's models, only mimo-v2.5 accepts images.
+	// Zhipu coding-plan LLMs are text-only. Vision uses the separate GLM-4.6V
+	// model through the optional, manually registered official MCP server.
+	"GLM-5.2":     false,
+	"GLM-5.1":     false,
+	"GLM-5-Turbo": false,
+	"GLM-4.7":     false,
+	"GLM-4.5-Air": false,
+	// MiMo: the default accepts images; the current pro sibling is text-only.
 	"mimo-v2.5":     true,
 	"mimo-v2.5-pro": false,
-	"mimo-v2-flash": false,
 	// DeepSeek: text-only across the board.
 	"deepseek-v4-pro":   false,
 	"deepseek-v4-flash": false,
@@ -639,8 +639,12 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.input.Focus()
 			m.mode = emInline
 		}
-	case feServiceTier, feThinking:
+	case feServiceTier:
 		if m.isCodexProvider() {
+			m.cycleFocused(+1)
+		}
+	case feThinking:
+		if m.hasCodexThinking() {
 			m.cycleFocused(+1)
 		}
 	case feTier:
@@ -793,8 +797,15 @@ func (m *PresetEditorModel) cycleCapProvider(name string, dir int) {
 		return
 	}
 	cur, _ := cfg["provider"].(string)
-	cfg["provider"] = cycleString(opts, cur, dir)
-	caps[name] = cfg
+	next := cycleString(opts, cur, dir)
+	if next == cur {
+		return
+	}
+	// Provider-specific model, endpoint, credential, protocol, and header
+	// fields cannot be carried across a provider change. Keep only the
+	// explicit new provider so the runtime fails closed instead of pairing
+	// it with another provider's identity.
+	caps[name] = map[string]interface{}{"provider": next}
 }
 
 // capsMap returns manifest.capabilities, allocating it if missing.
@@ -880,6 +891,14 @@ func (m *PresetEditorModel) applyInline(val string) {
 
 func (m PresetEditorModel) isCodexProvider() bool {
 	return asString(m.llmMap()["provider"]) == "codex"
+}
+
+func isCodexThinkingProvider(provider string) bool {
+	return provider == "codex" || provider == "codex-pool" || provider == "codex_pool"
+}
+
+func (m PresetEditorModel) hasCodexThinking() bool {
+	return isCodexThinkingProvider(asString(m.llmMap()["provider"]))
 }
 
 // isCustomOpenAI reports whether the working preset is in the narrow scope
@@ -981,7 +1000,7 @@ func (m PresetEditorModel) codexThinking() string {
 
 func (m *PresetEditorModel) setCodexThinking(effort string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" {
+	if !isCodexThinkingProvider(asString(llm["provider"])) {
 		delete(llm, "thinking")
 		return
 	}
@@ -1011,7 +1030,7 @@ func normalizeThinking(manifest map[string]interface{}) {
 	if llm == nil {
 		return
 	}
-	if asString(llm["provider"]) != "codex" {
+	if !isCodexThinkingProvider(asString(llm["provider"])) {
 		delete(llm, "thinking")
 		return
 	}
@@ -1160,7 +1179,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			m.setCodexServiceTier(cycleString(codexServiceTierOptions, m.codexServiceTier(), dir))
 		}
 	case feThinking:
-		if m.isCodexProvider() {
+		if m.hasCodexThinking() {
 			m.setCodexThinking(cycleString(codexThinkingOptions, m.codexThinking(), dir))
 		}
 	case feAPIKey:
@@ -1674,9 +1693,10 @@ func (m PresetEditorModel) capRow(f editorField, name string, width int) string 
 		keyCol = nameStyle.Width(15).Render(name)
 	}
 
-	// Inline provider strip for web_search.
+	// Inline provider strip for every multi-provider capability.
 	var detail string
-	if name == "web_search" && enabled && allowed {
+	_, hasProviderOptions := capabilityProviderOptions[name]
+	if hasProviderOptions && enabled && allowed {
 		detail = m.capProviderStrip(name, focused)
 	} else {
 		desc := i18n.T("firstrun.cap_desc." + name)
@@ -1772,7 +1792,7 @@ func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss
 }
 
 func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	if !m.isCodexProvider() {
+	if !m.hasCodexThinking() {
 		return ""
 	}
 	current := m.codexThinking()
@@ -1848,8 +1868,10 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 	switch f {
 	case feProvider, feAPICompat, feTier:
 		return true
-	case feServiceTier, feThinking:
+	case feServiceTier:
 		return m.isCodexProvider()
+	case feThinking:
+		return m.hasCodexThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
 	case feAPIKey:
@@ -1991,8 +2013,10 @@ func (m *PresetEditorModel) ensureFocusedVisible() {
 
 func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	switch f {
-	case feServiceTier, feThinking:
+	case feServiceTier:
 		return m.isCodexProvider()
+	case feThinking:
+		return m.hasCodexThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
 	default:

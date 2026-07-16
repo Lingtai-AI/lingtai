@@ -72,12 +72,40 @@ func testCodexPresetEditorPresetWithThinking(serviceTier interface{}, thinking i
 	}
 }
 
+func builtinPresetForEditorTest(t *testing.T, name string) preset.Preset {
+	t.Helper()
+	for _, p := range preset.BuiltinPresets() {
+		if p.Name == name {
+			return p
+		}
+	}
+	t.Fatalf("built-in preset %q not found", name)
+	return preset.Preset{}
+}
+
 func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if got := providerModels["zhipu"][0]; got != "GLM-5.2" {
 		t.Fatalf("zhipu default picker model = %q, want GLM-5.2", got)
 	}
 	if got := providerModels["deepseek"][0]; got != "deepseek-v4-pro" {
 		t.Fatalf("deepseek default picker model = %q, want deepseek-v4-pro", got)
+	}
+	wantMiMoModels := []string{"mimo-v2.5", "mimo-v2.5-pro"}
+	if got := providerModels["mimo"]; !reflect.DeepEqual(got, wantMiMoModels) {
+		t.Fatalf("mimo provider models = %#v, want %#v", got, wantMiMoModels)
+	}
+	if !modelHasVision["mimo-v2.5"] || modelHasVision["mimo-v2.5-pro"] {
+		t.Fatal("MiMo picker must keep native vision only for mimo-v2.5")
+	}
+	for _, provider := range capabilityProviderOptions["vision"] {
+		if provider == "zhipu" {
+			t.Fatal("vision provider picker must not expose the removed legacy Zhipu route")
+		}
+	}
+	for _, model := range providerModels["zhipu"] {
+		if modelHasVision[model] {
+			t.Fatalf("Zhipu coding-plan model %s must remain text-only; GLM-4.6V uses the optional manual MCP path", model)
+		}
 	}
 
 	wantCodexModels := []string{
@@ -94,6 +122,84 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 		if !modelHasVision[model] {
 			t.Fatalf("%s should be treated as vision-capable like the rest of the GPT-5.x Codex lineup", model)
 		}
+	}
+}
+
+func TestPresetEditorVisionProviderCyclePreservesOrResetsExactIdentity(t *testing.T) {
+	wantOptions := []string{"inherit", "minimax", "mimo", "gemini", "codex", "codex-pool"}
+	if got := capabilityProviderOptions["vision"]; !reflect.DeepEqual(got, wantOptions) {
+		t.Fatalf("vision provider options = %#v, want %#v", got, wantOptions)
+	}
+
+	tests := []struct {
+		name          string
+		current       string
+		next          string
+		currentKeyEnv string
+	}{
+		{name: "gemini", current: "gemini", next: "codex", currentKeyEnv: "GEMINI_API_KEY"},
+		{name: "codex-pool", current: "codex-pool", next: "inherit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := builtinPresetForEditorTest(t, tt.name)
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
+			if strip := m.capProviderStrip("vision", true); !strings.Contains(strip, "● "+tt.current) {
+				t.Fatalf("vision strip does not show current provider %q: %q", tt.current, strip)
+			}
+
+			_, unchangedCmd := m.commit()
+			unchanged := unchangedCmd().(PresetEditorCommitMsg)
+			unchangedCaps := unchanged.Preset.Manifest["capabilities"].(map[string]interface{})
+			unchangedVision := unchangedCaps["vision"].(map[string]interface{})
+			if got := unchangedVision["provider"]; got != tt.current {
+				t.Fatalf("ordinary clone changed vision provider: got %#v, want %q", got, tt.current)
+			}
+			if tt.currentKeyEnv != "" {
+				if got := unchangedVision["api_key_env"]; got != tt.currentKeyEnv {
+					t.Fatalf("ordinary clone changed current credential source: got %#v, want %q", got, tt.currentKeyEnv)
+				}
+			}
+
+			m.cycleCapProvider("vision", +1)
+			_, changedCmd := m.commit()
+			changed := changedCmd().(PresetEditorCommitMsg)
+			changedCaps := changed.Preset.Manifest["capabilities"].(map[string]interface{})
+			changedVision := changedCaps["vision"].(map[string]interface{})
+			if got := changedVision["provider"]; got != tt.next {
+				t.Fatalf("cycled vision provider = %#v, want %q", got, tt.next)
+			}
+			if len(changedVision) != 1 {
+				t.Fatalf("provider cycle retained incompatible identity fields: %#v", changedVision)
+			}
+		})
+	}
+}
+
+func TestPresetEditorCodexPoolThinkingIsEditableAndPreserved(t *testing.T) {
+	p := builtinPresetForEditorTest(t, "codex-pool")
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
+
+	if !m.fieldVisible(feThinking) {
+		t.Fatal("codex-pool thinking field must be visible")
+	}
+	if !m.isCyclable(feThinking) {
+		t.Fatal("codex-pool thinking field must be cyclable")
+	}
+
+	_, unchangedCmd := m.commit()
+	unchanged := unchangedCmd().(PresetEditorCommitMsg)
+	unchangedLLM := unchanged.Preset.Manifest["llm"].(map[string]interface{})
+	if got := unchangedLLM["thinking"]; got != "xhigh" {
+		t.Fatalf("ordinary codex-pool commit changed thinking: got %#v, want xhigh", got)
+	}
+
+	m.setCodexThinking("high")
+	_, changedCmd := m.commit()
+	changed := changedCmd().(PresetEditorCommitMsg)
+	changedLLM := changed.Preset.Manifest["llm"].(map[string]interface{})
+	if got := changedLLM["thinking"]; got != "high" {
+		t.Fatalf("codex-pool thinking edit was not preserved: got %#v, want high", got)
 	}
 }
 

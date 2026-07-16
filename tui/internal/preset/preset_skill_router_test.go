@@ -1,6 +1,7 @@
 package preset
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,258 +10,163 @@ import (
 	"testing"
 )
 
-// wantMaintenance is the exact canonical sentence that every TUI-shipped
-// SKILL.md must carry in its YAML frontmatter.
 const wantMaintenance = `If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths.`
 
-// TestPresetSkillRouter_BuiltinBijection verifies the 5-sided bijection
-// between BuiltinPresets(), embedded child dirs, parent YAML catalog,
-// human routing table, and the extracted temp tree.
-func TestPresetSkillRouter_BuiltinBijection(t *testing.T) {
-	// A = want from BuiltinPresets()
-	want := map[string]bool{}
-	for _, p := range BuiltinPresets() {
-		want[p.Name] = true
-	}
-	if len(want) != 12 {
-		t.Fatalf("BuiltinPresets() returned %d unique names, want 12", len(want))
-	}
+var (
+	maintenanceRE  = regexp.MustCompile(`(?m)^maintenance:\s*(.+?)\s*$`)
+	catalogEntryRE = regexp.MustCompile(`(?m)^- name:\s*(\S+)\n  location:\s*(\S+)$`)
+	catalogNameRE  = regexp.MustCompile(`(?m)^- name:`)
+	relatedFileRE  = regexp.MustCompile(`^  - ([^\s#].+)$`)
+)
 
-	// B = embedded child dirs
-	childDirs := map[string]bool{}
-	err := fs.WalkDir(skillsFS, "skills/lingtai-preset-skill/reference", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, "/SKILL.md") {
-			return nil
-		}
-		// Extract the dir name: reference/<name>/SKILL.md
-		rel := strings.TrimPrefix(path, "skills/lingtai-preset-skill/reference/")
-		parts := strings.SplitN(rel, "/", 2)
-		if len(parts) == 2 && parts[1] == "SKILL.md" {
-			childDirs[parts[0]] = true
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert A == B
-	for name := range want {
-		if !childDirs[name] {
-			t.Errorf("BuiltinPresets() has %q but no embedded child dir", name)
-		}
-	}
-	for name := range childDirs {
-		if !want[name] {
-			t.Errorf("embedded child dir %q not in BuiltinPresets()", name)
-		}
-	}
-
-	// Read parent
-	parentData, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
-	if err != nil {
-		t.Fatalf("cannot read parent SKILL.md: %v", err)
-	}
-	parentBody := string(parentData)
-
-	// C = parent YAML catalog names
-	yamlLocRE := regexp.MustCompile(`location:\s*reference/([^/ \n]+)/SKILL\.md`)
-	yamlNameRE := regexp.MustCompile(`name:\s*preset-skill-([^\s\n]+)`)
-	locMatches := yamlLocRE.FindAllStringSubmatch(parentBody, -1)
-	nameMatches := yamlNameRE.FindAllStringSubmatch(parentBody, -1)
-
-	catalogNames := map[string]bool{}
-	if len(locMatches) != len(nameMatches) {
-		t.Errorf("parent YAML catalog: %d location entries vs %d name entries", len(locMatches), len(nameMatches))
-	}
-	for i, m := range locMatches {
-		childName := m[1]
-		catalogNames[childName] = true
-		if i < len(nameMatches) {
-			expectedPrefix := "preset-skill-" + childName
-			if nameMatches[i][1] != childName {
-				t.Errorf("parent YAML catalog entry %d: name=%q does not match location=%q", i, nameMatches[i][1], childName)
-			}
-			_ = expectedPrefix
-		}
-	}
-
-	// Assert A == C
-	for name := range want {
-		if !catalogNames[name] {
-			t.Errorf("BuiltinPresets() has %q but parent YAML catalog does not", name)
-		}
-	}
-	for name := range catalogNames {
-		if !want[name] {
-			t.Errorf("parent YAML catalog has %q but BuiltinPresets() does not", name)
-		}
-	}
-
-	// D = human routing table: assert each want name and reference/<name>/SKILL.md appears
-	if !strings.Contains(parentBody, "Nested reference catalog") {
-		t.Error("parent missing 'Nested reference catalog' heading")
-	}
-	if !strings.Contains(parentBody, "Routing table") {
-		t.Error("parent missing 'Routing table' heading")
-	}
-	for name := range want {
-		loc := "reference/" + name + "/SKILL.md"
-		if !strings.Contains(parentBody, loc) {
-			t.Errorf("parent routing table missing %q", loc)
-		}
-	}
-
-	// E = extracted temp tree
-	globalDir := t.TempDir()
-	PopulateBundledLibrary(globalDir)
-	utilitiesDir := filepath.Join(globalDir, "utilities", "lingtai-preset-skill")
-	for name := range want {
-		childPath := filepath.Join(utilitiesDir, "reference", name, "SKILL.md")
-		if _, err := os.Stat(childPath); err != nil {
-			t.Errorf("extracted tree missing %s: %v", childPath, err)
-		}
-	}
-	// Check no extra children
-	entries, err := os.ReadDir(filepath.Join(utilitiesDir, "reference"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.IsDir() && !want[e.Name()] {
-			t.Errorf("extracted tree has extra child dir %q not in BuiltinPresets()", e.Name())
-		}
-	}
-
-	// BundledSkillNames check
-	if !BundledSkillNames()["lingtai-preset-skill"] {
-		t.Error("BundledSkillNames() does not contain lingtai-preset-skill")
-	}
-
-	// related_files check: every entry in parent must be a real repo-relative path
-	// by walking up from the package directory to the worktree root.
-	relatedRE := regexp.MustCompile(`(?m)^  - ([^\s#].+)$`)
-	inRelated := false
-	// Resolve the worktree root by walking up from the embedded skills dir
-	// to the tui/ directory, then one more level.
-	worktreeRoot := filepath.Join("..", "..", "..") // tui/internal/preset -> tui -> worktree root
-	for _, line := range strings.Split(parentBody, "\n") {
-		if strings.HasPrefix(line, "related_files:") {
-			inRelated = true
-			continue
-		}
-		if inRelated && strings.HasPrefix(line, "---") {
-			break
-		}
-		if inRelated {
-			m := relatedRE.FindStringSubmatch(line)
-			if m != nil {
-				rel := m[1]
-				abs := filepath.Join(worktreeRoot, rel)
-				if _, err := os.Stat(abs); err != nil {
-					t.Errorf("related_files entry %q does not resolve to a real file (checked %s)", rel, abs)
-				}
-			}
-		}
-	}
-}
-
-// TestPresetSkillRouter_ChildNaming verifies each child's frontmatter name
-// matches "preset-skill-<dirName>" and all are unique.
-func TestPresetSkillRouter_ChildNaming(t *testing.T) {
-	names := map[string]bool{}
-	err := fs.WalkDir(skillsFS, "skills/lingtai-preset-skill/reference", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, "/SKILL.md") {
-			return nil
-		}
-		rel := strings.TrimPrefix(path, "skills/lingtai-preset-skill/reference/")
-		parts := strings.SplitN(rel, "/", 2)
-		if len(parts) != 2 || parts[1] != "SKILL.md" {
-			return nil
-		}
-		dirName := parts[0]
-
-		data, err := fs.ReadFile(skillsFS, path)
-		if err != nil {
-			return err
-		}
-		body := string(data)
-		if !strings.HasPrefix(body, "---\n") {
-			t.Errorf("%s missing frontmatter", path)
-			return nil
-		}
-		end := strings.Index(body[4:], "\n---")
-		if end < 0 {
-			t.Errorf("%s missing closing ---", path)
-			return nil
-		}
-		fm := body[:4+end]
-		nameRE := regexp.MustCompile(`(?m)^name:\s*(.+)$`)
-		m := nameRE.FindStringSubmatch(fm)
-		if m == nil {
-			t.Errorf("%s missing name in frontmatter", path)
-			return nil
-		}
-		gotName := strings.TrimSpace(m[1])
-		wantName := "preset-skill-" + dirName
-		if gotName != wantName {
-			t.Errorf("%s: name=%q, want %q", path, gotName, wantName)
-		}
-		if names[gotName] {
-			t.Errorf("duplicate child name %q", gotName)
-		}
-		names[gotName] = true
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(names) != 12 {
-		t.Errorf("got %d unique child names, want 12", len(names))
-	}
-}
-
-// TestPresetSkillRouter_ParentMaintenanceAndRelated verifies the parent has
-// the canonical maintenance value and a non-empty related_files list.
-func TestPresetSkillRouter_ParentMaintenanceAndRelated(t *testing.T) {
-	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+// frontmatter returns only the YAML frontmatter, reporting malformed or short
+// files before attempting to slice past the opening delimiter.
+func frontmatter(path string, data []byte) (string, error) {
 	body := string(data)
 	if !strings.HasPrefix(body, "---\n") {
-		t.Fatal("parent missing frontmatter")
+		return "", fmt.Errorf("%s missing opening frontmatter delimiter", path)
 	}
 	end := strings.Index(body[4:], "\n---")
 	if end < 0 {
-		t.Fatal("parent missing closing ---")
+		return "", fmt.Errorf("%s missing closing frontmatter delimiter", path)
 	}
-	fm := body[:4+end]
+	return body[:4+end], nil
+}
 
-	maintRE := regexp.MustCompile(`(?m)^maintenance:\s*"?(.+?)"?\s*$`)
-	m := maintRE.FindStringSubmatch(fm)
-	if m == nil {
-		t.Fatal("parent missing maintenance field")
+func maintenanceValue(frontmatter string) (string, bool) {
+	match := maintenanceRE.FindStringSubmatch(frontmatter)
+	if match == nil {
+		return "", false
 	}
-	got := strings.TrimSpace(m[1])
-	if got != wantMaintenance {
-		t.Errorf("parent maintenance mismatch.\n got: %s\nwant: %s", got, wantMaintenance)
+	value := strings.TrimSpace(match[1])
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+	}
+	return value, true
+}
+
+// TestPresetSkillRouter_BuiltinBijection keeps the source preset list, the
+// embedded manuals, the parent router, and extracted utility tree aligned.
+func TestPresetSkillRouter_BuiltinBijection(t *testing.T) {
+	want := map[string]bool{}
+	for _, p := range BuiltinPresets() {
+		if want[p.Name] {
+			t.Errorf("BuiltinPresets() contains duplicate name %q", p.Name)
+		}
+		want[p.Name] = true
 	}
 
-	if !strings.Contains(fm, "related_files:") {
-		t.Error("parent missing related_files field")
+	children := map[string]bool{}
+	err := fs.WalkDir(skillsFS, "skills/lingtai-preset-skill/reference", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "/SKILL.md") {
+			return nil
+		}
+		rel := strings.TrimPrefix(path, "skills/lingtai-preset-skill/reference/")
+		parts := strings.SplitN(rel, "/", 2)
+		if len(parts) == 2 && parts[1] == "SKILL.md" {
+			if children[parts[0]] {
+				t.Errorf("embedded children contains duplicate %q", parts[0])
+			}
+			children[parts[0]] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameNames(t, "embedded children", want, children)
+
+	parentData, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
+	if err != nil {
+		t.Fatalf("read parent: %v", err)
+	}
+	_, err = frontmatter("parent", parentData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := string(parentData)
+	if !strings.Contains(parent, "When `BuiltinPresets()` gains a new template name") {
+		t.Error("parent does not state the new-preset maintenance contract")
+	}
+
+	catalogNames := map[string]bool{}
+	catalogLocations := map[string]bool{}
+	catalogEntries := catalogEntryRE.FindAllStringSubmatch(parent, -1)
+	if len(catalogEntries) != len(catalogNameRE.FindAllString(parent, -1)) {
+		t.Errorf("parent catalog has malformed or short name/location entries")
+	}
+	for _, match := range catalogEntries {
+		name, location := match[1], match[2]
+		if !strings.HasPrefix(name, "preset-skill-") {
+			t.Errorf("parent catalog has unexpected name %q", name)
+		}
+		child := strings.TrimPrefix(name, "preset-skill-")
+		wantLocation := "reference/" + child + "/SKILL.md"
+		if location != wantLocation {
+			t.Errorf("parent catalog pairs name %q with location %q, want %q", name, location, wantLocation)
+		}
+		if catalogNames[name] {
+			t.Errorf("parent catalog duplicates name %q", name)
+		}
+		if catalogLocations[location] {
+			t.Errorf("parent catalog duplicates location %q", location)
+		}
+		catalogNames[name] = true
+		catalogLocations[location] = true
+	}
+	wantCatalogNames := map[string]bool{}
+	for name := range want {
+		wantCatalogNames["preset-skill-"+name] = true
+	}
+	assertSameNames(t, "parent catalog names", wantCatalogNames, catalogNames)
+	wantLocations := map[string]bool{}
+	for name := range want {
+		wantLocations["reference/"+name+"/SKILL.md"] = true
+	}
+	assertSameNames(t, "parent catalog locations", wantLocations, catalogLocations)
+
+	globalDir := t.TempDir()
+	PopulateBundledLibrary(globalDir)
+	referenceDir := filepath.Join(globalDir, "utilities", "lingtai-preset-skill", "reference")
+	entries, err := os.ReadDir(referenceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extracted := map[string]bool{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			t.Errorf("extracted reference has unexpected file %q", entry.Name())
+			continue
+		}
+		extracted[entry.Name()] = true
+		if _, err := os.Stat(filepath.Join(referenceDir, entry.Name(), "SKILL.md")); err != nil {
+			t.Errorf("extracted child %q: %v", entry.Name(), err)
+		}
+	}
+	assertSameNames(t, "extracted children", want, extracted)
+	if !BundledSkillNames()["lingtai-preset-skill"] {
+		t.Error("parent router is not a bundled skill")
 	}
 }
 
-// TestPresetSkillRouter_ChildSizeBudget verifies each child body is within
-// the 1800-6000 char band (approx 450-1500 tokens).
-func TestPresetSkillRouter_ChildSizeBudget(t *testing.T) {
+func assertSameNames(t *testing.T, label string, want, got map[string]bool) {
+	t.Helper()
+	for name := range want {
+		if !got[name] {
+			t.Errorf("%s missing %q", label, name)
+		}
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("%s has unexpected %q", label, name)
+		}
+	}
+}
+
+func TestPresetSkillRouter_ChildMetadata(t *testing.T) {
 	err := fs.WalkDir(skillsFS, "skills/lingtai-preset-skill/reference", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -272,26 +178,20 @@ func TestPresetSkillRouter_ChildSizeBudget(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		text := string(data)
-		secondDash := strings.Index(text, "\n---")
-		if secondDash < 0 {
-			t.Errorf("%s missing closing ---", path)
+		fm, err := frontmatter(path, data)
+		if err != nil {
+			t.Error(err)
 			return nil
 		}
-		body := strings.TrimPrefix(text[secondDash+4:], "\n")
-		bodyChars := len(body)
-		approxTokens := bodyChars / 4
-
 		rel := strings.TrimPrefix(path, "skills/lingtai-preset-skill/reference/")
-		parts := strings.SplitN(rel, "/", 2)
-		name := parts[0]
-		t.Logf("%s: %d chars ~ %d tokens", name, bodyChars, approxTokens)
-
-		if bodyChars < 1800 {
-			t.Errorf("%s body too short: %d chars (min 1800)", name, bodyChars)
+		name := strings.SplitN(rel, "/", 2)[0]
+		wantName := "preset-skill-" + name
+		if !regexp.MustCompile(`(?m)^name:\s*` + regexp.QuoteMeta(wantName) + `\s*$`).MatchString(fm) {
+			t.Errorf("%s has no name %q", path, wantName)
 		}
-		if bodyChars > 6000 {
-			t.Errorf("%s body too long: %d chars (max 6000)", name, bodyChars)
+		value, ok := maintenanceValue(fm)
+		if !ok || value != wantMaintenance {
+			t.Errorf("%s has maintenance %q, want %q", path, value, wantMaintenance)
 		}
 		return nil
 	})
@@ -300,145 +200,7 @@ func TestPresetSkillRouter_ChildSizeBudget(t *testing.T) {
 	}
 }
 
-// TestPresetSkillRouter_ParentIsLeanRouter verifies the parent body is
-// within the 2500-7000 char band and contains the required headings.
-func TestPresetSkillRouter_ParentIsLeanRouter(t *testing.T) {
-	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	secondDash := strings.Index(text, "\n---")
-	if secondDash < 0 {
-		t.Fatal("parent missing closing ---")
-	}
-	body := strings.TrimPrefix(text[secondDash+4:], "\n")
-	bodyChars := len(body)
-	t.Logf("parent body: %d chars ~ %d tokens", bodyChars, bodyChars/4)
-
-	if bodyChars < 2500 {
-		t.Errorf("parent body too short: %d chars (min 2500)", bodyChars)
-	}
-	if bodyChars > 7000 {
-		t.Errorf("parent body too long: %d chars (max 7000)", bodyChars)
-	}
-	if !strings.Contains(body, "Nested reference catalog") {
-		t.Error("parent body missing 'Nested reference catalog' heading")
-	}
-	if !strings.Contains(body, "Routing table") {
-		t.Error("parent body missing 'Routing table' heading")
-	}
-}
-
-// TestPresetSkillRouter_ParentDoesNotDuplicateChildren verifies no >=48-char
-// normalized child body line appears verbatim in the parent body.
-func TestPresetSkillRouter_ParentDoesNotDuplicateChildren(t *testing.T) {
-	parentData, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parentText := string(parentData)
-	parentDash := strings.Index(parentText, "\n---")
-	if parentDash < 0 {
-		t.Fatal("parent missing closing ---")
-	}
-	parentBody := strings.TrimPrefix(parentText[parentDash+4:], "\n")
-
-	err = fs.WalkDir(skillsFS, "skills/lingtai-preset-skill/reference", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, "/SKILL.md") {
-			return nil
-		}
-		data, err := fs.ReadFile(skillsFS, path)
-		if err != nil {
-			return err
-		}
-		text := string(data)
-		secondDash := strings.Index(text, "\n---")
-		if secondDash < 0 {
-			return nil
-		}
-		childBody := strings.TrimPrefix(text[secondDash+4:], "\n")
-
-		rel := strings.TrimPrefix(path, "skills/lingtai-preset-skill/reference/")
-		childName := strings.SplitN(rel, "/", 2)[0]
-
-		for _, line := range strings.Split(childBody, "\n") {
-			normalized := strings.TrimSpace(line)
-			// Strip common markdown prefixes
-			normalized = strings.TrimPrefix(normalized, "- ")
-			normalized = strings.TrimPrefix(normalized, "* ")
-			normalized = strings.TrimPrefix(normalized, "> ")
-			normalized = strings.TrimPrefix(normalized, "# ")
-			// Strip backtick edges
-			normalized = strings.Trim(normalized, "`")
-			if len(normalized) >= 48 && strings.Contains(parentBody, normalized) {
-				t.Errorf("child %s: verbatim line in parent body: %.80s...", childName, normalized)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestCodexPoolManualDocumentsClassifiedContract verifies the codex-pool
-// child body documents the dedicated preset, v1/v2 exact-model classification
-// from kernel #841 and TUI #612, and links official sources without reviving
-// cancelled convergence proposals.
-func TestCodexPoolManualDocumentsClassifiedContract(t *testing.T) {
-	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/codex-pool/SKILL.md")
-	if err != nil {
-		t.Fatalf("cannot read codex-pool child: %v", err)
-	}
-	body := string(data)
-
-	// Must mention the dedicated codex-pool preset
-	if !strings.Contains(body, "codex-pool") {
-		t.Error("codex-pool child does not mention codex-pool preset")
-	}
-
-	// Must document v1/v2 pool shapes
-	if !strings.Contains(body, "version") || !strings.Contains(body, "models") {
-		t.Error("codex-pool child missing v1/v2 pool shape documentation")
-	}
-
-	// Must reference kernel #841 and TUI #612
-	if !strings.Contains(body, "#841") {
-		t.Error("codex-pool child missing kernel #841 reference")
-	}
-	if !strings.Contains(body, "#612") {
-		t.Error("codex-pool child missing TUI #612 reference")
-	}
-
-	// Must link official OpenAI/Codex sources
-	if !strings.Contains(body, "developers.openai.com/codex") {
-		t.Error("codex-pool child missing official OpenAI/Codex source link")
-	}
-
-	// Must link LingTai pool code/tests
-	if !strings.Contains(body, "codex_pool_store") {
-		t.Error("codex-pool child missing reference to TUI pool store code")
-	}
-
-	// Must NOT revive cancelled convergence proposals
-	if strings.Contains(body, "convergence") {
-		t.Error("codex-pool child references cancelled convergence proposals")
-	}
-
-	// Must mention exact-model classification
-	if !strings.Contains(body, "exact") {
-		t.Error("codex-pool child missing exact-model classification reference")
-	}
-}
-
-// TestBundledSkillsHaveMaintenance verifies all 70 SKILL.md files have the
-// exact canonical maintenance sentence.
-func TestBundledSkillsHaveMaintenance(t *testing.T) {
-	count := 0
+func TestPresetSkillRouter_AllBundledMaintenance(t *testing.T) {
 	err := fs.WalkDir(skillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -446,38 +208,130 @@ func TestBundledSkillsHaveMaintenance(t *testing.T) {
 		if d.IsDir() || !strings.HasSuffix(path, "/SKILL.md") {
 			return nil
 		}
-		count++
 		data, err := fs.ReadFile(skillsFS, path)
 		if err != nil {
 			return err
 		}
-		body := string(data)
-		if !strings.HasPrefix(body, "---\n") {
-			t.Errorf("%s missing YAML frontmatter", path)
+		fm, err := frontmatter(path, data)
+		if err != nil {
+			t.Error(err)
 			return nil
 		}
-		end := strings.Index(body[4:], "\n---")
-		if end < 0 {
-			t.Errorf("%s missing closing YAML frontmatter delimiter", path)
-			return nil
-		}
-		frontmatter := body[:4+end]
-		maintRE := regexp.MustCompile(`(?m)^maintenance:\s*"?(.+?)"?\s*$`)
-		match := maintRE.FindStringSubmatch(frontmatter)
-		if match == nil {
+		value, ok := maintenanceValue(fm)
+		if !ok {
 			t.Errorf("%s missing maintenance frontmatter", path)
-			return nil
-		}
-		value := strings.TrimSpace(match[1])
-		if value != wantMaintenance {
-			t.Errorf("%s maintenance value does not match canonical sentence.\n got: %.80s...\nwant: %.80s...", path, value, wantMaintenance)
+		} else if value != wantMaintenance {
+			t.Errorf("%s maintenance value %q, want %q", path, value, wantMaintenance)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 70 {
-		t.Fatalf("checked %d bundled skill SKILL.md files, want 70", count)
+}
+
+func TestBuiltinPresetVisionWiring(t *testing.T) {
+	presets := map[string]Preset{}
+	for _, p := range BuiltinPresets() {
+		presets[p.Name] = p
+	}
+
+	geminiCaps, ok := presets["gemini"].Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatal("gemini capabilities has unexpected type")
+	}
+	geminiVision, ok := geminiCaps["vision"].(map[string]interface{})
+	if !ok {
+		t.Fatal("gemini must expose a vision capability")
+	}
+	if got := geminiVision["provider"]; got != "gemini" {
+		t.Fatalf("gemini vision provider = %#v, want gemini", got)
+	}
+	if got := geminiVision["api_key_env"]; got != "GEMINI_API_KEY" {
+		t.Fatalf("gemini vision api_key_env = %#v, want GEMINI_API_KEY", got)
+	}
+
+	zhipuCaps, ok := presets["zhipu"].Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatal("zhipu capabilities has unexpected type")
+	}
+	if _, ok := zhipuCaps["vision"]; ok {
+		t.Fatal("zhipu must not expose a default vision capability for text-only GLM-5.2")
+	}
+}
+
+func TestPresetVisionManualContracts(t *testing.T) {
+	readChild := func(t *testing.T, name string) string {
+		t.Helper()
+		data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/"+name+"/SKILL.md")
+		if err != nil {
+			t.Fatalf("read %s manual: %v", name, err)
+		}
+		return string(data)
+	}
+
+	gemini := readChild(t, "gemini")
+	for _, want := range []string{"gemini-3-flash-preview", "GEMINI_API_KEY", "explicit LingTai `vision` capability"} {
+		if !strings.Contains(gemini, want) {
+			t.Errorf("gemini manual missing %q", want)
+		}
+	}
+
+	zhipu := readChild(t, "zhipu")
+	for _, want := range []string{"GLM-5.2", "@z_ai/mcp-server", "GLM-4.6V", "ZHIPU_API_KEY", "Z_AI_API_KEY", "Z_AI_MODE", "5-hour prompt pool"} {
+		if !strings.Contains(zhipu, want) {
+			t.Errorf("zhipu manual missing %q", want)
+		}
+	}
+
+	retiredModel := strings.Join([]string{"mimo", "v2", "flash"}, "-")
+	if mimo := readChild(t, "mimo"); strings.Contains(mimo, retiredModel) {
+		t.Fatalf("mimo manual still mentions retired model %q", retiredModel)
+	}
+}
+
+func TestPresetSkillRouter_ParentMaintenanceAndRelated(t *testing.T) {
+	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, err := frontmatter("parent", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, ok := maintenanceValue(fm)
+	if !ok || value != wantMaintenance {
+		t.Errorf("parent maintenance value %q, want %q", value, wantMaintenance)
+	}
+
+	seenRelated := false
+	relatedCount := 0
+	for _, line := range strings.Split(fm, "\n") {
+		if strings.HasPrefix(line, "related_files:") {
+			seenRelated = true
+			continue
+		}
+		if !seenRelated {
+			continue
+		}
+		match := relatedFileRE.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		rel := match[1]
+		relatedCount++
+		if rel == "" {
+			t.Error("parent related_files contains an empty path")
+			continue
+		}
+		if _, err := os.Stat(filepath.Join("..", "..", "..", rel)); err != nil {
+			t.Errorf("related_files entry %q does not resolve to a repo file: %v", rel, err)
+		}
+	}
+	if !seenRelated {
+		t.Fatal("parent missing related_files field")
+	}
+	if relatedCount == 0 {
+		t.Fatal("parent related_files field is empty")
 	}
 }

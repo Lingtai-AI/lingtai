@@ -1,68 +1,24 @@
 ---
 name: preset-skill-codex
-description: >
-  Nested lingtai-preset-skill reference for the `codex` built-in preset.
-  Read when verifying shipped identity, provider sources, and compatibility
-  facts for the `codex` template preset.
+description: Official-source-led manual for the TUI `codex` template.
 version: 1.0.0
-last_changed_at: "2026-07-10T10:00:00Z"
+last_changed_at: "2026-07-15T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
-# `codex` — built-in preset manual
+# `codex`
 
-Routes the agent through OpenAI's Codex backend using a ChatGPT account
-OAuth session, not a standard OpenAI API key.
+`codexPreset()` uses provider `codex`, model `gpt-5.6-sol`, the Codex endpoint
+`https://chatgpt.com/backend-api/codex`, and ChatGPT OAuth rather than an API
+key env-var. The manifest exposes provider-native `vision` and web search.
+Exact image support can depend on the current model/account; verify it rather
+than treating this manual as a promise.
 
-## When to read
+Read the official [Codex authentication](https://developers.openai.com/codex/auth)
+and [Codex models](https://developers.openai.com/codex/models) pages on demand.
+No separate Codex vision MCP is established. If the native route fails,
+report the failure and use this manual for discovery; do not fall back to a
+generic OpenAI key, switch providers, or auto-load/invoke an MCP.
 
-- Choosing or troubleshooting the single-account Codex preset.
-- Picking a model, binding an account, or distinguishing from `codex-pool`.
-
-## Shipped defaults (verify in TUI source)
-
-Source: `tui/internal/preset/preset.go:1100-1128`.
-
-| Field | Value |
-|---|---|
-| `name` | `codex` |
-| `llm.provider` | `codex` |
-| `llm.model` | `gpt-5.6-sol` |
-| `llm.base_url` | `https://chatgpt.com/backend-api/codex` |
-| `llm.thinking` | `xhigh` |
-| `llm.api_key_env` | `""` (OAuth only) |
-
-Model picker: `preset_editor.go:147-152`.
-
-## Use when / avoid when
-
-- **Use** when you want a single ChatGPT account to power a Codex agent.
-- **Avoid** when you need load-balancing across multiple accounts — use `codex-pool`.
-- **Avoid** when you want a standard OpenAI API key flow — this uses OAuth tokens.
-
-## Authentication
-
-Codex uses ChatGPT OAuth token files. The TUI writes these during first-run
-or Credentials setup.
-
-- Default token file: `~/.lingtai-tui/codex-auth.json`
-- Additional accounts: `~/.lingtai-tui/codex-auth/<slug>.json`
-- Bind specific account via `manifest.llm.codex_auth_path`.
-- Credential validity: judged by non-empty `refresh_token` in the bound file.
-
-Official docs: <https://developers.openai.com/codex/auth>.
-Official model catalog: <https://developers.openai.com/codex/models>.
-Reference implementation: <https://github.com/openai/codex>.
-
-## Operational caveats
-
-- Base URL ends in `/codex`; omitting it produces HTML/Cloudflare errors.
-- Token files are secret (mode `0600`); paths may appear in presets but
-  contents must never be logged or copied into reports.
-- Model availability depends on ChatGPT account tier and OpenAI rollout.
-
-## Maintenance checklist
-
-- **Provider-owned (refresh):** model names, availability, auth URLs from OpenAI.
-- **LingTai-owned (verify in source):** provider string, endpoint,
-  `codex_auth_path` behavior, OAuth token-file layout, capability wiring.
+Recheck the TUI preset source for model and capability changes. Never inspect,
+print, or reproduce OAuth token contents.
