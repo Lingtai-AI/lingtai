@@ -12,7 +12,9 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 empty until configured, the key slot is `LLM_API_KEY`, and the endpoint is
 user-supplied. Its `vision` capability inherits the configured LLM endpoint.
 Whether images work is therefore unknown until the actual provider, model,
-protocol, and endpoint are identified.
+protocol, and endpoint are identified. The vision tool still tries the current
+OpenAI-compatible endpoint, model, and credential by default instead of treating
+that uncertainty as setup-time manual-only.
 
 Read the configured endpoint’s official documentation on demand. Useful
 protocol references are the [OpenAI Chat API](https://platform.openai.com/docs/api-reference/chat),

@@ -11,15 +11,16 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 `openrouterPreset()` ships gateway model `z-ai/glm-5.1`, provider
 `openrouter`, a provider-resolved base URL, and `OPENROUTER_API_KEY`. The exact
 shipped slug is text-in/text-out, and the manifest has no `vision` capability.
-OpenRouter can accept images only after selecting a different downstream model
-that explicitly supports them; gateway-wide multimodality does not change this
-default.
+OpenRouter image support ultimately depends on the selected downstream model;
+gateway-wide multimodality does not prove that the current model supports images.
+The vision tool therefore tries the current endpoint, model, and credential over
+the OpenAI-compatible route by default instead of blocking on a preflight guess.
 
 Read the official [OpenRouter model guide](https://openrouter.ai/docs/guides/overview/models)
 and [image-understanding guide](https://openrouter.ai/docs/guides/overview/multimodal/image-understanding)
-on demand. No OpenRouter plan-level vision MCP is evidenced. If the current
-route cannot handle an image, report the unknown/unsupported case and let the
-agent choose an explicit skill; do not silently change model/provider or
-auto-load/invoke an MCP.
+on demand. No OpenRouter plan-level vision MCP is evidenced. If the real image
+request fails, the sanitized vision tool result reports the failure type and
+points to `vision(action="manual")` for explicit alternatives. Do not silently
+change model/provider or auto-load/invoke an MCP.
 
 Verify provider, model, endpoint resolution, and capability flags in TUI source.
