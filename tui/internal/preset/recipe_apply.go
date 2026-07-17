@@ -203,11 +203,8 @@ func RecipeNeedsApply(projectRoot string) bool {
 //     caller via the greetSubstitutor callback so this package stays free
 //     of TUI-only helpers.
 //   - Updates init.json:
-//   - comment_file / covenant_file / procedures_file fields in
-//     manifest.capabilities.{psyche, ...} (TODO: caller-specified
-//     structure — for v1 this function only handles skills.paths and
-//     .prompt; comment/covenant/procedures rewiring happens in the TUI
-//     layer that also owns init.json generation)
+//   - strips ignored legacy prompt-file fields when this additive
+//     skills-path rewrite serializes an existing document
 //   - manifest.capabilities.skills.paths gets "../../<library_name>"
 //     appended when the recipe declares a library (additive — existing
 //     entries are preserved, never removed)
@@ -338,6 +335,7 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 	if err := DecodeJSONUseNumber(data, &root); err != nil {
 		return fmt.Errorf("parse %s: %w", initJSONPath, err)
 	}
+	stripObsoleteInitFields(root)
 	manifest, ok := root["manifest"].(map[string]interface{})
 	if !ok {
 		return nil

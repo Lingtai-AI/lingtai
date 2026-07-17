@@ -86,6 +86,8 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 			return workersRehydrated, fmt.Errorf("parse orchestrator init.json: %w", err)
 		}
 
+		stripObsoleteInitFields(workerInit)
+
 		// Override manifest.agent_name and manifest.admin.
 		manifest, ok := workerInit["manifest"].(map[string]interface{})
 		if !ok {

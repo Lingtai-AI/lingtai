@@ -1550,8 +1550,6 @@ type AgentOpts struct {
 	Karma           bool     // lifecycle control over other agents
 	Nirvana         bool     // permanent agent destruction
 	CovenantFile    string   // path to covenant file
-	PrincipleFile   string   // path to principle file
-	ProceduresFile  string   // path to procedures file
 	SoulFile        string   // path to soul flow file
 	CommentFile     string   // path to comment file (optional)
 	Addons          []string // addon names to auto-populate in init.json (e.g. ["imap", "telegram"])
@@ -1656,6 +1654,15 @@ func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {
 	}
 }
 
+// stripObsoleteInitFields removes top-level init.json fields that the kernel
+// treats as ignored legacy input. New writers and explicit read-modify-write
+// paths must not carry them forward, because their presence triggers a
+// deterministic boot-time nudge before the agent can do useful work.
+func stripObsoleteInitFields(initJSON map[string]interface{}) {
+	delete(initJSON, "principle_file")
+	delete(initJSON, "procedures_file")
+}
+
 // GenerateInitJSONWithOpts creates a full init.json from a preset with explicit agent options.
 func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts) error {
 	if err := p.NormalizeLegacyCapabilities(); err != nil {
@@ -1666,8 +1673,24 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 		return fmt.Errorf("create agent dir: %w", err)
 	}
 
+	// Keep the existing root and manifest fields when /setup regenerates an
+	// agent. Known generated fields below overwrite these values; unrelated
+	// user/kernel fields remain intact.
+	var existingInit map[string]interface{}
+	existingInitPath := filepath.Join(agentDir, "init.json")
+	if existingData, err := os.ReadFile(existingInitPath); err == nil {
+		if DecodeJSONUseNumber(existingData, &existingInit) != nil {
+			existingInit = nil
+		}
+	}
+
 	// Build manifest with opts
 	manifest := make(map[string]interface{})
+	if existingManifest, ok := existingInit["manifest"].(map[string]interface{}); ok {
+		for key, value := range existingManifest {
+			manifest[key] = value
+		}
+	}
 	manifest["agent_name"] = agentName
 	lang := opts.Language
 	if lang == "" {
@@ -1839,17 +1862,16 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	}
 
 	// Resolve file paths — use opts if set, fallback to language defaults
+	// Keep an existing supported covenant path during /setup; fresh agents
+	// use the language default. Obsolete principle/procedures paths are not
+	// resolved or emitted.
 	covenantFile := opts.CovenantFile
 	if covenantFile == "" {
-		covenantFile = CovenantPath(globalDir, lang)
-	}
-	principleFile := opts.PrincipleFile
-	if principleFile == "" {
-		principleFile = PrinciplePath(globalDir, lang)
-	}
-	proceduresFile := opts.ProceduresFile
-	if proceduresFile == "" {
-		proceduresFile = ProceduresPath(globalDir, lang)
+		if existing, ok := existingInit["covenant_file"].(string); ok && existing != "" {
+			covenantFile = existing
+		} else {
+			covenantFile = CovenantPath(globalDir, lang)
+		}
 	}
 	// Load existing init.json addons + mcp fields so we preserve them across
 	// regens. Critical for /setup: when the user changes non-addon settings,
@@ -1863,40 +1885,48 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// disk file is normalized on the next refresh.
 	var existingAddonsList []interface{}
 	var existingMCP map[string]interface{}
-	existingInitPath := filepath.Join(agentDir, "init.json")
-	if existingData, err := os.ReadFile(existingInitPath); err == nil {
-		var existing map[string]interface{}
-		if DecodeJSONUseNumber(existingData, &existing) == nil {
-			switch v := existing["addons"].(type) {
-			case []interface{}:
-				existingAddonsList = v
-			case map[string]interface{}:
-				// Legacy dict shape — extract just the names.
-				for name := range v {
-					existingAddonsList = append(existingAddonsList, name)
-				}
-			}
-			if mcp, ok := existing["mcp"].(map[string]interface{}); ok && len(mcp) > 0 {
-				existingMCP = mcp
-			}
+	switch v := existingInit["addons"].(type) {
+	case []interface{}:
+		existingAddonsList = v
+	case map[string]interface{}:
+		// Legacy dict shape — extract just the names.
+		for name := range v {
+			existingAddonsList = append(existingAddonsList, name)
 		}
 	}
-
-	initJSON := map[string]interface{}{
-		"manifest":        manifest,
-		"covenant_file":   covenantFile,
-		"principle_file":  principleFile,
-		"procedures_file": proceduresFile,
-		"env_file":        config.EnvFilePath(globalDir),
-		"venv_path":       filepath.Join(globalDir, "runtime", "venv"),
-		"pad":             "",
-		// No seed-character field is written here. 灵台 (character) is durable
-		// state owned by the agent and managed after creation via
-		// system/lingtai.md / psyche — the kernel treats a missing seed as an
-		// empty seed and lets the agent author its own character. The legacy
-		// `prompt` field was an unknown key (boot warning, never honored); we
-		// emit neither `prompt` nor `lingtai`.
+	if mcp, ok := existingInit["mcp"].(map[string]interface{}); ok && len(mcp) > 0 {
+		existingMCP = mcp
 	}
+
+	envFile := config.EnvFilePath(globalDir)
+	if existing, ok := existingInit["env_file"].(string); ok && existing != "" {
+		envFile = existing
+	}
+	venvPath := filepath.Join(globalDir, "runtime", "venv")
+	if existing, ok := existingInit["venv_path"].(string); ok && existing != "" {
+		venvPath = existing
+	}
+	pad := interface{}("")
+	if existing, ok := existingInit["pad"]; ok {
+		pad = existing
+	}
+
+	initJSON := make(map[string]interface{}, len(existingInit)+8)
+	for key, value := range existingInit {
+		initJSON[key] = value
+	}
+	stripObsoleteInitFields(initJSON)
+	initJSON["manifest"] = manifest
+	initJSON["covenant_file"] = covenantFile
+	initJSON["env_file"] = envFile
+	initJSON["venv_path"] = venvPath
+	initJSON["pad"] = pad
+	// No seed-character field is written here. 灵台 (character) is durable
+	// state owned by the agent and managed after creation via
+	// system/lingtai.md / psyche — the kernel treats a missing seed as an
+	// empty seed and lets the agent author its own character. The legacy
+	// `prompt` field was an unknown key (boot warning, never honored); we
+	// emit neither `prompt` nor `lingtai`.
 
 	// Decide which addons to wire.
 	//
@@ -2106,6 +2136,7 @@ func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSe
 	if err := DecodeJSONUseNumber(data, &raw); err != nil {
 		return fmt.Errorf("parse: %w", err)
 	}
+	stripObsoleteInitFields(raw)
 	manifest, ok := raw["manifest"].(map[string]interface{})
 	if !ok {
 		return nil // no manifest, nothing to propagate

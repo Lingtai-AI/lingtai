@@ -818,7 +818,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 	// inner shape — every consumer does p.Manifest["language"], ["llm"],
 	// ["capabilities"], etc. — so we extract the inner manifest dict.
 	// Stash the outer dict separately so enterAgentNameDir can read fields
-	// like covenant_file / principle_file that live at top level.
+	// like covenant_file that lives at top level.
 	if orchDir != "" {
 		initPath := filepath.Join(orchDir, "init.json")
 		if data, err := os.ReadFile(initPath); err == nil {
@@ -2456,7 +2456,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 						Karma:           m.karmaIdx == 0,
 						Nirvana:         m.nirvanaIdx == 0,
 						CovenantFile:    m.covenantInput.Value(),
-						PrincipleFile:   m.principleInput.Value(),
 						SoulFile:        m.soulFlowInput.Value(),
 						CommentFile:     m.commentInput.Value(),
 						AllowedPresets:  m.allowedPresetRefs(),
@@ -2508,7 +2507,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					Karma:           m.karmaIdx == 0,
 					Nirvana:         m.nirvanaIdx == 0,
 					CovenantFile:    m.covenantInput.Value(),
-					PrincipleFile:   m.principleInput.Value(),
 					SoulFile:        m.soulFlowInput.Value(),
 					CommentFile:     m.commentInput.Value(),
 					AllowedPresets:  m.allowedPresetRefs(),
@@ -4452,10 +4450,6 @@ func (m *FirstRunModel) enterAgentNameDir(p preset.Preset) {
 			m.covenantInput.SetValue(s)
 			m.covenantDirty = true
 		}
-		if s, ok := m.setupKeepInitJSON["principle_file"].(string); ok && s != "" {
-			m.principleInput.SetValue(s)
-			m.principleDirty = true
-		}
 		if s, ok := m.setupKeepInitJSON["soul_file"].(string); ok && s != "" {
 			m.soulFlowInput.SetValue(s)
 			m.soulFlowDirty = true
@@ -5166,11 +5160,8 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 	p := m.currentPreset()
 	dirName := filepath.Base(m.setupOrchDir)
 
-	// Resolve prompt file paths from the project's staged .recipe/ so
-	// init.json stays consistent with whatever the user picked last. All
-	// four behavioral layers are optional — an empty return means "skip,
-	// kernel defaults take over" (for covenant/procedures) or "no file"
-	// (for comment/greet).
+	// Resolve supported prompt file paths from the project's staged .recipe/
+	// so init.json stays consistent with whatever the user picked last.
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
 		lang = "en"
@@ -5182,10 +5173,6 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
 		m.pendingAgentOpts.CovenantFile = covenantPath
 	}
-	if proceduresPath := resolveRecipeProcedures(projectRoot, lang); proceduresPath != "" {
-		m.pendingAgentOpts.ProceduresFile = proceduresPath
-	}
-
 	// /setup updates the default preset only — running agents keep their
 	// active preset until the next AED fallback or revert_preset call.
 	m.pendingAgentOpts.PreserveActivePreset = m.setupMode
@@ -5248,7 +5235,6 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 	// layers are optional in a recipe. Empty return = layer is absent:
 	//   - comment empty  → CommentFile stays unset (no comment file)
 	//   - covenant empty → CovenantFile stays unset (kernel default)
-	//   - procedures empty → ProceduresFile stays unset (kernel default)
 	//   - greet empty    → ApplyRecipe skips .prompt entirely
 	opts := m.pendingAgentOpts
 	if commentPath := resolveRecipeComment(projectRoot, lang); commentPath != "" {
@@ -5257,10 +5243,6 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 	if covenantPath := resolveRecipeCovenant(projectRoot, lang); covenantPath != "" {
 		opts.CovenantFile = covenantPath
 	}
-	if proceduresPath := resolveRecipeProcedures(projectRoot, lang); proceduresPath != "" {
-		opts.ProceduresFile = proceduresPath
-	}
-
 	// /setup: update default preset only, leave the running agent's active alone.
 	opts.PreserveActivePreset = m.setupMode
 

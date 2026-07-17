@@ -383,6 +383,8 @@ func (m *SettingsModel) saveAgentName() {
 	if data, err := os.ReadFile(initPath); err == nil {
 		var init map[string]interface{}
 		if err := preset.DecodeJSONUseNumber(data, &init); err == nil {
+			delete(init, "principle_file")
+			delete(init, "procedures_file")
 			if manifest, ok := init["manifest"].(map[string]interface{}); ok {
 				manifest["agent_name"] = m.agentName
 			}
@@ -406,11 +408,12 @@ func (m *SettingsModel) saveAgentLang(lang string) {
 	if err := preset.DecodeJSONUseNumber(data, &initData); err != nil {
 		return
 	}
+	delete(initData, "principle_file")
+	delete(initData, "procedures_file")
 	if manifest, ok := initData["manifest"].(map[string]interface{}); ok {
 		manifest["language"] = lang
 	}
 	initData["covenant_file"] = preset.CovenantPath(m.globalDir, lang)
-	initData["principle_file"] = preset.PrinciplePath(m.globalDir, lang)
 	delete(initData, "covenant")
 	delete(initData, "principle")
 	if out, err := json.MarshalIndent(initData, "", "  "); err == nil {

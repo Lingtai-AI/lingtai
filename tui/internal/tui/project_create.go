@@ -483,9 +483,6 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		if covenantPath := resolveRecipeCovenant(stagedProjectRoot, lang); covenantPath != "" {
 			agentOpts.CovenantFile = covenantPath
 		}
-		if proceduresPath := resolveRecipeProcedures(stagedProjectRoot, lang); proceduresPath != "" {
-			agentOpts.ProceduresFile = proceduresPath
-		}
 		if err := preset.GenerateInitJSONWithOpts(chosenPreset, agentName, dirName, stagingDir, opts.GlobalDir, agentOpts); err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("write staged init.json: %w", err))
