@@ -1,3 +1,60 @@
+---
+product: tui-portal
+release_version: "0.11.0"
+release_tag: "v0.11.0"
+kernel_tag: "v0.17.0"
+migration: built-in-readers-only
+refresh_required: true
+related_files:
+  - RELEASING.md
+  - install.sh
+  - kernel-release.json
+maintenance: |
+  Keep the v0.11.0 release section aligned with the TUI/Portal release behavior,
+  kernel pin, and public installer update contract. Preserve the durable
+  migration-history and runtime-retirement record below; release tags preserve
+  this file's exact historical versions.
+---
+# LingTai TUI and Portal 0.11.0 migration
+
+## Applies when
+
+The target TUI/Portal release is `0.11.0` / tag `v0.11.0`, paired with kernel
+tag `v0.17.0`, and that TUI tag lies in the open update interval
+`(current, target]`.
+
+## Migration
+
+**No automatic project rewrite.** Confirm that the installer selected the
+intended current TUI installation and that the TUI bundle manifest, platform
+archive, checksum, kernel pin, and kernel release manifest agree before
+mutation. Existing Homebrew installations remain supported, but the public
+installer is the canonical one-command install/update entry; do not combine a
+Homebrew binary update with an independently selected kernel version.
+
+Production startup does not run the retired generic TUI/Portal migration
+runtime. Existing `.lingtai/` files remain stored as they are. Kernel readers
+and Nudge diagnose canonical drift; an Agent or human applies any explicit
+repair after reviewing the exact source file and authorization boundary.
+
+## Validate
+
+- Confirm this file was read from the TUI repository at exact tag `v0.11.0`.
+- Verify both `lingtai-tui version` and `lingtai-portal --version` when Portal is
+  installed, plus the selected runtime's `lingtai.__version__` and import paths.
+- If the product, tag, stable path, mirror content, bundle hash, or kernel pin
+  does not match, stop rather than borrowing a kernel migration or another
+  release's document.
+
+## Refresh
+
+A running agent still has its old kernel code loaded after the verified binaries
+and runtime are installed. After active work is checkpointed and refresh is
+authorized, call `system(action='refresh')` and verify the relaunched process
+uses the selected v0.17.0 runtime.
+
+---
+
 # Migration history
 
 This file is a Git-versioned prose history and decision record. It is not a

@@ -98,7 +98,7 @@ func TestSourceTUIUpdaterRunsInstallScriptAndVerifiesRuntime(t *testing.T) {
 	if !result.Healthy || !result.Updated {
 		t.Fatalf("expected healthy source update: %+v", result)
 	}
-	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+	if !containsCall(runner.calls, "bash /tmp/install.sh update --prefix "+prefix+" --tui-tag v0.8.1 --non-interactive --yes") {
 		t.Fatalf("expected installer update call, got %#v", runner.calls)
 	}
 	if containsCall(runner.calls, "brew") {
@@ -329,7 +329,7 @@ func (r *sourceUpdateRunner) Run(name string, args ...string) CommandResult {
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
 	switch {
-	case strings.Contains(call, "--update"):
+	case strings.Contains(call, " update "):
 		if r.failInstall {
 			return CommandResult{Err: errors.New("exit status 1"), Stderr: "install failed"}
 		}
@@ -341,5 +341,22 @@ func (r *sourceUpdateRunner) Run(name string, args ...string) CommandResult {
 		return CommandResult{Stdout: r.runtimeVersion + "\n"}
 	default:
 		return CommandResult{Stdout: "ok\n"}
+	}
+}
+
+func TestSourceInstallCommandUsesCanonicalWebsiteInstallerAndForwardsAllArgs(t *testing.T) {
+	name, args := sourceInstallCommand("", "/tmp/lingtai prefix", "v0.11.0")
+	if name != "bash" {
+		t.Fatalf("name = %q, want bash", name)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"https://lingtai.ai/install.sh",
+		"update --prefix /tmp/lingtai prefix --tui-tag v0.11.0 --non-interactive --yes",
+		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sourceInstallCommand args %q do not contain %q", joined, want)
+		}
 	}
 }
