@@ -293,6 +293,42 @@ func buildDraftModel(t *testing.T) (FirstRunModel, string, string) {
 	return m, home, projectRoot
 }
 
+// TestDraftFirstRun_FreshHomeOffersBuiltinsWithoutWriting guards the no-project
+// Create regression where draft mode deliberately skipped Bootstrap to remain
+// pure, then populated its picker only from the not-yet-created templates/
+// directory. A truly fresh HOME must still expose every compiled template as a
+// template (including ordinary API-key and custom paths) without materializing
+// anything on disk before the user confirms the project.
+func TestDraftFirstRun_FreshHomeOffersBuiltinsWithoutWriting(t *testing.T) {
+	m, home, _ := buildDraftModel(t)
+
+	wantBuiltins := preset.BuiltinPresets()
+	if len(m.presets) != len(wantBuiltins) {
+		t.Fatalf("fresh draft preset count = %d, want %d compiled builtins; presets=%+v", len(m.presets), len(wantBuiltins), m.presets)
+	}
+
+	byName := make(map[string]preset.Preset, len(m.presets))
+	for _, p := range m.presets {
+		byName[p.Name] = p
+	}
+	for _, name := range []string{"minimax", "zhipu", "mimo", "deepseek", "custom"} {
+		p, ok := byName[name]
+		if !ok {
+			t.Errorf("fresh draft picker is missing compiled preset %q", name)
+			continue
+		}
+		if p.Source != preset.SourceTemplate {
+			t.Errorf("fresh draft preset %q source = %v, want SourceTemplate", name, p.Source)
+		}
+	}
+	if got := m.visiblePresetCount(); got != len(wantBuiltins) {
+		t.Errorf("visible preset count = %d, want %d", got, len(wantBuiltins))
+	}
+	if after := dirSnapshot(t, home); len(after) != 0 {
+		t.Fatalf("fresh draft constructor materialized files before confirmation: %+v", after)
+	}
+}
+
 // TestLauncherPrelude_ThemeLanguageDoNotPersist proves the launcher's
 // welcome prelude — which now owns theme (ctrl+t) and language (↑↓)
 // selection for the no-project flow — holds both choices in memory only,

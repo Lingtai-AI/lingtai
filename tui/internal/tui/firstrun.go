@@ -711,15 +711,32 @@ func (m *FirstRunModel) discoverRecipes() {
 // the user the same question twice. langCursor is synced from the seeded
 // draft.Language so any step that consults it agrees with the prelude.
 // preset.List() is a pure read (lists existing on-disk presets to offer as
-// a starting point); the draft flow always proceeds through the picker so
-// the user can create/select a preset draft regardless of what's on disk
-// yet — it never detours through stepAPIKey. Esc/Back/Ctrl+C at
+// a starting point). On a truly fresh machine templates/ does not exist yet
+// because draft mode intentionally skips Bootstrap; in that case the compiled
+// built-ins are appended in memory and stamped as templates. This preserves the
+// full provider picker and correct RefFor/IsTemplate semantics without writing
+// anything before confirmation. The draft flow always proceeds through the
+// picker — it never detours through stepAPIKey. Esc/Back/Ctrl+C at
 // stepPickPreset emit ProjectDraftCancelledMsg (see its doc comment).
 func NewDraftFirstRunModel(baseDir, globalDir string, hasPresets bool, draft *ProjectDraft) FirstRunModel {
 	m := newFirstRunModelForPurpose(purposeDraft, baseDir, globalDir, hasPresets, "")
 	m.draft = draft
 	m.step = stepPickPreset
 	m.presets, _ = preset.List()
+	hasTemplate := false
+	for _, p := range m.presets {
+		if p.Source == preset.SourceTemplate {
+			hasTemplate = true
+			break
+		}
+	}
+	if !hasTemplate {
+		builtins := preset.BuiltinPresets()
+		for i := range builtins {
+			builtins[i].Source = preset.SourceTemplate
+		}
+		m.presets = append(m.presets, builtins...)
+	}
 	if draft != nil {
 		for i, l := range []string{"en", "zh", "wen"} {
 			if l == draft.Language {
