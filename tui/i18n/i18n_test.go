@@ -188,6 +188,7 @@ func TestEnglishCodexCredentialSurfacesHaveNoCJK(t *testing.T) {
 	for key, value := range en {
 		credentialSurface := strings.HasPrefix(key, "codex.") ||
 			strings.HasPrefix(key, "firstrun.preset_pick.codex_") ||
+			key == "firstrun.preset_pick.draft_codex_logout_blocked" ||
 			strings.HasPrefix(key, "preset.codex_") ||
 			key == "preset_editor.api_key_codex_readonly" ||
 			strings.HasPrefix(key, "login.codex_")
