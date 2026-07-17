@@ -2,7 +2,7 @@
 product: tui-portal
 release_version: "0.11.0"
 release_tag: "v0.11.0"
-kernel_tag: "v0.17.0"
+kernel_tag: "v0.17.1"
 migration: built-in-readers-only
 refresh_required: true
 related_files:
@@ -20,7 +20,7 @@ maintenance: |
 ## Applies when
 
 The target TUI/Portal release is `0.11.0` / tag `v0.11.0`, paired with kernel
-tag `v0.17.0`, and that TUI tag lies in the open update interval
+tag `v0.17.1`, and that TUI tag lies in the open update interval
 `(current, target]`.
 
 ## Migration
@@ -51,7 +51,7 @@ repair after reviewing the exact source file and authorization boundary.
 A running agent still has its old kernel code loaded after the verified binaries
 and runtime are installed. After active work is checkpointed and refresh is
 authorized, call `system(action='refresh')` and verify the relaunched process
-uses the selected v0.17.0 runtime.
+uses the selected v0.17.1 runtime.
 
 ---
 
