@@ -57,7 +57,7 @@ broader memory model, read `system-manual`.
 | Shell commands, cron, host scheduling | `bash-manual` |
 | Kernel architecture / breaking changes | `lingtai-kernel-anatomy` |
 | TUI / portal code navigation | `lingtai-tui-anatomy` |
-| Web fetching/search/scraping | `web-browsing` |
+| Web fetching/search/scraping | `web_search(action="manual")` → `web-search-manual` |
 | Image understanding | `vision` |
 | Bug/stale-doc/missing-capability reports | `lingtai-issue-report` |
 

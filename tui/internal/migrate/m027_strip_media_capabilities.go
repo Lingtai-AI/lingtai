@@ -9,14 +9,12 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// migrateStripMediaCapabilities removes capability entries that were
-// promoted out of lingtai-kernel into TUI-side skills:
+// migrateStripMediaCapabilities removes capability entries that no longer
+// belong in LingTai agent manifests:
 //   - compose / video / draw / talk → minimax-cli skill
 //   - listen → listen skill
-//   - web_read → web-browsing skill (its trafilatura logic moved into
-//     the skill's scripts/extract.py path; the LLM still gets ranked
-//     search via the web_search tool, which now points at web-browsing
-//     for URL fetching).
+//   - web_read → built-in web_search tool; richer URL-fetching guidance is
+//     available through web_search(action="manual").
 //
 // Background: the four media-generation modalities were thin wrappers
 // around the MiniMax-Media MCP server, and `listen` was a thin wrapper

@@ -9,7 +9,7 @@ description: >
   vs BigModel mainland), and where the live docs are. MCP server
   registration is owned by the `mcp-manual` skill (kernel capability).
 version: 1.0.0
-last_changed_at: "2026-05-31T21:29:38-07:00"
+last_changed_at: "2026-07-17T02:08:30Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -32,7 +32,7 @@ When you need details — current models, exact tool parameters, per-tier quotas
 
 Note the URL pattern asymmetry: international is `/devpack/mcp/...`, mainland is `/cn/coding-plan/mcp/...`. If a path 404s, fetch the `llms.txt` index above to find the new path — they shift.
 
-Always `curl` (or use the `web-browsing` skill) when you need fresh info — the skill snapshot will go stale.
+Always `curl` (or use `web_search(action="manual")`) when you need fresh info — the skill snapshot will go stale.
 
 ## What You Get With One Key
 
@@ -118,7 +118,7 @@ If presets exist for **both** regions, the user has accounts in both — pick th
 |---|---|
 | Analyze image/screenshot/UI/diagram, no vision-capable LLM | This skill — vision MCP (8 specialized tools) |
 | Search the web with rich snippets | This skill — `webSearchPrime` (or built-in `web_search` capability if Zhipu is your LLM provider — that path uses the same MCP) |
-| Fetch and read a URL | This skill — `webReader` (or `web-browsing` skill for non-Zhipu free tier) |
+| Fetch and read a URL | This skill — `webReader` (or built-in `web_search` / `web-search-manual` for non-Zhipu free tier) |
 | Browse a GitHub repo (search docs, list files, read code) | This skill — zread |
 | Process a video file (≤8 MB) | This skill — `video_analysis` |
 | Pure compute / code generation | Just use your LLM directly |

@@ -14,7 +14,7 @@ description: >
 version: 3.0.0
 allowed-tools: Bash(python3 *) Bash(curl *) Bash(pip *) Bash(pip3 *)
 tags: [academic, research, arxiv, crossref, openalex, semantic-scholar, core, pubmed, unpaywall, doi, pdf, citation, pipeline, europe-pmc, nasa-ads, inspire-hep, nested-skill]
-last_changed_at: "2026-06-08T20:23:41-07:00"
+last_changed_at: "2026-07-17T02:08:30Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -149,11 +149,11 @@ Each card includes endpoint parameters, runnable code, response shape, rate limi
 - [error-handling.md](reference/error-handling.md) — 429 backoff, 403 publisher blocks, timeout patterns
 - [anti-pattern-text-consistency-vs-data-correspondence.md](reference/anti-pattern-text-consistency-vs-data-correspondence.md) — empirical-writing failure mode: prose drifts from the data while reviewer rounds make it more polished. Trigger pattern, re-anchoring steps, detection checklist.
 
-## Relationship to web-browsing
+## Relationship to built-in web search
 
-- **web-browsing** is the routing layer ("which tier to use for this URL?")
+- **`web-search-manual`** (returned by `web_search(action="manual")`) is the routing layer ("which tier to use for this URL?")
 - **academic-research** is the deep-dive layer ("how do I write OpenAlex filter parameters? what email does Unpaywall want?")
-- The two are complementary. If you're just scraping one publisher page and don't need the OA ladder, web-browsing's `extract_page.py` is lighter.
+- The two are complementary. If you're just scraping one publisher page and don't need the OA ladder, the built-in manual's `scripts/extract_page.py` is lighter.
 
 ## Known caveats
 

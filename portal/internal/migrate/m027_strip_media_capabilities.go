@@ -8,8 +8,8 @@ import (
 )
 
 // migrateStripMediaCapabilities removes capability entries promoted out of
-// lingtai-kernel into TUI-side skills: `compose`, `video`, `draw`, `talk`,
-// `listen`, `web_read` (the last folded into the `web-browsing` skill).
+// lingtai-kernel. Media/listen moved into TUI-side skills; `web_read` is now
+// covered by `web_search` and its manual.
 //
 // Strip-only: no MCP server registration is added. Agents that need media
 // generation can register the MiniMax-Media MCP server manually via the

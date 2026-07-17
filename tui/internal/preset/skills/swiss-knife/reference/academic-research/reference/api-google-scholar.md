@@ -1,11 +1,12 @@
 # Google Scholar Reference
 
 > **Note:** This file mentions `web_read` as a tool — that tool was removed.
-> URL fetching now lives in the `web-browsing` skill. Wherever you see
+> URL-fetching guidance now lives in the built-in `web-search-manual`,
+> returned by `web_search(action="manual")`. Wherever you see
 > `web_read(url=...)` below, substitute either `curl` (then parse with
-> BeautifulSoup — see `web-browsing/reference/tier-2-beautifulsoup.md`) or
+> BeautifulSoup — see the manual's `reference/tier-2-beautifulsoup.md`) or
 > `playwright` for JS-rendered / bot-protected pages
-> (`web-browsing/reference/tier-3-playwright.md`).
+> (see `reference/tier-3-playwright.md` in that manual).
 
 ## API Overview
 
@@ -302,7 +303,7 @@ import time
 import random
 
 def polite_fetch(url):
-    """Polite fetching: random delay + User-Agent. See web-browsing skill
+    """Polite fetching: random delay + User-Agent. See web-search-manual
     for richer tiers (trafilatura, Playwright stealth, Jina/Firecrawl)."""
     delay = random.uniform(2, 5)
     time.sleep(delay)

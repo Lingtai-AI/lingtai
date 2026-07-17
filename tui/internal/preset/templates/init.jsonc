@@ -103,7 +103,7 @@
       "web_search": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" }
 
       // --- Removed capabilities (for reference) ---
-      // "web_read"        — folded into the `web-browsing` skill.
+      // "web_read"        — covered by `web_search` and its built-in `manual` action.
       // "compose"/"video"/"draw"/"talk" — use the `media-creation` skill + an MCP server.
       // "listen"          — use the `listen` skill (faster-whisper + librosa).
     },

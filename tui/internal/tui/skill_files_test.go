@@ -296,59 +296,6 @@ func TestMinimaxCliPresetDiscoverySnippetPreservesHTTPSBaseURL(t *testing.T) {
 	}
 }
 
-func TestBuildSkillFolderEntries_WebBrowsingNestedReferences(t *testing.T) {
-	_, thisFile, _, _ := runtime.Caller(0)
-	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "web-browsing")
-
-	entries := buildSkillFolderEntries(skillDir)
-	if len(entries) == 0 {
-		t.Fatal("no entries; is web-browsing missing?")
-	}
-
-	rootBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootBody := string(rootBodyBytes)
-	for _, want := range []string{
-		"Nested reference catalog",
-		"reference/tier-quick-refs/SKILL.md",
-		"reference/routing-and-sites/SKILL.md",
-		"reference/maintenance-bundles/SKILL.md",
-	} {
-		if !strings.Contains(rootBody, want) {
-			t.Errorf("web-browsing root missing %q", want)
-		}
-	}
-
-	labels := make(map[string]MarkdownEntry)
-	for _, e := range entries {
-		labels[e.Label] = e
-	}
-	for _, want := range []string{
-		"tier-quick-refs/SKILL.md",
-		"routing-and-sites/SKILL.md",
-		"maintenance-bundles/SKILL.md",
-		"tier-0-pdf.md",
-	} {
-		e, ok := labels[want]
-		if !ok {
-			t.Fatalf("missing nested web-browsing entry %q", want)
-		}
-		if e.Group != "reference" {
-			t.Errorf("entry %q group = %q, want reference", want, e.Group)
-		}
-	}
-
-	childBodyBytes, err := os.ReadFile(filepath.Join(skillDir, "reference", "tier-quick-refs", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(childBodyBytes), "Nested web-browsing reference") {
-		t.Error("nested tier quick refs child should identify itself as a nested web-browsing reference")
-	}
-}
-
 func TestBuildSkillFolderEntries_DevGuideNestedReferences(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	skillDir := filepath.Join(filepath.Dir(thisFile), "..", "preset", "skills", "lingtai-dev-guide")

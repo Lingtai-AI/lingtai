@@ -3,7 +3,7 @@ name: dev-guide-debug-troubleshoot
 description: >
   Nested lingtai-dev-guide reference for diagnosing LingTai failures: agent process state, OOM/crashes, avatar spawn issues, post-molt memory loss, mail delivery, scheduled messages, tool timeouts, and escalation.
 version: 1.0.0
-last_changed_at: "2026-06-02T00:05:51-07:00"
+last_changed_at: "2026-07-17T02:08:30Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -556,7 +556,7 @@ read(file_path="/tmp/output.txt", offset=1, limit=100)
 - ❌ Reading a large file in a single call → should chunk it
 - ✅ Write long output to a file first, then read it in chunks
 
-**Related References**: `lingtai-kernel-anatomy` (bash/read tools); `web-browsing` skill
+**Related References**: `lingtai-kernel-anatomy` (bash/read tools); `web_search(action="manual")` / `web-search-manual`
 
 ---
 
