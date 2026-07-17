@@ -3,6 +3,7 @@ package i18n
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -139,7 +140,16 @@ func TestCodexBanners_LocaleSpecific(t *testing.T) {
 	t.Cleanup(func() { SetLang("en") })
 
 	SetLang("en")
+	if got, want := T("firstrun.preset_pick.codex_needs_oauth_hint"), "Codex login required — see Codex Credentials section below."; got != want {
+		t.Errorf("en firstrun.preset_pick.codex_needs_oauth_hint = %q, want %q", got, want)
+	}
+	if got, want := T("preset.codex_credential_section"), "Codex Credentials"; got != want {
+		t.Errorf("en preset.codex_credential_section = %q, want %q", got, want)
+	}
 	expired := TF("codex.oauth_expired_banner", T("preset.codex_credential_section"))
+	if hasCJK(expired) {
+		t.Errorf("en codex.oauth_expired_banner = %q, must not contain Chinese", expired)
+	}
 	if !contains(expired, "session expired") {
 		t.Errorf("en codex.oauth_expired_banner = %q, expected English prose", expired)
 	}
@@ -153,12 +163,36 @@ func TestCodexBanners_LocaleSpecific(t *testing.T) {
 
 	for _, lang := range []string{"zh", "wen"} {
 		SetLang(lang)
+		expired := TF("codex.oauth_expired_banner", T("preset.codex_credential_section"))
+		if !hasCJK(expired) {
+			t.Errorf("%s codex.oauth_expired_banner = %q, expected localized Chinese prose", lang, expired)
+		}
+		if !contains(expired, T("preset.codex_credential_section")) {
+			t.Errorf("%s codex.oauth_expired_banner = %q, expected localized credential section", lang, expired)
+		}
 		got := TF("codex.oauth_unverified_agent", "alice")
 		if !hasCJK(got) {
 			t.Errorf("%s codex.oauth_unverified_agent = %q, expected Chinese", lang, got)
 		}
 		if !contains(got, "alice") {
 			t.Errorf("%s codex.oauth_unverified_agent = %q, expected agent name interpolated", lang, got)
+		}
+	}
+}
+
+// TestEnglishCodexCredentialSurfacesHaveNoCJK scopes the English-locale check to
+// Codex credential keys only. The English catalog intentionally retains native
+// brand and aesthetic text elsewhere, so a global CJK ban would be incorrect.
+func TestEnglishCodexCredentialSurfacesHaveNoCJK(t *testing.T) {
+	en := loadLocaleForTest(t, "en")
+	for key, value := range en {
+		credentialSurface := strings.HasPrefix(key, "codex.") ||
+			strings.HasPrefix(key, "firstrun.preset_pick.codex_") ||
+			strings.HasPrefix(key, "preset.codex_") ||
+			key == "preset_editor.api_key_codex_readonly" ||
+			strings.HasPrefix(key, "login.codex_")
+		if credentialSurface && hasCJK(value) {
+			t.Errorf("en %s = %q, Codex credential surface must not contain Chinese", key, value)
 		}
 	}
 }
