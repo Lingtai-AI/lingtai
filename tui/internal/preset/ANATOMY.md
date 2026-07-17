@@ -67,6 +67,8 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `DecodeJSONUseNumber` | `tui/internal/preset/json_number.go:10-27` | exact-number, single-document decoder for explicit TUI read-modify-write paths; not a startup reader or migration |
 | `Load(name)` | `tui/internal/preset/preset.go:257` | saved/ first, then templates/; sets `Source` |
 | `List()` | `tui/internal/preset/preset.go:210` | saved (alphabetical) + templates (canonical order); each carries `Source` |
+| `ScanCategory()` / `ScanEmbeddedCategory()` | `tui/internal/preset/recipes.go:102-128` | disk-backed recipe discovery and read-only compiled metadata fallback |
+| `ReadEmbeddedRecipeFile()` | `tui/internal/preset/recipes.go:130-142` | reads compiled recipe content without materializing a path |
 | `Save(p)` | `tui/internal/preset/preset.go:373` | ALWAYS to `saved/`; never templates |
 | `RefreshTemplates()` | `tui/internal/preset/preset.go:437` | rewrites `templates/` from `BuiltinPresets()`, prunes retired |
 | `PopulateBundledLibrary(globalDir)` | `tui/internal/preset/preset.go:1288` | rewrites `~/.lingtai-tui/utilities/` from embedded `skills/` |
@@ -78,7 +80,7 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `Validate()` | `tui/internal/preset/preset.go:324` | mirrors kernel-side validation; `summary` non-empty, `tier` 1..5, `llm.provider`/`model` non-empty |
 | `//go:embed` directives | `tui/internal/preset/preset.go:16-47` | covenant, principle, procedures, templates, soul, recipe_assets, skills |
 | `skills/lingtai-dev-guide/` | `tui/internal/preset/skills/lingtai-dev-guide/SKILL.md:1`, `tui/internal/preset/skills/lingtai-dev-guide/reference/skill-stewardship/SKILL.md:1` | Bundled developer guide utility skill and its skill-stewardship nested reference, including the rule that skill authors keep routers lean and link dense content through progressive disclosure rather than encoding stale hard caps. |
-| `CopyBundle` | `tui/internal/preset/recipe_apply.go:59` | copies `.recipe/` (replace) + recipe skill library sibling (merge) + `.lingtai/` (merge) into project |
+| `CopyBundle` / `CopyEmbeddedBundle` | `tui/internal/preset/recipe_apply.go:59,122` | copies disk or compiled `.recipe/` (replace) plus recipe siblings into a project |
 | `RecipeNeedsApply` | `tui/internal/preset/recipe_apply.go:133` | diffs `.recipe/` vs last-applied snapshot under `.tui-asset/.recipe/` |
 | `ApplyRecipe` | `tui/internal/preset/recipe_apply.go:179` | writes `.prompt` + patches `skills.paths` per agent; snapshots `.recipe/` |
 | `AppendSkillsPath` | `tui/internal/preset/recipe_apply.go:268` | idempotent append to `manifest.capabilities.skills.paths` |
@@ -117,3 +119,4 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Kernel-owned init shape.** `templates/CONTRACT.md` is the narrow pointer for the embedded `init.jsonc` consumer copy. The kernel canonical trio linked by `templates/CONTRACT.md` owns init semantics; TUI's alias and exact-number helpers only protect explicit preset/editor/recipe/rehydration/settings writes and do not form a startup reader or migration.
 - **Template drift.** The embedded template and `examples/init.jsonc` are checked byte-for-byte locally; the exact kernel canonical path is linked in `templates/CONTRACT.md` and checked by integration/PR validation.
 - **No in-band marker.** There is no `"is_template": true` field. Two presets with identical JSON but different directories are treated differently — `Source` is set at load time, never serialized.
+- **Draft recipe fallback.** `ScanEmbeddedCategory` reads the four compiled recipe bundles in category order without writing `~/.lingtai-tui`; `CopyEmbeddedBundle` is used only by confirmed project creation to materialize the selected bundle.

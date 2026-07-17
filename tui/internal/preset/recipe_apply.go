@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Recipe lifecycle primitives.
@@ -111,6 +113,51 @@ func CopyBundle(srcBundleRoot, projectRoot string) error {
 	}
 
 	return nil
+}
+
+// CopyEmbeddedBundle materializes a compiled recipe into a project root after
+// user confirmation. Discovery and preview stay in memory; RunProjectCreate
+// then applies this project-root copy into its owned .lingtai staging tree
+// before the atomic rename.
+func CopyEmbeddedBundle(recipeName, projectRoot string) error {
+	if recipeName == "" || projectRoot == "" {
+		return fmt.Errorf("CopyEmbeddedBundle: empty paths")
+	}
+	root := embeddedRecipeRoot(recipeName)
+	if root == "" {
+		return fmt.Errorf("CopyEmbeddedBundle: recipe %q not found", recipeName)
+	}
+	if _, err := loadEmbeddedRecipeInfo(root, ""); err != nil {
+		return fmt.Errorf("CopyEmbeddedBundle: source bundle invalid: %w", err)
+	}
+
+	// Match CopyBundle's replace semantics for the selected behavioral layer;
+	// sibling libraries and imported .lingtai data remain additive.
+	dstRecipe := filepath.Join(projectRoot, RecipeDotDir)
+	if err := os.RemoveAll(dstRecipe); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("CopyEmbeddedBundle: remove old .recipe/: %w", err)
+	}
+	return iofs.WalkDir(recipeAssetsFS, root, func(filePath string, entry iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel := strings.TrimPrefix(filePath, root+"/")
+		target := filepath.Join(projectRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", filepath.Dir(target), err)
+		}
+		data, err := recipeAssetsFS.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read embedded %s: %w", rel, err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", target, err)
+		}
+		return nil
+	})
 }
 
 // RecipeNeedsApply reports whether the recipe currently selected in the

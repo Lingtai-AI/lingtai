@@ -3,9 +3,12 @@ package preset
 import (
 	"encoding/json"
 	"fmt"
+	iofs "io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Recipe source types. A recipe is a bundle containing a .recipe/ dotfolder
@@ -68,13 +71,85 @@ type AgoraRecipe struct {
 
 // DiscoveredRecipe holds a recipe found by scanning a category directory.
 type DiscoveredRecipe struct {
-	ID   string     // bundle directory name
-	Info RecipeInfo // from .recipe/recipe.json
-	Dir  string     // absolute path to the recipe bundle directory
+	ID       string     // bundle directory name
+	Info     RecipeInfo // from .recipe/recipe.json
+	Dir      string     // absolute path to the bundle directory; empty for embedded data
+	Embedded bool       // true when metadata came from the compiled recipe assets
 }
 
 // RecipeCategories defines the display order of built-in recipe categories.
 var RecipeCategories = []string{"recommended", "intrinsic", "examples"}
+
+// embeddedRecipeRoot returns the compiled recipe-assets path for a recipe ID.
+// IDs are unique across the category tree; the category loop preserves the
+// picker order and avoids inventing a filesystem path for embedded data.
+func embeddedRecipeRoot(name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, category := range RecipeCategories {
+		root := path.Join("recipe_assets", category, name)
+		if info, err := iofs.Stat(recipeAssetsFS, root); err == nil && info.IsDir() {
+			return root
+		}
+	}
+	return ""
+}
+
+// ScanEmbeddedCategory returns recipe metadata directly from the compiled
+// recipe assets. Dir is intentionally empty: callers must not present a fake
+// disk path or write these assets before the user confirms project creation.
+func ScanEmbeddedCategory(category, lang string) []DiscoveredRecipe {
+	root := path.Join("recipe_assets", category)
+	entries, err := iofs.ReadDir(recipeAssetsFS, root)
+	if err != nil {
+		return nil
+	}
+	var recipes []DiscoveredRecipe
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "" || entry.Name()[0] == '.' {
+			continue
+		}
+		recipeRoot := path.Join(root, entry.Name())
+		info, err := loadEmbeddedRecipeInfo(recipeRoot, lang)
+		if err != nil {
+			continue
+		}
+		recipes = append(recipes, DiscoveredRecipe{
+			ID:       entry.Name(),
+			Info:     info,
+			Embedded: true,
+		})
+	}
+	sort.Slice(recipes, func(i, j int) bool {
+		return recipes[i].ID < recipes[j].ID
+	})
+	return recipes
+}
+
+// ReadEmbeddedRecipeFile reads one compiled recipe file without materializing
+// it on disk. relPath is relative to the recipe bundle root and uses slash
+// separators, as required by io/fs.
+func ReadEmbeddedRecipeFile(name, relPath string) ([]byte, error) {
+	root := embeddedRecipeRoot(name)
+	if root == "" || relPath == "" {
+		return nil, fmt.Errorf("embedded recipe %q not found", name)
+	}
+	clean := path.Clean(relPath)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+		return nil, fmt.Errorf("invalid embedded recipe path %q", relPath)
+	}
+	return iofs.ReadFile(recipeAssetsFS, path.Join(root, clean))
+}
+
+func loadEmbeddedRecipeInfo(root, lang string) (RecipeInfo, error) {
+	_ = lang // recipe.json is canonical and not localized
+	data, err := iofs.ReadFile(recipeAssetsFS, path.Join(root, RecipeDotDir, "recipe.json"))
+	if err != nil {
+		return RecipeInfo{}, fmt.Errorf("read embedded recipe.json: %w", err)
+	}
+	return decodeRecipeInfo(data, root)
+}
 
 // ScanAgoraRecipes returns all valid recipes found under ~/lingtai-agora/recipes/.
 // Each subdirectory must contain a .recipe/recipe.json with a non-empty name.
@@ -170,12 +245,16 @@ func LoadRecipeInfo(bundleDir, lang string) (RecipeInfo, error) {
 	if err != nil {
 		return RecipeInfo{}, fmt.Errorf("read recipe.json: %w", err)
 	}
+	return decodeRecipeInfo(data, bundleDir)
+}
+
+func decodeRecipeInfo(data []byte, source string) (RecipeInfo, error) {
 	var info RecipeInfo
 	if err := json.Unmarshal(data, &info); err != nil {
 		return RecipeInfo{}, fmt.Errorf("parse recipe.json: %w", err)
 	}
 	if info.Name == "" {
-		return RecipeInfo{}, fmt.Errorf("recipe.json has empty name in %s", bundleDir)
+		return RecipeInfo{}, fmt.Errorf("recipe.json has empty name in %s", source)
 	}
 	if info.Version == "" {
 		info.Version = "1.0.0"

@@ -101,3 +101,54 @@ func recipeLayerUsesLang(recipeDir, layer, lang, path string) bool {
 	}
 	return filepath.Clean(filepath.Dir(path)) == filepath.Clean(filepath.Join(recipeDir, preset.RecipeDotDir, layer, lang))
 }
+
+// buildEmbeddedRecipeEntries previews a compiled fallback without inventing a
+// path under globalDir. MarkdownViewerModel reads Content directly, so opening
+// Ctrl+O remains truthful and zero-write before confirmation.
+func buildEmbeddedRecipeEntries(recipeName, lang string) []MarkdownEntry {
+	manifest, err := preset.ReadEmbeddedRecipeFile(recipeName, filepath.ToSlash(filepath.Join(preset.RecipeDotDir, "recipe.json")))
+	if err != nil {
+		return nil
+	}
+	var entries []MarkdownEntry
+	addLayer := func(layer string) {
+		content, localized := readEmbeddedRecipeLayer(recipeName, layer, lang)
+		if content == "" && !localized {
+			return
+		}
+		label := layer + ".md"
+		if localized {
+			label += " (" + lang + ")"
+		}
+		entries = append(entries, MarkdownEntry{
+			Label:   label,
+			Group:   layer + ".md",
+			Content: content,
+		})
+	}
+	addLayer("greet")
+	addLayer("comment")
+	entries = append(entries, MarkdownEntry{
+		Label:   "recipe.json",
+		Group:   "recipe.json",
+		Content: string(manifest),
+	})
+	addLayer("covenant")
+	addLayer("procedures")
+	return entries
+}
+
+func readEmbeddedRecipeLayer(recipeName, layer, lang string) (string, bool) {
+	if lang != "" {
+		rel := filepath.ToSlash(filepath.Join(preset.RecipeDotDir, layer, lang, layer+".md"))
+		if data, err := preset.ReadEmbeddedRecipeFile(recipeName, rel); err == nil {
+			return string(data), true
+		}
+	}
+	rel := filepath.ToSlash(filepath.Join(preset.RecipeDotDir, layer, layer+".md"))
+	data, err := preset.ReadEmbeddedRecipeFile(recipeName, rel)
+	if err != nil {
+		return "", false
+	}
+	return string(data), false
+}

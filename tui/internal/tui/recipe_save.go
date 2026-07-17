@@ -36,10 +36,20 @@ func sourceBundleDir(globalDir, recipeName, customDir string) string {
 // behavioral-layer resolution. Returns the project root so callers can
 // chain path resolution.
 func copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir string) (projectRoot string, err error) {
+	return copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir, false)
+}
+
+func copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir string, allowEmbedded bool) (projectRoot string, err error) {
 	projectRoot = filepath.Dir(lingtaiDir)
 	src := sourceBundleDir(globalDir, recipeName, customDir)
 	if src == "" {
-		return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
+		if !allowEmbedded {
+			return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
+		}
+		if err := preset.CopyEmbeddedBundle(recipeName, projectRoot); err != nil {
+			return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
+		}
+		return projectRoot, nil
 	}
 	if err := preset.CopyBundle(src, projectRoot); err != nil {
 		return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
