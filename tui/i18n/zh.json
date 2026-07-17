@@ -54,7 +54,6 @@
   "firstrun.soul_flow_enabled": "心流",
   "firstrun.soul_flow_enabled_hint": "启用自主心流（默认关闭）。开启后，器灵会按下方间隔反思近期工作、咨询往昔之我、浮现洞见。此开关会在器灵环境中设置 LINGTAI_SOUL_FLOW_ENABLED；保持关闭则器灵纯被动（可用 soul-manual 工具按需反思）",
   "firstrun.covenant": "约法",
-  "firstrun.principle": "原则",
   "firstrun.soul_flow": "心流",
   "firstrun.comment": "附言",
   "firstrun.comment_hint": "自定义系统提示",

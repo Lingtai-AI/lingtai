@@ -305,7 +305,6 @@ func TestPresetKeyNext_BlocksUntilModelValidated(t *testing.T) {
 		maxRpmInput:    textinput.New(),
 		maxAedInput:    textinput.New(),
 		covenantInput:  textinput.New(),
-		principleInput: textinput.New(),
 		soulFlowInput:  textinput.New(),
 		commentInput:   textinput.New(),
 		presets: []preset.Preset{

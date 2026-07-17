@@ -60,6 +60,45 @@ func TestSetupViewOmitsMoltPressureField(t *testing.T) {
 	}
 }
 
+func TestFirstRunAndSetupViewsOmitObsoletePrincipleControl(t *testing.T) {
+	i18n.SetLang("en")
+	for _, tc := range []struct {
+		name      string
+		setupMode bool
+	}{
+		{name: "first-run", setupMode: false},
+		{name: "setup", setupMode: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseDir := filepath.Join(t.TempDir(), ".lingtai")
+			globalDir := t.TempDir()
+			var m FirstRunModel
+			if tc.setupMode {
+				m = NewSetupModeModel(baseDir, globalDir, "", "test")
+			} else {
+				m = NewFirstRunModel(baseDir, globalDir, true, "")
+				m.presets = []preset.Preset{{
+					Name:     "test",
+					Manifest: map[string]interface{}{"language": "en"},
+				}}
+			}
+			m.width = 120
+			m.height = 40
+			m.enterAgentNameDir(m.currentPreset())
+			view := m.View()
+
+			if strings.Contains(view, i18n.T("firstrun.principle")) || strings.Contains(view, "firstrun.principle") {
+				t.Fatalf("%s view exposes the obsolete Principle control: %s", tc.name, view)
+			}
+			for _, label := range []string{i18n.T("firstrun.covenant"), i18n.T("firstrun.soul_flow"), i18n.T("firstrun.comment")} {
+				if !strings.Contains(view, label) {
+					t.Fatalf("%s view lost supported prompt %q: %s", tc.name, label, view)
+				}
+			}
+		})
+	}
+}
+
 func TestGetPresetProvider(t *testing.T) {
 	m := FirstRunModel{}
 

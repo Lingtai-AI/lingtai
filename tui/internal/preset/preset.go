@@ -1263,11 +1263,6 @@ func customPreset() Preset {
 	}
 }
 
-// PrinciplePath returns the absolute path to the principle file for a language.
-func PrinciplePath(globalDir, lang string) string {
-	return filepath.Join(globalDir, "principle", lang, "principle.md")
-}
-
 // ProceduresPath returns the absolute path to the procedures file for a language.
 // Checks the lang-specific path first, falls back to the root procedures.md.
 func ProceduresPath(globalDir, lang string) string {

@@ -54,7 +54,6 @@
   "firstrun.soul_flow_enabled": "Soul flow",
   "firstrun.soul_flow_enabled_hint": "opt in to autonomous soul flow (default OFF). When ON, the agent reflects on recent work, consults past selves, and surfaces insights on the cadence set below. Sets LINGTAI_SOUL_FLOW_ENABLED in the agent's env; leave OFF to keep the agent purely reactive (use the soul-manual tool for on-demand reflection)",
   "firstrun.covenant": "Covenant",
-  "firstrun.principle": "Principle",
   "firstrun.soul_flow": "Soul flow",
   "firstrun.comment": "Comment",
   "firstrun.comment_hint": "custom system prompt",
