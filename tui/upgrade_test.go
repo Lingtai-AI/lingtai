@@ -79,7 +79,7 @@ func TestStartupSourceUpdateConfirmRoutesThroughSourceUpdater(t *testing.T) {
 	if !updated {
 		t.Fatalf("confirmed source startup update should stop startup after update; stderr=%q output=\n%s", errOut.String(), out.String())
 	}
-	if !startupContainsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
+	if !startupContainsCall(runner.calls, "bash /tmp/install.sh update --prefix "+prefix+" --tui-tag v0.8.1 --non-interactive --yes") {
 		t.Fatalf("expected source installer update call, got %#v", runner.calls)
 	}
 	if startupContainsCall(runner.calls, "brew") {
@@ -172,7 +172,7 @@ func (r *startupSourceUpdateRunner) Run(name string, args ...string) config.Comm
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
 	switch {
-	case strings.Contains(call, "--update"):
+	case strings.Contains(call, " update "):
 		writeStartupSourceInstallMetadata(r.t, r.globalDir, r.prefix, r.binDir, r.latest)
 		return config.CommandResult{Stdout: "updated\n"}
 	case strings.HasSuffix(call, "lingtai-tui version"):

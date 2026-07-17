@@ -599,7 +599,7 @@ type tuiInstallMetadata struct {
 	// a pinned release-bundle artifact by explicit local file path, rather
 	// than from PyPI. See kernelSourceFromMetadata / the provenance gate in
 	// UpgradePythonRuntime below.
-	KernelSource   string `json:"kernel_source,omitempty"`   // "" | "pypi" | "bundle"
+	KernelSource   string `json:"kernel_source,omitempty"`    // "" | "pypi" | "bundle"
 	KernelBundleID string `json:"kernel_bundle_id,omitempty"` // e.g. "tui-v0.11.0" — the TUI bundle manifest's bundle_id
 	KernelVersion  string `json:"kernel_version,omitempty"`   // the pinned kernel version installed from the bundle
 	KernelProvider string `json:"kernel_provider,omitempty"`  // "github" | "gitee" — which provider served the bundle
@@ -1321,7 +1321,7 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 	// not "abandon the compatibility pin and install an arbitrary version
 	// from a package index." A forced check on a bundle-provisioned runtime
 	// reports that the kernel is pinned to the TUI bundle and points at the
-	// bundle-update path (re-run the one-command installer / `--update`)
+	// bundle-update path (re-run the one-command installer / `update`)
 	// instead of running any PyPI query or install — unlike the editable-
 	// install gate above, this is not "same behavior, force or not" by
 	// accident; it is the explicit fix for a real defect where force used to
@@ -1329,7 +1329,7 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 	if isBundle, bundleMeta := kernelBundleProvenance(globalDir); isBundle {
 		if force {
 			result.add(DoctorOK,
-				"Python lingtai is pinned to release bundle %s (kernel %s via %s); a forced update does not override this pin. Re-run the one-command installer (or its --update path) to move to a newer bundle.",
+				"Python lingtai is pinned to release bundle %s (kernel %s via %s); a forced update does not override this pin. Re-run the one-command installer (or its update mode) to move to a newer bundle.",
 				valueOrUnknown(bundleMeta.KernelBundleID), valueOrUnknown(bundleMeta.KernelVersion), valueOrUnknown(bundleMeta.KernelProvider))
 		} else {
 			result.add(DoctorOK,

@@ -359,11 +359,11 @@ func tuiReleaseURL(version string) string {
 
 func sourceInstallCommand(script, prefix, version string) (string, []string) {
 	if script == "" {
-		script = "https://raw.githubusercontent.com/Lingtai-AI/lingtai/" + version + "/install.sh"
+		script = "https://lingtai.ai/install.sh"
 	}
-	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
+	args := []string{"update", "--prefix", prefix, "--tui-tag", version, "--non-interactive", "--yes"}
 	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
-		shell := `set -euo pipefail; curl -fsSL "$1" | bash -s -- "$2" "$3" "$4" "$5" "$6" "$7"`
+		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
 		shellArgs := []string{"-c", shell, "lingtai-source-update", script}
 		shellArgs = append(shellArgs, args...)
 		return "bash", shellArgs
