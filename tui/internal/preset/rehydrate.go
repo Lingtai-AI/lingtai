@@ -82,7 +82,7 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 
 		// Deep-copy the orchestrator's init.json by re-parsing.
 		var workerInit map[string]interface{}
-		if err := json.Unmarshal(orchData, &workerInit); err != nil {
+		if err := DecodeJSONUseNumber(orchData, &workerInit); err != nil {
 			return workersRehydrated, fmt.Errorf("parse orchestrator init.json: %w", err)
 		}
 
@@ -90,6 +90,10 @@ func RehydrateNetwork(lingtaiDir, orchDirName string) (workersRehydrated int, er
 		manifest, ok := workerInit["manifest"].(map[string]interface{})
 		if !ok {
 			return workersRehydrated, fmt.Errorf("orchestrator init.json has no manifest object")
+		}
+		keep := Preset{Manifest: manifest}
+		if err := keep.NormalizeLegacyCapabilities(); err != nil {
+			return workersRehydrated, fmt.Errorf("canonicalize orchestrator capabilities: %w", err)
 		}
 		if name, ok := blueprint["agent_name"].(string); ok && name != "" {
 			manifest["agent_name"] = name

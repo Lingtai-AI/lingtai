@@ -181,6 +181,24 @@ func TestLoadFromPath_NormalizesLegacyRootContextLimit(t *testing.T) {
 	}
 }
 
+func TestLoadFromPath_PreservesCanonicalContextLimitFloatCompatibility(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "canonical.json")
+	data := []byte(`{"name":"canonical","description":{"summary":"canonical"},"manifest":{"llm":{"provider":"x","model":"y","context_limit":300000},"capabilities":{}}}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write preset: %v", err)
+	}
+
+	p, err := loadFromPath(path)
+	if err != nil {
+		t.Fatalf("loadFromPath() error: %v", err)
+	}
+	llm := p.Manifest["llm"].(map[string]interface{})
+	if got, ok := llm["context_limit"].(float64); !ok || got != 300000 {
+		t.Fatalf("manifest.llm.context_limit = %#v (%T), want float64(300000)", llm["context_limit"], llm["context_limit"])
+	}
+}
+
 func TestValidate_ConflictingLegacyRootContextLimitPreservesLLM(t *testing.T) {
 	p := Preset{
 		Name:        "conflict",

@@ -776,7 +776,7 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 		initPath := filepath.Join(orchDir, "init.json")
 		if data, err := os.ReadFile(initPath); err == nil {
 			var existing map[string]interface{}
-			if json.Unmarshal(data, &existing) == nil {
+			if preset.DecodeJSONUseNumber(data, &existing) == nil {
 				// addons may be either the new list shape (post-v0.7.3) or the
 				// legacy dict shape (pre-v0.7.3, pre-m028 migration). Read both.
 				switch v := existing["addons"].(type) {
@@ -800,11 +800,15 @@ func NewSetupModeModel(baseDir, globalDir, orchDir, orchName string) FirstRunMod
 				if agentName, _ := inner["agent_name"].(string); agentName != "" {
 					m.setupOrchName = agentName
 				}
-				m.setupKeepPreset = preset.Preset{
+				keepPreset := preset.Preset{
 					Name:        "keep_current",
 					Description: preset.PresetDescription{Summary: i18n.T("setup.keep_current_preset")},
 					Manifest:    inner,
 				}
+				if err := keepPreset.NormalizeLegacyCapabilities(); err != nil {
+					m.message = fmt.Sprintf("cannot load current shell capability configuration: %v", err)
+				}
+				m.setupKeepPreset = keepPreset
 				m.setupKeepInitJSON = existing
 			}
 		}
@@ -3136,7 +3140,7 @@ func (m FirstRunModel) View() string {
 		// Always-included capabilities (kernel intrinsics + core floor)
 		// — surfaced for awareness, not toggleable in the preset manifest.
 		leftBlock.WriteString("  " + StyleAccent.Render(i18n.T("firstrun.mandatory_caps")) + "\n\n")
-		mandatoryCaps := []string{"email", "psyche", "knowledge", "skills", "bash", "avatar", "daemon", "mcp", "file"}
+		mandatoryCaps := []string{"email", "psyche", "knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file"}
 		mandatoryLine := "  "
 		for _, name := range mandatoryCaps {
 			cell := "  [✓] " + name
@@ -4266,7 +4270,7 @@ func (m *FirstRunModel) applyCapSelections() {
 			delete(caps, name)
 		}
 	}
-	// Kernel core capabilities (knowledge, skills, bash, avatar, daemon,
+	// Kernel core capabilities (knowledge, skills, shell, avatar, daemon,
 	// mcp, file group) are injected at runtime by apply_core_defaults, so
 	// we don't stamp them into the saved manifest here.
 }

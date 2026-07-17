@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
@@ -134,7 +135,7 @@ func (d *PresetDescription) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var asMap map[string]interface{}
-	if err := json.Unmarshal(data, &asMap); err != nil {
+	if err := DecodeJSONUseNumber(data, &asMap); err != nil {
 		return err
 	}
 	if v, ok := asMap["summary"].(string); ok {
@@ -179,10 +180,13 @@ func SavedDir() string {
 // and stamps each result with the given source. Internal helper for
 // List(); centralizes the parse-and-skip-malformed logic so the two
 // directory walks can't drift.
-func listFromDir(dir string, src PresetSource) []Preset {
+func listFromDir(dir string, src PresetSource) ([]Preset, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	var out []Preset
 	for _, e := range entries {
@@ -195,12 +199,15 @@ func listFromDir(dir string, src PresetSource) []Preset {
 		path := filepath.Join(dir, e.Name())
 		p, err := loadFromPath(path)
 		if err != nil {
+			if errors.Is(err, ErrCapabilityConflict) {
+				return nil, err
+			}
 			continue
 		}
 		p.Source = src
 		out = append(out, p)
 	}
-	return out
+	return out, nil
 }
 
 // List returns saved presets first (alphabetical), then templates in
@@ -208,8 +215,14 @@ func listFromDir(dir string, src PresetSource) []Preset {
 // recording which directory it came from — callers should prefer
 // p.Source over name-matching when asking "is this a template?".
 func List() ([]Preset, error) {
-	saved := listFromDir(SavedDir(), SourceSaved)
-	templates := listFromDir(TemplatesDir(), SourceTemplate)
+	saved, err := listFromDir(SavedDir(), SourceSaved)
+	if err != nil {
+		return nil, fmt.Errorf("list saved presets: %w", err)
+	}
+	templates, err := listFromDir(TemplatesDir(), SourceTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("list template presets: %w", err)
+	}
 
 	sort.Slice(saved, func(i, j int) bool {
 		return saved[i].Name < saved[j].Name
@@ -286,10 +299,13 @@ func loadFromPath(path string) (Preset, error) {
 		return Preset{}, fmt.Errorf("read preset %s: %w", path, err)
 	}
 	var p Preset
-	if err := json.Unmarshal(data, &p); err != nil {
+	if err := DecodeJSONUseNumber(data, &p); err != nil {
 		return Preset{}, fmt.Errorf("parse preset %s: %w", path, err)
 	}
 	p.NormalizeLegacyContextLimit()
+	if err := p.NormalizeLegacyCapabilities(); err != nil {
+		return Preset{}, fmt.Errorf("canonicalize preset capabilities: %w", err)
+	}
 	return p, nil
 }
 
@@ -301,18 +317,36 @@ func (p *Preset) NormalizeLegacyContextLimit() {
 	if p == nil || p.Manifest == nil {
 		return
 	}
-	rootCtx, ok := p.Manifest["context_limit"]
-	if !ok {
-		return
+	rootCtx, hasRoot := p.Manifest["context_limit"]
+	if hasRoot {
+		delete(p.Manifest, "context_limit")
 	}
-	delete(p.Manifest, "context_limit")
 	llm, _ := p.Manifest["llm"].(map[string]interface{})
 	if llm == nil {
 		return
 	}
-	if _, hasCanonical := llm["context_limit"]; !hasCanonical {
-		llm["context_limit"] = rootCtx
+
+	// context_limit predates the exact-token capability path and existing
+	// callers expect this known integer field as float64 after loading. Keep the
+	// compatibility representation for both canonical and legacy-root input;
+	// capability values remain json.Number through canonicalization and writes.
+	if canonical, hasCanonical := llm["context_limit"]; hasCanonical {
+		if number, ok := canonical.(json.Number); ok {
+			if value, err := strconv.ParseFloat(string(number), 64); err == nil {
+				llm["context_limit"] = value
+			}
+		}
+		return
 	}
+	if !hasRoot {
+		return
+	}
+	if number, ok := rootCtx.(json.Number); ok {
+		if value, err := strconv.ParseFloat(string(number), 64); err == nil {
+			rootCtx = value
+		}
+	}
+	llm["context_limit"] = rootCtx
 }
 
 // validTiers mirrors the kernel-side TIER_VALUES in lingtai/presets.py.
@@ -324,6 +358,9 @@ var validTiers = map[string]bool{"1": true, "2": true, "3": true, "4": true, "5"
 func (p Preset) Validate() []error {
 	p.NormalizeLegacyContextLimit()
 	var errs []error
+	if err := p.NormalizeLegacyCapabilities(); err != nil {
+		errs = append(errs, err)
+	}
 	if p.Description.Summary == "" {
 		errs = append(errs, fmt.Errorf("description.summary must be non-empty"))
 	}
@@ -351,6 +388,11 @@ func (p Preset) Validate() []error {
 				if n <= 0 {
 					errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
 				}
+			case json.Number:
+				parsed, err := strconv.ParseInt(string(n), 10, 64)
+				if err != nil || parsed <= 0 {
+					errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
+				}
 			default:
 				errs = append(errs, fmt.Errorf("manifest.llm.context_limit must be a positive integer"))
 			}
@@ -371,6 +413,9 @@ func (p Preset) Validate() []error {
 // templates/ — that's owned by Bootstrap. Callers that want to seed
 // a template must use writeTemplate (preset package internal).
 func Save(p Preset) error {
+	if err := p.NormalizeLegacyCapabilities(); err != nil {
+		return fmt.Errorf("canonicalize preset capabilities: %w", err)
+	}
 	dir := SavedDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create saved presets dir: %w", err)
@@ -389,7 +434,7 @@ func Clone(src Preset, newName string) Preset {
 	// Deep copy via JSON round-trip to avoid shared map references
 	manifest := make(map[string]interface{})
 	if data, err := json.Marshal(src.Manifest); err == nil {
-		json.Unmarshal(data, &manifest)
+		_ = DecodeJSONUseNumber(data, &manifest)
 	}
 	desc := src.Description
 	if src.Description.Extra != nil {
@@ -945,7 +990,7 @@ func minimaxPreset() Preset {
 				"api_key": nil, "api_key_env": "MINIMAX_API_KEY",
 				"base_url": ProviderRegionURLs["minimax"][0].URL,
 			},
-			// Core caps (knowledge, skills, bash, avatar, daemon, mcp,
+			// Core caps (knowledge, skills, shell, avatar, daemon, mcp,
 			// read/write/edit/glob/grep + psyche/email intrinsics) are
 			// default-on in the kernel — only overrides and opt-in caps
 			// belong here. See lingtai-kernel capabilities.CORE_DEFAULTS.
@@ -1613,6 +1658,9 @@ func SyncCapabilityAPIKeyEnv(manifest map[string]interface{}) {
 
 // GenerateInitJSONWithOpts creates a full init.json from a preset with explicit agent options.
 func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDir string, opts AgentOpts) error {
+	if err := p.NormalizeLegacyCapabilities(); err != nil {
+		return fmt.Errorf("canonicalize preset capabilities: %w", err)
+	}
 	agentDir := filepath.Join(lingtaiDir, dirName)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
@@ -1684,7 +1732,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 			existingInitPath := filepath.Join(agentDir, "init.json")
 			if data, err := os.ReadFile(existingInitPath); err == nil {
 				var existing map[string]interface{}
-				if json.Unmarshal(data, &existing) == nil {
+				if DecodeJSONUseNumber(data, &existing) == nil {
 					if mn, ok := existing["manifest"].(map[string]interface{}); ok {
 						if pre, ok := mn["preset"].(map[string]interface{}); ok {
 							if cur, ok := pre["active"].(string); ok && cur != "" {
@@ -1818,7 +1866,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	existingInitPath := filepath.Join(agentDir, "init.json")
 	if existingData, err := os.ReadFile(existingInitPath); err == nil {
 		var existing map[string]interface{}
-		if json.Unmarshal(existingData, &existing) == nil {
+		if DecodeJSONUseNumber(existingData, &existing) == nil {
 			switch v := existing["addons"].(type) {
 			case []interface{}:
 				existingAddonsList = v
@@ -1973,7 +2021,7 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	merged := agentManifest
 	if existing, err := os.ReadFile(agentJSONPath); err == nil {
 		var prev map[string]interface{}
-		if json.Unmarshal(existing, &prev) == nil {
+		if DecodeJSONUseNumber(existing, &prev) == nil {
 			// Start from prev, then overwrite the wizard-controlled keys.
 			merged = prev
 			for k, v := range agentManifest {
@@ -2055,7 +2103,7 @@ func rewritePresetBlock(initPath, defaultRef string, allowed []string, allowedSe
 		return fmt.Errorf("read: %w", err)
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := DecodeJSONUseNumber(data, &raw); err != nil {
 		return fmt.Errorf("parse: %w", err)
 	}
 	manifest, ok := raw["manifest"].(map[string]interface{})

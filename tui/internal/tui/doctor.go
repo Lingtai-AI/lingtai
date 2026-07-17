@@ -22,7 +22,6 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/doctorreport"
-	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
@@ -1268,9 +1267,9 @@ func providerProbeConfig(provider, apiKey, baseURL, apiCompat string) (string, m
 
 // --- Kernel health checks ---
 
-// checkKernelHealth runs K1–K6 and appends findings to lines.
-// Returns true if every hard check passed. Soft warnings (version drift) do
-// not affect the return value but still surface as Warn lines.
+// checkKernelHealth runs the kernel/runtime health checks and appends findings to lines.
+// Returns true if every hard check passed. Soft warnings do not affect the
+// return value but still surface as Warn lines.
 func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
 	allOK := true
 
@@ -1341,41 +1340,8 @@ func checkKernelHealth(orchDir, globalDir string, lines *[]doctorLine) bool {
 		allOK = false
 	}
 
-	// K6. Migration version in .lingtai/meta.json vs this binary's CurrentVersion.
-	// orchDir is <projectRoot>/.lingtai/<orchName>, so .lingtai/ is its parent.
-	lingtaiDir := filepath.Dir(orchDir)
-	projectVersion, metaErr := readMetaVersion(lingtaiDir)
-	switch {
-	case metaErr != nil:
-		// meta.json missing or unreadable — surface but don't fail the suite,
-		// since a project being opened for the first time legitimately has none.
-		*lines = append(*lines, doctorLine{
-			Text: i18n.TF("doctor.meta_unreadable", metaErr.Error()), Warn: true,
-		})
-	case projectVersion == migrate.CurrentVersion:
-		*lines = append(*lines, doctorLine{
-			Text: i18n.TF("doctor.migration_ok", projectVersion), OK: true,
-		})
-	case projectVersion > migrate.CurrentVersion:
-		// User downgraded the TUI. Data format is ahead of the binary.
-		*lines = append(*lines, doctorLine{
-			Text: i18n.TF("doctor.migration_ahead", projectVersion, migrate.CurrentVersion),
-		})
-		*lines = append(*lines, doctorLine{
-			Text: i18n.T("doctor.suggest_upgrade_tui"), Hint: true,
-		})
-		allOK = false
-	default:
-		// projectVersion < CurrentVersion — migrations should have run at startup,
-		// so hitting this means a silent migration failure or a stale state.
-		*lines = append(*lines, doctorLine{
-			Text: i18n.TF("doctor.migration_behind", projectVersion, migrate.CurrentVersion),
-		})
-		*lines = append(*lines, doctorLine{
-			Text: i18n.T("doctor.suggest_restart_tui"), Hint: true,
-		})
-		allOK = false
-	}
+	// K6 was the former project migration/version-chain diagnostic. Runtime
+	// migrations are retired, so /doctor reports kernel/runtime health only.
 
 	// K7. Orchestrator heartbeat. Uses the canonical 3.0s liveness threshold
 	// from app.go / mail.go / nirvana.go. No remediation suggestion — a stale
@@ -1473,25 +1439,6 @@ func probeKernelCLI(python string) (error, string) {
 		return err, stderr.String()
 	}
 	return nil, ""
-}
-
-// readMetaVersion reads .lingtai/meta.json and returns the version field.
-// Returns (0, nil) if the file doesn't exist; (0, err) on parse failure.
-func readMetaVersion(lingtaiDir string) (int, error) {
-	data, err := os.ReadFile(filepath.Join(lingtaiDir, "meta.json"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	var meta struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return 0, err
-	}
-	return meta.Version, nil
 }
 
 func extractErrorMessage(body string) string {

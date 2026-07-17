@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 )
 
-// CurrentVersion is the latest migration version compiled into this binary.
-// IMPORTANT: when bumping, also bump portal/internal/migrate/migrate.go (see CLAUDE.md).
+// CurrentVersion is the retained historical registry version. Production TUI
+// startup/project creation no longer consults or stamps this registry.
+// Keep the value for historical tests and package parity only.
 // CurrentVersion history:
 //
 //	37 — preset-skills-paths (m037)
@@ -80,11 +81,10 @@ var migrations = []Migration{
 	{Version: 39, Name: "agent-init-context-preset-repair", Fn: migrateAgentInitContextPresetRepair},
 }
 
-// Run executes all pending migrations on the given .lingtai/ directory.
-// It reads the current version from meta.json (or assumes 0 if missing),
-// runs migrations sequentially, and writes the new version atomically.
-// Preserves all sibling fields in meta.json (e.g. addon_comment_cleanup_notified)
-// across the version bump.
+// Run is the retained historical/test API that executes pending migrations on
+// a .lingtai/ directory. Production TUI code has no caller. It reads the
+// current version from meta.json (or assumes 0 if missing), runs migrations
+// sequentially, and writes the new version atomically.
 func Run(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 
@@ -121,16 +121,10 @@ func Run(lingtaiDir string) error {
 	return persistMeta(lingtaiDir, &meta)
 }
 
-// StampCurrent writes meta.json at CurrentVersion without running any
-// migrations. Called by InitProject when a fresh .lingtai/ directory is
-// created — a freshly-generated project conforms to the current schema
-// by construction, so running historical migrations against it would
-// corrupt otherwise-valid data (e.g. the pre-m016 "library" key meant
-// "knowledge archive" but post-m016 it means "skill library", and m016
-// unconditionally renames library→codex).
-//
-// No-op if meta.json already exists — upgrade paths stay authoritative
-// for projects created by older TUI binaries.
+// StampCurrent is the retained historical/test API that writes meta.json at
+// CurrentVersion without running migrations. Production project creation no
+// longer calls it; fresh and existing project files remain un-stamped.
+
 func StampCurrent(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 	if _, err := os.Stat(metaPath); err == nil {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
-	"github.com/anthropics/lingtai-tui/internal/migrate"
 )
 
 // ErrAgentAlreadyRunning is returned by LaunchAgent when a `lingtai-agent run`
@@ -62,14 +61,6 @@ func InitProject(lingtaiDir string) error {
 	libraryShared := filepath.Join(lingtaiDir, ".library_shared")
 	if err := os.MkdirAll(libraryShared, 0o755); err != nil {
 		return fmt.Errorf("create .library_shared: %w", err)
-	}
-	// Stamp meta.json at the current migration version so the next TUI
-	// launch doesn't replay migrations against a freshly-created project.
-	// Migrations are upgrade paths for legacy data written by older TUIs;
-	// a fresh project already conforms to the current schema and running
-	// historical migrations (e.g. library→codex rename) would corrupt it.
-	if err := migrate.StampCurrent(lingtaiDir); err != nil {
-		return fmt.Errorf("stamp meta.json: %w", err)
 	}
 	return nil
 }

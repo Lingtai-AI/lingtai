@@ -5,6 +5,11 @@ related_files:
   - tui/internal/fs/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/tui/ANATOMY.md
+  - tui/internal/preset/capability_alias.go
+  - tui/internal/preset/capability_alias_test.go
+  - tui/internal/preset/json_number.go
+  - tui/internal/preset/json_number_test.go
+  - tui/internal/preset/templates/CONTRACT.md
   - tui/internal/preset/preset.go
   - tui/internal/preset/preset_test.go
   - tui/internal/preset/recipe_apply.go
@@ -57,6 +62,9 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 | `Preset` struct | `tui/internal/preset/preset.go:61` | `Name` + `Description` (structured object) + `Manifest` (raw JSON) + `Source` (runtime-only) |
 | `PresetSource` | `tui/internal/preset/preset.go:75` | `SourceUnknown` / `SourceTemplate` / `SourceSaved` — directory-of-origin |
 | `PresetDescription` | `tui/internal/preset/preset.go:99` | Structured `{summary, tier, Extra}` with custom marshal/unmarshal |
+| `CanonicalizeCapabilities` | `tui/internal/preset/capability_alias.go:24` | bounded in-memory `bash` -> `shell` helper for explicit preset/editor/write flows; conflicting configurations fail closed |
+| `NormalizeLegacyCapabilities` | `tui/internal/preset/capability_alias.go:47` | applies the bounded helper to a preset before explicit TUI output |
+| `DecodeJSONUseNumber` | `tui/internal/preset/json_number.go:10-27` | exact-number, single-document decoder for explicit TUI read-modify-write paths; not a startup reader or migration |
 | `Load(name)` | `tui/internal/preset/preset.go:257` | saved/ first, then templates/; sets `Source` |
 | `List()` | `tui/internal/preset/preset.go:210` | saved (alphabetical) + templates (canonical order); each carries `Source` |
 | `Save(p)` | `tui/internal/preset/preset.go:373` | ALWAYS to `saved/`; never templates |
@@ -106,4 +114,6 @@ The preset package owns the atomic `{llm, capabilities}` bundle layer — loadin
 - **Templates vs saved.** The directory IS the marker. `IsTemplate(p)` checks `p.Source == SourceTemplate`. Callers should prefer it over `IsBuiltin(p.Name)`. When writing `manifest.preset.*` paths, use `RefFor(p)` — it picks the right subdirectory from `Source`.
 - **Authorization gate.** `manifest.preset.allowed` is the explicit list; the kernel refuses any swap not in it. `default` and `active` must both appear. m029 introduced this declarative form.
 - **Saved name convention.** When a user edits a template, `AutoSavedName` picks `<template>-<N>` with the lowest unused N, so templates are never overwritten.
+- **Kernel-owned init shape.** `templates/CONTRACT.md` is the narrow pointer for the embedded `init.jsonc` consumer copy. The kernel canonical trio linked by `templates/CONTRACT.md` owns init semantics; TUI's alias and exact-number helpers only protect explicit preset/editor/recipe/rehydration/settings writes and do not form a startup reader or migration.
+- **Template drift.** The embedded template and `examples/init.jsonc` are checked byte-for-byte locally; the exact kernel canonical path is linked in `templates/CONTRACT.md` and checked by integration/PR validation.
 - **No in-band marker.** There is no `"is_template": true` field. Two presets with identical JSON but different directories are treated differently — `Source` is set at load time, never serialized.

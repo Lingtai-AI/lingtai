@@ -382,7 +382,7 @@ func (m *SettingsModel) saveAgentName() {
 	initPath := filepath.Join(m.orchDir, "init.json")
 	if data, err := os.ReadFile(initPath); err == nil {
 		var init map[string]interface{}
-		if err := json.Unmarshal(data, &init); err == nil {
+		if err := preset.DecodeJSONUseNumber(data, &init); err == nil {
 			if manifest, ok := init["manifest"].(map[string]interface{}); ok {
 				manifest["agent_name"] = m.agentName
 			}
@@ -403,7 +403,7 @@ func (m *SettingsModel) saveAgentLang(lang string) {
 		return
 	}
 	var initData map[string]interface{}
-	if err := json.Unmarshal(data, &initData); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &initData); err != nil {
 		return
 	}
 	if manifest, ok := initData["manifest"].(map[string]interface{}); ok {

@@ -31,7 +31,7 @@ func testPresetEditorPreset() preset.Preset {
 			},
 			"capabilities": map[string]interface{}{
 				"file":       map[string]interface{}{},
-				"bash":       map[string]interface{}{"yolo": true},
+				"shell":      map[string]interface{}{"yolo": true},
 				"avatar":     map[string]interface{}{},
 				"daemon":     map[string]interface{}{},
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},
@@ -417,6 +417,27 @@ func TestPresetEditorAPIKeyEditableWhenNoStoredKey(t *testing.T) {
 	}
 }
 
+func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
+	p := testPresetEditorPreset()
+	caps := p.Manifest["capabilities"].(map[string]interface{})
+	legacy := caps["shell"]
+	delete(caps, "shell")
+	caps["bash"] = legacy
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	workingCaps := m.working.Manifest["capabilities"].(map[string]interface{})
+	if _, ok := workingCaps["bash"]; ok {
+		t.Fatalf("editor retained legacy bash capability: %#v", workingCaps)
+	}
+	if got := workingCaps["shell"].(map[string]interface{})["yolo"]; got != true {
+		t.Fatalf("editor lost legacy shell configuration: %#v", workingCaps["shell"])
+	}
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	if !strings.Contains(m.View(), "shell") {
+		t.Fatalf("editor view does not display canonical shell capability")
+	}
+}
+
 func TestPresetEditorCapabilitiesAreOptionalOnly(t *testing.T) {
 	wantCaps := []string{"web_search", "vision"}
 	if strings.Join(editorCapabilities, ",") != strings.Join(wantCaps, ",") {
@@ -440,7 +461,7 @@ func TestDefaultCapsForDoesNotSerializeCoreFloor(t *testing.T) {
 		{model: "mimo-v2.5", wantVision: true},
 		{model: "mimo-v2.5-pro", wantVision: false},
 	}
-	coreCaps := []string{"file", "bash", "avatar", "daemon", "knowledge", "library", "skills", "mcp"}
+	coreCaps := []string{"file", "shell", "avatar", "daemon", "knowledge", "library", "skills", "mcp"}
 
 	for _, tt := range tests {
 		caps := defaultCapsFor(tt.model)
@@ -480,7 +501,7 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 	if !ok {
 		t.Fatalf("committed capabilities missing/wrong type: %T", commit.Preset.Manifest["capabilities"])
 	}
-	for _, capName := range []string{"library", "skills", "file", "bash", "avatar", "daemon"} {
+	for _, capName := range []string{"library", "skills", "file", "shell", "avatar", "daemon"} {
 		if _, ok := caps[capName]; ok {
 			t.Fatalf("commit injected core/legacy capability %q: %#v", capName, caps)
 		}
@@ -492,7 +513,7 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 
 // TestSyncCapsToModelPreservesNonOptionalCapabilities is the regression
 // test for issue #311: switching models must not delete capability
-// entries that are not model-conditional (skills.paths overrides, bash
+// entries that are not model-conditional (skills.paths overrides, shell
 // policy, etc.). Only the optionalCapabilities (web_search, vision) may
 // be reset to the target model's defaults.
 func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
@@ -502,7 +523,7 @@ func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
 		"web_search": map[string]interface{}{"provider": "zhipu"},
 		"vision":     map[string]interface{}{"provider": "inherit"},
 		"skills":     map[string]interface{}{"paths": skillsPaths},
-		"bash":       map[string]interface{}{"yolo": true},
+		"shell":      map[string]interface{}{"yolo": true},
 	}
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 
@@ -521,12 +542,12 @@ func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
 	if !reflect.DeepEqual(skills["paths"], skillsPaths) {
 		t.Fatalf("model switch mangled skills.paths: got %#v, want %#v", skills["paths"], skillsPaths)
 	}
-	bash, ok := caps["bash"].(map[string]interface{})
+	shell, ok := caps["shell"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("model switch dropped bash capability override: %#v", caps)
+		t.Fatalf("model switch dropped shell capability override: %#v", caps)
 	}
-	if yolo, _ := bash["yolo"].(bool); !yolo {
-		t.Fatalf("model switch lost bash yolo override: %#v", bash)
+	if yolo, _ := shell["yolo"].(bool); !yolo {
+		t.Fatalf("model switch lost shell yolo override: %#v", shell)
 	}
 	ws, ok := caps["web_search"].(map[string]interface{})
 	if !ok {
@@ -861,7 +882,7 @@ func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
-	for _, capName := range []string{"knowledge", "skills", "bash", "avatar", "daemon", "mcp", "file"} {
+	for _, capName := range []string{"knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file"} {
 		if !strings.Contains(view, capName) {
 			t.Fatalf("view missing always-included capability %q; view:\n%s", capName, view)
 		}

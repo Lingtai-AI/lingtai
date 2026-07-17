@@ -10,7 +10,6 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
-	"github.com/anthropics/lingtai-tui/internal/migrate"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 )
@@ -550,12 +549,6 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 	// into the final directory. Remove it now that it has served its
 	// purpose; a failure here is cosmetic and does not affect validity.
 	_ = os.Remove(filepath.Join(finalDir, stagingMarkerName))
-
-	// Stamp the migration version on the FINAL path too — InitProject
-	// already stamped it on the staging path before rename, and stamping
-	// is idempotent, but this guards against any future change to the
-	// staging-vs-final path assumptions.
-	_ = migrate.StampCurrent(finalDir)
 
 	// 6. Post-commit: never rolls back. Every failure below is collected
 	// as a warning; RunProjectCreate still returns Committed=true.

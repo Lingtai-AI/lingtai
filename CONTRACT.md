@@ -223,15 +223,15 @@ Root behavior rules:
    at the Composition Root, and reject unused interfaces or directory-only
    reshuffles as evidence of a completed migration.
 6. Because both binaries read one on-disk schema, a change to **shared** state
-   that both consume (a `.lingtai/` field, folder layout, or signal semantics
-   read by both, or the shared `meta.json` migration version) MUST keep both
-   `lingtai-tui` and `lingtai-portal` compatible and MUST keep the shared
-   migration version space in lockstep. This is compatibility, not mirrored
-   code: portal-only state (`.portal/` port and recordings), TUI-only or
-   kernel-facing capabilities, and each binary's distinct feature set are
-   legitimate and need not acquire a symmetric implementation in the other.
-   Existing portal migration coverage is deliberately a subset of the TUI's,
-   with parity/no-op slots to hold the shared version in lockstep.
+   that both consume (a `.lingtai/` field, folder layout, or signal semantics)
+   MUST keep `lingtai-tui` and `lingtai-portal` compatible. Legacy
+   `.lingtai/meta.json` migration fields may remain on disk, but production does
+   not consult, advance, or gate on them; the retained TUI/Portal migration
+   registries are historical/test APIs rather than a live lockstep contract.
+   This is compatibility, not mirrored code: portal-only state (`.portal/` port
+   and recordings), TUI-only or kernel-facing capabilities, and each binary's
+   distinct feature set are legitimate and need not acquire a symmetric
+   implementation in the other.
 7. A component's local `Behavior` section MAY add stricter obligations specific
    to that boundary, including safe handling of retries, cancellation, unknown
    side effects, ordering, recovery, or sensitive data. It MUST NOT contradict

@@ -139,24 +139,33 @@ lingtai-tui --version              # → vX.Y.Z-N-gSHORTSHA (git describe — ne
 
 A clean `vX.Y.Z` version string means the brew-installed binary is in front; a `-N-gSHORTSHA` suffix means dev mode is live. The `-N-g…` form comes from `git describe --tags` and is what `make build` bakes into `-X main.version`.
 
-After ANY rebuild of one binary (TUI OR portal), rebuild BOTH together — see the "Dev-mode rebuild gotcha" under Migrations below for why.
+After a shared code change, rebuild BOTH binaries together; the retained project migration registry is not a runtime compatibility gate.
 
 ### Migrations (`tui/internal/migrate/`)
 
-Versioned, append-only, forward-only migration system. Each migration is a file `m<NNN>_<name>.go` exporting a function `func migrate<Name>(lingtaiDir string) error`. Register it in `migrate.go` by appending to the `migrations` slice and bumping `CurrentVersion`. Migrations run once per project at TUI launch (version tracked in `.lingtai/meta.json`). They can read global state (`globalTUIDir()` helper) but receive the project's `.lingtai/` dir as input. Print warnings directly with `fmt.Println` — no i18n needed since migrations run before the TUI renders.
+This package is retained historical Git source and direct unit-test coverage for
+m001–m039. Production TUI startup, project creation, launcher, and diagnostics
+do not import or execute it, stamp `.lingtai/meta.json`, or maintain a project
+migration-progress/version chain. Existing project files continue as stored; the
+kernel reader/Nudge and explicit Agent edits own compatibility repair. Keep the
+registry/API at `CurrentVersion = 39` only for historical tests/parity. Do not add
+a new production migration, version check, stamp, preflight, or automatic
+`init.json` rewrite.
 
-**IMPORTANT: The TUI and portal share the same `meta.json` version space but have separate migration registries.** When adding migrations to the TUI, you MUST also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`. Migrations that touch shared on-disk state (init.json schema, preset paths, etc.) should be implemented in BOTH packages with identical logic — copy the file across. TUI-only migrations (assets, recipe state, anything portal doesn't read) get a no-op stub `Fn: func(_ string) error { return nil }` in the portal registry to preserve the version slot. Otherwise the portal refuses to open any project the TUI has already touched.
+The retained m001–m039 implementation and tests must not be deleted. The six
+retired m040/preflight paths are the only authorized deletions in the v4.2 recut.
+The adjacent `migration/migration.md` is prose/Git history, not runtime state.
 
-**Dev-mode rebuild gotcha:** When running symlinked dev binaries (`/opt/homebrew/bin/lingtai-{tui,portal}` → `~/Documents/GitHub/lingtai/{tui,portal}/bin/...`), a stale portal binary against a freshly-migrated project fails with `data version N is newer than this binary supports (M); upgrade lingtai-portal`. After ANY migration bump (or whenever `/viz` complains), rebuild BOTH:
+**Dev-mode rebuild:** rebuild both binaries after ordinary code changes as usual:
 ```bash
 cd ~/Documents/GitHub/lingtai/tui && make build
 cd ~/Documents/GitHub/lingtai/portal && make build
 ```
-The brew-installed pair never hits this because they ship together at the same version; dev mode hits it whenever you rebuild one and forget the other. Symptom: `/viz` works on brew install, fails on dev install.
+This is no longer a migration-version compatibility gate.
 
-Recent migrations worth knowing about:
-- **m029** — `manifest.preset.path` (directory the kernel scanned) → `manifest.preset.allowed` (explicit list of allowed preset path strings). Schema is now declarative.
-- **m030** — preset directory split: rewrites flat `~/.lingtai-tui/presets/X.json` paths in init.json to either `presets/templates/X.json` or `presets/saved/X.json` (see "Preset architecture" below).
+Recent historical entries worth knowing about:
+- **m029** — `manifest.preset.path` (directory the kernel scanned) → `manifest.preset.allowed` (explicit list of allowed preset path strings).
+- **m030** — preset directory split: rewrites flat `~/.lingtai-tui/presets/X.json` paths in init.json to either `presets/templates/X.json` or `presets/saved/X.json`.
 
 ### Global migrations (`tui/internal/globalmigrate/`)
 

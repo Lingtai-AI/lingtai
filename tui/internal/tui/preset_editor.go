@@ -223,7 +223,7 @@ var modelHasVision = map[string]bool{
 // explicit disable/null channel. The preset editor shows them for awareness but
 // does not serialize ordinary checkbox state for them.
 var alwaysIncludedCapabilities = []string{
-	"knowledge", "skills", "bash",
+	"knowledge", "skills", "shell",
 	"avatar", "daemon", "mcp", "file",
 }
 
@@ -366,6 +366,13 @@ func NewPresetEditorModel(p preset.Preset, lang string, existingKeys map[string]
 // callers that want to override built-in protection (e.g. tests, or
 // a future "fork built-in" flow that has already cloned upstream).
 func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingKeys map[string]string, globalDir string, isBuiltin bool) PresetEditorModel {
+	// Normalize legacy capability aliases before cloning so the form and its
+	// eventual write path expose only the canonical shell key. Conflicts are
+	// retained for Validate/commit to reject, but the error is visible now.
+	normalizationErr := ""
+	if err := p.NormalizeLegacyCapabilities(); err != nil {
+		normalizationErr = err.Error()
+	}
 	// Inline editor uses textarea — paste from the system clipboard
 	// works reliably (textinput drops chars on multi-byte pastes).
 	// We render only one row; updateInline intercepts Enter and the
@@ -410,6 +417,7 @@ func NewPresetEditorModelWithBuiltinFlag(p preset.Preset, lang string, existingK
 		existingKeys:   existingKeys,
 		globalDir:      globalDir,
 		apiKey:         apiKey,
+		saveErr:        normalizationErr,
 	}
 }
 
@@ -724,17 +732,17 @@ func (m PresetEditorModel) updateCapabilities(msg tea.KeyMsg) (PresetEditorModel
 		m.cycleCapProvider(editorCapabilities[m.capCursor], -1)
 		return m, nil
 	case "enter":
-		// On rows that have a nested config (bash.yolo, skills.paths),
+		// On rows that have a nested config (shell.yolo, skills.paths),
 		// drop into a single-line inline edit. Other rows: enter is a
 		// no-op (use space to toggle, tab to cycle providers).
 		name := editorCapabilities[m.capCursor]
 		switch name {
-		case "bash":
+		case "shell":
 			// Toggle yolo via Enter as a one-keystroke shortcut.
 			caps := m.capsMap()
-			cfg := capCfgMap(caps, "bash")
+			cfg := capCfgMap(caps, "shell")
 			cfg["yolo"] = !asBool(cfg["yolo"])
-			caps["bash"] = cfg
+			caps["shell"] = cfg
 		case "skills":
 			// Open inline editor with comma-joined paths.
 			caps := m.capsMap()
@@ -799,7 +807,7 @@ func (m *PresetEditorModel) toggleCapability(name string) {
 	// Synthesize a reasonable default config.
 	cfg := map[string]interface{}{}
 	switch name {
-	case "bash":
+	case "shell":
 		cfg["yolo"] = false
 	case "skills":
 		cfg["paths"] = []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
@@ -1114,7 +1122,7 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 
 // syncCapsToModel resets the model-conditional optional capabilities
 // (web_search, vision) to the default set for the new model. All other
-// capability entries — skills.paths overrides, bash policy, anything
+// capability entries — skills.paths overrides, shell policy, anything
 // not in optionalCapabilities — are not model-dependent and survive the
 // switch untouched. For free-text models not in the providerModels
 // catalog, leave caps alone; we don't know what counts as "default"
@@ -1286,7 +1294,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	// differs from the template's name), respect that name. Otherwise
 	// gap-fill the next "<template>-N" slot.
 	committed := clonePresetForEditor(m.working)
-	// Kernel core capabilities (knowledge, skills, bash, avatar, daemon,
+	// Kernel core capabilities (knowledge, skills, shell, avatar, daemon,
 	// mcp, file group) are floor-injected by apply_core_defaults at
 	// runtime, so we deliberately do NOT stamp them into the saved
 	// manifest. That keeps preset JSON minimal and avoids implying these
@@ -1638,7 +1646,7 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_mandatory"))))
 	alwaysIncludedRows := []string{
 		"email", "psyche", "soul", "system",
-		"knowledge", "skills", "bash",
+		"knowledge", "skills", "shell",
 		"avatar", "daemon", "mcp", "file",
 	}
 	for _, capName := range alwaysIncludedRows {
@@ -2216,7 +2224,7 @@ func (m PresetEditorModel) renderCapOverlay(_ string) string {
 		// Inline meta render (provider, yolo, paths preview).
 		var meta string
 		switch name {
-		case "bash":
+		case "shell":
 			if on {
 				if asBool(cfg["yolo"]) {
 					meta = "  yolo:on"
@@ -2360,7 +2368,7 @@ func clonePresetForEditor(p preset.Preset) preset.Preset {
 		return p
 	}
 	var out preset.Preset
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := preset.DecodeJSONUseNumber(data, &out); err != nil {
 		return p
 	}
 	return out

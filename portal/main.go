@@ -14,7 +14,6 @@ import (
 
 	"github.com/anthropics/lingtai-portal/i18n"
 	"github.com/anthropics/lingtai-portal/internal/api"
-	"github.com/anthropics/lingtai-portal/internal/migrate"
 )
 
 // version is set at build time via -ldflags "-X main.version=v0.4.2"
@@ -61,11 +60,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run migrations
-	if err := migrate.Run(lingtaiDir); err != nil {
-		fmt.Fprintf(os.Stderr, "migration error: %v\n", err)
-		os.Exit(1)
-	}
+	// Runtime project migrations are retired. Existing project files remain
+	// untouched; compatibility diagnosis and repair are Agent-owned.
 
 	// Ensure .portal/ directory exists
 	portalDir := filepath.Join(lingtaiDir, ".portal")

@@ -2,10 +2,12 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 // DetectOrchestrators scans baseDir for .agent.json files with admin privileges.
@@ -48,7 +50,7 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		return err
 	}
 	var orchInit map[string]interface{}
-	if err := json.Unmarshal(orchData, &orchInit); err != nil {
+	if err := preset.DecodeJSONUseNumber(orchData, &orchInit); err != nil {
 		return err
 	}
 	orchManifest, _ := orchInit["manifest"].(map[string]interface{})
@@ -60,6 +62,11 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 		return nil
 	}
 	orchCaps, _ := orchManifest["capabilities"].(map[string]interface{})
+	if orchCaps != nil {
+		if _, err := preset.CanonicalizeCapabilities(orchCaps); err != nil {
+			return fmt.Errorf("canonicalize orchestrator capabilities: %w", err)
+		}
+	}
 	orchSoul, _ := orchManifest["soul"].(map[string]interface{})
 	orchEnvFile, _ := orchInit["env_file"].(string)
 
@@ -81,7 +88,7 @@ func PropagateOrchestratorConfig(baseDir, orchDir string) error {
 			continue
 		}
 		var initJSON map[string]interface{}
-		if err := json.Unmarshal(data, &initJSON); err != nil {
+		if err := preset.DecodeJSONUseNumber(data, &initJSON); err != nil {
 			continue
 		}
 		manifest, _ := initJSON["manifest"].(map[string]interface{})

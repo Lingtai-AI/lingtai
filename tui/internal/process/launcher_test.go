@@ -34,4 +34,8 @@ func TestInitProject(t *testing.T) {
 	if string(data) != "[]" {
 		t.Errorf("contacts = %q, want %q", string(data), "[]")
 	}
+
+	if _, err := os.Stat(filepath.Join(lingtaiDir, "meta.json")); !os.IsNotExist(err) {
+		t.Errorf("InitProject wrote retired migration progress meta.json (err=%v)", err)
+	}
 }

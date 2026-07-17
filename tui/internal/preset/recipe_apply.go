@@ -288,7 +288,7 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 		return fmt.Errorf("read %s: %w", initJSONPath, err)
 	}
 	var root map[string]interface{}
-	if err := json.Unmarshal(data, &root); err != nil {
+	if err := DecodeJSONUseNumber(data, &root); err != nil {
 		return fmt.Errorf("parse %s: %w", initJSONPath, err)
 	}
 	manifest, ok := root["manifest"].(map[string]interface{})
@@ -299,6 +299,10 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 	if !ok {
 		return nil
 	}
+	capsChanged, err := CanonicalizeCapabilities(caps)
+	if err != nil {
+		return fmt.Errorf("canonicalize %s: %w", initJSONPath, err)
+	}
 	skills, ok := caps["skills"].(map[string]interface{})
 	if !ok {
 		return nil
@@ -308,12 +312,18 @@ func AppendSkillsPath(initJSONPath, pathEntry string) error {
 	if raw, ok := skills["paths"].([]interface{}); ok {
 		existing = raw
 	}
+	pathPresent := false
 	for _, p := range existing {
 		if s, ok := p.(string); ok && s == pathEntry {
-			return nil // already present
+			pathPresent = true
+			break
 		}
 	}
-	skills["paths"] = append(existing, pathEntry)
+	if !pathPresent {
+		skills["paths"] = append(existing, pathEntry)
+	} else if !capsChanged {
+		return nil // path and capability aliases are already canonical
+	}
 
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {

@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 )
 
-// CurrentVersion is the latest migration version compiled into this binary.
+// CurrentVersion is the retained historical registry version. Production Portal
+// startup no longer consults or stamps this registry.
 // Version history:
 //
 //	37 — preset-skills-paths (TUI-only no-op)
@@ -79,9 +80,9 @@ var migrations = []Migration{
 	{Version: 39, Name: "agent-init-context-preset-repair", Fn: migrateAgentInitContextPresetRepair},      // shared: copies legacy root context_limit into llm + rewrites stale codex preset pointers (PR #357)
 }
 
-// StampCurrent writes meta.json at CurrentVersion without running any
-// migrations. Mirror of the TUI helper — kept for parity so both binaries
-// know to skip migrations on fresh projects.
+// StampCurrent is the retained historical/test API. Production Portal startup
+// no longer calls it; project files remain un-stamped.
+
 func StampCurrent(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 	if _, err := os.Stat(metaPath); err == nil {
@@ -98,9 +99,9 @@ func StampCurrent(lingtaiDir string) error {
 	return os.Rename(tmpPath, metaPath)
 }
 
-// Run executes all pending migrations on the given .lingtai/ directory.
-// It reads the current version from meta.json (or assumes 0 if missing),
-// runs migrations sequentially, and writes the new version atomically.
+// Run is the retained historical/test API. Production Portal startup has no
+// caller and leaves existing project files untouched.
+
 func Run(lingtaiDir string) error {
 	metaPath := filepath.Join(lingtaiDir, "meta.json")
 

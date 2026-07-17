@@ -56,18 +56,27 @@
     // -------------------------------------------------------
     // Capabilities — the agent's tool surface
     // -------------------------------------------------------
+    // Shape layers (kernel reader contract): new/canonical writes use
+    // `manifest.capabilities.shell`. For read-only compatibility, the reader
+    // accepts legacy `manifest.capabilities.bash` and maps it in memory to
+    // `manifest.capabilities.shell`; the kernel never writes `bash`.
+    // If both keys are present, differing values are a conflict (BLOCKED).
+    // Equal dual values are compatibility-only; effective memory keeps `shell`.
+    //
+    // The kernel reader owns this classification; these comments are informative
+    // shape guidance, not a migration registry or a runtime history file.
     // The kernel boots the `lingtai.core.*` floor by default on every
-    // agent: knowledge, skills, bash, avatar, daemon, mcp, read, write,
+    // agent: knowledge, skills, shell, avatar, daemon, mcp, read, write,
     // edit, glob, grep — plus the always-on intrinsics psyche and email.
     // You do NOT need to list those here unless you want to OVERRIDE
-    // their default kwargs (e.g. give `bash` a deny-list policy file
+    // their default kwargs (e.g. give `shell` a deny-list policy file
     // instead of the default yolo mode).
     //
     // Top-level "disable" (sibling of "capabilities") opts a capability
     // out entirely: e.g. "disable": ["avatar"].
     //
     // Entries below are either:
-    //   1. Overrides for default-on capabilities (bash, skills here).
+    //   1. Overrides for default-on capabilities (shell, skills here).
     //   2. Opt-in capabilities not in the default set (vision, web_search).
     // -------------------------------------------------------
     "capabilities": {
@@ -75,7 +84,7 @@
       // Kernel default is { "yolo": true } (no deny-list). The TUI ships
       // a deny-list at bash_policy.json so agents started via lingtai-tui
       // get the sandboxed surface by default.
-      "bash": { "policy_file": "bash_policy.json" },
+      "shell": { "policy_file": "bash_policy.json" },
 
       // --- Skills catalog (override) ---
       // `skills` is default-on; this entry adds extra search paths to the
