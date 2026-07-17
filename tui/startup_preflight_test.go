@@ -9,6 +9,15 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
 
+func defaultPreflightOptions(out *bytes.Buffer) preflightOptions {
+	return preflightOptions{
+		GlobalDirPath:        func() (string, error) { return "/tmp/lingtai-test", nil },
+		CheckTUIUpgradeFunc:  func(string) string { return "" },
+		CheckAndPromptKernel: func(string) bool { return false },
+		PrintOutput:          out,
+	}
+}
+
 // TestRunVersionPreflightChecksBothTUIAndKernel proves the shared preflight
 // calls BOTH the read-only TUI check (config.CheckTUIUpgrade) and the
 // read-only kernel check (via CheckAndPromptKernel, which itself always
@@ -16,23 +25,22 @@ import (
 // the literal "every default interactive launch checks both TUI and kernel"
 // requirement, proven at the shared call site rather than per-branch.
 func TestRunVersionPreflightChecksBothTUIAndKernel(t *testing.T) {
+	var out bytes.Buffer
 	tuiCalls := 0
 	kernelCalls := 0
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath: func() (string, error) { return "/tmp/lingtai-test", nil },
-		CheckTUIUpgradeFunc: func(string) string {
-			tuiCalls++
-			return "" // up to date
-		},
-		CheckAndPromptKernel: func(globalDir string) bool {
-			kernelCalls++
-			if globalDir != "/tmp/lingtai-test" {
-				t.Fatalf("CheckAndPromptKernel globalDir = %q, want /tmp/lingtai-test", globalDir)
-			}
-			return false
-		},
-		PrintOutput: &bytes.Buffer{},
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.CheckTUIUpgradeFunc = func(string) string {
+		tuiCalls++
+		return ""
+	}
+	opts.CheckAndPromptKernel = func(globalDir string) bool {
+		kernelCalls++
+		if globalDir != "/tmp/lingtai-test" {
+			t.Fatalf("CheckAndPromptKernel globalDir = %q, want /tmp/lingtai-test", globalDir)
+		}
+		return false
+	}
+	exited := runVersionPreflightWithOptions(opts)
 	if exited {
 		t.Fatal("up-to-date TUI and kernel must not exit main()")
 	}
@@ -48,17 +56,14 @@ func TestRunVersionPreflightChecksBothTUIAndKernel(t *testing.T) {
 // resolution reports the error and signals main() to exit, without ever
 // reaching the TUI or kernel checks.
 func TestRunVersionPreflightGlobalDirFailureExits(t *testing.T) {
+	var out bytes.Buffer
 	tuiCalls := 0
 	kernelCalls := 0
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath:       func() (string, error) { return "", errors.New("no home dir") },
-		CheckTUIUpgradeFunc: func(string) string { tuiCalls++; return "" },
-		CheckAndPromptKernel: func(string) bool {
-			kernelCalls++
-			return false
-		},
-		PrintOutput: &bytes.Buffer{},
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.GlobalDirPath = func() (string, error) { return "", errors.New("no home dir") }
+	opts.CheckTUIUpgradeFunc = func(string) string { tuiCalls++; return "" }
+	opts.CheckAndPromptKernel = func(string) bool { kernelCalls++; return false }
+	exited := runVersionPreflightWithOptions(opts)
 	if !exited {
 		t.Fatal("a failed GlobalDirPath must signal main() to exit")
 	}
@@ -72,22 +77,16 @@ func TestRunVersionPreflightGlobalDirFailureExits(t *testing.T) {
 // true) signals main() to exit immediately — the user was already told to
 // restart — and never reaches the kernel check on this same launch.
 func TestRunVersionPreflightTUISelfUpgradeExits(t *testing.T) {
+	var out bytes.Buffer
 	kernelCalls := 0
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath:       func() (string, error) { return "/tmp/lingtai-test", nil },
-		CheckTUIUpgradeFunc: func(string) string { return "v0.9.0" },
-		DetectCurrentTUIInstall: func(string) config.TUIInstallInfo {
-			return config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew}
-		},
-		HandleTUIUpgrade: func(install config.TUIInstallInfo, ver, latest, globalDir string) bool {
-			return true
-		},
-		CheckAndPromptKernel: func(string) bool {
-			kernelCalls++
-			return false
-		},
-		PrintOutput: &bytes.Buffer{},
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.CheckTUIUpgradeFunc = func(string) string { return "v0.9.0" }
+	opts.DetectCurrentTUIInstall = func(string) config.TUIInstallInfo {
+		return config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew}
+	}
+	opts.HandleTUIUpgrade = func(config.TUIInstallInfo, string, string, string) bool { return true }
+	opts.CheckAndPromptKernel = func(string) bool { kernelCalls++; return false }
+	exited := runVersionPreflightWithOptions(opts)
 	if !exited {
 		t.Fatal("a completed TUI self-upgrade must signal main() to exit")
 	}
@@ -102,22 +101,16 @@ func TestRunVersionPreflightTUISelfUpgradeExits(t *testing.T) {
 // version-only path), the preflight continues on to the kernel check rather
 // than exiting.
 func TestRunVersionPreflightTUIUpgradeDeclinedContinuesToKernelCheck(t *testing.T) {
+	var out bytes.Buffer
 	kernelCalls := 0
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath:       func() (string, error) { return "/tmp/lingtai-test", nil },
-		CheckTUIUpgradeFunc: func(string) string { return "v0.9.0" },
-		DetectCurrentTUIInstall: func(string) config.TUIInstallInfo {
-			return config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew}
-		},
-		HandleTUIUpgrade: func(config.TUIInstallInfo, string, string, string) bool {
-			return false
-		},
-		CheckAndPromptKernel: func(string) bool {
-			kernelCalls++
-			return false
-		},
-		PrintOutput: &bytes.Buffer{},
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.CheckTUIUpgradeFunc = func(string) string { return "v0.9.0" }
+	opts.DetectCurrentTUIInstall = func(string) config.TUIInstallInfo {
+		return config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew}
+	}
+	opts.HandleTUIUpgrade = func(config.TUIInstallInfo, string, string, string) bool { return false }
+	opts.CheckAndPromptKernel = func(string) bool { kernelCalls++; return false }
+	exited := runVersionPreflightWithOptions(opts)
 	if exited {
 		t.Fatal("a declined TUI upgrade must not exit main()")
 	}
@@ -134,22 +127,17 @@ func TestRunVersionPreflightUnknownInstallMethodPrintsVersionAndContinues(t *tes
 	var out bytes.Buffer
 	handleCalls := 0
 	kernelCalls := 0
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath:       func() (string, error) { return "/tmp/lingtai-test", nil },
-		CheckTUIUpgradeFunc: func(string) string { return "v0.9.0" },
-		DetectCurrentTUIInstall: func(string) config.TUIInstallInfo {
-			return config.TUIInstallInfo{Method: config.TUIInstallMethodUnknown}
-		},
-		HandleTUIUpgrade: func(config.TUIInstallInfo, string, string, string) bool {
-			handleCalls++
-			return false
-		},
-		CheckAndPromptKernel: func(string) bool {
-			kernelCalls++
-			return false
-		},
-		PrintOutput: &out,
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.CheckTUIUpgradeFunc = func(string) string { return "v0.9.0" }
+	opts.DetectCurrentTUIInstall = func(string) config.TUIInstallInfo {
+		return config.TUIInstallInfo{Method: config.TUIInstallMethodUnknown}
+	}
+	opts.HandleTUIUpgrade = func(config.TUIInstallInfo, string, string, string) bool {
+		handleCalls++
+		return false
+	}
+	opts.CheckAndPromptKernel = func(string) bool { kernelCalls++; return false }
+	exited := runVersionPreflightWithOptions(opts)
 	if exited {
 		t.Fatal("unknown install method must not exit main()")
 	}
@@ -171,12 +159,9 @@ func TestRunVersionPreflightUnknownInstallMethodPrintsVersionAndContinues(t *tes
 // from the original returning-user path.
 func TestRunVersionPreflightKernelUpgradedPrintsConfirmation(t *testing.T) {
 	var out bytes.Buffer
-	exited := runVersionPreflightWithOptions(preflightOptions{
-		GlobalDirPath:        func() (string, error) { return "/tmp/lingtai-test", nil },
-		CheckTUIUpgradeFunc:  func(string) string { return "" },
-		CheckAndPromptKernel: func(string) bool { return true },
-		PrintOutput:          &out,
-	})
+	opts := defaultPreflightOptions(&out)
+	opts.CheckAndPromptKernel = func(string) bool { return true }
+	exited := runVersionPreflightWithOptions(opts)
 	if exited {
 		t.Fatal("a successful kernel upgrade must not exit main()")
 	}
