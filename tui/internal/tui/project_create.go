@@ -471,7 +471,7 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		return fail(PhaseApplyRecipe, err)
 	}
 	if draft.RecipeName != "" {
-		stagedProjectRoot, err := copyRecipeBundleWithEmbedded(stagingDir, opts.GlobalDir, draft.RecipeName, draft.RecipeCustomDir, true)
+		stagedProjectRoot, err := copyRecipeBundleWithEmbedded(stagingDir, opts.GlobalDir, draft.RecipeName, draft.RecipeCustomDir, draft.RecipeEmbedded)
 		if err != nil {
 			cleanupStaging()
 			return fail(PhaseApplyRecipe, fmt.Errorf("stage recipe bundle: %w", err))

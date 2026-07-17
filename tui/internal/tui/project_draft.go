@@ -81,8 +81,13 @@ type ProjectDraft struct {
 	AgentOpts preset.AgentOpts
 
 	// RecipeName/RecipeCustomDir select which recipe bundle to apply.
+	// RecipeEmbedded records that the reviewed picker row came from the
+	// compiled zero-write fallback. Creation must never infer this from the
+	// recipe name: a missing disk-backed recipe must fail, not silently switch
+	// to a compiled recipe with the same ID.
 	RecipeName      string
 	RecipeCustomDir string
+	RecipeEmbedded  bool
 
 	// ExistingKeys is a PRESENCE-ONLY mirror of FirstRunModel.existingKeys'
 	// key set — it never carries real secret values, by TYPE, not just by

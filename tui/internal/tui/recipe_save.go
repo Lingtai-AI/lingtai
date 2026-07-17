@@ -39,17 +39,17 @@ func copyRecipeBundle(lingtaiDir, globalDir, recipeName, customDir string) (proj
 	return copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir, false)
 }
 
-func copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir string, allowEmbedded bool) (projectRoot string, err error) {
+func copyRecipeBundleWithEmbedded(lingtaiDir, globalDir, recipeName, customDir string, useEmbedded bool) (projectRoot string, err error) {
 	projectRoot = filepath.Dir(lingtaiDir)
-	src := sourceBundleDir(globalDir, recipeName, customDir)
-	if src == "" {
-		if !allowEmbedded {
-			return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
-		}
+	if useEmbedded {
 		if err := preset.CopyEmbeddedBundle(recipeName, projectRoot); err != nil {
 			return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)
 		}
 		return projectRoot, nil
+	}
+	src := sourceBundleDir(globalDir, recipeName, customDir)
+	if src == "" {
+		return projectRoot, fmt.Errorf("copyRecipeBundle: could not resolve source bundle for %q", recipeName)
 	}
 	if err := preset.CopyBundle(src, projectRoot); err != nil {
 		return projectRoot, fmt.Errorf("copyRecipeBundle: %w", err)

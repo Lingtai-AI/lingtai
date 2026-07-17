@@ -2676,12 +2676,12 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				recipeName := m.recipeIdxToName(m.recipeIdx)
 				recipeDir := m.resolveCurrentRecipeDir()
 				var entries []MarkdownEntry
-				if recipeDir != "" {
-					entries = buildRecipeEntries(recipeDir, m.currentAgentLanguage())
-				} else {
+				if m.recipeIdxIsEmbedded(m.recipeIdx) {
 					// Embedded fallback recipes have no truthful disk path;
 					// render their files as in-memory MarkdownEntry content.
 					entries = buildEmbeddedRecipeEntries(recipeName, m.currentAgentLanguage())
+				} else if recipeDir != "" {
+					entries = buildRecipeEntries(recipeDir, m.currentAgentLanguage())
 				}
 				if len(entries) == 0 {
 					return m, nil
@@ -4795,6 +4795,19 @@ func (m FirstRunModel) recipeIdxToName(idx int) string {
 	}
 }
 
+func (m FirstRunModel) recipeIdxIsEmbedded(idx int) bool {
+	if idx < 0 {
+		return false
+	}
+	if m.hasImportedRecipe() {
+		if idx == 0 {
+			return false
+		}
+		idx--
+	}
+	return idx >= 0 && idx < len(m.discoveredRecipes) && m.discoveredRecipes[idx].Embedded
+}
+
 // agoraRecipeAt returns the AgoraRecipe for the given picker index, or nil.
 func (m FirstRunModel) agoraRecipeAt(idx int) *preset.AgoraRecipe {
 	offset := 0
@@ -5319,6 +5332,7 @@ func (m FirstRunModel) enterReviewStep(recipeName, customDir string) (FirstRunMo
 	if m.draft != nil {
 		m.draft.RecipeName = recipeName
 		m.draft.RecipeCustomDir = customDir
+		m.draft.RecipeEmbedded = m.recipeIdxIsEmbedded(m.recipeIdx)
 		m.draft.AgentName = m.agentName
 		m.draft.AgentDirName = m.pendingDirName
 		m.draft.AgentOpts = m.pendingAgentOpts

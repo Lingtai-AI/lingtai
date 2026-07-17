@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 func TestNewDraftFirstRunModel_FreshHomeShowsEmbeddedRecipesWithoutWrites(t *testing.T) {
@@ -50,6 +52,12 @@ func TestNewDraftFirstRunModel_FreshHomeShowsEmbeddedRecipesWithoutWrites(t *tes
 		}
 	}
 
+	m.recipeIdx = m.recipeNameToIdx("adaptive")
+	m, _ = m.enterReviewStep("adaptive", "")
+	if !draft.RecipeEmbedded {
+		t.Fatal("reviewed embedded picker row did not preserve source provenance")
+	}
+
 	if entries, err := os.ReadDir(home); err != nil {
 		t.Fatalf("read fresh home: %v", err)
 	} else if len(entries) != 0 {
@@ -79,6 +87,7 @@ func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutGlobalBootstrap(t *testing
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
 	draft.RecipeName = "adaptive"
+	draft.RecipeEmbedded = true
 
 	checkedBeforeRename := false
 	opts.InjectFailure = func(phase CreatePhase) error {
@@ -125,5 +134,109 @@ func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutGlobalBootstrap(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(root, ".recipe", "recipe.json")); err != nil {
 		t.Fatalf("published embedded recipe manifest missing: %v", err)
+	}
+}
+
+func TestRecipePreviewDoesNotSubstituteEmbeddedForMissingDiskRecipe(t *testing.T) {
+	globalDir := filepath.Join(t.TempDir(), "global")
+	if err := preset.Bootstrap(globalDir); err != nil {
+		t.Fatalf("bootstrap disk recipes: %v", err)
+	}
+	baseDir := filepath.Join(t.TempDir(), ".lingtai")
+	m := NewDraftFirstRunModel(baseDir, globalDir, false, NewProjectDraft(filepath.Dir(baseDir)))
+	m.recipeIdx = m.recipeNameToIdx("adaptive")
+	m.step = stepRecipe
+	if m.recipeIdxIsEmbedded(m.recipeIdx) {
+		t.Fatal("disk-backed adaptive row was mislabeled embedded")
+	}
+
+	diskDir := preset.RecipeDir(globalDir, "adaptive")
+	if diskDir == "" {
+		t.Fatal("bootstrapped adaptive recipe was not discovered on disk")
+	}
+	if err := os.Rename(diskDir, diskDir+".gone"); err != nil {
+		t.Fatalf("hide disk recipe: %v", err)
+	}
+	if got := m.resolveCurrentRecipeDir(); got != "" {
+		t.Fatalf("missing disk recipe still resolved to %q", got)
+	}
+
+	updated, cmd := m.Update(ctrlOKey(t))
+	if cmd != nil {
+		t.Fatalf("missing disk recipe preview returned command %v", cmd)
+	}
+	if updated.recipeViewer != nil {
+		t.Fatal("missing disk recipe silently opened compiled preview")
+	}
+}
+
+func TestRunProjectCreate_DoesNotSubstituteEmbeddedForMissingDiskRecipe(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	if err := preset.Bootstrap(opts.GlobalDir); err != nil {
+		t.Fatalf("bootstrap disk recipes: %v", err)
+	}
+	draft.RecipeName = "adaptive"
+	if draft.RecipeEmbedded {
+		t.Fatal("disk-backed draft unexpectedly marked embedded")
+	}
+
+	diskDir := preset.RecipeDir(opts.GlobalDir, draft.RecipeName)
+	if diskDir == "" {
+		t.Fatal("bootstrapped adaptive recipe was not discovered on disk")
+	}
+	if err := os.Rename(diskDir, diskDir+".gone"); err != nil {
+		t.Fatalf("hide disk recipe: %v", err)
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Err == nil || res.Committed {
+		t.Fatalf("missing disk recipe create = committed %v err %v, want failure", res.Committed, res.Err)
+	}
+	if res.FailedPhase != PhaseApplyRecipe {
+		t.Fatalf("missing disk recipe failed in phase %v, want %v", res.FailedPhase, PhaseApplyRecipe)
+	}
+	if !strings.Contains(res.Err.Error(), `could not resolve source bundle for "adaptive"`) {
+		t.Fatalf("missing disk recipe error = %q", res.Err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("failed create published .lingtai: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".recipe")); !os.IsNotExist(err) {
+		t.Fatalf("failed create wrote project recipe: %v", err)
+	}
+}
+
+func TestRunProjectCreate_EmbeddedProvenanceIgnoresLaterDiskRecipe(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	if err := preset.Bootstrap(opts.GlobalDir); err != nil {
+		t.Fatalf("bootstrap disk recipes: %v", err)
+	}
+	diskDir := preset.RecipeDir(opts.GlobalDir, "adaptive")
+	if diskDir == "" {
+		t.Fatal("bootstrapped adaptive recipe was not discovered on disk")
+	}
+	shadow := []byte(`{"id":"disk-shadow","name":"Disk Shadow"}`)
+	if err := os.WriteFile(filepath.Join(diskDir, ".recipe", "recipe.json"), shadow, 0o644); err != nil {
+		t.Fatalf("replace later disk recipe: %v", err)
+	}
+
+	draft.RecipeName = "adaptive"
+	draft.RecipeEmbedded = true
+	res := RunProjectCreate(draft, opts)
+	if res.Err != nil || !res.Committed {
+		t.Fatalf("embedded create = committed %v err %v", res.Committed, res.Err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, ".recipe", "recipe.json"))
+	if err != nil {
+		t.Fatalf("read published recipe: %v", err)
+	}
+	want, err := preset.ReadEmbeddedRecipeFile("adaptive", ".recipe/recipe.json")
+	if err != nil {
+		t.Fatalf("read compiled adaptive recipe: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("published recipe came from later disk source: got %q want compiled %q", got, want)
 	}
 }
