@@ -94,12 +94,16 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	// Run global migrations (best-effort, same as main TUI path)
 	globalmigrate.Run(globalDir)
 
-	// Ensure venv exists, then always run the non-blocking upgrade check so
-	// newly-created/repaired runtimes do not stay on a stale lingtai wheel until
-	// the next launch.
+	// Headless spawn never installs, repairs, or upgrades the runtime: it
+	// cannot prompt, and the only automatic opportunity to install/repair it
+	// is the interactive TUI's shared startup preflight, gated on explicit
+	// current-launch human consent. install.sh installs the kernel by
+	// default; config.RuntimeReady is a pure readiness check (never
+	// creates/repairs/upgrades) — a not-ready runtime surfaces as an
+	// actionable error instead of a silent install.
 	if !opts.SkipLaunch {
-		if _, err := config.EnsureRuntimeQuiet(globalDir, nil); err != nil {
-			WriteError(stderr, "venv setup failed: "+err.Error(), "bootstrap_failed")
+		if err := config.RuntimeReady(globalDir); err != nil {
+			WriteError(stderr, err.Error(), "bootstrap_failed")
 			return 1
 		}
 	}

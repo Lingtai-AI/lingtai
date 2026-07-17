@@ -48,6 +48,11 @@ func TestRunSpawn_RejectsUnknownPreset(t *testing.T) {
 		Preset:    "nonexistent-preset-xyz",
 		AgentName: "test",
 		Language:  "en",
+		// SkipLaunch bypasses the runtime-readiness check: this test asserts
+		// preset validation, not runtime setup, and headless spawn no longer
+		// silently installs a venv into the temp HOME to make that check
+		// pass — see config.RuntimeReady.
+		SkipLaunch: true,
 	})
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)

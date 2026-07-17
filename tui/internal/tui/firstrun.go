@@ -942,17 +942,22 @@ func (m FirstRunModel) runRehydratePropagation() tea.Cmd {
 	}
 }
 
-// runBootstrap runs venv creation + asset population in a goroutine.
+// runBootstrap runs the runtime readiness check + asset population in a
+// goroutine. It does NOT create or repair the venv itself: install.sh
+// installs the kernel by default, and the only automatic place the TUI may
+// install/repair it is main()'s shared startup preflight (before the
+// no-project gate), gated on explicit current-launch human consent. A
+// declined or absent runtime must not be silently repaired here just
+// because the human is now inside the first-run wizard — config.RuntimeReady
+// is a pure readiness check (never creates/repairs/upgrades); a not-ready
+// runtime surfaces as an actionable bootstrapErrMsg instead.
 func (m FirstRunModel) runBootstrap(ch chan<- string) tea.Cmd {
 	return func() tea.Msg {
 		progress := func(key string) {
 			ch <- key
 		}
-		// Venv (slow — creates venv + pip install). Quiet mode: no stdout/stderr leak.
-		// EnsureRuntimeQuiet also runs the non-blocking upgrade check after setup
-		// so first-run users do not keep a stale cached lingtai wheel until their
-		// second launch.
-		if _, err := config.EnsureRuntimeQuiet(m.globalDir, progress); err != nil {
+		progress("welcome.step_venv")
+		if err := config.RuntimeReady(m.globalDir); err != nil {
 			close(ch)
 			return bootstrapErrMsg{err: err.Error()}
 		}

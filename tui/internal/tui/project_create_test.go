@@ -50,10 +50,11 @@ func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 	return CreateOptions{
 		GlobalDir:           filepath.Join(home, ".lingtai-tui"),
 		ExpectedProjectRoot: expectedProjectRoot,
-		// Production still prepares the runtime when LingtaiCmd was empty at
-		// launcher entry. Tests inject a no-op so they stay hermetic; the
-		// empty command then records a post-commit warning instead of launching.
-		EnsureRuntime:     func(string) (bool, error) { return false, nil },
+		// Production still checks runtime readiness (read-only) when
+		// LingtaiCmd was empty at launcher entry. Tests inject a no-op so
+		// they stay hermetic; the empty command then records a post-commit
+		// warning instead of launching.
+		RuntimeReady:      func(string) error { return nil },
 		ResolveLingtaiCmd: func(string) string { return "" },
 	}
 }
@@ -153,34 +154,72 @@ func TestRunProjectCreate_AppliesRecipeInsideStagingBeforeRename(t *testing.T) {
 	}
 }
 
-func TestRunProjectCreate_EnsuresRuntimeWhenCommandWasInitiallyUnknown(t *testing.T) {
+// TestRunProjectCreate_ChecksRuntimeReadinessWhenCommandWasInitiallyUnknown
+// proves the post-commit launch phase checks runtime readiness exactly once
+// (read-only — RuntimeReady must never install/repair on its own) when the
+// launcher entry began with no resolved lingtai command.
+func TestRunProjectCreate_ChecksRuntimeReadinessWhenCommandWasInitiallyUnknown(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
-	ensureCalls := 0
-	opts.EnsureRuntime = func(globalDir string) (bool, error) {
-		ensureCalls++
+	readyCalls := 0
+	opts.RuntimeReady = func(globalDir string) error {
+		readyCalls++
 		if globalDir != opts.GlobalDir {
-			t.Fatalf("EnsureRuntime globalDir = %q, want %q", globalDir, opts.GlobalDir)
+			t.Fatalf("RuntimeReady globalDir = %q, want %q", globalDir, opts.GlobalDir)
 		}
-		return false, nil
+		return nil
 	}
 
 	res := RunProjectCreate(draft, opts)
 	if res.Err != nil || !res.Committed {
 		t.Fatalf("create result = committed %v err %v", res.Committed, res.Err)
 	}
-	if ensureCalls != 1 {
-		t.Fatalf("EnsureRuntime calls = %d, want 1", ensureCalls)
+	if readyCalls != 1 {
+		t.Fatalf("RuntimeReady calls = %d, want 1", readyCalls)
 	}
 	foundUnavailable := false
 	for _, warning := range res.PostCommitWarnings {
-		if strings.Contains(warning, "runtime command unavailable after ensure") {
+		if strings.Contains(warning, "runtime command unavailable") {
 			foundUnavailable = true
 			break
 		}
 	}
 	if !foundUnavailable {
 		t.Fatalf("post-commit warnings = %v, want unavailable-runtime warning", res.PostCommitWarnings)
+	}
+}
+
+// TestRunProjectCreate_NotReadyRuntimeSurfacesWarningWithoutMutating proves
+// that when RuntimeReady reports the runtime is not ready (e.g. the human
+// declined the preflight's install/repair prompt, or this is a from-scratch
+// machine), RunProjectCreate surfaces that as a post-commit warning and
+// never falls back to installing/repairing on its own — there is no second
+// mutating runtime path in this post-commit phase.
+func TestRunProjectCreate_NotReadyRuntimeSurfacesWarningWithoutMutating(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	readyCalls := 0
+	opts.RuntimeReady = func(string) error {
+		readyCalls++
+		return errors.New("lingtai kernel runtime is not ready")
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Err != nil || !res.Committed {
+		t.Fatalf("create result = committed %v err %v", res.Committed, res.Err)
+	}
+	if readyCalls != 1 {
+		t.Fatalf("RuntimeReady calls = %d, want 1", readyCalls)
+	}
+	foundNotReady := false
+	for _, warning := range res.PostCommitWarnings {
+		if strings.Contains(warning, "not ready") {
+			foundNotReady = true
+			break
+		}
+	}
+	if !foundNotReady {
+		t.Fatalf("post-commit warnings = %v, want a not-ready runtime warning", res.PostCommitWarnings)
 	}
 }
 
@@ -443,7 +482,7 @@ func TestRunProjectCreate_DirtyPresetSavedOnlyAfterCommit(t *testing.T) {
 	// never launch a real agent. The resulting post-commit launch warning is
 	// expected here; this test only requires the config/preset phase to finish
 	// without its own warning.
-	if len(res.PostCommitWarnings) != 1 || !strings.Contains(res.PostCommitWarnings[0], "post_commit_launch: runtime command unavailable after ensure") {
+	if len(res.PostCommitWarnings) != 1 || !strings.Contains(res.PostCommitWarnings[0], "post_commit_launch: runtime command unavailable") {
 		t.Fatalf("unexpected post-commit warnings: %v", res.PostCommitWarnings)
 	}
 

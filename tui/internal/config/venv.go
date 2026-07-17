@@ -178,7 +178,7 @@ func NeedsVenv(globalDir string) bool {
 	}
 	// Venv exists — verify lingtai is importable. A working PyPI install may
 	// still need conversion to local dev/editable mode; that is handled by the
-	// always-run CheckUpgrade/UpgradePythonRuntime path after this check, not by
+	// separate, consent-gated CheckUpgrade/UpgradePythonRuntime path, not by
 	// recreating the whole venv here.
 	if err := exec.Command(python, "-c", "import lingtai").Run(); err != nil {
 		return true
@@ -429,6 +429,12 @@ func EnsureAddons(python, agentDir string) error {
 // Runs pip install --upgrade if a newer version is available.
 // Returns true if an upgrade was performed.
 // Non-blocking: silently returns false on any error (offline, timeout, etc.).
+//
+// This is a mutating operation and must only be called after the current
+// launch has obtained explicit human consent (see main.go's shared startup
+// preflight) or via an explicitly-invoked path such as `doctor` /
+// `self-update` — never automatically. See RuntimeReady for the read-only
+// alternative every other caller must use instead.
 func CheckUpgrade(globalDir string) bool {
 	result := UpgradePythonRuntime(globalDir, false, &UpgradeRuntimeOptions{
 		HTTPClient: &http.Client{Timeout: 3 * time.Second},
@@ -436,45 +442,42 @@ func CheckUpgrade(globalDir string) bool {
 	return result.Updated
 }
 
-// RuntimeEnsureOptions injects side effects for startup runtime tests.
-type RuntimeEnsureOptions struct {
-	NeedsVenvFunc    func(string) bool
-	EnsureVenvFunc   func(string) error
-	CheckUpgradeFunc func(string) bool
+// RuntimeReadyError reports that the managed Python lingtai runtime is not
+// usable and no automatic install/repair will run to fix it. install.sh
+// installs the kernel by default, so an ordinary launch assumes it is
+// present; the ONLY automatic place the TUI may install or repair it is the
+// shared interactive startup preflight (main.go's runVersionPreflight, via
+// InspectKernel + RunKernelUpdate), gated on explicit current-launch human
+// consent. Every other caller — returning-user bootstrap, first-run wizard,
+// post-Create project launch, headless spawn — must treat a not-ready
+// runtime as this actionable error, never as a trigger to silently install
+// or repair on its own. A human can resolve it by re-running lingtai-tui
+// interactively and consenting to the install/repair prompt, or by running
+// `lingtai-tui doctor` / the `/update` command, or the one-command
+// installer (`install.sh`).
+type RuntimeReadyError struct {
+	GlobalDir string
 }
 
-// EnsureRuntime ensures the managed Python runtime is usable, then always runs
-// the non-blocking lingtai upgrade check. This is intentionally not an
-// if/else: a venv that was just created or repaired may still have been
-// installed from a stale wheel/cache, so startup should check PyPI in the same
-// launch instead of waiting for the next launch.
-func EnsureRuntime(globalDir string) (bool, error) {
-	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{})
+func (e *RuntimeReadyError) Error() string {
+	return fmt.Sprintf(
+		"lingtai kernel runtime is not ready at %s (missing, broken, or not yet installed). "+
+			"Run lingtai-tui interactively and consent to the install/repair prompt, or run "+
+			"`lingtai-tui doctor` / use the `/update` command, or re-run the one-command installer.",
+		RuntimeVenvDir(e.GlobalDir))
 }
 
-// EnsureRuntimeQuiet is the alt-screen-safe variant used by first-run setup.
-func EnsureRuntimeQuiet(globalDir string, progress ProgressFunc) (bool, error) {
-	return ensureRuntimeWithOptions(globalDir, RuntimeEnsureOptions{
-		EnsureVenvFunc: func(dir string) error { return EnsureVenvQuiet(dir, progress) },
-	})
-}
-
-func ensureRuntimeWithOptions(globalDir string, opts RuntimeEnsureOptions) (bool, error) {
-	if opts.NeedsVenvFunc == nil {
-		opts.NeedsVenvFunc = NeedsVenv
+// RuntimeReady is a READ-ONLY readiness check: it never creates, repairs, or
+// upgrades anything. Returns nil when the managed venv exists and lingtai is
+// importable (config.NeedsVenv reports false); otherwise returns
+// *RuntimeReadyError so the caller can surface an actionable message instead
+// of silently mutating the runtime out from under a human who may have just
+// declined the preflight's install/repair prompt.
+func RuntimeReady(globalDir string) error {
+	if NeedsVenv(globalDir) {
+		return &RuntimeReadyError{GlobalDir: globalDir}
 	}
-	if opts.EnsureVenvFunc == nil {
-		opts.EnsureVenvFunc = EnsureVenv
-	}
-	if opts.CheckUpgradeFunc == nil {
-		opts.CheckUpgradeFunc = CheckUpgrade
-	}
-	if opts.NeedsVenvFunc(globalDir) {
-		if err := opts.EnsureVenvFunc(globalDir); err != nil {
-			return false, err
-		}
-	}
-	return opts.CheckUpgradeFunc(globalDir), nil
+	return nil
 }
 
 // DoctorSeverity classifies lines emitted by the forced doctor/update routine.

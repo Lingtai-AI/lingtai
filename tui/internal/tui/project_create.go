@@ -102,14 +102,22 @@ type createFailureInjector func(phase CreatePhase) error
 // CreateOptions carries the pieces RunProjectCreate needs beyond the draft
 // itself — everything that in a normal (non-launcher) startup would come
 // from main.go's existing pipeline. LingtaiCmd may be empty before commit;
-// the post-commit phase still ensures the runtime, then resolves the command
-// again before deciding whether an agent can be launched.
+// the post-commit phase checks runtime readiness (never installs/repairs —
+// see RuntimeReady), then resolves the command again before deciding whether
+// an agent can be launched.
 type CreateOptions struct {
 	GlobalDir  string
 	LingtaiCmd string
-	// EnsureRuntime/ResolveLingtaiCmd replace their config counterparts in
-	// tests. Nil uses the real post-publish runtime preparation and resolver.
-	EnsureRuntime     func(globalDir string) (bool, error)
+	// RuntimeReady/ResolveLingtaiCmd replace their config counterparts in
+	// tests. Nil uses the real post-publish readiness check and resolver.
+	// RuntimeReady is READ-ONLY: it must never create, repair, or upgrade
+	// the runtime — install.sh installs the kernel by default, and the only
+	// automatic install/repair opportunity is the interactive TUI's shared
+	// startup preflight, gated on explicit human consent. A not-ready
+	// runtime here (e.g. the human declined that prompt, or this is a
+	// from-scratch machine) surfaces as a post-commit warning, never a
+	// silent install.
+	RuntimeReady      func(globalDir string) error
 	ResolveLingtaiCmd func(globalDir string) string
 	// ExpectedProjectRoot is the launcher-selected destination that the
 	// commit-boundary validator must match. It is intentionally independent
@@ -655,18 +663,18 @@ func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, cho
 		warn(PhasePostCommitLaunch, "%v", err)
 		return
 	}
-	ensureRuntime := opts.EnsureRuntime
-	if ensureRuntime == nil {
-		ensureRuntime = config.EnsureRuntime
+	runtimeReady := opts.RuntimeReady
+	if runtimeReady == nil {
+		runtimeReady = config.RuntimeReady
 	}
-	if _, err := ensureRuntime(opts.GlobalDir); err != nil {
-		warn(PhasePostCommitLaunch, "ensure runtime: %v", err)
+	if err := runtimeReady(opts.GlobalDir); err != nil {
+		warn(PhasePostCommitLaunch, "%v", err)
 		return
 	}
 	lingtaiCmd := opts.LingtaiCmd
 	if lingtaiCmd == "" {
 		// A genuinely fresh launcher entry can begin before the runtime exists,
-		// so resolve its command only after runtime preparation succeeds.
+		// so resolve its command only after confirming the runtime is ready.
 		resolveLingtaiCmd := opts.ResolveLingtaiCmd
 		if resolveLingtaiCmd == nil {
 			resolveLingtaiCmd = config.LingtaiCmd
@@ -674,7 +682,7 @@ func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, cho
 		lingtaiCmd = resolveLingtaiCmd(opts.GlobalDir)
 	}
 	if lingtaiCmd == "" {
-		warn(PhasePostCommitLaunch, "runtime command unavailable after ensure")
+		warn(PhasePostCommitLaunch, "runtime command unavailable")
 		return
 	}
 	if err := preset.Bootstrap(opts.GlobalDir); err != nil {

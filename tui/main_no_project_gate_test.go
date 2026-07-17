@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -54,13 +55,13 @@ func TestNoProjectGate_PrecedesGlobalDirAndMigrations(t *testing.T) {
 		"process.InitProject(",
 		"config.Register(",
 		"preset.PopulateBundledLibrary(",
-		"config.EnsureRuntime(",
+		"config.RuntimeReady(",
 		"preset.Bootstrap(",
 	}
 	for _, call := range eagerWrites {
 		idx := strings.Index(codeOnly, call)
 		if idx < 0 {
-			// Some calls (e.g. config.EnsureRuntime) only appear inside the
+			// Some calls (e.g. config.RuntimeReady) only appear inside the
 			// "!needsFirstRun" branch further down — still fine, just
 			// confirm it's after the gate if present at all.
 			continue
@@ -68,6 +69,51 @@ func TestNoProjectGate_PrecedesGlobalDirAndMigrations(t *testing.T) {
 		if idx < gateIdxCodeOnly {
 			t.Fatalf("%s appears BEFORE the no-project gate in func main() (offset %d < gate offset %d) — this reintroduces the eager-write defect the launcher exists to fix", call, idx, gateIdxCodeOnly)
 		}
+	}
+}
+
+// TestSharedVersionPreflight_PrecedesNoProjectGate is a source-order smoke
+// test proving the shared TUI+kernel version-check preflight
+// (runVersionPreflight) sits BEFORE tui.ProbeNoProjectPure in func main()'s
+// body — the literal requirement that every default interactive launch
+// shape (existing-project returning user, first-run via the no-project
+// launcher, and the empty-directory launcher itself) reaches the identical
+// read-only check, since none of those three shapes can be selected before
+// the gate runs. If a future edit moves the preflight call below the gate
+// (or removes it from func main() entirely, e.g. by inlining checks back
+// into prepareApp only), this test fails immediately.
+func TestSharedVersionPreflight_PrecedesNoProjectGate(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	mainBody := extractFuncBody(t, string(src), "func main() {")
+	codeOnly := stripLineComments(mainBody)
+
+	preflightIdx := strings.Index(codeOnly, "runVersionPreflight()")
+	if preflightIdx < 0 {
+		t.Fatal("expected func main() to call runVersionPreflight() directly")
+	}
+	gateIdx := strings.Index(codeOnly, "tui.ProbeNoProjectPure(projectDir)")
+	if gateIdx < 0 {
+		t.Fatal("gate call not found in comment-stripped func main() body")
+	}
+	if preflightIdx > gateIdx {
+		t.Fatalf("runVersionPreflight() appears AFTER the no-project gate (offset %d > gate offset %d) — every default interactive launch shape must reach the shared TUI+kernel check before the gate branches", preflightIdx, gateIdx)
+	}
+
+	// The preflight must be able to exit main() on its own (a completed TUI
+	// self-upgrade, or a resolution failure) — prove func main() actually
+	// checks its return value and returns, rather than ignoring it. The call
+	// site is `if runVersionPreflight() { return }`; search a small window
+	// immediately before the call for the guarding `if`.
+	beforeIdx := preflightIdx - 10
+	if beforeIdx < 0 {
+		beforeIdx = 0
+	}
+	around := codeOnly[beforeIdx : preflightIdx+120]
+	if !strings.Contains(around, "if runVersionPreflight()") {
+		t.Fatalf("expected `if runVersionPreflight() { ... }` guarding an early return in func main(), got context: %q", around)
 	}
 }
 
@@ -196,5 +242,43 @@ func TestNoProjectGate_SubcommandsNeverCallLauncher(t *testing.T) {
 		if strings.Contains(body, "runNoProjectLauncher") || strings.Contains(body, "ProbeNoProjectPure") || strings.Contains(body, "NewLauncherRootModel") {
 			t.Errorf("subcommand %s references the no-project launcher — subcommands must keep their existing early-return behavior unchanged", name)
 		}
+	}
+}
+
+// TestNoAutomaticEnsureRuntimeCallSurvivesAnywhere is a whole-tree source
+// scan proving EnsureRuntime/EnsureRuntimeQuiet (the removed automatic
+// venv-install/repair path) do not exist anywhere in production Go source
+// under tui/ — not just "unused," but structurally gone, so no future
+// refactor can silently reintroduce a hidden install/repair call. Only
+// config.RuntimeReady (read-only) and the fully consent-gated
+// config.RunKernelUpdate (behind the shared interactive preflight's [y/N]
+// prompt, or an explicit doctor/self-update/`/update` invocation) may touch
+// the managed runtime. Test files are excluded: this file's own history
+// (and this correction's report) legitimately discusses the removed names
+// in comments/strings.
+func TestNoAutomaticEnsureRuntimeCallSurvivesAnywhere(t *testing.T) {
+	root := "."
+	forbidden := regexp.MustCompile(`\bEnsureRuntime(Quiet)?\b`)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if forbidden.Match(data) {
+			t.Errorf("%s still references EnsureRuntime/EnsureRuntimeQuiet — these must not exist in production source; use config.RuntimeReady (read-only) plus the consent-gated preflight/doctor/self-update/update-command paths instead", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking tui/ for EnsureRuntime references: %v", err)
 	}
 }

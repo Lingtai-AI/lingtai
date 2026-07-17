@@ -316,74 +316,44 @@ func TestDetectTUIInstallMethodUnknownWhenMetadataDoesNotMatch(t *testing.T) {
 	}
 }
 
-func TestEnsureRuntimeChecksUpgradeAfterCreatingVenv(t *testing.T) {
-	var ensured bool
-	var checked bool
-	updated, err := ensureRuntimeWithOptions("/tmp/lingtai-test", RuntimeEnsureOptions{
-		NeedsVenvFunc: func(string) bool { return true },
-		EnsureVenvFunc: func(string) error {
-			ensured = true
-			return nil
-		},
-		CheckUpgradeFunc: func(string) bool {
-			if !ensured {
-				t.Fatalf("CheckUpgradeFunc ran before EnsureVenvFunc")
-			}
-			checked = true
-			return true
-		},
-	})
-	if err != nil {
-		t.Fatalf("EnsureRuntime err = %v", err)
+// TestRuntimeReadyReportsActionableErrorWhenVenvMissing proves RuntimeReady
+// is a pure readiness check: given a directory with no managed venv, it
+// returns an actionable *RuntimeReadyError rather than creating or repairing
+// anything. install.sh installs the kernel by default; the ONLY automatic
+// install/repair opportunity is main()'s shared startup preflight, gated on
+// explicit current-launch human consent — RuntimeReady must never install on
+// its own, even when called from returning-user startup, first-run, headless
+// spawn, or post-Create project launch.
+func TestRuntimeReadyReportsActionableErrorWhenVenvMissing(t *testing.T) {
+	dir := t.TempDir()
+	err := RuntimeReady(dir)
+	if err == nil {
+		t.Fatal("expected an error for a directory with no managed venv")
 	}
-	if !ensured || !checked || !updated {
-		t.Fatalf("expected ensure, check, and updated=true; ensured=%v checked=%v updated=%v", ensured, checked, updated)
+	var readyErr *RuntimeReadyError
+	if !errors.As(err, &readyErr) {
+		t.Fatalf("expected *RuntimeReadyError, got %T: %v", err, err)
 	}
-}
-
-func TestEnsureRuntimeChecksUpgradeWhenVenvAlreadyExists(t *testing.T) {
-	var ensured bool
-	var checked bool
-	updated, err := ensureRuntimeWithOptions("/tmp/lingtai-test", RuntimeEnsureOptions{
-		NeedsVenvFunc: func(string) bool { return false },
-		EnsureVenvFunc: func(string) error {
-			ensured = true
-			return nil
-		},
-		CheckUpgradeFunc: func(string) bool {
-			checked = true
-			return false
-		},
-	})
-	if err != nil {
-		t.Fatalf("EnsureRuntime err = %v", err)
+	if !strings.Contains(err.Error(), "not ready") {
+		t.Fatalf("expected an actionable 'not ready' message, got %q", err.Error())
 	}
-	if ensured {
-		t.Fatalf("did not expect EnsureVenvFunc when NeedsVenvFunc=false")
-	}
-	if !checked {
-		t.Fatalf("expected CheckUpgradeFunc even when venv already exists")
-	}
-	if updated {
-		t.Fatalf("expected updated=false")
+	// Confirm no venv materialized as a side effect of merely checking.
+	if _, statErr := os.Stat(RuntimeVenvDir(dir)); statErr == nil {
+		t.Fatal("RuntimeReady must not create the venv directory as a side effect of checking")
 	}
 }
 
-func TestEnsureRuntimeSkipsUpgradeWhenEnsureFails(t *testing.T) {
-	var checked bool
-	_, err := ensureRuntimeWithOptions("/tmp/lingtai-test", RuntimeEnsureOptions{
-		NeedsVenvFunc:  func(string) bool { return true },
-		EnsureVenvFunc: func(string) error { return errors.New("venv boom") },
-		CheckUpgradeFunc: func(string) bool {
-			checked = true
-			return true
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "venv boom") {
-		t.Fatalf("expected venv boom error, got %v", err)
-	}
-	if checked {
-		t.Fatalf("CheckUpgradeFunc should not run after EnsureVenvFunc failure")
+// TestRuntimeReadyIssuesNoMutatingCommands is a structural proof that
+// RuntimeReady delegates to NeedsVenv (a read-only stat/import probe) and
+// nothing else — it cannot reach EnsureVenv/pip/uv because there is no code
+// path from RuntimeReady to any of them any more.
+func TestRuntimeReadyIssuesNoMutatingCommands(t *testing.T) {
+	dir := t.TempDir()
+	before, _ := os.ReadDir(dir)
+	_ = RuntimeReady(dir)
+	after, _ := os.ReadDir(dir)
+	if len(after) != len(before) {
+		t.Fatalf("RuntimeReady must not write into globalDir merely by checking: before=%d entries, after=%d entries", len(before), len(after))
 	}
 }
 

@@ -98,18 +98,6 @@ func TestNoProjectProgramCancelDiscardsLateStartup(t *testing.T) {
 	}
 }
 
-func TestStartupUpgradeOutcomeNeverRetriesOrCreatesApp(t *testing.T) {
-	if got := startupKindAfterTUIUpgrade(false, true); got != startupUpgradeExit {
-		t.Fatalf("successful outside-program upgrade = %v, want upgrade exit", got)
-	}
-	if got := startupKindAfterTUIUpgrade(true, true); got != startupFallback {
-		t.Fatalf("successful in-program upgrade = %v, want outside-program fallback", got)
-	}
-	if got := startupKindAfterTUIUpgrade(false, false); got != startupReady {
-		t.Fatalf("declined/failed upgrade = %v, want continue", got)
-	}
-}
-
 func TestAgentCountPromptPredictionHonorsFreshMarker(t *testing.T) {
 	now := time.Now()
 	testCase := func(t *testing.T, fresh bool, count int, wantFallback, wantWrite bool, write func(string, []byte, os.FileMode) error) {

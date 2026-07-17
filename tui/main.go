@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,13 +98,36 @@ func main() {
 	projectDir, _ := os.Getwd()
 	projectDir, _ = filepath.Abs(projectDir)
 
+	// ---- Shared startup-update preflight (TUI + kernel, read-only) ----
+	//
+	// Runs ONCE, before any Bubble Tea program starts and before the
+	// no-project decision gate below, so every default interactive launch —
+	// existing-project returning user, first-run/setup, and the empty-
+	// directory no-project launcher — is covered by the identical read-only
+	// TUI (config.CheckTUIUpgrade) and kernel (config.InspectKernel) version
+	// checks. install.sh installs the kernel by default, so first-run is not
+	// a reason to skip the kernel check (Jason, 2026-07-16). Because this
+	// runs before ANY Bubble Tea program exists, the kernel-upgrade prompt
+	// (if InspectKernel reports an actionable update AND stdin is a real
+	// TTY) can safely block on stdin directly — no inProgram/fallback dance
+	// is needed here the way prepareApp needs it for prompts that might run
+	// inside the launcher's own program. A completed TUI self-upgrade always
+	// tells the user to restart and exits main() here, before the no-project
+	// gate or launcher ever starts. Uses config.GlobalDirPath() (pure, no
+	// mkdir) for the read-only check phase; a consented mutation (TUI
+	// self-upgrade or RunKernelUpdate) creates ~/.lingtai-tui itself as an
+	// intentional side effect of that mutation, not of merely checking.
+	if runVersionPreflight() {
+		return
+	}
+
 	// ---- No-project decision gate (design doc: "no-project-launcher") ----
 	//
 	// Before ANY of: config.GlobalDir() (which os.MkdirAll's
 	// ~/.lingtai-tui), globalmigrate.Run, MigrateLegacyLanguage/
 	// LoadTUIConfig's write paths, ValidateCodexAuthOnStartup, showWelcome,
 	// maybeShowAgentCount, process.InitProject, config.Register,
-	// preset.PopulateBundledLibrary, or EnsureRuntime/preset.Bootstrap —
+	// preset.PopulateBundledLibrary, or config.RuntimeReady/preset.Bootstrap —
 	// do a PURE, read-only check: does <projectDir>/.lingtai exist? Uses
 	// os.Lstat (never Stat) so a symlink there counts as "exists" without
 	// being followed or created through.
@@ -141,7 +165,7 @@ func main() {
 			return
 		}
 		if startup.kind == startupFallback {
-			runPreparedApp(startup.projectDir, startup.upgraded)
+			runPreparedApp(startup.projectDir)
 			return
 		}
 		if startup.kind == startupUpgradeExit || startup.kind == startupCanceled {
@@ -156,7 +180,7 @@ func main() {
 		return
 	}
 
-	runPreparedApp(projectDir, false)
+	runPreparedApp(projectDir)
 
 }
 
@@ -177,7 +201,6 @@ type startupResult struct {
 	projectDir string
 	app        tui.App
 	err        error
-	upgraded   bool
 }
 
 type startupReadyMsg struct{ result startupResult }
@@ -285,9 +308,10 @@ func (m noProjectProgramModel) View() tea.View {
 // lingtaiCmd is resolved via a best-effort PURE read of whatever venv might
 // already exist (config.LingtaiCmd only stats a path, it does not create
 // anything). An empty result is intentionally allowed: after a successful
-// atomic project publication, project_create.go always runs EnsureRuntime,
-// resolves the command again, and only then bootstraps/launches. Those
-// post-commit steps are best-effort and never roll back project creation.
+// atomic project publication, project_create.go checks runtime readiness
+// (config.RuntimeReady — read-only, never installs/repairs), resolves the
+// command again, and only then bootstraps/launches. Those post-commit steps
+// are best-effort and never roll back project creation.
 //
 // Returns (result, true) when the launcher reached a terminal decision, or
 // (zero, false) when the Bubble Tea program itself failed. The third return
@@ -1160,7 +1184,7 @@ func spawnMain() {
 
 // purgeMain is defined in purge_unix.go / purge_windows.go
 
-func runPreparedApp(projectDir string, runtimeUpgraded bool) {
+func runPreparedApp(projectDir string) {
 	result := prepareApp(projectDir, false)
 	if result.kind == startupUpgradeExit || result.kind == startupCanceled {
 		return
@@ -1171,9 +1195,6 @@ func runPreparedApp(projectDir string, runtimeUpgraded bool) {
 		}
 		fmt.Fprintln(os.Stderr, result.err)
 		os.Exit(1)
-	}
-	if runtimeUpgraded {
-		fmt.Println("Upgraded lingtai to latest version.")
 	}
 	p := tea.NewProgram(result.app)
 	if _, err := p.Run(); err != nil {
@@ -1240,16 +1261,6 @@ func agentCountPromptNeeded(globalDir string, now time.Time,
 	return false
 }
 
-func startupKindAfterTUIUpgrade(inProgram, upgraded bool) startupKind {
-	if !upgraded {
-		return startupReady
-	}
-	if inProgram {
-		return startupFallback
-	}
-	return startupUpgradeExit
-}
-
 func rustToolchainPromptNeeded(globalDir string) bool {
 	if os.Getenv("LINGTAI_SKIP_RUST_PROMPT") == "1" {
 		return false
@@ -1269,43 +1280,208 @@ func rustToolchainPromptNeeded(globalDir string) bool {
 	return err != nil
 }
 
+// kernelUpgradePromptNeeded reports whether the returning-user startup path
+// running inside the launcher's Bubble Tea program should fall back out to
+// read stdin for kernel-upgrade consent. Mirrors rustToolchainPromptNeeded's
+// interactive-only gate: a non-TTY stdin (piped, redirected, headless) never
+// prompts and never upgrades.
+func kernelUpgradePromptNeeded() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+// kernelUpgradePromptOptions injects stdin/stdout, the interactivity gate,
+// and the read-only inspect / mutating update functions for deterministic
+// tests.
+type kernelUpgradePromptOptions struct {
+	Input             io.Reader
+	Output            io.Writer
+	Interactive       func() bool
+	InspectKernelFunc func(string) config.KernelStatus
+	RunKernelUpdate   func(string, bool) config.DoctorReport
+}
+
+// maybeCheckAndPromptKernelUpgrade performs a read-only kernel version check
+// on EVERY default interactive launch (see
+// docs/superpowers/specs/2026-06-23-launch-kernel-upgrade-confirm-design.md
+// and .../2026-06-23-update-command-design.md, which define InspectKernel /
+// RunKernelUpdate). install.sh installs the kernel by default, so the TUI
+// assumes it is already present; this function's job is ONLY to ask before
+// mutating, never to silently install/repair/upgrade on its own. It only
+// ever prompts when InspectKernel reports an actionable state
+// (NeedsUpdate=true); an already-current, editable, or bundle-pinned kernel
+// — or a failed lookup — never prompts and never mutates. The prompt wording
+// distinguishes the two actionable cases per the human's explicit state
+// machine: an absent/unimportable/broken runtime (status.Installed=="")
+// gets an INSTALL/REPAIR prompt, never the generic "update available"
+// phrasing; a present-but-stale runtime gets an UPDATE prompt showing
+// installed → latest. When a prompt IS shown, it never persists or reuses
+// the answer: a "no", EOF, or non-interactive stdin all fall through to "no"
+// and perform no mutation. Only an explicit "y"/"yes" on THIS invocation
+// calls the mutating RunKernelUpdate (force=false, matching CheckUpgrade's
+// routine semantics) — the single install/repair/update path for this
+// launch. Returns true when an install/repair/update was actually performed.
+func maybeCheckAndPromptKernelUpgrade(globalDir string) bool {
+	return maybeCheckAndPromptKernelUpgradeWithOptions(globalDir, kernelUpgradePromptOptions{})
+}
+
+func maybeCheckAndPromptKernelUpgradeWithOptions(globalDir string, opts kernelUpgradePromptOptions) bool {
+	if opts.Input == nil {
+		opts.Input = os.Stdin
+	}
+	if opts.Output == nil {
+		opts.Output = os.Stdout
+	}
+	if opts.Interactive == nil {
+		opts.Interactive = kernelUpgradePromptNeeded
+	}
+	if opts.InspectKernelFunc == nil {
+		opts.InspectKernelFunc = config.InspectKernel
+	}
+	if opts.RunKernelUpdate == nil {
+		opts.RunKernelUpdate = config.RunKernelUpdate
+	}
+
+	// Read-only check runs unconditionally — even non-interactively — so the
+	// human requirement "every default interactive launch performs read-only
+	// version checks" holds regardless of TTY. Only the PROMPT and the
+	// mutating apply step are interactive-gated.
+	status := opts.InspectKernelFunc(globalDir)
+	if !status.NeedsUpdate {
+		return false
+	}
+	if !opts.Interactive() {
+		return false
+	}
+	if status.Installed == "" {
+		// Absent, unimportable, or otherwise broken — InspectKernel's own
+		// contract (missing venv or failed import) never populates
+		// Installed in this case. This is an install/repair decision, not a
+		// version-diff upgrade, so it must never be phrased as one.
+		fmt.Fprint(opts.Output, "lingtai kernel is not installed (or is broken). Install/repair it now? [y/N] ")
+	} else if status.Latest != "" {
+		fmt.Fprintf(opts.Output, "lingtai kernel %s → %s. Update now? [y/N] ", status.Installed, status.Latest)
+	} else {
+		fmt.Fprint(opts.Output, "lingtai kernel update available. Update now? [y/N] ")
+	}
+	if !answerYes(readLineLower(opts.Input)) {
+		return false
+	}
+	report := opts.RunKernelUpdate(globalDir, false)
+	return report.Healthy
+}
+
+// runVersionPreflight performs the shared read-only TUI + kernel version
+// check exactly once, before any Bubble Tea program starts and before the
+// no-project decision gate branches into "existing project" vs. "no-project
+// launcher" vs. (via the launcher) "first-run" vs. "create." Every one of
+// those default interactive launch shapes reaches this single call site, so
+// none of them can silently skip it. Returns true when main() should exit
+// immediately: a TUI self-upgrade completed (the user was already told to
+// restart) or resolving the global dir path failed.
+//
+// Dev builds (version containing "-", e.g. v0.4.31-4-gabcdef) skip the TUI
+// check, matching the long-standing convention this preflight is extracted
+// from. A failed/offline TUI or kernel lookup is handled by each check's own
+// existing non-blocking contract (CheckTUIUpgrade returns "" on any error;
+// InspectKernel reports NeedsUpdate=false on a failed PyPI lookup) — this
+// function does not add its own error handling on top.
+func runVersionPreflight() bool {
+	return runVersionPreflightWithOptions(preflightOptions{})
+}
+
+// preflightOptions injects every side-effecting call for deterministic
+// tests: none of them may reach the real network, global config, or a
+// mutating command unless a test explicitly wants to assert that path. Nil
+// fields (production) use the real config.GlobalDirPath (pure, no mkdir),
+// config.CheckTUIUpgrade, config.DetectCurrentTUIInstall, handleTUIUpgrade,
+// and maybeCheckAndPromptKernelUpgrade. A consented mutation (TUI
+// self-upgrade or RunKernelUpdate) creates ~/.lingtai-tui itself as an
+// intentional side effect of that mutation, not of merely checking.
+type preflightOptions struct {
+	GlobalDirPath           func() (string, error)
+	CheckTUIUpgradeFunc     func(string) string
+	DetectCurrentTUIInstall func(string) config.TUIInstallInfo
+	HandleTUIUpgrade        func(config.TUIInstallInfo, string, string, string) bool
+	CheckAndPromptKernel    func(string) bool
+	PrintOutput             io.Writer
+}
+
+func runVersionPreflightWithOptions(opts preflightOptions) bool {
+	if opts.GlobalDirPath == nil {
+		opts.GlobalDirPath = config.GlobalDirPath
+	}
+	if opts.CheckTUIUpgradeFunc == nil {
+		opts.CheckTUIUpgradeFunc = config.CheckTUIUpgrade
+	}
+	if opts.DetectCurrentTUIInstall == nil {
+		opts.DetectCurrentTUIInstall = config.DetectCurrentTUIInstall
+	}
+	if opts.HandleTUIUpgrade == nil {
+		opts.HandleTUIUpgrade = handleTUIUpgrade
+	}
+	if opts.CheckAndPromptKernel == nil {
+		opts.CheckAndPromptKernel = maybeCheckAndPromptKernelUpgrade
+	}
+	if opts.PrintOutput == nil {
+		opts.PrintOutput = os.Stdout
+	}
+
+	globalDir, err := opts.GlobalDirPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return true
+	}
+
+	// TUI version check (read-only). Skip for dev builds, matching the
+	// pre-existing convention this block is extracted from verbatim.
+	isDev := strings.Contains(version, "-")
+	latestVersion := ""
+	if !isDev {
+		latestVersion = opts.CheckTUIUpgradeFunc(version)
+	}
+	if latestVersion != "" {
+		install := opts.DetectCurrentTUIInstall(globalDir)
+		switch install.Method {
+		case config.TUIInstallMethodHomebrew, config.TUIInstallMethodSource:
+			if opts.HandleTUIUpgrade(install, version, latestVersion, globalDir) {
+				// A successful self-upgrade has always told the user to
+				// restart. Exit main() here, before the no-project gate or
+				// launcher ever starts — never construct or run an App.
+				return true
+			}
+		default:
+			fmt.Fprintln(opts.PrintOutput, "lingtai-tui "+version)
+		}
+	} else {
+		fmt.Fprintln(opts.PrintOutput, "lingtai-tui "+version)
+	}
+
+	// Kernel version check (read-only) + consent-gated prompt. Always runs
+	// on a plain terminal here (no Bubble Tea program exists yet), so the
+	// prompt can safely block on stdin directly.
+	if opts.CheckAndPromptKernel(globalDir) {
+		fmt.Fprintln(opts.PrintOutput, "Upgraded lingtai to latest version.")
+	}
+	return false
+}
+
 // prepareApp runs the normal post-decision startup pipeline and returns the
 // real App without starting a second Bubble Tea program. When inProgram is
 // true, terminal-coupled prompts and fatal paths become typed outcomes for
 // the caller to handle after Bubble Tea has released the terminal.
 func prepareApp(projectDir string, inProgram bool) startupResult {
-	// Print version and check for updates (3s timeout).
-	// Skip upgrade check for dev builds (version contains '-' suffix like v0.4.31-4-gabcdef).
+	// TUI + kernel version checks already ran once in main(), via
+	// runVersionPreflight, before any Bubble Tea program started and before
+	// the no-project decision gate — including for this call, whichever of
+	// the three default-launch shapes (existing project, first-run via the
+	// no-project launcher, or a fresh Create) led here. prepareApp never
+	// repeats them; doing so here would be a second, redundant read-only
+	// check per launch (and, if triggered inside the launcher's Bubble Tea
+	// program, a duplicate prompt).
 	globalDir, err := config.GlobalDir()
 	if err != nil {
 		return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
-	}
-	isDev := strings.Contains(version, "-")
-	latestVersion := ""
-	if !isDev {
-		latestVersion = config.CheckTUIUpgrade(version)
-	}
-	if latestVersion != "" {
-		install := config.DetectCurrentTUIInstall(globalDir)
-		switch install.Method {
-		case config.TUIInstallMethodHomebrew, config.TUIInstallMethodSource:
-			if inProgram {
-				return startupResult{kind: startupFallback}
-			}
-			if handleTUIUpgrade(install, version, latestVersion, globalDir) {
-				// A successful self-upgrade has always told the user to restart
-				// and returned from main. Never construct or run an App here.
-				return startupResult{kind: startupKindAfterTUIUpgrade(false, true)}
-			}
-		default:
-			if !inProgram {
-				fmt.Println("lingtai-tui " + version)
-			}
-		}
-	} else {
-		if !inProgram {
-			fmt.Println("lingtai-tui " + version)
-		}
 	}
 
 	// Global per-machine migrations (versioned in ~/.lingtai-tui/meta.json).
@@ -1454,25 +1630,17 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 	}
 
 	if !needsFirstRun {
-		// Returning user — ensure runtime + assets (fast no-ops if already exist).
-		// EnsureRuntime always runs the non-blocking upgrade check after a
-		// successful ensure so repaired/recreated venvs do not wait until the
-		// next launch to pick up a newer lingtai CLI.
-		if config.NeedsVenv(globalDir) {
-			if !inProgram {
-				fmt.Println("Setting up Python environment...")
-			} else {
-				return startupResult{kind: startupFallback, projectDir: projectDir}
-			}
-		}
-		if upgraded, err := config.EnsureRuntime(globalDir); err != nil {
-			return startupResult{kind: startupFatal, err: fmt.Errorf("error: %w", err)}
-		} else if upgraded {
-			if !inProgram {
-				fmt.Println("Upgraded lingtai to latest version.")
-			} else {
-				return startupResult{kind: startupFallback, projectDir: projectDir, upgraded: true}
-			}
+		// Returning user — assets (fast no-ops if already exist). The runtime
+		// itself is NOT ensured/installed/repaired here: install.sh installs
+		// the kernel by default, and the ONLY automatic opportunity to
+		// install or repair it is main()'s runVersionPreflight (before the
+		// no-project gate), gated on explicit current-launch human consent.
+		// A declined or absent runtime must not be silently repaired behind
+		// that decision — config.RuntimeReady is a pure readiness check
+		// (never creates/repairs/upgrades); a not-ready runtime surfaces as
+		// an actionable error instead.
+		if err := config.RuntimeReady(globalDir); err != nil {
+			return startupResult{kind: startupFatal, err: err}
 		}
 		if err := preset.Bootstrap(globalDir); err != nil {
 			return startupResult{kind: startupFatal, err: fmt.Errorf("bootstrap error: %w", err)}
