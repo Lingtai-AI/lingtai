@@ -8,6 +8,7 @@ related_files:
   - tui/internal/inventory/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/preset/ANATOMY.md
+  - tui/internal/process/ANATOMY.md
   - tui/internal/processscan/ANATOMY.md
   - tui/main.go
   - tui/main_no_project_gate_test.go
@@ -99,8 +100,8 @@ This folder is the self-contained Go module for the `lingtai-tui` terminal UI bi
   - `tui/internal/globalmigrate/` — separate per-machine housekeeping (`~/.lingtai-tui/`)
   - `tui/internal/fs/` — filesystem readers for agent state
   - `tui/internal/config/` — bootstrap, venv, global config (`tui/internal/config/ANATOMY.md`)
-  - `tui/internal/process/` — subprocess launcher
-  - `tui/internal/processscan/` — shared ps-based `lingtai run <agentDir>` process detection used by launch
+  - `tui/internal/process/` — agent-process lifecycle boundary: exact Python CLI launch plus platform termination (`tui/internal/process/ANATOMY.md`)
+  - `tui/internal/processscan/` — advisory cross-platform `lingtai run <agentDir>` process observation (`tui/internal/processscan/ANATOMY.md`)
   - `tui/internal/inventory/` — typed running-agent inventory built from processscan rows plus `.agent.json`/heartbeat/status enrichment (`tui/internal/inventory/ANATOMY.md`)
   - `tui/internal/headless/` — JSON-emitting non-interactive CLI surface (`bootstrap`, `presets`, `spawn` subcommands)
   - `tui/i18n/` — en/zh/wen locale tables

@@ -6,6 +6,8 @@ related_files:
   - README.md
   - dev-guide-skill/SKILL.md
   - tui/architecture_documents_test.go
+  - tui/internal/process/CONTRACT.md
+  - tui/internal/processscan/CONTRACT.md
 maintenance: |
   This file is the normative root of the distributed code interface definition
   system and the contract-of-contract for the LingTai Go repository (the two
@@ -247,12 +249,11 @@ The root contract has exactly `name`, `contract_version`, `related_files`, and
 `maintenance` frontmatter keys. It omits `root_contract` because it is the root.
 
 The governed-child rules in this section (and in `## Body contract`,
-`## Link semantics`, and `## Maintenance contract`) are the **normative target
-schema** for the first governed child, not invariants the smoke test enforces
-today — the repository has zero governed children and `## Validation` describes
-what is actually checked now. A first governed-child PR must justify and add only
-the focused validation its concrete graph needs; until then these rules remain
-review-owned.
+`## Link semantics`, and `## Maintenance contract`) are the normative schema for
+all root-governed children. The first governed vertical slice is the TUI agent
+process lifecycle plus its neighboring process-observation boundary. The focused
+validation in `## Validation` enforces that concrete graph without pretending to
+be a general YAML or architecture parser.
 
 Every governed child contract has exactly these frontmatter keys, in this
 order:
@@ -264,11 +265,10 @@ order:
    files. It includes the co-located paired `ANATOMY.md`, the Port, every
    production Adapter, contract tests, public exports, and directly relevant
    component contracts.
-5. `maintenance`: the canonical generic text from the template below. Whether
-   "canonical" means byte-exact normalized template text or simply a non-empty
-   maintenance contract is a decision the first governed-child PR makes and
-   tests; the current validator does not normalize or enforce child maintenance
-   text.
+5. `maintenance`: the canonical generic text from the template below. The
+   focused validator requires the canonical opening sentence and a non-empty
+   block; review remains responsible for detecting drift in the rest of the
+   maintenance wording rather than introducing a second YAML parser.
 
 ## Body contract
 
@@ -330,20 +330,27 @@ binary, on any supported OS) no longer conform.
 ## Validation
 
 `tui/architecture_documents_test.go` is a small real-repository smoke test in
-the existing TUI module, run with `cd tui && go test ./...`. It checks only the
-current entry-path invariants:
+the existing TUI module, run with `cd tui && go test ./...`. It checks the entry
+path plus the first concrete governed vertical slice:
 
 - the root `ANATOMY.md` and `CONTRACT.md` list each other and the repository-local
   `dev-guide-skill/SKILL.md`;
 - the three READMEs and `CLAUDE.md` contain Markdown links to both roots and the
-  dev guide.
+  dev guide;
+- root `CONTRACT.md` lists the process-lifecycle and process-observation children
+  exactly once;
+- each child uses the governed frontmatter prefix, points to the root, uses the
+  canonical maintenance opening, lists its paired Anatomy and decisive code/test
+  files, and has the seven required body headings once in order;
+- paired and parent/neighbor Anatomy links are reciprocal and every checked
+  related-file target is a regular file.
 
 It deliberately does not implement a second YAML parser or enforce scalar
-styles, heading order, symlink/case variants, or hypothetical child-contract
-rules. Those concerns remain review- and skill-owned until a concrete governed
-child or recurring defect earns focused machinery. The test lives in the TUI
-module because the root documents belong to neither binary and a third module is
-unnecessary. Citation drift remains owned by the `lingtai-tui-anatomy` skill.
+styles, arbitrary future child schemas, symlink/case variants, or citation line
+ranges. Those concerns remain review- and skill-owned until a recurring defect
+earns narrower machinery. The test lives in the TUI module because the root
+documents belong to neither binary and a third module is unnecessary. Citation
+drift remains owned by the `lingtai-tui-anatomy` skill.
 
 ## Template
 

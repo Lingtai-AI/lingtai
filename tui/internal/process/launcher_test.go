@@ -3,6 +3,7 @@ package process
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -37,5 +38,15 @@ func TestInitProject(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(lingtaiDir, "meta.json")); !os.IsNotExist(err) {
 		t.Errorf("InitProject wrote retired migration progress meta.json (err=%v)", err)
+	}
+}
+
+func TestAgentRunArgsPreserveWindowsPathAsOneArgument(t *testing.T) {
+	agentDir := `C:\Users\Jason\Ling Tai\.lingtai\orchestrator`
+	got := agentRunArgs(agentDir)
+	want := []string{"-m", "lingtai", "run", agentDir}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("agentRunArgs() = %#v, want %#v", got, want)
 	}
 }

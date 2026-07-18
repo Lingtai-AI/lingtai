@@ -110,6 +110,10 @@ func ForceLaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	return launchAgentUnsafe(lingtaiCmd, agentDir)
 }
 
+func agentRunArgs(agentDir string) []string {
+	return []string{"-m", "lingtai", "run", agentDir}
+}
+
 func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 	fs.CleanSignals(agentDir)
 	python := resolvePython(agentDir, lingtaiCmd)
@@ -119,7 +123,7 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("ensure addons: %w", err)
 	}
 
-	cmd := exec.Command(python, "-m", "lingtai", "run", agentDir)
+	cmd := exec.Command(python, agentRunArgs(agentDir)...)
 	// Redirect agent output to a log file instead of the TUI terminal
 	logPath := filepath.Join(agentDir, "logs")
 	os.MkdirAll(logPath, 0o755)

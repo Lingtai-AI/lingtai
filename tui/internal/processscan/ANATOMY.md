@@ -1,6 +1,8 @@
 ---
 related_files:
   - tui/ANATOMY.md
+  - tui/internal/process/ANATOMY.md
+  - tui/internal/processscan/CONTRACT.md
   - tui/internal/inventory/ANATOMY.md
   - tui/internal/migrate/ANATOMY.md
   - tui/internal/processscan/check.go
@@ -25,7 +27,7 @@ maintenance: |
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `~/.lingtai-tui/utilities/lingtai-tui-anatomy/SKILL.md`). Update this file in the same commit as code changes.
 
-`processscan` is the small, dependency-light subprocess detector for running LingTai agents. It exists outside `tui/internal/process` so packages that cannot import `process` (notably `migrate`, because `process` imports `migrate` during fresh-project stamping) can still reuse one tested `ps` matching implementation instead of copying it.
+`processscan` is the small, dependency-light subprocess detector for running LingTai agents. It exists outside `tui/internal/process` so packages that cannot import `process` (notably `migrate`, because `process` imports `migrate` during fresh-project stamping) can still reuse one tested `ps` matching implementation instead of copying it. Its observable behavior is governed by the nearby `CONTRACT.md`.
 
 ## Components
 
@@ -40,12 +42,24 @@ maintenance: |
 | `FindAllAgentProcesses` | `tui/internal/processscan/check.go:281` | shells out to process listing and returns all visible agent processes for list/purge, or the scan-command error |
 | `IsAgentRunning` | `tui/internal/processscan/check.go:333` | boolean convenience wrapper used by launch/migration boundaries |
 
-## Composition
+## Connections
 
 - **Upstream callers:** `tui/internal/process/check.go` re-exports this package for launch/refresh callers; `tui/internal/migrate/m036_sqlite_log_backfill.go` calls it directly to skip running agents before attempting offline SQLite rebuilds; `internal/inventory` consumes all-process scans for `lingtai-tui list` and `/projects` (`tui/internal/inventory/inventory.go:105-167`); `purge` uses the same agent-dir filtering boundary through inventory helpers.
-- **External dependency:** host `ps -eo pid=,command=` for one-dir checks, `ps -eo pid=,etime=,command=` for all-process list/purge, and WMIC/PowerShell on Windows. One-dir check errors fail closed to “no match” (advisory boundary); all-process scan errors are returned from `FindAllAgentProcesses` so `list`/`purge` fail loud instead of reporting an empty process table. The kernel workdir lock remains the authoritative safety gate for SQLite rebuilds.
+- **External dependency:** host `ps -eo pid=,command=` for one-dir checks, `ps -eo pid=,etime=,command=` for all-process list/purge, and WMIC/PowerShell on Windows. One-dir check errors collapse to “no visible match” (advisory boundary); all-process scan errors are returned from `FindAllAgentProcesses` so `list`/`purge` fail loud instead of reporting an empty process table. The kernel workdir lock remains the authoritative safety gate for SQLite rebuilds.
 
-## Invariants
+## Composition
+
+- **Parent:** `tui/` (`tui/ANATOMY.md`).
+- **Neighbor:** `tui/internal/process/` (`tui/internal/process/ANATOMY.md`) owns launch and termination while consuming this observation boundary.
+- **Consumers:** inventory, list, purge, and retained offline migration checks depend on this package without importing higher-level TUI process policy.
+
+## State
+
+- **Reads:** the current user's host process table through platform commands.
+- **Writes:** none. Parsing and scanning do not mutate project, agent, or global TUI state.
+- **Derived values:** PID, optional uptime, original command, and extracted full agent directory.
+
+## Notes
 
 1. Match supported launch forms (`python -m lingtai run`, `lingtai run`, `lingtai-agent run`) and preserve the full final agent-dir argument, including spaces.
 2. For one-dir checks, match only exact `<absAgentDir>` command arguments. Extra trailing args are accepted only when the boundary is unambiguous (quoted dir or no-space dir); unquoted dirs with spaces must be exact so prefix siblings such as `<absAgentDir> beta` do not match.

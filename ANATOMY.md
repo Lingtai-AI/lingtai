@@ -201,11 +201,11 @@ keep their current shape until they migrate; a component enters the paired
 governed system only when its co-located `CONTRACT.md` is linked from the root
 contract, and from that point the schema and link rules here apply.
 
-The governed-child frontmatter, body, and link/pairing rules below are the
-**normative target** for that first governed child, not machinery the smoke test
-runs today. The repository has zero governed children, so there is no mechanical
-child gate. A first governed-child PR must justify and add only the focused
-validation its concrete graph needs; until then these rules remain review-owned.
+The governed-child frontmatter, body, and link/pairing rules below now govern
+the first concrete vertical slice: TUI agent-process lifecycle and advisory
+process observation. The focused smoke test validates that pair, its root index,
+and reciprocal Anatomy links; broader future children remain review-owned until
+their own concrete graph earns equally narrow validation.
 
 **Frontmatter.** A root-governed component anatomy has exactly two YAML keys, in
 order: `related_files` (a non-empty, duplicate-free list of repo-relative
