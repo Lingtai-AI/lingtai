@@ -27,7 +27,7 @@ maintenance: |
 
 > **Maintenance:** see `lingtai-tui-anatomy` (at `~/.lingtai-tui/utilities/lingtai-tui-anatomy/SKILL.md`). Update this file in the same commit as code changes.
 
-`processscan` is the small, dependency-light subprocess detector for running LingTai agents. It exists outside `tui/internal/process` so packages that cannot import `process` (notably `migrate`, because `process` imports `migrate` during fresh-project stamping) can still reuse one tested `ps` matching implementation instead of copying it. Its observable behavior is governed by the nearby `CONTRACT.md`.
+`processscan` is the small, dependency-light subprocess detector for running LingTai agents. It stays outside `tui/internal/process` so lifecycle, inventory, list, purge, and retained historical migration code can reuse one tested `ps` matching implementation without importing the full launch/termination boundary. Its observable behavior is governed by the nearby `CONTRACT.md`.
 
 ## Components
 

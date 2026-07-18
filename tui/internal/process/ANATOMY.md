@@ -29,7 +29,7 @@ maintenance: |
 
 | Component | File | Purpose |
 |---|---|---|
-| `InitProject` | `tui/internal/process/launcher.go:20` | initialize the human mailbox and migration-owned project state before the TUI starts |
+| `InitProject` | `tui/internal/process/launcher.go:20` | initialize the human mailbox and minimal project filesystem bootstrap (`.tui-asset` and `.library_shared`) before the TUI starts |
 | `resolvePython` | `tui/internal/process/launcher.go:70` | prefer an existing agent-specific venv Python and otherwise use the caller-supplied managed-runtime command |
 | `LaunchAgent` | `tui/internal/process/launcher.go:96` | best-effort duplicate guard followed by one `python -m lingtai run <agentDir>` start |
 | `ForceLaunchAgent` | `tui/internal/process/launcher.go:109` | bypass duplicate observation only for a caller-controlled refresh/restart boundary |
