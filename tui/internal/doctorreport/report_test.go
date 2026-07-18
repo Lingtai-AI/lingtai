@@ -151,6 +151,53 @@ func TestWriteRedactsSecretsAcrossArtifacts(t *testing.T) {
 	}
 }
 
+func TestWriteRedactsTelegramBotTokensAcrossArtifacts(t *testing.T) {
+	out := t.TempDir()
+	botToken := "123456789:" + strings.Repeat("A", 30) + "_-Z"
+	secondBotToken := "987654321:" + strings.Repeat("Z", 33)
+	nearMisses := []string{
+		"12345:" + strings.Repeat("B", 30),
+		"1234567890123:" + strings.Repeat("C", 30),
+		"123456789:" + strings.Repeat("D", 29),
+		"123456789:" + strings.Repeat("E", 15) + "/" + strings.Repeat("E", 15),
+	}
+	draft := Draft{Lines: []Line{{
+		Severity: SeverityFail,
+		Text:     "bot tokens: " + botToken + "," + secondBotToken,
+	}}}
+	for _, nearMiss := range nearMisses {
+		draft.Lines = append(draft.Lines, Line{Severity: SeverityInfo, Text: "near miss: " + nearMiss})
+	}
+
+	if err := Write(out, draft); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	for _, name := range []string{"report.md", "metadata.json", "redaction.json"} {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", name, err)
+		}
+		for _, token := range []string{botToken, secondBotToken} {
+			if strings.Contains(string(data), token) {
+				t.Fatalf("artifact %s leaked Telegram bot token %q", name, token)
+			}
+		}
+	}
+	report, err := os.ReadFile(filepath.Join(out, "report.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(report.md): %v", err)
+	}
+	if !strings.Contains(string(report), "bot tokens: "+redactionMarker+","+redactionMarker) {
+		t.Fatalf("report.md missing adjacent bot-token redaction markers:\n%s", report)
+	}
+	for _, nearMiss := range nearMisses {
+		if !strings.Contains(string(report), nearMiss) {
+			t.Fatalf("report.md over-redacted near miss %q:\n%s", nearMiss, report)
+		}
+	}
+}
+
 func TestWriteDoesNotMutateCallerDraft(t *testing.T) {
 	original := "api_key=sk-test-rawapikey123456"
 	draft := Draft{Lines: []Line{{Severity: SeverityFail, Text: original}}}
