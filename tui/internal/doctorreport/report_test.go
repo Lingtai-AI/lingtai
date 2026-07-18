@@ -2,6 +2,7 @@ package doctorreport
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -195,6 +196,39 @@ func TestWriteRedactsTelegramBotTokensAcrossArtifacts(t *testing.T) {
 		if !strings.Contains(string(report), nearMiss) {
 			t.Fatalf("report.md over-redacted near miss %q:\n%s", nearMiss, report)
 		}
+	}
+}
+
+func TestRedactTextRedactsTelegramBotTokensAtStringBoundaries(t *testing.T) {
+	botToken := "123456789:" + strings.Repeat("A", 30) + "_-Z"
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "start of string", input: botToken, want: redactionMarker},
+		{name: "after double quote", input: `"` + botToken + `"`, want: `"` + redactionMarker + `"`},
+		{name: "after newline", input: "before\n" + botToken, want: "before\n" + redactionMarker},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := redactText(tt.input); got != tt.want {
+				t.Fatalf("redactText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactTextDoesNotRedactTelegramLikeLongNumericPrefixes(t *testing.T) {
+	for digits := 13; digits <= 16; digits++ {
+		digits := digits
+		t.Run(fmt.Sprintf("%d digits", digits), func(t *testing.T) {
+			candidate := strings.Repeat("1", digits) + ":" + strings.Repeat("A", 30)
+			if got := redactText(candidate); got != candidate {
+				t.Fatalf("redactText over-redacted %d-digit prefix: got %q, want %q", digits, got, candidate)
+			}
+		})
 	}
 }
 
