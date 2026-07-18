@@ -6,6 +6,11 @@ related_files:
   - tui/internal/processscan/ANATOMY.md
   - tui/internal/processscan/check.go
   - tui/internal/processscan/check_test.go
+  - tui/internal/processscan/scan_unix.go
+  - tui/internal/processscan/scan_windows.go
+  - tui/internal/processscan/scan_windows_test.go
+  - tui/go.mod
+  - tui/go.sum
   - tui/internal/process/CONTRACT.md
   - tui/internal/process/check.go
   - tui/internal/inventory/inventory.go
@@ -33,7 +38,7 @@ maintenance: |
 
 This contract governs advisory observation of LingTai agent processes in the host process table. It converts supported command lines into typed process records for launch duplicate checks, inventory, purge, and offline-migration safety. It does not own process launch, termination, heartbeat truth, kernel workdir locking, or a user-facing lifecycle state machine.
 
-The package is deliberately dependency-light concrete code. Its exported functions are the current behavioral Port; this contract does not claim an injected operating-system adapter migration is complete.
+The package is concrete code with narrow build-tagged operating-system adapters. Its exported functions are the current behavioral Port; the internal query-function seam is only a conformance-test boundary and does not change that Port.
 
 ## Behavior
 
@@ -55,7 +60,7 @@ The current observation Port is the exported API in `tui/internal/processscan`:
 ## Adapters
 
 - On Unix-like systems, the one-agent adapter invokes `ps -eo pid=,command=` and the all-agent adapter invokes `ps -eo pid=,etime=,command=`.
-- On Windows, the adapter first invokes WMIC process listing and falls back to Windows PowerShell `Get-CimInstance Win32_Process`; both feed the same `CommandLine`/`ProcessId` parser.
+- On Windows, the adapter queries `Win32_Process` in-process through `github.com/yusufpapurcu/wmi`, using a new per-call client and requesting `ProcessId` plus nullable `CommandLine`. It spawns no WMIC, PowerShell, shell, or other process-table helper and has no external-command fallback. Returned rows feed the same launch-marker and exact-path matcher as other process-table text.
 - `tui/internal/process/check.go` is the lifecycle package's compatibility adapter over this Port.
 - `list` and `purge` are fail-loud consumers of `FindAllAgentProcesses`; inventory enriches returned rows with filesystem state.
 
@@ -67,16 +72,18 @@ The current observation Port is the exported API in `tui/internal/processscan`:
 4. An unspaced directory may be followed by an unambiguous extra argument. A quoted spaced directory may also be followed by an extra argument. An unquoted spaced directory matches only as the exact command suffix; trailing text is ambiguous and MUST be rejected.
 5. Parser output preserves process-table order. No parser or scanner may mutate agent or project filesystem state.
 6. `FindAgentProcesses` and `IsAgentRunning` retain their legacy collapsed-error shape. Consumers MUST interpret empty/false as "no visible match" rather than a guaranteed stopped state.
-7. `FindAllAgentProcesses` MUST return host command failure. List, purge, or inventory callers MUST fail loud or report unknown; they MUST NOT convert that error into an empty process table.
+7. `FindAllAgentProcesses` MUST return a host query failure. List, purge, or inventory callers MUST fail loud or report unknown; they MUST NOT convert that error into an empty process table.
 8. Observation is advisory and race-prone. It is insufficient as the sole authorization for destructive, offline, or migration work.
 9. This package MUST remain free of imports back into higher-level `process`, `migrate`, inventory, presentation, or TUI packages.
 
 ## Contract tests
 
-`tui/internal/processscan/check_test.go` covers supported and unrelated command markers, exact and prefix-sibling path matching, quoted/unquoted paths with spaces, trailing-argument ambiguity, malformed rows, Windows `.exe` forms, WMIC records, list-all behavior, uptime preservation, and fail-loud all-process scan errors.
+`tui/internal/processscan/check_test.go` covers supported and unrelated command markers, exact and prefix-sibling path matching, quoted/unquoted paths with spaces, trailing-argument ambiguity, malformed rows, Windows `.exe` forms, retained WMIC parser records, nullable/empty command records, process-table order, list-all behavior, uptime preservation, collapsed one-agent errors, and fail-loud all-process query errors.
+
+`tui/internal/processscan/scan_windows_test.go` covers the in-process WMI query seam, exact path matching, nullable/empty command rows, query shape, and provider-error identity. It is compiled by the Windows cross-build gate; runtime WMI/COM behavior still requires real Windows validation.
 
 `tui/internal/process/check_test.go` covers the compatibility parser path used by lifecycle callers. `tui/architecture_documents_test.go` validates this Contract's root registration, paired Anatomy link, required related files, maintenance marker, and body headings.
 
 ## Maintenance
 
-Keep parsers, Unix/Windows host commands, caller-visible error meaning, conformance cases, the lifecycle contract link, and the paired Anatomy synchronized. A future richer `running / stopped / unknown` Port is a breaking successor, not permission to reinterpret the current boolean API silently.
+Keep parsers, Unix/Windows host adapters, caller-visible error meaning, conformance cases, the lifecycle contract link, and the paired Anatomy synchronized. A future richer `running / stopped / unknown` Port is a breaking successor, not permission to reinterpret the current boolean API silently.

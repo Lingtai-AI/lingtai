@@ -1,9 +1,7 @@
 package processscan
 
 import (
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -18,6 +16,18 @@ type AgentProcess struct {
 	AgentDir string
 	Command  string
 }
+
+// processRecord is the technology-neutral result supplied by a platform
+// process-table adapter before LingTai launch markers are matched. A nil or
+// empty CommandLine represents a process that cannot be identified and is
+// skipped.
+type processRecord struct {
+	PID         int
+	CommandLine *string
+}
+
+type processQuery func(abs string) ([]AgentProcess, error)
+type allProcessQuery func() ([]AgentProcess, error)
 
 // ParsePSOutput extracts AgentProcess records from `ps -eo pid=,command=`
 // output that match `lingtai run <abs>`. Split out from FindAgentProcesses so
@@ -105,6 +115,29 @@ func ParseWMICOutput(out, abs string) []AgentProcess {
 	return results
 }
 
+func agentProcessesFromRecords(records []processRecord, abs string) []AgentProcess {
+	var results []AgentProcess
+	for _, record := range records {
+		if record.CommandLine == nil {
+			continue
+		}
+		command := strings.TrimSpace(*record.CommandLine)
+		if command == "" {
+			continue
+		}
+		agentDir, ok := agentDirForCommand(command, abs)
+		if !ok {
+			continue
+		}
+		results = append(results, AgentProcess{
+			PID:      record.PID,
+			AgentDir: agentDir,
+			Command:  command,
+		})
+	}
+	return results
+}
+
 func agentDirForCommand(command, abs string) (string, bool) {
 	if abs == "" {
 		return ExtractAgentDir(command)
@@ -116,9 +149,9 @@ func agentDirForCommand(command, abs string) (string, bool) {
 }
 
 // ExtractAgentDir returns the argument after a supported LingTai launch marker.
-// The launcher passes the agent directory as the final argv element; when ps
-// or WMIC joins argv back into text, taking the rest after the marker preserves
-// spaces inside that directory.
+// The launcher passes the agent directory as the final argv element; when a
+// platform adapter presents argv as command text, taking the rest after the
+// marker preserves spaces inside that directory.
 func ExtractAgentDir(command string) (string, bool) {
 	rest, ok := agentDirRestAfterMarker(command)
 	if !ok {
@@ -257,75 +290,44 @@ func splitLeadingFields(line string, count int) ([]string, string, bool) {
 }
 
 // FindAgentProcesses returns all running `lingtai run <agentDir>` processes
-// visible to the current user via process listing. Empty slice on
-// error or no match. Use IsAgentRunning if you only need a boolean.
+// visible to the current user via the platform process-table adapter. Empty
+// slice on error or no match. Use IsAgentRunning for a boolean.
 func FindAgentProcesses(agentDir string) []AgentProcess {
+	return findAgentProcesses(agentDir, scanAgentProcesses)
+}
+
+func findAgentProcesses(agentDir string, query processQuery) []AgentProcess {
 	abs, err := filepath.Abs(agentDir)
 	if err != nil {
 		abs = agentDir
 	}
-	if runtime.GOOS == "windows" {
-		return findAgentProcessesWindows(abs)
-	}
-	out, err := exec.Command("ps", "-eo", "pid=,command=").Output()
+	processes, err := query(abs)
 	if err != nil {
 		return nil
 	}
-	return ParsePSOutput(string(out), abs)
+	return processes
 }
 
 // FindAllAgentProcesses returns every visible LingTai agent process. On Unix it
-// uses `etime` as a display-only uptime string. A process-scan command failure
-// is returned as an error, never as an empty result, so callers can tell
-// "nothing running" apart from "scan failed".
+// uses `etime` as a display-only uptime string. A host-query failure is returned
+// as an error, never as an empty result, so callers can distinguish "nothing
+// running" from "scan failed".
 func FindAllAgentProcesses() ([]AgentProcess, error) {
-	if runtime.GOOS == "windows" {
-		out, err := windowsAgentProcessOutput()
-		if err != nil {
-			return nil, err
-		}
-		return ParseWMICOutput(string(out), ""), nil
-	}
-	out, err := exec.Command("ps", "-eo", "pid=,etime=,command=").Output()
-	if err != nil {
-		return nil, err
-	}
-	return ParsePSListOutput(string(out)), nil
+	return findAllAgentProcesses(scanAllAgentProcesses)
 }
 
-func findAgentProcessesWindows(abs string) []AgentProcess {
-	out, err := windowsAgentProcessOutput()
+func findAllAgentProcesses(query allProcessQuery) ([]AgentProcess, error) {
+	return query()
+}
+
+// FindWindowsAgentProcesses preserves the legacy Windows-specific parser entry
+// point while delegating observation to the platform adapter.
+func FindWindowsAgentProcesses(abs string) []AgentProcess {
+	processes, err := scanWindowsAgentProcesses(abs)
 	if err != nil {
 		return nil
 	}
-	return ParseWMICOutput(string(out), abs)
-}
-
-func FindWindowsAgentProcesses(abs string) []AgentProcess {
-	return findAgentProcessesWindows(abs)
-}
-
-func windowsAgentProcessOutput() ([]byte, error) {
-	out, err := exec.Command(
-		"wmic",
-		"process",
-		"where",
-		"commandline like '%lingtai%run%'",
-		"get",
-		"processid,commandline",
-		"/format:list",
-	).Output()
-	if err == nil {
-		return out, nil
-	}
-	script := `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*lingtai*run*' } | ForEach-Object { "CommandLine=$($_.CommandLine)"; "ProcessId=$($_.ProcessId)"; "" }`
-	return exec.Command(
-		"powershell.exe",
-		"-NoProfile",
-		"-NonInteractive",
-		"-Command",
-		script,
-	).Output()
+	return processes
 }
 
 // IsAgentRunning returns true if any supported `lingtai run <agentDir>` launch
