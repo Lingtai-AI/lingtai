@@ -1,22 +1,25 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
 // modelValidityStatus is the setup-flow gate on the preset editor's Save
-// action: the exact current (provider, model, credential) tuple must
-// resolve to validityValid — a real, successful provider call, not a
-// non-empty-string check — before the editor will emit
-// PresetEditorCommitMsg. See commit() in preset_editor.go.
+// action. A real provider call must run for the exact current (provider,
+// model, credential) tuple. Deterministic failures block Save; retryable
+// provider failures may save with a warning and are re-probed later.
+// See commit() in preset_editor.go.
 type modelValidityStatus int
 
 const (
 	validityUnknown modelValidityStatus = iota
 	validityChecking
 	validityValid
+	validityRetryable
 	validityInvalid
 )
 
@@ -46,25 +49,34 @@ func checkModelValidityCmd(gen uint64, provider, model, apiKey, baseURL, apiComp
 			return modelValidityResultMsg{Generation: gen, Status: validityValid}
 		}
 		status, detail := probeLLM(provider, model, apiKey, baseURL, apiCompat)
-		if status == probeOK {
+		safeDetail := sanitizeModelValidityDetail(detail, apiKey)
+		switch status {
+		case probeOK:
 			return modelValidityResultMsg{Generation: gen, Status: validityValid}
+		case probeRateLimit, probeOverloaded:
+			return modelValidityResultMsg{Generation: gen, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
+		default:
+			return modelValidityResultMsg{Generation: gen, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
 		}
-		return modelValidityResultMsg{Generation: gen, Status: validityInvalid, Detail: probeStatusDetail(status, detail)}
 	}
 }
 
 // probeStatusDetail renders a probeStatus into a short, safe-to-display
-// message. probeLLM already strips the API key out of network-error
-// text; this only adds a stable label per status so the UI never shows a
-// raw provider error body verbatim beyond what probeLLM already limited
-// and sanitized.
+// message. Retryable provider responses keep their sanitized evidence so
+// Save can explain what the live test returned.
 func probeStatusDetail(status probeStatus, detail string) string {
 	switch status {
 	case probeAuthError:
 		return i18n.T("preset_editor.model_validity_auth_error")
 	case probeRateLimit:
+		if detail != "" {
+			return detail
+		}
 		return i18n.T("preset_editor.model_validity_rate_limited")
 	case probeOverloaded:
+		if detail != "" {
+			return detail
+		}
 		return i18n.T("preset_editor.model_validity_overloaded")
 	case probeNetworkError:
 		return i18n.T("preset_editor.model_validity_network_error")
@@ -78,4 +90,20 @@ func probeStatusDetail(status probeStatus, detail string) string {
 		}
 		return detail
 	}
+}
+
+// sanitizeModelValidityDetail keeps provider evidence useful without ever
+// surfacing the credential used by the live probe. It also normalizes
+// whitespace and caps the warning so a provider cannot flood the TUI.
+func sanitizeModelValidityDetail(detail, apiKey string) string {
+	if apiKey != "" {
+		detail = strings.ReplaceAll(detail, apiKey, "[redacted]")
+	}
+	detail = strings.Join(strings.Fields(detail), " ")
+	const maxRunes = 240
+	runes := []rune(detail)
+	if len(runes) > maxRunes {
+		detail = string(runes[:maxRunes]) + "…"
+	}
+	return detail
 }

@@ -29,7 +29,8 @@ import (
 type PresetEditorCommitMsg struct {
 	Preset    preset.Preset
 	APIKey    string
-	APIKeySet bool // true when the user typed/changed a value in this session
+	APIKeySet bool   // true when the user typed/changed a value in this session
+	Warning   string // localized, sanitized availability warning; never a credential
 }
 
 // PresetEditorCancelMsg fires on Esc (and after the dirty-prompt
@@ -434,7 +435,7 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 		}
 		m.modelValidity = msg.Status
 		m.modelValidityDetail = msg.Detail
-		if msg.Status == validityValid {
+		if msg.Status == validityValid || msg.Status == validityRetryable {
 			m.saveErr = ""
 		}
 		return m, nil
@@ -1264,25 +1265,31 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		m.saveErr = errs[0].Error()
 		return m, nil
 	}
-	// Real-availability gate: Save must not commit until a live provider
-	// call against the EXACT current (provider, model, credential) tuple
-	// has succeeded. If the tuple changed since the last check (or no
-	// check has run yet), kick one off now and block; if a check for
-	// this exact tuple is already in flight, stay blocked and let its
-	// result land via Update. This is deliberately re-checked on every
-	// Save attempt, not just once, since the user can revisit and edit
-	// again after an earlier successful save of a different tuple.
-	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity != validityValid {
-		if m.currentValidityKey() != m.modelValidityKey {
-			m, cmd := m.startModelValidityCheck()
-			m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
-			return m, cmd
-		}
-		if m.modelValidity == validityInvalid {
-			m.saveErr = i18n.T("preset_editor.model_validity_invalid_save")
-		} else {
-			m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
-		}
+	// Real-availability gate: always run a live call for the exact current
+	// tuple. Deterministic configuration failures stay blocked. A provider
+	// that was reached but is temporarily rate-limited or overloaded may be
+	// saved with a factual warning; reset that result so a later Save re-probes
+	// instead of permanently caching the operational failure.
+	var commitWarning string
+	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity == validityUnknown {
+		m, cmd := m.startModelValidityCheck()
+		m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
+		return m, cmd
+	}
+	switch m.modelValidity {
+	case validityValid:
+		// Continue to commit.
+	case validityRetryable:
+		llm, _ := m.working.Manifest["llm"].(map[string]interface{})
+		commitWarning = i18n.TF("preset_editor.model_validity_retryable_saved_warning", asString(llm["provider"]), asString(llm["model"]), m.modelValidityDetail)
+		m.modelValidity = validityUnknown
+		m.modelValidityDetail = ""
+		m.saveErr = ""
+	case validityInvalid:
+		m.saveErr = i18n.T("preset_editor.model_validity_invalid_save")
+		return m, nil
+	default:
+		m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
 		return m, nil
 	}
 	// Templates (built-ins) are starting points: the user picks one,
@@ -1321,7 +1328,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	}
 	normalizeLLMForCommit(committed.Manifest)
 	return m, func() tea.Msg {
-		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
+		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet, Warning: commitWarning}
 	}
 }
 
@@ -2345,6 +2352,8 @@ func (m PresetEditorModel) modelValidityLine() string {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  " + i18n.T("preset_editor.model_validity_checking"))
 	case validityValid:
 		return lipgloss.NewStyle().Foreground(ColorActive).Render("  " + i18n.T("preset_editor.model_validity_valid"))
+	case validityRetryable:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("  " + i18n.TF("preset_editor.model_validity_retryable_detail", m.modelValidityDetail))
 	case validityInvalid:
 		detail := m.modelValidityDetail
 		if detail == "" {

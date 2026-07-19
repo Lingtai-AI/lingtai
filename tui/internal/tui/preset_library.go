@@ -110,10 +110,11 @@ type PresetLibraryModel struct {
 	// the agent's allow-list. Compared against preset.RefFor(p).
 	activeRef string
 
-	focus   presetLibraryFocus
-	tierIdx int               // selection within the tag picker (0..len(tierValues), last = "untag")
-	saveErr string            // short error from the last save attempt
-	editor  PresetEditorModel // active when focus == presetLibFocusEditor
+	focus       presetLibraryFocus
+	tierIdx     int               // selection within the tag picker (0..len(tierValues), last = "untag")
+	saveErr     string            // short error from the last save attempt
+	saveWarning string            // non-blocking warning from a successful editor save
+	editor      PresetEditorModel // active when focus == presetLibFocusEditor
 
 	width  int
 	height int
@@ -216,6 +217,7 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			}
 			if err := preset.Save(toSave); err != nil {
 				m.saveErr = fmt.Sprintf("save failed: %v", err)
+				m.saveWarning = ""
 				return m, nil
 			}
 			m.presets, _ = preset.List()
@@ -227,6 +229,7 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			}
 			m.focus = presetLibFocusList
 			m.saveErr = ""
+			m.saveWarning = typed.Warning
 			return m, nil
 		case PresetEditorCancelMsg:
 			m.focus = presetLibFocusList
@@ -345,6 +348,7 @@ func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
 			m.editor = updated
 			m.focus = presetLibFocusEditor
 			m.saveErr = ""
+			m.saveWarning = ""
 			return m, m.editor.Init()
 		case "ctrl+r", "r":
 			// Reload from disk. ctrl+r is the canonical refresh key; bare r
@@ -410,6 +414,8 @@ func (m PresetLibraryModel) View() string {
 	}
 	if m.saveErr != "" {
 		hint = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.saveErr)
+	} else if m.saveWarning != "" {
+		hint = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(m.saveWarning)
 	}
 	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint)
 

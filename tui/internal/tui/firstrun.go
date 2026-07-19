@@ -194,17 +194,18 @@ type FirstRunModel struct {
 	draftPendingAPIKeys map[string]secretString
 	draftBaselineKeys   map[string]string
 
-	nameInput  textinput.Model
-	dirInput   textinput.Model
-	agentName  string
-	agentDir   string
-	message    string
-	baseDir    string // .lingtai/ directory
-	globalDir  string
-	width      int
-	height     int
-	hasPresets bool
-	fieldIdx   int // see agentNameDirFieldCount for field indices
+	nameInput         textinput.Model
+	dirInput          textinput.Model
+	agentName         string
+	agentDir          string
+	message           string
+	presetSaveWarning string // non-blocking warning from a successful editor save
+	baseDir           string // .lingtai/ directory
+	globalDir         string
+	width             int
+	height            int
+	hasPresets        bool
+	fieldIdx          int // see agentNameDirFieldCount for field indices
 	// Agent config text inputs
 	agentLangIdx   int // cycle: 0=en, 1=zh, 2=wen
 	ctxLimitInput  textinput.Model
@@ -1170,11 +1171,13 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			// tell whether the cursor still points at it later (see
 			// draftEditedPresetIdx's doc comment).
 			m.draftEditedPresetIdx = m.cursor
+			m.presetSaveWarning = msg.Warning
 			m.step = stepPickPreset
 			return m, nil
 		}
 		if err := preset.Save(toSave); err != nil {
 			m.message = "save preset: " + err.Error()
+			m.presetSaveWarning = ""
 			m.step = stepPickPreset
 			return m, nil
 		}
@@ -1185,6 +1188,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				break
 			}
 		}
+		m.presetSaveWarning = msg.Warning
 		m.step = stepPickPreset
 		return m, nil
 
@@ -1632,6 +1636,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
+				m.presetSaveWarning = ""
 				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
@@ -1654,6 +1659,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
 					return m, nil
 				}
+				m.presetSaveWarning = ""
 				m.presetEditor = NewPresetEditorModel(p, i18n.Lang(), m.existingKeys, m.globalDir)
 				m.step = stepEditPreset
 				return m, tea.Batch(
@@ -3016,6 +3022,9 @@ func (m FirstRunModel) View() string {
 			}
 		}
 		b.WriteString(StyleFaint.Render("  [Ctrl+C] "+i18n.T("common.quit")) + "\n")
+		if m.presetSaveWarning != "" {
+			b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(m.presetSaveWarning) + "\n")
+		}
 
 	case stepEditPreset:
 		// Delegate the entire screen to the embedded editor.

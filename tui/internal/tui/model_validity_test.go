@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
@@ -61,6 +64,28 @@ func anthropicOKServer(t *testing.T) *httptest.Server {
 
 // anthropicAuthErrorServer answers every request with 401, simulating an
 // invalid credential.
+
+// anthropicRateLimitServer proves the provider/model endpoint was reached,
+// then returns the retryable plan-credits shape that prompted this behavior.
+func anthropicRateLimitServer(t *testing.T, echoedSecret string, messageCalls *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[{"id":"test-model"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/messages":
+			messageCalls.Add(1)
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprintf(w, `{"error":{"type":"rate_limit_error","message":"Token Plan usage limit reached; purchase Credits (2056); x-api-key=%s"}}`, echoedSecret)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func anthropicAuthErrorServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +149,57 @@ func TestPresetEditorCommitBlocksUntilModelValidated(t *testing.T) {
 	}
 	if final.saveErr != "" {
 		t.Fatalf("unexpected saveErr after successful validated commit: %q", final.saveErr)
+	}
+}
+
+func TestPresetEditorRetryableRateLimitSavesWithWarningAndReprobes(t *testing.T) {
+	const apiKey = "sk-test-secret"
+	var messageCalls atomic.Int32
+	srv := anthropicRateLimitServer(t, apiKey, &messageCalls)
+	p := testValidityPreset(srv.URL)
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.apiKey = apiKey
+	checking, cmd := m.commit()
+	retryable := drainValidityResult(t, checking, cmd)
+	if retryable.modelValidity != validityRetryable {
+		t.Fatalf("expected validityRetryable after 429, got %v (%s)", retryable.modelValidity, retryable.modelValidityDetail)
+	}
+	if !strings.Contains(retryable.modelValidityDetail, "2056") {
+		t.Fatalf("expected provider evidence, got %q", retryable.modelValidityDetail)
+	}
+	if strings.Contains(retryable.modelValidityDetail, apiKey) {
+		t.Fatalf("validity detail leaked API key: %q", retryable.modelValidityDetail)
+	}
+	saved, saveCmd := retryable.commit()
+	if saveCmd == nil {
+		t.Fatalf("retryable failure should save with warning")
+	}
+	raw := saveCmd()
+	msg, ok := raw.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("expected PresetEditorCommitMsg, got %T", raw)
+	}
+	for _, evidence := range []string{"custom", "test-model", "2056", "Preset saved", "runtime calls may fail"} {
+		if !strings.Contains(msg.Warning, evidence) {
+			t.Fatalf("warning missing %q: %q", evidence, msg.Warning)
+		}
+	}
+	if strings.Contains(msg.Warning, apiKey) {
+		t.Fatalf("warning leaked API key: %q", msg.Warning)
+	}
+	if saved.modelValidity != validityUnknown {
+		t.Fatalf("retryable result must reset after save; got %v", saved.modelValidity)
+	}
+	rechecking, retryCmd := saved.commit()
+	if retryCmd == nil || rechecking.modelValidity != validityChecking {
+		t.Fatalf("same-tuple re-save must re-probe; status=%v cmd=%v", rechecking.modelValidity, retryCmd != nil)
+	}
+	rechecked := drainValidityResult(t, rechecking, retryCmd)
+	if rechecked.modelValidity != validityRetryable {
+		t.Fatalf("expected fresh retryable result, got %v", rechecked.modelValidity)
+	}
+	if got := messageCalls.Load(); got != 2 {
+		t.Fatalf("expected two real message probes, got %d", got)
 	}
 }
 

@@ -883,9 +883,9 @@ func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, 
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	case resp.StatusCode == 429:
-		return probeRateLimit, "429 rate limited"
+		return probeRateLimit, probeHTTPErrorDetail(resp.StatusCode, body)
 	case resp.StatusCode == 529 || resp.StatusCode == 503:
-		return probeOverloaded, fmt.Sprintf("%d overloaded", resp.StatusCode)
+		return probeOverloaded, probeHTTPErrorDetail(resp.StatusCode, body)
 	default:
 		return probeUnknown, fmt.Sprintf("%d %s", resp.StatusCode, extractErrorMessage(body))
 	}
@@ -1020,9 +1020,9 @@ func probeAnthropicMessages(model, apiKey, baseURL string) (probeStatus, string)
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("messages %d %s", resp.StatusCode, extractErrorMessage(respBody))
 	case resp.StatusCode == 429:
-		return probeRateLimit, "messages 429 rate limited"
+		return probeRateLimit, probeHTTPErrorDetail(resp.StatusCode, respBody)
 	case resp.StatusCode == 529 || resp.StatusCode == 503:
-		return probeOverloaded, fmt.Sprintf("messages %d overloaded", resp.StatusCode)
+		return probeOverloaded, probeHTTPErrorDetail(resp.StatusCode, respBody)
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		// Continue to envelope inspection below.
 	default:
@@ -1131,9 +1131,9 @@ func probeOpenAICompletions(model, apiKey, baseURL string) (probeStatus, string)
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return probeAuthError, fmt.Sprintf("chat/completions %d %s", resp.StatusCode, extractErrorMessage(respBody))
 	case resp.StatusCode == 429:
-		return probeRateLimit, "chat/completions 429 rate limited"
+		return probeRateLimit, probeHTTPErrorDetail(resp.StatusCode, respBody)
 	case resp.StatusCode == 529 || resp.StatusCode == 503:
-		return probeOverloaded, fmt.Sprintf("chat/completions %d overloaded", resp.StatusCode)
+		return probeOverloaded, probeHTTPErrorDetail(resp.StatusCode, respBody)
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		// Continue to envelope inspection below.
 	default:
@@ -1439,6 +1439,14 @@ func probeKernelCLI(python string) (error, string) {
 		return err, stderr.String()
 	}
 	return nil, ""
+}
+
+func probeHTTPErrorDetail(statusCode int, body string) string {
+	detail := strings.TrimSpace(extractErrorMessage(body))
+	if detail == "" {
+		return fmt.Sprintf("HTTP %d", statusCode)
+	}
+	return fmt.Sprintf("HTTP %d: %s", statusCode, detail)
 }
 
 func extractErrorMessage(body string) string {
