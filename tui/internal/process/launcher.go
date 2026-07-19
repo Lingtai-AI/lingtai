@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/duplaunch"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
-// ErrAgentAlreadyRunning is returned by LaunchAgent when a `lingtai-agent run`
-// process is already alive in the target workdir. Callers should surface this
-// to the user rather than re-attempting the launch.
+// ErrAgentAlreadyRunning is returned by LaunchAgent when the duplicate-launch
+// check does not allow the launch. Callers should surface this to the user
+// rather than re-attempting the launch.
 var ErrAgentAlreadyRunning = errors.New("a lingtai agent is already running in this workdir")
 
 func InitProject(lingtaiDir string) error {
@@ -87,20 +88,20 @@ func resolvePython(agentDir, fallbackCmd string) string {
 // LaunchAgent starts an agent process. lingtaiCmd is the global fallback Python;
 // the agent's init.json venv_path is tried first.
 //
-// Refuses to launch if another `lingtai-agent run <agentDir>` process is already
-// alive on this machine — this prevents the suspend→relaunch race where the
-// previous interpreter is still tearing down. Returns ErrAgentAlreadyRunning
-// in that case. The kernel's flock guarantees correctness of on-disk state,
-// but a duplicate Python process still shows up in `ps`/`lingtai-tui list`
-// and can mislead users; this guard keeps the process accounting honest.
+// The gate is the duplicate-launch check in internal/duplaunch: only its
+// affirmative Allow verdict — a non-creating probe of the kernel's
+// .agent.lock lease — permits the launch. Block and Unknown both refuse
+// (Unknown blocks) with ErrAgentAlreadyRunning wrapped around the evidence,
+// which prevents the suspend→relaunch race where the previous interpreter
+// is still tearing down.
 func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
-	if IsAgentRunning(agentDir) {
-		return nil, ErrAgentAlreadyRunning
+	if d := duplaunch.Check(agentDir); d.Verdict != duplaunch.Allow {
+		return nil, fmt.Errorf("%w (%s: %s)", ErrAgentAlreadyRunning, d.Verdict, d.Reason)
 	}
 	return launchAgentUnsafe(lingtaiCmd, agentDir)
 }
 
-// ForceLaunchAgent launches an agent without consulting IsAgentRunning. It
+// ForceLaunchAgent launches an agent without the duplicate-launch check. It
 // exists for /refresh, which has already done the work of terminating any
 // lingering interpreter and explicitly wants to bypass duplicate-launch
 // protection. Non-refresh callers must keep using LaunchAgent — the gate in
