@@ -15,42 +15,41 @@ git tag v0.X.Y
 git push origin v0.X.Y
 ```
 
-Pushing a `v*` tag triggers the root GitHub Actions workflow at
-`.github/workflows/release.yml`. The workflow is source-only and has two jobs:
-
-- **`source-release`** — verifies the pushed tag and creates the public GitHub
-  Release when it does not already exist. GitHub supplies the tag source archives;
-  the workflow does not build or upload prebuilt binaries, checksums, or bundles.
-- **`update-homebrew`** — computes the GitHub source-tarball checksum and updates
-  the source-build formula in `Lingtai-AI/homebrew-lingtai`.
+The root `.github/workflows/release.yml` validates the experimental Windows
+amd64 preview on pull requests and manual runs without publishing. A pushed
+`v*` tag additionally creates the source release, uploads exactly the preview
+zip, `.sha256`, and bootstrap script, and updates the source-build Homebrew tap.
+The preview is TUI/Portal-only; it is not a Python/kernel bundle or a supported
+native Windows runtime.
 
 ### Kernel compatibility metadata
 
 [`kernel-release.json`](kernel-release.json) remains compatibility metadata for
-explicit/manual bundle tooling. The source-only tag workflow does not read it or
-publish a TUI/kernel bundle.
+explicit/manual bundle tooling. The tag workflow does not read it or publish a
+TUI/kernel bundle.
 
 ### Gitee publication
 
-The source-only tag workflow does not synchronize to Gitee and does not
-publish TUI binary/bundle assets there. The existing
+The tag workflow does not synchronize to Gitee and does not publish the
+Windows preview or TUI/kernel bundle assets there. The existing
 [`scripts/sync_gitee_mirror.sh`](scripts/sync_gitee_mirror.sh) and
 [`scripts/publish_bundle_to_gitee.sh`](scripts/publish_bundle_to_gitee.sh)
 remain explicit maintainer tools; running them requires separate release authority
 and is not part of the automatic `v*` workflow.
 
-### 3. Create the GitHub release
+### 3. Verify the GitHub release
 
-The `release-assets` job creates the release automatically when it runs. To
-create it manually (or to add richer notes), run:
+Check that the tag workflow created the release and attached exactly:
 
-```bash
-gh release create v0.X.Y --title "v0.X.Y" --notes "release notes here..."
+```text
+lingtai-v0.X.Y-windows-amd64-preview.zip
+lingtai-v0.X.Y-windows-amd64-preview.zip.sha256
+install-windows-preview.ps1
 ```
 
-Binary assets are attached by the workflow. If the workflow could not run, the
-release still installs — `install.sh` falls back to building from the release
-source tarball.
+The zip must contain only `lingtai-tui.exe`, `lingtai-portal.exe`, and
+`WINDOWS-PREVIEW.md`. See [`docs/windows-preview.md`](docs/windows-preview.md)
+for checksum, install/update, and unsupported-runtime details.
 
 ### 4. Verify the automated Homebrew tap update
 
@@ -93,10 +92,8 @@ release checklist and are not decided here.
 
 ## Installing without Homebrew
 
-The current release workflow is source-only. Homebrew and the manual commands
-below build `lingtai-tui` and `lingtai-portal` from the tagged source. The
-one-shot installer may still consume compatible assets from older or explicitly
-published releases, but the tag workflow no longer produces them:
+The supported one-shot install path remains macOS, Linux, and WSL. Homebrew and
+the manual commands below build both binaries from tagged source:
 
 ```bash
 curl -fsSL https://lingtai.ai/install.sh | bash
@@ -117,11 +114,15 @@ cd ../portal && make build
 
 Requires Go toolchain and Node.js (for portal web frontend).
 
+The experimental Windows amd64 TUI/Portal-only preview is documented at
+[`docs/windows-preview.md`](docs/windows-preview.md). It remains separate from
+the supported installer and Python/kernel runtime.
+
 ### Source selection (GitHub vs Gitee) and the Python runtime
 
 The behavior below remains compatibility support for older or separately
-published bundle releases; the source-only tag workflow does not create or mirror
-these bundle artifacts.
+published bundle releases; the tag workflow does not create or mirror these
+bundle artifacts.
 
 `install.sh --source auto|github|gitee` (or `LINGTAI_SOURCE` env var) controls
 where the TUI/portal archives, the bundle manifest, and the pinned kernel
