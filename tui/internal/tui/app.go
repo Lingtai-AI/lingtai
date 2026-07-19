@@ -17,6 +17,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
+	"github.com/anthropics/lingtai-tui/internal/spawnprocess"
 )
 
 type appView int
@@ -1463,13 +1464,13 @@ func reviveDir(lingtaiCmd, dir string) error {
 	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
-func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) error {
+func waitForLaunchHeartbeat(child *spawnprocess.Child, dir string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if fs.IsAlive(dir, 3.0) {
 			return nil
 		}
-		if cmd != nil && !process.IsAgentRunning(dir) {
+		if child != nil && !process.IsAgentRunning(dir) {
 			return fmt.Errorf("agent launch exited before writing a fresh heartbeat; see %s", filepath.Join(dir, "logs", "agent.log"))
 		}
 		time.Sleep(200 * time.Millisecond)

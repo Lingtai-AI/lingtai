@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/duplaunch"
 	"github.com/anthropics/lingtai-tui/internal/fs"
+	"github.com/anthropics/lingtai-tui/internal/spawnprocess"
 )
 
 // ErrAgentAlreadyRunning is returned by LaunchAgent when the duplicate-launch
@@ -94,7 +94,7 @@ func resolvePython(agentDir, fallbackCmd string) string {
 // (Unknown blocks) with ErrAgentAlreadyRunning wrapped around the evidence,
 // which prevents the suspend→relaunch race where the previous interpreter
 // is still tearing down.
-func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
+func LaunchAgent(lingtaiCmd, agentDir string) (*spawnprocess.Child, error) {
 	if d := duplaunch.Check(agentDir); d.Verdict != duplaunch.Allow {
 		return nil, fmt.Errorf("%w (%s: %s)", ErrAgentAlreadyRunning, d.Verdict, d.Reason)
 	}
@@ -107,7 +107,7 @@ func LaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 // protection. Non-refresh callers must keep using LaunchAgent — the gate in
 // LaunchAgent is the only thing preventing two interpreters from racing on
 // the same agent dir during the suspend→relaunch window.
-func ForceLaunchAgent(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
+func ForceLaunchAgent(lingtaiCmd, agentDir string) (*spawnprocess.Child, error) {
 	return launchAgentUnsafe(lingtaiCmd, agentDir)
 }
 
@@ -115,7 +115,7 @@ func agentRunArgs(agentDir string) []string {
 	return []string{"-m", "lingtai", "run", agentDir}
 }
 
-func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
+func launchAgentUnsafe(lingtaiCmd, agentDir string) (*spawnprocess.Child, error) {
 	fs.CleanSignals(agentDir)
 	python := resolvePython(agentDir, lingtaiCmd)
 
@@ -124,18 +124,22 @@ func launchAgentUnsafe(lingtaiCmd, agentDir string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("ensure addons: %w", err)
 	}
 
-	cmd := exec.Command(python, agentRunArgs(agentDir)...)
 	// Redirect agent output to a log file instead of the TUI terminal
 	logPath := filepath.Join(agentDir, "logs")
 	os.MkdirAll(logPath, 0o755)
-	logFile, err := os.OpenFile(filepath.Join(logPath, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err == nil {
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
+	var logFile *os.File
+	if f, err := os.OpenFile(filepath.Join(logPath, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		logFile = f
 	}
 
-	if err := cmd.Start(); err != nil {
+	child, err := spawnprocess.Spawn(spawnprocess.Spec{
+		Executable: python,
+		Args:       agentRunArgs(agentDir),
+		Stdout:     logFile,
+		Stderr:     logFile,
+	})
+	if err != nil {
 		return nil, fmt.Errorf("launch agent: %w", err)
 	}
-	return cmd, nil
+	return child, nil
 }

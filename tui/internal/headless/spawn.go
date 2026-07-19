@@ -175,13 +175,13 @@ func RunSpawn(stdout, stderr io.Writer, opts SpawnOpts) int {
 	readyTimeout := readyTimeoutOrDefault(opts.ReadyTimeout)
 	if !opts.SkipLaunch {
 		lingtaiCmd := config.LingtaiCmd(globalDir)
-		cmd, err := launchAgent(lingtaiCmd, agentDir)
+		child, err := launchAgent(lingtaiCmd, agentDir)
 		if err != nil {
 			WriteError(stderr, "agent launch failed: "+err.Error(), "launch_failed")
 			return 1
 		}
-		pid = cmd.Process.Pid
-		cmd.Process.Release()
+		pid = child.PID
+		child.Proc.Release()
 
 		ready := waitForAgentReady(agentDir, readyTimeout)
 		if ready.Code != "ready" {
