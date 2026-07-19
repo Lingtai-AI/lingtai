@@ -11,7 +11,7 @@ description: >
   especially anything containing equations.
 version: 1.0.0
 tags: [html, report, mathjax, deliverable, artifact]
-last_changed_at: "2026-05-31T21:29:38-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -33,7 +33,15 @@ If the content is short and equation-free, plain text or Markdown is usually eno
 
 ## Standalone HTML skeleton
 
-The bundled template at `~/.lingtai-tui/utilities/swiss-knife/reference/html-report/assets/template.html` is a working starting point: typography reset, cards, callouts, tables, anchor nav, print-friendly layout, and MathJax wired up. Copy it, fill in the sections, save under `paper/drafts/` (or another project-local path).
+Start from the bundled template — it already wires up typography reset, cards,
+callouts, tables, anchor nav, print styles, and MathJax. Copy it, fill in the
+`<!-- TODO -->` markers, drop unused sections, and save under a project-local
+path (`paper/drafts/<topic>-$(date -u +%Y-%m-%d).html`):
+
+```bash
+cp ~/.lingtai-tui/utilities/swiss-knife/reference/html-report/assets/template.html \
+   paper/drafts/<your-topic>-$(date -u +%Y-%m-%d).html
+```
 
 Key rules for any HTML you produce, whether from the template or freshly authored:
 
@@ -98,17 +106,6 @@ Run through these every time, in order. They are cheap and the failure modes are
 6. **External links are absolute.** `grep -nE 'href="(arxiv:|doi:|//)' <path>` — relative or scheme-less hrefs break when the file is downloaded.
 7. **Open it locally** if a browser is available: `open <path>` (macOS) or `xdg-open <path>` (Linux). Eyeball the equations and headings.
 8. **When sending via Telegram/email**, attach the actual HTML file (not paste its contents) and include the path in the message so the human can find the source later.
-
-## Mini template
-
-The full template lives at `assets/template.html` in this sub-skill. It includes typography, MathJax, a navigation sidebar, cards, callouts, tables, and print styles. Copy it as your starting point:
-
-```bash
-cp ~/.lingtai-tui/utilities/swiss-knife/reference/html-report/assets/template.html \
-   paper/drafts/<your-topic>-$(date -u +%Y-%m-%d).html
-```
-
-Then fill in the `<!-- TODO -->` markers and remove sections you do not need.
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

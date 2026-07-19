@@ -43,87 +43,36 @@ Returns complete metadata, including `downloadUrl` (direct PDF link).
 
 ---
 
-## Code Examples
+## Code Example
 
-### Search Papers
+Search is a **POST** with a JSON body; detail/download are GETs. Year filtering
+goes inside the query string (`yearPublished>=2020 yearPublished<=2024`), not a
+separate parameter.
 
 ```python
 import requests
 
+BASE = "https://api.core.ac.uk/v3"
+
 def search_core(query, limit=10, offset=0):
-    """Search CORE academic papers.
-
-    Args:
-        query: Search query string
-        limit: Maximum number of results (default 10)
-        offset: Pagination offset (default 0)
-
-    Returns:
-        dict: Contains totalHits and a results list
-    """
-    url = "https://api.core.ac.uk/v3/search/works"
-    payload = {"q": query, "limit": limit, "offset": offset}
-    r = requests.post(url, json=payload, timeout=10)
-    r.raise_for_status()
-    return r.json()
-
-# Example
-results = search_core("transformer architecture", limit=5)
-print(f"Total hits: {results['totalHits']}")
-
-for paper in results['results']:
-    print(f"\nTitle: {paper['title']}")
-    print(f"Authors: {[a['name'] for a in paper.get('authors', [])]}")
-    print(f"Year: {paper.get('yearPublished', 'N/A')}")
-    print(f"DOI: {paper.get('doi', 'N/A')}")
-    if paper.get('downloadUrl'):
-        print(f"PDF: {paper['downloadUrl']}")
-```
-
-### Retrieve Paper Details and Download PDF
-
-```python
-def get_core_work(work_id):
-    """Retrieve complete information for a single paper."""
-    url = f"https://api.core.ac.uk/v3/works/{work_id}"
-    r = requests.get(url, timeout=10)
+    """Search CORE (POST). Returns dict with totalHits + results list."""
+    r = requests.post(f"{BASE}/search/works",
+                      json={"q": query, "limit": limit, "offset": offset}, timeout=10)
     r.raise_for_status()
     return r.json()
 
 def download_core_pdf(work_id, output_path):
-    """Download a paper's PDF.
-
-    Args:
-        work_id: CORE paper ID
-        output_path: Local file save path
-
-    Returns:
-        str: Saved file path on success; None when no PDF is available
-    """
-    data = get_core_work(work_id)
-    if data.get('downloadUrl'):
-        pdf = requests.get(data['downloadUrl'], timeout=30)
-        with open(output_path, 'wb') as f:
-            f.write(pdf.content)
+    """GET /works/{id}, then download its downloadUrl PDF. None if no PDF."""
+    data = requests.get(f"{BASE}/works/{work_id}", timeout=10).json()
+    if data.get("downloadUrl"):
+        with open(output_path, "wb") as f:
+            f.write(requests.get(data["downloadUrl"], timeout=30).content)
         return output_path
     return None
-```
 
-### Filtered Search
-
-```python
-def search_core_advanced(query, limit=10, year_from=None, year_to=None):
-    """Advanced search using query syntax."""
-    q = query
-    if year_from or year_to:
-        # CORE supports embedding year ranges in the query string
-        q = f"{query} yearPublished>={year_from or 1900} yearPublished<={year_to or 2100}"
-
-    url = "https://api.core.ac.uk/v3/search/works"
-    payload = {"q": q, "limit": limit, "offset": 0}
-    r = requests.post(url, json=payload, timeout=10)
-    r.raise_for_status()
-    return r.json()
+results = search_core("transformer architecture yearPublished>=2020", limit=5)
+for p in results["results"]:
+    print(f"{p['title']} ({p.get('yearPublished','N/A')}) — {p.get('downloadUrl','no PDF')}")
 ```
 
 ---
@@ -186,26 +135,10 @@ CORE's rate limits are relatively generous; special handling is typically unnece
 
 ## Error Handling
 
-```python
-import requests, time
-
-def core_search_safe(query, limit=10, retries=3, delay=2):
-    """CORE search with retry logic."""
-    url = "https://api.core.ac.uk/v3/search/works"
-    payload = {"q": query, "limit": limit, "offset": 0}
-    for attempt in range(retries):
-        try:
-            r = requests.post(url, json=payload, timeout=15)
-            if r.status_code == 200:
-                return r.json()
-            elif r.status_code == 429:
-                time.sleep(delay * (attempt + 1))
-            else:
-                raise Exception(f"CORE error {r.status_code}: {r.text[:200]}")
-        except requests.exceptions.Timeout:
-            time.sleep(delay)
-    raise Exception(f"Max retries exceeded for CORE search: {query}")
-```
+CORE's limits are generous, so special handling is rarely needed. For 429/5xx,
+reuse the retry-with-backoff pattern in [error-handling.md](error-handling.md) —
+note CORE search is a **POST**, so swap `requests.get` for `requests.post(...,
+json=payload)` in that helper.
 
 ---
 

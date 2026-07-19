@@ -5,7 +5,7 @@ description: >
   Use for model cost reports, cache rates, budget/burn analysis, and tools-per-API-call trends across LingTai logs.
 version: 2.1.0
 tags: [python, cost, tokens, litellm, budget, tools, agents]
-last_changed_at: "2026-06-23T17:01:03-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -57,14 +57,12 @@ Treat the metric as behavioral intensity, not token volume: a higher value means
 
 ## How It Works
 
-1. Scans all `logs/token_ledger.jsonl` files under the `.lingtai/` network directory
-2. For each entry, looks up the model in `litellm.model_cost` (2700+ models)
-3. Falls back to OpenRouter API (`/api/v1/models`) for real-time pricing (368 models)
-4. Falls back to custom pricing if the model isn't in either source
-5. Calculates per-agent and grand-total costs
-6. Reports cache hit rate, burn rate, and per-model breakdown
-
-For tool-call/API-call trend reports, the separate `tool_calls_per_api_call_trend.py` script scans `logs/events.jsonl`, counts `llm_response` and `tool_call_received` events, and writes Markdown/JSON/CSV daily trend artifacts.
+`cost_report.py` scans every `logs/token_ledger.jsonl` under `.lingtai/`, prices
+each entry via litellm `model_cost` → OpenRouter → custom-pricing fallback (see
+below), and reports per-agent/grand-total cost plus cache-hit and burn rates.
+`tool_calls_per_api_call_trend.py` instead scans `logs/events.jsonl`, counts
+`llm_response` / `tool_call_received` events, and writes Markdown/JSON/CSV daily
+trend artifacts.
 
 ## Pricing Sources
 

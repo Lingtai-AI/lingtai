@@ -9,7 +9,7 @@ description: >
   vs BigModel mainland), and where the live docs are. MCP server
   registration is owned by the `mcp-manual` skill (kernel capability).
 version: 1.0.0
-last_changed_at: "2026-07-17T02:08:30Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -87,28 +87,10 @@ Two ecosystems, **not interchangeable** — a key from one region returns auth e
 
 The MCP server registration must match the region of the key being used.
 
-**Auto-detect from the preset library.** Walk all presets in `~/.lingtai-tui/presets/`. For each one where `manifest.llm.provider == "zhipu"`, inspect `manifest.llm.base_url`:
-
-| `base_url` substring | Region | Mode |
-|---|---|---|
-| `z.ai` or `api.z.ai` | International | `ZAI` |
-| `bigmodel.cn` | Mainland | `ZHIPU` |
-
-```bash
-for f in ~/.lingtai-tui/presets/*.json ~/.lingtai-tui/presets/*.jsonc; do
-  [ -f "$f" ] || continue
-  python3 -c "
-import json
-try:
-    d = json.load(open('$f'))
-    llm = d.get('manifest', {}).get('llm', {})
-    if llm.get('provider') == 'zhipu':
-        print('$f', '→', llm.get('base_url') or '(null)')
-except Exception:
-    pass
-"
-done
-```
+**Auto-detect from the preset library.** Walk presets in `~/.lingtai-tui/presets/`
+(`json`/`jsonc`); for each `manifest.llm.provider == "zhipu"`, read
+`manifest.llm.base_url` and map it: `z.ai`/`api.z.ai` → International/`ZAI`,
+`bigmodel.cn` → Mainland/`ZHIPU`.
 
 If presets exist for **both** regions, the user has accounts in both — pick the one matching the key in `~/.lingtai-tui/.env`, or ask the user. If no Zhipu preset exists or the result is ambiguous, **ask the user**. Do not guess.
 

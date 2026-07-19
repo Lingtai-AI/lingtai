@@ -43,56 +43,29 @@ Returns full article text as structured XML (only for open-access articles with 
 
 ---
 
-## Code Examples
+## Code Example
 
-### Search by PMID
+Keyword and PMID lookup are the same `search` call — a PMID query is just
+`query="EXT_ID:{pmid}"`. Results are under `resultList.result`; each carries
+`title`, `authorString`, `journalInfo.journal.title`, `doi`, `pmcid`, and
+`isOpenAccess` (`"Y"`/`"N"`). Fetch full text (OA only) from
+`/{pmcid}/fullTextXML`.
 
 ```python
 import requests
 
-def search_by_pmid(pmid):
-    """Look up an article by its PubMed ID.
-    Example: search_by_pmid(23903748) returns Kucsko et al. 2013 Nature paper.
-    """
-    url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
-    params = {
-        "query": f"EXT_ID:{pmid}",
-        "resultType": "core",
-        "format": "json"
-    }
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    data = r.json()
-    if data["hitCount"] > 0:
-        result = data["resultList"]["result"][0]
-        return {
-            "title": result.get("title"),
-            "authors": result.get("authorString"),
-            "journal": result.get("journalInfo", {}).get("journal", {}).get("title"),
-            "year": result.get("pubYear"),
-            "doi": result.get("doi"),
-            "pmcid": result.get("pmcid"),
-            "isOpenAccess": result.get("isOpenAccess") == "Y"
-        }
-    return None
-```
-
-### Search by Keyword
-
-```python
 def search_europepmc(query, page_size=25):
-    """Search Europe PMC for biomedical articles."""
-    url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
-    params = {
-        "query": query,
-        "resultType": "core",
-        "format": "json",
-        "pageSize": page_size,
-        "sort": "CITED desc"
-    }
-    r = requests.get(url, params=params)
+    """Search Europe PMC. For a PMID use query='EXT_ID:{pmid}'."""
+    r = requests.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+                     params={"query": query, "resultType": "core", "format": "json",
+                             "pageSize": page_size, "sort": "CITED desc"})
     r.raise_for_status()
     return r.json()
+
+data = search_europepmc("EXT_ID:23903748")
+if data["hitCount"]:
+    r0 = data["resultList"]["result"][0]
+    print(r0["title"], r0.get("pmcid"), r0.get("isOpenAccess") == "Y")
 ```
 
 ---

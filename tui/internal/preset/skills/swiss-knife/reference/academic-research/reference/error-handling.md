@@ -18,20 +18,25 @@
 3. **Batch reduction**: request fewer results per call
 4. **API key**: if available, use it (dramatically increases limits for CORE and Semantic Scholar)
 
-```python
-import time
+Generic retry-with-backoff wrapper — the same shape reappears (with only the
+base delay and status-code branches tweaked) throughout the per-API references;
+they now link here instead of repeating it:
 
-def api_call_with_backoff(func, max_retries=3):
-    """Call an API with exponential backoff on 429."""
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except Exception as e:
-            if "429" in str(e) and attempt < max_retries - 1:
-                wait = 5 * (2 ** attempt)  # 5, 10, 20
-                time.sleep(wait)
-            else:
-                raise
+```python
+import time, requests
+
+def api_get_with_backoff(url, params=None, headers=None, retries=3, base_delay=2, timeout=15):
+    """GET with exponential backoff on 429/5xx. Adjust base_delay per API
+    (e.g. 2 for CrossRef/OpenAlex, 12 for Semantic Scholar without a key)."""
+    for attempt in range(retries):
+        r = requests.get(url, params=params, headers=headers, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 429 or r.status_code >= 500:
+            time.sleep(base_delay * (2 ** attempt))
+        else:
+            r.raise_for_status()
+    raise Exception(f"Request failed after {retries} retries: {url}")
 ```
 
 ### 403 Publisher Blocks

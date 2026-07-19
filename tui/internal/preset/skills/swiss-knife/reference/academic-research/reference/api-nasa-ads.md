@@ -57,42 +57,27 @@ Returns citation statistics, usage stats, and indicators (h-index, i10-index, et
 
 ---
 
-## Code Examples
+## Code Example
 
-### Basic Search
+Every call carries `Authorization: Bearer {token}`. Search is a GET (`docs` under
+`response`); BibTeX export is a POST with a `bibcode` list (`export` in the reply).
 
 ```python
 import requests
 
 ADS_TOKEN = "YOUR_TOKEN"  # Register at ui.adsabs.harvard.edu
+H = {"Authorization": f"Bearer {ADS_TOKEN}"}
 
 def search_ads(query, rows=10):
-    """Search NASA ADS for astrophysics papers."""
-    url = "https://api.adsabs.harvard.edu/v1/search/query"
-    headers = {"Authorization": f"Bearer {ADS_TOKEN}"}
-    params = {
-        "q": query,
-        "fl": "title,author,year,bibcode,citation_count,doi",
-        "rows": rows,
-        "sort": "citation_count desc"
-    }
-    r = requests.get(url, headers=headers, params=params)
+    r = requests.get("https://api.adsabs.harvard.edu/v1/search/query", headers=H,
+                     params={"q": query, "fl": "title,author,year,bibcode,citation_count,doi",
+                             "rows": rows, "sort": "citation_count desc"})
     r.raise_for_status()
     return r.json()["response"]["docs"]
-```
 
-### Get BibTeX
-
-```python
 def get_bibtex(bibcodes):
-    """Export BibTeX for a list of ADS bibcodes."""
-    url = "https://api.adsabs.harvard.edu/v1/export/bibtex"
-    headers = {
-        "Authorization": f"Bearer {ADS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    body = {"bibcode": bibcodes}
-    r = requests.post(url, headers=headers, json=body)
+    r = requests.post("https://api.adsabs.harvard.edu/v1/export/bibtex",
+                      headers={**H, "Content-Type": "application/json"}, json={"bibcode": bibcodes})
     r.raise_for_status()
     return r.json()["export"]
 ```

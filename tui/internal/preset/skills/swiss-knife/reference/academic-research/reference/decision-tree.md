@@ -78,7 +78,7 @@ What is your input?
 │   ├── All OA channels failed (Unpaywall/CORE/Europe PMC/arXiv)
 │   │   └── LibGen fallback → see libgen-fallback.md (last resort)
 │   └── Other URLs
-│       └── web_read → curl+BS → camoufox (escalate by tier)
+│       └── curl+BS → camoufox (escalate by tier)
 │
 └── Existing paper list
     ├── Need formatted citations?
@@ -128,8 +128,7 @@ Key integration points:
 
 | Method | Speed | Stability | Use Cases |
 |--------|-------|-----------|-----------|
-| web_read tool | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | Quick browsing; English page metadata may be missing |
-| curl + BeautifulSoup | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Scholar lists, Nature og meta, static pages |
+| curl + BeautifulSoup | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | Scholar lists, Nature og meta, static pages (start here) |
 | camoufox | ⭐⭐ | ⭐⭐⭐⭐⭐ | JS-rendered pages, anti-detection needs (recommended) |
 | playwright-stealth v2 | ⭐⭐ | ⭐⭐⭐⭐ | JS-rendered pages (Chromium-based) |
 

@@ -50,28 +50,13 @@ Models are cached under `~/.cache/huggingface/hub/`. Delete a directory there if
 ## Calling the Local Backend
 
 ```bash
-# Default model (qwen2-vl-2b)
-python3 <skill-path>/scripts/describe.py image.png --backend local
-
-# Specific model
-python3 <skill-path>/scripts/describe.py image.png --backend local --model moondream2
-python3 <skill-path>/scripts/describe.py image.png --backend local --model qwen2-vl-7b
-
-# Force CPU (useful for debugging or if GPU is busy)
-python3 <skill-path>/scripts/describe.py image.png --backend local --model qwen2-vl-2b --device cpu
+python3 <skill-path>/scripts/describe.py image.png --backend local \
+  [--model qwen2-vl-2b|moondream2|qwen2-vl-7b|llava-1.6-mistral-7b] [--device cpu]
 ```
 
-Available `--model` values:
-- `moondream2`
-- `qwen2-vl-2b` (default)
-- `qwen2-vl-7b`
-- `llava-1.6-mistral-7b`
-
-For other models from Hugging Face, pass the full repo ID with `--model-id`:
-```bash
-python3 <skill-path>/scripts/describe.py image.png --backend local --model-id "<org>/<model>"
-```
-The script will try generic Transformers loading; provider-specific quirks may not work.
+`--model` defaults to `qwen2-vl-2b`; `--device cpu` forces CPU (debugging / busy
+GPU). For any other Hugging Face model pass `--model-id "<org>/<model>"` (generic
+Transformers loading — provider-specific quirks may not work).
 
 ## Prompt Templates Per Model
 

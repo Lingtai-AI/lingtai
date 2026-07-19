@@ -57,95 +57,42 @@ PubMed provides the NCBI E-utilities API for searching biomedical literature. It
 | `rettype` | Return type | `abstract`, `full`, `medline`, `uilist` |
 | `retmode` | Response format | `text` (when `rettype=abstract`), `xml` (when `rettype=full`) |
 
-## Code Examples
+## Code Example
 
-### Search and Retrieve Article Details
+The E-utilities pipeline is esearch (→ PMIDs) → esummary (metadata) → efetch
+(abstract). Field codes go in `term` (`vaswani[au]`, `neural networks[mh] AND
+2020:2024[dp]`); sleep 0.34s/request without a key.
 
 ```python
-import requests
-import time
+import requests, time
 
 BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 def search_pubmed(query, retmax=5, field=None, sort="relevance"):
-    """Search PubMed and return a list of PMIDs."""
-    params = {
-        "db": "pubmed",
-        "term": query,
-        "retmax": retmax,
-        "retmode": "json",
-        "sort": sort,
-    }
-    if field:
-        params["field"] = field
-    r = requests.get(f"{BASE}/esearch.fcgi", params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["esearchresult"]["idlist"]
+    """esearch → list of PMIDs."""
+    params = {"db": "pubmed", "term": query, "retmax": retmax, "retmode": "json", "sort": sort}
+    if field: params["field"] = field
+    return requests.get(f"{BASE}/esearch.fcgi", params=params, timeout=10).json()["esearchresult"]["idlist"]
 
 def get_summaries(pmids):
-    """Retrieve summary metadata for a batch of articles."""
-    params = {
-        "db": "pubmed",
-        "id": ",".join(pmids),
-        "retmode": "json",
-    }
-    r = requests.get(f"{BASE}/esummary.fcgi", params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()["result"]
-    return {pmid: data[pmid] for pmid in data.get("uids", [])}
+    """esummary → {pmid: metadata} (batch, comma-joined ids)."""
+    d = requests.get(f"{BASE}/esummary.fcgi",
+                     params={"db": "pubmed", "id": ",".join(pmids), "retmode": "json"}, timeout=10).json()["result"]
+    return {p: d[p] for p in d.get("uids", [])}
 
 def fetch_abstract(pmid):
-    """Fetch the full abstract for a single article."""
-    params = {
-        "db": "pubmed",
-        "id": pmid,
-        "rettype": "abstract",
-        "retmode": "text",
-    }
-    r = requests.get(f"{BASE}/efetch.fcgi", params=params, timeout=10)
-    r.raise_for_status()
-    return r.text
+    """efetch → plain-text abstract (rettype=abstract, retmode=text)."""
+    return requests.get(f"{BASE}/efetch.fcgi",
+                        params={"db": "pubmed", "id": pmid, "rettype": "abstract", "retmode": "text"}, timeout=10).text
 
-# Usage example
 ids = search_pubmed("transformer architecture in genomics", retmax=3)
-summaries = get_summaries(ids)
-for pmid, art in summaries.items():
-    print(f"PMID:  {pmid}")
-    print(f"Title:  {art.get('title', 'N/A')}")
-    print(f"Journal:  {art.get('source', 'N/A')}")
-    print(f"Authors:  {[a['name'] for a in art.get('authors', [])[:3]]}")
-    print(f"Date:  {art.get('pubdate', 'N/A')}")
-    print("---")
-    time.sleep(0.34)  # Rate limit: ~3 requests/second
+for pmid, art in get_summaries(ids).items():
+    print(f"{pmid}: {art.get('title','N/A')} — {art.get('source','N/A')} ({art.get('pubdate','N/A')})")
+    time.sleep(0.34)  # ~3 req/s without a key
 ```
 
-### Search by Author
-
-```python
-ids = search_pubmed("vaswani[au]", retmax=5)
-```
-
-### Search by MeSH Term + Date Range
-
-```python
-ids = search_pubmed(
-    "neural networks[mh] AND genomics[mb] AND 2020:2024[dp]",
-    retmax=10
-)
-```
-
-### Direct curl Examples
-
-```bash
-# Search
-curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/e_utils/esearch.fcgi?db=pubmed&term=transformer+architecture&retmax=3&retmode=json"
-
-# Get summary
-curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/e_utils/esummary.fcgi?db=pubmed&id=42018049&retmode=json"
-
-# Get full abstract
-curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/e_utils/efetch.fcgi?db=pubmed&id=42018049&rettype=abstract&retmode=text"
-```
+Ad hoc: `curl -s ".../esearch.fcgi?db=pubmed&term=transformer&retmax=3&retmode=json"` (swap
+`esummary.fcgi?id={pmid}` or `efetch.fcgi?id={pmid}&rettype=abstract&retmode=text`).
 
 ## Response Formats
 

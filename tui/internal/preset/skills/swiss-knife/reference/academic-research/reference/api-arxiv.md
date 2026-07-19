@@ -56,25 +56,17 @@ curl -s "https://export.arxiv.org/api/query?search_query=ti:transformer+ANDNOT+a
 | `q-bio.NC` | Neurons and Cognition |
 | `stat.ML` | Statistics — Machine Learning |
 
-## Code Examples
-
-### Basic Search
+## Code Example
 
 ```python
 import urllib.request
 import xml.etree.ElementTree as ET
 
 def search_arxiv(query, max_results=10, sort_by="relevance", sort_order="descending"):
-    """Search arXiv papers.
-
-    Args:
-        query: Search expression (supports field prefixes, e.g. ti:transformer)
-        max_results: Maximum number of results to return
-        sort_by: Sort field (relevance / lastUpdatedDate / submittedDate)
-        sort_order: Sort direction (descending / ascending)
-
-    Returns:
-        list[dict]: Paper list, each containing title, authors, published, abstract, pdf_link, arxiv_id
+    """Search arXiv papers. query supports field prefixes (e.g. ti:transformer).
+    Returns list[dict] with title, authors, published, abstract, pdf_link, arxiv_id.
+    For a single known ID, pass id_list={arxiv_id} instead of search_query.
+    For large result sets, paginate with start=/max_results<=50 per call (arXiv's own recommendation).
     """
     url = (
         f"https://export.arxiv.org/api/query?"
@@ -100,57 +92,15 @@ def search_arxiv(query, max_results=10, sort_by="relevance", sort_order="descend
                 break
 
         results.append({
-            "arxiv_id": arxiv_id,
-            "title": title,
-            "authors": authors,
-            "published": published,
-            "abstract": summary,
-            "pdf_link": pdf_link,
+            "arxiv_id": arxiv_id, "title": title, "authors": authors,
+            "published": published, "abstract": summary, "pdf_link": pdf_link,
         })
     return results
 
-# Usage example
+# Usage
 papers = search_arxiv("ti:transformer+AND+au:vaswani", max_results=3)
 for p in papers:
-    print(f"[{p['published']}] {p['title']}")
-    print(f"  Authors: {', '.join(p['authors'])}")
-    print(f"  PDF: {p['pdf_link']}")
-    print(f"  Abstract: {p['abstract'][:150]}...")
-    print()
-```
-
-### Paginated Iteration
-
-```python
-def search_arxiv_all(query, total=100, per_page=50):
-    """Paginate through large result sets. arXiv recommends no more than 50 results per request to avoid timeouts."""
-    all_results = []
-    for start in range(0, total, per_page):
-        count = min(per_page, total - start)
-        batch = search_arxiv(query, max_results=count)
-        all_results.extend(batch)
-        if len(batch) < count:
-            break  # No more results
-    return all_results
-```
-
-### Direct Lookup by arXiv ID
-
-```python
-def get_by_arxiv_id(arxiv_id):
-    """Fetch a single paper by its arXiv ID."""
-    url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
-    data = urllib.request.urlopen(url, timeout=15).read().decode("utf-8")
-    root = ET.fromstring(data)
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
-    entry = root.find("atom:entry", ns)
-    if entry is None:
-        return None
-    return {
-        "title": entry.find("atom:title", ns).text.strip().replace("\n", " "),
-        "id": entry.find("atom:id", ns).text,
-        "published": entry.find("atom:published", ns).text[:10],
-    }
+    print(f"[{p['published']}] {p['title']} — {p['pdf_link']}")
 ```
 
 ## Response Format
@@ -219,26 +169,10 @@ The response is Atom XML with the following main structure:
 | Scenario | Resolution |
 |---|---|
 | HTTP 301 | Request `https://` directly, or use `-L` in curl to follow redirects |
-| Timeout | Increase timeout or retry with exponential backoff |
+| Timeout | Increase timeout or retry with exponential backoff (`time.sleep(2**attempt)`) |
 | Empty results | Verify query syntax, simplify search terms, try the `all:` prefix |
 | XML parse error | Check whether the response is an HTML error page instead of Atom XML |
 | Missing `title` in `entry` | Skip the entry (arXiv may still list removed entries in the index) |
-
-```python
-import time
-import urllib.error
-
-def search_arxiv_robust(query, max_results=10, retries=3):
-    """Robust search with retry logic."""
-    for attempt in range(retries):
-        try:
-            return search_arxiv(query, max_results)
-        except urllib.error.URLError as e:
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise
-```
 
 ## Related APIs
 

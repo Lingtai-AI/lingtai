@@ -56,44 +56,26 @@ Returns author profiles with affiliations, publication counts, and INSPIRE IDs.
 
 ---
 
-## Code Examples
+## Code Example
 
-### Search Papers
+All search endpoints (`literature`, `authors`, `institutions`, `conferences`)
+share the `hits.hits` shape; only the path and `q` differ. BibTeX comes from
+`literature/{id}?format=bibtex` as plain text.
 
 ```python
 import requests
 
-def search_inspire(query, size=10):
-    """Search INSPIRE-HEP for high-energy physics papers."""
-    url = "https://inspirehep.net/api/literature"
-    params = {"q": query, "size": size, "sort": "mostrecent"}
-    r = requests.get(url, params=params)
+def inspire_search(endpoint, query, size=10):
+    """endpoint: 'literature' | 'authors' | 'institutions' | 'conferences'."""
+    r = requests.get(f"https://inspirehep.net/api/{endpoint}",
+                     params={"q": query, "size": size, "sort": "mostrecent"})
     r.raise_for_status()
     return r.json()["hits"]["hits"]
-```
 
-### Get BibTeX
-
-```python
-def get_bibtex_inspire(literature_id):
-    """Get BibTeX for an INSPIRE-HEP literature record."""
-    url = f"https://inspirehep.net/api/literature/{literature_id}"
-    params = {"format": "bibtex"}
-    r = requests.get(url, params=params)
+def inspire_bibtex(literature_id):
+    r = requests.get(f"https://inspirehep.net/api/literature/{literature_id}", params={"format": "bibtex"})
     r.raise_for_status()
     return r.text
-```
-
-### Author Lookup
-
-```python
-def find_author(name):
-    """Find an author on INSPIRE-HEP."""
-    url = "https://inspirehep.net/api/authors"
-    params = {"q": name, "size": 5}
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    return r.json()["hits"]["hits"]
 ```
 
 ---

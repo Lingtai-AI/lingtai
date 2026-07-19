@@ -341,18 +341,8 @@ grep "Overfull" main.log
 aspell -t -c main.tex
 ```
 
-### Quick Reference
-
-| Command | Action |
-|---------|--------|
-| `latexmk -pdf main.tex` | Build PDF |
-| `latexmk -gg -pdf main.tex` | Force full rebuild |
-| `latexmk -C` | Clean artifacts |
-| `latexmk -pdf -pvc main.tex` | Build + watch |
-| `latexmk -xelatex main.tex` | Build with XeLaTeX |
-| `biber main` | Process bibliography |
-| `pdffonts main.pdf` | Check font embedding |
-| `pdfinfo main.pdf` | Page count + metadata |
+(Command quick-reference: the `latexmk` build/clean/watch/xelatex invocations are
+in §2, `biber main` in §3, `pdffonts`/`pdfinfo` above.)
 
 ---
 

@@ -95,120 +95,42 @@ Each concept returns: `id`, `display_name`, `level`, `works_count`, `cited_by_co
 
 ---
 
-## Code Examples
+## Code Example
 
-### Paper Search
+The three endpoints (`/works`, `/concepts`, `/institutions`) share one request
+shape — `search=` or `filter=`, `per-page`, `select` — so one helper covers all
+three; swap the URL and `filter`/`select` values per use case:
 
 ```python
 import requests
 
-def search_openalex(query, per_page=10, select='title,authorships,publication_year,cited_by_count'):
-    """Search OpenAlex papers."""
-    url = "https://api.openalex.org/works"
-    params = {"search": query, "per-page": per_page, "select": select}
-    r = requests.get(url, params=params, timeout=10)
+def openalex_query(endpoint, search=None, filt=None, per_page=10, select=None, sort=None):
+    """Generic OpenAlex query. endpoint: 'works' | 'concepts' | 'institutions'."""
+    params = {"per-page": per_page}
+    if search: params["search"] = search
+    if filt: params["filter"] = filt
+    if select: params["select"] = select
+    if sort: params["sort"] = sort
+    r = requests.get(f"https://api.openalex.org/{endpoint}", params=params, timeout=10)
     r.raise_for_status()
     return r.json()["results"]
 
-papers = search_openalex("attention is all you need", per_page=5)
+# Paper search
+papers = openalex_query("works", search="attention is all you need", per_page=5,
+                         select="title,authorships,publication_year,cited_by_count")
 for p in papers:
-    print(f"Title: {p['title']}")
-    print(f"Year: {p['publication_year']}, Cited by: {p['cited_by_count']}")
-    for a in p.get('authorships', [])[:3]:
-        inst = a['institutions'][0]['display_name'] if a.get('institutions') else 'N/A'
-        print(f"  - {a['author']['display_name']} ({inst})")
-    print("---")
-```
+    print(f"{p['title']} ({p['publication_year']}) — cited by {p['cited_by_count']}")
 
-### Filter Papers by Author/Institution
+# Filter by author/institution ID, or concept ID: swap the filter field
+by_author = openalex_query("works", filt="authorships.author.id:A5101082644", per_page=10)
+by_institution = openalex_query("works", filt="authorships.institutions.id:I145311948",
+                                 sort="cited_by_count:desc")
+by_concept = openalex_query("works", filt="concepts.id:C119857082", sort="cited_by_count:desc")
 
-```python
-def get_works_by_author(author_id, per_page=10):
-    """Retrieve paper list by OpenAlex author ID."""
-    url = "https://api.openalex.org/works"
-    params = {
-        "filter": f"authorships.author.id:{author_id}",
-        "per-page": per_page,
-        "select": "title,publication_year,cited_by_count"
-    }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["results"]
-
-def get_works_by_institution(inst_id, per_page=10):
-    """Retrieve highly cited papers from a given institution."""
-    url = "https://api.openalex.org/works"
-    params = {
-        "filter": f"authorships.institutions.id:{inst_id}",
-        "per-page": per_page,
-        "sort": "cited_by_count:desc",
-        "select": "title,publication_year,cited_by_count,authorships"
-    }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["results"]
-```
-
-### Concept Search and Paper Association
-
-```python
-def search_concepts(query, per_page=5):
-    """Search research concepts/topics."""
-    url = "https://api.openalex.org/concepts"
-    params = {"search": query, "per-page": per_page}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["results"]
-
-def get_concept_works(concept_id, per_page=10):
-    """Retrieve highly cited papers under a given concept."""
-    url = "https://api.openalex.org/works"
-    params = {
-        "filter": f"concepts.id:{concept_id}",
-        "per-page": per_page,
-        "sort": "cited_by_count:desc",
-        "select": "title,publication_year,cited_by_count"
-    }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["results"]
-
-# Example: search concept → retrieve its papers
-concepts = search_concepts("transformer architecture")
-for c in concepts:
-    print(f"[Level {c['level']}] {c['display_name']} — {c['works_count']:,} papers")
-
-ml_id = "C119857082"  # Machine learning
-papers = get_concept_works(ml_id)
-for p in papers[:5]:
-    print(f"{p['title'][:60]}... ({p['publication_year']})")
-```
-
-### Institution Search and Statistics
-
-```python
-def search_institutions(query, per_page=5):
-    """Search research institutions."""
-    url = "https://api.openalex.org/institutions"
-    params = {"search": query, "per-page": per_page}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["results"]
-
-def get_institution_detail(inst_id):
-    """Retrieve institution details."""
-    url = f"https://api.openalex.org/institutions/{inst_id}"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    return r.json()
-
-# Example
-insts = search_institutions("Stanford University", per_page=3)
-for i in insts:
-    print(f"{i['display_name']} ({i['country_code']})")
-    print(f"  Works: {i['works_count']:,}, Citations: {i['cited_by_count']:,}")
-    stats = i.get('summary_stats', {})
-    print(f"  h-index: {stats.get('h_index', 'N/A')}")
+# Concepts and institutions use the same helper with a different endpoint
+concepts = openalex_query("concepts", search="transformer architecture", per_page=5)
+institutions = openalex_query("institutions", search="Stanford University", per_page=3)
+# Single-record lookup (no wrapper): GET /institutions/{id} or /works/{id} directly
 ```
 
 ---
@@ -294,23 +216,9 @@ It is recommended to include `mailto` in your request parameters: `?search=...&m
 
 ## Error Handling
 
-```python
-import requests, time
-
-def openalex_get(url, params, retries=3, delay=2):
-    """OpenAlex request with retry logic."""
-    for attempt in range(retries):
-        r = requests.get(url, params=params, timeout=15)
-        if r.status_code == 200:
-            return r.json()
-        elif r.status_code == 429:
-            wait = delay * (attempt + 1)
-            print(f"Rate limited, waiting {wait}s...")
-            time.sleep(wait)
-        else:
-            raise Exception(f"OpenAlex error {r.status_code}: {r.text[:200]}")
-    raise Exception(f"Max retries exceeded for {url}")
-```
+HTTP 429 = rate limit exceeded. Use the generic retry-with-backoff helper in
+[error-handling.md](error-handling.md) (`base_delay=2` is a reasonable default
+for OpenAlex).
 
 ---
 

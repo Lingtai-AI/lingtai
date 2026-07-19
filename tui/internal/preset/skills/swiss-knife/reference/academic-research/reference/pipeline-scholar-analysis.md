@@ -40,154 +40,39 @@ What analysis is needed?
 
 ## Code Examples
 
-### Citation Network Construction
+All four analyses are OpenAlex `requests.get(...).json()` queries (see
+[api-openalex.md](api-openalex.md)); each differs only in the filter/select and
+how you aggregate `results`.
 
 ```python
-import requests
-
-def build_citation_network(doi, max_refs=10):
-    """Build a citation network using OpenAlex"""
-    clean_doi = doi.replace("https://doi.org/", "")
-    url = f"https://api.openalex.org/works/https://doi.org/{clean_doi}"
-    r = requests.get(url, timeout=10).json()
-
-    paper = {
-        "title": r.get("display_name"),
-        "year": r.get("publication_year"),
-        "citations": r.get("cited_by_count", 0),
-        "references": [w for w in r.get("referenced_works", [])[:20]],
-    }
-
-    # Retrieve reference details (forward citations)
-    refs = []
-    for ref_url in paper["references"][:max_refs]:
-        try:
-            ref_r = requests.get(ref_url, timeout=5).json()
-            refs.append({
-                "title": ref_r.get("display_name"),
-                "year": ref_r.get("publication_year"),
-                "doi": ref_r.get("doi"),
-            })
-        except Exception:
-            pass
-
-    return {"target": paper, "references": refs}
-
-
-def get_citing_papers(doi, limit=20):
-    """Retrieve papers citing a given DOI (backward citations)"""
-    clean_doi = doi.replace("https://doi.org/", "")
-    r = requests.get(
-        "https://api.openalex.org/works",
-        params={"filter": f"cites:https://doi.org/{clean_doi}", "per_page": limit},
-        timeout=10
-    ).json()
-    return [
-        {"title": w.get("display_name"), "year": w.get("publication_year"),
-         "citations": w.get("cited_by_count", 0)}
-        for w in r.get("results", [])
-    ]
-```
-
-### Research Trend Analysis
-
-```python
-import requests
-import time
-
-def analyze_topic_trends(topic, year_range=(2015, 2024)):
-    """Analyze temporal trends for a given topic"""
-    yearly_stats = {}
-    for year in range(year_range[0], year_range[1] + 1):
-        r = requests.get(
-            "https://api.openalex.org/works",
-            params={
-                "filter": f"title_and_abstract.search:{topic},publication_year:{year}",
-                "per_page": 100,
-                "select": "id,title,publication_year,cited_by_count"
-            },
-            timeout=10
-        ).json()
-
-        papers = r.get("results", [])
-        yearly_stats[year] = {
-            "count": len(papers),
-            "total_citations": sum(p.get("cited_by_count", 0) for p in papers),
-            "avg_citations": sum(p.get("cited_by_count", 0) for p in papers) / max(len(papers), 1),
-        }
-        time.sleep(0.3)  # Avoid rate limiting
-
-    return yearly_stats
-
-
-def print_trend_chart(stats):
-    """ASCII trend chart"""
-    max_count = max(v["count"] for v in stats.values()) if stats else 1
-    for year, v in sorted(stats.items()):
-        bar_len = int(v["count"] / max_count * 40)
-        print(f"{year} | {'█' * bar_len} {v['count']:3d} papers  avg cit {v['avg_citations']:.1f}")
-```
-
-### Research Gap Discovery
-
-```python
+import requests, time
 from collections import Counter
 
-def find_research_gaps(topic, years=(2018, 2024)):
-    """Identify research gaps for a given topic"""
-    import requests
+# 1. Citation network — forward refs live on the work; backward via cites: filter
+work = requests.get(f"https://api.openalex.org/works/https://doi.org/{doi}", timeout=10).json()
+refs = work.get("referenced_works", [])[:20]              # forward (dereference each URL for detail)
+citing = requests.get("https://api.openalex.org/works",
+    params={"filter": f"cites:https://doi.org/{doi}", "per_page": 20}, timeout=10).json()["results"]
 
-    r = requests.get(
-        "https://api.openalex.org/works",
-        params={
-            "filter": f"title_and_abstract.search:{topic},publication_year:{years[0]}:{years[1]}",
-            "per_page": 200,
-            "select": "concepts"
-        },
-        timeout=15
-    ).json()
+# 2. Topic trends — one query per year, aggregate count + avg cited_by_count
+for year in range(2015, 2025):
+    r = requests.get("https://api.openalex.org/works", params={
+        "filter": f"title_and_abstract.search:{topic},publication_year:{year}",
+        "per_page": 100, "select": "id,cited_by_count"}, timeout=10).json()["results"]
+    stats[year] = {"count": len(r), "avg": sum(p["cited_by_count"] for p in r) / max(len(r), 1)}
+    time.sleep(0.3)                                        # ASCII bar chart optional
 
-    concept_counts = Counter()
-    for w in r.get("results", []):
-        for c in w.get("concepts", []):
-            if c.get("level", 0) >= 1:
-                concept_counts[c["display_name"]] += 1
+# 3. Research gaps — count concepts (level>=1); rare concepts = candidate gaps
+counts = Counter(c["display_name"]
+    for w in requests.get("https://api.openalex.org/works", params={
+        "filter": f"title_and_abstract.search:{topic},publication_year:2018:2024",
+        "per_page": 200, "select": "concepts"}, timeout=15).json()["results"]
+    for c in w.get("concepts", []) if c.get("level", 0) >= 1)
 
-    total = sum(concept_counts.values())
-    print("=== High-Frequency Concepts (Well-Studied) ===")
-    for concept, count in concept_counts.most_common(10):
-        print(f"  {concept}: {count} papers ({count/total*100:.1f}%)")
-
-    print("\n=== Low-Frequency Concepts (Potential Gaps) ===")
-    for concept, count in concept_counts.most_common()[-10:]:
-        if count < 5:
-            print(f"  {concept}: {count} papers")
-```
-
-### Scholar Impact Analysis
-
-```python
-def analyze_author_impact(author_name):
-    """Comprehensive scholar impact analysis"""
-    import requests
-
-    r = requests.get(
-        "https://api.openalex.org/authors",
-        params={"filter": f"display_name.search:{author_name}", "per_page": 3},
-        timeout=10
-    ).json()
-
-    profiles = []
-    for author in r.get("results", []):
-        stats = author.get("summary_stats", {})
-        profiles.append({
-            "name": author.get("display_name"),
-            "institution": author.get("last_known_institution", {}).get("display_name"),
-            "works_count": stats.get("works_count", 0),
-            "cited_by_count": stats.get("cited_by_count", 0),
-            "h_index": stats.get("h_index"),
-        })
-    return profiles
+# 4. Author impact — summary_stats carries works_count / cited_by_count / h_index
+authors = requests.get("https://api.openalex.org/authors",
+    params={"filter": f"display_name.search:{name}", "per_page": 3}, timeout=10).json()["results"]
+# author["summary_stats"]["h_index"], author["last_known_institution"]["display_name"]
 ```
 
 ## Failure Fallbacks

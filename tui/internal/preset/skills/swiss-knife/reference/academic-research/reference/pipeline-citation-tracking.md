@@ -32,169 +32,36 @@ What do you need?
 
 ## Code Examples
 
-### APA 7 Formatting
+Standardize to `{title, authors:[{family,given}], year, journal, volume, issue,
+pages, doi}` first, then format.
+
+**APA 7** — `{author_str} ({year}). {title}. *{journal}*, {volume}({issue}),
+{pages}. https://doi.org/{doi}` where `author_str` is `Family, G.` for one, joined
+with ` & ` for two, and `Family, G., et al.` for 3+. Omit empty trailing fields.
+
+**BibTeX** — key = `{first_author_family}{year}` (lowercased, spaces stripped);
+emit only non-empty fields:
 
 ```python
-def format_apa(paper):
-    """APA 7 format"""
-    authors = paper.get("authors", [])
-    year = paper.get("year", "n.d.")
-    title = paper.get("title", "")
-    journal = paper.get("journal", paper.get("venue", ""))
-    volume = paper.get("volume", "")
-    issue = paper.get("issue", "")
-    pages = paper.get("pages", "")
-    doi = paper.get("doi", "")
-
-    if len(authors) == 0:
-        author_str = "Unknown"
-    elif len(authors) == 1:
-        author_str = f"{authors[0].get('family','')}, {authors[0].get('given','')[0]}."
-    elif len(authors) == 2:
-        a1, a2 = authors[0], authors[1]
-        author_str = (
-            f"{a1.get('family','')}, {a1.get('given','')[0]}. & "
-            f"{a2.get('family','')}, {a2.get('given','')[0]}."
-        )
-    else:
-        author_str = f"{authors[0].get('family','')}, {authors[0].get('given','')[0]}., et al."
-
-    parts = [f"{author_str} ({year}). {title}."]
-    if journal:
-        parts.append(f"*{journal}*")
-    if volume:
-        parts[-1] += f", {volume}"
-    if issue:
-        parts[-1] += f"({issue})"
-    if pages:
-        parts[-1] += f", {pages}"
-    if doi:
-        parts.append(f"https://doi.org/{doi}")
-
-    return " ".join(parts)
+def to_bibtex(p):
+    key = (p["authors"][0].get("family", "unknown") + str(p.get("year", "nd"))).lower().replace(" ", "")
+    fields = {"title": p.get("title", ""),
+              "author": " and ".join(f"{a.get('family','?')}, {a.get('given','')}" for a in p.get("authors", [])),
+              "year": str(p.get("year", "")), "journal": p.get("journal", ""),
+              "volume": p.get("volume", ""), "number": p.get("issue", ""),
+              "pages": p.get("pages", ""), "doi": p.get("doi", "")}
+    return f"@article{{{key},\n" + ",\n".join(f"  {k} = {{{v}}}" for k, v in fields.items() if v) + "\n}"
 ```
 
-### BibTeX Export
+**Batch-build a library** — OpenAlex search (`title_and_abstract.search`,
+`sort=cited_by_count:desc`), then map each work: split `authorships[].author.
+display_name` into given/family (last token = family), `host_venue.display_name`
+→ journal (OpenAlex may rename this to `primary_location`), strip the `doi:` URL
+prefix. Format each with the target style and write to a `.md`/`.bib` file.
 
-```python
-def to_bibtex(paper):
-    """Export to BibTeX"""
-    key_parts = []
-    if paper.get("authors"):
-        key_parts.append(paper["authors"][0].get("family", "unknown"))
-    key_parts.append(str(paper.get("year", "nd")))
-    key = "".join(key_parts).lower().replace(" ", "")
-
-    fields = {
-        "title": paper.get("title", ""),
-        "author": " and ".join(
-            f"{a.get('family','?')}, {a.get('given','')}"
-            for a in paper.get("authors", [])
-        ),
-        "year": str(paper.get("year", "")),
-        "journal": paper.get("journal", paper.get("venue", "")),
-        "volume": paper.get("volume", ""),
-        "number": paper.get("issue", ""),
-        "pages": paper.get("pages", ""),
-        "doi": paper.get("doi", ""),
-    }
-
-    entries = [f"  {k} = {{{v}}}" for k, v in fields.items() if v]
-    return f"@article{{{key},\n" + ",\n".join(entries) + "\n}"
-```
-
-### Batch-Build Reference Library
-
-```python
-import requests
-
-def build_reference_library(query, limit=50, style="apa"):
-    """
-    Build a reference library from a search:
-    1. Search papers via OpenAlex
-    2. Standardize fields
-    3. Format citations
-    4. Output to file
-    """
-    r = requests.get(
-        "https://api.openalex.org/works",
-        params={
-            "filter": f"title_and_abstract.search:{query}",
-            "sort": "cited_by_count:desc",
-            "per_page": limit
-        },
-        timeout=10
-    ).json()
-
-    papers = []
-    for w in r.get("results", []):
-        papers.append({
-            "title": w.get("display_name"),
-            "year": w.get("publication_year"),
-            "authors": [
-                {"family": a.get("author", {}).get("display_name", "").split()[-1],
-                 "given": " ".join(a.get("author", {}).get("display_name", "").split()[:-1])}
-                for a in w.get("authorships", [])
-            ],
-            "journal": w.get("host_venue", {}).get("display_name", ""),
-            "citations": w.get("cited_by_count", 0),
-            "doi": w.get("doi", "").replace("https://doi.org/", ""),
-        })
-
-    if style == "apa":
-        formatted = [format_apa(p) for p in papers]
-    elif style == "bibtex":
-        formatted = [to_bibtex(p) for p in papers]
-    else:
-        formatted = [format_apa(p) for p in papers]
-
-    output = f"# References — {query}\n\n" + "\n\n".join(formatted)
-    with open("/tmp/references.md", "w") as f:
-        f.write(output)
-    return "/tmp/references.md", len(papers)
-```
-
-### Generate Literature Review Document
-
-```python
-def compile_literature_review(papers, topic):
-    """Generate a structured review from a paper list"""
-    from collections import Counter
-
-    by_year = Counter(p.get("year") for p in papers if p.get("year"))
-    by_citations = sorted(papers, key=lambda x: x.get("citations", 0), reverse=True)
-    top_papers = by_citations[:10]
-
-    doc = f"""# Literature Review: {topic}
-
-## Overview
-- **Total papers**: {len(papers)}
-- **Publication years**: {min(by_year)} – {max(by_year)}
-- **Average per year**: {len(papers) / max(len(by_year), 1):.1f} papers
-
-## High-Impact Papers (Top 10)
-
-| # | Title | Year | Citations |
-|---|------|------|--------|
-"""
-    for i, p in enumerate(top_papers, 1):
-        title = p.get("title", "Unknown")[:60]
-        year = p.get("year", "?")
-        cites = p.get("citations", 0)
-        doc += f"| {i} | {title} | {year} | {cites} |\n"
-
-    doc += "\n## Temporal Trends\n\n"
-    for year in sorted(by_year):
-        bar = "▓" * by_year[year]
-        doc += f"- **{year}**: {bar} {by_year[year]} papers\n"
-
-    doc += "\n## References\n\n"
-    doc += "\n\n".join(format_apa(p) for p in by_citations)
-
-    with open("/tmp/literature_review.md", "w") as f:
-        f.write(doc)
-    return "/tmp/literature_review.md"
-```
+**Literature review doc** — from a paper list: sort by citations for a Top-10
+table, `Counter` on year for a temporal-trend bar list, then an APA references
+section.
 
 ## Failure Fallbacks
 

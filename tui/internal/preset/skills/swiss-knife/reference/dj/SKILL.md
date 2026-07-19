@@ -3,7 +3,7 @@ name: dj
 description: Nested swiss-knife reference for composing one music track that resonates with a project journal entry, on demand. Walks the user's saved presets to find a usable media-creation provider (MiniMax, etc.), reads the journal at ~/.lingtai-tui/brief/projects/<hash>/journal.md, picks a genre that fits the day, generates the audio, and saves it next to the journal under music/ with an index entry. Read this when the user asks for music for a journal day, a project's vibe, session mood, or a specific generated genre — decline honestly when no usable provider is configured.
 version: 1.1.0
 tags: [media-creation, music, journal, on-demand]
-last_changed_at: "2026-06-02T02:10:59-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -40,67 +40,12 @@ done
 
 For each one, the skill itself is the source of truth on **what providers it talks to** and **what env-var key** it expects. For MiniMax specifically, load the sibling Swiss Knife `minimax-cli` reference (`../minimax-cli/SKILL.md`); it is the canonical provider reference and explains how to scan TUI presets recursively, pick the declared MiniMax slot, export it without printing the key, and match the region.
 
-**Step B — cross-check against the user's saved presets.** Each media-creation skill expects an API key. The user's saved presets (including `~/.lingtai-tui/presets/saved/*.json`) declare which provider keys they have:
-
-```bash
-python3 - <<'PY'
-import glob, json, os
-
-def strip_jsonc(text: str) -> str:
-    # Remove comments outside strings; do not corrupt https:// base_url values.
-    out = []
-    i = 0
-    in_string = False
-    escape = False
-    while i < len(text):
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-        if in_string:
-            out.append(ch)
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            i += 1
-            continue
-        if ch == '"':
-            in_string = True
-            out.append(ch)
-            i += 1
-            continue
-        if ch == "/" and nxt == "/":
-            i += 2
-            while i < len(text) and text[i] not in "\r\n":
-                i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            i += 2
-            while i + 1 < len(text) and not (text[i] == "*" and text[i + 1] == "/"):
-                i += 1
-            i += 2 if i + 1 < len(text) else 0
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-root = os.path.expanduser("~/.lingtai-tui/presets")
-paths = sorted(set(
-    glob.glob(os.path.join(root, "**", "*.json"), recursive=True)
-    + glob.glob(os.path.join(root, "**", "*.jsonc"), recursive=True)
-))
-for path in paths:
-    try:
-        d = json.loads(strip_jsonc(open(path, encoding="utf-8").read()))
-    except Exception:
-        continue
-    llm = d.get("manifest", {}).get("llm", {}) or {}
-    print(llm.get("provider"), "|", llm.get("api_key_env") or "(none)", "|", path)
-PY
-```
-
-The saved keys themselves live in `~/.lingtai-tui/.env`. List key **names** only; never print values:
+**Step B — cross-check against the user's saved presets.** Each media-creation
+skill expects an API key. Scan `~/.lingtai-tui/presets/**/*.json` recursively for
+each preset's `manifest.llm` `provider` + `api_key_env` (slot name) — the sibling
+`../minimax-cli/SKILL.md` §3 carries the canonical JSONC-safe scanner; reuse it
+rather than re-implementing the comment-stripper here. The saved keys themselves
+live in `~/.lingtai-tui/.env`; list key **names** only, never values:
 
 ```bash
 grep -E '^[A-Z0-9_]+_API_KEY=' ~/.lingtai-tui/.env | cut -d= -f1

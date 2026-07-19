@@ -9,7 +9,7 @@ description: >
   *creating* music or audio, use the sibling `minimax-cli` reference (or `dj` for journal-inspired music) instead.
 version: 1.0.0
 tags: [audio, transcribe, whisper, librosa, music-analysis, nested-skill]
-last_changed_at: "2026-06-02T11:16:04-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -97,14 +97,11 @@ These are **measurements, not opinions**. Your job is to translate the numbers i
 
 ## When to use which
 
-| Input | Action |
-|---|---|
-| Voice note, lecture, podcast | `transcribe` |
-| Music with vocals — want lyrics | `transcribe` (warn human: lyrics may be wrong) |
-| Music — want to know if it matches a brief | `appreciate` |
-| Generated music from the sibling `minimax-cli` reference or `dj` — QA | `appreciate` |
-| TTS output from the sibling `minimax-cli` reference — verify pronunciation | `transcribe` (round-trip QA) |
-| Both (transcript + analysis) | Run both scripts |
+`transcribe` for anything you want *words* from — voice notes, lectures, podcasts,
+song lyrics (warn: lyrics may be wrong), or round-trip QA of `minimax-cli` TTS
+output. `appreciate` for anything you want *musical measurements* from — checking
+a track against a brief, or QAing generated music from `minimax-cli`/`dj`. Run
+both when you need transcript + analysis.
 
 ## Going Deeper
 

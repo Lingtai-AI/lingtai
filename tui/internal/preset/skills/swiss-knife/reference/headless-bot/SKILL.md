@@ -9,7 +9,7 @@ description: >
   the Telegram MCP case.
 version: 1.1.0
 tags: [utilities, bot, telegram, mcp, headless, bootstrap]
-last_changed_at: "2026-07-15T22:54:37Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -51,24 +51,14 @@ Telegram-specific inputs:
 
 ## Preferred Telegram Helper
 
-Run the bundled helper from an installed utility bundle:
+Run the bundled helper. Use the installed-bundle path
+`~/.lingtai-tui/utilities/swiss-knife/reference/headless-bot/scripts/create_telegram_bot_project.py`,
+or the source-checkout path
+`tui/internal/preset/skills/swiss-knife/reference/headless-bot/scripts/create_telegram_bot_project.py`:
 
 ```bash
 read -rsp 'Telegram bot token: ' TELEGRAM_BOT_TOKEN; export TELEGRAM_BOT_TOKEN; echo
-python3 ~/.lingtai-tui/utilities/swiss-knife/reference/headless-bot/scripts/create_telegram_bot_project.py \
-  --project-dir /path/to/new-project \
-  --preset minimax \
-  --agent-name my-bot-agent \
-  --language en \
-  --allowed-users 123456789 \
-  --preset-policy-from /path/to/source-agent/init.json
-```
-
-Or run it from a source checkout:
-
-```bash
-read -rsp 'Telegram bot token: ' TELEGRAM_BOT_TOKEN; export TELEGRAM_BOT_TOKEN; echo
-python3 tui/internal/preset/skills/swiss-knife/reference/headless-bot/scripts/create_telegram_bot_project.py \
+python3 <helper-path>/create_telegram_bot_project.py \
   --project-dir /path/to/new-project \
   --preset minimax \
   --agent-name my-bot-agent \

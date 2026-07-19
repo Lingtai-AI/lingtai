@@ -105,45 +105,20 @@ GET {MIRROR}/index.php?req={QUERY}&columns[]=t&columns[]=a&objects[]=f&open=0&re
 | `view` | `simple` or `detailed` |
 | `phrase` | `1` = exact phrase match |
 
-### By LibGen Internal Search API (JSON)
-
-Some mirrors expose a JSON API:
-
-```python
-def search_libgen(mirror, query, limit=10):
-    """Search LibGen and parse results from HTML."""
-    url = f"{mirror}/index.php"
-    params = {
-        "req": query,
-        "columns[]": ["t", "a"],
-        "objects[]": "f",
-        "open": 0,
-        "res": limit,
-        "view": "simple",
-        "phrase": 1,
-    }
-    r = requests.get(url, params=params, timeout=15)
-    r.raise_for_status()
-    return r.text  # Parse HTML for MD5 hashes and download links
-```
+Programmatic search is just `requests.get(f"{mirror}/index.php", params=...)`
+with those params — the response is HTML you parse for MD5 hashes and download
+links.
 
 ---
 
 ## Download Method
 
-LibGen download requires two steps: find the record's MD5 hash, then construct the download URL.
+Two steps: get the record's MD5 hash, then construct the download URL.
 
 ### Step 1: Get MD5 from search results
 
-Search results contain MD5 hashes in the detail links. Extract via regex or HTML parsing:
-
-```python
-import re
-
-def extract_md5_from_results(html):
-    """Extract MD5 hashes from LibGen search result HTML."""
-    return re.findall(r'[a-f0-9]{32}', html)
-```
+Result HTML embeds MD5 hashes in the detail links — extract them with
+`re.findall(r'[a-f0-9]{32}', html)`.
 
 ### Step 2: Construct download URL
 
@@ -174,22 +149,17 @@ If one pattern fails, try the next. The detail page (`ads.php?md5=...`) usually 
 
 ## Integration with PDF Pipeline
 
-LibGen sits at the end of the acquisition chain:
+LibGen is the **last resort** at the end of the chain:
 
 ```
 Unpaywall → CORE → Europe PMC → arXiv → Publisher OA → Authorized publisher (if licensed) → Zotero institutional handoff (human-in-the-loop, if applicable) → LibGen (last resort)
 ```
 
-**Before trying LibGen**, confirm you have exhausted all legitimate channels:
-1. Unpaywall: no OA version found
-2. CORE: no repository copy
-3. Europe PMC: not in PMC (or not biomedical)
-4. arXiv: no preprint version
-5. Publisher page: no free access
-6. Authorized publisher: no licensed institutional access available (or `--no-institutional` set) — see [authorized-publisher-access.md](authorized-publisher-access.md)
-7. Zotero institutional handoff: not applicable (no batch, or the user has no Zotero Desktop on an institutional network), or the human's Find Full Text did not resolve it — see [zotero-institutional-fulltext-handoff.md](zotero-institutional-fulltext-handoff.md)
-
-Only then proceed to LibGen.
+**Only proceed to LibGen after confirming every legitimate channel missed:** no
+OA (Unpaywall/CORE/Europe PMC/arXiv/publisher page), no licensed
+[authorized-publisher](authorized-publisher-access.md) access (or
+`--no-institutional`), and the [Zotero handoff](zotero-institutional-fulltext-handoff.md)
+is not applicable or the human's Find Full Text did not resolve it.
 
 ---
 

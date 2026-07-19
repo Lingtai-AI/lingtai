@@ -23,7 +23,7 @@ description: >
   / music *generation* — that's `minimax-cli`. MiMo ships **no MCP
   servers**; everything is HTTPS chat-completions.
 version: 2.0.0
-last_changed_at: "2026-05-31T21:29:38-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -77,27 +77,11 @@ For the modality you actually need, fetch the dedicated guide. The doc tree curr
 
 The TUI stores keys in `~/.lingtai-tui/.env` and tells each preset which slot to read via `manifest.llm.api_key_env`. Slots are per-preset, so a user with both pay-as-you-go and a Token Plan account has two distinct env vars.
 
-**Resolution: scan presets, find MiMo ones, read their declared slot.**
-
-```bash
-# Walk every preset; for each one whose provider is mimo, print
-# (slot-name, base_url) so you can pick the right account/region.
-python3 - <<'PY'
-import json, os, glob
-for path in glob.glob(os.path.expanduser("~/.lingtai-tui/presets/*.json")):
-    try:
-        with open(path) as f:
-            doc = json.load(f)
-    except Exception:
-        continue
-    llm = doc.get("manifest", {}).get("llm", {}) or {}
-    if llm.get("provider") != "mimo":
-        continue
-    slot = llm.get("api_key_env") or "MIMO_API_KEY"  # built-ins may leave empty → legacy default
-    base = llm.get("base_url") or ""
-    print(f"{os.path.basename(path):30s}  slot={slot:30s}  base_url={base}")
-PY
-```
+**Resolution: scan presets, find MiMo ones, read their declared slot.** Walk
+`~/.lingtai-tui/presets/*.json`; for each `manifest.llm.provider == "mimo"`, print
+its `api_key_env` slot (default `MIMO_API_KEY` if empty) and `base_url` so you can
+pick the right account/region. (For a recursive JSONC-safe scan, reuse the sibling
+`../minimax-cli/SKILL.md` §3 scanner with `provider == "mimo"`.)
 
 Slot naming (per `tui/internal/preset/preset.go::AutoEnvVarName`):
 - New user-saved presets: `MIMO_<N>_API_KEY` (no region suffix; `N` is a counter).

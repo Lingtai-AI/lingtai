@@ -104,16 +104,11 @@ path = fetch_paper.tier_publisher_extract(meta, Path("./out"))
 print(path)   # → out/paper.md, or None on a clean miss
 ```
 
-Lower-level helpers you can call directly while debugging:
-
-```python
-url  = fetch_paper._publisher_landing_url(meta)      # resolve landing URL
-html = fetch_paper._fetch_publisher_html(url)        # unauthenticated GET
-fetch_paper._looks_paywalled(html)                   # bool
-fetch_paper._extract_meta_tags(html)                 # citation_* dict
-fetch_paper._extract_article_body(html)              # plain-text body
-fetch_paper._build_publisher_markdown(meta, html, url)  # final Markdown
-```
+For step-by-step debugging, the same module exposes lower-level helpers mirroring
+the pipeline in *What it is*: `_publisher_landing_url(meta)`,
+`_fetch_publisher_html(url)` (unauthenticated GET), `_looks_paywalled(html)`,
+`_extract_meta_tags(html)`, `_extract_article_body(html)`, and
+`_build_publisher_markdown(meta, html, url)`.
 
 To stay inside the script's slug/manifest contract (idempotent re-runs,
 molt-survivable `papers/` resume), prefer the normal entry point:

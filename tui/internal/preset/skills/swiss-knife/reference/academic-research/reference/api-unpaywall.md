@@ -39,135 +39,41 @@ for doi in doi_list:
     time.sleep(0.1)  # No more than ~10 requests per second
 ```
 
-## Code Examples
+## Code Example
 
-### Find Open Access PDFs
+One GET returns everything. `best_oa_location` is Unpaywall's own pick; to
+choose yourself, rank `oa_locations` by version priority (`publishedVersion` >
+`acceptedVersion` > `submittedVersion`). Use a `mailto` User-Agent when
+downloading the PDF.
 
 ```python
 import requests
 
 def find_free_pdf(doi, email="my@university.edu"):
-    """Find a free PDF for a paper via Unpaywall.
-
-    Args:
-        doi: DOI string, e.g. '10.1038/nature12373'
-        email: Your real email address, used to identify your application (not a placeholder)
-
-    Returns:
-        dict: {
-            'doi': str,
-            'is_oa': bool,
-            'pdf_url': str|None,
-            'landing_url': str|None,
-            'version': str|None,
-            'license': str|None,
-            'oa_locations': list
-        }
-    """
-    url = f"https://api.unpaywall.org/v2/{doi}"
-    params = {"email": email}
-    r = requests.get(url, params=params, timeout=10)
+    """Unpaywall OA lookup. Returns the raw record; is_oa=False means no free copy."""
+    r = requests.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": email}, timeout=10)
     r.raise_for_status()
-    data = r.json()
+    return r.json()
 
-    result = {
-        "doi": data.get("doi"),
-        "is_oa": data.get("is_oa", False),
-        "pdf_url": None,
-        "landing_url": None,
-        "version": None,
-        "license": None,
-        "oa_locations": data.get("oa_locations", []),
-    }
-
-    best = data.get("best_oa_location")
-    if best:
-        result["pdf_url"] = best.get("url_for_pdf")
-        result["landing_url"] = best.get("url_for_landing_page")
-        result["version"] = best.get("version")
-        result["license"] = best.get("license")
-
-    return result
-
-# Usage example
-result = find_free_pdf("10.1038/nature12373", email="researcher@university.edu")
-if result["is_oa"]:
-    print(f"Free PDF: {result['pdf_url']}")
-    print(f"Version: {result['version']}")
-    print(f"License: {result['license']}")
-else:
-    print("No free version available")
-```
-
-### Download PDF
-
-```python
-def download_free_pdf(doi, output_path, email="my@university.edu"):
-    """Find and download a free PDF via Unpaywall."""
-    result = find_free_pdf(doi, email)
-    if not result["pdf_url"]:
-        print(f"No free PDF available: {doi}")
-        return None
-
-    headers = {"User-Agent": f"Academic Research Tool (mailto:{email})"}
-    r = requests.get(result["pdf_url"], timeout=30, headers=headers)
-    if r.status_code == 200:
-        with open(output_path, "wb") as f:
-            f.write(r.content)
-        print(f"Downloaded: {output_path}")
-        return output_path
-    else:
-        print(f"Download failed (HTTP {r.status_code}): {result['pdf_url']}")
-        return None
-
-# Usage example
-download_free_pdf("10.1038/nature12373", "/tmp/paper.pdf", "researcher@university.edu")
-```
-
-### Select the Best OA Source from Multiple Locations
-
-```python
-def find_best_oa(doi, email="my@university.edu"):
-    """Select the best PDF from all available OA sources.
-
-    Priority: publishedVersion > acceptedVersion > submittedVersion
-    """
-    url = f"https://api.unpaywall.org/v2/{doi}"
-    r = requests.get(url, params={"email": email}, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-
+def best_pdf_url(data):
+    """Best PDF: prefer best_oa_location, else highest-version oa_locations entry."""
     if not data.get("is_oa"):
         return None
+    best = data.get("best_oa_location") or {}
+    if best.get("url_for_pdf"):
+        return best["url_for_pdf"]
+    prio = {"publishedVersion": 3, "acceptedVersion": 2, "submittedVersion": 1}
+    locs = [l for l in data.get("oa_locations", []) if l.get("url_for_pdf")]
+    return max(locs, key=lambda l: prio.get(l.get("version"), 0))["url_for_pdf"] if locs else None
 
-    locations = data.get("oa_locations", [])
-    priority = {"publishedVersion": 3, "acceptedVersion": 2, "submittedVersion": 1}
-
-    best = None
-    best_score = 0
-    for loc in locations:
-        pdf = loc.get("url_for_pdf")
-        if not pdf:
-            continue
-        score = priority.get(loc.get("version"), 0)
-        if score > best_score:
-            best_score = score
-            best = loc
-
-    return best
-
-# Usage example
-best = find_best_oa("10.1038/nature12373", "researcher@university.edu")
-if best:
-    print(f"Best version: {best['version']}")
-    print(f"PDF URL: {best['url_for_pdf']}")
+data = find_free_pdf("10.1038/nature12373", email="researcher@university.edu")
+url = best_pdf_url(data)
+if url:
+    pdf = requests.get(url, timeout=30, headers={"User-Agent": "Academic Research Tool (mailto:researcher@university.edu)"})
+    open("/tmp/paper.pdf", "wb").write(pdf.content)
 ```
 
-### Direct curl Example
-
-```bash
-curl -s "https://api.unpaywall.org/v2/10.1038/nature12373?email=my@university.edu" | python3 -m json.tool
-```
+Or ad hoc: `curl -s "https://api.unpaywall.org/v2/10.1038/nature12373?email=my@university.edu" | python3 -m json.tool`
 
 ## Response Formats
 

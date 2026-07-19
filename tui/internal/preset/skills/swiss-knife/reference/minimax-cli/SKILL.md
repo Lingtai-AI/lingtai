@@ -8,7 +8,7 @@ description: >
   or one-shot shell vision.
 version: 2.1.0
 tags: [manual, cli, minimax, mmx, image, video, music, speech, tts, vision, media-generation]
-last_changed_at: "2026-06-02T11:16:04-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -126,33 +126,14 @@ for path in paths:
 PY
 ```
 
-Export the chosen slot without echoing the key. Python is used here so quoted or whitespace-padded `.env` values are handled consistently; for ordinary API-key lines a simple `grep` extraction is also fine, but do not print the value:
+Export the chosen slot **without echoing the key**. For ordinary API-key lines a
+`grep` extraction is enough; use Python only if a value is quoted or
+whitespace-padded (strip surrounding quotes/space, error if the slot is absent):
 
 ```bash
 SLOT=MINIMAX_CN_1_API_KEY  # replace with the slot printed above
-export MINIMAX_API_KEY="$({
-  python3 - "$SLOT" <<'PY'
-import os, sys
-slot = sys.argv[1]
-env_path = os.path.expanduser("~/.lingtai-tui/.env")
-value = None
-try:
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k == slot:
-                value = v.strip().strip('"').strip("'")
-                break
-except FileNotFoundError:
-    pass
-if not value:
-    raise SystemExit(f"missing {slot} in {env_path}")
-print(value)
-PY
-})"
+export MINIMAX_API_KEY="$(grep -E "^${SLOT}=" ~/.lingtai-tui/.env | head -1 | cut -d= -f2- | sed -E 's/^["'"'"' ]+|["'"'"' ]+$//g')"
+[ -n "$MINIMAX_API_KEY" ] || echo "missing $SLOT in ~/.lingtai-tui/.env"
 ```
 
 If multiple MiniMax presets exist and the user did not specify which account/region to use, ask. If no MiniMax preset exists, ask the user to save one through the TUI preset library; the TUI will populate the appropriate slot in `~/.lingtai-tui/.env`.

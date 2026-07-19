@@ -95,128 +95,44 @@ The returned `papers` array contains the author's paper list (each entry include
 
 ---
 
-## Code Examples
+## Code Example
 
-### Paper Search (Direct HTTP)
+All Graph API endpoints share one GET+params shape, so one helper covers
+search, citations/references, and author lookup — swap the path suffix and
+`fields`:
 
 ```python
-import requests, time
+import requests
 
-def search_papers(query, limit=10, fields=None):
-    """Search Semantic Scholar papers."""
-    url = "https://api.semanticscholar.org/graph/v1/paper/search"
-    params = {"query": query, "limit": limit}
+BASE = "https://api.semanticscholar.org/graph/v1"
+
+def s2_get(path, params, fields=None):
+    """GET any Semantic Scholar Graph API endpoint. path e.g. 'paper/search',
+    'paper/{id}/citations', 'paper/{id}/references', 'author/search', 'author/{id}'."""
     if fields:
-        params["fields"] = ",".join(fields)
-    r = requests.get(url, params=params, timeout=15)
+        params = {**params, "fields": ",".join(fields)}
+    r = requests.get(f"{BASE}/{path}", params=params, timeout=15)
     r.raise_for_status()
     return r.json()
 
-results = search_papers("deep learning", limit=5,
-                        fields=["title", "authors", "year", "abstract"])
+# Paper search
+results = s2_get("paper/search", {"query": "deep learning", "limit": 5},
+                  fields=["title", "authors", "year", "abstract"])
 for p in results.get("data", []):
-    print(f"Title: {p['title']}")
-    print(f"Year: {p.get('year')}, Authors: {[a['name'] for a in p.get('authors', [])[:3]]}")
-    print("---")
-```
+    print(f"{p['title']} ({p.get('year')}) — {[a['name'] for a in p.get('authors', [])[:3]]}")
 
-### Paper Search (Python SDK)
+# Citations / references — same shape, paper data nested under citingPaper/citedPaper
+citing = s2_get(f"paper/{results['data'][0]['paperId']}/citations", {"limit": 5})
 
-```python
-from semanticscholar import SemanticScholar
-
-# No key = limited quota
-ss = SemanticScholar()
-# With key:
-# ss = SemanticScholar(api_key='your-key')
-
-results = ss.search_paper(
-    'attention is all you need',
-    limit=5,
-    fields=['title', 'authors', 'year', 'abstract']
-)
-
-for paper in results[:5]:
-    print(f"Title: {paper.title}")
-    print(f"Year: {paper.year}")
-    print(f"Authors: {[a.name for a in paper.authors]}")
-    print("---")
-```
-
-SDK `search_paper` full signature:
-
-```python
-search_paper(
-    query: str,
-    year: str = None,                # '2020' or '2018-2022'
-    publication_types: list = None,
-    open_access_pdf: bool = None,
-    venue: list = None,
-    fields_of_study: list = None,
-    fields: list = None,
-    publication_date_or_year: str = None,
-    min_citation_count: int = None,
-    limit: int = 100,
-    bulk: bool = False,
-    sort: str = None,                # 'citationCount:desc'
-    match_title: bool = False
-)
-```
-
-### Get Citations and References
-
-```python
-def get_citations(paper_id, limit=5, fields=None):
-    """Get papers that have cited the specified paper."""
-    url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"
-    params = {"limit": limit}
-    if fields:
-        params["fields"] = ",".join(fields)
-    r = requests.get(url, params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
-
-def get_references(paper_id, limit=5, fields=None):
-    """Get references cited by the specified paper."""
-    url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references"
-    params = {"limit": limit}
-    if fields:
-        params["fields"] = ",".join(fields)
-    r = requests.get(url, params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
-```
-
-### Author Search and Profiles
-
-```python
-def search_authors(query, limit=5):
-    """Search for authors."""
-    url = "https://api.semanticscholar.org/graph/v1/author/search"
-    params = {"query": query, "limit": limit, "fields": "name,hIndex,citationCount"}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()["data"]
-
-def get_author_profile(author_id):
-    """Get author details and paper list."""
-    url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
-    params = {"fields": "name,hIndex,citationCount,papers"}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    return r.json()
-
-# Example
-authors = search_authors("yoshua bengio")
-for a in authors:
-    print(f"{a['name']} — h-index: {a.get('hIndex', 'N/A')}, citations: {a.get('citationCount', 'N/A')}")
-
+# Author search then profile (papers array on the profile)
+authors = s2_get("author/search", {"query": "yoshua bengio"}, fields=["name", "hIndex", "citationCount"])["data"]
 if authors:
-    profile = get_author_profile(authors[0]["authorId"])
-    print(f"\nTop papers by {profile['name']}:")
-    for p in profile.get('papers', [])[:5]:
-        print(f"  {p.get('title', 'N/A')[:70]}")
+    profile = s2_get(f"author/{authors[0]['authorId']}", {}, fields=["name", "hIndex", "citationCount", "papers"])
 ```
+
+`paperId` can also be `DOI:10.1234/...`, `ArXiv:2106.15928`, PMID, ACL, or a
+URL. The Python SDK (`pip install semanticscholar`) wraps the same endpoints:
+`SemanticScholar().search_paper(query, year=..., fields=..., limit=..., sort='citationCount:desc')`.
 
 ---
 
@@ -296,27 +212,10 @@ if authors:
 
 ## Error Handling
 
-```python
-import requests, time
-
-def safe_semantic_scholar_get(url, params, retries=3, delay=12):
-    """Semantic Scholar request with retry logic (no-key mode)."""
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, params=params, timeout=15)
-            if r.status_code == 200:
-                return r.json()
-            elif r.status_code == 429:
-                wait = delay * (attempt + 1)
-                print(f"Rate limited (429), waiting {wait}s... (attempt {attempt+1}/{retries})")
-                time.sleep(wait)
-            else:
-                raise Exception(f"S2 error {r.status_code}: {r.text[:200]}")
-        except requests.exceptions.Timeout:
-            print(f"Timeout, retrying... (attempt {attempt+1}/{retries})")
-            time.sleep(delay)
-    raise Exception(f"Max retries exceeded for {url}")
-```
+HTTP 429 = rate limited. Use the generic retry-with-backoff helper in
+[error-handling.md](error-handling.md) with `base_delay=12` (no key) — Semantic
+Scholar's free tier needs ~12s between requests, so start there rather than the
+default 2.
 
 ---
 

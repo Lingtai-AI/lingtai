@@ -75,25 +75,12 @@ HEADERS = {"User-Agent": "MyApp/1.0 (mailto:your@email.com)"}
 BASE = "https://api.crossref.org"
 
 def search_works(query, rows=5, select="DOI,title,author,published-print", **filters):
-    """Search CrossRef papers.
-
-    Args:
-        query: Search terms
-        rows: Number of results (1-100)
-        select: Fields to return (comma-separated)
-        **filters: Additional filters, e.g. type='journal-article', from_pub_date='2020-01-01'
-
-    Returns:
-        list[dict]: List of papers
+    """Search CrossRef papers. **filters e.g. type='journal-article', from_pub_date='2020-01-01'
+    (keys use '_' here, sent as '-' in the filter param). Returns list[dict].
     """
     params = {"query": query, "rows": rows, "select": select}
     if filters:
-        filter_parts = []
-        for k, v in filters.items():
-            key = k.replace("_", "-")
-            filter_parts.append(f"{key}:{v}")
-        params["filter"] = ",".join(filter_parts)
-
+        params["filter"] = ",".join(f"{k.replace('_', '-')}:{v}" for k, v in filters.items())
     r = requests.get(f"{BASE}/works", params=params, headers=HEADERS, timeout=15)
     r.raise_for_status()
     return r.json()["message"]["items"]
@@ -103,12 +90,14 @@ papers = search_works("transformer architecture", rows=3)
 for p in papers:
     title = p.get("title", ["N/A"])[0]
     authors = ", ".join(a["family"] for a in p.get("author", []))
-    doi = p.get("DOI", "N/A")
-    print(f"DOI: {doi}")
-    print(f"Title: {title}")
-    print(f"Authors: {authors}")
-    print()
+    print(f"DOI: {p.get('DOI', 'N/A')}  Title: {title}  Authors: {authors}")
 ```
+
+The `/funders` endpoint (same auth/params shape) searches funding agencies by
+name and returns each funder's DOI (e.g. NSF = `10.13039/100000001`, NIH =
+`10.13039/100000002`); combine with `filter=funder:{funder_doi}` on `/works` to
+pull an agency's funded papers. Date-range tracking combines
+`filter=from-pub-date:...,until-pub-date:...` with `sort=published-print&order=desc`.
 
 ### Response Format
 
@@ -141,174 +130,26 @@ for p in papers:
 
 ## 2. Funder Queries (Funders Endpoint)
 
-### Endpoint
+`GET https://api.crossref.org/funders?query=NSF&rows=5` searches funding
+agencies (same request shape as `/works`, returns `{id, location, name,
+alt-names, uri}` per item). Combine a funder DOI with `/works`:
+`filter=funder:{funder_doi},sort=published-print,order=desc` to get that
+agency's recent funded papers (`select` should include `funder,award` to see
+grant numbers).
 
-```
-GET https://api.crossref.org/funders
-```
-
-### Parameters
-
-| Parameter | Description | Example |
-|---|---|---|
-| `query` | Search for funding agencies | `query=NSF` |
-| `rows` | Number of results | `rows=5` |
-
-### Common Funder DOIs
-
-| Funding Agency | DOI Identifier |
-|---|---|
-| NIH (National Institutes of Health) | `10.13039/100000002` |
-| NSF (National Science Foundation) | `10.13039/100000001` |
-| DOE (U.S. Department of Energy) | `10.13039/100000015` |
-| EU (European Union) | `10.13039/501100000780` |
-| Wellcome Trust | `10.13039/100004440` |
-| DFG (German Research Foundation) | `10.13039/501100001659` |
-| JSPS (Japan Society for the Promotion of Science) | `10.13039/501100001691` |
-| NSFC (National Natural Science Foundation of China) | `10.13039/501100001809` |
-
-### Code Example
-
-```python
-def search_funders(query, rows=5):
-    """Search for funding agencies."""
-    params = {"query": query, "rows": rows}
-    r = requests.get(f"{BASE}/funders", params=params, headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    return r.json()["message"]["items"]
-
-def get_funder_works(funder_doi, rows=5):
-    """Retrieve papers funded by a specific agency.
-
-    Args:
-        funder_doi: Funder DOI (e.g. '10.13039/100000001' for NSF)
-        rows: Number of results
-    """
-    params = {
-        "filter": f"funder:{funder_doi}",
-        "rows": rows,
-        "select": "DOI,title,author,published-print,funder,award",
-        "sort": "published-print",
-        "order": "desc",
-    }
-    r = requests.get(f"{BASE}/works", params=params, headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    return r.json()["message"]["items"]
-
-# Search for funding agencies
-funders = search_funders("National Science Foundation")
-for f in funders:
-    print(f"{f['name']} (ID: {f['id']})")
-    print(f"  Location: {f.get('location', 'N/A')}")
-
-# Get recent papers funded by NSF
-nsf_works = get_funder_works("10.13039/100000001", rows=5)
-for w in nsf_works:
-    title = w.get("title", ["N/A"])[0]
-    awards = [a.get("award", []) for a in w.get("funder", [])]
-    flat_awards = [str(a) for sub in awards for a in sub]
-    print(f"[NSF] {title}")
-    if flat_awards:
-        print(f"  Award: {', '.join(flat_awards[:3])}")
-```
-
-### Response Format (Funders)
-
-```json
-{
-  "message": {
-    "items": [
-      {
-        "id": "100000001",
-        "location": "United States",
-        "name": "National Science Foundation",
-        "alt-names": ["NSF"],
-        "uri": "http://dx.doi.org/10.13039/100000001",
-        "tokens": ["national", "science", "foundation"]
-      }
-    ]
-  }
-}
-```
-
----
+**Common Funder DOIs**: NIH `10.13039/100000002` · NSF `10.13039/100000001` ·
+DOE `10.13039/100000015` · EU `10.13039/501100000780` · Wellcome Trust
+`10.13039/100004440` · DFG `10.13039/501100001659` · JSPS
+`10.13039/501100001691` · NSFC `10.13039/501100001809`
 
 ## 3. Recent Publications (Date-filtered Queries)
 
-### How It Works
-
-Combine the `from-pub-date` / `until-pub-date` filters with `sort=published-print` and `order=desc` to track the latest papers.
-
-### Code Example
-
-```python
-from datetime import date, timedelta
-
-def get_recent_papers(topic=None, days=7, rows=20, funder=None, journal=None):
-    """Retrieve recent papers.
-
-    Args:
-        topic: Search keyword (optional)
-        days: Number of days to look back
-        rows: Number of results
-        funder: Funder DOI (optional)
-        journal: Journal name (optional)
-
-    Returns:
-        list[dict]: Papers sorted by publication date in descending order
-    """
-    today = date.today()
-    since = today - timedelta(days=days)
-    filters = [f"from-pub-date:{since}"]
-    if funder:
-        filters.append(f"funder:{funder}")
-    if journal:
-        filters.append(f"container-title:{journal}")
-
-    params = {
-        "rows": rows,
-        "filter": ",".join(filters),
-        "sort": "published-print",
-        "order": "desc",
-        "select": "DOI,title,author,published-print,published-online",
-    }
-    if topic:
-        params["query"] = topic
-
-    r = requests.get(f"{BASE}/works", params=params, headers=HEADERS, timeout=15)
-    r.raise_for_status()
-    return r.json()["message"]["items"]
-
-def daily_digest(topic, rows=20):
-    """Daily digest: retrieve today's papers on a specific topic."""
-    return get_recent_papers(topic=topic, days=1, rows=rows)
-
-# Usage examples
-# Papers about "transformer" from the last 7 days
-papers = get_recent_papers("transformer", days=7)
-print(f"Found {len(papers)} recent papers on 'transformer'")
-for p in papers[:5]:
-    title = p.get("title", ["N/A"])[0]
-    pub = p.get("published-print", p.get("published-online", {}))
-    dp = pub.get("date-parts", [[None]])[0]
-    date_str = "-".join(str(x) for x in dp if x is not None)
-    print(f"  [{date_str}] {title[:80]}")
-
-# Specific funder + specific journal
-nsf_nature = get_recent_papers(days=30, funder="10.13039/100000001", journal="Nature")
-
-# Daily digest
-today_papers = daily_digest("large language model", rows=10)
-```
-
-### Advanced Filter Combinations
+Combine `from-pub-date`/`until-pub-date` filters with `sort=published-print`
+and `order=desc` to track the latest papers; add `funder:` and
+`container-title:` filters to narrow by agency or journal:
 
 ```bash
-# Specific date range + journal type
-curl -s "https://api.crossref.org/works?filter=from-pub-date:2026-04-01,until-pub-date:2026-04-22,type:journal-article&rows=5&select=DOI,title,published-print"
-
-# Nature papers with abstracts
-curl -s "https://api.crossref.org/works?filter=container-title:Nature,has-abstract:true&rows=3&select=DOI,title,abstract"
+curl -s "https://api.crossref.org/works?filter=from-pub-date:2026-04-01,until-pub-date:2026-04-22,type:journal-article,container-title:Nature&rows=5&select=DOI,title,published-print&sort=published-print&order=desc"
 ```
 
 ---
@@ -336,25 +177,8 @@ curl -s "https://api.crossref.org/works?filter=container-title:Nature,has-abstra
 | 429 | Rate limited | Back off and retry; verify you are in the Polite Pool |
 | 503 | Service temporarily unavailable | Retry with exponential backoff |
 
-```python
-import time
-
-def crossref_get(url, params=None, retries=3):
-    """CrossRef request with retry and backoff."""
-    for attempt in range(retries):
-        r = requests.get(url, params=params, headers=HEADERS, timeout=15)
-        if r.status_code == 200:
-            return r.json()
-        elif r.status_code == 429:
-            wait = min(30, 2 ** attempt * 2)
-            print(f"Rate limited, waiting {wait}s...")
-            time.sleep(wait)
-        elif r.status_code >= 500:
-            time.sleep(2 ** attempt)
-        else:
-            r.raise_for_status()
-    raise Exception(f"CrossRef request failed after {retries} retries: {url}")
-```
+For the generic retry-with-backoff pattern (429/5xx handling), see
+[error-handling.md](error-handling.md) — it applies unchanged here.
 
 ## Related APIs
 
