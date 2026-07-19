@@ -5,7 +5,7 @@ description: >
   thin, official-source-led child manual. Read a child only when its preset is
   relevant; this does not describe arbitrary saved presets.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
   - tui/internal/preset/preset.go
@@ -88,10 +88,10 @@ Each entry is a child manual, not a standalone top-level skill:
 
 The manuals describe direct provider-native or current-preset
 OpenAI-compatible vision conservatively. A missing or failed direct route is
-not a reason to switch providers, guess credentials, or automatically load or
-invoke an MCP. Reviewed official evidence positively identifies optional plan-level vision
-MCPs for Zhipu/Z.AI and MiniMax; their child manuals link them as explicit,
-manual-only methods. Unknowns remain unknown.
+not a reason to switch providers, guess credentials, or auto-load/invoke an
+MCP. Reviewed official evidence positively identifies optional plan-level
+vision MCPs for Zhipu/Z.AI and MiniMax; their child manuals link them as
+explicit, manual-only methods. Unknowns remain unknown.
 
 Saved presets are different: a clone under `~/.lingtai-tui/presets/saved/`
 may change provider, model, endpoint, credentials, or capabilities. Inspect

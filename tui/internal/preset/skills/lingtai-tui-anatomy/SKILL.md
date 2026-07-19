@@ -17,8 +17,8 @@ description: >
       anatomy.
     - You are about to write or update an `ANATOMY.md` in the lingtai repo
       and need to know the template, the citation rules, and the maintenance
-      discipline (which differs from the kernel's in two important ways —
-      see "Two-binary symmetry" below).
+      discipline (which differs from the kernel's — see "Two-binary
+      symmetry" below).
     - You hit a TUI/portal-specific gotcha (Bubble Tea v2 paste delivery,
       textarea theming, the shared meta.json version space, dev-mode
       rebuild) and want to find the place that explains it.
@@ -26,39 +26,19 @@ description: >
       machine: start with `lingtai-tui list --detailed` / `--admin`, then
       descend the TUI anatomy if you need the implementation.
 
-  How to use:
-    1. Read this file once — you are learning the convention.
-    2. Open the lingtai repo's `ANATOMY.md` (at the repo root). That is the
-       monorepo-root anatomy. Use its Components and Composition sections to
-       find the binary tree (`tui/` or `portal/`) whose anatomy holds your
-       question.
-    3. Descend. At each layer the anatomy points either further down the
-       tree or directly at code via `file:line` citations.
-    4. Read the cited code. The anatomy is the navigation aid; the code is
-       the truth.
-    5. If anatomy disagreed with code, update the anatomy before you leave
-       the file. Reading and maintaining are the same act.
-
-  How this differs from `lingtai-kernel-anatomy`:
-    - Two binary trees (`tui/`, `portal/`) under one repo root, with shared
-      per-project state. The repo-root anatomy enumerates both; per-binary
-      anatomies sit at `tui/ANATOMY.md` and `portal/ANATOMY.md`.
-    - File extension is `.go`, not `.py`. Citations look like
-      `tui/internal/preset/preset.go:1399`. The cheap-mechanical-checker
-      script in this skill is adapted for Go.
-    - Citations into the `lingtai-kernel` repo are NOT used — that is a
-      separate tree with its own anatomy. Cross-repo references are
-      narrative only ("the kernel writes this file; we read it").
+  How to use: read this file once to learn the convention, then descend the
+  tree from the repo-root `ANATOMY.md` — per-binary anatomies sit at
+  `tui/ANATOMY.md` and `portal/ANATOMY.md`. The body's "Use anatomy as
+  navigator" section owns the descent, and "Maintenance is part of reading"
+  owns the read-and-repair contract.
 version: 0.1.0
-last_changed_at: "2026-06-24T01:56:50-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai (Go) Anatomy — the Convention
 
-This skill is the canonical convention for `ANATOMY.md` files in the **lingtai** Go monorepo (the repo that ships `lingtai-tui` and `lingtai-portal`). It is the parallel of `lingtai-kernel-anatomy` for the Go side of the project. The two skills are intentionally similar — same 6-section template, same citation discipline, same maintenance contract — but they cover different trees and have different gotchas.
-
-The convention lives in this skill; the content lives in `ANATOMY.md` files distributed across the lingtai repo, starting at the repo root.
+This skill is the canonical convention for `ANATOMY.md` files in the **lingtai** Go monorepo (the repo that ships `lingtai-tui` and `lingtai-portal`) — the Go parallel of `lingtai-kernel-anatomy`: same 6-section template, same citation discipline, same maintenance contract, a different tree with different gotchas. The convention lives in this skill; the content lives in the `ANATOMY.md` files distributed across the repo, starting at the repo root.
 
 ## What an `ANATOMY.md` is
 
@@ -90,36 +70,36 @@ Every `ANATOMY.md` — including the repo-root anatomy — follows the same shap
 
 ## Two-binary symmetry — what's different from the kernel
 
-The lingtai repo has two binary trees that share a single per-project state schema (`.lingtai/meta.json`) and parallel migration registries. This produces a coupling pattern the kernel doesn't have:
+The lingtai repo has two binary trees sharing a single per-project state schema (`.lingtai/meta.json`) and parallel migration registries — a coupling the kernel doesn't have:
 
-- The TUI and portal **share the meta.json version space.** A migration that bumps `CurrentVersion` in `tui/internal/migrate/migrate.go` MUST also bump it in `portal/internal/migrate/migrate.go`. Anatomy in both `tui/internal/migrate/ANATOMY.md` and `portal/internal/migrate/ANATOMY.md` must reflect this contract.
-- Migrations that touch shared on-disk state (init.json schema, preset paths) live in BOTH packages with identical logic. Anatomy in either should cross-reference the other rather than duplicate the per-migration explanation.
-- Migrations that only one binary cares about get a no-op stub in the other to preserve the version slot. Anatomy notes the no-op stubs so a reader doesn't think they're orphan files.
+- **Shared meta.json version space.** A migration that bumps `CurrentVersion` in `tui/internal/migrate/migrate.go` MUST also bump it in `portal/internal/migrate/migrate.go`. Both `tui/internal/migrate/ANATOMY.md` and `portal/internal/migrate/ANATOMY.md` must reflect this contract.
+- **Shared-state migrations** (init.json schema, preset paths) live in BOTH packages with identical logic. Anatomy in either cross-references the other rather than duplicating the per-migration explanation.
+- **Single-binary migrations get a no-op stub in the other** to preserve the version slot. Anatomy notes the stubs so a reader doesn't think they're orphan files.
 
-Outside migrations, the two binaries are independent. They run in different processes; they don't import each other; they communicate only via the filesystem they both read.
+Outside migrations the two binaries are independent: separate processes, no imports between them, communicating only via the filesystem they both read.
 
 ## Use anatomy as navigator, not grep
 
-You are an agent. Reading 200 lines of code is one tool call; greping a symbol gives you 50 hits each costing their own evaluation. For **structural** questions (what shape is this part of the repo, where does behavior X live, what does Y connect to) descend `ANATOMY.md` files top-down. For **enumeration** questions (every callsite of a function, every file matching a pattern) grep is still right.
+You are an agent. Reading 200 cited lines is one tool call; greping a symbol gives you 50 hits each costing their own evaluation.
 
 | Question type | Tool |
 |---|---|
-| Structural | Descend the anatomy tree |
-| Enumeration | grep |
+| **Structural** — what shape is this part of the repo, where does behavior X live, what does Y connect to | Descend the anatomy tree top-down |
+| **Enumeration** — every callsite of a function, every file matching a pattern | grep |
 
-The descent: start at the repo root's `ANATOMY.md`, read its Components and Composition, pick the binary tree (`tui/` or `portal/`) whose territory contains your question, open that binary's anatomy, repeat. At each layer the anatomy will tell you whether to descend further or read the cited code directly.
+The descent: start at the repo root's `ANATOMY.md`, read its Components and Composition, pick the binary tree (`tui/` or `portal/`) whose territory contains your question, open that binary's anatomy, repeat. At each layer the anatomy tells you whether to descend further or read the cited code directly.
 
 ## Finding companions starts with `lingtai-tui list`
 
 Agent inventory is a command-surface question before it is a filesystem
-question.  When the need is "find companions", "which local agents are alive?",
-"where is that agent's working directory?", or "which chat handles does this
-running agent advertise?", run `lingtai-tui list --detailed` first.  Add
-`--admin` when the question depends on admin/karma flags, and pass a project
-path when you only want one project's `.lingtai/` network.
+question.  For "find companions", "which local agents are alive?", "where is
+that agent's working directory?", or "which chat handles does this running
+agent advertise?", run `lingtai-tui list --detailed` first.  Add `--admin` when
+the question depends on admin/karma flags, and pass a project path when you
+only want one project's `.lingtai/` network.
 
-Only fall back to manual `.lingtai/` scans when `lingtai-tui list` cannot answer
-the question (for example, offline agents with no running process).  If you need
+Fall back to manual `.lingtai/` scans only when `lingtai-tui list` cannot answer
+the question (for example, offline agents with no running process).  For
 code-level evidence, descend the repo anatomy to `tui/ANATOMY.md`; it points to
 `list_common.go`, `list_unix.go`, and `list_windows.go`, which own this command
 surface.
@@ -130,10 +110,11 @@ When you write or update an `ANATOMY.md`, every one of these must be true before
 
 - **Every named symbol in Components has a `file:line` citation.** "loads presets (`Load`)" is not enough; "loads presets (`tui/internal/preset/preset.go:421`)" is. Without citations, the next agent grepping for the symbol gains nothing from the anatomy.
 - **Citations are line ranges, not paragraphs.** Prefer `tui/internal/preset/preset.go:1330-1360` over a vague "see preset.go". Single-line citations only for one-line landmarks (constants, single-line helpers).
-- **Every citation has been verified.** Open the cited line. Confirm it still says what the anatomy claims. Citations rot fastest after refactors.
+- **Every citation has been verified.** Open the cited line and confirm it still says what the anatomy claims. Citations rot fastest after refactors.
+- **Citations stay inside this repo.** They point at `.go` (or `.tsx`/`.json`) paths from the repo root — `tui/internal/preset/preset.go:1399`. Never cite into the sibling `lingtai-kernel` repo: that tree has its own anatomy, so cross-repo references are narrative only ("the kernel writes this file; we read it").
 - **Cross-references between anatomies use repo-root-relative paths.** `tui/internal/preset/ANATOMY.md`, not `./ANATOMY.md` or `../preset/ANATOMY.md`. The repo root is the only stable reference frame.
 - **Cross-references are sparse and one-directional.** Cite parent and structural neighbors only — do not enumerate downstream callers (that's a grep question).
-- **Cross-binary references are narrative, not citation-rich.** When `portal/internal/api/` reads a file the TUI also reads, mention that the TUI does the same and link to its anatomy. Do not duplicate detailed citation lists across the two binary trees.
+- **Cross-binary references are narrative, not citation-rich.** When `portal/internal/api/` reads a file the TUI also reads, say so and link to its anatomy; do not duplicate detailed citation lists across the two binary trees.
 - **No leaf stubs.** Empty placeholder anatomies are clutter. A missing `ANATOMY.md` is an honest signal that the folder hasn't been mapped yet.
 - **No paraphrase.** Anatomy adds shape and connections, not summary. If the code's good naming already says what you're about to write, don't write it.
 
@@ -143,7 +124,7 @@ Every coding agent that reads anatomy is also a maintainer. The contract:
 
 - **Code matches anatomy:** read on, no action.
 - **Code disagrees with anatomy:** the code is almost always right. Update the anatomy to match before you leave the file. If you believe the code itself is wrong, report the bug — and note that anatomy and code disagreed, because that disagreement is itself a clue.
-- **Anatomy missing or empty:** if you understood the folder well enough to do your task, write the anatomy. Components, connections, state. Use the writing checklist above.
+- **Anatomy missing or empty:** if you understood the folder well enough to do your task, write the anatomy — components, connections, state, per the writing checklist above.
 
 ## When a code change requires anatomy updates
 
@@ -160,15 +141,15 @@ Usually no anatomy update is required for local implementation fixes, prompt wor
 
 ## Who maintains anatomy
 
-There are two kinds of agent that interact with this convention:
+Two kinds of agent interact with this convention:
 
-**Coding agents** (Claude Code, Codex CLI, any agent that edits files and creates commits): you MUST update the relevant `ANATOMY.md` files in the **same commit** as the code change. If a commit moves a function, renames a file, splits a package, or changes a connection between folders, the anatomies that cite that code are part of the diff. Do not split anatomy updates into a follow-up commit — drift starts the moment the code change lands without its anatomy update. Git history is the audit trail; anatomy files do not need their own version-history sections.
+**Coding agents** (Claude Code, Codex CLI, any agent that edits files and creates commits): you MUST update the relevant `ANATOMY.md` files in the **same commit** as the code change — whenever the change hits the trigger list above, the anatomies citing that code are part of the diff. Do not defer them to a follow-up commit; drift starts the moment the code lands without its anatomy update. Git history is the audit trail; anatomy files do not need their own version-history sections.
 
-**LingTai agents** (the Python creatures running inside `.lingtai/`): you generally do NOT modify the lingtai repo directly — you propose patches, the human applies them. Your role with anatomy is **to report drift as issues**. When you read anatomy and notice it disagrees with the code, mail the human, or write a `discussions/<name>-patch.md` proposal naming the specific citation that rotted and the correct line. Do not silently fix anatomy in your own working copy without surfacing the drift — the value of your read-pass is the signal that the drift exists.
+**LingTai agents** (the Python creatures running inside `.lingtai/`): you generally do NOT modify the lingtai repo directly — you propose patches, the human applies them. Your role with anatomy is **to report drift as issues**: mail the human, or write a `discussions/<name>-patch.md` proposal naming the specific citation that rotted and the correct line. Do not silently fix anatomy in your own working copy without surfacing the drift — the value of your read-pass is the signal that the drift exists.
 
 ## Citation rot during refactors
 
-The most common drift mode is **citation rot after a refactor**. When code moves between files, anatomies that cite the old file rot silently — the prose still reads correctly, but the citations point at a line that no longer exists or contains different code.
+The most common drift mode is **citation rot after a refactor**: when code moves between files, anatomies citing the old file rot silently — the prose still reads correctly, but the citations point at a line that no longer exists or now contains different code.
 
 The mechanical rule:
 
@@ -200,21 +181,21 @@ This only catches missing files and out-of-range lines. It does not prove semant
 
 ## The repo-root anatomy is just an anatomy
 
-The repo-root `ANATOMY.md` follows the same 6-section template as every other anatomy. It happens to enumerate the two binary trees (`tui/`, `portal/`) and the cross-cutting infra (install.sh, scripts/, examples/, docs/) in its Components and Composition sections — that's a property of being at the top of the tree, not a special role. There are no "doorways" or "entrances": there is the convention (this skill) and there is the tree of anatomies. The repo-root anatomy is the top of the tree. That is all.
+The repo-root `ANATOMY.md` follows the same 6-section template as every other anatomy. It happens to enumerate the two binary trees (`tui/`, `portal/`) and the cross-cutting infra (install.sh, scripts/, examples/, docs/) in its Components and Composition sections — that's a property of being at the top of the tree, not a special role. There are no "doorways" or "entrances": there is the convention (this skill), and there is the tree of anatomies whose top is the repo-root file.
 
 ## When the convention exposes structural pressure
 
-If a single Go package is large enough to need its own anatomy, that is a refactor signal — not a license to write per-file anatomies. The convention's first useful side effect is that it reveals where a package's organizational grain doesn't match its conceptual grain. The right response is "split into sub-packages or move out concerns" not "invent a parallel doc system that summarizes a too-large file."
+If a single Go package is large enough to need its own anatomy, that is a refactor signal — not a license to write per-file anatomies. The convention's first useful side effect is revealing where a package's organizational grain doesn't match its conceptual grain. The right response is "split into sub-packages or move out concerns," not "invent a parallel doc system that summarizes a too-large file."
 
-The TUI's `tui/internal/tui/` (~22k LOC, every Bubble Tea screen) is a known case: it warrants its own anatomy, but breaking it into sub-packages would fight Bubble Tea's screen-per-file convention. The right move there is a single thorough anatomy for the package, not a refactor.
+The TUI's `tui/internal/tui/` (~22k LOC, every Bubble Tea screen) is the known exception: it warrants its own anatomy, but splitting it into sub-packages would fight Bubble Tea's screen-per-file convention. The right move there is one thorough anatomy for the package, not a refactor.
 
 ## Relationship to other skills
 
-- **`lingtai-anatomy`** (the umbrella skill) — describes the LingTai *system* as a user experiences it: TUI flows, presets, init.jsonc, runtime layout under `~/.lingtai-tui/`. If your question is "how does my init.jsonc get there," start there.
-- **`lingtai-kernel-anatomy`** — the convention for the kernel's anatomy tree (Python, in the sibling `lingtai-kernel` repo). If your question is "what is X actually doing inside the agent runtime, where does it live in the kernel," start there.
-- **`lingtai-tui-anatomy` (this skill)** — the convention for the lingtai Go monorepo's anatomy tree. If your question is "what is the TUI doing, where does it live in the Go code, how does the portal share state with it," read this once to know the convention, then descend the lingtai repo's anatomy tree.
+The three anatomy skills are layered — the umbrella tells you about the world the user lives in, the kernel anatomy tells the agent about itself, and this skill tells coding agents about the binary that wraps the agent:
 
-The three skills are layered. The umbrella anatomy tells you about the world the user lives in. The kernel anatomy tells the agent about itself. This skill tells coding agents about the binary that wraps the agent.
+- **`lingtai-anatomy`** (the umbrella skill) — the LingTai *system* as a user experiences it: TUI flows, presets, init.jsonc, runtime layout under `~/.lingtai-tui/`. Start there for "how does my init.jsonc get there."
+- **`lingtai-kernel-anatomy`** — the convention for the kernel's anatomy tree (Python, in the sibling `lingtai-kernel` repo). Start there for "what is X actually doing inside the agent runtime, where does it live in the kernel."
+- **`lingtai-tui-anatomy` (this skill)** — the convention for the lingtai Go monorepo's anatomy tree. For "what is the TUI doing, where does it live in the Go code, how does the portal share state with it," read this once to know the convention, then descend the lingtai repo's anatomy tree.
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

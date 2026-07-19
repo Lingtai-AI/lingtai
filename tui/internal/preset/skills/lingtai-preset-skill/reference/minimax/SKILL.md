@@ -2,7 +2,7 @@
 name: preset-skill-minimax
 description: Official-source-led manual for the TUI `minimax` template.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -26,7 +26,5 @@ community `tomlee2013/minimax-mcp-vision` project is not official.
 Read the official [Anthropic-compatible API documentation](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)
 and [Token Plan MCP guide](https://platform.minimax.io/docs/guides/token-plan-mcp-guide)
 for current details. Do not silently switch providers or auto-load/invoke an
-MCP when the native route fails.
-
-Verify the manifest in TUI source after template changes. Never put a key or
-guessed credential in this manual.
+MCP when the native route fails. Verify the manifest in TUI source after
+template changes.

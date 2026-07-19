@@ -5,7 +5,7 @@ description: >
   a live network or methodology: scope disambiguation, human-in-the-loop metadata
   collection, bundle authoring, validation, git initialization, and handoff.
 version: 1.0.0
-last_changed_at: "2026-06-02T00:08:39-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -21,13 +21,13 @@ A recipe is the culture of a network, distilled into a portable seed. Your job i
 
 ## First: which "recipe" does the human mean?
 
-A project can hold three recipe-shaped artifacts at once. Confirm scope with the human before authoring anything:
+`../../SKILL.md` ("Disambiguate scope BEFORE picking a sub-guide") defines the three recipe-shaped artifacts a project can hold at once. Confirm scope with the human before authoring anything, then apply the export-side rule for each:
 
-1. **A recipe distilled from the inner network** (default, and what this sub-guide assumes). You look at the agents currently living in `.lingtai/` — orchestrator and avatars, their actual behavior, their accumulated culture — and write a NEW `.recipe/` that captures what makes this network distinctive.
+1. **A recipe distilled from the inner network** (the agents in `.lingtai/`) — the default, and what this sub-guide assumes. You write a NEW `.recipe/` capturing what makes this network distinctive.
 
-2. **The outer project's own `.recipe/`** at the project root (sibling of `.lingtai/`). If present, this is the recipe that originally *seeded* this project. If the human says "re-export the recipe," they may mean republish this existing bundle, NOT write a new one. Ask. Republishing is mostly a copy job (copy `<project>/.recipe/` and the matching `<project>/<library_name>/` sibling into `$HOME/lingtai-agora/recipes/<id>/`, then jump to Step 4 to validate). Distilling a fresh recipe is what the rest of this sub-guide covers.
+2. **The outer project's own `.recipe/`** at the project root (sibling of `.lingtai/`). If the human says "re-export the recipe," they may mean republish this existing bundle, NOT write a new one. Ask. Republishing is mostly a copy job (copy `<project>/.recipe/` and the matching `<project>/<library_name>/` sibling into `$HOME/lingtai-agora/recipes/<id>/`, then jump to Step 4 to validate). Distilling a fresh recipe is what the rest of this sub-guide covers.
 
-3. **The applied-recipe snapshot at `.lingtai/.tui-asset/.recipe/`** is a TUI-managed copy of #2, useful as *evidence* of what behavior is currently in force. It is not a separate artifact to ship — if the human wants what's in there, they almost certainly mean #2.
+3. **The applied-recipe snapshot at `.lingtai/.tui-asset/.recipe/`** — a TUI-managed copy of #2, useful as *evidence* of what behavior is currently in force. Not a separate artifact to ship: if the human wants what's in there, they almost certainly mean #2.
 
 The most common failure mode in a project that was itself seeded from a recipe (e.g., a methodology recipe applied to produce a domain network): the agent confuses #2 with #1 and ends up republishing the seeding methodology instead of distilling the network's actual culture. If the project has both a `.lingtai/` *and* its own `.recipe/` at the root, ASK the human which scope they want before proceeding.
 
@@ -41,22 +41,7 @@ A recipe bundle is the shareable artifact the TUI copies into a project on selec
     └── recipe.json                     # manifest (id, name, description, …)
 ```
 
-Everything else is optional. Typical bundles add a first-contact message, ongoing behavioral constraints, and sometimes a library of shared skills:
-
-```
-<bundle-root>/
-├── .recipe/                            # LingTai-facing behavioral layer
-│   ├── recipe.json
-│   ├── greet/greet.md                  # (optional) first-contact
-│   ├── greet/zh/greet.md               # (optional) locale variant
-│   ├── comment/comment.md              # (optional) ongoing behavioral constraints
-│   ├── covenant/covenant.md            # (optional) covenant override
-│   └── procedures/procedures.md        # (optional) procedures override
-├── <library_name>/                     # (optional) framework-agnostic skills
-│   ├── <skill-a>/SKILL.md
-│   └── <skill-b>/SKILL.md
-└── README.md                           # (optional) for GitHub display
-```
+Everything else is optional, and `../recipe-format/SKILL.md` ("Bundle Directory Structure") is the authoritative layout. Typical bundles add `greet/greet.md` (first-contact) and `comment/comment.md` (ongoing behavioral constraints), their `<lang>/` variants, occasionally `covenant/covenant.md` or `procedures/procedures.md`, and a `<library_name>/` sibling of framework-agnostic skills. Export adds one file the format reference does not: an optional `README.md` at the bundle root, for GitHub display.
 
 A recipe ships no `.lingtai/` snapshot — just the seed. The garden grows fresh in each new project that applies the recipe.
 
@@ -80,9 +65,7 @@ These rules prevent silent failures. Follow them without exception.
 
 3. **Always `mkdir -p` before writing.** The `write` tool may silently fail or report false success if the parent directory does not exist.
 
-4. **Verify after writing.** After writing all files in a step, run `find <bundle-dir> -type f | sort` and confirm the output lists every file you intended to create.
-
-5. **Never trust a write success message at face value.** Always verify with `find` or `ls`.
+4. **Verify after writing; never trust a write success message at face value.** After writing all files in a step, run `find <bundle-dir> -type f | sort` (or `ls`) and confirm the output lists every file you intended to create.
 
 ## Step 0: Resolve Paths + Reflect on the Network
 
@@ -156,7 +139,7 @@ mkdir -p "$BUNDLE/<library_name>"
 
 ### 2a. `recipe.json` (manifest)
 
-Write `$BUNDLE/.recipe/recipe.json` with the required fields. Example:
+Write `$BUNDLE/.recipe/recipe.json`. Field semantics, requiredness, and defaults live in `../recipe-format/SKILL.md` ("`recipe.json` — Manifest"); for an export, write `id` in kebab-case and keep `name` / `description` in one canonical language. Example:
 
 ```json
 {
@@ -168,13 +151,7 @@ Write `$BUNDLE/.recipe/recipe.json` with the required fields. Example:
 }
 ```
 
-- `id` — kebab-case machine identifier (required, stable across locales).
-- `name` — canonical display name shown in the TUI recipe picker (required). Keep one canonical language here.
-- `description` — canonical one-line picker hint (required). Keep one canonical language here.
-- `version` — optional, defaults to `"1.0.0"` if absent. Bump on iteration.
-- `library_name` — name of a sibling folder inside the bundle; `null` if the recipe ships no library.
-
-Do **not** write locale variants of `recipe.json`. There is exactly one manifest: `$BUNDLE/.recipe/recipe.json`. If the recipe is multilingual, localize the human-facing layers instead (`greet/<lang>/greet.md`, `comment/<lang>/comment.md`, etc.). The validator rejects `.recipe/<lang>/recipe.json` because the runtime ignores those files and they can silently drop load-bearing fields like `library_name`.
+Do **not** write locale variants of `recipe.json` — there is exactly one manifest, `$BUNDLE/.recipe/recipe.json`, and the validator rejects `.recipe/<lang>/recipe.json` because the runtime ignores those files and they can silently drop load-bearing fields like `library_name`. If the recipe is multilingual, localize the human-facing layers instead (`greet/<lang>/greet.md`, `comment/<lang>/comment.md`, etc.).
 
 ### 2b. `greet.md` — First Contact (optional)
 
@@ -196,12 +173,7 @@ Write `$BUNDLE/.recipe/comment/comment.md`. This is where the network's culture 
 - **Guardrails** — what does the orchestrator explicitly avoid? Topics it won't engage with? Actions it won't take without human approval?
 - **Skill references** — if the recipe ships a library, how and when should the orchestrator invoke which skill?
 
-**Where to look:**
-- The currently-applied comment at `.lingtai/.tui-asset/.recipe/comment/comment.md` — what's already codified
-- The orchestrator's recent mail — how it actually delegates and responds
-- Avatar `.agent.json` blueprints — what specialized agents exist and why
-- The covenant and procedures — any custom overrides already in place
-- The human's feedback patterns — what corrections has the human made repeatedly?
+**Where to look:** the sources you already read in Step 0c — the currently-applied comment at `.lingtai/.tui-asset/.recipe/comment/comment.md` (what's already codified), the orchestrator's recent mail (how it actually delegates and responds), and avatar `.agent.json` blueprints (what specialized agents exist and why) — plus the covenant and procedures for custom overrides already in place, and the human's feedback patterns: what corrections has the human made repeatedly?
 
 **Distillation technique:** For each behavioral norm you observe (e.g., "agents always deposit findings before emailing"), write it as an explicit rule (e.g., "Always write your findings to a file before sending an email summary"). Transform living behavior → explicit rule → readable prose.
 
@@ -222,16 +194,7 @@ cp -R .lingtai/.library_shared/<skill-a> $BUNDLE/<library_name>/<skill-a>
 
 Each skill directory must contain a valid `SKILL.md` (the validator does not walk skills deeply; it just warns if the library contains zero `SKILL.md` files anywhere).
 
-**Single-skill libraries**: if you're shipping exactly one skill and the library name matches the skill name, still use the nested layout:
-
-```
-$BUNDLE/<library_name>/             # library folder
-└── <library_name>/                 # skill folder (same name — this IS intentional)
-    ├── SKILL.md
-    └── ...
-```
-
-Do NOT flatten this to `$BUNDLE/<library_name>/SKILL.md` — the scanner only registers skills that are direct-child subdirectories of the library folder. A flat layout silently produces zero registered skills. (This mistake was observed on real bundles during export; prefer the nested layout even when it feels redundant.)
+**Single-skill libraries**: if you're shipping exactly one skill and the library name matches the skill name, still nest it — `$BUNDLE/<library_name>/<library_name>/SKILL.md`, the same name one level deeper, which IS intentional. Do NOT flatten this to `$BUNDLE/<library_name>/SKILL.md` — the scanner only registers skills that are direct-child subdirectories of the library folder. A flat layout silently produces zero registered skills. (This mistake was observed on real bundles during export; prefer the nested layout even when it feels redundant.)
 
 **Skills are monolingual.** Libraries do not have `<lang>/SKILL.md` variants — write skills in one language. If you want a bilingual skill, write both languages in the same `SKILL.md`.
 
@@ -276,7 +239,7 @@ VALIDATOR="$HOME/.lingtai-tui/utilities/lingtai-recipe/$TOOL_DIR/validate_recipe
 python3 "$VALIDATOR" "$HOME/lingtai-agora/recipes/<id>/"
 ```
 
-This is the canonical structural check. It verifies `.recipe/recipe.json`, the schema, behavioral-layer shape, placeholder discipline, and library sibling existence. Exit code 0 means the bundle is structurally valid.
+This is the canonical structural check; `../recipe-format/SKILL.md` ("What the validator checks") enumerates every check it runs. Exit code 0 means the bundle is structurally valid.
 
 **If the script reports errors:** stop, read the error lines, fix each one in the bundle directory, and re-run. Loop until clean.
 
@@ -333,4 +296,4 @@ Check `gh auth status` and follow the three-branch pattern:
 
 **Intrinsic skills don't need copying.** Skills under `.library/intrinsic/` are shipped with the TUI itself and already available in every installation. Only ship custom skills — the ones that grew out of this network.
 
-**Libraries are additive on recipe change.** If a recipient already has a recipe applied with `library_name: "old-lib"`, switching to your recipe with `library_name: "new-lib"` will append `"../../new-lib"` to their agents' `skills.paths` without removing the old one. Keep this in mind when naming — avoid names that could collide with common libraries the recipient might already have.
+**Libraries are additive on recipe change.** Applying your recipe appends `"../../<library_name>"` to the recipient's agents' `skills.paths` without removing whatever a previous recipe registered (`../recipe-format/SKILL.md`, "Library path is additive across recipe changes"). Keep this in mind when naming — avoid names that could collide with common libraries the recipient might already have.

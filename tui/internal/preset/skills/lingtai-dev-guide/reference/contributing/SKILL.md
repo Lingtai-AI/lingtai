@@ -3,96 +3,81 @@ name: dev-guide-contributing
 description: >
   Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, worktree inventory and exact-object approval gates, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
 version: 1.2.0
-last_changed_at: "2026-07-11T14:20:00-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Contributing to LingTai
 
-
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
-This guide covers how to make changes to each component of the LingTai project.
 
 ## General principles
 
-1. **Filesystem-only IPC.** The TUI, portal, and kernel communicate exclusively through files. If you need cross-process communication, write a file and let the other side poll.
-2. **Anatomy updates are part of the code change.** If your change moves, renames, splits, merges, or deletes a file/function/class cited by an `ANATOMY.md`, update the anatomy in the **same commit**. See the `lingtai-kernel-anatomy` and `lingtai-tui-anatomy` skills for the full convention.
-3. **Three-locale rule.** Adding an i18n key means updating all three of `en.json`, `zh.json`, `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations render as the raw key on screen — they don't fall back.
+1. **Filesystem-only IPC.** TUI, portal, and kernel communicate exclusively through files. Need cross-process communication? Write a file and let the other side poll.
+2. **Anatomy updates are part of the code change.** If your change moves, renames, splits, merges, or deletes anything cited by an `ANATOMY.md`, update the anatomy in the **same commit** (see "Anatomy maintenance" below).
+3. **Three-locale rule.** A new i18n key means updating `en.json`, `zh.json`, and `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations render as the raw key — they don't fall back.
 4. **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv.
-5. **Every non-trivial PR gets a self-contained HTML explainer for the human, but the explainer is local-only by default.** Write a single `.html` file with inline CSS, no remote assets, and no build step, then hand the human its absolute `file://`-openable path in the short message. Prefer an ignored local location such as `artifacts/pr<NUMBER>-<slug>-explainer.html`, `reports/pr<NUMBER>-<slug>-explainer.html`, `tmp/<topic>-<date>.html`, or the agent/worktree report workspace; do **not** commit routine PR explainers. Commit an HTML report only when the human explicitly asks, when it is a release/long-term reference artifact, or when repo documentation links to it deliberately; use `git add -f` for that exception and explain the reason in the PR. Name it `pr<NUMBER>-<slug>-explainer.html` once the PR exists (use `<topic>-<date>.html` pre-push, then rename locally). Write it **before** asking for review or merge, and refresh it locally when blockers or fixes materially change the story. Required sections: TL;DR, baseline, what-was-done (with diff snippets), validation, risks/decisions, next steps, source index. Plain text/Markdown is reserved for the short pointer message and conversational replies. The only exception is a strictly one-line docs/chore PR where the human has explicitly said "no report needed" — absent that waiver, write the HTML even for a small fix. If a change is too small for a useful explainer, that is a signal to bundle it with related work or get the waiver.
+5. **Every non-trivial PR gets a self-contained HTML explainer, local-only by default.** Requirements, naming, sections, the commit-vs-local rule, and the waiver exception live in `reference/pr-review-deliverables/SKILL.md` §3 — follow it rather than a summary here.
 
 ## Orchestrator + daemons (how the work happens)
 
-This is the operating discipline for *any* non-trivial LingTai contribution — TUI, portal, kernel, addons, or skills. Read this before you start writing code.
+The operating discipline for *any* non-trivial LingTai contribution — TUI, portal, kernel, addons, or skills.
 
 ### 1. Clarify and restate the contract
 
-Before dispatching work, restate the task in your own words: what changes, what does not, what "done" looks like, and what is explicitly out of scope. If the request is ambiguous, ask before dispatching. A daemon that runs against a fuzzy brief will deliver a fuzzy diff — and you will pay for it in review time.
+Before dispatching, restate the task: what changes, what does not, what "done" looks like, what is out of scope. Ask if the request is ambiguous. A daemon run against a fuzzy brief delivers a fuzzy diff, and you pay for it in review time.
 
 ### 2. Issue → worktree/branch → PR → merge
 
-Non-trivial work flows through this loop. No exceptions for "small" fixes that turn out to be non-small:
+Non-trivial work flows through this loop — no exceptions for "small" fixes that turn out to be non-small:
 
-1. **Issue.** Open or pick a GitHub issue that names the problem. If one does not exist, write one — it is the durable record of the contract.
-2. **Worktree + branch.** Create an isolated `git worktree` off `origin/main` on a topic branch (`fix/...`, `feat/...`, `docs/...`, `chore/...`). Never edit the main checkout, and never share a worktree across two parallel daemons.
-3. **PR.** Push the branch and open a PR against `Lingtai-AI/<repo>`. The PR body cites the issue, summarizes the change, and lists validation steps.
-4. **Merge.** After review, merge via the GitHub UI (or `gh pr merge`). Delete the branch and clean up the worktree. Worktrees that outlive this step accumulate — see "Worktree hygiene" below for the periodic cleanup procedure.
+1. **Issue.** Open or pick a GitHub issue naming the problem. If none exists, write one — it is the durable record of the contract.
+2. **Worktree + branch.** Isolated `git worktree` off `origin/main` on a topic branch (`fix/...`, `feat/...`, `docs/...`, `chore/...`). Never edit the main checkout; never share a worktree between parallel daemons.
+3. **PR.** Push and open against `Lingtai-AI/<repo>`. The body cites the issue, summarizes the change, lists validation steps.
+4. **Merge.** After review, merge via the GitHub UI or `gh pr merge`, then delete the branch and clean up the worktree (see "Worktree hygiene").
 
 ### 3. Decompose into daemon-sized tasks
 
-Orchestrators *plan, dispatch, and review*; they do not hand-code. The right tools for code reading, modification, testing, refactoring, PR preparation, batch scanning, and mechanical validation are the daemon backends:
+Orchestrators *plan, dispatch, and review*; they do not hand-code. Code reading, modification, testing, refactoring, PR preparation, batch scanning, and mechanical validation belong to the daemon backends — **Claude Code daemons** for exploratory reading, multi-file edits, skill/doc work, and PR composition; **Codex daemons** for tightly-scoped diffs, deterministic refactors, and mechanical validation.
 
-- **Claude Code daemons** — best for exploratory code reading, multi-file edits, skill/doc work, and PR composition.
-- **Codex daemons** — best for tightly-scoped diffs, deterministic refactors, and mechanical validation passes.
+Every dispatched daemon gets four things:
 
-Each dispatched daemon must receive:
+- **A scoped brief** — what to change, what to leave alone, what "done" means, absolute paths to source-of-truth files.
+- **Its own worktree and branch** — parallelism is safe only when worktrees are disjoint.
+- **Tests or validation steps** — `go test ./...`, `python -m pytest`, frontmatter parse, `git diff --check`, a grep for new headings; or an explicit "none applicable."
+- **A do-not-touch list** — unrelated untracked files, sibling worktrees, the main branch.
 
-- **A scoped brief.** What to change, what to leave alone, what "done" looks like, where the source-of-truth files live (absolute paths).
-- **Its own worktree and branch.** Daemons do not share a working tree. Parallelism is safe only when worktrees are disjoint.
-- **Tests or validation steps.** Whatever check confirms the change works — `go test ./...`, `python -m pytest`, frontmatter parse, `git diff --check`, a grep for the new headings. If no test is applicable, say so explicitly.
-- **A do-not-touch list.** Files, directories, or branches the daemon must not modify (e.g., unrelated untracked files in the main checkout, sibling worktrees, the main branch).
-
-Use as much **safe parallelism** as the decomposition allows. Independent daemons run concurrently; dependent steps run sequentially. The orchestrator's leverage comes from running many disjoint daemons in parallel, not from doing more of the work itself.
+Use as much safe parallelism as the decomposition allows. The orchestrator's leverage is many disjoint daemons running concurrently, not doing more of the work itself.
 
 ### 4. Orchestrator reviews diffs and tests; does not hand-code
 
-When a daemon reports back, the orchestrator's job is to:
+Read the diff (ground truth — not the daemon's summary), run or inspect the validation output, check imports and cross-file consistency against the brief, then merge/forward or send the daemon back with a tightened brief.
 
-1. Read the diff (not the daemon's summary — diffs are the ground truth).
-2. Run or inspect the validation output.
-3. Check imports, cross-file consistency, and adherence to the brief.
-4. Either merge/forward, or send the daemon back with a tightened brief.
-
-The orchestrator hand-codes only in narrow cases: emergency hotfixes when daemon dispatch overhead is unjustified, throwaway scratch work, or steering the daemon out of a stuck state. Default to dispatch.
+Hand-code only for emergency hotfixes where dispatch overhead is unjustified, throwaway scratch work, or steering a daemon out of a stuck state. Default to dispatch.
 
 ### 5. Routine portfolio sweep before broad planning
 
-Before planning any broad LingTai dev work, run — or dispatch — an org-wide **portfolio sweep**:
+Before planning broad dev work, run or dispatch a read-only `gh` sweep across `Lingtai-AI/*` enumerating open issues and PRs, summarized into stale items, unreviewed PRs, items relevant to the plan, and items that conflict with it. Let that surface decide what to pick up, defer, or coordinate around.
 
-- Run a read-only `gh` org sweep across `Lingtai-AI/*` to enumerate open issues and PRs.
-- Summarize: stale items, unreviewed PRs, items relevant to the planned work, and items that conflict with what you are about to do.
-- Let the current PR/issue surface guide which pieces to pick up, defer, or coordinate around.
-- Keep the sweep **read-only**. It informs planning; it does not file new issues or comment on PRs as a side effect.
-
-Skipping the sweep is how you end up duplicating in-flight work, stomping on someone else's branch, or shipping a fix that conflicts with a pending refactor.
+Keep it **read-only** — it informs planning; it does not file issues or comment as a side effect. Skipping it is how you duplicate in-flight work, stomp another branch, or ship a fix that conflicts with a pending refactor. Commands and digest shape: `reference/repo-watch/SKILL.md`.
 
 ### 6. Self-operate GitHub via `GH_TOKEN` when the human provides one
 
-For any of the `gh` invocations above — issue triage, PR creation, the portfolio sweep — if the human pastes a GitHub token into the session and you have bash, use it directly: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste and don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then ask explicit per-action consent before any mutation (issue creation, PR open/merge, comments). Never echo, log, or persist the token; let it live only in the env of the single command.
+If the human pastes a GitHub token and you have bash, use it directly for any `gh` invocation above: `GH_TOKEN=$TOKEN gh ...`. Don't print commands for the human to copy-paste; don't require `gh auth login`. Read-only probe first (`gh repo view`, `gh issue list`), then explicit per-action consent before any mutation. Never echo, log, or persist the token — it lives only in the env of the single command. The `lingtai-issue-report` skill's `filing-flow` reference owns the full consent-and-token protocol for issue filing.
 
 ## Worktree hygiene: inventory first, exact-object approval before cleanup
 
-Worktrees accumulate, so inventory them periodically. An audit can establish
+Worktrees accumulate, so inventory them periodically. An audit establishes
 eligibility; it **never authorizes deletion**. A merged, clean, generated-only,
 empty, temporary, or self-created worktree still requires the human or owning
 maintainer to approve the exact worktree path. Branch deletion, force removal,
-and metadata pruning are separate destructive objects/actions and are not implied.
+and metadata pruning are separate destructive actions and are never implied.
 
 ### 1. Build a read-only inventory
 
-Use the refs already present locally; do not run `fetch --prune` as part of a
-read-only audit because it mutates local remote-tracking refs. If freshness is
-unknown, label it unknown or use a separately authorized/expected fetch first.
+Use the refs already present locally. Do not run `fetch --prune` during a
+read-only audit — it mutates local remote-tracking refs. If freshness is unknown,
+label it unknown, or do a separately authorized fetch first.
 
 ```bash
 cd <repo-primary-checkout>
@@ -116,16 +101,14 @@ references it. Never treat another agent's workspace as yours to clean.
 ### 2. Prepare a proposal; do not remove yet
 
 A conservative candidate is secondary, fully merged into the observed main,
-remote-gone or detached, clean, and unreferenced. Those facts are only evidence.
-Before any cleanup, send the human/owner:
+remote-gone or detached, clean, and unreferenced — but those facts are only
+evidence. Before any cleanup, send the human/owner: the **exact worktree path**,
+branch, and full HEAD SHA; the merge/remote/dirt/dependency evidence and why
+removal is proposed; the exact commands requested, including whether branch
+removal, `--force`, or metadata pruning is involved; and the impact and recovery
+route.
 
-- the **exact worktree path**, branch (if any), and full HEAD SHA;
-- merge/remote/dirt/dependency evidence and why removal is proposed;
-- the exact commands/actions requested, including whether branch removal,
-  `--force`, or metadata pruning would be involved;
-- impact and recovery route.
-
-Wait for an imperative approval that names each exact object. A category such as
+Wait for an imperative approval naming each exact object. A category such as
 "merged worktrees", generated-only dirt, or permission to remove one worktree
 does not authorize another worktree, its branch, or a broad prune.
 
@@ -138,15 +121,15 @@ git worktree remove -- <exact-approved-worktree-path>
 git branch -d -- <exact-approved-branch>  # only when that branch was also approved
 ```
 
-Do not escalate to `--force`, `-D`, `git worktree prune`, filesystem removal, or
-a wildcard/glob unless the approval explicitly covers that exact object/action.
+Never escalate to `--force`, `-D`, `git worktree prune`, filesystem removal, or a
+wildcard/glob unless the approval explicitly covers that exact object and action.
 If any observed state changed after approval, stop and ask again.
 
 ### 4. Record and report
 
 Record each approved action with worktree path, branch, HEAD SHA, authorization
 receipt, command result, and recovery route. Report skipped candidates and why;
-do not convert a refusal or uncertainty into cleanup pressure.
+never convert a refusal or uncertainty into cleanup pressure.
 
 ## Changing the TUI (`tui/`)
 
@@ -172,13 +155,16 @@ go test ./...                 # run tests
 
 1. Create `tui/internal/migrate/m<NNN>_<name>.go` exporting `func migrate<Name>(lingtaiDir string) error`.
 2. Register in `migrate.go`: append to the `migrations` slice, bump `CurrentVersion`.
-3. **Also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`** — the TUI and portal share the `meta.json` version space.
-4. If the migration touches shared on-disk state (init.json schema, preset paths), implement it in both packages with identical logic.
+3. **Also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`** — TUI and portal share the `meta.json` version space.
+4. If it touches shared on-disk state (init.json schema, preset paths), implement it in both packages with identical logic.
 5. If it's TUI-only, add a no-op stub `Fn: func(_ string) error { return nil }` in the portal registry to preserve the version slot.
+
+Version collisions and the `data version N is newer than this binary supports`
+failure have their own recovery checklist in `reference/gotchas/SKILL.md`.
 
 ### Adding a new screen
 
-1. Create a new Bubble Tea model in `tui/internal/tui/`.
+1. Create a Bubble Tea model in `tui/internal/tui/`.
 2. Wire it into the main app model's `Update` function.
 3. Add i18n keys to all three locale files.
 4. Handle `tea.PasteMsg` forwarding if the screen has text inputs (see gotchas).
@@ -201,14 +187,14 @@ make build                    # builds web frontend + Go binary
 # Output: portal/bin/lingtai-portal
 ```
 
-The `make build` pipeline: `npm install` → `npm run build` (in `web/`) → `go build` (embeds `web/dist/` via `embed.go`).
+Pipeline: `npm install` → `npm run build` (in `web/`) → `go build` (embeds `web/dist/` via `embed.go`).
 
 ### Changing the web frontend
 
 1. Edit files in `portal/web/src/`.
 2. `cd portal/web && npm run build` to rebuild the frontend.
-3. `cd portal && make build` to embed the new frontend into the Go binary.
-4. The frontend is embedded at compile time via `//go:embed all:web/dist` in `portal/embed.go`.
+3. `cd portal && make build` to embed it into the Go binary.
+4. Embedding happens at compile time via `//go:embed all:web/dist` in `portal/embed.go`.
 
 ### Migrations
 
@@ -223,7 +209,7 @@ Same contract as TUI — see "Adding a migration" above. Portal-only migrations 
 - **Intrinsics:** `src/lingtai/kernel/intrinsics/` — email, soul, system, psyche, codex, etc.
 - **Skills:** `src/lingtai/intrinsic_skills/` — bundled skill manuals
 
-The kernel-root anatomy at `src/lingtai/kernel/ANATOMY.md` is the entry point for navigating the source. See the `lingtai-kernel-anatomy` skill for the convention.
+The kernel-root anatomy at `src/lingtai/kernel/ANATOMY.md` is the entry point for navigating the source; the `lingtai-kernel-anatomy` skill owns the convention.
 
 ### Build and test
 
@@ -241,21 +227,14 @@ With the TUI's runtime venv:
 
 Kernel source changes need no binary rebuild in editable mode, but they are live
 only in the checkout/package the agent actually imports. After a merge in another
-worktree, first identify the runtime import path and git HEAD, fast-forward or
-editable-reinstall that source if needed, then `refresh` and verify with an
-in-situ probe. See `reference/runtime-self-check/SKILL.md` for the checklist.
+worktree: identify the runtime import path and git HEAD, fast-forward or
+editable-reinstall that source, then `refresh` and verify with an in-situ probe —
+`reference/runtime-self-check/SKILL.md` has the checklist.
 
-### Auto-upgrader gotcha
-
-The TUI's auto-upgrader (`tui/internal/config/venv.go:428-437`, `config.CheckUpgrade`; invoked by `ensureRuntimeWithOptions` at `tui/internal/config/venv.go:462-477`) compares `lingtai.__version__` to PyPI's latest. If your local source's `pyproject.toml` version is **lower** than PyPI's, the upgrader replaces the editable install with the PyPI wheel — silently undoing dev mode.
-
-**Prevention:** Ensure `lingtai-kernel/pyproject.toml` `version` is `>=` PyPI's latest. After a release bump, pull the kernel repo so your local source matches.
-
-**Recovery:**
-```bash
-~/.local/bin/uv pip install -e ~/Documents/GitHub/lingtai-kernel \
-    -p ~/.lingtai-tui/runtime/venv
-```
+Beware the auto-upgrader: a local `pyproject.toml` version lower than PyPI's lets
+it replace the editable install with a wheel and silently undo dev mode.
+Prevention, symptoms, and recovery are in `reference/gotchas/SKILL.md` →
+"Auto-upgrader clobbers editable install".
 
 ## Changing MCP addons
 
@@ -272,8 +251,6 @@ Each addon (imap, telegram, feishu, wechat) is a separate repo with its own MCP 
 
 ## Changing skills
 
-Skills live in two places:
-
 | Location | Who owns it | Editable? |
 |---|---|---|
 | `<agent>/.library/intrinsic/` | CLI-managed. Wiped and rewritten on every refresh. | No — edits will be erased. |
@@ -281,30 +258,24 @@ Skills live in two places:
 | `../.library_shared/` | Network-shared. Add with `cp -r`, edit with admin permission. | Admin only. |
 | `~/.lingtai-tui/utilities/` | TUI-shipped utilities. | Depends on the skill. |
 
-To author a new skill, see the `skills-manual` skill for the full workflow (frontmatter schema, template, validator, publishing).
+To author a new skill, see `skills-manual` for the full workflow (frontmatter schema, template, validator, publishing), and `reference/skill-stewardship/SKILL.md` for LingTai-specific stewardship.
 
 ## Anatomy maintenance
 
-Every `ANATOMY.md` must be updated in the same commit as the code change it describes. The rules:
+Every `ANATOMY.md` is updated in the same commit as the code change it describes. The citation rules — `file:line` citations for every named symbol, line ranges over paragraphs, verified citations, repo-root-relative cross-references, no leaf stubs, no paraphrase — are owned by the `lingtai-tui-anatomy` skill (Go) and the `lingtai-kernel-anatomy` skill (Python). Read the matching one; don't work from a summary.
 
-- **Every named symbol in Components has a `file:line` citation.**
-- **Citations are line ranges, not paragraphs.**
-- **Every citation has been verified** — open the cited line and confirm.
-- **Cross-references use kernel-root-relative paths.**
-- **No leaf stubs, no paraphrase.**
+### Cheap mechanical check
 
-For the full convention, see the `lingtai-kernel-anatomy` skill (Python) or `lingtai-tui-anatomy` skill (Go).
-
-### Cheap mechanical check (Go)
+Scans anatomy citations for missing files and out-of-range line numbers. Set `root`/`ext`/`prefix` for the tree you are in — Go: `tui`, `go|ts|tsx`, `tui/`; Python: `src/lingtai/kernel`, `py`, `src/`.
 
 ```bash
 python - <<'PY'
 import pathlib, re
-root = pathlib.Path("tui")
+root, ext, prefix = pathlib.Path("tui"), r"go|ts|tsx", "tui/"
 for anatomy in root.rglob("ANATOMY.md"):
     text = anatomy.read_text()
-    for rel, line in re.findall(r"`?([A-Za-z0-9_./-]+\.(?:go|ts|tsx)):(\d+)", text):
-        path = root / rel if not rel.startswith("tui/") else pathlib.Path(rel)
+    for rel, line in re.findall(rf"`?([A-Za-z0-9_./-]+\.(?:{ext})):(\d+)", text):
+        path = root / rel if not rel.startswith(prefix) else pathlib.Path(rel)
         if not path.exists():
             print(f"{anatomy}: missing citation target {rel}:{line}")
             continue
@@ -314,21 +285,4 @@ for anatomy in root.rglob("ANATOMY.md"):
 PY
 ```
 
-### Cheap mechanical check (Python)
-
-```bash
-python - <<'PY'
-import pathlib, re
-root = pathlib.Path("src/lingtai/kernel")
-for anatomy in root.rglob("ANATOMY.md"):
-    text = anatomy.read_text()
-    for rel, line in re.findall(r"`?([A-Za-z0-9_./-]+\.py):(\d+)", text):
-        path = root / rel if not rel.startswith("src/") else pathlib.Path(rel)
-        if not path.exists():
-            print(f"{anatomy}: missing citation target {rel}:{line}")
-            continue
-        n = len(path.read_text().splitlines())
-        if int(line) > n:
-            print(f"{anatomy}: out-of-range citation {rel}:{line} > {n}")
-PY
-```
+It only catches missing files and out-of-range lines; you still have to open the cited code and confirm the claim.

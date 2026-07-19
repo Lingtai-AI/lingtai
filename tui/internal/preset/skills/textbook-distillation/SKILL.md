@@ -14,7 +14,7 @@ description: >
   or for one-off factual lookups (just answer those directly).
 version: 1.0.0
 tags: [learning, study, textbook, lecture-notes, html, curriculum, self-paced]
-last_changed_at: "2026-06-08T22:45:29-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -23,30 +23,20 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 You are helping a human teach themselves from a textbook (or a long technical
 document, lecture transcript, or paper set) without a live instructor. Your job
 is to **distill** the source into a structured learning track and ship
-**self-contained HTML lecture notes** in the style the human asks for — not to
-copy the book.
-
-Distillation means: extract the concepts, structure, and worked logic, then
-re-explain them in your own words with your own examples. It does **not** mean
-reproducing the author's text. See [Source limits & safety](#source-limits--copyright--safety)
-before you intake anything — those boundaries shape every later step.
+**self-contained HTML lecture notes** in the style the human asks for: extract
+the concepts, structure, and worked logic, then re-explain them in your own
+words with your own examples. Distillation is never reproduction of the author's
+text. Read [Source limits & safety](#source-limits--copyright--safety) before you
+intake anything — those boundaries shape every later step.
 
 ## When to use
 
-- The human wants to study a book/course/PDF on their own and asks for notes,
-  a syllabus, a curriculum, or a "course" built from it.
-- The human wants a chapter (or the whole book) turned into teachable lessons
-  with exercises and checkpoints.
-- The human wants a **customized HTML study guide** — a specific look, palette,
-  or emphasis (e.g. "dark theme, lots of diagrams, define every term in a box").
-
-**Do NOT use** when:
-
-- The ask is a single factual question — answer it directly.
-- The human wants the book reproduced verbatim, a chapter pasted out, or a
-  "summary so I can skip buying it." That crosses the copyright line below —
-  decline and offer a legitimate distillation instead.
-- The source is something the human is not authorized to use (see safety).
+The frontmatter `description` carries the triggers and anti-triggers. Two
+boundaries deserve restating here: an ask framed as "summarize the whole book so
+I can skip buying it" or "paste me the chapter" crosses the copyright line —
+decline it and offer a legitimate distillation instead; and material the
+human cannot point to a legitimate source for is out of scope entirely. Both are
+spelled out under "Source limits, copyright & safety" below.
 
 ## Workflow at a glance
 
@@ -128,39 +118,38 @@ human wanted.
 Now produce the deliverable: **one self-contained HTML file per lesson** (or a
 single file for a short track), in the human's style.
 
-**Mechanics of good standalone HTML are owned by the `html-report` reference.**
+**Standalone-HTML mechanics are owned by the `html-report` reference** — the
+skeleton, artifact hygiene, the validation checklist, and, critically, **MathJax
+setup**, since lecture notes for technical books almost always contain equations.
 Read `~/.lingtai-tui/utilities/swiss-knife/reference/html-report/SKILL.md` (or
-load the `swiss-knife` skill and route to `html-report`) for the skeleton,
-artifact hygiene, the validation checklist, and — critically — **MathJax setup**,
-since lecture notes for technical books almost always contain equations. Do not
-duplicate that guidance here; follow it.
+load `swiss-knife` and route to `html-report`) and follow it rather than
+re-deriving it here.
 
-A bundled starting template lives at
-`~/.lingtai-tui/utilities/textbook-distillation/assets/lesson-template.html`.
-Copy it, then apply the human's style and fill the lesson content. It already
-wires MathJax, a print stylesheet, collapsible checkpoint answers, callout
-boxes, and CSS variables for theming.
+Start from the bundled template at
+`~/.lingtai-tui/utilities/textbook-distillation/assets/lesson-template.html`,
+which already wires MathJax, a print stylesheet, collapsible checkpoint answers,
+callout boxes, CSS variables for theming, and the lesson structure below. Copy
+it, apply the human's style, fill in the content.
 
-Each lesson's HTML should contain, in order:
+Each lesson must carry, in order:
 
-1. **Header block** — lesson title, objective, source citation (title, author,
-   edition, page range), generation timestamp (`date -u +%Y-%m-%dT%H:%M:%SZ`),
-   and a one-line provenance caveat ("Distilled study notes — re-explained from
-   the source, not a reproduction of it.").
+1. **Header** — title, objective, source citation (title, author, edition, page
+   range), generation timestamp (`date -u +%Y-%m-%dT%H:%M:%SZ`), and the
+   provenance caveat ("Distilled study notes — re-explained from the source, not
+   a reproduction of it.").
 2. **Prerequisites** — a short "before this lesson" note linking prior lessons.
-3. **Concept exposition** — the teaching, in *your own words*, with diagrams /
-   tables / analogies as the style calls for. Define terms in callout boxes.
+3. **Concept exposition** — the teaching, in *your own words*, terms defined in
+   callout boxes, with diagrams / tables / analogies as the style calls for.
 4. **Worked example(s)** — step through the reasoning explicitly.
-5. **Exercises** — numbered, increasing difficulty. Hide solutions behind a
+5. **Exercises** — numbered, increasing difficulty, solutions hidden behind a
    `<details>` element so the learner attempts first.
 6. **Checkpoint** — self-check questions with collapsible answers; passing them
    is the signal to advance.
 7. **Footer** — "next lesson" link and the source citation again.
 
-After writing each file, run the `html-report` validation checklist (file exists
-and non-empty, MathJax wired if math is present, no equations stuck in
-`<pre>`/`<code>`, links absolute, HTML parses). Write the files to a project-local
-path the human can find (e.g. `study/<book-slug>/lesson-NN.html`), never `/tmp`.
+Run the `html-report` validation checklist against every file you write. Write
+them to a project-local path the human can find (e.g.
+`study/<book-slug>/lesson-NN.html`), never `/tmp`.
 
 ## Phase 5 — Review loop
 
@@ -229,12 +218,9 @@ These boundaries are not optional. They apply from intake onward.
 
 | Mistake | Fix |
 |---|---|
-| Generating HTML before map/plan approval | Gate on human approval at phases 2 and 3 |
 | Pasting/paraphrasing the book closely | Re-explain in your own words with your own examples |
-| Equations inside `<pre>`/`<code>` | Follow `html-report` MathJax rules — they won't render otherwise |
 | Skipping exercises/checkpoints | A learning track without practice is just a summary |
 | Ignoring stated style, then regenerating all files | Reflect style back, review lesson 1 before batching |
-| Writing files to `/tmp` | Write to `study/<book-slug>/` so the human can find them |
 | Inventing the book's specific treatment from memory | Label own-knowledge sections; cite the source for specifics |
 
 ---

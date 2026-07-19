@@ -8,47 +8,41 @@ description: >
   paths and human-specific details, a lightweight pre-publish benchmark/checklist,
   grooming shared-library candidates, and PR-ready skill cleanup.
 version: 1.0.1
-last_changed_at: "2026-07-03T08:05:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Skill Stewardship
 
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you
-here when you are deciding whether to write a skill, distilling experience into
-one, or cleaning a skill up so it can ship in a PR.
+here when deciding whether to write a skill, distilling experience into one, or
+cleaning a skill up so it can ship in a PR.
 
-This consolidates the skill-distillation meta-method (归一), the skill audit/
-triage practice, the experience-to-skill side of session-journal handoff, the
-lightweight skill-benchmark checklist, and shared-library candidate grooming. It
-governs *LingTai's* skill hygiene; for generic skill-authoring mechanics
-(frontmatter spec, trigger syntax, file layout) cross-link to `skills-manual`
-rather than duplicating it here.
+This consolidates the skill-distillation meta-method (归一), skill audit/triage,
+the experience-to-skill side of session-journal handoff, the skill-benchmark
+checklist, and shared-library grooming. It governs *LingTai's* skill hygiene; for
+generic authoring mechanics (frontmatter spec, trigger syntax, file layout)
+cross-link to `skills-manual` rather than duplicating it here.
 
 ## Core principle
 
-A skill is the standard way to turn a *repeated* experience into something
-triggered, executable, verifiable, and maintainable. Write one when the
-technique would otherwise be re-derived ad hoc across sessions or agents — and
-only after it is de-privatized and lightly benchmarked. Skills that ship in this
-repo's preset tree must be parameterized: no private paths, no human-specific
-details, no secrets.
+A skill turns a *repeated* experience into something triggered, executable,
+verifiable, and maintainable. Write one when the technique would otherwise be
+re-derived ad hoc across sessions or agents — and only after it is de-privatized
+and lightly benchmarked. Skills shipping in this repo's preset tree must be
+parameterized: no private paths, no human-specific details, no secrets.
 
 ## 1. When to write a skill
 
-Write a skill when:
+Write one when the technique was not intuitively obvious and you would reference
+it again; when multiple agents/sessions keep re-implementing the same workflow
+with divergent quality (convergent discovery is the strongest signal); or when
+the pattern is broadly reusable rather than a one-off.
 
-- the technique was not intuitively obvious and you would reference it again;
-- multiple agents/sessions keep re-implementing the same workflow with divergent
-  quality (convergent discovery is the strongest signal — see the skill audit);
-- the pattern is broadly reusable, not a one-off or project-specific convention.
-
-Do **not** write a skill for:
-
-- one-off solutions or single-incident narratives;
-- standard practices already documented elsewhere (link instead);
-- project-specific conventions — those belong in `CLAUDE.md`/repo docs;
-- mechanical constraints enforceable by a test/regex — automate, don't document.
+Do **not** write a skill for one-off solutions or single-incident narratives; for
+standard practices already documented elsewhere (link instead); for
+project-specific conventions (those belong in `CLAUDE.md`/repo docs); or for
+mechanical constraints a test/regex could enforce (automate, don't document).
 
 If it is real but not yet skill-worthy, leave it as a session-journal entry or a
 shared-library candidate (§5) until the pattern repeats.
@@ -58,33 +52,32 @@ shared-library candidate (§5) until the pattern repeats.
 LingTai utility skills use progressive disclosure: a short **router** SKILL.md at
 the root plus focused **nested references** under `reference/<topic>/SKILL.md`.
 
-Read/context limits are a design signal, not a global hard-cap issue to keep
-open forever. Do not encode an old tool threshold as a blanket character limit,
-and do not paste dense material into the root just because a reader might need
-it later. The root should carry only the progressive-disclosure link; the
-related/reference file carries the detail and can be loaded on demand. For the
-current mechanics (frontmatter, layout, validator, and limit-aware structure),
-load `skills-manual` rather than duplicating that manual here.
+Read/context limits are a design signal, not a global hard-cap to keep open
+forever. Do not encode an old tool threshold as a blanket character limit, and do
+not paste dense material into the root just because a reader might need it later.
+The root carries only the progressive-disclosure link; the related/reference file
+carries the detail and loads on demand. For current mechanics (frontmatter,
+layout, validator, limit-aware structure), load `skills-manual`.
 
-- Keep the router compact: a nested-reference catalog, a routing table, and
-  cross-links. Detailed procedures live in the nested files, not the router.
-- A nested reference is **parent-owned** — it is a drill-down of its parent
-  skill, not a standalone top-level skill. Begin each nested file by identifying
-  itself, e.g. "Nested lingtai-dev-guide reference."
-- When you add a nested reference, update the parent's catalog **and** routing
-  table in the same commit, and update any test that asserts the nested set (see
+- Keep the router compact: nested-reference catalog, routing table, cross-links.
+  Detailed procedures live in the nested files.
+- A nested reference is **parent-owned** — a drill-down of its parent skill, not a
+  standalone top-level skill. Begin each nested file by identifying itself, e.g.
+  "Nested lingtai-dev-guide reference."
+- Adding a nested reference means updating the parent's catalog **and** routing
+  table in the same commit, plus any test asserting the nested set (see
   `tui/internal/tui/skill_files_test.go`).
 
 Prefer adding a nested reference to an existing router over creating a new
-top-level skill when the topic is a drill-down of an existing domain.
+top-level skill when the topic drills down into an existing domain.
 
 ## 3. Distilling experience into a skill (归一)
 
-The distillation loop turns scattered experience (chats, reports, code, daemon
-logs, knowledge entries, session journals) into a maintainable `SKILL.md`:
+The loop that turns scattered experience (chats, reports, code, daemon logs,
+knowledge entries, session journals) into a maintainable `SKILL.md`:
 
-1. **Trigger.** State the concrete situations that should load this skill — write
-   them as the `description` "Use when…" triggers, in third person.
+1. **Trigger.** State the concrete situations that should load this skill — as
+   the `description` "Use when…" triggers, in third person.
 2. **Distill.** Extract the reusable technique, not the narrative. One excellent
    example beats five mediocre ones; drop session-specific storytelling.
 3. **Validate.** Confirm any commands/computations actually run and produce the
@@ -92,16 +85,17 @@ logs, knowledge entries, session journals) into a maintainable `SKILL.md`:
 4. **Maintain.** Note what would make the skill stale (an API change, a renamed
    file) so a future edit knows what to check.
 
-Session journals feed step 1–2: a journal entry that records a reusable gotcha,
-decision, or procedure is the raw material for a skill. Promote it only when the
-pattern recurs; until then it stays a journal/handoff note. (For the journal
-*format* itself, defer to the kernel knowledge/psyche manuals — this reference
-only covers using journals as skill seeds.)
+Session journals feed steps 1–2: an entry recording a reusable gotcha, decision,
+or procedure is raw material for a skill. Promote it only when the pattern
+recurs; until then it stays a journal/handoff note. (For the journal *format*,
+defer to the kernel knowledge/psyche manuals — this reference only covers using
+journals as skill seeds.)
 
 ## 4. De-private and parameterize before publishing
 
 Anything shipped in the preset skill tree (or proposed for the shared library)
-must be scrubbed:
+must be scrubbed. This list is the canonical de-privatization rule for the dev
+guide; other references point here.
 
 - **Paths:** `/Users/<name>/...` → `<your-lingtai-checkout>` or `~/.lingtai-tui/...`.
 - **People:** named individuals → "the maintainer"; private project names → generic.
@@ -109,35 +103,33 @@ must be scrubbed:
 - **Channels/IDs:** Telegram chat IDs, emails, recipient lists → parameterized or removed.
 - **PR/issue numbers:** concrete numbers → examples only ("e.g. a small PR like #NNN").
 
-It is fine to mention repo-relative paths and generic command examples; only
-private, machine-, or person-specific details must go.
+Repo-relative paths and generic command examples are fine; only private,
+machine-, or person-specific details must go.
 
 ## 5. Lightweight pre-publish benchmark / checklist
 
-Before a skill ships, run a quick "pre-flight" — a benchmark/checklist, not a
-heavy framework:
+A quick pre-flight before a skill ships — a checklist, not a framework:
 
 - [ ] YAML frontmatter parses; has `name` (letters/numbers/hyphens), a
       `description` that starts with "Use when…" and lists triggers only (no
       workflow summary), and for LingTai-maintained skills a `last_changed_at`
       ISO 8601 timestamp. For metadata-only backfills, initialize it from
-      `git log -1 --format=%cI -- path/to/SKILL.md`; for substantive skill
-      edits, update it in the same commit.
-- [ ] Document structure is scannable: overview/core principle, when-to-use,
-      steps, related references. Root routers contain links, not bulk; dense
-      content lives in related/nested reference files.
+      `git log -1 --format=%cI -- path/to/SKILL.md`; for substantive edits,
+      update it in the same commit.
+- [ ] Structure is scannable: overview/core principle, when-to-use, steps,
+      related references. Root routers contain links, not bulk.
 - [ ] Declared dependencies/cross-linked skills exist and are named correctly.
 - [ ] Any commands/snippets were actually executed and produce the claimed output
-      (the skill-benchmark practice caught real API breakage this way).
+      (this practice caught real API breakage).
 - [ ] De-privatization (§4) is complete.
 - [ ] For nested references: parent catalog + routing table + tests updated.
 
 ## 6. Shared-library candidate grooming
 
-Not every reusable experience belongs in this repo's preset tree. Triage:
+Not every reusable experience belongs in this repo's preset tree:
 
 - **Repo dev-guide nested reference** — developer/operator methodology for working
-  on LingTai itself (this is where these three new references live).
+  on LingTai itself.
 - **Shared library candidate** — broadly reusable agent behaviour that is not
   LingTai-dev-specific; groom it (de-private, benchmark) and propose it for the
   shared library rather than the preset tree.
@@ -149,20 +141,17 @@ discoverable; promote later when convergent reuse is demonstrated.
 
 ## 7. PR-ready skill cleanup
 
-Bundle skill changes into a reviewable PR with:
-
-- the router catalog/routing-table edits in the same commit as the new/changed
-  nested reference;
-- updated tests (`tui/internal/tui/skill_files_test.go` for nested-reference
-  assertions) and a passing focused run;
-- a self-contained HTML explainer (see `reference/pr-review-deliverables/SKILL.md`).
+Bundle skill changes into a reviewable PR with the router catalog/routing-table
+edits in the same commit as the new/changed nested reference; updated tests
+(`tui/internal/tui/skill_files_test.go` for nested-reference assertions) and a
+passing focused run; and a self-contained HTML explainer (see
+`reference/pr-review-deliverables/SKILL.md`).
 
 ## Related references
 
 - `skills-manual` — generic skill authoring: frontmatter spec, trigger syntax,
-  file layout, testing skills, and current limit-aware router/reference
-  structure. Defer to it for mechanics; this reference covers LingTai-specific
-  stewardship and links to the manual instead of copying it.
+  file layout, testing skills, limit-aware router/reference structure. Defer to it
+  for mechanics; this reference covers LingTai-specific stewardship.
 - `reference/pr-review-deliverables/SKILL.md` — review gates and the HTML
   explainer for a skill-changing PR.
 - `reference/contributing/SKILL.md` — issue → worktree → PR → merge loop and the

@@ -3,15 +3,15 @@ name: dev-guide-security-audit
 description: >
   Nested lingtai-dev-guide reference for security audits: secret scanning, file permissions, MCP config, communication security, data exposure, agent permission review, severity classification, and report format.
 version: 1.0.0
-last_changed_at: "2026-06-02T00:05:51-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai Security Audit Reference
 
-
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
-> **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document performs security audits based on the Lingtai architecture's file system layout, process model, and communication mechanisms.
+
+> **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document audits against the LingTai filesystem layout, process model, and communication mechanisms.
 
 ---
 
@@ -19,51 +19,24 @@ Nested lingtai-dev-guide reference. Read this after the top-level router sends y
 
 This audit framework is **strictly read-only**. Scan, report, recommend — but never modify any files. All fixes must be performed manually by authorized personnel with appropriate permissions.
 
+Two rules bind every dimension below: pattern matching produces false positives, so every hit needs manual verification; and **the report must never contain an actual secret value** — report "match found" with the value replaced by `<REDACTED>`, or the report itself becomes the leak.
+
+Each dimension is scoped to a `scan_dir`:
+
+```bash
+scan_dir="<network-dir>"
+```
+
 ---
 
 ## Audit Dimensions
 
 ### 1. Secret Leak Pattern Scan
 
-**Goal**: Detect accidentally exposed API keys, tokens, and credentials in the network directory.
-
-**Symptoms**:
-- Secrets accidentally committed to a Git repository
-- API keys hardcoded in configuration files
-- Authentication tokens present in log files
-
-**Causes**:
-- `.env` files accidentally committed to git during development
-- MCP server configurations with API keys written directly instead of referencing environment variables
-- Debug logs recording full authentication headers
-
-**Resolution (Scan)**:
+Detects API keys, tokens, and credentials exposed in the network directory — `.env` files committed during development, MCP configurations with keys written inline instead of referencing environment variables, and debug logs that captured full authentication headers.
 
 ```bash
-# Search for common secret patterns in the network directory
-scan_dir="<network-dir>"
-
-echo "=== GitHub Tokens ==="
-grep -rn "ghp_[0-9a-zA-Z]\{36\}" "$scan_dir" --include="*.json" --include="*.md" --include="*.txt" --include="*.env" --include="*.yaml" --include="*.yml" 2>/dev/null
-
-echo "=== OpenAI API Keys ==="
-grep -rn "sk-[0-9a-zA-Z]\{48\}" "$scan_dir" --include="*.json" --include="*.md" --include="*.txt" --include="*.env" 2>/dev/null
-
-echo "=== AWS Access Keys ==="
-grep -rn "AKIA[0-9A-Z]\{16\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
-
-echo "=== Private Keys ==="
-grep -rn "-----BEGIN.*PRIVATE KEY-----" "$scan_dir" 2>/dev/null
-
-echo "=== Hardcoded Secrets (common patterns) ==="
-grep -rn -i "password\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
-grep -rn -i "api_key\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
-grep -rn -i "secret\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
-```
-
-**Command Example (Comprehensive Scan)**:
-```bash
-# Scan multiple secret types and output to a report
+# Scan every known secret type; persist matching file paths only
 scan_dir="<network-dir>"
 report="/tmp/security-scan-$(date +%Y%m%d-%H%M%S).txt"
 
@@ -90,24 +63,27 @@ report="/tmp/security-scan-$(date +%Y%m%d-%H%M%S).txt"
     pattern="${entry%%:*}"
     label="${entry##*:}"
     echo "--- $label ---"
-    grep -rn -E "$pattern" "$scan_dir" 2>/dev/null | head -10
+    grep -rl -E "$pattern" "$scan_dir" 2>/dev/null | head -10
     echo ""
   done
 
   echo "--- RSA/EC/DSA Private Keys ---"
-  grep -rn "-----BEGIN.*PRIVATE KEY-----" "$scan_dir" 2>/dev/null | head -10
+  grep -rl "-----BEGIN.*PRIVATE KEY-----" "$scan_dir" 2>/dev/null | head -10
   echo ""
+
+  echo "--- Hardcoded Secrets (generic patterns) ---"
+  grep -rl -i "password\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
+  grep -rl -i "api_key\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
+  grep -rl -i "secret\s*[:=]\s*['\"][^'\"]\{8,\}" "$scan_dir" --include="*.json" --include="*.env" --include="*.yaml" 2>/dev/null
 
 } > "$report"
 
 echo "Report saved to: $report"
 ```
 
-**Common Pitfalls**:
-- ❌ Pattern matching is not 100% accurate → false positives are expected; manual verification is required
-- ❌ Scanning binary files → may produce excessive noise
-- ❌ Including actual secret values in the report → the report itself becomes a leak source
-- ✅ Report only "match found" and replace actual values with `<REDACTED>`
+The persisted report is a path-only triage index. For a quick inline check of one pattern group, run any single `grep -rn` above without the redirect, narrowing with `--include="*.json" --include="*.md" --include="*.txt" --include="*.env" --include="*.yaml" --include="*.yml"`.
+
+**Pitfalls.** Scanning binary files produces heavy noise. Never paste a matched secret into the report.
 
 **Related References**: `lingtai-kernel-anatomy` (file system layout)
 
@@ -115,18 +91,7 @@ echo "Report saved to: $report"
 
 ### 2. File Permission Audit
 
-**Goal**: Detect overly permissive file permissions to prevent unauthorized access.
-
-**Symptoms**:
-- Sensitive files (keys, configs) are readable/writable by any user
-- Agent working directories are modifiable by other agents
-
-**Causes**:
-- Default creation permissions are too loose (umask settings)
-- Permissions not checked during manual operations
-- Shared directory misconfiguration
-
-**Resolution (Audit)**:
+Detects overly permissive files — sensitive keys/configs readable or writable by any user, or agent working directories modifiable by other agents. Usually caused by a loose umask, unchecked manual operations, or shared-directory misconfiguration.
 
 ```bash
 scan_dir="<network-dir>"
@@ -148,11 +113,9 @@ find "$scan_dir" \( \
 echo ""
 echo "=== Files Not Owned by Current User ==="
 find "$scan_dir" ! -user "$(whoami)" -ls 2>/dev/null | head -20
-```
 
-**Checking Specific Sensitive File Permissions**:
-```bash
-# Check .secrets directory (if it exists)
+echo ""
+echo "=== .secrets/ Permission Check ==="
 for f in <network-dir>/.lingtai/*/.secrets/*.json; do
   if [ -f "$f" ]; then
     perms=$(stat -f "%Lp" "$f" 2>/dev/null || stat -c "%a" "$f")
@@ -163,11 +126,7 @@ for f in <network-dir>/.lingtai/*/.secrets/*.json; do
 done
 ```
 
-**Common Pitfalls**:
-- ❌ Modifying file permissions without understanding the impact → may break agent functionality
-- ❌ Only checking top-level directories → sensitive files may be in deeply nested subdirectories
-- ✅ Audit is read-only; modifications must be performed by authorized personnel
-- ✅ Focus on `.secrets/`, `mcp/servers.json`, and `.env` files
+**Pitfalls.** Changing permissions without understanding the impact can break agent functionality — the audit is read-only, and fixes belong to authorized personnel. Checking only top-level directories misses sensitive files nested deeper; focus on `.secrets/`, `mcp/servers.json`, and `.env`.
 
 **Related References**: `lingtai-kernel-anatomy` (directory structure)
 
@@ -175,57 +134,23 @@ done
 
 ### 3. MCP Configuration Audit
 
-**Goal**: Check MCP server configurations for security risks.
-
-**Symptoms**:
-- MCP configuration contains plaintext API keys
-- The `command` field points to untrusted executables
-- Environment variable references point to non-existent variables
-
-**Causes**:
-- Convenience-driven hardcoded keys during configuration
-- Absolute paths used to reference local scripts
-- MCP server sources not verified
-
-**Resolution (Audit)**:
+Checks MCP server configurations for plaintext keys, `command` fields pointing at untrusted executables, and env-var references that resolve to nothing.
 
 ```bash
 scan_dir="<network-dir>"
 
-echo "=== MCP Configurations ==="
 find "$scan_dir" -name "servers.json" -path "*/mcp/*" | while read conf; do
-  echo "--- $conf ---"
-  cat "$conf"
-  echo ""
+  echo "=== $conf ==="
 
-  # Check for hardcoded secrets
+  # Hardcoded secrets vs env references
   if grep -qiE "(api.key|secret|token|password)\s*:\s*\"[^\"]{8,}\"" "$conf" 2>/dev/null; then
     echo "🔴 CRITICAL: Hardcoded secret detected in $conf"
   fi
-
-  # Check for env var references (good practice)
   if grep -q '\${' "$conf" 2>/dev/null; then
     echo "✅ Uses environment variable references"
   fi
 
-  echo ""
-done
-```
-
-**Itemized Checklist**:
-
-| Check Item | Safe | Risk |
-|--------|------|------|
-| API key referenced via `${ENV_VAR}` | ✅ | — |
-| API key hardcoded in JSON | — | 🔴 Critical |
-| `command` points to system path (`/usr/bin/`, `npx`) | ✅ | — |
-| `command` points to project-local script | ⚠️ | 🟡 Requires verification |
-| `command` points to `/tmp/` or downloaded script | — | 🔴 Critical |
-
-**Command Example (Extract All command Fields)**:
-```bash
-find "$scan_dir" -name "servers.json" -path "*/mcp/*" | while read conf; do
-  echo "=== $conf ==="
+  # Per-server command/env breakdown (reports references, never values)
   python3 -c "
 import json, sys
 try:
@@ -250,11 +175,17 @@ except Exception as e:
 done
 ```
 
-**Common Pitfalls**:
-- ❌ Hardcoding keys and tracking with git → secrets enter version history
-- ❌ Not verifying MCP server sources → potential execution of malicious code
-- ✅ Store secrets in the `.secrets/` directory; MCP configurations should reference environment variables
-- ✅ Audit the source code and permissions of third-party MCP servers
+**Itemized Checklist**:
+
+| Check Item | Safe | Risk |
+|--------|------|------|
+| API key referenced via `${ENV_VAR}` | ✅ | — |
+| API key hardcoded in JSON | — | 🔴 Critical |
+| `command` points to system path (`/usr/bin/`, `npx`) | ✅ | — |
+| `command` points to project-local script | ⚠️ | 🟡 Requires verification |
+| `command` points to `/tmp/` or downloaded script | — | 🔴 Critical |
+
+**Pitfalls.** Hardcoded keys under git enter version history permanently. Unverified MCP server sources can execute malicious code — audit third-party servers' source and permissions. Store secrets in `.secrets/` and reference them from MCP config by environment variable.
 
 **Related References**: `mcp-manual` (MCP configuration specification — kernel `mcp` capability)
 
@@ -262,48 +193,21 @@ done
 
 ### 4. Communication Security Audit
 
-**Goal**: Evaluate the security posture of the Lingtai pigeon communication system.
-
-**Symptoms**:
-- Sensitive information transmitted via pigeon without encryption
-- Messages readable by anyone with file system access
-- No message integrity verification
-
-**Causes (Architectural Limitations)**:
-- Pigeons are stored as **plaintext JSON** on the file system
-- No message encryption (at rest or in transit)
-- No message authentication or integrity verification
-- Inconsistent `to` field types (agent-sent vs kernel-sent)
-
-**Resolution (Audit and Document)**:
-
-These are **architectural limitations**, not configuration issues, and cannot be fixed through simple reconfiguration. Auditors should document and report them.
+The LingTai pigeon system has **architectural limitations**, not misconfigurations: mail is stored as plaintext JSON with no encryption at rest or in transit, no message authentication or integrity verification, and inconsistent `to` field types between agent-sent and kernel-sent mail. These cannot be fixed by reconfiguration — auditors document and report them.
 
 ```bash
 scan_dir="<network-dir>"
 
-echo "=== Communication Security Audit ==="
-
-# Check mail storage format
-echo "--- Mail Storage ---"
+echo "--- Sensitive Patterns in Mail ---"
 find "$scan_dir" -path "*/mailbox/*" -name "*.json" | head -5 | while read mail; do
-  echo "File: $mail"
-  # Check if mail contains sensitive patterns
   if grep -qiE "(password|secret|token|api.key)" "$mail" 2>/dev/null; then
     echo "⚠️  Potential sensitive data in mail: $mail"
   fi
 done
 
-# Check for plaintext credentials in any mailbox
 echo ""
 echo "--- Credential Patterns in Mailboxes ---"
 grep -rn -iE "(password|api_key|secret|token)\s*[:=]" "$scan_dir" --include="*.json" -l 2>/dev/null | grep mailbox | head -10
-
-echo ""
-echo "=== Architectural Notes ==="
-echo "1. All mail is stored as plaintext JSON — no encryption at rest"
-echo "2. No message authentication or integrity verification"
-echo "3. File system permissions are the only access control"
 ```
 
 **Risk Assessment**:
@@ -315,10 +219,7 @@ echo "3. File system permissions are the only access control"
 | Inconsistent `to` field types | 🟢 Low | May cause routing issues |
 | No transport encryption | 🟢 Low | Local file system, no network transmission |
 
-**Common Pitfalls**:
-- ❌ Transmitting actual secrets via pigeon → use environment variables or .secrets instead
-- ❌ Assuming pigeon is a secure communication channel → anyone with file system access can read messages
-- ✅ Pass sensitive information through environment variables or the `.secrets/` directory, never in plaintext mail
+**Pitfalls.** Pigeon is not a secure channel — filesystem permissions are the only access control. Pass sensitive values through environment variables or `.secrets/`, never in plaintext mail.
 
 **Related References**: `lingtai-kernel-anatomy` (mail protocol; communication model)
 
@@ -326,35 +227,18 @@ echo "3. File system permissions are the only access control"
 
 ### 5. Data Exposure Audit
 
-**Goal**: Detect sensitive data that may be accidentally exposed in the network directory.
-
-**Symptoms**:
-- Codex entries contain sensitive information that should not be shared
-- Large data dump files left in the directory
-- Export files (`codex export`) containing full content
-
-**Causes**:
-- Agent records sensitive data in codex without marking it
-- Temporary files not cleaned up
-- Export files left in shared paths
-
-**Resolution (Audit)**:
+Detects sensitive data left lying in the network directory: codex entries holding information that should not be shared, large data dumps, and `codex export` files containing full entry content.
 
 ```bash
 scan_dir="<network-dir>"
 
-echo "=== Data Exposure Audit ==="
-
-# Large files that may be data dumps
 echo "--- Large Files (>10MB) ---"
 find "$scan_dir" -type f -size +10M -ls 2>/dev/null
 
-# Codex export files (contain full entry content)
 echo ""
 echo "--- Codex Export Files ---"
 find "$scan_dir" -name "*.codex.*" -ls 2>/dev/null
 
-# Files with sensitive names
 echo ""
 echo "--- Potentially Sensitive Files ---"
 find "$scan_dir" \( \
@@ -366,26 +250,19 @@ find "$scan_dir" \( \
   -name "dump.*" \
 ) -ls 2>/dev/null
 
-# Check for git-tracked secrets
 echo ""
 echo "--- Git History (if applicable) ---"
 if [ -d "$scan_dir/.git" ]; then
   cd "$scan_dir"
-  # Check if .gitignore covers sensitive paths
   echo ".gitignore contents:"
   cat .gitignore 2>/dev/null || echo "No .gitignore found!"
   echo ""
-  # Check recent commits for potential secret additions
   echo "Recent commits touching sensitive-looking files:"
   git log --oneline -10 -- "*.env" "*.key" "*.pem" "*.secret" ".secrets/" 2>/dev/null
 fi
 ```
 
-**Common Pitfalls**:
-- ❌ Sharing codex entry IDs with others → IDs are private; others cannot access them
-- ❌ Leaving export files in shared paths → any agent can read them
-- ✅ When sharing knowledge, pass the actual content (via pigeon or shared files), not just IDs
-- ✅ Do not enter sensitive data into codex, or clearly mark it as sensitive
+**Pitfalls.** Codex entry IDs are private — sharing an ID gives another agent nothing, so share the actual content (via pigeon or a shared file) instead. Export files left in shared paths are readable by any agent. Keep sensitive data out of codex, or mark it clearly.
 
 **Related References**: `lingtai-kernel-anatomy` (codex; five-layer accumulation)
 
@@ -393,26 +270,12 @@ fi
 
 ### 6. Agent Permission Audit
 
-**Goal**: Check agent init.json files for overly privileged configurations.
-
-**Symptoms**:
-- Low-privilege agents with admin (karma/nirvana) permissions
-- Multiple agents with identical full permissions
-
-**Causes**:
-- Convenience-driven granting of all permissions to every agent during configuration
-- Permissions not revoked after requirements change
-
-**Resolution (Audit)**:
+Checks init.json files for over-privileged agents — low-privilege workers holding karma/nirvana, or every agent granted identical full permissions because it was convenient at configuration time.
 
 ```bash
 scan_dir="<network-dir>"
 
-echo "=== Agent Permission Audit ==="
 find "$scan_dir" -name "init.json" | while read conf; do
-  agent_dir=$(dirname "$conf")
-  agent_name=$(basename "$(dirname "$conf" | sed 's|/.lingtai/.*||')")
-  # Try to extract just the init.json content
   python3 -c "
 import json, sys
 try:
@@ -448,26 +311,15 @@ done
 | `nirvana=True` | Primary orchestrator only | Can permanently delete agents and their working directories |
 | Both False | Worker avatars | ✅ Minimal privilege |
 
-**Common Pitfalls**:
-- ❌ Granting karma=True to all avatars → any compromised avatar can affect the entire network
-- ❌ Assigning nirvana=True to avatars → avatars can delete their parent
-- ✅ Only grant karma/nirvana to orchestrators; avatars should have zero admin privileges
-- ✅ Avatars encountering permission issues should report to their parent via pigeon
+**Pitfalls.** karma on every avatar means any compromised avatar can affect the whole network; nirvana on an avatar lets it delete its own parent. Grant karma/nirvana only to orchestrators, and have avatars report permission problems to their parent via pigeon.
 
 **Related References**: `lingtai-kernel-anatomy` (avatar permission model / network topology)
 
 ---
 
-## Comprehensive Audit Workflow
+## Reporting
 
-### Steps to Execute a Full Audit
-
-1. **Secret Scan**: Run the scan scripts from §1
-2. **Permission Audit**: Run the find commands from §2
-3. **MCP Configuration Check**: Run the check scripts from §3
-4. **Communication Security Assessment**: Document architectural limitations from §4
-5. **Data Exposure Check**: Run the file scans from §5
-6. **Agent Permission Review**: Run the init.json audit from §6
+A full audit runs §1–§6 in order, then classifies and reports.
 
 ### Severity Classification
 
@@ -480,22 +332,17 @@ done
 
 ### Report Format
 
-When reporting security findings to upstream (parent or human):
+When reporting findings upstream (parent or human), give for each finding:
 
 1. **Severity**: Critical / High / Medium / Low
-2. **Location**: Exact file path
-3. **Evidence**: Matched pattern (**always redact actual secret values**)
-4. **Recommendation**: Specific remediation steps
-5. **Never** include actual secret values in the report
+2. **Location**: exact file path
+3. **Evidence**: the matched pattern, with the value **always** replaced by `<REDACTED>`
+4. **Recommendation**: specific remediation steps
+
+**Never** include actual secret values in the report.
 
 ---
 
 ## Out of Scope
 
-- Network-layer security (TLS, firewalls)
-- Inter-agent process isolation
-- External user authentication
-- Runtime memory inspection
-- The above require system-level access privileges, which are beyond an agent's capabilities
-
-For audits in these areas, report to your system administrator.
+Network-layer security (TLS, firewalls), inter-agent process isolation, external user authentication, and runtime memory inspection all require system-level access privileges beyond an agent's capabilities. Report those areas to your system administrator.

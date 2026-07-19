@@ -3,15 +3,13 @@ name: tutorial-guide-agent-runtime
 description: >
   Nested tutorial-guide reference for lessons 4–6: init.json, lingtai-agent run, heartbeat and signal files, TUI runtime wrapping, and system prompt identity.
 version: 1.0.0
-last_changed_at: "2026-06-28T00:01:05-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Tutorial Guide — Agent Runtime Lessons
 
-Nested tutorial-guide reference for agent runtime lessons 4–6.
-
-Use this file after the root `tutorial-guide` router sends you here. Keep teaching live: discover current files, commands, and runtime state before explaining them.
+Nested tutorial-guide reference for agent runtime lessons 4–6, reached from the root `tutorial-guide` router. Teach live per the router's *discover, don't recite* rule: read the real file or run the real command before explaining it.
 
 ## Lesson 4: How Agents Are Born — init.json and `lingtai-agent run`
 
@@ -45,7 +43,7 @@ Explain: **you do not need the TUI to run an agent.** A valid init.json + `lingt
 
 Walk through TUI-specific features: preset system, setup wizard, slash commands (read from `~/.lingtai-tui/commands.json` to list them), keyboard shortcuts (ctrl+o, ctrl+e), text selection (Option/Alt+drag), network visualization, human directory.
 
-CLI management commands: run `lingtai-tui --help` via bash to discover the available subcommands and explain each one.
+Mention that headless CLI management commands exist; Lesson 10 walks through `lingtai-tui --help` in full, so leave the enumeration for then.
 
 ## Lesson 6: Identity — How the System Prompt Works
 

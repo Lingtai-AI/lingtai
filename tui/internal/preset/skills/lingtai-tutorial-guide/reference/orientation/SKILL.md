@@ -3,15 +3,13 @@ name: tutorial-guide-orientation
 description: >
   Nested tutorial-guide reference for lessons 1–3: welcome, live architecture discovery, global directory, project directory, and agent working directory.
 version: 1.0.0
-last_changed_at: "2026-06-10T19:45:10-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Tutorial Guide — Orientation Lessons
 
-Nested tutorial-guide reference for orientation lessons 1–3.
-
-Use this file after the root `tutorial-guide` router sends you here. Keep teaching live: discover current files, commands, and runtime state before explaining them.
+Nested tutorial-guide reference for orientation lessons 1–3, reached from the root `tutorial-guide` router. Teach live per the router's *discover, don't recite* rule: read the real file or run the real command before explaining it.
 
 ## Lesson 1: Welcome — What Is Lingtai?
 

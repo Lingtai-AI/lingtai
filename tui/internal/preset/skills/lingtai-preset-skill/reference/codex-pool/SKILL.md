@@ -2,7 +2,7 @@
 name: preset-skill-codex-pool
 description: Official-source-led manual for the TUI `codex-pool` template.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -12,8 +12,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 `https://chatgpt.com/backend-api/codex`, `thinking: xhigh`, and an empty
 `api_key_env` because it selects from local ChatGPT OAuth token files. The
 manifest declares `vision` parity with `codex`; pooling changes account
-selection, not the model or endpoint. Runtime availability requires the
-companion kernel dispatch support described below.
+selection, not the model or endpoint.
 
 That manifest parity requires the companion kernel pool-vision dispatch support.
 Kernel versions before the pool-vision fix can silently skip this capability

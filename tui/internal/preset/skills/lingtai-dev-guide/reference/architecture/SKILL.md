@@ -3,12 +3,11 @@ name: dev-guide-architecture
 description: >
   Nested lingtai-dev-guide reference for the project architecture: Go TUI/portal monorepo, Python kernel, MCP addon repos, filesystem IPC, and where per-project/per-machine state lives.
 version: 1.0.0
-last_changed_at: "2026-06-02T00:05:51-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Architecture
-
 
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
 This document maps the LingTai project: what the pieces are, how they connect, and where state lives.
@@ -62,31 +61,20 @@ The wrapper depends on the kernel one-directionally. The kernel never imports fr
 ## How they connect
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    lingtai (Go)                      │
-│                                                     │
-│  ┌─────────────┐    ┌──────────────┐               │
-│  │  lingtai-tui │    │ lingtai-portal│              │
-│  │  (terminal)  │    │  (web)       │               │
-│  └──────┬───────┘    └──────┬───────┘               │
-│         │                   │                        │
-│         └─────────┬─────────┘                        │
-│                   │                                  │
-│          Filesystem only                             │
-│          (.lingtai/<agent>/)                         │
-│                   │                                  │
-└───────────────────┼──────────────────────────────────┘
-                    │
-┌───────────────────┼──────────────────────────────────┐
-│          lingtai-kernel (Python)                      │
-│                   │                                  │
-│  ┌────────────────┴────────────────┐                 │
-│  │         Agent runtime           │                 │
-│  │  turn loop · tools · mailbox    │                 │
-│  │  soul · molt · notifications    │                 │
-│  └─────────────────────────────────┘                 │
-└──────────────────────────────────────────────────────┘
+   lingtai (Go)                          lingtai-kernel (Python)
+┌──────────────┬───────────────┐        ┌────────────────────────┐
+│ lingtai-tui  │ lingtai-portal│        │     Agent runtime      │
+│  (terminal)  │     (web)     │◄──────►│ turn loop · tools ·    │
+└──────────────┴───────────────┘        │ mailbox · soul · molt  │
+         filesystem only                └────────────────────────┘
+         (.lingtai/<agent>/)
 ```
+
+The TUI and portal never open a socket or RPC channel to a running agent. **All
+communication is through files** — agent manifests, heartbeats, signal files,
+mailbox folders, `.notification/`. This is a deliberate design choice: any new
+cross-process communication should follow the same pattern (write a file, let the
+other side poll).
 
 **TUI → kernel:** The TUI launches agents via `python -m lingtai run <dir>` as a subprocess (`tui/internal/process/launcher.go`). After spawn, the TUI never talks to the agent process directly — only via the agent's working directory.
 
@@ -153,7 +141,3 @@ The wrapper depends on the kernel one-directionally. The kernel never imports fr
 ├── utilities/                   # optional library paths for agents
 └── ...
 ```
-
-## Filesystem-only IPC
-
-The TUI and portal never open a socket or RPC channel to a running agent. All communication is through files: agent manifests, heartbeats, signal files, mailbox folders, `.notification/`. This is a deliberate design choice — any new cross-process communication should follow the same pattern: write a file, let the other side poll.

@@ -2,7 +2,7 @@
 name: preset-skill-deepseek
 description: Official-source-led manual for the TUI `deepseek` template.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -18,7 +18,5 @@ Read the official [DeepSeek API introduction](https://api-docs.deepseek.com/)
 when checking current models, protocol, or limits. For an image request,
 report that this preset’s shipped wiring is text-only and let the agent
 discover an explicitly chosen skill if one exists; do not guess credentials,
-switch providers, or automatically load or invoke an MCP.
-
-Verify the provider/model/endpoint/env-var fields in TUI source after a
-template change. Provider documentation, not this manual, owns volatile facts.
+switch providers, or auto-load/invoke an MCP. Verify the
+provider/model/endpoint/env-var fields in TUI source after a template change.

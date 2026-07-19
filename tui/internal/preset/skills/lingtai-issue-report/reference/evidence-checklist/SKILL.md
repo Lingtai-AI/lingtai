@@ -2,15 +2,15 @@
 name: issue-report-evidence-checklist
 description: Nested lingtai-issue-report reference for deciding when an observation is worth reporting, what evidence to collect, and how to keep secrets out of a report. Read this first, while the problem is fresh, before drafting the report body.
 version: 1.0.0
-last_changed_at: "2026-06-02T02:43:15-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Issue report — evidence checklist
 
-This is a nested `lingtai-issue-report` reference. It covers two things: *whether* an observation deserves a report, and *what evidence* to capture (without leaking secrets) before you draft one. Read it while the problem is still fresh — you can rarely reconstruct exact tool output later.
+This is a nested `lingtai-issue-report` reference: *whether* an observation deserves a report, and *what evidence* to capture (without leaking secrets) before you draft one. Read it while the problem is still fresh — you can rarely reconstruct exact tool output later.
 
-You operate inside the LingTai system continuously, hitting its skills, capabilities, and procedures as a real user. That makes you uniquely positioned to notice problems humans might miss — a doc URL that 404s, a capability that errors silently, a skill whose claims don't match what the API actually returns, a preset that ships a broken default, a procedure step that contradicts another. **When you notice something wrong, surface it.**
+The kinds of problem you are placed to catch: a doc URL that 404s, a capability that errors silently, a skill whose claims don't match what the API actually returns, a preset that ships a broken default, a procedure step that contradicts another.
 
 ## When to invoke the issue-report protocol
 
@@ -33,8 +33,6 @@ You should **not** invoke this skill for:
 - Feature requests for things the system was never designed to do
 
 ## What makes a good report
-
-You see far more than a human does inside the system. Use that:
 
 - **Quote verbatim.** Tool outputs, error strings, doc snippets — copy them, don't summarize. Maintainers grep.
 - **Show your work.** "I called X with args Y and got Z" beats "X seems broken."

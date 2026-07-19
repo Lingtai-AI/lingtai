@@ -2,7 +2,7 @@
 name: preset-skill-mimo
 description: Official-source-led manual for the TUI `mimo` template.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -19,7 +19,5 @@ and [OpenAI-compatible API page](https://platform.xiaomimimo.com/docs/zh-CN/api/
 on demand for current models, regions, and image-input rules. No official MiMo
 vision MCP is established by the reviewed evidence. A direct-call failure
 remains a direct-call failure; do not switch providers or auto-load/invoke an
-MCP.
-
-Recheck `preset.go` and the preset editor for LingTai-owned model, endpoint,
-env-var, and capability wiring. Never include credentials here.
+MCP. Recheck `preset.go` and the preset editor for LingTai-owned model,
+endpoint, env-var, and capability wiring.

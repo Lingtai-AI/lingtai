@@ -7,15 +7,15 @@ description: >
   idempotent repository-health digest. This is a nested lingtai-dev-guide
   reference, not a top-level intrinsic skill.
 version: 1.0.0
-last_changed_at: "2026-06-29T01:44:32-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai Repo Watch
 
-This nested reference is a read-only developer workflow for sweeping the
-`Lingtai-AI` GitHub org. It is intentionally under `lingtai-dev-guide` because it
-is LingTai-project-specific; it should not be installed as a kernel intrinsic
+This nested lingtai-dev-guide reference is a read-only developer workflow for
+sweeping the `Lingtai-AI` GitHub org. It lives here because it is
+LingTai-project-specific; it should not be installed as a kernel intrinsic
 capability for every agent.
 
 ## Boundaries
@@ -75,6 +75,10 @@ Keep each item compact:
 <repo>#<num> — <title> · <author> · opened <relative date> · updated <relative date> · <url>
 ```
 
+A full report adds a header (`# LingTai org watch — <timestamp>`, scope, filters,
+`GitHub writes: none`), a "Changes since last run" block (new / updated /
+closed-or-removed) when running statefully, and an artifact/state-paths footer.
+
 ## Cron / LaunchAgent monitor pattern
 
 When the human asks for ongoing monitoring:
@@ -91,29 +95,6 @@ When the human asks for ongoing monitoring:
 Do not embed secrets in the script output or report. If a Telegram bot token is
 needed for local alerts, read it from the existing local secret file and never
 print it.
-
-## Suggested report template
-
-```markdown
-# LingTai org watch — <timestamp>
-
-Scope: Lingtai-AI, non-archived repos. Filters: <filters>.
-GitHub writes: none.
-
-## Changes since last run
-- New: ...
-- Updated: ...
-- Closed/removed from open list: ...
-
-## Open PRs
-...
-
-## Open issues
-...
-
-## Artifact / state paths
-...
-```
 
 ## Validation
 

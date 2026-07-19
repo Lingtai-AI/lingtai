@@ -2,13 +2,13 @@
 name: issue-report-report-template
 description: Nested lingtai-issue-report reference for the report skeleton — subject/title format, the structured body sections (what's wrong, where, reproduction, expected vs actual, severity, suggested fix), and how to send it via LingTai email or the human's active channel. Read this when you are ready to assemble the report.
 version: 1.0.0
-last_changed_at: "2026-06-02T02:43:15-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Issue report — report template
 
-This is a nested `lingtai-issue-report` reference. It is the canonical structure for an issue report: the subject/title, the body sections, and how to deliver it through the appropriate communication channel before any filing decision.
+This is a nested `lingtai-issue-report` reference: the canonical structure for an issue report — subject/title, body sections, and how to deliver it through the right channel before any filing decision.
 
 ## The report template
 
@@ -59,7 +59,7 @@ email(action="send", address=<parent_or_human_address>, subject="[Issue Report] 
 # Always follow the surrounding agent's channel discipline.
 ```
 
-Send the report to your **parent avatar** (if you're an avatar) AND to the **human**. If you have multiple addressees (parent + human), send the same content to each appropriate channel explicitly.
+Send it to your **parent avatar** (if you're an avatar) AND to the **human** — the same content to each, sent explicitly per channel.
 
 ## Which repo
 

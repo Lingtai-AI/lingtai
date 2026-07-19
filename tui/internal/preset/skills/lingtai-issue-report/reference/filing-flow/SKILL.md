@@ -2,13 +2,13 @@
 name: issue-report-filing-flow
 description: Nested lingtai-issue-report reference for the filing decision — the always-required human consent boundary, the read-only gh probe, Path A (direct gh filing) and Path B (paste-ready handoff), token hygiene, and proactive surfacing. Read this once the report is drafted and you are deciding how it gets filed.
 version: 1.0.0
-last_changed_at: "2026-06-02T02:43:15-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Issue report — filing flow
 
-This is a nested `lingtai-issue-report` reference. It governs everything after the report is drafted: getting human consent, detecting whether `gh` can file directly, the two filing paths, and surfacing the issue proactively.
+This is a nested `lingtai-issue-report` reference. It governs everything after the report is drafted: human consent, detecting whether `gh` can file directly, the two filing paths, and proactive surfacing.
 
 ## The boundary — permission required, always
 
@@ -39,10 +39,7 @@ command -v gh
 gh auth status 2>&1
 ```
 
-Interpret the result:
-
-- **`gh` is installed AND (`gh auth status` exits 0 with a logged-in account, OR the human has handed you a `GH_TOKEN` this session)** → Path A is available.
-- **`gh` is missing, or neither auth source is present** → Path A is not available. Fall through to Path B.
+Interpret: `gh` installed **and** either auth source present → **Path A** is available. `gh` missing, or neither source present → Path A is out; fall through to **Path B**.
 
 Do **not** run `gh issue create` during the probe. Do **not** echo, log, or commit the token. The probe is read-only; the actual filing happens only after the human says yes.
 
@@ -59,14 +56,9 @@ If the probe succeeded, your permission ask becomes one of:
 If they say **file it** (or equivalent — "yes", "go ahead", "do it"):
 
 ```bash
-# When relying on existing gh auth:
+# Relying on existing gh auth. When using a human-provided token instead, prefix
+# this exact command with the inline env (single command): GH_TOKEN=$TOKEN gh issue create ...
 gh issue create \
-  --repo Lingtai-AI/lingtai \
-  --title "<your Subject line, minus the [Issue Report] prefix>" \
-  --body-file <path-to-a-tempfile-with-the-rendered-body>
-
-# When using a human-provided token (inline env, single command):
-GH_TOKEN=$TOKEN gh issue create \
   --repo Lingtai-AI/lingtai \
   --title "<your Subject line, minus the [Issue Report] prefix>" \
   --body-file <path-to-a-tempfile-with-the-rendered-body>
@@ -103,8 +95,7 @@ When you identify an issue that meets the "When to invoke" criteria (see the `ev
 1. You diagnose the problem (as part of your normal work)
 2. You apply a workaround or fix (if possible)
 3. **You proactively tell the human:** "I ran into [brief summary]. Want me to file a GitHub issue about it?"
-4. If they say yes → follow the filing path above
-5. If they say no → drop it
+4. Yes → follow the filing path above; no → drop it
 
 The human should never have to guess that you found a bug. **Your job is not just to fix — it's to surface.**
 

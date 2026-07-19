@@ -2,13 +2,13 @@
 name: lingtai-issue-report
 description: Protocol router for reporting bugs, stale info, missing capabilities, or design issues you spot in any LingTai skill, capability, preset, or system behavior. Enter through this router, then load the one nested reference you need — evidence-checklist (when to report, what evidence to collect, secret hygiene), report-template (the report body/title structure), or filing-flow (human consent, the gh CLI path, and the paste-ready fallback). You always assemble a structured report and ask the human for permission before filing.
 version: 1.4.0
-last_changed_at: "2026-06-02T02:43:15-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Reporting LingTai Issues
 
-This is a reference router. You operate inside the LingTai system continuously, hitting its skills, capabilities, and procedures as a real user — so you are uniquely positioned to notice problems humans miss. **When you notice something wrong, surface it.** This skill is the protocol. Enter through this router, pick the one nested reference that matches where you are in the report lifecycle, and read that leaf for the full procedure.
+This is a reference router. You use the LingTai system as a real user all day — its skills, capabilities, and procedures — so you are uniquely positioned to notice problems humans miss. **When you notice something wrong, surface it.** This skill is the protocol: enter through this router, pick the one nested reference matching where you are in the report lifecycle, and read that leaf for the full procedure.
 
 ## The non-negotiables (read before anything else)
 
@@ -35,19 +35,13 @@ The nested references elaborate these; they never weaken them.
 
 ## Routing table
 
-| Need | Read |
-|---|---|
-| Decide whether to report, gather evidence, or scrub secrets | `reference/evidence-checklist/SKILL.md` |
-| Assemble the report body/title and send it via mail | `reference/report-template/SKILL.md` |
-| Get consent and file it (gh CLI or paste-ready handoff) | `reference/filing-flow/SKILL.md` |
+You will usually move through all three in order, but read **one leaf at a time** — don't pull the whole protocol into context at once.
 
-## How to use this router
-
-1. **Just noticed something?** → `evidence-checklist` — confirm it's report-worthy and capture the evidence before it's gone.
-2. **Ready to write it up?** → `report-template` — fill in the structured body and mail it to your parent and the human.
-3. **Time to file?** → `filing-flow` — probe `gh`, ask the human's permission, then file via Path A or hand off via Path B.
-
-You will usually move through all three in order, but read one leaf at a time — don't pull the whole protocol into context at once.
+| Where you are | Read | What it covers |
+|---|---|---|
+| Just noticed something | `reference/evidence-checklist/SKILL.md` | Whether it's report-worthy, the evidence to capture before it's gone, scrubbing secrets |
+| Ready to write it up | `reference/report-template/SKILL.md` | The body/title structure, and mailing it to your parent and the human |
+| Time to file | `reference/filing-flow/SKILL.md` | The read-only `gh` probe, the human's permission, then Path A filing or Path B handoff |
 
 ---
 > **Found a bug or issue?** If you encounter any problems with this skill, load the `lingtai-issue-report` skill and follow its instructions to report it.

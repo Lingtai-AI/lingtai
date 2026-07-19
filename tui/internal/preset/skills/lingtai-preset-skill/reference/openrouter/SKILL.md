@@ -2,7 +2,7 @@
 name: preset-skill-openrouter
 description: Official-source-led manual for the TUI `openrouter` template.
 version: 1.0.0
-last_changed_at: "2026-07-15T00:00:00Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -21,6 +21,5 @@ and [image-understanding guide](https://openrouter.ai/docs/guides/overview/multi
 on demand. No OpenRouter plan-level vision MCP is evidenced. If the real image
 request fails, the sanitized vision tool result reports the failure type and
 points to `vision(action="manual")` for explicit alternatives. Do not silently
-change model/provider or auto-load/invoke an MCP.
-
-Verify provider, model, endpoint resolution, and capability flags in TUI source.
+change model/provider or auto-load/invoke an MCP. Verify provider, model,
+endpoint resolution, and capability flags in TUI source.

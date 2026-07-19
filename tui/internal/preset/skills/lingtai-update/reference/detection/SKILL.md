@@ -2,7 +2,7 @@
 name: lingtai-update-detection
 description: Use when determining how the running lingtai-tui was installed.
 version: 1.0.0
-last_changed_at: "2026-07-15T01:50:00-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -22,6 +22,6 @@ Nested `lingtai-update` reference. Detection is deliberately conservative.
    source metadata says otherwise.
 
 Symlinks matter: a manually linked or development binary may not be the Cellar
-copy that Homebrew upgrades. Check `lingtai-tui doctor` output and the resolved
-executable before choosing a manual command. The metadata is diagnostic and
-routing information; it is not a credential store.
+copy Homebrew upgrades. Check `lingtai-tui doctor` output and the resolved
+executable before choosing a manual command. This metadata is diagnostic and
+routing information, not a credential store.

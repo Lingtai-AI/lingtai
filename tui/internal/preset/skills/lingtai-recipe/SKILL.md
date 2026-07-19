@@ -6,23 +6,20 @@ description: >
   greeting, ongoing behaviour, and shipped library; every LingTai
   project uses one (selected at `/setup` time, inherited from a clone,
   or auto-discovered when a project already has `.recipe/` at its
-  root). The skill body fans out into two substantive sub-guides so
-  you load only what the task needs: `reference/recipe-format/SKILL.md` for
-  the bundle format + `recipe.json` schema + library sibling rules +
-  validator contract (read first when authoring or customising); and
-  `reference/export-recipe/SKILL.md` for shipping the methodology / culture as
-  a bundle others can use to seed *new* networks (no agents, no
-  mailboxes). Body also warns about the three different
-  recipe-shaped artifacts that can co-exist in one project (inner
-  network, outer applied recipe, captured applied snapshot — easy to
-  conflate). Read this skill when the human mentions recipes, wants
-  to author / customise one, or wants to publish a recipe for seeding
-  new networks. Do NOT use for one-off exports of a single agent
-  (that's just `cp -r`), or for in-network behaviour edits to the
+  root). Routes to two sub-guides — `reference/recipe-format/SKILL.md`
+  (read first when authoring or customising) and
+  `reference/export-recipe/SKILL.md` (shipping the methodology / culture
+  as a bundle others use to seed *new* networks) — and warns about the
+  three different recipe-shaped artifacts that can co-exist in one
+  project (inner network, outer applied recipe, captured applied
+  snapshot — easy to conflate). Read this skill when the human mentions
+  recipes, wants to author / customise one, or wants to publish a
+  recipe for seeding new networks. Do NOT use for one-off exports of a
+  single agent (that's just `cp -r`), or for in-network behaviour edits to the
   live system (those go through the kernel's writes to the agent's
   working directory, not through a recipe round-trip).
 version: 3.2.0
-last_changed_at: "2026-06-02T00:08:39-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -30,10 +27,7 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 
 > **Bundle root convention**: The bundle root is the directory that **contains** `.recipe/` at its top level (alongside the library folder). When pointing the TUI or any tool at a recipe, pass **this directory**, not `.recipe/` itself and not a parent of it. For recipes published via `lingtai-recipe` skill, this is `$HOME/lingtai-agora/recipes/<id>/`.
 
-A **recipe bundle** is a directory with two possible siblings at its root:
-
-- `.recipe/` (required) — the LingTai-facing behavioral layer: `recipe.json` manifest, optional `greet/`, `comment/`, `covenant/`, `procedures/` layer dirs with locale variants.
-- `<library_name>/` (optional) — a framework-agnostic skill library, named by `recipe.json#library_name`. Drop-in usable by any agent framework that reads `SKILL.md`.
+A **recipe bundle** is a required `.recipe/` behavioral layer (`recipe.json` manifest plus optional `greet/`, `comment/`, `covenant/`, `procedures/` layer dirs) beside an optional framework-agnostic skill library named by `recipe.json#library_name`. `reference/recipe-format/SKILL.md` is authoritative for that structure; this router does not restate it.
 
 Every LingTai project uses a recipe — selected during `/setup`, inherited from a cloned network, or auto-discovered when a project already has `.recipe/` at its root.
 
@@ -94,21 +88,19 @@ Installed at `~/.lingtai-tui/utilities/lingtai-recipe/`. Resolve absolute paths 
 
 ## Ground rules for the export flow
 
-- **Resolve `$HOME` first** — the `write` tool does not expand `~`. Run `echo $HOME` once and use the resolved absolute path everywhere.
-- **Always `mkdir -p` before writing**, and verify after with `find` / `ls` — `write` can silently succeed on missing parents.
-- **Talk to the human via `email`**, not text output. This is a multi-round flow with real latency; the human only reliably sees messages in their inbox.
 - **Never skip the interactive steps.** The flow requires human judgment at specific points (recipe naming, inspecting validator findings). The whole point of a skill-driven export is human-in-the-loop.
+- Resolve `$HOME` first, `mkdir -p` before every write, verify afterwards with `find` / `ls`, and talk to the human via `email` rather than text output. `reference/export-recipe/SKILL.md` ("How to talk to the human", "Critical: Filesystem Rules") is canonical for all four — follow it there in full before writing anything.
 
 ## Key structural rules that differ from older skills
 
-If you have memory of an older version of this skill, these are the things that changed. When in doubt, the validator (`scripts/validate_recipe.py`) is the source of truth.
+If you have memory of an older version of this skill, these are the things that changed — old shape → new shape only. `reference/recipe-format/SKILL.md` specifies the new format in full; when in doubt, the validator (`scripts/validate_recipe.py`) is the source of truth.
 
-- **Recipe bundles now have two siblings, not one.** Old format: recipe files all lived under `.lingtai-recipe/` at the repo root. New format: `.recipe/` dotfolder holds only LingTai-facing behavioral layers; libraries live at a sibling folder named by `recipe.json#library_name`.
-- **`recipe.json` moved into `.recipe/`.** Old location: `<repo-root>/recipe.json`. New location: `<bundle-root>/.recipe/recipe.json`. Schema also grew — see the format reference.
-- **All four behavioral layers are optional.** Old format: `greet.md` and `comment.md` were required. New format: every layer is optional. Absent greet → silent agent. Absent comment → no comment file in init.json. Absent covenant / procedures → kernel defaults.
-- **Library is a sibling, not inside `.recipe/`.** Old format: skills lived at `.lingtai-recipe/skills/<name>/SKILL.md`. New format: skills live at `<bundle>/<library_name>/<skill>/SKILL.md` — the library is a separate sibling folder, and the recipe declares its name via `recipe.json#library_name`. This makes libraries drop-in-usable by non-LingTai agent frameworks.
+- **Recipe bundles now have two siblings, not one.** Old: everything under `.lingtai-recipe/` at the repo root. New: `.recipe/` holds only LingTai-facing behavioral layers; libraries live at a sibling folder named by `recipe.json#library_name`.
+- **`recipe.json` moved into `.recipe/`.** Old: `<repo-root>/recipe.json`. New: `<bundle-root>/.recipe/recipe.json`, with a grown schema.
+- **All four behavioral layers are optional.** Old: `greet.md` and `comment.md` were required. New: every layer is optional. Absent greet → silent agent. Absent comment → no comment file in init.json. Absent covenant / procedures → kernel defaults.
+- **Library is a sibling, not inside `.recipe/`.** Old: `.lingtai-recipe/skills/<name>/SKILL.md`. New: `<bundle>/<library_name>/<skill>/SKILL.md`, which makes libraries drop-in-usable by non-LingTai agent frameworks.
 - **Library skills are monolingual.** No more `SKILL-en.md` / `SKILL-zh.md` variants. One `SKILL.md` per skill.
-- **Layer directories have their own fallback structure.** Old: `.lingtai-recipe/<lang>/greet.md`. New: `.recipe/greet/<lang>/greet.md` (layer-then-lang, with `<layer>.md` at the root of the layer dir as the default).
+- **Layer directories have their own fallback structure.** Old: `.lingtai-recipe/<lang>/greet.md`. New: `.recipe/greet/<lang>/greet.md` (layer-then-lang, with `<layer>.md` at the layer dir root as the default).
 - **`recipe.json` is single-canonical, never localized.** Localized display strings belong only in `greet.md` / `comment.md` / `covenant.md` / `procedures.md`.
 - **Network exports are gone (v3.2).** Earlier versions of this skill described an `export-network` flow that shipped the live `.lingtai/` snapshot alongside the recipe. That flow has been retired — `/export` now means recipe-only. Recipes are the seed; the garden is grown fresh in each new project.
 

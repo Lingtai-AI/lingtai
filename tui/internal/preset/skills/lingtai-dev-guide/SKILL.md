@@ -8,14 +8,14 @@ description: >
   review-ready, or steward a new skill. This is for developers and contributors;
   for end-user lessons, use tutorial-guide.
 version: 2.7.0
-last_changed_at: "2026-07-11T14:20:00-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai Developer Guide
 
-This skill is the cross-repository developer router for LingTai. The root stays
-short on purpose; detailed procedures live under `reference/<topic>/`.
+The cross-repository developer router for LingTai. The root stays short on
+purpose; detailed procedures live under `reference/<topic>/`.
 
 ## Repository-local developer guidance takes precedence
 
@@ -24,18 +24,17 @@ repository and read it first. When it exists, follow it for repository-specific
 rules; it takes precedence over this global guide. Use this guide afterward — or
 when the local guide routes here — to select the deeper cross-repository topic
 you need, then read that nested reference before touching code. Do not substitute
-generic procedures here for local guidance or restate local rules from memory.
+generic procedures here for local guidance, or restate local rules from memory.
 
 ## Non-negotiable rules
 
 - **Progressive disclosure:** router → nested reference → anatomy skill → code +
-  tests. Do not jump straight from memory to edits.
+  tests. Never jump from memory straight to edits.
 - **Code is truth:** reference files route and summarize; cited source files,
   tests, and `ANATOMY.md` files are authoritative.
 - **Anatomy travels with code:** if you move/rename/split/delete code cited by an
-  `ANATOMY.md`, update the anatomy in the same commit. When creating or
-  materially updating anatomy files, follow the ANATOMY frontmatter contract
-  below.
+  `ANATOMY.md`, update the anatomy in the same commit, following the ANATOMY
+  frontmatter contract below.
 - **Explicit human authorization gates:** do not open/merge PRs, push commits,
   file issues, close/delete resources, or change config unless the human gave an
   imperative authorization for that side effect.
@@ -43,13 +42,13 @@ generic procedures here for local guidance or restate local rules from memory.
   notes, and PR-readiness reports should be standalone HTML unless waived.
 - **Release/install docs rule:** LingTai runtime is normally managed by the
   TUI-created project venv; do not present bare `pip install/upgrade lingtai` as
-  the standard user path. Use manual pip/venv commands only for developer,
-  diagnostic, or verification contexts.
+  the standard user path. Manual pip/venv commands are for developer,
+  diagnostic, or verification contexts only.
 - **Patch-to-self refresh rule:** a merged PR or rebuilt checkout is not live in
   the agent until the runtime-imported source/package is updated, the agent is
   refreshed, and a live in-situ probe confirms the new behaviour. For kernel
-  fixes, always identify the actual import path and git HEAD first; do not
-  assume the repo you edited is the one this agent imports.
+  fixes, identify the actual import path and git HEAD first — do not assume the
+  repo you edited is the one this agent imports.
 - **Skill-size/progressive-disclosure rule:** when writing or updating skills,
   treat read/context limits as a reason to keep the router lean and link onward,
   not as a reason to paste large content into `SKILL.md`. Put dense material in
@@ -77,10 +76,10 @@ maintenance: |
 Rules:
 
 - `related_files` uses repo-relative paths only; every entry must be a real file.
-- Include files the anatomy explains and neighboring/parent/child `ANATOMY.md`
-  files where applicable. Do not make a complete graph; choose meaningful
-  anatomy links, but an isolated `ANATOMY.md` is invalid. Anatomy-to-anatomy
-  links must be bidirectional: if A lists B, B should list A.
+- Include the files the anatomy explains plus neighboring/parent/child
+  `ANATOMY.md` files. Do not build a complete graph — choose meaningful links —
+  but an isolated `ANATOMY.md` is invalid, and anatomy-to-anatomy links must be
+  bidirectional: if A lists B, B should list A.
 - `maintenance` carries the recursive instruction: copy it into new anatomy files
   and report drift when anatomy and code no longer match.
 
@@ -93,73 +92,58 @@ drill-down files, not standalone top-level skills.
 - name: dev-guide-architecture
   location: reference/architecture/SKILL.md
   description: |
-    Project shape, repositories, IPC boundaries, runtime state layout, and where
-    to start when orienting yourself in LingTai development.
+    Project shape, repos, IPC boundaries, and runtime state layout.
 - name: dev-guide-setup
   location: reference/setup/SKILL.md
   description: |
-    Local development environment setup for the Go TUI/portal repo, Python
-    kernel, MCP addons, and related verification commands.
+    Local dev environment for the Go TUI/portal repo, Python kernel, and MCP addons.
 - name: dev-guide-contributing
   location: reference/contributing/SKILL.md
   description: |
-    Contribution workflows for TUI, portal, kernel, addons, bundled utilities,
-    skill changes, tests, PR preparation, review discipline, and local
-    worktree hygiene (read-only inventory plus exact-object approval gates).
+    Contribution workflow, daemon decomposition, build/test commands, skill
+    changes, anatomy maintenance, and worktree hygiene with exact-object
+    approval gates.
 - name: dev-guide-gotchas
   location: reference/gotchas/SKILL.md
   description: |
-    Known pitfalls and footguns while coding LingTai: runtime venv assumptions,
-    prompt/system behavior, packaging, state files, and stale-doc hazards.
+    Known footguns: venv assumptions, migrations, packaging, state files, i18n.
 - name: dev-guide-debug-troubleshoot
   location: reference/debug-troubleshoot/SKILL.md
   description: |
-    Diagnosing stuck, errored, quiet, or misbehaving LingTai networks with logs,
-    health surfaces, doctor checks, and code-backed troubleshooting.
+    Diagnosing stuck, errored, quiet, or misbehaving LingTai networks.
 - name: dev-guide-security-audit
   location: reference/security-audit/SKILL.md
   description: |
-    Security auditing for secrets, permissions, MCP/addon config, channels,
-    data exposure, and safe reporting of findings.
+    Read-only audits of secrets, permissions, MCP config, channels, and data
+    exposure, with severity classification and safe reporting.
 - name: dev-guide-runtime-self-check
   location: reference/runtime-self-check/SKILL.md
   description: |
-    Developer/operator runtime self-check after refresh/checkout/preset/MCP
-    change: probe which lingtai code is running, confirm editable source and git
-    HEAD, verify the active TUI/portal binary and dev-mode symlinks, rebuild from
-    a clean worktree, inspect MCP/addon sources, confirm long-lived runtime
-    objects (services/adapters/caches) actually rebuilt after refresh rather than
-    serving stale behaviour, and report evidence with secrets redacted.
+    Probe which lingtai code is actually running after a refresh/checkout/preset/
+    MCP change — editable source, git HEAD, active binary and dev-mode symlinks,
+    whether long-lived runtime objects really rebuilt — and report it safely.
 - name: dev-guide-pr-review-deliverables
   location: reference/pr-review-deliverables/SKILL.md
   description: |
-    Getting a PR review-ready: readiness gates, multi-model/daemon/Claude
-    read-only review passes, self-contained local HTML explainers, PR body
-    hygiene, source-labeled deliverables with validation/syntax checks, and
-    maintainer authorization boundaries.
+    PR readiness gates, independent review passes, the self-contained local HTML
+    explainer, PR body hygiene, and maintainer authorization boundaries.
 - name: dev-guide-skill-stewardship
   location: reference/skill-stewardship/SKILL.md
   description: |
-    Turning experience into durable skills: when to write a skill, the
-    router-vs-nested-reference pattern, distillation (归一) and journals as skill
-    seeds, de-privatizing/parameterizing local paths and human details, a
-    lightweight pre-publish benchmark, shared-library grooming, and PR-ready skill
-    cleanup. Cross-links skills-manual for generic authoring.
+    Turning experience into durable skills: when to write one, router-vs-nested
+    structure, distillation (归一), de-privatization, a pre-publish benchmark,
+    shared-library grooming, and PR-ready cleanup. Cross-links skills-manual.
 - name: dev-guide-repo-watch
   location: reference/repo-watch/SKILL.md
   description: |
-    Read-only workflow for sweeping the Lingtai-AI GitHub org for open issues,
-    open PRs, and recent activity; includes non-self monitoring, digest shape,
-    and LaunchAgent/cron-style stateful alerting.
+    Read-only sweep of the Lingtai-AI org for open issues/PRs and recent
+    activity, plus non-self monitoring and stateful alerting.
 - name: dev-guide-cache-hit-rate
   location: reference/cache-hit-rate/SKILL.md
   description: |
-    Compute the recent prompt-cache hit rate from token ledgers over rolling
-    windows (default 1h / 5h / 1d / 3d). Covers the provider-agnostic
-    input/cached fields in logs/token_ledger.jsonl, the formula
-    (sum(cached)/sum(input) per window), timestamp/timezone handling, the
-    daemon double-count hazard, and the bundled read-only stdlib script documented
-    in that reference for an agent workdir, project root, or single ledger file.
+    Recent prompt-cache hit rate from token ledgers over rolling windows
+    (1h/5h/1d/3d): ledger fields, the formula, the daemon double-count hazard,
+    and the bundled read-only stdlib script.
 ```
 
 ## Routing table
@@ -172,9 +156,10 @@ drill-down files, not standalone top-level skills.
 | Avoid common footguns while coding | `reference/gotchas/SKILL.md` |
 | Diagnose a stuck, errored, or misbehaving LingTai network | `reference/debug-troubleshoot/SKILL.md` |
 | Audit secrets, permissions, MCP config, channels, or data exposure | `reference/security-audit/SKILL.md` |
-| Verify which runtime/binary is actually running after a refresh or rebuild, or why a fix that's on disk still serves stale behaviour (a long-lived service/adapter/cache that didn't rebuild) | `reference/runtime-self-check/SKILL.md` |
+| Verify which runtime/binary is actually running after a refresh or rebuild, or why a fix that's on disk still serves stale behaviour | `reference/runtime-self-check/SKILL.md` |
 | Get a PR review-ready: review gates, HTML explainer, PR hygiene | `reference/pr-review-deliverables/SKILL.md` |
 | Turn experience into a durable, de-privatized, PR-ready skill | `reference/skill-stewardship/SKILL.md` |
+| Sweep the GitHub org read-only, or install a non-self PR/issue monitor | `reference/repo-watch/SKILL.md` |
 | Measure the recent prompt-cache hit rate (1h/5h/1d/3d) from token ledgers | `reference/cache-hit-rate/SKILL.md` |
 
 ## Related skills to load instead or next
@@ -184,12 +169,12 @@ drill-down files, not standalone top-level skills.
 | Navigate Go TUI/portal code structurally | `lingtai-tui-anatomy` |
 | Navigate Python kernel code structurally | `lingtai-kernel-anatomy` |
 | Develop, register, or troubleshoot MCP servers/addons | `mcp-manual` first, then `lingtai-kernel-anatomy` `reference/mcp-protocol.md` |
-| Author or publish skills, including limit-aware router/reference structure | `skills-manual`, then `reference/skill-stewardship/SKILL.md` for LingTai-dev stewardship |
+| Author or publish skills, including limit-aware router/reference structure | `skills-manual`, then `reference/skill-stewardship/SKILL.md` |
 | Customize, export, or package project methodology as a recipe | `lingtai-recipe` |
 | Work on portal APIs, topology recording, replay, or `.portal/` state | `lingtai-portal-guide` |
+| Produce a standalone HTML deliverable (skeleton, MathJax, validation) | `swiss-knife` → `reference/html-report/SKILL.md` |
 | Prepare for a consequential molt during long dev work | `psyche-manual` |
 | Explain LingTai to an end user lesson-by-lesson | `tutorial-guide` |
-| Sweep the GitHub org read-only for current issues/PRs or install a non-self PR/issue monitor | `reference/repo-watch/SKILL.md` |
 | Report a LingTai bug or stale documentation | `lingtai-issue-report` |
 
 ## Orientation snapshot
@@ -202,41 +187,21 @@ drill-down files, not standalone top-level skills.
 
 ## Common routing examples
 
-- **"I need to change a TUI screen"** → `reference/contributing/SKILL.md` →
+Multi-hop routes the table above doesn't spell out:
+
+- **"Change a TUI screen"** → `reference/contributing/SKILL.md` →
   `lingtai-tui-anatomy` → relevant Go files → focused `go test`.
-- **"I need to update an ANATOMY.md"** → repo-specific anatomy skill →
-  apply the ANATOMY frontmatter contract (`related_files` + `maintenance`) and
-  report stale citations, dead paths, or claims that no longer match the code.
-- **"I need to add a capability or inspect runtime behavior"** →
-  `lingtai-kernel-anatomy` → relevant kernel anatomy/code → kernel tests.
-- **"An agent is quiet or unreachable"** → `reference/debug-troubleshoot/SKILL.md`
-  → `lingtai-doctor` if local health surfaces disagree.
-- **"This broad dev task needs triage"** → run the read-only portfolio sweep in
+- **"Update an ANATOMY.md"** → repo-specific anatomy skill → apply the ANATOMY
+  frontmatter contract above, and report stale citations, dead paths, or claims
+  that no longer match the code.
+- **"Add a capability or inspect runtime behavior"** → `lingtai-kernel-anatomy` →
+  kernel anatomy/code → kernel tests.
+- **"This broad dev task needs triage"** → the read-only portfolio sweep in
   `reference/contributing/SKILL.md`, then ask for authorization before mutating
   GitHub state.
-- **"Local worktrees are piling up"** → the "Worktree hygiene" section in
+- **"Local worktrees are piling up"** → "Worktree hygiene" in
   `reference/contributing/SKILL.md`: inventory read-only, propose exact objects,
-  and remove only after the human or owning maintainer approves them.
-
-## Skill layout
-
-```text
-lingtai-dev-guide/
-├── SKILL.md
-└── reference/
-    ├── architecture/SKILL.md
-    ├── setup/SKILL.md
-    ├── contributing/SKILL.md
-    ├── gotchas/SKILL.md
-    ├── debug-troubleshoot/SKILL.md
-    ├── security-audit/SKILL.md
-    ├── runtime-self-check/SKILL.md
-    ├── pr-review-deliverables/SKILL.md
-    ├── skill-stewardship/SKILL.md
-    └── cache-hit-rate/
-        ├── SKILL.md
-        └── scripts directory (cache_hit_rate.py)
-```
+  remove only after the human or owning maintainer approves them.
 
 Now read the nested reference that matches the task, then verify against current
 repo state before acting.

@@ -2,7 +2,7 @@
 name: portal-guide-overview
 description: Nested lingtai-portal-guide reference for portal purpose, opening the browser view, and the `.portal/` directory layout.
 version: 1.0.0
-last_changed_at: "2026-06-02T01:46:45-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -12,7 +12,7 @@ This is a nested `lingtai-portal-guide` reference. It covers what the portal is,
 
 ## What is the portal
 
-`lingtai-portal` is a Go binary that serves a web-based visualization of the agent network. It:
+`lingtai-portal` is a Go binary that:
 
 1. Reads the same `.lingtai/` directory as the TUI (filesystem-native, no separate database).
 2. Snapshots the network topology every 3 seconds into a JSONL tape.
@@ -21,9 +21,7 @@ This is a nested `lingtai-portal-guide` reference. It covers what the portal is,
 
 ## Opening the portal
 
-Read `.lingtai/.portal/port` to get the port number. Open `http://localhost:<port>` in a browser.
-
-If `.lingtai/.portal/port` does not exist, the portal is not running — the user can start it with `lingtai-portal`.
+Read `.lingtai/.portal/port` to get the port number, then open `http://localhost:<port>` in a browser. If that file does not exist, the portal is not running — the user can start it with `lingtai-portal`.
 
 ## `.portal/` directory
 

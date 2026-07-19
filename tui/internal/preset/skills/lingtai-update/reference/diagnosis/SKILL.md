@@ -2,7 +2,7 @@
 name: lingtai-update-diagnosis
 description: Use when a TUI or portal install, update, build, or restart fails.
 version: 1.0.0
-last_changed_at: "2026-07-15T01:50:00-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -25,9 +25,9 @@ formula source before retrying. A successful binary update still requires a
 fresh process: quit and relaunch the TUI.
 
 For source-build failures, separate Go module fetches from the portal's
-`npm ci`/frontend build. For an asset download failure, the installer is
-designed to fall back to a source build; record the release tag, OS/architecture,
-and the first actionable error rather than retrying blindly. Do not paste
-environment dumps, tokens, or private paths into reports. A Python import,
-venv, or kernel error is outside this skill; follow the kernel's
-`system-manual` runtime/kernel update manual.
+`npm ci`/frontend build. On asset download failure the installer is designed to
+fall back to a source build; record the release tag, OS/architecture, and the
+first actionable error rather than retrying blindly. Never paste environment
+dumps, tokens, or private paths into reports. Python import, venv, or kernel
+errors are outside this skill; follow the kernel's `system-manual`
+runtime/kernel update manual.

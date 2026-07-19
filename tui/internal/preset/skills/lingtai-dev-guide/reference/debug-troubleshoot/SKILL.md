@@ -3,17 +3,15 @@ name: dev-guide-debug-troubleshoot
 description: >
   Nested lingtai-dev-guide reference for diagnosing LingTai failures: agent process state, OOM/crashes, avatar spawn issues, post-molt memory loss, mail delivery, scheduled messages, tool timeouts, and escalation.
 version: 1.0.0
-last_changed_at: "2026-07-17T02:08:30Z"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai Debug & Troubleshoot Reference
 
-
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
-> **Read the `lingtai-kernel-anatomy` skill first to understand the architecture.** This document diagnoses issues based on the Lingtai architecture's process model, memory layers, and communication mechanisms.
 
----
+> **Read the `lingtai-kernel-anatomy` skill first.** It owns the concepts — lifecycle states, memory layers, mail protocol, tool surface — that every section below assumes. This document is only the diagnosis-and-recovery procedure; the per-section concept map is at the end.
 
 ## Quick Diagnosis Decision Tree
 
@@ -38,114 +36,29 @@ Problem?
     └── Tool output truncated → §4.3
 ```
 
----
-
 ## 1. Process Issues
 
 ### 1.1 Peer Unresponsive
 
-**Goal**: Determine why a peer is not replying to pigeons and take the appropriate recovery action.
+Pigeons go unanswered; the peer is in contacts but silent. Possible states: busy (long LLM turn), stuck (LLM timeout/upstream error), asleep (energy depleted or lulled), suspended (process dead), or wrong address.
 
-**Symptoms**:
-- Sent pigeons go unanswered for an extended period
-- The peer appears in the contacts list but produces no response
+Diagnose in order — `system(show)` (your own health) → `email(contacts)` (verify the address) → `email(send, address=<peer>, message="ping")` → the heartbeat:
 
-**Causes**:
-- Peer is busy (processing a long LLM turn)
-- Peer is stuck (LLM timeout / upstream error)
-- Peer is asleep (energy depleted or lulled)
-- Peer is suspended (process is dead)
-- Wrong address (no agent exists at that address)
-
-**Resolution**:
-
-1. First verify your own health:
-   ```
-   system(show)
-   ```
-2. Verify the peer's address:
-   ```
-   email(contacts)
-   ```
-3. Send a simple ping test:
-   ```
-   email(send, address=<peer>, message="ping")
-   ```
-4. Check the heartbeat to determine process state:
-   ```bash
-   ls -la <work-dir>/.lingtai/<peer>/.agent.heartbeat
-   cat <work-dir>/.lingtai/<peer>/.agent.heartbeat
-   ```
-5. Interpret the heartbeat:
-   - **Fresh heartbeat (< 5 minutes)**: Peer is busy — just wait
-   - **Stale heartbeat (> 5 minutes)**: May be stuck or crashed
-   - **No heartbeat file**: No agent may exist at that address
-
-**Command Example**:
 ```bash
-# Check heartbeats for all agents
-for dir in <network-dir>/.lingtai/*/; do
-  name=$(basename "$dir")
-  hb="$dir/.agent.heartbeat"
-  if [ -f "$hb" ]; then
-    age=$(( $(date +%s) - $(stat -f %m "$hb" 2>/dev/null || stat -c %Y "$hb") ))
-    echo "$name: heartbeat ${age}s ago"
-  else
-    echo "$name: NO heartbeat"
-  fi
-done
+ls -la <work-dir>/.lingtai/<peer>/.agent.heartbeat
+cat <work-dir>/.lingtai/<peer>/.agent.heartbeat
 ```
 
-**Action Decision**:
-- **Have karma privileges**:
-  - `system(interrupt, address=<peer>)` — interrupt a stuck LLM turn
-  - `system(cpr, address=<peer>)` — revive a suspended agent
-- **No karma privileges**: Report to parent, attaching evidence (heartbeat timestamp, last communication time)
+Fresh (< 5 min) = busy, just wait. Stale (> 5 min) = stuck or crashed. No file = probably no agent at that address. For a whole network at once, use the sweep in §5.
 
-**Common Pitfalls**:
-- ❌ Sending repeated probe emails → wastes resources; cannot wake a suspended process
-- ❌ Running CPR on a suspended agent without nirvana privileges → silent failure
-- ❌ Confusing asleep with suspended → asleep agents can be woken by email; suspended requires CPR
-- ✅ Correct approach: check heartbeat first, then decide whether to wait, interrupt, or CPR
+**Action.** With karma: `system(interrupt, address=<peer>)` for a stuck LLM turn, `system(cpr, address=<peer>)` to revive a suspended agent. Without karma: report to parent with evidence (heartbeat timestamp, last contact time).
 
-**Related References**: `lingtai-kernel-anatomy` (five lifecycle states; avatar management)
-
----
+**Pitfalls.** Repeated probe emails waste resources and cannot wake a suspended process; CPR without nirvana privileges fails silently. Asleep ≠ suspended — asleep agents wake on email, suspended ones need CPR first. Check the heartbeat before choosing to wait, interrupt, or CPR.
 
 ### 1.2 Peer OOM / Crashed
 
-**Goal**: Diagnose and recover from an unexpected peer process death.
+Heartbeat stops abruptly while the working directory survives. Usual causes: host memory exhausted (OS OOM killer), LLM upstream unresponsive past the process timeout, an uncaught Python exception, or a full disk.
 
-**Symptoms**:
-- Peer heartbeat suddenly stops
-- Working directory still exists but the process is gone
-
-**Causes**:
-- Host memory exhausted; OS OOM killer terminated the process
-- LLM upstream API unresponsive for too long, causing a process timeout
-- Python runtime failed to catch an exception
-- Disk space exhausted
-
-**Resolution**:
-
-1. Check whether the working directory still exists:
-   ```bash
-   ls -la <work-dir>/.lingtai/<peer>/
-   ```
-2. Review crash logs:
-   ```bash
-   cat <work-dir>/.lingtai/<peer>/logs/*.log | tail -50
-   ```
-3. Search for OOM indicators:
-   ```bash
-   grep -i "memory\|oom\|killed" <work-dir>/.lingtai/<peer>/logs/*.log
-   ```
-4. Check disk space:
-   ```bash
-   df -h <work-dir>
-   ```
-
-**Command Example**:
 ```bash
 # Comprehensive health check for an agent
 peer_dir="<work-dir>/.lingtai/<peer>"
@@ -159,223 +72,90 @@ echo "=== OOM scan ==="
 grep -il "oom\|killed\|memory" "$peer_dir/logs/"*.log 2>/dev/null || echo "No OOM indicators"
 ```
 
-**Action Decision**:
-- **Have karma privileges**: `system(cpr, address=<peer>)` to revive
-- After revival, check context usage — if near the limit, consider a molt
-
-**Common Pitfalls**:
-- ❌ Not checking context usage after CPR → may immediately crash again
-- ❌ Ignoring disk space → root cause unresolved, issue recurs
-- ✅ After OOM, prioritize checking context window and attachment file sizes
-
-**Related References**: `lingtai-kernel-anatomy` (process model; molt operations)
-
----
+**Action.** With karma, `system(cpr, address=<peer>)` revives it — then check context usage immediately, because reviving into a near-full context crashes again. After an OOM, prioritize the context window and attachment file sizes; ignoring disk space leaves the root cause live and the issue recurs.
 
 ### 1.3 Cannot Spawn Avatar
 
-**Goal**: Resolve `avatar(spawn)` call failures.
+`avatar(spawn)` errors, or the new process never appears under delegates. Causes: name collision, unwritable working directory, insufficient disk, or a malformed init.json.
 
-**Symptoms**:
-- `avatar(spawn)` returns an error
-- The new avatar process does not appear in the delegates directory
-
-**Causes**:
-- Name collision (an avatar with the same name already exists)
-- Working directory is not writable
-- Insufficient disk space
-- init.json format error
-
-**Resolution**:
-
-1. Check avatar logs to rule out name collisions and quantity limits:
-   ```bash
-   cat <work-dir>/.lingtai/delegates/ledger.jsonl
-   ```
-2. Verify the directory is writable:
-   ```bash
-   touch <work-dir>/.lingtai/delegates/.test && rm <work-dir>/.lingtai/delegates/.test
-   ```
-3. Check disk space:
-   ```bash
-   df -h <work-dir>
-   ```
-4. Compare against the parent's init.json to validate the format
-
-**Command Example**:
 ```bash
-# List all current avatars
+# List all current avatars (name collisions, quantity limits)
 cat <work-dir>/.lingtai/delegates/ledger.jsonl | python3 -c "
 import sys, json
 for line in sys.stdin:
     entry = json.loads(line.strip())
     print(f\"{entry.get('name', '?')}: {entry.get('status', '?')}\")
 "
+
+# Directory writable?
+touch <work-dir>/.lingtai/delegates/.test && rm <work-dir>/.lingtai/delegates/.test
+
+# Disk space
+df -h <work-dir>
 ```
 
-**Common Pitfalls**:
-- ❌ Avatar name contains special characters (slashes, spaces, leading dots) → spawn silently fails
-- ❌ Name exceeds 64 characters
-- ❌ Forgetting to check the ledger before spawning → name collision
-- ✅ Use only letters, digits, underscores, and hyphens in avatar names
+If those pass, compare the avatar's init.json against the parent's to validate the format.
 
-**Related References**: `lingtai-kernel-anatomy` (avatar/network topology)
-
----
+**Pitfalls.** Special characters in avatar names (slashes, spaces, leading dots) make spawn fail silently, as do names over 64 characters. Check the ledger first to avoid a collision; use only letters, digits, underscores, and hyphens.
 
 ## 2. Memory Issues
 
 ### 2.1 Post-Molt Amnesia
 
-**Goal**: Recover working context after a molt.
+After a molt you don't know what you were doing, and pad/lingtai are empty or partial. (A vanished conversation history is normal — that is what molt does.) Causes: durable layers not updated before molting, a system-forced molt that left no summary, or appended files exceeding the 100K token limit and failing to load.
 
-**Symptoms**:
-- After molting, you don't know what you were doing
-- Pad or lingtai content is empty or incomplete
-- Conversation history is completely gone (this is normal)
+Recover in this order:
 
-**Causes**:
-- Pad / codex / lingtai were not updated before molting
-- System-forced molt (no summary, only activity log pointers)
-- Appended files exceeded the 100K token limit, causing load failure
+```
+psyche(pad, load)                                    # 1. reload working notes
+codex(filter)                                        # 2. browse archived knowledge
+psyche(lingtai, load)                                # 3. reload identity
+email(check)                                         # 4. mail that arrived during the molt
+codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])   # 5. rebuild an empty pad
+```
 
-**Resolution**:
+If the molt was system-forced (no summary), the activity log is the only trail:
 
-1. Explicitly reload the pad:
-   ```
-   psyche(pad, load)
-   ```
-2. Browse archived knowledge in the codex:
-   ```
-   codex(filter)
-   ```
-3. Reload lingtai (identity):
-   ```
-   psyche(lingtai, load)
-   ```
-4. Check mail received during the molt:
-   ```
-   email(check)
-   ```
-5. Rebuild pad from codex exports (if pad is empty):
-   ```
-   codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])
-   ```
-6. If this was a system-forced molt (no summary), review the activity log:
-   ```bash
-   tail -200 <work-dir>/.lingtai/<name>/logs/events.jsonl
-   ```
-
-**Command Example**:
 ```bash
-# View recent molt records
+tail -200 <work-dir>/.lingtai/<name>/logs/events.jsonl
 grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 ```
 
-**Common Pitfalls**:
-- ❌ Forgetting to update four-layer storage before molting → complete amnesia on reincarnation
-- ❌ Relying on conversation history instead of codex/pad → all lost after molt
-- ❌ Not checking mailbox → missing important tasks that arrived during the molt
-- ✅ Follow the fixed checklist before molting: codex → pad edit → lingtai update → molt summary
-
-**Preventive Measures**:
-- Proactively prepare four-layer storage when context window exceeds 70%
-- Start organizing immediately upon receiving a level-1 warning
-- Send yourself a self-email to preserve critical unfinished items (email survives across molts)
-
-**Related References**: `lingtai-kernel-anatomy` (five-layer accumulation; molt operations; codex)
-
----
+**Prevention.** Follow the fixed pre-molt checklist — codex → pad edit → lingtai update → molt summary. Start preparing past 70% context and act immediately on a level-1 warning. Never treat conversation history as storage; it is all lost. Self-email survives molts, so mail yourself anything critical and unfinished.
 
 ### 2.2 Codex Entries Missing
 
-**Goal**: Recover codex entries that appear to have vanished.
+An entry you remember creating no longer appears in `codex(filter)`. Causes: submission failed silently, `consolidate` merged it into another entry (originals are deleted), manual deletion, or a lost export file.
 
-**Symptoms**:
-- A codex entry you remember creating is no longer visible
-- `codex(filter)` listing is missing expected entries
+```bash
+find <work-dir> -name "*.codex.*" -mtime -1                                  # export files
+grep "codex" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -20         # operation records
+```
 
-**Causes**:
-- The entry was never successfully submitted (error during submission)
-- It was merged into another entry via consolidate
-- It was manually deleted
-- An export file was accidentally deleted
+Also re-run `codex(filter)` and look for the content under a different title.
 
-**Resolution**:
-
-1. List all entries to check whether it exists under a different title:
-   ```
-   codex(filter)
-   ```
-2. Search for export files:
-   ```bash
-   find <work-dir> -name "*.codex.*" -mtime -1
-   ```
-3. Check activity logs for codex operation records:
-   ```bash
-   grep "codex" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -20
-   ```
-
-**Common Pitfalls**:
-- ❌ Assuming original entries still exist after consolidate → they have been merged and deleted
-- ❌ Not confirming whether submit succeeded → network errors may cause silent failure
-- ✅ Back up critical entries by exporting them before consolidate
-
-**Related References**: `lingtai-kernel-anatomy` (codex / memory system)
-
----
+**Pitfalls.** Originals do not survive `consolidate` — export critical entries first. Confirm every submit succeeded; a network error can fail silently.
 
 ### 2.3 Pad Not Loaded
 
-**Goal**: Resolve the pad not auto-loading after a molt.
+The system prompt has no pad content and working notes are gone. Causes: `pad.md` is empty, total appended file size exceeds the 100K token limit, or a loading error.
 
-**Symptoms**:
-- System prompt is missing pad content
-- Working notes are lost
+```
+psyche(pad, load)
+```
 
-**Causes**:
-- pad.md file is empty
-- Total appended file size exceeds 100K tokens
-- System loading error
+```bash
+cat <work-dir>/.lingtai/<name>/system/pad.md      # does it have content?
+du -sh <work-dir>/.lingtai/<name>/system/          # appended size, if it does
+```
 
-**Resolution**:
+If the pad is genuinely empty, rebuild it: `codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])`.
 
-1. Explicitly load:
-   ```
-   psyche(pad, load)
-   ```
-2. Check whether the file exists:
-   ```bash
-   cat <work-dir>/.lingtai/<name>/system/pad.md
-   ```
-3. If the file has content but loading failed, check the total appended file size:
-   ```bash
-   du -sh <work-dir>/.lingtai/<name>/system/
-   ```
-4. Rebuild from codex:
-   ```
-   codex(export, ids=[...]) → psyche(pad, edit, files=[<paths>])
-   ```
-
-**Common Pitfalls**:
-- ❌ Appending too many large files → exceeding the 100K token limit causes load failure
-- ❌ Not checking pad files before molting → discovering it is empty on reincarnation
-- ✅ Periodically check the appended file list: `psyche(pad, append)` without the files parameter shows the current list
-
-**Related References**: `lingtai-kernel-anatomy` (psyche / molt protocol)
-
----
+**Pitfalls.** Appending too many large files breaks loading at the 100K limit. Review the appended list periodically — `psyche(pad, append)` with no `files` parameter prints it — and check pad files *before* molting, not after.
 
 ### 2.4 Molt Imminent, Critical Operations Incomplete
 
-**Goal**: Prioritize the most critical operations when the context window is about to be exhausted.
-
-**Symptoms**:
-- System context warnings
-- Difficulty recalling earlier conversations
-- Tool invocations becoming slow
-
-**Resolution (by priority)**:
+Context warnings, difficulty recalling earlier conversation, sluggish tool calls. Spend what remains in priority order:
 
 | Priority | Action | Description |
 |----------|--------|-------------|
@@ -385,252 +165,102 @@ grep "molt" <work-dir>/.lingtai/<name>/logs/events.jsonl | tail -5
 | 🟢 P2 | Update lingtai | Identity changes, new skills |
 | 🔵 P3 | Write molt summary | Final step — last words for your successor |
 
-**Emergency Tips**:
-- Send yourself a self-email to preserve critical unfinished items (email survives across molts)
-- If you can only do one thing: write the most detailed molt summary possible
+Self-email survives molt, so use it for critical unfinished items. If you can only do one thing, write the most detailed molt summary possible.
 
-**Common Pitfalls**:
-- ❌ Starting new long operations (file analysis, web search) when context exceeds 80% → guaranteed overflow
-- ❌ Ignoring system warnings → forced molt with no summary
-- ✅ Start four-layer storage organization immediately upon receiving a level-1 warning
-
-**Related References**: `lingtai-kernel-anatomy` (warning levels; molt operations)
-
----
+**Pitfalls.** Do not start long operations (file analysis, web search) past 80% context — overflow is guaranteed. Ignoring system warnings ends in a forced molt with no summary.
 
 ## 3. Communication Issues
 
 ### 3.1 Pigeon Not Delivered
 
-**Goal**: Resolve issues where a sent pigeon was not received by the recipient.
+Sent successfully, but the recipient never got it. Causes: address format error (an internal address containing `@`), `send` used where `reply` was needed, a misspelled recipient directory, or a suspended recipient (mail is delivered but never processed).
 
-**Symptoms**:
-- Pigeon sent successfully but the recipient says they never received it
-- No incoming message in the recipient's inbox
+```
+email(check, folder=sent)     # confirm it actually went out
+```
 
-**Causes**:
-- Address format error (internal address contains `@`)
-- Used `send` instead of `reply`, causing a routing error
-- Recipient directory name misspelled
-- Recipient process is suspended (mail is delivered but won't be processed)
+```bash
+ls -la <work-dir>/.lingtai/<recipient>/mailbox/inbox/    # does their inbox exist?
+```
 
-**Resolution**:
+Address format: `human`, `researcher`, `some-peer` (bare path) are correct; `human@example.com` is **not** an internal address — the `@` routes it through the IMAP channel instead of the LingTai pigeon.
 
-1. Check sent mail to confirm successful delivery:
-   ```
-   email(check, folder=sent)
-   ```
-2. Verify address format:
-   - ✅ Correct: `human`, `researcher`, `some-peer` (bare path)
-   - ❌ Incorrect: `human@example.com` (contains `@` → routes through IMAP channel)
-3. Check whether the recipient's inbox exists:
-   ```bash
-   ls -la <work-dir>/.lingtai/<recipient>/mailbox/inbox/
-   ```
-
-**Common Pitfalls**:
-- ❌ Using `@` in an internal address → email routed to IMAP instead of lingtai pigeon
-- ❌ Using `send` instead of `reply` when responding to incoming mail → may route to the wrong address space
-- ❌ Repeatedly sending emails to a suspended recipient → mail piles up but is never processed
-- ✅ Always use `reply` for incoming messages and `send` for new conversations
-
-**Related References**: `lingtai-kernel-anatomy` (mail protocol)
-
----
+**Pitfalls.** Use `reply` for incoming messages and `send` only for new conversations; `send` on a reply can route into the wrong address space. Repeatedly mailing a suspended recipient just piles up unprocessed mail.
 
 ### 3.2 Pigeon Bounced "No agent at X"
 
-**Goal**: Resolve the "No agent at X" error when sending pigeons.
+`email(send)` returns "No agent at X". Either X contains `@` (wrong channel — switch to the IMAP tool), or X is a bare path with no agent behind it: renamed/migrated, nirvana'd (permanently deleted), or mid-molt and briefly unavailable.
 
-**Symptoms**:
-- `email(send)` returns "No agent at X"
+```bash
+cat <work-dir>/.lingtai/delegates/ledger.jsonl    # renamed, migrated, or gone?
+```
 
-**Causes**:
-- X contains `@` → wrong channel used (should use IMAP)
-- X is a bare path but no agent exists at that address
-- The agent was just nirvana'd (permanently deleted)
-- The agent is currently molting (temporarily unavailable)
+Ask the parent or peers whether the agent was nirvana'd. If it was just molting, wait a few seconds and retry.
 
-**Resolution**:
-
-1. If X contains `@`: switch to the IMAP tool
-2. If X is a bare path:
-   - Check whether the agent was renamed or migrated
-   - Review the avatar log:
-     ```bash
-     cat <work-dir>/.lingtai/delegates/ledger.jsonl
-     ```
-   - Ask the parent or peers whether the agent was nirvana'd
-3. If the agent just molted, wait a few seconds and retry
-
-**Common Pitfalls**:
-- ❌ Assuming "No agent" means the agent was deleted → it may be temporary
-- ❌ Using the email tool for addresses containing `@` → always fails
-- ✅ Determine address type first, then select the correct communication channel
-
-**Related References**: `lingtai-kernel-anatomy` (mail protocol; network topology)
-
----
+**Pitfalls.** "No agent" is not proof of deletion — it is often temporary. Determine the address type first, then pick the channel.
 
 ### 3.3 Scheduled Pigeon Not Firing
 
-**Goal**: Resolve scheduled pigeons created via schedule that are not sending as expected.
+A schedule stops sending at the expected interval. Causes: paused/cancelled, count exhausted, or interval/count set wrong.
 
-**Symptoms**:
-- Scheduled emails are not sent at the expected interval
-- Schedule appears to have stopped working
+```
+email(schedule={action: "list"})                                  # status: paused / active / exhausted
+email(schedule={action: "reactivate", schedule_id: "<id>"})       # if paused
+email(schedule={action: "cancel", schedule_id: "<id>"})           # if parameters are wrong:
+email(schedule={action: "create", interval: N, count: M}, address=..., message=...)
+```
 
-**Causes**:
-- Schedule is paused (was cancelled)
-- Count exhausted (reached the send limit)
-- interval/count parameters set incorrectly
-
-**Resolution**:
-
-1. List all schedules:
-   ```
-   email(schedule={action: "list"})
-   ```
-2. Check status: paused / active / exhausted
-3. If paused, reactivate:
-   ```
-   email(schedule={action: "reactivate", schedule_id: "<id>"})
-   ```
-4. If parameters are wrong, cancel and recreate:
-   ```
-   email(schedule={action: "cancel", schedule_id: "<id>"})
-   email(schedule={action: "create", interval: N, count: M}, address=..., message=...)
-   ```
-
-**Common Pitfalls**:
-- ❌ Forgetting the count parameter → schedule may fire once and stop
-- ❌ Cancelling but forgetting to recreate → task lost
-- ✅ Immediately list after creating a schedule to confirm parameters are correct
-
-**Related References**: `lingtai-kernel-anatomy` (mail protocol)
-
----
+**Pitfalls.** Omitting `count` can make a schedule fire once and stop; cancelling without recreating loses the task. List immediately after creating to confirm the parameters.
 
 ## 4. Tool Issues
 
 ### 4.1 Tool Timeout
 
-**Goal**: Resolve tool calls that hang or time out.
+A tool call hangs or times out. Causes: I/O-intensive work (`bash`, `web_search`) exceeding the default timeout, an unavailable external API, an oversized file, or host resource shortage.
 
-**Symptoms**:
-- Tool call returns no result for an extended period
-- Returns a timeout error
+```
+bash(command="...", timeout=120)                       # raise the bash timeout
+read(file_path="...", offset=1, limit=100)             # chunk large reads
 
-**Causes**:
-- I/O-intensive operations (bash, web_search) exceed default timeout
-- External API unavailable
-- File too large, causing read timeout
-- Host resource shortage
-
-**Resolution**:
-
-1. Identify tool type:
-   - I/O-intensive: bash, web_search
-   - Compute-intensive: vision
-2. Increase timeout for bash:
-   ```
-   bash(command="...", timeout=120)
-   ```
-3. Read large files in chunks:
-   ```
-   read(file_path="...", offset=1, limit=100)
-   ```
-4. For web operations: test connectivity with a simple query first
-5. For systemic timeouts: check host load
-
-**Command Example**:
-```bash
-# Redirect long output to a file
+# Best pattern for long output: redirect to a file, then read in chunks
 bash(command="long-running-command > /tmp/output.txt 2>&1", timeout=300)
-# Then read in chunks
 read(file_path="/tmp/output.txt", offset=1, limit=100)
 ```
 
-**Common Pitfalls**:
-- ❌ Using the default 30-second bash timeout for long tasks → guaranteed timeout
-- ❌ Reading a large file in a single call → should chunk it
-- ✅ Write long output to a file first, then read it in chunks
+For web operations, test connectivity with a simple query first; for systemic timeouts, check host load. `vision` is compute-intensive while `bash`/`web_search` are I/O-intensive — they fail differently.
 
-**Related References**: `lingtai-kernel-anatomy` (bash/read tools); `web_search(action="manual")` / `web-search-manual`
+**Pitfalls.** The default 30-second bash timeout guarantees failure on long tasks; single-call reads of large files guarantee truncation.
 
----
+See also `web_search(action="manual")` / the `web-search-manual` skill.
 
 ### 4.2 Tool Not Found
 
-**Goal**: Resolve an expected tool not appearing in the tool list.
+A tool returns "not available", or a newly installed MCP tool is invisible. Causes: the MCP server was not refreshed, the capability is missing from init.json, or `servers.json` is malformed.
 
-**Symptoms**:
-- Calling a tool returns "not available"
-- A newly installed MCP tool is not visible
+```
+system(show)        # 1. current capability list
+system(refresh)     # 2. after installing an MCP server or editing init.json
+system(show)        # 3. confirm
+```
 
-**Causes**:
-- Newly installed MCP server not refreshed
-- Capability not configured in init.json
-- MCP server configuration error (servers.json)
+```bash
+cat <work-dir>/.lingtai/<name>/mcp/servers.json
+```
 
-**Resolution**:
-
-1. View current capability list:
-   ```
-   system(show)
-   ```
-2. If you just installed an MCP server, refresh:
-   ```
-   system(refresh)
-   ```
-3. Check MCP configuration:
-   ```bash
-   cat <work-dir>/.lingtai/<name>/mcp/servers.json
-   ```
-4. Confirm after refreshing:
-   ```
-   system(show)
-   ```
-
-**Common Pitfalls**:
-- ❌ Not refreshing after installing MCP → new tool not visible
-- ❌ Not refreshing after modifying init.json → configuration not taking effect
-- ✅ Refresh immediately after install/modify, then show to confirm
-
-**Related References**: `mcp-manual` (MCP configuration — kernel `mcp` capability)
-
----
+**Pitfalls.** Nothing takes effect without a refresh — after install *and* after any init.json change. See `mcp-manual` for MCP configuration (kernel `mcp` capability).
 
 ### 4.3 Tool Output Truncated
 
-**Goal**: Resolve tools returning incomplete output.
-
-**Symptoms**:
-- Tool output is incomplete
-- Truncation markers appear at the end of the output
-
-**Causes**:
-- File too large, exceeding the single-return limit
-- grep matches exceed max_matches
-- Email preview was truncated
-
-**Resolution**:
+Output is incomplete or ends in a truncation marker — the file exceeded the single-return limit, grep hit `max_matches`, or an email preview was clipped.
 
 | Tool | Solution |
 |------|----------|
 | `read` | Use `offset`/`limit` to read in chunks |
 | `bash` | Redirect output to a file: `command > /tmp/out.txt 2>&1` |
 | `grep` | Reduce `max_matches` or narrow the glob scope |
-| `email(check)` | Use `filter.truncate=0` for full text, or `email(read)` to read a single message |
+| `email(check)` | Use `filter.truncate=0` for full text, or `email(read)` for a single message |
 
-**Common Pitfalls**:
-- ❌ Assuming output is complete → silent truncation may omit critical information
-- ❌ Repeatedly reading the same large file → wastes context
-- ✅ Write large output to a file first, then read as needed
-
-**Related References**: `lingtai-kernel-anatomy` (read/bash/grep tools)
-
----
+**Pitfalls.** Never assume output is complete — silent truncation drops exactly the detail you needed. Re-reading the same large file wastes context; write it out once, then read what you need.
 
 ## 5. Health Checks
 
@@ -666,28 +296,35 @@ for dir in <network-dir>/.lingtai/*/mailbox/inbox/; do
 done
 ```
 
-**Interpreting Results**:
-- ✅ = Healthy
-- ⚠️ = Warning (needs attention)
-- ❌ = Error (requires immediate action)
-
----
+✅ = healthy · ⚠️ = warning, needs attention · ❌ = error, requires immediate action.
 
 ## 6. Escalation Protocol
 
 When you cannot resolve a problem on your own:
 
-1. **Gather evidence**: Heartbeat timestamps, log excerpts, error messages
-2. **Report to parent**: Send via `email(send, address=<parent>)` with a subject prefixed with `[Issue]`
-3. **Include**:
-   - What happened
-   - What was attempted
-   - What was expected
-   - Relevant file paths
-4. **If the parent is also unresponsive**: Check whether other peers are alive — the issue may be network-wide
-5. **Never** send repeated probe emails to a seemingly unresponsive peer → escalate upward instead
+1. **Gather evidence**: heartbeat timestamps, log excerpts, error messages.
+2. **Report to parent**: `email(send, address=<parent>)` with a subject prefixed `[Issue]`.
+3. **Include**: what happened, what was attempted, what was expected, and the relevant file paths.
+4. **If the parent is also unresponsive**: check whether other peers are alive — the issue may be network-wide.
+5. **Never** send repeated probe emails to a seemingly unresponsive peer; escalate upward instead.
 
----
+## Concept references
+
+Each section's underlying concepts live in `lingtai-kernel-anatomy`:
+
+| Section | Anatomy topic |
+|---|---|
+| §1.1 | five lifecycle states; avatar management |
+| §1.2 | process model; molt operations |
+| §1.3 | avatar / network topology |
+| §2.1 | five-layer accumulation; molt operations; codex |
+| §2.2 | codex / memory system |
+| §2.3 | psyche / molt protocol |
+| §2.4 | warning levels; molt operations |
+| §3.1, §3.3 | mail protocol |
+| §3.2 | mail protocol; network topology |
+| §4.1, §4.3 | bash / read / grep tools |
+| §4.2 | see `mcp-manual` (kernel `mcp` capability) |
 
 ## Appendix: Five Lifecycle States Quick Reference
 

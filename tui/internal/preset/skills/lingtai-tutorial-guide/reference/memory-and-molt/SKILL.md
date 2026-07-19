@@ -3,15 +3,13 @@ name: tutorial-guide-memory-and-molt
 description: >
   Nested tutorial-guide reference for lesson 8: intrinsics, memory layers, molt, charge, and lifecycle continuity.
 version: 1.0.0
-last_changed_at: "2026-06-08T22:45:25-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Tutorial Guide — Memory and Molt Lesson
 
-Nested tutorial-guide reference for memory and molt lesson 8.
-
-Use this file after the root `tutorial-guide` router sends you here. Keep teaching live: discover current files, commands, and runtime state before explaining them.
+Nested tutorial-guide reference for memory and molt lesson 8, reached from the root `tutorial-guide` router. Teach live per the router's *discover, don't recite* rule: read the real file or run the real command before explaining it.
 
 ## Lesson 8: The Four Intrinsics and the Five Memory Layers
 
@@ -38,8 +36,6 @@ Walk through each one you find:
 - **Email** — filesystem-based communication. Always-on intrinsic; addon bridges (IMAP / Telegram / Feishu) plug in via the `mcp` capability. The distinction worth showing the human: **intrinsics are always loaded; capabilities are configured in init.json**.
 
 ### Part 2: Molt — Surviving Death
-
-This is the most important concept in the entire tutorial.
 
 **What is molt?** An agent's conversation history fills up its context window. When pressure builds (typically 70–95% full), the agent must shed the conversation to continue working. This is molt — a voluntary context reset.
 

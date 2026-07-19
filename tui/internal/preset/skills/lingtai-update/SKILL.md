@@ -5,19 +5,19 @@ description: >
   lingtai-portal, including /update-tui, install-method detection, Homebrew,
   source builds, tap inspection, or mainland-China connectivity.
 version: 1.0.0
-last_changed_at: "2026-07-15T01:50:00-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # LingTai TUI update
 
-This is the TUI-owned operational router for the two Go deliverables shipped by
-this repository: `lingtai-tui` and `lingtai-portal`. Read only the focused
-reference that matches the problem; code, tests, `ANATOMY.md`, and the current
-installer remain the source of truth.
+TUI-owned operational router for the two Go deliverables this repository ships:
+`lingtai-tui` and `lingtai-portal`. Read only the focused reference that matches
+the problem; code, tests, `ANATOMY.md`, and the current installer remain the
+source of truth.
 
-This skill documents existing paths. It does not add update machinery. The
-Python runtime and kernel install/update/nudge behavior belongs to the kernel's
+This skill documents existing paths; it does not add update machinery. Python
+runtime and kernel install/update/nudge behavior belongs to the kernel's
 `system-manual` runtime/kernel update manual; use that manual for kernel work,
 then return here for the TUI or portal binary boundary.
 
@@ -38,7 +38,7 @@ then return here for the TUI or portal binary boundary.
   description: Failure triage for updater, installer, binary, portal, and runtime symptoms.
 - name: lingtai-update-homebrew
   location: reference/homebrew/SKILL.md
-  description: Supported formula use and safe exploration of the Lingtai Homebrew tap and generated build logic.
+  description: Supported formula use and safe exploration of the Lingtai Homebrew tap and build logic.
 - name: lingtai-update-mainland
   location: reference/mainland-china/SKILL.md
   description: Mainland-China build/connectivity routing for Go, npm, GitHub, and Gitee without mirror guarantees.
@@ -55,5 +55,5 @@ then return here for the TUI or portal binary boundary.
 | Inspect Homebrew formula/tap behavior | `reference/homebrew/SKILL.md` |
 | Build or fetch from mainland China | `reference/mainland-china/SKILL.md` |
 
-The concise `/help` command entry remains in `lingtai-tui-help`; it routes deep
-questions here rather than duplicating these procedures.
+The concise `/help` entry stays in `lingtai-tui-help`; it routes deep questions
+here rather than duplicating these procedures.

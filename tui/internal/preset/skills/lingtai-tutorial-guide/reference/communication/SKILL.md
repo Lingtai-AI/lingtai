@@ -3,15 +3,13 @@ name: tutorial-guide-communication
 description: >
   Nested tutorial-guide reference for lesson 7: filesystem email, message flow, and external addon bridges.
 version: 1.0.0
-last_changed_at: "2026-06-12T13:46:46-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Tutorial Guide — Communication Lesson
 
-Nested tutorial-guide reference for communication lesson 7.
-
-Use this file after the root `tutorial-guide` router sends you here. Keep teaching live: discover current files, commands, and runtime state before explaining them.
+Nested tutorial-guide reference for communication lesson 7, reached from the root `tutorial-guide` router. Teach live per the router's *discover, don't recite* rule: read the real file or run the real command before explaining it.
 
 ## Lesson 7: Communication — Email and external bridges
 

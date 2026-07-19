@@ -6,7 +6,7 @@ description: >
   sibling mechanics, locale fallback, validator checks, hand-authored recipes,
   testing, and publishing.
 version: 1.0.0
-last_changed_at: "2026-06-02T00:08:39-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -34,9 +34,7 @@ my-recipe-bundle/
 │   │                                    #   they silently drop critical fields like library_name.
 │   ├── greet/                           # optional — first-contact message
 │   │   ├── greet.md                     #   default version
-│   │   ├── en/greet.md                  #   optional locale variants
-│   │   ├── zh/greet.md
-│   │   └── wen/greet.md
+│   │   └── <lang>/greet.md              #   optional locale variants (en, zh, wen)
 │   ├── comment/                         # optional — system-prompt constraints
 │   │   ├── comment.md
 │   │   └── <lang>/comment.md
@@ -85,9 +83,7 @@ Every bundle must contain `<bundle>/.recipe/recipe.json`:
 
 **There is exactly one `recipe.json` per bundle, at `.recipe/recipe.json`. No `<lang>/recipe.json` files. Ever.**
 
-Why: `recipe.json` carries **machine identity** — `id`, `version`, and especially `library_name`. These are not display strings; they're load-bearing fields the recipe-apply step reads to wire up `init.json#skills.paths` and locate the library folder on disk.
-
-Splitting `recipe.json` by locale is a footgun: if the active locale's variant lacks `library_name` (a typical mistake — a translator localizes `name` and `description` but doesn't realize `library_name` must be carried over too), the TUI silently fails to register the library. Recipe-apply runs without error, but the agent boots without the recipe's skills. This is a hard-to-diagnose class of bug — symptom is "library doesn't load" with no log entry.
+Why: `recipe.json` carries **machine identity** — `id`, `version`, and especially `library_name`. These are not display strings; they're load-bearing fields the recipe-apply step reads to wire up `init.json#skills.paths` and locate the library folder on disk. Splitting it by locale is a footgun: if the active locale's variant lacks `library_name` (a typical mistake — a translator localizes `name` and `description` but doesn't realize `library_name` must be carried over too), the TUI silently fails to register the library. Recipe-apply runs without error, but the agent boots without the recipe's skills — a hard-to-diagnose bug whose only symptom is "library doesn't load" with no log entry.
 
 **The runtime ignores any locale-variant `recipe.json`.** Only `.recipe/recipe.json` is read. The validator (`validate_recipe.py`) errors on any `<lang>/recipe.json` it finds, so they get caught at export time.
 
@@ -96,6 +92,8 @@ Splitting `recipe.json` by locale is a footgun: if the active locale's variant l
 ```
 .recipe/
 ├── recipe.json            # ✅ THE ONLY recipe.json
+├── zh/recipe.json         # ❌ FORBIDDEN — validator errors
+├── wen/recipe.json        # ❌ FORBIDDEN — validator errors
 ├── greet/
 │   ├── greet.md           # default
 │   ├── zh/greet.md        # ✅ locale variants OK here
@@ -103,13 +101,6 @@ Splitting `recipe.json` by locale is a footgun: if the active locale's variant l
 └── comment/
     ├── comment.md
     └── wen/comment.md     # ✅
-```
-
-```
-.recipe/
-├── recipe.json
-├── zh/recipe.json         # ❌ FORBIDDEN — validator errors
-└── wen/recipe.json        # ❌ FORBIDDEN — validator errors
 ```
 
 Extra fields in `recipe.json` are ignored — forward-compatible.
@@ -184,12 +175,7 @@ Keep it concise and natural. Do not recite a checklist — synthesize.
 
 **Common mistake:** mixing Patterns A and B — writing what looks like a direct utterance but with embedded "you should..." instructions. The agent then either ignores the instructions or recites them. Pick one pattern. If you find yourself wanting to say both "here's what to say" and "and here are some constraints", use Pattern B and put both inside the `[system]` directive.
 
-**Good greet.md (concrete, audience-facing):**
-```
-Hi! I'm the orchestrator for this network. The {{commands}}
-slash commands let you interact with me and my avatars.
-What would you like to work on?
-```
+The Pattern A example above is what good looks like: concrete and audience-facing.
 
 **Bad greet.md (instructions to self leaking out):**
 ```
@@ -257,15 +243,13 @@ Overrides the system-wide procedures (`~/.lingtai-tui/procedures/<lang>/procedur
 
 **When absent:** the kernel's system-default procedures are used at agent launch.
 
-**Rules:**
-- **No placeholders** — static text.
-- Same locale-fallback as greet and comment.
+**Rules:** same as `covenant.md` — static text, no placeholders, same locale-fallback as greet and comment.
 
 ## The Library Sibling
 
 When `recipe.json#library_name` is a non-null string, the bundle must contain a sibling folder with that exact name. The library is a framework-agnostic skill bundle — any agent framework that reads `SKILL.md` files (LingTai, Claude Skill, Cursor) can consume it.
 
-**Critical layout rule (strict)**: every skill lives in its **own subdirectory** under the library folder, with `SKILL.md` at the subdirectory root. A `SKILL.md` placed directly at the library-folder root is **never permitted** — the runtime scanner ignores it (only `<library>/<skill>/SKILL.md` is registered) and the validator rejects it as an error. This applies even when the library contains exactly one skill: nest it.
+**Critical layout rule (strict)**: every skill lives in its **own subdirectory** under the library folder, with `SKILL.md` at the subdirectory root. A `SKILL.md` placed directly at the library-folder root is **never permitted** — the runtime scanner ignores it (only `<library>/<skill>/SKILL.md` is registered) and the validator rejects it as an error.
 
 ```
 <bundle>/
@@ -322,10 +306,7 @@ Libraries don't have the `<lang>/` fallback the behavioral layer uses. Each skil
 
 ## i18n Fallback Rules
 
-All locale-aware content under `.recipe/` uses the same two-level fallback:
-
-1. Try `<lang>/`-prefixed variant
-2. Fall back to root
+All locale-aware content under `.recipe/` uses the same two-level fallback — `<lang>/`-prefixed variant first, then the root file:
 
 | Content | Lookup order |
 |---|---|
@@ -364,35 +345,9 @@ The validator is the single source of truth. If this reference and the validator
 
 ## Creating a Recipe by Hand
 
-Minimum viable recipe (no greet, no comment, no library):
+The minimum viable recipe is one file — `my-recipe/.recipe/recipe.json`, holding the required fields shown in the manifest example above with `library_name: null`. No greet, no comment, no library. The validator will pass. An agent created with this recipe starts silent, with the kernel's default covenant and procedures, and no library beyond the defaults.
 
-```
-my-recipe/
-└── .recipe/
-    └── recipe.json
-```
-
-With `recipe.json`:
-
-```json
-{
-  "id": "my-recipe",
-  "version": "1.0.0",
-  "name": "My Recipe",
-  "description": "Does nothing but apply cleanly.",
-  "library_name": null
-}
-```
-
-The validator will pass. An agent created with this recipe starts silent, with the kernel's default covenant and procedures, and no library beyond the defaults.
-
-Add layers as needed:
-
-- `.recipe/greet/greet.md` — give the agent a first-contact message
-- `.recipe/comment/comment.md` — give it ongoing behavioral constraints
-- `.recipe/covenant/covenant.md` — override the covenant if you need fundamentally different ethics
-- `.recipe/procedures/procedures.md` — override lifecycle procedures (rare)
-- `<library_name>/<skill>/SKILL.md` + update `recipe.json#library_name` — ship shared skills
+Add layers as needed — all optional, each specified above: `.recipe/greet/greet.md` (first-contact message), `.recipe/comment/comment.md` (ongoing behavioral constraints), `.recipe/covenant/covenant.md` (only when the ethics must fundamentally differ), `.recipe/procedures/procedures.md` (rare), and `<library_name>/<skill>/SKILL.md` plus a matching `recipe.json#library_name` to ship shared skills.
 
 ## Testing a Recipe
 

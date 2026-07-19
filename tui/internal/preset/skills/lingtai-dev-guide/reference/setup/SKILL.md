@@ -3,14 +3,14 @@ name: dev-guide-setup
 description: >
   Nested lingtai-dev-guide reference for local developer environment setup: cloning repos, building TUI/portal, dev-mode symlinks, editable kernel install, MCP addon setup, and verification.
 version: 1.0.0
-last_changed_at: "2026-06-12T15:01:39-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Development Environment Setup
 
-
 Nested lingtai-dev-guide reference. Read this after the top-level router sends you here.
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
@@ -101,11 +101,10 @@ Verify:
 After merging or updating kernel code, do not assume a running agent is using the
 checkout you just edited. The TUI runtime venv may point at an editable checkout
 that is behind `origin/main`, or at a detached worktree left by an earlier test.
-Before declaring a runtime fix live, probe the interpreter the agent will use,
-update the checkout if needed, refresh the agent, then probe again.
 
 Use the TUI runtime venv unless the agent's `init.json` explicitly names a
-different Python executable:
+different Python executable. This probe prints the import origin, git root,
+branch, and HEAD for the kernel and each MCP/addon module at once:
 
 ```bash
 RUNTIME_PY="$HOME/.lingtai-tui/runtime/venv/bin/python"
@@ -161,17 +160,16 @@ git switch main                         # only if it is safe to leave a worktree
 git pull --ff-only origin main
 ```
 
-Then refresh the agent so it reloads Python modules, MCP registrations, prompt
-sections, and runtime config:
+Then `system(action="refresh", reason="pick up updated runtime checkout")` and
+rerun the probe from the same interpreter. For addon/MCP work, verify both the
+curated package path (for example `lingtai.mcp_servers.telegram`) and any
+compatibility wrapper (`lingtai_telegram`) so stale external addon checkouts do
+not masquerade as the active implementation.
 
-```python
-system(action="refresh", reason="pick up updated runtime checkout")
-```
-
-Finally rerun the import probe from the same interpreter. For addon/MCP work,
-verify both the curated package path (for example `lingtai.mcp_servers.telegram`)
-and any compatibility wrapper (`lingtai_telegram`) so stale external addon
-checkouts do not masquerade as the active implementation.
+Order matters — update the imported source *before* refreshing, and confirm with
+a live probe afterward. `reference/runtime-self-check/SKILL.md` owns that
+discipline (the patch-to-self checklist and the live-object caveat); this section
+is only the setup-side command recipe.
 
 ## Set up MCP addons (optional)
 
@@ -188,27 +186,19 @@ Register the MCP server via the `mcp-manual` skill's workflow.
 ## Verify the full stack
 
 ```bash
-# 1. TUI builds and runs
-lingtai-tui --version
-
-# 2. Portal builds and runs
-lingtai-portal --version
+lingtai-tui --version          # 1. TUI builds and runs
+lingtai-portal --version       # 2. portal builds and runs
 
 # 3. Kernel is editable
 ~/.lingtai-tui/runtime/venv/bin/python -c "import lingtai; print(lingtai.__file__)"
 
-# 4. Create a test project and launch an agent
+# 4. Create a test project and launch an agent through the first-run wizard
 mkdir /tmp/test-lingtai && cd /tmp/test-lingtai
 lingtai-tui
-# Go through the first-run wizard to create an agent
 ```
 
 ## IDE setup
 
-### Go (TUI + portal)
+**Go (TUI + portal).** The Go modules are `github.com/anthropics/lingtai-tui` and `github.com/anthropics/lingtai-portal` (historical naming — not moving to `Lingtai-AI/`). Standard Go tooling (gopls, golangci-lint) works out of the box.
 
-The Go modules are `github.com/anthropics/lingtai-tui` and `github.com/anthropics/lingtai-portal` (historical naming — not moving to `Lingtai-AI/`). Standard Go tooling (gopls, golangci-lint) works out of the box.
-
-### Python (kernel)
-
-The kernel uses `pyproject.toml` for project metadata. Standard Python tooling (pyright, ruff) works. The editable install means changes to the kernel source are reflected immediately in the running agent — no rebuild needed.
+**Python (kernel).** The kernel uses `pyproject.toml` for project metadata. Standard Python tooling (pyright, ruff) works. The editable install means kernel source changes are reflected immediately in the running agent — no rebuild needed.

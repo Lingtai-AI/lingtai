@@ -2,7 +2,7 @@
 name: portal-guide-topology-and-api
 description: Nested lingtai-portal-guide reference for topology tape frames, replay chunks, portal API endpoints, and the Network JSON response.
 version: 1.0.0
-last_changed_at: "2026-06-02T01:46:45-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -17,24 +17,11 @@ Each line is a `TapeFrame`:
 ```json
 {
   "t": 1744567890123,
-  "net": {
-    "nodes": [...],
-    "avatar_edges": [...],
-    "contact_edges": [...],
-    "mail_edges": [...],
-    "stats": {
-      "active": 2,
-      "idle": 1,
-      "stuck": 0,
-      "asleep": 0,
-      "suspended": 3,
-      "total_mails": 42
-    }
-  }
+  "net": { "nodes": [...], "avatar_edges": [...], "contact_edges": [...], "mail_edges": [...], "stats": {...} }
 }
 ```
 
-`t` is milliseconds since epoch.
+`t` is milliseconds since epoch. `net` is the same `Network` object `/api/network` serves; *Network response shape* below is a representative example of its core fields.
 
 ## Replay chunks
 

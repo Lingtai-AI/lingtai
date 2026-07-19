@@ -2,7 +2,7 @@
 name: portal-guide-lifecycle-and-recording
 description: Nested lingtai-portal-guide reference for portal lifecycle-state interpretation, heartbeat staleness, recording, and tape reconstruction behavior.
 version: 1.0.0
-last_changed_at: "2026-06-02T01:46:45-07:00"
+last_changed_at: "2026-07-18T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -24,12 +24,10 @@ Heartbeat is the portal's liveness ground truth. `BuildNetwork()` currently call
 
 ## Recording
 
-The portal starts recording immediately on launch. A background goroutine calls `BuildNetwork()` every 3 seconds and appends the result as a JSONL line to `topology.jsonl`.
-
-This tape grows indefinitely.
+The portal starts recording immediately on launch: a background goroutine calls `BuildNetwork()` every 3 seconds and appends the result as a JSONL line to `topology.jsonl`. This tape grows indefinitely.
 
 ## Reconstruction
 
-On startup, if the tape needs reconstruction (missing, empty, or old format), the portal rebuilds it from replay chunks.
+On startup, if the tape needs reconstruction (missing, empty, or old format), the portal rebuilds it from replay chunks. While that runs, `.lingtai/.portal/reconstruct.progress` may contain a transient `current/total` progress string, which the `/api/topology/progress` endpoint parses and exposes to the browser UI.
 
-During startup reconstruction, `.lingtai/.portal/reconstruct.progress` may contain a transient `current/total` progress string. The `/api/topology/progress` endpoint parses that value and exposes JSON such as `{ "current": N, "total": M }` to the browser UI, or `{}` when no progress file is present. Manual `/api/topology/rebuild` returns the rebuilt `ReplayManifest` after rewriting the replay chunks.
+A manual `POST /api/topology/rebuild` instead reconstructs from source data and rewrites the replay chunks. The `topology-and-api` reference documents both endpoints' exact response shapes.
