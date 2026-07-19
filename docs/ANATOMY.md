@@ -4,6 +4,7 @@ related_files:
   - README.md
   - README.zh.md
   - README.wen.md
+  - docs/windows-preview.md
   - docs/known-limitations.md
   - docs/status.md
   - docs/graphify.md

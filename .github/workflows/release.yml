@@ -1,16 +1,128 @@
 name: Release
 
 on:
+  pull_request:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  windows-amd64-preview:
+    name: Windows amd64 preview
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache-dependency-path: |
+            tui/go.sum
+            portal/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: portal/web/package-lock.json
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "preview-${{ github.sha }}" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build and test TUI
+        shell: pwsh
+        working-directory: tui
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go test ./...
+          go vet ./...
+          go build -trimpath -ldflags "-X main.version=${{ steps.version.outputs.version }}" -o bin/lingtai-tui-windows-amd64.exe .
+          .\bin\lingtai-tui-windows-amd64.exe version
+
+      - name: Build and test Portal
+        shell: pwsh
+        working-directory: portal
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+          go test ./...
+          go vet ./...
+          go build -trimpath -ldflags "-X main.version=${{ steps.version.outputs.version }}" -o bin/lingtai-portal-windows-amd64.exe .
+          .\bin\lingtai-portal-windows-amd64.exe version
+
+      - name: Package exact preview archive
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $stage = 'dist/stage'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item tui/bin/lingtai-tui-windows-amd64.exe "$stage/lingtai-tui.exe"
+          Copy-Item portal/bin/lingtai-portal-windows-amd64.exe "$stage/lingtai-portal.exe"
+          @'
+          # LingTai Windows amd64 experimental preview
+
+          This archive contains only the Go TUI and Portal executables. It is not
+          a supported native Windows runtime: Python/kernel provisioning, lifecycle
+          interoperability, signing, PATH/services, and the built-in updater remain
+          unsupported or unvalidated. macOS, Linux, and WSL remain supported.
+          '@ | Set-Content -Path "$stage/WINDOWS-PREVIEW.md"
+          $zip = "dist/lingtai-$version-windows-amd64-preview.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try { $members = @($archive.Entries.FullName) }
+          finally { $archive.Dispose() }
+          $expected = @('lingtai-tui.exe', 'lingtai-portal.exe', 'WINDOWS-PREVIEW.md')
+          if ($members.Count -ne 3 -or (Compare-Object $members $expected)) { throw "unexpected archive members: $members" }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([IO.Path]::GetFileName($zip))" | Set-Content -Path "$zip.sha256"
+          Copy-Item install-windows-preview.ps1 dist/install-windows-preview.ps1
+
+      - name: Exercise bootstrap
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter 'lingtai-*-windows-amd64-preview.zip' | Select-Object -First 1
+          $install = Join-Path $env:RUNNER_TEMP 'lingtai-preview'
+          .\install-windows-preview.ps1 -ArchivePath $zip.FullName -ChecksumPath "$($zip.FullName).sha256" -InstallDir $install
+          & "$install/lingtai-tui.exe" version
+          & "$install/lingtai-portal.exe" version
+          $bad = Join-Path $env:RUNNER_TEMP 'bad.sha256'
+          "$('0' * 64)  $($zip.Name)" | Set-Content -Path $bad
+          try {
+            .\install-windows-preview.ps1 -ArchivePath $zip.FullName -ChecksumPath $bad -InstallDir $install
+            throw 'bootstrap accepted a bad checksum'
+          } catch {
+            if ($_.Exception.Message -eq 'bootstrap accepted a bad checksum') { throw }
+          }
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64-preview
+          path: |
+            dist/lingtai-*-windows-amd64-preview.zip
+            dist/lingtai-*-windows-amd64-preview.zip.sha256
+            dist/install-windows-preview.ps1
+          if-no-files-found: error
+
   source-release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Create GitHub source release
         env:
@@ -26,7 +138,38 @@ jobs:
               --title "$TAG" --notes "Release $TAG"
           fi
 
+  publish-windows-amd64-preview:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [source-release, windows-amd64-preview]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-amd64-preview
+          path: dist
+      - name: Upload exact preview assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]]
+          zip="dist/lingtai-${TAG}-windows-amd64-preview.zip"
+          sha="${zip}.sha256"
+          bootstrap="dist/install-windows-preview.ps1"
+          test -f "$zip" && test -f "$sha" && test -f "$bootstrap"
+          (cd dist && sha256sum -c "$(basename "$sha")")
+          test "$(unzip -Z1 "$zip" | wc -l | tr -d ' ')" = 3
+          test "$(unzip -Z1 "$zip" | LC_ALL=C sort)" = "$(printf '%s\n' WINDOWS-PREVIEW.md lingtai-portal.exe lingtai-tui.exe | LC_ALL=C sort)"
+          gh release upload "$TAG" "$zip" "$sha" "$bootstrap" --repo "$REPO" --clobber
+
   update-homebrew:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: source-release
     runs-on: ubuntu-latest
     steps:
       - name: Compute source tarball checksum

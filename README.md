@@ -78,7 +78,9 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-The installer covers macOS, Linux, and WSL (native Windows/PowerShell is planned). It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+The installer covers macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+
+Native Windows amd64 has an [experimental TUI/Portal-only preview](docs/windows-preview.md); it is not a supported native Python/kernel runtime path.
 
 > **New here?** Follow the step-by-step [tutorial at lingtai.ai](https://lingtai.ai/en/tutorial/) — install, first task, channels, memory, and lifecycle, walked through end to end.
 

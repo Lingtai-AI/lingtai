@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Static assertions for the source-only tag release workflow.
-
-The tag workflow must create a GitHub source release and update the Homebrew
-source-build formula. It must not build, package, upload, or mirror prebuilt
-binary/bundle artifacts.
-"""
+"""Static gates for exact, tag-only Windows preview publication."""
 from __future__ import annotations
 
 import sys
@@ -13,11 +8,10 @@ from pathlib import Path
 try:
     import yaml
 except ModuleNotFoundError:
-    print("SKIP: PyYAML not available in this environment", file=sys.stderr)
+    print("SKIP: PyYAML not available", file=sys.stderr)
     raise SystemExit(0)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
 FAILURES: list[str] = []
 
 
@@ -26,59 +20,74 @@ def check(condition: bool, message: str) -> None:
         FAILURES.append(message)
 
 
-def find_step(job: dict, name_substring: str) -> dict | None:
-    for step in job.get("steps", []):
-        if name_substring.lower() in step.get("name", "").lower():
-            return step
-    return None
+def find_step(job: dict, name: str) -> dict | None:
+    return next((step for step in job.get("steps", []) if name in step.get("name", "").lower()), None)
+
+
+def scripts(job: dict) -> str:
+    return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
 
 
 def main() -> int:
-    data = yaml.safe_load(WORKFLOW_PATH.read_text())
-    on = data.get("on") or data.get(True)  # YAML 1.1 bareword quirk guard
-    check("push" in on and "tags" in on["push"], "release.yml must trigger on tag pushes")
-    check(any("v*" in tag for tag in on["push"]["tags"]), "release.yml must trigger on v* tags")
+    data = yaml.safe_load(WORKFLOW.read_text())
+    on = data.get("on") or data.get(True)
+    check("pull_request" in on and "workflow_dispatch" in on, "PR/manual validation triggers required")
+    check(any("v*" in tag for tag in on["push"]["tags"]), "v* tag trigger required")
+    check(data.get("permissions", {}).get("contents") == "read", "default contents permission must be read")
 
     jobs = data.get("jobs", {})
-    check(set(jobs) == {"source-release", "update-homebrew"},
-          f"release jobs must be source-release + update-homebrew only, got {sorted(jobs)}")
+    expected = {"windows-amd64-preview", "source-release", "publish-windows-amd64-preview", "update-homebrew"}
+    check(set(jobs) == expected, f"unexpected release jobs: {sorted(jobs)}")
+
+    preview = jobs.get("windows-amd64-preview", {})
+    preview_text = scripts(preview)
+    check(preview.get("runs-on") == "windows-latest", "preview must run natively on Windows")
+    for needle in ("go test ./...", "go vet ./...", "lingtai-tui-windows-amd64.exe", "lingtai-portal-windows-amd64.exe", "install-windows-preview.ps1"):
+        check(needle in preview_text, f"preview validation missing {needle!r}")
+    upload = next((step for step in preview.get("steps", []) if step.get("uses") == "actions/upload-artifact@v4"), None)
+    check(upload is not None, "preview must upload a PR-safe Actions artifact")
+    if upload:
+        paths = {line.strip() for line in str(upload.get("with", {}).get("path", "")).splitlines() if line.strip()}
+        check(paths == {"dist/lingtai-*-windows-amd64-preview.zip", "dist/lingtai-*-windows-amd64-preview.zip.sha256", "dist/install-windows-preview.ps1"},
+              "all artifact paths must share the dist root used by publication")
+    check("gh release upload" not in preview_text, "preview validation must not publish")
 
     source = jobs.get("source-release", {})
+    check("github.event_name == 'push'" in str(source.get("if", "")), "source release must be tag-push gated")
+    check(source.get("permissions", {}).get("contents") == "write", "source release must request contents: write")
     create = find_step(source, "create github source release")
-    check(create is not None, "source-release must have a GitHub source release step")
-    if create:
-        script = create.get("run", "")
-        check("gh release create" in script, "source-release must create the GitHub release")
-        check("--verify-tag" in script, "source-release must verify the pushed tag")
-        check("gh release upload" not in script, "source-release must not upload binary assets")
+    check(create is not None and "--verify-tag" in create.get("run", ""), "source release must verify the tag")
+
+    publish = jobs.get("publish-windows-amd64-preview", {})
+    publish_text = scripts(publish)
+    check("github.event_name == 'push'" in str(publish.get("if", "")), "preview publication must be tag-push gated")
+    check(set(publish.get("needs", [])) == {"source-release", "windows-amd64-preview"},
+          "preview publication must need source release and validated artifact")
+    check(publish.get("permissions", {}).get("contents") == "write", "preview publication must request contents: write")
+    download = next((step for step in publish.get("steps", []) if step.get("uses") == "actions/download-artifact@v4"), None)
+    check(download is not None and download.get("with", {}).get("path") == "dist",
+          "validated artifact must download into dist")
+    for needle in ("lingtai-${TAG}-windows-amd64-preview.zip", 'bootstrap="dist/install-windows-preview.ps1"', "gh release upload"):
+        check(needle in publish_text, f"preview publication missing {needle!r}")
+    check("dist/*" not in publish_text and "*.zip" not in publish_text, "preview publication must not use wildcard assets")
 
     homebrew = jobs.get("update-homebrew", {})
-    checksum = find_step(homebrew, "compute source tarball checksum")
+    check("github.event_name == 'push'" in str(homebrew.get("if", "")), "Homebrew update must be tag-push gated")
+    check(homebrew.get("needs") == "source-release", "Homebrew update must wait for source release")
     formula = find_step(homebrew, "write formula")
-    check(checksum is not None, "update-homebrew must checksum the GitHub source tarball")
-    check(formula is not None, "update-homebrew must write the source-build formula")
-    if formula:
-        script = formula.get("run", "")
-        check("archive/refs/tags/${TAG}.tar.gz" in script,
-              "Homebrew formula must build from the GitHub tag source archive")
-        check('depends_on "go" => :build' in script,
-              "Homebrew formula must retain source-build Go dependency")
+    check(formula is not None and 'depends_on "go" => :build' in formula.get("run", ""),
+          "Homebrew must retain its source-build formula")
 
-    text = WORKFLOW_PATH.read_text()
-    forbidden = (
-        "release-assets", "publish-bundle", "gh release upload",
-        "lingtai-bundle-manifest.json", "publish_bundle_to_gitee.sh",
-        "sync_gitee_mirror.sh", "GITEE_ACCESS_TOKEN",
-    )
-    for needle in forbidden:
-        check(needle not in text, f"source-only workflow must not contain {needle!r}")
+    text = WORKFLOW.read_text()
+    for forbidden in ("lingtai-bundle-manifest.json", "publish_bundle_to_gitee.sh", "sync_gitee_mirror.sh", "GITEE_ACCESS_TOKEN", "windows-arm64"):
+        check(forbidden not in text, f"release workflow must not contain {forbidden!r}")
 
     if FAILURES:
-        print("FAILED source-only release workflow checks:", file=sys.stderr)
+        print("FAILED release workflow checks:", file=sys.stderr)
         for failure in FAILURES:
             print(f"  - {failure}", file=sys.stderr)
         return 1
-    print("OK: source-only GitHub release + Homebrew workflow, no prebuilt/bundle publication")
+    print("OK: native preview validation, exact tag-only assets, source release, and Homebrew gates")
     return 0
 
 
