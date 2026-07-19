@@ -524,6 +524,23 @@ try {
         NoModifyPath = $true
     }
     Assert-True ($r5.ExitCode -ne 0) 'version mismatch between requested and reported exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir5 'lingtai-tui.exe'))) 'version mismatch installs nothing'
+
+    # A prefix/superset is not an exact match: v9.9.90 must not satisfy v9.9.9.
+    $home5b = New-IsolatedHome
+    $binDir5b = Join-Path $home5b 'bin dir'
+    $fxNearVer = New-FixtureArchive -Version 'v9.9.9' -TuiVersion 'v9.9.90'
+    $r5b = Invoke-Installer @{
+        Version      = 'v9.9.9'
+        BinDir       = $binDir5b
+        GlobalDir    = (Join-Path $home5b '.lingtai-tui')
+        ArchivePath  = $fxNearVer.ArchivePath
+        ChecksumPath = $fxNearVer.ChecksumPath
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r5b.ExitCode -ne 0) 'near-match version v9.9.90 does not satisfy exact request v9.9.9'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir5b 'lingtai-tui.exe'))) 'near-match version installs nothing'
 
     # -----------------------------------------------------------------------
     # CONTRACT 6: idempotent second install. Re-running the same install over an
@@ -614,6 +631,26 @@ try {
     }
     Assert-Equal 0 $r9.ExitCode 'SkipVenv install exits 0'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9 'runtime\venv'))) 'SkipVenv left no runtime venv'
+
+    # The default native runtime path is currently unsupported. Its known
+    # fail-loud gate must run before any binary or metadata write so a caller
+    # never gets a failed command that already changed BinDir.
+    Write-Section 'contract: unavailable default runtime fails before install writes'
+    $home9b = New-IsolatedHome
+    $binDir9b = Join-Path $home9b 'bin dir'
+    $globalDir9b = Join-Path $home9b '.lingtai-tui'
+    $r9b = Invoke-Installer @{
+        Version      = 'v9.9.9'
+        BinDir       = $binDir9b
+        GlobalDir    = $globalDir9b
+        ArchivePath  = $fx.ArchivePath
+        ChecksumPath = $fx.ChecksumPath
+        NoModifyPath = $true
+    }
+    Assert-True ($r9b.ExitCode -ne 0) 'unavailable default runtime exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-tui.exe'))) 'runtime preflight failure installs no TUI binary'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-portal.exe'))) 'runtime preflight failure installs no portal binary'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9b 'install.json'))) 'runtime preflight failure writes no install metadata'
 
     # -----------------------------------------------------------------------
     # CONTRACT 10: NoModifyPath does not persist PATH.
