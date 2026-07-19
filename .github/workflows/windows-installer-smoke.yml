@@ -1,0 +1,60 @@
+name: Windows Installer Smoke
+
+# Runs the native-Windows installer contract suite (scripts/test-install-ps1.ps1)
+# under BOTH Windows PowerShell 5.1 (Desktop) and PowerShell 7 (Core) on
+# windows-latest. The suite is test-first: until install.ps1 exists it is RED by
+# design, so this workflow is expected to fail until the installer is
+# implemented against the seams the suite exercises.
+#
+# No secrets and no network dependency beyond actions/checkout and the
+# PowerShell hosts already present on windows-latest.
+
+on:
+  push:
+    paths:
+      - 'install.ps1'
+      - 'scripts/test-install-ps1.ps1'
+      - '.github/workflows/windows-installer-smoke.yml'
+  pull_request:
+    paths:
+      - 'install.ps1'
+      - 'scripts/test-install-ps1.ps1'
+      - '.github/workflows/windows-installer-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell-5-1:
+    name: Windows PowerShell 5.1 (Desktop)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report host edition
+        shell: powershell
+        run: |
+          "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+
+      - name: Run installer contract suite (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          .\scripts\test-install-ps1.ps1
+
+  powershell-7:
+    name: PowerShell 7 (Core)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report host edition
+        shell: pwsh
+        run: |
+          "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+
+      - name: Run installer contract suite (PowerShell 7)
+        shell: pwsh
+        run: |
+          ./scripts/test-install-ps1.ps1
