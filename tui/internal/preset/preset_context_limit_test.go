@@ -12,13 +12,13 @@ import (
 // intended budget. This is the canonical default; the firstrun wizard's
 // zero/invalid-input fallbacks mirror it.
 func TestDefaultAgentOpts_ContextLimit(t *testing.T) {
-	if got := DefaultAgentOpts().ContextLimit; got != 250000 {
-		t.Errorf("DefaultAgentOpts().ContextLimit = %d, want 250000", got)
+	if got := DefaultAgentOpts().ContextLimit; got != 300000 {
+		t.Errorf("DefaultAgentOpts().ContextLimit = %d, want 300000", got)
 	}
 }
 
 // TestGenerateInitJSON_WritesContextLimit verifies the default flows into the
-// generated manifest as 250000, and — crucially — that an explicit user
+// generated manifest as 300000, and — crucially — that an explicit user
 // override is preserved verbatim rather than being clamped back to the default.
 func TestGenerateInitJSON_WritesContextLimit(t *testing.T) {
 	withTempPresets(t, func() {
@@ -46,13 +46,13 @@ func TestGenerateInitJSON_WritesContextLimit(t *testing.T) {
 			return m
 		}
 
-		// Default flows through to the manifest as 250000.
+		// Default flows through to the manifest as 300000.
 		if err := GenerateInitJSONWithOpts(DefaultPreset(), "alice", "alice", lingtaiDir, globalDir, DefaultAgentOpts()); err != nil {
 			t.Fatalf("GenerateInitJSONWithOpts: %v", err)
 		}
 		// JSON numbers decode as float64.
-		if v, ok := readManifest("alice")["context_limit"].(float64); !ok || int(v) != 250000 {
-			t.Errorf("alice context_limit = %v (ok=%v), want 250000", readManifest("alice")["context_limit"], ok)
+		if v, ok := readManifest("alice")["context_limit"].(float64); !ok || int(v) != 300000 {
+			t.Errorf("alice context_limit = %v (ok=%v), want 300000", readManifest("alice")["context_limit"], ok)
 		}
 
 		// Explicit override is preserved, not reset to the default.
