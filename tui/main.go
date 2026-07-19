@@ -24,6 +24,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/tui"
+	"github.com/anthropics/lingtai-tui/internal/tuiinstance"
 )
 
 // version is set at build time via -ldflags "-X main.version=v0.4.2"
@@ -1128,6 +1129,19 @@ func spawnMain() {
 // purgeMain is defined in purge_unix.go / purge_windows.go
 
 func runPreparedApp(projectDir string) {
+	// TUIInstanceGuard: only acquired singleton ownership permits the
+	// protected interactive TUI startup below. Contended and Unknown
+	// refuse distinctly; there is no scan/PID/age/deletion bypass.
+	guard := tuiinstance.Acquire(filepath.Join(projectDir, ".lingtai"))
+	switch guard.State {
+	case tuiinstance.Contended:
+		fmt.Fprintln(os.Stderr, "another lingtai-tui instance already owns this project; refusing to start a second one")
+		os.Exit(1)
+	case tuiinstance.Unknown:
+		fmt.Fprintf(os.Stderr, "cannot verify exclusive TUI ownership for this project (%s); refusing to start\n", guard.Detail)
+		os.Exit(1)
+	}
+	defer guard.Token.Release()
 	result := prepareApp(projectDir, false)
 	if result.kind == startupUpgradeExit || result.kind == startupCanceled {
 		return
