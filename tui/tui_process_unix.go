@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/anthropics/lingtai-tui/internal/termobs"
 )
 
 func findOtherTUIProcesses() []runningTUIProcess {
@@ -60,12 +63,20 @@ func processCWD(pid int) string {
 }
 
 func stopTUIProcess(pid int) error {
+	// Pin the exact incarnation so the exit polls can't mistake a reused PID.
+	inc, err := termobs.Identify(pid)
+	if errors.Is(err, termobs.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
 		return err
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
+		if termobs.Observe(inc).Status == termobs.StatusExited {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -75,18 +86,13 @@ func stopTUIProcess(pid int) error {
 	}
 	deadline = time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
+		if termobs.Observe(inc).Status == termobs.StatusExited {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if processAlive(pid) {
+	if termobs.Observe(inc).Status != termobs.StatusExited {
 		return fmt.Errorf("PID %d still alive after SIGKILL", pid)
 	}
 	return nil
-}
-
-func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }

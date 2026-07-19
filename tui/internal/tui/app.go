@@ -13,10 +13,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/actionstate"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
+	"github.com/anthropics/lingtai-tui/internal/spawnprocess"
 )
 
 type appView int
@@ -811,10 +813,16 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			count := 0
 			var failures []string
 			for _, agent := range agents {
-				if agent.IsHuman {
+				if agent.IsHuman || a.lingtaiCmd == "" {
 					continue
 				}
-				if !fs.IsAlive(agent.WorkingDir, 3.0) && a.lingtaiCmd != "" {
+				d := actionstate.Evaluate(agent.WorkingDir, 3.0)
+				if d.Observation == actionstate.ObservationUnknown {
+					count++
+					failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), d.Reason))
+					continue
+				}
+				if d.CanRestart {
 					count++
 					if err := reviveDir(a.lingtaiCmd, agent.WorkingDir); err != nil {
 						failures = append(failures, fmt.Sprintf("%s (%s)", filepath.Base(agent.WorkingDir), firstLine(err)))
@@ -827,14 +835,18 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 				addMsg(i18n.TF("mail.cpr_all", count))
 			}
 		} else if targetDir != "" && a.lingtaiCmd != "" {
-			if !fs.IsAlive(targetDir, 3.0) {
+			d := actionstate.Evaluate(targetDir, 3.0)
+			switch {
+			case d.CanRestart:
 				if err := reviveDir(a.lingtaiCmd, targetDir); err != nil {
 					addMsg(i18n.TF("mail.launch_failed", firstLine(err)))
 				} else {
 					addMsg(i18n.TF("mail.cpr", targetName))
 				}
-			} else {
+			case d.Observation == actionstate.ObservationRunning:
 				addMsg(i18n.T("mail.cpr_alive"))
+			default:
+				addMsg(i18n.TF("mail.launch_failed", d.Reason))
 			}
 		}
 		return a, nil
@@ -1463,13 +1475,13 @@ func reviveDir(lingtaiCmd, dir string) error {
 	return waitForLaunchHeartbeat(cmd, dir, 10*time.Second)
 }
 
-func waitForLaunchHeartbeat(cmd *exec.Cmd, dir string, timeout time.Duration) error {
+func waitForLaunchHeartbeat(child *spawnprocess.Child, dir string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if fs.IsAlive(dir, 3.0) {
 			return nil
 		}
-		if cmd != nil && !process.IsAgentRunning(dir) {
+		if child != nil && !process.IsAgentRunning(dir) {
 			return fmt.Errorf("agent launch exited before writing a fresh heartbeat; see %s", filepath.Join(dir, "logs", "agent.log"))
 		}
 		time.Sleep(200 * time.Millisecond)

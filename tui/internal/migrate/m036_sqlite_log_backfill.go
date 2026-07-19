@@ -16,7 +16,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/anthropics/lingtai-tui/internal/config"
-	"github.com/anthropics/lingtai-tui/internal/processscan"
+	"github.com/anthropics/lingtai-tui/internal/migrationguard"
 )
 
 // sqliteBackfillCandidate is a stopped agent whose historical JSONL event log
@@ -87,6 +87,10 @@ func migrateSQLiteLogBackfill(lingtaiDir string) error {
 	fmt.Println("Starting SQLite log backfill migration...")
 	for i, c := range candidates {
 		fmt.Printf("\n[%d/%d] %s\n", i+1, len(candidates), c.Name)
+		if d := migrationguard.CheckAgentDir(c.AgentDir); !d.Permitted() {
+			fmt.Fprintf(os.Stderr, "warning: skipping SQLite backfill for %s: %s\n", c.Name, d.Reason)
+			continue
+		}
 		if err := sqliteRunRebuildWithProgress(python, c, os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintf(os.Stderr, "\nwarning: SQLite backfill failed for %s: %v\n", c.Name, err)
 			fmt.Fprintln(os.Stderr, "LingTai will continue to start normally; JSONL logs remain intact.")
@@ -173,7 +177,7 @@ func sqliteDiscoverBackfillCandidates(python, lingtaiDir string) ([]sqliteBackfi
 		if err != nil || info.Size() == 0 {
 			continue
 		}
-		if processscan.IsAgentRunning(agentDir) {
+		if !migrationguard.CheckAgentDir(agentDir).Permitted() {
 			skippedRunning++
 			continue
 		}

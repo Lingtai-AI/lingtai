@@ -1,6 +1,9 @@
 package processscan
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParsePSListOutputPreservesAgentDirsWithSpaces(t *testing.T) {
 	out := `  1234 00:01:02 /usr/bin/python -m lingtai run /tmp/Project With Spaces/.lingtai/agent A
@@ -197,11 +200,62 @@ func TestCommandMatchesAgentDirEOLAndArgBoundary(t *testing.T) {
 	}
 }
 
-func TestFindAllAgentProcessesReturnsScanError(t *testing.T) {
-	t.Setenv("PATH", t.TempDir()) // no ps / wmic / powershell reachable
-	procs, err := FindAllAgentProcesses()
-	if err == nil {
-		t.Fatalf("expected an error when the process-scan command is unavailable, got procs=%v", procs)
+func TestAgentProcessesFromRecordsSkipsUnknownCommandsAndPreservesOrder(t *testing.T) {
+	abs := `C:\Users\Raw Lee\Project With Spaces\.lingtai\agent-a`
+	empty := "   "
+	first := `C:\Python\python.exe -m lingtai run "C:\Users\Raw Lee\Project With Spaces\.lingtai\agent-a"`
+	sibling := `C:\Python\python.exe -m lingtai run "C:\Users\Raw Lee\Project With Spaces\.lingtai\agent-a-sibling"`
+	second := `C:\Python\Scripts\lingtai-agent.exe run "C:\Users\Raw Lee\Project With Spaces\.lingtai\agent-a"`
+
+	got := agentProcessesFromRecords([]processRecord{
+		{PID: 1, CommandLine: nil},
+		{PID: 2, CommandLine: &empty},
+		{PID: 3, CommandLine: &first},
+		{PID: 4, CommandLine: &sibling},
+		{PID: 5, CommandLine: &second},
+	}, abs)
+	if len(got) != 2 {
+		t.Fatalf("got %d processes, want 2: %+v", len(got), got)
+	}
+	if got[0].PID != 3 || got[1].PID != 5 {
+		t.Fatalf("process order/PIDs = %+v, want 3 then 5", got)
+	}
+	if got[0].AgentDir != abs || got[1].AgentDir != abs {
+		t.Fatalf("agent dirs = %q, %q; want %q", got[0].AgentDir, got[1].AgentDir, abs)
+	}
+	if got[0].Command != first || got[1].Command != second {
+		t.Fatalf("commands were not preserved: %+v", got)
+	}
+}
+
+func TestAgentProcessesFromRecordsListsAllRecognizedCommands(t *testing.T) {
+	command := `C:\Python\Scripts\lingtai.exe run C:\tmp\Project With Spaces\.lingtai\agent A`
+	got := agentProcessesFromRecords([]processRecord{{PID: 42, CommandLine: &command}}, "")
+	if len(got) != 1 {
+		t.Fatalf("got %d processes, want 1: %+v", len(got), got)
+	}
+	if got[0].AgentDir != `C:\tmp\Project With Spaces\.lingtai\agent A` {
+		t.Fatalf("AgentDir = %q", got[0].AgentDir)
+	}
+}
+
+func TestFindAgentProcessesCollapsesQueryError(t *testing.T) {
+	queryErr := errors.New("query failed")
+	got := findAgentProcesses("/tmp/project/.lingtai/agent", func(string) ([]AgentProcess, error) {
+		return nil, queryErr
+	})
+	if len(got) != 0 {
+		t.Fatalf("collapsed query error returned processes: %+v", got)
+	}
+}
+
+func TestFindAllAgentProcessesReturnsQueryError(t *testing.T) {
+	queryErr := errors.New("query failed")
+	procs, err := findAllAgentProcesses(func() ([]AgentProcess, error) {
+		return nil, queryErr
+	})
+	if !errors.Is(err, queryErr) {
+		t.Fatalf("error = %v, want %v", err, queryErr)
 	}
 	if len(procs) != 0 {
 		t.Fatalf("expected no processes alongside the error, got %v", procs)

@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/agentcounter"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/globalmigrate"
@@ -23,6 +24,7 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 	"github.com/anthropics/lingtai-tui/internal/process"
 	"github.com/anthropics/lingtai-tui/internal/tui"
+	"github.com/anthropics/lingtai-tui/internal/tuiinstance"
 )
 
 // version is set at build time via -ldflags "-X main.version=v0.4.2"
@@ -766,7 +768,7 @@ const agentCheckInterval = 4 * time.Hour
 // exits, so it's worth making sure the human sees the count before diving
 // back into the interface.
 func maybeShowAgentCount(globalDir string) {
-	n, scanned := scanAgentCount(globalDir, time.Now(), os.Stat, countRunningAgents,
+	n, scanned := scanAgentCount(globalDir, time.Now(), os.Stat, startupAgentCount(globalDir),
 		os.MkdirAll, os.WriteFile, os.Chtimes)
 	if !scanned {
 		return
@@ -1127,6 +1129,19 @@ func spawnMain() {
 // purgeMain is defined in purge_unix.go / purge_windows.go
 
 func runPreparedApp(projectDir string) {
+	// TUIInstanceGuard: only acquired singleton ownership permits the
+	// protected interactive TUI startup below. Contended and Unknown
+	// refuse distinctly; there is no scan/PID/age/deletion bypass.
+	guard := tuiinstance.Acquire(filepath.Join(projectDir, ".lingtai"))
+	switch guard.State {
+	case tuiinstance.Contended:
+		fmt.Fprintln(os.Stderr, "another lingtai-tui instance already owns this project; refusing to start a second one")
+		os.Exit(1)
+	case tuiinstance.Unknown:
+		fmt.Fprintf(os.Stderr, "cannot verify exclusive TUI ownership for this project (%s); refusing to start\n", guard.Detail)
+		os.Exit(1)
+	}
+	defer guard.Token.Release()
 	result := prepareApp(projectDir, false)
 	if result.kind == startupUpgradeExit || result.kind == startupCanceled {
 		return
@@ -1149,8 +1164,22 @@ func startupPromptNeeded(globalDir string) bool {
 	if _, err := os.Stat(filepath.Join(globalDir, ".firstrun")); os.IsNotExist(err) {
 		return true
 	}
-	return agentCountPromptNeeded(globalDir, time.Now(), os.Stat, countRunningAgents,
+	return agentCountPromptNeeded(globalDir, time.Now(), os.Stat, startupAgentCount(globalDir),
 		os.MkdirAll, os.WriteFile, os.Chtimes)
+}
+
+// startupAgentCount adapts the AgentCounter query to the func() int seam
+// used by scanAgentCount and agentCountPromptNeeded. An Unknown count is
+// surfaced on stderr instead of passing silently as zero.
+func startupAgentCount(globalDir string) func() int {
+	return func() int {
+		c := agentcounter.CountRunningAgents(globalDir)
+		if c.State != agentcounter.StateKnown {
+			fmt.Fprintf(os.Stderr, "agent count unknown: %s\n", strings.Join(c.Issues, "; "))
+			return 0
+		}
+		return c.Agents
+	}
 }
 
 // scanAgentCount belongs to the outside-program prompt. It refreshes the
