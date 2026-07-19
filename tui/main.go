@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/agentcounter"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/globalmigrate"
@@ -766,7 +767,7 @@ const agentCheckInterval = 4 * time.Hour
 // exits, so it's worth making sure the human sees the count before diving
 // back into the interface.
 func maybeShowAgentCount(globalDir string) {
-	n, scanned := scanAgentCount(globalDir, time.Now(), os.Stat, countRunningAgents,
+	n, scanned := scanAgentCount(globalDir, time.Now(), os.Stat, startupAgentCount(globalDir),
 		os.MkdirAll, os.WriteFile, os.Chtimes)
 	if !scanned {
 		return
@@ -1149,8 +1150,22 @@ func startupPromptNeeded(globalDir string) bool {
 	if _, err := os.Stat(filepath.Join(globalDir, ".firstrun")); os.IsNotExist(err) {
 		return true
 	}
-	return agentCountPromptNeeded(globalDir, time.Now(), os.Stat, countRunningAgents,
+	return agentCountPromptNeeded(globalDir, time.Now(), os.Stat, startupAgentCount(globalDir),
 		os.MkdirAll, os.WriteFile, os.Chtimes)
+}
+
+// startupAgentCount adapts the AgentCounter query to the func() int seam
+// used by scanAgentCount and agentCountPromptNeeded. An Unknown count is
+// surfaced on stderr instead of passing silently as zero.
+func startupAgentCount(globalDir string) func() int {
+	return func() int {
+		c := agentcounter.CountRunningAgents(globalDir)
+		if c.State != agentcounter.StateKnown {
+			fmt.Fprintf(os.Stderr, "agent count unknown: %s\n", strings.Join(c.Issues, "; "))
+			return 0
+		}
+		return c.Agents
+	}
 }
 
 // scanAgentCount belongs to the outside-program prompt. It refreshes the
