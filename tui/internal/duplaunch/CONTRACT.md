@@ -1,7 +1,8 @@
 # DuplicateLaunchCheck · Contract
 
 Policy interface: decide `allow` / `block` / `unknown` for launching one
-agent into one working directory. Caller: the `process.LaunchAgent` gate.
+agent into one working directory. Callers: the `process.LaunchAgent` gate and
+Windows lifecycle lock-clear probes before controlled refresh/revival mutation.
 
 ## Authority
 - Sole authority: this package's private, non-creating probe of the kernel's
