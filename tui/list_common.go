@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthropics/lingtai-tui/internal/agentinventory"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 )
@@ -166,6 +167,7 @@ func printListJSON(w io.Writer, snap inventory.Snapshot, opts listOptions) {
 }
 
 func printListWarnings(w io.Writer, phantomDirs []string, filterDir string) {
+	printAdvisoryInventory(w, filterDir)
 	if len(phantomDirs) == 0 {
 		return
 	}
@@ -177,6 +179,24 @@ func printListWarnings(w io.Writer, phantomDirs []string, filterDir string) {
 		fmt.Fprintf(w, "Run 'lingtai-tui purge %s' to kill them.\n", filterDir)
 	} else {
 		fmt.Fprintln(w, "Run 'lingtai-tui purge <dir>' to kill phantoms in a specific directory.")
+	}
+}
+
+// printAdvisoryInventory reports on-disk agent records whose own evidence is
+// unresolved (unknown or conflicting). Advisory only: never a gate.
+func printAdvisoryInventory(w io.Writer, filterDir string) {
+	if filterDir == "" {
+		return
+	}
+	records, err := agentinventory.Query(filepath.Join(filterDir, ".lingtai"))
+	if err != nil {
+		fmt.Fprintf(w, "\nWARNING: %v\n", err)
+		return
+	}
+	for _, r := range records {
+		if r.Presence == agentinventory.PresenceUnknown || r.Presence == agentinventory.PresenceConflict {
+			fmt.Fprintf(w, "advisory: agent %s is %s (%s)\n", r.Name, r.Presence, r.Detail)
+		}
 	}
 }
 
