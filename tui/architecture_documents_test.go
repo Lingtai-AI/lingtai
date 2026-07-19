@@ -35,6 +35,44 @@ func TestArchitectureEntryLinks(t *testing.T) {
 	}
 }
 
+func TestRuntimeControlSurfaceAnatomyRoute(t *testing.T) {
+	root := filepath.Clean("..")
+	for _, tc := range []struct {
+		path  string
+		wants []string
+	}{
+		{"ANATOMY.md", []string{
+			"Runtime/control-surface boundary",
+			"tui/ANATOMY.md",
+			"portal/ANATOMY.md",
+			"lingtai-kernel-anatomy",
+		}},
+		{"tui/ANATOMY.md", []string{
+			"Runtime/control-surface boundary",
+			"tui/internal/tui/app.go:640-670",
+			"tui/internal/process/launcher.go:87-135",
+			"tui/main.go:1640-1650",
+			"tui/internal/tui/app.go:763-906",
+			"tui/internal/fs/signal.go:9-55",
+			"tui/main.go:737-767",
+			"tui/internal/tui/app.go:1834-1883",
+		}},
+		{"portal/ANATOMY.md", []string{
+			"Runtime/control-surface boundary",
+			"portal/main.go:91-97",
+			"tui/ANATOMY.md",
+			"lingtai-kernel-anatomy",
+		}},
+	} {
+		text := readArchitectureFile(t, root, tc.path)
+		for _, want := range tc.wants {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing runtime-boundary route/anchor %q", tc.path, want)
+			}
+		}
+	}
+}
+
 func readArchitectureFile(t *testing.T, root, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))

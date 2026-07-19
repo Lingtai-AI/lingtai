@@ -38,7 +38,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 
 - **`portal/main.go:23-98`** — `main()` entry. Parses `--dir`, `--host`, `--port`, `--open`, `--lang` flags (`portal/main.go:34-44`); validates `.lingtai/` exists (`portal/main.go:52-55`); leaves project files untouched (runtime migrations are retired); creates `.portal/` directory (`portal/main.go:68-70`); constructs the `api.Server`, starts topology recording (`portal/main.go:73-74`), and serves on the requested host/port (`portal/main.go:75-82`). Blocks on SIGINT/SIGTERM, then calls `srv.Stop()` (`portal/main.go:91-97`).
 - **`portal/main.go:100-130`** — `openBrowser(url)` launches the OS default browser (darwin/linux/windows/WSL).
-- **`portal/main.go:132-139`** — `isWSL()` detects WSL via `/proc/version`.
+- **`portal/main.go:130-137`** — `isWSL()` detects WSL via `/proc/version`.
 - **`portal/embed.go:8-9`** — `//go:embed all:web/dist` compiles the React frontend build output into `webDist embed.FS`. No runtime Node dependency.
 - **`portal/embed.go:11-17`** — `WebFS()` returns `fs.Sub(webDist, "web/dist")` so the HTTP server mounts from the `web/dist/` root.
 - **`Makefile:1-24`** — Build pipeline. `web-build` runs `npm install && npm run build` in `web/`; `go-build` depends on it and stamps `main.version` via `-ldflags`. `cross-compile` targets darwin/linux × arm64/amd64.
@@ -74,6 +74,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 
 ## Notes
 
+- **Runtime/control-surface boundary:** Portal is a presentation/server process, not the agent runtime. Its SIGINT/SIGTERM path stops only the Portal HTTP server (`portal/main.go:91-97`); running agents remain kernel-owned and are observed through the filesystem described above. TUI-side Portal launch/release and agent lifecycle controls are mapped in `tui/ANATOMY.md`; exact Python lifecycle semantics belong to the separate `lingtai-kernel-anatomy` graph.
 - **Loopback host and random port are the defaults.** Empty `--host` resolves to `127.0.0.1`, and `--port 0` (the default, `portal/main.go:42`) lets the OS pick an available port (`portal/internal/api/server.go:48-60`). The bound port is written to `.portal/port` so callers can discover it.
 - **Explicit external hosts are unauthenticated.** `--host 0.0.0.0`, `--host ::`, or a named/non-loopback host is an opt-in for trusted-LAN use only. The display/open URL remains `http://localhost:<port>` for loopback and wildcard binds; explicit named/non-loopback hosts display directly.
 - **Live recording begins at startup.** `StartRecording` (`portal/internal/api/server.go:70-114`) runs in a background goroutine. On first call it checks whether the tape needs reconstruction (`needsReconstruction`, `portal/internal/api/server.go:174-200`), rebuilds from source events if needed, then records a snapshot every 3 seconds.

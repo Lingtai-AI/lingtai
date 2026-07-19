@@ -20,6 +20,8 @@ related_files:
   - tui/main.go
   - tui/go.mod
   - tui/Makefile
+  - tui/internal/preset/skills/lingtai-tui-help/SKILL.md
+  - tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md
   - portal/main.go
   - portal/embed.go
   - portal/go.mod
@@ -63,10 +65,10 @@ dependency.
 
 > **What is an `ANATOMY.md`?** This root file defines the convention (see
 > `## Anatomy convention`). The bundled `lingtai-tui-anatomy` skill
-> (`tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`) is a legacy
-> citation-navigation aid for the existing per-package anatomies; it predates
-> this root/paired convention and awaits a separate alignment, so where the two
-> disagree this file governs.
+> (`tui/internal/preset/skills/lingtai-tui-anatomy/SKILL.md`) is the
+> discoverable navigation aid into this distributed graph; this root remains
+> normative, and the skill routes readers here rather than duplicating the
+> convention.
 
 ## Components
 
@@ -170,6 +172,7 @@ This repo depends on `lingtai-kernel` only at runtime (the Python agent it launc
 
 ## Notes
 
+- **Runtime/control-surface boundary:** TUI and Portal are control/presentation processes; the independently running kernel process owns the agent heartbeat, listeners, and lifecycle. Closing a frontend is not an agent lifecycle operation, and ordinary persistence does not require a second `launchd` supervisor. Use explicit lifecycle commands and inspect current state instead. `tui/ANATOMY.md` carries the same-repo quit/launch/attach/signal/inventory source anchors; `portal/ANATOMY.md` carries the Portal shutdown boundary; exact Python runtime semantics remain in the separate `lingtai-kernel-anatomy` graph.
 - **Human-facing docs ownership:** the step-by-step beginner guide lives on the website tutorial (`https://lingtai.ai/{en,zh,wen}/tutorial/`), maintained outside this repo. In-repo, the human-facing surfaces are the three READMEs (concise orientation) and the bundled help assets (`tui/internal/preset/skills/lingtai-tui-help/assets/`, the canonical slash-command catalog). Any change that adds/removes/renames user-visible capabilities, slash commands, setup/install flows, channel/addon surfaces, memory/molt behavior, daemon/avatar behavior, or safety boundaries must keep the README orientation and help assets accurate and flag the website tutorial for a matching update (tracked in the separate website repo).
 - **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv (`~/.lingtai-tui/runtime/venv/bin/lingtai`). Build to `tui/bin/lingtai-tui`; never `tui/bin/lingtai`.
 - **Bubble Tea v2 paste delivery.** Bubble Tea v2 splits keys (`tea.KeyPressMsg`) from clipboard pastes (`tea.PasteMsg`). Any `Update` dispatcher gating on `case tea.KeyPressMsg:` must also forward `tea.PasteMsg` to whichever text widget is focused — otherwise paste silently drops. For embedded sub-models hosted inside another model (e.g. `PresetEditorModel` inside `FirstRunModel`), the host's outer `default:` branch must forward paste msgs into the sub-model. Trace top-down to find missing layers; the symptom is "typing works, paste does nothing."

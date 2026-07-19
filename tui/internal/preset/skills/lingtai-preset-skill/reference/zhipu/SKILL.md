@@ -1,19 +1,22 @@
 ---
 name: preset-skill-zhipu
 description: Official-source-led manual for the TUI `zhipu` template.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 2.0.0
+last_changed_at: "2026-07-19T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # `zhipu`
 
-`zhipuPreset()` ships provider `zhipu` with exact model `GLM-5.2`,
-`ZHIPU_API_KEY`, and the OpenAI-compatible regional endpoints
+`zhipuPreset()` (`tui/internal/preset/preset.go:1006-1023`) ships provider
+`zhipu` with exact model `GLM-5.2`, `ZHIPU_API_KEY`, and the
+OpenAI-compatible regional endpoints
 `https://open.bigmodel.cn/api/coding/paas/v4` (CN) and
 `https://api.z.ai/api/coding/paas/v4` (INTL). The manifest keeps `web_search`
 and `skills` and intentionally has no built-in `vision` key: GLM-5.2 is
 text-in/text-out, not a native image route.
+
+## Template-specific settings
 
 The separate official [Z.AI Vision MCP](https://docs.z.ai/devpack/mcp/vision-mcp-server)
 uses package `@z_ai/mcp-server` and the distinct backing model GLM-4.6V. It is a
@@ -26,3 +29,8 @@ Understanding is available on Lite/Pro/Max, but consumes the separate rolling
 5-hour prompt pool rather than the monthly MCP quota used by search/reader/zread.
 Do not auto-install, register, or invoke it. Recheck TUI source for the shipped
 model, regional URL, env-var, and capability wiring. Never guess a key.
+
+## Operations
+
+For base URL/API-compat/model/capability declaration shape versus
+credentials, see `reference/operations/endpoint-capabilities/SKILL.md`.

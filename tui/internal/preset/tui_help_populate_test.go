@@ -52,6 +52,61 @@ func TestBundledLingtaiTuiHelp(t *testing.T) {
 	}
 }
 
+// TestBundledLingtaiTuiHelpRuntimeBoundaryAndRouting pins the sanitized
+// regression that motivated the umbrella: UI exit is not agent lifecycle,
+// ordinary persistence must not default to launchd, and feature questions route
+// to their existing canonical skills instead of being duplicated here.
+func TestBundledLingtaiTuiHelpRuntimeBoundaryAndRouting(t *testing.T) {
+	help, err := ReadBundledSkillFile("lingtai-tui-help", "SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flatHelp := strings.Join(strings.Fields(help), " ")
+	for _, want := range []string{
+		"Anything you need to know about LingTai TUI",
+		"关闭 TUI/终端后 agent 会不会停止？",
+		"does **not** stop a running agent",
+		"launchd` is **not** the default remedy",
+		"feature: runtime-lifecycle-source",
+		"route: lingtai-tui-anatomy",
+		"route: assets/slash-commands.en.md",
+		"route: lingtai-preset-skill",
+		"route: lingtai-portal-guide",
+		"route: tutorial-guide",
+		"route: lingtai-update",
+		"route: lingtai-dev-guide",
+		"route: lingtai-doctor",
+		"route: mcp-manual",
+		"## Human routing table",
+	} {
+		normalizedWant := strings.Join(strings.Fields(want), " ")
+		if !strings.Contains(flatHelp, normalizedWant) {
+			t.Errorf("lingtai-tui-help umbrella missing %q", want)
+		}
+	}
+	for _, private := range []string{"/Users/", "LaunchAgent/", "com.apple."} {
+		if strings.Contains(help, private) {
+			t.Errorf("lingtai-tui-help leaked private screenshot detail %q", private)
+		}
+	}
+
+	anatomy, err := ReadBundledSkillFile("lingtai-tui-anatomy", "SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"repository-root `ANATOMY.md` is both the normative anatomy-of-anatomy",
+		"## Runtime-boundary route",
+		"tui/ANATOMY.md",
+		"portal/ANATOMY.md",
+		"lingtai-kernel-anatomy",
+	} {
+		if !strings.Contains(anatomy, want) {
+			t.Errorf("lingtai-tui-anatomy navigator missing %q", want)
+		}
+	}
+}
+
 // TestBtwHelpNegativeContract pins the semantic contract of the `/btw` help
 // entry across all three locales: it must present /btw as a mirror inquiry that
 // does NOT steer the active agent, and must redirect real instructions to a

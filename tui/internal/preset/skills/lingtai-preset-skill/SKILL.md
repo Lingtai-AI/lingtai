@@ -1,11 +1,14 @@
 ---
 name: lingtai-preset-skill
 description: >
-  Routes questions about the 12 TUI-shipped built-in preset templates to one
-  thin, official-source-led child manual. Read a child only when its preset is
-  relevant; this does not describe arbitrary saved presets.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+  Thin dual-axis router for preset questions: which of the 12 TUI-shipped
+  built-in preset templates (provider axis), and which cross-cutting preset
+  lifecycle mechanic (operation axis) — saving, checking availability,
+  activating/refreshing, endpoint/capability facts, or troubleshooting. Read
+  a child only when it is relevant; this does not describe arbitrary saved
+  presets.
+version: 2.0.0
+last_changed_at: "2026-07-19T00:00:00Z"
 related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/SKILL.md
   - tui/internal/preset/preset.go
@@ -24,21 +27,37 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/claude-agent-sdk/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/availability-save-gate/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/activation-session-refresh/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/troubleshooting-migration/SKILL.md
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
 # Built-in preset manuals
 
 This router covers exactly the names returned by `BuiltinPresets()` in
-`tui/internal/preset/preset.go`. It is for TUI-owned template presets only.
-When a question names one of them, open its child manual and then read the
-linked official introduction or vision page on demand. Provider pages own
-volatile model, pricing, endpoint, protocol, and plan facts; the TUI source
-owns the shipped name, manifest wiring, and capability flags.
+`tui/internal/preset/preset.go`, plus the cross-cutting mechanics that apply
+across all of them. It is for TUI-owned template presets only.
 
-## Nested reference catalog
+Preset questions split along two independent axes:
 
-Each entry is a child manual, not a standalone top-level skill:
+- **Provider axis** — "which template, and what are its unique facts?" (model,
+  endpoint, credential env-var, official links). One child per
+  `BuiltinPresets()` name under `reference/<provider>/SKILL.md`.
+- **Operation axis** — "what happens when I save / check / activate / refresh
+  / troubleshoot a preset, regardless of provider?" One child per mechanic
+  under `reference/operations/<operation>/SKILL.md`.
+
+A concrete question usually composes both: read the operation child for the
+mechanic, then the provider child for the provider-specific fact (exact
+model, endpoint, credential). Provider pages own volatile model, pricing,
+endpoint, protocol, and plan facts and route to the relevant operation
+child instead of restating shared mechanics; operation pages own the shared
+lifecycle mechanics and never encode provider-specific facts.
+
+## Provider catalog (12 direct children)
 
 ```yaml
 - name: preset-skill-minimax
@@ -67,8 +86,6 @@ Each entry is a child manual, not a standalone top-level skill:
   location: reference/custom/SKILL.md
 ```
 
-## Routing table
-
 | Preset | Child manual | Stable routing hint |
 |---|---|---|
 | `minimax` | `reference/minimax/SKILL.md` | MiniMax, Anthropic-shaped endpoint |
@@ -84,6 +101,29 @@ Each entry is a child manual, not a standalone top-level skill:
 | `claude-agent-sdk` | `reference/claude-agent-sdk/SKILL.md` | local Claude Code login |
 | `custom` | `reference/custom/SKILL.md` | user-supplied compatible endpoint |
 
+## Operation catalog (5 nested children)
+
+```yaml
+- name: preset-skill-op-saved-presets
+  location: reference/operations/saved-presets/SKILL.md
+- name: preset-skill-op-endpoint-capabilities
+  location: reference/operations/endpoint-capabilities/SKILL.md
+- name: preset-skill-op-availability-save-gate
+  location: reference/operations/availability-save-gate/SKILL.md
+- name: preset-skill-op-activation-session-refresh
+  location: reference/operations/activation-session-refresh/SKILL.md
+- name: preset-skill-op-troubleshooting-migration
+  location: reference/operations/troubleshooting-migration/SKILL.md
+```
+
+| Question shape | Child manual |
+|---|---|
+| How do saved presets differ from templates? Load/Save/Delete/Bootstrap order and atomicity? | `reference/operations/saved-presets/SKILL.md` |
+| What base URL / API compatibility / provider / model / capability declarations does a preset carry, distinct from credentials? Codex OAuth quota inspection. | `reference/operations/endpoint-capabilities/SKILL.md` |
+| Why does Save block or warn, and what does the live validity probe actually do (429/503/529 vs hard block)? | `reference/operations/availability-save-gate/SKILL.md` |
+| How does a saved preset become the running default, and what does `/refresh` actually switch? | `reference/operations/activation-session-refresh/SKILL.md` |
+| Something looks broken/stale — bounded triage before routing to a deeper runtime/update/migration skill | `reference/operations/troubleshooting-migration/SKILL.md` |
+
 ## Boundaries and maintenance
 
 The manuals describe direct provider-native or current-preset
@@ -98,6 +138,8 @@ may change provider, model, endpoint, credentials, or capabilities. Inspect
 its actual manifest instead of treating this catalog as coverage for it.
 
 When `BuiltinPresets()` gains a new template name, the same change must add a
-`reference/<name>/SKILL.md` child and both parent entries. The focused router
-test keeps the source list, embedded children, parent metadata, and extracted
-paths in bijection.
+`reference/<name>/SKILL.md` child and both provider-catalog entries. When a
+new cross-cutting mechanic is added, add a `reference/operations/<name>/SKILL.md`
+child and both operation-catalog entries instead of folding it into a
+provider page. The focused router test keeps the source list, embedded
+children, parent metadata, and extracted paths in bijection for both axes.
