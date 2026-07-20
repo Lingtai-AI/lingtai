@@ -61,7 +61,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 ### Configuration & diagnostics
 - `/setup` — agent setup wizard (provider, model, capabilities).
 - `/settings` — TUI preferences (theme, page size, language).
-- `/mcp` — MCP control panel for external-service bridges.
+- `/mcp` — read-only MCP inspection panel for external-service bridges.
 - `/doctor` — diagnose connection issues.
 - `/update` — update the Python kernel (confirm-gated).
 - `/update-tui` — update the TUI and possibly the co-installed portal binaries (confirm-gated).
@@ -275,11 +275,13 @@ change the agent's provider, model, or capabilities, use `/setup`.
 ### `/mcp` — open the MCP control panel
 **Usage:** `/mcp`
 
-Opens the MCP control panel, where you review each MCP bridge's resources,
-status, and config — the bridges (IMAP email, Telegram, Feishu, WeChat) that
-connect the agent to external services. Use it when configuring or
-troubleshooting an external-service integration. After changing MCP config, run
-`/refresh` to apply it.
+Opens a read-only MCP inspection panel, where you review each MCP bridge's
+resources, configuration, and current status — the bridges (IMAP email,
+Telegram, Feishu, WeChat) that connect the agent to external services. It does
+not configure or edit MCP. The former `/addon` command is retired and has no
+compatibility alias. Follow the current MCP/curated-addon documentation for
+setup, and obtain explicit authorization before making changes. After changing
+MCP config, run `/refresh` to apply it.
 
 ### `/doctor` — diagnose connection issues
 **Usage:** `/doctor`

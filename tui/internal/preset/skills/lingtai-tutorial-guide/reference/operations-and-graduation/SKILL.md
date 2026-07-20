@@ -28,23 +28,20 @@ Keyboard shortcuts: explain ctrl+o (three verbose modes: off → verbose → ext
 
 ## Lesson 11: Addons — External Connections
 
-**Discover available skills and addons dynamically** — use `skills({"action": "info"})` to get a full catalog of available skills. Explain that the catalog includes reusable procedures such as addon setup skills (`lingtai-*-setup`) and, if present, `lingtai-issue-report` for structured problem reports. List whatever you find and ask the human which ones interest them.
-
-For each addon the human wants to set up:
-1. Use `skills()` to find and read the setup skill's SKILL.md
-2. Follow its instructions exactly — do not hardcode setup steps
+**Addon setup route:**
+1. Start with `mcp-manual` and its `reference/curated-addons.md`.
+2. Use the relevant provider documentation for exact fields and supported setup steps; do not invent config paths or duplicate the kernel schema here.
+3. Require explicit authorization before making each config change.
 
 Key concepts to teach:
-- Secrets go in `.env`, not config files (config uses `*_env` references)
-- Config lives at `.lingtai/.addons/<addon>/config.json` (project-level, shared by all agents)
 - Avatars do NOT inherit addons
-- `/mcp` TUI command opens the MCP control panel and shows current configs
-- `/refresh` to apply changes
+- `/mcp` TUI command is read-only inspection of MCP configuration and status; it is not a setup or editor mechanism
+- Run `/refresh` only after an authorized config change
 
 ## Lesson 12: Graduation
 
 - Congratulate the human.
 - Next step: run `lingtai-tui` in a new project to create their own agent.
-- Remind them about addon setup via the `/mcp` control panel or editing configs directly.
+- Remind them to follow the current MCP/curated-addon documentation for addon setup, with explicit authorization; use `/mcp` only to inspect config/status.
 - To resume tutorial: rerun `lingtai-tui` in the same folder. To restart: `/nirvana` then `/setup` with Tutorial recipe.
 - The network grows with every avatar spawned.

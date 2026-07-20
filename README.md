@@ -92,7 +92,7 @@ For deeper TUI/portal update operations, install-method detection, Homebrew, and
 
 **Portal — `lingtai-portal`** is the visualization server. It reads project state to show the live agent network, mail edges, and history — useful once a project has more than one agent or when you want to see how the work evolved.
 
-**External channels** bridge the *same* scientist to the platforms you already use — memory, tools, and history are shared across them, and they are doors into one assistant, not separate bots. Configure from the TUI's `/mcp` panel or declare them in `init.json`. Credentials live in local `.secrets/` files (never in Git); external side effects are treated as real actions, and unknown senders do not auto-receive replies.
+**External channels** bridge the *same* scientist to the platforms you already use — memory, tools, and history are shared across them, and they are doors into one assistant, not separate bots. Setup follows the current MCP/curated-addon documentation and requires explicit authorization; the TUI's `/mcp` panel is read-only and only inspects configured bridges and their status. Credentials live in local `.secrets/` files (never in Git); external side effects are treated as real actions, and unknown senders do not auto-receive replies.
 
 | Addon | Use it for |
 |---|---|
