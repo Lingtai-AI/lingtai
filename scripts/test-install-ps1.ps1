@@ -1292,7 +1292,44 @@ try {
     Assert-Equal ($before17 -join "`n") ($after17 -join "`n") 'public-mode DryRun left the complete tree unchanged'
 
     # -----------------------------------------------------------------------
-    # CONTRACT 18: pinned-kernel runtime install end to end, using the REAL
+    # CONTRACT 18: a cryptographically and manifest-consistent bundle that is
+    # missing the required portal must fail before any destination write. The
+    # archive SHA, sidecar, and bundle manifest all agree; only the portal is
+    # absent, so this proves the installer enforces the complete dual-binary
+    # contract rather than accepting a TUI-only archive.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: manifest-consistent bundle missing portal fails before destination writes'
+    $missingPortalTag = 'v11.0.5'
+    $missingPortalFx = New-FixtureArchive -Version $missingPortalTag -IncludePortal $false
+    $missingPortalZipName = "lingtai-$missingPortalTag-windows-amd64.zip"
+    $missingPortalZipAsset = Register-FakeApiAsset -Name $missingPortalZipName -Bytes ([System.IO.File]::ReadAllBytes($missingPortalFx.ArchivePath))
+    $missingPortalShaAsset = Register-FakeApiAssetText -Name "$missingPortalZipName.sha256" -Text ("{0}  $missingPortalZipName" -f $missingPortalFx.Sha256)
+    $missingPortalBundleJson = New-BundleManifestJson -Tag $missingPortalTag -ArchiveSha256 $missingPortalFx.Sha256
+    $missingPortalManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $missingPortalBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $missingPortalTag -Assets @($missingPortalZipAsset, $missingPortalShaAsset, $missingPortalManifestAsset)
+
+    $home18m = New-IsolatedHome
+    $binDir18m = Join-Path $home18m 'bin dir'
+    $globalDir18m = Join-Path $home18m '.lingtai-tui'
+    New-Item -ItemType Directory -Force -Path $binDir18m | Out-Null
+    $sentinel18m = Join-Path $binDir18m 'preexisting.txt'
+    Set-Content -LiteralPath $sentinel18m -Value 'must remain untouched' -Encoding ASCII
+    $before18m = @(Get-TreeSnapshot $binDir18m)
+    $r18m = Invoke-Installer @{
+        Version      = $missingPortalTag
+        BinDir       = $binDir18m
+        GlobalDir    = $globalDir18m
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    $after18m = @(Get-TreeSnapshot $binDir18m)
+    Assert-True ($r18m.ExitCode -ne 0) 'manifest-consistent archive without portal exits non-zero'
+    Assert-Equal ($before18m -join "`n") ($after18m -join "`n") 'missing-portal failure leaves destination tree unchanged'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir18m 'lingtai-tui.exe'))) 'missing-portal archive installs no TUI binary'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir18m 'lingtai-portal.exe'))) 'missing-portal archive installs no portal binary'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 19: pinned-kernel runtime install end to end, using the REAL
     # Python already present on windows-latest plus a genuine (trivial,
     # dependency-free) wheel built offline -- proves the full
     # resolve -> bundle -> venv -> kernel-manifest -> wheel-select -> verify ->

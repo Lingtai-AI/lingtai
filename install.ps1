@@ -16,7 +16,8 @@
         lingtai-bundle-manifest.json (schema lingtai.tui.bundle/v1), download the
         lingtai-<tag>-windows-amd64.zip archive plus its .sha256 sidecar, verify
         the archive's SHA-256 against the manifest before extraction, and confirm
-        the staged lingtai-tui.exe reports exactly that tag before touching BinDir.
+        the staged lingtai-tui.exe and lingtai-portal.exe are present, with the
+        TUI reporting exactly that tag, before touching BinDir.
 
       * LOCAL ARTIFACT MODE (-ArchivePath + -ChecksumPath): install the TUI/portal
         binaries FROM an already-downloaded release archive plus its sha256
@@ -35,9 +36,9 @@
     interpreter is selected and SHA-256 verified, and only that local wheel path
     is installed -- LingTai is never installed from a package index by name and
     the kernel tag is never resolved as "latest" or changed from the pin.
-    -SkipVenv is the explicit TUI-only mode that skips all of this and creates no
-    venv; -DryRun performs the same resolution/validation reads but writes
-    nothing.
+    -SkipVenv is the explicit binary-only mode that skips all of this and creates
+    no venv; it still requires and installs both the TUI and portal. -DryRun
+    performs the same resolution/validation reads but writes nothing.
 
 .PARAMETER Version
     Release tag/version to install, e.g. v0.11.4. In local-artifact mode the
@@ -717,7 +718,7 @@ LingTai's Windows runtime venv is created from an already-available supported
 Python installation -- this installer never downloads or bootstraps an
 unpinned Python/uv toolchain. Install Python 3.11+ (for example from
 python.org or the Microsoft Store) and re-run, or pass -SkipVenv to install
-the TUI/portal binaries only.
+the TUI/portal binaries only (both binaries are still required).
 "@
 }
 
@@ -950,7 +951,7 @@ function Install-FromLocalArtifact {
         Write-Warn "DRY RUN: checksum verified; no staging, extraction, or install will occur."
         Write-Step "[dry-run] would expand the archive into an installer-owned staging dir under TEMP"
         Write-Step "[dry-run] would require lingtai-tui.exe and verify it reports version '$Requested'"
-        Write-Step "[dry-run] would install lingtai-tui.exe (and optional lingtai-portal.exe) into $BinDir"
+        Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
         return @()
     }
 
@@ -975,11 +976,16 @@ function Install-FromLocalArtifact {
     # 4. Verify the STAGED tui reports the requested version BEFORE any BinDir write.
     Confirm-StagedVersion -StagedTui $tui.FullName -Requested $Requested
 
-    # Optional portal.
+    # Require the portal before any destination write. A verified archive that
+    # omits it is not a complete Windows bundle, including under -SkipVenv.
     $portal = Get-ChildItem -LiteralPath $extract -Recurse -Filter 'lingtai-portal.exe' -ErrorAction SilentlyContinue |
         Select-Object -First 1
+    if (-not $portal) {
+        Fail "Archive does not contain required lingtai-portal.exe. Staging kept for inspection: $stage"
+    }
 
-    # 5. Install idempotently into BinDir (only reached once staging validated).
+    # 5. Install idempotently into BinDir (only reached once both binaries and
+    # the staged TUI version have been validated).
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
     Copy-Item -LiteralPath $tui.FullName -Destination $tuiDest -Force
@@ -987,14 +993,10 @@ function Install-FromLocalArtifact {
 
     $managed = New-Object System.Collections.Generic.List[string]
     $managed.Add($tuiDest)
-    if ($portal) {
-        $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
-        Copy-Item -LiteralPath $portal.FullName -Destination $portalDest -Force
-        Write-Ok "Installed lingtai-portal.exe -> $BinDir"
-        $managed.Add($portalDest)
-    } else {
-        Write-Step "Archive has no lingtai-portal.exe; installing the TUI only."
-    }
+    $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
+    Copy-Item -LiteralPath $portal.FullName -Destination $portalDest -Force
+    Write-Ok "Installed lingtai-portal.exe -> $BinDir"
+    $managed.Add($portalDest)
 
     return $managed.ToArray()
 }
@@ -1037,7 +1039,7 @@ function Install-FromPublicRelease {
     if ($DryRun) {
         Write-Step "[dry-run] would download $($bundle.ArchiveFilename) and its .sha256 sidecar from $RepoUrl release $tag"
         Write-Step "[dry-run] would verify the archive against the bundle manifest digest, stage, and verify the staged version"
-        Write-Step "[dry-run] would install lingtai-tui.exe (and optional lingtai-portal.exe) into $BinDir"
+        Write-Step "[dry-run] would install lingtai-tui.exe and lingtai-portal.exe into $BinDir"
         return @{ Managed = @(); Bundle = $bundle; Tag = $tag }
     }
 

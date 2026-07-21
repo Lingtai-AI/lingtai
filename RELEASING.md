@@ -23,9 +23,10 @@ Pushing a `v*` tag triggers the root GitHub Actions workflow at
   this job does not build or upload prebuilt binaries, checksums, or bundles.
 - **`update-homebrew`** — computes the GitHub source-tarball checksum and updates
   the source-build formula in `Lingtai-AI/homebrew-lingtai`.
-- **`windows-release`** (`needs: source-release`) — builds `lingtai-tui.exe` (and
-  `lingtai-portal.exe`, when the portal web build succeeds) for `windows/amd64`,
-  packages `lingtai-<tag>-windows-amd64.zip` plus its `.sha256` sidecar, generates
+- **`windows-release`** (`needs: source-release`) — builds both
+  `lingtai-tui.exe` and `lingtai-portal.exe` for `windows/amd64`; the portal web
+  build is mandatory. It packages the dual-binary
+  `lingtai-<tag>-windows-amd64.zip` plus its `.sha256` sidecar, generates
   `lingtai-bundle-manifest.json` (schema `lingtai.tui.bundle/v1`) binding the tag's
   exact commit to the archive digest and to [`kernel-release.json`](kernel-release.json)'s
   pinned kernel tag, and uploads all three to the release. It **fails closed**
@@ -67,16 +68,20 @@ release: it selects the `cp311`/`cp312`/`cp313` `win_amd64` wheel matching the
 venv's actual interpreter, verifies its digest, and installs it by explicit
 local file path. LingTai is never installed by package name from any index —
 the same "no PyPI fallback" contract `install.sh` holds itself to. `-SkipVenv`
-installs the TUI/portal binaries only; `-DryRun` performs the same
-resolution/validation reads but writes nothing. See
+skips only the kernel venv and still installs both required TUI/portal binaries;
+`-DryRun` performs the same resolution/validation reads but writes nothing. The
+Windows Installer Smoke workflow covers the contract suite under PowerShell 5.1
+and PowerShell 7 on PR/push; its tag-only exact-tag smoke waits for the published
+asset and verifies both installed binaries. See
 [`scripts/test-install-ps1.ps1`](scripts/test-install-ps1.ps1) for the full
 contract and [`.github/workflows/windows-installer-smoke.yml`](.github/workflows/windows-installer-smoke.yml)
 for its Windows PowerShell 5.1 / PowerShell 7 CI coverage.
 
 ### 3. Create the GitHub release
 
-The `release-assets` job creates the release automatically when it runs. To
-create it manually (or to add richer notes), run:
+The `source-release` job creates the GitHub release, and `windows-release` adds
+the dual-binary ZIP, checksum sidecar, and bundle manifest. To create a release
+manually (or to add richer notes), run:
 
 ```bash
 gh release create v0.X.Y --title "v0.X.Y" --notes "release notes here..."
@@ -127,10 +132,10 @@ release checklist and are not decided here.
 
 ## Installing without Homebrew
 
-The current release workflow is source-only. Homebrew and the manual commands
-below build `lingtai-tui` and `lingtai-portal` from the tagged source. The
-one-shot installer may still consume compatible assets from older or explicitly
-published releases, but the tag workflow no longer produces them:
+The tag workflow publishes both GitHub source archives and the verified Windows
+bundle assets described above. Homebrew and the manual commands below still
+build `lingtai-tui` and `lingtai-portal` from the tagged source when a source
+build is preferred:
 
 ```bash
 curl -fsSL https://lingtai.ai/install.sh | bash
@@ -153,9 +158,10 @@ Requires Go toolchain and Node.js (for portal web frontend).
 
 ### Source selection (GitHub vs Gitee) and the Python runtime
 
-The behavior below remains compatibility support for older or separately
-published bundle releases; the source-only tag workflow does not create or mirror
-these bundle artifacts.
+The behavior below applies to the bundle assets published by the tag workflow
+and to compatible bundle releases published separately. Gitee synchronization
+and bundle publication remain explicit maintainer tools; the tag workflow does
+not invoke them.
 
 `install.sh --source auto|github|gitee` (or `LINGTAI_SOURCE` env var) controls
 where the TUI/portal archives, the bundle manifest, and the pinned kernel
