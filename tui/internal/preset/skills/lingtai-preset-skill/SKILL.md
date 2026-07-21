@@ -96,8 +96,8 @@ lifecycle mechanics and never encode provider-specific facts.
 | `kimi` | `reference/kimi/SKILL.md` | Kimi Code, OpenAI-compatible |
 | `nvidia` | `reference/nvidia/SKILL.md` | NVIDIA NIM/API Catalog gateway |
 | `openrouter` | `reference/openrouter/SKILL.md` | OpenRouter gateway |
-| `codex` | `reference/codex/SKILL.md` | ChatGPT OAuth Codex route |
-| `codex-pool` | `reference/codex-pool/SKILL.md` | pooled ChatGPT OAuth Codex route |
+| `codex` | `reference/codex/SKILL.md` | ChatGPT OAuth Codex route — canonical Codex behavior manual |
+| `codex-pool` | `reference/codex-pool/SKILL.md` | pool file format/edit protocol only — behavior is `reference/codex/SKILL.md` |
 | `claude-agent-sdk` | `reference/claude-agent-sdk/SKILL.md` | local Claude Code login |
 | `custom` | `reference/custom/SKILL.md` | user-supplied compatible endpoint |
 

@@ -73,11 +73,12 @@ already succeeded.
 **Saving a preset alone does not switch a running session.** A saved or
 even newly-activated (`default`) preset only takes effect on the *next*
 launch/refresh of a given agent — an explicit `/refresh [preset]`,
-relaunch, or new service construction is required to pick it up. This
-mirrors the codex-pool selection-at-construction rule in
-`reference/codex-pool/SKILL.md` — that pool selection is one more thing
-an in-place preset/pool-file edit does not retroactively touch on an
-already-running session.
+relaunch, or new service construction is required to pick it up: which
+*template/provider* a session uses is fixed at launch/refresh time. This is
+distinct from which *account* a Codex-provider session draws from within an
+already-running session — see `reference/codex/SKILL.md` for that, since
+the kernel now selects an account dynamically per send rather than fixing
+one at construction.
 
 ## Operations
 

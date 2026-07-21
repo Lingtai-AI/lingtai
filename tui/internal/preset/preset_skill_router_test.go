@@ -368,9 +368,10 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 }
 
 // TestPresetSkillRouter_CodexPoolContract checks the codex-pool manual holds
-// the critical pool-format/selection/manual-edit facts the #691 brief
-// requires, without asserting on prose wording beyond the load-bearing
-// technical terms.
+// the critical pool-format/manual-edit facts and correctly redirects
+// selection-behavior questions to the canonical reference/codex/SKILL.md
+// manual instead of restating superseded per-session-sticky selection
+// claims (kernel now selects dynamically per send; see reference/codex).
 func TestPresetSkillRouter_CodexPoolContract(t *testing.T) {
 	data, err := fs.ReadFile(skillsFS, "skills/lingtai-preset-skill/reference/codex-pool/SKILL.md")
 	if err != nil {
@@ -387,11 +388,6 @@ func TestPresetSkillRouter_CodexPoolContract(t *testing.T) {
 		"stores only refs and integer weights",
 		"never token",
 		"Weight 0 means the account is present but disabled",
-		"sticky within one agent wake/session",
-		"excludes `molt_count`",
-		"Selection happens at adapter/service construction",
-		"does **not** reselect an",
-		"already-running session",
 		"Configured weights are inputs, not measured shares",
 		"falls back to the legacy",
 		"Exact authorization",
@@ -403,11 +399,20 @@ func TestPresetSkillRouter_CodexPoolContract(t *testing.T) {
 		"Never print token/auth contents or absolute auth paths",
 		"tui/internal/tui/codex_pool_store.go:11-330",
 		"login.go:171-201,285-299,603-702",
-		"auth/codex_pool.py:72-323",
-		"_register.py:424-497",
+		"reference/codex/SKILL.md",
+		"canonical",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("codex-pool manual missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		"sticky within one agent wake/session",
+		"excludes `molt_count`",
+		"Selection happens at adapter/service construction",
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("codex-pool manual still asserts superseded per-session-sticky selection claim %q; selection behavior now belongs to reference/codex/SKILL.md", unwanted)
 		}
 	}
 }

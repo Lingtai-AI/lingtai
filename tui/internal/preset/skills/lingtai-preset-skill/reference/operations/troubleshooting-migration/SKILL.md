@@ -35,10 +35,19 @@ migration internals it doesn't own.
   `reference/operations/availability-save-gate/SKILL.md` first — pending,
   hard-blocked, and retryable-warned are three different states with
   different next actions.
-- **"I edited the preset/pool file but the running agent didn't change."**
+- **"I edited the preset but the running agent didn't switch templates."**
   Expected — see `reference/operations/activation-session-refresh/SKILL.md`:
   saving alone never switches a running session; an explicit refresh,
-  relaunch, or new service construction is required.
+  relaunch, or new service construction is required to pick up a *different
+  template/provider*.
+- **"I edited the Codex pool file and the running agent's account
+  selection looks unaffected."** Check `reference/codex/SKILL.md` first —
+  under the current default, account selection happens dynamically per
+  send, so a pool-file edit is live-consulted on the *next* send within an
+  already-running Codex session; it does not require a refresh the way a
+  template/provider switch does. If it still looks wrong after that, then
+  check `reference/codex-pool/SKILL.md` for the pool file's own format and
+  edit protocol.
 - **"codex-pool file looks wrong / refuses my edit."** See
   `reference/codex-pool/SKILL.md` — check whether the pool is
   model-classified (a `models` key, even `{}`) before assuming a flat edit
@@ -46,11 +55,11 @@ migration internals it doesn't own.
 
 ## Out of scope — route, don't guess
 
-- Deeper **runtime** questions (kernel adapter registration, request-scoped
-  failover behavior beyond what's cited in `reference/codex-pool/SKILL.md`,
-  live provider request/response shapes) belong to kernel-side skills or
-  direct kernel source reading — do not extrapolate kernel internals from
-  TUI-side evidence.
+- Deeper **runtime** questions (kernel provider/factory internals, ledger
+  fields not yet documented in `reference/codex/SKILL.md`, live provider
+  request/response shapes) belong to kernel-side skills or direct kernel
+  source reading — do not extrapolate kernel internals from TUI-side
+  evidence.
 - **Update/upgrade mechanics** (how a TUI version bump itself is delivered,
   migration numbering, `tui/internal/migrate/`) belong to the migration
   package's own ANATOMY.md and ownership, not this preset skill tree.
