@@ -77,7 +77,15 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-安装脚本支持 macOS、Linux 和 WSL（原生 Windows/PowerShell 在计划中），会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+
+原生 Windows/PowerShell 现已支持：
+
+```powershell
+irm https://lingtai.ai/install.ps1 | iex
+```
+
+它会解析最新的发布标签，校验 Windows 二进制压缩包与锁定的内核发布版本的校验和，并安装 `lingtai-tui`/`lingtai-portal` 及 Python 运行时虚拟环境。加上 `-SkipVenv` 可只安装 TUI/portal 二进制文件。详细契约见 [`RELEASING.md`](RELEASING.md)。
 
 > **第一次用？** 跟着 [lingtai.ai 上的教程](https://lingtai.ai/zh/tutorial/) 一步步来——安装、第一个任务、外接渠道、记忆与生命周期，从头到尾走一遍。
 

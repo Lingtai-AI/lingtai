@@ -82,7 +82,15 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-一令安装之脚本，通 macOS、Linux 与 WSL（原生 Windows/PowerShell 尚在计划），装 `lingtai-tui` 与 `lingtai-portal`。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
+一令安装之脚本，通 macOS、Linux 与 WSL，装 `lingtai-tui` 与 `lingtai-portal`。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
+
+原生 Windows/PowerShell 今已可用：
+
+```powershell
+irm https://lingtai.ai/install.ps1 | iex
+```
+
+此令解析最新之发布标签，校 Windows 二进制包与所锁内核发布之验证码，遂装 `lingtai-tui`、`lingtai-portal` 及 Python 运行时之虚环境。加 `-SkipVenv` 则唯装 TUI/portal 二进制。其详见 [`RELEASING.md`](RELEASING.md)。
 
 > **初入灵台？** 循 [lingtai.ai 之教程](https://lingtai.ai/wen/tutorial/) 逐步而行——自安装、首务、外接诸渠、记忆与生死，首尾一贯。
 

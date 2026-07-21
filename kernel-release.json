@@ -1,5 +1,5 @@
 {
   "schema": "lingtai.tui.kernel-pin/v1",
-  "kernel_tag": "v0.17.1",
+  "kernel_tag": "v0.18.0",
   "comment": "Repo-owned pin: the kernel release tag a TUI release binds into its bundle manifest. Bump this deliberately in the same PR/commit that intends to ship a new kernel version with the next TUI release; the release workflow never resolves 'latest kernel' on its own. See RELEASING.md."
 }

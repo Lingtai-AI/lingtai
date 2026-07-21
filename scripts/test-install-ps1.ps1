@@ -31,6 +31,14 @@
     install outputs under a single throwaway test root, so a run can never touch
     the developer's real profile or PATH.
 
+    Public-mode (no -ArchivePath) contracts -- tag/latest resolution, bundle
+    manifest validation, Windows archive+sidecar download/verify, and the
+    pinned-kernel venv/wheel install -- are driven against a local
+    System.Net.HttpListener fake GitHub API (see "fake GitHub API server"
+    below), reached through install.ps1's LINGTAI_GITHUB_API_BASE /
+    LINGTAI_KERNEL_GITHUB_API_BASE override seam. No test in this suite depends
+    on a live GitHub release.
+
 .NOTES
     Exit code 0 => all contract tests passed (only possible once install.ps1
     exists AND satisfies the contract). Non-zero => at least one contract
@@ -317,6 +325,197 @@ function New-FixtureArchive {
 }
 
 # ---------------------------------------------------------------------------
+# Fake GitHub API + release-asset server (System.Net.HttpListener).
+#
+# install.ps1's public-mode resolution (Resolve-PublicTag, Get-ReleaseAssetUrl,
+# Get-BundleManifest, Get-KernelManifest, Install-KernelWheel) reads its base
+# URLs from $env:LINGTAI_GITHUB_API_BASE / $env:LINGTAI_KERNEL_GITHUB_API_BASE
+# -- the exact override seam install.ps1 exposes for this offline suite (mirrors
+# install.sh's LINGTAI_GITEE_OWNER/LINGTAI_GITEE_REPO pattern). Pointing those
+# at a local HttpListener lets every public-mode contract below run fully
+# offline and deterministically, with no dependency on a live GitHub release.
+#
+# Routes are registered as exact path -> {Status, Body} entries; a request for
+# an unregistered path returns 404, matching "no such asset" from the real API.
+#
+# NOTE ON RELEASE ASSET DOWNLOADS: the real GitHub API's release JSON embeds a
+# `browser_download_url` per asset, and install.ps1 downloads FROM that URL --
+# it never constructs a download URL itself. This fake server exploits that:
+# every asset's browser_download_url simply points back at this same listener
+# under /assets/<name>, so registering the bytes at that path is sufficient;
+# install.ps1 needs no additional knowledge of a separate download host.
+# ---------------------------------------------------------------------------
+$script:FakeApiListener = $null
+$script:FakeApiPrefix = $null
+$script:FakeApiRoutes = @{}
+$script:FakeApiJob = $null
+
+function Start-FakeGitHubApi {
+    $port = Get-Random -Minimum 30000 -Maximum 40000
+    $prefix = "http://127.0.0.1:$port/"
+    $listener = New-Object System.Net.HttpListener
+    $listener.Prefixes.Add($prefix)
+    $listener.Start()
+    $script:FakeApiListener = $listener
+    $script:FakeApiPrefix = $prefix
+    $script:FakeApiRoutes = @{}
+
+    # A background runspace pumps requests so the main test thread is never
+    # blocked; each response is looked up by exact path in $script:FakeApiRoutes
+    # via a synchronized hashtable (thread-safe cross-runspace sharing).
+    $sync = [hashtable]::Synchronized($script:FakeApiRoutes)
+    $script:FakeApiRoutes = $sync
+
+    $ps = [powershell]::Create()
+    $ps.AddScript({
+        param($listener, $routes)
+        while ($listener.IsListening) {
+            try {
+                $context = $listener.GetContext()
+            } catch {
+                break
+            }
+            $path = $context.Request.Url.AbsolutePath
+            $route = $routes[$path]
+            if ($route) {
+                $context.Response.StatusCode = $route.Status
+                # Routes always carry raw bytes (BodyBytes) so binary assets
+                # (zips, wheels) round-trip exactly -- never re-encoded through
+                # a string, which would corrupt non-ASCII byte values.
+                $bytes = $route.BodyBytes
+                $context.Response.ContentLength64 = $bytes.Length
+                $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+            } else {
+                $context.Response.StatusCode = 404
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes('not found')
+                $context.Response.ContentLength64 = $bytes.Length
+                $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+            }
+            $context.Response.OutputStream.Close()
+        }
+    }) | Out-Null
+    $ps.AddArgument($listener) | Out-Null
+    $ps.AddArgument($sync) | Out-Null
+    $script:FakeApiJob = $ps.BeginInvoke()
+    $script:FakeApiPs = $ps
+
+    return $prefix
+}
+
+function Stop-FakeGitHubApi {
+    if ($script:FakeApiListener) {
+        try { $script:FakeApiListener.Stop() } catch {}
+        try { $script:FakeApiListener.Close() } catch {}
+    }
+    if ($script:FakeApiPs) {
+        try { $script:FakeApiPs.Stop() } catch {}
+        try { $script:FakeApiPs.Dispose() } catch {}
+    }
+}
+
+function Register-FakeApiRoute {
+    <#
+      Registers a raw-bytes response. Prefer this (or the Text/Bytes wrappers
+      below) over hand-building the route hashtable so every path stores
+      BodyBytes, never a re-encoded string.
+    #>
+    param([string]$Path, [byte[]]$BodyBytes, [int]$Status = 200)
+    $script:FakeApiRoutes[$Path] = @{ Status = $Status; BodyBytes = $BodyBytes }
+}
+
+function Register-FakeApiRouteText {
+    param([string]$Path, [string]$Text, [int]$Status = 200)
+    Register-FakeApiRoute -Path $Path -BodyBytes ([System.Text.Encoding]::UTF8.GetBytes($Text)) -Status $Status
+}
+
+function Register-FakeApiAsset {
+    <#
+      Registers a binary asset at /assets/<name> and returns the object shape
+      the GitHub release-assets API embeds ({name, browser_download_url}).
+    #>
+    param([string]$Name, [byte[]]$Bytes)
+    Register-FakeApiRoute -Path "/assets/$Name" -BodyBytes $Bytes
+    return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
+}
+
+function Register-FakeApiAssetText {
+    param([string]$Name, [string]$Text)
+    Register-FakeApiRouteText -Path "/assets/$Name" -Text $Text
+    return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
+}
+
+function Register-FakeRelease {
+    <#
+      Registers GET /repos/<repo>/releases/tags/<tag> (and, if -Latest, also
+      .../releases/latest) with the given asset list, mirroring the real
+      GitHub release API's {tag_name, assets: [{name, browser_download_url}]}.
+    #>
+    param([string]$ApiPathPrefix, [string]$Tag, [array]$Assets, [switch]$Latest)
+    $body = @{ tag_name = $Tag; assets = $Assets } | ConvertTo-Json -Depth 6
+    Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/tags/$Tag" -Text $body
+    if ($Latest) {
+        Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/latest" -Text $body
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Bundle / kernel manifest fixture builders (schema lingtai.tui.bundle/v1 and
+# lingtai.kernel.release/v1) -- same shapes install.sh's strict parser and
+# scripts/test-install-sh-gitee-bundle.sh's fixtures use.
+# ---------------------------------------------------------------------------
+function New-BundleManifestJson {
+    param(
+        [string]$Tag,
+        [string]$TuiCommit = ('a' * 40),
+        [string]$KernelTag = 'v0.18.0',
+        [string]$KernelVersion = '0.18.0',
+        [string]$ArchiveFilename,
+        [string]$ArchiveSha256
+    )
+    if (-not $ArchiveFilename) { $ArchiveFilename = "lingtai-$Tag-windows-amd64.zip" }
+    $manifest = [ordered]@{
+        schema                   = 'lingtai.tui.bundle/v1'
+        bundle_id                = $Tag
+        tui_tag                  = $Tag
+        tui_commit                = $TuiCommit
+        generated_at              = '2026-07-21T00:00:00Z'
+        kernel_tag                = $KernelTag
+        kernel_version             = $KernelVersion
+        kernel_manifest_filename   = 'lingtai-kernel-release-manifest.json'
+        archives                  = @(@{ filename = $ArchiveFilename; sha256 = $ArchiveSha256 })
+        providers                 = @{
+            github = @{ repo = 'Lingtai-AI/lingtai' }
+            gitee  = @{ owner = 'huangzesen1997'; repo = 'lingtai' }
+        }
+    }
+    return ($manifest | ConvertTo-Json -Depth 6)
+}
+
+function New-KernelManifestJson {
+    param(
+        [string]$KernelVersion = '0.18.0',
+        [array]$Wheels
+    )
+    $artifacts = @()
+    foreach ($w in $Wheels) {
+        $artifacts += @{
+            filename    = $w.filename
+            sha256      = $w.sha256
+            kind        = 'wheel'
+            python_tag  = $w.python_tag
+            abi_tag     = $w.abi_tag
+            platform_tag = $w.platform_tag
+        }
+    }
+    $manifest = [ordered]@{
+        schema         = 'lingtai.kernel.release/v1'
+        kernel_version = $KernelVersion
+        artifacts      = $artifacts
+    }
+    return ($manifest | ConvertTo-Json -Depth 6)
+}
+
+# ---------------------------------------------------------------------------
 # Installer invocation seam. Runs install.ps1 in a child PowerShell using the
 # SAME host executable that is running this suite, so PS 5.1 vs PS 7 coverage is
 # driven entirely by which host launches this file. Captures stdout, stderr, and
@@ -420,6 +619,22 @@ try {
     Assert-True (Test-Path -LiteralPath $fx.ArchivePath) 'fixture archive was created'
     Assert-True (Test-Path -LiteralPath $fx.ChecksumPath) 'fixture checksum sidecar was created'
     Assert-Equal $fx.Sha256 (Get-Sha256Hex -Path $fx.ArchivePath) 'sidecar sha256 matches archive bytes'
+
+    # -----------------------------------------------------------------------
+    # Fake GitHub API + asset server. Every test in this suite -- including the
+    # pre-existing local-artifact contracts below, which now also resolve a
+    # bundle manifest for their default (non -SkipVenv) runtime step -- points
+    # install.ps1 at this listener via LINGTAI_GITHUB_API_BASE /
+    # LINGTAI_KERNEL_GITHUB_API_BASE so NOTHING in this suite depends on a live
+    # GitHub release. An unregistered path 404s exactly like a real missing
+    # release/asset, which is what gives CONTRACT 9b (below) its deterministic
+    # "no bundle available" failure without a live network dependency.
+    # -----------------------------------------------------------------------
+    Write-Section 'fixture: fake GitHub API server'
+    $apiPrefix = Start-FakeGitHubApi
+    Assert-True (-not [string]::IsNullOrWhiteSpace($apiPrefix)) 'fake GitHub API server started'
+    [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai", 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai-kernel", 'Process')
 
     # -----------------------------------------------------------------------
     # CONTRACT 1: local fixture install (download/expand equivalent).
@@ -643,10 +858,12 @@ try {
     Assert-Equal 0 $r9.ExitCode 'SkipVenv install exits 0'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9 'runtime\venv'))) 'SkipVenv left no runtime venv'
 
-    # The default native runtime path is currently unsupported. Its known
-    # fail-loud gate must run before any binary or metadata write so a caller
-    # never gets a failed command that already changed BinDir.
-    Write-Section 'contract: unavailable default runtime fails before install writes'
+    # A default (non -SkipVenv) install for a tag with no resolvable bundle
+    # (v9.9.9 has no registered route on the fake API, so the bundle-manifest
+    # fetch 404s exactly like a real missing release) must fail loud BEFORE any
+    # binary or metadata write, so a caller never gets a failed command that
+    # already changed BinDir.
+    Write-Section 'contract: unresolvable runtime bundle fails before install writes'
     $home9b = New-IsolatedHome
     $binDir9b = Join-Path $home9b 'bin dir'
     $globalDir9b = Join-Path $home9b '.lingtai-tui'
@@ -658,7 +875,7 @@ try {
         ChecksumPath = $fx.ChecksumPath
         NoModifyPath = $true
     }
-    Assert-True ($r9b.ExitCode -ne 0) 'unavailable default runtime exits non-zero'
+    Assert-True ($r9b.ExitCode -ne 0) 'unresolvable runtime bundle exits non-zero'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-tui.exe'))) 'runtime preflight failure installs no TUI binary'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-portal.exe'))) 'runtime preflight failure installs no portal binary'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9b 'install.json'))) 'runtime preflight failure writes no install metadata'
@@ -695,6 +912,352 @@ try {
     Skip-NotYet 'PATH persistence (affirmative case)' `
         'Persisting PATH writes process-global HKCU\Environment state that cannot be isolated under the test root nor safely restored on a shared runner after an abrupt failure; implement with a safe save/restore harness before enabling.'
 
+    # =========================================================================
+    # PUBLIC MODE (no -ArchivePath): resolution, bundle-manifest validation, and
+    # the pinned-kernel runtime path, all served by the fake GitHub API above.
+    # =========================================================================
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 11: successful public-mode resolve + install with -SkipVenv.
+    # An explicit -Version resolves the bundle manifest, downloads the Windows
+    # archive + sidecar, verifies both against the manifest digest, confirms
+    # the staged version, and installs into BinDir -- no live GitHub release
+    # involved anywhere in this test.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode resolves tag, validates bundle, installs from release asset'
+    $pubTag = 'v11.0.0'
+    $pubFx = New-FixtureArchive -Version $pubTag
+    $pubZipBytes = [System.IO.File]::ReadAllBytes($pubFx.ArchivePath)
+    $pubZipAsset = Register-FakeApiAsset -Name "lingtai-$pubTag-windows-amd64.zip" -Bytes $pubZipBytes
+    $pubShaAsset = Register-FakeApiAssetText -Name "lingtai-$pubTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$pubTag-windows-amd64.zip" -f $pubFx.Sha256)
+    $pubBundleJson = New-BundleManifestJson -Tag $pubTag -ArchiveSha256 $pubFx.Sha256
+    $pubManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $pubBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $pubTag -Assets @($pubZipAsset, $pubShaAsset, $pubManifestAsset)
+
+    $home11 = New-IsolatedHome
+    $binDir11 = Join-Path $home11 'bin dir'
+    $globalDir11 = Join-Path $home11 '.lingtai-tui'
+    $r11 = Invoke-Installer @{
+        Version      = $pubTag
+        BinDir       = $binDir11
+        GlobalDir    = $globalDir11
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $r11.ExitCode 'public-mode install exits 0'
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir11 'lingtai-tui.exe')) 'public-mode install placed lingtai-tui.exe under BinDir'
+    $meta11 = $null
+    try { $meta11 = Get-Content -LiteralPath (Join-Path $globalDir11 'install.json') -Raw | ConvertFrom-Json } catch {}
+    Assert-True ($null -ne $meta11) 'public-mode install wrote a parseable install.json'
+    if ($null -ne $meta11) {
+        Assert-Equal 'powershell-release-asset' $meta11.install_kind 'public-mode install.json records install_kind powershell-release-asset'
+        Assert-Equal $pubTag $meta11.resolved_ref 'public-mode install.json records the resolved tag'
+    }
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 12: release checksum sidecar disagreeing with the bundle
+    # manifest digest is refused as mixed provenance -- installs nothing.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode refuses a sidecar that disagrees with the bundle manifest digest'
+    $mixTag = 'v11.0.1'
+    $mixFx = New-FixtureArchive -Version $mixTag
+    $mixZipAsset = Register-FakeApiAsset -Name "lingtai-$mixTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($mixFx.ArchivePath))
+    # Sidecar reports a DIFFERENT (well-formed but wrong) digest than the bundle manifest.
+    $wrongDigest = '0' * 64
+    $mixShaAsset = Register-FakeApiAssetText -Name "lingtai-$mixTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$mixTag-windows-amd64.zip" -f $wrongDigest)
+    $mixBundleJson = New-BundleManifestJson -Tag $mixTag -ArchiveSha256 $mixFx.Sha256
+    $mixManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $mixBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $mixTag -Assets @($mixZipAsset, $mixShaAsset, $mixManifestAsset)
+
+    $home12 = New-IsolatedHome
+    $binDir12 = Join-Path $home12 'bin dir'
+    $r12 = Invoke-Installer @{
+        Version      = $mixTag
+        BinDir       = $binDir12
+        GlobalDir    = (Join-Path $home12 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r12.ExitCode -ne 0) 'mixed-provenance sidecar/manifest digest exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir12 'lingtai-tui.exe'))) 'mixed-provenance digest installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 13: malformed bundle manifest (wrong schema) fails loud.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode rejects a malformed bundle manifest'
+    $badTag = 'v11.0.2'
+    $badManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text '{"schema":"unexpected/v1"}'
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $badTag -Assets @($badManifestAsset)
+
+    $home13 = New-IsolatedHome
+    $binDir13 = Join-Path $home13 'bin dir'
+    $r13 = Invoke-Installer @{
+        Version      = $badTag
+        BinDir       = $binDir13
+        GlobalDir    = (Join-Path $home13 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r13.ExitCode -ne 0) 'malformed bundle manifest schema exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir13 'lingtai-tui.exe'))) 'malformed bundle manifest installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 13b: a bundle manifest with a genuine duplicate key WITHIN the
+    # same JSON object fails loud. This is the regression case for a bug where
+    # duplicate-key detection was a flat scan over the whole document: the
+    # manifest schema legitimately has "repo" once under providers.github and
+    # once under providers.gitee (different objects, same leaf key name), which
+    # a flat scan would misreport as a duplicate and reject every valid
+    # manifest. The scoped (depth-tracked) check must accept that shape while
+    # still catching a REAL duplicate within one object.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode rejects a manifest with a same-object duplicate key'
+    $dupTag = 'v11.0.2b'
+    # Two "schema" keys inside the SAME top-level object -- a genuine violation.
+    $dupManifestText = '{"schema":"lingtai.tui.bundle/v1","schema":"lingtai.tui.bundle/v1","bundle_id":"' + $dupTag + '","tui_tag":"' + $dupTag + '","tui_commit":"' + ('a' * 40) + '","generated_at":"2026-07-21T00:00:00Z","kernel_tag":"v0.18.0","kernel_version":"0.18.0","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"lingtai-' + $dupTag + '-windows-amd64.zip","sha256":"' + ('a' * 64) + '"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}'
+    $dupManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $dupManifestText
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $dupTag -Assets @($dupManifestAsset)
+
+    $home13b = New-IsolatedHome
+    $binDir13b = Join-Path $home13b 'bin dir'
+    $r13b = Invoke-Installer @{
+        Version      = $dupTag
+        BinDir       = $binDir13b
+        GlobalDir    = (Join-Path $home13b '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r13b.ExitCode -ne 0) 'same-object duplicate key exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir13b 'lingtai-tui.exe'))) 'same-object duplicate key installs nothing'
+    # Note: CONTRACT 11 (and every other public-mode contract in this suite)
+    # already proves the positive case -- a well-formed manifest with "repo"
+    # legitimately duplicated across providers.github/providers.gitee installs
+    # successfully -- so no separate positive assertion is needed here.
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 14: a release whose bundle manifest references a Windows archive
+    # that was never actually uploaded fails loud (asset listing has no such
+    # name) rather than attempting an unresolvable download.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode fails when the manifest-referenced archive asset is missing'
+    $missTag = 'v11.0.3'
+    $missBundleJson = New-BundleManifestJson -Tag $missTag -ArchiveSha256 ('a' * 64)
+    $missManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $missBundleJson
+    # Deliberately do NOT register the zip/sha256 assets for this tag.
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $missTag -Assets @($missManifestAsset)
+
+    $home14 = New-IsolatedHome
+    $binDir14 = Join-Path $home14 'bin dir'
+    $r14 = Invoke-Installer @{
+        Version      = $missTag
+        BinDir       = $binDir14
+        GlobalDir    = (Join-Path $home14 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r14.ExitCode -ne 0) 'missing manifest-referenced archive asset exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir14 'lingtai-tui.exe'))) 'missing archive asset installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 15: a correctly-checksummed archive whose staged lingtai-tui.exe
+    # reports the WRONG version still fails loud (the staged-version gate from
+    # local-artifact mode applies identically to public-mode downloads).
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode enforces staged version even with a valid checksum'
+    $wrongVerTag = 'v11.0.4'
+    $wrongVerFx = New-FixtureArchive -Version $wrongVerTag -TuiVersion 'v0.0.1'
+    $wvZipAsset = Register-FakeApiAsset -Name "lingtai-$wrongVerTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($wrongVerFx.ArchivePath))
+    $wvShaAsset = Register-FakeApiAssetText -Name "lingtai-$wrongVerTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$wrongVerTag-windows-amd64.zip" -f $wrongVerFx.Sha256)
+    $wvBundleJson = New-BundleManifestJson -Tag $wrongVerTag -ArchiveSha256 $wrongVerFx.Sha256
+    $wvManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $wvBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $wrongVerTag -Assets @($wvZipAsset, $wvShaAsset, $wvManifestAsset)
+
+    $home15 = New-IsolatedHome
+    $binDir15 = Join-Path $home15 'bin dir'
+    $r15 = Invoke-Installer @{
+        Version      = $wrongVerTag
+        BinDir       = $binDir15
+        GlobalDir    = (Join-Path $home15 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r15.ExitCode -ne 0) 'staged version mismatch in public mode exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir15 'lingtai-tui.exe'))) 'staged version mismatch in public mode installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 16: "latest" resolves through the release API exactly once. No
+    # -Version means GET .../releases/latest, and the resolved tag (not the
+    # literal string "latest") is what gets validated/installed/recorded.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode resolves latest through the release API once'
+    $latestTag = 'v11.1.0'
+    $latestFx = New-FixtureArchive -Version $latestTag
+    $latZipAsset = Register-FakeApiAsset -Name "lingtai-$latestTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($latestFx.ArchivePath))
+    $latShaAsset = Register-FakeApiAssetText -Name "lingtai-$latestTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$latestTag-windows-amd64.zip" -f $latestFx.Sha256)
+    $latBundleJson = New-BundleManifestJson -Tag $latestTag -ArchiveSha256 $latestFx.Sha256
+    $latManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $latBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $latestTag -Assets @($latZipAsset, $latShaAsset, $latManifestAsset) -Latest
+
+    $home16 = New-IsolatedHome
+    $binDir16 = Join-Path $home16 'bin dir'
+    $globalDir16 = Join-Path $home16 '.lingtai-tui'
+    $r16 = Invoke-Installer @{
+        BinDir       = $binDir16
+        GlobalDir    = $globalDir16
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $r16.ExitCode 'no -Version (latest resolution) install exits 0'
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir16 'lingtai-tui.exe')) 'latest-resolved install placed lingtai-tui.exe under BinDir'
+    $meta16 = $null
+    try { $meta16 = Get-Content -LiteralPath (Join-Path $globalDir16 'install.json') -Raw | ConvertFrom-Json } catch {}
+    if ($null -ne $meta16) {
+        Assert-Equal $latestTag $meta16.resolved_ref 'latest resolution records the concrete resolved tag, not the literal "latest"'
+    } else {
+        Assert-True $false 'latest-resolved install wrote a parseable install.json'
+    }
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 17: public mode -DryRun performs no writes (resolution/validation
+    # reads are allowed; no staging/bin/global directories are created).
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode DryRun performs no writes'
+    $home17 = New-IsolatedHome
+    $binDir17 = Join-Path $home17 'bin dir'
+    $globalDir17 = Join-Path $home17 '.lingtai-tui'
+    New-Item -ItemType Directory -Force -Path $binDir17, $globalDir17 | Out-Null
+    $before17 = @(Get-TreeSnapshot $binDir17) + @(Get-TreeSnapshot $globalDir17)
+    $r17 = Invoke-Installer @{
+        Version      = $pubTag
+        BinDir       = $binDir17
+        GlobalDir    = $globalDir17
+        SkipVenv     = $true
+        NoModifyPath = $true
+        DryRun       = $true
+    }
+    $after17 = @(Get-TreeSnapshot $binDir17) + @(Get-TreeSnapshot $globalDir17)
+    Assert-Equal 0 $r17.ExitCode 'public-mode DryRun exits 0'
+    Assert-Equal ($before17 -join "`n") ($after17 -join "`n") 'public-mode DryRun left the complete tree unchanged'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 18: pinned-kernel runtime install end to end, using the REAL
+    # Python already present on windows-latest plus a genuine (trivial,
+    # dependency-free) wheel built offline -- proves the full
+    # resolve -> bundle -> venv -> kernel-manifest -> wheel-select -> verify ->
+    # pip-install -> import/version/provenance chain, not just its gates.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: full runtime install from a real venv + genuine wheel'
+    $pyCmd = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pyCmd) { $pyCmd = Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if (-not $pyCmd) {
+        Skip-NotYet 'full runtime install (real Python + wheel)' 'no py/python launcher found on this runner'
+    } else {
+        $tag18 = 'v11.2.0'
+        $fx18 = New-FixtureArchive -Version $tag18
+        $zipAsset18 = Register-FakeApiAsset -Name "lingtai-$tag18-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($fx18.ArchivePath))
+        $shaAsset18 = Register-FakeApiAssetText -Name "lingtai-$tag18-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$tag18-windows-amd64.zip" -f $fx18.Sha256)
+
+        # Determine the interpreter's actual cpXY tag so the wheel fixture matches
+        # whatever Python version this runner actually has -- the suite must not
+        # assume a specific minor version.
+        $probeArgs = @('-c', 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')
+        if ($pyCmd.Name -eq 'py.exe' -or $pyCmd.Name -eq 'py') {
+            $cpTag = (& $pyCmd.Source '-3' @probeArgs) 2>$null
+        } else {
+            $cpTag = (& $pyCmd.Source @probeArgs) 2>$null
+        }
+        if ($cpTag -notmatch '^cp3(11|12|13)$') {
+            Skip-NotYet 'full runtime install (real Python + wheel)' "runner Python reports unsupported tag '$cpTag' (need cp311/cp312/cp313)"
+        } else {
+            # Build a minimal, dependency-free "lingtai" wheel offline via pip's
+            # own wheel machinery (no network: --no-build-isolation, no index).
+            $wheelSrc = Join-Path $TestRoot ("lingtai-wheel-src-{0}" -f ([Guid]::NewGuid().ToString('N')))
+            $pkgDir = Join-Path $wheelSrc 'lingtai'
+            New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pkgDir '__init__.py') -Value '__version__ = "0.18.0"' -Encoding ASCII
+            $pyprojectToml = @'
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lingtai"
+version = "0.18.0"
+'@
+            Set-Content -LiteralPath (Join-Path $wheelSrc 'pyproject.toml') -Value $pyprojectToml -Encoding ASCII
+            $wheelOutDir = Join-Path $TestRoot ("lingtai-wheel-out-{0}" -f ([Guid]::NewGuid().ToString('N')))
+            New-Item -ItemType Directory -Force -Path $wheelOutDir | Out-Null
+            $wheelBuildArgs = @('-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation', '-w', $wheelOutDir, $wheelSrc)
+            if ($pyCmd.Name -eq 'py.exe' -or $pyCmd.Name -eq 'py') { $wheelBuildArgs = @('-3') + $wheelBuildArgs }
+            & $pyCmd.Source @wheelBuildArgs *> (Join-Path $TestRoot 'wheel-build.log')
+            $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
+
+            if (-not $builtWheel) {
+                Skip-NotYet 'full runtime install (real Python + wheel)' 'could not build an offline test wheel (setuptools/pip wheel unavailable) -- see wheel-build.log'
+            } else {
+                # Rename to the exact cpXY-cpXY-win_amd64 platform tag Select-KernelWheel expects.
+                $renamedWheel = Join-Path $wheelOutDir "lingtai-0.18.0-$cpTag-$cpTag-win_amd64.whl"
+                Move-Item -LiteralPath $builtWheel.FullName -Destination $renamedWheel -Force
+                $wheelSha = Get-Sha256Hex -Path $renamedWheel
+                $wheelBytes = [System.IO.File]::ReadAllBytes($renamedWheel)
+                $wheelAsset = Register-FakeApiAsset -Name (Split-Path -Leaf $renamedWheel) -Bytes $wheelBytes
+
+                $kernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                    @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = $wheelSha; python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+                )
+                $kernelManifestAsset = Register-FakeApiAssetText -Name 'lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+                Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Assets @($wheelAsset, $kernelManifestAsset)
+
+                $bundleJson18 = New-BundleManifestJson -Tag $tag18 -ArchiveSha256 $fx18.Sha256 -KernelTag 'v0.18.0' -KernelVersion '0.18.0'
+                $manifestAsset18 = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $bundleJson18
+                Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $tag18 -Assets @($zipAsset18, $shaAsset18, $manifestAsset18)
+
+                $home18 = New-IsolatedHome
+                $binDir18 = Join-Path $home18 'bin dir'
+                $globalDir18 = Join-Path $home18 '.lingtai-tui'
+                $r18 = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir18
+                    GlobalDir    = $globalDir18
+                    NoModifyPath = $true
+                }
+                Assert-Equal 0 $r18.ExitCode "full runtime install exits 0 (stderr: $($r18.Stderr))"
+                Assert-True (Test-Path -LiteralPath (Join-Path $binDir18 'lingtai-tui.exe')) 'full runtime install placed lingtai-tui.exe under BinDir'
+                Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\Scripts\python.exe')) 'full runtime install created the venv'
+                Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\kernel-provenance.json')) 'full runtime install wrote kernel provenance'
+                $meta18 = $null
+                try { $meta18 = Get-Content -LiteralPath (Join-Path $globalDir18 'install.json') -Raw | ConvertFrom-Json } catch {}
+                if ($null -ne $meta18) {
+                    Assert-Equal 'bundle' $meta18.kernel_source 'full runtime install.json records kernel_source=bundle'
+                    Assert-Equal '0.18.0' $meta18.kernel_version 'full runtime install.json records the installed kernel version'
+                } else {
+                    Assert-True $false 'full runtime install wrote a parseable install.json'
+                }
+
+                # Wheel digest mismatch must fail loud and touch no BinDir/venv.
+                Write-Section 'contract: kernel wheel checksum mismatch fails loud, installs nothing'
+                $badKernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                    @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = ('f' * 64); python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+                )
+                Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson
+                $home19 = New-IsolatedHome
+                $binDir19 = Join-Path $home19 'bin dir'
+                $globalDir19 = Join-Path $home19 '.lingtai-tui'
+                $r19 = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir19
+                    GlobalDir    = $globalDir19
+                    NoModifyPath = $true
+                }
+                Assert-True ($r19.ExitCode -ne 0) 'kernel wheel digest mismatch exits non-zero'
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir19 'lingtai-tui.exe'))) 'kernel wheel digest mismatch installs no TUI binary'
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
+                # Restore the good kernel manifest for any later reuse of this route.
+                Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+            }
+        }
+    }
+
 } finally {
     # -----------------------------------------------------------------------
     # Restore ambient environment. NOTE: this only restores the isolated env
@@ -705,6 +1268,9 @@ try {
     foreach ($name in $IsolatedVars) {
         [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
     }
+    [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', $null, 'Process')
+    Stop-FakeGitHubApi
 }
 
 # ---------------------------------------------------------------------------

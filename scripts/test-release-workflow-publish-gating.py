@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Static assertions for the source-only tag release workflow.
+"""Static assertions for the tag release workflow.
 
-The tag workflow must create a GitHub source release and update the Homebrew
-source-build formula. It must not build, package, upload, or mirror prebuilt
-binary/bundle artifacts.
+The tag workflow must create a GitHub source release, update the Homebrew
+source-build formula, and publish exactly one prebuilt asset: a Windows
+AMD64 TUI/portal archive plus its checksum sidecar and bundle manifest. Only
+the windows-release job may upload release assets; source-release must
+remain upload-free and Homebrew must remain source-tarball-based.
 """
 from __future__ import annotations
 
@@ -40,8 +42,8 @@ def main() -> int:
     check(any("v*" in tag for tag in on["push"]["tags"]), "release.yml must trigger on v* tags")
 
     jobs = data.get("jobs", {})
-    check(set(jobs) == {"source-release", "update-homebrew"},
-          f"release jobs must be source-release + update-homebrew only, got {sorted(jobs)}")
+    check(set(jobs) == {"source-release", "update-homebrew", "windows-release"},
+          f"release jobs must be source-release + update-homebrew + windows-release only, got {sorted(jobs)}")
 
     source = jobs.get("source-release", {})
     create = find_step(source, "create github source release")
@@ -63,22 +65,50 @@ def main() -> int:
               "Homebrew formula must build from the GitHub tag source archive")
         check('depends_on "go" => :build' in script,
               "Homebrew formula must retain source-build Go dependency")
+    homebrew_text = "\n".join(step.get("run", "") for step in homebrew.get("steps", []))
+    check("gh release upload" not in homebrew_text,
+          "update-homebrew must not upload release assets")
+
+    windows = jobs.get("windows-release", {})
+    check(windows.get("needs") == "source-release",
+          "windows-release must depend on source-release so upload cannot race release creation")
+
+    windows_text = "\n".join(step.get("run", "") for step in windows.get("steps", []))
+    check("kernel-release.json" in windows_text,
+          "windows-release must read the repo-owned kernel-release.json pin")
+    check("kernel_tag" in windows_text and 'gh release view "$kernel_tag"' in windows_text,
+          "windows-release must fail closed unless the pinned kernel release exists")
+    check("win_amd64" in windows_text,
+          "windows-release must require a win_amd64 kernel wheel before building")
+    check("GOOS=windows GOARCH=amd64" in windows_text,
+          "windows-release must cross-compile for windows/amd64")
+    check("lingtai-bundle-manifest.json" in windows_text,
+          "windows-release must generate the strict bundle manifest")
+    upload_step = find_step(windows, "upload windows release assets")
+    check(upload_step is not None, "windows-release must have an asset upload step")
+    if upload_step:
+        script = upload_step.get("run", "")
+        check("gh release upload" in script, "windows-release must upload the Windows assets")
+        check("$zip_name" in script and "$zip_name.sha256" in script and "lingtai-bundle-manifest.json" in script,
+              "windows-release must upload the ZIP, its sha256 sidecar, and the bundle manifest")
 
     text = WORKFLOW_PATH.read_text()
     forbidden = (
-        "release-assets", "publish-bundle", "gh release upload",
-        "lingtai-bundle-manifest.json", "publish_bundle_to_gitee.sh",
-        "sync_gitee_mirror.sh", "GITEE_ACCESS_TOKEN",
+        "publish-bundle", "publish_bundle_to_gitee.sh",
+        "sync_gitee_mirror.sh", "GITEE_ACCESS_TOKEN", "resolve latest kernel",
     )
     for needle in forbidden:
-        check(needle not in text, f"source-only workflow must not contain {needle!r}")
+        check(needle not in text, f"release workflow must not contain {needle!r}")
+
+    check(text.count("gh release upload") == 1,
+          "gh release upload must appear exactly once, in windows-release")
 
     if FAILURES:
-        print("FAILED source-only release workflow checks:", file=sys.stderr)
+        print("FAILED release workflow checks:", file=sys.stderr)
         for failure in FAILURES:
             print(f"  - {failure}", file=sys.stderr)
         return 1
-    print("OK: source-only GitHub release + Homebrew workflow, no prebuilt/bundle publication")
+    print("OK: source GitHub release + Homebrew + gated Windows asset/bundle publication")
     return 0
 
 

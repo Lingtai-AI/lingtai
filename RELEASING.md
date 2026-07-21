@@ -16,28 +16,62 @@ git push origin v0.X.Y
 ```
 
 Pushing a `v*` tag triggers the root GitHub Actions workflow at
-`.github/workflows/release.yml`. The workflow is source-only and has two jobs:
+`.github/workflows/release.yml`, which has three jobs:
 
 - **`source-release`** — verifies the pushed tag and creates the public GitHub
   Release when it does not already exist. GitHub supplies the tag source archives;
-  the workflow does not build or upload prebuilt binaries, checksums, or bundles.
+  this job does not build or upload prebuilt binaries, checksums, or bundles.
 - **`update-homebrew`** — computes the GitHub source-tarball checksum and updates
   the source-build formula in `Lingtai-AI/homebrew-lingtai`.
+- **`windows-release`** (`needs: source-release`) — builds `lingtai-tui.exe` (and
+  `lingtai-portal.exe`, when the portal web build succeeds) for `windows/amd64`,
+  packages `lingtai-<tag>-windows-amd64.zip` plus its `.sha256` sidecar, generates
+  `lingtai-bundle-manifest.json` (schema `lingtai.tui.bundle/v1`) binding the tag's
+  exact commit to the archive digest and to [`kernel-release.json`](kernel-release.json)'s
+  pinned kernel tag, and uploads all three to the release. It **fails closed**
+  before building anything unless `kernel-release.json`'s pinned kernel release
+  already exists and publishes a `cp311`/`cp312`/`cp313` `win_amd64` wheel with a
+  verified digest — it never resolves "latest kernel."
 
 ### Kernel compatibility metadata
 
-[`kernel-release.json`](kernel-release.json) remains compatibility metadata for
-explicit/manual bundle tooling. The source-only tag workflow does not read it or
-publish a TUI/kernel bundle.
+[`kernel-release.json`](kernel-release.json) is the repo-owned pin the
+`windows-release` job reads to bind a TUI release to one exact kernel release.
+Bump it deliberately, in the same PR/commit that intends to ship a new kernel
+version with the next TUI release; the workflow never resolves "latest kernel"
+on its own.
 
 ### Gitee publication
 
-The source-only tag workflow does not synchronize to Gitee and does not
-publish TUI binary/bundle assets there. The existing
+The tag workflow does not synchronize to Gitee and does not publish TUI
+binary/bundle assets there. The existing
 [`scripts/sync_gitee_mirror.sh`](scripts/sync_gitee_mirror.sh) and
 [`scripts/publish_bundle_to_gitee.sh`](scripts/publish_bundle_to_gitee.sh)
 remain explicit maintainer tools; running them requires separate release authority
 and is not part of the automatic `v*` workflow.
+
+### Installing on Windows (PowerShell)
+
+```powershell
+irm https://lingtai.ai/install.ps1 | iex
+# or an exact version (parameters require the scriptblock form, not | iex):
+&([scriptblock]::Create((irm https://lingtai.ai/install.ps1))) -Version v0.X.Y
+```
+
+`install.ps1`'s public (default) mode resolves one exact release tag, downloads
+and strictly validates `lingtai-bundle-manifest.json`, downloads and SHA-256
+verifies the Windows archive, confirms the staged `lingtai-tui.exe` reports
+exactly that tag, and — unless `-SkipVenv` is passed — provisions
+`%USERPROFILE%\.lingtai-tui\runtime\venv` from the bundle's pinned kernel
+release: it selects the `cp311`/`cp312`/`cp313` `win_amd64` wheel matching the
+venv's actual interpreter, verifies its digest, and installs it by explicit
+local file path. LingTai is never installed by package name from any index —
+the same "no PyPI fallback" contract `install.sh` holds itself to. `-SkipVenv`
+installs the TUI/portal binaries only; `-DryRun` performs the same
+resolution/validation reads but writes nothing. See
+[`scripts/test-install-ps1.ps1`](scripts/test-install-ps1.ps1) for the full
+contract and [`.github/workflows/windows-installer-smoke.yml`](.github/workflows/windows-installer-smoke.yml)
+for its Windows PowerShell 5.1 / PowerShell 7 CI coverage.
 
 ### 3. Create the GitHub release
 

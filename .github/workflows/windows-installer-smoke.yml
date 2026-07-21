@@ -2,15 +2,19 @@ name: Windows Installer Smoke
 
 # Runs the native-Windows installer contract suite (scripts/test-install-ps1.ps1)
 # under BOTH Windows PowerShell 5.1 (Desktop) and PowerShell 7 (Core) on
-# windows-latest. The suite is test-first: until install.ps1 exists it is RED by
-# design, so this workflow is expected to fail until the installer is
-# implemented against the seams the suite exercises.
+# windows-latest. Public-mode contracts (tag/latest resolution, bundle
+# manifest validation, Windows archive download/verify, pinned-kernel venv
+# install) run against a local fake GitHub API inside the suite -- no live
+# release or secrets are used on this trigger.
 #
-# No secrets and no network dependency beyond actions/checkout and the
-# PowerShell hosts already present on windows-latest.
+# A separate exact-tag smoke (below) runs ONLY on a pushed v* tag, after
+# release.yml has had a chance to publish that tag's real assets; it is not
+# part of pull_request CI and never depends on "latest".
 
 on:
   push:
+    tags:
+      - 'v*'
     paths:
       - 'install.ps1'
       - 'scripts/test-install-ps1.ps1'
@@ -58,3 +62,53 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-install-ps1.ps1
+
+  windows-release-asset-smoke:
+    name: Exact-tag release asset smoke (pwsh)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-powershell-5-1, powershell-7]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Wait for this tag's Windows release asset to be published
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINGTAI_VERSION: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetName = "lingtai-$($env:LINGTAI_VERSION)-windows-amd64.zip"
+          # release.yml runs as an independent workflow triggered by the same
+          # tag push; there is no ordering guarantee between the two, so poll
+          # for the asset rather than assuming it already exists.
+          $deadline = (Get-Date).AddMinutes(15)
+          $found = $false
+          while ((Get-Date) -lt $deadline) {
+            $names = (gh release view $env:LINGTAI_VERSION --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name') 2>$null
+            if ($names -contains $assetName) { $found = $true; break }
+            Start-Sleep -Seconds 20
+          }
+          if (-not $found) {
+            Write-Error "post-release smoke: $assetName was not published within 15 minutes of the tag push"
+            exit 1
+          }
+
+      - name: Install TUI binaries from this exact tag's published release (SkipVenv)
+        shell: pwsh
+        env:
+          LINGTAI_VERSION: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binDir = Join-Path $env:RUNNER_TEMP 'lingtai-smoke-bin'
+          $globalDir = Join-Path $env:RUNNER_TEMP 'lingtai-smoke-global'
+          .\install.ps1 -Version $env:LINGTAI_VERSION -BinDir $binDir -GlobalDir $globalDir -SkipVenv -NoModifyPath
+          $reported = & (Join-Path $binDir 'lingtai-tui.exe') version
+          if ($reported.Trim() -ne "lingtai-tui $env:LINGTAI_VERSION") {
+            Write-Error "post-release smoke: expected 'lingtai-tui $env:LINGTAI_VERSION', got '$reported'"
+            exit 1
+          }
+          Write-Host "OK: $reported"

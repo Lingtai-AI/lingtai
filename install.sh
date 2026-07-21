@@ -23,7 +23,11 @@
 # .github/workflows/release.yml):
 #   lingtai-<tag>-<os>-<arch>.tar.gz    e.g. lingtai-v0.10.5-linux-amd64.tar.gz
 # where <os> is darwin|linux and <arch> is amd64|arm64. The tarball contains
-# lingtai-tui and (when built) lingtai-portal at its top level.
+# lingtai-tui and (when built) lingtai-portal at its top level. The bundle
+# manifest may also list a lingtai-<tag>-windows-amd64.zip entry for the same
+# release; this installer's strict manifest parser accepts that entry (so a
+# Windows archive in the manifest never fails POSIX validation) but never
+# selects or downloads it — native Windows installs use install.ps1 instead.
 #
 # Source policy (--source auto|github|gitee, or LINGTAI_SOURCE env; default
 # auto): auto runs a bounded, fail-open public-IP country lookup and prefers
@@ -497,7 +501,7 @@ try:
         name = string(archive["filename"], "archive filename")
         if name in names: raise ValueError("archives contains duplicate filenames")
         names.add(name)
-        if not re.fullmatch(r"lingtai-[^/]+-(?:darwin|linux)-(?:amd64|arm64)\.tar\.gz", name): raise ValueError("archive filename is invalid")
+        if not (re.fullmatch(r"lingtai-[^/]+-(?:darwin|linux)-(?:amd64|arm64)\.tar\.gz", name) or re.fullmatch(r"lingtai-[^/]+-windows-amd64\.zip", name)): raise ValueError("archive filename is invalid")
         if not isinstance(archive["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", archive["sha256"]): raise ValueError("archive sha256 must be lowercase 64-hex")
     target = f"lingtai-{expected_tag}-{os_name}-{arch}.tar.gz"
     hits = [archive for archive in data["archives"] if archive["filename"] == target]
