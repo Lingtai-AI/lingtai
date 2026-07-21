@@ -36,6 +36,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pin a deterministic, contract-supported CPython (3.11/3.12/3.13) on PATH.
+      # windows-latest's ambient default `py -3` can drift to an unsupported
+      # interpreter (e.g. 3.14) ahead of this repo's supported range, which
+      # would otherwise leave the real-runtime venv+wheel contract permanently
+      # unexercised (NOT-YET) on every run.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
       - name: Report host edition
         shell: powershell
         run: |
@@ -52,6 +62,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Pin a deterministic, contract-supported CPython (3.11/3.12/3.13) on PATH.
+      # windows-latest's ambient default `py -3` can drift to an unsupported
+      # interpreter (e.g. 3.14) ahead of this repo's supported range, which
+      # would otherwise leave the real-runtime venv+wheel contract permanently
+      # unexercised (NOT-YET) on every run.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
       - name: Report host edition
         shell: pwsh

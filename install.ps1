@@ -618,7 +618,10 @@ function Find-VenvPython {
     foreach ($name in @('python', 'python3')) {
         $cmd = Get-Command -Name $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd) {
-            $verOut = & $cmd.Source '-c' 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>$null
+            # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
+            # 5.1's native argument-array-to-command-line reconstruction mishandles
+            # embedded double quotes, corrupting the string the interpreter receives.
+            $verOut = & $cmd.Source '-c' 'import sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor))' 2>$null
             if ($LASTEXITCODE -eq 0 -and $verOut -match '^3\.(1[1-3])$') {
                 return @{ Launcher = $cmd.Source; Args = @() }
             }
@@ -642,7 +645,10 @@ the TUI/portal binaries only.
 # minor version than the one that created it.
 function Get-VenvWheelTag {
     param([string]$VenvPython)
-    $tag = & $VenvPython '-c' 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")' 2>$null
+    # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
+    # 5.1's native argument-array-to-command-line reconstruction mishandles
+    # embedded double quotes, corrupting the string the interpreter receives.
+    $tag = & $VenvPython '-c' 'import sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor))' 2>$null
     if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^cp3(11|12|13)$') {
         Fail "Could not determine a supported CPython tag from the venv interpreter (got '$tag')."
     }
@@ -700,6 +706,9 @@ function Install-KernelWheel {
 # install.sh's bundle path holds itself to.
 function Confirm-KernelImport {
     param([string]$VenvPython, [string]$ExpectedVersion)
+    # Single-quoted Python throughout (no embedded ") -- Windows PowerShell 5.1's
+    # native argument-array-to-command-line reconstruction mishandles embedded
+    # double quotes, corrupting the script text the interpreter actually receives.
     $probe = & $VenvPython '-c' @'
 import importlib.metadata as m
 import json
@@ -707,19 +716,19 @@ import sys
 try:
     import lingtai
 except ImportError as exc:
-    print(f"IMPORT_FAILED:{exc}")
+    print('IMPORT_FAILED:' + str(exc))
     sys.exit(1)
-dist = m.distribution("lingtai")
+dist = m.distribution('lingtai')
 version = dist.version
 editable = False
 try:
-    direct_url_text = dist.read_text("direct_url.json")
+    direct_url_text = dist.read_text('direct_url.json')
     if direct_url_text:
         direct_url = json.loads(direct_url_text)
-        editable = bool(direct_url.get("dir_info", {}).get("editable", False))
+        editable = bool(direct_url.get('dir_info', {}).get('editable', False))
 except Exception:
     pass
-print(f"OK:{version}:{editable}")
+print('OK:' + str(version) + ':' + str(editable))
 '@ 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $probe -or $probe -notmatch '^OK:') {
         Fail "Post-install verification failed: could not import lingtai in the venv ($probe)"

@@ -379,6 +379,13 @@ function Start-FakeGitHubApi {
             $route = $routes[$path]
             if ($route) {
                 $context.Response.StatusCode = $route.Status
+                # The real GitHub API always answers with Content-Type: application/json;
+                # install.ps1's Invoke-GitHubApi relies on Invoke-RestMethod's
+                # Content-Type-driven auto-parsing to turn the body into an object
+                # (HttpListener otherwise defaults to text/html, which Invoke-RestMethod
+                # returns as an unparsed string -- silently breaking every .tag_name /
+                # .assets access downstream). Set it whenever the route declares one.
+                if ($route.ContentType) { $context.Response.ContentType = $route.ContentType }
                 # Routes always carry raw bytes (BodyBytes) so binary assets
                 # (zips, wheels) round-trip exactly -- never re-encoded through
                 # a string, which would corrupt non-ASCII byte values.
@@ -419,13 +426,13 @@ function Register-FakeApiRoute {
       below) over hand-building the route hashtable so every path stores
       BodyBytes, never a re-encoded string.
     #>
-    param([string]$Path, [byte[]]$BodyBytes, [int]$Status = 200)
-    $script:FakeApiRoutes[$Path] = @{ Status = $Status; BodyBytes = $BodyBytes }
+    param([string]$Path, [byte[]]$BodyBytes, [int]$Status = 200, [string]$ContentType = '')
+    $script:FakeApiRoutes[$Path] = @{ Status = $Status; BodyBytes = $BodyBytes; ContentType = $ContentType }
 }
 
 function Register-FakeApiRouteText {
-    param([string]$Path, [string]$Text, [int]$Status = 200)
-    Register-FakeApiRoute -Path $Path -BodyBytes ([System.Text.Encoding]::UTF8.GetBytes($Text)) -Status $Status
+    param([string]$Path, [string]$Text, [int]$Status = 200, [string]$ContentType = '')
+    Register-FakeApiRoute -Path $Path -BodyBytes ([System.Text.Encoding]::UTF8.GetBytes($Text)) -Status $Status -ContentType $ContentType
 }
 
 function Register-FakeApiAsset {
@@ -452,9 +459,13 @@ function Register-FakeRelease {
     #>
     param([string]$ApiPathPrefix, [string]$Tag, [array]$Assets, [switch]$Latest)
     $body = @{ tag_name = $Tag; assets = $Assets } | ConvertTo-Json -Depth 6
-    Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/tags/$Tag" -Text $body
+    # install.ps1's Invoke-GitHubApi reads this route through Invoke-RestMethod,
+    # which only auto-parses the body into an object when Content-Type says JSON
+    # (HttpListener's unset default is text/html); the real GitHub API always
+    # answers these endpoints with application/json, so mirror that here.
+    Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/tags/$Tag" -Text $body -ContentType 'application/json; charset=utf-8'
     if ($Latest) {
-        Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/latest" -Text $body
+        Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/latest" -Text $body -ContentType 'application/json; charset=utf-8'
     }
 }
 
@@ -1147,35 +1158,56 @@ try {
     # pip-install -> import/version/provenance chain, not just its gates.
     # -----------------------------------------------------------------------
     Write-Section 'contract: full runtime install from a real venv + genuine wheel'
-    $pyCmd = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $pyCmd) { $pyCmd = Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    # Discover a genuinely SUPPORTED interpreter (cp311/cp312/cp313) the same way
+    # install.ps1's own Find-VenvPython does: try the py launcher pinned to each
+    # exact supported minor in turn, then fall back to a bare python/python3 on
+    # PATH. Bare `py -3` (no minor) is deliberately NOT used here -- the launcher
+    # resolves that to the HIGHEST registered version, which can silently be a
+    # newer, unsupported CPython (e.g. cp314) even when a supported one is also
+    # installed/pinned in this job, permanently skipping this contract instead of
+    # exercising it.
+    $probeArgs = @('-c', 'import sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor))')
+    $pyCmd = $null
+    $cpTag = $null
+    $py = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($py) {
+        foreach ($minor in @('3.13', '3.12', '3.11')) {
+            $probe = (& $py.Source "-$minor" @probeArgs) 2>$null
+            if ($LASTEXITCODE -eq 0 -and $probe -match '^cp3(11|12|13)$') {
+                $pyCmd = @{ Source = $py.Source; ExtraArgs = @("-$minor") }
+                $cpTag = $probe
+                break
+            }
+        }
+    }
     if (-not $pyCmd) {
-        Skip-NotYet 'full runtime install (real Python + wheel)' 'no py/python launcher found on this runner'
+        foreach ($name in @('python', 'python3')) {
+            $cmd = Get-Command -Name $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cmd) {
+                $probe = (& $cmd.Source @probeArgs) 2>$null
+                if ($LASTEXITCODE -eq 0 -and $probe -match '^cp3(11|12|13)$') {
+                    $pyCmd = @{ Source = $cmd.Source; ExtraArgs = @() }
+                    $cpTag = $probe
+                    break
+                }
+            }
+        }
+    }
+    if (-not $pyCmd) {
+        Skip-NotYet 'full runtime install (real Python + wheel)' 'no supported CPython 3.11/3.12/3.13 found via the py launcher or python/python3 on PATH'
     } else {
         $tag18 = 'v11.2.0'
         $fx18 = New-FixtureArchive -Version $tag18
         $zipAsset18 = Register-FakeApiAsset -Name "lingtai-$tag18-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($fx18.ArchivePath))
         $shaAsset18 = Register-FakeApiAssetText -Name "lingtai-$tag18-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$tag18-windows-amd64.zip" -f $fx18.Sha256)
 
-        # Determine the interpreter's actual cpXY tag so the wheel fixture matches
-        # whatever Python version this runner actually has -- the suite must not
-        # assume a specific minor version.
-        $probeArgs = @('-c', 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')
-        if ($pyCmd.Name -eq 'py.exe' -or $pyCmd.Name -eq 'py') {
-            $cpTag = (& $pyCmd.Source '-3' @probeArgs) 2>$null
-        } else {
-            $cpTag = (& $pyCmd.Source @probeArgs) 2>$null
-        }
-        if ($cpTag -notmatch '^cp3(11|12|13)$') {
-            Skip-NotYet 'full runtime install (real Python + wheel)' "runner Python reports unsupported tag '$cpTag' (need cp311/cp312/cp313)"
-        } else {
-            # Build a minimal, dependency-free "lingtai" wheel offline via pip's
-            # own wheel machinery (no network: --no-build-isolation, no index).
-            $wheelSrc = Join-Path $TestRoot ("lingtai-wheel-src-{0}" -f ([Guid]::NewGuid().ToString('N')))
-            $pkgDir = Join-Path $wheelSrc 'lingtai'
-            New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
-            Set-Content -LiteralPath (Join-Path $pkgDir '__init__.py') -Value '__version__ = "0.18.0"' -Encoding ASCII
-            $pyprojectToml = @'
+        # Build a minimal, dependency-free "lingtai" wheel offline via pip's
+        # own wheel machinery (no network: --no-build-isolation, no index).
+        $wheelSrc = Join-Path $TestRoot ("lingtai-wheel-src-{0}" -f ([Guid]::NewGuid().ToString('N')))
+        $pkgDir = Join-Path $wheelSrc 'lingtai'
+        New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $pkgDir '__init__.py') -Value '__version__ = "0.18.0"' -Encoding ASCII
+        $pyprojectToml = @'
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
@@ -1184,77 +1216,76 @@ build-backend = "setuptools.build_meta"
 name = "lingtai"
 version = "0.18.0"
 '@
-            Set-Content -LiteralPath (Join-Path $wheelSrc 'pyproject.toml') -Value $pyprojectToml -Encoding ASCII
-            $wheelOutDir = Join-Path $TestRoot ("lingtai-wheel-out-{0}" -f ([Guid]::NewGuid().ToString('N')))
-            New-Item -ItemType Directory -Force -Path $wheelOutDir | Out-Null
-            $wheelBuildArgs = @('-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation', '-w', $wheelOutDir, $wheelSrc)
-            if ($pyCmd.Name -eq 'py.exe' -or $pyCmd.Name -eq 'py') { $wheelBuildArgs = @('-3') + $wheelBuildArgs }
-            & $pyCmd.Source @wheelBuildArgs *> (Join-Path $TestRoot 'wheel-build.log')
-            $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
+        Set-Content -LiteralPath (Join-Path $wheelSrc 'pyproject.toml') -Value $pyprojectToml -Encoding ASCII
+        $wheelOutDir = Join-Path $TestRoot ("lingtai-wheel-out-{0}" -f ([Guid]::NewGuid().ToString('N')))
+        New-Item -ItemType Directory -Force -Path $wheelOutDir | Out-Null
+        $wheelBuildArgs = @('-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation', '-w', $wheelOutDir, $wheelSrc)
+        $wheelBuildArgs = @($pyCmd.ExtraArgs) + $wheelBuildArgs
+        & $pyCmd.Source @wheelBuildArgs *> (Join-Path $TestRoot 'wheel-build.log')
+        $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
 
-            if (-not $builtWheel) {
-                Skip-NotYet 'full runtime install (real Python + wheel)' 'could not build an offline test wheel (setuptools/pip wheel unavailable) -- see wheel-build.log'
-            } else {
-                # Rename to the exact cpXY-cpXY-win_amd64 platform tag Select-KernelWheel expects.
-                $renamedWheel = Join-Path $wheelOutDir "lingtai-0.18.0-$cpTag-$cpTag-win_amd64.whl"
-                Move-Item -LiteralPath $builtWheel.FullName -Destination $renamedWheel -Force
-                $wheelSha = Get-Sha256Hex -Path $renamedWheel
-                $wheelBytes = [System.IO.File]::ReadAllBytes($renamedWheel)
-                $wheelAsset = Register-FakeApiAsset -Name (Split-Path -Leaf $renamedWheel) -Bytes $wheelBytes
+        if (-not $builtWheel) {
+            Skip-NotYet 'full runtime install (real Python + wheel)' 'could not build an offline test wheel (setuptools/pip wheel unavailable) -- see wheel-build.log'
+        } else {
+            # Rename to the exact cpXY-cpXY-win_amd64 platform tag Select-KernelWheel expects.
+            $renamedWheel = Join-Path $wheelOutDir "lingtai-0.18.0-$cpTag-$cpTag-win_amd64.whl"
+            Move-Item -LiteralPath $builtWheel.FullName -Destination $renamedWheel -Force
+            $wheelSha = Get-Sha256Hex -Path $renamedWheel
+            $wheelBytes = [System.IO.File]::ReadAllBytes($renamedWheel)
+            $wheelAsset = Register-FakeApiAsset -Name (Split-Path -Leaf $renamedWheel) -Bytes $wheelBytes
 
-                $kernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
-                    @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = $wheelSha; python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
-                )
-                $kernelManifestAsset = Register-FakeApiAssetText -Name 'lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
-                Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Assets @($wheelAsset, $kernelManifestAsset)
+            $kernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = $wheelSha; python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+            )
+            $kernelManifestAsset = Register-FakeApiAssetText -Name 'lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+            Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Assets @($wheelAsset, $kernelManifestAsset)
 
-                $bundleJson18 = New-BundleManifestJson -Tag $tag18 -ArchiveSha256 $fx18.Sha256 -KernelTag 'v0.18.0' -KernelVersion '0.18.0'
-                $manifestAsset18 = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $bundleJson18
-                Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $tag18 -Assets @($zipAsset18, $shaAsset18, $manifestAsset18)
+            $bundleJson18 = New-BundleManifestJson -Tag $tag18 -ArchiveSha256 $fx18.Sha256 -KernelTag 'v0.18.0' -KernelVersion '0.18.0'
+            $manifestAsset18 = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $bundleJson18
+            Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $tag18 -Assets @($zipAsset18, $shaAsset18, $manifestAsset18)
 
-                $home18 = New-IsolatedHome
-                $binDir18 = Join-Path $home18 'bin dir'
-                $globalDir18 = Join-Path $home18 '.lingtai-tui'
-                $r18 = Invoke-Installer @{
-                    Version      = $tag18
-                    BinDir       = $binDir18
-                    GlobalDir    = $globalDir18
-                    NoModifyPath = $true
-                }
-                Assert-Equal 0 $r18.ExitCode "full runtime install exits 0 (stderr: $($r18.Stderr))"
-                Assert-True (Test-Path -LiteralPath (Join-Path $binDir18 'lingtai-tui.exe')) 'full runtime install placed lingtai-tui.exe under BinDir'
-                Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\Scripts\python.exe')) 'full runtime install created the venv'
-                Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\kernel-provenance.json')) 'full runtime install wrote kernel provenance'
-                $meta18 = $null
-                try { $meta18 = Get-Content -LiteralPath (Join-Path $globalDir18 'install.json') -Raw | ConvertFrom-Json } catch {}
-                if ($null -ne $meta18) {
-                    Assert-Equal 'bundle' $meta18.kernel_source 'full runtime install.json records kernel_source=bundle'
-                    Assert-Equal '0.18.0' $meta18.kernel_version 'full runtime install.json records the installed kernel version'
-                } else {
-                    Assert-True $false 'full runtime install wrote a parseable install.json'
-                }
-
-                # Wheel digest mismatch must fail loud and touch no BinDir/venv.
-                Write-Section 'contract: kernel wheel checksum mismatch fails loud, installs nothing'
-                $badKernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
-                    @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = ('f' * 64); python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
-                )
-                Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson
-                $home19 = New-IsolatedHome
-                $binDir19 = Join-Path $home19 'bin dir'
-                $globalDir19 = Join-Path $home19 '.lingtai-tui'
-                $r19 = Invoke-Installer @{
-                    Version      = $tag18
-                    BinDir       = $binDir19
-                    GlobalDir    = $globalDir19
-                    NoModifyPath = $true
-                }
-                Assert-True ($r19.ExitCode -ne 0) 'kernel wheel digest mismatch exits non-zero'
-                Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir19 'lingtai-tui.exe'))) 'kernel wheel digest mismatch installs no TUI binary'
-                Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
-                # Restore the good kernel manifest for any later reuse of this route.
-                Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+            $home18 = New-IsolatedHome
+            $binDir18 = Join-Path $home18 'bin dir'
+            $globalDir18 = Join-Path $home18 '.lingtai-tui'
+            $r18 = Invoke-Installer @{
+                Version      = $tag18
+                BinDir       = $binDir18
+                GlobalDir    = $globalDir18
+                NoModifyPath = $true
             }
+            Assert-Equal 0 $r18.ExitCode "full runtime install exits 0 (stderr: $($r18.Stderr))"
+            Assert-True (Test-Path -LiteralPath (Join-Path $binDir18 'lingtai-tui.exe')) 'full runtime install placed lingtai-tui.exe under BinDir'
+            Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\Scripts\python.exe')) 'full runtime install created the venv'
+            Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\kernel-provenance.json')) 'full runtime install wrote kernel provenance'
+            $meta18 = $null
+            try { $meta18 = Get-Content -LiteralPath (Join-Path $globalDir18 'install.json') -Raw | ConvertFrom-Json } catch {}
+            if ($null -ne $meta18) {
+                Assert-Equal 'bundle' $meta18.kernel_source 'full runtime install.json records kernel_source=bundle'
+                Assert-Equal '0.18.0' $meta18.kernel_version 'full runtime install.json records the installed kernel version'
+            } else {
+                Assert-True $false 'full runtime install wrote a parseable install.json'
+            }
+
+            # Wheel digest mismatch must fail loud and touch no BinDir/venv.
+            Write-Section 'contract: kernel wheel checksum mismatch fails loud, installs nothing'
+            $badKernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = ('f' * 64); python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+            )
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson
+            $home19 = New-IsolatedHome
+            $binDir19 = Join-Path $home19 'bin dir'
+            $globalDir19 = Join-Path $home19 '.lingtai-tui'
+            $r19 = Invoke-Installer @{
+                Version      = $tag18
+                BinDir       = $binDir19
+                GlobalDir    = $globalDir19
+                NoModifyPath = $true
+            }
+            Assert-True ($r19.ExitCode -ne 0) 'kernel wheel digest mismatch exits non-zero'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir19 'lingtai-tui.exe'))) 'kernel wheel digest mismatch installs no TUI binary'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
+            # Restore the good kernel manifest for any later reuse of this route.
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
         }
     }
 
