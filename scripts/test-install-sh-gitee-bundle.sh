@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Focused tests for the Gitee-aware bundle installer additions to install.sh:
 # --source override validation, country detection (success/failure/fail-open),
-# Gitee response parsing, same-tag/same-bundle fallback, checksum
-# mismatch fail-loud, bundle/kernel manifest schema handling, and kernel
-# wheel selection. Kept as a separate file from scripts/test-install-sh.sh
-# (which predates this feature) rather than growing that file further.
+# Gitee response parsing, same-tag/same-bundle fallback, provider-aware
+# third-party dependency indexes, checksum mismatch fail-loud, bundle/kernel
+# manifest schema handling, and kernel wheel selection. Kept as a separate file
+# from scripts/test-install-sh.sh (which predates this feature) rather than
+# growing that file further.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -229,6 +230,29 @@ register_response_text() {
   assert_eq "gitee" "$BUNDLE_PROVIDER" "explicit --source gitee bypasses detection"
 )
 
+# --- third-party dependency index follows the final bundle provider ----------
+
+(
+  unset LINGTAI_PYPI_INDEX_URL
+  BUNDLE_PROVIDER="github"
+  assert_eq "https://pypi.org/simple" "$(python_dependency_index_url)" \
+    "GitHub bundle provider defaults third-party dependencies to official PyPI"
+)
+
+(
+  unset LINGTAI_PYPI_INDEX_URL
+  BUNDLE_PROVIDER="gitee"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" "$(python_dependency_index_url)" \
+    "Gitee bundle provider defaults third-party dependencies to Tsinghua TUNA"
+)
+
+(
+  LINGTAI_PYPI_INDEX_URL="https://packages.example.invalid/simple"
+  BUNDLE_PROVIDER="gitee"
+  assert_eq "$LINGTAI_PYPI_INDEX_URL" "$(python_dependency_index_url)" \
+    "explicit LINGTAI_PYPI_INDEX_URL overrides the Gitee default"
+)
+
 (
   # auto + CN + gitee reachable -> gitee
   fakebin="$tmp/resolve-fakebin-cn-reachable"
@@ -244,6 +268,8 @@ register_response_text() {
   BUNDLE_PROVIDER=""
   resolve_source_provider
   assert_eq "gitee" "$BUNDLE_PROVIDER" "auto + CN + Gitee reachable resolves to gitee"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" "$(python_dependency_index_url)" \
+    "auto-selected Gitee uses Tsinghua TUNA for third-party dependencies"
 )
 
 (
@@ -347,7 +373,39 @@ register_response_text() {
   fetch_bundle_manifest || fail "fetch_bundle_manifest should succeed via same-tag GitHub fallback"
   assert_eq "v0.11.0" "$BUNDLE_TAG" "fetch_bundle_manifest resolves the explicit tag, not a re-queried latest"
   assert_eq "github" "$BUNDLE_PROVIDER" "fetch_bundle_manifest updates BUNDLE_PROVIDER to the provider that actually served the manifest"
+  assert_eq "https://pypi.org/simple" "$(python_dependency_index_url)" \
+    "same-tag fallback to GitHub uses official PyPI"
   assert_eq "v0.16.4" "$(bundle_manifest_field kernel_tag)" "bundle_manifest_field reads the fetched manifest"
+)
+
+(
+  # Preferred provider (GitHub) lacks the manifest for this exact tag, while
+  # Gitee serves it. The final provider and dependency index must move together.
+  fakebin="$tmp/bundle-fallback-to-gitee-fakebin"
+  setup_fake_curl "$fakebin"
+  register_response_text "https://api.github.com/repos/Lingtai-AI/lingtai/releases/tags/v0.11.0" \
+    '{"tag_name":"v0.11.0","assets":[]}'
+  fallback_archive="lingtai-v0.11.0-$(detect_os)-$(detect_arch).tar.gz"
+  fallback_manifest="$(printf '%s' '{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","tui_tag":"v0.11.0","tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","kernel_tag":"v0.16.4","kernel_version":"0.16.4","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"ARCHIVE","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}' | sed "s/ARCHIVE/$fallback_archive/")"
+  register_response_text "https://gitee.com/api/v5/repos/huangzesen1997/lingtai/releases/tags/v0.11.0" \
+    '{"id":1,"tag_name":"v0.11.0","attach_files":[{"name":"lingtai-bundle-manifest.json","browser_download_url":"https://gitee.com/huangzesen1997/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json"}]}'
+  register_response_text \
+    "https://gitee.com/huangzesen1997/lingtai/releases/download/v0.11.0/lingtai-bundle-manifest.json" \
+    "$fallback_manifest"
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai"
+  DOWNLOAD_BASE="https://github.com/Lingtai-AI/lingtai/releases/download"
+
+  unset LINGTAI_PYPI_INDEX_URL
+  BUNDLE_PROVIDER="github"
+  VERSION="v0.11.0"
+  BUNDLE_TAG=""
+  BUNDLE_MANIFEST_JSON=""
+  fetch_bundle_manifest || fail "fetch_bundle_manifest should succeed via same-tag Gitee fallback"
+  assert_eq "gitee" "$BUNDLE_PROVIDER" "same-tag fallback records Gitee as the final bundle provider"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" "$(python_dependency_index_url)" \
+    "same-tag fallback to Gitee uses Tsinghua TUNA"
 )
 
 (

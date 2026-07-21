@@ -40,8 +40,9 @@
 # Python `lingtai` runtime is installed from that pinned kernel release
 # artifact by explicit local file path — never `pip install lingtai` from any
 # package index — with SHA256 verified before install. Third-party
-# dependencies still resolve via the configured package index
-# (LINGTAI_PYPI_INDEX_URL, default pypi.org); only lingtai's own bytes are
+# dependencies still resolve via one configured package index. An explicit
+# LINGTAI_PYPI_INDEX_URL always wins; otherwise the final Gitee bundle provider
+# uses Tsinghua TUNA and GitHub uses pypi.org. Only lingtai's own bytes are
 # pinned. If no compatible platform wheel exists for the runtime's
 # interpreter, the pinned sdist is used instead (may require a local build
 # toolchain).
@@ -66,6 +67,8 @@ GO_DL_BASE="${LINGTAI_GO_DL_BASE:-https://go.dev/dl}"  # official Go toolchain d
 NODE_DL_BASE="${LINGTAI_NODE_DL_BASE:-https://nodejs.org/dist}"
 UV_INSTALLER_URL="${LINGTAI_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"  # official uv bootstrap installer
 NODE_TOOLCHAIN_VERSION="${LINGTAI_NODE_VERSION:-22.12.0}"
+PYPI_INDEX_URL_DEFAULT="https://pypi.org/simple"
+PYPI_INDEX_URL_GITEE_DEFAULT="https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 
 # Gitee mirror: a real repository, but release assets may not exist for every
 # tag yet (see gitee_release_asset_url / gitee_bundle_manifest_url below,
@@ -138,7 +141,7 @@ Usage:
   ./install.sh --update --prefix <prefix> --version <tag> --non-interactive
 
 Options:
-  --version <tag>      Release tag to install (default: latest GitHub release)
+  --version <tag>      Release tag to install (default: latest from selected source)
   --ref <ref>          Build a specific git branch/tag/commit from source
   --bin-dir <dir>      Install binaries into <dir>
   --prefix <dir>       Install binaries into <dir>/bin (used by --update)
@@ -386,6 +389,21 @@ resolve_source_provider() {
     fi
   else
     BUNDLE_PROVIDER="github"
+  fi
+}
+
+# python_dependency_index_url chooses the single package index used only for
+# third-party dependencies of the verified local LingTai artifact. An explicit
+# override always wins. Otherwise the provider that actually served the final
+# bundle manifest decides the reachable default: Gitee uses Tsinghua TUNA;
+# GitHub uses official PyPI.
+python_dependency_index_url() {
+  if [[ -n "${LINGTAI_PYPI_INDEX_URL:-}" ]]; then
+    printf '%s' "$LINGTAI_PYPI_INDEX_URL"
+  elif [[ "${BUNDLE_PROVIDER:-github}" == "gitee" ]]; then
+    printf '%s' "$PYPI_INDEX_URL_GITEE_DEFAULT"
+  else
+    printf '%s' "$PYPI_INDEX_URL_DEFAULT"
   fi
 }
 
@@ -1133,8 +1151,8 @@ ensure_runtime_venv() {
 # Installs the Python `lingtai` runtime from the release-pinned kernel
 # artifact named in the TUI bundle manifest, by explicit local file path —
 # never `pip install lingtai` against any package index. The configured
-# package index (LINGTAI_PYPI_INDEX_URL, default pypi.org) is used ONLY to
-# resolve lingtai's own third-party dependencies during that local-path
+# package index (explicit LINGTAI_PYPI_INDEX_URL, otherwise provider default)
+# is used ONLY to resolve lingtai's own third-party dependencies during that local-path
 # install; lingtai itself is never requested from an index.
 
 # kernel_manifest_url_for_provider echoes the kernel release manifest asset
@@ -1394,7 +1412,7 @@ install_kernel_from_bundle() {
   fi
   note "Verified SHA256 for $fname."
 
-  index_url="${LINGTAI_PYPI_INDEX_URL:-https://pypi.org/simple}"
+  index_url="$(python_dependency_index_url)"
   say "Installing lingtai from local artifact (dependencies resolved via $index_url) ..."
   # Explicit local path: pip/uv never requests the package name "lingtai"
   # from any index here — only third-party dependency resolution uses

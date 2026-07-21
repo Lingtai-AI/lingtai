@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -98,7 +99,7 @@ func TestSourceTUIUpdaterRunsInstallScriptAndVerifiesRuntime(t *testing.T) {
 	if !result.Healthy || !result.Updated {
 		t.Fatalf("expected healthy source update: %+v", result)
 	}
-	if !containsCall(runner.calls, "bash /tmp/install.sh update --prefix "+prefix+" --tui-tag v0.8.1 --non-interactive --yes") {
+	if !containsCall(runner.calls, "bash /tmp/install.sh --update --prefix "+prefix+" --version v0.8.1 --non-interactive") {
 		t.Fatalf("expected installer update call, got %#v", runner.calls)
 	}
 	if containsCall(runner.calls, "brew") {
@@ -329,7 +330,7 @@ func (r *sourceUpdateRunner) Run(name string, args ...string) CommandResult {
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
 	switch {
-	case strings.Contains(call, " update "):
+	case strings.Contains(call, " --update "):
 		if r.failInstall {
 			return CommandResult{Err: errors.New("exit status 1"), Stderr: "install failed"}
 		}
@@ -352,11 +353,29 @@ func TestSourceInstallCommandUsesCanonicalWebsiteInstallerAndForwardsAllArgs(t *
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"https://lingtai.ai/install.sh",
-		"update --prefix /tmp/lingtai prefix --tui-tag v0.11.0 --non-interactive --yes",
+		"--update --prefix /tmp/lingtai prefix --version v0.11.0 --non-interactive",
 		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("sourceInstallCommand args %q do not contain %q", joined, want)
 		}
+	}
+}
+
+func TestSourceInstallCommandMatchesRealInstallerParser(t *testing.T) {
+	installerPath, err := filepath.Abs(filepath.Join("..", "..", "..", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, args := sourceInstallCommand(installerPath, "/tmp/lingtai prefix", "v0.11.0")
+	if name != "bash" || len(args) < 2 || args[0] != installerPath {
+		t.Fatalf("local sourceInstallCommand = %q %#v, want bash followed by %s and update args", name, args, installerPath)
+	}
+
+	parser := `set -euo pipefail; export LINGTAI_INSTALL_SH_SOURCE_ONLY=1; source "$1"; shift; parse_args "$@"`
+	parserArgs := []string{"-c", parser, "lingtai-installer-parser", installerPath}
+	parserArgs = append(parserArgs, args[1:]...)
+	if output, err := exec.Command("bash", parserArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("source updater arguments are rejected by install.sh's real parser: %v\n%s", err, output)
 	}
 }

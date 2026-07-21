@@ -1,8 +1,8 @@
 ---
 name: lingtai-update-install
 description: Use when installing or building the lingtai-tui and lingtai-portal binaries.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.1.0
+last_changed_at: "2026-07-21T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -14,11 +14,14 @@ Nested `lingtai-update` reference. The supported public first-install path is:
 curl -fsSL https://lingtai.ai/install.sh | bash
 ```
 
-`install.sh` resolves the latest GitHub Release, prefers a matching
-`lingtai-<tag>-<os>-<arch>.tar.gz` asset, and falls back to building the release
-source when no asset is available. It installs both binaries into a selected bin
-directory and prepares the TUI-managed runtime; that runtime is not a second TUI
-update path.
+`install.sh` resolves one release bundle through `--source auto|github|gitee`
+(or `LINGTAI_SOURCE`), prefers a matching
+`lingtai-<tag>-<os>-<arch>.tar.gz` asset, and falls back on the same tag or builds
+the release source when no asset is available. It installs both binaries into a
+selected bin directory and prepares the TUI-managed runtime; that runtime is not
+a second TUI update path. For the local runtime artifact's third-party
+dependencies, explicit `LINGTAI_PYPI_INDEX_URL` wins; otherwise a final Gitee
+bundle uses Tsinghua TUNA and a final GitHub bundle uses official PyPI.
 
 For a deliberate source build, the current repository layout is:
 
