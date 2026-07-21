@@ -383,6 +383,47 @@ function Invoke-GitHubApi {
     }
 }
 
+# Get-TextAssetContent downloads $Url and returns its body as decoded UTF-8
+# text, for callers that need the raw text of a downloaded release asset
+# (the bundle/kernel manifests) rather than an already-parsed object.
+#
+# Invoke-WebRequest's .Content property is NOT safe to read directly across
+# PowerShell hosts here: on Windows PowerShell 5.1 (Desktop), -UseBasicParsing
+# only decodes .Content to a [string] when the response's Content-Type is
+# recognized as text (text/*, application/json, ...); for anything else
+# (including the text/html HttpListener falls back to, or the
+# application/octet-stream a real CDN/release-asset host commonly serves) it
+# instead surfaces as a [byte[]] -- which PowerShell's default array-to-string
+# coercion turns into a space-separated list of decimal byte values, not
+# decoded text, and ConvertFrom-Json then fails on that decimal-number
+# garbage. PowerShell 7 Core's .Content is always a string, but can still
+# carry a leading UTF-8 BOM (U+FEFF) that ConvertFrom-Json chokes on as
+# trailing "additional text" after the first token.
+#
+# RawContentStream is present on both editions' response object and is
+# ALWAYS the untouched raw byte stream regardless of Content-Type
+# classification, so decoding it explicitly as UTF-8 (and stripping an
+# optional BOM) is the one code path that behaves identically on PS 5.1 and
+# PS7 no matter what Content-Type the server did or didn't declare.
+function Get-TextAssetContent {
+    param([string]$Url)
+    $response = $null
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing
+    } catch {
+        Fail "Download failed: $Url ($($_.Exception.Message))"
+    }
+    $bytes = $response.RawContentStream.ToArray()
+    if (-not $bytes -or $bytes.Length -eq 0) {
+        Fail "Empty response body from $Url."
+    }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        Fail "Response from $Url decoded to empty/unsupported text content."
+    }
+    return $text
+}
+
 # Resolve-PublicTag resolves $Requested to an exact vX.Y.Z tag: validated as-is
 # if given, or the repo's latest release tag if empty. "latest" is resolved
 # through the release API exactly once -- never re-queried on a fallback.
@@ -531,7 +572,7 @@ function Get-BundleManifest {
     if (-not $url) {
         Fail "Release $Tag has no lingtai-bundle-manifest.json asset. LingTai's Windows install requires a pinned bundle; there is no unpinned fallback."
     }
-    $raw = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
+    $raw = Get-TextAssetContent -Url $url
     return Confirm-BundleManifest -RawJson $raw -ExpectedTag $Tag
 }
 
@@ -595,7 +636,7 @@ function Get-KernelManifest {
     if (-not $url) {
         Fail "Pinned kernel release $KernelTag has no $ManifestFilename asset."
     }
-    $raw = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
+    $raw = Get-TextAssetContent -Url $url
     return Confirm-KernelManifest -RawJson $raw -ExpectedKernelTag $KernelTag
 }
 

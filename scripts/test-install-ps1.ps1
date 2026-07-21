@@ -545,13 +545,28 @@ function Register-FakeApiAsset {
       the GitHub release-assets API embeds ({name, browser_download_url}).
     #>
     param([string]$Name, [byte[]]$Bytes)
-    Register-FakeApiRoute -Path "/assets/$Name" -BodyBytes $Bytes
+    # Real GitHub release-asset downloads (browser_download_url, served from its
+    # CDN) always answer application/octet-stream regardless of file extension --
+    # never application/json even for a .json asset. Deliberately mirror that
+    # here (rather than leaving it to HttpListener's text/html default) so this
+    # fixture exercises install.ps1's Get-TextAssetContent through the SAME
+    # "Content-Type is not a recognized text type" condition production traffic
+    # actually presents, instead of accidentally dodging it.
+    Register-FakeApiRoute -Path "/assets/$Name" -BodyBytes $Bytes -ContentType 'application/octet-stream'
     return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
 }
 
 function Register-FakeApiAssetText {
     param([string]$Name, [string]$Text)
-    Register-FakeApiRouteText -Path "/assets/$Name" -Text $Text
+    # See Register-FakeApiAsset: real GitHub serves release assets (including
+    # JSON manifest assets like lingtai-bundle-manifest.json) as
+    # application/octet-stream, never application/json. Setting that here
+    # deliberately, rather than relying on HttpListener's implicit text/html
+    # default, is what makes the CONTRACT 11/16/17/18 public-mode/full-runtime
+    # contracts actually exercise install.ps1's Get-TextAssetContent normalization
+    # (RawContentStream -> explicit UTF-8 decode -> BOM strip) instead of merely
+    # happening to work by accident of an unrelated default.
+    Register-FakeApiRouteText -Path "/assets/$Name" -Text $Text -ContentType 'application/octet-stream'
     return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
 }
 
@@ -1385,6 +1400,10 @@ version = "0.18.0"
                 NoModifyPath = $true
             }
             Assert-Equal 0 $r18.ExitCode "full runtime install exits 0 (stderr: $($r18.Stderr))"
+            if ($r18.ExitCode -ne 0) {
+                Write-InstallerDiagnostics -Result $r18 -Context 'CONTRACT 18 (full runtime install)'
+                Write-FakeGitHubApiHealth -Context 'CONTRACT 18 (full runtime install)'
+            }
             Assert-True (Test-Path -LiteralPath (Join-Path $binDir18 'lingtai-tui.exe')) 'full runtime install placed lingtai-tui.exe under BinDir'
             Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\Scripts\python.exe')) 'full runtime install created the venv'
             Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\kernel-provenance.json')) 'full runtime install wrote kernel provenance'
@@ -1402,7 +1421,7 @@ version = "0.18.0"
             $badKernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
                 @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = ('f' * 64); python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
             )
-            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson -ContentType 'application/octet-stream'
             $home19 = New-IsolatedHome
             $binDir19 = Join-Path $home19 'bin dir'
             $globalDir19 = Join-Path $home19 '.lingtai-tui'
@@ -1416,7 +1435,7 @@ version = "0.18.0"
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir19 'lingtai-tui.exe'))) 'kernel wheel digest mismatch installs no TUI binary'
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
             # Restore the good kernel manifest for any later reuse of this route.
-            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson -ContentType 'application/octet-stream'
         }
     }
 
