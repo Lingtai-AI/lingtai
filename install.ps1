@@ -566,8 +566,14 @@ function Confirm-BundleManifest {
         if ([string]::IsNullOrEmpty($name)) { Fail "invalid strict bundle manifest: archive filename must be a nonempty string" }
         if (-not $names.Add($name)) { Fail "invalid strict bundle manifest: archives contains duplicate filenames" }
         $isPosix = $name -match '^lingtai-[^/]+-(darwin|linux)-(amd64|arm64)\.tar\.gz$'
-        $isWindows = $name -match '^lingtai-[^/]+-windows-amd64\.zip$'
-        if (-not ($isPosix -or $isWindows)) { Fail "invalid strict bundle manifest: archive filename is invalid" }
+        # Named $isWindowsArchive, NOT $isWindows: PowerShell variable names are
+        # case-insensitive, and $IsWindows is PS7+'s automatic read-only OS
+        # variable -- assigning a local $isWindows collides with it and throws
+        # "Cannot overwrite variable IsWindows because it is read-only or
+        # constant." on PS7 (PS5.1 has no automatic $IsWindows, so it never hit
+        # this). Reproduced from a live CI failure isolated to the PS7 job.
+        $isWindowsArchive = $name -match '^lingtai-[^/]+-windows-amd64\.zip$'
+        if (-not ($isPosix -or $isWindowsArchive)) { Fail "invalid strict bundle manifest: archive filename is invalid" }
         if ($archive.sha256 -notmatch '^[0-9a-f]{64}$') { Fail "invalid strict bundle manifest: archive sha256 must be lowercase 64-hex" }
     }
 
