@@ -135,7 +135,7 @@ jobs:
             exit 1
           }
 
-      - name: Install TUI binaries from this exact tag's published release (SkipVenv)
+      - name: Install TUI and portal binaries from this exact tag's published release (SkipVenv)
         shell: pwsh
         env:
           LINGTAI_VERSION: ${{ github.ref_name }}
@@ -144,9 +144,21 @@ jobs:
           $binDir = Join-Path $env:RUNNER_TEMP 'lingtai-smoke-bin'
           $globalDir = Join-Path $env:RUNNER_TEMP 'lingtai-smoke-global'
           .\install.ps1 -Version $env:LINGTAI_VERSION -BinDir $binDir -GlobalDir $globalDir -SkipVenv -NoModifyPath
-          $reported = & (Join-Path $binDir 'lingtai-tui.exe') version
+          $tuiPath = Join-Path $binDir 'lingtai-tui.exe'
+          $portalPath = Join-Path $binDir 'lingtai-portal.exe'
+          if (-not (Test-Path -LiteralPath $portalPath -PathType Leaf)) {
+            Write-Error "post-release smoke: installed lingtai-portal.exe is missing at '$portalPath'"
+            exit 1
+          }
+          $reported = & $tuiPath version
           if ($reported.Trim() -ne "lingtai-tui $env:LINGTAI_VERSION") {
             Write-Error "post-release smoke: expected 'lingtai-tui $env:LINGTAI_VERSION', got '$reported'"
             exit 1
           }
           Write-Host "OK: $reported"
+          $portalReported = & $portalPath version
+          if ($portalReported.Trim() -ne "lingtai-portal $env:LINGTAI_VERSION") {
+            Write-Error "post-release smoke: expected 'lingtai-portal $env:LINGTAI_VERSION', got '$portalReported'"
+            exit 1
+          }
+          Write-Host "OK: $portalReported"

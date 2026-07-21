@@ -5,7 +5,9 @@ The tag workflow must create a GitHub source release, update the Homebrew
 source-build formula, and publish exactly one prebuilt asset: a Windows
 AMD64 TUI/portal archive plus its checksum sidecar and bundle manifest. Only
 the windows-release job may upload release assets; source-release must
-remain upload-free and Homebrew must remain source-tarball-based.
+remain upload-free and Homebrew must remain source-tarball-based. The Windows
+archive must fail closed unless both binaries are built and packaged, and
+exact-tag smoke must verify both installed binaries.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ except ModuleNotFoundError:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
+SMOKE_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "windows-installer-smoke.yml"
 FAILURES: list[str] = []
 
 
@@ -92,6 +95,32 @@ def main() -> int:
         check("$zip_name" in script and "$zip_name.sha256" in script and "lingtai-bundle-manifest.json" in script,
               "windows-release must upload the ZIP, its sha256 sidecar, and the bundle manifest")
 
+    portal_build = find_step(windows, "build lingtai-portal.exe")
+    check(portal_build is not None, "windows-release must have a portal build step")
+    if portal_build:
+        check("continue-on-error" not in portal_build,
+              "portal build must fail loud; continue-on-error is forbidden")
+        check("id" not in portal_build,
+              "portal build must not retain outcome plumbing after fail-loud gating")
+
+    package = find_step(windows, "package windows archive")
+    check(package is not None, "windows-release must have a Windows package step")
+    if package:
+        package_script = package.get("run", "")
+        check("test -f dist/lingtai-tui.exe" in package_script,
+              "Windows package must require lingtai-tui.exe")
+        check("test -f dist/lingtai-portal.exe" in package_script,
+              "Windows package must require lingtai-portal.exe")
+        check('zip -X "../$zip_name" lingtai-tui.exe lingtai-portal.exe' in package_script,
+              "Windows package must include both binaries unconditionally")
+        for forbidden in (
+            "continue-on-error", "PORTAL_BUILD_OUTCOME", "rm -f dist/lingtai-portal.exe",
+            "publishing the Windows archive with lingtai-tui.exe only",
+            "-f lingtai-portal.exe ]] &&",
+        ):
+            check(forbidden not in package_script,
+                  f"Windows package must not contain fallback logic {forbidden!r}")
+
     text = WORKFLOW_PATH.read_text()
     forbidden = (
         "publish-bundle", "publish_bundle_to_gitee.sh",
@@ -102,6 +131,20 @@ def main() -> int:
 
     check(text.count("gh release upload") == 1,
           "gh release upload must appear exactly once, in windows-release")
+
+    smoke = yaml.safe_load(SMOKE_WORKFLOW_PATH.read_text())
+    exact_smoke = smoke.get("jobs", {}).get("windows-release-asset-smoke", {})
+    exact_steps = "\n".join(step.get("run", "") for step in exact_smoke.get("steps", []))
+    check("-SkipVenv" in exact_steps,
+          "exact-tag smoke must install with -SkipVenv")
+    check("lingtai-portal.exe" in exact_steps and "Test-Path" in exact_steps,
+          "exact-tag smoke must require the installed portal executable")
+    check("$portalPath" in exact_steps and "& $portalPath version" in exact_steps,
+          "exact-tag smoke must execute the portal version surface")
+    check('"lingtai-portal $env:LINGTAI_VERSION"' in exact_steps,
+          "exact-tag smoke must assert the portal version")
+    check("& $tuiPath version" in exact_steps and '"lingtai-tui $env:LINGTAI_VERSION"' in exact_steps,
+          "exact-tag smoke must preserve the TUI version assertion")
 
     if FAILURES:
         print("FAILED release workflow checks:", file=sys.stderr)

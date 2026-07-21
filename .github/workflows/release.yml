@@ -249,9 +249,7 @@ jobs:
             -o "$GITHUB_WORKSPACE/dist/lingtai-tui.exe" .
 
       - name: Build lingtai-portal.exe (windows/amd64)
-        id: portal_build
         working-directory: portal
-        continue-on-error: true
         run: |
           set -euo pipefail
           npm --prefix web ci
@@ -261,18 +259,13 @@ jobs:
             -o "$GITHUB_WORKSPACE/dist/lingtai-portal.exe" .
 
       - name: Package Windows archive
-        env:
-          PORTAL_BUILD_OUTCOME: ${{ steps.portal_build.outcome }}
         run: |
           set -euo pipefail
-          if [[ "$PORTAL_BUILD_OUTCOME" != "success" ]]; then
-            echo "::warning::lingtai-portal.exe build did not succeed; publishing the Windows archive with lingtai-tui.exe only."
-            rm -f dist/lingtai-portal.exe
-          fi
           test -f dist/lingtai-tui.exe
+          test -f dist/lingtai-portal.exe
 
           zip_name="lingtai-${TAG}-windows-amd64.zip"
-          ( cd dist && zip -X "../$zip_name" lingtai-tui.exe $( [[ -f lingtai-portal.exe ]] && echo lingtai-portal.exe ) )
+          ( cd dist && zip -X "../$zip_name" lingtai-tui.exe lingtai-portal.exe )
           sha256sum "$zip_name" > "$zip_name.sha256"
           echo "zip_name=$zip_name" >> "$GITHUB_ENV"
 
