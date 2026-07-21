@@ -488,11 +488,17 @@ function Confirm-BundleManifest {
     # regex would accept the FIRST textual "generated_at" match anywhere,
     # including one nested inside another object earlier in the text;
     # anchoring the value match to \G at the exact offset right after the
-    # top-level key's own match (via [regex]::Match($RawJson, pattern, index)
-    # with a \G-leading pattern, which only matches starting AT that index,
-    # never later in the string) guarantees the captured token is the
-    # top-level key's own value, not any other occurrence, regardless of
-    # JSON field order.
+    # top-level key's own match (via the INSTANCE Regex.Match(input, startAt)
+    # overload on a compiled [regex] object, with a \G-leading pattern, which
+    # only matches starting AT that index, never later in the string)
+    # guarantees the captured token is the top-level key's own value, not any
+    # other occurrence, regardless of JSON field order. This must be the
+    # instance overload, not the static [regex]::Match($s, $pattern, $arg)
+    # overload -- that 3-arg STATIC overload's third parameter is
+    # RegexOptions, not a start offset, and silently rejects an integer index
+    # as an invalid RegexOptions value on both PS 5.1 and PS7 (reproduced
+    # from a live CI failure on both hosts).
+    $generatedAtValueRegex = [regex]'\G\s*"([^"\\]*)"'
     $keyOrBraceMatches = [regex]::Matches($RawJson, '[{}]|"([A-Za-z_]+)"\s*:')
     $seenStack = New-Object 'System.Collections.Generic.Stack[System.Collections.Generic.HashSet[string]]'
     $seenStack.Push((New-Object 'System.Collections.Generic.HashSet[string]'))
@@ -507,7 +513,7 @@ function Confirm-BundleManifest {
                 Fail "invalid strict bundle manifest: duplicate JSON key: $($m.Groups[1].Value)"
             }
             if ($seenStack.Count -eq 2 -and $m.Groups[1].Value -eq 'generated_at') {
-                $valueMatch = [regex]::Match($RawJson, '\G\s*"([^"\\]*)"', $m.Index + $m.Length)
+                $valueMatch = $generatedAtValueRegex.Match($RawJson, $m.Index + $m.Length)
                 $generatedAtToken = if ($valueMatch.Success) { $valueMatch.Groups[1].Value } else { $null }
             }
         }
