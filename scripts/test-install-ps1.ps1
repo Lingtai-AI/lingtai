@@ -99,6 +99,54 @@ function Skip-NotYet {
     Write-Host "  NOT-YET - $Label : $Reason"
 }
 
+# Prints a bounded tail of an Invoke-Installer result's captured stdout/stderr
+# so an unexpected-failure contract is decisive from a single CI log instead of
+# needing another opaque rerun. Call this ONLY after an assertion has already
+# failed -- it is a diagnostic aid, never a substitute for the assertion, and
+# it never changes pass/fail state.
+function Write-InstallerDiagnostics {
+    param([hashtable]$Result, [string]$Context, [int]$MaxLines = 40)
+    Write-Host "  ---- $Context : captured child process output (exit $($Result.ExitCode)) ----"
+    foreach ($streamName in @('Stdout', 'Stderr')) {
+        $text = $Result[$streamName]
+        Write-Host "  -- $streamName --"
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            Write-Host '  (empty)'
+            continue
+        }
+        $lines = $text -split "`r?`n"
+        $tail = $lines | Select-Object -Last $MaxLines
+        foreach ($line in $tail) { Write-Host "  | $line" }
+        if ($lines.Count -gt $MaxLines) {
+            Write-Host "  | ... ($($lines.Count - $MaxLines) earlier line(s) omitted)"
+        }
+    }
+    Write-Host "  ---- end $Context diagnostics ----"
+}
+
+# Prints a bounded tail of a log file (e.g. wheel-build.log) so a build-tool
+# failure is decisive from a single CI log instead of needing another opaque
+# rerun. Purely diagnostic -- never affects pass/fail/NOT-YET state.
+function Write-LogFileTail {
+    param([string]$Path, [string]$Context, [int]$MaxLines = 40)
+    Write-Host "  ---- $Context : tail of $Path ----"
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Host '  (file not found)'
+    } else {
+        $lines = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
+        if ($lines.Count -eq 0) {
+            Write-Host '  (empty)'
+        } else {
+            $tail = $lines | Select-Object -Last $MaxLines
+            foreach ($line in $tail) { Write-Host "  | $line" }
+            if ($lines.Count -gt $MaxLines) {
+                Write-Host "  | ... ($($lines.Count - $MaxLines) earlier line(s) omitted)"
+            }
+        }
+    }
+    Write-Host "  ---- end $Context diagnostics ----"
+}
+
 # ---------------------------------------------------------------------------
 # Environment isolation. Every install output, and every ambient location the
 # installer might read/write, is redirected under one test root. Original
@@ -375,30 +423,55 @@ function Start-FakeGitHubApi {
             } catch {
                 break
             }
-            $path = $context.Request.Url.AbsolutePath
-            $route = $routes[$path]
-            if ($route) {
-                $context.Response.StatusCode = $route.Status
-                # The real GitHub API always answers with Content-Type: application/json;
-                # install.ps1's Invoke-GitHubApi relies on Invoke-RestMethod's
-                # Content-Type-driven auto-parsing to turn the body into an object
-                # (HttpListener otherwise defaults to text/html, which Invoke-RestMethod
-                # returns as an unparsed string -- silently breaking every .tag_name /
-                # .assets access downstream). Set it whenever the route declares one.
-                if ($route.ContentType) { $context.Response.ContentType = $route.ContentType }
-                # Routes always carry raw bytes (BodyBytes) so binary assets
-                # (zips, wheels) round-trip exactly -- never re-encoded through
-                # a string, which would corrupt non-ASCII byte values.
-                $bytes = $route.BodyBytes
-                $context.Response.ContentLength64 = $bytes.Length
-                $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
-            } else {
-                $context.Response.StatusCode = 404
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes('not found')
-                $context.Response.ContentLength64 = $bytes.Length
-                $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+            # A public-mode contract can make several SEQUENTIAL requests against
+            # this one listener (release-JSON lookup(s) + asset downloads). Any
+            # unhandled exception while building/writing ONE response would
+            # otherwise fall out of this while loop and silently kill the runspace
+            # -- nobody observes $ps.EndInvoke() -- leaving every LATER request in
+            # the same contract (or any later contract) to hit connection-refused
+            # instead of a clean HTTP response. Never let one request's failure
+            # take down the listener for the rest of the suite; always try to
+            # answer with SOMETHING (a 500 if we can't build the intended
+            # response) and keep looping.
+            try {
+                $path = $context.Request.Url.AbsolutePath
+                $route = $routes[$path]
+                if ($route) {
+                    $context.Response.StatusCode = $route.Status
+                    # The real GitHub API always answers with Content-Type:
+                    # application/json; install.ps1's Invoke-GitHubApi relies on
+                    # Invoke-RestMethod's Content-Type-driven auto-parsing to turn
+                    # the body into an object (HttpListener otherwise defaults to
+                    # text/html, which Invoke-RestMethod returns as an unparsed
+                    # string -- silently breaking every .tag_name/.assets access
+                    # downstream). Set it whenever the route declares one.
+                    if ($route.ContentType) { $context.Response.ContentType = $route.ContentType }
+                    # Routes always carry raw bytes (BodyBytes) so binary assets
+                    # (zips, wheels) round-trip exactly -- never re-encoded through
+                    # a string, which would corrupt non-ASCII byte values.
+                    $bytes = $route.BodyBytes
+                    $context.Response.ContentLength64 = $bytes.Length
+                    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+                } else {
+                    $context.Response.StatusCode = 404
+                    $bytes = [System.Text.Encoding]::UTF8.GetBytes('not found')
+                    $context.Response.ContentLength64 = $bytes.Length
+                    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+                }
+            } catch {
+                try {
+                    $context.Response.StatusCode = 500
+                    $errBytes = [System.Text.Encoding]::UTF8.GetBytes("fake API handler error: $($_.Exception.Message)")
+                    $context.Response.ContentLength64 = $errBytes.Length
+                    $context.Response.OutputStream.Write($errBytes, 0, $errBytes.Length)
+                } catch {
+                    # The response is unusable (e.g. client already disconnected).
+                    # Nothing more can be done for THIS request; fall through to
+                    # closing it and keep the listener loop alive for the next one.
+                }
+            } finally {
+                try { $context.Response.OutputStream.Close() } catch {}
             }
-            $context.Response.OutputStream.Close()
         }
     }) | Out-Null
     $ps.AddArgument($listener) | Out-Null
@@ -418,6 +491,37 @@ function Stop-FakeGitHubApi {
         try { $script:FakeApiPs.Stop() } catch {}
         try { $script:FakeApiPs.Dispose() } catch {}
     }
+}
+
+# Diagnostic aid, never a pass/fail signal: reports whether the fake GitHub API's
+# background runspace is still alive and listening, and surfaces any error it
+# recorded. A public-mode contract makes several sequential requests against
+# this one listener; if the runspace's request-handling loop ever died silently
+# (see Start-FakeGitHubApi's per-request try/catch), every later request in the
+# SAME contract or a later one would hit connection-refused instead of a clean
+# HTTP response, which looks identical to "install.ps1 itself failed" from the
+# outside. Call this after any unexpected-failure public-mode contract so a
+# dead listener is decisive from a single CI log instead of another guess.
+function Write-FakeGitHubApiHealth {
+    param([string]$Context)
+    Write-Host "  ---- $Context : fake GitHub API health ----"
+    $listenerAlive = $false
+    try { $listenerAlive = [bool]($script:FakeApiListener -and $script:FakeApiListener.IsListening) } catch {}
+    Write-Host "  | listener.IsListening = $listenerAlive"
+    if ($script:FakeApiPs) {
+        Write-Host "  | runspace state = $($script:FakeApiPs.InvocationStateInfo.State)"
+        if ($script:FakeApiPs.HadErrors) {
+            Write-Host '  | runspace HadErrors = True; errors:'
+            foreach ($e in $script:FakeApiPs.Streams.Error) {
+                Write-Host "  | $e"
+            }
+        } else {
+            Write-Host '  | runspace HadErrors = False'
+        }
+    } else {
+        Write-Host '  | no runspace handle recorded'
+    }
+    Write-Host "  ---- end $Context fake GitHub API health ----"
 }
 
 function Register-FakeApiRoute {
@@ -956,6 +1060,10 @@ try {
         NoModifyPath = $true
     }
     Assert-Equal 0 $r11.ExitCode 'public-mode install exits 0'
+    if ($r11.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r11 -Context 'CONTRACT 11 (public-mode install)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 11 (public-mode install)'
+    }
     Assert-True (Test-Path -LiteralPath (Join-Path $binDir11 'lingtai-tui.exe')) 'public-mode install placed lingtai-tui.exe under BinDir'
     $meta11 = $null
     try { $meta11 = Get-Content -LiteralPath (Join-Path $globalDir11 'install.json') -Raw | ConvertFrom-Json } catch {}
@@ -1119,6 +1227,10 @@ try {
         NoModifyPath = $true
     }
     Assert-Equal 0 $r16.ExitCode 'no -Version (latest resolution) install exits 0'
+    if ($r16.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r16 -Context 'CONTRACT 16 (latest resolution)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 16 (latest resolution)'
+    }
     Assert-True (Test-Path -LiteralPath (Join-Path $binDir16 'lingtai-tui.exe')) 'latest-resolved install placed lingtai-tui.exe under BinDir'
     $meta16 = $null
     try { $meta16 = Get-Content -LiteralPath (Join-Path $globalDir16 'install.json') -Raw | ConvertFrom-Json } catch {}
@@ -1148,6 +1260,10 @@ try {
     }
     $after17 = @(Get-TreeSnapshot $binDir17) + @(Get-TreeSnapshot $globalDir17)
     Assert-Equal 0 $r17.ExitCode 'public-mode DryRun exits 0'
+    if ($r17.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r17 -Context 'CONTRACT 17 (public-mode DryRun)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 17 (public-mode DryRun)'
+    }
     Assert-Equal ($before17 -join "`n") ($after17 -join "`n") 'public-mode DryRun left the complete tree unchanged'
 
     # -----------------------------------------------------------------------
@@ -1221,11 +1337,26 @@ version = "0.18.0"
         New-Item -ItemType Directory -Force -Path $wheelOutDir | Out-Null
         $wheelBuildArgs = @('-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation', '-w', $wheelOutDir, $wheelSrc)
         $wheelBuildArgs = @($pyCmd.ExtraArgs) + $wheelBuildArgs
-        & $pyCmd.Source @wheelBuildArgs *> (Join-Path $TestRoot 'wheel-build.log')
+        $wheelBuildLog = Join-Path $TestRoot 'wheel-build.log'
+        # `pip wheel` can legitimately fail here (missing/older setuptools, no
+        # network for a transitive build dependency, etc.) and this contract must
+        # treat that as NOT-YET, not abort the suite. On Windows PowerShell 5.1,
+        # ANY text a native command writes to stderr is wrapped as an ErrorRecord
+        # and promoted to a terminating NativeCommandError under
+        # $ErrorActionPreference = 'Stop' -- merging streams via `*>` (or `2>&1`)
+        # still goes through that wrapping before the redirect target sees it, so
+        # it does NOT protect against the abort (unlike `2>$null`, which discards
+        # stderr before it can be wrapped). Redirect stdout and stderr to their
+        # OWN separate file targets instead of merging them, which avoids the
+        # ErrorRecord promotion entirely while still capturing full diagnostics.
+        & $pyCmd.Source @wheelBuildArgs 1> $wheelBuildLog 2> "$wheelBuildLog.stderr"
+        $wheelBuildExit = $LASTEXITCODE
+        Get-Content -LiteralPath "$wheelBuildLog.stderr" -ErrorAction SilentlyContinue | Add-Content -LiteralPath $wheelBuildLog
         $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
 
         if (-not $builtWheel) {
-            Skip-NotYet 'full runtime install (real Python + wheel)' 'could not build an offline test wheel (setuptools/pip wheel unavailable) -- see wheel-build.log'
+            Skip-NotYet 'full runtime install (real Python + wheel)' "could not build an offline test wheel (setuptools/pip wheel unavailable, pip exit $wheelBuildExit) -- see wheel-build.log"
+            Write-LogFileTail -Path $wheelBuildLog -Context 'CONTRACT 18 (wheel build)'
         } else {
             # Rename to the exact cpXY-cpXY-win_amd64 platform tag Select-KernelWheel expects.
             $renamedWheel = Join-Path $wheelOutDir "lingtai-0.18.0-$cpTag-$cpTag-win_amd64.whl"

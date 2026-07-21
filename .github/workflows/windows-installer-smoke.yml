@@ -46,6 +46,15 @@ jobs:
         with:
           python-version: '3.13'
 
+      # CPython 3.12+ dropped bundling setuptools/wheel with ensurepip (only
+      # pip itself is guaranteed), so a --no-build-isolation `pip wheel` build
+      # of CONTRACT 18's offline test fixture otherwise fails with
+      # "No module named 'setuptools'" on a fresh setup-python interpreter.
+      - name: Install build prerequisites for the offline wheel fixture
+        shell: powershell
+        run: |
+          python -m pip install --upgrade setuptools wheel
+
       - name: Report host edition
         shell: powershell
         run: |
@@ -72,6 +81,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+
+      # CPython 3.12+ dropped bundling setuptools/wheel with ensurepip (only
+      # pip itself is guaranteed), so a --no-build-isolation `pip wheel` build
+      # of CONTRACT 18's offline test fixture otherwise fails with
+      # "No module named 'setuptools'" on a fresh setup-python interpreter.
+      - name: Install build prerequisites for the offline wheel fixture
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade setuptools wheel
 
       - name: Report host edition
         shell: pwsh
