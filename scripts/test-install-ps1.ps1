@@ -1260,6 +1260,16 @@ try {
     # reads are allowed; no staging/bin/global directories are created).
     # -----------------------------------------------------------------------
     Write-Section 'contract: public mode DryRun performs no writes'
+    # CONTRACT 17 re-requests $pubTag (v11.0.0, registered back in CONTRACT 11),
+    # but the manifest asset lives at a SHARED, tag-independent path
+    # (/assets/lingtai-bundle-manifest.json) that CONTRACT 16 (immediately
+    # above) already overwrote with v11.1.0's manifest to exercise "latest"
+    # resolution. Re-register $pubTag's own manifest here before invoking the
+    # installer, or Get-BundleManifest fetches v11.1.0's content while
+    # Confirm-BundleManifest validates it against the resolved tag v11.0.0,
+    # failing "bundle_id/tui_tag does not equal resolved tag" -- a fixture
+    # sequencing bug, not an installer defect.
+    Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $pubBundleJson | Out-Null
     $home17 = New-IsolatedHome
     $binDir17 = Join-Path $home17 'bin dir'
     $globalDir17 = Join-Path $home17 '.lingtai-tui'

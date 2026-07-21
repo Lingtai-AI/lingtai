@@ -476,9 +476,27 @@ function Confirm-BundleManifest {
     # twice inside one provider block) is a real violation. A depth-tracking
     # scan (each "{" pushes a fresh key set, each "}" pops it) mirrors
     # install.sh's per-object object_pairs_hook check without a full parser.
+    #
+    # This same scan also captures generated_at's ORIGINAL source token, but
+    # ONLY the occurrence at the manifest's own top-level object depth. The
+    # stack is pre-loaded with one HashSet before scanning starts, so the
+    # top-level object's own opening brace pushes a second frame -- its keys
+    # are seen at $seenStack.Count -eq 2, not 1 (Count is 1 only before that
+    # opening brace is reached, and again after its matching closing brace
+    # pops back, never while its own keys are being scanned; traced against
+    # the actual push/pop sequence, not assumed). An unanchored whole-document
+    # regex would accept the FIRST textual "generated_at" match anywhere,
+    # including one nested inside another object earlier in the text;
+    # anchoring the value match to \G at the exact offset right after the
+    # top-level key's own match (via [regex]::Match($RawJson, pattern, index)
+    # with a \G-leading pattern, which only matches starting AT that index,
+    # never later in the string) guarantees the captured token is the
+    # top-level key's own value, not any other occurrence, regardless of
+    # JSON field order.
     $keyOrBraceMatches = [regex]::Matches($RawJson, '[{}]|"([A-Za-z_]+)"\s*:')
     $seenStack = New-Object 'System.Collections.Generic.Stack[System.Collections.Generic.HashSet[string]]'
     $seenStack.Push((New-Object 'System.Collections.Generic.HashSet[string]'))
+    $generatedAtToken = $null
     foreach ($m in $keyOrBraceMatches) {
         if ($m.Value -eq '{') {
             $seenStack.Push((New-Object 'System.Collections.Generic.HashSet[string]'))
@@ -487,6 +505,10 @@ function Confirm-BundleManifest {
         } elseif ($m.Groups[1].Success) {
             if (-not $seenStack.Peek().Add($m.Groups[1].Value)) {
                 Fail "invalid strict bundle manifest: duplicate JSON key: $($m.Groups[1].Value)"
+            }
+            if ($seenStack.Count -eq 2 -and $m.Groups[1].Value -eq 'generated_at') {
+                $valueMatch = [regex]::Match($RawJson, '\G\s*"([^"\\]*)"', $m.Index + $m.Length)
+                $generatedAtToken = if ($valueMatch.Success) { $valueMatch.Groups[1].Value } else { $null }
             }
         }
     }
@@ -515,7 +537,14 @@ function Confirm-BundleManifest {
     if ($data.tui_commit -notmatch '^[0-9a-f]{40}$') {
         Fail "invalid strict bundle manifest: tui_commit must be a 40-character lowercase commit SHA"
     }
-    if ($data.generated_at -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
+    # Validated against $generatedAtToken (the top-level source token
+    # captured above), never against $data.generated_at: PowerShell 7 Core's
+    # ConvertFrom-Json silently auto-converts ISO-8601-looking strings to
+    # [datetime], with no cross-edition opt-out (-DateKind is PS 7.5+ only),
+    # and DateTime.ToString()'s current-culture rendering then fails this
+    # strict check even for a well-formed source value -- reproduced from a
+    # live PS7 CI failure.
+    if (-not $generatedAtToken -or $generatedAtToken -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
         Fail "invalid strict bundle manifest: generated_at must be YYYY-MM-DDTHH:MM:SSZ"
     }
 
@@ -737,7 +766,13 @@ function Install-KernelWheel {
     # any index here -- only third-party dependency resolution goes through
     # the index, exactly like install.sh's install_kernel_from_bundle.
     Write-Info "Installing lingtai from the verified local wheel (dependencies resolve via the configured package index) ..."
-    & $VenvPython '-m' 'pip' 'install' $dest
+    # pip's stdout is voided (Out-Null), not just left to print: PowerShell
+    # has no per-statement return-value isolation, so an unsuppressed native
+    # command's stdout becomes part of this function's own output and, from
+    # there, leaks into any caller that bare-calls it -- this previously
+    # corrupted Install-Venv's return value ($kernelMeta) at its call site.
+    # $LASTEXITCODE is unaffected by Out-Null.
+    & $VenvPython '-m' 'pip' 'install' $dest | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "pip install of the local wheel failed (exit $LASTEXITCODE)." }
 }
 
@@ -836,11 +871,17 @@ function Install-Venv {
     $venvDir = Join-Path $GlobalDir 'runtime\venv'
     Write-Info "Provisioning Python runtime venv at $venvDir ..."
 
+    # Every native-command/void-intent call below is piped to Out-Null (see
+    # Install-KernelWheel for why: leaked stdout here previously corrupted
+    # this function's `return @{...}` into a mixed array, which failed with
+    # "The property 'KernelSource' cannot be found on this object" at the
+    # Invoke-Main call site -- confirmed from a live CI failure). Out-Null
+    # does not affect $LASTEXITCODE, still read after each native call.
     $bootstrap = Find-VenvPython
     if (-not (Test-Path -LiteralPath $venvDir)) {
         New-Item -ItemType Directory -Force -Path (Split-Path $venvDir -Parent) | Out-Null
         $venvArgs = @($bootstrap.Args) + @('-m', 'venv', $venvDir)
-        & $bootstrap.Launcher @venvArgs
+        & $bootstrap.Launcher @venvArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "Failed to create the venv at $venvDir (exit $LASTEXITCODE)." }
     }
     $venvPython = Join-Path $venvDir 'Scripts\python.exe'
@@ -853,12 +894,12 @@ function Install-Venv {
     $wheel = Select-KernelWheel -KernelManifest $kernelManifest -WheelTag $wheelTag
 
     $stage = New-StagingDir
-    Install-KernelWheel -VenvPython $venvPython -Wheel $wheel -KernelTag $Bundle.KernelTag -StageDir $stage
+    Install-KernelWheel -VenvPython $venvPython -Wheel $wheel -KernelTag $Bundle.KernelTag -StageDir $stage | Out-Null
     $installedVersion = Confirm-KernelImport -VenvPython $venvPython -ExpectedVersion $kernelManifest.kernel_version
 
     Write-KernelProvenance -VenvDir $venvDir -TuiTag $TuiTag -TuiCommit $Bundle.TuiCommit -BundleId $Bundle.BundleId `
         -KernelTag $Bundle.KernelTag -KernelVersion $installedVersion -WheelFilename $wheel.filename `
-        -WheelSha256 $wheel.sha256 -Provider 'github'
+        -WheelSha256 $wheel.sha256 -Provider 'github' | Out-Null
 
     return @{
         KernelSource   = 'bundle'
@@ -1073,6 +1114,26 @@ function Invoke-Main {
     $kernelMeta = $null
     if (-not $SkipVenv -and -not $DryRun) {
         $kernelMeta = Install-Venv -Bundle $bundle -TuiTag $resolvedTag -GlobalDir $GlobalDir
+        # Static shape check on Install-Venv's return contract. This function
+        # returns a plain hashtable with exactly these four keys; if that ever
+        # regresses (e.g. an unsuppressed statement inside Install-Venv or a
+        # function it calls leaks native-command/pipeline output, turning the
+        # return value into a mixed array instead of a bare hashtable), fail
+        # here with a precise diagnostic instead of letting a malformed
+        # $kernelMeta reach Write-InstallMetadata and fail three frames away
+        # with a confusing "property cannot be found" error.
+        $expectedKernelMetaKeys = @('KernelSource', 'KernelBundleId', 'KernelVersion', 'KernelProvider')
+        if ($kernelMeta -isnot [hashtable]) {
+            # $kernelMeta.GetType() throws on $null -- compute the type
+            # description first so this diagnostic never masks itself with a
+            # secondary "cannot call a method on a null-valued expression".
+            $actualKernelMetaType = if ($null -eq $kernelMeta) { 'null' } else { $kernelMeta.GetType().FullName }
+            Fail "Internal error: Install-Venv returned a $actualKernelMetaType, not a hashtable. Its return value was likely polluted by an unsuppressed statement's output."
+        }
+        $missingKernelMetaKeys = $expectedKernelMetaKeys | Where-Object { -not $kernelMeta.ContainsKey($_) }
+        if ($missingKernelMetaKeys) {
+            Fail "Internal error: Install-Venv's return value is missing expected key(s): $($missingKernelMetaKeys -join ', ')."
+        }
     } elseif (-not $SkipVenv -and $DryRun) {
         if ($bundle) {
             Write-Step "[dry-run] would provision the runtime venv from kernel $($bundle.KernelTag) at $GlobalDir\runtime\venv"
