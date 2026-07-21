@@ -640,7 +640,7 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	// Load OAuth / CLI auth status. Codex is local-file based (a read-only
 	// check of existing ~/.lingtai-tui/codex-auth*.json files — needed even
 	// in purposeDraft so the draft wizard's own Codex row reflects
-	// "already authed" state correctly). Claude Agent SDK auth uses a
+	// "already authed" state correctly). Claude Code auth uses a
 	// subprocess exec (`claude auth status --json`) to probe the existing
 	// Claude Code CLI login — that auth row is hidden in the UI already
 	// (unsupported for now), so purposeDraft skips this probe entirely as
@@ -2992,7 +2992,7 @@ func (m FirstRunModel) View() string {
 			// Claude Code OAuth/auth row is hidden for now — that auth path
 			// is unsupported in the current build, so we don't surface a
 			// setup affordance for it. Detection (claudeCodeAuthValid /
-			// refreshClaudeCodeAuth) still runs and feeds the claude-agent-sdk
+			// refreshClaudeCodeAuth) still runs and feeds the claude-code
 			// credential guard; only the user-visible row is suppressed.
 
 		}

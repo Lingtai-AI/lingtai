@@ -230,7 +230,7 @@ func List() ([]Preset, error) {
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
 		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7,
-		"codex-pool": 8, "claude-agent-sdk": 9, "custom": 10,
+		"codex-pool": 8, "claude": 9, "custom": 10,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -543,7 +543,7 @@ func BuiltinPresets() []Preset {
 		openrouterPreset(),
 		codexPreset(),
 		codexPoolPreset(),
-		claudeAgentSDKPreset(),
+		claudePreset(),
 		customPreset(),
 	}
 }
@@ -552,6 +552,7 @@ func BuiltinPresets() []Preset {
 // classify legacy files in presets/ during the directory split, and by
 // IsBuiltin (which exists for callers that only have a Name, not a
 // loaded Preset).
+// Legacy provider spellings remain recognized for flat-layout migration.
 var builtinNames = map[string]bool{
 	"minimax":          true,
 	"zhipu":            true,
@@ -565,6 +566,7 @@ var builtinNames = map[string]bool{
 	"codex_oauth":      true,
 	"codex-pool":       true,
 	"codex_pool":       true,
+	"claude":           true,
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
@@ -641,9 +643,9 @@ type ResolvedRef struct {
 	// only when that env var has a value in the passed existingKeys map.
 	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
 	// declares no api_key_env), this is true only when OAuth is configured
-	// (see AuthState.CodexOAuthConfigured). For a claude-agent-sdk preset
-	// (provider "claude-agent-sdk"/"claude_agent_sdk", which authenticates
-	// through the local Claude Code CLI login and declares no api_key_env),
+	// (see AuthState.CodexOAuthConfigured). For a Claude preset
+	// (provider "claude-code"/"claude_code", which authenticates through the
+	// local Claude Code CLI login and declares no api_key_env),
 	// this is true only when the CLI reports a logged-in session (see
 	// AuthState.ClaudeCodeAuthConfigured). A preset with an empty
 	// api_key_env that is not one of those OAuth/CLI providers has no
@@ -681,9 +683,9 @@ type AuthState struct {
 
 	// ClaudeCodeAuthConfigured is true when the local Claude Code CLI
 	// (`claude`) is installed and reports a logged-in session. The
-	// claude-agent-sdk provider authenticates through that existing CLI
-	// login (no per-request API key, no separate token stored by the TUI),
-	// so a claude-agent-sdk preset is credential-valid only when this is
+	// claude-code provider authenticates through that existing CLI login
+	// (no per-request API key, no separate token stored by the TUI), so a
+	// Claude preset is credential-valid only when this is
 	// true. Computed by the caller (see tui.claudeCodeAuthConfigured) and
 	// passed in to avoid the preset→tui import cycle.
 	ClaudeCodeAuthConfigured bool
@@ -818,10 +820,10 @@ func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) R
 			// itself is the kernel's job at runtime; the credential guard only
 			// needs "is at least one Codex account logged in".
 			r.HasKey = auth.CodexOAuthConfigured
-		case provider == "claude-agent-sdk" || provider == "claude_agent_sdk":
-			// Claude Agent SDK declares no api_key_env by design — it
-			// authenticates through the local Claude Code CLI login. Valid
-			// only when that CLI reports a logged-in session.
+		case provider == "claude-code" || provider == "claude_code" ||
+			provider == "claude-agent-sdk" || provider == "claude_agent_sdk":
+			// Claude Code owns OAuth and declares no api_key_env. Keep the
+			// old Agent SDK spellings only for user-saved preset compatibility.
 			r.HasKey = auth.ClaudeCodeAuthConfigured
 		default:
 			// No api_key_env and not codex: no configured credential and no
@@ -1207,28 +1209,27 @@ func codexPoolPreset() Preset {
 	}
 }
 
-func claudeAgentSDKPreset() Preset {
+func claudePreset() Preset {
 	return Preset{
-		Name:        "claude-agent-sdk",
+		Name:        "claude",
 		Description: PresetDescription{Summary: "Claude Code / Claude Max — uses your local Claude CLI login (no API key)"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Clean-room completion provider backed by the Claude Agent
-				// SDK (kernel provider "claude-agent-sdk"). It authenticates
-				// through the local Claude Code CLI login — no per-request API
-				// key, and the TUI stores no Anthropic token of its own. So
+				// The kernel's canonical Claude Code provider invokes the local
+				// `claude` CLI, whose print-mode backend is shown as "claude-p"
+				// in the TUI. It reuses the CLI's OAuth login — no per-request
+				// API key, and the TUI stores no Anthropic token of its own. So
 				// api_key is nil and api_key_env is empty; credential validity
 				// is judged by detecting an existing `claude` CLI login (see
 				// AuthState.ClaudeCodeAuthConfigured). Default model is the CLI
-				// alias "opus" (Jason's requested Opus 4.8 default), never
-				// a dated API model id, so Claude Code maps it to the current
-				// its own endpoint.
-				"provider": "claude-agent-sdk", "model": "opus",
+				// alias "opus"; the editor also offers "fable", whose full ID
+				// is `claude-fable-5` in current Claude Code.
+				"provider": "claude-code", "model": "opus",
 				"api_key": nil, "api_key_env": "",
 			},
-			// Conservative capabilities: the Claude Agent SDK is wired here as
-			// a completion provider only. We do NOT route web_search or vision
-			// through it — the SDK's own native tool surface is out of scope,
+			// Conservative capabilities: Claude Code is wired here as a completion
+			// provider only. We do NOT route web_search or vision through it —
+			// the CLI's own native tool surface is out of scope,
 			// and there's no inherit path validated for this provider yet.
 			// Keep the standard LingTai skills default so agents behave like
 			// any other preset.

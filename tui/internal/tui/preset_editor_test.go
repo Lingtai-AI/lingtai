@@ -106,6 +106,10 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if got := providerModels["mimo"]; !reflect.DeepEqual(got, wantMiMoModels) {
 		t.Fatalf("mimo provider models = %#v, want %#v", got, wantMiMoModels)
 	}
+	wantClaudeModels := []string{"opus", "fable", "sonnet", "haiku"}
+	if got := providerModels["claude-code"]; !reflect.DeepEqual(got, wantClaudeModels) {
+		t.Fatalf("claude-code provider models = %#v, want %#v", got, wantClaudeModels)
+	}
 	if !modelHasVision["mimo-v2.5"] || modelHasVision["mimo-v2.5-pro"] {
 		t.Fatal("MiMo picker must keep native vision only for mimo-v2.5")
 	}

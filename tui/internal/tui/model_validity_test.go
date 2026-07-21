@@ -480,3 +480,14 @@ func TestPresetKeyNext_InvalidModelBlocksAdvance(t *testing.T) {
 		t.Fatalf("expected a visible error message explaining the block")
 	}
 }
+
+func TestCheckModelValidityCmdClaudeCodeUsesOAuth(t *testing.T) {
+	msg := checkModelValidityCmd(17, "claude-code", "fable", "", "", "")()
+	got, ok := msg.(modelValidityResultMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want modelValidityResultMsg", msg)
+	}
+	if got.Generation != 17 || got.Status != validityValid {
+		t.Fatalf("result = %#v, want generation 17 and validityValid", got)
+	}
+}

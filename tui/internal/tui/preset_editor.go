@@ -156,11 +156,14 @@ var providerModels = map[string][]string{
 	// changes which token file each request routes through (the pool), not the
 	// model catalog. Keep the two lists identical.
 	"codex-pool": {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
-	// Claude Agent SDK uses Claude Code CLI aliases, not dated API IDs.
-	// Keep opus first to match Jason's requested Opus 4.8 default;
-	// sonnet/haiku remain selectable for cheaper or faster runs.
-	"claude-agent-sdk": {"opus", "sonnet", "haiku"},
-	"claude_agent_sdk": {"opus", "sonnet", "haiku"},
+	// Claude Code uses CLI aliases, not dated API IDs. Current Claude Code
+	// resolves fable to claude-fable-5. Keep the old provider spellings only
+	// so user-saved presets remain editable after the built-in moves to
+	// canonical provider "claude-code".
+	"claude-code":      {"opus", "fable", "sonnet", "haiku"},
+	"claude_code":      {"opus", "fable", "sonnet", "haiku"},
+	"claude-agent-sdk": {"opus", "fable", "sonnet", "haiku"},
+	"claude_agent_sdk": {"opus", "fable", "sonnet", "haiku"},
 }
 
 var codexServiceTierOptions = []string{"normal", "fast"}

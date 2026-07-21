@@ -96,6 +96,16 @@ const (
 	presetLibFocusEditor
 )
 
+type claudeCodeAccountMsg struct {
+	account string
+}
+
+func loadClaudeCodeAccountCmd() tea.Cmd {
+	return func() tea.Msg {
+		return claudeCodeAccountMsg{account: claudeCodeAccount()}
+	}
+}
+
 // PresetLibraryModel is the dedicated screen for browsing and tagging the
 // preset library at ~/.lingtai-tui/presets/.
 type PresetLibraryModel struct {
@@ -108,7 +118,8 @@ type PresetLibraryModel struct {
 	// active). Empty when in global-library mode. Used to render the
 	// "●" marker that distinguishes the current preset from the rest of
 	// the agent's allow-list. Compared against preset.RefFor(p).
-	activeRef string
+	activeRef     string
+	claudeAccount string
 
 	focus       presetLibraryFocus
 	tierIdx     int               // selection within the tag picker (0..len(tierValues), last = "untag")
@@ -179,9 +190,14 @@ func NewPresetLibraryModelForAgent(lang, globalDir string, allowed []string, act
 	}
 }
 
-func (m PresetLibraryModel) Init() tea.Cmd { return nil }
+func (m PresetLibraryModel) Init() tea.Cmd { return loadClaudeCodeAccountCmd() }
 
 func (m PresetLibraryModel) Update(msg tea.Msg) (PresetLibraryModel, tea.Cmd) {
+	if accountMsg, ok := msg.(claudeCodeAccountMsg); ok {
+		m.claudeAccount = accountMsg.account
+		return m, nil
+	}
+
 	// Editor focus consumes ALL non-resize messages until it commits or
 	// cancels. The two messages it emits are intercepted below.
 	if m.focus == presetLibFocusEditor {
@@ -506,6 +522,15 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 	return box.Render(strings.Join(rows, "\n"))
 }
 
+func isClaudeCodeProvider(provider string) bool {
+	switch provider {
+	case "claude-code", "claude_code", "claude-agent-sdk", "claude_agent_sdk":
+		return true
+	default:
+		return false
+	}
+}
+
 func (m PresetLibraryModel) renderPreview(width, height int) string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -540,8 +565,16 @@ func (m PresetLibraryModel) renderPreview(width, height int) string {
 	llm, _ := p.Manifest["llm"].(map[string]interface{})
 	if llm != nil {
 		b.WriteString(sectionHead("LLM"))
-		b.WriteString(kv("provider", asString(llm["provider"])))
+		provider := asString(llm["provider"])
+		displayProvider := provider
+		if isClaudeCodeProvider(provider) {
+			displayProvider = "claude-p"
+		}
+		b.WriteString(kv("provider", displayProvider))
 		b.WriteString(kv("model", asString(llm["model"])))
+		if isClaudeCodeProvider(provider) {
+			b.WriteString(kv("account", m.claudeAccount))
+		}
 		if v := asString(llm["base_url"]); v != "" {
 			b.WriteString(kv("base_url", v))
 		}

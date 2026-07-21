@@ -22,11 +22,11 @@ instead of re-explaining the shape every time.
   `codex-pool`, ...). Selects which adapter class handles the request; not
   itself a credential.
 - **`model`** — the exact model string sent to the provider. Some
-  providers (`gemini`, `claude-agent-sdk`) use a native alias or model id
+  providers (`gemini`, `claude-code`) use a native alias or model id
   with no override surface; others (`custom`) leave it empty until
   configured.
 - **`base_url`** — the endpoint the adapter calls. Native adapters
-  (`gemini`, `claude-agent-sdk`) omit it entirely; OpenAI-compatible and
+  (`gemini`, `claude-code`) omit it entirely; OpenAI-compatible and
   gateway providers set it explicitly or leave it `nil` for
   provider-resolved defaults (`openrouter`).
 - **`api_compat`** — when present (`"openai"`), tells the kernel to route
@@ -47,12 +47,12 @@ These declaration fields answer "what will be called and how" — they are
 
 - **Credentials** — `api_key_env` (env-var name, not a value),
   `codex_auth_path` (which bound OAuth token file, not its contents), or
-  local CLI login state (`claude-agent-sdk`). See `ResolveRefsWithAuth`
+  local CLI login state (`claude-code`). See `ResolveRefsWithAuth`
   (`tui/internal/preset/preset.go:752-836`) for how credential *validity*
   (not the declaration) is judged per-provider — keyed providers check
   `existingKeys[envName]`, `codex`/`codex-pool` check OAuth state
   (per-account when `AuthState.CodexAuthDir` is set, else the global
-  `CodexOAuthConfigured` bool), `claude-agent-sdk` checks
+  `CodexOAuthConfigured` bool), `claude-code` checks
   `ClaudeCodeAuthConfigured`.
 - **Live probes** — an actual HTTP call proving the declared endpoint,
   model, and credential currently work together. See

@@ -25,7 +25,7 @@ related_files:
   - tui/internal/preset/skills/lingtai-preset-skill/reference/openrouter/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/codex-pool/SKILL.md
-  - tui/internal/preset/skills/lingtai-preset-skill/reference/claude-agent-sdk/SKILL.md
+  - tui/internal/preset/skills/lingtai-preset-skill/reference/claude/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/custom/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/saved-presets/SKILL.md
   - tui/internal/preset/skills/lingtai-preset-skill/reference/operations/endpoint-capabilities/SKILL.md
@@ -80,8 +80,8 @@ lifecycle mechanics and never encode provider-specific facts.
   location: reference/codex/SKILL.md
 - name: preset-skill-codex-pool
   location: reference/codex-pool/SKILL.md
-- name: preset-skill-claude-agent-sdk
-  location: reference/claude-agent-sdk/SKILL.md
+- name: preset-skill-claude
+  location: reference/claude/SKILL.md
 - name: preset-skill-custom
   location: reference/custom/SKILL.md
 ```
@@ -98,7 +98,7 @@ lifecycle mechanics and never encode provider-specific facts.
 | `openrouter` | `reference/openrouter/SKILL.md` | OpenRouter gateway |
 | `codex` | `reference/codex/SKILL.md` | ChatGPT OAuth Codex route |
 | `codex-pool` | `reference/codex-pool/SKILL.md` | pooled ChatGPT OAuth Codex route |
-| `claude-agent-sdk` | `reference/claude-agent-sdk/SKILL.md` | local Claude Code login |
+| `claude` | `reference/claude/SKILL.md` | local Claude Code login |
 | `custom` | `reference/custom/SKILL.md` | user-supplied compatible endpoint |
 
 ## Operation catalog (5 nested children)
