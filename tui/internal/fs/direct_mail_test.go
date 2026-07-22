@@ -5,22 +5,14 @@ import (
 	"testing"
 )
 
-type directTargetTestInput struct {
-	ProjectDirectory string
-	Directory        string
-	AgentID          string
-	Address          string
-}
+type directTargetTestInput = DirectTarget
 
-// These adapters keep the RED contract executable against the prior public API.
-// The implementation change will replace the address-only calls with the new
-// project-Agent DirectTarget boundary without changing the table expectations.
 func isDirectMailForTest(msg MailMessage, humanAddress string, target directTargetTestInput) bool {
-	return IsDirectMail(msg, humanAddress, target.Address)
+	return IsDirectMail(msg, humanAddress, target)
 }
 
 func directThreadKeyForTest(target directTargetTestInput) string {
-	return AddressFingerprint(target.Address)
+	return DirectThreadKey(target)
 }
 
 func TestNormalizeMailEndpoints(t *testing.T) {

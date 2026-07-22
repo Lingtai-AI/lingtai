@@ -17,6 +17,7 @@ import (
 
 // agentManifest is the raw JSON shape of .agent.json.
 type agentManifest struct {
+	AgentID   string           `json:"agent_id"`
 	AgentName string           `json:"agent_name"`
 	Nickname  string           `json:"nickname"`
 	Address   string           `json:"address"`
@@ -47,6 +48,7 @@ func ReadAgent(dir string) (AgentNode, error) {
 	caps := ParseCapabilities(m.Capabilities)
 
 	return AgentNode{
+		AgentID:      m.AgentID,
 		Address:      m.Address,
 		AgentName:    m.AgentName,
 		Nickname:     m.Nickname,
