@@ -38,12 +38,15 @@ func TestIsDirectMail(t *testing.T) {
 		want   bool
 	}{
 		{name: "human to scalar target", msg: MailMessage{From: human, To: main}, target: main, want: true},
-		{name: "human multi-to belongs to main", msg: MailMessage{From: human, To: []interface{}{main, agentB}}, target: main, want: true},
-		{name: "human multi-to belongs to b", msg: MailMessage{From: human, To: []string{main, agentB}}, target: agentB, want: true},
-		{name: "b multi-to belongs to b", msg: MailMessage{From: agentB, To: []interface{}{human, main}}, target: agentB, want: true},
-		{name: "b multi-to does not belong to main", msg: MailMessage{From: agentB, To: []interface{}{human, main}}, target: main, want: false},
-		{name: "cc does not create main membership", msg: MailMessage{From: agentB, To: human, CC: []string{main}}, target: main, want: false},
-		{name: "cc leaves b membership direct", msg: MailMessage{From: agentB, To: human, CC: []string{main}}, target: agentB, want: true},
+		{name: "human to singleton list target", msg: MailMessage{From: human, To: []interface{}{main}}, target: main, want: true},
+		{name: "target to scalar human", msg: MailMessage{From: agentB, To: human}, target: agentB, want: true},
+		{name: "human multi-to is not direct for main", msg: MailMessage{From: human, To: []interface{}{main, agentB}}, target: main, want: false},
+		{name: "human multi-to is not direct for b", msg: MailMessage{From: human, To: []string{main, agentB}}, target: agentB, want: false},
+		{name: "target multi-to is not direct", msg: MailMessage{From: agentB, To: []interface{}{human, main}}, target: agentB, want: false},
+		{name: "third party sender is not direct", msg: MailMessage{From: agentB, To: main}, target: main, want: false},
+		{name: "cc cannot create target membership", msg: MailMessage{From: agentB, To: human, CC: []string{main}}, target: main, want: false},
+		{name: "cc prevents otherwise exact incoming mail", msg: MailMessage{From: agentB, To: human, CC: []string{main}}, target: agentB, want: false},
+		{name: "cc prevents otherwise exact outgoing mail", msg: MailMessage{From: human, To: main, CC: []string{agentB}}, target: main, want: false},
 		{name: "human cc only is not direct", msg: MailMessage{From: human, To: agentB, CC: []string{main}}, target: main, want: false},
 		{name: "surrounding whitespace is not identity", msg: MailMessage{From: " " + human + " ", To: []string{" " + main + " "}}, target: " " + main + " ", want: true},
 	}
