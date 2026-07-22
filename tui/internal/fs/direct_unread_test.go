@@ -181,6 +181,22 @@ func TestDirectUnreadPersistsExactAgentIDAndRebaselinesMismatchedIntegrity(t *te
 	}
 }
 
+func TestDirectUnreadOpenDoesNotRebaselineExistingStableThread(t *testing.T) {
+	project := t.TempDir()
+	target := directUnreadTarget(project, "agent-a", "agent-id-a", "project/agent-a")
+	baseline := directUnreadIncoming(target, "baseline", "baseline", "2026-07-22T14:44:00Z")
+	_ = mustOpenDirectUnreadStore(t, project, []DirectTarget{target}, []MailMessage{baseline})
+
+	unresolved := directUnreadIncoming(target, "invalid-time", "invalid-time", "not-rfc3339")
+	reopened, err := OpenDirectUnreadStore(project, directUnreadHuman, []DirectTarget{target}, []MailMessage{baseline, unresolved})
+	if err != nil {
+		t.Fatalf("reopen existing stable thread re-evaluated current accepted mail: %v", err)
+	}
+	if _, err := reopened.UnreadCount(target, []MailMessage{baseline, unresolved}); err == nil {
+		t.Fatal("UnreadCount accepted unresolved current mail after a successful no-rebaseline reopen")
+	}
+}
+
 func TestDirectUnreadBaselinesMissingMalformedAndUnsupportedStateButReturnsReadFailures(t *testing.T) {
 	stateCases := []struct {
 		name     string
