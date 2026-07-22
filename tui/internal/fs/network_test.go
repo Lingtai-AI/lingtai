@@ -19,7 +19,7 @@ func setupTestNetwork(t *testing.T) string {
 	os.MkdirAll(filepath.Join(aliceDir, "delegates"), 0o755)
 
 	writeJSON(t, filepath.Join(aliceDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "alice", "address": "alice", "state": "ACTIVE",
+		"agent_id": "id-alice", "agent_name": "alice", "address": "alice", "state": "ACTIVE",
 		"admin": map[string]interface{}{"karma": true},
 	})
 	// Fresh heartbeat so IsAlive returns true and State is not overridden
@@ -37,7 +37,7 @@ func setupTestNetwork(t *testing.T) string {
 	bobDir := filepath.Join(base, "bob")
 	os.MkdirAll(filepath.Join(bobDir, "mailbox", "inbox"), 0o755)
 	writeJSON(t, filepath.Join(bobDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "bob", "address": "bob", "state": "IDLE",
+		"agent_id": "id-bob", "agent_name": "bob", "address": "bob", "state": "IDLE",
 		"admin": map[string]interface{}{"karma": false},
 	})
 	// Fresh heartbeat so IsAlive returns true and State is not overridden
@@ -46,7 +46,7 @@ func setupTestNetwork(t *testing.T) string {
 	humanDir := filepath.Join(base, "human")
 	os.MkdirAll(filepath.Join(humanDir, "mailbox", "inbox"), 0o755)
 	writeJSON(t, filepath.Join(humanDir, ".agent.json"), map[string]interface{}{
-		"agent_name": "human", "address": "human", "admin": nil,
+		"agent_id": "id-human", "agent_name": "human", "address": "human", "admin": nil,
 	})
 
 	return base
@@ -90,6 +90,33 @@ func TestBuildNetwork(t *testing.T) {
 	}
 	if net.Activity.Status != NetworkStatusActive {
 		t.Errorf("activity status = %q, want %q", net.Activity.Status, NetworkStatusActive)
+	}
+}
+
+func TestBuildNetworkCarriesManifestAgentIDs(t *testing.T) {
+	base := setupTestNetwork(t)
+
+	net, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build network: %v", err)
+	}
+	want := map[string]string{"alice": "id-alice", "bob": "id-bob", "human": "id-human"}
+	for _, node := range net.Nodes {
+		encoded, err := json.Marshal(node)
+		if err != nil {
+			t.Fatalf("marshal node %s: %v", node.AgentName, err)
+		}
+		var fields map[string]interface{}
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatalf("unmarshal node %s: %v", node.AgentName, err)
+		}
+		if got := fields["agent_id"]; got != want[node.AgentName] {
+			t.Errorf("node %s agent_id = %#v, want %q", node.AgentName, got, want[node.AgentName])
+		}
+		delete(want, node.AgentName)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing expected nodes: %#v", want)
 	}
 }
 

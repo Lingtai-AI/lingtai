@@ -17,6 +17,7 @@ func TestReadAgent_ValidManifest(t *testing.T) {
 	os.MkdirAll(agentDir, 0o755)
 
 	manifest := map[string]interface{}{
+		"agent_id":     "id-alice",
 		"agent_name":   "alice",
 		"address":      "alice",
 		"state":        "ACTIVE",
@@ -32,6 +33,17 @@ func TestReadAgent_ValidManifest(t *testing.T) {
 	}
 	if node.AgentName != "alice" {
 		t.Errorf("agent_name = %q, want %q", node.AgentName, "alice")
+	}
+	exported, err := json.Marshal(node)
+	if err != nil {
+		t.Fatalf("marshal AgentNode: %v", err)
+	}
+	var exportedFields map[string]interface{}
+	if err := json.Unmarshal(exported, &exportedFields); err != nil {
+		t.Fatalf("unmarshal AgentNode JSON: %v", err)
+	}
+	if got := exportedFields["agent_id"]; got != "id-alice" {
+		t.Errorf("agent_id = %#v, want id-alice", got)
 	}
 	if node.State != "ACTIVE" {
 		t.Errorf("state = %q, want %q", node.State, "ACTIVE")
