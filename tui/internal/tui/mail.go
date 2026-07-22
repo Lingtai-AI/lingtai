@@ -630,9 +630,9 @@ func (m *MailModel) buildMessages() {
 				e.ApiCallID = currentApiCallID
 			}
 		}
-		// Session mail is a derived copy of MailCache. The live mailbox below is
-		// the sole display source for mail; skipping this copy prevents duplicate
-		// rendering while leaving every non-mail event path unchanged.
+		// Session mail is a derived copy of MailCache. The accepted mailbox
+		// snapshot below is the sole display source for mail; skipping this copy prevents
+		// duplicate rendering while leaving every non-mail event path unchanged.
 		if e.Type == "mail" {
 			continue
 		}
@@ -1728,8 +1728,8 @@ func (m MailModel) renderMessages(msgs []ChatMessage) string {
 				nameStyle = avatarStyle
 			}
 			name := nameStyle.Render(msg.From)
-			// Mail is projected from the same live mailbox source in every layer, so
-			// keep its row renderer identical when Ctrl+O adds event history around it.
+			// Mail is projected from the same accepted mailbox snapshot in every layer,
+			// so keep its row renderer identical when Ctrl+O adds event history around it.
 			ts := ""
 			if msg.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, msg.Timestamp); err == nil {
