@@ -95,7 +95,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `MailCache` | `tui/internal/fs/mail.go:104` | incremental refresh cache: outbox + inbox + sent merged |
 | `NewMailCache(humanDir)` | `tui/internal/fs/mail.go:114` | creates cache; `Refresh()` returns updated copy (receiver not mutated) |
 | `MailCache.Clone()` | `tui/internal/fs/mail.go:127` | deep-clones seen sets, message slices, recipients, attachments, and identity while preserving nil versus non-nil-empty shapes for accepted-snapshot publication |
-| `WriteMail` | `tui/internal/fs/mail.go:254-316` | writes local mail to recipient inbox + sender sent (or human outbox for pseudo-agent); returns `ErrRemoteMailUnsupported` before mailbox allocation for remote addresses |
+| `WriteMail` | `tui/internal/fs/mail.go:328-391` | writes local mail to recipient inbox + sender sent (or human outbox for pseudo-agent); returns `ErrRemoteMailUnsupported` before mailbox allocation for remote addresses |
 | **direct_mail.go** | | |
 | `DirectTarget` / `DirectThreadKey` / `AddressFingerprint` | `tui/internal/fs/direct_mail.go:9-38` | target carries canonical project + target directories, durable manifest AgentID, and current route; thread identity hashes `(project, agent_id)`, while the address fingerprint is route-only |
 | `NormalizeMailEndpoints` / `IsDirectMail` | `tui/internal/fs/direct_mail.go:40-149` | keeps lenient deduplication for topology, but direct membership requires one valid raw recipient, empty CC, distinct endpoints, exact current addresses, and matching supplied inbound `identity.agent_id` |
