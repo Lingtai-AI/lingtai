@@ -353,10 +353,38 @@ func (m MailModel) activeViewportView() string {
 	return m.directChat.viewport.View()
 }
 
+// revealOlderDirectPage synchronously expands only the current direct
+// projection by one accepted-snapshot page. It owns no cache, job, or I/O path;
+// Main history and every other target remain untouched. The caller's top anchor
+// is restored after the single direct publish.
+func (m MailModel) revealOlderDirectPage(target fs.DirectTarget) (MailModel, bool) {
+	if !m.directChat.viewport.AtTop() || !m.directChat.hasOlder || m.pageSize <= 0 {
+		return m, false
+	}
+	horizon := m.directChat.revealHorizon
+	if horizon <= 0 {
+		horizon = m.pageSize
+	}
+	nextHorizon := horizon + m.pageSize
+	if nextHorizon <= horizon {
+		return m, false
+	}
+	accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
+	projection, hasOlder := projectDirectMessages(m.humanAddr, target, accepted, nextHorizon)
+	m.directChat.projection = projection
+	m.directChat.revealHorizon = nextHorizon
+	m.directChat.hasOlder = hasOlder
+	m.publishDirectViewport(false)
+	m.directChat.viewport.GotoTop()
+	return m, true
+}
+
 // updateDirectScroll navigates the stored current direct viewport directly.
-// It never renders or publishes content and never mutates Main's viewport.
+// Ordinary scrolling never renders or publishes content and never mutates
+// Main's viewport. Ctrl+U at the top may explicitly reveal one accepted page.
 func (m MailModel) updateDirectScroll(msg tea.Msg) (MailModel, tea.Cmd) {
-	if _, ok := m.currentDirectTarget(); !ok || !m.ready {
+	target, ok := m.currentDirectTarget()
+	if !ok || !m.ready {
 		return m, nil
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
@@ -367,6 +395,10 @@ func (m MailModel) updateDirectScroll(msg tea.Msg) (MailModel, tea.Cmd) {
 		case "end", "ctrl+end":
 			m.directChat.viewport.GotoBottom()
 			return m, nil
+		case "ctrl+u":
+			if revealed, ok := m.revealOlderDirectPage(target); ok {
+				return revealed, nil
+			}
 		}
 	}
 	var cmd tea.Cmd
