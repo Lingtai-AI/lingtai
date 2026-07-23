@@ -5,7 +5,17 @@ import (
 	"strings"
 )
 
+type NetworkOptions struct {
+	// SkipMailEdges avoids scanning every historical mailbox message.
+	// The default BuildNetwork path keeps mail edges for callers that need them.
+	SkipMailEdges bool
+}
+
 func BuildNetwork(baseDir string) (Network, error) {
+	return BuildNetworkWithOptions(baseDir, NetworkOptions{})
+}
+
+func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, error) {
 	nodes, err := DiscoverAgents(baseDir)
 	if err != nil {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
@@ -40,8 +50,13 @@ func BuildNetwork(baseDir string) (Network, error) {
 		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
 	}
 
-	// Count from inbox only — sent would double-count
-	mailEdges := buildMailEdges(nodes, baseDir)
+	// Count from inbox only — sent would double-count.
+	// /kanban and other first-screen callers can opt out because this
+	// requires reading every historical message.json for every node.
+	var mailEdges []MailEdge
+	if !opts.SkipMailEdges {
+		mailEdges = buildMailEdges(nodes, baseDir)
+	}
 	stats := computeStats(nodes, mailEdges)
 	activity := computeNetworkActivity(nodes)
 

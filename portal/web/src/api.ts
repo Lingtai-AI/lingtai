@@ -1,7 +1,7 @@
 import type { Network, AgentNode, AvatarEdge, ContactEdge, MailEdge, NetworkStats } from './types';
 
-export async function fetchNetwork(): Promise<Network> {
-  const res = await fetch('/api/network');
+export async function fetchNetwork(signal?: AbortSignal): Promise<Network> {
+  const res = await fetch('/api/network', { signal });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

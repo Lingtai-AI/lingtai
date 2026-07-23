@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,26 +16,119 @@ import (
 
 var TopologyMu sync.Mutex
 
+type networkSnapshotBuilder func(string) (fs.Network, error)
+
+type networkSnapshotCache struct {
+	mu         sync.Mutex
+	build      networkSnapshotBuilder
+	inFlight   chan struct{}
+	network    fs.Network
+	err        error
+	hasNetwork bool
+}
+
+func newNetworkSnapshotCache(build networkSnapshotBuilder) *networkSnapshotCache {
+	if build == nil {
+		build = func(baseDir string) (fs.Network, error) {
+			return fs.BuildNetworkWithOptions(baseDir, fs.NetworkOptions{SkipMailEdges: true})
+		}
+	}
+	return &networkSnapshotCache{build: build}
+}
+
+func (c *networkSnapshotCache) get(baseDir string) (fs.Network, bool, error) {
+	for {
+		c.mu.Lock()
+		if c.inFlight != nil {
+			if c.hasNetwork {
+				network := c.network
+				c.mu.Unlock()
+				return network, true, nil
+			}
+			ch := c.inFlight
+			c.mu.Unlock()
+			<-ch
+			c.mu.Lock()
+			network, err, ok := c.network, c.err, c.hasNetwork
+			c.mu.Unlock()
+			if ok || err != nil {
+				return network, true, err
+			}
+			continue
+		}
+
+		ch := make(chan struct{})
+		c.inFlight = ch
+		build := c.build
+		c.mu.Unlock()
+
+		network, err := build(baseDir)
+
+		c.mu.Lock()
+		if err == nil {
+			c.network = network
+			c.hasNetwork = true
+		}
+		c.err = err
+		c.inFlight = nil
+		close(ch)
+		c.mu.Unlock()
+
+		return network, false, err
+	}
+}
+
+func networkRequestIncludesMailEdges(r *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mail"))) {
+	case "1", "true", "yes", "include", "included":
+		return true
+	}
+	return false
+}
+
+func normalizeNetworkResponse(network *fs.Network) {
+	if network.Nodes == nil {
+		network.Nodes = []fs.AgentNode{}
+	}
+	if network.AvatarEdges == nil {
+		network.AvatarEdges = []fs.AvatarEdge{}
+	}
+	if network.ContactEdges == nil {
+		network.ContactEdges = []fs.ContactEdge{}
+	}
+	if network.MailEdges == nil {
+		network.MailEdges = []fs.MailEdge{}
+	}
+	network.Lang = i18n.Lang()
+}
+
 func NewNetworkHandler(baseDir string) http.HandlerFunc {
+	cache := newNetworkSnapshotCache(nil)
 	return func(w http.ResponseWriter, r *http.Request) {
-		network, err := fs.BuildNetwork(baseDir)
+		includeMailEdges := networkRequestIncludesMailEdges(r)
+		var (
+			network   fs.Network
+			fromCache bool
+			err       error
+		)
+		if includeMailEdges {
+			network, err = fs.BuildNetwork(baseDir)
+		} else {
+			network, fromCache, err = cache.get(baseDir)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if network.Nodes == nil {
-			network.Nodes = []fs.AgentNode{}
+		normalizeNetworkResponse(&network)
+		if fromCache {
+			w.Header().Set("X-LingTai-Network-Cache", "hit")
 		}
-		if network.AvatarEdges == nil {
-			network.AvatarEdges = []fs.AvatarEdge{}
+		if includeMailEdges {
+			w.Header().Set("X-LingTai-Network-Mail-Edges", "included")
+		} else {
+			w.Header().Set("X-LingTai-Network-Mail-Edges", "skipped")
 		}
-		if network.ContactEdges == nil {
-			network.ContactEdges = []fs.ContactEdge{}
-		}
-		if network.MailEdges == nil {
-			network.MailEdges = []fs.MailEdge{}
-		}
-		network.Lang = i18n.Lang()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(network)
 	}

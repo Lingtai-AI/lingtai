@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -195,5 +196,131 @@ func TestAppendTopologyAt_CreatesDirectory(t *testing.T) {
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("file not created: %v", err)
+	}
+}
+
+func setupNetworkHandlerMailFixture(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	writeNetworkHandlerAgent(t, filepath.Join(base, "alice"), "alice")
+	writeNetworkHandlerAgent(t, filepath.Join(base, "bob"), "bob")
+	writeNetworkHandlerMail(t, filepath.Join(base, "bob"), "inbox", "msg-1", fs.MailMessage{
+		ID:         "msg-1",
+		From:       "alice",
+		To:         "bob",
+		ReceivedAt: time.Now().Format(time.RFC3339),
+	})
+	return base
+}
+
+func writeNetworkHandlerAgent(t *testing.T, agentDir, name string) {
+	t.Helper()
+	os.MkdirAll(agentDir, 0o755)
+	data, _ := json.Marshal(map[string]interface{}{
+		"agent_name": name,
+		"address":    name,
+		"state":      "IDLE",
+		"admin":      map[string]interface{}{"karma": false},
+	})
+	os.WriteFile(filepath.Join(agentDir, ".agent.json"), data, 0o644)
+}
+
+func writeNetworkHandlerMail(t *testing.T, agentDir, folder, msgID string, msg fs.MailMessage) {
+	t.Helper()
+	msgDir := filepath.Join(agentDir, "mailbox", folder, msgID)
+	os.MkdirAll(msgDir, 0o755)
+	data, _ := json.Marshal(msg)
+	os.WriteFile(filepath.Join(msgDir, "message.json"), data, 0o644)
+}
+
+func TestNetworkHandlerSkipsMailEdgesByDefault(t *testing.T) {
+	base := setupNetworkHandlerMailFixture(t)
+	handler := NewNetworkHandler(base)
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/network", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("default status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-LingTai-Network-Mail-Edges"); got != "skipped" {
+		t.Fatalf("default mail-edge header = %q, want skipped", got)
+	}
+	var fast fs.Network
+	if err := json.Unmarshal(rr.Body.Bytes(), &fast); err != nil {
+		t.Fatalf("decode fast network: %v", err)
+	}
+	if len(fast.MailEdges) != 0 || fast.Stats.TotalMails != 0 {
+		t.Fatalf("default network should skip mail history, got edges=%d total=%d", len(fast.MailEdges), fast.Stats.TotalMails)
+	}
+
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/network?mail=1", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("mail=1 status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-LingTai-Network-Mail-Edges"); got != "included" {
+		t.Fatalf("mail=1 header = %q, want included", got)
+	}
+	var full fs.Network
+	if err := json.Unmarshal(rr.Body.Bytes(), &full); err != nil {
+		t.Fatalf("decode full network: %v", err)
+	}
+	if len(full.MailEdges) != 1 || full.Stats.TotalMails != 1 {
+		t.Fatalf("mail=1 network should include mail history, got edges=%d total=%d", len(full.MailEdges), full.Stats.TotalMails)
+	}
+}
+
+func TestNetworkSnapshotCacheCoalescesInFlightBuilds(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	cache := newNetworkSnapshotCache(func(string) (fs.Network, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return fs.Network{Nodes: []fs.AgentNode{{Address: "agent"}}}, nil
+	})
+
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := cache.get("base")
+		first <- err
+	}()
+	<-started
+
+	second := make(chan struct {
+		fromCache bool
+		err       error
+	}, 1)
+	go func() {
+		_, fromCache, err := cache.get("base")
+		second <- struct {
+			fromCache bool
+			err       error
+		}{fromCache: fromCache, err: err}
+	}()
+
+	select {
+	case got := <-second:
+		t.Fatalf("second request returned before first build completed: %+v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("builder calls while first in flight = %d, want 1", got)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatalf("first get: %v", err)
+	}
+	got := <-second
+	if got.err != nil {
+		t.Fatalf("second get: %v", got.err)
+	}
+	if !got.fromCache {
+		t.Fatalf("second get fromCache = false, want true")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("builder calls after coalesced requests = %d, want 1", got)
 	}
 }

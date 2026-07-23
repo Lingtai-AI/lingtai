@@ -99,10 +99,27 @@ export default function App() {
 
   useEffect(() => {
     if (vizMode !== 'live') return;
-    const poll = () => fetchNetwork().then(onNetworkUpdate).catch(console.error);
+    let inFlight: AbortController | null = null;
+    const poll = () => {
+      if (inFlight) return;
+      const controller = new AbortController();
+      inFlight = controller;
+      fetchNetwork(controller.signal)
+        .then(onNetworkUpdate)
+        .catch((err) => {
+          if ((err as Error).name !== 'AbortError') console.error(err);
+        })
+        .finally(() => {
+          if (inFlight === controller) inFlight = null;
+        });
+    };
     poll();
     const id = setInterval(poll, 3000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      if (inFlight) inFlight.abort();
+      inFlight = null;
+    };
   }, [onNetworkUpdate, vizMode]);
 
   // ── Replay rAF cleanup on unmount ────────────────────────────

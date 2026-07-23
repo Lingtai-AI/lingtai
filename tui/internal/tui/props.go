@@ -102,7 +102,7 @@ type propsLoadMsg struct {
 }
 
 func (m PropsModel) loadData() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 
 	var dirs []string
 	for _, n := range net.Nodes {

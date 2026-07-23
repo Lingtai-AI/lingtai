@@ -99,7 +99,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `LocationStale(loc, maxAge)` | `tui/internal/fs/location.go:52` | true if `ResolvedAt` exceeds `maxAge` |
 | `UpdateHumanLocation(humanDir)` | `tui/internal/fs/location.go:65` | reads human `.agent.json`, resolves if stale, writes atomically |
 | **network.go** | | |
-| `BuildNetwork(baseDir)` | `tui/internal/fs/network.go:8` | full topology: nodes, avatar edges, contact edges, mail edges, stats |
+| `BuildNetwork(baseDir)` / `BuildNetworkWithOptions(baseDir, opts)` | `tui/internal/fs/network.go:8` | full topology by default; callers such as `/kanban` can set `NetworkOptions{SkipMailEdges:true}` to avoid scanning every historical `message.json` while preserving nodes/avatar/contact/stats-by-state |
 | **activity.go** | | |
 | `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:42` | lightweight non-human project activity badge: folds agent state, heartbeat liveness, `.status.json` activity evidence, and running daemons into active, daemon-active, idle, asleep, suspend |
 | `hasStatusActivity(agentDir, now)` | `tui/internal/fs/activity.go:174` | treats heartbeat-live agents as active when status-snapshot evidence is fresh: `active_turn` via mtime/started_at/last_progress_at within 600s, or `last_progress_at` within 90s |
