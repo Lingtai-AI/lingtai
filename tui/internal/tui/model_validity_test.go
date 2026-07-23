@@ -110,6 +110,208 @@ func TestCodexModelValidityRequiresSelectedModel(t *testing.T) {
 	}
 }
 
+// codexPoolProbeServer records the Authorization header of every Responses
+// call and answers with the per-bearer status code (200 with a valid envelope
+// when unlisted), so pool preflight tests can assert exactly which accounts
+// were probed, and in what order, against a purely local fake backend.
+func codexPoolProbeServer(t *testing.T, statusByBearer map[string]int) (*httptest.Server, *[]string) {
+	t.Helper()
+	calls := &[]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		*calls = append(*calls, auth)
+		code, listed := statusByBearer[auth]
+		if !listed {
+			code = http.StatusOK
+		}
+		w.WriteHeader(code)
+		if code == http.StatusOK {
+			_, _ = w.Write([]byte(`{"object":"response","output":[]}`))
+		} else {
+			_, _ = w.Write([]byte(`{"error":"probe fixture failure"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, calls
+}
+
+// seedTwoAccountCodexPool writes a two-account flat pool plus a valid legacy
+// token that must never be probed while the pool is non-empty. The fake token
+// values are secret-shaped so redaction assertions are meaningful.
+func seedTwoAccountCodexPool(t *testing.T, dir string) {
+	t.Helper()
+	writeCodexProbeToken(t, filepath.Join(dir, "codex-auth", "first.json"), "first-access-secret")
+	writeCodexProbeToken(t, filepath.Join(dir, "codex-auth", "second.json"), "second-access-secret")
+	writeCodexProbeToken(t, filepath.Join(dir, "codex-auth.json"), "legacy-access-secret")
+	pool := `{"version":1,"accounts":[{"path":"codex-auth/first.json","weight":1},{"path":"codex-auth/second.json","weight":1}]}`
+	if err := os.WriteFile(codexPoolPath(dir), []byte(pool), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCodexPoolModelValidityChecksEveryAccount is the #706 false-green
+// regression: the runtime weighted-selects among ALL pool accounts, so one
+// passing account must not certify a pool whose later account cannot serve
+// the model. Both accounts must be probed and the result must be the
+// deterministic failure, with no hidden legacy fallback request.
+func TestCodexPoolModelValidityChecksEveryAccount(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	seedTwoAccountCodexPool(t, dir)
+	srv, calls := codexPoolProbeServer(t, map[string]int{
+		"Bearer second-access-secret": http.StatusForbidden,
+	})
+
+	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+	if status != probeAuthError || !strings.Contains(detail, "no eligible Codex pool account") {
+		t.Fatalf("probe = %v, %q; want deterministic ineligible-pool failure", status, detail)
+	}
+	if len(*calls) != 2 || (*calls)[0] != "Bearer first-access-secret" || (*calls)[1] != "Bearer second-access-secret" {
+		t.Fatalf("calls = %v; want both pool accounts probed in file order and no legacy fallback", *calls)
+	}
+}
+
+// TestCodexPoolModelValidityFailFastSkipsLaterAccounts pins the fail-fast
+// half of the invariant: once the first account fails deterministically the
+// preflight stops — later accounts (which would succeed) are not probed and
+// cannot rescue the pool.
+func TestCodexPoolModelValidityFailFastSkipsLaterAccounts(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	seedTwoAccountCodexPool(t, dir)
+	srv, calls := codexPoolProbeServer(t, map[string]int{
+		"Bearer first-access-secret": http.StatusForbidden,
+	})
+
+	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+	if status != probeAuthError || !strings.Contains(detail, "no eligible Codex pool account") {
+		t.Fatalf("probe = %v, %q; want deterministic ineligible-pool failure", status, detail)
+	}
+	if len(*calls) != 1 || (*calls)[0] != "Bearer first-access-secret" {
+		t.Fatalf("calls = %v; want exactly the first (failing) account and nothing after it", *calls)
+	}
+}
+
+// TestCodexPoolModelValidityAllAccountsPassIsGreen proves probeOK requires the
+// loop to reach the end: every account is probed exactly once and only then is
+// the pool certified.
+func TestCodexPoolModelValidityAllAccountsPassIsGreen(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	seedTwoAccountCodexPool(t, dir)
+	srv, calls := codexPoolProbeServer(t, nil)
+
+	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+	if status != probeOK || detail != "" {
+		t.Fatalf("probe = %v, %q; want probeOK for an all-pass pool", status, detail)
+	}
+	if len(*calls) != 2 || (*calls)[0] != "Bearer first-access-secret" || (*calls)[1] != "Bearer second-access-secret" {
+		t.Fatalf("calls = %v; want exactly one probe per pool account, in file order", *calls)
+	}
+}
+
+// TestCodexPoolModelValidityTransientFailureIsNotGreen proves a transient
+// non-OK result on a later account keeps the pool non-green under the
+// existing status taxonomy (429 stays retryable, 5xx stays overloaded).
+func TestCodexPoolModelValidityTransientFailureIsNotGreen(t *testing.T) {
+	cases := []struct {
+		name string
+		code int
+		want probeStatus
+	}{
+		{"rate-limited", http.StatusTooManyRequests, probeRateLimit},
+		{"overloaded", http.StatusInternalServerError, probeOverloaded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LINGTAI_TUI_DIR", "")
+			dir := t.TempDir()
+			seedTwoAccountCodexPool(t, dir)
+			srv, calls := codexPoolProbeServer(t, map[string]int{
+				"Bearer second-access-secret": tc.code,
+			})
+
+			status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+			if status != tc.want || !strings.Contains(detail, "no eligible Codex pool account") {
+				t.Fatalf("probe = %v, %q; want transient %v and no green", status, detail, tc.want)
+			}
+			if len(*calls) != 2 {
+				t.Fatalf("calls = %v; want the passing account then the transient one", *calls)
+			}
+		})
+	}
+}
+
+// TestCodexPoolModelValidityMissingTokenFailsWithoutRequest pins the local
+// deterministic failure: an unreadable/missing token file fails the preflight
+// immediately, costs no HTTP request for that entry or any later entry, and
+// never falls back to the valid legacy token.
+func TestCodexPoolModelValidityMissingTokenFailsWithoutRequest(t *testing.T) {
+	cases := []struct {
+		name      string
+		pool      string
+		wantCalls []string
+	}{
+		{
+			name:      "first-account-missing",
+			pool:      `{"version":1,"accounts":[{"path":"codex-auth/absent.json","weight":1},{"path":"codex-auth/first.json","weight":1}]}`,
+			wantCalls: nil,
+		},
+		{
+			name:      "later-account-missing",
+			pool:      `{"version":1,"accounts":[{"path":"codex-auth/first.json","weight":1},{"path":"codex-auth/absent.json","weight":1}]}`,
+			wantCalls: []string{"Bearer first-access-secret"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LINGTAI_TUI_DIR", "")
+			dir := t.TempDir()
+			writeCodexProbeToken(t, filepath.Join(dir, "codex-auth", "first.json"), "first-access-secret")
+			writeCodexProbeToken(t, filepath.Join(dir, "codex-auth.json"), "legacy-access-secret")
+			if err := os.WriteFile(codexPoolPath(dir), []byte(tc.pool), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			srv, calls := codexPoolProbeServer(t, nil)
+
+			status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+			if status != probeAuthError || !strings.Contains(detail, "no eligible Codex pool account") {
+				t.Fatalf("probe = %v, %q; want deterministic missing-credential failure", status, detail)
+			}
+			if len(*calls) != len(tc.wantCalls) {
+				t.Fatalf("calls = %v, want %v (no request for the missing entry or anything after it)", *calls, tc.wantCalls)
+			}
+			for i, want := range tc.wantCalls {
+				if (*calls)[i] != want {
+					t.Fatalf("calls = %v, want %v", *calls, tc.wantCalls)
+				}
+			}
+		})
+	}
+}
+
+// TestCodexPoolModelValidityDetailOmitsSecretsAndPaths guards the display
+// boundary: a pool preflight failure detail may name the model but must never
+// carry token material, absolute paths, or pool refs.
+func TestCodexPoolModelValidityDetailOmitsSecretsAndPaths(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	seedTwoAccountCodexPool(t, dir)
+	srv, _ := codexPoolProbeServer(t, map[string]int{
+		"Bearer second-access-secret": http.StatusForbidden,
+	})
+
+	_, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+	for _, banned := range []string{
+		"first-access-secret", "second-access-secret", "legacy-access-secret",
+		dir, "codex-auth/first.json", "codex-auth/second.json",
+	} {
+		if strings.Contains(detail, banned) {
+			t.Fatalf("detail leaked %q: %q", banned, detail)
+		}
+	}
+}
+
 // newPresetKeyTestInput builds a textarea pre-filled with val, matching
 // the shape FirstRunModel.presetKeyInput expects in production.
 func newPresetKeyTestInput(val string) textarea.Model {
