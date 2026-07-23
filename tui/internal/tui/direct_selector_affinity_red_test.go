@@ -134,6 +134,31 @@ func directAffinityWriteManifest(t *testing.T, directory, agentID, nickname, add
 	}
 }
 
+func directAffinityWriteLiveState(t *testing.T, directory, state string) {
+	t.Helper()
+	manifestPath := filepath.Join(directory, ".agent.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read agent manifest: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("parse agent manifest: %v", err)
+	}
+	manifest["state"] = state
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal agent manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("write agent manifest: %v", err)
+	}
+	heartbeat := fmt.Sprintf("%.6f", float64(time.Now().UnixNano())/1e9)
+	if err := os.WriteFile(filepath.Join(directory, ".agent.heartbeat"), []byte(heartbeat), 0o644); err != nil {
+		t.Fatalf("write fresh agent heartbeat: %v", err)
+	}
+}
+
 func directAffinityIncoming(target fs.DirectTarget, mailboxID, receivedAt, body string) fs.MailMessage {
 	return fs.MailMessage{
 		MailboxID:  mailboxID,
@@ -782,12 +807,20 @@ func TestDirectV1PaletteCancelRetriesVisibilityImmediately(t *testing.T) {
 	}
 }
 
-// TestDirectV1RecipientChromeOmitsMainLifecycle keeps Main's existing lifecycle
-// chrome intact while preventing a direct recipient identity from being paired
-// with Main's state, thinking quote, elapsed time, or network activity.
-func TestDirectV1RecipientChromeOmitsMainLifecycle(t *testing.T) {
+// TestDirectV1RecipientChromeUsesSelectedAgentLifecycle keeps Main's existing
+// lifecycle chrome intact while reusing that chrome for the selected agent's
+// own state. Main's state, thinking quote, elapsed time, and network activity
+// must never be paired with a direct recipient identity.
+func TestDirectV1RecipientChromeUsesSelectedAgentLifecycle(t *testing.T) {
 	fixture := newDirectAffinityFixture(t, true)
 	app := fixture.app
+	directAffinityWriteLiveState(t, fixture.targetA.Directory, "idle")
+	var refreshCmd tea.Cmd
+	app.mail, refreshCmd = app.mail.issueRefreshRequest()
+	if refreshCmd == nil {
+		t.Fatal("selected-agent lifecycle refresh returned no command")
+	}
+	app, _ = directAffinityApply(app, refreshCmd())
 	app, _ = directAffinityApply(app, mailRefreshMsg{
 		generation: app.mail.generation,
 		state:      "active",
@@ -800,7 +833,7 @@ func TestDirectV1RecipientChromeOmitsMainLifecycle(t *testing.T) {
 	app.mail.activeSince = time.Now().Add(-12 * time.Second)
 
 	mainTitle, mainEmail := directAffinityChromeLines(t, app.mail.View())
-	stateLabel := i18n.T("state.active")
+	mainStateLabel := i18n.T("state.active")
 	quote := thinkingQuotesMap["en"][app.mail.quoteIdx%len(thinkingQuotesMap["en"])]
 	networkLabel := networkActivityShortLabel()
 	networkState := networkActivityStatusLabel(fs.NetworkStatusActive)
@@ -810,8 +843,8 @@ func TestDirectV1RecipientChromeOmitsMainLifecycle(t *testing.T) {
 		line     string
 		required []string
 	}{
-		{"Main title", mainTitle, []string{directAffinityMainName, "◉", stateLabel, quote, networkLabel, networkState}},
-		{"Main Email To", mainEmail, []string{directAffinityMainName, spinnerFrames[app.mail.pulseTick%len(spinnerFrames)], stateLabel, elapsed}},
+		{"Main title", mainTitle, []string{directAffinityMainName, "◉", mainStateLabel, quote, networkLabel, networkState}},
+		{"Main Email To", mainEmail, []string{directAffinityMainName, spinnerFrames[app.mail.pulseTick%len(spinnerFrames)], mainStateLabel, elapsed}},
 	} {
 		for _, token := range check.required {
 			if token == "" || !strings.Contains(check.line, token) {
@@ -822,24 +855,63 @@ func TestDirectV1RecipientChromeOmitsMainLifecycle(t *testing.T) {
 
 	app, _ = directAffinityActivate(t, app, fixture.targetA.AgentID)
 	directTitle, directEmail := directAffinityChromeLines(t, app.mail.View())
-	for name, line := range map[string]string{
-		"direct title":    directTitle,
-		"direct Email To": directEmail,
+	targetStateLabel := i18n.T("state.idle")
+	for _, check := range []struct {
+		name     string
+		line     string
+		required []string
+	}{
+		{"direct title", directTitle, []string{fixture.targetA.Address, "◉", targetStateLabel}},
+		{"direct Email To", directEmail, []string{fixture.targetA.Address, "◉", targetStateLabel}},
 	} {
-		if !strings.Contains(line, fixture.targetA.Address) {
-			t.Errorf("%s omitted exact recipient %q: %q", name, fixture.targetA.Address, line)
+		for _, token := range check.required {
+			if token == "" || !strings.Contains(check.line, token) {
+				t.Errorf("%s omitted selected-agent lifecycle token %q: %q", check.name, token, check.line)
+			}
 		}
 		for _, mainLifecycle := range []string{
-			"◉",
 			spinnerFrames[app.mail.pulseTick%len(spinnerFrames)],
-			stateLabel,
+			mainStateLabel,
 			elapsed,
 			quote,
 			networkLabel,
 			networkState,
 		} {
-			if mainLifecycle != "" && strings.Contains(line, mainLifecycle) {
-				t.Errorf("%s paired direct recipient with Main lifecycle token %q: %q", name, mainLifecycle, line)
+			if mainLifecycle != "" && strings.Contains(check.line, mainLifecycle) {
+				t.Errorf("%s paired direct recipient with Main lifecycle token %q: %q", check.name, mainLifecycle, check.line)
+			}
+		}
+	}
+
+	directAffinityWriteLiveState(t, fixture.targetA.Directory, "active")
+	app.mail, refreshCmd = app.mail.issueRefreshRequest()
+	app, _ = directAffinityApply(app, refreshCmd())
+	threadKey := fs.DirectThreadKey(fixture.targetA)
+	targetLifecycle, ok := app.mail.directLifecycles[threadKey]
+	if !ok || !strings.EqualFold(targetLifecycle.state, "active") || targetLifecycle.activeSince.IsZero() {
+		t.Fatalf("selected ACTIVE lifecycle = %#v, want stable-key state plus independent timer", targetLifecycle)
+	}
+	targetLifecycle.activeSince = time.Now().Add(-7*time.Minute - 10*time.Second)
+	app.mail.directLifecycles[threadKey] = targetLifecycle
+	targetStateLabel = i18n.T("state.active")
+	targetElapsed := strings.TrimSpace(activeElapsedFor(targetLifecycle.state, targetLifecycle.activeSince))
+	directTitle, directEmail = directAffinityChromeLines(t, app.mail.View())
+	for _, check := range []struct {
+		name     string
+		line     string
+		required []string
+	}{
+		{"active direct title", directTitle, []string{fixture.targetA.Address, "◉", targetStateLabel}},
+		{"active direct Email To", directEmail, []string{fixture.targetA.Address, spinnerFrames[app.mail.pulseTick%len(spinnerFrames)], targetStateLabel, targetElapsed}},
+	} {
+		for _, token := range check.required {
+			if token == "" || !strings.Contains(check.line, token) {
+				t.Errorf("%s omitted selected ACTIVE lifecycle token %q: %q", check.name, token, check.line)
+			}
+		}
+		for _, mainLifecycle := range []string{elapsed, quote, networkLabel, i18n.T("state.suspended")} {
+			if mainLifecycle != "" && strings.Contains(check.line, mainLifecycle) {
+				t.Errorf("%s paired direct recipient with Main lifecycle token %q: %q", check.name, mainLifecycle, check.line)
 			}
 		}
 	}

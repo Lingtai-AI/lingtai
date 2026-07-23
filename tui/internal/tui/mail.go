@@ -78,6 +78,7 @@ type mailRefreshMsg struct {
 	acceptedSnapshot     acceptedMailSnapshot
 	selectorRows         []agentSelectorRow
 	directPublication    *fs.DirectMailPublication
+	directStates         map[string]string // stable direct-thread key -> target lifecycle state
 	alive                bool
 	state                string // active, idle, stuck, asleep, suspended, or ""
 	activity             fs.NetworkActivity
@@ -173,6 +174,11 @@ var thinkingQuotesMap = map[string][]string{
 	},
 }
 
+type directAgentLifecycle struct {
+	state       string
+	activeSince time.Time
+}
+
 type MailModel struct {
 	humanDir             string
 	humanAddr            string
@@ -242,13 +248,15 @@ type MailModel struct {
 
 	// The /agents direct-conversation core: one accepted publication serial,
 	// the Mail-owned canonical conversation catalog/selection, the one
-	// current-only direct state projected from the accepted publication, and
-	// the immutable fs-owned direct publication itself.
+	// current-only direct state projected from the accepted publication, the
+	// accepted per-thread lifecycle cache, and the immutable fs-owned direct
+	// publication itself.
 	acceptedSnapshotSerial uint64
 	directChat             directChatState
 	agentSelector          agentSelectorState
 	agentRail              agentRailState
 	directPublication      *fs.DirectMailPublication
+	directLifecycles       map[string]directAgentLifecycle
 	directPrepared         bool
 
 	// Durable direct-unread work is serialized through one accepted-coordinate
@@ -616,11 +624,45 @@ func (m MailModel) issueRefreshRequest() (MailModel, tea.Cmd) {
 	return m, m.refreshMail
 }
 
+func resolveAgentLifecycle(directory string) (bool, string, fs.AgentNode) {
+	alive := directory != "" && fs.IsAlive(directory, 3.0)
+	var node fs.AgentNode
+	if directory != "" {
+		node, _ = fs.ReadAgent(directory)
+	}
+	state := node.State
+	if !alive {
+		if fs.HasRefreshTaken(directory) {
+			state = "refreshing"
+		} else {
+			state = "suspended"
+		}
+	}
+	return alive, state, node
+}
+
+func resolveDirectLifecycleStates(rows []agentSelectorRow) map[string]string {
+	states := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.Main {
+			continue
+		}
+		key := fs.DirectThreadKey(row.Target)
+		if key == "" {
+			continue
+		}
+		_, state, _ := resolveAgentLifecycle(row.Target.Directory)
+		states[key] = state
+	}
+	return states
+}
+
 func (m MailModel) refreshMail() tea.Msg {
 	// Every value below is prepared on this tea.Cmd invocation, before Bubble
 	// Tea receives the completion: the incremental cache refresh, the deep
-	// accepted snapshot clone, canonical selector-row discovery, and the
-	// immutable direct publication. Update only validates and installs these
+	// accepted snapshot clone, canonical selector-row discovery, immutable
+	// direct publication, and target lifecycle states. Update only validates
+	// and installs these
 	// detached results; it performs no manifest, unread, or clone work.
 	cache := m.cache.Refresh()
 	acceptedSnapshot := newAcceptedMailSnapshot(cache)
@@ -631,32 +673,20 @@ func (m MailModel) refreshMail() tea.Msg {
 		acceptedSnapshot.cache.Messages,
 	)
 
-	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
+	alive, state, orchestrator := resolveAgentLifecycle(m.orchestrator)
+	directStates := resolveDirectLifecycleStates(selectorRows)
 	var activity fs.NetworkActivity
 	if m.baseDir != "" {
 		if a, err := fs.ComputeNetworkActivity(m.baseDir); err == nil {
 			activity = a
 		}
 	}
-	state := ""
 	orchName := m.orchName
 	orchNickname := ""
-	if m.orchestrator != "" {
-		if node, err := fs.ReadAgent(m.orchestrator); err == nil {
-			state = node.State
-			if node.AgentName != "" {
-				orchName = node.AgentName
-			}
-			orchNickname = node.Nickname
-		}
+	if orchestrator.AgentName != "" {
+		orchName = orchestrator.AgentName
 	}
-	if !alive {
-		if fs.HasRefreshTaken(m.orchestrator) {
-			state = "refreshing"
-		} else {
-			state = "suspended"
-		}
-	}
+	orchNickname = orchestrator.Nickname
 	return mailRefreshMsg{
 		generation:           m.generation,
 		refreshRequestSerial: m.refreshRequestSerial,
@@ -665,6 +695,7 @@ func (m MailModel) refreshMail() tea.Msg {
 		acceptedSnapshot:     acceptedSnapshot,
 		selectorRows:         selectorRows,
 		directPublication:    directPublication,
+		directStates:         directStates,
 		alive:                alive,
 		state:                state,
 		activity:             activity,
@@ -1070,11 +1101,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if !staleRequest {
 			if acceptedPrepared {
 				// One matching prepared payload installs atomically: mailbox
-				// cache, deep accepted snapshot, canonical selector rows, and
-				// the immutable direct publication all belong to this request.
+				// cache, deep accepted snapshot, canonical selector rows, target
+				// lifecycle states, and immutable direct publication all belong
+				// to this request.
 				m.cache = msg.cache
 				m.acceptedSnapshot = msg.acceptedSnapshot
 				m = m.installSelectorRows(msg.selectorRows)
+				m = m.installDirectLifecycleStates(msg.directStates)
 				m.directPublication = msg.directPublication
 				m.directPrepared = true
 				m = m.clampAgentRail()
@@ -2088,12 +2121,38 @@ func (m MailModel) humanName() string {
 	return i18n.T("mail.you")
 }
 
-// stateGlyph returns the leading glyph for the agent-state badge. ACTIVE uses
+func (m MailModel) installDirectLifecycleStates(states map[string]string) MailModel {
+	now := time.Now()
+	next := make(map[string]directAgentLifecycle, len(states))
+	for key, state := range states {
+		status := m.directLifecycles[key]
+		if strings.EqualFold(state, "ACTIVE") {
+			if !strings.EqualFold(status.state, "ACTIVE") || status.activeSince.IsZero() {
+				status.activeSince = now
+			}
+		} else {
+			status.activeSince = time.Time{}
+		}
+		status.state = state
+		next[key] = status
+	}
+	m.directLifecycles = next
+	return m
+}
+
+func (m MailModel) activeRecipientLifecycle() directAgentLifecycle {
+	if target, ok := m.currentDirectTarget(); ok {
+		return m.directLifecycles[fs.DirectThreadKey(target)]
+	}
+	return directAgentLifecycle{state: m.orchState, activeSince: m.activeSince}
+}
+
+// stateGlyphFor returns the leading glyph for an agent-state badge. ACTIVE uses
 // the rotating spinner frame so the badge visibly animates in normal mode;
 // every other state gets a distinct static glyph (color carries the rest of
 // the distinction via StateColor).
-func (m MailModel) stateGlyph() string {
-	switch strings.ToUpper(m.orchState) {
+func (m MailModel) stateGlyphFor(state string) string {
+	switch strings.ToUpper(state) {
 	case "ACTIVE":
 		return spinnerFrames[m.pulseTick%len(spinnerFrames)]
 	case "ASLEEP":
@@ -2107,17 +2166,25 @@ func (m MailModel) stateGlyph() string {
 	}
 }
 
-// activeElapsed returns a short " 12s" / " 3m" suffix while the agent is ACTIVE,
-// or "" otherwise — the "how long has it been working" signal.
-func (m MailModel) activeElapsed() string {
-	if !strings.EqualFold(m.orchState, "ACTIVE") || m.activeSince.IsZero() {
+func (m MailModel) stateGlyph() string {
+	return m.stateGlyphFor(m.orchState)
+}
+
+func activeElapsedFor(state string, activeSince time.Time) string {
+	if !strings.EqualFold(state, "ACTIVE") || activeSince.IsZero() {
 		return ""
 	}
-	d := time.Since(m.activeSince)
+	d := time.Since(activeSince)
 	if d < time.Minute {
 		return fmt.Sprintf(" %ds", int(d.Seconds()))
 	}
 	return fmt.Sprintf(" %dm", int(d.Minutes()))
+}
+
+// activeElapsed returns a short " 12s" / " 3m" suffix while Main is ACTIVE,
+// or "" otherwise — the "how long has it been working" signal.
+func (m MailModel) activeElapsed() string {
+	return activeElapsedFor(m.orchState, m.activeSince)
 }
 
 func (m MailModel) networkActivityBadge() string {
@@ -2267,21 +2334,18 @@ func (m MailModel) View() string {
 		titleLeft += " " + StyleSubtle.Render(i18n.T("mail.visit_exit_hint"))
 	}
 
-	// State badge with color
-	stateKey := m.orchState
+	// Resolve the one visible recipient and render its state through Main's
+	// existing badge language. Direct selection changes the subject, not the UI.
+	recipientLifecycle := m.activeRecipientLifecycle()
+	stateKey := recipientLifecycle.state
 	if stateKey == "" {
 		stateKey = "unknown"
 	}
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	// A validated direct selection keeps only the exact recipient identity: the
-	// state badge, thinking quote/spinner, network badge, and elapsed timer are
-	// Main orchestrator (host) facts, not target facts.
 	titleRightBase := orchNameStyle.Render(m.activeRecipientLabel())
-	if !direct {
-		titleRightBase += " " + stateStyle.Render("◉ "+stateLabel)
-	}
+	titleRightBase += " " + stateStyle.Render("◉ "+stateLabel)
 
 	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
 	titleCenter := ""
@@ -2327,13 +2391,8 @@ func (m MailModel) View() string {
 	// where their attention already is. Reuses the header's stateStyle/stateLabel
 	// and is independent of the verbose level.
 	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel())
-	if direct {
-		// Host lifecycle chrome is omitted next to a direct recipient identity.
-		toLabel += " "
-	} else {
-		indicator := stateStyle.Render(m.stateGlyph() + " " + stateLabel + m.activeElapsed())
-		toLabel += "  " + indicator + " "
-	}
+	indicator := stateStyle.Render(m.stateGlyphFor(recipientLifecycle.state) + " " + stateLabel + activeElapsedFor(recipientLifecycle.state, recipientLifecycle.activeSince))
+	toLabel += "  " + indicator + " "
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
 		sepWidth = 0
