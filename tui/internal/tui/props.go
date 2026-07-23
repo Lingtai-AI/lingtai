@@ -602,10 +602,14 @@ func (m PropsModel) renderLeft(maxW int) string {
 
 			if len(allowedRefs) > 0 {
 				cfg, _ := config.LoadConfig(m.globalDir)
+				poolEligible, poolEligibleModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
 				auth := preset.AuthState{
-					CodexOAuthConfigured:     codexOAuthConfigured(m.globalDir),
-					CodexAuthDir:             m.globalDir,
-					ClaudeCodeAuthConfigured: claudeCodeAuthConfigured(),
+					CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
+					CodexAuthDir:              m.globalDir,
+					CodexPoolEligible:         poolEligible,
+					CodexPoolEligibleModels:   poolEligibleModels,
+					CodexPoolFallbackEligible: poolFallback,
+					ClaudeCodeAuthConfigured:  claudeCodeAuthConfigured(),
 				}
 				resolved := preset.ResolveRefsWithAuth(allowedRefs, cfg.Keys, auth)
 				lines = append(lines, "  "+labelStyle.Render(i18n.T("props.preset_allowed")+":"))

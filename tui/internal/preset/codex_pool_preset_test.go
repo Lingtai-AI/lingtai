@@ -61,9 +61,8 @@ func TestCodexPresetUsesRequestedDefault(t *testing.T) {
 	}
 }
 
-// TestCodexPoolProviderCredentialValidity verifies a codex-pool preset is judged
-// credential-valid exactly when Codex OAuth is configured — reusing the codex
-// OAuth signal rather than falling into the "no credential" default branch.
+// TestCodexPoolProviderCredentialValidity verifies that global OAuth existence
+// is not confused with pool membership or validated-empty fallback readiness.
 func TestCodexPoolProviderCredentialValidity(t *testing.T) {
 	// Point HOME at a temp dir so Save() and the "~/"-prefixed ref below resolve
 	// against the test tree, never the real user's presets.
@@ -82,15 +81,28 @@ func TestCodexPoolProviderCredentialValidity(t *testing.T) {
 		t.Error("codex-pool must not be credential-valid when no Codex OAuth is configured")
 	}
 
-	// With OAuth configured → valid.
 	withAuth := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexOAuthConfigured: true})
-	if len(withAuth) != 1 {
-		t.Fatalf("expected 1 resolved ref; got %d", len(withAuth))
+	if len(withAuth) != 1 || !withAuth[0].Exists {
+		t.Fatalf("expected 1 existing resolved ref; got %#v", withAuth)
 	}
-	if !withAuth[0].Exists {
-		t.Fatalf("codex-pool preset ref should resolve to an existing file; got %#v", withAuth[0])
+	if withAuth[0].HasKey {
+		t.Error("global Codex OAuth alone must not make codex-pool valid")
 	}
-	if !withAuth[0].HasKey {
-		t.Error("codex-pool must be credential-valid when Codex OAuth is configured")
+
+	withFlat := ResolveRefsWithAuth([]string{ref}, nil, AuthState{CodexPoolEligible: true})
+	if !withFlat[0].HasKey {
+		t.Error("flat pool eligibility must make codex-pool valid")
+	}
+	withClassified := ResolveRefsWithAuth([]string{ref}, nil, AuthState{
+		CodexPoolEligibleModels: map[string]bool{"gpt-5.6-sol": true},
+	})
+	if !withClassified[0].HasKey {
+		t.Error("exact classified-model eligibility must make codex-pool valid")
+	}
+	withWrongModel := ResolveRefsWithAuth([]string{ref}, nil, AuthState{
+		CodexPoolEligibleModels: map[string]bool{"other-model": true},
+	})
+	if withWrongModel[0].HasKey {
+		t.Error("a different classified model must not make codex-pool valid")
 	}
 }

@@ -235,6 +235,81 @@ func codexPoolWeights(globalDir string) map[string]int {
 	return out
 }
 
+// codexPoolAccountsEligible reports whether one account is selectable by the
+// kernel: positive weight plus a valid token file.
+func codexPoolAccountsEligible(globalDir string, accounts []codexPoolAccount) bool {
+	for _, acct := range accounts {
+		if acct.Weight <= 0 {
+			continue
+		}
+		abs := resolveCodexPoolRef(globalDir, acct.Path)
+		if abs != "" && codexAuthPathValid(abs) {
+			return true
+		}
+	}
+	return false
+}
+
+func codexPoolLegacyFallbackValid(globalDir string) bool {
+	return codexAuthPathValid(filepath.Join(codexPoolBaseDir(globalDir), "codex-auth.json"))
+}
+
+// codexPoolEligible mirrors the runtime distinction between an empty pool and
+// a nonempty pool whose members are unusable. Only an absent/empty applicable
+// category may use the valid legacy fallback; a nonempty unusable category
+// remains ineligible and fails closed.
+func codexPoolEligible(globalDir, model string) bool {
+	poolPath := codexPoolPath(globalDir)
+	payload, err := os.Stat(poolPath)
+	if os.IsNotExist(err) {
+		return codexPoolLegacyFallbackValid(globalDir)
+	}
+	if err != nil || payload.IsDir() {
+		return false
+	}
+	p, err := loadCodexPool(globalDir)
+	if err != nil {
+		return false
+	}
+	if p.Models == nil {
+		if len(p.Accounts) == 0 {
+			return codexPoolLegacyFallbackValid(globalDir)
+		}
+		return codexPoolAccountsEligible(globalDir, p.Accounts)
+	}
+	if model == "" {
+		return false
+	}
+	accounts, ok := (*p.Models)[model]
+	if !ok || len(accounts) == 0 {
+		return codexPoolLegacyFallbackValid(globalDir)
+	}
+	return codexPoolAccountsEligible(globalDir, accounts)
+}
+
+// codexPoolEligibilityFacts returns the same facts for the preset health
+// renderer. A non-nil classified map preserves the pool's classification bit.
+func codexPoolEligibilityFacts(globalDir string) (flat bool, classified map[string]bool, fallback bool) {
+	poolPath := codexPoolPath(globalDir)
+	if _, err := os.Stat(poolPath); os.IsNotExist(err) {
+		return codexPoolEligible(globalDir, ""), nil, codexPoolLegacyFallbackValid(globalDir)
+	} else if err != nil {
+		return false, nil, false
+	}
+	p, err := loadCodexPool(globalDir)
+	if err != nil {
+		return false, nil, false
+	}
+	if p.Models == nil {
+		return codexPoolEligible(globalDir, ""), nil, false
+	}
+	classified = make(map[string]bool, len(*p.Models))
+	for model := range *p.Models {
+		classified[model] = codexPoolEligible(globalDir, model)
+	}
+	return false, classified, codexPoolLegacyFallbackValid(globalDir)
+}
+
 // codexPoolModelInfo reports whether the pool file is model-classified (has a
 // top-level `models` map — presence, not size, is the classification bit, so
 // an empty `{}` reports true/0) and how many model categories it holds.
