@@ -69,6 +69,9 @@ const codexPoolVersionModels = 2
 var errCodexPoolModelClassified = errors.New(
 	"codex-auth-pool.json is model-classified (has a models map); flat weight edits are disabled — edit the file by hand")
 
+var errCodexPoolDroppedEntries = errors.New(
+	"codex-auth-pool.json contains malformed account entries; weight edits are disabled — edit the file by hand")
+
 // codexPoolAccount is one balanced account: a stable ref to its token file plus
 // an integer weight. Weight 0 disables the account without dropping it.
 type codexPoolAccount struct {
@@ -86,9 +89,10 @@ type codexPoolAccount struct {
 // plus keeping both fields typed is what makes load→save lossless for
 // hand-authored v2 files.
 type codexPool struct {
-	Version  int                            `json:"version"`
-	Accounts []codexPoolAccount             `json:"accounts"`
-	Models   *map[string][]codexPoolAccount `json:"models,omitempty"`
+	Version        int                            `json:"version"`
+	Accounts       []codexPoolAccount             `json:"accounts"`
+	Models         *map[string][]codexPoolAccount `json:"models,omitempty"`
+	DroppedEntries int                            `json:"-"`
 }
 
 // codexPoolPath returns the absolute path of the pool file. LINGTAI_TUI_DIR
@@ -188,18 +192,21 @@ func loadCodexPool(globalDir string) (codexPool, error) {
 	pool := codexPool{Version: raw.Version}
 	var decodeErr error
 	if len(raw.Accounts) > 0 && string(raw.Accounts) != "null" {
-		pool.Accounts, decodeErr = decodeCodexPoolAccounts(raw.Accounts)
+		var dropped int
+		pool.Accounts, dropped, decodeErr = decodeCodexPoolAccounts(raw.Accounts)
 		if decodeErr != nil {
 			return codexPool{}, decodeErr
 		}
+		pool.DroppedEntries += dropped
 	}
 	if raw.Models != nil {
 		pool.Models = &map[string][]codexPoolAccount{}
 		for model, entries := range *raw.Models {
-			decoded, decodeErr := decodeCodexPoolAccounts(entries)
+			decoded, dropped, decodeErr := decodeCodexPoolAccounts(entries)
 			if decodeErr != nil {
 				continue
 			}
+			pool.DroppedEntries += dropped
 			(*pool.Models)[model] = decoded
 		}
 	}
@@ -209,20 +216,22 @@ func loadCodexPool(globalDir string) (codexPool, error) {
 	return pool, nil
 }
 
-func decodeCodexPoolAccounts(raw json.RawMessage) ([]codexPoolAccount, error) {
+func decodeCodexPoolAccounts(raw json.RawMessage) ([]codexPoolAccount, int, error) {
 	var entries []json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	accounts := make([]codexPoolAccount, 0, len(entries))
+	dropped := 0
 	for _, entry := range entries {
 		var account codexPoolAccount
 		if len(entry) == 0 || entry[0] != '{' || json.Unmarshal(entry, &account) != nil {
+			dropped++
 			continue
 		}
 		accounts = append(accounts, account)
 	}
-	return accounts, nil
+	return accounts, dropped, nil
 }
 
 // saveCodexPool writes the pool file (version stamped, parent created). The file
@@ -424,6 +433,11 @@ func setCodexPoolWeight(globalDir, absPath string, weight int) error {
 	if err != nil {
 		// A malformed pool file must not be silently overwritten — surface it.
 		return err
+	}
+	if pool.DroppedEntries > 0 {
+		// The read-only path may mirror the kernel by ignoring malformed
+		// entries, but a write must not turn that leniency into data loss.
+		return errCodexPoolDroppedEntries
 	}
 	if pool.Models != nil {
 		// A model-classified pool (any `models` dict, even empty) has no flat

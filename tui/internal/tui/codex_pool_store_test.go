@@ -520,6 +520,32 @@ func TestSetCodexPoolWeight_RefusesModelClassifiedPool(t *testing.T) {
 	}
 }
 
+func TestSetCodexPoolWeight_RefusesPoolWithDroppedRawEntries(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := []byte(`{"version":1,"accounts":[{"path":"codex-auth/typo.json","weight":"2"},{"path":"codex-auth/work.json","weight":1}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatalf("seed pool: %v", err)
+	}
+
+	work := filepath.Join(dir, codexAuthSubdir, "work.json")
+	err := setCodexPoolWeight(dir, work, 2)
+	if err == nil {
+		t.Fatal("weight edit on a pool with dropped entries must be refused")
+	}
+	if !errors.Is(err, errCodexPoolDroppedEntries) {
+		t.Errorf("refusal error = %v, want errCodexPoolDroppedEntries", err)
+	}
+
+	got, readErr := os.ReadFile(codexPoolPath(dir))
+	if readErr != nil {
+		t.Fatalf("read pool file back: %v", readErr)
+	}
+	if string(got) != string(raw) {
+		t.Errorf("refused edit must leave the pool file byte-identical;\n got: %s\nwant: %s", got, raw)
+	}
+}
+
 // TestCodexPoolModelInfo covers the UI's classification probe: missing, flat,
 // and malformed pools report unclassified; a v2 pool reports classified with
 // its category count.
