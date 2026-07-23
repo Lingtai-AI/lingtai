@@ -274,3 +274,40 @@ func TestBuildNetwork_MailEdgesUnaffected(t *testing.T) {
 		t.Fatalf("mail edges = %d, want 0", len(net.MailEdges))
 	}
 }
+
+func TestBuildNetworkWithOptionsSkipsMailEdges(t *testing.T) {
+	base := setupPortalTestNetwork(t)
+	writeMailMessage(t, filepath.Join(base, "bob"), "inbox", "msg-1", MailMessage{
+		ID:         "msg-1",
+		From:       "alice",
+		To:         "bob",
+		ReceivedAt: time.Now().Format(time.RFC3339),
+	})
+
+	full, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build full network: %v", err)
+	}
+	if len(full.MailEdges) != 1 {
+		t.Fatalf("full mail edges = %d, want 1", len(full.MailEdges))
+	}
+	if full.Stats.TotalMails != 1 {
+		t.Fatalf("full total mails = %d, want 1", full.Stats.TotalMails)
+	}
+
+	fast, err := BuildNetworkWithOptions(base, NetworkOptions{SkipMailEdges: true})
+	if err != nil {
+		t.Fatalf("build fast network: %v", err)
+	}
+	if len(fast.MailEdges) != 0 {
+		t.Fatalf("fast mail edges = %d, want 0", len(fast.MailEdges))
+	}
+	if fast.Stats.TotalMails != 0 {
+		t.Fatalf("fast total mails = %d, want 0", fast.Stats.TotalMails)
+	}
+	if len(fast.Nodes) != len(full.Nodes) || len(fast.AvatarEdges) != len(full.AvatarEdges) || len(fast.ContactEdges) != len(full.ContactEdges) {
+		t.Fatalf("fast topology changed nodes/avatar/contact counts: fast=%d/%d/%d full=%d/%d/%d",
+			len(fast.Nodes), len(fast.AvatarEdges), len(fast.ContactEdges),
+			len(full.Nodes), len(full.AvatarEdges), len(full.ContactEdges))
+	}
+}

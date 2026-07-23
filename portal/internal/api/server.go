@@ -1,9 +1,7 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -78,36 +76,23 @@ func (s *Server) StartRecording(baseDir string) {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 
-		// Check if tape needs reconstruction
-		if needsReconstruction(topologyPath) {
-			replayDir := filepath.Join(baseDir, ".portal", "replay", "chunks")
-			progressPath := filepath.Join(baseDir, ".portal", "reconstruct.progress")
-			os.WriteFile(progressPath, []byte("0/0"), 0o644)
-
-			frames, err := agentfs.ReconstructTape(baseDir)
-			if err == nil && len(frames) > 0 {
-				TopologyMu.Lock()
-				_, _ = writeReconstructedReplay(topologyPath, replayDir, progressPath, frames)
-				TopologyMu.Unlock()
+		recordCurrent := func() {
+			// Keep recording off the full historical-mail path. Full replay
+			// reconstruction remains available through POST /api/topology/rebuild.
+			if network, err := agentfs.BuildNetworkWithOptions(baseDir, agentfs.NetworkOptions{SkipMailEdges: true}); err == nil {
+				AppendTopology(topologyPath, network)
 			}
-			os.Remove(progressPath)
 		}
 
-		// Record current state immediately
-		if network, err := agentfs.BuildNetwork(baseDir); err == nil {
-			AppendTopology(topologyPath, network)
-		}
+		// Record current state immediately without reconstructing history first.
+		recordCurrent()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				network, err := agentfs.BuildNetwork(baseDir)
-				if err != nil {
-					continue
-				}
-				AppendTopology(topologyPath, network)
+				recordCurrent()
 			}
 		}
 	}()
@@ -171,32 +156,4 @@ func (s *Server) Stop(ctx context.Context) error {
 		<-s.done
 	}
 	return s.httpServer.Shutdown(ctx)
-}
-
-// needsReconstruction checks if topology.jsonl is missing, empty,
-// or uses the old format (missing direct/cc/bcc on mail edges).
-func needsReconstruction(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return true
-	}
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	if len(lines) == 0 {
-		return true
-	}
-	lastLine := lines[len(lines)-1]
-	var frame struct {
-		Net struct {
-			MailEdges []struct {
-				Direct *int `json:"direct"`
-			} `json:"mail_edges"`
-		} `json:"net"`
-	}
-	if json.Unmarshal(lastLine, &frame) != nil {
-		return true
-	}
-	if len(frame.Net.MailEdges) == 0 {
-		return false
-	}
-	return frame.Net.MailEdges[0].Direct == nil
 }

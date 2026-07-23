@@ -5,7 +5,18 @@ import (
 	"strings"
 )
 
+type NetworkOptions struct {
+	// SkipMailEdges avoids scanning inbox/archive message history for live
+	// first-screen graph loads. The default BuildNetwork path keeps mail edges
+	// for replay reconstruction and explicit full-history callers.
+	SkipMailEdges bool
+}
+
 func BuildNetwork(baseDir string) (Network, error) {
+	return BuildNetworkWithOptions(baseDir, NetworkOptions{})
+}
+
+func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, error) {
 	nodes, err := DiscoverAgents(baseDir)
 	if err != nil {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
@@ -45,8 +56,13 @@ func BuildNetwork(baseDir string) (Network, error) {
 		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
 	}
 
-	// Count from inbox + archive — messages exist in exactly one folder
-	mailEdges := buildMailEdges(nodes, baseDir)
+	// Count from inbox + archive — messages exist in exactly one folder.
+	// Live portal requests and recording can opt out because this is O(all
+	// historical message.json files) on the critical open/poll path.
+	var mailEdges []MailEdge
+	if !opts.SkipMailEdges {
+		mailEdges = buildMailEdges(nodes, baseDir)
+	}
 	stats := computeStats(nodes, mailEdges)
 
 	// Relativize all edge addresses so they match AgentNode.Address format

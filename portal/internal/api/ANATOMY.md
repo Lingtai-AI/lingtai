@@ -22,7 +22,7 @@ maintenance: |
 
 > **Maintenance:** see the `lingtai-tui-anatomy` skill. **Coding agents** update this file in the same commit as code changes.
 
-HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSON REST API on `/api/*`. Manages a live topology tape (3-second snapshots appended as JSONL during recording; reconstructed tapes use activity-driven sampling on the same 3s grid), compressed hourly replay caches, and on-the-fly reconstruction from source events.
+HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSON REST API on `/api/*`. Manages a live topology tape (3-second snapshots appended as JSONL during recording), compressed hourly replay caches, and explicit reconstruction from source events via `POST /api/topology/rebuild`.
 
 ## Components
 
@@ -31,19 +31,19 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 - **`portal/internal/api/server.go:20-28`** — `Server` struct. Wraps `http.Server` with bound `host`/`port`, `baseDir`, `cancel`/`done` for the recording goroutine.
 - **`portal/internal/api/server.go:31-45`** — `NewServer(baseDir, staticFS)`. Registers 6 API routes (`portal/internal/api/server.go:33-38`) and mounts `staticFS` at `/` (`portal/internal/api/server.go:39`). Routes fixed before the Server is returned.
 - **`portal/internal/api/server.go:48-66`** — `Start(portFile, host, fixedPort)`. Resolves an empty host to `127.0.0.1`, listens with `net.JoinHostPort`, stores the effective host, writes only the bound port to `portFile`, and serves in a goroutine.
-- **`portal/internal/api/server.go:70-114`** — `StartRecording(baseDir)`. Background goroutine with a 3-second ticker (`portal/internal/api/server.go:78`). On first run: checks `needsReconstruction`, rebuilds tape from source via `agentfs.ReconstructTape`, writes replay caches through `writeReconstructedReplay` (`portal/internal/api/server.go:82-93`), then records `agentfs.BuildNetwork` snapshots on every tick via `AppendTopology` (`portal/internal/api/server.go:96-110`).
-- **`portal/internal/api/server.go:116-164`** — `Port`, `Host`, `URL`, and host helpers. `URL()` keeps `http://localhost:<port>` for loopback and wildcard binds, but renders explicit named/non-loopback hosts directly. `ExternalAccessWarning()` reports unauthenticated non-loopback/wildcard binds for the CLI.
-- **`portal/internal/api/server.go:166-172`** — `Stop(ctx)`. Cancels the recording goroutine, waits for `s.done`, shuts down the HTTP server.
-- **`portal/internal/api/server.go:174-200`** — `needsReconstruction(path)`. Returns true if `topology.jsonl` is missing, empty, or uses the old format (lacking `direct`/`cc`/`bcc` fields on mail edges).
+- **`portal/internal/api/server.go:68-112`** — `StartRecording(baseDir)`. Background goroutine with a 3-second ticker. It records a current live snapshot immediately and every tick using `agentfs.BuildNetworkWithOptions(..., SkipMailEdges:true)`, so portal startup no longer reconstructs history or scans all mail before the live view can open. Full reconstruction remains explicit via `POST /api/topology/rebuild`.
+- **`portal/internal/api/server.go:114-162`** — `Port`, `Host`, `URL`, and host helpers. `URL()` keeps `http://localhost:<port>` for loopback and wildcard binds, but renders explicit named/non-loopback hosts directly. `ExternalAccessWarning()` reports unauthenticated non-loopback/wildcard binds for the CLI.
+- **`portal/internal/api/server.go:164-170`** — `Stop(ctx)`. Cancels the recording goroutine, waits for `s.done`, shuts down the HTTP server.
 
 ### Handlers (`handlers.go`)
 
 - **`portal/internal/api/handlers.go:16`** — `TopologyMu sync.Mutex`. Global mutex guarding `topology.jsonl` writes and reads.
-- **`portal/internal/api/handlers.go:18-40`** — `NewNetworkHandler(baseDir)`. `GET /api/network` — live snapshot of the agent network via `fs.BuildNetwork`. Always returns `[]` not `null` for empty slices. Sets `Lang` on the response.
-- **`portal/internal/api/handlers.go:43-68`** — `NewTopologyHandler(baseDir)`. `GET /api/topology` — reads `topology.jsonl`, parses it into a JSON array of raw messages.
-- **`portal/internal/api/handlers.go:88-133`** — `AppendTopology(path, network)` / `AppendTopologyAt`. Writes one JSONL line `{"t":<unix_ms>,"net":<network>}`. Normalises nil slices to `[]`. Opens the file with `O_APPEND`; creates parent dirs on first write.
-- **`portal/internal/api/handlers.go:135-155`** — `NewProgressHandler(baseDir)`. `GET /api/topology/progress` — reads `reconstruct.progress` (`"N/M"` format), returns `{"current":N,"total":M}` or `{}`.
-- **`portal/internal/api/handlers_test.go:16-93`** — CORS regression coverage for live network, topology, and progress handlers, including success and error/fallback responses.
+- **`portal/internal/api/handlers.go:18-103`** — `networkSnapshotCache` and helpers. Coalesces overlapping default live network builds and can serve the last no-mail snapshot while a build is in flight.
+- **`portal/internal/api/handlers.go:105-139`** — `NewNetworkHandler(baseDir)`. `GET /api/network` defaults to a fast live snapshot via `fs.BuildNetworkWithOptions(..., SkipMailEdges:true)`; `?mail=1` (or true/yes/include) opts into full historical mail edges. Always returns `[]` not `null` for empty slices and sets `Lang`.
+- **`portal/internal/api/handlers.go:142-167`** — `NewTopologyHandler(baseDir)`. `GET /api/topology` — reads `topology.jsonl`, parses it into a JSON array of raw messages.
+- **`portal/internal/api/handlers.go:187-232`** — `AppendTopology(path, network)` / `AppendTopologyAt`. Writes one JSONL line `{"t":<unix_ms>,"net":<network>}`. Normalises nil slices to `[]`. Opens the file with `O_APPEND`; creates parent dirs on first write.
+- **`portal/internal/api/handlers.go:234-254`** — `NewProgressHandler(baseDir)`. `GET /api/topology/progress` — reads `reconstruct.progress` (`"N/M"` format), returns `{"current":N,"total":M}` or `{}`.
+- **`portal/internal/api/handlers_test.go`** — CORS regression coverage plus fast-default/full-mail opt-in and singleflight tests for live network handling.
 
 ### Replay (`replay.go`, ~675 lines)
 
@@ -62,7 +62,7 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 ## Connections
 
 - **Called by `portal/main.go:73-88`.** `NewServer` + `srv.StartRecording` + `srv.Start` + `srv.URL` — the HTTP server is the portal's only runtime component.
-- **Calls `portal/internal/fs/`:** `BuildNetwork` (live snapshot), `ReconstructTape` (full rebuild from events + mailbox), and all types (`TapeFrame`, `Network`, `AgentNode`, `MailEdge`, etc.).
+- **Calls `portal/internal/fs/`:** `BuildNetworkWithOptions` (fast live snapshot), `BuildNetwork` (explicit full-mail snapshot), `ReconstructTape` (full rebuild from events + mailbox), and all types (`TapeFrame`, `Network`, `AgentNode`, `MailEdge`, etc.).
 - **Calls `portal/i18n/`:** `i18n.Lang()` for the language field on `/api/network` responses.
 - **Port file consumed by the TUI.** `main.go` writes `.portal/port` via `srv.Start`; the TUI reads it to discover the portal URL. See `tui/ANATOMY.md`.
 
@@ -77,7 +77,7 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 - **`.portal/topology.jsonl`** — Always written with `TopologyMu` held. Appended by `AppendTopology` (live recording) and overwritten by `NewRebuildHandler` (reconstruction).
 - **`.portal/replay/chunks/<hourMs>.json.gz`** — Gzip-compressed delta-encoded hourly chunks. Written by `writeReconstructedReplay` for reconstructed tapes (`portal/internal/api/replay.go:454-466`) and by `buildManifest` when a new live-recorded hour completes (`portal/internal/api/replay.go:282-298`).
 - **`.portal/replay/chunks/manifest.json`** — Chunk index (`ReplayManifest`). Written by `writeReconstructedReplay` (`portal/internal/api/replay.go:480-485`) and `buildManifest` (`portal/internal/api/replay.go:329-331`).
-- **`.portal/reconstruct.progress`** — Temporary `"N/M"` file. Written by `StartRecording` / `writeReconstructedReplay` during reconstruction (`portal/internal/api/server.go:76-85`, `portal/internal/api/replay.go:417-446`) and read by `/api/topology/progress`.
+- **`.portal/reconstruct.progress`** — Temporary `"N/M"` file. Written by explicit reconstruction through `writeReconstructedReplay` (`portal/internal/api/replay.go:417-446`) and read by `/api/topology/progress`; normal startup recording does not create it.
 
 ## Notes
 
@@ -85,4 +85,4 @@ HTTP server for `lingtai-portal`: serves the embedded React SPA on `/` and a JSO
 - **No wildcard CORS.** API handlers intentionally do not set `Access-Control-Allow-Origin: *`; same-origin browser requests from the embedded portal UI still work.
 - **TopologyMu is coarse-grained.** One global lock gates all topology I/O — both live append (3s ticker) and rebuild (POST handler). The rebuild endpoint replaces the file entirely while holding the lock.
 - **Delta encoding is the memory-replay strategy.** Instead of replaying every 3-second frame, the frontend requests hourly chunks and interpolates. Keyframes every 100 frames anchor the interpolation; deltas carry only changed fields.
-- **Old-format detection is structural.** `needsReconstruction` checks whether the most recent JSONL line's mail edges carry `direct` fields. Missing fields → rebuild. This is format migration driven by data inspection, not version stamps.
+- **Reconstruction is explicit.** Startup recording intentionally avoids automatic history rebuilds so the live graph can open even when topology/replay files are missing or stale; use `POST /api/topology/rebuild` to regenerate full replay caches.

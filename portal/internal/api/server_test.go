@@ -106,3 +106,22 @@ func TestHostWarningsOnlyForExternalOrWildcardBinds(t *testing.T) {
 		t.Fatalf("warning %q should mention unauthenticated trusted-LAN exposure", warning)
 	}
 }
+
+func TestStartRecordingDoesNotAutoReconstructMissingTopology(t *testing.T) {
+	dir := t.TempDir()
+	srv := NewServer(dir, nil)
+	srv.StartRecording(dir)
+	if err := srv.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".portal", "reconstruct.progress")); !os.IsNotExist(err) {
+		t.Fatalf("reconstruct.progress should not be created by StartRecording, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".portal", "replay")); !os.IsNotExist(err) {
+		t.Fatalf("replay dir should not be created by StartRecording, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".portal", "topology.jsonl")); err != nil {
+		t.Fatalf("topology snapshot should still be recorded: %v", err)
+	}
+}
