@@ -891,10 +891,147 @@ func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
 			t.Fatalf("view missing always-included capability %q; view:\n%s", capName, view)
 		}
 	}
+	// web_search and vision are default/always-included tools, not
+	// user-selectable capabilities: they render in the same informational
+	// (non-interactive) section as the kernel core floor above.
 	for _, capName := range []string{"web_search", "vision"} {
 		if !strings.Contains(view, capName) {
-			t.Fatalf("view missing optional capability %q; view:\n%s", capName, view)
+			t.Fatalf("view missing always-included tool name %q; view:\n%s", capName, view)
 		}
+	}
+}
+
+// TestPresetEditorWebSearchAndVisionAreNotFocusableFields is the regression
+// test for the fixed-capability-providers change: web_search and vision
+// must not appear as cursor-navigable/editable rows. They're rendered
+// read-only via mandatoryCapRow alongside the other always-included tools.
+func TestPresetEditorWebSearchAndVisionAreNotFocusableFields(t *testing.T) {
+	for _, f := range []editorField{feCapWebSearch, feCapVision} {
+		for _, got := range editorFieldOrder {
+			if got == f {
+				t.Fatalf("capability field %v must not be in editorFieldOrder %#v", f, editorFieldOrder)
+			}
+		}
+	}
+}
+
+// TestPresetEditorWebSearchAndVisionViewHasNoCheckboxOrProviderNames
+// asserts the web_search/vision rows in the live editor view render
+// exactly like the other always-included tools (plain "[✓] name  desc"
+// via mandatoryCapRow) with no radio strip of provider options — those
+// are the fixed/default tool routes, not user choices. Scoped to just
+// those two row lines, since provider names like "minimax"/"gemini"
+// legitimately appear elsewhere in the view (the LLM provider/model
+// rows and their radio strips).
+func TestPresetEditorWebSearchAndVisionViewHasNoCheckboxOrProviderNames(t *testing.T) {
+	p := testPresetEditorPreset()
+	caps := p.Manifest["capabilities"].(map[string]interface{})
+	caps["web_search"] = map[string]interface{}{"provider": "zhipu"}
+	caps["vision"] = map[string]interface{}{"provider": "gemini"}
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+	view := m.View()
+
+	for _, capName := range []string{"web_search", "vision"} {
+		line := findLineContaining(t, view, capName)
+		if !strings.Contains(line, "[✓]") {
+			t.Fatalf("%s row must render the informational [✓] marker; got: %q", capName, line)
+		}
+		if strings.Contains(line, "[ ]") {
+			t.Fatalf("%s row must not render an unchecked/toggleable checkbox; got: %q", capName, line)
+		}
+		if strings.Contains(line, "●") || strings.Contains(line, "○") {
+			t.Fatalf("%s row must not render a provider radio strip; got: %q", capName, line)
+		}
+		for _, providerName := range []string{"duckduckgo", "zhipu", "gemini", "inherit"} {
+			if strings.Contains(line, providerName) {
+				t.Fatalf("%s row must not display provider name %q; got: %q", capName, providerName, line)
+			}
+		}
+	}
+}
+
+func findLineContaining(t *testing.T, view, substr string) string {
+	t.Helper()
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, substr) {
+			return line
+		}
+	}
+	t.Fatalf("view has no line containing %q", substr)
+	return ""
+}
+
+// TestPresetEditorCursorCannotLandOnWebSearchOrVision walks the entire
+// cursor range via Down and confirms it never lands on the removed
+// feCapWebSearch/feCapVision positions — keyboard navigation cannot
+// focus these rows.
+func TestPresetEditorCursorCannotLandOnWebSearchOrVision(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+	for i := 0; i < len(editorFieldOrder)+5; i++ {
+		f := editorFieldOrder[m.cursor]
+		if f == feCapWebSearch || f == feCapVision {
+			t.Fatalf("cursor landed on removed capability field %v at step %d", f, i)
+		}
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+}
+
+// TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue
+// ensures saving an existing preset with old init.json-style capability
+// values (including a non-default web_search provider) round-trips them
+// unchanged. The editor's field-list change must not normalize, rewrite,
+// or migrate values it no longer exposes as editable UI.
+func TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue(t *testing.T) {
+	p := testPresetEditorPreset()
+	caps := p.Manifest["capabilities"].(map[string]interface{})
+	caps["web_search"] = map[string]interface{}{"provider": "zhipu"}
+	caps["vision"] = map[string]interface{}{"provider": "gemini", "api_key_env": "GEMINI_API_KEY"}
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m = withValidModelValidity(m)
+
+	_, cmd := m.commit()
+	msg := cmd()
+	commit, ok := msg.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg", msg)
+	}
+	gotCaps, ok := commit.Preset.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("committed capabilities missing/wrong type: %T", commit.Preset.Manifest["capabilities"])
+	}
+	if !reflect.DeepEqual(gotCaps["web_search"], caps["web_search"]) {
+		t.Fatalf("web_search capability changed on save: got %#v, want %#v", gotCaps["web_search"], caps["web_search"])
+	}
+	if !reflect.DeepEqual(gotCaps["vision"], caps["vision"]) {
+		t.Fatalf("vision capability changed on save: got %#v, want %#v", gotCaps["vision"], caps["vision"])
+	}
+}
+
+// TestPresetEditorSaveNotBlockedByCapabilityState confirms the save gate
+// (modelValidity) is unaffected by web_search/vision capability presence
+// or absence — capability state must never block Save/Next. The only
+// save gate is the independent base-LLM model availability check.
+func TestPresetEditorSaveNotBlockedByCapabilityState(t *testing.T) {
+	p := testPresetEditorPreset()
+	caps := p.Manifest["capabilities"].(map[string]interface{})
+	delete(caps, "web_search")
+	delete(caps, "vision")
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m = withValidModelValidity(m)
+
+	_, cmd := m.commit()
+	if cmd == nil {
+		t.Fatalf("commit returned nil cmd with no capabilities present and a valid model")
+	}
+	msg := cmd()
+	if _, ok := msg.(PresetEditorCommitMsg); !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must not be blocked by missing capabilities)", msg)
 	}
 }
 

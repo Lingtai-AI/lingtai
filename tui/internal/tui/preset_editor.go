@@ -75,12 +75,13 @@ var capFieldNames = map[editorField]string{
 }
 
 // editorFieldOrder is the rendering order of fields. The cursor walks
-// this slice; section headers render between transitions. Only truly
-// optional/provider-conditional capabilities appear as editable rows.
+// this slice; section headers render between transitions. web_search
+// and vision are default/always-included tools (not user-selectable
+// capabilities) and are rendered read-only in the mandatory section
+// below, so they do not appear here.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feBaseURL, feAPIKey,
-	feCapWebSearch, feCapVision,
 	feSave,
 }
 
@@ -1656,23 +1657,20 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
 	// Always-included capabilities — kernel intrinsics plus the core
-	// floor injected by apply_core_defaults at runtime. The editor lists
-	// them for awareness; users cannot toggle them off via the preset
-	// manifest (the kernel's explicit-disable channel is the only way).
+	// floor injected by apply_core_defaults at runtime, plus web_search
+	// and vision, which are default/always-included tools rather than
+	// user-selectable capabilities. The editor lists them for awareness;
+	// users cannot toggle them off via the preset manifest (the kernel's
+	// explicit-disable channel is the only way).
 	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_mandatory"))))
 	alwaysIncludedRows := []string{
 		"email", "psyche", "soul", "system",
 		"knowledge", "skills", "shell",
 		"avatar", "daemon", "mcp", "file",
+		"web_search", "vision",
 	}
 	for _, capName := range alwaysIncludedRows {
 		rows = append(rows, plain(m.mandatoryCapRow(capName, width-4)))
-	}
-	rows = append(rows, plain(""))
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
-	for _, capName := range optionalCapabilities {
-		f := capFieldFor(capName)
-		rows = append(rows, row(f, m.capRow(f, capName, width-4)))
 	}
 	rows = append(rows, plain(""))
 	rows = append(rows, row(feSave, m.renderSaveButton()))
