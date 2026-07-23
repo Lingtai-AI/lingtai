@@ -53,3 +53,35 @@ func TestPaletteAgentCommandsKeepMainFallback(t *testing.T) {
 		t.Fatalf("/sleep with Main current did not retain Main target %q: %v", app.orchDir, err)
 	}
 }
+
+func TestPaletteAgentOwnedViewsFollowCurrentConversation(t *testing.T) {
+	fixture := newDirectAffinityFixture(t, false)
+	base, _ := directAffinityActivate(t, fixture.app, fixture.targetA.AgentID)
+	base.orchDir = t.TempDir()
+	base.orchName = "Main"
+
+	tests := []struct {
+		command     string
+		selectedDir func(App) string
+	}{
+		{command: "settings", selectedDir: func(a App) string { return a.settings.orchDir }},
+		{command: "kanban", selectedDir: func(a App) string { return a.props.orchDir }},
+		{command: "daemons", selectedDir: func(a App) string { return a.daemons.orchDir }},
+		{command: "notification", selectedDir: func(a App) string { return a.notification.agentDir }},
+		{command: "skills", selectedDir: func(a App) string { return a.library.selectedDir }},
+		{command: "knowledge", selectedDir: func(a App) string { return a.knowledge.selectedDir }},
+		{command: "library", selectedDir: func(a App) string { return a.knowledge.selectedDir }},
+		{command: "codex", selectedDir: func(a App) string { return a.knowledge.selectedDir }},
+		{command: "system", selectedDir: func(a App) string { return a.system.selectedDir }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			updated, _ := base.handlePaletteCommand(tt.command, "")
+			app := updated.(App)
+			if got := tt.selectedDir(app); got != fixture.targetA.Directory {
+				t.Fatalf("/%s targeted %q, want selected agent %q", tt.command, got, fixture.targetA.Directory)
+			}
+		})
+	}
+}

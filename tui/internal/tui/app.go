@@ -821,6 +821,13 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	}
 	targetDir := a.orchDir
 	targetName := a.orchName
+	if target, ok := a.mail.currentDirectTarget(); ok {
+		targetDir = target.Directory
+		targetName = target.Address
+		if targetName == "" {
+			targetName = filepath.Base(targetDir)
+		}
+	}
 	switch command {
 	case "sleep":
 		if args == "all" {
@@ -1012,7 +1019,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
-		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
+		a.settings = NewSettingsModel(a.globalDir, a.projectDir, targetDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "nirvana":
 		a.currentView = appViewNirvana
@@ -1020,15 +1027,15 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
 	case "kanban":
 		a.currentView = appViewProps
-		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
+		a.props = NewPropsModel(a.projectDir, targetDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "daemons":
 		a.currentView = appViewDaemons
-		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		a.daemons = NewDaemonsModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.daemons.Init(), a.sendSize())
 	case "notification":
 		a.currentView = appViewNotification
-		a.notification = NewNotificationModel(a.orchDir)
+		a.notification = NewNotificationModel(targetDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
 	case "goal":
 		if targetDir == "" {
@@ -1051,7 +1058,7 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		// Agent-scoped: mirror what the skills capability would inject for
 		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
 		// in init.json (manifest.capabilities.skills.paths).
-		a.library = NewLibraryModel(a.projectDir, a.orchDir, a.tuiConfig.Language)
+		a.library = NewLibraryModel(a.projectDir, targetDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "agents":
 		// The /agents selector is a Mail-owned overlay over the canonical
@@ -1066,11 +1073,11 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a.openProjectsView()
 	case "knowledge", "library", "codex":
 		a.currentView = appViewKnowledge
-		a.knowledge = NewKnowledgeModel(a.projectDir, a.orchDir)
+		a.knowledge = NewKnowledgeModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.knowledge.Init(), a.sendSize())
 	case "system":
 		a.currentView = appViewSystem
-		a.system = NewSystemModel(a.projectDir, a.orchDir)
+		a.system = NewSystemModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "mailbox":
 		a.currentView = appViewMailbox
@@ -1100,15 +1107,15 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("export.help"))
 			return a, nil
 		}
-		if a.orchDir == "" {
+		if targetDir == "" {
 			addMsg(i18n.T("export.no_agent"))
 			return a, nil
 		}
-		if !fs.IsAlive(a.orchDir, 3.0) {
+		if !fs.IsAlive(targetDir, 3.0) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
-		fs.WritePrompt(a.orchDir, i18n.T("export.recipe_prompt"))
+		fs.WritePrompt(targetDir, i18n.T("export.recipe_prompt"))
 		addMsg(i18n.T("export.recipe_sent"))
 		return a, nil
 	case "molt":
