@@ -108,9 +108,19 @@ type MailCache struct {
 	inboxDir  string
 	sentDir   string
 	outboxDir string
+
+	// lastFullSentScan records the last time Refresh walked the entire sent/
+	// tree. Pending outbox messages still get exact sent/<id>/message.json checks
+	// every refresh, but historical sent mail is budgeted so the 1s TUI refresh
+	// loop does not repeatedly full-scan large external-disk mailboxes.
+	lastFullSentScan time.Time
 }
 
 // NewMailCache creates an empty cache for the given human directory.
+// mailCacheFullSentScanInterval budgets expensive full sent/ scans in
+// MailCache.Refresh. Tests override this package var.
+var mailCacheFullSentScanInterval = 10 * time.Second
+
 func NewMailCache(humanDir string) MailCache {
 	return MailCache{
 		seen:      make(map[string]int),
@@ -127,24 +137,33 @@ func NewMailCache(humanDir string) MailCache {
 // Delivered flag flipped from false to true in place (no duplicate entry).
 func (c MailCache) Refresh() MailCache {
 	out := MailCache{
-		seen:      make(map[string]int, len(c.seen)+16),
-		Messages:  make([]MailMessage, len(c.Messages)),
-		humanDir:  c.humanDir,
-		inboxDir:  c.inboxDir,
-		sentDir:   c.sentDir,
-		outboxDir: c.outboxDir,
+		seen:             make(map[string]int, len(c.seen)+16),
+		Messages:         make([]MailMessage, len(c.Messages)),
+		humanDir:         c.humanDir,
+		inboxDir:         c.inboxDir,
+		sentDir:          c.sentDir,
+		outboxDir:        c.outboxDir,
+		lastFullSentScan: c.lastFullSentScan,
 	}
 	copy(out.Messages, c.Messages)
 	for k, v := range c.seen {
 		out.seen[k] = v
 	}
 
-	// Order matters: scan outbox first so messages appear immediately after send.
-	// Then inbox and sent — for any mailbox id previously seen in outbox that now
-	// appears in sent, the scan flips Delivered to true in place.
+	// Order matters: scan outbox first so messages appear immediately after send,
+	// then inbox. Pending outbox messages get exact sent/<id>/message.json checks
+	// on every refresh so their Delivered flag flips promptly after pickup without
+	// forcing a full sent/ scan every second. Historical sent/ discovery is budgeted
+	// below because large external-disk sent folders can dominate the TUI loop.
 	out.scanFolder(out.outboxDir, false /* delivered */)
 	out.scanFolder(out.inboxDir, true)
-	out.scanFolder(out.sentDir, true)
+	out.markDeliveredFromSentIDs()
+
+	now := time.Now()
+	if out.lastFullSentScan.IsZero() || now.Sub(out.lastFullSentScan) >= mailCacheFullSentScanInterval {
+		out.scanFolder(out.sentDir, true)
+		out.lastFullSentScan = now
+	}
 
 	// Sort by ReceivedAt (RFC3339 strings sort lexicographically).
 	sort.Slice(out.Messages, func(i, j int) bool {
@@ -155,6 +174,7 @@ func (c MailCache) Refresh() MailCache {
 	// which could diverge from the directory name if a future kernel rewrote
 	// the JSON during pickup. MailboxID is set to the directory name at write
 	// time in WriteMail and never mutated.
+	out.seen = make(map[string]int, len(out.Messages))
 	for i, m := range out.Messages {
 		out.seen[m.MailboxID] = i
 	}
@@ -196,6 +216,27 @@ func (c *MailCache) scanFolder(folder string, delivered bool) {
 		msg.Delivered = delivered
 		c.seen[name] = len(c.Messages)
 		c.Messages = append(c.Messages, msg)
+	}
+}
+
+// markDeliveredFromSentIDs checks only the exact sent/<mailbox-id>/message.json
+// paths for messages already visible as pending/undelivered. This preserves the
+// immediate outbox→sent delivered-state transition without a full sent/ walk.
+func (c *MailCache) markDeliveredFromSentIDs() {
+	for i := range c.Messages {
+		if c.Messages[i].Delivered {
+			continue
+		}
+		mailboxID := c.Messages[i].MailboxID
+		if mailboxID == "" {
+			mailboxID = c.Messages[i].ID
+		}
+		if mailboxID == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(c.sentDir, mailboxID, "message.json")); err == nil {
+			c.Messages[i].Delivered = true
+		}
 	}
 }
 

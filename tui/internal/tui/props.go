@@ -46,6 +46,18 @@ type PropsModel struct {
 	// hint.
 	AutoRefresh bool
 
+	// Reload state. Auto-refresh ticks can arrive faster than an external-disk
+	// network scan completes, so the props view keeps one load in flight and marks
+	// skipped ticks as stale instead of queuing overlapping scans.
+	loadInFlight        bool
+	loadSkippedTicks    int
+	loadLastDuration    time.Duration
+	loadLastCompleted   time.Time
+	detailInFlight      bool
+	detailSkippedTicks  int
+	detailLastDuration  time.Duration
+	detailLastCompleted time.Time
+
 	// Scrollable viewport for content
 	viewport viewport.Model
 	ready    bool // viewport initialized
@@ -82,6 +94,11 @@ type PropsModel struct {
 // Ctrl+D recent-call lane (main agent on the left, daemons on the right).
 const detailRecentCalls = 100
 
+// propsSlowLoadThreshold marks disk-backed props scans that are slow enough to
+// explain stale UI on external volumes. It is intentionally conservative: the
+// marker is informational and does not block future reloads.
+const propsSlowLoadThreshold = 500 * time.Millisecond
+
 func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 	return PropsModel{
 		baseDir:     baseDir,
@@ -99,9 +116,34 @@ type propsLoadMsg struct {
 	adminStart     string
 	agentDirs      []string
 	agentNodes     []fs.AgentNode
+	selectedDir    string
+	startedAt      time.Time
+	duration       time.Duration
+}
+
+type propsDetailLoadMsg struct {
+	selectedDir                   string
+	startedAt                     time.Time
+	duration                      time.Duration
+	detailByProvider              map[string]fs.TokenTotals
+	detailRecent                  []fs.LedgerEntry
+	detailDaemonRecent            []fs.DaemonLedgerEntry
+	detailCurrentSessionStats     fs.SessionTokenStats
+	detailLastSessionStats        fs.SessionTokenStats
+	detailCurrentSessionToolCalls int64
+	detailLastSessionToolCalls    int64
+	detailContextStats            fs.ContextStats
+	detailDaemonCounts            fs.DaemonCounts
+	detailMCPNames                []string
+	detailRebuilds                []time.Time
+	detailRefreshes               []time.Time
 }
 
 func (m PropsModel) loadData() tea.Msg {
+	return m.loadDataStarted(time.Now())
+}
+
+func (m PropsModel) loadDataStarted(startedAt time.Time) tea.Msg {
 	net, _ := fs.BuildNetwork(m.baseDir)
 
 	var dirs []string
@@ -136,10 +178,28 @@ func (m PropsModel) loadData() tea.Msg {
 		adminStart:     adminStart,
 		agentDirs:      allDirs,
 		agentNodes:     net.Nodes,
+		selectedDir:    m.selectedDir,
+		startedAt:      startedAt,
+		duration:       time.Since(startedAt),
 	}
 }
 
-func (m PropsModel) Init() tea.Cmd { return m.loadData }
+func (m PropsModel) loadDataCmd(startedAt time.Time) tea.Cmd {
+	return func() tea.Msg { return m.loadDataStarted(startedAt) }
+}
+
+func (m PropsModel) startLoadData() (PropsModel, tea.Cmd) {
+	if m.loadInFlight {
+		m.loadSkippedTicks++
+		return m, nil
+	}
+	m.loadInFlight = true
+	m.loadSkippedTicks = 0
+	startedAt := time.Now()
+	return m, m.loadDataCmd(startedAt)
+}
+
+func (m PropsModel) Init() tea.Cmd { return m.loadDataCmd(time.Now()) }
 
 // AutoReloadCmd implements autoReloadable: on the app-level 1s tick, reload the
 // kanban dashboard from disk so network/token/status data stays live without a
@@ -148,14 +208,13 @@ func (m PropsModel) Init() tea.Cmd { return m.loadData }
 // folder state.
 //
 // Returns nil — skipping this tick — while the agent picker is open (selectedDir
-// is mid-change). The Ctrl+D detail pane remains live: App.autoRefreshActiveView
-// refreshes the detail caches in place before this command reloads the outer
-// dashboard data.
+// is mid-change) or a previous load is still in flight. The App-level path uses
+// startLoadData so skipped ticks are counted and surfaced as a stale marker.
 func (m PropsModel) AutoReloadCmd() tea.Cmd {
-	if m.pickerOpen {
+	if m.pickerOpen || m.loadInFlight {
 		return nil
 	}
-	return m.loadData
+	return m.loadDataCmd(time.Now())
 }
 
 // propsHeaderLines is the number of lines used by the header (title + separator + optional callout).
@@ -186,13 +245,38 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		m.syncViewportContent()
 
 	case propsLoadMsg:
+		m.loadInFlight = false
+		m.loadLastDuration = msg.duration
+		m.loadLastCompleted = msg.startedAt.Add(msg.duration)
 		m.network = msg.network
 		m.tokens = msg.tokens
-		m.selectedTokens = msg.selectedTokens
-		m.selectedStatus = msg.selectedStatus
+		if msg.selectedDir == m.selectedDir {
+			m.selectedTokens = msg.selectedTokens
+			m.selectedStatus = msg.selectedStatus
+		}
 		m.adminStart = msg.adminStart
 		m.agentDirs = msg.agentDirs
 		m.agentNodes = msg.agentNodes
+		m.syncViewportContent()
+
+	case propsDetailLoadMsg:
+		m.detailInFlight = false
+		m.detailLastDuration = msg.duration
+		m.detailLastCompleted = msg.startedAt.Add(msg.duration)
+		if msg.selectedDir == m.selectedDir {
+			m.detailByProvider = msg.detailByProvider
+			m.detailRecent = msg.detailRecent
+			m.detailDaemonRecent = msg.detailDaemonRecent
+			m.detailCurrentSessionStats = msg.detailCurrentSessionStats
+			m.detailLastSessionStats = msg.detailLastSessionStats
+			m.detailCurrentSessionToolCalls = msg.detailCurrentSessionToolCalls
+			m.detailLastSessionToolCalls = msg.detailLastSessionToolCalls
+			m.detailContextStats = msg.detailContextStats
+			m.detailDaemonCounts = msg.detailDaemonCounts
+			m.detailMCPNames = msg.detailMCPNames
+			m.detailRebuilds = msg.detailRebuilds
+			m.detailRefreshes = msg.detailRefreshes
+		}
 		m.syncViewportContent()
 
 	case tea.MouseWheelMsg:
@@ -217,7 +301,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 			return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 		case "ctrl+r":
 			// Reload the dashboard data (network, tokens, agent status) from disk.
-			return m, m.loadData
+			return m.startLoadData()
 		case "ctrl+t":
 			m.pickerOpen = true
 			for i, n := range m.agentNodes {
@@ -229,13 +313,16 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 			m.syncViewportContent()
 			return m, nil
 		case "ctrl+d":
-			// Toggle detail view. Reload the per-provider breakdown
-			// from disk on every open so the data is fresh — these
-			// reads are cheap (small local ledger, init, and daemon files).
+			// Toggle detail view. Reload the per-provider breakdown asynchronously on
+			// every open; external disks can make the detail reads expensive enough to
+			// block rendering if they run inline on the keypress path.
 			m.detailOpen = !m.detailOpen
 			if m.detailOpen {
-				m.loadDetail()
 				m.viewport.GotoTop()
+				var detailCmd tea.Cmd
+				m, detailCmd = m.startDetailLoad()
+				m.syncViewportContent()
+				return m, detailCmd
 			}
 			m.syncViewportContent()
 			return m, nil
@@ -246,6 +333,42 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m PropsModel) startDetailLoad() (PropsModel, tea.Cmd) {
+	if m.detailInFlight {
+		m.detailSkippedTicks++
+		return m, nil
+	}
+	m.detailInFlight = true
+	m.detailSkippedTicks = 0
+	startedAt := time.Now()
+	return m, m.loadDetailCmd(startedAt)
+}
+
+func (m PropsModel) loadDetailCmd(startedAt time.Time) tea.Cmd {
+	selectedDir := m.selectedDir
+	return func() tea.Msg {
+		scratch := PropsModel{selectedDir: selectedDir}
+		scratch.loadDetail()
+		return propsDetailLoadMsg{
+			selectedDir:                   selectedDir,
+			startedAt:                     startedAt,
+			duration:                      time.Since(startedAt),
+			detailByProvider:              scratch.detailByProvider,
+			detailRecent:                  scratch.detailRecent,
+			detailDaemonRecent:            scratch.detailDaemonRecent,
+			detailCurrentSessionStats:     scratch.detailCurrentSessionStats,
+			detailLastSessionStats:        scratch.detailLastSessionStats,
+			detailCurrentSessionToolCalls: scratch.detailCurrentSessionToolCalls,
+			detailLastSessionToolCalls:    scratch.detailLastSessionToolCalls,
+			detailContextStats:            scratch.detailContextStats,
+			detailDaemonCounts:            scratch.detailDaemonCounts,
+			detailMCPNames:                scratch.detailMCPNames,
+			detailRebuilds:                scratch.detailRebuilds,
+			detailRefreshes:               scratch.detailRefreshes,
+		}
+	}
 }
 
 // loadDetail populates the detail-view caches from disk for the
@@ -430,6 +553,9 @@ func (m PropsModel) View() string {
 	if m.AutoRefresh {
 		refreshHint = i18n.T("hints.auto_refresh_live") + " " + RuneBullet + " " + refreshHint
 	}
+	if status := m.reloadStatusHint(); status != "" {
+		refreshHint += " " + RuneBullet + " " + status
+	}
 
 	var footerLine string
 	if m.detailOpen {
@@ -445,6 +571,29 @@ func (m PropsModel) View() string {
 	footer := strings.Repeat("\u2500", m.width) + "\n" + StyleFaint.Render(footerLine)
 
 	return header + "\n" + PaintViewportBG(m.viewport.View(), m.width) + "\n" + footer
+}
+
+func (m PropsModel) reloadStatusHint() string {
+	var parts []string
+	if m.loadInFlight {
+		parts = append(parts, "loading")
+	}
+	if m.loadSkippedTicks > 0 {
+		parts = append(parts, fmt.Sprintf("stale:%d", m.loadSkippedTicks))
+	}
+	if m.loadLastDuration >= propsSlowLoadThreshold {
+		parts = append(parts, "slow:"+m.loadLastDuration.Round(time.Millisecond).String())
+	}
+	if m.detailOpen && m.detailInFlight {
+		parts = append(parts, "detail loading")
+	}
+	if m.detailSkippedTicks > 0 {
+		parts = append(parts, fmt.Sprintf("detail stale:%d", m.detailSkippedTicks))
+	}
+	if m.detailLastDuration >= propsSlowLoadThreshold {
+		parts = append(parts, "detail slow:"+m.detailLastDuration.Round(time.Millisecond).String())
+	}
+	return strings.Join(parts, " "+RuneBullet+" ")
 }
 
 func padToWidth(s string, w int) string {

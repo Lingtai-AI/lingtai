@@ -25,6 +25,11 @@ const (
 	RoleUnknown Role = "?"
 )
 
+var (
+	inventorySlowThreshold = 500 * time.Millisecond
+	maxIMIdentityFiles     = 8
+)
+
 // Options controls inventory conversion. FilterDir is a project root, not a
 // .lingtai directory. SelfPID is excluded so list never reports itself when a
 // test or wrapper command happens to match the process pattern.
@@ -81,6 +86,7 @@ type Record struct {
 	AdminSummary   string
 	IMHandles      string
 	ReadError      string
+	SlowFields     []string
 
 	CreatedAt          string
 	MoltCount          int
@@ -223,33 +229,36 @@ func enrichRecord(r *Record) {
 	r.AgentName = fallback
 	r.AdminSummary = "unknown"
 
-	node, err := fs.ReadAgent(r.AgentDir)
+	start := time.Now()
+	node, raw, err := readAgentManifestOnce(r.AgentDir)
+	noteSlow(r, "agent_json", start)
 	if err == nil {
 		r.Address = firstNonEmpty(node.Address, fallback)
 		r.AgentName = firstNonEmpty(node.AgentName, fallback)
 		r.Nickname = node.Nickname
 		r.State = node.State
 		r.IsHuman = node.IsHuman
-	} else {
-		r.ReadError = err.Error()
-	}
-
-	raw, err := fs.ReadAgentRaw(r.AgentDir)
-	if err != nil {
-		if r.ReadError == "" {
-			r.ReadError = err.Error()
-		}
-	} else {
 		r.IsOrchestrator = fs.IsOrchestratorManifest(raw)
 		r.AdminSummary = SummarizeAdmin(raw["admin"])
 		if r.IsOrchestrator {
 			r.IsHuman = false
 		}
-		r.IMHandles = SummarizeIMIdentities(r.AgentDir)
+		start = time.Now()
+		var truncated bool
+		r.IMHandles, truncated = summarizeIMIdentities(r.AgentDir, maxIMIdentityFiles)
+		noteSlow(r, "mcp_identities", start)
+		if truncated {
+			appendSlowField(r, "mcp_identities_truncated")
+		}
 		r.CreatedAt = rawString(raw, "created_at")
 		r.MoltCount, r.MoltCountAvailable = rawInt(raw, "molt_count")
+	} else {
+		r.ReadError = err.Error()
 	}
+
+	start = time.Now()
 	status := fs.ReadStatus(r.AgentDir)
+	noteSlow(r, "status", start)
 	ctx := status.Tokens.Context
 	if ctx.WindowSize > 0 {
 		r.ContextTotalTokens = ctx.TotalTokens
@@ -258,8 +267,64 @@ func enrichRecord(r *Record) {
 		r.ContextAvailable = true
 	}
 	r.Role = RoleFor(*r)
+	start = time.Now()
 	r.Heartbeat = fs.ReadHeartbeat(r.AgentDir, fs.AgentAliveThresholdSec)
+	noteSlow(r, "heartbeat", start)
+	start = time.Now()
 	r.LockExists = fileExists(filepath.Join(r.AgentDir, ".agent.lock"))
+	noteSlow(r, "lock", start)
+}
+
+type inventoryAgentManifest struct {
+	AgentName    string           `json:"agent_name"`
+	Nickname     string           `json:"nickname"`
+	Address      string           `json:"address"`
+	State        string           `json:"state"`
+	Admin        *json.RawMessage `json:"admin,omitempty"`
+	Capabilities json.RawMessage  `json:"capabilities"`
+	Location     *fs.Location     `json:"location,omitempty"`
+}
+
+func readAgentManifestOnce(agentDir string) (fs.AgentNode, map[string]interface{}, error) {
+	data, err := os.ReadFile(filepath.Join(agentDir, ".agent.json"))
+	if err != nil {
+		return fs.AgentNode{}, nil, fmt.Errorf("read manifest: %w", err)
+	}
+	var manifest inventoryAgentManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fs.AgentNode{}, nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fs.AgentNode{}, nil, fmt.Errorf("parse manifest raw: %w", err)
+	}
+	isHuman := manifest.Admin == nil || string(*manifest.Admin) == "null"
+	node := fs.AgentNode{
+		Address:      manifest.Address,
+		AgentName:    manifest.AgentName,
+		Nickname:     manifest.Nickname,
+		State:        manifest.State,
+		IsHuman:      isHuman,
+		Capabilities: fs.ParseCapabilities(manifest.Capabilities),
+		Location:     manifest.Location,
+		WorkingDir:   agentDir,
+	}
+	return node, raw, nil
+}
+
+func noteSlow(r *Record, field string, start time.Time) {
+	elapsed := time.Since(start)
+	if elapsed < inventorySlowThreshold {
+		return
+	}
+	appendSlowField(r, fmt.Sprintf("%s:%dms", field, elapsed.Milliseconds()))
+}
+
+func appendSlowField(r *Record, field string) {
+	if strings.TrimSpace(field) == "" {
+		return
+	}
+	r.SlowFields = append(r.SlowFields, field)
 }
 
 func RoleFor(r Record) Role {
@@ -453,15 +518,27 @@ func fileExists(path string) bool {
 }
 
 func SummarizeIMIdentities(agentDir string) string {
+	summary, _ := summarizeIMIdentities(agentDir, maxIMIdentityFiles)
+	return summary
+}
+
+func summarizeIMIdentities(agentDir string, maxFiles int) (string, bool) {
 	identityDir := filepath.Join(agentDir, "system", "mcp_identities")
 	entries, err := os.ReadDir(identityDir)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var parts []string
+	jsonSeen := 0
+	truncated := false
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
+		}
+		jsonSeen++
+		if maxFiles > 0 && jsonSeen > maxFiles {
+			truncated = true
+			break
 		}
 		mcp := strings.TrimSuffix(entry.Name(), ".json")
 		data, err := os.ReadFile(filepath.Join(identityDir, entry.Name()))
@@ -494,7 +571,7 @@ func SummarizeIMIdentities(agentDir string) string {
 		}
 	}
 	sort.Strings(parts)
-	return strings.Join(parts, ";")
+	return strings.Join(parts, ";"), truncated
 }
 
 func publicHandle(account map[string]interface{}) string {

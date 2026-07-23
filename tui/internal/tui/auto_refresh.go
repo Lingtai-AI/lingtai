@@ -48,16 +48,29 @@ func (a App) autoRefreshActiveView() (App, tea.Cmd) {
 	switch a.currentView {
 	case appViewProps:
 		// Keep the dashboard live, but do not interrupt the agent picker. The
-		// Ctrl+D detail layer is also live: refresh its derived breakdowns in
-		// place before scheduling the same outer dashboard reload Ctrl+R uses.
+		// Ctrl+D detail layer is also live, but both outer and detail reloads are
+		// guarded so slow external-disk scans do not stack overlapping commands.
 		if a.props.pickerOpen {
 			return a, nil
 		}
+		var cmds []tea.Cmd
 		if a.props.detailOpen {
-			a.props.loadDetail()
+			var detailCmd tea.Cmd
+			a.props, detailCmd = a.props.startDetailLoad()
 			a.props.syncViewportContent()
+			if detailCmd != nil {
+				cmds = append(cmds, detailCmd)
+			}
 		}
-		return a, a.props.AutoReloadCmd()
+		var reloadCmd tea.Cmd
+		a.props, reloadCmd = a.props.startLoadData()
+		if reloadCmd != nil {
+			cmds = append(cmds, reloadCmd)
+		}
+		if len(cmds) == 0 {
+			return a, nil
+		}
+		return a, tea.Batch(cmds...)
 	}
 	return a, nil
 }

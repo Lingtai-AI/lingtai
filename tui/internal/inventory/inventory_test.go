@@ -241,3 +241,70 @@ func TestSnapshotJSONFixtureParity(t *testing.T) {
 		t.Fatalf("record JSON parity lost: %s", data)
 	}
 }
+
+func TestFromProcessesMarksSlowInventoryFields(t *testing.T) {
+	oldThreshold := inventorySlowThreshold
+	inventorySlowThreshold = 0
+	defer func() { inventorySlowThreshold = oldThreshold }()
+
+	agentDir := filepath.Join(t.TempDir(), "agent")
+	writeAgentJSON(t, agentDir, "agent", "IDLE", `{}`)
+
+	snap := FromProcesses([]processscan.AgentProcess{{PID: 7, AgentDir: agentDir}}, Options{})
+	if len(snap.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(snap.Records))
+	}
+	for _, prefix := range []string{"agent_json:", "status:", "heartbeat:", "lock:"} {
+		if !hasSlowPrefix(snap.Records[0].SlowFields, prefix) {
+			t.Fatalf("expected slow field prefix %q in %#v", prefix, snap.Records[0].SlowFields)
+		}
+	}
+}
+
+func TestFromProcessesMarksTruncatedIMIdentities(t *testing.T) {
+	oldMax := maxIMIdentityFiles
+	maxIMIdentityFiles = 1
+	defer func() { maxIMIdentityFiles = oldMax }()
+
+	agentDir := filepath.Join(t.TempDir(), "agent")
+	writeAgentJSON(t, agentDir, "agent", "IDLE", `{}`)
+	identityDir := filepath.Join(agentDir, "system", "mcp_identities")
+	if err := os.MkdirAll(identityDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, handle := range map[string]string{"telegram": "bot_one", "wechat": "bot_two"} {
+		body := fmt.Sprintf(`{"mcp":%q,"accounts":[{"bot_username":%q}]}`, name, handle)
+		if err := os.WriteFile(filepath.Join(identityDir, name+".json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap := FromProcesses([]processscan.AgentProcess{{PID: 7, AgentDir: agentDir}}, Options{})
+	if len(snap.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(snap.Records))
+	}
+	if snap.Records[0].IMHandles == "" {
+		t.Fatalf("expected at least one identity handle")
+	}
+	if !hasSlowExact(snap.Records[0].SlowFields, "mcp_identities_truncated") {
+		t.Fatalf("expected truncated marker in %#v", snap.Records[0].SlowFields)
+	}
+}
+
+func hasSlowPrefix(fields []string, prefix string) bool {
+	for _, field := range fields {
+		if strings.HasPrefix(field, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSlowExact(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
+}

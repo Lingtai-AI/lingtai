@@ -22,6 +22,7 @@ import (
 // keypress is tea.KeyPressMsg{Code: 'r', Text: "r"} whose .String() is "r".
 
 func ctrlR() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl} }
+func ctrlD() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl} }
 func bareR() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'r', Text: "r"} }
 
 // --- Cmd-returning views: Ctrl+R must trigger a (re)load command. ---
@@ -31,6 +32,42 @@ func TestPropsCtrlRTriggersReload(t *testing.T) {
 	_, cmd := m.Update(ctrlR())
 	if cmd == nil {
 		t.Fatal("PropsModel ctrl+r returned nil cmd; expected a reload command")
+	}
+}
+
+func TestPropsCtrlRSkipsWhileLoadInFlight(t *testing.T) {
+	m := NewPropsModel(t.TempDir(), t.TempDir(), t.TempDir())
+	m.loadInFlight = true
+	updated, cmd := m.Update(ctrlR())
+	if cmd != nil {
+		t.Fatal("PropsModel ctrl+r should not queue overlapping reload while one is in flight")
+	}
+	if updated.loadSkippedTicks != 1 {
+		t.Fatalf("loadSkippedTicks = %d, want 1", updated.loadSkippedTicks)
+	}
+}
+
+func TestPropsCtrlDLoadsDetailAsynchronously(t *testing.T) {
+	dir := t.TempDir()
+	m := NewPropsModel(dir, dir, dir)
+	updated, cmd := m.Update(ctrlD())
+	if cmd == nil {
+		t.Fatal("PropsModel ctrl+d opening detail should return async detail load command")
+	}
+	if !updated.detailOpen {
+		t.Fatal("PropsModel ctrl+d should open detail view")
+	}
+	if !updated.detailInFlight {
+		t.Fatal("PropsModel ctrl+d should mark detail load in flight")
+	}
+	msg := cmd()
+	detailMsg, ok := msg.(propsDetailLoadMsg)
+	if !ok {
+		t.Fatalf("ctrl+d command returned %T, want propsDetailLoadMsg", msg)
+	}
+	updated, _ = updated.Update(detailMsg)
+	if updated.detailInFlight {
+		t.Fatal("detailInFlight should clear when propsDetailLoadMsg is applied")
 	}
 }
 

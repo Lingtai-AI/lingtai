@@ -103,7 +103,7 @@ func printList(w io.Writer, records []inventory.Record, opts listOptions, showUp
 		imHandles := firstNonEmpty(r.IMHandles, "-")
 		name := firstNonEmpty(r.AgentName, r.Agent)
 		address := firstNonEmpty(r.Address, r.Agent)
-		state := firstNonEmpty(r.State, "unknown")
+		state := annotateSlowState(firstNonEmpty(r.State, "unknown"), r.SlowFields)
 		role := string(r.Role)
 		pid := fmt.Sprint(r.PID)
 		if opts.Admin {
@@ -178,6 +178,13 @@ func printListWarnings(w io.Writer, phantomDirs []string, filterDir string) {
 	} else {
 		fmt.Fprintln(w, "Run 'lingtai-tui purge <dir>' to kill phantoms in a specific directory.")
 	}
+}
+
+func annotateSlowState(state string, slowFields []string) string {
+	if len(slowFields) == 0 {
+		return state
+	}
+	return state + " [slow:" + strings.Join(slowFields, ",") + "]"
 }
 
 func firstNonEmpty(values ...string) string {
