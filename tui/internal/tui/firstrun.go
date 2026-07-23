@@ -361,6 +361,13 @@ type FirstRunModel struct {
 	presetDefaultIdx int
 	presetCfgCursor  int    // cursor on the agent-preset-config page (row index)
 	presetCfgMessage string // transient validation flash (e.g. "default cannot be unallowed")
+	// The selected default must pass the same real Codex Responses probe before
+	// Next can advance. This is separate from the API-key step's validity state
+	// because OAuth presets have no key textarea.
+	presetCfgValidity       modelValidityStatus
+	presetCfgValidityDetail string
+	presetCfgValidityGen    uint64
+	presetCfgValidityKey    string
 	// Addon selection state (shown below capabilities)
 	addonSelected map[string]bool // "imap", "telegram"
 	addonOrder    []string        // ["imap", "telegram"]
@@ -1063,6 +1070,17 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			updated, cmd := m.presetEditor.Update(msg)
 			m.presetEditor = updated
 			return m, cmd
+		}
+		if m.step == stepAgentPresets {
+			if msg.Generation != m.presetCfgValidityGen {
+				return m, nil
+			}
+			m.presetCfgValidity = msg.Status
+			m.presetCfgValidityDetail = msg.Detail
+			if msg.Status == validityInvalid {
+				m.presetCfgMessage = msg.Detail
+			}
+			return m, nil
 		}
 		if msg.Generation != m.presetKeyValidityGen {
 			return m, nil
@@ -1950,6 +1968,28 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					// on the right preset.
 					m.cursor = m.savedPresetIdx[m.presetDefaultIdx]
 					p := m.presets[m.cursor]
+					if m.isCodexPreset(p) {
+						key := m.presetCfgValidityKeyFor(p)
+						if m.presetCfgValidityKey != key || m.presetCfgValidity == validityUnknown {
+							m.presetCfgValidityGen++
+							m.presetCfgValidityKey = key
+							m.presetCfgValidity = validityChecking
+							m.presetCfgValidityDetail = ""
+							llm, _ := p.Manifest["llm"].(map[string]interface{})
+							provider, _ := llm["provider"].(string)
+							model, _ := llm["model"].(string)
+							baseURL, _ := llm["base_url"].(string)
+							ref, _ := llm["codex_auth_path"].(string)
+							m.presetCfgMessage = i18n.T("preset_editor.model_validity_checking")
+							return m, checkCodexModelValidityCmd(m.presetCfgValidityGen, provider, model, baseURL, m.globalDir, ref)
+						}
+						if m.presetCfgValidity != validityValid {
+							if m.presetCfgValidityDetail != "" {
+								m.presetCfgMessage = m.presetCfgValidityDetail
+							}
+							return m, nil
+						}
+					}
 					if m.presetNeedsKey(p) {
 						return m.enterPresetKeyFor(p)
 					}
@@ -3929,6 +3969,21 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 	return val, ok
 }
 
+func (m FirstRunModel) isCodexPreset(p preset.Preset) bool {
+	provider, _ := llmStringField(p, "provider")
+	return provider == "codex" || provider == "codex_oauth" || provider == "codex-pool" || provider == "codex_pool"
+}
+
+func (m FirstRunModel) presetCfgValidityKeyFor(p preset.Preset) string {
+	llm, _ := p.Manifest["llm"].(map[string]interface{})
+	return strings.Join([]string{
+		asString(llm["provider"]),
+		asString(llm["model"]),
+		asString(llm["base_url"]),
+		asString(llm["codex_auth_path"]),
+	}, "\x00")
+}
+
 // stampAutoEnvVar returns a copy of p with manifest.llm.api_key_env
 // populated when it's empty. Uses preset.AutoEnvVarName to pick a
 // gap-filling slot in existingKeys (PROVIDER[_REGION]_N_API_KEY).
@@ -4032,6 +4087,9 @@ func (m *FirstRunModel) enterCapabilities() tea.Cmd {
 func (m *FirstRunModel) enterAgentPresets() tea.Cmd {
 	m.step = stepAgentPresets
 	m.presetCfgMessage = ""
+	m.presetCfgValidity = validityUnknown
+	m.presetCfgValidityDetail = ""
+	m.presetCfgValidityKey = ""
 
 	// Build the row list: indices of saved (non-template) presets within
 	// m.presets. Templates are hidden — Step 2 is for the "saved-only"

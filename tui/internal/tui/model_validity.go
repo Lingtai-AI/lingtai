@@ -40,16 +40,34 @@ type modelValidityResultMsg struct {
 func checkModelValidityCmd(gen uint64, provider, model, apiKey, baseURL, apiCompat string) tea.Cmd {
 	return func() tea.Msg {
 		if oauthProviders[provider] {
-			// OAuth providers (codex/codex_oauth) authenticate via a
-			// token file the kernel subprocess owns, not an API key this
-			// process holds. doctor.go treats these as unprobeable from
-			// here (probeOAuth), not invalid; mirror that so a codex
-			// preset with a bound account is treated as valid without a
-			// bogus "no key" failure.
+			// Codex is handled by checkCodexModelValidityCmd, which must
+			// use the selected token path and the Responses endpoint. Keep
+			// this compatibility path for callers that do not have a
+			// preset/global-dir context; it is not used by the editor.
 			return modelValidityResultMsg{Generation: gen, Status: validityValid}
 		}
 		status, detail := probeLLM(provider, model, apiKey, baseURL, apiCompat)
 		safeDetail := sanitizeModelValidityDetail(detail, apiKey)
+		switch status {
+		case probeOK:
+			return modelValidityResultMsg{Generation: gen, Status: validityValid}
+		case probeRateLimit, probeOverloaded:
+			return modelValidityResultMsg{Generation: gen, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
+		default:
+			return modelValidityResultMsg{Generation: gen, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
+		}
+	}
+}
+
+// checkCodexModelValidityCmd performs the Codex-specific real-call gate. A
+// token-file parse or /codex/models response is deliberately insufficient:
+// the selected model must answer on the same Responses endpoint and account
+// path the runtime will use. Pool presets try only their actual positive,
+// valid candidates; an ineligible non-empty pool therefore fails closed.
+func checkCodexModelValidityCmd(gen uint64, provider, model, baseURL, globalDir, authRef string) tea.Cmd {
+	return func() tea.Msg {
+		status, detail := probeCodexModel(provider, model, baseURL, globalDir, authRef)
+		safeDetail := sanitizeModelValidityDetail(detail, "")
 		switch status {
 		case probeOK:
 			return modelValidityResultMsg{Generation: gen, Status: validityValid}

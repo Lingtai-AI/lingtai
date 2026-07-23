@@ -1369,6 +1369,9 @@ func (m PresetEditorModel) startModelValidityCheck() (PresetEditorModel, tea.Cmd
 	apiKey := m.apiKey
 	baseURL := asString(llm["base_url"])
 	apiCompat := asString(llm["api_compat"])
+	if provider == "codex" || provider == "codex_oauth" || provider == "codex-pool" || provider == "codex_pool" {
+		return m, checkCodexModelValidityCmd(gen, provider, model, baseURL, m.globalDir, asString(llm["codex_auth_path"]))
+	}
 	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
 }
 
