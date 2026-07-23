@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,9 +17,13 @@ import (
 )
 
 const defaultKeyframeInterval = 100
+const chunkFormatVersion = 2
+
+var errStaleChunkFormat = errors.New("stale replay chunk format")
 
 // ReplayChunk is the wire format for a range of delta-encoded topology frames.
 type ReplayChunk struct {
+	V                int           `json:"v,omitempty"`
 	Start            int64         `json:"start"`
 	End              int64         `json:"end"`
 	KeyframeInterval int           `json:"keyframe_interval"`
@@ -34,11 +39,14 @@ type ReplayFrame struct {
 
 // FrameDelta holds only the fields that changed relative to the previous frame.
 type FrameDelta struct {
-	Nodes        []fs.AgentNode   `json:"nodes,omitempty"`
-	AvatarEdges  []fs.AvatarEdge  `json:"avatar_edges,omitempty"`
-	ContactEdges []fs.ContactEdge `json:"contact_edges,omitempty"`
-	Mail         []fs.MailEdge    `json:"mail,omitempty"`
-	Stats        *fs.NetworkStats `json:"stats,omitempty"`
+	Nodes               []fs.AgentNode   `json:"nodes,omitempty"`
+	AvatarEdges         []fs.AvatarEdge  `json:"avatar_edges,omitempty"`
+	AvatarEdgesRemoved  [][2]string      `json:"avatar_edges_removed,omitempty"`
+	ContactEdges        []fs.ContactEdge `json:"contact_edges,omitempty"`
+	ContactEdgesRemoved [][2]string      `json:"contact_edges_removed,omitempty"`
+	Mail                []fs.MailEdge    `json:"mail,omitempty"`
+	MailRemoved         [][2]string      `json:"mail_removed,omitempty"`
+	Stats               *fs.NetworkStats `json:"stats,omitempty"`
 }
 
 // ChunkInfo is a manifest entry describing one chunk.
@@ -59,6 +67,7 @@ type ReplayManifest struct {
 // every keyframeInterval frames and compact deltas in between.
 func deltaEncode(frames []fs.TapeFrame, keyframeInterval int) ReplayChunk {
 	chunk := ReplayChunk{
+		V:                chunkFormatVersion,
 		KeyframeInterval: keyframeInterval,
 	}
 	if len(frames) == 0 {
@@ -128,10 +137,19 @@ func computeDelta(prev, curr *fs.Network) *FrameDelta {
 	for _, e := range prev.AvatarEdges {
 		prevAvatars[avatarKey{e.Parent, e.Child}] = e
 	}
+	currAvatars := make(map[avatarKey]bool, len(curr.AvatarEdges))
 	for _, e := range curr.AvatarEdges {
 		k := avatarKey{e.Parent, e.Child}
+		currAvatars[k] = true
 		if pe, ok := prevAvatars[k]; !ok || pe != e {
 			delta.AvatarEdges = append(delta.AvatarEdges, e)
+			hasChange = true
+		}
+	}
+	for _, e := range prev.AvatarEdges {
+		k := avatarKey{e.Parent, e.Child}
+		if !currAvatars[k] {
+			delta.AvatarEdgesRemoved = append(delta.AvatarEdgesRemoved, [2]string{e.Parent, e.Child})
 			hasChange = true
 		}
 	}
@@ -142,10 +160,19 @@ func computeDelta(prev, curr *fs.Network) *FrameDelta {
 	for _, e := range prev.ContactEdges {
 		prevContacts[contactKey{e.Owner, e.Target}] = e
 	}
+	currContacts := make(map[contactKey]bool, len(curr.ContactEdges))
 	for _, e := range curr.ContactEdges {
 		k := contactKey{e.Owner, e.Target}
+		currContacts[k] = true
 		if pe, ok := prevContacts[k]; !ok || pe != e {
 			delta.ContactEdges = append(delta.ContactEdges, e)
+			hasChange = true
+		}
+	}
+	for _, e := range prev.ContactEdges {
+		k := contactKey{e.Owner, e.Target}
+		if !currContacts[k] {
+			delta.ContactEdgesRemoved = append(delta.ContactEdgesRemoved, [2]string{e.Owner, e.Target})
 			hasChange = true
 		}
 	}
@@ -156,10 +183,19 @@ func computeDelta(prev, curr *fs.Network) *FrameDelta {
 	for _, e := range prev.MailEdges {
 		prevMail[mailKey{e.Sender, e.Recipient}] = e
 	}
+	currMail := make(map[mailKey]bool, len(curr.MailEdges))
 	for _, e := range curr.MailEdges {
 		k := mailKey{e.Sender, e.Recipient}
+		currMail[k] = true
 		if pe, ok := prevMail[k]; !ok || pe != e {
 			delta.Mail = append(delta.Mail, e)
+			hasChange = true
+		}
+	}
+	for _, e := range prev.MailEdges {
+		k := mailKey{e.Sender, e.Recipient}
+		if !currMail[k] {
+			delta.MailRemoved = append(delta.MailRemoved, [2]string{e.Sender, e.Recipient})
 			hasChange = true
 		}
 	}
@@ -339,7 +375,7 @@ func buildManifest(topologyPath, replayDir string) (ReplayManifest, error) {
 // if no frame can be located.
 func firstFrameForChunk(info ChunkInfo, replayDir, topologyPath string) int64 {
 	cachePath := filepath.Join(replayDir, strconv.FormatInt(info.Start, 10)+".json.gz")
-	if chunk, err := readChunkCache(cachePath); err == nil && len(chunk.Frames) > 0 {
+	if chunk, err := readChunkCache(cachePath); (err == nil || errors.Is(err, errStaleChunkFormat)) && len(chunk.Frames) > 0 {
 		return chunk.Frames[0].T
 	}
 	// Fallback: scan JSONL for the first frame in this chunk's hour window.
@@ -520,18 +556,55 @@ func readChunkCache(path string) (ReplayChunk, error) {
 	if err := json.NewDecoder(gr).Decode(&chunk); err != nil {
 		return ReplayChunk{}, err
 	}
+	if chunk.V == 0 {
+		return chunk, errStaleChunkFormat
+	}
+	if chunk.V != chunkFormatVersion {
+		return ReplayChunk{}, fmt.Errorf("unsupported replay chunk format version %d", chunk.V)
+	}
 	return chunk, nil
 }
 
 func loadChunk(replayDir, topologyPath string, hourStart int64) (ReplayChunk, error) {
 	cachePath := filepath.Join(replayDir, strconv.FormatInt(hourStart, 10)+".json.gz")
-	if chunk, err := readChunkCache(cachePath); err == nil {
-		return chunk, nil
+	cachedChunk, cacheErr := readChunkCache(cachePath)
+	if cacheErr == nil {
+		return cachedChunk, nil
+	}
+	hasStaleCache := errors.Is(cacheErr, errStaleChunkFormat)
+
+	frames, err := scanJSONLChunk(topologyPath, hourStart)
+	if err != nil {
+		if hasStaleCache {
+			return cachedChunk, nil
+		}
+		return ReplayChunk{}, err
 	}
 
+	if len(frames) == 0 {
+		if hasStaleCache {
+			return cachedChunk, nil
+		}
+		return ReplayChunk{V: chunkFormatVersion, Start: hourStart, End: hourStart}, nil
+	}
+
+	if hasStaleCache && !jsonlCoversStaleChunk(frames, cachedChunk) {
+		return cachedChunk, nil
+	}
+
+	chunk := deltaEncode(frames, defaultKeyframeInterval)
+	if hasStaleCache {
+		if err := writeChunkCache(cachePath, chunk); err != nil {
+			return ReplayChunk{}, err
+		}
+	}
+	return chunk, nil
+}
+
+func scanJSONLChunk(topologyPath string, hourStart int64) ([]fs.TapeFrame, error) {
 	f, err := os.Open(topologyPath)
 	if err != nil {
-		return ReplayChunk{}, err
+		return nil, err
 	}
 	defer f.Close()
 
@@ -557,12 +630,20 @@ func loadChunk(replayDir, topologyPath string, hourStart int64) (ReplayChunk, er
 		}
 		frames = append(frames, frame)
 	}
+	return frames, scanner.Err()
+}
 
-	if len(frames) == 0 {
-		return ReplayChunk{Start: hourStart, End: hourStart}, nil
+func jsonlCoversStaleChunk(frames []fs.TapeFrame, stale ReplayChunk) bool {
+	if len(stale.Frames) == 0 {
+		return len(frames) > 0
 	}
-
-	return deltaEncode(frames, defaultKeyframeInterval), nil
+	if len(frames) < len(stale.Frames) {
+		return false
+	}
+	if frames[0].T > stale.Frames[0].T {
+		return false
+	}
+	return frames[len(frames)-1].T >= stale.Frames[len(stale.Frames)-1].T
 }
 
 // NewManifestHandler serves GET /api/topology/manifest.

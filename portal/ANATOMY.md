@@ -42,7 +42,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 - **`portal/embed.go:8-9`** — `//go:embed all:web/dist` compiles the React frontend build output into `webDist embed.FS`. No runtime Node dependency.
 - **`portal/embed.go:11-17`** — `WebFS()` returns `fs.Sub(webDist, "web/dist")` so the HTTP server mounts from the `web/dist/` root.
 - **`Makefile:1-24`** — Build pipeline. `web-build` runs `npm install && npm run build` in `web/`; `go-build` depends on it and stamps `main.version` via `-ldflags`. `cross-compile` targets darwin/linux × arm64/amd64.
-- **`internal/api/`** — HTTP server, handlers, and the replay endpoint. See `portal/internal/api/ANATOMY.md`.
+- **`internal/api/`** — HTTP server, handlers, and the 756-line replay endpoint. See `portal/internal/api/ANATOMY.md`.
 - **`internal/fs/`** — Filesystem readers: agent manifests, heartbeat, mailbox, network reconstruction (`reconstruct.go`), topology types (`types.go`). Same shape as `tui/internal/fs/` but Portal-specific.
 - **`internal/migrate/`** — retained m001–m039 source/tests and registry history; production Portal does not import or execute it. See `portal/internal/migrate/ANATOMY.md`.
 - **`web/`** — React 19 + TypeScript + Vite frontend. Source under `web/src/`; builds to `web/dist/`.
@@ -69,7 +69,7 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 - **`.portal/port`** — Written on server start (`portal/main.go:75-76` → `portal/internal/api/server.go:61-62`). Contains only the bound TCP port as an ASCII integer. Read by the TUI to know where to open the browser.
 - **`.portal/topology.jsonl`** — JSONL tape of network snapshots. Each line is `{"t": <unix_ms>, "net": <Network>}`. Appended every 3 seconds by `StartRecording` (`portal/internal/api/server.go:96-110`); also appended by the live handlers on each request.
 - **`.portal/replay/chunks/`** — Compressed hourly replay chunks (`<hourMs>.json.gz`), each containing delta-encoded frames with keyframes every 100 frames. Plus `manifest.json` indexing all chunks.
-- **`.portal/reconstruct.progress`** — Temporary `"N/M"` progress file during tape reconstruction. Startup creates/deletes it in `StartRecording` (`portal/internal/api/server.go:82-93`); the shared replay writer updates it while caching reconstructed frames (`portal/internal/api/replay.go:417-446`).
+- **`.portal/reconstruct.progress`** — Temporary `"N/M"` progress file during tape reconstruction. Startup creates/deletes it in `StartRecording` (`portal/internal/api/server.go:82-93`); the shared replay writer updates it while caching reconstructed frames (`portal/internal/api/replay.go:443-472`).
 - **`meta.json`** — Legacy project migration metadata may remain under `.lingtai/`; Portal production does not read, write, or advance it.
 
 ## Notes
