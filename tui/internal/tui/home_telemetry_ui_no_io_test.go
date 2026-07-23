@@ -37,7 +37,7 @@ func TestHomeTelemetryUIPathReadsCacheNotDisk(t *testing.T) {
 
 	m := NewMailModel(humanDir, "human@local", "~", orchDir, "TestOrch", 50, dir, "en", false, 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m, _ = m.Update(m.initialRebuild())
+	m, _ = m.Update(acceptedInitialMailRefresh(m))
 	// Async fetch round-trip: this is the ONE place telemetry I/O happens.
 	m, _ = m.Update(m.fetchHomeTelemetry())
 	if !m.hasHomeTelemetry() {

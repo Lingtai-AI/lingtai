@@ -38,11 +38,11 @@ func TestNewMailModelDefersSessionRebuild(t *testing.T) {
 	}
 }
 
-// TestMailInitRunsRebuild verifies that Init()'s command performs the deferred
+// TestProjectMailStoreRunsRebuild verifies that the root store performs the deferred
 // rebuild and that feeding its message into Update populates the message stream.
 // This is the other half of the deferral: the work still happens, just off the
 // synchronous launch path.
-func TestMailInitRunsRebuild(t *testing.T) {
+func TestProjectMailStoreRunsRebuild(t *testing.T) {
 	humanDir := t.TempDir()
 	orchDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(orchDir, "logs"), 0o755); err != nil {
@@ -60,16 +60,16 @@ func TestMailInitRunsRebuild(t *testing.T) {
 	m.verbose = verboseThinking
 
 	// Run the initial rebuild command (the deferred heavy work).
-	msg := m.initialRebuild()
+	msg := acceptedInitialMailRefresh(m)
 	if msg == nil {
-		t.Fatal("initialRebuild returned nil msg")
+		t.Fatal("project store initial refresh returned nil msg")
 	}
 	if got := m.sessionCache.Len(); got != 0 {
-		t.Fatalf("initialRebuild mutated the installed session cache before acceptance; got %d entries", got)
+		t.Fatalf("project store rebuild mutated the installed session cache before acceptance; got %d entries", got)
 	}
 	rm, ok := msg.(mailRefreshMsg)
 	if !ok || rm.sessionCache == nil || rm.sessionCache.Len() == 0 {
-		t.Fatalf("initialRebuild did not return a populated command-local session cache: %#v", rm.sessionCache)
+		t.Fatalf("project store rebuild did not return a populated command-local session cache: %#v", rm.sessionCache)
 	}
 
 	// Feed the resulting message through Update — acceptance installs the rebuilt
@@ -86,12 +86,13 @@ func TestMailInitRunsRebuild(t *testing.T) {
 	}
 }
 
-// TestMailInitIncludesRebuildCmd verifies Init() actually schedules the rebuild.
-func TestMailInitIncludesRebuildCmd(t *testing.T) {
+// TestAppInitRequestsProjectStoreRebuild verifies root Init schedules the store.
+func TestAppInitRequestsProjectStoreRebuild(t *testing.T) {
 	dir := t.TempDir()
-	m := NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0)
-	if cmd := m.Init(); cmd == nil {
-		t.Fatal("MailModel.Init returned nil cmd; expected at least the rebuild + refresh batch")
+	a := App{currentView: appViewMail}
+	a.installMailModel(NewMailModel(dir, "human@local", dir, dir, "orch", 20, dir, "en", false, 0))
+	if cmd := a.Init(); cmd == nil {
+		t.Fatal("App.Init returned nil cmd; expected a project-store refresh request")
 	}
 	_ = tea.Batch // keep the bubbletea import meaningful even if Batch isn't referenced directly
 }

@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/anthropics/lingtai-tui/internal/config"
 )
 
@@ -66,7 +65,7 @@ func TestReturningToMailAfterPageSizeChangeRebuildsExactWindow(t *testing.T) {
 		orchName:    "agent",
 	}
 	a.installMailModel(NewMailModel(t.TempDir(), "human", projectDir, orchDir, "agent", 200, globalDir, "en", false, 0))
-	initial := a.mail.initialRebuild().(mailRefreshMsg)
+	initial := acceptedInitialMailRefresh(a.mail).(mailRefreshMsg)
 	a.mail, _ = a.mail.Update(initial)
 	if a.mail.sessionCache.Len() != 200 {
 		t.Fatalf("precondition cache = %d, want 200", a.mail.sessionCache.Len())
@@ -78,14 +77,11 @@ func TestReturningToMailAfterPageSizeChangeRebuildsExactWindow(t *testing.T) {
 	if got.mail.pageSize != 100 || got.mail.generation == oldGeneration || !got.mail.initialLoading {
 		t.Fatalf("page-size change did not start fresh Mail generation: page=%d generation=%d old=%d loading=%v", got.mail.pageSize, got.mail.generation, oldGeneration, got.mail.initialLoading)
 	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok || len(batch) == 0 {
-		t.Fatalf("return-to-Mail command = %T, want non-empty tea.BatchMsg", cmd())
-	}
-	refresh, ok := batch[0]().(mailRefreshMsg)
+	storeRefresh, ok := findProjectMailRefresh(cmd)
 	if !ok {
-		t.Fatalf("first return-to-Mail command = %T, want fresh mailRefreshMsg", batch[0]())
+		t.Fatal("return-to-Mail command did not schedule a fresh project-store refresh")
 	}
+	refresh := storeRefresh.mail
 	if got := refresh.sessionCache.Len(); got != 100 {
 		t.Fatalf("new page-size content cache = %d, want exactly 100", got)
 	}
