@@ -28,6 +28,20 @@ import (
 // version is set at build time via -ldflags "-X main.version=v0.4.2"
 var version = "dev"
 
+func dispatchDoctor(args []string, showHelp func(), runDoctor func()) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		showHelp()
+		return
+	}
+	runDoctor()
+}
+
+func printDoctorHelp() {
+	printWelcomeInfo()
+	fmt.Println()
+	printHelp()
+}
+
 func main() {
 	// Handle flags
 	if len(os.Args) > 1 {
@@ -75,7 +89,7 @@ func main() {
 			return
 		}
 		if arg == "doctor" {
-			doctorMain()
+			dispatchDoctor(os.Args[2:], printDoctorHelp, doctorMain)
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\nRun 'lingtai-tui --help' for usage.\n", arg)
