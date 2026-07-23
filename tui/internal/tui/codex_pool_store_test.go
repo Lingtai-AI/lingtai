@@ -655,3 +655,16 @@ func TestCodexPoolEligibilityFacts_FallbackAndFailClosed(t *testing.T) {
 		t.Fatal("nonempty unusable classified category must remain ineligible")
 	}
 }
+
+func TestCodexPoolEligibility_DroppedEntriesUseLegacyFallback(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	writeStubCodexToken(t, legacyCodexAuthPath(dir), "legacy@example.com")
+	raw := []byte(`{"version":1,"accounts":[0,{"path":"","weight":1},{"path":"codex-auth/disabled.json","weight":1,"enabled":false},{"path":"codex-auth/zero.json","weight":0}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !codexPoolEligible(dir, "gpt-test") {
+		t.Fatal("all dropped pool entries should be validated-empty and use legacy fallback")
+	}
+}

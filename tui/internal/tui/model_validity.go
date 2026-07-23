@@ -29,6 +29,7 @@ const (
 // check was in flight) and is discarded.
 type modelValidityResultMsg struct {
 	Generation uint64
+	Source     string
 	Status     modelValidityStatus
 	Detail     string
 }
@@ -38,23 +39,27 @@ type modelValidityResultMsg struct {
 // Bubble Tea event loop — probeLLM runs inside the returned tea.Cmd's
 // closure, which Bubble Tea executes on its own goroutine.
 func checkModelValidityCmd(gen uint64, provider, model, apiKey, baseURL, apiCompat string) tea.Cmd {
+	return checkModelValidityCmdForSource(gen, "preset-key", provider, model, apiKey, baseURL, apiCompat)
+}
+
+func checkModelValidityCmdForSource(gen uint64, source, provider, model, apiKey, baseURL, apiCompat string) tea.Cmd {
 	return func() tea.Msg {
 		if oauthProviders[provider] {
 			// Codex is handled by checkCodexModelValidityCmd, which must
 			// use the selected token path and the Responses endpoint. Keep
 			// this compatibility path for callers that do not have a
 			// preset/global-dir context; it is not used by the editor.
-			return modelValidityResultMsg{Generation: gen, Status: validityValid}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityValid}
 		}
 		status, detail := probeLLM(provider, model, apiKey, baseURL, apiCompat)
 		safeDetail := sanitizeModelValidityDetail(detail, apiKey)
 		switch status {
 		case probeOK:
-			return modelValidityResultMsg{Generation: gen, Status: validityValid}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityValid}
 		case probeRateLimit, probeOverloaded:
-			return modelValidityResultMsg{Generation: gen, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
 		default:
-			return modelValidityResultMsg{Generation: gen, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
 		}
 	}
 }
@@ -65,16 +70,20 @@ func checkModelValidityCmd(gen uint64, provider, model, apiKey, baseURL, apiComp
 // path the runtime will use. Pool presets try only their actual positive,
 // valid candidates; an ineligible non-empty pool therefore fails closed.
 func checkCodexModelValidityCmd(gen uint64, provider, model, baseURL, globalDir, authRef string) tea.Cmd {
+	return checkCodexModelValidityCmdForSource(gen, "codex-config", provider, model, baseURL, globalDir, authRef)
+}
+
+func checkCodexModelValidityCmdForSource(gen uint64, source, provider, model, baseURL, globalDir, authRef string) tea.Cmd {
 	return func() tea.Msg {
 		status, detail := probeCodexModel(provider, model, baseURL, globalDir, authRef)
 		safeDetail := sanitizeModelValidityDetail(detail, "")
 		switch status {
 		case probeOK:
-			return modelValidityResultMsg{Generation: gen, Status: validityValid}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityValid}
 		case probeRateLimit, probeOverloaded:
-			return modelValidityResultMsg{Generation: gen, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityRetryable, Detail: probeStatusDetail(status, safeDetail)}
 		default:
-			return modelValidityResultMsg{Generation: gen, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
+			return modelValidityResultMsg{Generation: gen, Source: source, Status: validityInvalid, Detail: probeStatusDetail(status, safeDetail)}
 		}
 	}
 }

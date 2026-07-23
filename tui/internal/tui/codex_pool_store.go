@@ -72,8 +72,9 @@ var errCodexPoolModelClassified = errors.New(
 // codexPoolAccount is one balanced account: a stable ref to its token file plus
 // an integer weight. Weight 0 disables the account without dropping it.
 type codexPoolAccount struct {
-	Path   string `json:"path"`
-	Weight int    `json:"weight"`
+	Path    string `json:"path"`
+	Weight  int    `json:"weight"`
+	Enabled *bool  `json:"enabled,omitempty"`
 }
 
 // codexPool is the on-disk pool file shape. Models (v2) classifies accounts by
@@ -176,14 +177,52 @@ func loadCodexPool(globalDir string) (codexPool, error) {
 		}
 		return codexPool{}, err
 	}
-	var pool codexPool
-	if err := json.Unmarshal(data, &pool); err != nil {
+	var raw struct {
+		Version  int                         `json:"version"`
+		Accounts json.RawMessage             `json:"accounts"`
+		Models   *map[string]json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return codexPool{}, err
+	}
+	pool := codexPool{Version: raw.Version}
+	var decodeErr error
+	if len(raw.Accounts) > 0 && string(raw.Accounts) != "null" {
+		pool.Accounts, decodeErr = decodeCodexPoolAccounts(raw.Accounts)
+		if decodeErr != nil {
+			return codexPool{}, decodeErr
+		}
+	}
+	if raw.Models != nil {
+		pool.Models = &map[string][]codexPoolAccount{}
+		for model, entries := range *raw.Models {
+			decoded, decodeErr := decodeCodexPoolAccounts(entries)
+			if decodeErr != nil {
+				continue
+			}
+			(*pool.Models)[model] = decoded
+		}
 	}
 	if pool.Version == 0 {
 		pool.Version = codexPoolVersion
 	}
 	return pool, nil
+}
+
+func decodeCodexPoolAccounts(raw json.RawMessage) ([]codexPoolAccount, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
+	}
+	accounts := make([]codexPoolAccount, 0, len(entries))
+	for _, entry := range entries {
+		var account codexPoolAccount
+		if len(entry) == 0 || entry[0] != '{' || json.Unmarshal(entry, &account) != nil {
+			continue
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, nil
 }
 
 // saveCodexPool writes the pool file (version stamped, parent created). The file
@@ -238,8 +277,11 @@ func codexPoolWeights(globalDir string) map[string]int {
 // codexPoolAccountsEligible reports whether one account is selectable by the
 // kernel: positive weight plus a valid token file.
 func codexPoolAccountsEligible(globalDir string, accounts []codexPoolAccount) bool {
+	if len(codexPoolAccountsRepresentable(accounts)) == 0 {
+		return codexPoolLegacyFallbackValid(globalDir)
+	}
 	for _, acct := range accounts {
-		if acct.Weight <= 0 {
+		if acct.Enabled != nil && !*acct.Enabled || acct.Weight <= 0 || strings.TrimSpace(acct.Path) == "" {
 			continue
 		}
 		abs := resolveCodexPoolRef(globalDir, acct.Path)
@@ -248,6 +290,16 @@ func codexPoolAccountsEligible(globalDir string, accounts []codexPoolAccount) bo
 		}
 	}
 	return false
+}
+
+func codexPoolAccountsRepresentable(accounts []codexPoolAccount) []codexPoolAccount {
+	eligible := make([]codexPoolAccount, 0, len(accounts))
+	for _, acct := range accounts {
+		if (acct.Enabled == nil || *acct.Enabled) && acct.Weight > 0 && strings.TrimSpace(acct.Path) != "" {
+			eligible = append(eligible, acct)
+		}
+	}
+	return eligible
 }
 
 func codexPoolLegacyFallbackValid(globalDir string) bool {

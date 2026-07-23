@@ -30,24 +30,23 @@ func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probe
 			return probeUnknown, "Codex pool is unreadable"
 		}
 		if pool.Models == nil {
-			if len(pool.Accounts) == 0 {
+			accounts := codexPoolAccountsRepresentable(pool.Accounts)
+			if len(accounts) == 0 {
 				paths = append(paths, legacyCodexAuthPath(globalDir))
 			} else {
-				for _, account := range pool.Accounts {
-					if account.Weight > 0 {
-						paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
-					}
+				for _, account := range accounts {
+					paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
 				}
 			}
 		} else {
 			accounts, present := (*pool.Models)[model]
 			if !present || len(accounts) == 0 {
 				paths = append(paths, legacyCodexAuthPath(globalDir))
+			} else if representable := codexPoolAccountsRepresentable(accounts); len(representable) == 0 {
+				paths = append(paths, legacyCodexAuthPath(globalDir))
 			} else {
-				for _, account := range accounts {
-					if account.Weight > 0 {
-						paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
-					}
+				for _, account := range representable {
+					paths = append(paths, resolveCodexPoolRef(globalDir, account.Path))
 				}
 			}
 		}

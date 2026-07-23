@@ -546,6 +546,9 @@ func (m LoginModel) codexOAuthImpactMessage() string {
 	all, _ := preset.List()
 	affected := 0
 	for _, p := range all {
+		if p.Source != preset.SourceSaved {
+			continue
+		}
 		llm, _ := p.Manifest["llm"].(map[string]interface{})
 		provider, _ := llm["provider"].(string)
 		if provider == "codex" || provider == "codex_oauth" || provider == "codex-pool" || provider == "codex_pool" {

@@ -83,6 +83,26 @@ func TestCodexPoolModelValidityFailsClosedForIneligibleNonemptyPool(t *testing.T
 	}
 }
 
+func TestCodexPoolModelValidity_ZeroDisabledAndBlankUseLegacyProbe(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"object":"response","output":[]}`))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	writeCodexProbeToken(t, filepath.Join(dir, "codex-auth.json"), "legacy")
+	raw := []byte(`{"version":1,"accounts":[{"path":"","weight":1},{"path":"codex-auth/disabled.json","weight":1,"enabled":false},{"path":"codex-auth/zero.json","weight":0}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, detail := probeCodexModel("codex-pool", "gpt-test", srv.URL, dir, "")
+	if status != probeOK || detail != "" || calls != 1 {
+		t.Fatalf("probe = %v, %q, calls=%d; want legacy fallback", status, detail, calls)
+	}
+}
+
 func TestCodexModelValidityRequiresSelectedModel(t *testing.T) {
 	status, detail := probeCodexModel("codex", "", "", t.TempDir(), "")
 	if status != probeUnknown || !strings.Contains(detail, "selected Codex model is missing") {
@@ -505,6 +525,46 @@ func TestPresetKeyNext_BlocksUntilModelValidated(t *testing.T) {
 	}
 	if m.step == stepPresetKey {
 		t.Fatalf("expected the wizard to advance past stepPresetKey once validated")
+	}
+}
+
+func TestFirstRunValidityStreamsDoNotCrossTalk(t *testing.T) {
+	m := FirstRunModel{step: stepAgentPresets, presetCfgValidityGen: 1, presetCfgValidity: validityChecking, presetKeyValidityGen: 1, presetKeyValidity: validityChecking}
+	keyResult := modelValidityResultMsg{Generation: 1, Source: "preset-key", Status: validityValid}
+	m, _ = m.Update(keyResult)
+	if m.presetCfgValidity != validityChecking {
+		t.Fatalf("key-stream result satisfied config stream: %v", m.presetCfgValidity)
+	}
+	if m.presetKeyValidity != validityChecking {
+		t.Fatalf("key-stream result should not route while config step is active")
+	}
+	configInvalid := modelValidityResultMsg{Generation: 1, Source: "codex-config", Status: validityInvalid, Detail: "probe failed"}
+	m, _ = m.Update(configInvalid)
+	if m.presetCfgValidity != validityInvalid || m.presetCfgMessage != "probe failed" {
+		t.Fatalf("matching config result not applied: status=%v message=%q", m.presetCfgValidity, m.presetCfgMessage)
+	}
+	configValid := modelValidityResultMsg{Generation: 1, Source: "codex-config", Status: validityValid}
+	m, _ = m.Update(configValid)
+	if m.presetCfgValidity != validityValid {
+		t.Fatalf("matching valid result not applied: %v", m.presetCfgValidity)
+	}
+}
+
+func TestFirstRunCodexConfigCheckingBlocksNext(t *testing.T) {
+	m := FirstRunModel{
+		step:              stepAgentPresets,
+		presets:           []preset.Preset{{Manifest: map[string]interface{}{"llm": map[string]interface{}{"provider": "codex", "model": "gpt-test"}}}},
+		savedPresetIdx:    []int{0},
+		presetAllowed:     []bool{true},
+		presetDefaultIdx:  0,
+		presetCfgCursor:   2, // row 0, Back 1, Next 2
+		presetCfgValidity: validityChecking,
+		cursor:            0,
+	}
+	m.presetCfgValidityKey = m.presetCfgValidityKeyFor(m.presets[0])
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil || updated.step != stepAgentPresets {
+		t.Fatalf("checking Codex config must keep Next blocked: step=%v cmd=%v", updated.step, cmd != nil)
 	}
 }
 

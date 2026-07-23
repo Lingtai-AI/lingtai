@@ -430,6 +430,9 @@ func (m PresetEditorModel) Init() tea.Cmd { return nil }
 func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case modelValidityResultMsg:
+		if msg.Source != "editor" && msg.Source != "" {
+			return m, nil
+		}
 		// Drop results from an abandoned check: either a newer check has
 		// since been dispatched (Generation mismatch) or the tuple it
 		// was checking is no longer the current one.
@@ -1370,9 +1373,9 @@ func (m PresetEditorModel) startModelValidityCheck() (PresetEditorModel, tea.Cmd
 	baseURL := asString(llm["base_url"])
 	apiCompat := asString(llm["api_compat"])
 	if provider == "codex" || provider == "codex_oauth" || provider == "codex-pool" || provider == "codex_pool" {
-		return m, checkCodexModelValidityCmd(gen, provider, model, baseURL, m.globalDir, asString(llm["codex_auth_path"]))
+		return m, checkCodexModelValidityCmdForSource(gen, "editor", provider, model, baseURL, m.globalDir, asString(llm["codex_auth_path"]))
 	}
-	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
+	return m, checkModelValidityCmdForSource(gen, "editor", provider, model, apiKey, baseURL, apiCompat)
 }
 
 // hasSemanticEdits reports whether the user changed any field whose

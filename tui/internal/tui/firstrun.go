@@ -1072,6 +1072,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			return m, cmd
 		}
 		if m.step == stepAgentPresets {
+			if msg.Source != "codex-config" {
+				return m, nil
+			}
 			if msg.Generation != m.presetCfgValidityGen {
 				return m, nil
 			}
@@ -1082,7 +1085,7 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if msg.Generation != m.presetKeyValidityGen {
+		if msg.Source != "preset-key" || msg.Generation != m.presetKeyValidityGen {
 			return m, nil
 		}
 		m.presetKeyValidity = msg.Status
@@ -3954,7 +3957,7 @@ func (m FirstRunModel) startPresetKeyValidityCheck(apiKey string) (FirstRunModel
 	m.presetKeyValidity = validityChecking
 	m.presetKeyValidityDetail = ""
 	gen := m.presetKeyValidityGen
-	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
+	return m, checkModelValidityCmdForSource(gen, "preset-key", provider, model, apiKey, baseURL, apiCompat)
 }
 
 // llmStringField returns a string-typed field from a preset's
