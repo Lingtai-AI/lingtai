@@ -152,19 +152,19 @@ func v1BoundaryFixture(t *testing.T, width int) (App, string, string) {
 	}`)
 
 	accepted := []fs.MailMessage{
-		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-in", "2026-07-22T10:00:00Z", "ALPHA-DIRECT-IN", humanAddress, nil),
+		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-in", "2026-07-22T10:00:00Z", "A1IN7X9Q", humanAddress, nil),
 		{
 			MailboxID:  "alpha-out",
 			From:       humanAddress,
 			To:         alphaAddress,
-			Message:    "ALPHA-DIRECT-OUT",
+			Message:    "A2OUT8ZQ",
 			ReceivedAt: "2026-07-22T10:01:00Z",
 			Delivered:  true,
 		},
-		v1BoundaryIncoming("agent-b", bravoAddress, "bravo-in", "2026-07-22T10:02:00Z", "BRAVO-DIRECT-IN", humanAddress, nil),
-		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-group", "2026-07-22T10:03:00Z", "ALPHA-GROUP-MUST-NOT-LEAK", []interface{}{humanAddress, bravoAddress}, nil),
-		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-cc", "2026-07-22T10:04:00Z", "ALPHA-CC-MUST-NOT-LEAK", humanAddress, []string{bravoAddress}),
-		v1BoundaryIncoming("agent-b", alphaAddress, "alpha-contradictory", "2026-07-22T10:05:00Z", "ALPHA-CONTRADICTORY-ID-MUST-NOT-LEAK", humanAddress, nil),
+		v1BoundaryIncoming("agent-b", bravoAddress, "bravo-in", "2026-07-22T10:02:00Z", "B3IN6K2P", humanAddress, nil),
+		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-group", "2026-07-22T10:03:00Z", "G4RP9M7N", []interface{}{humanAddress, bravoAddress}, nil),
+		v1BoundaryIncoming("agent-a", alphaAddress, "alpha-cc", "2026-07-22T10:04:00Z", "C5CC8V2L", humanAddress, []string{bravoAddress}),
+		v1BoundaryIncoming("agent-b", alphaAddress, "alpha-contradictory", "2026-07-22T10:05:00Z", "X6ID4Q9R", humanAddress, nil),
 	}
 
 	mail := NewMailModel(humanDir, humanAddress, projectDir, orchDir, "Main Orchestrator", 20, "", "en", false, 0)
@@ -193,7 +193,7 @@ func v1BoundaryFixture(t *testing.T, width int) (App, string, string) {
 	mainMessages = append(mainMessages, ChatMessage{
 		Type:      "mail",
 		From:      "Main",
-		Body:      "MAIN-ONLY-TRANSCRIPT",
+		Body:      "M7ONLY2S",
 		Timestamp: "2026-07-22T09:59:00Z",
 	})
 	app.mail.messages = mainMessages
@@ -247,12 +247,12 @@ func TestAgentsDirectConversationBoundaryThroughRealPalette(t *testing.T) {
 			}
 			app, _ = v1BoundaryApply(app, tea.KeyPressMsg{Code: tea.KeyEsc})
 			afterCursor := ansi.Strip(app.View().Content)
-			if !strings.Contains(afterCursor, "MAIN-ONLY-TRANSCRIPT") ||
-				strings.Contains(afterCursor, "ALPHA-DIRECT-IN") {
+			if !strings.Contains(afterCursor, "M7ONLY2S") ||
+				strings.Contains(afterCursor, "A1IN7X9Q") {
 				t.Errorf("cursor-only movement changed current Main selection at width %d:\n%s", width, afterCursor)
 			}
 
-			const mainDraft = "MAIN-DRAFT-MUST-RETURN"
+			const mainDraft = "D8MAIN3T"
 			app.mail.input.SetValue(mainDraft)
 			app.mail.syncViewportHeight()
 			app.mail.viewport.GotoBottom()
@@ -274,17 +274,17 @@ func TestAgentsDirectConversationBoundaryThroughRealPalette(t *testing.T) {
 			}
 
 			direct := ansi.Strip(app.View().Content)
-			for _, strict := range []string{"ALPHA-DIRECT-IN", "ALPHA-DIRECT-OUT"} {
+			for _, strict := range []string{"A1IN7X9Q", "A2OUT8ZQ"} {
 				if !strings.Contains(direct, strict) {
 					t.Errorf("Alpha direct view at width %d omitted strict mail %q:\n%s", width, strict, direct)
 				}
 			}
 			for _, leak := range []string{
-				"BRAVO-DIRECT-IN",
-				"ALPHA-GROUP-MUST-NOT-LEAK",
-				"ALPHA-CC-MUST-NOT-LEAK",
-				"ALPHA-CONTRADICTORY-ID-MUST-NOT-LEAK",
-				"MAIN-ONLY-TRANSCRIPT",
+				"B3IN6K2P",
+				"G4RP9M7N",
+				"C5CC8V2L",
+				"X6ID4Q9R",
+				"M7ONLY2S",
 				mainDraft,
 			} {
 				if strings.Contains(direct, leak) {
@@ -335,9 +335,9 @@ func TestAgentsDirectConversationBoundaryThroughRealPalette(t *testing.T) {
 				t.Errorf("Main viewport changed across direct conversation: offset=%d want=%d", app.mail.viewport.YOffset(), mainOffset)
 			}
 			main := ansi.Strip(app.View().Content)
-			if !strings.Contains(main, "MAIN-ONLY-TRANSCRIPT") ||
-				strings.Contains(main, "ALPHA-DIRECT-IN") ||
-				strings.Contains(main, "ALPHA-DIRECT-OUT") {
+			if !strings.Contains(main, "M7ONLY2S") ||
+				strings.Contains(main, "A1IN7X9Q") ||
+				strings.Contains(main, "A2OUT8ZQ") {
 				t.Errorf("return to Main at width %d did not restore only Main content:\n%s", width, main)
 			}
 			if len(v1BoundaryOutbox(t, humanDir)) != 1 {
