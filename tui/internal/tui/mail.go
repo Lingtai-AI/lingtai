@@ -229,6 +229,12 @@ type MailModel struct {
 	directChat             directChatState
 	agentSelector          agentSelectorState
 
+	// The one Mail-owned durable direct unread store, opened and synchronized
+	// only from the accepted publication path. There is no second scanner,
+	// model, cache, or per-target store.
+	directUnread            *fs.DirectUnreadStore
+	directUnreadProjectRoot string
+
 	// Home telemetry is resolved asynchronously off the render/input path (its
 	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
 	// locked/slow sidecar). View()/hasHomeTelemetry()/syncViewportHeight() read
@@ -950,6 +956,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.cache = msg.cache
 		m.acceptedSnapshot = newAcceptedMailSnapshot(msg.cache)
 		m = m.publishAcceptedSelectorRows()
+		m = m.syncAcceptedDirectUnread()
 		var directVisibilityCmd tea.Cmd
 		m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
 		m.orchAlive = msg.alive
@@ -1235,6 +1242,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case directVisibilityMsg:
+		return m.handleDirectVisibility(msg), nil
+
 	case OpenEditorMsg:
 		// Show editor intro page before launching
 		m.showEditorWarn = true
@@ -1273,7 +1283,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				return m, m.launchEditor(m.editorWarnText)
 			case "esc", "ctrl+c":
 				m.showEditorWarn = false
-				return m, nil
+				return m, m.currentDirectVisibilityCmd()
 			}
 			return m, nil
 		}

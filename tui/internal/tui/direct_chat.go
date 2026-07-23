@@ -3,9 +3,11 @@ package tui
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/fs"
 )
 
@@ -125,6 +127,86 @@ func (m MailModel) publishAcceptedDirectSnapshot() (MailModel, tea.Cmd) {
 	m.directChat.acceptedSnapshotSerial = m.acceptedSnapshotSerial
 	m.directChat.scrollOffset = m.directScrollBottom()
 	return m, deferredDirectVisibilityCmd(projectRoot, threadKey, m.directChat.generation, m.acceptedSnapshotSerial)
+}
+
+// syncAcceptedDirectUnread opens or synchronizes the one Mail-owned durable
+// direct unread store from the accepted publication path only. It hands the
+// store the FULL accepted snapshot so newly discovered targets baseline at the
+// accepted boundary; it never counts for display, renders, or marks seen. The
+// canonical selector rows remain the only target discovery.
+func (m MailModel) syncAcceptedDirectUnread() MailModel {
+	if strings.TrimSpace(m.baseDir) == "" {
+		return m
+	}
+	projectRoot := filepath.Dir(filepath.Clean(m.baseDir))
+	if projectRoot == "." {
+		return m
+	}
+	targets := make([]fs.DirectTarget, 0, len(m.agentSelector.rows))
+	for _, row := range m.agentSelector.rows {
+		if !row.Main {
+			targets = append(targets, row.Target)
+		}
+	}
+	accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
+	store := m.directUnread
+	var err error
+	if store == nil || m.directUnreadProjectRoot != projectRoot {
+		store, err = fs.OpenDirectUnreadStore(projectRoot, m.humanAddr, targets, accepted)
+	} else {
+		err = store.SyncTargets(targets, accepted)
+	}
+	if err != nil {
+		m.statusFlash = i18n.T("agent_selector.unread_failed")
+		m.statusExpiry = time.Now().Add(5 * time.Second)
+		return m
+	}
+	m.directUnread = store
+	m.directUnreadProjectRoot = projectRoot
+	return m
+}
+
+// handleDirectVisibility accepts only an exact current coordinate — project
+// root, strict thread key, direct generation, and accepted snapshot serial all
+// matching the current selection — while Mail is ready and the direct
+// transcript is unobscured. Only then may the durable store MarkSeen, from the
+// FULL accepted snapshot. Everything else fails closed without durable changes.
+func (m MailModel) handleDirectVisibility(msg directVisibilityMsg) MailModel {
+	projectRoot, threadKey, ok := m.directTargetCoordinates(m.directChat.target)
+	if !m.ready || m.directVisibilityObscured() || !ok ||
+		msg.projectRoot == "" || msg.threadKey == "" || msg.directGeneration == 0 ||
+		msg.acceptedSnapshotSerial == 0 || msg.projectRoot != projectRoot ||
+		msg.threadKey != threadKey || msg.directGeneration != m.directChat.generation ||
+		msg.acceptedSnapshotSerial != m.acceptedSnapshotSerial ||
+		m.directChat.threadKey != threadKey ||
+		m.directChat.acceptedSnapshotSerial != m.acceptedSnapshotSerial ||
+		m.agentSelector.selectedThreadKey != threadKey || m.directUnread == nil {
+		return m
+	}
+	accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
+	if err := m.directUnread.MarkSeen(m.directChat.target, accepted); err != nil {
+		m.statusFlash = i18n.T("agent_selector.unread_failed")
+		m.statusExpiry = time.Now().Add(5 * time.Second)
+	}
+	return m
+}
+
+// directVisibilityObscured names the Mail-owned surfaces that cover the direct
+// transcript. An obscured coordinate is rejected, never queued; closing the
+// obstruction emits a fresh current coordinate instead.
+func (m MailModel) directVisibilityObscured() bool {
+	return m.agentSelector.selectorOpen || m.showEditorWarn || m.input.IsPaletteActive()
+}
+
+// currentDirectVisibilityCmd creates a fresh coordinate only for the exact
+// accepted current direct selection. Rejected coordinates are deliberately
+// never replayed.
+func (m MailModel) currentDirectVisibilityCmd() tea.Cmd {
+	target, ok := m.currentDirectTarget()
+	if !ok {
+		return nil
+	}
+	return deferredDirectVisibilityCmd(target.ProjectDirectory, m.directChat.threadKey, m.directChat.generation, m.acceptedSnapshotSerial)
 }
 
 // directTargetCoordinates validates the selected target against the MailModel's

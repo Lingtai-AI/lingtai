@@ -181,7 +181,7 @@ func (m MailModel) updateAgentSelector(msg tea.KeyPressMsg) (MailModel, tea.Cmd)
 	case "esc":
 		m.agentSelector.selectorOpen = false
 		_ = m.input.Focus()
-		return m, nil
+		return m, m.currentDirectVisibilityCmd()
 	case "up", "k":
 		return m.moveSelectorCursor(-1), nil
 	case "down", "j":
