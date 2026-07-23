@@ -2,12 +2,15 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 // seedLoginCodexAuth writes a stub codex-auth.json under dir and returns
@@ -63,6 +66,41 @@ func TestLoginModel_DelTwoPressDeletesCodex(t *testing.T) {
 	}
 	if len(m.entries) != 0 {
 		t.Errorf("entry should be dropped; entries=%#v", m.entries)
+	}
+}
+
+func TestCodexOAuthImpactMessageCountsSavedPresetsOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	savedDir := filepath.Join(preset.PresetsDir(), "saved")
+	templateDir := filepath.Join(preset.PresetsDir(), "templates")
+	if err := os.MkdirAll(savedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, name, provider string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"name":%q,"manifest":{"llm":{"provider":%q}}}`, name, provider)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(templateDir, "codex.json"), "codex", "codex")
+
+	noSaved := LoginModel{}
+	if got := noSaved.codexOAuthImpactMessage(); got != i18n.T("login.codex_oauth_saved_no_preset") {
+		t.Fatalf("no-saved message = %q", got)
+	}
+	write(filepath.Join(savedDir, "mine.json"), "mine", "codex")
+	inactive := LoginModel{activePreset: "anthropic"}
+	if got := inactive.codexOAuthImpactMessage(); !strings.Contains(got, "1") {
+		t.Fatalf("inactive message must count one saved preset: %q", got)
+	}
+	active := LoginModel{activePreset: "codex", activeModel: "gpt-test"}
+	if got := active.codexOAuthImpactMessage(); !strings.Contains(got, "1") || !strings.Contains(got, "gpt-test") {
+		t.Fatalf("active message = %q", got)
 	}
 }
 

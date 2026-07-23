@@ -643,7 +643,9 @@ type ResolvedRef struct {
 	// only when that env var has a value in the passed existingKeys map.
 	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
 	// declares no api_key_env), this is true only when OAuth is configured
-	// (see AuthState.CodexOAuthConfigured). For a Claude preset
+	// (see AuthState.CodexOAuthConfigured). For a codex-pool preset, this is
+	// true only when the caller proves a usable member in the applicable pool
+	// category, or a validated empty pool can use the legacy fallback. For a Claude preset
 	// (provider "claude-code"/"claude_code", which authenticates through the
 	// local Claude Code CLI login and declares no api_key_env),
 	// this is true only when the CLI reports a logged-in session (see
@@ -661,9 +663,8 @@ type ResolvedRef struct {
 }
 
 // AuthState carries machine-level credential facts the credential guard
-// cannot derive from a preset file alone. Today that is only Codex OAuth,
-// but the struct leaves room to add future OAuth providers without churning
-// the ResolveRefs signature again.
+// cannot derive from a preset file alone. Ordinary Codex OAuth, pool
+// membership, and fallback readiness remain separate facts.
 type AuthState struct {
 	// CodexOAuthConfigured is true when the legacy single-account token
 	// file ~/.lingtai-tui/codex-auth.json parses and carries a non-empty
@@ -680,6 +681,17 @@ type AuthState struct {
 	// of the global CodexOAuthConfigured bool, so multiple Codex accounts
 	// are judged independently. Empty falls back to CodexOAuthConfigured.
 	CodexAuthDir string
+
+	// CodexPoolEligible says that a flat pool has a usable positively weighted
+	// member, or that the validated empty pool may use the legacy fallback.
+	CodexPoolEligible bool
+
+	// CodexPoolEligibleModels is non-nil for a model-classified pool. It is
+	// keyed by exact model; absent keys are false and do not fall back to the
+	// flat fact. CodexPoolFallbackEligible covers an absent/empty applicable
+	// category when the legacy token is valid.
+	CodexPoolEligibleModels   map[string]bool
+	CodexPoolFallbackEligible bool
 
 	// ClaudeCodeAuthConfigured is true when the local Claude Code CLI
 	// (`claude`) is installed and reports a logged-in session. The
@@ -784,10 +796,12 @@ func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) R
 		envName := ""
 		provider := ""
 		codexAuthPath := ""
+		model := ""
 		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
 			envName, _ = llm["api_key_env"].(string)
 			provider, _ = llm["provider"].(string)
 			codexAuthPath, _ = llm["codex_auth_path"].(string)
+			model, _ = llm["model"].(string)
 		}
 		switch {
 		case envName != "":
@@ -811,15 +825,15 @@ func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) R
 				r.HasKey = auth.CodexOAuthConfigured
 			}
 		case provider == "codex-pool" || provider == "codex_pool":
-			// The pool provider load-balances across the Codex accounts listed
-			// in ~/.lingtai-tui/codex-auth-pool.json (weights live there, not in
-			// the preset). It reuses the same ChatGPT-OAuth token files as the
-			// codex provider, so it is credential-valid whenever ANY Codex OAuth
-			// account is configured — the same signal the single-account codex
-			// preset uses for its legacy fallback. Judging the pool membership
-			// itself is the kernel's job at runtime; the credential guard only
-			// needs "is at least one Codex account logged in".
-			r.HasKey = auth.CodexOAuthConfigured
+			// A global OAuth account is not enough. The caller must prove a
+			// usable member in the applicable pool category, or the kernel's
+			// validated-empty fallback path.
+			if auth.CodexPoolEligibleModels != nil {
+				eligible, present := auth.CodexPoolEligibleModels[model]
+				r.HasKey = eligible || (!present && auth.CodexPoolFallbackEligible)
+			} else {
+				r.HasKey = auth.CodexPoolEligible
+			}
 		case provider == "claude-code" || provider == "claude_code" ||
 			provider == "claude-agent-sdk" || provider == "claude_agent_sdk":
 			// Claude Code owns OAuth and declares no api_key_env. Keep the
