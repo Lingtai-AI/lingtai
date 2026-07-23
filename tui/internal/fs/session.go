@@ -133,7 +133,7 @@ const (
 // It incrementally tails three data sources and appends new entries.
 //
 // Concurrency: every public entry point that touches mutable state
-// (RebuildFromSources, RebuildFromSourcesInMemory, Persist, Refresh, IngestMail,
+// (RebuildFromSources, RebuildFromSourcesInMemory, Persist, PersistErr, Refresh, IngestMail,
 // Entries, Len, HistoryStats) holds mu. The unexported helpers (ingestMail, IngestEvents,
 // IngestInquiries, append, rewriteFile) assume the caller already holds mu and
 // never lock themselves — that keeps the lock non-reentrant and avoids deadlock.
@@ -283,7 +283,7 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	// Write sorted session.jsonl in one shot only for an already-accepted cache.
 	// Deferred commands build in memory and call Persist after generation checks.
 	if persist {
-		sc.rewriteFile()
+		_ = sc.rewriteFile()
 	}
 
 	// Each ingestion path leaves its offset at the last complete record it
@@ -309,37 +309,44 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 }
 
 // Persist requests that the accepted in-memory snapshot replace session.jsonl.
-// Completeness is a truncation-safety guard, not authorization: rewriteFile
-// separately permits only MainAggregateWriter. A partial cache is a no-op so it
-// cannot replace the operator's complete derived replay file.
+// It is the compatibility path for callers that intentionally remain best-effort.
 func (sc *SessionCache) Persist() {
+	_ = sc.PersistErr()
+}
+
+// PersistErr requests the same complete, role-gated replacement as Persist and
+// reports any filesystem or encoding failure to obligation-owning callers.
+func (sc *SessionCache) PersistErr() error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if !sc.complete {
-		return
+		return nil
 	}
-	sc.rewriteFile()
+	return sc.rewriteFile()
 }
 
-// rewriteFile overwrites session.jsonl with the current in-memory entries.
+// rewriteFile atomically replaces session.jsonl with the current entries.
 // The caller must hold sc.mu.
-func (sc *SessionCache) rewriteFile() {
+func (sc *SessionCache) rewriteFile() error {
 	if sc.persistenceRole != MainAggregateWriter {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(sc.path), 0o755); err != nil {
-		return
+		return fmt.Errorf("rewrite session: create parent: %w", err)
 	}
-	f, err := os.Create(sc.path)
-	if err != nil {
-		return
+	if err := writeAtomicReplacement(sc.path, 0o644, func(destination io.Writer) error {
+		encoder := json.NewEncoder(destination)
+		encoder.SetEscapeHTML(false)
+		for _, entry := range sc.entries {
+			if err := encoder.Encode(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("rewrite session: %w", err)
 	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	enc.SetEscapeHTML(false)
-	for _, e := range sc.entries {
-		_ = enc.Encode(e)
-	}
+	return nil
 }
 
 func (sc *SessionCache) append(entries ...SessionEntry) {
