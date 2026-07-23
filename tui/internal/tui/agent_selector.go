@@ -136,10 +136,13 @@ func discoverAgentSelectorRows(projectDir string) []agentSelectorRow {
 }
 
 // publishAcceptedSelectorRows installs the canonical conversation catalog from
-// the accepted-refresh path only. View never discovers targets.
+// the accepted-refresh path only. View never discovers targets. The mutable
+// cursor survives the row replacement by stable identity — the synthetic Main
+// row or the row's fs.DirectThreadKey — independently of the current selection.
 func (m MailModel) publishAcceptedSelectorRows() MailModel {
+	cursorKey := m.agentSelector.cursorThreadKey()
 	m.agentSelector.rows = discoverAgentSelectorRows(m.baseDir)
-	m.agentSelector.normalizeCursor()
+	m.agentSelector.restoreCursorByThreadKey(cursorKey)
 	return m
 }
 
@@ -223,6 +226,30 @@ func (m MailModel) renderAgentSelector() string {
 	lines = append(lines, i18n.T("agent_selector.hint"))
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// cursorThreadKey names the stable identity currently under the mutable
+// cursor: "" for the synthetic Main row (or an out-of-range cursor), otherwise
+// the row's stable thread key.
+func (s agentSelectorState) cursorThreadKey() string {
+	if s.cursor < 0 || s.cursor >= len(s.rows) || s.rows[s.cursor].Main {
+		return ""
+	}
+	return fs.DirectThreadKey(s.rows[s.cursor].Target)
+}
+
+// restoreCursorByThreadKey moves the cursor to the row carrying the given
+// stable identity ("" is the synthetic Main row). A vanished identity falls
+// back deterministically to the leading Main row.
+func (s *agentSelectorState) restoreCursorByThreadKey(key string) {
+	for index, row := range s.rows {
+		if row.Main && key == "" || !row.Main && fs.DirectThreadKey(row.Target) == key {
+			s.cursor = index
+			return
+		}
+	}
+	s.cursor = 0
+	s.normalizeCursor()
 }
 
 func (s *agentSelectorState) normalizeCursor() {

@@ -117,10 +117,15 @@ type tickMsg struct {
 	at         time.Time
 }
 
-// EditorDoneMsg carries the final text from the external editor.
+// EditorDoneMsg carries the final text from the external editor, tagged with
+// the Mail generation and the exact Main/direct context captured at launch.
+// Main launches leave the three direct fields empty/zero.
 type EditorDoneMsg struct {
-	Text       string
-	Generation uint64
+	Text             string
+	Generation       uint64
+	ProjectRoot      string
+	DirectThreadKey  string
+	DirectGeneration uint64
 }
 
 func tickEvery(d time.Duration, generation uint64) tea.Cmd {
@@ -1255,6 +1260,20 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if msg.Generation != m.generation {
 			return m, nil
 		}
+		// Launch-context affinity: a completion may install text/pending, show
+		// hints, or schedule refresh work only in the exact Main/direct context
+		// captured at launch. A direct completion must match the current
+		// validated target's project root, stable thread key, and direct
+		// generation; a Main context accepts only an untagged completion.
+		if target, ok := m.currentDirectTarget(); ok {
+			if msg.ProjectRoot != target.ProjectDirectory ||
+				msg.DirectThreadKey != m.directChat.threadKey ||
+				msg.DirectGeneration != m.directChat.generation {
+				return m, nil
+			}
+		} else if msg.ProjectRoot != "" || msg.DirectThreadKey != "" || msg.DirectGeneration != 0 {
+			return m, nil
+		}
 		m.pendingMessage = msg.Text
 		m.input.SetValue(msg.Text)
 		m.syncViewportHeight()
@@ -1331,7 +1350,10 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			case "esc":
 				m.input.Reset()
 				m.syncViewportHeight()
-				return m, nil
+				// The closed palette no longer obscures the direct transcript;
+				// re-emit a fresh exact coordinate instead of replaying the one
+				// rejected while obscured.
+				return m, m.currentDirectVisibilityCmd()
 			default:
 				// Forward typing to input, then update palette filter
 				var cmd tea.Cmd
@@ -1966,6 +1988,15 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 		return nil
 	}
 	generation := m.generation
+	// Capture the launch context: a direct launch tags the completion with the
+	// validated target's coordinates, a Main launch leaves them empty/zero.
+	var projectRoot, directThreadKey string
+	var directGeneration uint64
+	if target, ok := m.currentDirectTarget(); ok {
+		projectRoot = target.ProjectDirectory
+		directThreadKey = m.directChat.threadKey
+		directGeneration = m.directChat.generation
+	}
 	tmpFile.WriteString(text)
 	tmpFile.Close()
 	editor := os.Getenv("EDITOR")
@@ -1980,7 +2011,13 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 		}
 		content, _ := os.ReadFile(tmpFile.Name())
 		os.Remove(tmpFile.Name())
-		return EditorDoneMsg{Text: string(content), Generation: generation}
+		return EditorDoneMsg{
+			Text:             string(content),
+			Generation:       generation,
+			ProjectRoot:      projectRoot,
+			DirectThreadKey:  directThreadKey,
+			DirectGeneration: directGeneration,
+		}
 	})
 }
 
@@ -2072,11 +2109,17 @@ func (m MailModel) View() string {
 	stateLabel := i18n.T("state." + stateKey)
 	stateStyle := lipgloss.NewStyle().Foreground(StateColor(strings.ToUpper(stateKey)))
 	orchNameStyle := lipgloss.NewStyle().Foreground(ColorText).Bold(true)
-	titleRightBase := orchNameStyle.Render(m.activeRecipientLabel()) + " " + stateStyle.Render("◉ "+stateLabel)
+	// A validated direct selection keeps only the exact recipient identity: the
+	// state badge, thinking quote/spinner, network badge, and elapsed timer are
+	// Main orchestrator (host) facts, not target facts.
+	titleRightBase := orchNameStyle.Render(m.activeRecipientLabel())
+	if !direct {
+		titleRightBase += " " + stateStyle.Render("◉ "+stateLabel)
+	}
 
 	// Thinking indicator: fixed quote per ACTIVE session, pulsing color + spinners
 	titleCenter := ""
-	if strings.EqualFold(m.orchState, "ACTIVE") {
+	if !direct && strings.EqualFold(m.orchState, "ACTIVE") {
 		quotes := thinkingQuotesMap[i18n.Lang()]
 		if quotes == nil {
 			quotes = thinkingQuotesMap["en"]
@@ -2090,7 +2133,7 @@ func (m MailModel) View() string {
 	}
 
 	titleRight := titleRightBase
-	if badge := m.networkActivityBadge(); badge != "" {
+	if badge := m.networkActivityBadge(); !direct && badge != "" {
 		needWidth := lipgloss.Width(titleLeft) + lipgloss.Width(titleCenter) + lipgloss.Width(titleRightBase) + lipgloss.Width(badge) + 4
 		if needWidth <= m.width {
 			titleRight += badge
@@ -2117,8 +2160,14 @@ func (m MailModel) View() string {
 	// sees the agent's live state (animated spinner + elapsed while ACTIVE) right
 	// where their attention already is. Reuses the header's stateStyle/stateLabel
 	// and is independent of the verbose level.
-	indicator := stateStyle.Render(m.stateGlyph() + " " + stateLabel + m.activeElapsed())
-	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel()) + "  " + indicator + " "
+	toLabel := StyleFaint.Render("Email To: ") + lipgloss.NewStyle().Foreground(ColorAgent).Render(m.activeRecipientLabel())
+	if direct {
+		// Host lifecycle chrome is omitted next to a direct recipient identity.
+		toLabel += " "
+	} else {
+		indicator := stateStyle.Render(m.stateGlyph() + " " + stateLabel + m.activeElapsed())
+		toLabel += "  " + indicator + " "
+	}
 	sepWidth := m.width - lipgloss.Width(toLabel)
 	if sepWidth < 0 {
 		sepWidth = 0

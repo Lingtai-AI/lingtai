@@ -109,11 +109,13 @@ func clearedDirectChat(previous directChatState) directChatState {
 	return directChatState{generation: previous.generation}
 }
 
-// publishAcceptedDirectSnapshot advances the accepted publication coordinate
-// and republishes only a still-current direct selection. It never marks mail
-// seen; the fresh deferred coordinate carries the new accepted serial instead.
+// publishAcceptedDirectSnapshot advances the accepted publication coordinate,
+// reconciles the current selection against the accepted safe rows, and
+// republishes only a still-current direct selection. It never marks mail seen;
+// the fresh deferred coordinate carries the new accepted serial instead.
 func (m MailModel) publishAcceptedDirectSnapshot() (MailModel, tea.Cmd) {
 	m.acceptedSnapshotSerial = nextAcceptedSnapshotSerial(m.acceptedSnapshotSerial)
+	m = m.reconcileAcceptedDirectSelection()
 
 	projectRoot, threadKey, ok := m.directTargetCoordinates(m.directChat.target)
 	if !ok || m.directChat.threadKey != threadKey ||
@@ -127,6 +129,41 @@ func (m MailModel) publishAcceptedDirectSnapshot() (MailModel, tea.Cmd) {
 	m.directChat.acceptedSnapshotSerial = m.acceptedSnapshotSerial
 	m.directChat.scrollOffset = m.directScrollBottom()
 	return m, deferredDirectVisibilityCmd(projectRoot, threadKey, m.directChat.generation, m.acceptedSnapshotSerial)
+}
+
+// reconcileAcceptedDirectSelection rebinds a still-selected stable thread key
+// to its exactly-one accepted safe row — the canonical rediscovered target may
+// carry a new directory/address — before direct projection or send can use it.
+// A selected key that is absent or ambiguous in the accepted rows fails closed
+// to Main within the same accepted publication: selection and direct state are
+// cleared, the exact stored Main compose returns, and the active viewport is
+// recalculated so a stale direct send is impossible. The durable unread store
+// is deliberately untouched.
+func (m MailModel) reconcileAcceptedDirectSelection() MailModel {
+	key := m.agentSelector.selectedThreadKey
+	if key == "" && m.directChat.threadKey == "" {
+		return m
+	}
+	if key != "" && key == m.directChat.threadKey {
+		matches := 0
+		var rebound fs.DirectTarget
+		for _, row := range m.agentSelector.rows {
+			if !row.Main && fs.DirectThreadKey(row.Target) == key {
+				matches++
+				rebound = row.Target
+			}
+		}
+		if matches == 1 {
+			m.directChat.target = rebound
+			return m
+		}
+	}
+	m.agentSelector.selectedThreadKey = ""
+	m = m.restoreMainCompose()
+	m.directChat = clearedDirectChat(m.directChat)
+	m.lastInputLines = -1
+	m.syncViewportHeight()
+	return m
 }
 
 // syncAcceptedDirectUnread opens or synchronizes the one Mail-owned durable
