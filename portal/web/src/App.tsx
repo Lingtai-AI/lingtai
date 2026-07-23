@@ -39,6 +39,23 @@ function diffMailBullets(prev: Network | null, next: Network, realNow: number): 
 
 export type VizMode = 'live' | 'replay';
 
+function networkWithMailEdges(current: Network | null, mailNetwork: Network): Network {
+  if (!current) return mailNetwork;
+  return {
+    ...current,
+    mail_edges: mailNetwork.mail_edges,
+    stats: {
+      ...current.stats,
+      total_mails: mailNetwork.stats.total_mails,
+    },
+  };
+}
+
+function preserveLoadedMailEdges(next: Network, prev: Network | null): Network {
+  if (!prev || prev.mail_edges.length === 0 || next.mail_edges.length > 0) return next;
+  return networkWithMailEdges(next, prev);
+}
+
 const DEFAULT_SPEED = 10;
 
 export default function App() {
@@ -84,16 +101,18 @@ export default function App() {
   });
   const MAX_LOADED_CHUNKS = 3;
 
-  // Live mode: use a ref for prev network to avoid stale closures
+  // Live mode: use refs for prev network and on-demand full-mail loading.
   const prevNetworkRef = useRef<Network | null>(null);
+  const mailLoadRef = useRef<AbortController | null>(null);
 
   // ── Live mode ────────────────────────────────────────────────
 
   const onNetworkUpdate = useCallback((net: Network) => {
     const prev = prevNetworkRef.current;
-    const newBullets = diffMailBullets(prev, net, performance.now());
-    prevNetworkRef.current = net;
-    setNetwork(net);
+    const merged = preserveLoadedMailEdges(net, prev);
+    const newBullets = diffMailBullets(prev, merged, performance.now());
+    prevNetworkRef.current = merged;
+    setNetwork(merged);
     if (newBullets.length > 0) setBullets(newBullets);
   }, []); // no deps — uses ref, not state
 
@@ -104,7 +123,7 @@ export default function App() {
       if (inFlight) return;
       const controller = new AbortController();
       inFlight = controller;
-      fetchNetwork(controller.signal)
+      fetchNetwork({ signal: controller.signal })
         .then(onNetworkUpdate)
         .catch((err) => {
           if ((err as Error).name !== 'AbortError') console.error(err);
@@ -121,6 +140,41 @@ export default function App() {
       inFlight = null;
     };
   }, [onNetworkUpdate, vizMode]);
+
+
+  useEffect(() => {
+    if (vizMode !== 'live' || edgeMode !== 'email') {
+      if (mailLoadRef.current) {
+        mailLoadRef.current.abort();
+        mailLoadRef.current = null;
+      }
+      return;
+    }
+    if ((network?.mail_edges.length ?? 0) > 0 || mailLoadRef.current) return;
+
+    const controller = new AbortController();
+    mailLoadRef.current = controller;
+    fetchNetwork({ includeMailEdges: true, signal: controller.signal })
+      .then((mailNetwork) => {
+        setNetwork((current) => {
+          const merged = networkWithMailEdges(current, mailNetwork);
+          prevNetworkRef.current = merged;
+          return merged;
+        });
+      })
+      .catch((err) => {
+        if ((err as Error).name !== 'AbortError') console.error(err);
+      })
+      .finally(() => {
+        if (mailLoadRef.current === controller) mailLoadRef.current = null;
+      });
+  }, [edgeMode, network?.mail_edges.length, vizMode]);
+
+  useEffect(() => {
+    return () => {
+      if (mailLoadRef.current) mailLoadRef.current.abort();
+    };
+  }, []);
 
   // ── Replay rAF cleanup on unmount ────────────────────────────
 
