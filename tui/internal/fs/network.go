@@ -76,7 +76,7 @@ func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 		inbox, _ := ReadInbox(n.WorkingDir)
 		for _, msg := range inbox {
 			from := RelativizeAddress(ResolveAddress(msg.From, baseDir), baseDir)
-			recipients := resolveRecipients(msg.To)
+			recipients := NormalizeMailEndpoints(msg.To)
 			for _, r := range recipients {
 				counts[edgeKey{from, RelativizeAddress(ResolveAddress(r, baseDir), baseDir)}]++
 			}
@@ -92,22 +92,6 @@ func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 		})
 	}
 	return edges
-}
-
-func resolveRecipients(to interface{}) []string {
-	switch v := to.(type) {
-	case string:
-		return []string{v}
-	case []interface{}:
-		var result []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result
-	}
-	return nil
 }
 
 func computeStats(nodes []AgentNode, mailEdges []MailEdge) NetworkStats {

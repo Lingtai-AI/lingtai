@@ -39,18 +39,24 @@ const bodhiLeaf = "" +
 // The app should transition to first-run.
 type NirvanaDoneMsg struct{}
 
+// nirvanaCleanStartMsg is internal — asks the root App to invalidate every
+// project-mail lifetime synchronously before destructive filesystem cleanup can
+// begin. The root then returns doClean as the next command.
+type nirvanaCleanStartMsg struct{}
+
 // nirvanaCleanDoneMsg is internal — signals that cleanup finished.
 type nirvanaCleanDoneMsg struct{}
 
 // NirvanaModel is a full-screen confirmation view for /nirvana (clean & start fresh).
 // Cursor defaults to Cancel (index 1) so the user must deliberately move up.
 type NirvanaModel struct {
-	lingtaiDir string // .lingtai/ path
-	cursor     int    // 0 = Confirm, 1 = Cancel
-	cleaning   bool   // true while cleanup runs
-	done       bool   // true when cleanup complete, waiting for Enter
-	width      int
-	height     int
+	lingtaiDir     string // .lingtai/ path
+	cursor         int    // 0 = Confirm, 1 = Cancel
+	cleaning       bool   // true while cleanup runs
+	cleanupStarted bool   // true after the root consumes the one cleanup-start handoff
+	done           bool   // true when cleanup complete, waiting for Enter
+	width          int
+	height         int
 }
 
 func NewNirvanaModel(lingtaiDir string) NirvanaModel {
@@ -103,7 +109,9 @@ func (m NirvanaModel) Update(msg tea.Msg) (NirvanaModel, tea.Cmd) {
 			switch m.cursor {
 			case 0: // Confirm
 				m.cleaning = true
-				return m, m.doClean()
+				// Defer destructive work until the root App has synchronously
+				// invalidated every async owner from the lifetime being deleted.
+				return m, func() tea.Msg { return nirvanaCleanStartMsg{} }
 			case 1: // Cancel
 				return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 			}

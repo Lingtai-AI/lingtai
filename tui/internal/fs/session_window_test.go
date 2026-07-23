@@ -156,7 +156,7 @@ func TestWindowedRebuildTailIndexReachesJSONLPrefixOnOlderLoad(t *testing.T) {
 	cache := NewMailCache(humanDir).Refresh()
 
 	// (1) Initial newest window of 3 → newest 3 events (e9,e10,e11), partial.
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
 	assertSessionMarkersExactly(t, sc.Entries(), "e9", "e10", "e11")
 	if sc.Complete() {
@@ -166,14 +166,14 @@ func TestWindowedRebuildTailIndexReachesJSONLPrefixOnOlderLoad(t *testing.T) {
 	// (2) A larger explicit older request (window 8) exhausts the 4 indexed tail
 	// rows and must reach the un-indexed JSONL prefix — no duplicates, no order
 	// break. Newest 8 events are e4..e11.
-	sc2 := NewSessionCache(humanDir, root)
+	sc2 := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc2.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 8)
 	assertSessionMarkersExactly(t, sc2.Entries(),
 		"e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11")
 
 	// (3) A window >= whole history (12) reaches the whole prefix → complete and
 	// persistable.
-	sc3 := NewSessionCache(humanDir, root)
+	sc3 := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc3.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 12)
 	assertSessionMarkersExactly(t, sc3.Entries(),
 		"e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11")
@@ -197,7 +197,7 @@ func TestWindowedExactEqualWindowIsComplete(t *testing.T) {
 	cache := NewMailCache(humanDir).Refresh()
 
 	// Window exactly equal to history reaches byte offset zero and is complete.
-	scEqual := NewSessionCache(humanDir, root)
+	scEqual := NewSessionCache(humanDir, root, MainAggregateWriter)
 	scEqual.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 4)
 	assertSessionBodiesExactly(t, scEqual.Entries(), "e0", "e1", "e2", "e3")
 	if !scEqual.Complete() {
@@ -205,7 +205,7 @@ func TestWindowedExactEqualWindowIsComplete(t *testing.T) {
 	}
 
 	// A larger request remains complete and stable.
-	scNext := NewSessionCache(humanDir, root)
+	scNext := NewSessionCache(humanDir, root, MainAggregateWriter)
 	scNext.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 8)
 	assertSessionBodiesExactly(t, scNext.Entries(), "e0", "e1", "e2", "e3")
 	if !scNext.Complete() {
@@ -222,7 +222,7 @@ func TestWindowedRebuildKeepsOnlyNewestEventsButFullEOFOffset(t *testing.T) {
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	buildWindowSQLiteEvents(t, sqliteBin, orchDir, 10)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
 
@@ -251,7 +251,7 @@ func TestWindowedRebuildWithoutSQLitePreservesLegacyGroupBoundary(t *testing.T) 
 		`{"type":"tool_result","ts":5,"tool_name":"grep","status":"ok"}` + "\n"
 	writeSessionTestFile(t, eventsPath, content)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 3)
 	entries := sc.Entries()
 	if len(entries) != 4 || entries[0].Type != "llm_response" {
@@ -275,7 +275,7 @@ func TestWindowedRebuildWithoutSQLiteRetainsOnlyNewestContentAndCountsAll(t *tes
 	writeSessionTestFile(t, eventsPath, content)
 	cache := NewMailCache(humanDir).Refresh()
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
 	assertSessionBodiesExactly(t, sc.Entries(), "e7", "e8", "e9")
 	if sc.Complete() {
@@ -299,7 +299,7 @@ func TestWindowedRebuildWithoutSQLiteRetainsOnlyNewestContentAndCountsAll(t *tes
 		t.Fatalf("stats after tail refresh = %+v, want Detailed=11", stats)
 	}
 
-	complete := NewSessionCache(humanDir, root)
+	complete := NewSessionCache(humanDir, root, MainAggregateWriter)
 	complete.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 20)
 	if !complete.Complete() || complete.Len() != 11 {
 		t.Fatalf("larger no-index window = complete %v len %d, want true/11", complete.Complete(), complete.Len())
@@ -316,7 +316,7 @@ func TestJSONLWindowSkipsHugeOlderBodyAndCountsItFromBoundedMetadata(t *testing.
 		sessionEventJSONL(4, "text_output", "e3")
 	writeSessionTestFile(t, eventsPath, content)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 2)
 	assertSessionBodiesExactly(t, sc.Entries(), "e2", "e3")
 	stats, _, err := sc.ExactHistoryStats()
@@ -351,7 +351,7 @@ func TestWindowedRebuildSparseInteriorIndexUsesCanonicalJSONL(t *testing.T) {
 	createSessionSQLite(t, sqliteBin, orchDir, inserts)
 	cache := NewMailCache(humanDir).Refresh()
 
-	newest := NewSessionCache(humanDir, root)
+	newest := NewSessionCache(humanDir, root, MainAggregateWriter)
 	newest.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
 	assertSessionBodiesExactly(t, newest.Entries(), "e7", "e8", "e9")
 	if newest.Complete() {
@@ -362,14 +362,14 @@ func TestWindowedRebuildSparseInteriorIndexUsesCanonicalJSONL(t *testing.T) {
 		t.Fatalf("canonical sparse-index stats = %+v err=%v, want 10 detailed", stats, err)
 	}
 
-	older := NewSessionCache(humanDir, root)
+	older := NewSessionCache(humanDir, root, MainAggregateWriter)
 	older.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 6)
 	assertSessionBodiesExactly(t, older.Entries(), "e4", "e5", "e6", "e7", "e8", "e9")
 	if older.Complete() {
 		t.Fatal("interior holes are incorporated, but older canonical history still remains")
 	}
 
-	all := NewSessionCache(humanDir, root)
+	all := NewSessionCache(humanDir, root, MainAggregateWriter)
 	all.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 10)
 	assertSessionBodiesExactly(t, all.Entries(), "e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9")
 	if !all.Complete() {
@@ -386,7 +386,7 @@ func TestSessionMetadataStructuralLateKeysAndNestedDecoys(t *testing.T) {
 		`{"nested":{"type":"text_output","text":"nested only","input_tokens":5},"padding":"` + huge + `","type":"not_session","ts":3}` + "\n"
 	writeSessionTestFile(t, eventsPath, content)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
 	entries := sc.Entries()
 	if len(entries) != 2 || entries[0].Type != "text_output" || entries[0].Body != "late text" || entries[1].Type != "llm_response" {
@@ -418,7 +418,7 @@ func TestWindowedRebuildSkipsNonRenderableTextMetadata(t *testing.T) {
 	}, "\n") + "\n"
 	writeSessionTestFile(t, eventsPath, content)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 5)
 	entries := sc.Entries()
 	wantTypes := []string{"llm_call", "text_output", "llm_response", "insight", "text_output"}
@@ -476,7 +476,7 @@ func TestSessionMetadataCanonicalNumericFallback(t *testing.T) {
 		})
 	}
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
 	entries := sc.Entries()
 	if len(entries) != 2 || entries[0].Body != "finite ignored number" || entries[1].Type != "llm_response" {
@@ -521,7 +521,7 @@ func TestSessionMetadataCanonicalDepthLimit(t *testing.T) {
 		t.Fatalf("over-depth metadata unexpectedly accepted: %+v", got)
 	}
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.RebuildFromSourcesWindowedInMemory(NewMailCache(humanDir).Refresh(), "human", orchDir, "orch", 10)
 	entries := sc.Entries()
 	if len(entries) != 1 || entries[0].Body != "root plus 9999 arrays" {
@@ -541,7 +541,7 @@ func TestWindowedRebuildLargerThanHistoryIsComplete(t *testing.T) {
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	buildWindowSQLiteEvents(t, sqliteBin, orchDir, 4)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 2000)
 
@@ -560,7 +560,7 @@ func TestPersistRefusesPartialWindowedCache(t *testing.T) {
 
 	sessionPath := filepath.Join(humanDir, "logs", "session.jsonl")
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 3)
 	sc.Persist()
@@ -581,7 +581,7 @@ func TestPartialWindowRefreshDoesNotAppendSessionFile(t *testing.T) {
 	cache := NewMailCache(humanDir).Refresh()
 	sessionPath := filepath.Join(humanDir, "logs", "session.jsonl")
 
-	partial := NewSessionCache(humanDir, root)
+	partial := NewSessionCache(humanDir, root, MainAggregateWriter)
 	partial.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 2)
 	if partial.Complete() {
 		t.Fatal("two-entry window over four events must be partial")
@@ -603,7 +603,7 @@ func TestPartialWindowRefreshDoesNotAppendSessionFile(t *testing.T) {
 		t.Fatalf("partial EOF refresh must leave session.jsonl absent; stat err = %v", err)
 	}
 
-	complete := NewSessionCache(humanDir, root)
+	complete := NewSessionCache(humanDir, root, MainAggregateWriter)
 	complete.Refresh(cache, "human", orchDir, "orch")
 	complete.Persist()
 	if data, err := os.ReadFile(sessionPath); err != nil || len(data) == 0 {
@@ -623,7 +623,7 @@ func TestFreshCacheRefreshPersistsAsComplete(t *testing.T) {
 	writeSessionTestFile(t, eventsPath,
 		`{"ts":1781300001,"type":"text_output","text":"only"}`+"\n")
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	// A plain Refresh reads the whole file from offset 0 — a full, complete load.
 	sc.Refresh(cache, "human", orchDir, "orch")
@@ -649,7 +649,7 @@ func TestWindowedRebuildUnboundedMatchesLegacy(t *testing.T) {
 	root, humanDir, orchDir := newSessionTestDirs(t)
 	buildWindowSQLiteEvents(t, sqliteBin, orchDir, 5)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesWindowedInMemory(cache, "human", orchDir, "orch", 0)
 

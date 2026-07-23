@@ -59,20 +59,22 @@ type ViewChangeMsg struct {
 }
 
 type pulseTickMsg struct {
-	generation uint64
-	at         time.Time
+	envelope asyncEnvelope
+	at       time.Time
 }
 
-func pulseTick(generation uint64) tea.Cmd {
+func pulseTick(current asyncCurrent) tea.Cmd {
+	envelope := captureAsync(asyncLivenessPulse, current)
 	return tea.Every(250*time.Millisecond, func(t time.Time) tea.Msg {
-		return pulseTickMsg{generation: generation, at: t}
+		return pulseTickMsg{envelope: envelope, at: t}
 	})
 }
 
-type mailRefreshMsg struct {
-	generation   uint64
-	cache        fs.MailCache     // incrementally updated cache
-	sessionCache *fs.SessionCache // command-local authoritative rebuild; installed only after generation acceptance
+// mailRefreshPayload is synchronous, already accepted presentation data carried
+// by projectMailRefreshMsg. It has no independent async identity or gate.
+type mailRefreshPayload struct {
+	snapshot     *ProjectMailSnapshot
+	sessionCache *fs.SessionCache
 	alive        bool
 	state        string // active, idle, stuck, asleep, suspended, or ""
 	activity     fs.NetworkActivity
@@ -81,52 +83,33 @@ type mailRefreshMsg struct {
 	initial      bool   // true only for the deferred initial rebuild (clears the loading banner)
 }
 
-// mailPersistMsg is the second, post-frame phase of an accepted authoritative
-// rebuild. The command that emits it performs no I/O; Update re-checks both the
-// activation generation and installed cache identity before writing, so an old
-// rebuild cannot race a newer activation's canonical session cache.
+// mailPersistMsg is the post-frame phase of an accepted authoritative rebuild.
+// Its envelope is the sole permission to write the still-current source cache.
 type mailPersistMsg struct {
-	generation   uint64
+	envelope     asyncEnvelope
 	sessionCache *fs.SessionCache
 }
 
-// mailOlderPageMsg carries an async older-history page: a command-local session
-// cache rebuilt with a larger ingest window. Like the initial
-// rebuild it is generation-gated — a stale page (from a superseded activation)
-// must never replace the installed cache. It is only produced by explicit upward
-// navigation (Ctrl+U / top paging), never on the first-frame critical path.
+// mailOlderPageMsg carries an async older-history page rebuilt from the captured
+// installed cache and accepted snapshot version.
 type mailOlderPageMsg struct {
-	generation   uint64
+	envelope     asyncEnvelope
 	sessionCache *fs.SessionCache
-	ingestWindow int // cumulative newest-session content window; grows by pageSize per key
+	ingestWindow int
 }
 
-// mailHistoryCountMsg is the one asynchronous exact-count result for an
-// activation/source/horizon. Its originating cache identity remains the gate even
-// if Ctrl+U has since replaced the installed content cache.
+// mailHistoryCountMsg carries one asynchronous exact-count result. The envelope
+// binds its originating outstanding cache and canonical source horizon.
 type mailHistoryCountMsg struct {
-	generation uint64
-	cache      *fs.SessionCache
-	identity   string
-	stats      fs.SessionHistoryStats
-	err        error
-}
-
-type tickMsg struct {
-	generation uint64
-	at         time.Time
+	envelope asyncEnvelope
+	stats    fs.SessionHistoryStats
+	err      error
 }
 
 // EditorDoneMsg carries the final text from the external editor.
 type EditorDoneMsg struct {
-	Text       string
-	Generation uint64
-}
-
-func tickEvery(d time.Duration, generation uint64) tea.Cmd {
-	return tea.Every(d, func(t time.Time) tea.Msg {
-		return tickMsg{generation: generation, at: t}
-	})
+	envelope asyncEnvelope
+	Text     string
 }
 
 // MailModel is the main chat view — a single chronological stream.
@@ -173,17 +156,16 @@ type MailModel struct {
 	baseDir              string // .lingtai/ directory
 	visitExitHint        bool   // append subtle Esc-Esc return hint to the title row
 	verbose              verboseLevel
-	messages             []ChatMessage // derived from cache on each refresh
-	cache                fs.MailCache  // incremental mail cache
-	pageSize             int           // max messages shown (from settings)
-	loadedExtra          int           // additional older messages loaded via ctrl+u
+	messages             []ChatMessage        // derived from cache on each refresh
+	acceptedSnapshot     *ProjectMailSnapshot // immutable project-store snapshot; MailModel never refreshes it
+	pageSize             int                  // max messages shown (from settings)
+	loadedExtra          int                  // additional older messages loaded via ctrl+u
 	viewport             viewport.Model
 	input                InputModel
 	palette              PaletteModel
 	width                int
 	height               int
 	ready                bool
-	pollRate             time.Duration // refresh interval
 	orchAlive            bool
 	orchState            string // agent state from .agent.json
 	networkActivity      fs.NetworkActivity
@@ -211,15 +193,21 @@ type MailModel struct {
 	initialLoading       bool                   // true until the bounded initial content rebuild has been applied
 	ingestWindow         int                    // cumulative content window; initialized to pageSize and grows by pageSize
 	auxiliaryMessages    int                    // all renderable mail/inquiry entries, including older ones withheld across a partial event gap
-	olderLoadInFlight    bool                   // true while an async older-page rebuild is running (debounce + generation gate)
+	olderLoadInFlight    bool                   // true while an async older-page rebuild is running (debounce)
+	olderLoadEnvelope    asyncEnvelope          // exact physical completion token for non-publishing debounce settlement
 	historyCountLoading  bool                   // neutral banner while exact count metadata is in flight
 	historyCountLoaded   bool                   // exact stats are accepted for this activation/source/horizon
 	historyCountCache    *fs.SessionCache       // originating cache identity gate for the one async count task
 	historyCountIdentity string                 // canonical source/horizon identity captured by historyCountCache
 	historyStats         fs.SessionHistoryStats // accepted exact count, reused across every older-page rebuild
 	copyMode             bool                   // chat-only: disables mouse capture so the terminal can select/copy visible text
-	generation           uint64                 // activation token; stale async messages are ignored without rescheduling
-	beforeRebuild        func()                 // optional deterministic test hook before deferred rebuild I/O
+	generation           uint64                 // activation token mirrored in asyncBinding
+	asyncBinding         asyncBinding           // canonical project/store/target/thread lifetime binding
+	asyncStoreVersion    uint64                 // accepted snapshot version for snapshot-derived work
+	asyncTickEpoch       uint64                 // current root refresh-tick chain (pulse has its own epoch below)
+	pulseEpoch           uint64                 // current 250ms liveness-pulse chain
+	revalidateTarget     func(asyncOwner, asyncTarget) bool
+	beforeRebuild        func() // optional deterministic test hook before deferred rebuild I/O
 
 	// Home telemetry is resolved asynchronously off the render/input path (its
 	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
@@ -253,16 +241,14 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 		orchName:          orchName,
 		input:             input,
 		palette:           palette,
-		pollRate:          1 * time.Second,
-		cache:             fs.NewMailCache(humanDir),
 		pageSize:          pageSize,
 		globalDir:         globalDir,
 		quoteIdx:          -1,
 		insightsEnabled:   insights,
 		toolCallTruncate:  toolCallTruncate,
 		dismissedInsights: make(map[string]bool),
-		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir)),
-		// The authoritative session rebuild is deferred to initialRebuild() (see
+		sessionCache:      fs.NewSessionCache(humanDir, filepath.Dir(baseDir), fs.MainAggregateWriter),
+		// The authoritative session rebuild is deferred to ProjectMailStore (see
 		// below), so the first frames render before history is loaded. Show a
 		// loading banner at the top of the stream until that rebuild's refresh
 		// lands; the mailRefreshMsg handler clears it on the initial message.
@@ -272,95 +258,118 @@ func NewMailModel(humanDir, humanAddr, baseDir, orchDir, orchName string, pageSi
 	// intentionally NOT done here. NewMailModel runs on the synchronous launch
 	// path (NewApp, before tea.Program.Run), so even the newest content window
 	// would delay the first frame on content-heavy projects. The rebuild is
-	// deferred to initialRebuild(), a command run by Init(), so the first frame
+	// requested by App.Init and run by ProjectMailStore, so the first frame
 	// paints immediately (empty) and the newest mail_page_size entries fill in a
 	// beat later. Exact full-history metadata counting remains separate and async.
 	return m
 }
 
-// initialRebuild performs the one-time authoritative bounded content rebuild off
-// the synchronous launch path. It refreshes mail, loads the newest
-// mail_page_size canonical event entries plus current auxiliary sources, and
-// merges them chronologically. Exact full-history event counts run separately.
-// Running this as a tea.Cmd keeps the first frame instant. It returns a
-// mailRefreshMsg carrying command-local mail and session caches; the live model
-// installs and persists them only after accepting the message's generation, so
-// a late rebuild cannot mutate a newer activation.
-func (m MailModel) initialRebuild() tea.Msg {
-	if m.beforeRebuild != nil {
-		m.beforeRebuild()
-	}
-	// Refresh mail cache before session rebuild so mail entries are included.
-	cache := m.cache.Refresh()
-	// Always rebuild from authoritative sources on launch. Keep both the in-memory
-	// snapshot and its session.jsonl write command-local until Update accepts this
-	// generation; stale work must have no effect on the installed cache.
-	//
-	// mail_page_size directly owns both the initial newest content window and the
-	// visible/reveal batch. Exact full-history metadata is launched separately
-	// after this bounded content result is accepted.
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+// rebuildSession builds the target/session portion of an initial project-store
+// refresh. The ProjectMailStore owns and supplies the detached mailbox cache;
+// this helper never scans mailbox directories itself.
+func (m MailModel) rebuildSession(cache fs.MailCache) *fs.SessionCache {
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
 	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), m.pageSize)
-	m.cache = cache
-	// Tag the resulting refresh as the initial one so the handler can clear the
-	// loading banner. Only this rebuild flips initialLoading off; periodic ticks
-	// produce untagged mailRefreshMsg values and never re-show the banner.
-	msg := m.refreshMail()
-	if rm, ok := msg.(mailRefreshMsg); ok {
-		rm.initial = true
-		rm.generation = m.generation
-		rm.sessionCache = sessionCache
-		return rm
+	return sessionCache
+}
+
+func (m *MailModel) invalidateAsync() {
+	if m == nil {
+		return
 	}
-	return msg
+	// A destructive project reset has no successor Mail lifetime yet. Clear the
+	// canonical binding first so every late envelope fails closed, then release
+	// only Mail-local non-publishing/in-flight coordinates. A future install binds
+	// a fresh nonzero generation and owner/store/target identity.
+	m.generation = 0
+	m.asyncBinding = asyncBinding{}
+	m.asyncStoreVersion = 0
+	m.asyncTickEpoch = 0
+	m.pulseEpoch = 0
+	m.revalidateTarget = nil
+	m.olderLoadInFlight = false
+	m.olderLoadEnvelope = asyncEnvelope{}
+	m.historyCountLoading = false
+	m.historyCountCache = nil
+	m.historyCountIdentity = ""
+	m.homeTelemetryInFlight = false
+}
+
+func (m MailModel) asyncCurrent() asyncCurrent {
+	current := asyncCurrent{
+		binding:          m.asyncBinding,
+		storeVersion:     m.asyncStoreVersion,
+		tickEpoch:        m.asyncTickEpoch,
+		pulseEpoch:       m.pulseEpoch,
+		revalidateTarget: m.revalidateTarget,
+	}
+	if m.sessionCache != nil {
+		current.sessionSource = asyncSourceCache{
+			cache:    m.sessionCache,
+			identity: m.sessionCache.HistoryCountIdentity(),
+		}
+	}
+	if m.historyCountCache != nil {
+		current.outstandingCount = asyncSourceCache{
+			cache:    m.historyCountCache,
+			identity: m.historyCountIdentity,
+		}
+	}
+	return current
+}
+
+// requestMailRefresh asks the root ProjectMailStore to run its sole refresh
+// pipeline. It performs no mailbox I/O and cannot start a ticker.
+func (m MailModel) requestMailRefresh(initial bool) tea.Cmd {
+	envelope := captureAsync(refreshAsyncKind(initial), m.asyncCurrent())
+	return func() tea.Msg {
+		return projectMailRefreshRequestMsg{envelope: envelope, initial: initial}
+	}
 }
 
 // requestOlderPage starts an asynchronous load of the next older page of history.
-// It is invoked only by explicit upward navigation (Ctrl+U at the top of a
-// partial windowed cache) — never on the first-frame path. It marks a load
-// in-flight (debounce) and returns a generation-tagged command that rebuilds the
-// session cache with a window one page larger; the result is applied only after
-// the mailOlderPageMsg passes the generation + in-flight gate in Update. Returns
-// (m, nil) with no state change when there is nothing to load or a load is
-// already running.
+// It is invoked only by explicit upward navigation and debounces one in-flight
+// rebuild. Shared envelope acceptance owns all target/source/version identity.
 func (m MailModel) requestOlderPage() (MailModel, tea.Cmd) {
 	if m.olderLoadInFlight || !m.cacheIsPartial() {
 		return m, nil
 	}
 	m.olderLoadInFlight = true
+	m.olderLoadEnvelope = captureAsync(asyncOlderPage, m.asyncCurrent())
 	nextWindow := m.ingestWindow + m.pageSize
-	generation := m.generation
-	return m, func() tea.Msg { return m.olderPageCmd(nextWindow, generation) }
+	return m, func() tea.Msg { return m.olderPageCmd(nextWindow) }
 }
 
-// olderPageCmd performs the off-path windowed rebuild for an older page. It reuses
-// the same authoritative merge/sort/dedup/api-grouping path as the initial
-// rebuild and grows the content window by exactly one configured page per request,
-// so older entries stay chronologically ordered, duplicate-free across the boundary,
-// and api-call-group consistent. The rebuilt cache is command-local until Update
-// accepts this generation.
-func (m MailModel) olderPageCmd(window int, generation uint64) tea.Msg {
-	cache := m.cache.Refresh()
-	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir))
+// olderPageCmd performs the off-path windowed rebuild for an older page.
+func (m MailModel) olderPageCmd(window int) tea.Msg {
+	envelope := captureAsync(asyncOlderPage, m.asyncCurrent())
+	cache := m.snapshotCache()
+	sessionCache := fs.NewSessionCache(m.humanDir, filepath.Dir(m.baseDir), fs.MainAggregateWriter)
 	sessionCache.RebuildFromSourcesWindowedInMemory(cache, m.humanAddr, m.orchestrator, m.orchDisplayName(), window)
 	return mailOlderPageMsg{
-		generation:   generation,
+		envelope:     envelope,
 		sessionCache: sessionCache,
 		ingestWindow: window,
 	}
 }
 
-func (m MailModel) historyCountCmd(cache *fs.SessionCache, generation uint64) tea.Cmd {
+func (m MailModel) historyCountCmd(cache *fs.SessionCache) tea.Cmd {
+	envelope := captureAsync(asyncExactHistoryCount, m.asyncCurrent())
 	return func() tea.Msg {
 		stats, gotIdentity, err := cache.ExactHistoryStats()
+		if err == nil && gotIdentity != envelope.source.identity {
+			err = fmt.Errorf("history source changed while exact count was running")
+		}
 		return mailHistoryCountMsg{
-			generation: generation,
-			cache:      cache,
-			identity:   gotIdentity,
-			stats:      stats,
-			err:        err,
+			envelope: envelope,
+			stats:    stats,
+			err:      err,
 		}
 	}
+}
+
+func (m MailModel) asyncPulseCmd() tea.Cmd {
+	return pulseTick(m.asyncCurrent())
 }
 
 func (m MailModel) firstFrameWindow() int { return m.pageSize }
@@ -541,11 +550,10 @@ func (m MailModel) showChatTailHint() bool {
 	return m.chatTailRemainingLines() > m.viewport.Height()
 }
 
-func (m MailModel) refreshMail() tea.Msg {
-	// Incremental cache refresh — only reads new messages from disk. Human
-	// location refresh is launched by Update only after generation acceptance.
-	cache := m.cache.Refresh()
-
+// collectRefreshState reads target/project status that travels beside a store
+// refresh. Mailbox scanning is deliberately absent: ProjectMailStore is the
+// only caller of MailCache.Refresh.
+func (m MailModel) collectRefreshState() mailRefreshPayload {
 	alive := m.orchestrator != "" && fs.IsAlive(m.orchestrator, 3.0)
 	var activity fs.NetworkActivity
 	if m.baseDir != "" {
@@ -572,7 +580,14 @@ func (m MailModel) refreshMail() tea.Msg {
 			state = "suspended"
 		}
 	}
-	return mailRefreshMsg{generation: m.generation, cache: cache, alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
+	return mailRefreshPayload{alive: alive, state: state, activity: activity, orchName: orchName, orchNickname: orchNickname}
+}
+
+func (m MailModel) snapshotCache() fs.MailCache {
+	if m.acceptedSnapshot == nil {
+		return fs.NewMailCache(m.humanDir)
+	}
+	return m.acceptedSnapshot.cache
 }
 
 // orchDisplayName returns the nickname if set, otherwise the agent name.
@@ -590,7 +605,8 @@ func (m MailModel) orchDisplayName() string {
 // partial event window or be rendered twice.
 func (m *MailModel) buildMessages() {
 	// Ingest new entries from all sources into session.jsonl.
-	m.sessionCache.Refresh(m.cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
+	cache := m.snapshotCache()
+	m.sessionCache.Refresh(cache, m.humanAddr, m.orchestrator, m.orchDisplayName())
 	if m.historyCountLoaded {
 		// Refresh incrementally advances the accepted exact metadata at EOF.
 		m.historyStats = m.sessionCache.HistoryStats()
@@ -652,7 +668,7 @@ func (m *MailModel) buildMessages() {
 		cm := sessionEntryToChatMessage(e, m.humanAddr)
 		chatMsgs = append(chatMsgs, cm)
 	}
-	for _, msg := range m.cache.Messages {
+	for _, msg := range cache.Messages {
 		chatMsgs = append(chatMsgs, mailMessageToChatMessage(msg, m.humanAddr, m.orchDisplayName()))
 		m.auxiliaryMessages++
 	}
@@ -812,14 +828,9 @@ func mailMessageToChatMessage(msg fs.MailMessage, humanAddr, orchName string) Ch
 func (m MailModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.input.Init(),
-		// initialRebuild does the one-time authoritative session rebuild off the
-		// synchronous launch path (see initialRebuild and NewMailModel). It
-		// returns a mailRefreshMsg, so the standard refresh handler builds the
-		// view once history is loaded. The periodic tick below then keeps it
-		// current via the incremental Refresh path.
-		m.initialRebuild,
-		tickEvery(m.pollRate, m.generation),
-		pulseTick(m.generation),
+		// ProjectMailStore owns initial/steady mailbox refresh and the mail tick.
+		// MailModel keeps only its full-binding target/UI pulse animation.
+		m.asyncPulseCmd(),
 	)
 }
 
@@ -872,16 +883,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case mailRefreshMsg:
-		// Accept the activation before touching any model/cache state. In
-		// particular, stale initial rebuilds carry detached SessionCaches that must
-		// never replace or persist over the current generation.
-		if msg.generation != m.generation {
-			return m, nil
-		}
-		// The detached command is read-only. Launch this best-effort network/cache
-		// refresh only after the generation gate; it remains off the Update path.
-		go fs.UpdateHumanLocation(m.humanDir)
+	case mailRefreshPayload:
+		// App.Update has already accepted the outer projectMailRefreshMsg envelope.
+		// This nested value is synchronous presentation payload, not another gate.
 		var persistCmd tea.Cmd
 		var countCmd tea.Cmd
 		if msg.sessionCache != nil {
@@ -905,11 +909,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			// A superseding first frame cancels any older-page load and resets the
 			// revealed-extra window; the fresh cache defines what is loaded.
 			m.olderLoadInFlight = false
+			m.olderLoadEnvelope = asyncEnvelope{}
 			m.loadedExtra = 0
-			generation := msg.generation
 			sessionCache := msg.sessionCache
+			persistEnvelope := captureAsync(asyncSessionPersist, m.asyncCurrent())
 			persistCmd = func() tea.Msg {
-				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
+				return mailPersistMsg{envelope: persistEnvelope, sessionCache: sessionCache}
 			}
 			if msg.initial && !m.historyCountLoaded && m.historyCountCache == nil {
 				identity := sessionCache.HistoryCountIdentity()
@@ -917,7 +922,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 					m.historyCountLoading = true
 					m.historyCountCache = sessionCache
 					m.historyCountIdentity = identity
-					countCmd = m.historyCountCmd(sessionCache, generation)
+					countCmd = m.historyCountCmd(sessionCache)
 				}
 			}
 		}
@@ -926,7 +931,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			// drop the loading banner. Periodic refreshes leave this untouched.
 			m.initialLoading = false
 		}
-		m.cache = msg.cache
+		m.acceptedSnapshot = msg.snapshot
 		m.orchAlive = msg.alive
 		m.orchState = msg.state
 		m.networkActivity = msg.activity
@@ -999,10 +1004,10 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailPersistMsg:
-		// Persist only the cache still installed for this activation. This runs on
-		// the serialized Update path after the accepted history has been painted,
-		// so no stale or concurrent writer can overtake a newer generation.
-		if msg.generation != m.generation || msg.sessionCache == nil || msg.sessionCache != m.sessionCache {
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
+			return m, nil
+		}
+		if msg.sessionCache == nil || msg.sessionCache != msg.envelope.source.cache {
 			return m, nil
 		}
 		msg.sessionCache.Persist()
@@ -1012,8 +1017,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailHistoryCountMsg:
-		if msg.generation != m.generation || msg.cache == nil ||
-			msg.cache != m.historyCountCache || msg.identity != m.historyCountIdentity {
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
 			return m, nil
 		}
 		if msg.err != nil {
@@ -1021,14 +1025,8 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			// or retries the same source/horizon task on Ctrl+U.
 			return m, nil
 		}
-		// Ctrl+U may replace the bounded content cache while this count is running.
-		// Accept only against a current cache built from the same source/horizon,
-		// and take EOF-tail deltas from that currently refreshed cache rather than
-		// the detached origin cache (which stops receiving Refresh calls once it is
-		// replaced). A changed source/horizon starts a replacement count below.
-		if m.sessionCache == nil || m.sessionCache.HistoryCountIdentity() != msg.identity {
-			return m, nil
-		}
+		// Same-horizon replacement remains valid because acceptAsync compares the
+		// outstanding origin cache while requiring the current installed horizon.
 		delta := m.sessionCache.HistoryStats()
 		m.historyStats = fs.SessionHistoryStats{
 			Detailed: msg.stats.Detailed + delta.Detailed,
@@ -1044,13 +1042,22 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case mailOlderPageMsg:
-		// An explicit older-page rebuild completed. Gate on generation and on a
-		// load actually being in flight, so a superseded activation (view switch,
-		// visit, or a fresh first frame) cannot install a stale enlarged cache.
-		if msg.generation != m.generation || !m.olderLoadInFlight || msg.sessionCache == nil {
+		exactPhysicalCompletion := m.olderLoadInFlight && msg.envelope == m.olderLoadEnvelope
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
+			if exactPhysicalCompletion {
+				m.olderLoadInFlight = false
+				m.olderLoadEnvelope = asyncEnvelope{}
+			}
+			return m, nil
+		}
+		if !exactPhysicalCompletion {
 			return m, nil
 		}
 		m.olderLoadInFlight = false
+		m.olderLoadEnvelope = asyncEnvelope{}
+		if msg.sessionCache == nil {
+			return m, nil
+		}
 		complete := msg.sessionCache.Complete()
 		// Reveal the newly-loaded older page by growing the render window in
 		// lockstep with the ingest window (one page = pageSize messages).
@@ -1082,7 +1089,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			m.historyCountCache = m.sessionCache
 			m.historyCountIdentity = identity
 			m.historyStats = fs.SessionHistoryStats{}
-			countCmd = m.historyCountCmd(m.sessionCache, msg.generation)
+			countCmd = m.historyCountCmd(m.sessionCache)
 		case m.historyCountLoaded:
 			m.sessionCache.SetHistoryStats(m.historyStats)
 		}
@@ -1099,10 +1106,10 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// like an accepted initial rebuild.
 		var persistCmd tea.Cmd
 		if complete {
-			generation := msg.generation
 			sessionCache := msg.sessionCache
+			persistEnvelope := captureAsync(asyncSessionPersist, m.asyncCurrent())
 			persistCmd = func() tea.Msg {
-				return mailPersistMsg{generation: generation, sessionCache: sessionCache}
+				return mailPersistMsg{envelope: persistEnvelope, sessionCache: sessionCache}
 			}
 		}
 		if persistCmd != nil || countCmd != nil {
@@ -1111,26 +1118,13 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case pulseTickMsg:
-		if msg.generation != m.generation {
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
 			return m, nil
 		}
 		if strings.EqualFold(m.orchState, "ACTIVE") {
 			m.pulseTick++
 		}
-		return m, pulseTick(m.generation)
-
-	case tickMsg:
-		if msg.generation != m.generation {
-			return m, nil
-		}
-		// Steady-state driver: alongside the incremental mail refresh, schedule a
-		// background telemetry fetch (debounced by in-flight + TTL). All telemetry
-		// I/O funnels through maybeScheduleHomeTelemetry — the UI path never gathers.
-		cmds = append(cmds, m.refreshMail, tickEvery(m.pollRate, m.generation))
-		if cmd := m.maybeScheduleHomeTelemetry(time.Now()); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		return m, tea.Batch(cmds...)
+		return m, m.asyncPulseCmd()
 
 	case homeTelemetryMsg:
 		if msg.generation != m.generation {
@@ -1187,7 +1181,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			os.Remove(filepath.Join(m.baseDir, ".tui-asset", ".insight.done"))
 			m.input.Reset()
 			m.syncViewportHeight()
-			return m, m.refreshMail
+			return m, m.requestMailRefresh(false)
 		}
 		return m, nil
 
@@ -1198,7 +1192,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m, nil
 
 	case EditorDoneMsg:
-		if msg.Generation != m.generation {
+		if !acceptAsync(m.asyncCurrent(), msg.envelope) {
 			return m, nil
 		}
 		m.pendingMessage = msg.Text
@@ -1208,7 +1202,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// Refresh viewport and force a full repaint after the terminal returns from
 		// the external editor; editors such as vim can leave the alt screen visually
 		// stale until Bubble Tea draws a clean frame.
-		return m, tea.Batch(m.refreshMail, tea.ClearScreen)
+		return m, tea.Batch(m.requestMailRefresh(false), tea.ClearScreen)
 
 	case PaletteSelectMsg:
 		m.input.Reset()
@@ -1299,7 +1293,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			// Refresh the mail thread and agent state from disk. ctrl+r is a
 			// control key, so it does not interfere with typing `r` into the
 			// compose textarea (which falls through to the default branch).
-			return m, m.refreshMail
+			return m, m.requestMailRefresh(false)
 		case "ctrl+o":
 			// Cycle: normal → thinking → extended → normal
 			switch m.verbose {
@@ -1319,7 +1313,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.viewport.GotoBottom()
 				return m, nil
 			}
-			return m, m.refreshMail
+			return m, m.requestMailRefresh(false)
 
 		case "ctrl+u":
 			if m.ready && m.viewport.AtTop() {
@@ -1898,7 +1892,7 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 	if err != nil {
 		return nil
 	}
-	generation := m.generation
+	envelope := captureAsync(asyncEditorDone, m.asyncCurrent())
 	tmpFile.WriteString(text)
 	tmpFile.Close()
 	editor := os.Getenv("EDITOR")
@@ -1913,7 +1907,7 @@ func (m MailModel) launchEditor(text string) tea.Cmd {
 		}
 		content, _ := os.ReadFile(tmpFile.Name())
 		os.Remove(tmpFile.Name())
-		return EditorDoneMsg{Text: string(content), Generation: generation}
+		return EditorDoneMsg{envelope: envelope, Text: string(content)}
 	})
 }
 

@@ -390,6 +390,15 @@ func runCreatedProject(result tui.LauncherResult) {
 
 	lingtaiDir := filepath.Join(result.ProjectRoot, ".lingtai")
 	orchestrators := tui.DetectOrchestrators(lingtaiDir)
+	// Reconcile needsFirstRun with actual orchestrator state.
+	// If there are zero orchestrators, force first-run. This catches the
+	// "user ran `lingtai-tui clean` and relaunched in the same folder"
+	// case: clean removed .lingtai/, so the invariant checks at the top
+	// of main() were skipped (they only run if .lingtai/ already exists),
+	// but process.InitProject then recreated an empty .lingtai/ with only
+	// human/ inside. Without this fallback, a returning user (global
+	// config.json exists, so needsFirstRun would otherwise be false) would
+	// reach NewApp with no orchestrator to launch.
 	needsFirstRun := len(orchestrators) == 0
 	app := tui.NewApp(globalDir, lingtaiDir, needsFirstRun, false, orchestrators, tuiCfg, "", "")
 	p := tea.NewProgram(app)
@@ -1645,9 +1654,6 @@ func prepareApp(projectDir string, inProgram bool) startupResult {
 				}
 			}
 		}
-		// Resolve human location in background (ipinfo.io, cached 1h)
-		humanDir := filepath.Join(lingtaiDir, "human")
-		go fs.UpdateHumanLocation(humanDir)
 	}
 	// If needsFirstRun: welcome page goroutine handles everything
 

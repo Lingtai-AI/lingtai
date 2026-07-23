@@ -57,7 +57,7 @@ func newReadyMailModelWithTelemetry(t *testing.T, w, h int) MailModel {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	// Drive the deferred initial rebuild (the normal launch path) so the
 	// notification populates the session cache. No Ctrl+O, verbose stays off.
-	m, _ = m.Update(m.initialRebuild())
+	m, _ = m.Update(acceptedInitialMailRefresh(t, &m))
 	// Home telemetry is now resolved asynchronously: gathering it does I/O off the
 	// UI path via the fetchHomeTelemetry command, and the model only shows the row
 	// once the resulting homeTelemetryMsg has landed. Drive that round-trip here
@@ -83,7 +83,7 @@ func TestHomeViewKeepsStatusBarWhenTelemetryShows(t *testing.T) {
 	}
 	base := NewMailModel(dir, "human@local", "~", baseOrch, "TestOrch", 50, dir, "en", false, 0)
 	base, _ = base.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	base, _ = base.Update(base.initialRebuild())
+	base, _ = base.Update(acceptedInitialMailRefresh(t, &base))
 	if base.hasHomeTelemetry() {
 		t.Skip("environment unexpectedly has session telemetry data; skipping the baseline comparison")
 	}

@@ -12,34 +12,42 @@ import (
 
 func runMailPersistCmd(t *testing.T, cmd tea.Cmd) mailPersistMsg {
 	t.Helper()
+	if persist, ok := findMailPersistCmd(cmd); ok {
+		return persist
+	}
+	t.Fatalf("post-frame command produced %T without mailPersistMsg", runCmd(cmd))
+	return mailPersistMsg{}
+}
+
+func findMailPersistCmd(cmd tea.Cmd) (mailPersistMsg, bool) {
 	msg := runCmd(cmd)
 	if persist, ok := msg.(mailPersistMsg); ok {
-		return persist
+		return persist, true
 	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, child := range batch {
-			if persist, ok := runCmd(child).(mailPersistMsg); ok {
-				return persist
+			if persist, ok := findMailPersistCmd(child); ok {
+				return persist, true
 			}
 		}
 	}
-	t.Fatalf("post-frame command produced %T without mailPersistMsg", msg)
-	return mailPersistMsg{}
+	return mailPersistMsg{}, false
 }
 
 func TestMailModelIgnoresOldGenerationAsyncMessages(t *testing.T) {
 	m := NewMailModel("", "", "", "", "agent", 10, "", "en", false, 0)
-	m.generation = 2
+	bindMailModelForAsyncTest(t, &m, 2)
 	m.initialLoading = true
 	m.homeTelemetryInFlight = true
 
+	stale := m.asyncCurrent()
+	stale.binding.generation = 1
+	stale.sessionSource = asyncSourceCache{cache: m.sessionCache, identity: "stale-history"}
 	cases := []tea.Msg{
-		mailRefreshMsg{generation: 1, initial: true, state: "active"},
-		mailPersistMsg{generation: 1, sessionCache: m.sessionCache},
-		tickMsg{generation: 1},
-		pulseTickMsg{generation: 1},
+		mailPersistMsg{envelope: captureAsync(asyncSessionPersist, stale), sessionCache: m.sessionCache},
+		pulseTickMsg{envelope: captureAsync(asyncLivenessPulse, stale)},
 		homeTelemetryMsg{generation: 1, t: homeTelemetry{apiCalls: 9}},
-		EditorDoneMsg{Generation: 1, Text: "old editor text"},
+		EditorDoneMsg{envelope: captureAsync(asyncEditorDone, stale), Text: "old editor text"},
 	}
 	for _, msg := range cases {
 		var cmd tea.Cmd
@@ -49,7 +57,7 @@ func TestMailModelIgnoresOldGenerationAsyncMessages(t *testing.T) {
 		}
 	}
 	if !m.initialLoading {
-		t.Fatal("stale initial refresh should not clear loading")
+		t.Fatal("stale async work should not clear loading")
 	}
 	if !m.homeTelemetryInFlight {
 		t.Fatal("stale telemetry should not clear in-flight state")
@@ -63,10 +71,21 @@ func TestReturnFromVisitResumesInitialLoadingWithNewGenerationRebuild(t *testing
 	a := visitTestApp(t)
 	origGen := a.mail.generation
 	a.mail.initialLoading = true
+	staleOriginal := detachedAppProjectMailRefresh(&a, true)
 
 	visited, _ := a.enterVisitedAgent(ProjectsAgentSelectedMsg{Record: visitRecord(filepath.Join(filepath.Dir(filepath.Dir(a.projectDir)), "target"), "worker", "Worker")})
+	// The fixture uses a synthetic visited target that does not exist in the live
+	// process inventory. Install the visited owner first, then give that newly
+	// constructed store a deterministic eligible-target resolver before launching
+	// the same production initial-refresh wrapper.
+	visited.setAsyncTargetRevalidator(func(asyncOwner, asyncTarget) bool { return true })
+	visitCmd := visited.beginProjectMailRefresh(true)
 	targetGen := visited.mail.generation
-	model, cmd := visited.Update(mailRefreshMsg{generation: origGen, initial: true, state: "ACTIVE"})
+	staleTarget, ok := findProjectMailRefresh(visitCmd)
+	if !ok {
+		t.Fatal("visit did not schedule its authoritative initial refresh")
+	}
+	model, cmd := visited.Update(staleOriginal)
 	if cmd != nil {
 		t.Fatalf("stale original initial completion returned cmd %T", runCmd(cmd))
 	}
@@ -82,29 +101,27 @@ func TestReturnFromVisitResumesInitialLoadingWithNewGenerationRebuild(t *testing
 	if restored.mail.generation == origGen || restored.mail.generation == targetGen {
 		t.Fatalf("restore generation = %d, want new generation beyond orig %d and target %d", restored.mail.generation, origGen, targetGen)
 	}
-	cmds := resumeBatchCommands(t, resumeCmd)
-	if len(cmds) != 4 {
-		t.Fatalf("resume should arm one rebuild/refresh, one poll, one pulse, and size; got %d commands", len(cmds))
-	}
-	msg, ok := cmds[0]().(mailRefreshMsg)
+	storeMsg, ok := findProjectMailRefresh(resumeCmd)
 	if !ok {
-		t.Fatalf("first resume command produced %T, want mailRefreshMsg", cmds[0]())
+		t.Fatal("resume did not schedule a ProjectMailStore refresh")
 	}
-	if !msg.initial || msg.generation != restored.mail.generation {
-		t.Fatalf("resume command = initial %v generation %d, want initial true generation %d", msg.initial, msg.generation, restored.mail.generation)
+	if !storeMsg.mail.initial || storeMsg.envelope.generation.thread != restored.mail.generation {
+		t.Fatalf("resume command = initial %v generation %d, want initial true generation %d", storeMsg.mail.initial, storeMsg.envelope.generation.thread, restored.mail.generation)
 	}
-	updated, _ := restored.mail.Update(msg)
-	if updated.initialLoading {
+	model, _ = restored.Update(storeMsg)
+	accepted := model.(App)
+	if accepted.mail.initialLoading {
 		t.Fatal("new-generation initial rebuild should clear loading")
 	}
 
-	stale := restored.mail
-	stale, cmd = stale.Update(mailRefreshMsg{generation: targetGen, initial: true, state: "ACTIVE"})
+	beforeState := accepted.mail.orchState
+	model, cmd = accepted.Update(staleTarget)
 	if cmd != nil {
 		t.Fatalf("stale target refresh returned cmd %T", runCmd(cmd))
 	}
-	if !stale.initialLoading || stale.orchState == "ACTIVE" {
-		t.Fatalf("stale target refresh mutated restored mail: loading=%v state=%q", stale.initialLoading, stale.orchState)
+	stale := model.(App)
+	if stale.mail.initialLoading || stale.mail.orchState != beforeState {
+		t.Fatalf("stale target refresh mutated restored mail: loading=%v state=%q want=%q", stale.mail.initialLoading, stale.mail.orchState, beforeState)
 	}
 }
 
@@ -126,19 +143,16 @@ func TestReturnFromVisitClearsTelemetryInFlightAndAllowsNewFetch(t *testing.T) {
 	if restored.mail.homeTelemetryInFlight {
 		t.Fatal("resume should clear activation-local telemetry in-flight flag")
 	}
-	cmds := resumeBatchCommands(t, resumeCmd)
-	if len(cmds) != 4 {
-		t.Fatalf("resume should arm one refresh, one poll, one pulse, and size; got %d commands", len(cmds))
-	}
-	msg, ok := cmds[0]().(mailRefreshMsg)
+	storeMsg, ok := findProjectMailRefresh(resumeCmd)
 	if !ok {
-		t.Fatalf("first resume command produced %T, want mailRefreshMsg", cmds[0]())
+		t.Fatal("resume did not schedule a ProjectMailStore refresh")
 	}
-	if msg.initial {
-		t.Fatal("non-loading resume should start ordinary refresh, not initial rebuild")
+	msg := storeMsg.mail
+	if !msg.initial {
+		t.Fatal("visit return must fresh-rebuild before publishing restored home")
 	}
-	if msg.generation != restored.mail.generation {
-		t.Fatalf("refresh generation = %d, want %d", msg.generation, restored.mail.generation)
+	if storeMsg.envelope.generation.thread != restored.mail.generation {
+		t.Fatalf("refresh generation = %d, want %d", storeMsg.envelope.generation.thread, restored.mail.generation)
 	}
 
 	if telemetryCmd := restored.mail.maybeScheduleHomeTelemetry(time.Now()); telemetryCmd == nil {
@@ -168,7 +182,7 @@ func TestBlockedInitialRebuildDoesNotBlockRootInteraction(t *testing.T) {
 		close(started)
 		<-release
 	}
-	load := a.mail.initialRebuild
+	load := a.beginProjectMailRefresh(true)
 	go func() { completed <- load() }()
 	<-started
 
@@ -258,7 +272,7 @@ func TestInitialRebuildDoesNotMutateInstalledCacheBeforeAcceptance(t *testing.T)
 
 	m := NewMailModel(humanDir, "human", root, orchDir, "agent", 2000, "", "en", false, 0)
 	installed := m.sessionCache
-	msg := m.initialRebuild()
+	msg := acceptedInitialMailRefresh(t, &m)
 
 	if got := installed.Len(); got != 0 {
 		t.Fatalf("initial rebuild mutated the installed cache before acceptance: got %d entries", got)
@@ -292,11 +306,15 @@ func TestMailPersistRejectsReplacedCacheWithinGeneration(t *testing.T) {
 	staleHumanDir := filepath.Join(root, "stale-human")
 	currentHumanDir := filepath.Join(root, "current-human")
 	m := NewMailModel(staleHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
+	bindMailModelForAsyncTest(t, &m, 1)
 	staleCache := m.sessionCache
+	staleCurrent := m.asyncCurrent()
+	staleCurrent.sessionSource = asyncSourceCache{cache: staleCache, identity: "stale-cache"}
+	staleEnvelope := captureAsync(asyncSessionPersist, staleCurrent)
 	current := NewMailModel(currentHumanDir, "human", root, "", "agent", 2000, "", "en", false, 0)
 	m.sessionCache = current.sessionCache
 
-	updated, cmd := m.Update(mailPersistMsg{generation: m.generation, sessionCache: staleCache})
+	updated, cmd := m.Update(mailPersistMsg{envelope: staleEnvelope, sessionCache: staleCache})
 	if cmd != nil {
 		t.Fatalf("replaced same-generation cache returned a command: %T", runCmd(cmd))
 	}
@@ -312,7 +330,7 @@ func TestAppRoutesInitialMailCompletionWhileProjectsActive(t *testing.T) {
 	a := visitTestApp(t)
 	a.mail.verbose = verboseThinking
 	writeMailGenerationEvent(t, a.orchDir, "projects-time completion")
-	msg := a.mail.initialRebuild()
+	msg := detachedAppProjectMailRefresh(&a, true)
 
 	model, _ := a.Update(ViewChangeMsg{View: "projects"})
 	got := model.(App)
@@ -414,20 +432,26 @@ func TestAppRoutesInitialMailCompletionWhileProjectsActive(t *testing.T) {
 }
 
 func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
-	humanDir := t.TempDir()
-	orchDir := t.TempDir()
+	projectDir := filepath.Join(t.TempDir(), ".lingtai")
+	humanDir := filepath.Join(projectDir, "human")
+	orchDir := filepath.Join(projectDir, "Main")
 	writeMailGenerationEvent(t, orchDir, "generation B")
 
-	a := App{currentView: appViewMail}
-	a.installMailModel(NewMailModel(humanDir, "human", t.TempDir(), orchDir, "agent", 2000, "", "en", false, 0))
+	a := App{currentView: appViewMail, projectDir: projectDir, orchDir: orchDir, orchName: "agent"}
+	a.installMailModel(NewMailModel(humanDir, "human", projectDir, orchDir, "agent", 2000, "", "en", false, 0))
 	a.mail.verbose = verboseThinking
-	lateA := a.mail.initialRebuild
+	lateA := detachedAppProjectMailRefresh(&a, true)
+	// This fixture keeps the detached A result while allowing B to own a distinct
+	// physical slot; exact settlement behavior is covered by the store tests.
+	a.mailStore.refreshInFlight = false
+	a.mailStore.refreshInitial = false
+	a.mailStore.refreshInFlightEnvelope = asyncEnvelope{}
 
 	// Install generation B from the same preserved model. This mirrors returning
-	// to a preserved mail model: generations differ, but the pre-fix cache pointer
-	// was shared by both command closures.
+	// to a preserved mail model while the detached A completion is still pending.
 	a.installMailModel(a.mail)
-	model, persistCmd := a.Update(a.mail.initialRebuild())
+	currentB := detachedAppProjectMailRefresh(&a, true)
+	model, persistCmd := a.Update(currentB)
 	a = model.(App)
 	if persistCmd == nil {
 		t.Fatal("generation B initial rebuild did not schedule persistence")
@@ -444,7 +468,6 @@ func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
 	}
 
 	appendMailGenerationEvent(t, orchDir, "late generation A")
-	staleMsg := lateA()
 	if got := a.mail.sessionCache.Entries(); !reflect.DeepEqual(got, beforeEntries) {
 		t.Fatalf("late generation A mutated generation B cache before acceptance:\n got %#v\nwant %#v", got, beforeEntries)
 	}
@@ -454,16 +477,16 @@ func TestLateInitialRebuildCannotMutateCurrentGenerationCache(t *testing.T) {
 		t.Fatal("late generation A rewrote generation B's persisted session cache before acceptance")
 	}
 
-	model, cmd := a.Update(staleMsg)
+	model, cmd := a.Update(lateA)
+	updated := model.(App)
 	if cmd != nil {
 		t.Fatalf("stale initial completion returned command %T", runCmd(cmd))
 	}
-	got := model.(App)
-	if !reflect.DeepEqual(got.mail.sessionCache.Entries(), beforeEntries) {
+	if !reflect.DeepEqual(updated.mail.sessionCache.Entries(), beforeEntries) {
 		t.Fatal("rejected generation A changed generation B cache")
 	}
-	if !reflect.DeepEqual(got.mail.messages, beforeMessages) {
-		t.Fatalf("rejected generation A changed generation B visible projection:\n got %#v\nwant %#v", got.mail.messages, beforeMessages)
+	if !reflect.DeepEqual(updated.mail.messages, beforeMessages) {
+		t.Fatalf("rejected generation A changed generation B visible projection:\n got %#v\nwant %#v", updated.mail.messages, beforeMessages)
 	}
 	if afterFile, err := os.ReadFile(sessionPath); err != nil {
 		t.Fatal(err)

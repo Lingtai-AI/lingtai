@@ -120,6 +120,15 @@ type sessionHistoryCountPlan struct {
 	upper    int64
 }
 
+// SessionPersistenceRole separates history completeness from permission to
+// write the shared human/logs/session.jsonl aggregate.
+type SessionPersistenceRole uint8
+
+const (
+	NoPersist SessionPersistenceRole = iota
+	MainAggregateWriter
+)
+
 // SessionCache is an append-only cache backed by session.jsonl.
 // It incrementally tails three data sources and appends new entries.
 //
@@ -145,6 +154,7 @@ type SessionCache struct {
 	rebuilding         bool                    // true during RebuildFromSources — suppress file writes
 	complete           bool                    // true when the cache holds the full history; false after a windowed rebuild truncated older events
 	afterRebuildIngest func()                  // optional deterministic test hook after authoritative reads
+	persistenceRole    SessionPersistenceRole  // only MainAggregateWriter may change session.jsonl
 
 	// soulVoices indexes voices by fire_id, populated by tailing
 	// soul_flow.jsonl. Used to inflate soul_flow SessionEntry bodies that
@@ -163,24 +173,25 @@ type soulVoiceRecord struct {
 
 // NewSessionCache constructs an in-memory cache without touching the filesystem.
 // Parent directories are created only by accepted persistence/append writes.
-func NewSessionCache(humanDir string, projectPath string) *SessionCache {
+func NewSessionCache(humanDir string, projectPath string, persistenceRole SessionPersistenceRole) *SessionCache {
 	return &SessionCache{
-		path:        filepath.Join(humanDir, "logs", "session.jsonl"),
-		projectPath: projectPath,
-		soulVoices:  make(map[string][]soulVoiceRecord),
+		path:            filepath.Join(humanDir, "logs", "session.jsonl"),
+		projectPath:     projectPath,
+		soulVoices:      make(map[string][]soulVoiceRecord),
+		persistenceRole: persistenceRole,
 		// Complete-from-zero: a fresh cache holds nothing, which trivially IS the
-		// full (empty) history. A plain NewSessionCache + full Refresh + Persist
-		// (no windowed rebuild) therefore still writes session.jsonl, matching the
-		// pre-windowing Persist contract. Only a windowed rebuild that PROVES it
-		// truncated older events flips this false; the JSONL fallback and every
-		// full rebuild keep it true.
+		// full (empty) history. A MainAggregateWriter cache followed by full Refresh
+		// + Persist (no windowed rebuild) may therefore still write session.jsonl,
+		// matching the pre-windowing completeness contract. NoPersist remains
+		// memory-only regardless. Only a windowed rebuild that PROVES it truncated
+		// older events flips this false; full rebuilds keep it true.
 		complete: true,
 	}
 }
 
 // RebuildFromSources reads all data sources from scratch, merges and sorts them
-// chronologically, writes session.jsonl, and retains each source's last complete
-// consumed-record boundary for subsequent Refresh calls.
+// chronologically, requests a rewrite through the role-enforcing primitive, and
+// retains each source's last complete consumed-record boundary for Refresh.
 func (sc *SessionCache) RebuildFromSources(cache MailCache, humanAddr, orchDir, orchName string) {
 	sc.rebuildFromSources(cache, humanAddr, orchDir, orchName, true, 0)
 }
@@ -297,11 +308,10 @@ func (sc *SessionCache) rebuildFromSources(cache MailCache, humanAddr, orchDir, 
 	}
 }
 
-// Persist writes the accepted in-memory snapshot to session.jsonl — but ONLY
-// when the cache is proven complete. A partial (windowed) cache holds just the
-// newest slice of history; rewriting session.jsonl from it would truncate the
-// operator's complete derived replay file. In that case Persist is a no-op and
-// the existing complete session.jsonl (if any) is left untouched.
+// Persist requests that the accepted in-memory snapshot replace session.jsonl.
+// Completeness is a truncation-safety guard, not authorization: rewriteFile
+// separately permits only MainAggregateWriter. A partial cache is a no-op so it
+// cannot replace the operator's complete derived replay file.
 func (sc *SessionCache) Persist() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -314,6 +324,9 @@ func (sc *SessionCache) Persist() {
 // rewriteFile overwrites session.jsonl with the current in-memory entries.
 // The caller must hold sc.mu.
 func (sc *SessionCache) rewriteFile() {
+	if sc.persistenceRole != MainAggregateWriter {
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(sc.path), 0o755); err != nil {
 		return
 	}
@@ -340,6 +353,9 @@ func (sc *SessionCache) append(entries ...SessionEntry) {
 	// cache is intentionally incomplete, so its incremental EOF additions must
 	// remain memory-only rather than create or extend a misleading session.jsonl.
 	if sc.rebuilding || !sc.complete {
+		return
+	}
+	if sc.persistenceRole != MainAggregateWriter {
 		return
 	}
 
