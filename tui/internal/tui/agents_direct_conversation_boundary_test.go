@@ -177,9 +177,7 @@ func v1BoundaryFixture(t *testing.T, width int) (App, string, string) {
 		mail:        mail,
 	}
 	app, _ = v1BoundaryApply(app, tea.WindowSizeMsg{Width: width, Height: 24})
-	cache := fs.NewMailCache(humanDir)
-	cache.Messages = accepted
-	app, _ = v1BoundaryApply(app, mailRefreshMsg{generation: app.mail.generation, cache: cache})
+	app, _ = directPerformancePreparedRefresh(t, app, accepted)
 
 	mainMessages := make([]ChatMessage, 0, 18)
 	for i := 0; i < 17; i++ {
@@ -203,10 +201,10 @@ func v1BoundaryFixture(t *testing.T, width int) (App, string, string) {
 	return app, humanDir, alphaAddress
 }
 
-// TestAgentsDirectConversationBoundaryThroughRealPalette defines the first
-// independently shippable V1 product boundary without naming future selector
-// or direct-chat implementation types. The only driver is the existing App,
-// MailModel, InputModel/palette, accepted MailCache, and filesystem outbox.
+// TestAgentsDirectConversationBoundaryThroughRealPalette keeps the canonical V1
+// activation path underneath the V2 presentation rail. The only driver is the
+// existing App, MailModel, InputModel/palette, accepted MailCache, and
+// filesystem outbox.
 func TestAgentsDirectConversationBoundaryThroughRealPalette(t *testing.T) {
 	i18n.SetLang("en")
 
@@ -214,8 +212,16 @@ func TestAgentsDirectConversationBoundaryThroughRealPalette(t *testing.T) {
 		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
 			app, humanDir, alphaAddress := v1BoundaryFixture(t, width)
 			budget := app.layoutBudget()
-			if budget.RailVisible || budget.RailWidth != 0 || budget.ContentWidth != width {
-				t.Fatalf("V1 width %d layout = %#v; want no rail and full-width Mail content", width, budget)
+			wantVisible := width >= 85
+			wantRail := 0
+			wantContent := width
+			if wantVisible {
+				wantRail = agentRailWidth
+				wantContent = width - agentRailWidth
+			}
+			if budget.RailVisible != wantVisible || budget.RailWidth != wantRail || budget.ContentWidth != wantContent {
+				t.Fatalf("width %d layout = %#v; want visible=%v rail=%d content=%d",
+					width, budget, wantVisible, wantRail, wantContent)
 			}
 
 			mainMessagesBeforeCursor := append([]ChatMessage(nil), app.mail.messages...)

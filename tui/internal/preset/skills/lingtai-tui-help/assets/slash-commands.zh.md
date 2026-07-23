@@ -203,6 +203,10 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 选择主会话或当前项目中的智能体进行直接邮件。使用方向键（或 j/k）与
 Home/End 移动，Enter 或 Space 选择，Esc 取消且不改变当前会话。
 
+邮件视图宽度达到 85 列时，同一份规范会话列表也会显示在 24 列宽的侧栏中。按 Tab
+聚焦或离开侧栏；移动与激活按键与上面相同。`/agents` 在任何宽度下都可用，并始终使用
+完全相同的会话条目。
+
 ### `/projects` — 切换到运行中的 admin 智能体
 **用法：** `/projects`
 

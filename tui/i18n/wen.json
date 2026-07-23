@@ -845,6 +845,7 @@
   "firstrun.preset_pick.draft_codex_logout_blocked": "唯稿耳 —— 此 Codex 凭据先于此项之创而存，不得于此除之，盘中之物未曾稍改。请弃或竟其向导，而后于 /setup 登出。",
   "palette.agents": "擇主會或靈使",
   "cmd.agents": "擇主會或本案靈使，以通專函。",
+  "agent_rail.title": "郵會",
   "agent_selector.main": "主會",
   "agent_selector.omitted": "已略 %d 不安靈使列",
   "agent_selector.unread_failed": "靈使未讀之狀未能更新",

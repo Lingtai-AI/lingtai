@@ -135,13 +135,6 @@ func discoverAgentSelectorRows(projectDir string) []agentSelectorRow {
 	return rows
 }
 
-// publishAcceptedSelectorRows is the compatibility preparation path for
-// internally fabricated refresh messages. Real refresh commands discover rows
-// before returning to Bubble Tea and install them through installSelectorRows.
-func (m MailModel) publishAcceptedSelectorRows() MailModel {
-	return m.installSelectorRows(discoverAgentSelectorRows(m.baseDir))
-}
-
 // installSelectorRows publishes a command-prepared canonical catalog without
 // manifest discovery. The mutable cursor survives the row replacement by
 // stable identity — the synthetic Main row or the row's fs.DirectThreadKey —
@@ -226,7 +219,7 @@ func (m MailModel) updateAgentSelector(msg tea.KeyPressMsg) (MailModel, tea.Cmd)
 // renderAgentSelector is the compact Mail-owned overlay over the stored
 // canonical rows and cursor. It performs no discovery or I/O.
 func (m MailModel) renderAgentSelector() string {
-	width := m.width - 4
+	width := m.width - 3
 	if width < 16 {
 		width = m.width
 	}
@@ -241,7 +234,7 @@ func (m MailModel) renderAgentSelector() string {
 		lines = append(lines, prefix+ansi.Truncate(row.Label, width-2, ""))
 	}
 	lines = append(lines, i18n.T("agent_selector.hint"))
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).PaddingLeft(1).Width(m.width).Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

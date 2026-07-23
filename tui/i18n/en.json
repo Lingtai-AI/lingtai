@@ -845,6 +845,7 @@
   "firstrun.preset_pick.draft_codex_logout_blocked": "Draft only — this Codex credential already existed before this project draft, so it can't be removed here. Nothing on disk has changed. Cancel or finish the wizard, then log out from /setup instead.",
   "palette.agents": "Choose Main or an agent",
   "cmd.agents": "Choose Main or a same-project agent for direct mail.",
+  "agent_rail.title": "Conversations",
   "agent_selector.main": "Main",
   "agent_selector.omitted": "%d unsafe agent row(s) omitted",
   "agent_selector.unread_failed": "Agent unread status could not be updated",

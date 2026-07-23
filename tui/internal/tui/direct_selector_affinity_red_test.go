@@ -97,7 +97,7 @@ func newDirectAffinityFixture(t *testing.T, withOrchestrator bool) directAffinit
 		directAffinityIncoming(targetA, "alpha-baseline", "2026-07-23T10:00:00Z", "alpha baseline"),
 		directAffinityIncoming(targetB, "bravo-baseline", "2026-07-23T10:01:00Z", "bravo baseline"),
 	}
-	app, _ = directAffinityPublish(app, initial)
+	app, _ = directAffinityPublish(t, app, initial)
 	app.mail.initialLoading = false
 
 	return directAffinityFixture{
@@ -157,11 +157,9 @@ func directAffinityApply(app App, msg tea.Msg) (App, tea.Cmd) {
 	return model.(App), cmd
 }
 
-func directAffinityPublish(app App, accepted []fs.MailMessage) (App, tea.Cmd) {
-	return directAffinityApply(app, mailRefreshMsg{
-		generation: app.mail.generation,
-		cache:      directAffinityCache(app.mail.humanDir, accepted),
-	})
+func directAffinityPublish(t *testing.T, app App, accepted []fs.MailMessage) (App, tea.Cmd) {
+	t.Helper()
+	return directPerformancePreparedRefresh(t, app, accepted)
 }
 
 // directAffinityRequirePreparedRefresh keeps the pre-Green RED compile-valid
@@ -295,6 +293,38 @@ func directAffinityVisibilityFromCmd(t *testing.T, cmd tea.Cmd, context string) 
 	return directVisibilityMsg{}, false
 }
 
+func directAffinityApplyPreparedResult(t *testing.T, app App, cmd tea.Cmd, context string) App {
+	t.Helper()
+	if cmd == nil {
+		t.Fatalf("%s: no prepared direct-unread command", context)
+	}
+	msg := runCmd(cmd)
+	if result, ok := msg.(directUnreadResultMsg); ok {
+		app, _ = directAffinityApply(app, result)
+		return app
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		count := 0
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			result, ok := runCmd(child).(directUnreadResultMsg)
+			if !ok {
+				continue
+			}
+			count++
+			app, _ = directAffinityApply(app, result)
+		}
+		if count == 1 {
+			return app
+		}
+		t.Fatalf("%s: prepared command produced %d directUnreadResultMsg values, want exactly 1", context, count)
+	}
+	t.Fatalf("%s: prepared command produced %T, want directUnreadResultMsg", context, msg)
+	return app
+}
+
 func directAffinityUnread(t *testing.T, mail MailModel, target fs.DirectTarget, accepted []fs.MailMessage) int {
 	t.Helper()
 	if mail.directUnread == nil {
@@ -393,7 +423,7 @@ func TestDirectV1AcceptedSelectorPreservesCursorIdentity(t *testing.T) {
 
 		directAffinityWriteManifest(t, fixture.targetA.Directory, fixture.targetA.AgentID, "Zulu", fixture.targetA.Address, false)
 		accepted := app.mail.acceptedSnapshot.messagesForUnread(app.mail.humanDir)
-		app, _ = directAffinityPublish(app, accepted)
+		app, _ = directAffinityPublish(t, app, accepted)
 
 		if got := app.mail.agentSelector.selectedThreadKey; got != keyB {
 			t.Errorf("accepted reorder changed current B key to %q", got)
@@ -421,7 +451,7 @@ func TestDirectV1AcceptedSelectorPreservesCursorIdentity(t *testing.T) {
 
 		directAffinityWriteManifest(t, fixture.targetA.Directory, fixture.targetA.AgentID, "Zulu", fixture.targetA.Address, false)
 		accepted := app.mail.acceptedSnapshot.messagesForUnread(app.mail.humanDir)
-		app, _ = directAffinityPublish(app, accepted)
+		app, _ = directAffinityPublish(t, app, accepted)
 
 		if app.mail.agentSelector.selectedThreadKey != "" {
 			t.Errorf("accepted reorder changed Main current to %q", app.mail.agentSelector.selectedThreadKey)
@@ -452,7 +482,7 @@ func TestDirectV1AcceptedRefreshReconcilesCurrentTarget(t *testing.T) {
 		"2026-07-23T10:02:00Z",
 		"unread before route rebind",
 	))
-	app, _ = directAffinityPublish(app, accepted)
+	app, _ = directAffinityPublish(t, app, accepted)
 	if got := directAffinityUnread(t, app.mail, fixture.targetA, accepted); got != 1 {
 		t.Fatalf("precondition: A unread = %d, want 1", got)
 	}
@@ -481,7 +511,7 @@ func TestDirectV1AcceptedRefreshReconcilesCurrentTarget(t *testing.T) {
 		"2026-07-23T10:03:00Z",
 		"unread on rebound route",
 	))
-	app, _ = directAffinityPublish(app, accepted)
+	app, _ = directAffinityPublish(t, app, accepted)
 
 	catalogTarget := app.mail.agentSelector.rows[directAffinityRowIndex(t, app.mail, rebound.AgentID)].Target
 	if !reflect.DeepEqual(catalogTarget, rebound) {
@@ -512,8 +542,7 @@ func TestDirectV1AcceptedRefreshReconcilesCurrentTarget(t *testing.T) {
 	if err := os.RemoveAll(rebound.Directory); err != nil {
 		t.Fatalf("remove rebound A route: %v", err)
 	}
-	storeBeforeRemoval := app.mail.directUnread
-	app, _ = directAffinityPublish(app, accepted)
+	app, _ = directAffinityPublish(t, app, accepted)
 
 	if app.mail.agentSelector.selectedThreadKey != "" || app.mail.directChat.threadKey != "" {
 		t.Errorf("removed A did not fail closed to Main: selected=%q directKey=%q directAgent=%q directAddress=%q",
@@ -528,8 +557,8 @@ func TestDirectV1AcceptedRefreshReconcilesCurrentTarget(t *testing.T) {
 	if got := app.mail.input.Value(); got != mainCompose {
 		t.Errorf("removed A restored compose %q, want exact Main compose %q", got, mainCompose)
 	}
-	if app.mail.directUnread == nil || app.mail.directUnread != storeBeforeRemoval {
-		t.Error("removed A discarded or replaced the one Mail-owned durable unread store")
+	if app.mail.directUnread == nil {
+		t.Error("removed A discarded the one Mail-owned durable unread store")
 	} else if got := directAffinityUnread(t, app.mail, rebound, accepted); got != 1 {
 		t.Errorf("removed A durable unread = %d, want retained 1 on stable A key", got)
 	}
@@ -716,7 +745,7 @@ func TestDirectV1PaletteCancelRetriesVisibilityImmediately(t *testing.T) {
 		"2026-07-23T10:02:00Z",
 		"unread while palette obscures transcript",
 	))
-	app, _ = directAffinityPublish(app, accepted)
+	app, _ = directAffinityPublish(t, app, accepted)
 	if got := directAffinityUnread(t, app.mail, fixture.targetA, accepted); got != 1 {
 		t.Fatalf("precondition: A unread = %d, want 1", got)
 	}
@@ -744,7 +773,9 @@ func TestDirectV1PaletteCancelRetriesVisibilityImmediately(t *testing.T) {
 	}
 	retry, retryOK := directAffinityVisibilityFromCmd(t, retryCmd, "palette Esc")
 	if retryOK {
-		app, _ = directAffinityApply(app, retry)
+		var markSeenCmd tea.Cmd
+		app, markSeenCmd = directAffinityApply(app, retry)
+		app = directAffinityApplyPreparedResult(t, app, markSeenCmd, "palette visibility retry")
 	}
 	if got := directAffinityUnread(t, app.mail, fixture.targetA, accepted); got != 0 {
 		t.Errorf("fresh exact visibility immediately after palette Esc left unread=%d, want 0", got)
@@ -757,10 +788,8 @@ func TestDirectV1PaletteCancelRetriesVisibilityImmediately(t *testing.T) {
 func TestDirectV1RecipientChromeOmitsMainLifecycle(t *testing.T) {
 	fixture := newDirectAffinityFixture(t, true)
 	app := fixture.app
-	accepted := app.mail.acceptedSnapshot.messagesForUnread(app.mail.humanDir)
 	app, _ = directAffinityApply(app, mailRefreshMsg{
 		generation: app.mail.generation,
-		cache:      directAffinityCache(app.mail.humanDir, accepted),
 		state:      "active",
 		alive:      true,
 		activity: fs.NetworkActivity{

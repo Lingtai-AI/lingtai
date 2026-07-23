@@ -26,6 +26,46 @@ type directPerformanceFixture struct {
 	targetA fs.DirectTarget
 }
 
+func directPerformancePreparedRefresh(t *testing.T, app App, accepted []fs.MailMessage) (App, tea.Cmd) {
+	t.Helper()
+	cache := fs.NewMailCache(app.mail.humanDir)
+	cache.Messages = append([]fs.MailMessage(nil), accepted...)
+	app.mail.cache = cache
+
+	var producer tea.Cmd
+	app.mail, producer = app.mail.issueRefreshRequest()
+	if producer == nil {
+		t.Fatal("real prepared refresh producer returned no command")
+	}
+	refresh, ok := producer().(mailRefreshMsg)
+	if !ok || refresh.refreshRequestSerial == 0 || !refresh.prepared || refresh.directPublication == nil {
+		t.Fatalf("real prepared refresh completion = %#v, want nonzero serial/prepared/publication", refresh)
+	}
+	app, follow := directPerformanceApply(app, refresh)
+	if follow == nil {
+		t.Fatal("accepted prepared refresh did not start the direct-unread lane")
+	}
+
+	message := follow()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok {
+		batch = tea.BatchMsg{func() tea.Msg { return message }}
+	}
+	var resultCmd tea.Cmd
+	for _, child := range batch {
+		result, ok := child().(directUnreadResultMsg)
+		if !ok {
+			continue
+		}
+		app, resultCmd = directPerformanceApply(app, result)
+	}
+	if app.mail.directUnread == nil || !app.mail.directPrepared {
+		t.Fatalf("prepared refresh did not install V1 direct state: unread=%p prepared=%v",
+			app.mail.directUnread, app.mail.directPrepared)
+	}
+	return app, resultCmd
+}
+
 // newDirectPerformanceFixture uses only an accepted in-memory MailCache. The
 // human manifest's deliberately future resolved_at is non-stale, so the real
 // accepted-refresh location goroutine only reads it and cannot race TempDir
@@ -67,12 +107,7 @@ func newDirectPerformanceFixture(t *testing.T, pageSize, width, height int, acce
 	}
 	app, _ = directPerformanceApply(app, tea.WindowSizeMsg{Width: width, Height: height})
 
-	cache := fs.NewMailCache(humanDir)
-	cache.Messages = append([]fs.MailMessage(nil), accepted...)
-	app, _ = directPerformanceApply(app, mailRefreshMsg{
-		generation: app.mail.generation,
-		cache:      cache,
-	})
+	app, _ = directPerformancePreparedRefresh(t, app, accepted)
 	return directPerformanceFixture{app: app, targetA: targetA}
 }
 
