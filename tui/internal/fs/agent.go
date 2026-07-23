@@ -4,7 +4,6 @@ package fs
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -640,14 +639,35 @@ func SumTokenLedgerByProvider(path string, recentN int) (
 
 // SumMoltSessionTokenLedger reads an agent's logs and sums non-daemon token
 // usage for the current molt session (since the latest psyche_molt event) and
-// the immediately previous session (the window before that latest molt).
+// the immediately previous session (the window before that latest molt). Detail
+// views retain a compatibility fallback for old directories whose canonical
+// event log is unavailable but whose derived SQLite sidecar remains.
 func SumMoltSessionTokenLedger(agentDir string) MoltSessionTokenStats {
-	ledgerPath := filepath.Join(agentDir, "logs", "token_ledger.jsonl")
-	currentSince, lastSince, lastBefore, ok, err := sqlitelog.QueryMoltSessionWindows(agentDir)
-	if err != nil || !ok {
-		currentSince, lastSince, lastBefore = moltSessionWindows(filepath.Join(agentDir, "logs", "events.jsonl"))
+	logsDir := filepath.Join(agentDir, "logs")
+	ledgerPath := filepath.Join(logsDir, "token_ledger.jsonl")
+	currentSince, lastSince, lastBefore, ok := canonicalMoltSessionWindows(filepath.Join(logsDir, "events.jsonl"))
+	if !ok {
+		var err error
+		currentSince, lastSince, lastBefore, ok, err = sqlitelog.QueryMoltSessionWindows(agentDir)
+		if err != nil || !ok {
+			currentSince, lastSince, lastBefore = time.Time{}, time.Time{}, time.Time{}
+		}
 	}
 	return sumMoltSessionTokenLedgerBetween(ledgerPath, currentSince, lastSince, lastBefore)
+}
+
+// SumMoltSessionTokenLedgerFromEvents is the process-free variant for the
+// once-per-second home worker. It never consults the SQLite sidecar: without a
+// readable canonical event log, the session boundary is unknown and the home
+// telemetry fragment degrades to empty rather than forking or showing lifetime
+// ledger totals as the current session.
+func SumMoltSessionTokenLedgerFromEvents(agentDir string) MoltSessionTokenStats {
+	logsDir := filepath.Join(agentDir, "logs")
+	currentSince, lastSince, lastBefore, ok := canonicalMoltSessionWindows(filepath.Join(logsDir, "events.jsonl"))
+	if !ok {
+		return MoltSessionTokenStats{}
+	}
+	return sumMoltSessionTokenLedgerBetween(filepath.Join(logsDir, "token_ledger.jsonl"), currentSince, lastSince, lastBefore)
 }
 
 func sumMoltSessionTokenLedgerBetween(path string, currentSince, lastSince, lastBefore time.Time) MoltSessionTokenStats {
@@ -934,39 +954,6 @@ func addLedgerEntryToSessionStats(stats *SessionTokenStats, entry LedgerEntry) {
 	case "":
 		// Non-Codex rows.
 	}
-}
-
-// moltSessionWindows returns the current lower bound, previous lower bound, and
-// previous upper bound from logs/events.jsonl psyche_molt rows. Missing bounds
-// are returned as zero times, which makes the first current session start at the
-// beginning of the ledger while suppressing a nonexistent previous session.
-func moltSessionWindows(eventsPath string) (currentSince, lastSince, lastBefore time.Time) {
-	f, err := os.Open(eventsPath)
-	if err != nil {
-		return time.Time{}, time.Time{}, time.Time{}
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	for {
-		var evt struct {
-			Type string  `json:"type"`
-			TS   float64 `json:"ts"`
-		}
-		if err := dec.Decode(&evt); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return currentSince, lastSince, lastBefore
-		}
-		if evt.Type != "psyche_molt" || evt.TS <= 0 {
-			continue
-		}
-		lastSince = currentSince
-		lastBefore = unixFloatTime(evt.TS)
-		currentSince = lastBefore
-	}
-	return currentSince, lastSince, lastBefore
 }
 
 func unixFloatTime(ts float64) time.Time {
