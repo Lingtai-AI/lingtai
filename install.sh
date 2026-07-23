@@ -168,6 +168,28 @@ say()  { echo "==> $*"; }
 warn() { echo "warning: $*" >&2; }
 note() { echo "    $*"; }
 
+# print_path_hint gives the user a shell-specific command without changing the
+# current process PATH or writing a shell rc file. SHELL is the user's login
+# shell on the supported macOS/Linux paths; use a direct export for an
+# unrecognized or unset shell rather than guessing its startup file.
+print_path_hint() {
+  local bin_dir="$1" shell_name="${SHELL:-}" rc_file
+  case ":${PATH}:" in
+    *":${bin_dir}:"*) return 0 ;;
+  esac
+  case "${shell_name##*/}" in
+    zsh)  rc_file="$HOME/.zshrc" ;;
+    bash) rc_file="$HOME/.bashrc" ;;
+    *)
+      say "Note: $bin_dir is not on your PATH. Add this export to your shell startup file:"
+      note "export PATH=\"$bin_dir:\$PATH\""
+      return 0
+      ;;
+  esac
+  say "Note: $bin_dir is not on your PATH. Add it with:"
+  note "echo 'export PATH=\"$bin_dir:\$PATH\"' >> \"$rc_file\" && source \"$rc_file\""
+}
+
 # is_wsl reports whether we're running under Windows Subsystem for Linux.
 is_wsl() {
   if [[ -n "${WSL_DISTRO_NAME:-}" || -n "${WSL_INTEROP:-}" ]]; then
@@ -2010,13 +2032,7 @@ say "Wrote install metadata to $GLOBAL_DIR/install.json"
 say "Done. $("$BIN_DIR/lingtai-tui" version 2>&1 || echo "$VERSION")"
 
 # Tell the user how to put BIN_DIR on PATH if it isn't already.
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    say "Note: $BIN_DIR is not on your PATH. Add it with:"
-    note "echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
-    ;;
-esac
+print_path_hint "$BIN_DIR"
 }
 
 if [[ "${LINGTAI_INSTALL_SH_SOURCE_ONLY:-0}" != "1" ]]; then
