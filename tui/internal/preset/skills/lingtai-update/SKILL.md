@@ -4,8 +4,8 @@ description: >
   Use when updating, installing, building, or debugging lingtai-tui or
   lingtai-portal, including /update-tui, install-method detection, Homebrew,
   source builds, tap inspection, or mainland-China connectivity.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.1.0
+last_changed_at: "2026-07-21T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -41,7 +41,7 @@ then return here for the TUI or portal binary boundary.
   description: Supported formula use and safe exploration of the Lingtai Homebrew tap and build logic.
 - name: lingtai-update-mainland
   location: reference/mainland-china/SKILL.md
-  description: Mainland-China build/connectivity routing for Go, npm, GitHub, and Gitee without mirror guarantees.
+  description: Mainland-China release and dependency routing for Go, npm, GitHub/Gitee bundles, and provider-aware PyPI defaults without reachability guarantees.
 ```
 
 ## Routing table

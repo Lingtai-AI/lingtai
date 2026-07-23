@@ -361,7 +361,7 @@ func sourceInstallCommand(script, prefix, version string) (string, []string) {
 	if script == "" {
 		script = "https://lingtai.ai/install.sh"
 	}
-	args := []string{"update", "--prefix", prefix, "--tui-tag", version, "--non-interactive", "--yes"}
+	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
 	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
 		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
 		shellArgs := []string{"-c", shell, "lingtai-source-update", script}

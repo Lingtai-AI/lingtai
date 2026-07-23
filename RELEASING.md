@@ -177,9 +177,12 @@ artifact (a platform wheel matched to the venv's actual interpreter, or the
 pinned sdist as a fallback) by **explicit local file path**. LingTai is
 **never** installed by requesting the package name `lingtai` from any package
 index — there is no PyPI fallback for LingTai itself. SHA256 is verified
-before install. The configured package index (`LINGTAI_PYPI_INDEX_URL`,
-default `pypi.org`) is used only to resolve `lingtai`'s third-party
-dependencies once the local artifact is being installed.
+before install. One package index is then used only to resolve the local
+artifact's third-party dependencies: an explicit `LINGTAI_PYPI_INDEX_URL`
+always wins; otherwise a final Gitee bundle uses Tsinghua TUNA
+(`https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`) and a final GitHub
+bundle uses `https://pypi.org/simple`. Same-tag provider fallback updates this
+default together with the final bundle provider.
 
 On the default one-command path (no `--ref`, not `--update`) a resolved
 bundle + a successful kernel-artifact install are **mandatory**: if no bundle

@@ -1,8 +1,8 @@
 ---
 name: lingtai-update-mainland
 description: Use when building or fetching TUI/portal releases from mainland China.
-version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.1.0
+last_changed_at: "2026-07-21T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -21,15 +21,23 @@ export GOSUMDB="sum.golang.google.cn"
 export NPM_CONFIG_REGISTRY="https://registry.npmmirror.com"
 ```
 
-For release/tag/API access the installer still uses GitHub, so it may need an
-accessible route, an explicitly supplied `--version vX.Y.Z`, or a local source
-ref. Current installer code never selects a Gitee mirror: use one only when your
-organization has a verified source mirror, and never present it as an automatic
-LingTai fallback.
+For release/tag/API access, `install.sh --source auto|github|gitee` (or
+`LINGTAI_SOURCE`) selects GitHub or the verified LingTai Gitee mirror. `auto`
+runs a bounded, fail-open country lookup, prefers Gitee in mainland China, and
+keeps any provider fallback on the same resolved tag. Explicit `github` or
+`gitee` always wins and skips detection.
+
+The Python `lingtai` runtime itself is installed from the bundle's verified
+local artifact, not requested by package name from an index. Its third-party
+dependencies use one index: explicit `LINGTAI_PYPI_INDEX_URL` always wins;
+otherwise a final Gitee bundle uses Tsinghua TUNA
+(`https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`) and a final GitHub
+bundle uses `https://pypi.org/simple`. Do not add an extra index automatically.
 
 Homebrew has separate knobs because its superenv can scrub ordinary variables:
 `HOMEBREW_GOPROXY` maps to `GOPROXY` and `HOMEBREW_NPM_CONFIG_REGISTRY` to
 `NPM_CONFIG_REGISTRY`. The formula probes the npm registry with `npm ping`; a
 failed probe leaves npm's registry alone. Verify TLS and the actual client
-(`go`, `npm`, or `curl`) independently, then retry the smallest failing phase.
-Do not mix kernel/PyPI connectivity advice into this TUI/portal build route.
+(`go`, `npm`, `curl`, `pip`, or `uv`) independently, then retry the smallest
+failing phase. Release-bundle reachability and Python dependency-index
+reachability are separate checks even though their defaults are coordinated.
