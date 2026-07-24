@@ -241,6 +241,11 @@ Choose Main or a same-project agent for direct mail. Move with the arrow keys
 (or j/k) and Home/End, select with Enter or Space, and press Esc to cancel
 without changing the current conversation.
 
+On the Mail screen at 85 columns or wider, the same canonical conversation list
+is also visible in a 24-column rail. Press Tab to focus or leave the rail; use
+the same movement and activation keys there. `/agents` remains available at
+every width and selects from exactly the same rows.
+
 ### `/projects` — switch to a running admin agent
 **Usage:** `/projects`
 

@@ -26,8 +26,8 @@ type agentSelectorRow struct {
 // agentSelectorState is the one Mail-owned canonical conversation catalog and
 // selection: accepted safe rows, the mutable selector cursor, the stable
 // current thread key, and the /agents overlay open state. It owns no rail
-// geometry, focus, scroll window, or badge state — there is no visible rail in
-// this node.
+// geometry, focus, scroll window, or badge state; the visible rail is only a
+// presentation over this canonical state.
 type agentSelectorState struct {
 	rows              []agentSelectorRow
 	cursor            int
@@ -133,13 +133,6 @@ func discoverAgentSelectorRows(projectDir string) []agentSelectorRow {
 	rows = append(rows, agentSelectorRow{Label: i18n.T("agent_selector.main"), Main: true})
 	rows = append(rows, ordinary...)
 	return rows
-}
-
-// publishAcceptedSelectorRows is the compatibility preparation path for
-// internally fabricated refresh messages. Real refresh commands discover rows
-// before returning to Bubble Tea and install them through installSelectorRows.
-func (m MailModel) publishAcceptedSelectorRows() MailModel {
-	return m.installSelectorRows(discoverAgentSelectorRows(m.baseDir))
 }
 
 // installSelectorRows publishes a command-prepared canonical catalog without

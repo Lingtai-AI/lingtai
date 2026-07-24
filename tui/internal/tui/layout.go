@@ -18,15 +18,11 @@ const minimumChatWidth = 60
 // content rectangle via a WindowSizeMsg. View() composes root chrome around the
 // child content, so chrome never gets appended after a child has already
 // rendered at full terminal height.
-//
-// RailWidth is intentionally zero until the first visible rail PR. Naming the
-// horizontal geometry here lets that future render and mouse hit-testing share
-// the same source without changing today's pixels or narrowing non-mail views.
 type LayoutBudget struct {
 	TerminalWidth int // full terminal width, clamped >= 0
 	Height        int // full terminal height
 	ContentWidth  int // width handed to the child screen, clamped >= 0
-	RailWidth     int // root-owned mail rail width (0 until the rail exists)
+	RailWidth     int // root-owned mail rail width
 	MinChatWidth  int // minimum usable content width when a rail is requested
 	RailVisible   bool
 
@@ -93,9 +89,8 @@ func resolveHorizontalLayout(terminalWidth, requestedRailWidth, minChatWidth int
 
 // layoutBudget computes the current root layout budget from terminal size and
 // root-owned chrome. Horizontal dimensions are clamped before subtraction, and
-// content width is reduced exactly once only when a non-zero mail rail fits
-// beside the minimum chat width. The requested rail is formally zero in this
-// foundation PR, so all current views retain the full terminal width.
+// content width is reduced exactly once only when the 24-column Mail rail fits
+// beside the minimum chat width. Non-Mail views request no rail.
 func (a App) layoutBudget() LayoutBudget {
 	top := a.topChromeRows()
 	bottom := a.bottomChromeRows()
@@ -105,6 +100,9 @@ func (a App) layoutBudget() LayoutBudget {
 	}
 
 	requestedRailWidth := 0
+	if a.currentView == appViewMail && a.width >= agentRailWidth+minimumChatWidth+1 {
+		requestedRailWidth = agentRailWidth
+	}
 	terminalWidth, contentWidth, railWidth, railVisible := resolveHorizontalLayout(
 		a.width,
 		requestedRailWidth,

@@ -202,36 +202,6 @@ func (m MailModel) reconcileAcceptedDirectSelection() MailModel {
 	return m
 }
 
-// syncAcceptedDirectUnread is the explicitly confined compatibility path for
-// unprepared/internal mailRefreshMsg values. Real refresh commands use the
-// serialized async publication methods below and never perform durable I/O in
-// Update.
-func (m MailModel) syncAcceptedDirectUnread() MailModel {
-	if strings.TrimSpace(m.baseDir) == "" {
-		return m
-	}
-	projectRoot := filepath.Dir(filepath.Clean(m.baseDir))
-	if projectRoot == "." {
-		return m
-	}
-	targets := directTargetsForRows(m.agentSelector.rows)
-	accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
-	store := m.directUnread
-	var err error
-	if store == nil || m.directUnreadProjectRoot != projectRoot {
-		store, err = fs.OpenDirectUnreadStore(projectRoot, m.humanAddr, targets, accepted)
-	} else {
-		err = store.SyncTargets(targets, accepted)
-	}
-	if err != nil {
-		m.flashDirectUnreadFailure()
-		return m
-	}
-	m.directUnread = store
-	m.directUnreadProjectRoot = projectRoot
-	return m
-}
-
 type directUnreadOperation uint8
 
 const (
@@ -309,10 +279,8 @@ func (m MailModel) startDirectUnreadSync(continuation *fs.DirectUnreadStore) (Ma
 // handleDirectVisibility accepts only an exact current coordinate — project
 // root, strict thread key, direct generation, and accepted snapshot serial all
 // matching the current selection — while Mail is ready and the direct
-// transcript is unobscured. Production launches MarkSeen off-loop through the
-// same serialized durable lane; the unprepared compatibility branch preserves
-// existing fabricated-message tests. Everything else fails closed without
-// durable changes.
+// transcript is unobscured. MarkSeen runs off-loop through the same serialized
+// durable lane. Everything else fails closed without durable changes.
 func (m MailModel) handleDirectVisibility(msg directVisibilityMsg) (MailModel, tea.Cmd) {
 	projectRoot, threadKey, ok := m.directTargetCoordinates(m.directChat.target)
 	if !m.ready || m.directVisibilityObscured() || !ok ||
@@ -323,13 +291,6 @@ func (m MailModel) handleDirectVisibility(msg directVisibilityMsg) (MailModel, t
 		m.directChat.threadKey != threadKey ||
 		m.directChat.acceptedSnapshotSerial != m.acceptedSnapshotSerial ||
 		m.agentSelector.selectedThreadKey != threadKey || m.directUnread == nil {
-		return m, nil
-	}
-	if !m.directPrepared {
-		accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
-		if err := m.directUnread.MarkSeen(m.directChat.target, accepted); err != nil {
-			m.flashDirectUnreadFailure()
-		}
 		return m, nil
 	}
 	if m.directUnreadOpInFlight || m.directPublication == nil {

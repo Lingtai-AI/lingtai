@@ -114,10 +114,16 @@ func directUnreadRedNewMail(project directUnreadRedProject, pageSize int) MailMo
 	return mail
 }
 
-func directUnreadRedPublish(mail MailModel, accepted []fs.MailMessage) (MailModel, tea.Cmd) {
-	cache := fs.NewMailCache(mail.humanDir)
-	cache.Messages = accepted
-	return mail.Update(mailRefreshMsg{generation: mail.generation, cache: cache})
+func directUnreadRedPublish(t *testing.T, mail MailModel, accepted []fs.MailMessage) (MailModel, tea.Cmd) {
+	t.Helper()
+	app := App{
+		currentView: appViewMail,
+		width:       mail.width,
+		height:      mail.height,
+		mail:        mail,
+	}
+	app, cmd := directPerformancePreparedRefresh(t, app, accepted)
+	return app.mail, cmd
 }
 
 func directUnreadRedStatePath(project directUnreadRedProject) string {
@@ -193,6 +199,45 @@ func directUnreadRedVisibilityFromCmd(t *testing.T, cmd tea.Cmd, context string)
 	return directVisibilityMsg{}, false
 }
 
+func directUnreadRedApplyPreparedResult(t *testing.T, mail MailModel, cmd tea.Cmd, context string) MailModel {
+	t.Helper()
+	if cmd == nil {
+		t.Fatalf("%s: no prepared direct-unread command", context)
+	}
+	msg := runCmd(cmd)
+	if result, ok := msg.(directUnreadResultMsg); ok {
+		mail, _ = mail.Update(result)
+		return mail
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		count := 0
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			result, ok := runCmd(child).(directUnreadResultMsg)
+			if !ok {
+				continue
+			}
+			count++
+			mail, _ = mail.Update(result)
+		}
+		if count == 1 {
+			return mail
+		}
+		t.Fatalf("%s: prepared command produced %d directUnreadResultMsg values, want exactly 1", context, count)
+	}
+	t.Fatalf("%s: prepared command produced %T, want directUnreadResultMsg", context, msg)
+	return mail
+}
+
+func directUnreadRedApplyVisibility(t *testing.T, mail MailModel, visibility directVisibilityMsg, context string) MailModel {
+	t.Helper()
+	var cmd tea.Cmd
+	mail, cmd = mail.Update(visibility)
+	return directUnreadRedApplyPreparedResult(t, mail, cmd, context)
+}
+
 func directUnreadRedActivate(t *testing.T, mail MailModel, agentID string) (MailModel, directVisibilityMsg, bool) {
 	t.Helper()
 	mail = mail.openAgentSelector()
@@ -229,7 +274,7 @@ func TestDirectUnreadAcceptedPublicationSync(t *testing.T) {
 
 	// The first accepted publication must open exactly this project's durable
 	// store and baseline the safe row before any direct selection exists.
-	mail, _ = directUnreadRedPublish(mail, nil)
+	mail, _ = directUnreadRedPublish(t, mail, nil)
 	statePath := directUnreadRedStatePath(project)
 	t.Logf("durable DirectUnreadStore path: %s", statePath)
 	if _, err := os.Stat(statePath); err != nil {
@@ -253,7 +298,7 @@ func TestDirectUnreadAcceptedPublicationSync(t *testing.T) {
 		directUnreadRedIncoming(project.targetA, "a-new-before-selection", at),
 		directUnreadRedIncoming(project.targetB, "b-present-at-discovery", at.Add(time.Second)),
 	}
-	mail, _ = directUnreadRedPublish(mail, accepted)
+	mail, _ = directUnreadRedPublish(t, mail, accepted)
 	secondThreads := directUnreadRedReadThreads(t, project)
 	keyB := fs.DirectThreadKey(project.targetB)
 	if _, ok := secondThreads[keyB]; !ok {
@@ -279,7 +324,7 @@ func TestDirectUnreadVisibilityAcknowledgement(t *testing.T) {
 	targets := []fs.DirectTarget{project.targetA, project.targetB}
 	directUnreadRedSeedStore(t, project, targets)
 	mail := directUnreadRedNewMail(project, 200)
-	mail, _ = directUnreadRedPublish(mail, accepted)
+	mail, _ = directUnreadRedPublish(t, mail, accepted)
 
 	var visibility directVisibilityMsg
 	var ok bool
@@ -294,7 +339,7 @@ func TestDirectUnreadVisibilityAcknowledgement(t *testing.T) {
 		t.Fatalf("visibility fixture is not ready and unobscured: ready=%v selector=%v editorWarn=%v palette=%v",
 			mail.ready, mail.agentSelector.selectorOpen, mail.showEditorWarn, mail.input.IsPaletteActive())
 	}
-	mail, _ = mail.Update(visibility)
+	mail = directUnreadRedApplyVisibility(t, mail, visibility, "current direct visibility")
 	if got := directUnreadRedCount(t, project, targets, project.targetA, accepted); got != 0 {
 		t.Errorf("exact current directVisibilityMsg through MailModel.Update unread = %d, want 0 after durable MarkSeen", got)
 	}
@@ -343,7 +388,7 @@ func TestDirectUnreadRejectsStaleVisibility(t *testing.T) {
 				targets := []fs.DirectTarget{project.targetA, project.targetB}
 				directUnreadRedSeedStore(t, project, targets)
 				mail := directUnreadRedNewMail(project, 200)
-				mail, _ = directUnreadRedPublish(mail, accepted)
+				mail, _ = directUnreadRedPublish(t, mail, accepted)
 				var current directVisibilityMsg
 				var ok bool
 				mail, current, ok = directUnreadRedActivate(t, mail, project.targetA.AgentID)
@@ -378,7 +423,7 @@ func TestDirectUnreadRejectsStaleVisibility(t *testing.T) {
 		targets := []fs.DirectTarget{project.targetA, project.targetB}
 		directUnreadRedSeedStore(t, project, targets)
 		mail := directUnreadRedNewMail(project, 200)
-		mail, _ = directUnreadRedPublish(mail, accepted)
+		mail, _ = directUnreadRedPublish(t, mail, accepted)
 		mail, staleA, ok := directUnreadRedActivate(t, mail, project.targetA.AgentID)
 		if !ok {
 			return
@@ -399,7 +444,7 @@ func TestDirectUnreadRejectsStaleVisibility(t *testing.T) {
 		targets := []fs.DirectTarget{project.targetA, project.targetB}
 		directUnreadRedSeedStore(t, project, targets)
 		mail := directUnreadRedNewMail(project, 200)
-		mail, _ = directUnreadRedPublish(mail, accepted)
+		mail, _ = directUnreadRedPublish(t, mail, accepted)
 		mail, staleA, ok := directUnreadRedActivate(t, mail, project.targetA.AgentID)
 		if !ok {
 			return
@@ -446,7 +491,7 @@ func TestDirectUnreadObstructionRetriesVisibility(t *testing.T) {
 			targets := []fs.DirectTarget{project.targetA, project.targetB}
 			directUnreadRedSeedStore(t, project, targets)
 			mail := directUnreadRedNewMail(project, 200)
-			mail, _ = directUnreadRedPublish(mail, accepted)
+			mail, _ = directUnreadRedPublish(t, mail, accepted)
 			var current directVisibilityMsg
 			var ok bool
 			mail, current, ok = directUnreadRedActivate(t, mail, project.targetA.AgentID)
@@ -470,7 +515,7 @@ func TestDirectUnreadObstructionRetriesVisibility(t *testing.T) {
 					retry.acceptedSnapshotSerial != current.acceptedSnapshotSerial {
 					t.Errorf("closing %s retry = %#v, want fresh current coordinate matching %#v", tc.name, retry, current)
 				}
-				mail, _ = mail.Update(retry)
+				mail = directUnreadRedApplyVisibility(t, mail, retry, "visibility retry after closing "+tc.name)
 			}
 			if got := directUnreadRedCount(t, project, targets, project.targetA, accepted); got != 0 {
 				t.Errorf("current visible retry after closing %s unread = %d, want 0", tc.name, got)
@@ -498,7 +543,7 @@ func TestDirectUnreadMarksFullAcceptedSnapshot(t *testing.T) {
 	if mail.pageSize != pageSize {
 		t.Fatalf("configured page size = %d, want %d", mail.pageSize, pageSize)
 	}
-	mail, _ = directUnreadRedPublish(mail, accepted)
+	mail, _ = directUnreadRedPublish(t, mail, accepted)
 	if got := len(mail.acceptedSnapshot.messagesForUnread(mail.humanDir)); got != len(accepted) {
 		t.Fatalf("accepted unread snapshot has %d messages, want full %d", got, len(accepted))
 	}
@@ -512,7 +557,7 @@ func TestDirectUnreadMarksFullAcceptedSnapshot(t *testing.T) {
 	if !ok {
 		return
 	}
-	mail, _ = mail.Update(visibility)
+	mail = directUnreadRedApplyVisibility(t, mail, visibility, "full-snapshot visibility")
 	if got := directUnreadRedCount(t, project, targets, project.targetA, accepted); got != 0 {
 		t.Errorf("visible MarkSeen with page size %d and %d accepted messages left %d unread; want full accepted snapshot cleared",
 			pageSize, len(accepted), got)
@@ -530,7 +575,7 @@ func TestDirectUnreadMarkSeenFailureFailsClosed(t *testing.T) {
 		time.Date(2026, 7, 23, 17, 0, 0, 0, time.UTC),
 	)}
 	mail := directUnreadRedNewMail(project, 200)
-	mail, _ = directUnreadRedPublish(mail, accepted)
+	mail, _ = directUnreadRedPublish(t, mail, accepted)
 	var visibility directVisibilityMsg
 	var ok bool
 	mail, visibility, ok = directUnreadRedActivate(t, mail, project.targetA.AgentID)
@@ -560,7 +605,9 @@ func TestDirectUnreadMarkSeenFailureFailsClosed(t *testing.T) {
 		t.Fatalf("create deterministic MarkSeen blocker: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) })
-	mail, _ = mail.Update(visibility)
+	var markSeenCmd tea.Cmd
+	mail, markSeenCmd = mail.Update(visibility)
+	mail = directUnreadRedApplyPreparedResult(t, mail, markSeenCmd, "failing visible MarkSeen")
 	if err := os.Chmod(stateDir, 0o755); err != nil {
 		t.Fatalf("release deterministic MarkSeen blocker: %v", err)
 	}

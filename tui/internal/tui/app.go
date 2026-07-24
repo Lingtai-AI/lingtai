@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -316,7 +317,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Derive both axes from the root layout budget, then forward the
 		// child content rectangle — never the raw terminal dimensions. See
 		// layout.go (LayoutBudget) for the contract.
-		return a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
+		budget := a.layoutBudget()
+		if a.currentView == appViewMail {
+			if budget.RailVisible {
+				a.mail = a.mail.clampAgentRail()
+			} else if a.mail.agentRail.focused {
+				a.mail = a.mail.blurAgentRail()
+			}
+		}
+		return a.updateChildWindowSize(budget.ChildWindowSize())
+
+	case tea.MouseClickMsg:
+		if a.currentView == appViewMail {
+			return a.updateMailMouseClick(msg)
+		}
+
+	case tea.MouseWheelMsg:
+		if a.currentView == appViewMail {
+			return a.updateMailMouseWheel(msg)
+		}
+
+	case tea.PasteMsg:
+		if a.currentView == appViewMail && a.layoutBudget().RailVisible && a.mail.agentRail.focused {
+			return a, nil
+		}
 
 	case tea.FocusMsg:
 		ApplyTerminalBG()
@@ -692,6 +716,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, tea.Quit
 			}
 		}
+		if a.currentView == appViewMail {
+			if updated, cmd, handled := a.updateAgentRailKey(msg); handled {
+				return updated, cmd
+			}
+		}
 	}
 
 	// === Forward to current view ===
@@ -784,6 +813,9 @@ func (a App) openSetupCredentials() (App, tea.Cmd) {
 }
 
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
+	if a.currentView == appViewMail && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
 	addMsg := func(text string) {
 		a.mail.AddSystemMessage(text)
 	}
@@ -1023,8 +1055,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.library.Init(), a.sendSize())
 	case "agents":
 		// The /agents selector is a Mail-owned overlay over the canonical
-		// conversation rows; it works at every terminal width.
-		if a.currentView == appViewMail {
+		// conversation rows; it works at every terminal width. A delayed
+		// palette result cannot displace an editor warning that already owns
+		// the Mail surface.
+		if a.currentView == appViewMail && !a.mail.showEditorWarn {
 			a.mail = a.mail.openAgentSelector()
 		}
 		return a, nil
@@ -1395,6 +1429,124 @@ type childWindowSizeMsg struct {
 	tea.WindowSizeMsg
 }
 
+func (a App) updateAgentRailKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
+	if !a.layoutBudget().RailVisible {
+		return a, nil, false
+	}
+	if !a.mail.agentRail.focused {
+		if msg.Code != tea.KeyTab ||
+			!a.mail.input.Focused() ||
+			a.mail.showEditorWarn ||
+			a.mail.agentSelector.selectorOpen ||
+			a.mail.input.IsPaletteActive() {
+			return a, nil, false
+		}
+		a.mail = a.mail.focusAgentRail()
+		return a, nil, true
+	}
+
+	// Mail owns copy mode. Its toggle and first Esc keep their established
+	// precedence even while the rail has presentation focus.
+	if msg.String() == copyModeToggleKey || a.mail.copyMode && msg.String() == "esc" {
+		return a, nil, false
+	}
+	if msg.String() == "ctrl+r" {
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.Update(msg)
+		return a, cmd, true
+	}
+
+	switch msg.String() {
+	case "tab", "esc":
+		a.mail = a.mail.blurAgentRail()
+	case "up", "k":
+		a.mail = a.mail.moveSelectorCursor(-1).keepAgentRailCursorVisible()
+	case "down", "j":
+		a.mail = a.mail.moveSelectorCursor(1).keepAgentRailCursorVisible()
+	case "home":
+		a.mail = a.mail.setSelectorCursor(0).keepAgentRailCursorVisible()
+	case "end":
+		a.mail = a.mail.setSelectorCursor(len(a.mail.agentSelector.rows) - 1).keepAgentRailCursorVisible()
+	case "enter":
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.activateConversationRow(a.mail.agentSelector.cursor)
+		a.mail = a.mail.keepAgentRailCursorVisible()
+		return a, cmd, true
+	default:
+		if msg.Code == ' ' {
+			var cmd tea.Cmd
+			a.mail, cmd = a.mail.activateConversationRow(a.mail.agentSelector.cursor)
+			a.mail = a.mail.keepAgentRailCursorVisible()
+			return a, cmd, true
+		}
+	}
+	return a, nil, true
+}
+
+func (a App) mailMouseChildCoordinates(x, y int) (LayoutBudget, int, int, bool) {
+	budget := a.layoutBudget()
+	if x < 0 || x >= budget.TerminalWidth ||
+		y < budget.TopChromeRows ||
+		y >= budget.TopChromeRows+budget.ChildHeight {
+		return budget, 0, 0, false
+	}
+	return budget, x - budget.RailWidth, y - budget.TopChromeRows, true
+}
+
+func (a App) updateMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd) {
+	budget, childX, childY, inside := a.mailMouseChildCoordinates(msg.X, msg.Y)
+	if !inside {
+		return a, nil
+	}
+	if budget.RailVisible && msg.X < budget.RailWidth {
+		if a.mail.copyMode || a.mail.directVisibilityObscured() || msg.Button != tea.MouseLeft {
+			return a, nil
+		}
+		row := a.mail.agentRailRowAt(childY)
+		if row < 0 {
+			return a, nil
+		}
+		a.mail = a.mail.setSelectorCursor(row).keepAgentRailCursorVisible()
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.activateConversationRow(row)
+		return a, cmd
+	}
+
+	if msg.Button == tea.MouseLeft && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
+	msg.X = childX
+	msg.Y = childY
+	var cmd tea.Cmd
+	a.mail, cmd = a.mail.Update(msg)
+	return a, cmd
+}
+
+func (a App) updateMailMouseWheel(msg tea.MouseWheelMsg) (App, tea.Cmd) {
+	budget, childX, childY, inside := a.mailMouseChildCoordinates(msg.X, msg.Y)
+	if !inside {
+		return a, nil
+	}
+	if budget.RailVisible && msg.X < budget.RailWidth {
+		if a.mail.copyMode || a.mail.directVisibilityObscured() {
+			return a, nil
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			a.mail = a.mail.scrollAgentRail(-1)
+		case tea.MouseWheelDown:
+			a.mail = a.mail.scrollAgentRail(1)
+		}
+		return a, nil
+	}
+
+	msg.X = childX
+	msg.Y = childY
+	var cmd tea.Cmd
+	a.mail, cmd = a.mail.Update(msg)
+	return a, cmd
+}
+
 func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.currentView {
@@ -1632,7 +1784,10 @@ func (a App) visitEscEligible() bool {
 	if !a.visiting || a.selectMode || a.currentView != appViewMail {
 		return false
 	}
-	return !a.mail.copyMode && !a.mail.showEditorWarn && !a.mail.input.IsPaletteActive()
+	return !a.mail.copyMode &&
+		!a.mail.agentRail.focused &&
+		!a.mail.showEditorWarn &&
+		!a.mail.input.IsPaletteActive()
 }
 
 // RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
@@ -1659,6 +1814,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	// navigation so it never leaks into the destination (and so entering mail
 	// hands ctrl+y back to the mail model's own copyMode).
 	a.selectMode = false
+	if viewName != "mail" && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
@@ -1780,6 +1938,14 @@ func (a App) View() tea.View {
 		content = a.firstRun.View()
 	case appViewMail:
 		content = a.mail.View()
+		budget := a.layoutBudget()
+		if budget.RailVisible {
+			content = lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				a.mail.renderAgentRail(budget.RailWidth, budget.ChildHeight),
+				content,
+			)
+		}
 	case appViewSettings:
 		content = a.settings.View()
 	case appViewProps:

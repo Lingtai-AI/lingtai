@@ -146,13 +146,9 @@ func newDirectPagingFixture(t *testing.T, pageSize, width, height int, accepted 
 	return fixture
 }
 
-func directPagingRefresh(app App, accepted []fs.MailMessage) (App, tea.Cmd) {
-	cache := fs.NewMailCache(app.mail.humanDir)
-	cache.Messages = append([]fs.MailMessage(nil), accepted...)
-	return directPerformanceApply(app, mailRefreshMsg{
-		generation: app.mail.generation,
-		cache:      cache,
-	})
+func directPagingRefresh(t *testing.T, app App, accepted []fs.MailMessage) (App, tea.Cmd) {
+	t.Helper()
+	return directPerformancePreparedRefresh(t, app, accepted)
 }
 
 // TestDirectOlderPagingRevealsOneCurrentOnlyPageAtATime defines direct Ctrl+U
@@ -275,7 +271,7 @@ func TestDirectStoredViewportInvalidationIsContentAndWidthAffine(t *testing.T) {
 		t.Fatalf("sentinel precondition content/offset = %q/%d; want exact sentinel/%d", app.mail.directChat.viewport.GetContent(), app.mail.directChat.viewport.YOffset(), sentinelOffset)
 	}
 	acceptedSerialBefore := app.mail.acceptedSnapshotSerial
-	app, _ = directPagingRefresh(app, accepted)
+	app, _ = directPagingRefresh(t, app, accepted)
 	if app.mail.acceptedSnapshotSerial != acceptedSerialBefore+1 ||
 		app.mail.directChat.acceptedSnapshotSerial != app.mail.acceptedSnapshotSerial {
 		t.Fatalf("byte-identical accepted refresh coordinates = accepted=%d direct=%d; want accepted=%d direct=%d",
@@ -331,7 +327,7 @@ func TestDirectStoredViewportInvalidationIsContentAndWidthAffine(t *testing.T) {
 
 	changedAccepted := append(append([]fs.MailMessage(nil), accepted...), directPerformanceIncoming(fixture.targetA, messageCount, directPagingBody(messageCount)))
 	contentBeforeChangedPage := app.mail.directChat.viewport.GetContent()
-	app, _ = directPagingRefresh(app, changedAccepted)
+	app, _ = directPagingRefresh(t, app, changedAccepted)
 	expectedChangedPage := app.mail.renderMessages(app.mail.directChat.projection)
 	directPagingAssertProjection(t, app.mail, 16, 25, pageSize, true, "changed newest accepted page")
 	if app.mail.directChat.viewport.GetContent() != expectedChangedPage ||

@@ -247,6 +247,7 @@ type MailModel struct {
 	acceptedSnapshotSerial uint64
 	directChat             directChatState
 	agentSelector          agentSelectorState
+	agentRail              agentRailState
 	directPublication      *fs.DirectMailPublication
 	directPrepared         bool
 
@@ -983,6 +984,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m.viewport.GotoBottom()
 			}
 		}
+		m = m.clampAgentRail()
 		return m, nil
 
 	case mailRefreshMsg:
@@ -995,9 +997,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// One monotonic request serial, newest-accepted-completion gate: a
 		// completion older than the newest accepted request installs no mailbox
 		// cache, accepted snapshot, selector rows, publication, or unread work,
-		// and schedules no side effect. Serial 0 marks fabricated internal test
-		// messages, which keep their established compatibility path. The
-		// one-shot initial rebuild is the single split acceptance: its bounded
+		// and schedules no side effect. Serial 0 marks status-only fabricated
+		// internal messages and never installs direct state. The one-shot
+		// initial rebuild is the single split acceptance: its bounded
 		// Main session result below stays generation-gated exactly as before,
 		// while its stale mailbox/direct payload is equally rejected.
 		staleRequest := msg.refreshRequestSerial != 0 &&
@@ -1008,7 +1010,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		if !staleRequest && msg.refreshRequestSerial != 0 {
 			m.acceptedRefreshRequestSerial = msg.refreshRequestSerial
 		}
-		if !staleRequest {
+		acceptedPrepared := !staleRequest &&
+			msg.refreshRequestSerial != 0 &&
+			msg.prepared &&
+			msg.acceptedSnapshot.ready &&
+			msg.directPublication != nil
+		if acceptedPrepared {
 			// The detached command is read-only. Launch this best-effort
 			// network/cache refresh only after the acceptance gates; it remains
 			// off the Update path.
@@ -1061,30 +1068,18 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		var directVisibilityCmd tea.Cmd
 		var directUnreadCmd tea.Cmd
 		if !staleRequest {
-			m.cache = msg.cache
-			if msg.prepared && msg.acceptedSnapshot.ready && msg.directPublication != nil {
+			if acceptedPrepared {
 				// One matching prepared payload installs atomically: mailbox
 				// cache, deep accepted snapshot, canonical selector rows, and
 				// the immutable direct publication all belong to this request.
+				m.cache = msg.cache
 				m.acceptedSnapshot = msg.acceptedSnapshot
 				m = m.installSelectorRows(msg.selectorRows)
 				m.directPublication = msg.directPublication
 				m.directPrepared = true
-			} else {
-				// Compatibility for internal tests that construct mailRefreshMsg
-				// directly. No real producer reaches this discovery/clone path.
-				m.acceptedSnapshot = newAcceptedMailSnapshot(msg.cache)
-				m = m.publishAcceptedSelectorRows()
-				m.directPublication = fs.NewDirectMailPublication(
-					m.humanAddr,
-					directTargetsForRows(m.agentSelector.rows),
-					m.acceptedSnapshot.cache.Messages,
-				)
-				m.directPrepared = false
-				m = m.syncAcceptedDirectUnread()
-			}
-			m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
-			if m.directPrepared {
+				m = m.clampAgentRail()
+				m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
+				m = m.recomputeAgentRailUnread()
 				m.directUnreadSyncPending = true
 				m, directUnreadCmd = m.maybeStartDirectUnreadSync()
 			}
@@ -1393,10 +1388,16 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		return m.handleDirectVisibility(msg)
 
 	case directUnreadResultMsg:
-		return m.handleDirectUnreadResult(msg)
+		var cmd tea.Cmd
+		m, cmd = m.handleDirectUnreadResult(msg)
+		m = m.recomputeAgentRailUnread()
+		return m, cmd
 
 	case OpenEditorMsg:
-		// Show editor intro page before launching
+		// Show editor intro page before launching. The command that emits this
+		// message is asynchronous, so an intervening Tab may have focused the
+		// conversation rail; the warning must take sole surface ownership.
+		m = m.blurAgentRail()
 		m.showEditorWarn = true
 		m.editorWarnText = msg.Text
 		return m, nil
@@ -1465,6 +1466,16 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 		if m.copyMode && msg.String() == "esc" {
 			m.copyMode = false
+			return m, nil
+		}
+
+		if msg.String() == "ctrl+e" {
+			// Open the warning in this serialized Mail update before any path can
+			// forward the key to InputModel's context-free asynchronous editor
+			// command. The exact draft therefore cannot outlive its Mail route.
+			m = m.blurAgentRail()
+			m.showEditorWarn = true
+			m.editorWarnText = m.input.Value()
 			return m, nil
 		}
 

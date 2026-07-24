@@ -840,6 +840,7 @@
   "firstrun.preset_pick.draft_codex_logout_blocked": "仅为草稿 —— 此 Codex 凭据在创建本项目草稿之前就已存在，无法在此处移除，磁盘上的内容未发生任何变化。请取消或完成向导后，再到 /setup 中登出。",
   "palette.agents": "选择主会话或智能体",
   "cmd.agents": "选择主会话或当前项目中的智能体进行直接邮件。",
+  "agent_rail.title": "会话",
   "agent_selector.main": "主会话",
   "agent_selector.omitted": "已省略 %d 个不安全的智能体条目",
   "agent_selector.unread_failed": "无法更新智能体未读状态",
