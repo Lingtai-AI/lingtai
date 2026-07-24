@@ -43,18 +43,6 @@ func testPresetEditorPreset() preset.Preset {
 	}
 }
 
-// withValidModelValidity seeds m as though its current (provider, model,
-// credential) tuple already passed a real-availability check, so tests
-// that exercise commit()'s save-shape behavior (not the validity gate
-// itself) don't need to pump an async checkModelValidityCmd or hit a
-// live provider. See TestPresetEditorCommitBlocksUntilModelValidated and
-// friends for tests of the gate itself.
-func withValidModelValidity(m PresetEditorModel) PresetEditorModel {
-	m.modelValidity = validityValid
-	m.modelValidityKey = m.currentValidityKey()
-	return m
-}
-
 func testCodexPresetEditorPreset(serviceTier interface{}) preset.Preset {
 	return testCodexPresetEditorPresetWithThinking(serviceTier, nil)
 }
@@ -158,7 +146,6 @@ func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := builtinPresetForEditorTest(t, tt.name)
 			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
-			m = withValidModelValidity(m)
 
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
@@ -179,7 +166,6 @@ func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 func TestPresetEditorCodexPoolThinkingIsEditableAndPreserved(t *testing.T) {
 	p := builtinPresetForEditorTest(t, "codex-pool")
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
-	m = withValidModelValidity(m)
 
 	if !m.fieldVisible(feThinking) {
 		t.Fatal("codex-pool thinking field must be visible")
@@ -305,7 +291,6 @@ func TestPresetEditorAPIKeyUnchangedWhenStoredKeyUntouched(t *testing.T) {
 	p := testPresetEditorPreset()
 	p.Source = preset.SourceSaved
 	m := NewPresetEditorModel(p, "en", keys, "")
-	m = withValidModelValidity(m)
 
 	_, cmd := m.commit()
 	if cmd == nil {
@@ -344,7 +329,6 @@ func TestPresetEditorAPIKeyBlankEditKeepsStoredKey(t *testing.T) {
 		t.Fatalf("blank API key edit should be a no-op, not stage a clear")
 	}
 
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	if cmd == nil {
 		t.Fatalf("commit returned nil cmd")
@@ -371,7 +355,6 @@ func TestPresetEditorTemplateDoesNotInheritStoredProviderKey(t *testing.T) {
 		t.Fatalf("template editor should not render old provider key, got %q", got)
 	}
 
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	if cmd == nil {
 		t.Fatalf("commit returned nil cmd")
@@ -450,7 +433,6 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 		"web_search": map[string]interface{}{"provider": "duckduckgo"},
 	}
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	m = withValidModelValidity(m)
 
 	_, cmd := m.commit()
 	if cmd == nil {
@@ -558,7 +540,6 @@ func TestPresetEditorCodexServiceTierFastAndNormal(t *testing.T) {
 	if got, _ := llm["service_tier"].(string); got != "fast" {
 		t.Fatalf("cycling normal -> fast wrote service_tier=%#v, want fast", llm["service_tier"])
 	}
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -596,7 +577,6 @@ func TestPresetEditorCodexServiceTierDisplayAndCommitNormalization(t *testing.T)
 			if got := m.fieldString(feServiceTier); got != tc.wantDisplay {
 				t.Fatalf("service tier display = %q, want %q", got, tc.wantDisplay)
 			}
-			m = withValidModelValidity(m)
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
 			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -652,7 +632,6 @@ func TestPresetEditorCodexThinkingSelectionAndCommit(t *testing.T) {
 				t.Fatalf("thinking display = %q, want %q", got, tc.effort)
 			}
 
-			m = withValidModelValidity(m)
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
 			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -689,7 +668,6 @@ func TestPresetEditorCodexThinkingDisplayAndCommitNormalization(t *testing.T) {
 			if got := m.fieldString(feThinking); got != tc.wantDisplay {
 				t.Fatalf("thinking display = %q, want %q", got, tc.wantDisplay)
 			}
-			m = withValidModelValidity(m)
 			_, cmd := m.commit()
 			commit := cmd().(PresetEditorCommitMsg)
 			llm := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -724,7 +702,6 @@ func TestPresetEditorThinkingHiddenAndRemovedForNonCodex(t *testing.T) {
 		t.Fatalf("cursor landed on hidden thinking field for non-codex preset")
 	}
 
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -746,7 +723,6 @@ func TestPresetEditorProviderSwitchClearsThinking(t *testing.T) {
 		t.Fatalf("provider switch away from codex should remove llm.thinking; got %#v", llm["thinking"])
 	}
 
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -778,7 +754,6 @@ func TestPresetEditorServiceTierHiddenForNonCodexAndPreserved(t *testing.T) {
 
 	llm := m.working.Manifest["llm"].(map[string]interface{})
 	llm["service_tier"] = "provider-specific"
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -800,7 +775,6 @@ func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
 		t.Fatalf("provider switch should preserve existing service_tier; got %#v", llm["service_tier"])
 	}
 
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -959,7 +933,6 @@ func TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue(t *test
 	caps["vision"] = map[string]interface{}{"provider": "gemini", "api_key_env": "GEMINI_API_KEY"}
 
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	m = withValidModelValidity(m)
 
 	_, cmd := m.commit()
 	msg := cmd()
@@ -979,10 +952,11 @@ func TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue(t *test
 	}
 }
 
-// TestPresetEditorSaveNotBlockedByCapabilityState confirms the save gate
-// (modelValidity) is unaffected by web_search/vision capability presence
-// or absence — capability state must never block Save/Next. The only
-// save gate is the independent base-LLM model availability check.
+// TestPresetEditorSaveNotBlockedByCapabilityState confirms Save is
+// unaffected by web_search/vision capability presence or absence —
+// capability state must never block Save/Next. Save only performs local
+// structural validation (Preset.Validate); it never blocks on a live
+// provider/model check.
 func TestPresetEditorSaveNotBlockedByCapabilityState(t *testing.T) {
 	p := testPresetEditorPreset()
 	caps := p.Manifest["capabilities"].(map[string]interface{})
@@ -990,7 +964,6 @@ func TestPresetEditorSaveNotBlockedByCapabilityState(t *testing.T) {
 	delete(caps, "vision")
 
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	m = withValidModelValidity(m)
 
 	_, cmd := m.commit()
 	if cmd == nil {
@@ -999,6 +972,76 @@ func TestPresetEditorSaveNotBlockedByCapabilityState(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(PresetEditorCommitMsg); !ok {
 		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must not be blocked by missing capabilities)", msg)
+	}
+}
+
+// TestPresetEditorSaveDoesNotProbeAPIKeyProvider is the regression test
+// for the reported (Jason, 2026-07-23) bug where every provider — Codex
+// and API-key providers such as DeepSeek alike — was rejected by a
+// save-time live-availability check even though the configured provider
+// worked. Save must only run local structural validation
+// (Preset.Validate) and must never make a live network call: base_url
+// points at a closed local port, so any HTTP attempt would fail/hang and
+// this test would time out or fail if commit() still probed.
+func TestPresetEditorSaveDoesNotProbeAPIKeyProvider(t *testing.T) {
+	unreachable := "http://127.0.0.1:1" // reserved port; connection refused instantly, never a real server
+	p := preset.Preset{
+		Name:        "deepseek-test",
+		Description: preset.PresetDescription{Summary: "DeepSeek editor test preset"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider":    "deepseek",
+				"model":       "deepseek-v4-pro",
+				"api_compat":  "openai",
+				"base_url":    unreachable,
+				"api_key_env": "DEEPSEEK_API_KEY",
+			},
+		},
+	}
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.apiKey = "sk-deepseek-test"
+
+	updated, cmd := m.commit()
+	if updated.saveErr != "" {
+		t.Fatalf("save must not be blocked by a pending/failed availability check; saveErr=%q", updated.saveErr)
+	}
+	if cmd == nil {
+		t.Fatalf("expected commit() to return the commit cmd immediately, not a pending validity-check cmd")
+	}
+	msg := cmd()
+	commit, ok := msg.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must succeed without a live provider probe)", msg)
+	}
+	if commit.Preset.Manifest["llm"].(map[string]interface{})["provider"] != "deepseek" {
+		t.Fatalf("committed preset lost its provider: %#v", commit.Preset.Manifest["llm"])
+	}
+}
+
+// TestPresetEditorSaveDoesNotProbeCodexProvider is the Codex half of the
+// same regression: Codex presets (OAuth-based, no api_key_env) must also
+// reach PresetEditorCommitMsg on the first Save with no pending/checking
+// state and no live Responses-endpoint call.
+func TestPresetEditorSaveDoesNotProbeCodexProvider(t *testing.T) {
+	p := testCodexPresetEditorPreset(nil)
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["base_url"] = "http://127.0.0.1:1" // reserved port; would fail/hang if ever dialed
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
+
+	updated, cmd := m.commit()
+	if updated.saveErr != "" {
+		t.Fatalf("save must not be blocked by a pending/failed availability check; saveErr=%q", updated.saveErr)
+	}
+	if cmd == nil {
+		t.Fatalf("expected commit() to return the commit cmd immediately, not a pending validity-check cmd")
+	}
+	msg := cmd()
+	commit, ok := msg.(PresetEditorCommitMsg)
+	if !ok {
+		t.Fatalf("commit cmd returned %T, want PresetEditorCommitMsg (save must succeed without a live Codex probe)", msg)
+	}
+	if commit.Preset.Manifest["llm"].(map[string]interface{})["provider"] != "codex" {
+		t.Fatalf("committed preset lost its provider: %#v", commit.Preset.Manifest["llm"])
 	}
 }
 
@@ -1153,7 +1196,6 @@ func TestPresetEditorWireAPICommitPersistsAndOmitsAuto(t *testing.T) {
 	// Select responses and commit — should persist.
 	m.cycleFocused(+1) // auto -> chat_completions
 	m.cycleFocused(+1) // chat_completions -> responses
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -1188,7 +1230,6 @@ func TestPresetEditorWireAPICleanupOnScopeExit(t *testing.T) {
 	}
 
 	// Commit must strip the stale wire_api.
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})
@@ -1212,7 +1253,6 @@ func TestPresetEditorWireAPICleanupOnProviderSwitch(t *testing.T) {
 	}
 
 	// Commit must strip the stale wire_api.
-	m = withValidModelValidity(m)
 	_, cmd := m.commit()
 	commit := cmd().(PresetEditorCommitMsg)
 	committedLLM := commit.Preset.Manifest["llm"].(map[string]interface{})

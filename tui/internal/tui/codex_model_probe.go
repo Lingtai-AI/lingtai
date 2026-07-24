@@ -25,10 +25,6 @@ import (
 //   - ErrCodexAuthTransient (network/5xx/timeout/write failure) ->
 //     probeOverloaded. A known-stale token must never be sent to /responses
 //     and have its resulting 401 misread as deterministic ineligibility.
-//     probeOverloaded already maps to validityRetryable in
-//     checkCodexModelValidityCmdForSource (model_validity.go), so Save
-//     proceeds with a warning instead of blocking on an operational hiccup
-//     that says nothing about the account or model.
 func freshCodexAccessToken(path string, tokens CodexTokens) (string, probeStatus, string) {
 	fresh, err := ensureFreshCodexTokens(path, tokens)
 	switch err {

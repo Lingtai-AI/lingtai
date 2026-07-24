@@ -827,6 +827,88 @@ func failingGlobalDir(t *testing.T) string {
 	return dir
 }
 
+// TestPresetKeyNext_AdvancesWithoutLiveProbeForAPIKeyProvider is the
+// regression test for the reported (Jason, 2026-07-23) bug where every
+// provider — Codex and API-key providers such as DeepSeek alike — was
+// rejected by a save-time live-availability check even though the
+// configured provider worked. Pressing Next on stepPresetKey must save
+// the key and advance immediately: no pending/checking state, and no
+// live HTTP call (base_url points at a reserved, unreachable port, so a
+// probe would fail/hang and this test would not pass step advancement).
+func TestPresetKeyNext_AdvancesWithoutLiveProbeForAPIKeyProvider(t *testing.T) {
+	dir := t.TempDir()
+	keyInput := textarea.New()
+	keyInput.SetValue("sk-deepseek-test")
+	m := FirstRunModel{
+		step:         stepPresetKey,
+		globalDir:    dir,
+		existingKeys: map[string]string{},
+		keyFieldIdx:  2, // Next button
+		cursor:       0,
+		presets: []preset.Preset{
+			{
+				Name: "deepseek-test",
+				Manifest: map[string]interface{}{
+					"llm": map[string]interface{}{
+						"provider":    "deepseek",
+						"model":       "deepseek-v4-pro",
+						"api_compat":  "openai",
+						"base_url":    "http://127.0.0.1:1", // reserved port; would fail/hang if ever dialed
+						"api_key_env": "DEEPSEEK_API_KEY",
+					},
+				},
+			},
+		},
+		presetKeyInput: keyInput,
+	}
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.step == stepPresetKey {
+		t.Fatalf("expected the wizard to advance past stepPresetKey immediately, with no live probe; message=%q", m.message)
+	}
+	if cmd == nil {
+		t.Fatalf("expected enterCapabilities' cmd on the first Next press")
+	}
+	if got := m.existingKeys["DEEPSEEK_API_KEY"]; got != "sk-deepseek-test" {
+		t.Fatalf("expected the pasted key to be saved; got %q", got)
+	}
+}
+
+// TestFirstRunAgentPresetsNext_AdvancesWithoutLiveCodexProbe is the Codex
+// half of the same regression: selecting a Codex preset as default on
+// stepAgentPresets and pressing Next must advance immediately with no
+// live Responses-endpoint call and no pending/checking state.
+func TestFirstRunAgentPresetsNext_AdvancesWithoutLiveCodexProbe(t *testing.T) {
+	m := FirstRunModel{
+		step: stepAgentPresets,
+		presets: []preset.Preset{{
+			Name: "codex-test",
+			Manifest: map[string]interface{}{
+				"llm": map[string]interface{}{
+					"provider": "codex",
+					"model":    "gpt-5.6-sol",
+					"base_url": "http://127.0.0.1:1", // reserved port; would fail/hang if ever dialed
+				},
+			},
+		}},
+		savedPresetIdx:   []int{0},
+		presetAllowed:    []bool{true},
+		presetDefaultIdx: 0,
+		presetCfgCursor:  2, // row 0, Back 1, Next 2
+		cursor:           0,
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if updated.step == stepAgentPresets {
+		t.Fatalf("expected the wizard to advance past stepAgentPresets immediately, with no live Codex probe; message=%q", updated.presetCfgMessage)
+	}
+	if cmd == nil {
+		t.Fatalf("expected a cmd once the wizard advances past stepAgentPresets")
+	}
+}
+
 // TestPresetKeyNext_SaveConfigErrorSurfacesAndDoesNotAdvance covers the
 // stepPresetKey "Next" path (issue #509): when persisting the pasted API key
 // fails, the wizard must surface the error and stay on stepPresetKey rather
@@ -855,12 +937,6 @@ func TestPresetKeyNext_SaveConfigErrorSurfacesAndDoesNotAdvance(t *testing.T) {
 		},
 		presetKeyInput: keyInput,
 	}
-	// Pre-seed the real-availability check as already-passed for this
-	// exact (provider, model, credential) tuple — this test exercises
-	// the save-config-error path downstream of the gate, not the gate
-	// itself (see TestPresetKeyNext_BlocksUntilModelValidated for that).
-	m.presetKeyValidity = validityValid
-	m.presetKeyValidityKey = m.presetKeyValidityKeyFor("sk-test-key")
 
 	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 

@@ -81,8 +81,8 @@ already-running session.
 
 ## Operations
 
-For the live-probe gate a preset must pass before it can be saved and
-therefore become eligible here, see
+For why Save no longer requires a live-probe pass before a preset becomes
+eligible here (structural validation only), see
 `reference/operations/availability-save-gate/SKILL.md`. For the
 Load/Save/Delete contract, see
 `reference/operations/saved-presets/SKILL.md`.

@@ -120,7 +120,7 @@ lifecycle mechanics and never encode provider-specific facts.
 |---|---|
 | How do saved presets differ from templates? Load/Save/Delete/Bootstrap order and atomicity? | `reference/operations/saved-presets/SKILL.md` |
 | What base URL / API compatibility / provider / model / capability declarations does a preset carry, distinct from credentials? Codex OAuth quota inspection. | `reference/operations/endpoint-capabilities/SKILL.md` |
-| Why does Save block or warn, and what does the live validity probe actually do (429/503/529 vs hard block)? | `reference/operations/availability-save-gate/SKILL.md` |
+| Does Save make a live provider call, and where does real availability diagnosis live? | `reference/operations/availability-save-gate/SKILL.md` |
 | How does a saved preset become the running default, and what does `/refresh` actually switch? | `reference/operations/activation-session-refresh/SKILL.md` |
 | Something looks broken/stale — bounded triage before routing to a deeper runtime/update/migration skill | `reference/operations/troubleshooting-migration/SKILL.md` |
 

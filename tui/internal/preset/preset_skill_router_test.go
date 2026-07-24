@@ -451,17 +451,23 @@ func TestPresetSkillRouter_SavedAndAvailabilitySourceContracts(t *testing.T) {
 
 	gate := readOperation("availability-save-gate")
 	for _, want := range []string{
-		"For non-OAuth providers",
-		"`codex` and the legacy\n  `codex_oauth` alias",
-		"Current-source gap",
-		"`codex-pool` provider string is not in",
-		"hard-block Save as `probeNoKey`",
-		"pressing Save again with the unchanged tuple does not",
-		"Transport timeouts remain in this category",
-		"Provider-reached rate limit / overload",
+		"Save is structural-only",
+		"never makes a live provider/model network call",
+		"Codex, Codex-pool, and API-key providers like",
+		"DeepSeek",
+		"not been replaced by another probe",
+		"`/doctor`",
 	} {
 		if !strings.Contains(gate, want) {
 			t.Errorf("availability-save-gate manual missing %q", want)
+		}
+	}
+	for _, mustNotContain := range []string{
+		"hard-block Save as `probeNoKey`",
+		"pressing Save again with the unchanged tuple does not",
+	} {
+		if strings.Contains(gate, mustNotContain) {
+			t.Errorf("availability-save-gate manual still describes the removed live-probe save gate: %q", mustNotContain)
 		}
 	}
 }
