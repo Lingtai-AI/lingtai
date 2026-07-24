@@ -202,13 +202,8 @@ func TestStartupHomebrewUpdateConfirmMigratesToNativeInstall(t *testing.T) {
 	if !updated {
 		t.Fatalf("confirmed homebrew migration should stop startup after migrating; stderr=%q output=\n%s", errOut.String(), out.String())
 	}
-	if !startupContainsCall(runner.calls, "install.sh --version v0.8.1 --non-interactive") {
-		t.Fatalf("expected native fresh-install call, got %#v", runner.calls)
-	}
-	for _, call := range runner.calls {
-		if strings.Contains(call, "--update") {
-			t.Fatalf("homebrew migration must not use --update, got %#v", runner.calls)
-		}
+	if !startupContainsCall(runner.calls, "raw.githubusercontent.com/Lingtai-AI/lingtai/v0.8.1/install.sh") || !startupContainsCall(runner.calls, "--update --prefix ") || !startupContainsCall(runner.calls, "--version v0.8.1 --non-interactive") {
+		t.Fatalf("expected version-pinned raw installer update call, got %#v", runner.calls)
 	}
 	if !strings.Contains(out.String(), "Remove the old Homebrew installation now? [y/N]") {
 		t.Fatalf("missing cleanup consent prompt after a verified migration:\n%s", out.String())
@@ -280,7 +275,7 @@ func TestStartupHomebrewUpdateConfirmCleanupRemovesHomebrewAfterVerifiedPATHTake
 
 // TestStartupHomebrewUpdateNotTakenOverByPATHDoesNotClaimMigrated is the
 // startup-level version of the Apple-Silicon PATH-precedence scenario: a
-// fresh install.sh run installs and verifies a native binary, but the
+// version-pinned install.sh update installs and verifies a native binary, but the
 // resolved `lingtai-tui` on PATH is still the Homebrew one. Startup must not
 // print "Migrated!" or stop as if a restart will pick up the new binary — it
 // must fall through to normal startup with the manual-cleanup guidance
@@ -311,8 +306,8 @@ func TestStartupHomebrewUpdateNotTakenOverByPATHDoesNotClaimMigrated(t *testing.
 	if updated {
 		t.Fatal("a shadowed-PATH install must not report startup as updated/needing restart")
 	}
-	if !startupContainsCall(runner.calls, "install.sh --version v0.8.1 --non-interactive") {
-		t.Fatalf("expected native fresh-install call to still run once, got %#v", runner.calls)
+	if !startupContainsCall(runner.calls, "raw.githubusercontent.com/Lingtai-AI/lingtai/v0.8.1/install.sh") || !startupContainsCall(runner.calls, "--update --prefix ") || !startupContainsCall(runner.calls, "--version v0.8.1 --non-interactive") {
+		t.Fatalf("expected version-pinned raw installer update call to run once, got %#v", runner.calls)
 	}
 	if strings.Contains(out.String(), "Migrated! Please restart lingtai-tui") {
 		t.Fatalf("must not claim migration completion when PATH still resolves Homebrew:\n%s", out.String())
@@ -357,6 +352,59 @@ func TestStartupHomebrewUpdateFailureLeavesHomebrewUsable(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "untouched and still usable") {
 		t.Fatalf("missing rollback guidance on failed migration:\n%s", out.String())
+	}
+}
+
+func TestStartupHomebrewMigrationFailureWakesPreparedAgentsAndLeavesSiblingTUIRunning(t *testing.T) {
+	projectDir := t.TempDir()
+	agentDir := filepath.Join(projectDir, ".lingtai", "agent")
+	preexistingAgentDir := filepath.Join(projectDir, ".lingtai", "preexisting-agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(preexistingAgentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.json"), []byte(`{"agent_id":"agent","admin":{},"state":"asleep"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(preexistingAgentDir, ".agent.json"), []byte(`{"agent_id":"preexisting","admin":{},"state":"asleep"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	preexistingSleep := filepath.Join(preexistingAgentDir, ".sleep")
+	if err := os.WriteFile(preexistingSleep, []byte("pre-existing marker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	globalDir := t.TempDir()
+	runner := &startupHomebrewMigrationRunner{t: t, globalDir: globalDir, prefix: t.TempDir(), binDir: t.TempDir(), latest: "v0.8.1", failInstall: true}
+	var out, errOut bytes.Buffer
+	updated := handleTUIUpgradeWithOptions(config.TUIInstallInfo{Method: config.TUIInstallMethodHomebrew}, "v0.8.0", "v0.8.1", startupTUIUpgradeOptions{
+		Input:     strings.NewReader("y\n"),
+		Output:    &out,
+		ErrOutput: &errOut,
+		Runner:    runner,
+		GlobalDir: globalDir,
+		Stat:      statMissingForStartupTest,
+		FindOtherTUIProcesses: func() []runningTUIProcess {
+			return []runningTUIProcess{{PID: 999999, CWD: projectDir, Command: "lingtai-tui"}}
+		},
+	})
+
+	if updated {
+		t.Fatal("failed migration must not stop startup")
+	}
+	if errOut.Len() == 0 {
+		t.Fatal("failed migration should report the installer error")
+	}
+	if _, err := os.Stat(filepath.Join(agentDir, ".sleep")); !os.IsNotExist(err) {
+		t.Fatalf("installer failure must remove the migration sleep signal, err=%v", err)
+	}
+	if got, err := os.ReadFile(preexistingSleep); err != nil || string(got) != "pre-existing marker" {
+		t.Fatalf("installer failure must preserve pre-existing sleep marker, got %q err=%v", got, err)
+	}
+	if strings.Contains(out.String(), "Stopping lingtai-tui") {
+		t.Fatalf("native migration must not stop sibling TUI processes before an installer can fail:\n%s", out.String())
 	}
 }
 

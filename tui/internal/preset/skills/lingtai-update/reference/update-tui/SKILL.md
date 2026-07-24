@@ -16,8 +16,11 @@ presets, or utility library, and never auto-restarts the current TUI — relaunc
 after a successful update.
 
 - Homebrew: migrates to LingTai's native installer instead of running brew.
-  Runs `install.sh --version <tag> --non-interactive` (no `--update`, no
-  `--prefix`, since no source install exists yet) to a fresh native prefix,
+  Runs the version-pinned raw release script
+  `https://raw.githubusercontent.com/Lingtai-AI/lingtai/<tag>/install.sh`
+  with `--update --prefix <native-prefix> --version <tag> --non-interactive`,
+  accepting and updating existing managed runtime/receipt state in place while preserving the exact target tag
+  rather than using ordinary first-install mode.
   then verifies the new `install.json` source metadata, the binary version at
   the new `bin_dir`, and the Python runtime. On any migration failure the old
   Homebrew formula/keg remains exactly as usable as before the attempt — the
