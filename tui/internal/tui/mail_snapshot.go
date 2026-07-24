@@ -21,3 +21,9 @@ func (s acceptedMailSnapshot) cacheCopy(humanDir string) fs.MailCache {
 	}
 	return s.cache.Clone()
 }
+
+// messagesForUnread returns a fresh accepted-snapshot message slice for unread
+// consumers; cacheCopy keeps both not-ready and returned data detached.
+func (s acceptedMailSnapshot) messagesForUnread(humanDir string) []fs.MailMessage {
+	return s.cacheCopy(humanDir).Messages
+}

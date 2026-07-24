@@ -19,6 +19,9 @@ related_files:
   - tui/internal/fs/mail_test.go
   - tui/internal/fs/direct_mail.go
   - tui/internal/fs/direct_mail_test.go
+  - tui/internal/fs/direct_unread.go
+  - tui/internal/fs/direct_unread_test.go
+  - tui/internal/fs/direct_unread_transactionality_test.go
   - tui/internal/fs/network.go
   - tui/internal/fs/network_test.go
   - tui/internal/fs/session.go
@@ -51,7 +54,7 @@ maintenance: |
 
 ## What this is
 
-The TUI's filesystem window into an agent working directory (`<project>/.lingtai/<agent>/`). Agent state — manifest, heartbeat, mail, token ledger, location, network topology, chat history — is read through this package. The kernel owns agent state; the TUI's narrow writes are signal files, human outbox/location, and its derived human `logs/session.jsonl` replay cache.
+The TUI's filesystem window into an agent working directory (`<project>/.lingtai/<agent>/`). Agent state — manifest, heartbeat, mail, token ledger, location, network topology, chat history — is read through this package. The kernel owns agent state; the TUI's narrow writes are signal files, human outbox/location, its derived human `logs/session.jsonl` replay cache, and the separately owned project-local direct-unread cursor file `<project>/.lingtai/.tui-asset/direct-unread.json`.
 
 ## Components
 
@@ -99,6 +102,10 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | **direct_mail.go** | | |
 | `DirectTarget` / `DirectThreadKey` / `AddressFingerprint` | `tui/internal/fs/direct_mail.go:9-38` | target carries canonical project + target directories, durable manifest AgentID, and current route; thread identity hashes `(project, agent_id)`, while the address fingerprint is route-only |
 | `NormalizeMailEndpoints` / `IsDirectMail` | `tui/internal/fs/direct_mail.go:40-149` | keeps lenient deduplication for topology, but direct membership requires one valid raw recipient, empty CC, distinct endpoints, exact current addresses, and matching supplied inbound `identity.agent_id` |
+| **direct_unread.go** | | |
+| `DirectUnreadStore` / `OpenDirectUnreadStore` | `tui/internal/fs/direct_unread.go:17-90` | mutex-protected owner of project-local `<project>/.lingtai/.tui-asset/direct-unread.json`; version-1 state keys exact `DirectThreadKey` identity, stores literal `agent_id`, and baselines only caller-supplied accepted mail |
+| `SyncTargets` / `UnreadCount` / `MarkSeen` | `tui/internal/fs/direct_unread.go:94-208` | adds but never prunes stable keys, counts IDs after a parsed-time cursor (including unseen IDs at its instant), and atomically saves copy-on-write monotonic advances before publishing memory |
+| `saveDirectUnreadState` / direct cursor resolver | `tui/internal/fs/direct_unread.go:254-390` | serializes indented version-1 JSON plus newline, self-creates the TUI state parent, uses `writeJSONAtomic`, and accepts only strict incoming direct mail with RFC3339Nano timestamps and exact nonblank stable IDs |
 | **ledger.go** | | |
 | `ReadLedger(dir)` | `tui/internal/fs/ledger.go:17` | reads `delegates/ledger.jsonl` → `[]AvatarEdge` + child dirs |
 | **location.go** | | |
@@ -145,7 +152,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 - **Called by `tui/internal/inventory/`** — running-agent inventory enriches process rows with `.agent.json`, heartbeat, status PID, lock, admin, IM identity, and orchestrator-role metadata.
 - **Reads from agent working directories** — `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/*/`, `logs/log.sqlite` (molt/session-boundary and diagnostic indexes, never canonical session replay authority), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
 - **Writes signal files** (the only agent-owned files the TUI writes): `.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`, `.refresh`/`.refresh.taken`.
-- **Writes human-owned/derived state** — local `WriteMail` writes recipient inbox + sender sent, or `human/mailbox/outbox/<mailbox-id>/` for pseudo-agent sends; remote addresses fail before any mailbox write. Only a complete `MainAggregateWriter` changes `human/logs/session.jsonl` (`tui/internal/fs/session.go:315-382`).
+- **Writes human-owned/derived state** — local `WriteMail` writes recipient inbox + sender sent, or `human/mailbox/outbox/<mailbox-id>/` for pseudo-agent sends; remote addresses fail before any mailbox write. Only a complete `MainAggregateWriter` changes `human/logs/session.jsonl` (`tui/internal/fs/session.go:315-382`). Separately, `DirectUnreadStore` alone reads/writes its TUI-owned `<project>/.lingtai/.tui-asset/direct-unread.json` cursor state (`tui/internal/fs/direct_unread.go:48-90,254-266`); it is not agent, migration, or session state.
 - **Calls `ipinfo.io`** — `ResolveLocation` makes an HTTP call; `UpdateHumanLocation` caches result in human's `.agent.json`.
 
 ## Composition
@@ -156,8 +163,8 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 
 ## State
 
-- **Reads**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/log.sqlite` (additive index), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`.
-- **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field, and the TUI-derived human `logs/session.jsonl` replay cache only from `MainAggregateWriter` persist/append paths.
+- **Reads**: `.agent.json`, `.agent.heartbeat`, `.status.json`, `mailbox/inbox/*`, `mailbox/sent/*`, `logs/log.sqlite` (additive index), `logs/token_ledger.jsonl` (main rows only for agent totals/detail), `logs/events.jsonl`, `logs/soul_inquiry.jsonl`, `logs/soul_flow.jsonl`, `delegates/ledger.jsonl`, `mailbox/contacts.json`, `daemons/*/daemon.json`, `daemons/*/logs/token_ledger.jsonl`, and TUI-owned `<project>/.lingtai/.tui-asset/direct-unread.json`.
+- **Writes**: signal files (`.sleep`, `.suspend`, `.interrupt`, `.prompt`, `.inquiry`), human `mailbox/outbox/*`, human `.agent.json` location field, the TUI-derived human `logs/session.jsonl` replay cache only from `MainAggregateWriter` persist/append paths, and `DirectUnreadStore`'s separate TUI-owned `<project>/.lingtai/.tui-asset/direct-unread.json`.
 
 ## Notes
 
@@ -166,6 +173,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 - **`Delivered` is transient.** `MailMessage.Delivered` is `json:"-"` — set by `MailCache.Refresh()` based on which folder the message was found in. Outbox → false; inbox/sent → true.
 - **`MailCache` refresh and snapshot boundaries differ.** `Refresh()` returns a new cache without mutating the receiver, while `Clone()` is the explicit deep-copy boundary for accepted publication: nested recipient, attachment, and identity graphs cannot alias the live producer, and nil shapes are preserved.
 - **Direct mail identity boundary.** `DirectTarget` separates stable identity (canonical project directory + manifest `agent_id`) from current routing (target directory + address); `DirectThreadKey` hashes only the stable pair, and `AddressFingerprint` is route-only. `NormalizeMailEndpoints` remains deliberately lenient for topology edges. `IsDirectMail` instead validates one raw recipient, rejects any CC, malformed/multi-entry envelope, empty/equal endpoints, or cross-address record, and on incoming mail requires any supplied nonblank `identity.agent_id` to match literally while allowing exact-address fallback for legacy mail without that field.
+- **Durable direct unread boundary.** `DirectUnreadStore` is the sole owner of the self-created TUI state file `<project>/.lingtai/.tui-asset/direct-unread.json`, schema version 1; it never reads or migrates historical rail state. Each `DirectThreadKey` entry retains exact `agent_id` and a monotonic parsed-time cursor of sorted unique effective IDs at that instant, so route/directory changes do not reset it and absent inventory entries are not pruned (`tui/internal/fs/direct_unread.go:17-34,46-90,93-135,288-390`). This state is not `SessionCache`/`session.jsonl` and has no migration ownership.
 - **Session persistence role.** `MainAggregateWriter` is the only role authorized to mutate the compatibility aggregate `human/logs/session.jsonl`; zero-safe `NoPersist` is enforced inside both rewrite and append primitives. `complete` describes whether the in-memory history window can safely replace or extend a complete derived file—it is not write authorization.
 - **Session cache reconstruction.** `RebuildFromSources` is idempotent — it re-ingests all mail + events + inquiries from offset 0, sorts by timestamp, and requests a role-gated `session.jsonl` rewrite; `RebuildFromSourcesInMemory` performs the same read/merge without filesystem writes for detached generation-gated work. Canonical `logs/events.jsonl` owns session content and completeness: the additive SQLite log's source identity and endpoint offsets do not prove interior continuity, so they are not used to declare a replay complete. Every path retains the last complete-record boundary it actually consumed, so trailing partial records and concurrent appends are retried by `Refresh` rather than leaked, duplicated, or skipped.
 - **Windowed reconstruction and count metadata.** `RebuildFromSourcesWindowedInMemory` retains only the newest requested parser-produced session-event content window while loading mail/inquiries in full. `mail_page_size` directly owns that initial window and every later Ctrl+U increment. Empty/missing/wrong-type text rows do not spend content slots, while hidden `llm_call` and zero-token `llm_response` grouping carriers still do. The content path captures the canonical JSONL source/horizon but never runs a full-history aggregate. `ExactHistoryStats` is one async metadata task per activation/source/horizon: same-horizon Ctrl+U caches reuse it, while a genuinely newer horizon supersedes the old task. Accepted stats are cache/identity/generation/current-horizon-gated, reused by older-page caches, and incremented for parser-proven EOF refresh rows. JSONL content is read backward from EOF; top-level count/window metadata uses a structural fixed-buffer fast path across arbitrarily long string/nested payloads, enforces the same 10,000-container limit as `encoding/json`, and falls back to canonical one-record decoding whenever a bounded key/type/number lexeme or parser edge is declined. A cut legacy group retains only its nearest hidden `llm_response` marker. Increasing windows rescan the same canonical horizon, include every session row regardless of SQLite sparsity, and become complete only after reaching byte offset zero; parser-proven offsets, stable sort, and the shared completeness gate on both persistence and incremental disk append keep that convergence honest.
