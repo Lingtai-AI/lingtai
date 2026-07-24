@@ -2,6 +2,7 @@ package doctorreport
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -148,6 +149,142 @@ func TestWriteRedactsSecretsAcrossArtifacts(t *testing.T) {
 	}
 	if !strings.Contains(all, "[REDACTED]") {
 		t.Fatalf("expected redaction marker in artifacts:\n%s", all)
+	}
+}
+
+func TestWriteRedactsTelegramBotTokensAcrossArtifacts(t *testing.T) {
+	out := t.TempDir()
+	botToken := "123456789:" + strings.Repeat("A", 30) + "_-Z"
+	secondBotToken := "987654321:" + strings.Repeat("Z", 33)
+	canonicalAPIURL := "https://api.telegram.org/bot" + botToken + "/getMe"
+	canonicalFileURL := "https://api.telegram.org/file/bot" + secondBotToken + "/photos/file_0.jpg"
+	nearMisses := []string{
+		"12345:" + strings.Repeat("B", 30),
+		"1234567890123:" + strings.Repeat("C", 30),
+		"123456789:" + strings.Repeat("D", 29),
+		"123456789:" + strings.Repeat("E", 15) + "/" + strings.Repeat("E", 15),
+	}
+	draft := Draft{Lines: []Line{
+		{Severity: SeverityFail, Text: "bot tokens: " + botToken + "," + secondBotToken},
+		{Severity: SeverityFail, Text: "canonical Bot API URL: " + canonicalAPIURL},
+		{Severity: SeverityFail, Text: "canonical file URL: " + canonicalFileURL},
+	}}
+	for _, nearMiss := range nearMisses {
+		draft.Lines = append(draft.Lines, Line{Severity: SeverityInfo, Text: "near miss: " + nearMiss})
+	}
+
+	if err := Write(out, draft); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	for _, name := range []string{"report.md", "metadata.json", "redaction.json"} {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", name, err)
+		}
+		for _, token := range []string{botToken, secondBotToken} {
+			if strings.Contains(string(data), token) {
+				t.Fatalf("artifact %s leaked Telegram bot token %q", name, token)
+			}
+		}
+	}
+	report, err := os.ReadFile(filepath.Join(out, "report.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(report.md): %v", err)
+	}
+	if !strings.Contains(string(report), "bot tokens: "+redactionMarker+","+redactionMarker) {
+		t.Fatalf("report.md missing adjacent bot-token redaction markers:\n%s", report)
+	}
+	for _, want := range []string{
+		"https://api.telegram.org/bot" + redactionMarker + "/getMe",
+		"https://api.telegram.org/file/bot" + redactionMarker + "/photos/file_0.jpg",
+	} {
+		if !strings.Contains(string(report), want) {
+			t.Fatalf("report.md missing redacted Telegram URL %q:\n%s", want, report)
+		}
+	}
+	for _, nearMiss := range nearMisses {
+		if !strings.Contains(string(report), nearMiss) {
+			t.Fatalf("report.md over-redacted near miss %q:\n%s", nearMiss, report)
+		}
+	}
+}
+
+func TestRedactTextRedactsTelegramBotTokensAtStringBoundaries(t *testing.T) {
+	botToken := "123456789:" + strings.Repeat("A", 30) + "_-Z"
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "start of string", input: botToken, want: redactionMarker},
+		{name: "after double quote", input: `"` + botToken + `"`, want: `"` + redactionMarker + `"`},
+		{name: "after newline", input: "before\n" + botToken, want: "before\n" + redactionMarker},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := redactText(tt.input); got != tt.want {
+				t.Fatalf("redactText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactTextRedactsTelegramBotTokensInCanonicalPaths(t *testing.T) {
+	botToken := "123456789:" + strings.Repeat("A", 30) + "_-Z"
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "canonical Bot API URL",
+			input: "https://api.telegram.org/bot" + botToken + "/getMe",
+			want:  "https://api.telegram.org/bot" + redactionMarker + "/getMe",
+		},
+		{
+			name:  "canonical file URL",
+			input: "https://api.telegram.org/file/bot" + botToken + "/photos/file_0.jpg",
+			want:  "https://api.telegram.org/file/bot" + redactionMarker + "/photos/file_0.jpg",
+		},
+		{
+			name:  "bare bot path",
+			input: "/bot" + botToken,
+			want:  "/bot" + redactionMarker,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := redactText(tt.input); got != tt.want {
+				t.Fatalf("redactText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactTextDoesNotRedactTelegramLikeCanonicalURLNearMisses(t *testing.T) {
+	nearMisses := []string{
+		"https://api.telegram.org/bot" + strings.Repeat("1", 13) + ":" + strings.Repeat("A", 30) + "/getMe",
+		"https://api.telegram.org/bot123456789:" + strings.Repeat("A", 29) + "/getMe",
+	}
+	for _, candidate := range nearMisses {
+		if got := redactText(candidate); got != candidate {
+			t.Fatalf("redactText over-redacted canonical URL near miss: got %q, want %q", got, candidate)
+		}
+	}
+}
+
+func TestRedactTextDoesNotRedactTelegramLikeLongNumericPrefixes(t *testing.T) {
+	for digits := 13; digits <= 16; digits++ {
+		digits := digits
+		t.Run(fmt.Sprintf("%d digits", digits), func(t *testing.T) {
+			candidate := strings.Repeat("1", digits) + ":" + strings.Repeat("A", 30)
+			if got := redactText(candidate); got != candidate {
+				t.Fatalf("redactText over-redacted %d-digit prefix: got %q, want %q", digits, got, candidate)
+			}
+		})
 	}
 }
 

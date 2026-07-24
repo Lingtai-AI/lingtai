@@ -144,6 +144,7 @@ func redactionInfo() redactionFile {
 			"url_credentials",
 			"home_usernames",
 			"known_api_key_shapes",
+			"telegram_bot_tokens",
 		},
 		Note: "Built only from visible /doctor result lines and safe metadata. " +
 			"No raw event logs, prompts, tool I/O, command text, or API key values are collected.",
@@ -235,6 +236,8 @@ func redactText(s string) string {
 	s = jsonSecretFieldRe.ReplaceAllString(s, `${1}"`+redactionMarker+`"`)
 	s = assignmentSecretRe.ReplaceAllString(s, `${1}=`+redactionMarker)
 	s = apiKeyShapeRe.ReplaceAllString(s, redactionMarker)
+	s = telegramBotURLTokenRe.ReplaceAllString(s, `${1}`+redactionMarker+`${3}`)
+	s = telegramBotTokenRe.ReplaceAllString(s, `${1}`+redactionMarker)
 	return s
 }
 
@@ -261,4 +264,12 @@ var (
 		`(?i)\b((?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password|authorization|credential))\s*=\s*("[^"]*"|'[^']*'|[^\s,}]+)`,
 	)
 	apiKeyShapeRe = regexp.MustCompile(`\b(?:sk-ant|sk-proj|sk)-[A-Za-z0-9_-]{8,}\b`)
+	// Canonical Telegram Bot API and file-download paths place the token directly
+	// after the literal "/bot", so redact that narrow path shape before applying
+	// the generic leading-boundary rule below.
+	telegramBotURLTokenRe = regexp.MustCompile(`(?i)(/bot)([0-9]{6,12}:[A-Za-z0-9_-]{30,})(/|$)`)
+	// Telegram bot tokens are digits (6 to 12) followed by a colon and at least
+	// 30 token characters. A leading boundary keeps ordinary embedded text intact
+	// without consuming the delimiter that may introduce a following token.
+	telegramBotTokenRe = regexp.MustCompile(`(^|[^A-Za-z0-9_-])([0-9]{6,12}:[A-Za-z0-9_-]{30,})`)
 )
