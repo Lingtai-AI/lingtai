@@ -121,6 +121,80 @@ func NewMailCache(humanDir string) MailCache {
 	}
 }
 
+// Clone returns a recursively detached copy of the cache. Unlike Refresh's
+// ordinary copy-on-refresh behavior, Clone separates every mutable collection
+// in the mailbox graph and preserves nil versus non-nil empty shapes.
+func (c MailCache) Clone() MailCache {
+	out := MailCache{
+		humanDir:  c.humanDir,
+		inboxDir:  c.inboxDir,
+		sentDir:   c.sentDir,
+		outboxDir: c.outboxDir,
+	}
+	if c.seen != nil {
+		out.seen = make(map[string]int, len(c.seen))
+		for id, index := range c.seen {
+			out.seen[id] = index
+		}
+	}
+	if c.Messages != nil {
+		out.Messages = make([]MailMessage, len(c.Messages))
+		for i, msg := range c.Messages {
+			out.Messages[i] = cloneMailMessage(msg)
+		}
+	}
+	return out
+}
+
+func cloneMailMessage(msg MailMessage) MailMessage {
+	out := msg
+	out.To = cloneJSONValue(msg.To)
+	out.CC = cloneStrings(msg.CC)
+	out.Attachments = cloneStrings(msg.Attachments)
+	out.Identity = cloneJSONMap(msg.Identity)
+	return out
+}
+
+func cloneStrings(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
+}
+
+func cloneJSONMap(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(src))
+	for key, value := range src {
+		out[key] = cloneJSONValue(value)
+	}
+	return out
+}
+
+func cloneJSONValue(src interface{}) interface{} {
+	switch value := src.(type) {
+	case map[string]interface{}:
+		return cloneJSONMap(value)
+	case []interface{}:
+		if value == nil {
+			return []interface{}(nil)
+		}
+		out := make([]interface{}, len(value))
+		for i, item := range value {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	case []string:
+		return cloneStrings(value)
+	default:
+		return value
+	}
+}
+
 // Refresh scans outbox, inbox, and sent folders for new messages, returning
 // an updated cache. The receiver is not mutated — safe to call from a goroutine.
 // A message that transitions from outbox/ to sent/ between refreshes has its

@@ -345,6 +345,105 @@ func TestMailCache_InboxAndSentDeliveredTrue(t *testing.T) {
 	}
 }
 
+func TestMailCacheCloneDetachesMutableGraphAndPreservesShapes(t *testing.T) {
+	original := MailCache{
+		seen:      map[string]int{"one": 0, "two": 1},
+		humanDir:  "/human",
+		inboxDir:  "/human/mailbox/inbox",
+		sentDir:   "/human/mailbox/sent",
+		outboxDir: "/human/mailbox/outbox",
+		Messages: []MailMessage{
+			{
+				ID:          "one",
+				MailboxID:   "one",
+				To:          []string{"to-one"},
+				CC:          []string{"cc-one"},
+				Attachments: []string{"one.txt"},
+				Identity: map[string]interface{}{
+					"nested": map[string]interface{}{
+						"role":    "original-role",
+						"labels":  []interface{}{"original-label"},
+						"aliases": []string{"original-alias"},
+					},
+				},
+				Delivered: true,
+			},
+			{
+				ID:        "two",
+				MailboxID: "two",
+				To: []interface{}{
+					"to-two",
+					map[string]interface{}{"route": []interface{}{"original-route"}},
+				},
+			},
+			{ID: "three", MailboxID: "three", To: "scalar-to"},
+		},
+	}
+	clone := original.Clone()
+	if !reflect.DeepEqual(clone, original) {
+		t.Fatalf("clone differs from original:\n got %#v\nwant %#v", clone, original)
+	}
+
+	original.seen["one"] = 99
+	original.Messages[0].CC[0] = "mutated-original-cc"
+	original.Messages[0].Attachments[0] = "mutated-original.txt"
+	original.Messages[0].To.([]string)[0] = "mutated-original-to"
+	originalNested := original.Messages[0].Identity["nested"].(map[string]interface{})
+	originalNested["role"] = "mutated-original-role"
+	originalNested["labels"].([]interface{})[0] = "mutated-original-label"
+	originalNested["aliases"].([]string)[0] = "mutated-original-alias"
+	originalRoute := original.Messages[1].To.([]interface{})[1].(map[string]interface{})
+	originalRoute["route"].([]interface{})[0] = "mutated-original-route"
+
+	if clone.seen["one"] != 0 || clone.Messages[0].CC[0] != "cc-one" ||
+		clone.Messages[0].Attachments[0] != "one.txt" || clone.Messages[0].To.([]string)[0] != "to-one" {
+		t.Fatalf("original mutation reached clone: %#v", clone.Messages[0])
+	}
+	cloneNested := clone.Messages[0].Identity["nested"].(map[string]interface{})
+	if cloneNested["role"] != "original-role" || cloneNested["labels"].([]interface{})[0] != "original-label" ||
+		cloneNested["aliases"].([]string)[0] != "original-alias" {
+		t.Fatalf("nested original mutation reached clone: %#v", cloneNested)
+	}
+	cloneRoute := clone.Messages[1].To.([]interface{})[1].(map[string]interface{})
+	if cloneRoute["route"].([]interface{})[0] != "original-route" || clone.Messages[2].To != "scalar-to" {
+		t.Fatalf("JSON-shaped To clone is not detached: %#v", clone.Messages[1].To)
+	}
+
+	clone.seen["two"] = 77
+	clone.Messages[0].CC[0] = "mutated-clone-cc"
+	clone.Messages[0].Attachments[0] = "mutated-clone.txt"
+	clone.Messages[0].To.([]string)[0] = "mutated-clone-to"
+	cloneNested["labels"].([]interface{})[0] = "mutated-clone-label"
+	cloneRoute["route"].([]interface{})[0] = "mutated-clone-route"
+	if original.seen["two"] != 1 || original.Messages[0].CC[0] != "mutated-original-cc" ||
+		original.Messages[0].Attachments[0] != "mutated-original.txt" || original.Messages[0].To.([]string)[0] != "mutated-original-to" ||
+		originalNested["labels"].([]interface{})[0] != "mutated-original-label" || originalRoute["route"].([]interface{})[0] != "mutated-original-route" {
+		t.Fatalf("clone mutation reached original: %#v", original.Messages)
+	}
+
+	nilClone := (MailCache{}).Clone()
+	if nilClone.seen != nil || nilClone.Messages != nil {
+		t.Fatalf("nil cache shapes changed: seen=%#v messages=%#v", nilClone.seen, nilClone.Messages)
+	}
+	emptyClone := (MailCache{seen: map[string]int{}, Messages: []MailMessage{}}).Clone()
+	if emptyClone.seen == nil || emptyClone.Messages == nil || len(emptyClone.seen) != 0 || len(emptyClone.Messages) != 0 {
+		t.Fatalf("non-nil empty cache shapes changed: seen=%#v messages=%#v", emptyClone.seen, emptyClone.Messages)
+	}
+	messageShapes := (MailCache{Messages: []MailMessage{
+		{To: []string{}, CC: []string{}, Attachments: []string{}, Identity: map[string]interface{}{}},
+		{To: []interface{}{}},
+	}}).Clone()
+	if messageShapes.Messages[0].CC == nil || messageShapes.Messages[0].Attachments == nil || messageShapes.Messages[0].Identity == nil {
+		t.Fatalf("non-nil empty message shapes changed: %#v", messageShapes.Messages[0])
+	}
+	if to, ok := messageShapes.Messages[0].To.([]string); !ok || to == nil {
+		t.Fatalf("non-nil empty []string To changed: %#v", messageShapes.Messages[0].To)
+	}
+	if to, ok := messageShapes.Messages[1].To.([]interface{}); !ok || to == nil {
+		t.Fatalf("non-nil empty []interface{} To changed: %#v", messageShapes.Messages[1].To)
+	}
+}
+
 // writeSenderManifest writes .agent.json with the given admin value so
 // WriteMail treats senderDir as a real agent (not pseudo).
 func writeSenderManifest(t *testing.T, dir string, admin interface{}) {
