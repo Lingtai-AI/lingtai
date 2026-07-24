@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
@@ -113,11 +115,6 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	if !modelHasVision["mimo-v2.5"] || modelHasVision["mimo-v2.5-pro"] {
 		t.Fatal("MiMo picker must keep native vision only for mimo-v2.5")
 	}
-	for _, provider := range capabilityProviderOptions["vision"] {
-		if provider == "zhipu" {
-			t.Fatal("vision provider picker must not expose the removed legacy Zhipu route")
-		}
-	}
 	for _, model := range providerModels["zhipu"] {
 		if modelHasVision[model] {
 			t.Fatalf("Zhipu coding-plan model %s must remain text-only; GLM-4.6V uses the optional manual MCP path", model)
@@ -141,53 +138,39 @@ func TestPresetEditorProviderModelLineupsPinRequestedDefaults(t *testing.T) {
 	}
 }
 
-func TestPresetEditorVisionProviderCyclePreservesOrResetsExactIdentity(t *testing.T) {
-	wantOptions := []string{"inherit", "minimax", "mimo", "gemini", "codex", "codex-pool"}
-	if got := capabilityProviderOptions["vision"]; !reflect.DeepEqual(got, wantOptions) {
-		t.Fatalf("vision provider options = %#v, want %#v", got, wantOptions)
-	}
-
+// TestPresetEditorVisionProviderIdentityIsCommitImmutable is the
+// regression test for the always-included-capabilities change: there is
+// no longer any editor control (checkbox, provider cycle, or model
+// switch) that can change a capability's provider or other config.
+// Committing a built-in preset with a non-default vision provider must
+// round-trip that provider (and any credential fields alongside it)
+// byte-for-byte, for every built-in that ships one.
+func TestPresetEditorVisionProviderIdentityIsCommitImmutable(t *testing.T) {
 	tests := []struct {
 		name          string
 		current       string
-		next          string
 		currentKeyEnv string
 	}{
-		{name: "gemini", current: "gemini", next: "codex", currentKeyEnv: "GEMINI_API_KEY"},
-		{name: "codex-pool", current: "codex-pool", next: "inherit"},
+		{name: "gemini", current: "gemini", currentKeyEnv: "GEMINI_API_KEY"},
+		{name: "codex-pool", current: "codex-pool"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := builtinPresetForEditorTest(t, tt.name)
 			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", true)
 			m = withValidModelValidity(m)
-			if strip := m.capProviderStrip("vision", true); !strings.Contains(strip, "● "+tt.current) {
-				t.Fatalf("vision strip does not show current provider %q: %q", tt.current, strip)
-			}
 
-			_, unchangedCmd := m.commit()
-			unchanged := unchangedCmd().(PresetEditorCommitMsg)
-			unchangedCaps := unchanged.Preset.Manifest["capabilities"].(map[string]interface{})
-			unchangedVision := unchangedCaps["vision"].(map[string]interface{})
-			if got := unchangedVision["provider"]; got != tt.current {
-				t.Fatalf("ordinary clone changed vision provider: got %#v, want %q", got, tt.current)
+			_, cmd := m.commit()
+			commit := cmd().(PresetEditorCommitMsg)
+			caps := commit.Preset.Manifest["capabilities"].(map[string]interface{})
+			vision := caps["vision"].(map[string]interface{})
+			if got := vision["provider"]; got != tt.current {
+				t.Fatalf("commit changed vision provider: got %#v, want %q", got, tt.current)
 			}
 			if tt.currentKeyEnv != "" {
-				if got := unchangedVision["api_key_env"]; got != tt.currentKeyEnv {
-					t.Fatalf("ordinary clone changed current credential source: got %#v, want %q", got, tt.currentKeyEnv)
+				if got := vision["api_key_env"]; got != tt.currentKeyEnv {
+					t.Fatalf("commit changed vision credential source: got %#v, want %q", got, tt.currentKeyEnv)
 				}
-			}
-
-			m.cycleCapProvider("vision", +1)
-			_, changedCmd := m.commit()
-			changed := changedCmd().(PresetEditorCommitMsg)
-			changedCaps := changed.Preset.Manifest["capabilities"].(map[string]interface{})
-			changedVision := changedCaps["vision"].(map[string]interface{})
-			if got := changedVision["provider"]; got != tt.next {
-				t.Fatalf("cycled vision provider = %#v, want %q", got, tt.next)
-			}
-			if len(changedVision) != 1 {
-				t.Fatalf("provider cycle retained incompatible identity fields: %#v", changedVision)
 			}
 		})
 	}
@@ -442,45 +425,22 @@ func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
 	}
 }
 
-func TestPresetEditorCapabilitiesAreOptionalOnly(t *testing.T) {
-	wantCaps := []string{"web_search", "vision"}
-	if strings.Join(editorCapabilities, ",") != strings.Join(wantCaps, ",") {
-		t.Fatalf("editorCapabilities = %#v, want %#v", editorCapabilities, wantCaps)
+// TestPresetEditorNoCapabilityFieldsInEditorFieldOrder is the regression
+// test for removing the separate editable-capability concept. The prior
+// editorField enum had feCapFile/feCapBash/feCapWebSearch/feCapAvatar/
+// feCapDaemon/feCapVision entries; none of them exist anymore, so
+// editorFieldOrder's fixed length below is a compile-time-checked proxy
+// for "no capability slot was added back in". The Capabilities section
+// is rendered entirely from formRows' fixed capabilityRows list, never
+// from editorFieldOrder or the cursor.
+func TestPresetEditorNoCapabilityFieldsInEditorFieldOrder(t *testing.T) {
+	wantOrder := []editorField{
+		feName, feSummary, feTier, feGains, feLoses,
+		feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feBaseURL, feAPIKey,
+		feSave,
 	}
-
-	for _, field := range []editorField{feCapFile, feCapBash, feCapAvatar, feCapDaemon} {
-		for _, got := range editorFieldOrder {
-			if got == field {
-				t.Fatalf("core capability field %v should not be in editorFieldOrder %#v", field, editorFieldOrder)
-			}
-		}
-	}
-}
-
-func TestDefaultCapsForDoesNotSerializeCoreFloor(t *testing.T) {
-	tests := []struct {
-		model      string
-		wantVision bool
-	}{
-		{model: "mimo-v2.5", wantVision: true},
-		{model: "mimo-v2.5-pro", wantVision: false},
-	}
-	coreCaps := []string{"file", "shell", "avatar", "daemon", "knowledge", "library", "skills", "mcp"}
-
-	for _, tt := range tests {
-		caps := defaultCapsFor(tt.model)
-		if _, ok := caps["web_search"]; !ok {
-			t.Fatalf("defaultCapsFor(%q) missing web_search: %#v", tt.model, caps)
-		}
-		_, hasVision := caps["vision"]
-		if hasVision != tt.wantVision {
-			t.Fatalf("defaultCapsFor(%q) vision presence = %v, want %v; caps=%#v", tt.model, hasVision, tt.wantVision, caps)
-		}
-		for _, capName := range coreCaps {
-			if _, ok := caps[capName]; ok {
-				t.Fatalf("defaultCapsFor(%q) serialized core capability %q: %#v", tt.model, capName, caps)
-			}
-		}
+	if !reflect.DeepEqual(editorFieldOrder, wantOrder) {
+		t.Fatalf("editorFieldOrder = %#v, want %#v (no capability field should ever appear here)", editorFieldOrder, wantOrder)
 	}
 }
 
@@ -515,12 +475,15 @@ func TestPresetEditorCommitDoesNotInjectLegacyCoreCaps(t *testing.T) {
 	}
 }
 
-// TestSyncCapsToModelPreservesNonOptionalCapabilities is the regression
-// test for issue #311: switching models must not delete capability
-// entries that are not model-conditional (skills.paths overrides, shell
-// policy, etc.). Only the optionalCapabilities (web_search, vision) may
-// be reset to the target model's defaults.
-func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
+// TestModelSwitchNeverTouchesCapabilities is the regression test for the
+// always-included-capabilities change: switching the LLM model — via
+// direct field edit (applyInline) or via cycling (cycleFocused), including
+// a switch from a vision-capable model to a cataloged text-only one and
+// back — must never add, remove, or modify any capability. The prior
+// syncCapsToModel behavior (dropping vision on text-only models, resetting
+// web_search's provider) is gone: no reachable model-switch path may
+// change a capability.
+func TestModelSwitchNeverTouchesCapabilities(t *testing.T) {
 	skillsPaths := []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
 	p := testPresetEditorPreset()
 	p.Manifest["capabilities"] = map[string]interface{}{
@@ -530,87 +493,52 @@ func TestSyncCapsToModelPreservesNonOptionalCapabilities(t *testing.T) {
 		"shell":      map[string]interface{}{"yolo": true},
 	}
 	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	before := deepCopyCaps(t, m.working.Manifest["capabilities"])
 
-	// mimo-v2.5-pro is a cataloged text-only model: vision must drop,
-	// web_search must reset to the default backend.
-	m.syncCapsToModel("mimo-v2.5-pro")
+	// mimo-v2.5-pro is a cataloged text-only model. Direct field edit
+	// (feModel + applyInline) must not touch capabilities even though the
+	// model no longer supports vision.
+	m.cursor = editorFieldOrderIndex(t, feModel)
+	m.applyInline("mimo-v2.5-pro")
+	assertCapsUnchanged(t, "applyInline to text-only model", m, before)
 
-	caps, ok := m.working.Manifest["capabilities"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("capabilities missing/wrong type after model switch: %T", m.working.Manifest["capabilities"])
-	}
-	skills, ok := caps["skills"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("model switch dropped skills capability: %#v", caps)
-	}
-	if !reflect.DeepEqual(skills["paths"], skillsPaths) {
-		t.Fatalf("model switch mangled skills.paths: got %#v, want %#v", skills["paths"], skillsPaths)
-	}
-	shell, ok := caps["shell"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("model switch dropped shell capability override: %#v", caps)
-	}
-	if yolo, _ := shell["yolo"].(bool); !yolo {
-		t.Fatalf("model switch lost shell yolo override: %#v", shell)
-	}
-	ws, ok := caps["web_search"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("model switch lost web_search: %#v", caps)
-	}
-	if got := ws["provider"]; got != "duckduckgo" {
-		t.Fatalf("web_search should reset to target model default duckduckgo, got %#v", got)
-	}
-	if _, hasVision := caps["vision"]; hasVision {
-		t.Fatalf("vision should be dropped for text-only model: %#v", caps)
-	}
+	// Cycling the model field (feModel + cycleFocused) must not touch
+	// capabilities either, in either direction.
+	m.llmMap()["provider"] = "mimo"
+	m.llmMap()["model"] = "mimo-v2.5-pro"
+	m.cycleFocused(+1) // mimo-v2.5-pro -> mimo-v2.5 (vision-capable)
+	assertCapsUnchanged(t, "cycleFocused to vision-capable model", m, before)
+	m.cycleFocused(-1) // back to mimo-v2.5-pro
+	assertCapsUnchanged(t, "cycleFocused back to text-only model", m, before)
+
+	// Switching provider (which can also reset the model) must not touch
+	// capabilities.
+	m.cursor = editorFieldOrderIndex(t, feProvider)
+	m.cycleFocused(+1)
+	assertCapsUnchanged(t, "provider switch", m, before)
 }
 
-func TestSyncCapsToModelAddsVisionAndKeepsSkillsOnVisionModel(t *testing.T) {
-	skillsPaths := []interface{}{"../.library_shared"}
-	p := testPresetEditorPreset()
-	p.Manifest["capabilities"] = map[string]interface{}{
-		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-		"skills":     map[string]interface{}{"paths": skillsPaths},
-	}
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-
-	// mimo-v2.5 is vision-capable: vision must appear with its default.
-	m.syncCapsToModel("mimo-v2.5")
-
-	caps, ok := m.working.Manifest["capabilities"].(map[string]interface{})
+func deepCopyCaps(t *testing.T, caps interface{}) map[string]interface{} {
+	t.Helper()
+	m, ok := caps.(map[string]interface{})
 	if !ok {
-		t.Fatalf("capabilities missing/wrong type after model switch: %T", m.working.Manifest["capabilities"])
+		t.Fatalf("capabilities missing/wrong type: %T", caps)
 	}
-	skills, ok := caps["skills"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("model switch dropped skills capability: %#v", caps)
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = v
 	}
-	if !reflect.DeepEqual(skills["paths"], skillsPaths) {
-		t.Fatalf("model switch mangled skills.paths: got %#v, want %#v", skills["paths"], skillsPaths)
-	}
-	vision, ok := caps["vision"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("vision-capable model should gain vision default: %#v", caps)
-	}
-	if got := vision["provider"]; got != "inherit" {
-		t.Fatalf("vision default provider = %#v, want \"inherit\"", got)
-	}
+	return out
 }
 
-func TestSyncCapsToModelLeavesCapsAloneForUnknownModel(t *testing.T) {
-	p := testPresetEditorPreset()
-	p.Manifest["capabilities"] = map[string]interface{}{
-		"web_search": map[string]interface{}{"provider": "zhipu"},
-		"skills":     map[string]interface{}{"paths": []interface{}{"../.library_shared"}},
+func assertCapsUnchanged(t *testing.T, step string, m PresetEditorModel, before map[string]interface{}) {
+	t.Helper()
+	after, ok := m.working.Manifest["capabilities"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("%s: capabilities missing/wrong type: %T", step, m.working.Manifest["capabilities"])
 	}
-	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
-	before := m.working.Manifest["capabilities"]
-
-	m.syncCapsToModel("some-free-text-model")
-
-	if !reflect.DeepEqual(m.working.Manifest["capabilities"], before) {
-		t.Fatalf("unknown model id must not touch capabilities: got %#v, want %#v",
-			m.working.Manifest["capabilities"], before)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("%s: capabilities changed: got %#v, want %#v", step, after, before)
 	}
 }
 
@@ -881,37 +809,61 @@ func TestPresetEditorProviderSwitchPreservesServiceTier(t *testing.T) {
 	}
 }
 
-func TestPresetEditorViewShowsCoreAsInformational(t *testing.T) {
+// TestPresetEditorViewShowsOneCapabilitiesSectionWithAllRows verifies the
+// human-facing contract: a single "Capabilities" section (not "Always
+// Included") lists every capability the runtime can grant an agent,
+// including web_search and vision, alongside the kernel core floor.
+func TestPresetEditorViewShowsOneCapabilitiesSectionWithAllRows(t *testing.T) {
 	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 	view := m.View()
 
-	for _, capName := range []string{"knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file"} {
+	if !strings.Contains(view, "Capabilities") {
+		t.Fatalf("view missing renamed \"Capabilities\" section header; view:\n%s", view)
+	}
+	if strings.Contains(view, "Always Included") {
+		t.Fatalf("view still shows the old \"Always Included\" section header; view:\n%s", view)
+	}
+	for _, capName := range []string{
+		"knowledge", "skills", "shell", "avatar", "daemon", "mcp", "file",
+		"web_search", "vision",
+	} {
 		if !strings.Contains(view, capName) {
 			t.Fatalf("view missing always-included capability %q; view:\n%s", capName, view)
 		}
 	}
-	// web_search and vision are default/always-included tools, not
-	// user-selectable capabilities: they render in the same informational
-	// (non-interactive) section as the kernel core floor above.
-	for _, capName := range []string{"web_search", "vision"} {
-		if !strings.Contains(view, capName) {
-			t.Fatalf("view missing always-included tool name %q; view:\n%s", capName, view)
-		}
-	}
 }
 
-// TestPresetEditorWebSearchAndVisionAreNotFocusableFields is the regression
-// test for the fixed-capability-providers change: web_search and vision
-// must not appear as cursor-navigable/editable rows. They're rendered
-// read-only via mandatoryCapRow alongside the other always-included tools.
-func TestPresetEditorWebSearchAndVisionAreNotFocusableFields(t *testing.T) {
-	for _, f := range []editorField{feCapWebSearch, feCapVision} {
-		for _, got := range editorFieldOrder {
-			if got == f {
-				t.Fatalf("capability field %v must not be in editorFieldOrder %#v", f, editorFieldOrder)
+// TestPresetEditorViewShowsCapabilitiesGuidanceLine asserts the one-line
+// explanation of how to customize capabilities (ask the agent to explain
+// init.json, then edit init.json) is present in the rendered view, and
+// that it is actually localized — not just falling back to English —
+// in all three shipped locales.
+func TestPresetEditorViewShowsCapabilitiesGuidanceLine(t *testing.T) {
+	for _, tc := range []struct {
+		lang string
+		want string
+	}{
+		{lang: "en", want: "init.json"},
+		{lang: "zh", want: "init.json"},
+		{lang: "wen", want: "init.json"},
+	} {
+		t.Run(tc.lang, func(t *testing.T) {
+			i18n.SetLang(tc.lang)
+			t.Cleanup(func() { i18n.SetLang("en") })
+
+			m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), tc.lang, nil, "", false)
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+			view := m.View()
+
+			guidance := i18n.T("preset_editor.capabilities_guidance")
+			if guidance == "" || guidance == "preset_editor.capabilities_guidance" {
+				t.Fatalf("lang %q: capabilities_guidance key missing/untranslated", tc.lang)
 			}
-		}
+			if !strings.Contains(view, tc.want) {
+				t.Fatalf("lang %q: view missing capabilities guidance mentioning %q; view:\n%s", tc.lang, tc.want, view)
+			}
+		})
 	}
 }
 
@@ -963,21 +915,36 @@ func findLineContaining(t *testing.T, view, substr string) string {
 	return ""
 }
 
-// TestPresetEditorCursorCannotLandOnWebSearchOrVision walks the entire
-// cursor range via Down and confirms it never lands on the removed
-// feCapWebSearch/feCapVision positions — keyboard navigation cannot
-// focus these rows.
-func TestPresetEditorCursorCannotLandOnWebSearchOrVision(t *testing.T) {
-	m := NewPresetEditorModelWithBuiltinFlag(testPresetEditorPreset(), "en", nil, "", false)
+// TestPresetEditorNoKeypressAtAnyCursorPositionChangesCapabilities is the
+// acceptance test for "no reachable checkbox/provider control can remove
+// or change a capability on this page": walk every cursor position in the
+// form and, at each one, try every input this page recognizes as a
+// mutation trigger (Space, Enter, Left, Right). None of it may change
+// manifest.capabilities.
+func TestPresetEditorNoKeypressAtAnyCursorPositionChangesCapabilities(t *testing.T) {
+	p := testPresetEditorPreset()
+	before := deepCopyCaps(t, p.Manifest["capabilities"])
+
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
 
-	for i := 0; i < len(editorFieldOrder)+5; i++ {
-		f := editorFieldOrder[m.cursor]
-		if f == feCapWebSearch || f == feCapVision {
-			t.Fatalf("cursor landed on removed capability field %v at step %d", f, i)
+	for i := 0; i < len(editorFieldOrder); i++ {
+		m.cursor = i
+		for _, key := range []tea.KeyPressMsg{
+			{Text: " "},
+			{Code: tea.KeyEnter},
+			{Code: tea.KeyLeft},
+			{Code: tea.KeyRight},
+		} {
+			trial := m
+			trial, _ = trial.Update(key)
+			assertCapsUnchanged(t, "keypress at cursor "+lbl(editorFieldOrder[i]), trial, before)
 		}
-		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
+}
+
+func lbl(f editorField) string {
+	return fmt.Sprintf("field=%d", int(f))
 }
 
 // TestPresetEditorCommitPreservesExistingCapabilityValuesByteForValue
