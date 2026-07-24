@@ -1975,7 +1975,10 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 // validateOneCodexAuthFile refreshes a single Codex token file in place,
 // returning a banner string only on a malformed file or a server-side-revoked
 // grant. label identifies the account in the banner without leaking secrets.
-// Token material is written 0600 and never logged.
+// Token material is written 0600 and never logged. The actual expiry check,
+// refresh call, and atomic write-back live in ensureFreshCodexTokens
+// (oauth.go), shared with the save-time Codex eligibility probe
+// (codex_model_probe.go) so both agree on staleness/revocation handling.
 func validateOneCodexAuthFile(authPath, label string) string {
 	raw, err := os.ReadFile(authPath)
 	if err != nil {
@@ -1986,36 +1989,19 @@ func validateOneCodexAuthFile(authPath, label string) string {
 		return fmt.Sprintf("⚠ Codex OAuth (%s): credential malformed — re-login via /setup", label)
 	}
 
-	const refreshBufferSeconds = 300
-	if tokens.ExpiresAt > time.Now().Unix()+refreshBufferSeconds {
-		return ""
+	_, err = ensureFreshCodexTokens(authPath, tokens)
+	if err == ErrCodexAuthRevoked {
+		// Localized banner (#412). The %s slot is a navigation hint
+		// (/setup → <credentials section>), so it carries the section
+		// label, not the account. Per-account coverage (#415) is provided
+		// by validateCodexAuthOnStartup iterating every account file; the
+		// account itself is identified via the malformed banner below.
+		return i18n.TF("codex.oauth_expired_banner", i18n.T("preset.codex_credential_section"))
 	}
-
-	fresh, err := refreshCodexTokens(tokens.RefreshToken, tokens)
-	if err != nil {
-		if err == ErrCodexAuthRevoked {
-			// Localized banner (#412). The %s slot is a navigation hint
-			// (/setup → <credentials section>), so it carries the section
-			// label, not the account. Per-account coverage (#415) is provided
-			// by validateCodexAuthOnStartup iterating every account file; the
-			// account itself is identified via the malformed banner below.
-			return i18n.TF("codex.oauth_expired_banner", i18n.T("preset.codex_credential_section"))
-		}
-		return ""
-	}
-
-	out, err := json.MarshalIndent(fresh, "", "  ")
-	if err != nil {
-		return ""
-	}
-	tmpPath := authPath + ".tmp"
-	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
-		return ""
-	}
-	if err := os.Rename(tmpPath, authPath); err != nil {
-		os.Remove(tmpPath)
-		return ""
-	}
+	// Both nil (already fresh, or refreshed and persisted) and
+	// ErrCodexAuthTransient (network/5xx/timeout/write failure) are silent
+	// here, matching pre-extraction behavior: do not penalize the user for
+	// being offline, and do not surface anything when nothing is wrong.
 	return ""
 }
 

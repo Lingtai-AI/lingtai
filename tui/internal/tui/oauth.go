@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ import (
 // 5xx, timeout) which leave the local tokens untouched.
 var ErrCodexAuthRevoked = errors.New("codex refresh token rejected — re-authenticate")
 
+// ErrCodexAuthTransient is returned by ensureFreshCodexTokens when a
+// refresh was needed but could not be completed for a reason unrelated to
+// the grant itself (network error, timeout, 5xx from auth.openai.com, or a
+// failure persisting the refreshed bundle back to disk). The stored
+// refresh_token is presumed still good — callers must not treat this the
+// same as ErrCodexAuthRevoked.
+var ErrCodexAuthTransient = errors.New("codex token refresh did not complete — try again")
+
 // ErrCodexAuthCancelled is delivered in CodexOAuthDoneMsg.Err when the
 // caller cancels the OAuth flow via the supplied context (user pressed
 // Del/Backspace on the Codex 凭据 row, or navigated away). Handlers use
@@ -33,10 +42,10 @@ var ErrCodexAuthRevoked = errors.New("codex refresh token rejected — re-authen
 var ErrCodexAuthCancelled = errors.New("codex oauth cancelled")
 
 const (
-	codexClientID      = "app_EMoamEEZ73f0CkXaXp7hrann"
-	codexAuthIssuerURL = "https://auth.openai.com"
-	codexAuthURL       = codexAuthIssuerURL + "/oauth/authorize"
-	codexTokenURL      = codexAuthIssuerURL + "/oauth/token"
+	codexClientID        = "app_EMoamEEZ73f0CkXaXp7hrann"
+	codexAuthIssuerURL   = "https://auth.openai.com"
+	codexAuthURL         = codexAuthIssuerURL + "/oauth/authorize"
+	codexTokenURLDefault = codexAuthIssuerURL + "/oauth/token"
 	// codexScope must include the connector scopes — without them the
 	// authorize page rejects the request immediately. Matches the official
 	// Codex CLI scope string.
@@ -58,6 +67,13 @@ const (
 	oauthTimeout      = 5 * time.Minute
 	deviceAuthTimeout = 15 * time.Minute
 )
+
+// codexTokenURL is the live OAuth token endpoint. It is a var (not the
+// codexTokenURLDefault const directly) solely so tests can redirect
+// refreshCodexTokens at a local httptest server (see
+// setCodexTokenURLForTest in model_validity_test.go); production code never
+// reassigns it.
+var codexTokenURL = codexTokenURLDefault
 
 // CodexTokens holds the token bundle written to disk.
 type CodexTokens struct {
@@ -703,4 +719,73 @@ func refreshCodexTokens(refreshToken string, existing CodexTokens) (*CodexTokens
 		merged.Email = email
 	}
 	return &merged, nil
+}
+
+// codexRefreshBufferSeconds is the shared staleness window: a token within
+// this many seconds of expiry is refreshed rather than used as-is. Used by
+// every caller of ensureFreshCodexTokens (TUI startup validation and the
+// save-time Codex eligibility probe) so they agree on what "fresh" means.
+const codexRefreshBufferSeconds = 300
+
+// ensureFreshCodexTokens is the single owning-layer helper for "make sure
+// this on-disk Codex token bundle is not stale, refreshing and persisting
+// it if needed." It is the one place that checks expires_at, calls
+// refreshCodexTokens, and does the atomic (.tmp + rename) write-back —
+// callers must not reimplement any part of this. Behavior is exactly
+// validateOneCodexAuthFile's pre-extraction refresh logic (same buffer,
+// same expiry comparison, same write-back), generalized to a second caller.
+//
+// tokens is the already-parsed bundle for path (callers already read the
+// file to get here). Returns:
+//   - (tokens, nil) unchanged when the access token is not within
+//     codexRefreshBufferSeconds of ExpiresAt (this also covers ExpiresAt ==
+//     0 as "due for refresh", same as before this helper existed — every
+//     real token file from the OAuth/refresh flow sets a positive
+//     expires_at, so this only matters for a hand-built/malformed file).
+//   - (refreshed tokens, nil) after a successful refresh; the file at path
+//     has already been updated atomically (0600, tmp+rename) so every other
+//     reader in this process sees the fresh bundle immediately.
+//   - (tokens, ErrCodexAuthRevoked) when auth.openai.com rejected the
+//     refresh_token (401/403) — the grant is dead; the caller must hard-fail
+//     and point the user at re-login. The file is left untouched.
+//   - (tokens, ErrCodexAuthTransient) on any other refresh failure (network,
+//     timeout, 5xx, or a failure writing the refreshed bundle back to disk)
+//     — the refresh_token is presumed still good; the caller must not treat
+//     this as a deterministic failure of the account/model/credential.
+//
+// In every non-nil-error case the returned tokens are the caller's original
+// (possibly stale) input — callers that can tolerate a stale token (none do
+// today; see ErrCodexAuthTransient's doc) may still use AccessToken from it,
+// but the intended handling is to surface the error, not the token.
+func ensureFreshCodexTokens(path string, tokens CodexTokens) (CodexTokens, error) {
+	if tokens.ExpiresAt > time.Now().Unix()+codexRefreshBufferSeconds {
+		return tokens, nil
+	}
+	if strings.TrimSpace(tokens.RefreshToken) == "" {
+		return tokens, nil
+	}
+	fresh, err := refreshCodexTokens(tokens.RefreshToken, tokens)
+	if err != nil {
+		if err == ErrCodexAuthRevoked {
+			return tokens, ErrCodexAuthRevoked
+		}
+		return tokens, ErrCodexAuthTransient
+	}
+	out, err := json.MarshalIndent(fresh, "", "  ")
+	if err != nil {
+		return tokens, ErrCodexAuthTransient
+	}
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
+		return tokens, ErrCodexAuthTransient
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		// Matches the pre-extraction startup behavior (validateOneCodexAuthFile):
+		// a failed rename means tmpPath is orphaned, so it is removed rather
+		// than left behind. This is the same net filesystem effect as before
+		// this helper was shared — not a new deletion path.
+		os.Remove(tmpPath)
+		return tokens, ErrCodexAuthTransient
+	}
+	return *fresh, nil
 }

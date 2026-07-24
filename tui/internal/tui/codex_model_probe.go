@@ -10,6 +10,37 @@ import (
 	"time"
 )
 
+// freshCodexAccessToken returns an access token guaranteed not to be stale
+// for the eligibility probe. readCodexTokenFile has no expiry check, so a
+// token that was valid at TUI startup but has since expired (the TUI only
+// refreshes once, at launch, in ValidateCodexAuthOnStartup) would otherwise
+// be sent to /responses as-is, draw a 401, and be misreported as an
+// ineligible account/model — a false negative for a perfectly valid Codex
+// credential. The actual expiry check, refresh, and write-back are owned by
+// ensureFreshCodexTokens (oauth.go) — the same helper the startup validator
+// uses — so this function only translates that outcome into a probeStatus:
+//   - refreshed or already-fresh -> probeOK with the token to use.
+//   - ErrCodexAuthRevoked (refresh_token rejected server-side) -> a hard
+//     probeAuthError; a dead grant must still block Save.
+//   - ErrCodexAuthTransient (network/5xx/timeout/write failure) ->
+//     probeOverloaded. A known-stale token must never be sent to /responses
+//     and have its resulting 401 misread as deterministic ineligibility.
+//     probeOverloaded already maps to validityRetryable in
+//     checkCodexModelValidityCmdForSource (model_validity.go), so Save
+//     proceeds with a warning instead of blocking on an operational hiccup
+//     that says nothing about the account or model.
+func freshCodexAccessToken(path string, tokens CodexTokens) (string, probeStatus, string) {
+	fresh, err := ensureFreshCodexTokens(path, tokens)
+	switch err {
+	case nil:
+		return fresh.AccessToken, probeOK, ""
+	case ErrCodexAuthRevoked:
+		return "", probeAuthError, "Codex OAuth credential was revoked — re-authenticate"
+	default: // ErrCodexAuthTransient
+		return "", probeOverloaded, "Codex OAuth token refresh did not complete — try again"
+	}
+}
+
 // probeCodexModel is the eligibility probe for the ChatGPT-backed Codex
 // providers. It intentionally does not use the models catalogue: that only
 // proves token reachability, not that this model/account can serve a real
@@ -65,7 +96,12 @@ func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probe
 			lastStatus, lastDetail = probeAuthError, "Codex OAuth credential is missing or unusable"
 			continue
 		}
-		status, detail := probeCodexResponses(path, tokens.AccessToken, model, baseURL)
+		accessToken, status, detail := freshCodexAccessToken(path, tokens)
+		if status != probeOK {
+			lastStatus, lastDetail = status, detail
+			continue
+		}
+		status, detail = probeCodexResponses(path, accessToken, model, baseURL)
 		if status == probeOK {
 			return status, ""
 		}
