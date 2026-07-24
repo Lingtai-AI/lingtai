@@ -8,7 +8,8 @@
 # the installed Go is missing or older than tui/go.mod requires (distro
 # packages often are), the official Go toolchain tarball is downloaded for the
 # build. It then creates or updates the Python runtime venv and installs the
-# `lingtai` package into it.
+# `lingtai` package into it. The no-argument path remains this official stable
+# release flow; use --latest explicitly for current TUI main + kernel main.
 #
 # Public entry point (once served from the website):
 #   curl -fsSL https://lingtai.ai/install.sh | bash
@@ -59,6 +60,8 @@ set -euo pipefail
 
 REPO_SLUG="Lingtai-AI/lingtai"
 REPO="https://github.com/${REPO_SLUG}.git"
+KERNEL_REPO_SLUG="Lingtai-AI/lingtai-kernel"
+KERNEL_REPO="https://github.com/${KERNEL_REPO_SLUG}.git"
 API_BASE="https://api.github.com/repos/${REPO_SLUG}"
 DOWNLOAD_BASE="https://github.com/${REPO_SLUG}/releases/download"
 RAW_INSTALL_URL="https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh"
@@ -96,6 +99,7 @@ BUILD_DIR="$TMPDIR/lingtai-install-$$"
 # --- flags / state -----------------------------------------------------------
 REF=""               # explicit source ref (branch/tag/commit) => forces source build
 VERSION=""           # explicit release tag to install (default: latest release)
+LATEST_MAIN_MODE=0   # --latest: explicit current-main TUI + kernel source install
 UPDATE_MODE=0        # --update: re-run for an existing source/user-local install
 INSTALL_PREFIX=""    # --prefix: install root (bin_dir = <prefix>/bin)
 BIN_DIR_OVERRIDE=""  # --bin-dir: explicit bin directory
@@ -124,6 +128,9 @@ BUNDLE_MANIFEST_KERNEL_TAG=""
 BUNDLE_MANIFEST_KERNEL_VERSION=""
 BUNDLE_MANIFEST_KERNEL_FILENAME=""
 BUNDLE_MANIFEST_BUNDLE_ID=""
+TUI_MAIN_SHA=""
+KERNEL_MAIN_SHA=""
+KERNEL_SOURCE_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -134,10 +141,13 @@ a prebuilt per-platform tarball when available, otherwise a source build.
 
 Usage:
   curl -fsSL https://lingtai.ai/install.sh | bash
+  curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
   ./install.sh [--version <tag>] [--bin-dir <dir>|--prefix <dir>]
   ./install.sh --update --prefix <prefix> --version <tag> --non-interactive
 
 Options:
+  --latest             Explicitly build TUI main + kernel main from source;
+                       records and prints both resolved full commit SHAs
   --version <tag>      Release tag to install (default: latest GitHub release)
   --ref <ref>          Build a specific git branch/tag/commit from source
   --bin-dir <dir>      Install binaries into <dir>
@@ -631,6 +641,17 @@ resolved_ref_for_checkout() {
 
 # --- bin dir / prefix helpers ------------------------------------------------
 
+# resolve_main_branch_sha resolves one exact full commit before either source
+# checkout begins. The subsequent clones are checked against these pins; a
+# moving main branch therefore fails loudly instead of building a mixed pair.
+resolve_main_branch_sha() {
+  local repo_url="$1" sha
+  command -v git &>/dev/null || return 1
+  sha="$(git ls-remote "$repo_url" refs/heads/main 2>/dev/null | awk 'NF { print $1; exit }')"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$sha"
+}
+
 prefix_for_bin_dir() {
   local bin_dir="$1"
   if [[ "$(basename "$bin_dir")" == "bin" ]]; then
@@ -678,22 +699,33 @@ ensure_lingtai_alias() {
 # --- arg parsing -------------------------------------------------------------
 
 parse_args() {
+  local saw_latest=0 saw_ref=0 saw_version=0 saw_from_source=0 saw_skip_python=0 saw_source=0 saw_update=0
+  LATEST_MAIN_MODE=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ref) REF="${2:?error: --ref requires a value}"; shift 2 ;;
-      --version) VERSION="${2:?error: --version requires a value}"; shift 2 ;;
+      --latest) LATEST_MAIN_MODE=1; saw_latest=1; shift ;;
+      --ref) REF="${2:?error: --ref requires a value}"; saw_ref=1; shift 2 ;;
+      --version) VERSION="${2:?error: --version requires a value}"; saw_version=1; shift 2 ;;
       --prefix) INSTALL_PREFIX="${2:?error: --prefix requires a value}"; shift 2 ;;
       --bin-dir) BIN_DIR_OVERRIDE="${2:?error: --bin-dir requires a value}"; shift 2 ;;
-      --from-source) FROM_SOURCE=1; shift ;;
+      --from-source) FROM_SOURCE=1; saw_from_source=1; shift ;;
       --skip-portal) SKIP_PORTAL=1; shift ;;
-      --skip-python|--skip-venv) SKIP_VENV=1; shift ;;
-      --source) SOURCE_ARG="${2:?error: --source requires a value}"; shift 2 ;;
-      --update) UPDATE_MODE=1; shift ;;
+      --skip-python|--skip-venv) SKIP_VENV=1; saw_skip_python=1; shift ;;
+      --source) SOURCE_ARG="${2:?error: --source requires a value}"; saw_source=1; shift 2 ;;
+      --update) UPDATE_MODE=1; saw_update=1; shift ;;
       --non-interactive) NON_INTERACTIVE=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) echo "error: unknown flag: $1" >&2; usage >&2; exit 1 ;;
     esac
   done
+
+  if [[ "$saw_latest" == "1" ]]; then
+    if [[ "$saw_ref" == "1" || "$saw_version" == "1" || "$saw_from_source" == "1" || "$saw_skip_python" == "1" || "$saw_source" == "1" || "$saw_update" == "1" || "$SOURCE_ARG" != "auto" ]]; then
+      echo "error: --latest cannot be combined with --ref, --version, --from-source, --skip-python/--skip-venv, --source/LINGTAI_SOURCE, or --update" >&2
+      usage >&2
+      exit 1
+    fi
+  fi
 
   # --update is the TUI source updater contract: it passes --prefix and
   # --version and expects an in-place source-compatible update.
@@ -764,11 +796,17 @@ write_install_metadata() {
   # value to record here). The block is omitted entirely, not written as
   # empty strings, when KERNEL_SOURCE is "" — old readers see exactly the
   # same install.json shape as before this field existed.
+  # Stable bundle provenance remains unchanged; latest-main provenance is
+  # emitted below only after the checked-out kernel source was installed.
   local bundle_json=""
   if [[ "$KERNEL_SOURCE" == "bundle" ]]; then
     bundle_json="$(printf ',\n  "kernel_source": "bundle",\n  "kernel_bundle_id": "%s",\n  "kernel_version": "%s",\n  "kernel_provider": "%s"' \
       "$(json_escape "$KERNEL_BUNDLE_ID")" "$(json_escape "$KERNEL_VERSION_INSTALLED")" "$(json_escape "$KERNEL_PROVIDER")")"
     bundle_json="$(printf '%s,\n  "bundle_provider": "%s"' "$bundle_json" "$(json_escape "$BUNDLE_PROVIDER")")"
+  fi
+  if [[ "$KERNEL_SOURCE" == "main" ]]; then
+    bundle_json="$(printf ',\n  "source_mode": "latest-main",\n  "tui_commit": "%s",\n  "kernel_source": "main",\n  "kernel_commit": "%s",\n  "kernel_version": "%s",\n  "kernel_provider": "github"' \
+      "$(json_escape "$TUI_MAIN_SHA")" "$(json_escape "$KERNEL_MAIN_SHA")" "$(json_escape "$KERNEL_VERSION_INSTALLED")")"
   fi
 
   metadata_path="$global_dir/install.json"
@@ -970,7 +1008,7 @@ ensure_runtime_venv() {
     return 0
   fi
 
-  if [[ -z "$BUNDLE_MANIFEST_JSON" ]]; then
+  if [[ "$LATEST_MAIN_MODE" != "1" && -z "$BUNDLE_MANIFEST_JSON" ]]; then
     if [[ "$BUNDLE_REQUIRED" == "1" ]]; then
       echo "error: no pinned kernel release bundle could be resolved for this install." >&2
       echo "       Tried provider(s): $BUNDLE_PROVIDER (with same-tag fallback to the other provider)." >&2
@@ -997,6 +1035,10 @@ ensure_runtime_venv() {
 
   say "Setting up Python runtime venv at $venv_dir ..."
   if ! ensure_python; then
+    if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+      echo "error: --latest requires Python prerequisites to provision kernel main; refusing a partial install." >&2
+      return 1
+    fi
     warn "Skipping Python runtime venv — Python prerequisites are missing."
     warn "Re-run install after installing Python, or the TUI will create the venv on first launch."
     return 0
@@ -1023,6 +1065,10 @@ ensure_runtime_venv() {
 
     if [[ -n "$recreate_reason" ]]; then
       if [[ "$repair_attempt" != "0" ]]; then
+        if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+          echo "error: $recreate_reason after recreate; --latest cannot leave the kernel runtime unprovisioned." >&2
+          return 1
+        fi
         warn "$recreate_reason after recreate; leaving runtime venv repair to the TUI."
         return 0
       fi
@@ -1039,6 +1085,10 @@ ensure_runtime_venv() {
             warn "uv venv failed; falling back to python3 -m venv"
             uv=""
           else
+            if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+              echo "error: uv could not create the kernel-main runtime venv and no supported Python fallback is available." >&2
+              return 1
+            fi
             warn "uv venv failed and no Python 3.11+ with venv/ensurepip is available; skipping runtime setup."
             warn "Install uv or Python with venv/ensurepip support, then re-run the installer."
             return 0
@@ -1047,8 +1097,19 @@ ensure_runtime_venv() {
       fi
       if [[ ! -x "$venv_dir/bin/python" && ! -x "$venv_dir/bin/python3" && -z "$uv" ]]; then
         if python_ok; then
-          python3 -m venv "$venv_dir" || { warn "failed to create venv"; return 0; }
+          if ! python3 -m venv "$venv_dir"; then
+            if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+              echo "error: failed to create the kernel-main runtime venv." >&2
+              return 1
+            fi
+            warn "failed to create venv"
+            return 0
+          fi
         else
+          if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+            echo "error: no supported Python/uv runtime is available for kernel main." >&2
+            return 1
+          fi
           warn "Cannot create runtime venv: uv is unavailable and no Python 3.11+ with venv/ensurepip is available."
           warn "Install uv or Python with venv/ensurepip support, then re-run the installer."
           return 0
@@ -1059,6 +1120,10 @@ ensure_runtime_venv() {
       elif [[ -x "$venv_dir/bin/python3" ]]; then
         py="$venv_dir/bin/python3"
       else
+        if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+          echo "error: kernel-main runtime venv has no Python interpreter at $venv_dir." >&2
+          return 1
+        fi
         warn "venv python not found at $venv_dir; skipping runtime setup."
         return 0
       fi
@@ -1073,6 +1138,10 @@ ensure_runtime_venv() {
         repair_attempt=1
         continue
       fi
+      if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+        echo "error: kernel-main runtime venv has no pip/uv installer after recreate." >&2
+        return 1
+      fi
       warn "runtime venv pip is missing after recreate; TUI will repair it on first launch."
       return 0
     fi
@@ -1085,7 +1154,11 @@ ensure_runtime_venv() {
     # once after a venv recreate (a legitimate transient-environment repair,
     # the same pattern every other step in this loop uses), then FAILS LOUD —
     # it never falls back to `pip install lingtai` from an index.
-    if install_kernel_from_bundle "$py" "$uv"; then
+    if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+      if install_kernel_from_main "$py" "$uv"; then
+        install_ok=1
+      fi
+    elif install_kernel_from_bundle "$py" "$uv"; then
       install_ok=1
     fi
     if [[ "$install_ok" != "1" ]]; then
@@ -1095,11 +1168,19 @@ ensure_runtime_venv() {
         repair_attempt=1
         continue
       fi
-      echo "error: failed to install the pinned kernel bundle artifact into the runtime venv after recreate." >&2
-      echo "       bundle: $(bundle_manifest_field bundle_id 2>/dev/null || echo "?") kernel: $(bundle_manifest_field kernel_tag 2>/dev/null || echo "?") via $KERNEL_MANIFEST_PROVIDER" >&2
+      if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+        echo "error: failed to install kernel main commit $KERNEL_MAIN_SHA into the runtime venv after recreate." >&2
+      else
+        echo "error: failed to install the pinned kernel bundle artifact into the runtime venv after recreate." >&2
+        echo "       bundle: $(bundle_manifest_field bundle_id 2>/dev/null || echo "?") kernel: $(bundle_manifest_field kernel_tag 2>/dev/null || echo "?") via $KERNEL_MANIFEST_PROVIDER" >&2
+      fi
       echo "       LingTai's Python runtime is never installed from PyPI/an index by package name," >&2
-      echo "       so this is a hard stop rather than a silent fallback. Re-run the installer, or" >&2
-      echo "       pass --skip-python to install the TUI/portal binaries only." >&2
+      if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+        echo "       so this is a hard stop rather than a silent fallback. Re-run --latest after fixing the error above." >&2
+      else
+        echo "       so this is a hard stop rather than a silent fallback. Re-run the installer, or" >&2
+        echo "       pass --skip-python to install the TUI/portal binaries only." >&2
+      fi
       return 1
     fi
 
@@ -1109,6 +1190,10 @@ ensure_runtime_venv() {
         venv_dir="$HOME/.lingtai-tui/runtime/venv-repair-$$-1"
         repair_attempt=1
         continue
+      fi
+      if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+        echo "error: kernel main import failed after reinstall; refusing a partial --latest install." >&2
+        return 1
       fi
       warn "runtime venv is still unhealthy after reinstall; TUI will repair it on first launch."
       return 0
@@ -1417,6 +1502,30 @@ install_kernel_from_bundle() {
   return 0
 }
 
+# install_kernel_from_main installs the checked-out kernel main source tree by
+# local path. Dependencies may use the configured index, but the LingTai source
+# itself is never looked up by package name and never falls back to PyPI.
+install_kernel_from_main() {
+  local py="$1" uv="$2" index_url="${LINGTAI_PYPI_INDEX_URL:-https://pypi.org/simple}"
+  [[ -n "$KERNEL_SOURCE_DIR" && -d "$KERNEL_SOURCE_DIR" ]] || return 1
+  [[ "$KERNEL_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$(git -C "$KERNEL_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)" == "$KERNEL_MAIN_SHA" ]] || {
+    echo "error: kernel source checkout no longer matches resolved main commit $KERNEL_MAIN_SHA" >&2
+    return 1
+  }
+  say "Installing lingtai from kernel main source ($KERNEL_MAIN_SHA; dependencies via $index_url) ..."
+  if [[ -n "$uv" ]]; then
+    "$uv" pip install --index-url "$index_url" -p "$(dirname "$(dirname "$py")")" "$KERNEL_SOURCE_DIR" || return 1
+  else
+    "$py" -m pip install --index-url "$index_url" "$KERNEL_SOURCE_DIR" || return 1
+  fi
+  "$py" -c 'import lingtai; print("lingtai", getattr(lingtai, "__version__", "?"))' || return 1
+  KERNEL_SOURCE="main"
+  KERNEL_VERSION_INSTALLED="$("$py" -c 'import lingtai; print(getattr(lingtai, "__version__", "?"))' 2>/dev/null || true)"
+  KERNEL_PROVIDER="github"
+  return 0
+}
+
 # --- install flows -----------------------------------------------------------
 
 # resolve_bin_dir picks the install bin directory honoring --bin-dir/--prefix
@@ -1647,6 +1756,45 @@ build_from_source() {
   if [[ "$UPDATE_MODE" == "1" ]]; then
     verify_tui_binary_version "$BIN_DIR/lingtai-tui" "$VERSION"
   fi
+}
+
+# build_latest_from_main resolves and pins both repositories before building. It
+# deliberately does not consult release metadata: --latest is a separate,
+# explicit current-main mode and never falls back to a stable tag or bundle.
+build_latest_from_main() {
+  local actual_kernel_sha
+  TUI_MAIN_SHA="$(resolve_main_branch_sha "$REPO")" || {
+    echo "error: could not resolve the full TUI main commit from $REPO" >&2
+    return 1
+  }
+  KERNEL_MAIN_SHA="$(resolve_main_branch_sha "$KERNEL_REPO")" || {
+    echo "error: could not resolve the full kernel main commit from $KERNEL_REPO" >&2
+    return 1
+  }
+  say "Resolved TUI main commit: $TUI_MAIN_SHA"
+  say "Resolved kernel main commit: $KERNEL_MAIN_SHA"
+
+  # Reuse the existing source-build path for the TUI. Its shallow clone is
+  # accepted only when it lands on the exact SHA resolved above.
+  build_from_source main
+  if [[ "${RESOLVED_COMMIT:-}" != "$TUI_MAIN_SHA" ]]; then
+    echo "error: TUI main moved during checkout (resolved $TUI_MAIN_SHA, cloned ${RESOLVED_COMMIT:-unknown})" >&2
+    return 1
+  fi
+
+  KERNEL_SOURCE_DIR="$BUILD_DIR/kernel"
+  ensure_build_deps 1
+  say "Cloning lingtai-kernel (main at $KERNEL_MAIN_SHA) ..."
+  git clone --depth 1 --branch main "$KERNEL_REPO" "$KERNEL_SOURCE_DIR"
+  actual_kernel_sha="$(git -C "$KERNEL_SOURCE_DIR" rev-parse HEAD)"
+  if [[ "$actual_kernel_sha" != "$KERNEL_MAIN_SHA" ]]; then
+    echo "error: kernel main moved during checkout (resolved $KERNEL_MAIN_SHA, cloned $actual_kernel_sha)" >&2
+    return 1
+  fi
+  TUI_MAIN_SHA="$RESOLVED_COMMIT"
+  KERNEL_MAIN_SHA="$actual_kernel_sha"
+  say "Using TUI main commit: $TUI_MAIN_SHA"
+  say "Using kernel main commit: $KERNEL_MAIN_SHA"
 }
 
 # normalize_go_version prints MAJOR.MINOR.PATCH for Go language/toolchain
@@ -1910,7 +2058,10 @@ if command -v curl &>/dev/null && \
 fi
 
 resolve_bin_dir
-resolve_source_provider
+if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+  build_latest_from_main || exit 1
+else
+  resolve_source_provider
 if [[ "$BUNDLE_PROVIDER" == "gitee" ]]; then
   say "Source: Gitee (${GITEE_OWNER}/${GITEE_REPO}) — override with --source github or LINGTAI_SOURCE=github."
 fi
@@ -2001,13 +2152,23 @@ else
   fi
 fi
 
+fi
+
 # Provision the pinned runtime before recording install metadata. This makes
 # kernel_source and its bundle fields a postcondition of verified provisioning,
 # never a claim about a partially completed install.
 if ! ensure_runtime_venv "$BIN_DIR"; then
   echo "error: LingTai install incomplete — the TUI/portal binaries installed, but the" >&2
-  echo "       Python runtime could not be provisioned from a verified pinned bundle." >&2
-  echo "       See the error above. Re-run, or pass --skip-python if TUI-only is intended." >&2
+  if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+    echo "       Python runtime could not be provisioned from kernel main commit $KERNEL_MAIN_SHA." >&2
+  else
+    echo "       Python runtime could not be provisioned from a verified pinned bundle." >&2
+  fi
+  if [[ "$LATEST_MAIN_MODE" == "1" ]]; then
+    echo "       See the error above and re-run --latest after fixing it." >&2
+  else
+    echo "       See the error above. Re-run, or pass --skip-python if TUI-only is intended." >&2
+  fi
   exit 1
 fi
 

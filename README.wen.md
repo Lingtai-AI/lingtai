@@ -82,6 +82,14 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+若欲明启 TUI 与内核当前 `main` 之开发安装，可行：
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
+```
+
+此命令会显出并录下两仓库之完整提交 SHA。此模式别于默认稳定安装，不能与 `--version`、`--ref`、`--update`、`--source` 或 `--skip-python` 并用。
+
 一令安装之脚本，通 macOS、Linux 与 WSL，装 `lingtai-tui` 与 `lingtai-portal`。此后**余事皆委于 TUI**——初启之时，作 `.lingtai/`，备其 Python 运行时，引君择模型与配方，并令一常驻格物者守此项目。后欲升级，重跑安装脚本（或 `lingtai-tui self-update`），再启 TUI 可也。
 
 原生 Windows/PowerShell 今已可用：

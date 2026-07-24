@@ -78,6 +78,14 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
+For the explicit development installer (current `main` of both the TUI and kernel), use:
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
+```
+
+It prints and records the exact full commit SHA for each repository. This mode is separate from the default stable installer and cannot be combined with `--version`, `--ref`, `--update`, `--source`, or `--skip-python`.
+
 The installer covers macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
 
 Native Windows/PowerShell is also available:
