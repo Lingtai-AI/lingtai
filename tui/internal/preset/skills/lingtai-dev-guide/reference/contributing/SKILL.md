@@ -2,8 +2,8 @@
 name: dev-guide-contributing
 description: >
   Nested lingtai-dev-guide reference for contribution workflow: issue/worktree/PR discipline, worktree inventory and exact-object approval gates, daemon decomposition, portfolio sweeps, repo-specific build/test commands, skill changes, and anatomy maintenance.
-version: 1.2.0
-last_changed_at: "2026-07-18T00:00:00Z"
+version: 1.2.1
+last_changed_at: "2026-07-24T00:00:00Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -19,6 +19,7 @@ Nested lingtai-dev-guide reference. Read this after the top-level router sends y
 4. **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv.
 5. **Every non-trivial PR gets a self-contained HTML explainer, local-only by default.** Requirements, naming, sections, the commit-vs-local rule, and the waiver exception live in `reference/pr-review-deliverables/SKILL.md` §3 — follow it rather than a summary here.
 6. **Prefer one honest sandbox acceptance when it exercises the real end-to-end path.** Keep only minimal syntax/smoke checks for obvious breakage; open the reviewable PR promptly and continue broader validation after the PR when needed, rather than building a broad pytest or synthetic matrix.
+7. **Every test must earn its maintenance cost by protecting a distinct failure invariant.** Inventory existing coverage before adding cases. When one mechanism needs multiple inputs, prefer table-driven or parameterized cases and shared setup over one pytest per narrative example. Do not inflate a PR with exhaustive assertion prose, and do not delete non-overlapping old tests merely to make the diff smaller.
 
 ## Orchestrator + daemons (how the work happens)
 
