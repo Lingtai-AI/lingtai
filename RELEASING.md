@@ -158,6 +158,22 @@ Requires Go toolchain and Node.js (for portal web frontend).
 
 ### Source selection (GitHub vs Gitee) and the Python runtime
 
+The POSIX installer has one explicit non-release mode:
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
+```
+
+`--latest` resolves `refs/heads/main` independently in the TUI repository and
+`lingtai-kernel`, verifies each shallow checkout against its resolved full SHA,
+builds the TUI from source, and installs the kernel from the checked-out local
+source tree. It prints both SHAs and records them in `~/.lingtai-tui/install.json`
+under `source_mode: "latest-main"`, `tui_commit`, and `kernel_commit`. This mode
+is deliberately separate from the no-argument/latest-release, `--version`,
+`--ref`, and `--update` paths; conflicts fail before network access, and a
+failed main checkout or kernel install never falls back to a stable release or
+package-index install. It is POSIX-only; `install.ps1` is unchanged.
+
 The behavior below applies to the bundle assets published by the tag workflow
 and to compatible bundle releases published separately. Gitee synchronization
 and bundle publication remain explicit maintainer tools; the tag workflow does

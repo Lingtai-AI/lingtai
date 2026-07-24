@@ -18,6 +18,7 @@ Nested lingtai-dev-guide reference. Read this after the top-level router sends y
 3. **Three-locale rule.** A new i18n key means updating `en.json`, `zh.json`, and `wen.json` in both `tui/i18n/` and (where applicable) `portal/i18n/`. Missing translations render as the raw key — they don't fall back.
 4. **Binary naming.** The TUI binary is `lingtai-tui`, never `lingtai`. `lingtai` is the Python agent CLI inside the runtime venv.
 5. **Every non-trivial PR gets a self-contained HTML explainer, local-only by default.** Requirements, naming, sections, the commit-vs-local rule, and the waiver exception live in `reference/pr-review-deliverables/SKILL.md` §3 — follow it rather than a summary here.
+6. **Prefer one honest sandbox acceptance when it exercises the real end-to-end path.** Keep only minimal syntax/smoke checks for obvious breakage; open the reviewable PR promptly and continue broader validation after the PR when needed, rather than building a broad pytest or synthetic matrix.
 
 ## Orchestrator + daemons (how the work happens)
 
