@@ -1469,6 +1469,16 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			return m, nil
 		}
 
+		if msg.String() == "ctrl+e" {
+			// Open the warning in this serialized Mail update before any path can
+			// forward the key to InputModel's context-free asynchronous editor
+			// command. The exact draft therefore cannot outlive its Mail route.
+			m = m.blurAgentRail()
+			m.showEditorWarn = true
+			m.editorWarnText = m.input.Value()
+			return m, nil
+		}
+
 		// If palette is active, route to palette
 		if m.input.IsPaletteActive() {
 			switch msg.String() {
@@ -1529,14 +1539,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+e":
-			// Open the warning in this serialized Mail update. Returning a
-			// context-free command here would let the draft outlive a direct
-			// route or project change before the result comes back.
-			m = m.blurAgentRail()
-			m.showEditorWarn = true
-			m.editorWarnText = m.input.Value()
-			return m, nil
 		case "ctrl+v":
 			m.pasteClipboardImageFromSystem()
 			return m, nil

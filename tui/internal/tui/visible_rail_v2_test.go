@@ -651,6 +651,72 @@ func TestVisibleRailV2KeyboardFocusAndActivation(t *testing.T) {
 					visibleRailV2ObserveRail(app.mail).focused, app.mail.input.Focused())
 			}
 		})
+		t.Run("palette Ctrl+E is synchronous and cannot create a second surface", func(t *testing.T) {
+			fixture := newFixture(t)
+			app := fixture.app
+			app.mail.input.SetValue("/agents")
+			app.mail.palette.SetFilter("agents")
+			if !app.mail.input.IsPaletteActive() {
+				t.Fatal("/agents did not activate the real Mail palette")
+			}
+
+			app, openEditorCmd := visibleRailV2Apply(app, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+			if openEditorCmd != nil {
+				t.Error("palette-active Ctrl+E left an asynchronous result that can outlive its Mail route")
+			}
+			if !app.mail.showEditorWarn || app.mail.editorWarnText != "/agents" {
+				t.Errorf("palette-active Ctrl+E did not synchronously preserve exact text: warning=%v text=%q",
+					app.mail.showEditorWarn, app.mail.editorWarnText)
+			}
+
+			// On the old implementation Ctrl+E and palette Enter produced independent
+			// commands. Preserve that real reverse delivery order for the authentic RED:
+			// /agents opens first, then the delayed editor result arrives second.
+			if openEditorCmd != nil {
+				var selectCmd tea.Cmd
+				app, selectCmd = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyEnter})
+				if selectCmd == nil {
+					t.Fatal("old palette-active path produced no real /agents selection command")
+				}
+				for _, msg := range visibleRailV2CollectCmd(selectCmd) {
+					app, _ = visibleRailV2Apply(app, msg)
+				}
+				app, _ = visibleRailV2Apply(app, openEditorCmd())
+			} else {
+				// A previously queued /agents result must stay inert once the synchronous
+				// warning owns Mail.
+				app, _ = visibleRailV2Apply(app, PaletteSelectMsg{Command: "agents"})
+			}
+			if !app.mail.showEditorWarn || app.mail.agentSelector.selectorOpen ||
+				app.mail.editorWarnText != "/agents" {
+				t.Errorf("palette Ctrl+E delivery order left competing surfaces: warning=%v selector=%v text=%q",
+					app.mail.showEditorWarn, app.mail.agentSelector.selectorOpen, app.mail.editorWarnText)
+			}
+
+			app, _ = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyEsc})
+			if app.mail.showEditorWarn || app.mail.agentSelector.selectorOpen {
+				t.Errorf("first Esc did not close the sole warning surface: warning=%v selector=%v",
+					app.mail.showEditorWarn, app.mail.agentSelector.selectorOpen)
+			}
+			// The preserved slash text may reopen its base palette after warning cancel;
+			// close that palette before proving there is no delayed cross-route editor.
+			if app.mail.input.IsPaletteActive() {
+				app, _ = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyEsc})
+			}
+			if app.mail.showEditorWarn || app.mail.agentSelector.selectorOpen ||
+				app.mail.input.IsPaletteActive() || !app.mail.input.Focused() {
+				t.Errorf("palette Ctrl+E did not restore a single composer owner: warning=%v selector=%v palette=%v input=%v",
+					app.mail.showEditorWarn, app.mail.agentSelector.selectorOpen,
+					app.mail.input.IsPaletteActive(), app.mail.input.Focused())
+			}
+			app = visibleRailV2Focus(t, app)
+			app, _ = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyDown})
+			app, _ = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyEnter})
+			visibleRailV2AssertCurrent(t, app, fixture.targets[0])
+			if app.mail.showEditorWarn || app.mail.agentSelector.selectorOpen {
+				t.Error("route activation resurrected a delayed palette editor surface")
+			}
+		})
 		t.Run("palette prevents rail focus", func(t *testing.T) {
 			fixture := newFixture(t)
 			app := fixture.app
