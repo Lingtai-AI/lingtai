@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +82,83 @@ type codexPoolAccount struct {
 	Path    string `json:"path"`
 	Weight  int    `json:"weight"`
 	Enabled *bool  `json:"enabled,omitempty"`
+}
+
+// errCodexPoolInvalidWeight marks an entry whose present `weight` value is not
+// an exact integer the kernel reader would accept; decodeCodexPoolAccounts
+// drops such entries (fail-closed) instead of laundering them into a weight.
+var errCodexPoolInvalidWeight = errors.New("codex pool account weight is not a usable integer")
+
+// UnmarshalJSON decodes one pool account with the same practical weight
+// semantics as the kernel reader: an omitted `weight` key defaults to 1, and a
+// finite positive integral number spelling (`1.0`, `2e0`) decodes to its exact
+// int value. Explicit integer 0/negative values are retained so their
+// disabled/unrepresentable semantics survive. A present null, bool, string,
+// fractional, zero/negative float-form, or out-of-int-range value fails the
+// entry so it is dropped, never silently rewritten. Saving still marshals the
+// plain struct, so weights canonicalize to JSON integers on write.
+func (a *codexPoolAccount) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Path    string          `json:"path"`
+		Weight  json.RawMessage `json:"weight"`
+		Enabled *bool           `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	weight, ok := codexPoolWeightFromRaw(raw.Weight)
+	if !ok {
+		return errCodexPoolInvalidWeight
+	}
+	*a = codexPoolAccount{Path: raw.Path, Weight: weight, Enabled: raw.Enabled}
+	return nil
+}
+
+// codexPoolWeightFromRaw converts a raw JSON `weight` value into the exact
+// integer weight. A nil/empty raw value means the key was absent (kernel
+// default: 1). A present value must be a JSON number: pure integer literals
+// keep their exact value (including 0/negative), while decimal/exponent
+// spellings are accepted only when finite, positive, and exactly integral.
+// Acceptance never rounds through float64.
+func codexPoolWeightFromRaw(raw json.RawMessage) (int, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return 1, true
+	}
+	// Only a JSON number token may carry a weight; null/bool/string/object/
+	// array forms fail closed.
+	if c := trimmed[0]; c != '-' && (c < '0' || c > '9') {
+		return 0, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	var num json.Number
+	if err := dec.Decode(&num); err != nil {
+		return 0, false
+	}
+	s := num.String()
+	if !strings.ContainsAny(s, ".eE") {
+		n, err := strconv.ParseInt(s, 10, strconv.IntSize)
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	}
+	// Decimal/exponent spelling. Reject non-finite magnitudes first so a huge
+	// exponent cannot force an enormous exact expansion below; this gate only
+	// rejects, it never accepts.
+	if f, err := strconv.ParseFloat(s, 64); err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
+		return 0, false
+	}
+	r, ok := new(big.Rat).SetString(s)
+	if !ok || !r.IsInt() || r.Sign() <= 0 {
+		return 0, false
+	}
+	n := r.Num()
+	if !n.IsInt64() || n.Int64() > math.MaxInt {
+		return 0, false
+	}
+	return int(n.Int64()), true
 }
 
 // codexPool is the on-disk pool file shape. Models (v2) classifies accounts by

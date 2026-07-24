@@ -682,6 +682,182 @@ func TestCodexPoolEligibilityFacts_FallbackAndFailClosed(t *testing.T) {
 	}
 }
 
+// TestCodexPoolWeightDecodeKernelParity pins per-entry weight decoding to the
+// kernel reader's practical contract (codex_pool.py's weight coercion): an
+// omitted weight defaults to 1, exact positive integral number spellings are
+// accepted as ints, explicit integer 0/negative values stay retained but
+// unrepresentable, and every other form fails closed by dropping the entry —
+// never rounding, wrapping, or coercing it into a usable weight.
+func TestCodexPoolWeightDecodeKernelParity(t *testing.T) {
+	cases := []struct {
+		name              string
+		weightJSON        string // raw JSON after `"weight":`; "" = key omitted
+		wantWeight        int
+		wantKept          bool
+		wantRepresentable bool
+	}{
+		{"omitted-defaults-to-1", "", 1, true, true},
+		{"null-dropped", "null", 0, false, false},
+		{"positive-int", "2", 2, true, true},
+		{"zero-int-disabled", "0", 0, true, false},
+		{"negative-int-retained", "-3", -3, true, false},
+		{"integral-float", "1.0", 1, true, true},
+		{"integral-exponent", "2e0", 2, true, true},
+		{"larger-integral-exponent", "3e2", 300, true, true},
+		{"fractional", "1.5", 0, false, false},
+		{"negative-fraction", "-0.5", 0, false, false},
+		{"zero-float-form", "0.0", 0, false, false},
+		{"negative-float-form", "-2.0", 0, false, false},
+		{"bool", "true", 0, false, false},
+		{"numeric-string", `"2"`, 0, false, false},
+		{"int64-overflow", "9223372036854775808", 0, false, false},
+		{"huge-exponent-overflow", "1e309", 0, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LINGTAI_TUI_DIR", "")
+			dir := t.TempDir()
+			entry := `{"path":"codex-auth/a.json"`
+			if tc.weightJSON != "" {
+				entry += `,"weight":` + tc.weightJSON
+			}
+			entry += `}`
+			raw := `{"version":1,"accounts":[` + entry + `]}`
+			if err := os.WriteFile(codexPoolPath(dir), []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pool, err := loadCodexPool(dir)
+			if err != nil {
+				t.Fatalf("loadCodexPool: %v", err)
+			}
+			if tc.wantKept {
+				if pool.DroppedEntries != 0 || len(pool.Accounts) != 1 {
+					t.Fatalf("kept form dropped: accounts=%d dropped=%d", len(pool.Accounts), pool.DroppedEntries)
+				}
+				if pool.Accounts[0].Weight != tc.wantWeight {
+					t.Fatalf("weight = %d, want %d", pool.Accounts[0].Weight, tc.wantWeight)
+				}
+			} else {
+				if pool.DroppedEntries != 1 || len(pool.Accounts) != 0 {
+					t.Fatalf("invalid form not dropped: accounts=%#v dropped=%d", pool.Accounts, pool.DroppedEntries)
+				}
+			}
+			gotRepresentable := len(codexPoolAccountsRepresentable(pool.Accounts)) == 1
+			if gotRepresentable != tc.wantRepresentable {
+				t.Fatalf("representable = %v, want %v", gotRepresentable, tc.wantRepresentable)
+			}
+		})
+	}
+}
+
+// TestCodexPoolWeightNonFiniteSyntaxFailsClosed proves the JSON-invalid
+// non-finite spellings never become a weight: the whole file fails to parse,
+// which the callers already surface as corruption (fail-closed).
+func TestCodexPoolWeightNonFiniteSyntaxFailsClosed(t *testing.T) {
+	for _, form := range []string{"NaN", "Infinity", "-Infinity"} {
+		t.Run(form, func(t *testing.T) {
+			t.Setenv("LINGTAI_TUI_DIR", "")
+			dir := t.TempDir()
+			raw := `{"version":1,"accounts":[{"path":"codex-auth/a.json","weight":` + form + `}]}`
+			if err := os.WriteFile(codexPoolPath(dir), []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadCodexPool(dir); err == nil {
+				t.Fatalf("non-finite weight %s must fail the load, not decode", form)
+			}
+		})
+	}
+}
+
+// TestCodexPoolWeightDecodeModelClassifiedCategories proves the same decoder
+// runs inside every exact-model category: omitted and `1.0` weights are
+// accepted in the selected category while the other category stays untouched.
+func TestCodexPoolWeightDecodeModelClassifiedCategories(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := `{"version":2,"models":{"gpt-test":[{"path":"codex-auth/a.json"},{"path":"codex-auth/b.json","weight":1.0}],"gpt-other":[{"path":"codex-auth/c.json","weight":3}]}}`
+	if err := os.WriteFile(codexPoolPath(dir), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := loadCodexPool(dir)
+	if err != nil {
+		t.Fatalf("loadCodexPool: %v", err)
+	}
+	if pool.Models == nil || pool.DroppedEntries != 0 {
+		t.Fatalf("classified pool mis-decoded: models=%v dropped=%d", pool.Models, pool.DroppedEntries)
+	}
+	selected := (*pool.Models)["gpt-test"]
+	if len(selected) != 2 || selected[0].Weight != 1 || selected[1].Weight != 1 {
+		t.Fatalf("gpt-test category = %#v, want omitted→1 and 1.0→1", selected)
+	}
+	other := (*pool.Models)["gpt-other"]
+	if len(other) != 1 || other[0].Path != "codex-auth/c.json" || other[0].Weight != 3 {
+		t.Fatalf("gpt-other category mangled: %#v", other)
+	}
+}
+
+// TestLoadSaveCodexPool_CanonicalizesWeightSpellings proves load→save→reload
+// rewrites omitted/float weight spellings as explicit JSON integers while an
+// explicit zero stays zero — semantic parity, not byte preservation.
+func TestLoadSaveCodexPool_CanonicalizesWeightSpellings(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := `{"version":1,"accounts":[{"path":"codex-auth/a.json","weight":1.0},{"path":"codex-auth/b.json"},{"path":"codex-auth/c.json","weight":0}]}`
+	if err := os.WriteFile(codexPoolPath(dir), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := loadCodexPool(dir)
+	if err != nil {
+		t.Fatalf("loadCodexPool: %v", err)
+	}
+	if err := saveCodexPool(dir, pool); err != nil {
+		t.Fatalf("saveCodexPool: %v", err)
+	}
+	body, err := os.ReadFile(codexPoolPath(dir))
+	if err != nil {
+		t.Fatalf("read saved pool: %v", err)
+	}
+	if strings.Contains(string(body), "1.0") {
+		t.Fatalf("saved pool kept a float weight spelling: %s", body)
+	}
+	reloaded, err := loadCodexPool(dir)
+	if err != nil {
+		t.Fatalf("reload pool: %v", err)
+	}
+	if reloaded.Version != codexPoolVersion || len(reloaded.Accounts) != 3 {
+		t.Fatalf("reloaded pool = %#v", reloaded)
+	}
+	for i, want := range []int{1, 1, 0} {
+		if reloaded.Accounts[i].Weight != want {
+			t.Fatalf("account %d weight = %d, want %d (canonical integer)", i, reloaded.Accounts[i].Weight, want)
+		}
+	}
+}
+
+// TestCodexPoolWeightFractionalEntryBlocksWeightEdits extends the dropped-entry
+// write refusal to the new decoder's fail-closed forms: a fractional weight is
+// dropped on read, so a weight edit must refuse and leave the operator's file
+// byte-identical — invalid forms are never laundered into valid entries.
+func TestCodexPoolWeightFractionalEntryBlocksWeightEdits(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := []byte(`{"version":1,"accounts":[{"path":"codex-auth/typo.json","weight":1.5},{"path":"codex-auth/work.json","weight":1}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := setCodexPoolWeight(dir, filepath.Join(dir, codexAuthSubdir, "work.json"), 2)
+	if !errors.Is(err, errCodexPoolDroppedEntries) {
+		t.Fatalf("edit on a pool with a fractional weight = %v, want errCodexPoolDroppedEntries", err)
+	}
+	got, readErr := os.ReadFile(codexPoolPath(dir))
+	if readErr != nil {
+		t.Fatalf("read pool file back: %v", readErr)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("refused edit must leave the pool file byte-identical;\n got: %s\nwant: %s", got, raw)
+	}
+}
+
 func TestCodexPoolEligibility_DroppedEntriesUseLegacyFallback(t *testing.T) {
 	t.Setenv("LINGTAI_TUI_DIR", "")
 	dir := t.TempDir()

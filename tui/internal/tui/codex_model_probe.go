@@ -15,6 +15,10 @@ import (
 // proves token reachability, not that this model/account can serve a real
 // Responses request. Pool candidates are the same token paths the kernel can
 // select, and a non-empty pool never falls back silently to the legacy token.
+// Because the kernel weighted-selects among ALL of those candidates at
+// runtime, probeOK certifies a pool only when every candidate passed: the
+// probe walks the candidates in file order and fails fast at the first
+// account that cannot serve the model.
 func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probeStatus, string) {
 	if strings.TrimSpace(model) == "" {
 		return probeUnknown, "selected Codex model is missing"
@@ -23,8 +27,9 @@ func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probe
 		return probeNoKey, "Codex credential directory is unavailable"
 	}
 
+	isPool := provider == "codex-pool" || provider == "codex_pool"
 	paths := []string{}
-	if provider == "codex-pool" || provider == "codex_pool" {
+	if isPool {
 		pool, err := loadCodexPool(globalDir)
 		if err != nil {
 			return probeUnknown, "Codex pool is unreadable"
@@ -57,24 +62,28 @@ func probeCodexModel(provider, model, baseURL, globalDir, authRef string) (probe
 		return probeAuthError, fmt.Sprintf("no eligible Codex account for model %s", model)
 	}
 
-	var lastStatus probeStatus = probeAuthError
-	var lastDetail string
+	// Every candidate must pass the same real Responses probe: the runtime may
+	// weighted-select any of them, so the first non-OK candidate (or a missing
+	// token, which costs no request) fails the whole preflight immediately and
+	// keeps its existing status/detail taxonomy. The detail stays count-free
+	// and never carries tokens, paths, or pool refs.
+	fail := func(status probeStatus, detail string) (probeStatus, string) {
+		if isPool {
+			return status, fmt.Sprintf("no eligible Codex pool account served model %s: %s", model, detail)
+		}
+		return status, detail
+	}
 	for _, path := range paths {
 		tokens, ok := readCodexTokenFile(path)
 		if !ok || strings.TrimSpace(tokens.AccessToken) == "" {
-			lastStatus, lastDetail = probeAuthError, "Codex OAuth credential is missing or unusable"
-			continue
+			return fail(probeAuthError, "Codex OAuth credential is missing or unusable")
 		}
 		status, detail := probeCodexResponses(path, tokens.AccessToken, model, baseURL)
-		if status == probeOK {
-			return status, ""
+		if status != probeOK {
+			return fail(status, detail)
 		}
-		lastStatus, lastDetail = status, detail
 	}
-	if provider == "codex-pool" || provider == "codex_pool" {
-		return lastStatus, fmt.Sprintf("no eligible Codex pool account served model %s: %s", model, lastDetail)
-	}
-	return lastStatus, lastDetail
+	return probeOK, ""
 }
 
 func probeCodexResponses(authPath, accessToken, model, baseURL string) (probeStatus, string) {
