@@ -31,8 +31,15 @@ type startupTUIUpgradeOptions struct {
 	Output    io.Writer
 	ErrOutput io.Writer
 
-	Runner config.CommandRunner
-	Stat   func(string) (os.FileInfo, error)
+	Runner   config.CommandRunner
+	Stat     func(string) (os.FileInfo, error)
+	LookPath func(string) (string, error)
+
+	// UninstallHomebrew overrides the injected Homebrew formula uninstall used
+	// when the human confirms the cleanup prompt below. Nil in production
+	// (config.homebrewTUIUpdater.Upgrade defaults to the real `brew uninstall`
+	// call); tests inject a fake so no real brew ever runs.
+	UninstallHomebrew func() error
 
 	GlobalDir           string
 	SourceInstallScript string
@@ -80,8 +87,44 @@ func handleTUIUpgradeWithOptions(install config.TUIInstallInfo, version, latestV
 	}
 }
 
+// handleHomebrewTUIUpgrade migrates a Homebrew-managed install to LingTai's
+// native installer instead of running `brew upgrade`. The consent prompt is
+// explicit about the migration so a Homebrew user is never surprised by a
+// binary appearing at a new path. The migration step itself never touches the
+// Homebrew formula/keg. Once a native install is verified — either right
+// after this call's own migration, or immediately for a pre-existing
+// DuplicateNativeInstall — a second, separate consent question
+// (homebrewCleanupPrompt) decides whether to actually remove Homebrew; see
+// config.attemptHomebrewCleanup.
 func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
 	fmt.Fprintf(opts.Output, "lingtai-tui %s (latest: %s)\n", version, latestVersion)
+
+	// This function can ask up to two sequential questions in one flow (the
+	// migrate-or-others prompt below, then the cleanup prompt inside
+	// RunTUIUpdate). Both must read from the SAME *bufio.Reader: constructing
+	// a fresh bufio.Reader per prompt (as the old single-prompt readLineLower
+	// helper does) silently discards any input already buffered ahead past
+	// the first '\n', dropping the second answer even when both lines were
+	// present. See readLineLowerFromReader's doc comment.
+	stdin := bufio.NewReader(opts.Input)
+
+	if install.DuplicateNativeInstall {
+		fmt.Fprintln(opts.Output, "  Homebrew install detected, and a native lingtai-tui install already exists.")
+		fmt.Fprintf(opts.Output, "  %s\n", install.DuplicateNativeDetail)
+		fmt.Fprintln(opts.Output, "  The native install is ready and verified.")
+		update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
+			LatestVersion:          latestVersion,
+			GlobalDir:              opts.GlobalDir,
+			Runner:                 opts.Runner,
+			LookPath:               opts.LookPath,
+			ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
+			UninstallHomebrew:      opts.UninstallHomebrew,
+		})
+		printTUIUpdateLines(opts.Output, update.Lines)
+		return false
+	}
+
+	fmt.Fprintln(opts.Output, "  Homebrew install detected. LingTai now installs and updates itself with a native installer instead of Homebrew.")
 
 	others := opts.FindOtherTUIProcesses()
 	if len(others) > 0 {
@@ -93,53 +136,68 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 				fmt.Fprintf(opts.Output, "    PID %d  %s\n", p.PID, p.Command)
 			}
 		}
-		fmt.Fprintln(opts.Output, "  Upgrading while they keep running can leave old/new Cellar binaries mixed.")
-		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and upgrade now? [y/N] ")
-		if !answerYes(readLineLower(opts.Input)) {
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Quit the other TUI windows first, then run:")
-			fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
+		fmt.Fprintln(opts.Output, "  Migrating while they keep running can leave old/new binaries mixed.")
+		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and migrate from Homebrew to the native installer now? [y/N] ")
+		if !answerYes(readLineLowerFromReader(stdin)) {
+			fmt.Fprintln(opts.Output, "  Migration skipped. Quit the other TUI windows first, then run:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
 		if err := opts.PrepareOtherTUIProcessesUpgrade(others); err != nil {
-			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for upgrade: %v\n", err)
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Please close them manually and try again.")
+			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for migration: %v\n", err)
+			fmt.Fprintln(opts.Output, "  Migration skipped. Please close them manually and try again.")
 			return false
 		}
 	} else {
-		fmt.Fprint(opts.Output, "  Upgrade now? [Y/n] ")
-		answer := readLineLower(opts.Input)
-		if answer == "n" || answer == "no" {
+		fmt.Fprint(opts.Output, "  Migrate from Homebrew to the native installer now? [y/N] ")
+		if !answerYes(readLineLowerFromReader(stdin)) {
+			fmt.Fprintln(opts.Output, "  Migration skipped. Run manually later:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
 	}
 
-	fmt.Fprintln(opts.Output, "  Upgrading...")
+	fmt.Fprintln(opts.Output, "  Migrating from Homebrew to the native installer...")
 	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
-		LatestVersion: latestVersion,
-		Runner:        opts.Runner,
+		LatestVersion:          latestVersion,
+		GlobalDir:              opts.GlobalDir,
+		Runner:                 opts.Runner,
+		LookPath:               opts.LookPath,
+		ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
+		UninstallHomebrew:      opts.UninstallHomebrew,
 	})
+	printTUIUpdateLines(opts.Output, update.Lines)
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
-			err = fmt.Errorf("homebrew upgrade failed")
+			err = fmt.Errorf("homebrew-to-native migration failed")
 		}
-		fmt.Fprintf(opts.ErrOutput, "  Upgrade failed: %v\n", err)
+		fmt.Fprintf(opts.ErrOutput, "  Migration failed: %v\n", err)
+		return false
+	}
+	if !update.Updated {
+		fmt.Fprintln(opts.Output, "  Native install ready, but the migration is not complete yet — see the manual-cleanup guidance above.")
 		return false
 	}
 
-	// Verify the upgrade actually changed the binary by re-checking the
-	// version. Brew returns exit 0 even for "already installed".
-	postUpgrade := opts.CheckTUIUpgrade(version)
-	if postUpgrade != "" {
-		// Still outdated — brew formula not updated yet, don't loop.
-		fmt.Fprintln(opts.Output, "  Brew formula not yet updated. Run manually later:")
-		fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
-		return false
-	}
-
-	fmt.Fprintln(opts.Output, "  Upgraded! Please restart lingtai-tui to use the new version:")
+	fmt.Fprintln(opts.Output, "  Migrated! Please restart lingtai-tui to use the native binary:")
 	fmt.Fprintln(opts.Output, "    lingtai-tui")
 	return true
+}
+
+// homebrewCleanupPrompt returns the ConfirmHomebrewCleanup callback for the
+// interactive startup path: the exact, concrete removal question, asked only
+// once config.homebrewTUIUpdater.Upgrade has already verified a native
+// install exists (fresh migration or a pre-existing duplicate). Defaults to
+// No on anything but an explicit "y"/"yes" answer. Takes the same
+// *bufio.Reader the caller used for its own prompt(s) so a second sequential
+// question in one flow reads the next line instead of losing it to a
+// freshly-buffered reader.
+func homebrewCleanupPrompt(opts startupTUIUpgradeOptions, stdin *bufio.Reader) func() bool {
+	return func() bool {
+		fmt.Fprint(opts.Output, "  Remove the old Homebrew installation now? [y/N] ")
+		return answerYes(readLineLowerFromReader(stdin))
+	}
 }
 
 func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
@@ -183,7 +241,19 @@ func printTUIUpdateLines(w io.Writer, lines []config.DoctorLine) {
 }
 
 func readLineLower(input io.Reader) string {
-	reader := bufio.NewReader(input)
+	return readLineLowerFromReader(bufio.NewReader(input))
+}
+
+// readLineLowerFromReader reads one line from an existing *bufio.Reader
+// rather than wrapping the underlying io.Reader fresh each call. bufio.Reader
+// reads ahead into its own internal buffer, so constructing a new one per
+// prompt (as readLineLower above does) silently discards any input already
+// buffered past the first '\n' — invisible with a single prompt per call, but
+// it drops the answer to a SECOND sequential prompt (e.g. the Homebrew
+// cleanup question after the migration question) even though both lines were
+// present in the input. Callers that ask more than one question in a single
+// flow must share one *bufio.Reader across all of them.
+func readLineLowerFromReader(reader *bufio.Reader) string {
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(strings.ToLower(line))
 }

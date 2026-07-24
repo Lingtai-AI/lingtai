@@ -134,7 +134,7 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 - **TUI → human pseudo-mailbox.** The TUI is the user's MUA: it writes outbound messages into `.lingtai/human/mailbox/outbox/<uuid>/message.json`; agents poll this folder and claim deliveries.
 - **Portal → filesystem.** Same read pattern as the TUI; additionally writes `.lingtai/.portal/port`, recordings under `.lingtai/.portal/recordings/`, and topology snapshots that feed the replay timeline.
 - **Portal ↔ TUI integration.** `lingtai-tui` discovers an installed `lingtai-portal` to launch on `/viz`; otherwise the binaries are independent.
-- **TUI ↔ Homebrew tap.** Pushing a release tag runs `.github/workflows/release.yml`, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`. Users running `brew upgrade lingtai-ai/lingtai/lingtai-tui` pull from there. Manual tap edits are fallback/debug steps only. See `RELEASING.md`.
+- **TUI ↔ Homebrew tap.** Pushing a release tag runs `.github/workflows/release.yml`, which updates `Lingtai-AI/homebrew-lingtai/lingtai-tui.rb`, so `brew install`/manual `brew upgrade lingtai-ai/lingtai/lingtai-tui` still pull from there. Manual tap edits are fallback/debug steps only. See `RELEASING.md`. LingTai's own update paths (`/update-tui`, `self-update`, `doctor`) no longer run `brew upgrade` for a detected Homebrew install — they migrate it to the native installer instead (`tui/internal/config/tui_updater.go`'s `homebrewTUIUpdater`), leaving the old formula/keg installed but no longer the update target.
 - **Portal embeds web frontend.** `embed.go` at the portal root compiles `portal/web/dist/` into the Go binary so `lingtai-portal` ships with no runtime dependency on Node.
 
 ### Cross-repo dependencies

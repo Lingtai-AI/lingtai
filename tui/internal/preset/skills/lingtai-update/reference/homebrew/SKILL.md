@@ -9,7 +9,16 @@ maintenance: "If you find stale or incorrect information here, use the lingtai-i
 # Homebrew path and tap exploration
 
 Nested `lingtai-update` reference. The supported formula is
-`lingtai-ai/lingtai/lingtai-tui`:
+`lingtai-ai/lingtai/lingtai-tui`. `brew install` still works for a first
+install, but `/update-tui`, `lingtai-tui self-update`, and `lingtai-tui
+doctor` no longer run `brew upgrade` against it — a detected Homebrew install
+now migrates (with explicit consent) to LingTai's native installer instead;
+see the `update-tui` reference. The commands below remain useful for manual
+exploration of an existing Homebrew install. The migration step itself never
+touches the old formula/keg; removing it is a separate, interactive-only
+consent step (the startup "Remove the old Homebrew installation now? [y/N]"
+prompt, see `update-tui`) — `self-update` and `doctor` never run `brew
+uninstall` and only report the manual command:
 
 ```bash
 brew install lingtai-ai/lingtai/lingtai-tui
