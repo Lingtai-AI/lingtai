@@ -326,7 +326,7 @@ func (m MailModel) handleDirectVisibility(msg directVisibilityMsg) (MailModel, t
 // visibility because activation may have become visible while the durable open
 // was in flight.
 func (m MailModel) handleDirectUnreadResult(msg directUnreadResultMsg) (MailModel, tea.Cmd) {
-	if !m.directUnreadOpInFlight || msg.opSerial == 0 || msg.opSerial != m.directUnreadOpSerial {
+	if !m.directUnreadOpInFlight || msg.opSerial != m.directUnreadOpSerial {
 		return m, nil
 	}
 	m.directUnreadOpInFlight = false
@@ -555,45 +555,12 @@ func nextAcceptedSnapshotSerial(current uint64) uint64 {
 }
 
 // projectPublishedDirectMessages converts only one page exposed by the
-// installed fs-owned publication. The nil fallback exists solely for narrow
-// internal test seams that predate accepted refresh messages; production
-// always installs a publication before direct activation can become current.
+// installed fs-owned publication.
 func (m MailModel) projectPublishedDirectMessages(target fs.DirectTarget, horizon int) ([]ChatMessage, bool) {
-	if m.directPublication != nil {
-		messages, hasOlder := m.directPublication.DirectPage(target, horizon)
-		projected := make([]ChatMessage, len(messages))
-		for index, message := range messages {
-			projected[index] = mailMessageToChatMessage(message, m.humanAddr, target.Address)
-		}
-		return projected, hasOlder
-	}
-	accepted := m.acceptedSnapshot.messagesForUnread(m.humanDir)
-	return projectDirectMessages(m.humanAddr, target, accepted, horizon)
-}
-
-// projectDirectMessages is the legacy owner-neutral bounded projection seam.
-// Accepted production uses DirectMailPublication; this implementation remains
-// source-compatible for focused helpers and fabricated pre-publication state.
-func projectDirectMessages(humanAddr string, target fs.DirectTarget, accepted []fs.MailMessage, horizon int) ([]ChatMessage, bool) {
-	if horizon < 1 {
-		return nil, false
-	}
-	capacity := min(horizon, len(accepted))
-	projected := make([]ChatMessage, 0, capacity)
-	hasOlder := false
-	for index := len(accepted) - 1; index >= 0; index-- {
-		message := accepted[index]
-		if !fs.IsDirectMail(message, humanAddr, target) {
-			continue
-		}
-		if len(projected) == horizon {
-			hasOlder = true
-			break
-		}
-		projected = append(projected, mailMessageToChatMessage(message, humanAddr, target.Address))
-	}
-	for left, right := 0, len(projected)-1; left < right; left, right = left+1, right-1 {
-		projected[left], projected[right] = projected[right], projected[left]
+	messages, hasOlder := m.directPublication.DirectPage(target, horizon)
+	projected := make([]ChatMessage, len(messages))
+	for index, message := range messages {
+		projected[index] = mailMessageToChatMessage(message, m.humanAddr, target.Address)
 	}
 	return projected, hasOlder
 }

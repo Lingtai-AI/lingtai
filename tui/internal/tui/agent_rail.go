@@ -102,7 +102,7 @@ func (m MailModel) agentRailRowAt(childY int) int {
 	}
 	offset := clampAgentRailOffset(m.agentRail.scrollOffset, len(m.agentSelector.rows), m.height)
 	index := offset + childY - agentRailRowsStart
-	if index < 0 || index >= len(m.agentSelector.rows) {
+	if index >= len(m.agentSelector.rows) {
 		return -1
 	}
 	return index

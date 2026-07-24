@@ -103,9 +103,9 @@ func visibleRailV2AcceptPrepared(t *testing.T, app App) App {
 	if unreadResults == 0 {
 		t.Fatal("accepted real prepared refresh did not produce the V1 direct-unread result")
 	}
-	if !app.mail.directPrepared || app.mail.directPublication == nil || app.mail.directUnread == nil {
-		t.Fatalf("accepted prepared state incomplete: prepared=%v publication=%p unread=%p",
-			app.mail.directPrepared, app.mail.directPublication, app.mail.directUnread)
+	if app.mail.directPublication == nil || app.mail.directUnread == nil {
+		t.Fatalf("accepted prepared state incomplete: publication=%p unread=%p",
+			app.mail.directPublication, app.mail.directUnread)
 	}
 	return app
 }
@@ -1280,12 +1280,11 @@ func TestVisibleRailV2UnpreparedRefreshCannotInstallDirectState(t *testing.T) {
 	}
 	if app.mail.directPublication != beforePublication ||
 		app.mail.directUnread != beforeUnread ||
-		!app.mail.directPrepared ||
 		app.mail.acceptedSnapshotSerial != beforeSerial {
-		t.Errorf("serial-0 unprepared message changed direct state: publication %p->%p unread %p->%p prepared=%v serial %d->%d",
+		t.Errorf("serial-0 unprepared message changed direct state: publication %p->%p unread %p->%p serial %d->%d",
 			beforePublication, app.mail.directPublication,
 			beforeUnread, app.mail.directUnread,
-			app.mail.directPrepared, beforeSerial, app.mail.acceptedSnapshotSerial)
+			beforeSerial, app.mail.acceptedSnapshotSerial)
 	}
 	afterBytes, err := os.ReadFile(fixture.statePath)
 	if err != nil {
@@ -1318,8 +1317,8 @@ func TestVisibleRailV2UnpreparedRefreshCannotInstallDirectState(t *testing.T) {
 			break
 		}
 	}
-	if !foundIntruder || !app.mail.directPrepared || app.mail.directPublication == beforePublication {
-		t.Errorf("real prepared path did not install the new safe row/publication: rows=%v prepared=%v publication=%p",
-			agentIDs, app.mail.directPrepared, app.mail.directPublication)
+	if !foundIntruder || app.mail.directPublication == beforePublication {
+		t.Errorf("real prepared path did not install the new safe row/publication: rows=%v publication=%p",
+			agentIDs, app.mail.directPublication)
 	}
 }

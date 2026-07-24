@@ -59,9 +59,9 @@ func directPerformancePreparedRefresh(t *testing.T, app App, accepted []fs.MailM
 		}
 		app, resultCmd = directPerformanceApply(app, result)
 	}
-	if app.mail.directUnread == nil || !app.mail.directPrepared {
-		t.Fatalf("prepared refresh did not install V1 direct state: unread=%p prepared=%v",
-			app.mail.directUnread, app.mail.directPrepared)
+	if app.mail.directUnread == nil || app.mail.directPublication == nil {
+		t.Fatalf("prepared refresh did not install V1 direct state: unread=%p publication=%p",
+			app.mail.directUnread, app.mail.directPublication)
 	}
 	return app, resultCmd
 }

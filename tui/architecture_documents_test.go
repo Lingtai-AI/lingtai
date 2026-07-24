@@ -52,10 +52,10 @@ func TestRuntimeControlSurfaceAnatomyRoute(t *testing.T) {
 			"tui/internal/tui/app.go:640-670",
 			"tui/internal/process/launcher.go:87-135",
 			"tui/main.go:1640-1650",
-			"tui/internal/tui/app.go:763-906",
+			"tui/internal/tui/app.go:763-903",
 			"tui/internal/fs/signal.go:9-55",
 			"tui/main.go:737-767",
-			"tui/internal/tui/app.go:1834-1883",
+			"tui/internal/tui/app.go:1831-1880",
 		}},
 		{"portal/ANATOMY.md", []string{
 			"Runtime/control-surface boundary",

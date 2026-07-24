@@ -824,9 +824,6 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	if target, ok := a.mail.currentDirectTarget(); ok {
 		targetDir = target.Directory
 		targetName = target.Address
-		if targetName == "" {
-			targetName = filepath.Base(targetDir)
-		}
 	}
 	switch command {
 	case "sleep":

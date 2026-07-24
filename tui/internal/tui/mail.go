@@ -257,7 +257,6 @@ type MailModel struct {
 	agentRail              agentRailState
 	directPublication      *fs.DirectMailPublication
 	directLifecycles       map[string]directAgentLifecycle
-	directPrepared         bool
 
 	// Durable direct-unread work is serialized through one accepted-coordinate
 	// command at a time. A newer accepted publication coalesces into
@@ -1109,7 +1108,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				m = m.installSelectorRows(msg.selectorRows)
 				m = m.installDirectLifecycleStates(msg.directStates)
 				m.directPublication = msg.directPublication
-				m.directPrepared = true
 				m = m.clampAgentRail()
 				m, directVisibilityCmd = m.publishAcceptedDirectSnapshot()
 				m = m.recomputeAgentRailUnread()
