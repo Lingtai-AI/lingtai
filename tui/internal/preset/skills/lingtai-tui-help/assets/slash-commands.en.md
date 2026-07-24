@@ -315,11 +315,18 @@ single keystroke.
 
 Detects how the `lingtai-tui` binary was installed (Homebrew or source/user-local)
 and, after you confirm, upgrades the TUI binary and may refresh the co-installed
-portal binary — the Python kernel is untouched. After a successful update it
-shows a restart prompt; it never
-auto-restarts the running TUI. If the install method is unsupported (unknown/
-other), it reports that and makes no changes. The confirmation is mandatory:
-`/update-tui` never installs on a single keystroke.
+portal binary — the Python kernel is untouched. A Homebrew install migrates to
+the native installer instead of running brew; `/update-tui` itself never removes
+the old Homebrew formula/keg — that removal question is asked separately, only
+by the interactive **startup** `[y/N]` prompt (not this command), once a native
+install is verified. On a host where the native binary isn't yet resolved ahead
+of Homebrew on PATH, `/update-tui` reports that the migration is installed but
+not yet complete rather than claiming success, and repeats that report on every
+future run until Homebrew is removed or PATH is reordered. After a successful
+update it shows a restart prompt; it never auto-restarts the running TUI. If
+the install method is unsupported (unknown/other), it reports that and makes no
+changes. The confirmation is mandatory: `/update-tui` never installs on a
+single keystroke.
 
 For install-method detection, source-build failures, Homebrew tap details, or
 mainland-China connectivity, open the bundled `lingtai-update` skill.

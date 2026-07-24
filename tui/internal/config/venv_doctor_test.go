@@ -210,7 +210,8 @@ func TestDetectTUIInstallMethodSourceAliasInBrewBinBeatsHomebrew(t *testing.T) {
 	globalDir := t.TempDir()
 	// A source install with brew present lands in $(brew --prefix)/bin. Invoked
 	// through the "lingtai" alias, the Homebrew path heuristic would otherwise
-	// misroute this source install to `brew upgrade`.
+	// misroute this source install into a Homebrew-to-native migration attempt
+	// it doesn't need.
 	binDir := "/opt/homebrew/bin"
 	exe := filepath.Join(binDir, "lingtai")
 	writeSourceInstallMetadata(t, globalDir, "/opt/homebrew", binDir, []string{filepath.Join(binDir, "lingtai-tui")})
@@ -313,6 +314,76 @@ func TestDetectTUIInstallMethodUnknownWhenMetadataDoesNotMatch(t *testing.T) {
 	}
 	if len(info.Diagnostics) == 0 || !strings.Contains(info.Diagnostics[0].Text, "does not match executable") {
 		t.Fatalf("expected stale metadata diagnostic, got %+v", info.Diagnostics)
+	}
+}
+
+// TestDetectTUIInstallMethodApplePreSiliconPathOrderShadowsNativeBinDir
+// pins the exact PATH-precedence fact BLOCKER-1 turns on: on a standard
+// Apple-Silicon Homebrew host, /opt/homebrew/bin is earlier on PATH than
+// install.sh's default native bin dir (~/.local/bin or /usr/local/bin), so a
+// fresh native install does not take over `lingtai-tui` resolution. This test
+// does not itself resolve PATH (detectTUIInstallMethod takes the running exe
+// as an argument, not a PATH scan) — it pins the install-metadata-vs-exe
+// mismatch classification that the updater's LookPath probe (tested in
+// tui_updater_test.go) exists to catch downstream of this detection.
+func TestDetectTUIInstallMethodApplePreSiliconPathOrderShadowsNativeBinDir(t *testing.T) {
+	globalDir := t.TempDir()
+	nativePrefix := t.TempDir()
+	nativeBinDir := filepath.Join(nativePrefix, "bin") // stands in for ~/.local/bin
+	writeSourceInstallMetadata(t, globalDir, nativePrefix, nativeBinDir, []string{filepath.Join(nativeBinDir, "lingtai-tui")})
+
+	// The running exe is still the Homebrew-linked binary: /opt/homebrew/bin
+	// precedes the native bin dir on PATH, so the shell never reached the
+	// freshly-installed native binary this launch.
+	homebrewExe := "/opt/homebrew/bin/__lingtai_doctor_test_lingtai_tui__"
+
+	info := detectTUIInstallMethod(globalDir, homebrewExe, DoctorOptions{
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if info.Method != TUIInstallMethodHomebrew {
+		t.Fatalf("resolved exe is still Homebrew's, method should stay homebrew, got %s", info.Method)
+	}
+	if !info.DuplicateNativeInstall {
+		t.Fatalf("expected DuplicateNativeInstall for shadowed-but-valid native metadata, got %+v", info)
+	}
+	wantTarget := filepath.Join(nativeBinDir, "lingtai-tui")
+	if info.DuplicateNativeTarget != wantTarget {
+		t.Fatalf("DuplicateNativeTarget = %q, want %q (structured path for the cleanup primitive's post-uninstall PATH check)", info.DuplicateNativeTarget, wantTarget)
+	}
+	if !strings.Contains(info.DuplicateNativeDetail, nativeBinDir) {
+		t.Fatalf("expected duplicate detail to name the native bin dir, got %q", info.DuplicateNativeDetail)
+	}
+	if !strings.Contains(info.DuplicateNativeDetail, "v0.8.1") {
+		t.Fatalf("expected duplicate detail to name the verified version, got %q", info.DuplicateNativeDetail)
+	}
+	if !strings.Contains(info.DuplicateNativeDetail, "/opt/homebrew") {
+		t.Fatalf("expected duplicate detail to also name the shadowing Homebrew path, got %q", info.DuplicateNativeDetail)
+	}
+	if !strings.Contains(info.Summary(), "duplicate native install") {
+		t.Fatalf("expected duplicate state to surface in Summary(), got %q", info.Summary())
+	}
+}
+
+// TestDetectTUIInstallMethodNoDuplicateWhenOnlySourceMetadataMismatches
+// proves the duplicate marker is specific to the Homebrew+stale-native-
+// metadata combination — a stale/mismatched source install with a
+// *non-Homebrew* running exe must still fall through to plain "unknown",
+// exactly as before this change (regression guard for
+// TestDetectTUIInstallMethodUnknownWhenMetadataDoesNotMatch above).
+func TestDetectTUIInstallMethodNoDuplicateWhenOnlySourceMetadataMismatches(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	writeSourceInstallMetadata(t, globalDir, prefix, binDir, []string{filepath.Join(binDir, "lingtai-tui")})
+
+	info := detectTUIInstallMethod(globalDir, filepath.Join(t.TempDir(), "bin", "lingtai-tui"), DoctorOptions{
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if info.Method != TUIInstallMethodUnknown {
+		t.Fatalf("method = %s, want unknown", info.Method)
+	}
+	if info.DuplicateNativeInstall {
+		t.Fatalf("non-homebrew unknown exe must not report a duplicate native install: %+v", info)
 	}
 }
 
@@ -713,17 +784,29 @@ func (f commandRunnerFunc) Run(name string, args ...string) CommandResult {
 	return f(name, args...)
 }
 
-func TestRunDoctorUpdateTUIOutdatedForceRunsBrewInOrder(t *testing.T) {
-	runner := &fakeRunner{versions: []string{"0.9.7", "0.9.7"}}
-	report := RunDoctorUpdate(t.TempDir(), DoctorOptions{
+func TestRunDoctorUpdateTUIOutdatedForceMigratesHomebrewToNative(t *testing.T) {
+	globalDir := t.TempDir()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	target := filepath.Join(binDir, "lingtai-tui")
+	runner := &homebrewMigrationRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"}
+	report := RunDoctorUpdate(globalDir, DoctorOptions{
 		CurrentTUIVersion: "v0.8.0",
 		ForceTUI:          true,
 		ForcePython:       false,
 		HTTPClient:        testVersionClient(t, "0.9.7", "v0.8.1"),
 		Runner:            runner,
 		LookPath: func(name string) (string, error) {
+			// name is "lingtai-tui" for the post-migration PATH-takeover proof
+			// (config.homebrewTUIUpdater.Upgrade) and "brew" for the unrelated
+			// cargo/toolchain probe elsewhere in RunDoctorUpdate; both must
+			// resolve for this test to prove a genuinely successful migration
+			// rather than accidentally exercising the shadowed-PATH branch.
 			if name == "brew" {
 				return "/opt/homebrew/bin/brew", nil
+			}
+			if name == "lingtai-tui" {
+				return target, nil
 			}
 			return "", errors.New("not found")
 		},
@@ -736,18 +819,17 @@ func TestRunDoctorUpdateTUIOutdatedForceRunsBrewInOrder(t *testing.T) {
 	if !report.Healthy {
 		t.Fatalf("expected healthy report: %+v", report.Lines)
 	}
-	if !containsLine(report.Lines, "Brew upgrade finished") {
-		t.Fatalf("expected brew completion guidance: %+v", report.Lines)
+	if !containsLine(report.Lines, "Migrated from Homebrew to the native installer") {
+		t.Fatalf("expected migration completion guidance: %+v", report.Lines)
 	}
-	want := []string{
-		"/opt/homebrew/bin/brew update",
-		"/opt/homebrew/bin/brew upgrade lingtai-ai/lingtai/lingtai-tui",
+	// doctor is non-interactive: it never supplies ConfirmHomebrewCleanup, so
+	// even a fully verified PATH takeover must leave Homebrew removal pending
+	// — doctor must never prompt or run brew uninstall itself.
+	if !containsLine(report.Lines, "brew uninstall") {
+		t.Fatalf("expected manual brew uninstall guidance since doctor never prompts/uninstalls: %+v", report.Lines)
 	}
-	if !containsCall(runner.calls, want[0]) || !containsCall(runner.calls, want[1]) {
-		t.Fatalf("expected brew calls %v, got %#v", want, runner.calls)
-	}
-	if indexOfCall(runner.calls, want[0]) > indexOfCall(runner.calls, want[1]) {
-		t.Fatalf("expected brew update before brew upgrade, got %#v", runner.calls)
+	if runsBrewCommand(runner.calls) {
+		t.Fatalf("forced doctor update for a homebrew install must never run brew, got %#v", runner.calls)
 	}
 }
 

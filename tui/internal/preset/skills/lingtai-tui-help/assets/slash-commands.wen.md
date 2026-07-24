@@ -248,7 +248,7 @@ Space 择之，Esc 罢而不易当前会。
 ### `/update-tui` — 更 TUI 与 portal 器
 **用：** `/update-tui`
 
-察 `lingtai-tui` 器之安法（brew 或源码/本地），允而后更其器，或并刷新共装之 portal 器——不触 Python 核。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
+察 `lingtai-tui` 器之安法（brew 或源），俟允而独升其器（不更核）。brew 装者，迁于原生安装器，不复行 brew；`/update-tui` 自身不去旧 formula/keg——去留另为一事，唯启动时交互之流程，于原生器验讫之后，方以 `[y/N]` 复问，此命令不问。若原生器未先 brew 而列于 PATH，则 `/update-tui` 如实告以迁已装而未竟，不诳言成，且每行必复告此状，至去旧 brew 装或调整 PATH 为止。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
 
 ### `/login` — 察并理凭
 **用：** `/login`

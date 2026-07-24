@@ -564,6 +564,25 @@ type TUIInstallInfo struct {
 	Detail       string
 	MetadataPath string
 	Diagnostics  []DoctorLine
+
+	// DuplicateNativeInstall is set when valid native (source-install-shaped)
+	// metadata exists at MetadataPath but does not match the currently
+	// resolved lingtai-tui executable, AND that executable still resolves to
+	// Homebrew. This is the post-migration state on a host where the native
+	// install landed in a bin dir that is not earlier on PATH than Homebrew's:
+	// a native binary was installed and verified, but the shell still runs
+	// the Homebrew one. Method stays TUIInstallMethodHomebrew (the resolved
+	// binary really is still Homebrew's) so routing/detail text is unchanged,
+	// but callers must check this field first and surface the manual-cleanup
+	// state instead of re-running the migration installer.
+	DuplicateNativeInstall bool
+	DuplicateNativeDetail  string
+	// DuplicateNativeTarget is the verified native lingtai-tui binary path
+	// (bin_dir/lingtai-tui) backing DuplicateNativeInstall/DuplicateNativeDetail
+	// above, kept as a structured path (not parsed out of the human-readable
+	// Detail string) so callers can re-resolve PATH and compare against it
+	// after a Homebrew cleanup.
+	DuplicateNativeTarget string
 }
 
 // Summary returns a human-readable label for the install method.
@@ -573,6 +592,9 @@ func (i TUIInstallInfo) Summary() string {
 		label = "source/user-local"
 	} else if i.Method == TUIInstallMethodUnknown {
 		label = "unknown/other"
+	}
+	if i.DuplicateNativeInstall {
+		label = "homebrew (duplicate native install pending manual cleanup)"
 	}
 	if i.Detail == "" {
 		return label
@@ -710,6 +732,10 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
 	case ReleaseComparisonUpToDate:
 		r.add(DoctorOK, "TUI is up to date")
+		if install.DuplicateNativeInstall {
+			r.add(DoctorWarn, "%s", install.DuplicateNativeDetail)
+			r.add(DoctorInfo, "Remove the old Homebrew install yourself with `brew uninstall %s` (never done automatically) once you've confirmed the native install works.", homebrewTUIFormula)
+		}
 		return
 	case ReleaseComparisonCurrentNonSemver:
 		r.add(DoctorWarn, "Cannot compare TUI release versions: current version %q is not a strict vX.Y.Z release; latest is %q", current, release.TagName)
@@ -728,13 +754,11 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		return
 	}
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:         release.TagName,
-		GlobalDir:             globalDir,
-		Runner:                opts.Runner,
-		LookPath:              opts.LookPath,
-		Stat:                  opts.Stat,
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
+		LatestVersion: release.TagName,
+		GlobalDir:     globalDir,
+		Runner:        opts.Runner,
+		LookPath:      opts.LookPath,
+		Stat:          opts.Stat,
 	})
 	for _, line := range update.Lines {
 		r.add(line.Severity, "%s", line.Text)
@@ -754,6 +778,9 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 		opts.LookupEnv = os.LookupEnv
 	}
 
+	var staleNativeMeta tuiInstallMetadata
+	var staleNativeMetaValid bool
+
 	meta, err := readTUIInstallMetadata(info.MetadataPath)
 	if err == nil {
 		if isSourceInstallMetadata(meta) {
@@ -764,6 +791,15 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 				}
 				return TUIInstallInfo{Method: TUIInstallMethodSource, Detail: detail, MetadataPath: info.MetadataPath}
 			}
+			// Valid native metadata exists but the running exe doesn't match
+			// it — e.g. a prior Homebrew-to-native migration installed and
+			// verified a native binary, but Homebrew is still earlier on
+			// PATH so the shell keeps resolving the old binary. Remember
+			// this instead of only emitting a diagnostic: if the exe below
+			// also resolves as Homebrew, this becomes the duplicate-install
+			// state rather than a plain fresh Homebrew detection.
+			staleNativeMeta = meta
+			staleNativeMetaValid = true
 			info.Diagnostics = append(info.Diagnostics, DoctorLine{
 				Severity: DoctorWarn,
 				Text:     fmt.Sprintf("TUI install metadata at %s does not match executable %s; ignoring it", info.MetadataPath, exe),
@@ -792,6 +828,19 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 	if ok, detail := detectHomebrewTUIInstall(homebrewExe, opts.LookupEnv); ok {
 		info.Method = TUIInstallMethodHomebrew
 		info.Detail = detail
+		if staleNativeMetaValid {
+			binDir := staleNativeMeta.BinDir
+			if binDir == "" {
+				binDir = filepath.Join(staleNativeMeta.Prefix, "bin")
+			}
+			target := filepath.Join(binDir, "lingtai-tui")
+			info.DuplicateNativeInstall = true
+			info.DuplicateNativeTarget = target
+			info.DuplicateNativeDetail = fmt.Sprintf(
+				"native install already verified at %s (version %s), but %s is still resolved first on PATH",
+				target, valueOrUnknown(staleNativeMeta.StampedVersion), detail,
+			)
+		}
 	}
 	return info
 }

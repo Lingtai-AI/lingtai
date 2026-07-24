@@ -257,7 +257,7 @@ Telegram、飞书、微信）将智能体连接到外部服务。它不负责设
 ### `/update-tui` — 更新 TUI 与 portal 二进制
 **用法：** `/update-tui`
 
-检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后升级 TUI 二进制，并可能同时刷新共装的 portal 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
+检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后升级 TUI 二进制，并可能同时刷新共装的 portal 二进制——不触碰 Python 内核。Homebrew 安装会迁移到原生安装器而不再执行 brew；`/update-tui` 本身不会移除旧的 Homebrew formula/keg——是否移除是另一个独立的问题，只有交互式**启动**流程在原生安装通过验证后才会以 `[y/N]` 提问，本命令不会。如果原生二进制在 PATH 中尚未排在 Homebrew 之前，`/update-tui` 会如实报告迁移已安装但尚未完成，而非宣称成功，并在 Homebrew 被移除或 PATH 被调整之前的每次运行中持续如实报告该状态。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
 
 ### `/login` — 查看与管理凭证
 **用法：** `/login`
