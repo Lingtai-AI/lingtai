@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -897,6 +898,15 @@ func TestFirstRunAgentPresetsNext_AdvancesWithoutLiveCodexProbe(t *testing.T) {
 		presetDefaultIdx: 0,
 		presetCfgCursor:  2, // row 0, Back 1, Next 2
 		cursor:           0,
+		nameInput:        textinput.New(),
+		dirInput:         textinput.New(),
+		ctxLimitInput:    textinput.New(),
+		soulDelayInput:   textinput.New(),
+		maxRpmInput:      textinput.New(),
+		maxAedInput:      textinput.New(),
+		covenantInput:    textinput.New(),
+		soulFlowInput:    textinput.New(),
+		commentInput:     textinput.New(),
 	}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
