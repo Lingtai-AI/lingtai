@@ -147,23 +147,64 @@ func fitAgentRailLine(line string, width int) string {
 func (m MailModel) renderAgentRailRow(row agentSelectorRow, index, width int) string {
 	current := row.Main && m.agentSelector.selectedThreadKey == "" ||
 		!row.Main && fs.DirectThreadKey(row.Target) == m.agentSelector.selectedThreadKey
-	prefix := selectorRowPrefix(current, index == m.agentSelector.cursor)
+	cursor := index == m.agentSelector.cursor
+	highlighted := m.agentRail.focused && cursor
+	render := func(style lipgloss.Style, text string) string {
+		if text == "" {
+			return ""
+		}
+		if highlighted {
+			style = style.Background(ColorSurface)
+		}
+		return style.Render(text)
+	}
+
+	cursorMarker := render(lipgloss.NewStyle(), " ")
+	if highlighted {
+		cursorMarker = render(lipgloss.NewStyle().Foreground(ColorAccent), ">")
+	}
+	currentMarker := render(lipgloss.NewStyle(), " ")
+	if current {
+		currentMarker = render(lipgloss.NewStyle().Foreground(ColorAgent), "•")
+	}
+
 	badge := ""
 	if !row.Main {
 		if count := m.agentRail.unreadByThread[fs.DirectThreadKey(row.Target)]; count > 0 {
 			badge = fmt.Sprintf(" %d", count)
 		}
 	}
-	labelWidth := width - lipgloss.Width(prefix) - lipgloss.Width(badge)
+
+	plainLabel := ansi.Strip(row.Label)
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	if row.Main || current || highlighted {
+		labelStyle = lipgloss.NewStyle().Foreground(ColorText)
+	}
+	if current {
+		labelStyle = labelStyle.Bold(true)
+	}
+
+	labelWidth := width - 3 - lipgloss.Width(badge)
 	if labelWidth < 0 {
 		labelWidth = 0
 	}
-	label := ansi.Truncate(row.Label, labelWidth, "…")
-	line := prefix + label
-	if padding := width - lipgloss.Width(line) - lipgloss.Width(badge); padding > 0 {
-		line += strings.Repeat(" ", padding)
+	label := ansi.Truncate(plainLabel, labelWidth, "")
+	if labelWidth > 0 && lipgloss.Width(plainLabel) > labelWidth {
+		contentWidth := labelWidth - 1
+		label = ansi.Truncate(plainLabel, contentWidth, "")
+		if padding := contentWidth - lipgloss.Width(label); padding > 0 {
+			label += strings.Repeat(" ", padding)
+		}
+		label += "…"
 	}
-	return fitAgentRailLine(line+badge, width)
+	line := cursorMarker +
+		currentMarker +
+		render(lipgloss.NewStyle(), " ") +
+		render(labelStyle, label)
+	if padding := width - lipgloss.Width(line) - lipgloss.Width(badge); padding > 0 {
+		line += render(lipgloss.NewStyle(), strings.Repeat(" ", padding))
+	}
+	return fitAgentRailLine(line+render(lipgloss.NewStyle(), badge), width)
 }
 
 // renderAgentRail is a pure projection of the current V1 selector and the
