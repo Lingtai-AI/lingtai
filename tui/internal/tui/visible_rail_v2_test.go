@@ -460,15 +460,31 @@ func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 		t.Errorf("derived accepted unread map = %#v, want Alpha=12 Bravo=3 Long=1", rail.unread)
 	}
 
-	// /agents and the rail are two presentations of the same V1 rows.
+	// /agents and the rail are two presentations of the same V1 rows. V2 must
+	// not restyle the canonical overlay while adding the separate rail.
 	selector := ansi.Strip(app.mail.renderAgentSelector())
-	lastPosition := -1
-	for _, row := range app.mail.agentSelector.rows {
-		position := strings.Index(selector, row.Label)
-		if position < 0 || position <= lastPosition {
-			t.Errorf("/agents overlay does not render canonical row %q in rail order", row.Label)
-		}
-		lastPosition = position
+	canonicalSelectorWidth := app.mail.width - 4
+	if canonicalSelectorWidth < 16 {
+		canonicalSelectorWidth = app.mail.width
+	}
+	canonicalSelectorLines := []string{i18n.T("agent_selector.title")}
+	for index, row := range app.mail.agentSelector.rows {
+		current := row.Main && app.mail.agentSelector.selectedThreadKey == "" ||
+			!row.Main && fs.DirectThreadKey(row.Target) == app.mail.agentSelector.selectedThreadKey
+		prefix := selectorRowPrefix(current, index == app.mail.agentSelector.cursor)
+		canonicalSelectorLines = append(canonicalSelectorLines,
+			prefix+ansi.Truncate(row.Label, canonicalSelectorWidth-2, ""))
+	}
+	canonicalSelectorLines = append(canonicalSelectorLines, i18n.T("agent_selector.hint"))
+	canonicalSelectorBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		Width(canonicalSelectorWidth).
+		Render(strings.Join(canonicalSelectorLines, "\n"))
+	wantSelector := ansi.Strip(lipgloss.Place(app.mail.width, app.mail.height,
+		lipgloss.Center, lipgloss.Center, canonicalSelectorBox))
+	if selector != wantSelector {
+		t.Error("V2 restyled the canonical /agents overlay while adding the separate rail")
 	}
 
 	app.mail = app.mail.setSelectorCursor(bravoIndex)
