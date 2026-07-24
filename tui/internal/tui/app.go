@@ -290,8 +290,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// Reserve rows for root chrome first, then forward the *reduced*
-		// child window size — never the raw terminal height. See
+		// Derive both axes from the root layout budget, then forward the
+		// child content rectangle — never the raw terminal dimensions. See
 		// layout.go (LayoutBudget) for the contract.
 		return a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
 
@@ -1498,9 +1498,9 @@ func firstLine(err error) string {
 
 // sendSize returns a tea.Cmd that sends the current *child* window size to a
 // newly created view so it doesn't render with zero width/height. The size is
-// the terminal dimensions reduced by any root chrome (see layout.go) — the same
-// budget the incoming-WindowSizeMsg handler forwards, so a freshly-routed view
-// and a resized view agree on their height.
+// the content rectangle produced by LayoutBudget (see layout.go) — the same
+// geometry the incoming-WindowSizeMsg handler forwards, so a freshly-routed
+// view and a resized view agree on viewport/composer/header/footer dimensions.
 func (a App) sendSize() tea.Cmd {
 	cs := a.layoutBudget().ChildWindowSize()
 	return func() tea.Msg { return childWindowSizeMsg{WindowSizeMsg: cs} }
