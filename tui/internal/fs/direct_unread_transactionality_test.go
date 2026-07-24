@@ -3,6 +3,7 @@ package fs
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -49,12 +50,10 @@ func TestDirectUnreadCopyOnWriteSaveFailureKeepsMemoryAndBytes(t *testing.T) {
 		t.Fatalf("ReadFile state before failed save: %v", err)
 	}
 
-	// writeJSONAtomic, the established JSON helper, writes statePath+".tmp" in
-	// the same directory. A directory at that path makes each attempted save fail
-	// without modifying the current durable file.
-	if err := os.Mkdir(statePath+".tmp", 0o755); err != nil {
-		t.Fatalf("Mkdir failing temp path: %v", err)
-	}
+	// Block creation of every sibling temp name, including unique names. On a
+	// platform that does not enforce directory write permissions this failure
+	// subcase is explicitly skipped rather than reporting false coverage.
+	makeDirectoryUnwritableOrSkip(t, filepath.Dir(statePath))
 	if err := store.MarkSeen(target, []MailMessage{baseline, late}); err == nil {
 		t.Error("MarkSeen succeeded despite deterministic state save failure")
 	}
@@ -79,9 +78,6 @@ func TestDirectUnreadCopyOnWriteSaveFailureKeepsMemoryAndBytes(t *testing.T) {
 		t.Fatalf("failed SyncTargets changed persisted bytes:\nbefore=%q\nafter=%q", before, afterSync)
 	}
 
-	if err := os.Remove(statePath + ".tmp"); err != nil {
-		t.Fatalf("Remove failing temp path: %v", err)
-	}
 	newMail := directUnreadIncoming(newTarget, "new", "new", "2026-07-22T14:46:00Z")
 	if _, err := store.UnreadCount(newTarget, []MailMessage{newMail}); err == nil {
 		t.Error("failed SyncTargets published the new target in memory")

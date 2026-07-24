@@ -43,6 +43,61 @@ type directUnreadMessage struct {
 	at time.Time
 }
 
+var directUnreadPathLocks sync.Map // canonical state path -> *sync.Mutex
+
+func directUnreadPathMutex(path string) *sync.Mutex {
+	key, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		key = filepath.Clean(path)
+	}
+	lock, _ := directUnreadPathLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+// Direct-unread transactions always acquire locks in this order: canonical
+// path mutex, stable sibling OS lock, then store.mu. They release in reverse.
+func withDirectUnreadTransaction(path string, transaction func() error) (err error) {
+	processLock := directUnreadPathMutex(path)
+	processLock.Lock()
+	defer processLock.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create direct unread state parent: %w", err)
+	}
+	lockPath := path + ".lock"
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("open direct unread transaction lock: %w", err)
+	}
+	if err := lockFileExclusive(file); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("lock direct unread transaction: %w", err)
+	}
+	defer func() {
+		if unlockErr := unlockFile(file); err == nil && unlockErr != nil {
+			err = fmt.Errorf("unlock direct unread transaction: %w", unlockErr)
+		}
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close direct unread transaction lock: %w", closeErr)
+		}
+	}()
+	return transaction()
+}
+
+// refreshedDirectUnreadState chooses a valid on-disk snapshot as the mutation
+// baseline. Recoverable absent/malformed/unsupported state keeps valid memory
+// and requests a repair write; all other read errors fail closed.
+func refreshedDirectUnreadState(path string, memory directUnreadState) (directUnreadState, bool, error) {
+	disk, recoverable, err := readDirectUnreadState(path)
+	if err != nil {
+		return directUnreadState{}, false, err
+	}
+	if recoverable || disk.Threads == nil {
+		return cloneDirectUnreadState(memory), true, nil
+	}
+	return cloneDirectUnreadState(disk), false, nil
+}
+
 // OpenDirectUnreadStore opens version-1 state and baselines any missing,
 // corrupt, unsupported, or target-invalid cursor from accepted direct mail.
 func OpenDirectUnreadStore(projectDirectory, humanAddress string, targets []DirectTarget, accepted []MailMessage) (*DirectUnreadStore, error) {
@@ -54,40 +109,47 @@ func OpenDirectUnreadStore(projectDirectory, humanAddress string, targets []Dire
 	}
 
 	path := filepath.Join(projectDirectory, ".lingtai", ".tui-asset", "direct-unread.json")
-	state, fresh, err := readDirectUnreadState(path)
-	if err != nil {
+	var opened directUnreadState
+	if err := withDirectUnreadTransaction(path, func() error {
+		state, fresh, err := readDirectUnreadState(path)
+		if err != nil {
+			return err
+		}
+		changed := fresh
+		if state.Threads == nil {
+			state.Threads, changed = make(map[string]directUnreadThread), true
+		}
+		next := cloneDirectUnreadState(state)
+		needsBaseline := make([]DirectTarget, 0, len(targets))
+		for _, target := range targets {
+			key := DirectThreadKey(target)
+			thread, exists := next.Threads[key]
+			_, valid := directUnreadCursorForThread(thread)
+			if !exists || thread.AgentID != target.AgentID || !valid {
+				needsBaseline = append(needsBaseline, target)
+			}
+		}
+		if len(needsBaseline) != 0 {
+			baselines, err := directUnreadBaselines(needsBaseline, accepted, humanAddress)
+			if err != nil {
+				return err
+			}
+			for _, target := range needsBaseline {
+				next.Threads[DirectThreadKey(target)] = directUnreadThreadForCursor(target.AgentID, baselines[DirectThreadKey(target)])
+			}
+			changed = true
+		}
+		if changed {
+			if err := saveDirectUnreadState(path, next); err != nil {
+				return err
+			}
+		}
+		opened = cloneDirectUnreadState(next)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	changed := fresh
-	if state.Threads == nil {
-		state.Threads, changed = make(map[string]directUnreadThread), true
-	}
-	next := cloneDirectUnreadState(state)
-	needsBaseline := make([]DirectTarget, 0, len(targets))
-	for _, target := range targets {
-		key := DirectThreadKey(target)
-		thread, exists := next.Threads[key]
-		_, valid := directUnreadCursorForThread(thread)
-		if !exists || thread.AgentID != target.AgentID || !valid {
-			needsBaseline = append(needsBaseline, target)
-		}
-	}
-	if len(needsBaseline) != 0 {
-		baselines, err := directUnreadBaselines(needsBaseline, accepted, humanAddress)
-		if err != nil {
-			return nil, err
-		}
-		for _, target := range needsBaseline {
-			next.Threads[DirectThreadKey(target)] = directUnreadThreadForCursor(target.AgentID, baselines[DirectThreadKey(target)])
-		}
-		changed = true
-	}
-	if changed {
-		if err := saveDirectUnreadState(path, next); err != nil {
-			return nil, err
-		}
-	}
-	return &DirectUnreadStore{projectDirectory: projectDirectory, humanAddress: humanAddress, statePath: path, state: cloneDirectUnreadState(next)}, nil
+	return &DirectUnreadStore{projectDirectory: projectDirectory, humanAddress: humanAddress, statePath: path, state: opened}, nil
 }
 
 // SyncTargets adds and baselines genuinely new stable keys; it never prunes.
@@ -98,40 +160,47 @@ func (s *DirectUnreadStore) SyncTargets(targets []DirectTarget, accepted []MailM
 	if err := validateDirectUnreadTargets(s.projectDirectory, targets); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return withDirectUnreadTransaction(s.statePath, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	newTargets := make([]DirectTarget, 0, len(targets))
-	for _, target := range targets {
-		key := DirectThreadKey(target)
-		thread, exists := s.state.Threads[key]
-		if !exists {
-			newTargets = append(newTargets, target)
-			continue
+		base, repair, err := refreshedDirectUnreadState(s.statePath, s.state)
+		if err != nil {
+			return err
 		}
-		if thread.AgentID != target.AgentID {
-			return fmt.Errorf("sync direct unread target %q: inconsistent agent ID", key)
+		newTargets := make([]DirectTarget, 0, len(targets))
+		for _, target := range targets {
+			key := DirectThreadKey(target)
+			thread, exists := base.Threads[key]
+			if !exists {
+				newTargets = append(newTargets, target)
+				continue
+			}
+			if thread.AgentID != target.AgentID {
+				return fmt.Errorf("sync direct unread target %q: inconsistent agent ID", key)
+			}
+			if _, valid := directUnreadCursorForThread(thread); !valid {
+				return fmt.Errorf("sync direct unread target %q: invalid stored boundary", key)
+			}
 		}
-		if _, valid := directUnreadCursorForThread(thread); !valid {
-			return fmt.Errorf("sync direct unread target %q: invalid stored boundary", key)
+		next := cloneDirectUnreadState(base)
+		if len(newTargets) != 0 {
+			baselines, err := directUnreadBaselines(newTargets, accepted, s.humanAddress)
+			if err != nil {
+				return err
+			}
+			for _, target := range newTargets {
+				next.Threads[DirectThreadKey(target)] = directUnreadThreadForCursor(target.AgentID, baselines[DirectThreadKey(target)])
+			}
 		}
-	}
-	if len(newTargets) == 0 {
+		if repair || len(newTargets) != 0 {
+			if err := saveDirectUnreadState(s.statePath, next); err != nil {
+				return err
+			}
+		}
+		s.state = cloneDirectUnreadState(next)
 		return nil
-	}
-	baselines, err := directUnreadBaselines(newTargets, accepted, s.humanAddress)
-	if err != nil {
-		return err
-	}
-	next := cloneDirectUnreadState(s.state)
-	for _, target := range newTargets {
-		next.Threads[DirectThreadKey(target)] = directUnreadThreadForCursor(target.AgentID, baselines[DirectThreadKey(target)])
-	}
-	if err := saveDirectUnreadState(s.statePath, next); err != nil {
-		return err
-	}
-	s.state = cloneDirectUnreadState(next)
-	return nil
+	})
 }
 
 // UnreadCount counts unique accepted incoming direct messages after the cursor.
@@ -184,27 +253,39 @@ func (s *DirectUnreadStore) MarkSeen(target DirectTarget, accepted []MailMessage
 	}
 	candidate := directUnreadCursorForMessages(messages)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	thread, err := s.threadForTargetLocked(target)
-	if err != nil {
-		return err
-	}
-	current, valid := directUnreadCursorForThread(thread)
-	if !valid {
-		return fmt.Errorf("mark direct unread target %q: invalid stored boundary", DirectThreadKey(target))
-	}
-	nextCursor, changed := advanceDirectUnreadCursor(current, candidate)
-	if !changed {
+	return withDirectUnreadTransaction(s.statePath, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		base, repair, err := refreshedDirectUnreadState(s.statePath, s.state)
+		if err != nil {
+			return err
+		}
+		key := DirectThreadKey(target)
+		thread, exists := base.Threads[key]
+		if !exists {
+			return fmt.Errorf("direct unread target %q is not synchronized", key)
+		}
+		if thread.AgentID != target.AgentID {
+			return fmt.Errorf("direct unread target %q has inconsistent agent ID", key)
+		}
+		current, valid := directUnreadCursorForThread(thread)
+		if !valid {
+			return fmt.Errorf("mark direct unread target %q: invalid stored boundary", key)
+		}
+		nextCursor, changed := advanceDirectUnreadCursor(current, candidate)
+		next := cloneDirectUnreadState(base)
+		if changed {
+			next.Threads[key] = directUnreadThreadForCursor(target.AgentID, nextCursor)
+		}
+		if repair || changed {
+			if err := saveDirectUnreadState(s.statePath, next); err != nil {
+				return err
+			}
+		}
+		s.state = cloneDirectUnreadState(next)
 		return nil
-	}
-	next := cloneDirectUnreadState(s.state)
-	next.Threads[DirectThreadKey(target)] = directUnreadThreadForCursor(target.AgentID, nextCursor)
-	if err := saveDirectUnreadState(s.statePath, next); err != nil {
-		return err
-	}
-	s.state = cloneDirectUnreadState(next)
-	return nil
+	})
 }
 
 func validateDirectUnreadTargets(projectDirectory string, targets []DirectTarget) error {
