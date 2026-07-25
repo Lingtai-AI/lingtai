@@ -271,52 +271,6 @@ func scanInternalMailbox(dir, source string) []parsedMail {
 	return mails
 }
 
-func scanImapMailbox(dir, account string) []parsedMail {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var mails []parsedMail
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		msgPath := filepath.Join(dir, entry.Name(), "message.json")
-		data, err := os.ReadFile(msgPath)
-		if err != nil {
-			continue
-		}
-		var msg mailMessage
-		if json.Unmarshal(data, &msg) != nil {
-			continue
-		}
-
-		from := msg.From
-		if msg.FromAddress != "" && msg.FromAddress != msg.From {
-			from = msg.From + " <" + msg.FromAddress + ">"
-		}
-
-		// Parse IMAP date (RFC 2822 style)
-		t, _ := time.Parse("Mon, 02 Jan 2006 15:04:05 -0700", msg.Date)
-
-		atts := parseAttachments(msg.Attachments)
-		if len(atts) == 0 {
-			atts = parseAttachments(msg.Files)
-		}
-
-		mails = append(mails, parsedMail{
-			From:        from,
-			To:          account,
-			Subject:     msg.Subject,
-			Body:        msg.Message,
-			Time:        t,
-			Attachments: atts,
-			Source:      "imap:" + account,
-		})
-	}
-	return mails
-}
-
 func isTextAttachment(contentType, filename string) bool {
 	if strings.HasPrefix(contentType, "text/") {
 		return true

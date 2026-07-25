@@ -38,7 +38,7 @@ maintenance: |
 | `enrichRecord`, `RoleFor`, `enterability` | `tui/internal/inventory/inventory.go:220-295` | Read `.agent.json` and `.status.json`, derive role/admin/IM/heartbeat/lock plus lifecycle/molt/live-context state, and mark unreadable, human, phantom, pathless, or non-admin records as non-enterable with a typed reason and optional detail; only valid orchestrator/admin records are enterable. |
 | `collapseByAgentDir` | `tui/internal/inventory/inventory.go:297-320` | Collapses duplicate visible processes for the same agent dir, preferring the PID currently advertised in `.status.json` when available. |
 | `sortRecords` / `groupRecords` | `tui/internal/inventory/inventory.go:346-397` | Deterministic project, role, display-name, path, PID sorting and project grouping. |
-| `SummarizeIMIdentities`, `SummarizeAdmin`, `HumanUptimeFromEtime`, `HeartbeatLabel` | `tui/internal/inventory/inventory.go:455-602` | Small rendering helpers shared by CLI and TUI callers without importing either package. |
+| `SummarizeIMIdentities`, `SummarizeAdmin`, `HumanUptimeFromEtime` | `tui/internal/inventory/inventory.go:455-565` | Small rendering helpers shared by CLI and TUI callers without importing either package. |
 
 ## Connections
 

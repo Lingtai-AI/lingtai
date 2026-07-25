@@ -589,14 +589,3 @@ func parseEtimeSeconds(etime string) (int, bool) {
 	}
 	return days*24*60*60 + secs, true
 }
-
-func HeartbeatLabel(h fs.HeartbeatStatus) string {
-	switch {
-	case h.Fresh:
-		return "fresh"
-	case h.Exists:
-		return "stale"
-	default:
-		return "missing"
-	}
-}

@@ -159,17 +159,6 @@ func notificationTitle(agentDir string) string {
 	return fmt.Sprintf("%s — %s", base, filepath.Base(agentDir))
 }
 
-func (m NotificationModel) blockWrapWidth() int {
-	wrapWidth := m.width - 8
-	if wrapWidth < 40 {
-		return 40
-	}
-	if wrapWidth > 120 {
-		return 120
-	}
-	return wrapWidth
-}
-
 // renderNotificationSnapshot formats a single NotificationBlockSnapshot for display.
 // It shows the event identity, modern metadata sections, the full raw meta block,
 // global _notification_guidance, and each channel's actual payload from the
@@ -289,13 +278,6 @@ func notificationMarkdownMapBlock(s sqlitelog.NotificationBlockSnapshot, cursor,
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s\n\n", notificationSnapshotMarkdownTitle(s, cursor, total, label))
 	notificationWriteMarkdownMapSection(&sb, label, value)
-	return sb.String()
-}
-
-func notificationMarkdownAnyBlock(s sqlitelog.NotificationBlockSnapshot, cursor, total int, label string, value interface{}) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# %s\n\n", notificationSnapshotMarkdownTitle(s, cursor, total, label))
-	notificationWriteMarkdownAnySection(&sb, label, value)
 	return sb.String()
 }
 
