@@ -540,7 +540,6 @@ func (m PropsModel) renderLeft(maxW int) string {
 	lines = append(lines, "  "+labelStyle.Render(i18n.T("props.soul_flow")+": ")+m.renderSoulFlowValue(raw, valueStyle, labelStyle))
 	renderFields([]propsField{
 		{"molt_count", i18n.T("props.molt_count")},
-		{"max_turns", i18n.T("props.max_turns")},
 		{"max_rpm", i18n.T("props.max_rpm")},
 	})
 

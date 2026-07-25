@@ -53,6 +53,22 @@ func TestPropsRenderLeftShowsStartedAtLocalOffset(t *testing.T) {
 	}
 }
 
+func TestPropsRenderLeftHidesStaleMaxTurnsButShowsMaxRpm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".agent.json"), []byte(`{"agent_name":"mimo","max_turns":500,"max_rpm":30}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := PropsModel{selectedDir: dir}
+	left := ansi.Strip(m.renderLeft(80))
+	if strings.Contains(left, "Max turns") {
+		t.Fatalf("renderLeft should not render the stale max_turns row:\n%s", left)
+	}
+	if !strings.Contains(left, "Max RPM") || !strings.Contains(left, "30") {
+		t.Fatalf("renderLeft should still render the truthful max_rpm field:\n%s", left)
+	}
+}
+
 func TestPropsRenderRightShowsNetworkCreatedLocalOffset(t *testing.T) {
 	origLocal := time.Local
 	t.Cleanup(func() { time.Local = origLocal })

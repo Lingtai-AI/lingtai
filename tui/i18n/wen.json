@@ -378,7 +378,6 @@
   "props.api_compat": "API 兼",
   "props.api_key_env": "钥变量",
   "props.context_limit": "识限",
-  "props.max_turns": "轮限",
   "props.max_rpm": "频限",
   "props.streaming": "流",
   "props.no_data": "无",
