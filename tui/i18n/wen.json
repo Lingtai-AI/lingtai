@@ -652,8 +652,6 @@
   "recipe.swap_hint": "由 '%s' 至 '%s'，如何施之？",
   "recipe.swap_inplace": "就地更替",
   "recipe.swap_inplace_desc": "更 comment 之文，排新问候。现网犹存。",
-  "recipe.swap_fresh": "重开（净 .lingtai/ 而再设之）",
-  "recipe.swap_fresh_desc": "灭今网，以新仪重始。不可复。",
   "recipe.swap_cancel": "止",
   "recipe.swap_nirvana_hint": "欲以新功法重来而除旧史，行 /nirvana。",
   "recipe.preview_greet": "greet.md",
