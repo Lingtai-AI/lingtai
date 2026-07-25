@@ -822,3 +822,69 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 		t.Fatalf("custom preset should omit wire_api so kernel/editor default to auto")
 	}
 }
+
+func TestCredentialFamilyAliases(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     CredentialFamily
+	}{
+		{"codex", CredentialFamilyCodexSingle},
+		{"codex_oauth", CredentialFamilyCodexSingle},
+		{"codex-pool", CredentialFamilyCodexPool},
+		{"codex_pool", CredentialFamilyCodexPool},
+		{"claude-code", CredentialFamilyClaudeCLI},
+		{"claude_code", CredentialFamilyClaudeCLI},
+		{"claude-agent-sdk", CredentialFamilyClaudeCLI},
+		{"claude_agent_sdk", CredentialFamilyClaudeCLI},
+		{"codex.json", CredentialFamilyOther},
+		{"custom", CredentialFamilyOther},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			if got := ClassifyCredentialFamily(tc.provider); got != tc.want {
+				t.Fatalf("ClassifyCredentialFamily(%q) = %q, want %q", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveRefs_ManifestFamilyDispatchAndFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	authDir := t.TempDir()
+	writeStubTokenFile(t, filepath.Join(authDir, "codex-auth.json"))
+
+	codexOAuthRef := writePresetFile(t, dir, "codex-oauth", "codex_oauth", "STALE_CODEX_KEY")
+	got := ResolveRefsWithAuth([]string{codexOAuthRef}, map[string]string{"STALE_CODEX_KEY": "must-not-be-used"}, AuthState{CodexAuthDir: authDir})
+	if len(got) != 1 || got[0].Family != CredentialFamilyCodexSingle || got[0].Provider != "codex_oauth" || !got[0].HasKey {
+		t.Fatalf("codex_oauth resolution = %#v, want manifest-owned CodexSingle auth", got)
+	}
+
+	malformed := filepath.Join(dir, "codex.json")
+	if err := os.WriteFile(malformed, []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = ResolveRefsWithAuth([]string{malformed}, nil, AuthState{CodexOAuthConfigured: true})
+	if len(got) != 1 {
+		t.Fatalf("malformed resolution length = %d, want 1", len(got))
+	}
+	if got[0].ManifestValid || got[0].Family != CredentialFamilyOther || got[0].HasKey {
+		t.Fatalf("malformed codex path failed open: %#v", got[0])
+	}
+}
+
+func TestResolvePresetWithAuthPreservesKeyedAndLocalBehavior(t *testing.T) {
+	keyed := Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{
+		"provider": "custom", "model": "local", "api_key_env": "CUSTOM_TEST_KEY",
+	}}}
+	got := ResolvePresetWithAuth(keyed, map[string]string{"CUSTOM_TEST_KEY": "present"}, AuthState{})
+	if got.Family != CredentialFamilyOther || !got.HasKey {
+		t.Fatalf("keyed custom resolution = %#v, want key-backed Other", got)
+	}
+	local := Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{
+		"provider": "custom", "model": "local",
+	}}}
+	got = ResolvePresetWithAuth(local, nil, AuthState{})
+	if got.Family != CredentialFamilyOther || got.HasKey {
+		t.Fatalf("keyless custom/local resolution = %#v, want unchanged no-key behavior", got)
+	}
+}

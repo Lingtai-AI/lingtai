@@ -551,7 +551,10 @@ func (m LoginModel) codexOAuthImpactMessage() string {
 		}
 		llm, _ := p.Manifest["llm"].(map[string]interface{})
 		provider, _ := llm["provider"].(string)
-		if provider == "codex" || provider == "codex_oauth" || provider == "codex-pool" || provider == "codex_pool" {
+		if func() bool {
+			family := preset.ClassifyCredentialFamily(provider)
+			return family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool
+		}() {
 			affected++
 		}
 	}
@@ -565,7 +568,10 @@ func (m LoginModel) codexOAuthImpactMessage() string {
 	if m.activeModel != "" {
 		active += " (" + m.activeModel + ")"
 	}
-	if m.activePreset != "codex" && m.activePreset != "codex_oauth" && m.activePreset != "codex-pool" && m.activePreset != "codex_pool" {
+	if func() bool {
+		family := preset.ClassifyCredentialFamily(m.activePreset)
+		return family != preset.CredentialFamilyCodexSingle && family != preset.CredentialFamilyCodexPool
+	}() {
 		return i18n.TF("login.codex_oauth_saved_inactive", affected, active)
 	}
 	return i18n.TF("login.codex_oauth_saved_active", affected, active)

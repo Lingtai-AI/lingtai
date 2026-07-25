@@ -2276,15 +2276,23 @@ func codexOAuthConfigured(globalDir string) bool {
 	return codexAuthPathValid(legacyCodexAuthPath(globalDir))
 }
 
-// validateCodexAuthForAgents scans all agent directories under projectDir for
-// init.json files whose active/default preset is codex, and validates the
-// SPECIFIC Codex account each such preset binds to (manifest.llm.codex_auth_path,
-// falling back to the legacy file). If any agent's bound account is missing or
-// invalid, returns a warning naming that agent. A different, validly-bound
-// account never suppresses (or triggers) the warning. Returns "" when all
-// codex-using agents have a usable bound account.
+// validateCodexAuthForAgents scans active/default preset manifests for every
+// agent under projectDir. Single-account Codex presets validate their bound
+// account; Codex pool presets reuse the kernel-mirroring pool eligibility facts.
+// Provider ownership comes only from a successfully loaded manifest, never from
+// a preset filename or path, so malformed/unreadable refs are skipped. Returns a
+// warning naming the first Codex agent without usable credentials, or "" when
+// every discovered Codex agent is eligible.
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	entries, _ := os.ReadDir(projectDir)
+	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(globalDir)
+	auth := preset.AuthState{
+		CodexOAuthConfigured:      codexOAuthConfigured(globalDir),
+		CodexAuthDir:              globalDir,
+		CodexPoolEligible:         poolEligible,
+		CodexPoolEligibleModels:   poolModels,
+		CodexPoolFallbackEligible: poolFallback,
+	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -2299,52 +2307,29 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 			continue
 		}
 		manifest, _ := init["manifest"].(map[string]interface{})
-		if manifest == nil {
-			continue
-		}
 		presetBlock, _ := manifest["preset"].(map[string]interface{})
 		if presetBlock == nil {
 			continue
 		}
+		seen := map[string]bool{}
 		for _, key := range []string{"default", "active"} {
 			presetRef, _ := presetBlock[key].(string)
-			if presetRef == "" || !strings.Contains(presetRef, "codex") {
+			if presetRef == "" || seen[presetRef] {
 				continue
 			}
-			// Resolve the preset's bound account (#415) and validate just that
-			// file; warn (localized, #412) naming the agent only when its own
-			// bound account is missing — a different account staying invalid
-			// no longer condemns this agent.
-			if !codexPresetRefAuthValid(globalDir, presetRef) {
+			seen[presetRef] = true
+			// The family and auth facts come exclusively from the loaded
+			// manifest. Unreadable/malformed refs have no family and are
+			// intentionally skipped; in particular they never fall back to
+			// a legacy Codex credential based on a filename or path.
+			rr := preset.ResolveRefsWithAuth([]string{presetRef}, nil, auth)
+			if len(rr) != 1 || !rr[0].ManifestValid {
+				continue
+			}
+			if (rr[0].Family == preset.CredentialFamilyCodexSingle || rr[0].Family == preset.CredentialFamilyCodexPool) && !rr[0].HasKey {
 				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}
 	}
 	return ""
-}
-
-// codexPresetRefAuthValid loads the preset file at presetRef and validates the
-// Codex OAuth account it binds to (manifest.llm.codex_auth_path, empty →
-// legacy fallback). When the preset file can't be read (e.g. a transient path),
-// it falls back to validating the legacy account so a missing preset file
-// doesn't spuriously fail an agent that may still resolve at launch.
-func codexPresetRefAuthValid(globalDir, presetRef string) bool {
-	abs := presetRef
-	if strings.HasPrefix(abs, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			abs = filepath.Join(home, abs[2:])
-		}
-	}
-	ref := ""
-	if data, err := os.ReadFile(abs); err == nil {
-		var p map[string]interface{}
-		if json.Unmarshal(data, &p) == nil {
-			if manifest, ok := p["manifest"].(map[string]interface{}); ok {
-				if llm, ok := manifest["llm"].(map[string]interface{}); ok {
-					ref, _ = llm["codex_auth_path"].(string)
-				}
-			}
-		}
-	}
-	return codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
 }

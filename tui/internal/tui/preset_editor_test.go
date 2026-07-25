@@ -1290,3 +1290,111 @@ func TestPresetEditorWireAPIEnterCyclesAndPreservesLegacyFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestPresetEditorCodexSingleAPIKeyDisplayKeepsBoundAccount(t *testing.T) {
+	globalDir := t.TempDir()
+	writeStubCodexToken(t, legacyCodexAuthPath(globalDir), "bound@example.test")
+	m := NewPresetEditorModel(testCodexPresetEditorPreset(nil), "en", nil, globalDir)
+	if got := m.fieldString(feAPIKey); got != "✓ bound@example.test" {
+		t.Fatalf("CodexSingle API-key row = %q, want bound-account display", got)
+	}
+}
+
+func TestPresetEditorCredentialFamilyGates(t *testing.T) {
+	tests := []struct {
+		provider       string
+		account        bool
+		thinking       bool
+		serviceTierKey bool
+	}{
+		{"codex", true, true, true},
+		{"codex_oauth", true, true, true},
+		{"codex-pool", false, true, false},
+		{"codex_pool", false, true, false},
+		{"claude-code", false, false, false},
+		{"claude_code", false, false, false},
+		{"claude-agent-sdk", false, false, false},
+		{"claude_agent_sdk", false, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			p := testCodexPresetEditorPreset(nil)
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = tc.provider
+			m := NewPresetEditorModel(p, "en", nil, t.TempDir())
+			if got := m.isCodexProvider(); got != tc.account {
+				t.Fatalf("isCodexProvider() = %v, want %v", got, tc.account)
+			}
+			if got := m.hasCodexThinking(); got != tc.thinking {
+				t.Fatalf("hasCodexThinking() = %v, want %v", got, tc.thinking)
+			}
+			m.setCodexServiceTier("fast")
+			workingLLM := m.llmMap()
+			_, hasTier := workingLLM["service_tier"]
+			if hasTier != tc.serviceTierKey {
+				t.Fatalf("service_tier presence = %v, want %v", hasTier, tc.serviceTierKey)
+			}
+			m.setCodexAuthRef("codex-auth/account.json")
+			_, hasRef := workingLLM["codex_auth_path"]
+			if hasRef != tc.account {
+				t.Fatalf("codex_auth_path presence = %v, want %v", hasRef, tc.account)
+			}
+		})
+	}
+}
+
+func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		readOnly   bool
+		messageKey string
+	}{
+		{name: "codex", provider: "codex", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
+		{name: "codex oauth alias", provider: "codex_oauth", readOnly: true, messageKey: "preset_editor.api_key_codex_readonly"},
+		{name: "codex pool", provider: "codex-pool", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "codex pool alias", provider: "codex_pool", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "claude cli", provider: "claude-code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "claude cli alias", provider: "claude_code", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "claude agent sdk", provider: "claude-agent-sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "claude agent sdk alias", provider: "claude_agent_sdk", readOnly: true, messageKey: "preset_editor.api_key_managed_externally"},
+		{name: "other", provider: "minimax", readOnly: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := testPresetEditorPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["provider"] = tt.provider
+			llm["api_key_env"] = "TEST_API_KEY"
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", map[string]string{"TEST_API_KEY": "existing"}, "", false)
+			if tt.readOnly {
+				wantDisplay := i18n.T(tt.messageKey)
+				if tt.provider == "codex" || tt.provider == "codex_oauth" {
+					wantDisplay = i18n.T("codex.oauth_not_logged_in")
+				}
+				if got := m.fieldString(feAPIKey); got != wantDisplay {
+					t.Fatalf("API-key display = %q, want managed/read-only label %q", got, wantDisplay)
+				}
+			} else if got := m.fieldString(feAPIKey); got == "" || got == "existing" {
+				t.Fatalf("Other API-key display = %q, want a masked existing key", got)
+			}
+			m.cursor = int(feAPIKey)
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if tt.readOnly {
+				if m.mode != emBrowse {
+					t.Fatalf("mode after Enter = %v, want browse", m.mode)
+				}
+				if m.apiKeySet {
+					t.Fatal("read-only credential row set apiKeySet")
+				}
+				if got := m.saveErr; got != i18n.T(tt.messageKey) {
+					t.Fatalf("hint = %q, want %q", got, i18n.T(tt.messageKey))
+				}
+				return
+			}
+			if m.mode != emInline {
+				t.Fatalf("Other API-key row mode after Enter = %v, want inline", m.mode)
+			}
+		})
+	}
+}

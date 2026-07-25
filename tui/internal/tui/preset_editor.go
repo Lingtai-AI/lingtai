@@ -534,10 +534,16 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feAPIKey:
-		// Codex preset — OAuth credential is managed on the preset picker
-		// page. API key field is read-only; no-op here.
-		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
+		// Non-Other credential families do not consume a typed API key at
+		// save time. Keep this row visibly read-only so it cannot suggest
+		// that typing here changes the bound OAuth/CLI credential.
+		family := preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"]))
+		switch family {
+		case preset.CredentialFamilyCodexSingle:
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
+			return *m, nil
+		case preset.CredentialFamilyCodexPool, preset.CredentialFamilyClaudeCLI:
+			m.saveErr = i18n.T("preset_editor.api_key_managed_externally")
 			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
@@ -627,11 +633,12 @@ func (m *PresetEditorModel) applyInline(val string) {
 }
 
 func (m PresetEditorModel) isCodexProvider() bool {
-	return asString(m.llmMap()["provider"]) == "codex"
+	return preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"])) == preset.CredentialFamilyCodexSingle
 }
 
 func isCodexThinkingProvider(provider string) bool {
-	return provider == "codex" || provider == "codex-pool" || provider == "codex_pool"
+	family := preset.ClassifyCredentialFamily(provider)
+	return family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool
 }
 
 func (m PresetEditorModel) hasCodexThinking() bool {
@@ -677,7 +684,7 @@ func (m PresetEditorModel) codexAuthRef() string {
 // stray key in the JSON.
 func (m *PresetEditorModel) setCodexAuthRef(ref string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" || strings.TrimSpace(ref) == "" {
+	if preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle || strings.TrimSpace(ref) == "" {
 		delete(llm, "codex_auth_path")
 		return
 	}
@@ -713,7 +720,7 @@ func (m PresetEditorModel) codexServiceTier() string {
 
 func (m *PresetEditorModel) setCodexServiceTier(tier string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" || tier != "fast" {
+	if preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle || tier != "fast" {
 		delete(llm, "service_tier")
 		return
 	}
@@ -753,7 +760,7 @@ func (m *PresetEditorModel) setCodexThinking(effort string) {
 
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
-	if llm == nil || asString(llm["provider"]) != "codex" {
+	if llm == nil || preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle {
 		return
 	}
 	if asString(llm["service_tier"]) == "fast" {
@@ -1072,7 +1079,8 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		// account (manifest.llm.codex_auth_path → resolved token file) and
 		// its validity. When more than one account exists, ←/→ cycles the
 		// binding (see isCyclable/cycleField). No secret is shown.
-		if asString(llm["provider"]) == "codex" {
+		family := preset.ClassifyCredentialFamily(asString(llm["provider"]))
+		if family == preset.CredentialFamilyCodexSingle {
 			if m.globalDir != "" {
 				label, valid := m.codexBoundAccountLabel()
 				if valid {
@@ -1082,8 +1090,12 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 			}
 			return i18n.T("codex.oauth_not_logged_in")
 		}
-		// Display the key (masked). The env-var name is an internal
-		// detail; the user only needs to see whether a key is set.
+		if family == preset.CredentialFamilyCodexPool || family == preset.CredentialFamilyClaudeCLI {
+			return i18n.T("preset_editor.api_key_managed_externally")
+		}
+		// Other providers display the existing key masked. The env-var name
+		// is an internal detail; the user only needs to see whether a key is
+		// set.
 		return maskAPIKey(m.apiKey)
 	}
 	return ""

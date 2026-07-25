@@ -548,6 +548,8 @@
   "preset_editor.field_api_key": "API 密钥",
   "preset_editor.api_key_unset": "（未设置——在此粘贴）",
   "preset_editor.api_key_codex_readonly": "OAuth 凭据 — 于预设选择页管理。",
+  "preset_editor.api_key_managed_externally": "凭据由 API-key 字段之外的登录管理。",
+  "firstrun.preset_pick.codex_pool_unavailable_hint": "此模型没有可用的 Codex 池账户。",
   "preset_editor.field_edit": "编辑",
   "preset_editor.field_streaming": "流式输出",
   "preset_editor.field_karma": "因果",
