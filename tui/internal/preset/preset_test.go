@@ -480,7 +480,7 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 		if !ok {
 			t.Fatal("manifest not a map")
 		}
-		for _, key := range []string{"agent_name", "language", "llm", "capabilities", "admin", "streaming", "max_turns"} {
+		for _, key := range []string{"agent_name", "language", "llm", "capabilities", "admin", "streaming"} {
 			if _, exists := manifest[key]; !exists {
 				t.Errorf("manifest missing key %q", key)
 			}
@@ -488,8 +488,8 @@ func TestGenerateInitJSON_ProducesValidJSON(t *testing.T) {
 		if manifest["agent_name"] != "test-agent" {
 			t.Errorf("agent_name = %v, want %q", manifest["agent_name"], "test-agent")
 		}
-		if got, want := manifest["max_turns"], float64(500); got != want {
-			t.Errorf("max_turns = %v, want %v", got, want)
+		if _, exists := manifest["max_turns"]; exists {
+			t.Errorf("manifest should not contain max_turns for a newly generated init.json, got %v", manifest["max_turns"])
 		}
 
 		// Check .agent.json exists

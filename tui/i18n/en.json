@@ -383,7 +383,6 @@
   "props.api_compat": "API compat",
   "props.api_key_env": "API key env",
   "props.context_limit": "Context limit",
-  "props.max_turns": "Max turns",
   "props.max_rpm": "Max RPM",
   "props.streaming": "Streaming",
   "props.no_data": "No agent data",

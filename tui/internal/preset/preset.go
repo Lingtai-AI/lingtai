@@ -1721,10 +1721,6 @@ func GenerateInitJSONWithOpts(p Preset, agentName, dirName, lingtaiDir, globalDi
 	// longer accepts configurable context.molt thresholds or messages (Jason
 	// #4135/#4137/#4140). Existing init.json files that still carry stale keys
 	// are left untouched (no migration); the kernel ignores them.
-	// Per-wake loop budget: every iteration of the LLM/tool-call loop
-	// counts as a turn, not just LLM requests, so tool-heavy work burns
-	// through it quickly. The agent sleeps when the budget is exhausted.
-	manifest["max_turns"] = 500
 	manifest["max_rpm"] = opts.MaxRpm
 	// AED max-attempts: normalize through ClampAedAttempts so a zero-value
 	// AgentOpts (caller didn't set it) still writes a valid default rather
