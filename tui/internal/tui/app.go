@@ -109,9 +109,6 @@ type App struct {
 	visitOriginalMail       MailModel
 	visitOriginalProjects   ProjectsModel
 	visitOriginalView       appView
-	visitTargetProjectDir   string
-	visitTargetAgentDir     string
-	visitTargetAgentName    string
 	doubleEscArmed          bool
 	doubleEscFirstAt        time.Time
 }
@@ -1810,9 +1807,6 @@ func (a App) enterVisitedAgent(msg ProjectsAgentSelectedMsg) (App, tea.Cmd) {
 	a.projectDir = filepath.Join(r.Project, ".lingtai")
 	a.orchDir = r.AgentDir
 	a.orchName = firstNonEmpty(r.AgentName, r.Agent)
-	a.visitTargetProjectDir = a.projectDir
-	a.visitTargetAgentDir = a.orchDir
-	a.visitTargetAgentName = a.orchName
 	a.currentView = appViewMail
 	a.selectMode = false
 	a.doubleEscArmed = false
@@ -1838,9 +1832,6 @@ func (a App) returnFromVisit() (App, tea.Cmd) {
 	a.visitOriginalOrchDir = ""
 	a.visitOriginalOrchName = ""
 	a.visitOriginalView = appViewMail
-	a.visitTargetProjectDir = ""
-	a.visitTargetAgentDir = ""
-	a.visitTargetAgentName = ""
 	a.doubleEscArmed = false
 	resumeCmd := a.resumeMailModel(restored)
 	if a.currentView == appViewProjects {
