@@ -1502,6 +1502,13 @@ func (a App) agentRailToggleEligible() bool {
 		!a.mail.directVisibilityObscured()
 }
 
+func (a App) collapsedAgentRailControlVisible() bool {
+	return a.currentView == appViewMail &&
+		a.width >= agentRailMinTerminalWidth &&
+		a.mail.agentRail.explicitlyCollapsed &&
+		a.mail.ordinaryHeaderVisible()
+}
+
 func (a App) toggleAgentRail() (App, tea.Cmd) {
 	a.mail.agentRail.explicitlyCollapsed = !a.mail.agentRail.explicitlyCollapsed
 	if a.mail.agentRail.explicitlyCollapsed && a.mail.agentRail.focused {
@@ -1587,6 +1594,11 @@ func (a App) updateMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd) {
 		if a.mail.copyMode || a.mail.directVisibilityObscured() || msg.Button != tea.MouseLeft {
 			return a, nil
 		}
+		if childY == 0 &&
+			msg.X >= agentRailCollapseControlStart &&
+			msg.X < agentRailCollapseControlStart+agentRailControlWidth {
+			return a.toggleAgentRail()
+		}
 		row := a.mail.agentRailRowAt(childY)
 		if row < 0 {
 			return a, nil
@@ -1595,6 +1607,16 @@ func (a App) updateMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd) {
 		var cmd tea.Cmd
 		a.mail, cmd = a.mail.activateConversationRow(row)
 		return a, cmd
+	}
+
+	if a.collapsedAgentRailControlVisible() &&
+		childY == 0 &&
+		childX >= 0 &&
+		childX < agentRailControlWidth {
+		if msg.Button != tea.MouseLeft || !a.agentRailToggleEligible() {
+			return a, nil
+		}
+		return a.toggleAgentRail()
 	}
 
 	if msg.Button == tea.MouseLeft && a.mail.agentRail.focused {
@@ -2028,7 +2050,7 @@ func (a App) View() tea.View {
 	case appViewFirstRun:
 		content = a.firstRun.View()
 	case appViewMail:
-		content = a.mail.View()
+		content = a.mail.view(a.collapsedAgentRailControlVisible())
 		budget := a.layoutBudget()
 		if budget.RailVisible {
 			content = lipgloss.JoinHorizontal(

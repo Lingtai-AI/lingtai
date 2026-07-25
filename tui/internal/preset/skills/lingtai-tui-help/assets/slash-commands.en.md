@@ -242,10 +242,12 @@ Choose Main or a same-project agent for direct mail. Move with the arrow keys
 without changing the current conversation.
 
 On the Mail screen at 85 columns or wider, press F2 to toggle the 24-column
-conversation rail between expanded and fully hidden. Tab can enter or leave the
-rail only while it is expanded. At 84 columns or narrower, the rail is
-automatically hidden. `/agents` remains the canonical all-width fallback and
-selects from exactly the same rows.
+conversation rail between expanded and fully hidden. The expanded rail shows
+`[F2<]`; left-click it to collapse the rail. After an explicit collapse, the
+ordinary Mail header shows `[F2>]`; left-click it to expand the rail. Tab can
+enter or leave the rail only while it is expanded. At 84 columns or narrower,
+the rail is automatically hidden. `/agents` remains the canonical all-width
+fallback and selects from exactly the same rows.
 
 ### `/projects` — switch to a running admin agent
 **Usage:** `/projects`
