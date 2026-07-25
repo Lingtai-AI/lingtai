@@ -139,7 +139,6 @@ never convert a refusal or uncertainty into cleanup pressure.
 
 - **Screens / UI models:** `tui/internal/tui/` — one file per screen (Bubble Tea convention)
 - **Presets:** `tui/internal/preset/` — `preset.go` (~1900 lines) handles load/save/list
-- **Migrations:** `tui/internal/migrate/` — append a new `m<NNN>_<name>.go` file
 - **Filesystem access:** `tui/internal/fs/` — read-only window into agent working directories
 - **Subprocess launch:** `tui/internal/process/` — how agents are spawned
 - **i18n:** `tui/i18n/` — en/zh/wen JSON tables
@@ -152,17 +151,6 @@ make build                    # builds to tui/bin/lingtai-tui
 make cross-compile            # all platforms
 go test ./...                 # run tests
 ```
-
-### Adding a migration
-
-1. Create `tui/internal/migrate/m<NNN>_<name>.go` exporting `func migrate<Name>(lingtaiDir string) error`.
-2. Register in `migrate.go`: append to the `migrations` slice, bump `CurrentVersion`.
-3. **Also bump `CurrentVersion` in `portal/internal/migrate/migrate.go`** — TUI and portal share the `meta.json` version space.
-4. If it touches shared on-disk state (init.json schema, preset paths), implement it in both packages with identical logic.
-5. If it's TUI-only, add a no-op stub `Fn: func(_ string) error { return nil }` in the portal registry to preserve the version slot.
-
-Version collisions and the `data version N is newer than this binary supports`
-failure have their own recovery checklist in `reference/gotchas/SKILL.md`.
 
 ### Adding a new screen
 
@@ -178,7 +166,6 @@ failure have their own recovery checklist in `reference/gotchas/SKILL.md`.
 - **API handlers:** `portal/internal/api/` — `server.go`, `handlers.go`, `replay.go`
 - **Filesystem access:** `portal/internal/fs/` — same shape as TUI's, portal-tailored
 - **Web frontend:** `portal/web/src/` — React 19 + TypeScript + Vite
-- **Migrations:** `portal/internal/migrate/` — shares version space with TUI
 - **i18n:** `portal/i18n/` — independent of TUI's i18n, same three-locale rule
 
 ### Build and test
@@ -197,10 +184,6 @@ Pipeline: `npm install` → `npm run build` (in `web/`) → `go build` (embeds `
 2. `cd portal/web && npm run build` to rebuild the frontend.
 3. `cd portal && make build` to embed it into the Go binary.
 4. Embedding happens at compile time via `//go:embed all:web/dist` in `portal/embed.go`.
-
-### Migrations
-
-Same contract as TUI — see "Adding a migration" above. Portal-only migrations get a no-op stub in the TUI registry.
 
 ## Changing the kernel (`lingtai-kernel/`)
 
