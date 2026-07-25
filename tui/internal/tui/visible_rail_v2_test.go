@@ -306,8 +306,9 @@ func visibleRailV2RailRow(app App, canonicalIndex int) string {
 
 func visibleRailV2ExpectedVisualRow(row agentSelectorRow, current, cursor, focused bool, width int) string {
 	highlighted := focused && cursor
+	surfaceOwner := (focused && cursor) || (!focused && current)
 	render := func(style lipgloss.Style, text string) string {
-		if highlighted {
+		if surfaceOwner {
 			style = style.Background(ColorSurface)
 		}
 		return style.Render(text)
