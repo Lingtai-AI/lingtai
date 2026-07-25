@@ -128,14 +128,47 @@ func TestAgentRailKeyboardCollapseHelpContract(t *testing.T) {
 				t.Errorf("%s /agents keyboard-collapse paragraph does not mention %q", c.asset, required)
 			}
 		}
-		lower := strings.ToLower(section)
-		for _, forbidden := range []string{
-			"[f2<]", "[f2>]",
-			"mouse", "click",
-			"鼠标", "鼠標", "点击", "點擊", "鼠",
+	}
+}
+
+func TestAgentRailVisibleControlsHelpContract(t *testing.T) {
+	leftClickByLang := map[string]string{
+		"en":  "left-click",
+		"zh":  "左键点击",
+		"wen": "鼠左击",
+	}
+	for _, c := range helpLangs {
+		content, err := preset.ReadBundledSkillFile(helpSkillName, c.asset)
+		if err != nil {
+			t.Fatalf("reading %s: %v", c.asset, err)
+		}
+
+		const heading = "### `/agents`"
+		start := strings.Index(content, heading)
+		if start < 0 {
+			t.Fatalf("%s has no %s section", c.asset, heading)
+		}
+		section := content[start:]
+		if next := strings.Index(section[len(heading):], "\n### "); next >= 0 {
+			section = section[:len(heading)+next]
+		}
+		paragraphs := strings.Split(strings.TrimSpace(section), "\n\n")
+		if len(paragraphs) < 3 {
+			t.Fatalf("%s /agents help has no visible-control paragraph", c.asset)
+		}
+		controlParagraph := paragraphs[len(paragraphs)-1]
+		for _, required := range []string{
+			"[F2<]",
+			"[F2>]",
+			leftClickByLang[c.lang],
+			"85",
+			"84",
+			"F2",
+			"Tab",
+			"/agents",
 		} {
-			if strings.Contains(lower, forbidden) {
-				t.Errorf("%s /agents help contains forbidden control/mouse wording %q", c.asset, forbidden)
+			if !strings.Contains(controlParagraph, required) {
+				t.Errorf("%s /agents visible-control paragraph does not mention %q", c.asset, required)
 			}
 		}
 	}

@@ -12,8 +12,12 @@ import (
 )
 
 const (
-	agentRailWidth     = 24
-	agentRailRowsStart = 2
+	agentRailWidth                = 24
+	agentRailRowsStart            = 2
+	agentRailControlWidth         = 5
+	agentRailCollapseControlStart = agentRailWidth - 1 - agentRailControlWidth
+	agentRailCollapseControl      = "[F2<]"
+	agentRailExpandControl        = "[F2>]"
 )
 
 // agentRailState is presentation state over the canonical V1 selector. Rows,
@@ -224,7 +228,12 @@ func (m MailModel) renderAgentRail(width, height int) string {
 	for index := range lines {
 		lines[index] = frameLine("", "│")
 	}
-	lines[0] = frameLine("  "+i18n.T("agent_rail.title"), "│")
+	title := fitAgentRailLine("  "+i18n.T("agent_rail.title"), agentRailCollapseControlStart)
+	controlStyle := StyleSubtle
+	if m.agentRail.focused {
+		controlStyle = StyleAccent
+	}
+	lines[0] = frameLine(title+controlStyle.Render(agentRailCollapseControl), "│")
 	if height > 1 {
 		lines[1] = frameLine(strings.Repeat("─", innerWidth), "┤")
 	}

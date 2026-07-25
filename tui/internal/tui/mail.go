@@ -2336,7 +2336,15 @@ func composeCenteredHeader(left, center, right string, width int) string {
 	return left + " " + center + " " + right
 }
 
+func (m MailModel) ordinaryHeaderVisible() bool {
+	return m.ready && !m.showEditorWarn && !m.agentSelector.selectorOpen
+}
+
 func (m MailModel) View() string {
+	return m.view(false)
+}
+
+func (m MailModel) view(showAgentRailExpandControl bool) string {
 	if m.showEditorWarn {
 		return m.viewEditorWarn()
 	}
@@ -2348,6 +2356,9 @@ func (m MailModel) View() string {
 	// Build header: left = app title, center = thinking quote, right = agent [state]
 	brand := i18n.T("app.brand")
 	titleLeft := StyleTitle.Render("  " + brand)
+	if showAgentRailExpandControl {
+		titleLeft = StyleSubtle.Render(agentRailExpandControl) + titleLeft
+	}
 	if m.visitExitHint {
 		titleLeft += " " + StyleSubtle.Render(i18n.T("mail.visit_exit_hint"))
 	}
