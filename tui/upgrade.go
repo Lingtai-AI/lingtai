@@ -46,7 +46,7 @@ type startupTUIUpgradeOptions struct {
 
 	CheckTUIUpgrade                 func(string) string
 	FindOtherTUIProcesses           func() []runningTUIProcess
-	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) error
+	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) (func() error, error)
 }
 
 func (o *startupTUIUpgradeOptions) setDefaults() {
@@ -136,18 +136,34 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 				fmt.Fprintf(opts.Output, "    PID %d  %s\n", p.PID, p.Command)
 			}
 		}
-		fmt.Fprintln(opts.Output, "  Migrating while they keep running can leave old/new binaries mixed.")
-		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and migrate from Homebrew to the native installer now? [y/N] ")
+		fmt.Fprintln(opts.Output, "  Their TUI processes will remain running; only their agents are put to sleep while the managed runtime is updated.")
+		fmt.Fprint(opts.Output, "  Put those agents to sleep and migrate from Homebrew to the native installer now? [y/N] ")
 		if !answerYes(readLineLowerFromReader(stdin)) {
-			fmt.Fprintln(opts.Output, "  Migration skipped. Quit the other TUI windows first, then run:")
+			fmt.Fprintln(opts.Output, "  Migration skipped. Run manually later:")
 			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
-		if err := opts.PrepareOtherTUIProcessesUpgrade(others); err != nil {
+		rollback, err := opts.PrepareOtherTUIProcessesUpgrade(others)
+		if err != nil {
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					fmt.Fprintf(opts.ErrOutput, "  Could not restore partially prepared agents: %v\n", rollbackErr)
+				}
+			}
 			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for migration: %v\n", err)
-			fmt.Fprintln(opts.Output, "  Migration skipped. Please close them manually and try again.")
+			fmt.Fprintln(opts.Output, "  Migration skipped. The prepared agents were restored; try again later.")
 			return false
 		}
+		defer func() {
+			// The installer only needs the agents paused while it mutates the
+			// managed runtime. Always restore the exact pre-migration signal
+			// state, and surface a rollback error instead of hiding it.
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					fmt.Fprintf(opts.ErrOutput, "  Could not restore prepared agents: %v\n", rollbackErr)
+				}
+			}
+		}()
 	} else {
 		fmt.Fprint(opts.Output, "  Migrate from Homebrew to the native installer now? [y/N] ")
 		if !answerYes(readLineLowerFromReader(stdin)) {
@@ -275,7 +291,12 @@ func (r streamingCommandRunner) Run(name string, args ...string) config.CommandR
 	return config.CommandResult{Err: err}
 }
 
-func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) error {
+type preparedAgentSleep struct {
+	sleepFile  string
+	wasPresent bool
+}
+
+func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) (func() error, error) {
 	projects := map[string]bool{}
 	for _, p := range procs {
 		if projectDir := findProjectDirFromCWD(p.CWD); projectDir != "" {
@@ -283,20 +304,35 @@ func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) error {
 		}
 	}
 
+	var prepared []preparedAgentSleep
 	for projectDir := range projects {
 		fmt.Printf("  Putting agents in %s to sleep...\n", projectDir)
-		if err := sleepAgentsInProject(projectDir); err != nil {
-			return err
+		states, err := sleepAgentsInProject(projectDir)
+		prepared = append(prepared, states...)
+		if err != nil {
+			return wakePreparedAgents(prepared), err
 		}
 	}
 
-	for _, p := range procs {
-		fmt.Printf("  Stopping lingtai-tui PID %d...\n", p.PID)
-		if err := stopTUIProcess(p.PID); err != nil {
-			return err
+	// Native migration installs beside Homebrew and does not overwrite the
+	// running Homebrew binary. Keep sibling TUI processes running; only the
+	// agents using the managed runtime are paused during the installer call.
+	return wakePreparedAgents(prepared), nil
+}
+
+func wakePreparedAgents(prepared []preparedAgentSleep) func() error {
+	return func() error {
+		var firstErr error
+		for _, state := range prepared {
+			if state.wasPresent {
+				continue
+			}
+			if err := os.Remove(state.sleepFile); err != nil && !os.IsNotExist(err) && firstErr == nil {
+				firstErr = err
+			}
 		}
+		return firstErr
 	}
-	return nil
 }
 
 func findProjectDirFromCWD(cwd string) string {
@@ -319,25 +355,34 @@ func findProjectDirFromCWD(cwd string) string {
 	}
 }
 
-func sleepAgentsInProject(projectDir string) error {
+func sleepAgentsInProject(projectDir string) ([]preparedAgentSleep, error) {
 	lingtaiDir := filepath.Join(projectDir, ".lingtai")
 	agents, err := fs.DiscoverAgents(lingtaiDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
+	var prepared []preparedAgentSleep
 	var alive []string
 	for _, agent := range agents {
 		if agent.IsHuman {
 			continue
 		}
 		sleepFile := filepath.Join(agent.WorkingDir, ".sleep")
-		if err := os.WriteFile(sleepFile, []byte(""), 0o644); err != nil {
-			return err
+		_, statErr := os.Stat(sleepFile)
+		wasPresent := statErr == nil
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return prepared, statErr
 		}
+		if !wasPresent {
+			if err := os.WriteFile(sleepFile, []byte(""), 0o644); err != nil {
+				return prepared, err
+			}
+		}
+		prepared = append(prepared, preparedAgentSleep{sleepFile: sleepFile, wasPresent: wasPresent})
 		if !agentIsAsleep(agent.WorkingDir) {
 			alive = append(alive, agent.WorkingDir)
 		}
@@ -359,7 +404,7 @@ func sleepAgentsInProject(projectDir string) error {
 	if len(alive) > 0 {
 		fmt.Printf("  Warning: %d agent(s) did not report asleep after .sleep signal.\n", len(alive))
 	}
-	return nil
+	return prepared, nil
 }
 
 func agentIsAsleep(agentDir string) bool {

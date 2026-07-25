@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,6 +49,12 @@ func TestHomebrewTUIUpdaterMigratesToNativeInstallAndVerifies(t *testing.T) {
 	binDir := filepath.Join(prefix, "bin")
 	target := filepath.Join(binDir, "lingtai-tui")
 	runner := &homebrewMigrationRunner{t: t, globalDir: globalDir, prefix: prefix, binDir: binDir, latest: "v0.8.1", runtimeVersion: "0.9.7"}
+	if err := os.MkdirAll(filepath.Join(globalDir, "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "install.json"), []byte(`{"legacy":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodHomebrew}, TUIUpdateOptions{
 		LatestVersion:       "v0.8.1",
@@ -67,16 +74,12 @@ func TestHomebrewTUIUpdaterMigratesToNativeInstallAndVerifies(t *testing.T) {
 	if !result.NeedsManualCleanup {
 		t.Fatalf("no cleanup consent given; Homebrew removal must stay pending: %+v", result)
 	}
-	if !containsCall(runner.calls, "bash /tmp/install.sh --version v0.8.1 --non-interactive") {
-		t.Fatalf("expected native fresh-install call, got %#v", runner.calls)
+	wantInstall := "bash /tmp/install.sh --update --prefix " + nativeMigrationPrefix(globalDir) + " --version v0.8.1 --non-interactive"
+	if !containsCall(runner.calls, wantInstall) {
+		t.Fatalf("expected version-pinned raw installer update call %q, got %#v", wantInstall, runner.calls)
 	}
 	if runsBrewCommand(runner.calls) {
 		t.Fatalf("homebrew migration must never run brew, got %#v", runner.calls)
-	}
-	for _, call := range runner.calls {
-		if strings.Contains(call, "--update") {
-			t.Fatalf("homebrew migration must not use --update (no prior source install exists), got %#v", runner.calls)
-		}
 	}
 	if !containsLine(result.Lines, "Native install metadata verified") {
 		t.Fatalf("expected metadata verification line: %+v", result.Lines)
@@ -776,41 +779,105 @@ func (r *homebrewMigrationRunner) Run(name string, args ...string) CommandResult
 	}
 }
 
-func TestNativeMigrationInstallCommandUsesCanonicalWebsiteInstallerNoUpdateNoPrefix(t *testing.T) {
-	name, args := nativeMigrationInstallCommand("", "v0.11.0")
+func TestHomebrewMigrationCreatesNativeBinDirBeforeRunner(t *testing.T) {
+	globalDir := t.TempDir()
+	wantBinDir := filepath.Join(nativeMigrationPrefix(globalDir), "bin")
+	created := false
+	calls := 0
+	runner := commandRunnerFunc(func(name string, args ...string) CommandResult {
+		calls++
+		if !created {
+			t.Fatalf("runner called before native bin dir creation: %s %s", name, strings.Join(args, " "))
+		}
+		return CommandResult{Err: errors.New("stop after order check")}
+	})
+
+	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodHomebrew}, TUIUpdateOptions{
+		LatestVersion:       "v0.11.0",
+		GlobalDir:           globalDir,
+		Runner:              runner,
+		SourceInstallScript: "/tmp/install.sh",
+		MkdirAll: func(path string, perm os.FileMode) error {
+			if path != wantBinDir {
+				t.Fatalf("MkdirAll path = %q, want %q", path, wantBinDir)
+			}
+			created = true
+			return os.MkdirAll(path, perm)
+		},
+	})
+
+	if result.Healthy || calls != 1 {
+		t.Fatalf("expected runner failure after ordered preparation, result=%+v calls=%d", result, calls)
+	}
+	if _, err := os.Stat(wantBinDir); err != nil {
+		t.Fatalf("native migration bin dir was not created: %v", err)
+	}
+}
+
+func TestHomebrewMigrationBinDirCreationFailurePreventsRunner(t *testing.T) {
+	globalDir := t.TempDir()
+	calls := 0
+	result := RunTUIUpdate(TUIInstallInfo{Method: TUIInstallMethodHomebrew}, TUIUpdateOptions{
+		LatestVersion: "v0.11.0",
+		GlobalDir:     globalDir,
+		Runner: commandRunnerFunc(func(string, ...string) CommandResult {
+			calls++
+			return CommandResult{}
+		}),
+		MkdirAll: func(string, os.FileMode) error {
+			return errors.New("mkdir denied")
+		},
+	})
+
+	if result.Healthy || result.Err == nil {
+		t.Fatalf("directory creation failure must be reported: %+v", result)
+	}
+	if calls != 0 {
+		t.Fatalf("directory creation failure must prevent runner, got %d calls", calls)
+	}
+	if !containsLine(result.Lines, "prepare native migration bin dir") {
+		t.Fatalf("expected preparation failure line: %+v", result.Lines)
+	}
+}
+
+func TestNativeMigrationInstallCommandUsesVersionedRawReleaseInstaller(t *testing.T) {
+	name, args := nativeMigrationInstallCommand("", "/tmp/native", "v0.11.0")
 	if name != "bash" {
 		t.Fatalf("name = %q, want bash", name)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"https://lingtai.ai/install.sh",
-		"--version v0.11.0 --non-interactive",
+		"https://raw.githubusercontent.com/Lingtai-AI/lingtai/v0.11.0/install.sh",
+		"--update --prefix /tmp/native --version v0.11.0 --non-interactive",
 		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("nativeMigrationInstallCommand args %q do not contain %q", joined, want)
 		}
 	}
-	for _, unwanted := range []string{"--update", "--prefix"} {
+	for _, unwanted := range []string{"lingtai.ai/"} {
 		if strings.Contains(joined, unwanted) {
-			t.Fatalf("nativeMigrationInstallCommand args %q must not contain %q (no prior source install to update)", joined, unwanted)
+			t.Fatalf("migration must not invoke non-release installer source %q: %s", unwanted, joined)
 		}
 	}
 }
 
-func TestSourceInstallCommandUsesCanonicalWebsiteInstallerAndForwardsAllArgs(t *testing.T) {
+func TestSourceInstallCommandUsesVersionedRawReleaseInstallerAndForwardsAllArgs(t *testing.T) {
 	name, args := sourceInstallCommand("", "/tmp/lingtai prefix", "v0.11.0")
 	if name != "bash" {
 		t.Fatalf("name = %q, want bash", name)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"https://lingtai.ai/install.sh",
+		"https://raw.githubusercontent.com/Lingtai-AI/lingtai/v0.11.0/install.sh",
 		"--update --prefix /tmp/lingtai prefix --version v0.11.0 --non-interactive",
 		`shift; curl -fsSL "$script" | bash -s -- "$@"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("sourceInstallCommand args %q do not contain %q", joined, want)
 		}
+	}
+	if strings.Contains(joined, "lingtai.ai/") {
+		t.Fatalf("source updater must not invoke the public installer: %q", joined)
 	}
 }

@@ -47,6 +47,7 @@ type TUIUpdateOptions struct {
 	Runner   CommandRunner
 	LookPath func(string) (string, error)
 	Stat     func(string) (os.FileInfo, error)
+	MkdirAll func(string, os.FileMode) error
 
 	Install TUIInstallInfo
 
@@ -229,12 +230,10 @@ func (homebrewTUIUpdater) InstallMethod() TUIInstallMethod {
 }
 
 // Upgrade migrates a Homebrew-managed install to LingTai's native installer
-// instead of running `brew upgrade`. It reuses the exact install.sh
-// contract and verification steps as the source updater below (fresh
-// install, then verify install.json + binary version + Python runtime), but
-// installs to a fresh native prefix rather than `--update`-ing an existing
-// source install (none exists yet). The Homebrew formula/keg is never
-// touched — no `brew` command runs here — so any failure leaves the
+// instead of running `brew upgrade`. It uses the version-pinned raw release
+// install.sh update contract while preserving the exact requested release tag.
+// The source install path is not used for migration.
+// The Homebrew formula/keg is never touched — no `brew` command runs here — so any failure leaves the
 // Homebrew-installed binary exactly as usable as before this call.
 func (homebrewTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 	result := TUIUpdateResult{Healthy: true}
@@ -267,7 +266,20 @@ func (homebrewTUIUpdater) Upgrade(opts TUIUpdateOptions) TUIUpdateResult {
 		return result
 	}
 
-	name, args := nativeMigrationInstallCommand(opts.SourceInstallScript, opts.LatestVersion)
+	prefix := nativeMigrationPrefix(opts.GlobalDir)
+	nativeBinDir := filepath.Join(prefix, "bin")
+	mkdirAll := opts.MkdirAll
+	if mkdirAll == nil {
+		mkdirAll = os.MkdirAll
+	}
+	if err := mkdirAll(nativeBinDir, 0o755); err != nil {
+		result.Err = fmt.Errorf("create native migration bin dir %s: %w", nativeBinDir, err)
+		result.add(DoctorFail, "Could not prepare native migration bin dir %s: %v", nativeBinDir, err)
+		result.add(DoctorInfo, "The Homebrew-installed lingtai-tui is untouched and still usable.")
+		return result
+	}
+
+	name, args := nativeMigrationInstallCommand(opts.SourceInstallScript, prefix, opts.LatestVersion)
 	result.add(DoctorInfo, "Migrating from Homebrew to the native installer. Running: %s %s", name, strings.Join(args, " "))
 	res := opts.Runner.Run(name, args...)
 	appendCommandOutputToTUIUpdate(&result, res)
@@ -420,18 +432,29 @@ func attemptHomebrewCleanup(result *TUIUpdateResult, opts TUIUpdateOptions, targ
 	result.add(DoctorOK, "`lingtai-tui` on PATH now resolves to the native binary at %s. Migration complete.", target)
 }
 
-// nativeMigrationInstallCommand builds the install.sh invocation that
-// migrates a Homebrew install to a fresh native install. Unlike
-// sourceInstallCommand's --update (which requires an existing source bin
-// dir), this runs install.sh's normal fresh-install path: no --update, no
-// --prefix, so install.sh resolves its own default writable location
-// (preferring /usr/local/bin, else ~/.local/bin — never Homebrew's prefix)
-// exactly as it would for any new user.
-func nativeMigrationInstallCommand(script, version string) (string, []string) {
-	if script == "" {
-		script = "https://lingtai.ai/install.sh"
+// nativeMigrationInstallCommand builds the version-pinned raw release
+// install.sh invocation for a Homebrew migration. Unlike ordinary first-install
+// mode, --update accepts and updates the existing source-compatible runtime/receipt state in place.
+func nativeMigrationPrefix(globalDir string) string {
+	return filepath.Join(filepath.Dir(filepath.Clean(globalDir)), ".local")
+}
+
+const releaseInstallScriptBaseURL = "https://raw.githubusercontent.com/Lingtai-AI/lingtai"
+
+func versionedInstallScriptURL(version string) string {
+	return releaseInstallScriptBaseURL + "/" + version + "/install.sh"
+}
+
+func installerScriptURL(override, version string) string {
+	if override != "" {
+		return override
 	}
-	args := []string{"--version", version, "--non-interactive"}
+	return versionedInstallScriptURL(version)
+}
+
+func nativeMigrationInstallCommand(script, prefix, version string) (string, []string) {
+	script = installerScriptURL(script, version)
+	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
 	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
 		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
 		shellArgs := []string{"-c", shell, "lingtai-homebrew-migration", script}
@@ -585,9 +608,7 @@ func tuiReleaseURL(version string) string {
 }
 
 func sourceInstallCommand(script, prefix, version string) (string, []string) {
-	if script == "" {
-		script = "https://lingtai.ai/install.sh"
-	}
+	script = installerScriptURL(script, version)
 	args := []string{"--update", "--prefix", prefix, "--version", version, "--non-interactive"}
 	if strings.HasPrefix(script, "http://") || strings.HasPrefix(script, "https://") {
 		shell := `set -euo pipefail; script="$1"; shift; curl -fsSL "$script" | bash -s -- "$@"`
