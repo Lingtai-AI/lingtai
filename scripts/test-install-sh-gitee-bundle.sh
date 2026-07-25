@@ -369,6 +369,85 @@ register_response_text() {
   fi
 )
 
+# --- validate_kernel_manifest: strict structural validator for the kernel
+# release manifest (schema lingtai.kernel.release/v1) ------------------------
+#
+# valid_kernel_manifest emits a canonical valid v0.16.4-shaped manifest: one
+# wheel artifact matching cp312-cp312-macosx_11_0_arm64, one sdist, and a
+# satisfiable sdist_fallback. Real lowercase 64-hex digests (not "aaaa").
+valid_kernel_manifest() {
+  printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","kernel_tag":"v0.16.4","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","artifacts":[
+    {"filename":"lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl","sha256":"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},
+    {"filename":"lingtai-0.16.4.tar.gz","sha256":"b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
+  ],"sdist_fallback":"lingtai-0.16.4.tar.gz"}'
+}
+
+expect_good_kernel_manifest() {
+  local label="$1" body="$2" tag="${3:-v0.16.4}" out rc
+  if out="$(validate_kernel_manifest "$body" "$tag" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  [[ "$rc" -eq 0 ]] || fail "kernel manifest validator rejected $label (rc=$rc): $out"
+  [[ -z "$out" ]] || fail "kernel manifest validator printed unexpected output for $label: $out"
+}
+
+expect_good_kernel_manifest "the canonical valid manifest" "$(valid_kernel_manifest)" v0.16.4
+
+expect_bad_kernel_manifest() {
+  local label="$1" body="$2" tag="${3:-v0.16.4}"
+  if validate_kernel_manifest "$body" "$tag" >/dev/null 2>&1; then
+    fail "kernel manifest validator accepted $label"
+  fi
+}
+
+# Failing-first evidence: the pre-fix test suite's own fixtures used
+# sha256:"aaaa"/"cccc" (see the fetch_kernel_manifest/select_kernel_wheel
+# fixtures below, now repaired) — those were PASSING fixtures against the old
+# substring-grep gate. Pin that the validator rejects that exact shape.
+expect_bad_kernel_manifest "short non-hex sha256 (\"aaaa\")" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][0]["sha256"]="aaaa"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "short non-hex sha256 (\"cccc\")" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][1]["sha256"]="cccc"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "uppercase 64-hex sha256" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][0]["sha256"]=d["artifacts"][0]["sha256"].upper(); print(json.dumps(d))')"
+expect_bad_kernel_manifest "malformed/non-object JSON containing the schema string" \
+  '["not an object but", "schema", "lingtai.kernel.release/v1"]'
+expect_bad_kernel_manifest "plain text containing the schema string" \
+  'this is not json but mentions "schema": "lingtai.kernel.release/v1" in prose'
+expect_bad_kernel_manifest "wrong pinned tag/version (served v9.9.9, pinned v0.16.4)" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["kernel_version"]="9.9.9"; d["kernel_tag"]="v9.9.9"; d["artifacts"][0]["filename"]="lingtai-9.9.9-cp312-cp312-macosx_11_0_arm64.whl"; d["artifacts"][1]["filename"]="lingtai-9.9.9.tar.gz"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "kernel_tag does not equal pinned tag requested" \
+  "$(valid_kernel_manifest)" "v0.16.5"
+expect_bad_kernel_manifest "traversal filename" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][0]["filename"]="../../escaped-kernel.whl"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "separator/whitespace filename" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][0]["filename"]="lingtai-0.16.4-cp312-cp312-evil arch.whl"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "unsatisfiable sdist_fallback (names no listed artifact)" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["sdist_fallback"]="does-not-exist.tar.gz"; print(json.dumps(d))')"
+expect_bad_kernel_manifest "non-sdist sdist_fallback (names the wheel)" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["sdist_fallback"]=d["artifacts"][0]["filename"]; print(json.dumps(d))')"
+expect_bad_kernel_manifest "duplicate top-level JSON key" \
+  '{"schema":"lingtai.kernel.release/v1","schema":"other"}'
+expect_bad_kernel_manifest "missing commit" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); del d["commit"]; print(json.dumps(d))')"
+expect_bad_kernel_manifest "commit not 40 hex" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["commit"]="deadbeef"; print(json.dumps(d))')"
+expect_good_kernel_manifest "uppercase 40-hex commit (kernel canonical validation is case-insensitive)" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["commit"]=d["commit"].upper(); print(json.dumps(d))')"
+expect_bad_kernel_manifest "empty artifacts" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"]=[]; print(json.dumps(d))')"
+expect_bad_kernel_manifest "duplicate artifact filenames" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"].append(dict(d["artifacts"][0])); print(json.dumps(d))')"
+
+# Forward-compatibility (must NOT regress): a valid manifest with one unknown
+# top-level key is accepted — a newer kernel release adding a field must not
+# hard-fail this installer (see validate_kernel_manifest's comment).
+expect_good_kernel_manifest "an unknown top-level key for cross-repo forward compatibility" \
+  "$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["future_optional_field"]="whatever-a-newer-kernel-release-adds"; print(json.dumps(d))')" \
+  v0.16.4
+
 # --- kernel manifest handoff survives provider selection in the same shell ---
 
 (
@@ -379,13 +458,36 @@ register_response_text() {
     [[ "$1" == "gitee" ]] && printf 'https://example.invalid/%s/manifest.json' "$2"
   }
   curl() {
-    printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[]}'
+    valid_kernel_manifest
   }
 
   fetch_kernel_manifest v0.16.4 || fail "fetch_kernel_manifest should populate explicit state"
   assert_eq "gitee" "$KERNEL_MANIFEST_PROVIDER" "kernel manifest provider survives fetch"
   [[ "$KERNEL_MANIFEST_JSON" == *'"kernel_version":"0.16.4"'* ]] ||
     fail "kernel manifest JSON survives fetch"
+)
+
+(
+  # Rejection occurs at fetch_kernel_manifest, before filename/URL/destination
+  # use: a served body that fails structural validation must make
+  # fetch_kernel_manifest itself return nonzero and leave KERNEL_MANIFEST_JSON
+  # unset, so no downstream caller (select_kernel_wheel, kernel_sdist_fallback,
+  # install_kernel_from_bundle) ever sees the bad body.
+  BUNDLE_PROVIDER="gitee"
+  KERNEL_MANIFEST_PROVIDER=""
+  KERNEL_MANIFEST_JSON=""
+  kernel_manifest_url_for_provider() {
+    [[ "$1" == "gitee" ]] && printf 'https://example.invalid/%s/manifest.json' "$2"
+  }
+  curl() {
+    printf '%s' 'plain text mentioning "schema": "lingtai.kernel.release/v1" but not a manifest'
+  }
+
+  if fetch_kernel_manifest v0.16.4; then
+    fail "fetch_kernel_manifest must reject a body that only contains the schema substring"
+  fi
+  assert_eq "" "$KERNEL_MANIFEST_JSON" "fetch_kernel_manifest must leave KERNEL_MANIFEST_JSON unset on rejection"
+  assert_eq "" "$KERNEL_MANIFEST_PROVIDER" "fetch_kernel_manifest must leave KERNEL_MANIFEST_PROVIDER unset on rejection"
 )
 
 # --- select_kernel_wheel: exact match preferred, no match -> empty ----------
@@ -476,9 +578,9 @@ PYEOF
   fakebin="$tmp/install-checksum-fail-fakebin"
   setup_fake_curl "$fakebin"
 
-  kernel_manifest='{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[
+  kernel_manifest='{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","kernel_tag":"v0.16.4","commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","artifacts":[
     {"filename":"lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl","sha256":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"},
-    {"filename":"lingtai-0.16.4.tar.gz","sha256":"cccc","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
+    {"filename":"lingtai-0.16.4.tar.gz","sha256":"2222222222222222222222222222222222222222222222222222222222222222","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}
   ],"sdist_fallback":"lingtai-0.16.4.tar.gz"}'
 
   register_response_text \
@@ -514,6 +616,49 @@ PYEOF
   assert_eq "" "$KERNEL_SOURCE" "KERNEL_SOURCE must stay unset when install_kernel_from_bundle fails"
   if [[ ! -f "$BUILD_DIR/kernel-artifact/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" ]]; then
     fail "the tampered/mismatched artifact must be retained for diagnosis after checksum failure"
+  fi
+)
+
+# --- install_kernel_from_bundle: path-traversal filename is rejected at the
+# manifest boundary, before any file is written -------------------------------
+
+(
+  fakebin="$tmp/install-traversal-fakebin"
+  setup_fake_curl "$fakebin"
+
+  traversal_manifest="$(printf '%s' "$(valid_kernel_manifest)" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["artifacts"][0]["filename"]="../../escaped-kernel.whl"; print(json.dumps(d))')"
+
+  register_response_text \
+    "https://api.github.com/repos/Lingtai-AI/lingtai-kernel/releases/tags/v0.16.4" \
+    '{"tag_name":"v0.16.4","assets":[{"name":"lingtai-kernel-release-manifest.json"}]}'
+  register_response_text \
+    "https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v0.16.4/lingtai-kernel-release-manifest.json" \
+    "$traversal_manifest"
+
+  export PATH="$fakebin:/usr/bin:/bin"
+  KERNEL_GH_API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai-kernel"
+
+  fake_py="$tmp/fake-python-traversal-test"
+  cat > "$fake_py" <<'PYEOF'
+#!/usr/bin/env bash
+cat <<'TAGS'
+cp312-cp312-macosx_11_0_arm64
+TAGS
+PYEOF
+  chmod +x "$fake_py"
+
+  BUNDLE_MANIFEST_JSON='{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","kernel_tag":"v0.16.4"}'
+  BUILD_DIR="$tmp/install-traversal-build"
+  KERNEL_SOURCE=""
+  if install_kernel_from_bundle "$fake_py" ""; then
+    fail "install_kernel_from_bundle must reject a traversal filename, not succeed"
+  fi
+  assert_eq "" "$KERNEL_SOURCE" "KERNEL_SOURCE must stay unset when the manifest fails validation"
+  if [[ -d "$BUILD_DIR/kernel-artifact" ]]; then
+    fail "no file/dir should be created under BUILD_DIR when the manifest is rejected before download"
+  fi
+  if [[ -f "$tmp/escaped-kernel.whl" ]]; then
+    fail "traversal filename must never reach a curl -o destination outside BUILD_DIR"
   fi
 )
 

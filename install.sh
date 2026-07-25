@@ -1250,11 +1250,105 @@ kernel_manifest_url_for_provider() {
   esac
 }
 
+# validate_kernel_manifest is a stdlib-only Python heredoc, style-matched to
+# parse_bundle_manifest above, that structurally validates a kernel release
+# manifest body against schema lingtai.kernel.release/v1 before any
+# filename/URL/destination use (RELEASING.md: "the generator, the publisher,
+# and the TUI installer's consumer all import or mirror" this shape).
+# Deliberately accepts unknown TOP-LEVEL keys (unlike parse_bundle_manifest's
+# exact-key-set bundle check): the kernel manifest crosses a repo boundary,
+# so a newer kernel release adding a field must not hard-fail this installer.
+# No packaging/PEP 440 dependency — install.sh must work with bare stdlib
+# Python, same constraint python_platform_tags already documents.
+validate_kernel_manifest() {
+  local body="$1" expected_tag="$2"
+  BODY="$body" python3 - "$expected_tag" <<'PY'
+import json, os, re, sys
+expected_tag = sys.argv[1]
+def pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+def string(value, label):
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a nonempty string")
+    return value
+FILENAME_RE = re.compile(r"[^/\\\s\x00]+")
+def safe_component(value, label):
+    string(value, label)
+    if not FILENAME_RE.fullmatch(value) or ".." in value:
+        raise ValueError(f"{label} is not a safe path component")
+    return value
+try:
+    data = json.loads(os.environ["BODY"], object_pairs_hook=pairs)
+    if not isinstance(data, dict):
+        raise ValueError("manifest must be a JSON object")
+    if data.get("schema") != "lingtai.kernel.release/v1":
+        raise ValueError("unexpected schema")
+    kernel_version = string(data.get("kernel_version"), "kernel_version")
+    kernel_tag = string(data.get("kernel_tag"), "kernel_tag")
+    if kernel_tag != f"v{kernel_version}":
+        raise ValueError("kernel_tag does not equal 'v' + kernel_version")
+    if kernel_tag != expected_tag:
+        raise ValueError(f"kernel_tag {kernel_tag!r} does not match the pinned tag {expected_tag!r}")
+    commit = data.get("commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        raise ValueError("commit must be a 40-character hex SHA")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError("artifacts must be a nonempty array")
+    names = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            raise ValueError("artifact entry must be an object")
+        for key in ("filename", "sha256", "kind", "python_tag", "abi_tag", "platform_tag"):
+            if key not in artifact:
+                raise ValueError(f"artifact entry missing required key: {key}")
+        filename = safe_component(artifact["filename"], "artifact filename")
+        if filename in names:
+            raise ValueError("artifacts contains duplicate filenames")
+        names.add(filename)
+        sha256 = artifact["sha256"]
+        if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise ValueError(f"artifact {filename!r} sha256 must be lowercase 64-hex")
+        kind = artifact["kind"]
+        if kind not in ("wheel", "sdist"):
+            raise ValueError(f"artifact {filename!r} kind must be 'wheel' or 'sdist'")
+        python_tag, abi_tag, platform_tag = artifact["python_tag"], artifact["abi_tag"], artifact["platform_tag"]
+        if kind == "wheel":
+            safe_component(python_tag, f"artifact {filename!r} python_tag")
+            safe_component(abi_tag, f"artifact {filename!r} abi_tag")
+            safe_component(platform_tag, f"artifact {filename!r} platform_tag")
+            expected_name = f"lingtai-{kernel_version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
+            if filename != expected_name:
+                raise ValueError(f"wheel filename {filename!r} does not match its own tag fields")
+        else:
+            if python_tag is not None or abi_tag is not None or platform_tag is not None:
+                raise ValueError(f"sdist artifact {filename!r} must have null python_tag/abi_tag/platform_tag")
+            expected_name = f"lingtai-{kernel_version}.tar.gz"
+            if filename != expected_name:
+                raise ValueError(f"sdist filename {filename!r} does not match kernel_version")
+    sdist_fallback = data.get("sdist_fallback")
+    if not isinstance(sdist_fallback, str) or not sdist_fallback:
+        raise ValueError("sdist_fallback must be a nonempty string")
+    fallback_hits = [a for a in artifacts if a["filename"] == sdist_fallback]
+    if len(fallback_hits) != 1 or fallback_hits[0]["kind"] != "sdist":
+        raise ValueError("sdist_fallback must name exactly one listed sdist artifact")
+except (ValueError, TypeError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"invalid strict kernel manifest: {exc}")
+PY
+}
+
 # fetch_kernel_manifest resolves the pinned kernel tag/manifest for the
 # CURRENT BUNDLE_PROVIDER + the bundle's kernel_tag. Falls back to the other
 # provider for the SAME kernel tag only (same-bundle-fallback contract).
 # Populates KERNEL_MANIFEST_JSON and KERNEL_MANIFEST_PROVIDER in this shell;
-# returns nonzero if unavailable on either provider.
+# returns nonzero if unavailable on either provider. The manifest body is
+# structurally validated (validate_kernel_manifest) before it is trusted —
+# no filename/URL/destination use happens on an unvalidated body.
 fetch_kernel_manifest() {
   local kernel_tag="$1" provider="$BUNDLE_PROVIDER" url body other
   KERNEL_MANIFEST_PROVIDER=""
@@ -1274,8 +1368,8 @@ fetch_kernel_manifest() {
 
   body="$(curl -fsSL --max-time 30 "$url" 2>/dev/null || true)"
   [[ -n "$body" ]] || return 1
-  if ! printf '%s' "$body" | grep -q '"schema"[[:space:]]*:[[:space:]]*"lingtai.kernel.release/v1"'; then
-    echo "error: kernel manifest at $url has an unexpected schema" >&2
+  if ! validate_kernel_manifest "$body" "$kernel_tag"; then
+    echo "error: kernel manifest at $url failed structural validation" >&2
     return 1
   fi
 
