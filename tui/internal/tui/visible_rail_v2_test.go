@@ -301,7 +301,7 @@ func visibleRailV2RailRow(app App, canonicalIndex int) string {
 	if line < 0 || line >= len(segments) {
 		return ""
 	}
-	return segments[line]
+	return ansi.Cut(segments[line], 0, visibleRailV2Width-1)
 }
 
 func visibleRailV2RailLineContaining(app App, text string) string {
@@ -394,6 +394,116 @@ func TestVisibleRailV2GeometryAndComposition(t *testing.T) {
 	})
 }
 
+func TestVisibleRailV2InBudgetDividerAndCellAwareFitting(t *testing.T) {
+	fixture := newVisibleRailV2Fixture(
+		t,
+		[]string{"Sibling", "ASCII Placeholder", "CJK Placeholder", "ANSI Placeholder"},
+		[]int{0, 0, 0, 0},
+		85,
+		12,
+		"",
+	)
+	app := fixture.app
+	fittingCases := []struct {
+		name  string
+		index int
+		label string
+	}{
+		{
+			name:  "ASCII",
+			index: visibleRailV2RowIndex(t, app.mail, fixture.targets[1].AgentID),
+			label: "ASCII label deliberately longer than the inner rail",
+		},
+		{
+			name:  "CJK",
+			index: visibleRailV2RowIndex(t, app.mail, fixture.targets[2].AgentID),
+			label: "量子纠缠观测标签长到超出侧栏内部宽度",
+		},
+		{
+			name:  "ANSI",
+			index: visibleRailV2RowIndex(t, app.mail, fixture.targets[3].AgentID),
+			label: "\x1b[35mANSI label deliberately longer than the inner rail\x1b[0m",
+		},
+	}
+	for _, test := range fittingCases {
+		app.mail.agentSelector.rows[test.index].Label = test.label
+	}
+
+	budget := app.layoutBudget()
+	if !budget.RailVisible || budget.RailWidth != 24 || budget.ContentWidth != 61 ||
+		budget.TerminalWidth != 85 {
+		t.Fatalf("width 85 budget = terminal/content/rail/visible %d/%d/%d/%v, want 85/61/24/true",
+			budget.TerminalWidth, budget.ContentWidth, budget.RailWidth, budget.RailVisible)
+	}
+
+	segments := visibleRailV2RailSegments(app)
+	if len(segments) != budget.ChildHeight {
+		t.Fatalf("rail lines = %d, want child height %d", len(segments), budget.ChildHeight)
+	}
+	for line, segment := range segments {
+		if got := lipgloss.Width(segment); got != visibleRailV2Width {
+			t.Errorf("rail line %d width = %d, want exact %d cells: %q",
+				line, got, visibleRailV2Width, segment)
+		}
+		wantDivider := "│"
+		if line == 1 {
+			wantDivider = "┤"
+		}
+		if got := ansi.Cut(segment, visibleRailV2Width-1, visibleRailV2Width); got != wantDivider {
+			t.Errorf("rail line %d cell 23 = %q, want %q in the 24-cell budget",
+				line, got, wantDivider)
+		}
+	}
+	if got := ansi.Cut(segments[1], 0, visibleRailV2Width-1); got != strings.Repeat("─", visibleRailV2Width-1) {
+		t.Errorf("header rule inner cells = %q, want 23 horizontal-rule cells", got)
+	}
+
+	rawLines := strings.Split(app.mail.renderAgentRail(budget.RailWidth, budget.ChildHeight), "\n")
+	for line, raw := range rawLines {
+		glyph := "│"
+		if line == 1 {
+			glyph = "┤"
+		}
+		wantSuffix := lipgloss.NewStyle().Foreground(ColorBorder).Render(glyph)
+		if !strings.HasSuffix(raw, wantSuffix) {
+			t.Errorf("rail line %d divider is not the expected ColorBorder %q suffix: %q",
+				line, glyph, raw)
+		}
+	}
+
+	for _, test := range fittingCases {
+		t.Run(test.name, func(t *testing.T) {
+			content := visibleRailV2RailRow(app, test.index)
+			plain := ansi.Strip(content)
+			if got := lipgloss.Width(content); got != visibleRailV2Width-1 {
+				t.Errorf("inner row width = %d, want 23 cells: %q", got, plain)
+			}
+			if strings.Contains(plain, ansi.Strip(test.label)) {
+				t.Errorf("long %s label was not fitted inside the inner rectangle: %q", test.name, plain)
+			}
+			if got := ansi.Cut(plain, visibleRailV2Width-2, visibleRailV2Width-1); got != "…" {
+				t.Errorf("long %s label final inner cell = %q, want ellipsis: %q", test.name, got, plain)
+			}
+		})
+	}
+
+	mainLine := visibleRailV2RailRow(app, visibleRailV2RowIndex(t, app.mail, ""))
+	siblingLine := visibleRailV2RailRow(app, visibleRailV2RowIndex(t, app.mail, fixture.targets[0].AgentID))
+	labelOrigin := func(line, label string) int {
+		line = ansi.Strip(line)
+		offset := strings.Index(line, label)
+		if offset < 0 {
+			return -1
+		}
+		return lipgloss.Width(line[:offset])
+	}
+	if mainOrigin, siblingOrigin := labelOrigin(mainLine, i18n.T("agent_selector.main")),
+		labelOrigin(siblingLine, "Sibling"); mainOrigin != 2 || siblingOrigin != mainOrigin {
+		t.Errorf("fixed label origins = Main %d, sibling %d, want both at display cell 2:\nMain: %q\nsibling: %q",
+			mainOrigin, siblingOrigin, mainLine, siblingLine)
+	}
+}
+
 func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 	fixture := newVisibleRailV2Fixture(
 		t,
@@ -427,8 +537,8 @@ func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 	if !strings.Contains(segments[0], i18n.T("agent_rail.title")) {
 		t.Errorf("rail title row = %q, want localized title %q", segments[0], i18n.T("agent_rail.title"))
 	}
-	if got := strings.TrimSpace(segments[1]); got != strings.Repeat("─", visibleRailV2Width) {
-		t.Errorf("rail separator row = %q, want 24-cell separator", got)
+	if got := strings.TrimSpace(segments[1]); got != strings.Repeat("─", visibleRailV2Width-1)+"┤" {
+		t.Errorf("rail separator row = %q, want 23-cell rule plus in-budget junction", got)
 	}
 
 	mainLine := visibleRailV2RailRow(app, visibleRailV2RowIndex(t, app.mail, ""))

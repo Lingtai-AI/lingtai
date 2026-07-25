@@ -158,7 +158,7 @@ func (m MailModel) renderAgentRailRow(row agentSelectorRow, index, width int) st
 	if labelWidth < 0 {
 		labelWidth = 0
 	}
-	label := ansi.Truncate(row.Label, labelWidth, "")
+	label := ansi.Truncate(row.Label, labelWidth, "…")
 	line := prefix + label
 	if padding := width - lipgloss.Width(line) - lipgloss.Width(badge); padding > 0 {
 		line += strings.Repeat(" ", padding)
@@ -172,13 +172,18 @@ func (m MailModel) renderAgentRail(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	innerWidth := width - 1
+	dividerStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+	frameLine := func(content, divider string) string {
+		return fitAgentRailLine(content, innerWidth) + dividerStyle.Render(divider)
+	}
 	lines := make([]string, height)
 	for index := range lines {
-		lines[index] = strings.Repeat(" ", width)
+		lines[index] = frameLine("", "│")
 	}
-	lines[0] = fitAgentRailLine("  "+i18n.T("agent_rail.title"), width)
+	lines[0] = frameLine("  "+i18n.T("agent_rail.title"), "│")
 	if height > 1 {
-		lines[1] = fitAgentRailLine(strings.Repeat("─", width), width)
+		lines[1] = frameLine(strings.Repeat("─", innerWidth), "┤")
 	}
 
 	offset := clampAgentRailOffset(m.agentRail.scrollOffset, len(m.agentSelector.rows), height)
@@ -189,7 +194,10 @@ func (m MailModel) renderAgentRail(width, height int) string {
 		if rowIndex >= len(m.agentSelector.rows) || lineIndex >= height {
 			break
 		}
-		lines[lineIndex] = m.renderAgentRailRow(m.agentSelector.rows[rowIndex], rowIndex, width)
+		lines[lineIndex] = frameLine(
+			m.renderAgentRailRow(m.agentSelector.rows[rowIndex], rowIndex, innerWidth),
+			"│",
+		)
 	}
 	return strings.Join(lines, "\n")
 }
