@@ -131,17 +131,14 @@ when the portal is in scope.
 ## 3. Rebuild the active TUI from a clean release worktree
 
 To make the running binary reflect `origin/main` (or a release head), rebuild
-from a clean worktree, not a dirty feature branch. After rebuilding either
-binary, rebuild **both** — a stale portal against a freshly migrated project
-fails with `data version N is newer than this binary supports`.
+from a clean worktree, not a dirty feature branch.
 
 ```bash
 REPO=<your-lingtai-checkout>
 git -C "$REPO" fetch origin main --tags --prune
 
-# Build both so TUI and portal stay at the same meta.json version.
 cd "$REPO/tui" && make build
-cd "$REPO/portal" && make build
+cd "$REPO/portal" && make build   # only if the portal is also in scope
 ```
 
 ### Verify the rebuild actually landed on PATH
@@ -287,7 +284,7 @@ not the matched secret.
 ## Related references
 
 - `reference/setup/SKILL.md` — establish or recover editable dev mode and symlinks.
-- `reference/gotchas/SKILL.md` — dev-mode rebuild gotcha, editable-install behaviour.
+- `reference/gotchas/SKILL.md` — editable-install behaviour.
 - `reference/debug-troubleshoot/SKILL.md` — failing networks, MCP boot, preset/path mismatch.
 - `reference/security-audit/SKILL.md` — full secret/permission audit and safe-reporting format.
 - `reference/cache-hit-rate/SKILL.md` — the token-ledger measurement that proves a cache fix took effect.
