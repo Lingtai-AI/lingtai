@@ -270,11 +270,11 @@ type MailModel struct {
 	directUnreadOpInFlight  bool
 	directUnreadSyncPending bool
 
-	// Home telemetry is resolved asynchronously off the render/input path (its
-	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
-	// locked/slow sidecar). View()/hasHomeTelemetry()/syncViewportHeight() read
-	// this cached snapshot ONLY; the fetchHomeTelemetry background command
-	// refreshes it via homeTelemetryMsg. See home_telemetry.go's async note.
+	// Home telemetry is resolved asynchronously off the render/input path. Its I/O
+	// reads one .status.json snapshot plus context-only manifest fallback; it no
+	// longer reaches sqlite, the ledger, or events.jsonl. View(),
+	// hasHomeTelemetry(), and syncViewportHeight() read this cached snapshot ONLY;
+	// fetchHomeTelemetry refreshes it via homeTelemetryMsg. See home_telemetry.go.
 	homeTelemetry          homeTelemetry // last-known snapshot; zero value renders no row
 	homeTelemetryLoaded    bool          // true once a background fetch has completed at least once
 	homeTelemetryInFlight  bool          // true while a fetchHomeTelemetry command is running (debounce)

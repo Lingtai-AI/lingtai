@@ -287,8 +287,30 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 }
 
 // AgentStatus holds live runtime status from .status.json (same as system("show")).
+//
+// The five scalar Tokens fields are the CURRENT SESSION token economy — "session"
+// meaning SINCE THE LATEST psyche_molt. They share the session boundary that
+// SumMoltSessionTokenLedger(...).Current re-derives, not necessarily its totals:
+// the ledger also counts source=soul consultation rows that these counters omit.
+// The kernel publishes them from SessionManager's cumulative counters, which
+// reset_session_token_usage zeroes on molt and restore_token_state preserves
+// across refresh (lingtai-kernel base_agent/identity.py `_status`). They are
+// written atomically with Context, giving one coherent economy+context pair.
+//
+// Older snapshots may omit these fields, so they decode as 0 and callers drop the
+// fragment. A pre-current snapshot may instead contain populated counters wider
+// than its last logged psyche_molt; the current kernel resets before logging that
+// boundary, but no version marker lets a reader repair legacy scope. The sibling
+// `tokens.total_tokens` is deliberately omitted: it equals InputTokens+
+// OutputTokens+ThinkingTokens, while Context.TotalTokens is live context size.
 type AgentStatus struct {
 	Tokens struct {
+		InputTokens    int64 `json:"input_tokens"`
+		OutputTokens   int64 `json:"output_tokens"`
+		ThinkingTokens int64 `json:"thinking_tokens"`
+		CachedTokens   int64 `json:"cached_tokens"`
+		APICalls       int64 `json:"api_calls"`
+
 		Estimated bool `json:"estimated"`
 		Context   struct {
 			SystemTokens  int     `json:"system_tokens"`

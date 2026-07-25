@@ -687,3 +687,78 @@ func TestSumMoltSessionTokenLedgerCacheInvalidatesOnLedgerChange(t *testing.T) {
 		t.Fatalf("after ledger append stats = %+v", stats.Current)
 	}
 }
+
+// TestReadStatusDecodesSessionTokenTotals pins the `.status.json` token contract
+// Home telemetry now depends on: the five since-last-molt session scalars the
+// kernel publishes next to the context block decode into AgentStatus.Tokens, and
+// the sibling `total_tokens` is deliberately NOT mapped (it duplicates
+// input+output+thinking and would collide conceptually with the context block's
+// own TotalTokens).
+func TestReadStatusDecodesSessionTokenTotals(t *testing.T) {
+	agentDir := t.TempDir()
+	status := `{
+	  "runtime": {"pid": 99, "running": true, "uptime_seconds": 3.5},
+	  "tokens": {
+	    "input_tokens": 1781297,
+	    "output_tokens": 13165,
+	    "thinking_tokens": 5955,
+	    "cached_tokens": 1547776,
+	    "total_tokens": 999999,
+	    "api_calls": 29,
+	    "estimated": false,
+	    "context": {"total_tokens": 48000, "window_size": 250000, "usage_pct": 19.2}
+	  }
+	}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ReadStatus(agentDir).Tokens
+	if got.InputTokens != 1781297 || got.OutputTokens != 13165 ||
+		got.ThinkingTokens != 5955 || got.CachedTokens != 1547776 || got.APICalls != 29 {
+		t.Errorf("session totals = %+v, want the published input/output/thinking/cached/api_calls", got)
+	}
+	// `total_tokens` is deliberately inconsistent with the three components here
+	// (the kernel always writes the true sum), so a caller deriving the session
+	// total from the components gets 1800417 while one that started decoding the
+	// sibling field would get 999999. Callers must sum the components.
+	if sum := got.InputTokens + got.OutputTokens + got.ThinkingTokens; sum != 1800417 {
+		t.Errorf("input+output+thinking = %d, want 1800417", sum)
+	}
+	// The context block is a DIFFERENT quantity and must stay independent.
+	if got.Context.TotalTokens != 48000 || got.Context.WindowSize != 250000 {
+		t.Errorf("context = %+v, want total 48000 / window 250000", got.Context)
+	}
+	if got.Estimated {
+		t.Error("Estimated = true, want false")
+	}
+}
+
+// TestReadStatusMissingOrLegacyStatusYieldsZeroTokenTotals pins the degradation
+// side: an absent, malformed, or pre-token-totals `.status.json` leaves every
+// session scalar at zero so callers omit the fragment, and never signals an
+// error a caller could mistake for "fall back to another source".
+func TestReadStatusMissingOrLegacyStatusYieldsZeroTokenTotals(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string // "" = write no file at all
+	}{
+		{name: "missing", body: ""},
+		{name: "malformed", body: "{not valid json"},
+		{name: "legacy without token totals", body: `{"tokens":{"estimated":true,"context":{"window_size":200000}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agentDir := t.TempDir()
+			if tc.body != "" {
+				if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(tc.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := ReadStatus(agentDir).Tokens
+			if got.InputTokens != 0 || got.OutputTokens != 0 || got.ThinkingTokens != 0 ||
+				got.CachedTokens != 0 || got.APICalls != 0 {
+				t.Errorf("session totals = %+v, want all zero", got)
+			}
+		})
+	}
+}

@@ -11,17 +11,17 @@ import (
 	"time"
 )
 
-// moltSessionWindowQueryTimeout is a WORKER-LOCAL BACKSTOP that bounds how long
-// the molt-session-window sqlite3 subprocess may run before it is killed. It is
-// NOT the mechanism that protects the UI thread: home telemetry is gathered on a
-// background tea.Cmd (tui: fetchHomeTelemetry), never on the render (View) or
-// keypress (syncViewportHeight) path, so the UI never waits on this query. This
-// deadline exists only so a pathological sidecar — e.g. the kernel wedged holding
-// the write lock indefinitely — cannot pin a background worker forever; on expiry
-// the query degrades to the last cached window (see moltWindowCache). It is
-// deliberately CONSERVATIVE (1s, far above a normal write's brief lock) precisely
-// because it no longer sits on a latency-sensitive path: a tight deadline here
-// would only cause spurious stale reads with no UI-responsiveness benefit.
+// moltSessionWindowQueryTimeout bounds how long the molt-session-window sqlite3
+// subprocess may run before it is killed. The current TUI caller reaches this
+// query through PropsModel.loadDetail, synchronously from Ctrl+D and auto-refresh,
+// so this deadline is also the hard ceiling on that UI path. It prevents a
+// pathological sidecar — e.g. the kernel wedged while holding the write lock —
+// from blocking indefinitely; on expiry the query degrades to the last cached
+// window (see moltWindowCache). The 1s value is deliberately conservative, far
+// above a normal write's brief lock, to favor a fresh boundary without permitting
+// an unbounded wait. A cache hit avoids the fork but does not make a miss async.
+// Callers needing tighter responsiveness must add their own asynchronous boundary;
+// keep that distinction explicit whenever this caller topology changes.
 const moltSessionWindowQueryTimeout = 1 * time.Second
 
 // moltSessionWindowBusyTimeoutMS is the sqlite busy_timeout (milliseconds) applied
@@ -29,20 +29,20 @@ const moltSessionWindowQueryTimeout = 1 * time.Second
 // database lock; without busy_timeout the read fails instantly with SQLITE_BUSY,
 // which the caller (fs.SumMoltSessionTokenLedger) treats as "no sqlite result"
 // and falls back to an expensive full events.jsonl parse. A short busy_timeout
-// lets the read wait out a normal write and still return promptly, well within
-// moltSessionWindowQueryTimeout. This too runs on the background worker, not the
-// UI thread.
+// lets the read wait out a normal write while staying well inside
+// moltSessionWindowQueryTimeout. Because the current detail caller is synchronous,
+// keep this wait materially shorter than the outer ceiling.
 const moltSessionWindowBusyTimeoutMS = 150
 
 // moltSessionWindowCacheTTL is the minimum interval between two live sqlite
 // subprocess launches for the same agent's molt-session windows. It is a
-// secondary optimization: the TUI already debounces telemetry fetches at the
-// model level (tui: homeTelemetryTTL), so in practice this rarely fires, but it
-// keeps any other caller (and back-to-back background fetches) from relaunching
-// the subprocess needlessly. The molt window itself only moves when the kernel
-// writes a new psyche_molt row (minutes apart at most), so a sub-second staleness
-// on the boundary is invisible to the token totals, which are separately re-summed
-// from the ledger by the caller.
+// secondary optimization for repeated detail loads (Ctrl+D / auto-refresh) and
+// any other back-to-back caller, keeping them from relaunching the subprocess
+// needlessly. The molt window itself only moves when the kernel writes a new
+// psyche_molt row, so sub-second boundary staleness is normally invisible to
+// token totals, which the caller separately re-sums from the ledger. The cache
+// is process-global because the copied Bubble Tea models cannot safely own this
+// cross-refresh freshness state.
 const moltSessionWindowCacheTTL = 750 * time.Millisecond
 
 // moltWindow is a resolved molt-session-window result plus enough freshness
@@ -59,14 +59,14 @@ type moltWindow struct {
 }
 
 // moltWindowCache holds the last successful molt-window query per agent. It is a
-// process-global cache shared across background telemetry fetches — the caller
-// (fs.SumMoltSessionTokenLedger, reached from the fetchHomeTelemetry tea.Cmd)
-// copies the model by value and so cannot hold the cache itself, exactly like
-// fs.moltSessionTokenLedgerCache. Its two jobs: (1) skip the subprocess entirely
-// within moltSessionWindowCacheTTL when the sidecar is unchanged, and (2) serve a
-// STALE window if a live query times out or errors, so a locked/slow database
-// degrades to stale-but-cheap telemetry instead of the expensive events.jsonl
-// fallback path.
+// process-global cache shared across detail loads and any other caller of the
+// ledger helpers; copied Bubble Tea models cannot safely own this cross-refresh
+// state, exactly as with fs.moltSessionTokenLedgerCache. Its two jobs are to skip
+// the subprocess within moltSessionWindowCacheTTL when the sidecar is unchanged
+// and to serve a STALE window if a live query times out or errors. A locked/slow
+// database therefore degrades to stale-but-cheap detail data rather than the
+// expensive events.jsonl fallback path. Callers still decide whether that stale
+// result is acceptable for their own latency and freshness contract.
 var moltWindowCache = struct {
 	sync.Mutex
 	byDir map[string]moltWindow
@@ -90,16 +90,16 @@ func moltWindowNow() time.Time {
 // the sqlite sidecar. It returns the current session lower bound, the previous
 // session lower bound, and the previous session upper bound.
 //
-// It is called from the background telemetry fetch (tui: fetchHomeTelemetry),
-// NOT from the render/keypress path, so it does not need to protect the UI
-// thread. It is nonetheless guarded so a single stuck sidecar cannot pin a
-// background worker: the sqlite3 subprocess runs under a conservative worker-local
-// deadline (moltSessionWindowQueryTimeout) with a sqlite busy timeout, and a
-// process-global cache (moltWindowCache) both skips the subprocess for unchanged
-// sidecars within moltSessionWindowCacheTTL and serves the last good result when
-// a live query times out or errors. On such a degradation it returns ok=true,
-// err=nil so the caller uses the (stale) cached window rather than falling back
-// to an expensive full events.jsonl parse.
+// The remaining TUI path reaches it through the /kanban detail ledger helpers,
+// including synchronously from Ctrl+D and auto-refresh. A stuck sidecar therefore
+// must not wait without a ceiling: the sqlite3 subprocess uses
+// moltSessionWindowQueryTimeout plus a sqlite busy timeout, while the
+// process-global moltWindowCache skips unchanged sidecars within
+// moltSessionWindowCacheTTL and serves the last good result when a live query
+// times out or errors. On that degradation this returns ok=true, err=nil so the
+// caller uses the stale cached window rather than falling back to an expensive
+// full events.jsonl parse. The cache reduces work; it does not move the caller
+// off the UI path.
 func QueryMoltSessionWindows(agentDir string) (currentSince, lastSince, lastBefore time.Time, ok bool, err error) {
 	db := DBPath(agentDir)
 	info, statErr := os.Stat(db)
@@ -108,7 +108,7 @@ func QueryMoltSessionWindows(agentDir string) (currentSince, lastSince, lastBefo
 	}
 
 	// Fast path: a recent cached window for an unchanged sidecar. Skips the
-	// subprocess entirely for back-to-back background fetches.
+	// subprocess entirely for back-to-back detail loads.
 	if w, hit := cachedMoltWindow(agentDir, info); hit {
 		return w.currentSince, w.lastSince, w.lastBefore, w.ok, nil
 	}
@@ -193,8 +193,8 @@ func queryMoltWindowLive(bin, db string) (moltWindow, error) {
 // query: the sidecar is byte-identical (size+mtime) to when it was cached AND
 // the cache entry is younger than moltSessionWindowCacheTTL. The size+mtime gate
 // means a kernel write (new psyche_molt) invalidates the cache immediately; the
-// TTL floor keeps back-to-back background fetches from re-launching the subprocess
-// even while a write is streaming in.
+// TTL floor keeps repeated detail loads from re-launching the subprocess even
+// while a write is streaming in.
 func cachedMoltWindow(agentDir string, info os.FileInfo) (moltWindow, bool) {
 	moltWindowCache.Lock()
 	defer moltWindowCache.Unlock()
