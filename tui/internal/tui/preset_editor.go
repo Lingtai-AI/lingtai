@@ -1713,11 +1713,6 @@ func clonePresetForEditor(p preset.Preset) preset.Preset {
 	return out
 }
 
-func asBool(v interface{}) bool {
-	b, _ := v.(bool)
-	return b
-}
-
 func asExtra(extra map[string]interface{}, key string) string {
 	if extra == nil {
 		return ""

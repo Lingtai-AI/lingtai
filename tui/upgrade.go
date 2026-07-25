@@ -44,7 +44,6 @@ type startupTUIUpgradeOptions struct {
 	GlobalDir           string
 	SourceInstallScript string
 
-	CheckTUIUpgrade                 func(string) string
 	FindOtherTUIProcesses           func() []runningTUIProcess
 	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) (func() error, error)
 }
@@ -61,9 +60,6 @@ func (o *startupTUIUpgradeOptions) setDefaults() {
 	}
 	if o.Runner == nil {
 		o.Runner = streamingCommandRunner{stdout: os.Stdout, stderr: os.Stderr}
-	}
-	if o.CheckTUIUpgrade == nil {
-		o.CheckTUIUpgrade = config.CheckTUIUpgrade
 	}
 	if o.FindOtherTUIProcesses == nil {
 		o.FindOtherTUIProcesses = findOtherTUIProcesses

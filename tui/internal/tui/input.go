@@ -296,10 +296,6 @@ func (m InputModel) AtMaxHeight() bool {
 	return m.textarea.Height() >= m.textarea.MaxHeight
 }
 
-func (m InputModel) ScrollOffset() int {
-	return m.textarea.ScrollYOffset()
-}
-
 func (m InputModel) ScrollPercent() float64 {
 	return m.textarea.ScrollPercent()
 }

@@ -301,10 +301,6 @@ func findAgentProcessesWindows(abs string) []AgentProcess {
 	return ParseWMICOutput(string(out), abs)
 }
 
-func FindWindowsAgentProcesses(abs string) []AgentProcess {
-	return findAgentProcessesWindows(abs)
-}
-
 func windowsAgentProcessOutput() ([]byte, error) {
 	out, err := exec.Command(
 		"wmic",
