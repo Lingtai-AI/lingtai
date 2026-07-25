@@ -10,7 +10,10 @@ import (
 	"github.com/anthropics/lingtai-tui/i18n"
 )
 
-const minimumChatWidth = 60
+const (
+	minimumChatWidth          = 60
+	agentRailMinTerminalWidth = agentRailWidth + minimumChatWidth + 1
+)
 
 // LayoutBudget is the root-owned vertical and horizontal layout contract. The
 // root App reserves rows for persistent chrome and columns for the mail-only
@@ -100,7 +103,9 @@ func (a App) layoutBudget() LayoutBudget {
 	}
 
 	requestedRailWidth := 0
-	if a.currentView == appViewMail && a.width >= agentRailWidth+minimumChatWidth+1 {
+	if a.currentView == appViewMail &&
+		a.width >= agentRailMinTerminalWidth &&
+		!a.mail.agentRail.explicitlyCollapsed {
 		requestedRailWidth = agentRailWidth
 	}
 	terminalWidth, contentWidth, railWidth, railVisible := resolveHorizontalLayout(

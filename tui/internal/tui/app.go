@@ -121,6 +121,9 @@ func humanAddr(projectDir string) string {
 }
 
 func (a *App) installMailModel(m MailModel) {
+	explicitlyCollapsed := a.mail.agentRail.explicitlyCollapsed
+	m.agentRail.explicitlyCollapsed = explicitlyCollapsed
+	m = m.blurAgentRail()
 	a.mailGeneration++
 	m.generation = a.mailGeneration
 	m.advancePollEpoch()
@@ -766,6 +769,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
 				return a, tea.Quit
 			}
+		}
+		if msg.Code == tea.KeyF2 {
+			if a.agentRailToggleEligible() {
+				return a.toggleAgentRail()
+			}
+			return a, nil
 		}
 		if a.currentView == appViewMail {
 			if updated, cmd, handled := a.updateAgentRailKey(msg); handled {
@@ -1484,6 +1493,25 @@ func setActivePreset(dir, presetPath string) error {
 
 type childWindowSizeMsg struct {
 	tea.WindowSizeMsg
+}
+
+func (a App) agentRailToggleEligible() bool {
+	return a.currentView == appViewMail &&
+		a.width >= agentRailMinTerminalWidth &&
+		!a.mail.copyMode &&
+		!a.mail.directVisibilityObscured()
+}
+
+func (a App) toggleAgentRail() (App, tea.Cmd) {
+	a.mail.agentRail.explicitlyCollapsed = !a.mail.agentRail.explicitlyCollapsed
+	if a.mail.agentRail.explicitlyCollapsed && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
+	a, cmd := a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
+	if a.mail.directChat.mainComposeStored {
+		a.mail.directChat.mainInput.SetWidth(a.mail.width)
+	}
+	return a, cmd
 }
 
 func (a App) updateAgentRailKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
