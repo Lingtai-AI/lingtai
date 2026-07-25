@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/anthropics/lingtai-tui/i18n"
-	"github.com/anthropics/lingtai-tui/internal/sqlitelog"
 )
 
 // SessionEntry is the JSON-serializable entry stored in session.jsonl.
@@ -1489,56 +1488,6 @@ func indexedJSONLBoundary(path string, sourceOffset, snapshotEnd int64) int64 {
 // complete line (terminated by \n), and returns new SessionEntry values plus the
 // updated offset. Lines without a trailing \n (partial writes at EOF) are NOT
 // consumed — they will be retried on the next poll.
-func (sc *SessionCache) tailJSONLRange(path string, offset, end int64, parseFn func([]byte) *SessionEntry) ([]SessionEntry, int64) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, offset
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, offset
-	}
-	if offset < 0 || offset > info.Size() {
-		offset = 0
-	}
-	if end < offset {
-		end = offset
-	}
-	if end > info.Size() {
-		end = info.Size()
-	}
-	if end == offset {
-		return nil, offset
-	}
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, offset
-	}
-	data, err := io.ReadAll(io.LimitReader(f, end-offset))
-	if err != nil {
-		return nil, offset
-	}
-	var entries []SessionEntry
-	consumed := int64(0)
-	for len(data) > 0 {
-		idx := bytes.IndexByte(data, '\n')
-		if idx < 0 {
-			break
-		}
-		line := data[:idx]
-		data = data[idx+1:]
-		consumed += int64(idx) + 1
-		line = bytes.TrimRight(line, "\r")
-		if len(line) == 0 {
-			continue
-		}
-		if e := parseFn(line); e != nil {
-			entries = append(entries, *e)
-		}
-	}
-	return entries, offset + consumed
-}
-
 func (sc *SessionCache) tailJSONL(path string, offset int64, parseFn func([]byte) *SessionEntry) ([]SessionEntry, int64) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1600,21 +1549,6 @@ func parseEvent(line []byte) *SessionEntry {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil
 	}
-	return parseEventMap(raw)
-}
-
-func parseSQLiteEvent(row sqlitelog.SessionEventRow) *SessionEntry {
-	var raw map[string]interface{}
-	if row.FieldsJSON != "" {
-		if err := json.Unmarshal([]byte(row.FieldsJSON), &raw); err != nil {
-			return nil
-		}
-	}
-	if raw == nil {
-		raw = make(map[string]interface{})
-	}
-	raw["type"] = row.Type
-	raw["ts"] = row.TS
 	return parseEventMap(raw)
 }
 
@@ -2277,12 +2211,4 @@ func ParseSessionTs(s string) time.Time {
 		return t
 	}
 	return time.Time{}
-}
-
-func fileSize(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
 }
