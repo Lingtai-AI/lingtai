@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Focused tests for the Gitee-aware bundle installer additions to install.sh:
 # --source override validation, country detection (success/failure/fail-open),
-# Gitee response parsing, same-tag/same-bundle fallback, checksum
-# mismatch fail-loud, bundle/kernel manifest schema handling, and kernel
-# wheel selection. Kept as a separate file from scripts/test-install-sh.sh
-# (which predates this feature) rather than growing that file further.
+# Gitee response parsing, same-tag/same-bundle fallback, the third-party
+# dependency index that the final bundle provider selects (asserted on the real
+# install command's argv), checksum mismatch fail-loud, bundle/kernel manifest
+# schema handling, and kernel wheel selection. Kept as a separate file from
+# scripts/test-install-sh.sh (which predates this feature) rather than growing
+# that file further.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -515,6 +517,235 @@ PYEOF
   if [[ ! -f "$BUILD_DIR/kernel-artifact/lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl" ]]; then
     fail "the tampered/mismatched artifact must be retained for diagnosis after checksum failure"
   fi
+)
+
+# --- command path: the dependency index follows the FINAL bundle provider ---
+#
+# These run install_kernel_from_bundle for real (fake curl + stub
+# interpreter/uv) and assert on the EXACT argv the install command receives.
+# Deliberately command-path rather than helper-level: what decides whether a
+# mainland-China install can resolve lingtai's third-party dependencies is what
+# pip/uv is actually asked to do, not what a helper returns in isolation.
+
+KERNEL_ARTIFACT_NAME="lingtai-0.16.4-cp312-cp312-macosx_11_0_arm64.whl"
+
+# argv_count echoes how many recorded argv elements exactly equal $2.
+argv_count() {
+  local n
+  n="$(grep -cxF -- "$2" "$1" 2>/dev/null || true)"
+  printf '%s' "${n:-0}"
+}
+
+# argv_value_after echoes the argv element immediately following the first
+# element that exactly equals $2. Position-independent on purpose: the uv form
+# interleaves `-p <venv>` between the index URL and the local artifact.
+argv_value_after() {
+  local file="$1" flag="$2" idx
+  idx="$(grep -nxF -- "$flag" "$file" 2>/dev/null | head -1 | cut -d: -f1)"
+  [[ -n "$idx" ]] || return 1
+  sed -n "$((idx + 1))p" "$file"
+}
+
+# capture_bundle_install_argv <case-dir> <uv|pip> <bundle-provider> <kernel-provider>
+# Drives install_kernel_from_bundle end to end and leaves the exact argv of the
+# install command in <case-dir>/argv.txt, one element per line. Must be called
+# inside a subshell: it mutates PATH and installer globals.
+capture_bundle_install_argv() {
+  local case_dir="$1" installer="$2" bundle_provider="$3" kernel_provider="$4"
+  local venv_bin="$case_dir/venv/bin" fakebin="$case_dir/fakebin"
+  local argv_log="$case_dir/argv.txt"
+  mkdir -p "$venv_bin"
+  : > "$argv_log"
+
+  # The stub interpreter MUST dispatch on its first argument. install.sh calls
+  # it three different ways — `$py - <<PY` (platform tags), `$py -m pip install
+  # ...` (the install), `$py -c 'import lingtai...'` (post-install check). A
+  # stub that answers every call with the tag list would record no argv at all
+  # and make every assertion below pass vacuously.
+  local py="$venv_bin/python"
+  cat > "$py" <<STUB_PY
+#!/usr/bin/env bash
+case "\${1:-}" in
+  -)
+    cat >/dev/null
+    echo "cp312-cp312-macosx_11_0_arm64"
+    ;;
+  -m)
+    printf '%s\n' "\$@" >> "$argv_log"
+    ;;
+esac
+exit 0
+STUB_PY
+  chmod +x "$py"
+
+  local uv=""
+  if [[ "$installer" == "uv" ]]; then
+    uv="$case_dir/uv"
+    cat > "$uv" <<STUB_UV
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >> "$argv_log"
+exit 0
+STUB_UV
+    chmod +x "$uv"
+  fi
+
+  # The manifest digest must match the served bytes, otherwise the checksum
+  # gate returns before the install command ever runs.
+  local wheel_body="$case_dir/wheel.bin" wheel_sha
+  printf 'stub-wheel-bytes-for-%s' "$(basename "$case_dir")" > "$wheel_body"
+  wheel_sha="$(shasum -a 256 "$wheel_body" | cut -d' ' -f1)"
+
+  local kernel_manifest
+  kernel_manifest="$(printf '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[{"filename":"%s","sha256":"%s","kind":"wheel","python_tag":"cp312","abi_tag":"cp312","platform_tag":"macosx_11_0_arm64"}],"sdist_fallback":""}' \
+    "$KERNEL_ARTIFACT_NAME" "$wheel_sha")"
+
+  setup_fake_curl "$fakebin"
+  # setup_fake_curl reuses one response directory per test process; clear it so
+  # a previous case's registration cannot answer this case's request.
+  rm -rf "${FAKE_CURL_DIR:?}" && mkdir -p "$FAKE_CURL_DIR"
+
+  local kernel_tags_gh="https://api.github.com/repos/Lingtai-AI/lingtai-kernel/releases/tags/v0.16.4"
+  local kernel_tags_gitee="https://gitee.com/api/v5/repos/huangzesen1997/lingtai-kernel/releases/tags/v0.16.4"
+  local gh_dl="https://github.com/Lingtai-AI/lingtai-kernel/releases/download/v0.16.4"
+  local gitee_dl="https://gitee.com/huangzesen1997/lingtai-kernel/releases/download/v0.16.4"
+
+  if [[ "$kernel_provider" == "gitee" ]]; then
+    register_response_text "$kernel_tags_gitee" \
+      "$(printf '{"id":1,"tag_name":"v0.16.4","attach_files":[{"name":"lingtai-kernel-release-manifest.json","browser_download_url":"%s/lingtai-kernel-release-manifest.json"},{"name":"%s","browser_download_url":"%s/%s"}]}' \
+        "$gitee_dl" "$KERNEL_ARTIFACT_NAME" "$gitee_dl" "$KERNEL_ARTIFACT_NAME")"
+    register_response_text "$gitee_dl/lingtai-kernel-release-manifest.json" "$kernel_manifest"
+    register_response "$gitee_dl/$KERNEL_ARTIFACT_NAME" "$wheel_body"
+  else
+    # Gitee is probed first whenever the bundle came from Gitee; make it miss so
+    # the KERNEL manifest provider can differ from the FINAL BUNDLE provider.
+    register_response_text "$kernel_tags_gitee" "" 22
+    register_response_text "$kernel_tags_gh" \
+      '{"tag_name":"v0.16.4","assets":[{"name":"lingtai-kernel-release-manifest.json"}]}'
+    register_response_text "$gh_dl/lingtai-kernel-release-manifest.json" "$kernel_manifest"
+    register_response "$gh_dl/$KERNEL_ARTIFACT_NAME" "$wheel_body"
+  fi
+
+  export PATH="$fakebin:/usr/bin:/bin"
+  GITEE_OWNER="huangzesen1997"
+  GITEE_REPO="lingtai"
+  GITEE_KERNEL_REPO="lingtai-kernel"
+  GITEE_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai"
+  GITEE_KERNEL_API_BASE="https://gitee.com/api/v5/repos/huangzesen1997/lingtai-kernel"
+  KERNEL_GH_API_BASE="https://api.github.com/repos/Lingtai-AI/lingtai-kernel"
+
+  BUNDLE_PROVIDER="$bundle_provider"
+  BUNDLE_MANIFEST_JSON='{"schema":"lingtai.tui.bundle/v1","bundle_id":"v0.11.0","kernel_tag":"v0.16.4"}'
+  BUNDLE_MANIFEST_BUNDLE_ID="v0.11.0"
+  BUNDLE_MANIFEST_KERNEL_TAG="v0.16.4"
+  BUNDLE_MANIFEST_KERNEL_VERSION="0.16.4"
+  BUNDLE_MANIFEST_KERNEL_FILENAME="lingtai-kernel-release-manifest.json"
+  BUILD_DIR="$case_dir/build"
+  KERNEL_SOURCE=""
+  KERNEL_PROVIDER=""
+
+  install_kernel_from_bundle "$py" "$uv" >/dev/null || return 1
+  printf '%s' "$argv_log"
+}
+
+# assert_single_local_artifact_install checks the invariants that hold for EVERY
+# provider/index combination: exactly one --index-url, never an
+# --extra-index-url, and the install target is the verified local artifact
+# rather than the package name "lingtai" requested from an index.
+assert_single_local_artifact_install() {
+  local log="$1" label="$2"
+  [[ -s "$log" ]] || fail "$label: recorded no install argv at all (stub never reached)"
+  assert_eq "1" "$(argv_count "$log" "--index-url")" "$label: exactly one --index-url"
+  assert_eq "0" "$(argv_count "$log" "--extra-index-url")" "$label: no --extra-index-url"
+  assert_eq "0" "$(argv_count "$log" "lingtai")" "$label: never requests the package name lingtai"
+  local target
+  target="$(tail -n 1 "$log")"
+  [[ "$target" == */"$KERNEL_ARTIFACT_NAME" ]] ||
+    fail "$label: install target should be the local artifact path, got '$target'"
+  [[ -f "$target" ]] || fail "$label: install target '$target' is not an existing local file"
+}
+
+(
+  # FINAL provider gitee + no override -> Tsinghua TUNA. This is the
+  # availability defect: official PyPI is not reliably reachable from the
+  # mainland-China environments Gitee exists to serve.
+  unset LINGTAI_PYPI_INDEX_URL
+  case_dir="$tmp/argv-gitee-uv"
+  log="$(capture_bundle_install_argv "$case_dir" uv gitee gitee)" ||
+    fail "install_kernel_from_bundle should succeed on the gitee/uv command path"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" \
+    "$(argv_value_after "$log" "--index-url")" \
+    "gitee bundle provider resolves third-party dependencies via Tsinghua TUNA (uv)"
+  assert_single_local_artifact_install "$log" "gitee/uv"
+)
+
+(
+  # Same contract on the pip path (no uv available).
+  unset LINGTAI_PYPI_INDEX_URL
+  case_dir="$tmp/argv-gitee-pip"
+  log="$(capture_bundle_install_argv "$case_dir" pip gitee gitee)" ||
+    fail "install_kernel_from_bundle should succeed on the gitee/pip command path"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" \
+    "$(argv_value_after "$log" "--index-url")" \
+    "gitee bundle provider resolves third-party dependencies via Tsinghua TUNA (pip)"
+  assert_single_local_artifact_install "$log" "gitee/pip"
+)
+
+(
+  # The FINAL BUNDLE provider decides — not whichever provider happened to serve
+  # the kernel manifest. Here the bundle came from Gitee but the kernel manifest
+  # fell back to GitHub for the SAME kernel tag; the index must stay TUNA.
+  unset LINGTAI_PYPI_INDEX_URL
+  case_dir="$tmp/argv-gitee-bundle-github-kernel"
+  log="$(capture_bundle_install_argv "$case_dir" uv gitee github)" ||
+    fail "install_kernel_from_bundle should succeed when the kernel manifest falls back to GitHub"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" \
+    "$(argv_value_after "$log" "--index-url")" \
+    "a same-kernel-tag GitHub manifest fallback does not move the index off the Gitee bundle provider"
+  assert_single_local_artifact_install "$log" "gitee-bundle/github-kernel"
+)
+
+(
+  # FINAL provider github + no override -> official PyPI, unchanged.
+  unset LINGTAI_PYPI_INDEX_URL
+  case_dir="$tmp/argv-github-uv"
+  log="$(capture_bundle_install_argv "$case_dir" uv github github)" ||
+    fail "install_kernel_from_bundle should succeed on the github/uv command path"
+  assert_eq "https://pypi.org/simple" "$(argv_value_after "$log" "--index-url")" \
+    "github bundle provider keeps resolving third-party dependencies via official PyPI"
+  assert_single_local_artifact_install "$log" "github/uv"
+)
+
+(
+  # An explicit non-empty override always wins, on either provider.
+  export LINGTAI_PYPI_INDEX_URL="https://packages.example.invalid/simple"
+  case_dir="$tmp/argv-override-gitee"
+  log="$(capture_bundle_install_argv "$case_dir" uv gitee gitee)" ||
+    fail "install_kernel_from_bundle should succeed with an explicit index override"
+  assert_eq "https://packages.example.invalid/simple" "$(argv_value_after "$log" "--index-url")" \
+    "explicit non-empty LINGTAI_PYPI_INDEX_URL overrides the Gitee default"
+  assert_single_local_artifact_install "$log" "override/gitee"
+)
+
+(
+  export LINGTAI_PYPI_INDEX_URL="https://packages.example.invalid/simple"
+  case_dir="$tmp/argv-override-github"
+  log="$(capture_bundle_install_argv "$case_dir" pip github github)" ||
+    fail "install_kernel_from_bundle should succeed with an explicit index override on github"
+  assert_eq "https://packages.example.invalid/simple" "$(argv_value_after "$log" "--index-url")" \
+    "explicit non-empty LINGTAI_PYPI_INDEX_URL overrides the GitHub default"
+  assert_single_local_artifact_install "$log" "override/github"
+)
+
+(
+  # An EMPTY override is not an override: it must not blank out the index.
+  export LINGTAI_PYPI_INDEX_URL=""
+  case_dir="$tmp/argv-empty-override-gitee"
+  log="$(capture_bundle_install_argv "$case_dir" uv gitee gitee)" ||
+    fail "install_kernel_from_bundle should succeed with an empty index override"
+  assert_eq "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" \
+    "$(argv_value_after "$log" "--index-url")" \
+    "an empty LINGTAI_PYPI_INDEX_URL falls through to the Gitee provider default"
+  assert_single_local_artifact_install "$log" "empty-override/gitee"
 )
 
 # --- ensure_runtime_venv: fail-loud gate (Blocker 1 repair) -----------------
