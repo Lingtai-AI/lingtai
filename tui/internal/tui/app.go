@@ -770,7 +770,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, tea.Quit
 			}
 		}
-		if msg.Code == tea.KeyF2 {
+		if msg.Code == tea.KeyF2 || msg.Code == 'g' && msg.Mod == tea.ModCtrl {
 			if a.agentRailToggleEligible() {
 				return a.toggleAgentRail()
 			}

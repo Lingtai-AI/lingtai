@@ -14,10 +14,10 @@ import (
 const (
 	agentRailWidth                = 24
 	agentRailRowsStart            = 2
-	agentRailControlWidth         = 5
+	agentRailControlWidth         = 3
 	agentRailCollapseControlStart = agentRailWidth - 1 - agentRailControlWidth
-	agentRailCollapseControl      = "[F2<]"
-	agentRailExpandControl        = "[F2>]"
+	agentRailCollapseControl      = "[<]"
+	agentRailExpandControl        = "[>]"
 )
 
 // agentRailState is presentation state over the canonical V1 selector. Rows,
