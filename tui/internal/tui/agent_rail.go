@@ -155,11 +155,12 @@ func (m MailModel) renderAgentRailRow(row agentSelectorRow, index, width int) st
 		!row.Main && fs.DirectThreadKey(row.Target) == m.agentSelector.selectedThreadKey
 	cursor := index == m.agentSelector.cursor
 	highlighted := m.agentRail.focused && cursor
+	surfaceOwner := highlighted || (!m.agentRail.focused && current)
 	render := func(style lipgloss.Style, text string) string {
 		if text == "" {
 			return ""
 		}
-		if highlighted {
+		if surfaceOwner {
 			style = style.Background(ColorSurface)
 		}
 		return style.Render(text)
