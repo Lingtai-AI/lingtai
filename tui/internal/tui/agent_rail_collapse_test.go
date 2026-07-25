@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"context"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -32,6 +35,33 @@ type agentRailCollapseGeometryState struct {
 	explicitlyCollapsed bool
 	railFocused         bool
 	composerFocused     bool
+}
+
+type agentRailRawInputModel struct {
+	app       App
+	key       tea.KeyPressMsg
+	sawKey    bool
+	appTypeOK bool
+}
+
+func (m agentRailRawInputModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m agentRailRawInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	m.key = key
+	m.sawKey = true
+	updated, _ := m.app.Update(key)
+	m.app, m.appTypeOK = updated.(App)
+	return m, tea.Quit
+}
+
+func (m agentRailRawInputModel) View() tea.View {
+	return tea.NewView("")
 }
 
 func agentRailCollapseApply(t *testing.T, app App, msg tea.Msg) (App, tea.Cmd) {
@@ -141,6 +171,197 @@ func agentRailCollapseRenderedLine(t *testing.T, app App, childY int) string {
 func agentRailCollapseRenderedCells(t *testing.T, app App, childY, start, end int) string {
 	t.Helper()
 	return ansi.Strip(ansi.Cut(agentRailCollapseRenderedLine(t, app, childY), start, end))
+}
+
+func TestAgentRailCtrlGAccessibleControls(t *testing.T) {
+	newFixture := func(t *testing.T) App {
+		t.Helper()
+		return newVisibleRailV2Fixture(
+			t,
+			[]string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"},
+			[]int{0, 0, 0, 0, 0, 0, 0, 0},
+			85,
+			8,
+			"ROOT",
+		).app
+	}
+	ctrlG := tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
+	if ctrlG.Code != 'g' || ctrlG.Mod != tea.ModCtrl || ctrlG.Text != "" {
+		t.Fatalf("pinned Bubble Tea Ctrl+G representation = %#v, want Code 'g', ModCtrl, and empty Text", ctrlG)
+	}
+	if got := ctrlG.String(); got != "ctrl+g" {
+		t.Fatalf("pinned Bubble Tea Ctrl+G representation string = %q, want %q", got, "ctrl+g")
+	}
+
+	app := visibleRailV2Focus(t, newFixture(t))
+	app.mail.input.SetValue("Main retained draft")
+	app.mail = app.mail.setSelectorCursor(2)
+	var activationCmd tea.Cmd
+	app, activationCmd = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if activationCmd == nil {
+		t.Fatal("canonical direct activation produced no visibility command")
+	}
+	app.mail.input.SetValue("direct retained draft")
+	app.mail = app.mail.
+		setSelectorCursor(len(app.mail.agentSelector.rows) - 1).
+		keepAgentRailCursorVisible()
+	if app.mail.agentRail.scrollOffset == 0 {
+		t.Fatal("fixture did not establish a retained rail scroll offset")
+	}
+	stable := agentRailCollapseStableSnapshot(app)
+	if !stable.currentDirect {
+		t.Fatal("fixture did not establish a direct conversation")
+	}
+
+	var cmd tea.Cmd
+	app, cmd = agentRailCollapseApply(t, app, ctrlG)
+	if cmd != nil {
+		t.Error("Ctrl+G collapse returned an unexpected command")
+	}
+	if !app.mail.agentRail.explicitlyCollapsed {
+		t.Error("Ctrl+G did not collapse the eligible expanded rail")
+	}
+	agentRailCollapseAssertGeometry(t, "Ctrl+G collapse", app, 0, 85)
+	if app.mail.agentRail.focused || !app.mail.input.Focused() {
+		t.Errorf("Ctrl+G collapse did not transfer focus to the composer: rail=%v composer=%v",
+			app.mail.agentRail.focused, app.mail.input.Focused())
+	}
+	agentRailCollapseAssertStable(t, "Ctrl+G collapse", stable, app)
+
+	app, cmd = agentRailCollapseApply(t, app, ctrlG)
+	if cmd != nil {
+		t.Error("Ctrl+G expansion returned an unexpected command")
+	}
+	if app.mail.agentRail.explicitlyCollapsed {
+		t.Error("Ctrl+G did not expand the eligible collapsed rail")
+	}
+	agentRailCollapseAssertGeometry(t, "Ctrl+G expansion", app, 24, 61)
+	if app.mail.agentRail.focused || !app.mail.input.Focused() {
+		t.Errorf("Ctrl+G expansion took rail focus: rail=%v composer=%v",
+			app.mail.agentRail.focused, app.mail.input.Focused())
+	}
+	agentRailCollapseAssertStable(t, "Ctrl+G round trip", stable, app)
+
+	for _, state := range []struct {
+		name                string
+		explicitlyCollapsed bool
+		configure           func(*testing.T, App) App
+		active              func(App) bool
+	}{
+		{
+			name: "width 84",
+			configure: func(t *testing.T, app App) App {
+				app, _ = agentRailCollapseApply(t, app, tea.WindowSizeMsg{Width: 84, Height: 8})
+				return app
+			},
+			active: func(app App) bool {
+				return app.width == 84 && !app.layoutBudget().RailVisible
+			},
+		},
+		{
+			name:                "/agents modal",
+			explicitlyCollapsed: true,
+			configure: func(_ *testing.T, app App) App {
+				app.mail = app.mail.openAgentSelector()
+				return app
+			},
+			active: func(app App) bool { return app.mail.agentSelector.selectorOpen },
+		},
+	} {
+		t.Run("inert in "+state.name, func(t *testing.T) {
+			app := newFixture(t)
+			if state.explicitlyCollapsed {
+				app, _ = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyF2})
+			}
+			app = state.configure(t, app)
+			if !state.active(app) {
+				t.Fatalf("%s fixture did not establish its ineligible state", state.name)
+			}
+			stable := agentRailCollapseStableSnapshot(app)
+			wantCollapsed := app.mail.agentRail.explicitlyCollapsed
+
+			var cmd tea.Cmd
+			app, cmd = agentRailCollapseApply(t, app, ctrlG)
+			if cmd != nil {
+				t.Errorf("Ctrl+G in %s returned an unexpected command", state.name)
+			}
+			if app.mail.agentRail.explicitlyCollapsed != wantCollapsed {
+				t.Errorf("Ctrl+G in %s changed latent collapsed=%v to %v",
+					state.name, wantCollapsed, app.mail.agentRail.explicitlyCollapsed)
+			}
+			if !state.active(app) {
+				t.Errorf("Ctrl+G in %s dismissed its ineligible state", state.name)
+			}
+			agentRailCollapseAssertStable(t, "ineligible "+state.name+" Ctrl+G", stable, app)
+		})
+	}
+}
+
+func TestAgentRailRawInputAccelerators(t *testing.T) {
+	// The F2 case is supplemental parser-to-App coverage that is expected to be
+	// GREEN on the base commit. It cannot reproduce macOS interception before
+	// bytes reach stdin, so it is not the authentic RED for this change.
+	tests := []struct {
+		name string
+		raw  string
+		key  tea.KeyPressMsg
+	}{
+		{name: "Ctrl+G", raw: "\x07", key: tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}},
+		{name: "SS3 F2", raw: "\x1bOQ", key: tea.KeyPressMsg{Code: tea.KeyF2}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := newVisibleRailV2Fixture(
+				t,
+				[]string{"Alpha", "Bravo"},
+				[]int{0, 0},
+				85,
+				14,
+				"",
+			).app
+			app = visibleRailV2Focus(t, app)
+			stable := agentRailCollapseStableSnapshot(app)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			program := tea.NewProgram(
+				agentRailRawInputModel{app: app},
+				tea.WithContext(ctx),
+				tea.WithInput(strings.NewReader(test.raw)),
+				tea.WithOutput(io.Discard),
+				tea.WithoutRenderer(),
+				tea.WithoutSignalHandler(),
+				tea.WithEnvironment([]string{"TERM=xterm-256color"}),
+			)
+			final, err := program.Run()
+			if err != nil {
+				t.Fatalf("Bubble Tea program returned an error: %v", err)
+			}
+			got, ok := final.(agentRailRawInputModel)
+			if !ok {
+				t.Fatalf("Bubble Tea program returned %T, want agentRailRawInputModel", final)
+			}
+			if !got.sawKey {
+				t.Fatal("Bubble Tea program saw no KeyPressMsg")
+			}
+			if got.key != test.key {
+				t.Errorf("raw bytes decoded to %#v, want %#v", got.key, test.key)
+			}
+			if !got.appTypeOK {
+				t.Fatal("App.Update did not return tui.App")
+			}
+			if !got.app.mail.agentRail.explicitlyCollapsed {
+				t.Error("decoded key did not collapse the eligible rail through App.Update")
+			}
+			agentRailCollapseAssertGeometry(t, "raw input collapse", got.app, 0, 85)
+			if got.app.mail.agentRail.focused || !got.app.mail.input.Focused() {
+				t.Errorf("raw input collapse did not transfer focus: rail=%v composer=%v",
+					got.app.mail.agentRail.focused, got.app.mail.input.Focused())
+			}
+			agentRailCollapseAssertStable(t, "raw input collapse", stable, got.app)
+		})
+	}
 }
 
 func TestAgentRailF2CollapseStateMachine(t *testing.T) {
@@ -575,12 +796,12 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 	}
 
 	t.Run("expanded rendered cells collapse through one root chrome translation", func(t *testing.T) {
-		for x := 18; x <= 22; x++ {
-			t.Run(string(rune('a'+x-18)), func(t *testing.T) {
+		for x := 20; x <= 22; x++ {
+			t.Run(string(rune('a'+x-20)), func(t *testing.T) {
 				app := visibleRailV2Focus(t, newFixture(t))
 				budget := app.layoutBudget()
-				if got := agentRailCollapseRenderedCells(t, app, 0, 18, 23); got != "[F2<]" {
-					t.Errorf("expanded rail cells 18..22 render %q, want %q", got, "[F2<]")
+				if got := agentRailCollapseRenderedCells(t, app, 0, 20, 23); got != "[<]" {
+					t.Errorf("expanded rail cells 20..22 render %q, want %q", got, "[<]")
 				}
 
 				stable := agentRailCollapseStableSnapshot(app)
@@ -606,7 +827,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 		app := newFixture(t)
 		budget := app.layoutBudget()
 		app, _ = agentRailCollapseApply(t, app, tea.MouseClickMsg(tea.Mouse{
-			X: 18, Y: budget.TopChromeRows - 1, Button: tea.MouseLeft,
+			X: 20, Y: budget.TopChromeRows - 1, Button: tea.MouseLeft,
 		}))
 		if app.mail.agentRail.explicitlyCollapsed {
 			t.Error("control X on root chrome row collapsed the rail before child-Y translation")
@@ -614,13 +835,13 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 	})
 
 	t.Run("collapsed rendered cells expand without taking focus", func(t *testing.T) {
-		for x := 0; x <= 4; x++ {
+		for x := 0; x <= 2; x++ {
 			t.Run(string(rune('a'+x)), func(t *testing.T) {
 				app := newFixture(t)
 				app, _ = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyF2})
 				budget := app.layoutBudget()
-				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got != "[F2>]" {
-					t.Errorf("collapsed Mail header cells 0..4 render %q, want %q", got, "[F2>]")
+				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got != "[>]" {
+					t.Errorf("collapsed Mail header cells 0..2 render %q, want %q", got, "[>]")
 				}
 
 				stable := agentRailCollapseStableSnapshot(app)
@@ -655,8 +876,8 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 		app := fixture.app
 		budget := app.layoutBudget()
 		stable := agentRailCollapseStableSnapshot(app)
-		if got := agentRailCollapseRenderedCells(t, app, 0, 18, 23); got != "[F2<]" {
-			t.Fatalf("width-120 expanded control renders %q, want %q", got, "[F2<]")
+		if got := agentRailCollapseRenderedCells(t, app, 0, 20, 23); got != "[<]" {
+			t.Fatalf("width-120 expanded control renders %q, want %q", got, "[<]")
 		}
 
 		var cmd tea.Cmd
@@ -674,13 +895,13 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			t.Errorf("unfocused width-120 collapse changed focus: rail=%v composer=%v",
 				app.mail.agentRail.focused, app.mail.input.Focused())
 		}
-		if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got != "[F2>]" {
-			t.Fatalf("width-120 collapsed control renders %q, want %q", got, "[F2>]")
+		if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got != "[>]" {
+			t.Fatalf("width-120 collapsed control renders %q, want %q", got, "[>]")
 		}
 
 		budget = app.layoutBudget()
 		app, cmd = agentRailCollapseApply(t, app, tea.MouseClickMsg(tea.Mouse{
-			X: 4, Y: budget.TopChromeRows, Button: tea.MouseLeft,
+			X: 2, Y: budget.TopChromeRows, Button: tea.MouseLeft,
 		}))
 		if cmd != nil {
 			t.Error("width-120 expand control scheduled unexpected work")
@@ -701,7 +922,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 		app, _ = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyF2})
 		app.mail.ready = false
 		budget := app.layoutBudget()
-		if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got == "[F2>]" {
+		if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got == "[>]" {
 			t.Fatalf("loading frame rendered collapsed control %q", got)
 		}
 		stable := agentRailCollapseStableSnapshot(app)
@@ -725,7 +946,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			{
 				name: "adjacent title cell",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 17, Y: b.TopChromeRows, Button: tea.MouseLeft}
+					return tea.Mouse{X: 19, Y: b.TopChromeRows, Button: tea.MouseLeft}
 				},
 			},
 			{
@@ -737,31 +958,31 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			{
 				name: "right button",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows, Button: tea.MouseRight}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows, Button: tea.MouseRight}
 				},
 			},
 			{
 				name: "middle button",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows, Button: tea.MouseMiddle}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows, Button: tea.MouseMiddle}
 				},
 			},
 			{
 				name: "separator row",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows + 1, Button: tea.MouseLeft}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows + 1, Button: tea.MouseLeft}
 				},
 			},
 			{
 				name: "canonical Main row",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows + 2, Button: tea.MouseLeft}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows + 2, Button: tea.MouseLeft}
 				},
 			},
 			{
 				name: "root chrome row",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows - 1, Button: tea.MouseLeft}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows - 1, Button: tea.MouseLeft}
 				},
 			},
 			{
@@ -773,7 +994,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			{
 				name: "negative y",
 				mouse: func(LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: -1, Button: tea.MouseLeft}
+					return tea.Mouse{X: 20, Y: -1, Button: tea.MouseLeft}
 				},
 			},
 			{
@@ -785,7 +1006,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			{
 				name: "child bottom edge",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 18, Y: b.TopChromeRows + b.ChildHeight, Button: tea.MouseLeft}
+					return tea.Mouse{X: 20, Y: b.TopChromeRows + b.ChildHeight, Button: tea.MouseLeft}
 				},
 			},
 		}
@@ -821,7 +1042,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 			{
 				name: "adjacent header cell",
 				mouse: func(b LayoutBudget) tea.Mouse {
-					return tea.Mouse{X: 5, Y: b.TopChromeRows, Button: tea.MouseLeft}
+					return tea.Mouse{X: 3, Y: b.TopChromeRows, Button: tea.MouseLeft}
 				},
 			},
 			{
@@ -938,13 +1159,13 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 		for _, state := range states {
 			t.Run(state.name, func(t *testing.T) {
 				app := state.configure(newFixture(t))
-				if got := agentRailCollapseRenderedCells(t, app, 0, 18, 23); got != "[F2<]" {
-					t.Fatalf("%s obscured expanded control renders %q, want %q", state.name, got, "[F2<]")
+				if got := agentRailCollapseRenderedCells(t, app, 0, 20, 23); got != "[<]" {
+					t.Fatalf("%s obscured expanded control renders %q, want %q", state.name, got, "[<]")
 				}
 				budget := app.layoutBudget()
 				stable := agentRailCollapseStableSnapshot(app)
 				app, cmd := agentRailCollapseApply(t, app, tea.MouseClickMsg(tea.Mouse{
-					X: 18, Y: budget.TopChromeRows, Button: tea.MouseLeft,
+					X: 20, Y: budget.TopChromeRows, Button: tea.MouseLeft,
 				}))
 				if cmd != nil {
 					t.Errorf("%s control click scheduled unexpected work", state.name)
@@ -989,8 +1210,8 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 				app := newFixture(t)
 				app, _ = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyF2})
 				app = state.configure(app)
-				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got != "[F2>]" {
-					t.Fatalf("%s obscured collapsed control renders %q, want %q", state.name, got, "[F2>]")
+				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got != "[>]" {
+					t.Fatalf("%s obscured collapsed control renders %q, want %q", state.name, got, "[>]")
 				}
 				budget := app.layoutBudget()
 				stable := agentRailCollapseStableSnapshot(app)
@@ -1101,7 +1322,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 				}
 				app = state.configure(t, app)
 				budget := app.layoutBudget()
-				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got == "[F2>]" {
+				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got == "[>]" {
 					t.Fatalf("%s rendered a collapsed control without the ordinary Mail header", state.name)
 				}
 				stable := agentRailCollapseStableSnapshot(app)
@@ -1119,7 +1340,7 @@ func TestAgentRailCollapseMouseControlGeometry(t *testing.T) {
 				if !state.active(app) {
 					t.Errorf("%s hidden-target click displaced the owning frame", state.name)
 				}
-				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 5); got == "[F2>]" {
+				if got := agentRailCollapseRenderedCells(t, app, 0, 0, 3); got == "[>]" {
 					t.Errorf("%s advertised a collapsed control after the hidden-target click", state.name)
 				}
 				if got := app.layoutBudget(); got.TerminalWidth != state.wantTerminalWidth ||
@@ -1153,10 +1374,10 @@ func TestAgentRailVisibleControlRendering(t *testing.T) {
 	}
 
 	expandedLine := agentRailCollapseRenderedLine(t, app, 0)
-	if got := ansi.Strip(ansi.Cut(expandedLine, 18, 23)); got != "[F2<]" {
-		t.Errorf("expanded control cells 18..22 = %q, want %q", got, "[F2<]")
+	if got := ansi.Strip(ansi.Cut(expandedLine, 20, 23)); got != "[<]" {
+		t.Errorf("expanded control cells 20..22 = %q, want %q", got, "[<]")
 	}
-	if !strings.Contains(expandedLine, StyleSubtle.Render("[F2<]")) {
+	if !strings.Contains(expandedLine, StyleSubtle.Render("[<]")) {
 		t.Errorf("ordinary expanded control does not use the exact subtle span: %q", expandedLine)
 	}
 	if got := ansi.Strip(ansi.Cut(expandedLine, 23, 24)); got != "│" {
@@ -1165,22 +1386,22 @@ func TestAgentRailVisibleControlRendering(t *testing.T) {
 
 	app = visibleRailV2Focus(t, app)
 	focusedLine := agentRailCollapseRenderedLine(t, app, 0)
-	if !strings.Contains(focusedLine, StyleAccent.Render("[F2<]")) {
+	if !strings.Contains(focusedLine, StyleAccent.Render("[<]")) {
 		t.Errorf("focused expanded control does not use the exact accent span: %q", focusedLine)
 	}
-	if got := ansi.Strip(ansi.Cut(focusedLine, 18, 23)); got != "[F2<]" {
-		t.Errorf("focused expanded control moved from cells 18..22: %q", got)
+	if got := ansi.Strip(ansi.Cut(focusedLine, 20, 23)); got != "[<]" {
+		t.Errorf("focused expanded control moved from cells 20..22: %q", got)
 	}
 
 	app, _ = agentRailCollapseApply(t, app, tea.KeyPressMsg{Code: tea.KeyF2})
 	collapsedLine := agentRailCollapseRenderedLine(t, app, 0)
-	if got := ansi.Strip(ansi.Cut(collapsedLine, 0, 5)); got != "[F2>]" {
-		t.Errorf("collapsed control cells 0..4 = %q, want %q", got, "[F2>]")
+	if got := ansi.Strip(ansi.Cut(collapsedLine, 0, 3)); got != "[>]" {
+		t.Errorf("collapsed control cells 0..2 = %q, want %q", got, "[>]")
 	}
-	if !strings.Contains(collapsedLine, StyleSubtle.Render("[F2>]")) {
+	if !strings.Contains(collapsedLine, StyleSubtle.Render("[>]")) {
 		t.Errorf("collapsed ordinary-header control does not use the exact subtle span: %q", collapsedLine)
 	}
-	if got := ansi.Strip(ansi.Cut(app.mail.View(), 0, 5)); got == "[F2>]" {
+	if got := ansi.Strip(ansi.Cut(app.mail.View(), 0, 3)); got == "[>]" {
 		t.Errorf("public MailModel.View compatibility wrapper unexpectedly advertised %q", got)
 	}
 	if app.mail.agentRail.focused || !app.mail.input.Focused() {
