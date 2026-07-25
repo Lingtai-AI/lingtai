@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,150 @@ func TestDeltaEncode_NodeChanges(t *testing.T) {
 	}
 	if chunk.Frames[1].Delta.Nodes[0].State != "SUSPENDED" {
 		t.Errorf("delta node state = %q, want SUSPENDED", chunk.Frames[1].Delta.Nodes[0].State)
+	}
+}
+
+func TestComputeDelta_RemovedAvatarEdge(t *testing.T) {
+	prev := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}, {Address: "b", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{{Parent: "a", Child: "b", ChildName: "agent-b"}},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 2},
+	}
+	curr := prev
+	curr.AvatarEdges = []fs.AvatarEdge{}
+
+	delta := computeDelta(&prev, &curr)
+	if delta == nil {
+		t.Fatal("expected delta for removed avatar edge")
+	}
+	if len(delta.AvatarEdges) != 0 {
+		t.Fatalf("AvatarEdges len = %d, want 0", len(delta.AvatarEdges))
+	}
+	if len(delta.AvatarEdgesRemoved) != 1 {
+		t.Fatalf("AvatarEdgesRemoved len = %d, want 1", len(delta.AvatarEdgesRemoved))
+	}
+	if delta.AvatarEdgesRemoved[0] != [2]string{"a", "b"} {
+		t.Errorf("AvatarEdgesRemoved[0] = %#v, want [a b]", delta.AvatarEdgesRemoved[0])
+	}
+}
+
+func TestComputeDelta_RemovedContactAndMailEdgesOnly(t *testing.T) {
+	prev := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}, {Address: "b", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{{Owner: "a", Target: "b", Name: "agent-b"}},
+		MailEdges:    []fs.MailEdge{{Sender: "a", Recipient: "b", Count: 3, Direct: 3}},
+		Stats:        fs.NetworkStats{Active: 2},
+	}
+	curr := prev
+	curr.ContactEdges = []fs.ContactEdge{}
+	curr.MailEdges = []fs.MailEdge{}
+
+	delta := computeDelta(&prev, &curr)
+	if delta == nil {
+		t.Fatal("expected non-nil removal-only delta")
+	}
+	if len(delta.ContactEdges) != 0 {
+		t.Fatalf("ContactEdges len = %d, want 0", len(delta.ContactEdges))
+	}
+	if len(delta.Mail) != 0 {
+		t.Fatalf("Mail len = %d, want 0", len(delta.Mail))
+	}
+	if len(delta.ContactEdgesRemoved) != 1 || delta.ContactEdgesRemoved[0] != [2]string{"a", "b"} {
+		t.Fatalf("ContactEdgesRemoved = %#v, want [[a b]]", delta.ContactEdgesRemoved)
+	}
+	if len(delta.MailRemoved) != 1 || delta.MailRemoved[0] != [2]string{"a", "b"} {
+		t.Fatalf("MailRemoved = %#v, want [[a b]]", delta.MailRemoved)
+	}
+	if len(delta.Nodes) != 0 || len(delta.AvatarEdgesRemoved) != 0 || delta.Stats != nil {
+		t.Fatalf("unexpected extra delta fields: %+v", delta)
+	}
+}
+
+func TestComputeDelta_NodeRemovalWithDependentEdgeRemovals(t *testing.T) {
+	prev := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}, {Address: "b", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{{Parent: "a", Child: "b", ChildName: "agent-b"}},
+		ContactEdges: []fs.ContactEdge{{Owner: "a", Target: "b", Name: "agent-b"}},
+		MailEdges:    []fs.MailEdge{{Sender: "a", Recipient: "b", Count: 1, Direct: 1}},
+		Stats:        fs.NetworkStats{Active: 2},
+	}
+	curr := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 2},
+	}
+
+	delta := computeDelta(&prev, &curr)
+	if delta == nil {
+		t.Fatal("expected delta for node and edge removals")
+	}
+	foundTombstone := false
+	for _, n := range delta.Nodes {
+		if n.Address == "b" && n.State == "__REMOVED__" {
+			foundTombstone = true
+		}
+	}
+	if !foundTombstone {
+		t.Fatalf("delta.Nodes = %#v, want tombstone for b", delta.Nodes)
+	}
+	if len(delta.AvatarEdgesRemoved) != 1 || delta.AvatarEdgesRemoved[0] != [2]string{"a", "b"} {
+		t.Fatalf("AvatarEdgesRemoved = %#v, want [[a b]]", delta.AvatarEdgesRemoved)
+	}
+	if len(delta.ContactEdgesRemoved) != 1 || delta.ContactEdgesRemoved[0] != [2]string{"a", "b"} {
+		t.Fatalf("ContactEdgesRemoved = %#v, want [[a b]]", delta.ContactEdgesRemoved)
+	}
+	if len(delta.MailRemoved) != 1 || delta.MailRemoved[0] != [2]string{"a", "b"} {
+		t.Fatalf("MailRemoved = %#v, want [[a b]]", delta.MailRemoved)
+	}
+}
+
+func TestDeltaEncode_EdgeRemovalRoundTripContract(t *testing.T) {
+	net0 := replayEdgeNetwork(false)
+	net1 := replayEdgeNetwork(true)
+	net2 := replayEdgeNetwork(false)
+	frames := []fs.TapeFrame{
+		{T: 3600000, Net: net0},
+		{T: 3603000, Net: net1},
+		{T: 3606000, Net: net2},
+	}
+
+	chunk := deltaEncode(frames, 100)
+	if chunk.V != chunkFormatVersion {
+		t.Fatalf("chunk.V = %d, want %d", chunk.V, chunkFormatVersion)
+	}
+	if len(chunk.Frames[1].Delta.AvatarEdges) != 1 {
+		t.Fatalf("frame[1] AvatarEdges len = %d, want 1", len(chunk.Frames[1].Delta.AvatarEdges))
+	}
+	if len(chunk.Frames[2].Delta.AvatarEdgesRemoved) != 1 {
+		t.Fatalf("frame[2] AvatarEdgesRemoved len = %d, want 1", len(chunk.Frames[2].Delta.AvatarEdgesRemoved))
+	}
+
+	avatarEdges := map[string]fs.AvatarEdge{}
+	for _, frame := range chunk.Frames {
+		if frame.Net != nil {
+			avatarEdges = map[string]fs.AvatarEdge{}
+			for _, e := range frame.Net.AvatarEdges {
+				avatarEdges[e.Parent+"\x00"+e.Child] = e
+			}
+			continue
+		}
+		if frame.Delta == nil {
+			continue
+		}
+		for _, removed := range frame.Delta.AvatarEdgesRemoved {
+			delete(avatarEdges, removed[0]+"\x00"+removed[1])
+		}
+		for _, e := range frame.Delta.AvatarEdges {
+			avatarEdges[e.Parent+"\x00"+e.Child] = e
+		}
+	}
+	if len(avatarEdges) != 0 {
+		t.Fatalf("final avatar edge count = %d, want 0", len(avatarEdges))
 	}
 }
 
@@ -313,6 +458,237 @@ func TestLoadChunk_FromCache(t *testing.T) {
 	}
 	if len(chunk.Frames) != 3 {
 		t.Errorf("len(Frames) = %d, want 3", len(chunk.Frames))
+	}
+}
+
+func TestLoadChunk_StaleV0WithCompleteJSONLReturnsV2WithoutRewritingCache(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	cachePath := filepath.Join(replayDir, "3600000.json.gz")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := staleReplayChunk([]int64{3600000, 3603000, 3606000})
+	if err := writeChunkCache(cachePath, stale); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+	before := readCacheBytes(t, cachePath)
+
+	for _, frame := range []fs.TapeFrame{
+		{T: 3600000, Net: replayEdgeNetwork(false)},
+		{T: 3603000, Net: replayEdgeNetwork(true)},
+		{T: 3606000, Net: replayEdgeNetwork(false)},
+	} {
+		AppendTopologyAt(topologyPath, frame.Net, frame.T)
+	}
+
+	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
+	if err != nil {
+		t.Fatalf("loadChunk: %v", err)
+	}
+	if chunk.V != chunkFormatVersion {
+		t.Fatalf("chunk.V = %d, want %d", chunk.V, chunkFormatVersion)
+	}
+	if len(chunk.Frames) != 3 {
+		t.Fatalf("len(Frames) = %d, want 3", len(chunk.Frames))
+	}
+	if chunk.Frames[2].Delta == nil || len(chunk.Frames[2].Delta.AvatarEdgesRemoved) != 1 {
+		t.Fatalf("frame[2] delta = %+v, want avatar edge removal", chunk.Frames[2].Delta)
+	}
+
+	// The reconstructed V2 chunk is an in-memory result only: a read path must
+	// never persistently mutate or replace the on-disk replay cache.
+	if after := readCacheBytes(t, cachePath); !bytes.Equal(before, after) {
+		t.Fatalf("cache bytes changed on read: %d bytes before, %d bytes after", len(before), len(after))
+	}
+	if _, err := readChunkCache(cachePath); !errors.Is(err, errStaleChunkFormat) {
+		t.Fatalf("readChunkCache error = %v, want stale format preserved on disk", err)
+	}
+}
+
+// TestLoadChunk_StaleV0WithEqualCountJSONLGapServesStale is the counterexample
+// that frame count plus endpoints cannot detect: JSONL [0, 6, 9] has the same
+// frame count as stale [0, 3, 6] and brackets its endpoints, yet is missing
+// T=3603000 entirely. Serving the JSONL reconstruction would silently drop that
+// timestamp, and persisting it would delete the only copy of that history.
+func TestLoadChunk_StaleV0WithEqualCountJSONLGapServesStale(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	cachePath := filepath.Join(replayDir, "3600000.json.gz")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := staleReplayChunk([]int64{3600000, 3603000, 3606000})
+	if err := writeChunkCache(cachePath, stale); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+	before := readCacheBytes(t, cachePath)
+
+	for _, ts := range []int64{3600000, 3606000, 3609000} {
+		AppendTopologyAt(topologyPath, replayEdgeNetwork(false), ts)
+	}
+
+	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
+	if err != nil {
+		t.Fatalf("loadChunk: %v", err)
+	}
+	if chunk.V != 0 {
+		t.Fatalf("chunk.V = %d, want stale V0", chunk.V)
+	}
+	if len(chunk.Frames) != len(stale.Frames) {
+		t.Fatalf("len(Frames) = %d, want %d", len(chunk.Frames), len(stale.Frames))
+	}
+	if !chunkHasFrameAt(chunk, 3603000) {
+		t.Fatalf("frames = %v, want stale history retaining T=3603000", frameTimes(chunk))
+	}
+
+	if after := readCacheBytes(t, cachePath); !bytes.Equal(before, after) {
+		t.Fatalf("cache bytes changed on read: %d bytes before, %d bytes after", len(before), len(after))
+	}
+	if _, err := readChunkCache(cachePath); !errors.Is(err, errStaleChunkFormat) {
+		t.Fatalf("readChunkCache error = %v, want stale format preserved on disk", err)
+	}
+}
+
+func TestLoadChunk_StaleV0WithNoJSONLFramesServesStale(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	cachePath := filepath.Join(replayDir, "3600000.json.gz")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(topologyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(topologyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := staleReplayChunk([]int64{3600000, 3603000, 3606000})
+	if err := writeChunkCache(cachePath, stale); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+
+	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
+	if err != nil {
+		t.Fatalf("loadChunk: %v", err)
+	}
+	if chunk.V != 0 {
+		t.Fatalf("chunk.V = %d, want stale V0", chunk.V)
+	}
+	if len(chunk.Frames) != len(stale.Frames) {
+		t.Fatalf("len(Frames) = %d, want %d", len(chunk.Frames), len(stale.Frames))
+	}
+	if got := firstFrameForChunk(ChunkInfo{Start: 3600000}, replayDir, topologyPath); got != 3600000 {
+		t.Fatalf("firstFrameForChunk = %d, want 3600000 from stale cache", got)
+	}
+	if _, err := readChunkCache(cachePath); !errors.Is(err, errStaleChunkFormat) {
+		t.Fatalf("readChunkCache error = %v, want stale format", err)
+	}
+}
+
+func TestLoadChunk_StaleV0WithPartialJSONLServesStaleWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	cachePath := filepath.Join(replayDir, "3600000.json.gz")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := staleReplayChunk([]int64{3600000, 3603000, 3606000})
+	if err := writeChunkCache(cachePath, stale); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+	AppendTopologyAt(topologyPath, replayEdgeNetwork(false), 3606000)
+
+	chunk, err := loadChunk(replayDir, topologyPath, 3600000)
+	if err != nil {
+		t.Fatalf("loadChunk: %v", err)
+	}
+	if chunk.V != 0 {
+		t.Fatalf("chunk.V = %d, want stale V0", chunk.V)
+	}
+	if len(chunk.Frames) != len(stale.Frames) {
+		t.Fatalf("len(Frames) = %d, want %d", len(chunk.Frames), len(stale.Frames))
+	}
+	if _, err := readChunkCache(cachePath); !errors.Is(err, errStaleChunkFormat) {
+		t.Fatalf("readChunkCache error = %v, want stale format after partial JSONL", err)
+	}
+}
+
+// TestJSONLCoversStaleChunk_SequenceAware pins the coverage predicate to
+// subsequence semantics: the stale timestamp sequence must appear in the JSONL
+// in order and with duplicate occurrences preserved, while extra JSONL frames
+// interleaved around it are legitimate. Distinct-timestamp set membership is
+// not sufficient — it accepts both duplicate loss and reordered history when
+// unrelated extra frames make the counts line up.
+func TestJSONLCoversStaleChunk_SequenceAware(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stale []int64
+		jsonl []int64
+		want  bool
+	}{
+		{
+			// Duplicate hidden by an extra frame: stale has T=3 twice, JSONL
+			// has it once, and the extra T=9 makes the counts match.
+			name:  "duplicate occurrence lost behind extra frame",
+			stale: []int64{0, 3, 3, 6},
+			jsonl: []int64{0, 3, 6, 9},
+			want:  false,
+		},
+		{
+			// Reordered history: same distinct timestamps, different order.
+			name:  "stale order not preserved by jsonl",
+			stale: []int64{0, 6, 3},
+			jsonl: []int64{0, 3, 6, 9},
+			want:  false,
+		},
+		{
+			// Legitimate growth: every stale timestamp appears in order; the
+			// interleaved and trailing extras are new frames, not losses.
+			name:  "ordered stale covered despite extra jsonl frames",
+			stale: []int64{0, 3, 6},
+			jsonl: []int64{0, 1, 3, 5, 6, 9},
+			want:  true,
+		},
+		{
+			// The originally-reported gap case must stay rejected.
+			name:  "equal count endpoint gap still rejected",
+			stale: []int64{0, 3, 6},
+			jsonl: []int64{0, 6, 9},
+			want:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := jsonlCoversStaleChunk(jsonlFramesAt(tc.jsonl), staleReplayChunk(tc.stale))
+			if got != tc.want {
+				t.Fatalf("jsonlCoversStaleChunk(jsonl=%v, stale=%v) = %v, want %v", tc.jsonl, tc.stale, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadChunk_CorruptCacheIsNotCompatibilityFallback(t *testing.T) {
+	dir := t.TempDir()
+	topologyPath := filepath.Join(dir, ".portal", "missing-topology.jsonl")
+	replayDir := filepath.Join(dir, ".portal", "replay", "chunks")
+	cachePath := filepath.Join(replayDir, "3600000.json.gz")
+	if err := os.MkdirAll(replayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, []byte("not a gzip replay chunk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loadChunk(replayDir, topologyPath, 3600000); err == nil {
+		t.Fatal("loadChunk succeeded with corrupt cache and missing JSONL, want error")
 	}
 }
 
@@ -529,4 +905,66 @@ func TestReplayHandlersDoNotSetCORSHeadersOnFallbackAndErrorPaths(t *testing.T) 
 		}
 		assertNoCORS(t, rr)
 	})
+}
+
+func replayEdgeNetwork(withAvatarEdge bool) fs.Network {
+	net := fs.Network{
+		Nodes:        []fs.AgentNode{{Address: "a", State: "ACTIVE"}, {Address: "b", State: "ACTIVE"}},
+		AvatarEdges:  []fs.AvatarEdge{},
+		ContactEdges: []fs.ContactEdge{},
+		MailEdges:    []fs.MailEdge{},
+		Stats:        fs.NetworkStats{Active: 2},
+	}
+	if withAvatarEdge {
+		net.AvatarEdges = []fs.AvatarEdge{{Parent: "a", Child: "b", ChildName: "agent-b"}}
+	}
+	return net
+}
+
+func readCacheBytes(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cache bytes: %v", err)
+	}
+	return data
+}
+
+func chunkHasFrameAt(chunk ReplayChunk, ts int64) bool {
+	for _, f := range chunk.Frames {
+		if f.T == ts {
+			return true
+		}
+	}
+	return false
+}
+
+func frameTimes(chunk ReplayChunk) []int64 {
+	times := make([]int64, 0, len(chunk.Frames))
+	for _, f := range chunk.Frames {
+		times = append(times, f.T)
+	}
+	return times
+}
+
+func jsonlFramesAt(times []int64) []fs.TapeFrame {
+	frames := make([]fs.TapeFrame, 0, len(times))
+	for _, ts := range times {
+		frames = append(frames, fs.TapeFrame{T: ts, Net: replayEdgeNetwork(false)})
+	}
+	return frames
+}
+
+func staleReplayChunk(times []int64) ReplayChunk {
+	net := replayEdgeNetwork(false)
+	chunk := ReplayChunk{
+		Start:            times[0],
+		End:              times[len(times)-1],
+		KeyframeInterval: defaultKeyframeInterval,
+		Frames:           []ReplayFrame{{T: times[0], Net: &net}},
+	}
+	for _, t := range times[1:] {
+		chunk.Frames = append(chunk.Frames, ReplayFrame{T: t})
+	}
+	return chunk
 }
