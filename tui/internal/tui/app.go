@@ -616,15 +616,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(a.mail.Init(), a.sendSize())
 
-	case RecipeFreshStartMsg:
-		a.pendingRecipe = msg.Recipe
-		a.pendingCustomDir = msg.CustomDir
-		a.nirvanaCleanupPending = false
-		a.nirvanaCleanupStarted = false
-		a.currentView = appViewNirvana
-		a.nirvana = NewNirvanaModel(a.projectDir)
-		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
-
 	case NirvanaDoneMsg:
 		// Nirvana complete: .lingtai/ wiped, go to first-run.
 		// Re-init project to recreate the human folder so agents can
@@ -1884,15 +1875,6 @@ func (a App) visitEscEligible() bool {
 		!a.mail.agentRail.focused &&
 		!a.mail.showEditorWarn &&
 		!a.mail.input.IsPaletteActive()
-}
-
-// RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
-// chooses "Fresh start (wipe .lingtai/ and reconfigure)". The app routes
-// this to NirvanaModel and stores the recipe so post-nirvana first-run
-// can pre-select it.
-type RecipeFreshStartMsg struct {
-	Recipe    string
-	CustomDir string
 }
 
 type refreshDoneMsg struct {

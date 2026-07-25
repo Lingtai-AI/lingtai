@@ -378,7 +378,7 @@ type FirstRunModel struct {
 	// Swap-confirm state (stepRecipeSwapConfirm — wired in Task 9)
 	pendingRecipeName string
 	pendingCustomDir  string
-	swapConfirmIdx    int // 0=swap, 1=fresh, 2=cancel
+	swapConfirmIdx    int // 0=swap, 1=cancel
 
 	// purpose is the typed discriminator visible to Update/Init. Normal and
 	// draft flows pass their purpose directly into the shared constructor;
@@ -4700,7 +4700,6 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 	var b strings.Builder
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
 
 	b.WriteString("\n  " + titleStyle.Render(i18n.T("recipe.swap_title")) + "\n\n")
 	b.WriteString("  " + i18n.TF("recipe.swap_hint", m.currentRecipe, m.pendingRecipeName) + "\n\n")
@@ -4708,11 +4707,10 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 	type option struct {
 		label string
 		desc  string
-		warn  bool
 	}
 	opts := []option{
-		{i18n.T("recipe.swap_inplace"), i18n.T("recipe.swap_inplace_desc"), false},
-		{i18n.T("recipe.swap_cancel"), "", false},
+		{i18n.T("recipe.swap_inplace"), i18n.T("recipe.swap_inplace_desc")},
+		{i18n.T("recipe.swap_cancel"), ""},
 	}
 
 	for i, opt := range opts {
@@ -4720,13 +4718,7 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 		labelStyle := lipgloss.NewStyle().Foreground(ColorText)
 		if i == m.swapConfirmIdx {
 			cursor = "> "
-			if opt.warn {
-				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorSuspended)
-			} else {
-				labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-			}
-		} else if opt.warn {
-			labelStyle = warnStyle
+			labelStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 		}
 		b.WriteString(cursor + labelStyle.Render(opt.label) + "\n")
 		if opt.desc != "" {

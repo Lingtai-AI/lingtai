@@ -652,8 +652,6 @@
   "recipe.swap_hint": "从 '%s' 切换到 '%s'。如何应用？",
   "recipe.swap_inplace": "就地替换",
   "recipe.swap_inplace_desc": "更新 comment 文件并排队新的问候。保留现有网络。",
-  "recipe.swap_fresh": "重新开始（清除 .lingtai/ 并重新配置）",
-  "recipe.swap_fresh_desc": "销毁当前网络并用新配方重新开始。不可逆。",
   "recipe.swap_cancel": "取消",
   "recipe.swap_nirvana_hint": "若要以新配方重来并清除当前历史，请使用 /nirvana。",
   "recipe.preview_greet": "greet.md",

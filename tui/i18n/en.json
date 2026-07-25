@@ -657,8 +657,6 @@
   "recipe.swap_hint": "Changing from '%s' to '%s'. How should this apply?",
   "recipe.swap_inplace": "Swap in place",
   "recipe.swap_inplace_desc": "Update the comment file and queue a new greet. Existing network preserved.",
-  "recipe.swap_fresh": "Fresh start (wipe .lingtai/ and reconfigure)",
-  "recipe.swap_fresh_desc": "Destroy the current network and start over with the new recipe. Irreversible.",
   "recipe.swap_cancel": "Cancel",
   "recipe.swap_nirvana_hint": "To start fresh with a new recipe and wipe current history, use /nirvana.",
   "recipe.preview_greet": "greet.md",
