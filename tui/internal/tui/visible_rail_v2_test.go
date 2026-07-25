@@ -304,6 +304,131 @@ func visibleRailV2RailRow(app App, canonicalIndex int) string {
 	return ansi.Cut(segments[line], 0, visibleRailV2Width-1)
 }
 
+func visibleRailV2ExpectedVisualRow(row agentSelectorRow, current, cursor, focused bool, width int) string {
+	highlighted := focused && cursor
+	render := func(style lipgloss.Style, text string) string {
+		if highlighted {
+			style = style.Background(ColorSurface)
+		}
+		return style.Render(text)
+	}
+
+	cursorMarker := render(lipgloss.NewStyle(), " ")
+	if focused && cursor {
+		cursorMarker = render(lipgloss.NewStyle().Foreground(ColorAccent), ">")
+	}
+	currentMarker := render(lipgloss.NewStyle(), " ")
+	if current {
+		currentMarker = render(lipgloss.NewStyle().Foreground(ColorAgent), "•")
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextDim)
+	if row.Main || current || highlighted {
+		labelStyle = lipgloss.NewStyle().Foreground(ColorText)
+	}
+	if current {
+		labelStyle = labelStyle.Bold(true)
+	}
+
+	plainLabel := ansi.Strip(row.Label)
+	labelWidth := width - 3
+	if labelWidth < 0 {
+		labelWidth = 0
+	}
+	label := ansi.Truncate(plainLabel, labelWidth, "…")
+	line := cursorMarker +
+		currentMarker +
+		render(lipgloss.NewStyle(), " ") +
+		render(labelStyle, label)
+	if padding := width - lipgloss.Width(line); padding > 0 {
+		line += render(lipgloss.NewStyle(), strings.Repeat(" ", padding))
+	}
+	return fitAgentRailLine(line, width)
+}
+
+func visibleRailV2AssertVisualSemantics(t *testing.T, app App, stage string) {
+	t.Helper()
+
+	rail := visibleRailV2ObserveRail(app.mail)
+	if rail.focused != app.mail.agentRail.focused {
+		t.Fatalf("%s reflected focus = %v, concrete rail focus = %v",
+			stage, rail.focused, app.mail.agentRail.focused)
+	}
+	if len(rail.unread) != 0 {
+		t.Fatalf("%s fixture acquired unread state: %#v", stage, rail.unread)
+	}
+
+	for index, row := range app.mail.agentSelector.rows {
+		current := row.Main && app.mail.agentSelector.selectedThreadKey == "" ||
+			!row.Main && fs.DirectThreadKey(row.Target) == app.mail.agentSelector.selectedThreadKey
+		cursor := index == app.mail.agentSelector.cursor
+		got := app.mail.renderAgentRailRow(row, index, visibleRailV2Width-1)
+		want := visibleRailV2ExpectedVisualRow(row, current, cursor, rail.focused, visibleRailV2Width-1)
+		if got != want {
+			t.Errorf("%s row %q visual spans differ:\n got: %q\nwant: %q",
+				stage, row.Label, got, want)
+		}
+
+		plain := ansi.Strip(got)
+		wantPrefix := "   "
+		switch {
+		case rail.focused && cursor && current:
+			wantPrefix = ">• "
+		case rail.focused && cursor:
+			wantPrefix = ">  "
+		case current:
+			wantPrefix = " • "
+		}
+		if prefix := ansi.Cut(plain, 0, 3); prefix != wantPrefix {
+			t.Errorf("%s row %q marker prefix = %q, want %q",
+				stage, row.Label, prefix, wantPrefix)
+		}
+		plainLabel := ansi.Strip(row.Label)
+		if offset := strings.Index(plain, plainLabel); offset < 0 || lipgloss.Width(plain[:offset]) != 3 {
+			t.Errorf("%s row %q label origin = %d, want display cell 3 in %q",
+				stage, row.Label, offset, plain)
+		}
+		if width := lipgloss.Width(got); width != visibleRailV2Width-1 {
+			t.Errorf("%s row %q width = %d, want 23 inner cells",
+				stage, row.Label, width)
+		}
+	}
+
+	lines := strings.Split(app.mail.renderAgentRail(visibleRailV2Width, app.layoutBudget().ChildHeight), "\n")
+	if len(lines) != app.layoutBudget().ChildHeight {
+		t.Fatalf("%s rail height = %d, want %d", stage, len(lines), app.layoutBudget().ChildHeight)
+	}
+	for lineIndex, line := range lines {
+		if width := lipgloss.Width(line); width != visibleRailV2Width {
+			t.Errorf("%s rail line %d width = %d, want 24 cells", stage, lineIndex, width)
+		}
+		wantDivider := "│"
+		if lineIndex == 1 {
+			wantDivider = "┤"
+		}
+		if divider := ansi.Cut(ansi.Strip(line), visibleRailV2Width-1, visibleRailV2Width); divider != wantDivider {
+			t.Errorf("%s rail line %d divider = %q, want %q in cell 23",
+				stage, lineIndex, divider, wantDivider)
+		}
+	}
+	if rail.focused {
+		focusedLineIndex := agentRailRowsStart + app.mail.agentSelector.cursor - rail.scrollOffset
+		if focusedLineIndex < 0 || focusedLineIndex >= len(lines) {
+			t.Fatalf("%s focused line index = %d, outside %d rendered lines",
+				stage, focusedLineIndex, len(lines))
+		}
+		focusedLine := lines[focusedLineIndex]
+		wantDivider := lipgloss.NewStyle().Foreground(ColorBorder).Render("│")
+		if !strings.HasSuffix(focusedLine, wantDivider) {
+			t.Errorf("%s focused line divider is not the exact independent ColorBorder suffix %q: %q",
+				stage, wantDivider, focusedLine)
+		} else if inner := strings.TrimSuffix(focusedLine, wantDivider); !strings.HasSuffix(inner, ansi.ResetStyle) {
+			t.Errorf("%s focused line does not reset row-owned styling before its ColorBorder divider: %q",
+				stage, focusedLine)
+		}
+	}
+}
+
 func visibleRailV2RailLineContaining(app App, text string) string {
 	for _, line := range visibleRailV2RailSegments(app) {
 		if strings.Contains(line, text) {
@@ -498,8 +623,8 @@ func TestVisibleRailV2InBudgetDividerAndCellAwareFitting(t *testing.T) {
 		return lipgloss.Width(line[:offset])
 	}
 	if mainOrigin, siblingOrigin := labelOrigin(mainLine, i18n.T("agent_selector.main")),
-		labelOrigin(siblingLine, "Sibling"); mainOrigin != 2 || siblingOrigin != mainOrigin {
-		t.Errorf("fixed label origins = Main %d, sibling %d, want both at display cell 2:\nMain: %q\nsibling: %q",
+		labelOrigin(siblingLine, "Sibling"); mainOrigin != 3 || siblingOrigin != mainOrigin {
+		t.Errorf("fixed label origins = Main %d, sibling %d, want both at display cell 3:\nMain: %q\nsibling: %q",
 			mainOrigin, siblingOrigin, mainLine, siblingLine)
 	}
 }
@@ -546,20 +671,20 @@ func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 	bravoLine := visibleRailV2RailRow(app, bravoIndex)
 	longIndex := visibleRailV2RowIndex(t, app.mail, fixture.targets[2].AgentID)
 	longLine := visibleRailV2RailRow(app, longIndex)
-	if !strings.HasPrefix(mainLine, "  "+i18n.T("agent_selector.main")) {
+	if !strings.HasPrefix(mainLine, "   "+i18n.T("agent_selector.main")) {
 		t.Errorf("Main rail row = %q, want canonical first row with neither marker", mainLine)
 	}
 	if strings.HasSuffix(mainLine, " 12") || strings.HasSuffix(mainLine, " 3") || strings.HasSuffix(mainLine, " 1") {
 		t.Errorf("Main rail row acquired a direct unread badge: %q", mainLine)
 	}
-	if !strings.HasPrefix(alphaLine, "> Alpha") || !strings.HasSuffix(alphaLine, " 12") {
+	if !strings.HasPrefix(alphaLine, ">  Alpha") || !strings.HasSuffix(alphaLine, " 12") {
 		t.Errorf("cursor-only Alpha row = %q, want > marker and full decimal badge 12", alphaLine)
 	}
-	if !strings.HasPrefix(bravoLine, "• Bravo") || !strings.HasSuffix(bravoLine, " 3") {
+	if !strings.HasPrefix(bravoLine, " • Bravo") || !strings.HasSuffix(bravoLine, " 3") {
 		t.Errorf("current-only Bravo row = %q, want • marker and badge 3", bravoLine)
 	}
 	if strings.Contains(longLine, "This Label Is Deliberately Longer Than Twenty Four Cells") ||
-		!strings.HasPrefix(longLine, "  This Label") || !strings.HasSuffix(longLine, " 1") {
+		!strings.HasPrefix(longLine, "   This Label") || !strings.HasSuffix(longLine, " 1") {
 		t.Errorf("long direct row = %q, want width-safe truncation leaving its full badge", longLine)
 	}
 
@@ -599,7 +724,7 @@ func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 
 	app.mail = app.mail.setSelectorCursor(bravoIndex)
 	bothLine := visibleRailV2RailRow(app, bravoIndex)
-	if !strings.HasPrefix(bothLine, ">•Bravo") {
+	if !strings.HasPrefix(bothLine, ">• Bravo") {
 		t.Errorf("current+cursor Bravo row = %q, want >• marker", bothLine)
 	}
 
@@ -619,6 +744,69 @@ func TestVisibleRailV2CanonicalRenderAndPureView(t *testing.T) {
 	}
 	if !reflect.DeepEqual(beforeFiles, afterFiles) {
 		t.Error("App.View changed fixture filesystem bytes")
+	}
+}
+
+func TestVisibleRailV2FocusCurrentVisualSemantics(t *testing.T) {
+	for _, leave := range []tea.KeyPressMsg{
+		{Code: tea.KeyTab},
+		{Code: tea.KeyEsc},
+	} {
+		t.Run("blur-again-with-"+leave.String(), func(t *testing.T) {
+			fixture := newVisibleRailV2Fixture(
+				t,
+				[]string{"Alpha", "Bravo", "Charlie"},
+				[]int{0, 0, 0},
+				85,
+				16,
+				"",
+			)
+			app := fixture.app
+			alphaIndex := visibleRailV2RowIndex(t, app.mail, fixture.targets[0].AgentID)
+			bravoIndex := visibleRailV2RowIndex(t, app.mail, fixture.targets[1].AgentID)
+
+			var activationCmd tea.Cmd
+			app.mail, activationCmd = app.mail.activateConversationRow(bravoIndex)
+			if activationCmd == nil {
+				t.Fatal("canonical V1 activation of the current Bravo row produced no visibility command")
+			}
+			app.mail = app.mail.setSelectorCursor(alphaIndex)
+			if app.mail.agentSelector.cursor != alphaIndex {
+				t.Fatalf("canonical cursor = %d, want separate Alpha row %d",
+					app.mail.agentSelector.cursor, alphaIndex)
+			}
+			visibleRailV2AssertCurrent(t, app, fixture.targets[1])
+			visibleRailV2AssertVisualSemantics(t, app, "initial blurred separate cursor/current")
+
+			app = visibleRailV2Focus(t, app)
+			visibleRailV2AssertVisualSemantics(t, app, "focused separate cursor/current")
+
+			app.mail.agentSelector.rows[bravoIndex].Label = "\x1b[35mBra" + ansi.ResetStyle + "vo after reset"
+			app.mail = app.mail.setSelectorCursor(bravoIndex)
+			if app.mail.agentSelector.cursor != bravoIndex {
+				t.Fatalf("canonical cursor = %d, want shared Bravo row %d",
+					app.mail.agentSelector.cursor, bravoIndex)
+			}
+			visibleRailV2AssertCurrent(t, app, fixture.targets[1])
+			visibleRailV2AssertVisualSemantics(t, app, "focused shared cursor/current")
+
+			app.mail = app.mail.setSelectorCursor(alphaIndex)
+			app, cmd := visibleRailV2Apply(app, leave)
+			if cmd != nil {
+				t.Errorf("%s from the focused rail returned an unexpected command", leave.String())
+			}
+			rail := visibleRailV2ObserveRail(app.mail)
+			if rail.focused || !app.mail.input.Focused() {
+				t.Errorf("%s did not blur the rail and restore composer focus: rail=%v input=%v",
+					leave.String(), rail.focused, app.mail.input.Focused())
+			}
+			if app.mail.agentSelector.cursor != alphaIndex {
+				t.Errorf("%s changed the retained canonical cursor to %d, want %d",
+					leave.String(), app.mail.agentSelector.cursor, alphaIndex)
+			}
+			visibleRailV2AssertCurrent(t, app, fixture.targets[1])
+			visibleRailV2AssertVisualSemantics(t, app, "blurred again separate cursor/current")
+		})
 	}
 }
 
@@ -1128,7 +1316,7 @@ func TestVisibleRailV2ReorderResizeAndScroll(t *testing.T) {
 	}
 	alphaIndex = visibleRailV2RowIndex(t, app.mail, fixture.targets[0].AgentID)
 	bravoIndex = visibleRailV2RowIndex(t, app.mail, fixture.targets[1].AgentID)
-	if line := visibleRailV2RailLineContaining(app, "Zulu"); !strings.HasPrefix(line, "> Zulu") {
+	if line := visibleRailV2RailLineContaining(app, "Zulu"); !strings.HasPrefix(line, ">  Zulu") {
 		t.Errorf("reordered cursor row = %q, want canonical A identity rendered at its new index", line)
 	}
 
