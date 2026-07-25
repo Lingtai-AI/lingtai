@@ -23,6 +23,8 @@ type agentRailState struct {
 	focused        bool
 	scrollOffset   int
 	unreadByThread map[string]int
+
+	explicitlyCollapsed bool
 }
 
 func agentRailVisibleRows(height int) int {
