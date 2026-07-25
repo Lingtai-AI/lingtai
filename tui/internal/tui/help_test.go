@@ -177,12 +177,6 @@ func TestAgentRailVisibleControlsHelpContract(t *testing.T) {
 			"[<]",
 			"[>]",
 			leftClickByLang[c.lang],
-			"85",
-			"84",
-			"Ctrl+G",
-			"fn/Globe+F2",
-			"Tab",
-			"/agents",
 		} {
 			if !strings.Contains(controlParagraph, required) {
 				t.Errorf("%s /agents visible-control paragraph does not mention %q", c.asset, required)

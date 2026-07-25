@@ -350,12 +350,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// child content rectangle — never the raw terminal dimensions. See
 		// layout.go (LayoutBudget) for the contract.
 		budget := a.layoutBudget()
-		if a.currentView == appViewMail {
-			if budget.RailVisible {
-				a.mail = a.mail.clampAgentRail()
-			} else if a.mail.agentRail.focused {
-				a.mail = a.mail.blurAgentRail()
-			}
+		if a.currentView == appViewMail &&
+			!budget.RailVisible &&
+			a.mail.agentRail.focused {
+			a.mail = a.mail.blurAgentRail()
 		}
 		return a.updateChildWindowSize(budget.ChildWindowSize())
 
@@ -1611,7 +1609,6 @@ func (a App) updateMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd) {
 
 	if a.collapsedAgentRailControlVisible() &&
 		childY == 0 &&
-		childX >= 0 &&
 		childX < agentRailControlWidth {
 		if msg.Button != tea.MouseLeft || !a.agentRailToggleEligible() {
 			return a, nil

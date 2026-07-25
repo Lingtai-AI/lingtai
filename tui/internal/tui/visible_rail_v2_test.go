@@ -34,7 +34,6 @@ type visibleRailV2Fixture struct {
 }
 
 type visibleRailV2RailObservation struct {
-	present      bool
 	focused      bool
 	scrollOffset int
 	unread       map[string]int
@@ -197,46 +196,17 @@ func visibleRailV2RowIndex(t *testing.T, mail MailModel, agentID string) int {
 	return -1
 }
 
-// visibleRailV2ObserveRail reads only the future presentation state. The RED
-// remains compile-valid before that state exists, while every test also pins
-// concrete App/View/input/selector behavior rather than treating reflection
-// absence as the feature proof.
 func visibleRailV2ObserveRail(mail MailModel) visibleRailV2RailObservation {
-	root := reflect.ValueOf(mail)
-	for index := 0; index < root.NumField(); index++ {
-		candidate := root.Field(index)
-		if candidate.Kind() == reflect.Pointer {
-			if candidate.IsNil() {
-				continue
-			}
-			candidate = candidate.Elem()
-		}
-		if candidate.Kind() != reflect.Struct {
-			continue
-		}
-		focused := candidate.FieldByName("focused")
-		scroll := candidate.FieldByName("scrollOffset")
-		unread := candidate.FieldByName("unreadByThread")
-		if !focused.IsValid() || focused.Kind() != reflect.Bool ||
-			!scroll.IsValid() || scroll.Kind() != reflect.Int ||
-			!unread.IsValid() || unread.Kind() != reflect.Map {
-			continue
-		}
-		observation := visibleRailV2RailObservation{
-			present:      true,
-			focused:      focused.Bool(),
-			scrollOffset: int(scroll.Int()),
-			unread:       make(map[string]int),
-		}
-		iter := unread.MapRange()
-		for iter.Next() {
-			if iter.Key().Kind() == reflect.String && iter.Value().Kind() == reflect.Int {
-				observation.unread[iter.Key().String()] = int(iter.Value().Int())
-			}
-		}
-		return observation
+	rail := mail.agentRail
+	unread := make(map[string]int, len(rail.unreadByThread))
+	for threadKey, count := range rail.unreadByThread {
+		unread[threadKey] = count
 	}
-	return visibleRailV2RailObservation{unread: map[string]int{}}
+	return visibleRailV2RailObservation{
+		focused:      rail.focused,
+		scrollOffset: rail.scrollOffset,
+		unread:       unread,
+	}
 }
 
 func visibleRailV2ObserveState(app App) visibleRailV2StateObservation {
@@ -351,10 +321,6 @@ func visibleRailV2AssertVisualSemantics(t *testing.T, app App, stage string) {
 	t.Helper()
 
 	rail := visibleRailV2ObserveRail(app.mail)
-	if rail.focused != app.mail.agentRail.focused {
-		t.Fatalf("%s reflected focus = %v, concrete rail focus = %v",
-			stage, rail.focused, app.mail.agentRail.focused)
-	}
 	if len(rail.unread) != 0 {
 		t.Fatalf("%s fixture acquired unread state: %#v", stage, rail.unread)
 	}
@@ -447,9 +413,9 @@ func visibleRailV2Focus(t *testing.T, app App) App {
 		t.Errorf("Tab into the visible rail returned an unexpected command")
 	}
 	rail := visibleRailV2ObserveRail(app.mail)
-	if !rail.present || !rail.focused || app.mail.input.Focused() {
-		t.Errorf("Tab did not focus the visible rail and blur the shared composer: present=%v focused=%v input=%v",
-			rail.present, rail.focused, app.mail.input.Focused())
+	if !rail.focused || app.mail.input.Focused() {
+		t.Errorf("Tab did not focus the visible rail and blur the shared composer: focused=%v input=%v",
+			rail.focused, app.mail.input.Focused())
 	}
 	return app
 }
@@ -918,9 +884,6 @@ func TestVisibleRailV2KeyboardFocusAndActivation(t *testing.T) {
 			app, openEditorCmd := visibleRailV2Apply(app, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 			if openEditorCmd != nil {
 				t.Error("real Ctrl+E left an asynchronous result that can outlive its Mail route")
-				// Keep exercising the old implementation after the authentic RED so the
-				// competing delayed-surface assertion remains independently observable.
-				app, _ = visibleRailV2Apply(app, openEditorCmd())
 			}
 			if !app.mail.showEditorWarn || app.mail.editorWarnText != "route-affine draft" ||
 				visibleRailV2ObserveRail(app.mail).focused || !app.mail.input.Focused() {
@@ -968,24 +931,9 @@ func TestVisibleRailV2KeyboardFocusAndActivation(t *testing.T) {
 					app.mail.showEditorWarn, app.mail.editorWarnText)
 			}
 
-			// On the old implementation Ctrl+E and palette Enter produced independent
-			// commands. Preserve that real reverse delivery order for the authentic RED:
-			// /agents opens first, then the delayed editor result arrives second.
-			if openEditorCmd != nil {
-				var selectCmd tea.Cmd
-				app, selectCmd = visibleRailV2Apply(app, tea.KeyPressMsg{Code: tea.KeyEnter})
-				if selectCmd == nil {
-					t.Fatal("old palette-active path produced no real /agents selection command")
-				}
-				for _, msg := range visibleRailV2CollectCmd(selectCmd) {
-					app, _ = visibleRailV2Apply(app, msg)
-				}
-				app, _ = visibleRailV2Apply(app, openEditorCmd())
-			} else {
-				// A previously queued /agents result must stay inert once the synchronous
-				// warning owns Mail.
-				app, _ = visibleRailV2Apply(app, PaletteSelectMsg{Command: "agents"})
-			}
+			// A previously queued /agents result must stay inert once the synchronous
+			// warning owns Mail.
+			app, _ = visibleRailV2Apply(app, PaletteSelectMsg{Command: "agents"})
 			if !app.mail.showEditorWarn || app.mail.agentSelector.selectorOpen ||
 				app.mail.editorWarnText != "/agents" {
 				t.Errorf("palette Ctrl+E delivery order left competing surfaces: warning=%v selector=%v text=%q",
@@ -1185,9 +1133,9 @@ func TestVisibleRailV2MouseWheelAndCoordinateRouting(t *testing.T) {
 		if wantMax < 0 {
 			wantMax = 0
 		}
-		if !rail.present || rail.scrollOffset != wantMax {
-			t.Errorf("wheel-down rail scroll = present=%v offset=%d, want bounded max %d",
-				rail.present, rail.scrollOffset, wantMax)
+		if rail.scrollOffset != wantMax {
+			t.Errorf("wheel-down rail scroll offset=%d, want bounded max %d",
+				rail.scrollOffset, wantMax)
 		}
 		if app.mail.agentSelector.cursor != beforeCursor ||
 			app.mail.agentSelector.selectedThreadKey != beforeCurrent {
