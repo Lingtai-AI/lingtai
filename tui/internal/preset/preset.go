@@ -86,7 +86,7 @@ const (
 	// from embedded data on every launch.
 	SourceTemplate
 	// SourceSaved means the preset lives under presets/saved/. User-
-	// owned; never touched by Bootstrap/SeedMissingBuiltins.
+	// owned; never touched by Bootstrap/RefreshTemplates.
 	SourceSaved
 )
 
@@ -462,17 +462,6 @@ func Delete(name string) error {
 	}
 	return err
 }
-
-// EnsureDefault is now a no-op kept for callers that haven't been
-// updated. Templates are unconditionally rewritten by RefreshTemplates
-// on every Bootstrap, and saved presets are user territory — there is
-// nothing to "ensure default" anymore.
-func EnsureDefault() error { return nil }
-
-// SeedMissingBuiltins is replaced by RefreshTemplates. Kept as a thin
-// alias so old callers (lingtai-claude-code, codex-plugin) that import
-// the preset package don't break on upgrade.
-func SeedMissingBuiltins() error { return RefreshTemplates() }
 
 // RefreshTemplates rewrites templates/ from BuiltinPresets() wholesale.
 // Called from Bootstrap on every TUI launch. Deletes any *.json file
