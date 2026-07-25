@@ -81,7 +81,6 @@ const (
 	emBrowse      editorMode = iota // navigating field list
 	emInline                        // textinput active for the focused field
 	emClonePrompt                   // built-in: prompt for new name on semantic edit
-	emDirtyPrompt                   // legacy "discard? y/N" — kept for compat
 	emExitPrompt                    // three-way exit on Esc: save / discard / cancel
 )
 
@@ -358,8 +357,6 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 			return m.updateInline(msg)
 		case emClonePrompt:
 			return m.updateClonePrompt(msg)
-		case emDirtyPrompt:
-			return m.updateDirtyPrompt(msg)
 		case emExitPrompt:
 			return m.updateExitPrompt(msg)
 		default:
@@ -474,17 +471,6 @@ func (m PresetEditorModel) updateInline(msg tea.KeyMsg) (PresetEditorModel, tea.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
-}
-
-func (m PresetEditorModel) updateDirtyPrompt(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y":
-		return m, func() tea.Msg { return PresetEditorCancelMsg{} }
-	default:
-		// Anything else returns to browse without discarding.
-		m.mode = emBrowse
-		return m, nil
-	}
 }
 
 // updateExitPrompt is the three-way "save / discard / cancel" overlay
@@ -1089,12 +1075,6 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 	return ""
 }
 
-func (m PresetEditorModel) isDirty() bool {
-	a, _ := json.Marshal(m.working)
-	b, _ := json.Marshal(m.original)
-	return string(a) != string(b)
-}
-
 // ───────────────────────────────────────────────────────────────────────────
 // View
 // ───────────────────────────────────────────────────────────────────────────
@@ -1138,8 +1118,6 @@ func (m PresetEditorModel) View() string {
 	switch m.mode {
 	case emClonePrompt:
 		full = m.renderCloneOverlay(full)
-	case emDirtyPrompt:
-		full = m.renderDirtyOverlay(full)
 	case emExitPrompt:
 		full = m.renderExitOverlay(full)
 	}
@@ -1667,8 +1645,6 @@ func (m PresetEditorModel) renderFooter() string {
 	switch m.mode {
 	case emInline:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
-	case emDirtyPrompt:
-		return hintStyle.Render("  " + i18n.T("preset_editor.hint_dirty"))
 	case emExitPrompt:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_exit"))
 	}
@@ -1688,17 +1664,6 @@ func (m PresetEditorModel) renderCloneOverlay(_ string) string {
 		Padding(1, 2).
 		Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
-}
-
-func (m PresetEditorModel) renderDirtyOverlay(_ string) string {
-	style := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color("214")).
-		Padding(1, 2).
-		Render(i18n.T("preset_editor.dirty_prompt") + "\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[y] "+i18n.T("preset_editor.discard")+
-				"   [n/Esc] "+i18n.T("preset_editor.cancel_discard")))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, style)
 }
 
 func (m PresetEditorModel) renderExitOverlay(_ string) string {
