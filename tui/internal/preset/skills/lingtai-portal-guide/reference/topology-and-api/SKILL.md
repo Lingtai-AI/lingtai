@@ -2,7 +2,7 @@
 name: portal-guide-topology-and-api
 description: Nested lingtai-portal-guide reference for topology tape frames, replay chunks, portal API endpoints, and the Network JSON response.
 version: 1.0.0
-last_changed_at: "2026-07-18T00:00:00Z"
+last_changed_at: "2026-07-25T15:12:43Z"
 maintenance: "If you find stale or incorrect information here, use the lingtai-issue-report skill to assemble evidence and obtain per-issue human consent before filing an issue. Never include secrets, credentials, tokens, or private paths."
 ---
 
@@ -34,7 +34,7 @@ All endpoints are served at `http://localhost:<port>`.
 | Endpoint | Method | Response | Description |
 |----------|--------|----------|-------------|
 | `/api/network` | GET | `Network` JSON | Live network state (nodes, edges, stats) |
-| `/api/topology` | GET | JSON array of `TapeFrame` | Full topology tape (can be large) |
+| `/api/topology` | GET | JSON array of `TapeFrame` | Current `topology.jsonl` contents: after reconstruction this is only the last reconstructed frame plus subsequent live snapshots, not the full history |
 | `/api/topology/manifest` | GET | `ReplayManifest` JSON | Chunk metadata for replay |
 | `/api/topology/chunk?start=<hourMs>` | GET | Chunk JSON (optionally gzip-encoded when requested) | Frames for one hour-bucket start time |
 | `/api/topology/progress` | GET | JSON object such as `{ "current": N, "total": M }` (or `{}`) | Reconstruction progress parsed from `reconstruct.progress` |
