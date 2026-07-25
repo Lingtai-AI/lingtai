@@ -103,7 +103,7 @@
       "web_search": { "provider": "minimax", "api_key_env": "MINIMAX_API_KEY" }
 
       // --- Removed capabilities (for reference) ---
-      // "web_read"        — covered by `web_search` and its built-in `manual` action.
+      // "web_read"        — folded into the `web-browsing` skill.
       // "compose"/"video"/"draw"/"talk" — use the `media-creation` skill + an MCP server.
       // "listen"          — use the `listen` skill (faster-whisper + librosa).
     },
@@ -241,9 +241,16 @@
   "pad": ""
   // Or use a file: "pad_file": "pad.md"
 
-  // Character / 灵台 is NOT seeded here. It is durable state the agent owns
-  // and authors for itself after creation — managed via system/lingtai.md
-  // (psyche), not written into init.json by the TUI. There is no seed field
-  // for it in this file; omitting it lets the agent start with an empty
-  // character and write its own.
+  // Character / 灵台 supports two modes. The recommended default is
+  // self-evolve: omit `lingtai` (or set it to an empty string), and the
+  // agent's psyche-authored system/lingtai.md survives refresh and molt.
+  //
+  // Forced identity examples (add a comma after `"pad": ""` above, then
+  // uncomment one only when the configured value must be authoritative on
+  // every reconstruction):
+  // "lingtai": "Describe the agent's configured identity here."
+  // "lingtai_file": "lingtai.md"
+  // A nonempty resolved value from either form replaces system/lingtai.md
+  // during boot, refresh, and post-molt prompt reconstruction. An empty or
+  // absent resolved value leaves system/lingtai.md untouched.
 }
