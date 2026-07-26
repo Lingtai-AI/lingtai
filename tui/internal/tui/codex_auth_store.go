@@ -343,7 +343,7 @@ func isSavedCodexPreset(p preset.Preset) bool {
 		return false
 	}
 	prov, _ := llm["provider"].(string)
-	return prov == "codex"
+	return preset.ClassifyCredentialFamily(prov) == preset.CredentialFamilyCodexSingle
 }
 
 // presetCodexAuthRef returns the preset's current manifest.llm.codex_auth_path
