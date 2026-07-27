@@ -2452,7 +2452,7 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 		leftLabel = lipgloss.NewStyle().Foreground(ColorAgent).Render("  ◉ " + m.statusFlash)
 	} else {
 		m.statusFlash = ""
-		leftLabel = StyleSubtle.Render("  " + m.baseDir)
+		leftLabel = StyleSubtle.Render("  " + i18n.T("mail.agent_rail_collapse_hint"))
 	}
 	// Separator between the ctrl+o verbosity affordance and the slash-command
 	// affordance. Localized (`hints.sep`): English reads `ctrl+o to expand, / for

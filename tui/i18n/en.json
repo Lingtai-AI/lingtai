@@ -127,6 +127,7 @@
   "mail.btw_suspended": "Agent is not running. Try /refresh first.",
   "mail.btw_waiting": "Inquiry waiting for agent...",
   "mail.btw_thinking": "Agent is thinking...",
+  "mail.agent_rail_collapse_hint": "click [<] or ctrl+g to collapse",
   "mail.copy_mode": "COPY MODE — drag to select · ⌘C copy · ctrl+y/esc exit",
   "mail.visit_exit_hint": "(esc-esc to exit)",
   "mail.insight_sent": "Requesting insight...",

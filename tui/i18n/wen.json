@@ -127,6 +127,7 @@
   "mail.btw_suspended": "灵未醒，先 /refresh。",
   "mail.btw_waiting": "旁问待灵受之...",
   "mail.btw_thinking": "灵思中...",
+  "mail.agent_rail_collapse_hint": "击 [<] 或 ctrl+g 收会话",
   "mail.copy_mode": "录文 — 曳而择之 · ⌘C 录之 · ctrl+y/esc 退",
   "mail.visit_exit_hint": "（Esc Esc 返）",
   "mail.insight_sent": "请省中...",
