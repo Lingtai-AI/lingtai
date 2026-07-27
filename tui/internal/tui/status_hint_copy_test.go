@@ -54,10 +54,6 @@ func TestHomeStatusHintShowsExpandCommandsCopy(t *testing.T) {
 	if !strings.Contains(out, want) {
 		t.Errorf("home footer must render the exact prompt %q; got:\n%s", want, out)
 	}
-	const collapseHint = "click [<] or ctrl+g to collapse"
-	if !strings.Contains(out, collapseHint) {
-		t.Errorf("home footer must render the rail affordance %q; got:\n%s", collapseHint, out)
-	}
 
 	for _, bad := range []string{"ctrl+o soul", "ctrl+e editor"} {
 		if strings.Contains(out, bad) {

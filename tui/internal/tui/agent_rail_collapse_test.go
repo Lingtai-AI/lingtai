@@ -1312,6 +1312,13 @@ func TestAgentRailVisibleControlRendering(t *testing.T) {
 	if got := ansi.Strip(ansi.Cut(expandedLine, 23, 24)); got != "│" {
 		t.Errorf("expanded divider cell 23 = %q, want %q", got, "│")
 	}
+	budget := app.layoutBudget()
+	if got := ansi.Strip(agentRailCollapseRenderedLine(t, app, budget.ChildHeight-2)); !strings.Contains(got, "click [<] or ctrl+g") {
+		t.Errorf("left-column hint first line = %q", got)
+	}
+	if got := ansi.Strip(agentRailCollapseRenderedLine(t, app, budget.ChildHeight-1)); !strings.Contains(got, "to collapse") {
+		t.Errorf("left-column hint second line = %q", got)
+	}
 
 	app = visibleRailV2Focus(t, app)
 	focusedLine := agentRailCollapseRenderedLine(t, app, 0)

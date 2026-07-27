@@ -14,6 +14,7 @@ import (
 const (
 	agentRailWidth                = 24
 	agentRailRowsStart            = 2
+	agentRailHintLines            = 2
 	agentRailControlWidth         = 3
 	agentRailCollapseControlStart = agentRailWidth - 1 - agentRailControlWidth
 	agentRailCollapseControl      = "[<]"
@@ -31,8 +32,15 @@ type agentRailState struct {
 	explicitlyCollapsed bool
 }
 
+func agentRailHintVisible(height int) bool {
+	return height >= agentRailRowsStart+agentRailHintLines+1
+}
+
 func agentRailVisibleRows(height int) int {
 	visible := height - agentRailRowsStart
+	if agentRailHintVisible(height) {
+		visible -= agentRailHintLines
+	}
 	if visible < 1 {
 		return 1
 	}
@@ -103,7 +111,8 @@ func (m MailModel) scrollAgentRail(delta int) MailModel {
 }
 
 func (m MailModel) agentRailRowAt(childY int) int {
-	if childY < agentRailRowsStart || childY >= m.height {
+	if childY < agentRailRowsStart || childY >= m.height ||
+		childY >= agentRailRowsStart+agentRailVisibleRows(m.height) {
 		return -1
 	}
 	offset := clampAgentRailOffset(m.agentRail.scrollOffset, len(m.agentSelector.rows), m.height)
@@ -251,6 +260,12 @@ func (m MailModel) renderAgentRail(width, height int) string {
 			m.renderAgentRailRow(m.agentSelector.rows[rowIndex], rowIndex, innerWidth),
 			"│",
 		)
+	}
+	if agentRailHintVisible(height) {
+		hintLines := strings.SplitN(i18n.T("agent_rail.collapse_hint"), "\n", agentRailHintLines)
+		for index, line := range hintLines {
+			lines[height-agentRailHintLines+index] = frameLine(StyleSubtle.Render("  "+line), "│")
+		}
 	}
 	return strings.Join(lines, "\n")
 }
