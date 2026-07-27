@@ -826,6 +826,7 @@
   "palette.agents": "Choose Main or an agent",
   "cmd.agents": "Choose Main or a same-project agent for direct mail.",
   "agent_rail.title": "Conversations",
+  "agent_rail.collapse_hint": "click [<] or ctrl+g\nto collapse",
   "agent_selector.main": "Main",
   "agent_selector.omitted": "%d unsafe agent row(s) omitted",
   "agent_selector.unread_failed": "Agent unread status could not be updated",

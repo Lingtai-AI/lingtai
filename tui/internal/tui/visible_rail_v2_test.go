@@ -1125,10 +1125,7 @@ func TestVisibleRailV2MouseWheelAndCoordinateRouting(t *testing.T) {
 			})
 		}
 		rail := visibleRailV2ObserveRail(app.mail)
-		visibleRows := budget.ChildHeight - 2
-		if visibleRows < 1 {
-			visibleRows = 1
-		}
+		visibleRows := agentRailVisibleRows(budget.ChildHeight)
 		wantMax := len(app.mail.agentSelector.rows) - visibleRows
 		if wantMax < 0 {
 			wantMax = 0
