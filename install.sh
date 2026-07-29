@@ -40,12 +40,14 @@
 # provider; it never independently re-resolves "latest" on the fallback. The
 # Python `lingtai` runtime is installed from that pinned kernel release
 # artifact by explicit local file path — never `pip install lingtai` from any
-# package index — with SHA256 verified before install. Third-party
-# dependencies still resolve via the configured package index
-# (LINGTAI_PYPI_INDEX_URL, default pypi.org); only lingtai's own bytes are
-# pinned. If no compatible platform wheel exists for the runtime's
-# interpreter, the pinned sdist is used instead (may require a local build
-# toolchain).
+# package index — with SHA256 verified before install. Those third-party
+# dependencies resolve via exactly ONE package index, chosen by
+# python_dependency_index_url: a non-empty LINGTAI_PYPI_INDEX_URL always wins,
+# otherwise the provider that actually served the final bundle manifest picks a
+# provider-aligned default (Gitee -> Tsinghua TUNA, GitHub -> pypi.org). Only
+# lingtai's own bytes are pinned. If no compatible platform wheel exists for
+# the runtime's interpreter, the pinned sdist is used instead (may require a
+# local build toolchain).
 #
 # LingTai is NEVER installed by requesting the package name "lingtai" from
 # any index — there is no PyPI fallback. On the default one-command path a
@@ -69,6 +71,15 @@ GO_DL_BASE="${LINGTAI_GO_DL_BASE:-https://go.dev/dl}"  # official Go toolchain d
 NODE_DL_BASE="${LINGTAI_NODE_DL_BASE:-https://nodejs.org/dist}"
 UV_INSTALLER_URL="${LINGTAI_UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}"  # official uv bootstrap installer
 NODE_TOOLCHAIN_VERSION="${LINGTAI_NODE_VERSION:-22.12.0}"
+
+# The single package index used ONLY for third-party dependencies of the
+# verified local LingTai artifact — see python_dependency_index_url. Tsinghua
+# TUNA is a cloud-neutral domestic PyPI mirror; it is the Gitee-path default
+# because pypi.org is not reliably reachable from mainland-China hosts, which
+# makes dependency resolution the remaining failure point of an otherwise
+# checksum-verified Gitee install.
+PYPI_INDEX_URL_DEFAULT="https://pypi.org/simple"
+PYPI_INDEX_URL_GITEE_DEFAULT="https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 
 # Gitee mirror: a real repository, but release assets may not exist for every
 # tag yet (see gitee_release_asset_url / gitee_bundle_manifest_url below,
@@ -136,7 +147,7 @@ usage() {
   cat <<'EOF'
 One-shot installer for lingtai-tui, lingtai-portal, and the Python runtime.
 
-Homebrew is not required. By default the latest GitHub Release is installed:
+Homebrew is not required. By default the latest release bundle is installed from the selected source:
 a prebuilt per-platform tarball when available, otherwise a source build.
 
 Usage:
@@ -148,7 +159,7 @@ Usage:
 Options:
   --latest             Explicitly build TUI main + kernel main from source;
                        records and prints both resolved full commit SHAs
-  --version <tag>      Release tag to install (default: latest GitHub release)
+  --version <tag>      Release tag to install (default: latest from --source)
   --ref <ref>          Build a specific git branch/tag/commit from source
   --bin-dir <dir>      Install binaries into <dir>
   --prefix <dir>       Install binaries into <dir>/bin (used by --update)
@@ -396,6 +407,29 @@ resolve_source_provider() {
     fi
   else
     BUNDLE_PROVIDER="github"
+  fi
+}
+
+# python_dependency_index_url echoes the ONE package index used to resolve the
+# third-party dependencies of the verified local LingTai artifact. LingTai
+# itself is never requested by package name from this or any other index.
+#
+# Precedence, deliberately narrow:
+#   1. a non-empty LINGTAI_PYPI_INDEX_URL always wins (an empty value is not an
+#      override and falls through, so it can never blank out the index);
+#   2. otherwise the FINAL bundle provider — the one that actually served the
+#      bundle manifest, after any same-tag fallback moved BUNDLE_PROVIDER —
+#      picks the default it can reach: Gitee -> Tsinghua TUNA, GitHub ->
+#      official PyPI.
+# Callers pass the result as a single `--index-url <url>` argv pair; there is
+# deliberately no --extra-index-url, so exactly one index is ever consulted.
+python_dependency_index_url() {
+  if [[ -n "${LINGTAI_PYPI_INDEX_URL:-}" ]]; then
+    printf '%s' "$LINGTAI_PYPI_INDEX_URL"
+  elif [[ "${BUNDLE_PROVIDER:-github}" == "gitee" ]]; then
+    printf '%s' "$PYPI_INDEX_URL_GITEE_DEFAULT"
+  else
+    printf '%s' "$PYPI_INDEX_URL_DEFAULT"
   fi
 }
 
@@ -1217,10 +1251,11 @@ ensure_runtime_venv() {
 #
 # Installs the Python `lingtai` runtime from the release-pinned kernel
 # artifact named in the TUI bundle manifest, by explicit local file path —
-# never `pip install lingtai` against any package index. The configured
-# package index (LINGTAI_PYPI_INDEX_URL, default pypi.org) is used ONLY to
-# resolve lingtai's own third-party dependencies during that local-path
-# install; lingtai itself is never requested from an index.
+# never `pip install lingtai` against any package index. One package index
+# (python_dependency_index_url: an explicit non-empty LINGTAI_PYPI_INDEX_URL,
+# else the final bundle provider's selected default) is used ONLY to resolve
+# lingtai's own third-party dependencies during that local-path install;
+# lingtai itself is never requested from an index.
 
 # kernel_manifest_url_for_provider echoes the kernel release manifest asset
 # URL on the given provider/tag, or nothing if unavailable.
@@ -1479,11 +1514,13 @@ install_kernel_from_bundle() {
   fi
   note "Verified SHA256 for $fname."
 
-  index_url="${LINGTAI_PYPI_INDEX_URL:-https://pypi.org/simple}"
+  index_url="$(python_dependency_index_url)"
   say "Installing lingtai from local artifact (dependencies resolved via $index_url) ..."
   # Explicit local path: pip/uv never requests the package name "lingtai"
   # from any index here — only third-party dependency resolution uses
   # --index-url. This is the "no pip install lingtai from index" guarantee.
+  # One quoted `--index-url "$index_url"` pair and no --extra-index-url, so
+  # dependency resolution consults exactly one index.
   if [[ -n "$uv" ]]; then
     "$uv" pip install --index-url "$index_url" -p "$(dirname "$(dirname "$py")")" "$dest" || return 1
   else

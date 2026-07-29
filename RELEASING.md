@@ -193,9 +193,25 @@ artifact (a platform wheel matched to the venv's actual interpreter, or the
 pinned sdist as a fallback) by **explicit local file path**. LingTai is
 **never** installed by requesting the package name `lingtai` from any package
 index — there is no PyPI fallback for LingTai itself. SHA256 is verified
-before install. The configured package index (`LINGTAI_PYPI_INDEX_URL`,
-default `pypi.org`) is used only to resolve `lingtai`'s third-party
-dependencies once the local artifact is being installed.
+before install. A package index is used only to resolve `lingtai`'s
+third-party dependencies once the local artifact is being installed, and
+`install.sh` consults exactly one: a non-empty `LINGTAI_PYPI_INDEX_URL` always
+wins, otherwise the provider that actually served the bundle manifest (after
+any same-tag fallback) picks a default it can reach — Gitee →
+`https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`, GitHub →
+`https://pypi.org/simple`. There is no `--extra-index-url`.
+
+That default exists because `pypi.org` is not reliably reachable from
+mainland-China hosts: Gitee already transports the checksum-verified bundle
+artifacts, but sending their third-party dependencies to `pypi.org` left the
+install failing at dependency resolution (observed on a real Aliyun host).
+Tsinghua TUNA is a cloud-neutral domestic default, not a reachability
+guarantee; `LINGTAI_PYPI_INDEX_URL` is the explicit escape hatch. This applies
+to the POSIX verified-bundle path only — `install.ps1` and `--latest` are
+unchanged, and the `/update-tui`/Homebrew migration bootstrap still fetches the
+version-pinned GitHub raw `install.sh`
+([`tui/internal/config/tui_updater.go`](tui/internal/config/tui_updater.go))
+before any provider selection happens.
 
 On the default one-command path (no `--ref`, not `--update`) a resolved
 bundle + a successful kernel-artifact install are **mandatory**: if no bundle
