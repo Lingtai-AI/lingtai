@@ -8,7 +8,7 @@
     the PowerShell counterpart to install.sh and parses/runs identically under
     Windows PowerShell 5.1 (Desktop) and PowerShell 7+ (Core).
 
-    Two install sources are supported:
+    Three install sources are supported:
 
       * PUBLIC MODE (no -ArchivePath, the default): resolve one exact vX.Y.Z TUI
         release tag from GitHub (an explicit -Version, or the latest release
@@ -29,7 +29,12 @@
         still resolves the pinned bundle for -Version over the network exactly as
         in public mode, since the kernel pin is not shipped inside the archive.
 
-    Both modes provision the Python runtime venv (default, non -SkipVenv) ONLY
+      * CURRENT-MAIN DEV MODE (-Latest): resolve and pin refs/heads/main to full
+        commits in both Lingtai-AI/lingtai and Lingtai-AI/lingtai-kernel before
+        checkout, build both native Windows binaries from the pinned TUI tree,
+        and install the pinned kernel checkout by local path into the runtime venv.
+
+    Both release modes provision the Python runtime venv (default, non -SkipVenv) ONLY
     from the resolved release's pinned kernel bundle: the bundle manifest's
     kernel_tag/kernel_manifest_filename select the lingtai-kernel release
     manifest, a wheel matching the venv's actual CPython 3.11/3.12/3.13 win_amd64
@@ -48,6 +53,12 @@
 .PARAMETER BinDir
     Directory the binaries install into. Defaults to a per-user, non-admin
     location: %LOCALAPPDATA%\Programs\lingtai\bin. Never requires administrator.
+
+.PARAMETER Latest
+    Explicit current-main development mode. Pins and checks out main in both
+    repositories, builds lingtai-tui.exe and the required lingtai-portal.exe,
+    and installs the checked-out kernel source as a non-editable local build
+    into the runtime venv.
 
 .PARAMETER GlobalDir
     Per-user global state directory (the ~/.lingtai-tui analogue). Defaults to
@@ -86,6 +97,9 @@
                   -ChecksumPath .\lingtai-v0.11.4-windows-amd64.zip.sha256 `
                   -Version v0.11.4 -SkipVenv
 
+.EXAMPLE
+    .\install.ps1 -Latest -BinDir "$env:LOCALAPPDATA\Programs\lingtai\bin"
+
 .NOTES
     Requires PowerShell 5.1 or later. Does not require administrator.
     Exit 0 => success. Non-zero => a fail-loud error. Validation and the
@@ -100,6 +114,7 @@ param(
     [string]$GlobalDir    = $env:LINGTAI_GLOBAL_DIR,
     [string]$ArchivePath,
     [string]$ChecksumPath,
+    [switch]$Latest,
     [switch]$SkipVenv,
     [switch]$NoModifyPath,
     [switch]$DryRun
@@ -333,16 +348,25 @@ function Write-InstallMetadata {
         [string]$KernelSource = '',
         [string]$KernelBundleId = '',
         [string]$KernelVersion = '',
-        [string]$KernelProvider = ''
+        [string]$KernelProvider = '',
+        [string]$SourceMode = '',
+        [string]$TuiCommit = '',
+        [string]$KernelCommit = ''
     )
     $stamped = $ResolvedRef -replace '^v', ''
+    $upgradeCommand = 're-run install.ps1 with a newer -ArchivePath/-Version'
+    if ($SourceMode -eq 'latest-main') {
+        if ($TuiCommit -notmatch '^[0-9a-fA-F]{40}$') { Fail "Current-main install metadata requires a full TUI commit SHA." }
+        $stamped = "main-$($TuiCommit.ToLowerInvariant())"
+        $upgradeCommand = 're-run install.ps1 -Latest'
+    }
     $meta = [ordered]@{
         schema           = 'lingtai.tui.install/v1'
         schema_version   = 1
         install_method   = 'powershell'
         install_kind     = $InstallKind
         self_update      = $false
-        upgrade_command  = 're-run install.ps1 with a newer -ArchivePath/-Version'
+        upgrade_command  = $upgradeCommand
         prefix           = $Prefix
         bin_dir          = $BinDir
         repo_url         = $RepoUrl
@@ -355,9 +379,14 @@ function Write-InstallMetadata {
     }
     if ($KernelSource) {
         $meta['kernel_source']       = $KernelSource
-        $meta['kernel_bundle_id']    = $KernelBundleId
         $meta['kernel_version']      = $KernelVersion
         $meta['kernel_provider']     = $KernelProvider
+        if ($KernelBundleId) { $meta['kernel_bundle_id'] = $KernelBundleId }
+    }
+    if ($SourceMode) {
+        $meta['source_mode']  = $SourceMode
+        $meta['tui_commit']   = $TuiCommit
+        $meta['kernel_commit'] = $KernelCommit
     }
     $metaPath = Join-Path $GlobalDir 'install.json'
     New-Item -ItemType Directory -Force -Path $GlobalDir | Out-Null
@@ -692,8 +721,8 @@ function Find-VenvPython {
     $py = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     foreach ($minor in @('3.13', '3.12', '3.11')) {
         if ($py) {
-            $probe = & $py.Source "-$minor" '-c' 'print(1)' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $probe -eq '1') {
+            $probe = & $py.Source "-$minor" '-c' 'import struct, sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $probe -match '^3\.(11|12|13):64$') {
                 return @{ Launcher = $py.Source; Args = @("-$minor") }
             }
         }
@@ -704,8 +733,8 @@ function Find-VenvPython {
             # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
             # 5.1's native argument-array-to-command-line reconstruction mishandles
             # embedded double quotes, corrupting the string the interpreter receives.
-            $verOut = & $cmd.Source '-c' 'import sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor))' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $verOut -match '^3\.(1[1-3])$') {
+            $verOut = & $cmd.Source '-c' 'import struct, sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $verOut -match '^3\.(11|12|13):64$') {
                 return @{ Launcher = $cmd.Source; Args = @() }
             }
         }
@@ -731,10 +760,11 @@ function Get-VenvWheelTag {
     # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
     # 5.1's native argument-array-to-command-line reconstruction mishandles
     # embedded double quotes, corrupting the string the interpreter receives.
-    $tag = & $VenvPython '-c' 'import sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor))' 2>$null
-    if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^cp3(11|12|13)$') {
-        Fail "Could not determine a supported CPython tag from the venv interpreter (got '$tag')."
+    $probe = & $VenvPython '-c' 'import struct, sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
+    if ($LASTEXITCODE -ne 0 -or $probe -notmatch '^cp3(11|12|13):64$') {
+        Fail "The managed venv must use 64-bit CPython 3.11, 3.12, or 3.13 before a win_amd64 wheel can be selected (got '$probe')."
     }
+    $tag = ($probe -split ':')[0]
     return "$tag-$tag-win_amd64"
 }
 
@@ -789,49 +819,128 @@ function Install-KernelWheel {
     if ($LASTEXITCODE -ne 0) { Fail "pip install of the local wheel failed (exit $LASTEXITCODE)." }
 }
 
-# Confirm-KernelImport verifies the freshly installed distribution imports,
-# reports its version, and proves it is not an editable/source install (no
-# direct_url.json, or one that is not editable) -- the same provenance bar
-# install.sh's bundle path holds itself to.
+# Confirm-KernelImport preserves the release-wheel import/version/non-editable
+# verification contract. When VenvDir + KernelSource are supplied by -Latest,
+# it additionally requires the import to stay inside that managed venv and PEP
+# 610 provenance to identify the exact non-editable pinned source checkout.
 function Confirm-KernelImport {
-    param([string]$VenvPython, [string]$ExpectedVersion)
+    param(
+        [string]$VenvPython,
+        [string]$ExpectedVersion,
+        [string]$VenvDir,
+        [string]$KernelSource
+    )
+    $strictSource = -not ([string]::IsNullOrWhiteSpace($VenvDir) -and [string]::IsNullOrWhiteSpace($KernelSource))
+    if ($strictSource -and ([string]::IsNullOrWhiteSpace($VenvDir) -or [string]::IsNullOrWhiteSpace($KernelSource))) {
+        Fail "Strict kernel source verification requires both VenvDir and KernelSource."
+    }
+    $mode = if ($strictSource) { 'source' } else { 'wheel' }
+    $expectedArg = if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) { '-' } else { $ExpectedVersion }
+    $venvArg = if ($strictSource) { $VenvDir } else { '-' }
+    $sourceArg = if ($strictSource) { $KernelSource } else { '-' }
+
     # Single-quoted Python throughout (no embedded ") -- Windows PowerShell 5.1's
     # native argument-array-to-command-line reconstruction mishandles embedded
     # double quotes, corrupting the script text the interpreter actually receives.
-    $probe = & $VenvPython '-c' @'
+    $probeScript = @'
 import importlib.metadata as m
 import json
+from pathlib import Path
 import sys
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
+
+def fail(code, detail):
+    print(code + ':' + detail)
+    sys.exit(1)
+
 try:
     import lingtai
 except ImportError as exc:
-    print('IMPORT_FAILED:' + str(exc))
-    sys.exit(1)
+    fail('IMPORT_FAILED', str(exc))
+
+mode = sys.argv[1]
+expected_version = '' if sys.argv[2] == '-' else sys.argv[2]
+if mode not in ('wheel', 'source'):
+    fail('INVALID_VERIFICATION_MODE', mode)
 dist = m.distribution('lingtai')
 version = dist.version
-editable = False
-try:
-    direct_url_text = dist.read_text('direct_url.json')
-    if direct_url_text:
+if expected_version and version != expected_version:
+    fail('VERSION_MISMATCH', str(version))
+
+module_value = getattr(lingtai, '__file__', None)
+module_path = Path(module_value).resolve() if module_value else None
+direct_source = '<wheel>'
+if mode == 'source':
+    venv_dir = Path(sys.argv[3]).resolve()
+    kernel_source = Path(sys.argv[4]).resolve()
+    if module_path is None:
+        fail('MODULE_PATH_MISSING', 'lingtai.__file__ is empty')
+    try:
+        module_path.relative_to(venv_dir)
+    except ValueError:
+        fail('MODULE_OUTSIDE_VENV', str(module_path))
+
+    try:
+        direct_url_text = dist.read_text('direct_url.json')
+    except Exception as exc:
+        fail('DIRECT_URL_UNREADABLE', str(exc))
+    if not direct_url_text:
+        fail('DIRECT_URL_MISSING', 'direct_url.json is absent or empty')
+    try:
         direct_url = json.loads(direct_url_text)
-        editable = bool(direct_url.get('dir_info', {}).get('editable', False))
-except Exception:
-    pass
-print('OK:' + str(version) + ':' + str(editable))
-'@ 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $probe -or $probe -notmatch '^OK:') {
-        Fail "Post-install verification failed: could not import lingtai in the venv ($probe)"
+    except Exception as exc:
+        fail('DIRECT_URL_INVALID', str(exc))
+    if not isinstance(direct_url, dict):
+        fail('DIRECT_URL_INVALID', 'top-level value is not an object')
+    dir_info = direct_url.get('dir_info')
+    if not isinstance(dir_info, dict):
+        fail('DIRECT_URL_INVALID', 'dir_info is missing or not an object')
+    if dir_info.get('editable', False) is not False:
+        fail('DIRECT_URL_EDITABLE', 'editable local install is not allowed')
+    url = direct_url.get('url')
+    if not isinstance(url, str) or not url:
+        fail('DIRECT_URL_INVALID', 'url is missing')
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != 'file':
+        fail('DIRECT_URL_NOT_LOCAL', url)
+    path_text = url2pathname(unquote(parsed.path))
+    if parsed.netloc and parsed.netloc.lower() not in ('', 'localhost'):
+        path_text = '//' + parsed.netloc + path_text
+    direct_source = Path(path_text).resolve()
+    if direct_source != kernel_source:
+        fail('DIRECT_URL_WRONG_SOURCE', str(direct_source))
+else:
+    editable = False
+    try:
+        direct_url_text = dist.read_text('direct_url.json')
+        if direct_url_text:
+            direct_url = json.loads(direct_url_text)
+            editable = bool(direct_url.get('dir_info', {}).get('editable', False))
+    except Exception:
+        pass
+    if editable:
+        fail('DIRECT_URL_EDITABLE', 'release wheel install is editable')
+
+print('OK')
+print(str(version))
+print(str(module_path) if module_path is not None else '<unknown>')
+print(str(direct_source))
+'@
+    $probe = @(& $VenvPython '-c' $probeScript $mode $expectedArg $venvArg $sourceArg 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $probe.Count -lt 4 -or $probe[0].Trim() -ne 'OK') {
+        $kind = if ($strictSource) { 'pinned main kernel source' } else { 'release kernel wheel' }
+        Fail "Post-install verification failed for the $kind ($($probe -join '; '))"
     }
-    $parts = $probe -split ':'
-    $installedVersion = $parts[1]
-    $isEditable = $parts[2] -eq 'True'
-    if ($isEditable) {
-        Fail "Installed lingtai distribution is editable/source-provenance; the Windows bundle install must be a real wheel install."
-    }
+    $installedVersion = $probe[1].Trim()
     if ($ExpectedVersion -and $installedVersion -ne $ExpectedVersion) {
         Fail "Installed lingtai version '$installedVersion' does not match the pinned kernel manifest version '$ExpectedVersion'."
     }
-    Write-Ok "Verified lingtai $installedVersion imports and is a non-editable wheel install."
+    if ($strictSource) {
+        Write-Ok "Verified lingtai $installedVersion imports from the managed venv and matches the non-editable pinned kernel source."
+    } else {
+        Write-Ok "Verified lingtai $installedVersion imports and is a non-editable wheel install."
+    }
     return $installedVersion
 }
 
@@ -920,6 +1029,129 @@ function Install-Venv {
         KernelVersion  = $installedVersion
         KernelProvider = 'github'
     }
+}
+
+# --- Current-main development install ---------------------------------------
+
+function Resolve-MainSha {
+    param([string]$RemoteUrl, [string]$Label)
+    $lines = & git ls-remote $RemoteUrl 'refs/heads/main' 2>$null
+    if ($LASTEXITCODE -ne 0) { Fail "Could not resolve $Label refs/heads/main. Install Git and verify network access to $RemoteUrl." }
+    $sha = ($lines | Select-Object -First 1) -split '\s+' | Select-Object -First 1
+    if ($sha -notmatch '^[0-9a-fA-F]{40}$') { Fail "Could not resolve a full $Label main commit from $RemoteUrl." }
+    return $sha.ToLowerInvariant()
+}
+
+function Invoke-NativeBuild {
+    param([string]$Tool, [string[]]$Arguments, [string]$Failure)
+    & $Tool @Arguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "$Failure (exit $LASTEXITCODE)." }
+}
+
+function Confirm-DevPrerequisites {
+    foreach ($tool in @('git','go','node','npm')) {
+        if (-not (Get-Command -Name $tool -CommandType Application -ErrorAction SilentlyContinue)) {
+            Fail "-Latest requires '$tool' on PATH. Install Git, Go, and Node.js/npm using your organization's supported installers, then re-run; this installer does not bootstrap them."
+        }
+    }
+    $goVersion = (& go version 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { Fail "-Latest requires a working Go toolchain (go version failed)." }
+    $nodeVersion = (& node '--version' 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+        Fail "-Latest requires a parseable Node.js version from 'node --version' (got '$nodeVersion'). Install a supported Node.js release and re-run."
+    }
+    $nodeMajor = [int]$Matches[1]
+    $nodeMinor = [int]$Matches[2]
+    $nodeSupported = (($nodeMajor -eq 20 -and $nodeMinor -ge 19) -or
+        ($nodeMajor -eq 22 -and $nodeMinor -ge 12) -or $nodeMajor -gt 22)
+    if (-not $nodeSupported) {
+        Fail "-Latest requires Node.js 20.19+, 22.12+, or a newer major for the Vite build; found $nodeVersion. Node 21 and Node 22 below 22.12 are unsupported."
+    }
+    $python = Find-VenvPython
+    Write-Ok "Using build prerequisites: $goVersion; Node.js $nodeVersion; Python launcher $($python.Launcher)"
+}
+
+# Resolve both pins before either checkout. Build output remains under an
+# installer-owned staging directory until both binaries and their versions are
+# validated, so destination writes happen only after the complete pair exists.
+function Build-LatestMain {
+    Confirm-DevPrerequisites
+    $tuiSha = Resolve-MainSha -RemoteUrl $RepoUrl -Label 'TUI'
+    $kernelSha = Resolve-MainSha -RemoteUrl 'https://github.com/Lingtai-AI/lingtai-kernel.git' -Label 'kernel'
+    Write-Info "Resolved TUI main commit: $tuiSha"
+    Write-Info "Resolved kernel main commit: $kernelSha"
+    if ($DryRun) {
+        Write-Step "[dry-run] would shallow-checkout both pinned main commits and build lingtai-tui.exe plus required lingtai-portal.exe"
+        return @{ TuiSha = $tuiSha; KernelSha = $kernelSha; DryRun = $true }
+    }
+
+    $stage = New-StagingDir
+    $tuiSource = Join-Path $stage 'lingtai'
+    $kernelSource = Join-Path $stage 'lingtai-kernel'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main',$RepoUrl,$tuiSource) -Failure 'TUI main checkout failed'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'fetch','--depth','1','origin',$tuiSha) -Failure 'TUI pinned commit fetch failed'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'checkout','--detach',$tuiSha) -Failure 'TUI pinned checkout failed'
+    $actualTui = (& git -C $tuiSource rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($actualTui -ne $tuiSha) { Fail "TUI checkout mismatch: resolved $tuiSha but checked out $actualTui. Staging kept at $stage." }
+
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main','https://github.com/Lingtai-AI/lingtai-kernel.git',$kernelSource) -Failure 'kernel main checkout failed'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'fetch','--depth','1','origin',$kernelSha) -Failure 'kernel pinned commit fetch failed'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'checkout','--detach',$kernelSha) -Failure 'kernel pinned checkout failed'
+    $actualKernel = (& git -C $kernelSource rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($actualKernel -ne $kernelSha) { Fail "kernel checkout mismatch: resolved $kernelSha but checked out $actualKernel. Staging kept at $stage." }
+
+    $version = "main-$tuiSha"
+    $tuiOut = Join-Path $stage 'lingtai-tui.exe'
+    $portalOut = Join-Path $stage 'lingtai-portal.exe'
+    Push-Location (Join-Path $tuiSource 'portal/web')
+    try {
+        Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed'
+        Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed'
+    } finally { Pop-Location }
+    Push-Location (Join-Path $tuiSource 'tui')
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$tuiOut,'.') -Failure 'lingtai-tui.exe build failed' }
+    finally { Pop-Location }
+    Push-Location (Join-Path $tuiSource 'portal')
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' }
+    finally { Pop-Location }
+    Confirm-StagedVersion -StagedTui $tuiOut -Requested $version
+    $portalProbe = & $portalOut 'version' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $portalProbe.Trim() -ne "lingtai-portal $version") {
+        Fail "Built lingtai-portal.exe failed provenance verification (expected 'lingtai-portal $version', got '$($portalProbe.Trim())'). Staging kept at $stage."
+    }
+    return @{ Stage = $stage; TuiSource = $tuiSource; KernelSource = $kernelSource; TuiSha = $tuiSha; KernelSha = $kernelSha; Version = $version; Tui = $tuiOut; Portal = $portalOut; DryRun = $false }
+}
+
+function Install-MainVenv {
+    param([string]$KernelSource, [string]$KernelSha, [string]$GlobalDir)
+    $bootstrap = Find-VenvPython
+    $venvDir = Join-Path $GlobalDir 'runtime\venv'
+    if (-not (Test-Path -LiteralPath $venvDir)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $venvDir -Parent) | Out-Null
+        $venvArgs = @($bootstrap.Args) + @('-m','venv',$venvDir)
+        & $bootstrap.Launcher @venvArgs | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "-Latest could not create the runtime venv at $venvDir." }
+    }
+    $python = Join-Path $venvDir 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $python)) { Fail "-Latest runtime venv has no Scripts\python.exe at $venvDir." }
+    Get-VenvWheelTag -VenvPython $python | Out-Null
+    $head = (& git -C $KernelSource rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($head -ne $KernelSha) { Fail "Kernel source changed before install: expected $KernelSha, got $head." }
+    Write-Info "Installing lingtai from the verified checked-out kernel source path (non-editable local build) ..."
+    & $python '-m' 'pip' 'install' $KernelSource | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "-Latest kernel source install failed (exit $LASTEXITCODE)." }
+    $version = Confirm-KernelImport -VenvPython $python -ExpectedVersion '' -VenvDir $venvDir -KernelSource $KernelSource
+    return @{ KernelSource='main'; KernelVersion=$version; KernelProvider='github'; KernelCommit=$KernelSha }
+}
+
+function Install-FromBuiltMain {
+    param([hashtable]$Build, [string]$BinDir)
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'; $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
+    Copy-Item -LiteralPath $Build.Tui -Destination $tuiDest -Force
+    Copy-Item -LiteralPath $Build.Portal -Destination $portalDest -Force
+    Write-Ok "Installed pinned main binaries into $BinDir"
+    return @($tuiDest,$portalDest)
 }
 
 # --- Local-artifact install --------------------------------------------------
@@ -1086,6 +1318,12 @@ function Invoke-Main {
     if ([string]::IsNullOrWhiteSpace($BinDir))    { $BinDir    = Get-DefaultBinDir }
     if ([string]::IsNullOrWhiteSpace($GlobalDir)) { $GlobalDir = Get-DefaultGlobalDir }
 
+    $rawArch = $env:PROCESSOR_ARCHITECTURE
+    if ($env:PROCESSOR_ARCHITEW6432) { $rawArch = $env:PROCESSOR_ARCHITEW6432 }
+    if ($Latest -and $rawArch -ne 'AMD64') {
+        Fail "-Latest supports native Windows amd64 only; this host is not amd64. Use WSL2 with install.sh --latest."
+    }
+
     # prefix is the parent of BinDir, matching install.sh's <prefix>/bin layout.
     $prefix = Split-Path $BinDir -Parent
     if ([string]::IsNullOrWhiteSpace($prefix)) { $prefix = $BinDir }
@@ -1098,6 +1336,29 @@ function Invoke-Main {
     }
     if ($haveArchive -and [string]::IsNullOrWhiteSpace($Version)) {
         Fail "-Version is required with -ArchivePath so staged bytes can be verified against an exact release."
+    }
+    if ($Latest) {
+        $conflicts = New-Object System.Collections.Generic.List[string]
+        if ($haveArchive) { $conflicts.Add('-ArchivePath/-ChecksumPath') }
+        if (-not [string]::IsNullOrWhiteSpace($Version)) { $conflicts.Add('-Version/LINGTAI_VERSION') }
+        if ($SkipVenv) { $conflicts.Add('-SkipVenv') }
+        if ($conflicts.Count -gt 0) {
+            Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries and provisions the checked-out kernel runtime."
+        }
+        Write-Info 'Mode: current main development install (-Latest)'
+        $mainBuild = Build-LatestMain
+        if ($DryRun) {
+            Write-Step "[dry-run] would install the kernel checkout into $GlobalDir\runtime\venv"
+            Write-Step "[dry-run] would copy both pinned binaries into $BinDir and write additive install.json main provenance"
+            return
+        }
+        $mainKernel = Install-MainVenv -KernelSource $mainBuild.KernelSource -KernelSha $mainBuild.KernelSha -GlobalDir $GlobalDir
+        $mainManaged = Install-FromBuiltMain -Build $mainBuild -BinDir $BinDir
+        Add-ToPath -Dir $BinDir
+        Write-InstallMetadata -GlobalDir $GlobalDir -Prefix $prefix -BinDir $BinDir -RequestedRef 'main' -ResolvedRef 'main' -ResolvedCommit $mainBuild.TuiSha -InstallKind 'powershell-latest-main' -ManagedBinaries $mainManaged -KernelSource $mainKernel.KernelSource -KernelVersion $mainKernel.KernelVersion -KernelProvider $mainKernel.KernelProvider -SourceMode 'latest-main' -TuiCommit $mainBuild.TuiSha -KernelCommit $mainBuild.KernelSha
+        Write-Host ''
+        Write-Host "LingTai current-main development install complete (TUI $($mainBuild.TuiSha); kernel $($mainBuild.KernelSha))." -ForegroundColor Green
+        return
     }
 
     Write-Info "Target BinDir: $BinDir"

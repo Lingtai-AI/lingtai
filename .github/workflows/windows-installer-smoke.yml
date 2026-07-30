@@ -18,11 +18,17 @@ on:
     paths:
       - 'install.ps1'
       - 'scripts/test-install-ps1.ps1'
+      - 'tui/go.mod'
+      - 'tui/internal/config/kernel_bundle_provenance_test.go'
+      - 'tui/internal/config/venv.go'
       - '.github/workflows/windows-installer-smoke.yml'
   pull_request:
     paths:
       - 'install.ps1'
       - 'scripts/test-install-ps1.ps1'
+      - 'tui/go.mod'
+      - 'tui/internal/config/kernel_bundle_provenance_test.go'
+      - 'tui/internal/config/venv.go'
       - '.github/workflows/windows-installer-smoke.yml'
 
 permissions:
@@ -36,6 +42,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Go from tui/go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+
+      - name: Set up Node.js 22.12.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+
       # Pin a deterministic, contract-supported CPython (3.11/3.12/3.13) on PATH.
       # windows-latest's ambient default `py -3` can drift to an unsupported
       # interpreter (e.g. 3.14) ahead of this repo's supported range, which
@@ -59,6 +75,15 @@ jobs:
         shell: powershell
         run: |
           "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+
+      - name: Current-main dry-run preflight
+        shell: powershell
+        run: |
+          $binDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-dryrun-ps51-bin'
+          $globalDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-dryrun-ps51-global'
+          .\install.ps1 -Latest -DryRun -NoModifyPath -BinDir $binDir -GlobalDir $globalDir
+          if (Test-Path -LiteralPath $binDir) { throw "DryRun created BinDir: $binDir" }
+          if (Test-Path -LiteralPath $globalDir) { throw "DryRun created GlobalDir: $globalDir" }
 
       - name: Run installer contract suite (Windows PowerShell 5.1)
         shell: powershell
@@ -72,6 +97,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Go from tui/go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+
+      - name: Set up Node.js 22.12.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+
       # Pin a deterministic, contract-supported CPython (3.11/3.12/3.13) on PATH.
       # windows-latest's ambient default `py -3` can drift to an unsupported
       # interpreter (e.g. 3.14) ahead of this repo's supported range, which
@@ -96,10 +131,106 @@ jobs:
         run: |
           "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
 
+      - name: Current-main dry-run preflight
+        shell: pwsh
+        run: |
+          $binDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-dryrun-ps7-bin'
+          $globalDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-dryrun-ps7-global'
+          ./install.ps1 -Latest -DryRun -NoModifyPath -BinDir $binDir -GlobalDir $globalDir
+          if (Test-Path -LiteralPath $binDir) { throw "DryRun created BinDir: $binDir" }
+          if (Test-Path -LiteralPath $globalDir) { throw "DryRun created GlobalDir: $globalDir" }
+
       - name: Run installer contract suite (PowerShell 7)
         shell: pwsh
         run: |
           ./scripts/test-install-ps1.ps1
+
+  windows-current-main-smoke:
+    name: Windows current-main install smoke (pwsh)
+    if: github.event_name == 'pull_request'
+    needs: [windows-powershell-5-1, powershell-7]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go from tui/go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+
+      - name: Set up Node.js 22.12.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install current-main build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-main-bin'
+          $globalDir = Join-Path $env:RUNNER_TEMP 'lingtai-latest-main-global'
+          ./install.ps1 -Latest -NoModifyPath -BinDir $binDir -GlobalDir $globalDir
+          $tuiPath = Join-Path $binDir 'lingtai-tui.exe'
+          $portalPath = Join-Path $binDir 'lingtai-portal.exe'
+          if (-not (Test-Path -LiteralPath $tuiPath -PathType Leaf)) { throw "missing $tuiPath" }
+          if (-not (Test-Path -LiteralPath $portalPath -PathType Leaf)) { throw "missing $portalPath" }
+          $meta = Get-Content -Raw (Join-Path $globalDir 'install.json') | ConvertFrom-Json
+          if ($meta.tui_commit -notmatch '^[0-9a-f]{40}$') { throw "invalid tui_commit" }
+          if ($meta.kernel_commit -notmatch '^[0-9a-f]{40}$') { throw "invalid kernel_commit" }
+          if ($meta.install_method -ne 'powershell' -or $meta.install_kind -ne 'powershell-latest-main') { throw "invalid current-main install metadata" }
+          if ($meta.source_mode -ne 'latest-main' -or $meta.kernel_source -ne 'main' -or $meta.kernel_provider -ne 'github') { throw "invalid current-main metadata" }
+          $expected = "main-$($meta.tui_commit)"
+          if ($meta.stamped_version -ne $expected) { throw "stamped_version mismatch: expected $expected, got $($meta.stamped_version)" }
+          if ($meta.upgrade_command -ne 're-run install.ps1 -Latest') { throw "invalid current-main upgrade_command" }
+          $venvPython = Join-Path $globalDir 'runtime\venv\Scripts\python.exe'
+          $importProbe = @(& $venvPython '-c' 'import lingtai; print(lingtai.__version__); print(lingtai.__file__)')
+          if ($LASTEXITCODE -ne 0 -or $importProbe.Count -lt 2) { throw 'lingtai import failed' }
+          if ($importProbe[0].Trim() -ne $meta.kernel_version) { throw "kernel version mismatch: import=$($importProbe[0]) metadata=$($meta.kernel_version)" }
+          $venvRoot = [IO.Path]::GetFullPath((Join-Path $globalDir 'runtime\venv'))
+          $modulePath = [IO.Path]::GetFullPath($importProbe[1].Trim())
+          if (-not $modulePath.StartsWith($venvRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "lingtai.__file__ is outside managed venv: $modulePath" }
+          $directUrlProbe = @'
+          import importlib.metadata as m
+          import json
+          from pathlib import Path
+          from urllib.parse import unquote, urlparse
+          from urllib.request import url2pathname
+          dist = m.distribution('lingtai')
+          text = dist.read_text('direct_url.json')
+          if not text:
+              raise SystemExit('direct_url.json is absent or empty')
+          data = json.loads(text)
+          if not isinstance(data, dict) or not isinstance(data.get('dir_info'), dict):
+              raise SystemExit('direct_url.json is malformed')
+          if data['dir_info'].get('editable', False) is not False:
+              raise SystemExit('lingtai distribution is editable')
+          parsed = urlparse(data.get('url', ''))
+          if parsed.scheme.lower() != 'file':
+              raise SystemExit('lingtai direct URL is not local')
+          path_text = url2pathname(unquote(parsed.path))
+          if parsed.netloc and parsed.netloc.lower() not in ('', 'localhost'):
+              path_text = '//' + parsed.netloc + path_text
+          print(str(Path(path_text).resolve()))
+          '@
+          $directSourceProbe = @(& $venvPython '-c' $directUrlProbe)
+          if ($LASTEXITCODE -ne 0 -or $directSourceProbe.Count -ne 1) { throw "invalid lingtai direct_url provenance: $($directSourceProbe -join '; ')" }
+          $directSource = [IO.Path]::GetFullPath($directSourceProbe[0].Trim())
+          $tempRoot = [IO.Path]::GetFullPath($env:TEMP)
+          if ((Split-Path -Leaf $directSource) -ne 'lingtai-kernel' -or -not $directSource.StartsWith($tempRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "lingtai direct URL is not the staged lingtai-kernel checkout: $directSource" }
+          function Invoke-BoundedVersion([string]$Path, [string]$Expected) {
+            $out = Join-Path $env:RUNNER_TEMP ((Split-Path $Path -Leaf) + '.probe.txt')
+            $p = Start-Process -FilePath $Path -ArgumentList 'version' -RedirectStandardOutput $out -NoNewWindow -PassThru
+            if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "probe timed out: $Path" }
+            if ($p.ExitCode -ne 0 -or (Get-Content -Raw $out).Trim() -ne $Expected) { throw "probe failed: $Path" }
+          }
+          Invoke-BoundedVersion $tuiPath "lingtai-tui $expected"
+          Invoke-BoundedVersion $portalPath "lingtai-portal $expected"
 
   windows-release-asset-smoke:
     name: Exact-tag release asset smoke (pwsh)
@@ -150,15 +281,13 @@ jobs:
             Write-Error "post-release smoke: installed lingtai-portal.exe is missing at '$portalPath'"
             exit 1
           }
-          $reported = & $tuiPath version
-          if ($reported.Trim() -ne "lingtai-tui $env:LINGTAI_VERSION") {
-            Write-Error "post-release smoke: expected 'lingtai-tui $env:LINGTAI_VERSION', got '$reported'"
-            exit 1
+          function Invoke-BoundedVersion([string]$Path, [string]$Expected) {
+            $out = Join-Path $env:RUNNER_TEMP ((Split-Path $Path -Leaf) + '.release-probe.txt')
+            $p = Start-Process -FilePath $Path -ArgumentList 'version' -RedirectStandardOutput $out -NoNewWindow -PassThru
+            if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "probe timed out: $Path" }
+            $reported = (Get-Content -Raw $out).Trim()
+            if ($p.ExitCode -ne 0 -or $reported -ne $Expected) { throw "probe failed: $Path (got '$reported')" }
+            Write-Host "OK: $reported"
           }
-          Write-Host "OK: $reported"
-          $portalReported = & $portalPath version
-          if ($portalReported.Trim() -ne "lingtai-portal $env:LINGTAI_VERSION") {
-            Write-Error "post-release smoke: expected 'lingtai-portal $env:LINGTAI_VERSION', got '$portalReported'"
-            exit 1
-          }
-          Write-Host "OK: $portalReported"
+          Invoke-BoundedVersion $tuiPath "lingtai-tui $env:LINGTAI_VERSION"
+          Invoke-BoundedVersion $portalPath "lingtai-portal $env:LINGTAI_VERSION"

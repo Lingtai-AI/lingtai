@@ -96,6 +96,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 This resolves the latest tagged release, verifies the Windows binary archive and the pinned kernel release against their published checksums, and installs both `lingtai-tui`/`lingtai-portal` and the Python runtime venv. Pass `-SkipVenv` to install the TUI/portal binaries only. See [`RELEASING.md`](RELEASING.md) for the exact contract.
 
+For a native Windows current-main debugging install, use `.\install.ps1 -Latest`. It is amd64-only; on ARM64, use WSL2 with `install.sh --latest`. It pins full `main` SHAs for both repositories, builds both binaries, and installs the checked-out kernel source as a non-editable local build into `%USERPROFILE%\.lingtai-tui\runtime\venv`. Git, Go, Node.js/npm (Node 20.19+, 22.12+, or a newer major; Node 21 and Node 22.<12 are unsupported), and supported 64-bit CPython 3.11–3.13 must already be available. `-Latest -DryRun` validates these prerequisites and makes no destination, PATH, or config writes. `-Latest` cannot be combined with `-Version`, `-ArchivePath`, or `-SkipVenv`. The separate website repository still needs a matching install-flow note.
+
 > **New here?** Follow the step-by-step [tutorial at lingtai.ai](https://lingtai.ai/en/tutorial/) — install, first task, channels, memory, and lifecycle, walked through end to end.
 
 > Homebrew (`brew install lingtai-ai/lingtai/lingtai-tui`) still works for existing users, but the one-line installer is the recommended path for new installs. The `lingtai` PyPI package is the Python runtime the TUI manages for you — reach for `pip` only when developing or diagnosing the kernel itself.
