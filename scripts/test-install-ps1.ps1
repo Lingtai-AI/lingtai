@@ -769,7 +769,10 @@ function Set-DevBootstrapEnv {
     }
     $env:OS = 'Windows_NT'
     $env:PROCESSOR_ARCHITECTURE = 'AMD64'
-    [Environment]::SetEnvironmentVariable('PROCESSOR_ARCHITEW6432', $null, 'Process')
+    # Model an amd64 host explicitly in both native and WOW64 signals. Clearing
+    # ARCHITEW6432 through System.Environment can remain stale in the PS7 env
+    # provider inherited by the child, which makes the fixture look non-amd64.
+    $env:PROCESSOR_ARCHITEW6432 = 'AMD64'
 }
 
 function New-CmdShim {
@@ -1069,7 +1072,7 @@ try {
     Assert-NotContains $wingetFailOut 'NativeCommandError' 'fake winget stderr does not escape as a PS5.1 NativeCommandError'
     Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.BinDir)) 'fake winget failure creates no BinDir'
     Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.GlobalDir)) 'fake winget failure creates no GlobalDir'
-    $wingetFailLog = if (Test-Path -LiteralPath $wingetFailCase.WingetLog) { @(Get-Content -LiteralPath $wingetFailCase.WingetLog) } else { @() }
+    $wingetFailLog = @(if (Test-Path -LiteralPath $wingetFailCase.WingetLog) { Get-Content -LiteralPath $wingetFailCase.WingetLog })
     Assert-Equal 1 $wingetFailLog.Count 'fake winget failure attempted exactly one package before failing'
     if ($wingetFailLog.Count -eq 1) {
         Assert-Equal $expectedWingetArgv[0] $wingetFailLog[0] 'fake winget failure receives the exact Git.Git argv'
@@ -1083,7 +1086,7 @@ try {
     Assert-Contains $wingetOkOut 'Could not resolve TUI refs/heads/main' 'fake winget success reaches the controlled pre-checkout main-ref failure'
     Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.BinDir)) 'fake winget success before checkout writes no BinDir'
     Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.GlobalDir)) 'fake winget success before checkout writes no GlobalDir'
-    $wingetOkLog = if (Test-Path -LiteralPath $wingetOkCase.WingetLog) { @(Get-Content -LiteralPath $wingetOkCase.WingetLog) } else { @() }
+    $wingetOkLog = @(if (Test-Path -LiteralPath $wingetOkCase.WingetLog) { Get-Content -LiteralPath $wingetOkCase.WingetLog })
     Assert-Equal 4 $wingetOkLog.Count 'fake winget success invokes exactly one command per unique package ID'
     if ($wingetOkLog.Count -eq $expectedWingetArgv.Count) {
         for ($i = 0; $i -lt $expectedWingetArgv.Count; $i++) {
@@ -1130,7 +1133,7 @@ try {
     Assert-True ($shadow.ExitCode -ne 0) 'invalid process Python plus fake winget reaches controlled main-ref failure'
     Assert-Contains $shadowOut 'Using build prerequisites' 'invalid process Python is replaced by refreshed fake CPython during revalidation'
     Assert-Contains $shadowOut 'Could not resolve TUI refs/heads/main' 'shadowing repair reaches controlled pre-checkout main-ref failure'
-    $shadowWingetLog = if (Test-Path -LiteralPath $shadowCase.WingetLog) { @(Get-Content -LiteralPath $shadowCase.WingetLog) } else { @() }
+    $shadowWingetLog = @(if (Test-Path -LiteralPath $shadowCase.WingetLog) { Get-Content -LiteralPath $shadowCase.WingetLog })
     Assert-Equal 1 $shadowWingetLog.Count 'shadowing repair invokes exactly one prerequisite package'
     if ($shadowWingetLog.Count -eq 1) {
         Assert-Equal $expectedWingetArgv[3] $shadowWingetLog[0] 'shadowing repair invokes exact Python.Python.3.13 argv'
