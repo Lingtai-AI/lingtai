@@ -68,6 +68,7 @@ func TestPaletteAgentOwnedViewsFollowCurrentConversation(t *testing.T) {
 		{command: "kanban", selectedDir: func(a App) string { return a.props.orchDir }},
 		{command: "daemons", selectedDir: func(a App) string { return a.daemons.orchDir }},
 		{command: "notification", selectedDir: func(a App) string { return a.notification.agentDir }},
+		{command: "taskcard", selectedDir: func(a App) string { return a.taskcard.agentDir }},
 		{command: "skills", selectedDir: func(a App) string { return a.library.selectedDir }},
 		{command: "knowledge", selectedDir: func(a App) string { return a.knowledge.selectedDir }},
 		{command: "library", selectedDir: func(a App) string { return a.knowledge.selectedDir }},

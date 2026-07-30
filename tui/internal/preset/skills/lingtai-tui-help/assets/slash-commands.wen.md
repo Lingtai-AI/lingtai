@@ -44,6 +44,7 @@
 - `/system` — 阅器灵之系统诸文（system.md、covenant 等）。
 - `/daemons` — 察各器灵守护之运及其录。
 - `/notification` — 观当前 Agent 近日所受告块，并可以左右翻阅。
+- `/taskcard` — 观器灵今所活之 Task Card（如有）。
 - `/presets` — 览此器灵可以 `/refresh` 换之预设。
 
 ### 网络与分享
@@ -175,6 +176,14 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 **用法：** `/notification`
 
 显当前所聚 Agent 近日所受之 agent-visible 告块（自 `logs/log.sqlite` 重建）。凡徽标有疑、Agent 言有告，或欲验近来实际注入彼灵之告块，可用之。左/右翻阅近告，`r` 重载，Esc/`q` 返聊天；此视只读，不 dismiss，亦不改告。
+
+### `/taskcard` — 观器灵之 Task Card
+**用：** `/taskcard`
+
+显当下器灵之 Task Card——即其工作之境下 `taskcard/taskcard.md`——唯 `taskcard/status`
+恰读作 `active` 时乃显。此与 Telegram 所投于常驻卡者，同一 agent-local 之物也；TUI
+唯示之，一时之影，绘于 markdown 阅器中。欲新之，重行 `/taskcard` 即可。若无活卡，
+则示一简状之语。
 
 ### `/presets` — 启预设之库
 **用：** `/presets`

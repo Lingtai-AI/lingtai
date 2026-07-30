@@ -42,6 +42,7 @@ const (
 	appViewDaemons
 	appViewNotification
 	appViewHelp
+	appViewTaskCard
 )
 
 const doubleEscReturnWindow = 600 * time.Millisecond
@@ -63,6 +64,7 @@ type App struct {
 	notification  NotificationModel
 	presetLibrary PresetLibraryModel
 	help          HelpModel
+	taskcard      TaskCardModel
 	firstRun      FirstRunModel
 	addon         AddonModel
 	doctor        DoctorModel
@@ -764,7 +766,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
+			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp && a.currentView != appViewTaskCard {
 				return a, tea.Quit
 			}
 		}
@@ -854,6 +856,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewNotification:
 		updated, cmd := a.notification.Update(msg)
 		a.notification = updated
+		return a, cmd
+	case appViewTaskCard:
+		updated, cmd := a.taskcard.Update(msg)
+		a.taskcard = updated
 		return a, cmd
 	case appViewHelp:
 		updated, cmd := a.help.Update(msg)
@@ -1094,6 +1100,10 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNotification
 		a.notification = NewNotificationModel(targetDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "taskcard":
+		a.currentView = appViewTaskCard
+		a.taskcard = NewTaskCardModel(targetDir)
+		return a, tea.Batch(a.taskcard.Init(), a.sendSize())
 	case "goal":
 		if targetDir == "" {
 			addMsg(i18n.T("mail.goal_no_agent"))
@@ -1692,6 +1702,8 @@ func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 		a.notification, cmd = a.notification.Update(msg)
 	case appViewHelp:
 		a.help, cmd = a.help.Update(msg)
+	case appViewTaskCard:
+		a.taskcard, cmd = a.taskcard.Update(msg)
 	}
 	return a, cmd
 }
@@ -1988,6 +2000,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNotification
 		a.notification = NewNotificationModel(a.orchDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "taskcard":
+		a.currentView = appViewTaskCard
+		a.taskcard = NewTaskCardModel(a.orchDir)
+		return a, tea.Batch(a.taskcard.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -2090,6 +2106,8 @@ func (a App) View() tea.View {
 		content = a.notification.View()
 	case appViewHelp:
 		content = a.help.View()
+	case appViewTaskCard:
+		content = a.taskcard.View()
 	}
 	// Compose root-owned chrome (top banner today) around the child content.
 	// The child was already sized to the reduced budget, so chrome occupies

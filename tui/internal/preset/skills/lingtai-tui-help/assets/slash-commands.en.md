@@ -50,6 +50,7 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 - `/system` — browse the agent's system files (system.md, covenant, …).
 - `/daemons` — inspect per-agent daemon runs and their records.
 - `/notification` — show the current agent's latest notification blocks with left/right navigation.
+- `/taskcard` — show the agent's active declarative Task Card, if any.
 - `/presets` — view the presets this agent can switch to with `/refresh`.
 
 ### Network & sharing
@@ -214,6 +215,16 @@ trace exactly what a background daemon did.
 **Usage:** `/notification`
 
 Shows the focused agent's latest agent-visible notification blocks reconstructed from `logs/log.sqlite`. Use this when notification badges look wrong, an agent says it has notifications, or you want to inspect the recent blocks actually injected into the agent. Left/right moves through the latest blocks, `r` reloads, and Esc/`q` returns to chat; the view is read-only and does not dismiss or mutate notifications.
+
+### `/taskcard` — show the agent's Task Card
+**Usage:** `/taskcard`
+
+Shows the current agent's declarative Task Card — `taskcard/taskcard.md` under
+its working directory — when `taskcard/status` reads exactly `active`. This is
+the same agent-local artifact Telegram projects onto its resident card; the TUI
+only displays it, point-in-time, in the markdown viewer. Re-run `/taskcard` to
+refresh. When no active card is available, it shows a short status message
+instead.
 
 ### `/presets` — open the preset library
 **Usage:** `/presets`

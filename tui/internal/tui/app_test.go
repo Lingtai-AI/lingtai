@@ -43,6 +43,22 @@ func TestHelpViewQClosesNotQuit(t *testing.T) {
 	_ = updated
 }
 
+func TestTaskCardViewQClosesNotQuit(t *testing.T) {
+	a := App{currentView: appViewTaskCard, taskcard: NewTaskCardModel(t.TempDir())}
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a = m.(App)
+
+	updated, cmd := a.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+
+	if _, ok := runCmd(cmd).(tea.QuitMsg); ok {
+		t.Fatal("q in /taskcard quit the app; want viewer close")
+	}
+	if _, ok := runCmd(cmd).(MarkdownViewerCloseMsg); !ok {
+		t.Fatalf("q in /taskcard did not emit MarkdownViewerCloseMsg; cmd produced %T", runCmd(cmd))
+	}
+	_ = updated
+}
+
 // TestHelpViewCloseReturnsToMail verifies App routes MarkdownViewerCloseMsg
 // from the help viewer back to the mail view.
 func TestHelpViewCloseReturnsToMail(t *testing.T) {
