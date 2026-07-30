@@ -691,8 +691,17 @@ function Invoke-Installer {
     [string[]]$invokeArgs = $argList.ToArray()
     $outFile = Join-Path $TestRoot ("out-{0}.txt" -f ([Guid]::NewGuid().ToString('N')))
     $errFile = Join-Path $TestRoot ("err-{0}.txt" -f ([Guid]::NewGuid().ToString('N')))
-    & $psHost @invokeArgs 1> $outFile 2> $errFile
-    $exitCode = $LASTEXITCODE
+    # This seam deliberately captures child stderr and non-zero exits for contract
+    # assertions. PS 5.1 promotes any native stderr to NativeCommandError under
+    # the suite's global Stop policy, even with a separate redirect target.
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $psHost @invokeArgs 1> $outFile 2> $errFile
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     return @{
         ExitCode = $exitCode
         Stdout   = (Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)
