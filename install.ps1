@@ -720,6 +720,32 @@ function Get-KernelManifest {
 function Get-SupportedVenvPythonDiscovery {
     $invalidDirectories = New-Object System.Collections.Generic.List[string]
     $invalidDetails = New-Object System.Collections.Generic.List[string]
+
+    # PowerShell 5.1 turns native stderr into ErrorRecord objects. With this
+    # script's fail-loud ErrorActionPreference=Stop, the Windows `py` launcher
+    # exits the whole installer when it exists but has no installed runtimes
+    # ("No suitable Python runtime found") unless the probe is isolated here.
+    function Invoke-PythonDiscoveryProbe {
+        param([string]$Launcher, [string[]]$Arguments)
+        $savedErrorActionPreference = $ErrorActionPreference
+        $records = @()
+        $exitCode = 1
+        try {
+            $ErrorActionPreference = 'Continue'
+            $records = @(& $Launcher @Arguments 2>&1)
+            $exitCode = $LASTEXITCODE
+        } catch {
+            $records = @($_)
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $output = (@($records | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message }
+            else { [string]$_ }
+        }) -join "`n").Trim()
+        return @{ ExitCode = $exitCode; Output = $output }
+    }
+
     # Include implementation identity: PyPy and other Python-compatible runtimes
     # cannot satisfy the managed CPython wheel/venv contract merely by matching
     # the requested language version and pointer width.
@@ -729,9 +755,9 @@ function Get-SupportedVenvPythonDiscovery {
     if ($py) {
         $pyProbeDetails = @()
         foreach ($minor in @('3.13', '3.12', '3.11')) {
-            $probeOutput = & $py.Source "-$minor" '-c' $probeCode 2>$null
-            $probeExit = $LASTEXITCODE
-            $probe = ($probeOutput | Out-String).Trim()
+            $probeResult = Invoke-PythonDiscoveryProbe -Launcher $py.Source -Arguments @("-$minor", '-c', $probeCode)
+            $probeExit = $probeResult.ExitCode
+            $probe = $probeResult.Output
             if ($probeExit -eq 0 -and $probe -match '^cpython:3\.(11|12|13):64$') {
                 return @{ Python = @{ Launcher = $py.Source; Args = @("-$minor") }; InvalidDirectories = @(); Detail = "launcher $($py.Source)" }
             }
@@ -748,9 +774,9 @@ function Get-SupportedVenvPythonDiscovery {
             # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
             # 5.1's native argument-array-to-command-line reconstruction mishandles
             # embedded double quotes, corrupting the string the interpreter receives.
-            $probeOutput = & $cmd.Source '-c' $probeCode 2>$null
-            $probeExit = $LASTEXITCODE
-            $probe = ($probeOutput | Out-String).Trim()
+            $probeResult = Invoke-PythonDiscoveryProbe -Launcher $cmd.Source -Arguments @('-c', $probeCode)
+            $probeExit = $probeResult.ExitCode
+            $probe = $probeResult.Output
             if ($probeExit -eq 0 -and $probe -match '^cpython:3\.(11|12|13):64$') {
                 return @{ Python = @{ Launcher = $cmd.Source; Args = @() }; InvalidDirectories = @(); Detail = "launcher $($cmd.Source)" }
             }
