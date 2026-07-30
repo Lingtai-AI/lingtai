@@ -715,37 +715,79 @@ function Get-KernelManifest {
 
 # Find-VenvPython locates an already-available CPython 3.11/3.12/3.13 (amd64)
 # via the Windows `py` launcher (preferred, most reliable version selection)
-# or a bare `python`/`python3` on PATH. Never downloads or bootstraps a
-# Python runtime -- fails loud with an actionable message if none is found.
-function Find-VenvPython {
+# or a bare `python`/`python3` on PATH. This probe never downloads or
+# bootstraps Python; -Latest owns any separate prerequisite repair step.
+function Get-SupportedVenvPythonDiscovery {
+    $invalidDirectories = New-Object System.Collections.Generic.List[string]
+    $invalidDetails = New-Object System.Collections.Generic.List[string]
+    # Include implementation identity: PyPy and other Python-compatible runtimes
+    # cannot satisfy the managed CPython wheel/venv contract merely by matching
+    # the requested language version and pointer width.
+    $probeCode = 'import struct, sys; print(sys.implementation.name + '':'' + str(sys.version_info.major) + ''.'' + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))'
+
     $py = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    foreach ($minor in @('3.13', '3.12', '3.11')) {
-        if ($py) {
-            $probe = & $py.Source "-$minor" '-c' 'import struct, sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $probe -match '^3\.(11|12|13):64$') {
-                return @{ Launcher = $py.Source; Args = @("-$minor") }
+    if ($py) {
+        $pyProbeDetails = @()
+        foreach ($minor in @('3.13', '3.12', '3.11')) {
+            $probeOutput = & $py.Source "-$minor" '-c' $probeCode 2>$null
+            $probeExit = $LASTEXITCODE
+            $probe = ($probeOutput | Out-String).Trim()
+            if ($probeExit -eq 0 -and $probe -match '^cpython:3\.(11|12|13):64$') {
+                return @{ Python = @{ Launcher = $py.Source; Args = @("-$minor") }; InvalidDirectories = @(); Detail = "launcher $($py.Source)" }
             }
+            $pyProbeDetails += if ($probe) { "$minor=$probe" } else { "$minor=exit $probeExit" }
         }
+        $pyDir = Split-Path -Parent $py.Source
+        if ($pyDir) { $invalidDirectories.Add($pyDir) | Out-Null }
+        $invalidDetails.Add("py ($($py.Source)): $($pyProbeDetails -join ', ')") | Out-Null
     }
+
     foreach ($name in @('python', 'python3')) {
         $cmd = Get-Command -Name $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd) {
             # Single-quoted Python literal only (no embedded ") -- Windows PowerShell
             # 5.1's native argument-array-to-command-line reconstruction mishandles
             # embedded double quotes, corrupting the string the interpreter receives.
-            $verOut = & $cmd.Source '-c' 'import struct, sys; print(str(sys.version_info.major) + ''.'' + str(sys.version_info.minor) + '':'' + str(struct.calcsize(''P'') * 8))' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $verOut -match '^3\.(11|12|13):64$') {
-                return @{ Launcher = $cmd.Source; Args = @() }
+            $probeOutput = & $cmd.Source '-c' $probeCode 2>$null
+            $probeExit = $LASTEXITCODE
+            $probe = ($probeOutput | Out-String).Trim()
+            if ($probeExit -eq 0 -and $probe -match '^cpython:3\.(11|12|13):64$') {
+                return @{ Python = @{ Launcher = $cmd.Source; Args = @() }; InvalidDirectories = @(); Detail = "launcher $($cmd.Source)" }
             }
+            $cmdDir = Split-Path -Parent $cmd.Source
+            if ($cmdDir) { $invalidDirectories.Add($cmdDir) | Out-Null }
+            $observed = if ($probe) { $probe } else { "exit $probeExit" }
+            $invalidDetails.Add("$name ($($cmd.Source)): $observed") | Out-Null
         }
     }
+
+    $detail = if ($invalidDetails.Count -gt 0) {
+        "requires 64-bit CPython 3.11-3.13; rejected $(@($invalidDetails) -join '; ')"
+    } else {
+        'missing; requires 64-bit CPython 3.11-3.13'
+    }
+    return @{
+        Python = $null
+        InvalidDirectories = @($invalidDirectories | Select-Object -Unique)
+        Detail = $detail
+    }
+}
+
+function Find-SupportedVenvPython {
+    $discovery = Get-SupportedVenvPythonDiscovery
+    return $discovery.Python
+}
+
+function Find-VenvPython {
+    $found = Find-SupportedVenvPython
+    if ($found) { return $found }
     Fail @"
 No supported Python interpreter (CPython 3.11, 3.12, or 3.13, 64-bit) was found
 via the 'py' launcher or 'python'/'python3' on PATH.
 
 LingTai's Windows runtime venv is created from an already-available supported
-Python installation -- this installer never downloads or bootstraps an
-unpinned Python/uv toolchain. Install Python 3.11+ (for example from
+Python installation at this stage; the release/local-artifact path does not
+bootstrap an unpinned Python/uv toolchain. Install Python 3.11+ (for example from
 python.org or the Microsoft Store) and re-run, or pass -SkipVenv to install
 the TUI/portal binaries only (both binaries are still required).
 "@
@@ -1049,33 +1091,213 @@ function Invoke-NativeBuild {
 }
 
 function Confirm-DevPrerequisites {
-    foreach ($tool in @('git','go','node','npm')) {
-        if (-not (Get-Command -Name $tool -CommandType Application -ErrorAction SilentlyContinue)) {
-            Fail "-Latest requires '$tool' on PATH. Install Git, Go, and Node.js/npm using your organization's supported installers, then re-run; this installer does not bootstrap them."
+    param([switch]$SkipBootstrap)
+    $packages = [ordered]@{
+        git    = 'Git.Git'
+        go     = 'GoLang.Go'
+        node   = 'OpenJS.NodeJS.LTS'
+        npm    = 'OpenJS.NodeJS.LTS'
+        python = 'Python.Python.3.13'
+    }
+    # Existing invalid command directories are preserved but moved behind the
+    # refreshed Machine/User PATH so freshly installed valid tools can win.
+    $deprioritizedPathDirs = @()
+
+    function Get-UniquePrerequisitePackages {
+        param([array]$Items)
+        $seen = @{}
+        $unique = @()
+        foreach ($item in $Items) {
+            $package = $item.Value.Package
+            if (-not $seen.ContainsKey($package)) {
+                $seen[$package] = $true
+                $unique += $package
+            }
+        }
+        return $unique
+    }
+
+    function Get-WingetInstallArgs {
+        param([string]$Package)
+        return @('install','--id',$Package,'--exact','--source','winget','--accept-source-agreements','--accept-package-agreements','--disable-interactivity','--silent')
+    }
+
+    function Format-WingetInstallCommand {
+        param([string]$Package)
+        return "winget $((Get-WingetInstallArgs -Package $Package) -join ' ')"
+    }
+
+    $status = [ordered]@{}
+    $git = Get-Command -Name 'git' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $gitVersion = ''
+    if ($git) { $gitVersion = (& $git.Source '--version' 2>$null | Out-String).Trim() }
+    $gitValid = [bool]($git -and $LASTEXITCODE -eq 0 -and $gitVersion)
+    $status.git = [ordered]@{ Command = 'git'; Package = $packages.git; Valid = $gitValid; Detail = if ($gitVersion) { $gitVersion } else { 'missing or git --version failed' } }
+    if ($git -and -not $gitValid) { $deprioritizedPathDirs += (Split-Path -Parent $git.Source) }
+
+    $go = Get-Command -Name 'go' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $goVersion = ''
+    if ($go) { $goVersion = (& $go.Source version 2>$null | Out-String).Trim() }
+    $goValid = [bool]($go -and $LASTEXITCODE -eq 0 -and $goVersion)
+    $status.go = [ordered]@{ Command = 'go'; Package = $packages.go; Valid = $goValid; Detail = if ($goVersion) { $goVersion } else { 'missing or go version failed' } }
+    if ($go -and -not $goValid) { $deprioritizedPathDirs += (Split-Path -Parent $go.Source) }
+
+    $node = Get-Command -Name 'node' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $nodeVersion = ''
+    $nodeSupported = $false
+    if ($node) {
+        $nodeVersion = (& $node.Source '--version' 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $nodeVersion -match '^v(\d+)\.(\d+)\.(\d+)$') {
+            $nodeMajor = [int]$Matches[1]; $nodeMinor = [int]$Matches[2]
+            $nodeSupported = (($nodeMajor -eq 20 -and $nodeMinor -ge 19) -or ($nodeMajor -eq 22 -and $nodeMinor -ge 12) -or $nodeMajor -gt 22)
         }
     }
-    $goVersion = (& go version 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) { Fail "-Latest requires a working Go toolchain (go version failed)." }
-    $nodeVersion = (& node '--version' 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
-        Fail "-Latest requires a parseable Node.js version from 'node --version' (got '$nodeVersion'). Install a supported Node.js release and re-run."
+    # Supported Node policy: 20.19+, 22.12+, or a newer major; Node 21 and
+    # Node 22 below 22.12 are unsupported.
+    $nodeDetail = if ($nodeSupported) { $nodeVersion } elseif ($nodeVersion) { "unsupported version $nodeVersion (Node 21 and Node 22 below 22.12 are unsupported)" } else { 'missing or node --version failed' }
+    $status.node = [ordered]@{ Command = 'node'; Package = $packages.node; Valid = $nodeSupported; Detail = $nodeDetail }
+    if ($node -and -not $nodeSupported) { $deprioritizedPathDirs += (Split-Path -Parent $node.Source) }
+
+    $npm = Get-Command -Name 'npm' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $npmVersion = ''
+    if ($npm) { $npmVersion = (& $npm.Source '--version' 2>$null | Out-String).Trim() }
+    $npmValid = [bool]($npm -and $LASTEXITCODE -eq 0 -and $npmVersion)
+    $status.npm = [ordered]@{ Command = 'npm'; Package = $packages.npm; Valid = $npmValid; Detail = if ($npmVersion) { $npmVersion } else { 'missing or npm --version failed' } }
+    if ($npm -and -not $npmValid) { $deprioritizedPathDirs += (Split-Path -Parent $npm.Source) }
+
+    $pythonDiscovery = Get-SupportedVenvPythonDiscovery
+    $python = $pythonDiscovery.Python
+    $status.python = [ordered]@{ Command = 'py/python'; Package = $packages.python; Valid = [bool]$python; Detail = if ($python) { "launcher $($python.Launcher)" } else { $pythonDiscovery.Detail } }
+    if (-not $python) { $deprioritizedPathDirs += @($pythonDiscovery.InvalidDirectories) }
+
+    $missing = @($status.GetEnumerator() | Where-Object { -not $_.Value.Valid })
+    if ($missing.Count -eq 0) {
+        Write-Ok "Using build prerequisites: $goVersion; Node.js $nodeVersion; Python launcher $($python.Launcher)"
+        return @{ Ready = $true; Deferred = $false; Status = $status }
     }
-    $nodeMajor = [int]$Matches[1]
-    $nodeMinor = [int]$Matches[2]
-    $nodeSupported = (($nodeMajor -eq 20 -and $nodeMinor -ge 19) -or
-        ($nodeMajor -eq 22 -and $nodeMinor -ge 12) -or $nodeMajor -gt 22)
-    if (-not $nodeSupported) {
-        Fail "-Latest requires Node.js 20.19+, 22.12+, or a newer major for the Vite build; found $nodeVersion. Node 21 and Node 22 below 22.12 are unsupported."
+
+    Write-Warn "-Latest found unsatisfied prerequisites: $($missing.Name -join ', ')"
+    foreach ($item in $missing) { Write-Step "$($item.Name): $($item.Value.Detail); normal -Latest would install $($item.Value.Package)" }
+    $uniquePackages = @(Get-UniquePrerequisitePackages -Items $missing)
+    Write-Step "winget repair commands:"
+    foreach ($package in $uniquePackages) { Write-Step "  $(Format-WingetInstallCommand -Package $package)" }
+    if ($DryRun) {
+        Write-Step '[dry-run] no winget invocation or prerequisite installation; stopping before main checkout/build'
+        return @{ Ready = $false; Deferred = $true; Status = $status }
     }
-    $python = Find-VenvPython
-    Write-Ok "Using build prerequisites: $goVersion; Node.js $nodeVersion; Python launcher $($python.Launcher)"
+
+    if ($SkipBootstrap) { return @{ Ready = $false; Deferred = $false; Status = $status } }
+
+    $winget = Get-Command -Name 'winget' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $winget) {
+        Fail "-Latest cannot install missing prerequisites because winget was not found. Install Microsoft App Installer/winget, ensure 'winget' is on PATH, then re-run. Required repair commands:`n$((@($uniquePackages | ForEach-Object { Format-WingetInstallCommand -Package $_ }) -join "`n"))"
+    }
+    foreach ($package in $uniquePackages) {
+        $wingetArgs = Get-WingetInstallArgs -Package $package
+        $wingetCommand = Format-WingetInstallCommand -Package $package
+        Write-Info "Installing prerequisite package $package ..."
+        $savedErrorActionPreference = $ErrorActionPreference
+        $wingetExit = $null
+        $wingetOutput = ''
+        $wingetInvokeError = $null
+        try {
+            # Native stderr becomes ErrorRecord objects under PS5.1 even with the
+            # local Continue policy. Preserve the real exit code while rendering
+            # only each record's message, not PowerShell's NativeCommandError
+            # wrapper/type metadata.
+            $ErrorActionPreference = 'Continue'
+            $wingetRecords = @(& $winget.Source @wingetArgs 2>&1)
+            $wingetExit = $LASTEXITCODE
+            $wingetOutput = (@($wingetRecords | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message }
+                else { [string]$_ }
+            }) -join "`n")
+        } catch {
+            $wingetInvokeError = $_.Exception.Message
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        if ($wingetInvokeError) {
+            Fail "winget could not start prerequisite package ${package}: $wingetCommand. Check package policy, elevation, and App Installer, then re-run. Error: $wingetInvokeError"
+        }
+        if ($null -eq $wingetExit) { $wingetExit = 1 }
+        if ($wingetExit -ne 0) {
+            Fail "winget command failed for prerequisite package $package (exit $wingetExit): $wingetCommand. Check package policy, elevation, and App Installer, then re-run. Output: $wingetOutput"
+        }
+    }
+    Refresh-ProcessPath -DeprioritizeDirectories $deprioritizedPathDirs
+    $rechecked = Confirm-DevPrerequisitesAfterBootstrap
+    if (-not $rechecked.Ready) {
+        $failed = @($rechecked.Status.GetEnumerator() | Where-Object { -not $_.Value.Valid })
+        Fail "-Latest prerequisite bootstrap completed but validation still fails for $($failed.Name -join ', '). Packages attempted: $($uniquePackages -join ', ')."
+    }
+    return $rechecked
+}
+
+function Refresh-ProcessPath {
+    param([string[]]$DeprioritizeDirectories = @())
+    function Get-PathKey {
+        param([string]$PathEntry)
+        if ([string]::IsNullOrWhiteSpace($PathEntry)) { return '' }
+        return $PathEntry.Trim().TrimEnd([char[]]'\/')
+    }
+
+    $original = @($env:PATH -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $deprioritizedKeys = @($DeprioritizeDirectories | ForEach-Object { Get-PathKey -PathEntry $_ } | Where-Object { $_ })
+    $preferredOriginal = @()
+    $deprioritizedOriginal = @()
+    foreach ($entry in $original) {
+        if ($deprioritizedKeys -contains (Get-PathKey -PathEntry $entry)) {
+            $deprioritizedOriginal += $entry
+        } else {
+            $preferredOriginal += $entry
+        }
+    }
+
+    # The process-scoped overrides are a hermetic contract-test seam only;
+    # normal installs still read the real Machine/User values.
+    $machineOverride = [Environment]::GetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', 'Process')
+    $userOverride = [Environment]::GetEnvironmentVariable('LINGTAI_TEST_USER_PATH', 'Process')
+    $machine = if ($null -ne $machineOverride) { $machineOverride } else { [Environment]::GetEnvironmentVariable('PATH', 'Machine') }
+    $user = if ($null -ne $userOverride) { $userOverride } else { [Environment]::GetEnvironmentVariable('PATH', 'User') }
+    $refreshed = @($machine, $user) | Where-Object { $_ } |
+        ForEach-Object { $_ -split ';' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $preferredRefreshed = @()
+    $deprioritizedRefreshed = @()
+    foreach ($entry in $refreshed) {
+        if ($deprioritizedKeys -contains (Get-PathKey -PathEntry $entry)) {
+            $deprioritizedRefreshed += $entry
+        } else {
+            $preferredRefreshed += $entry
+        }
+    }
+    $merged = @($preferredOriginal, $preferredRefreshed, $deprioritizedOriginal, $deprioritizedRefreshed) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $unique = @()
+    $seen = @{}
+    foreach ($entry in $merged) {
+        $cleanEntry = $entry.Trim()
+        $key = Get-PathKey -PathEntry $cleanEntry
+        if ($key -and -not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $unique += $cleanEntry
+        }
+    }
+    $env:PATH = ($unique -join ';')
+    Write-Step 'Refreshed process PATH from Machine + User environment, preserved process-only entries, and moved previously invalid command directories behind refreshed package paths.'
+}
+
+function Confirm-DevPrerequisitesAfterBootstrap {
+    return (Confirm-DevPrerequisites -SkipBootstrap)
 }
 
 # Resolve both pins before either checkout. Build output remains under an
 # installer-owned staging directory until both binaries and their versions are
 # validated, so destination writes happen only after the complete pair exists.
 function Build-LatestMain {
-    Confirm-DevPrerequisites
+    $prerequisites = Confirm-DevPrerequisites
+    if ($prerequisites.Deferred) { return @{ DryRun = $true; PrerequisitesDeferred = $true } }
     $tuiSha = Resolve-MainSha -RemoteUrl $RepoUrl -Label 'TUI'
     $kernelSha = Resolve-MainSha -RemoteUrl 'https://github.com/Lingtai-AI/lingtai-kernel.git' -Label 'kernel'
     Write-Info "Resolved TUI main commit: $tuiSha"

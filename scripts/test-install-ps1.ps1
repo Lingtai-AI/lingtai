@@ -92,6 +92,16 @@ function Assert-Equal {
     }
 }
 
+function Assert-Contains {
+    param([string]$Haystack, [string]$Needle, [string]$Label)
+    Assert-True ($Haystack.Contains($Needle)) $Label
+}
+
+function Assert-NotContains {
+    param([string]$Haystack, [string]$Needle, [string]$Label)
+    Assert-True (-not $Haystack.Contains($Needle)) $Label
+}
+
 # A test whose behavior is deliberately deferred. It records the gap loudly and
 # honestly instead of pretending the contract point is covered.
 function Skip-NotYet {
@@ -153,7 +163,7 @@ function Write-LogFileTail {
 # installer might read/write, is redirected under one test root. Original
 # values are captured and restored in the finally block.
 # ---------------------------------------------------------------------------
-$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP')
+$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'OS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'LINGTAI_TEST_WINGET_LOG', 'LINGTAI_TEST_WINGET_TOOL_DIR', 'LINGTAI_TEST_WINGET_EXIT', 'LINGTAI_TEST_MACHINE_PATH', 'LINGTAI_TEST_USER_PATH', 'LINGTAI_TEST_PATH_LOG')
 $SavedEnv = @{}
 foreach ($name in $IsolatedVars) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -398,6 +408,7 @@ $script:FakeApiListener = $null
 $script:FakeApiPrefix = $null
 $script:FakeApiRoutes = @{}
 $script:FakeApiJob = $null
+$script:FakeApiPs = $null
 
 function Start-FakeGitHubApi {
     $port = Get-Random -Minimum 30000 -Maximum 40000
@@ -730,6 +741,217 @@ function Get-TreeSnapshot {
         } | Sort-Object
 }
 
+function Join-Snapshot {
+    param([string[]]$Snapshot)
+    return (@($Snapshot) -join "`n")
+}
+
+function Get-InstallerOutput {
+    param([hashtable]$Result)
+    return "$($Result.Stdout)`n$($Result.Stderr)"
+}
+
+function Set-DevBootstrapEnv {
+    param([string[]]$PathEntries)
+    $clean = @($PathEntries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # PowerShell 7 launches .cmd application shims through cmd.exe; retain only
+    # System32 from the ambient host so the hermetic fake commands remain
+    # executable without exposing real Git/Go/Node/Python/winget installations.
+    $systemDirectory = [Environment]::SystemDirectory
+    if (-not [string]::IsNullOrWhiteSpace($systemDirectory) -and $clean -notcontains $systemDirectory) {
+        $clean += $systemDirectory
+    }
+    $env:PATH = ($clean -join ';')
+    if ([string]::IsNullOrWhiteSpace($env:PATHEXT)) {
+        $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
+    } elseif (($env:PATHEXT -split ';') -notcontains '.CMD') {
+        $env:PATHEXT = "$env:PATHEXT;.CMD"
+    }
+    $env:OS = 'Windows_NT'
+    $env:PROCESSOR_ARCHITECTURE = 'AMD64'
+    # Model an amd64 host explicitly in both native and WOW64 signals. Clearing
+    # ARCHITEW6432 through System.Environment can remain stale in the PS7 env
+    # provider inherited by the child, which makes the fixture look non-amd64.
+    $env:PROCESSOR_ARCHITEW6432 = 'AMD64'
+}
+
+function New-CmdShim {
+    param([string]$Dir, [string]$Name, [string[]]$Lines)
+    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+    $path = Join-Path $Dir "$Name.cmd"
+    Set-Content -LiteralPath $path -Value $Lines -Encoding ASCII
+    return $path
+}
+
+function New-ValidDevToolShims {
+    param([string]$Dir, [switch]$WithoutPython)
+    New-CmdShim -Dir $Dir -Name 'git' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+        'if "%1"=="ls-remote" (echo controlled fake main-ref failure 1>&2& exit /b 42)',
+        'echo fake git unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'go' -Lines @(
+        '@echo off',
+        'if "%1"=="version" (echo go version go1.26.0 windows/amd64& exit /b 0)',
+        'echo fake go unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'node' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo v22.13.0& exit /b 0)',
+        'echo fake node unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'npm' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo 10.9.0& exit /b 0)',
+        'echo fake npm unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    if (-not $WithoutPython) {
+        New-CmdShim -Dir $Dir -Name 'python' -Lines @(
+            '@echo off',
+            'if "%1"=="-c" (echo cpython:3.13:64& exit /b 0)',
+            'echo fake python unexpected args: %* 1>&2',
+            'exit /b 98'
+        ) | Out-Null
+    }
+}
+
+function New-FakeWingetShim {
+    param([string]$Dir)
+    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+    $impl = Join-Path $Dir 'winget-impl.ps1'
+    $implSource = @'
+$ErrorActionPreference = 'Stop'
+$log = $env:LINGTAI_TEST_WINGET_LOG
+if ($log) { Add-Content -LiteralPath $log -Value ($args -join ' ') -Encoding ASCII }
+$forcedExit = $env:LINGTAI_TEST_WINGET_EXIT
+if ($forcedExit) {
+    [Console]::Error.WriteLine("fake winget forced failure $forcedExit")
+    exit ([int]$forcedExit)
+}
+$idIndex = [Array]::IndexOf($args, '--id')
+if ($idIndex -lt 0 -or $idIndex + 1 -ge $args.Count) {
+    [Console]::Error.WriteLine('fake winget missing --id')
+    exit 64
+}
+$package = $args[$idIndex + 1]
+$toolDir = $env:LINGTAI_TEST_WINGET_TOOL_DIR
+if (-not $toolDir) {
+    [Console]::Error.WriteLine('fake winget missing LINGTAI_TEST_WINGET_TOOL_DIR')
+    exit 65
+}
+New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+function Write-Cmd($Name, [string[]]$Lines) {
+    Set-Content -LiteralPath (Join-Path $toolDir "$Name.cmd") -Value $Lines -Encoding ASCII
+}
+switch ($package) {
+    'Git.Git' {
+        Write-Cmd 'git' @(
+            '@echo off',
+            'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+            'if "%1"=="ls-remote" (echo controlled fake main-ref failure 1>&2& exit /b 42)',
+            'echo fake git unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'GoLang.Go' {
+        Write-Cmd 'go' @(
+            '@echo off',
+            'if "%1"=="version" (echo go version go1.26.0 windows/amd64& exit /b 0)',
+            'echo fake go unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'OpenJS.NodeJS.LTS' {
+        Write-Cmd 'node' @(
+            '@echo off',
+            'if "%1"=="--version" (echo v22.13.0& exit /b 0)',
+            'echo fake node unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+        Write-Cmd 'npm' @(
+            '@echo off',
+            'if "%1"=="--version" (echo 10.9.0& exit /b 0)',
+            'echo fake npm unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'Python.Python.3.13' {
+        Write-Cmd 'python' @(
+            '@echo off',
+            'if "%1"=="-c" (echo cpython:3.13:64& exit /b 0)',
+            'echo fake python unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    default {
+        [Console]::Error.WriteLine("fake winget unknown package $package")
+        exit 66
+    }
+}
+exit 0
+'@
+    Set-Content -LiteralPath $impl -Encoding ASCII -Value $implSource
+    New-CmdShim -Dir $Dir -Name 'winget' -Lines @(
+        '@echo off',
+        '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0winget-impl.ps1" %*',
+        'exit /b %ERRORLEVEL%'
+    ) | Out-Null
+}
+
+function New-DevBootstrapCase {
+    param([switch]$WithWinget, [switch]$WithValidTools)
+    $caseHome = New-IsolatedHome
+    $emptyPath = Join-Path $caseHome 'empty path'
+    $wingetDir = Join-Path $caseHome 'fake winget'
+    $toolDir = Join-Path $caseHome 'fake installed tools'
+    $processOnlyDir = Join-Path $caseHome 'process only path'
+    New-Item -ItemType Directory -Force -Path $emptyPath, $toolDir, $processOnlyDir | Out-Null
+    if ($WithWinget) { New-FakeWingetShim -Dir $wingetDir }
+    if ($WithValidTools) { New-ValidDevToolShims -Dir $toolDir }
+    $pathEntries = @()
+    if ($WithWinget) { $pathEntries += $wingetDir }
+    $pathEntries += @($toolDir, $processOnlyDir, $emptyPath)
+    Set-DevBootstrapEnv -PathEntries $pathEntries
+    $env:LINGTAI_TEST_WINGET_LOG = Join-Path $caseHome 'winget-argv.log'
+    $env:LINGTAI_TEST_WINGET_TOOL_DIR = $toolDir
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_WINGET_EXIT', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $null, 'Process')
+
+    # Both Windows PowerShell and pwsh lazily create per-profile startup-state
+    # files even under -NoProfile/-NonInteractive. Warm the exact child host now,
+    # before any DryRun tree snapshot, so the no-write assertion measures only
+    # installer effects rather than first-process runtime bookkeeping.
+    $psHost = (Get-Process -Id $PID).Path
+    $savedErrorActionPreference = $ErrorActionPreference
+    $warmExit = $null
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $psHost -NoProfile -NonInteractive -Command '$null' 1>$null 2>$null
+        $warmExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($warmExit -ne 0) { throw "Failed to warm child PowerShell host '$psHost' (exit $warmExit)." }
+
+    return @{
+        Home = $caseHome
+        BinDir = Join-Path $caseHome 'bin dest'
+        GlobalDir = Join-Path $caseHome '.lingtai-tui'
+        ToolDir = $toolDir
+        WingetDir = $wingetDir
+        EmptyPath = $emptyPath
+        WingetLog = $env:LINGTAI_TEST_WINGET_LOG
+        ProcessOnlyDir = $processOnlyDir
+    }
+}
+
 try {
     # -----------------------------------------------------------------------
     # PRECONDITION: installer script must exist. Until it does, this fails and
@@ -748,6 +970,197 @@ try {
     # Report the host so the workflow logs prove PS 5.1 and PS 7 both parsed and
     # executed the identical file.
     Write-Host ("  host: {0} {1}" -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion)
+
+    # CONTRACT 21: -Latest prerequisite bootstrap behavior. These tests execute
+    # install.ps1 in child PowerShell processes with isolated PATH entries and a
+    # fake winget/application set. They never invoke real winget and never write
+    # Machine/User PATH or runner-global locations.
+    Write-Section 'contract: -Latest prerequisite bootstrap behavior'
+    $exactGitCommand = 'winget install --id Git.Git --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactGoCommand = 'winget install --id GoLang.Go --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactNodeCommand = 'winget install --id OpenJS.NodeJS.LTS --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactPythonCommand = 'winget install --id Python.Python.3.13 --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $expectedWingetArgv = @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand) |
+        ForEach-Object { $_.Substring('winget '.Length) }
+
+    $dryCase = New-DevBootstrapCase
+    $dryBefore = Join-Snapshot -Snapshot (Get-TreeSnapshot -Path $dryCase.Home)
+    $dryRun = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $dryCase.BinDir; GlobalDir = $dryCase.GlobalDir; NoModifyPath = $true }
+    $dryAfter = Join-Snapshot -Snapshot (Get-TreeSnapshot -Path $dryCase.Home)
+    $dryOut = Get-InstallerOutput -Result $dryRun
+    if ($dryRun.ExitCode -ne 0) {
+        Write-Host "  ---- all-missing DryRun child output (exit $($dryRun.ExitCode)) ----"
+        foreach ($line in @($dryOut -split "`r?`n")) { Write-Host "  | $line" }
+    }
+    Assert-Equal 0 $dryRun.ExitCode '-Latest -DryRun with all prerequisites missing exits zero'
+    Assert-Equal $dryBefore $dryAfter '-Latest -DryRun leaves the complete isolated tree unchanged'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.BinDir)) '-Latest -DryRun creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.GlobalDir)) '-Latest -DryRun creates no GlobalDir'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.WingetLog)) '-Latest -DryRun invokes no winget'
+    foreach ($name in @('git','go','node','npm','python')) {
+        Assert-Contains $dryOut $name "-Latest -DryRun reports unsatisfied $name"
+    }
+    foreach ($cmd in @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand)) {
+        Assert-Contains $dryOut $cmd "-Latest -DryRun reports exact command: $cmd"
+    }
+    Assert-NotContains $dryOut 'Resolved TUI main commit' '-Latest -DryRun with missing prerequisites stops before main ref resolution'
+
+    $unsupportedCase = New-DevBootstrapCase -WithValidTools
+    New-CmdShim -Dir $unsupportedCase.ToolDir -Name 'node' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo v21.7.3& exit /b 0)',
+        'echo fake node unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $unsupportedCase.ToolDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo cpython:3.13:32& exit /b 0)',
+        'echo fake python unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    $unsupported = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $unsupportedCase.BinDir; GlobalDir = $unsupportedCase.GlobalDir; NoModifyPath = $true }
+    $unsupportedOut = Get-InstallerOutput -Result $unsupported
+    Assert-Equal 0 $unsupported.ExitCode '-Latest -DryRun reports unsupported Node/Python without writing'
+    Assert-Contains $unsupportedOut 'unsupported version v21.7.3' '-Latest identifies unsupported Node policy'
+    Assert-Contains $unsupportedOut 'cpython:3.13:32' '-Latest reports the rejected non-64-bit CPython probe result'
+    Assert-Contains $unsupportedOut 'requires 64-bit CPython 3.11-3.13' '-Latest states the required Python architecture and implementation'
+    Assert-Contains $unsupportedOut $exactNodeCommand '-Latest plans Node LTS repair for unsupported Node'
+    Assert-Contains $unsupportedOut $exactPythonCommand '-Latest plans Python repair for non-64-bit Python'
+    Assert-NotContains $unsupportedOut $exactGitCommand '-Latest does not repair valid Git'
+    Assert-NotContains $unsupportedOut $exactGoCommand '-Latest does not repair valid Go'
+    Assert-True (-not (Test-Path -LiteralPath $unsupportedCase.WingetLog)) 'unsupported DryRun invokes no winget'
+
+    $nonCpythonCase = New-DevBootstrapCase -WithValidTools
+    New-CmdShim -Dir $nonCpythonCase.ToolDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo pypy:3.13:64& exit /b 0)',
+        'echo fake Python-compatible runtime unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    $nonCpython = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $nonCpythonCase.BinDir; GlobalDir = $nonCpythonCase.GlobalDir; NoModifyPath = $true }
+    $nonCpythonOut = Get-InstallerOutput -Result $nonCpython
+    Assert-Equal 0 $nonCpython.ExitCode '-Latest -DryRun rejects non-CPython without writing'
+    Assert-Contains $nonCpythonOut 'pypy:3.13:64' '-Latest reports the rejected non-CPython probe result'
+    Assert-Contains $nonCpythonOut 'requires 64-bit CPython 3.11-3.13' '-Latest states the exact CPython prerequisite contract'
+    Assert-Contains $nonCpythonOut $exactPythonCommand '-Latest plans CPython repair for a 64-bit non-CPython runtime'
+    Assert-NotContains $nonCpythonOut $exactGitCommand '-Latest does not repair valid Git in non-CPython case'
+    Assert-NotContains $nonCpythonOut $exactGoCommand '-Latest does not repair valid Go in non-CPython case'
+    Assert-NotContains $nonCpythonOut $exactNodeCommand '-Latest does not repair valid Node/npm in non-CPython case'
+    Assert-True (-not (Test-Path -LiteralPath $nonCpythonCase.WingetLog)) 'non-CPython DryRun invokes no winget'
+
+    $noWingetCase = New-DevBootstrapCase
+    $noWinget = Invoke-Installer @{ Latest = $true; BinDir = $noWingetCase.BinDir; GlobalDir = $noWingetCase.GlobalDir; NoModifyPath = $true }
+    $noWingetOut = Get-InstallerOutput -Result $noWinget
+    Assert-True ($noWinget.ExitCode -ne 0) '-Latest without winget exits non-zero'
+    Assert-Contains $noWingetOut 'winget was not found' '-Latest without winget explains App Installer/winget remediation'
+    foreach ($cmd in @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand)) {
+        Assert-Contains $noWingetOut $cmd "-Latest without winget prints exact remediation command: $cmd"
+    }
+    Assert-NotContains $noWingetOut 'Resolved TUI main commit' '-Latest without winget fails before checkout'
+    Assert-True (-not (Test-Path -LiteralPath $noWingetCase.BinDir)) '-Latest without winget creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $noWingetCase.GlobalDir)) '-Latest without winget creates no GlobalDir'
+
+    $wingetFailCase = New-DevBootstrapCase -WithWinget
+    $env:LINGTAI_TEST_WINGET_EXIT = '73'
+    $wingetFail = Invoke-Installer @{ Latest = $true; BinDir = $wingetFailCase.BinDir; GlobalDir = $wingetFailCase.GlobalDir; NoModifyPath = $true }
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_WINGET_EXIT', $null, 'Process')
+    $wingetFailOut = Get-InstallerOutput -Result $wingetFail
+    Assert-True ($wingetFail.ExitCode -ne 0) 'fake winget nonzero exits non-zero'
+    Assert-Contains $wingetFailOut 'exit 73' 'fake winget nonzero preserves actual exit code under PS 5.1/7'
+    Assert-Contains $wingetFailOut 'Git.Git' 'fake winget nonzero names the failed package'
+    Assert-Contains $wingetFailOut $exactGitCommand 'fake winget nonzero prints the exact failed command'
+    Assert-NotContains $wingetFailOut 'NativeCommandError' 'fake winget stderr does not escape as a PS5.1 NativeCommandError'
+    Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.BinDir)) 'fake winget failure creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.GlobalDir)) 'fake winget failure creates no GlobalDir'
+    $wingetFailLog = @(if (Test-Path -LiteralPath $wingetFailCase.WingetLog) { Get-Content -LiteralPath $wingetFailCase.WingetLog })
+    Assert-Equal 1 $wingetFailLog.Count 'fake winget failure attempted exactly one package before failing'
+    if ($wingetFailLog.Count -eq 1) {
+        Assert-Equal $expectedWingetArgv[0] $wingetFailLog[0] 'fake winget failure receives the exact Git.Git argv'
+    }
+
+    $wingetOkCase = New-DevBootstrapCase -WithWinget
+    $wingetOk = Invoke-Installer @{ Latest = $true; BinDir = $wingetOkCase.BinDir; GlobalDir = $wingetOkCase.GlobalDir; NoModifyPath = $true }
+    $wingetOkOut = Get-InstallerOutput -Result $wingetOk
+    Assert-True ($wingetOk.ExitCode -ne 0) 'fake winget success reaches controlled main-ref failure'
+    Assert-Contains $wingetOkOut 'Using build prerequisites' 'fake winget success performs full post-bootstrap revalidation'
+    Assert-Contains $wingetOkOut 'Could not resolve TUI refs/heads/main' 'fake winget success reaches the controlled pre-checkout main-ref failure'
+    Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.BinDir)) 'fake winget success before checkout writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.GlobalDir)) 'fake winget success before checkout writes no GlobalDir'
+    $wingetOkLog = @(if (Test-Path -LiteralPath $wingetOkCase.WingetLog) { Get-Content -LiteralPath $wingetOkCase.WingetLog })
+    Assert-Equal 4 $wingetOkLog.Count 'fake winget success invokes exactly one command per unique package ID'
+    if ($wingetOkLog.Count -eq $expectedWingetArgv.Count) {
+        for ($i = 0; $i -lt $expectedWingetArgv.Count; $i++) {
+            Assert-Equal $expectedWingetArgv[$i] $wingetOkLog[$i] "fake winget success receives exact argv for package index $i"
+        }
+    }
+    foreach ($id in @('Git.Git','GoLang.Go','OpenJS.NodeJS.LTS','Python.Python.3.13')) {
+        $matches = @($wingetOkLog | Where-Object { $_ -like "*--id $id *" })
+        Assert-Equal 1 $matches.Count "fake winget success invokes $id exactly once"
+    }
+    $nodeMatches = @($wingetOkLog | Where-Object { $_ -like '*--id OpenJS.NodeJS.LTS *' })
+    Assert-Equal 1 $nodeMatches.Count 'Node/npm share one deduplicated OpenJS.NodeJS.LTS install'
+    Assert-True (Test-Path -LiteralPath $wingetOkCase.ProcessOnlyDir) 'process-only PATH directory still exists after refresh/revalidation'
+
+    # A process-only unsupported Python must not keep shadowing the CPython that
+    # fake winget exposes only through the refreshed Machine path.
+    $shadowCase = New-DevBootstrapCase -WithWinget
+    $shadowExistingDir = Join-Path $shadowCase.Home 'valid existing tools'
+    $shadowInvalidPythonDir = Join-Path $shadowCase.Home 'invalid process python'
+    New-ValidDevToolShims -Dir $shadowExistingDir -WithoutPython
+    New-CmdShim -Dir $shadowExistingDir -Name 'git' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+        'if "%1"=="ls-remote" (echo %PATH%>"%LINGTAI_TEST_PATH_LOG%"& echo controlled fake main-ref failure 1>&2& exit /b 42)',
+        'echo fake git unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $shadowInvalidPythonDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo cpython:3.13:32& exit /b 0)',
+        'echo invalid fake python unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    Set-DevBootstrapEnv -PathEntries @($shadowCase.WingetDir, $shadowInvalidPythonDir, $shadowExistingDir, $shadowCase.ProcessOnlyDir, $shadowCase.EmptyPath)
+    $shadowPathLog = Join-Path $shadowCase.Home 'path-after-refresh.log'
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $shadowCase.ToolDir, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', ';', 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $shadowPathLog, 'Process')
+    $shadow = Invoke-Installer @{ Latest = $true; BinDir = $shadowCase.BinDir; GlobalDir = $shadowCase.GlobalDir; NoModifyPath = $true }
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $null, 'Process')
+    $shadowOut = Get-InstallerOutput -Result $shadow
+    Assert-True ($shadow.ExitCode -ne 0) 'invalid process Python plus fake winget reaches controlled main-ref failure'
+    Assert-Contains $shadowOut 'Using build prerequisites' 'invalid process Python is replaced by refreshed fake CPython during revalidation'
+    Assert-Contains $shadowOut 'Could not resolve TUI refs/heads/main' 'shadowing repair reaches controlled pre-checkout main-ref failure'
+    $shadowWingetLog = @(if (Test-Path -LiteralPath $shadowCase.WingetLog) { Get-Content -LiteralPath $shadowCase.WingetLog })
+    Assert-Equal 1 $shadowWingetLog.Count 'shadowing repair invokes exactly one prerequisite package'
+    if ($shadowWingetLog.Count -eq 1) {
+        Assert-Equal $expectedWingetArgv[3] $shadowWingetLog[0] 'shadowing repair invokes exact Python.Python.3.13 argv'
+    }
+    Assert-True (Test-Path -LiteralPath $shadowPathLog) 'controlled git seam captured the post-refresh child PATH'
+    $shadowPath = if (Test-Path -LiteralPath $shadowPathLog) { (Get-Content -LiteralPath $shadowPathLog -Raw).Trim() } else { '' }
+    $installedPythonIndex = $shadowPath.IndexOf($shadowCase.ToolDir, [System.StringComparison]::OrdinalIgnoreCase)
+    $invalidPythonIndex = $shadowPath.IndexOf($shadowInvalidPythonDir, [System.StringComparison]::OrdinalIgnoreCase)
+    Assert-True ($installedPythonIndex -ge 0 -and $invalidPythonIndex -ge 0 -and $installedPythonIndex -lt $invalidPythonIndex) 'refreshed installed CPython directory precedes the invalid process-only Python directory'
+    Assert-True (-not (Test-Path -LiteralPath $shadowCase.BinDir)) 'shadowing repair controlled failure writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $shadowCase.GlobalDir)) 'shadowing repair controlled failure writes no GlobalDir'
+
+    $validCase = New-DevBootstrapCase -WithWinget -WithValidTools
+    $valid = Invoke-Installer @{ Latest = $true; BinDir = $validCase.BinDir; GlobalDir = $validCase.GlobalDir; NoModifyPath = $true }
+    $validOut = Get-InstallerOutput -Result $valid
+    Assert-True ($valid.ExitCode -ne 0) 'already-valid prerequisites reach controlled main-ref failure'
+    Assert-Contains $validOut 'Using build prerequisites' 'already-valid prerequisites are accepted without bootstrap'
+    Assert-Contains $validOut 'Could not resolve TUI refs/heads/main' 'already-valid prerequisites proceed to main-ref resolution'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.WingetLog)) 'already-valid prerequisites do not invoke winget'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.BinDir)) 'already-valid controlled failure writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.GlobalDir)) 'already-valid controlled failure writes no GlobalDir'
+
+    # CONTRACT 21 mutates only this test process's environment. Restore the
+    # original host values before the legacy fixture/compiler contracts run.
+    foreach ($name in $IsolatedVars) {
+        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
+    }
 
     # CONTRACT 20: current-main is an explicit, self-contained mode. Its
     # runtime and source pins are not optional, so release/local-artifact and
