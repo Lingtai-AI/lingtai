@@ -1425,16 +1425,20 @@ version = "0.18.0"
         # `pip wheel` can legitimately fail here (missing/older setuptools, no
         # network for a transitive build dependency, etc.) and this contract must
         # treat that as NOT-YET, not abort the suite. On Windows PowerShell 5.1,
-        # ANY text a native command writes to stderr is wrapped as an ErrorRecord
-        # and promoted to a terminating NativeCommandError under
-        # $ErrorActionPreference = 'Stop' -- merging streams via `*>` (or `2>&1`)
-        # still goes through that wrapping before the redirect target sees it, so
-        # it does NOT protect against the abort (unlike `2>$null`, which discards
-        # stderr before it can be wrapped). Redirect stdout and stderr to their
-        # OWN separate file targets instead of merging them, which avoids the
-        # ErrorRecord promotion entirely while still capturing full diagnostics.
-        & $pyCmd.Source @wheelBuildArgs 1> $wheelBuildLog 2> "$wheelBuildLog.stderr"
-        $wheelBuildExit = $LASTEXITCODE
+        # ANY text a native command writes to stderr is wrapped as an ErrorRecord.
+        # Redirection still emits that record before the target consumes it, so
+        # the suite's global $ErrorActionPreference = 'Stop' would terminate even
+        # when pip succeeds. Downgrade only this native invocation to Continue,
+        # preserve both output streams for diagnostics, capture $LASTEXITCODE,
+        # and restore the fail-fast preference immediately afterward.
+        $savedErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $pyCmd.Source @wheelBuildArgs 1> $wheelBuildLog 2> "$wheelBuildLog.stderr"
+            $wheelBuildExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
         Get-Content -LiteralPath "$wheelBuildLog.stderr" -ErrorAction SilentlyContinue | Add-Content -LiteralPath $wheelBuildLog
         $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
 
