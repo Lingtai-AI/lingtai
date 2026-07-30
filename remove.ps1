@@ -263,7 +263,7 @@ function Invoke-Main {
         if ($entries.Count -eq 0) {
             try { Remove-Item -LiteralPath $globalDir -Force -ErrorAction Stop } catch { }
         } else {
-            $survivors = $entries | ForEach-Object { $_.Name }
+            $survivors = @($entries | ForEach-Object { $_.Name })
         }
     }
 
