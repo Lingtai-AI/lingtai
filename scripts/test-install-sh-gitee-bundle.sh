@@ -381,7 +381,7 @@ register_response_text() {
     [[ "$1" == "gitee" ]] && printf 'https://example.invalid/%s/manifest.json' "$2"
   }
   curl() {
-    printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","artifacts":[]}'
+    printf '%s' '{"schema":"lingtai.kernel.release/v1","kernel_version":"0.16.4","kernel_tag":"v0.16.4","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","generated_at":"2026-07-15T00:00:00Z","sdist_fallback":"lingtai-0.16.4.tar.gz","artifacts":[{"filename":"lingtai-0.16.4.tar.gz","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","kind":"sdist","python_tag":null,"abi_tag":null,"platform_tag":null}]}'
   }
 
   fetch_kernel_manifest v0.16.4 || fail "fetch_kernel_manifest should populate explicit state"
