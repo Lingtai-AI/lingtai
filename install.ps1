@@ -1201,11 +1201,17 @@ function Confirm-DevPrerequisites {
         $wingetOutput = ''
         $wingetInvokeError = $null
         try {
-            # Native stderr is a terminating NativeCommandError under PS5.1's
-            # global Stop policy; this local seam preserves the real exit code.
+            # Native stderr becomes ErrorRecord objects under PS5.1 even with the
+            # local Continue policy. Preserve the real exit code while rendering
+            # only each record's message, not PowerShell's NativeCommandError
+            # wrapper/type metadata.
             $ErrorActionPreference = 'Continue'
-            $wingetOutput = (& $winget.Source @wingetArgs 2>&1 | Out-String)
+            $wingetRecords = @(& $winget.Source @wingetArgs 2>&1)
             $wingetExit = $LASTEXITCODE
+            $wingetOutput = (@($wingetRecords | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message }
+                else { [string]$_ }
+            }) -join "`n")
         } catch {
             $wingetInvokeError = $_.Exception.Message
         } finally {

@@ -408,6 +408,7 @@ $script:FakeApiListener = $null
 $script:FakeApiPrefix = $null
 $script:FakeApiRoutes = @{}
 $script:FakeApiJob = $null
+$script:FakeApiPs = $null
 
 function Start-FakeGitHubApi {
     $port = Get-Random -Minimum 30000 -Maximum 40000
@@ -753,6 +754,13 @@ function Get-InstallerOutput {
 function Set-DevBootstrapEnv {
     param([string[]]$PathEntries)
     $clean = @($PathEntries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # PowerShell 7 launches .cmd application shims through cmd.exe; retain only
+    # System32 from the ambient host so the hermetic fake commands remain
+    # executable without exposing real Git/Go/Node/Python/winget installations.
+    $systemDirectory = [Environment]::SystemDirectory
+    if (-not [string]::IsNullOrWhiteSpace($systemDirectory) -and $clean -notcontains $systemDirectory) {
+        $clean += $systemDirectory
+    }
     $env:PATH = ($clean -join ';')
     if ([string]::IsNullOrWhiteSpace($env:PATHEXT)) {
         $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
@@ -912,6 +920,23 @@ function New-DevBootstrapCase {
     [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $null, 'Process')
     [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', $null, 'Process')
     [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $null, 'Process')
+
+    # Both Windows PowerShell and pwsh lazily create per-profile startup-state
+    # files even under -NoProfile/-NonInteractive. Warm the exact child host now,
+    # before any DryRun tree snapshot, so the no-write assertion measures only
+    # installer effects rather than first-process runtime bookkeeping.
+    $psHost = (Get-Process -Id $PID).Path
+    $savedErrorActionPreference = $ErrorActionPreference
+    $warmExit = $null
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $psHost -NoProfile -NonInteractive -Command '$null' 1>$null 2>$null
+        $warmExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($warmExit -ne 0) { throw "Failed to warm child PowerShell host '$psHost' (exit $warmExit)." }
+
     return @{
         Home = $caseHome
         BinDir = Join-Path $caseHome 'bin dest'
@@ -960,6 +985,10 @@ try {
     $dryRun = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $dryCase.BinDir; GlobalDir = $dryCase.GlobalDir; NoModifyPath = $true }
     $dryAfter = Join-Snapshot -Snapshot (Get-TreeSnapshot -Path $dryCase.Home)
     $dryOut = Get-InstallerOutput -Result $dryRun
+    if ($dryRun.ExitCode -ne 0) {
+        Write-Host "  ---- all-missing DryRun child output (exit $($dryRun.ExitCode)) ----"
+        foreach ($line in @($dryOut -split "`r?`n")) { Write-Host "  | $line" }
+    }
     Assert-Equal 0 $dryRun.ExitCode '-Latest -DryRun with all prerequisites missing exits zero'
     Assert-Equal $dryBefore $dryAfter '-Latest -DryRun leaves the complete isolated tree unchanged'
     Assert-True (-not (Test-Path -LiteralPath $dryCase.BinDir)) '-Latest -DryRun creates no BinDir'
