@@ -1388,6 +1388,13 @@ function Install-MainVenv {
     Write-Info "Installing lingtai from the verified checked-out kernel source path (non-editable local build) ..."
     & $python '-m' 'pip' 'install' $KernelSource | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "-Latest kernel source install failed (exit $LASTEXITCODE)." }
+    # A reused managed venv can already contain the same LingTai version with a
+    # stale editable/local direct_url.json. The dependency-resolving install
+    # above may then report the requirement satisfied without replacing that
+    # root package. Reinstall only LingTai itself from this exact checked-out
+    # source so provenance is deterministic while preserving resolved deps.
+    & $python '-m' 'pip' 'install' '--force-reinstall' '--no-deps' $KernelSource | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "-Latest pinned kernel reinstall failed (exit $LASTEXITCODE)." }
     $version = Confirm-KernelImport -VenvPython $python -ExpectedVersion '' -VenvDir $venvDir -KernelSource $KernelSource
     return @{ KernelSource='main'; KernelVersion=$version; KernelProvider='github'; KernelCommit=$KernelSha }
 }
