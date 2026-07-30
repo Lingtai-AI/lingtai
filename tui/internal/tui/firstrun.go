@@ -1598,8 +1598,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// Saved codex preset whose bound account isn't authed → require
 				// login first. Checks the preset's own codex_auth_path, so a
 				// different account being missing doesn't block this one.
-				if m.getPresetProvider(p) == "codex" && !m.codexPresetAuthValid(p) {
-					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
+				family, authValid := m.presetCredentialState(p)
+				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
+					m.message = i18n.T(m.presetCredentialHintKey(family))
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -1621,8 +1622,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if !ok {
 					return m, nil
 				}
-				if m.getPresetProvider(p) == "codex" && !m.codexPresetAuthValid(p) {
-					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
+				family, authValid := m.presetCredentialState(p)
+				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
+					m.message = i18n.T(m.presetCredentialHintKey(family))
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -2844,12 +2846,12 @@ func (m FirstRunModel) View() string {
 			if displayDesc == "preset.desc_"+p.Name {
 				displayDesc = p.Description.Summary
 			}
-			isCodex := m.getPresetProvider(p) == "codex"
-			needsOAuth := isCodex && !m.codexPresetAuthValid(p)
+			family, authValid := m.presetCredentialState(p)
+			needsCredential := (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			name := nameStyle.Render(displayName)
-			if needsOAuth {
-				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
+			if needsCredential {
+				name += " " + StyleFaint.Render(i18n.T(m.presetCredentialHintKey(family)))
 			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
@@ -3793,7 +3795,11 @@ func (m FirstRunModel) currentPresetKeyEnv() string {
 	if m.cursor < 0 || m.cursor >= len(m.presets) {
 		return ""
 	}
-	envName, _ := llmStringField(m.presets[m.cursor], "api_key_env")
+	p := m.presets[m.cursor]
+	if preset.ClassifyCredentialFamily(m.getPresetProvider(p)) != preset.CredentialFamilyOther {
+		return ""
+	}
+	envName, _ := llmStringField(p, "api_key_env")
 	return envName
 }
 
@@ -3822,7 +3828,8 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 // for codex; cleaner to leave api_key_env empty for the kernel's
 // _codex factory to ignore.
 func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Preset {
-	if provider, _ := llmStringField(p, "provider"); provider == "codex" {
+	provider, _ := llmStringField(p, "provider")
+	if preset.ClassifyCredentialFamily(provider) != preset.CredentialFamilyOther {
 		return p
 	}
 	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
@@ -4510,18 +4517,31 @@ func (m FirstRunModel) presetAtVisibleIdx(i int) (preset.Preset, bool) {
 	return m.presets[i], true
 }
 
-// codexPresetAuthValid reports whether the Codex OAuth credential bound to a
-// specific preset is usable. It resolves the preset's
-// manifest.llm.codex_auth_path against globalDir (empty → legacy single-
-// account file) and validates that token file. This is what gates editing /
-// selecting a particular codex preset, so one missing account never blocks a
-// different, validly-bound codex preset.
-func (m FirstRunModel) codexPresetAuthValid(p preset.Preset) bool {
-	ref := ""
-	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-		ref, _ = llm["codex_auth_path"].(string)
+// presetAuthState gathers the loaded credential facts used by preset selection.
+// CodexSingle validates its bound token; CodexPool validates the applicable
+// model category; ClaudeCLI reports the external CLI session.
+func (m FirstRunModel) presetAuthState() preset.AuthState {
+	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
+	return preset.AuthState{
+		CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
+		CodexAuthDir:              m.globalDir,
+		CodexPoolEligible:         poolEligible,
+		CodexPoolEligibleModels:   poolModels,
+		CodexPoolFallbackEligible: poolFallback,
+		ClaudeCodeAuthConfigured:  m.claudeCodeAuthValid,
 	}
-	return codexAuthPathValid(resolveCodexAuthPath(m.globalDir, ref))
+}
+
+func (m FirstRunModel) presetCredentialState(p preset.Preset) (preset.CredentialFamily, bool) {
+	rr := preset.ResolvePresetWithAuth(p, m.existingKeys, m.presetAuthState())
+	return rr.Family, rr.ManifestValid && rr.HasKey
+}
+
+func (m FirstRunModel) presetCredentialHintKey(family preset.CredentialFamily) string {
+	if family == preset.CredentialFamilyCodexPool {
+		return "firstrun.preset_pick.codex_pool_unavailable_hint"
+	}
+	return "firstrun.preset_pick.codex_needs_oauth_hint"
 }
 
 func (m FirstRunModel) codexAuthDisplayLabel() string {
@@ -4535,7 +4555,7 @@ func (m FirstRunModel) codexAuthDisplayLabel() string {
 func (m *FirstRunModel) refreshCodexAuth() {
 	// codexAuth.valid reflects whether ANY Codex account is configured, so
 	// the inline credential row shows an authed state once the user has at
-	// least one account. Per-preset gating uses codexPresetAuthValid.
+	// least one account. Per-preset gating uses presetCredentialState.
 	tokens, ok := readCodexTokenFile(legacyCodexAuthPath(m.globalDir))
 	if !ok {
 		// No legacy account; fall back to any per-account file so the row
@@ -4579,7 +4599,8 @@ func (m *FirstRunModel) refreshClaudeCodeAuth() {
 // uses ChatGPT-OAuth, never paste-key, regardless of api_key_env
 // (a stale/auto-stamped value must not route the user to stepPresetKey).
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
-	if m.getPresetProvider(p) == "codex" {
+	family := preset.ClassifyCredentialFamily(m.getPresetProvider(p))
+	if family != preset.CredentialFamilyOther {
 		return false
 	}
 	envName, ok := llmStringField(p, "api_key_env")
@@ -4746,7 +4767,7 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 // presetModelName reads the truthful manifest.llm.model value straight off
 // the preset that will actually be applied — the same field
 // Preset.Validate() requires to be non-empty and the same location every
-// other read site in this file (e.g. codexPresetAuthValid,
+// other read site in this file (e.g. presetCredentialState,
 // currentPresetKeyEnv) already reads llm from. Returns "" if somehow
 // missing rather than guessing or hardcoding a default; the caller's row()
 // helper renders "—" for an empty value rather than fabricating one.

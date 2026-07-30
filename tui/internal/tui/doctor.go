@@ -833,17 +833,9 @@ const (
 // the LingTai config (no api_key / api_key_env). The doctor cannot probe
 // these directly; the spawned CLI handles its own auth (e.g. `codex`
 // reads ~/.codex/auth.json from a prior `codex login`).
-var oauthProviders = map[string]bool{
-	"codex":            true,
-	"codex_oauth":      true,
-	"claude-code":      true,
-	"claude_code":      true,
-	"claude-agent-sdk": true, // legacy saved-preset compatibility
-	"claude_agent_sdk": true, // legacy saved-preset compatibility
-}
-
 func probeLLM(provider, model, apiKey, baseURL, apiCompat string) (probeStatus, string) {
-	if oauthProviders[provider] {
+	family := preset.ClassifyCredentialFamily(provider)
+	if family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool || family == preset.CredentialFamilyClaudeCLI {
 		return probeOAuth, ""
 	}
 	if apiKey == "" {

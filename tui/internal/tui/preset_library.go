@@ -523,12 +523,7 @@ func (m PresetLibraryModel) renderList(width, height int) string {
 }
 
 func isClaudeCodeProvider(provider string) bool {
-	switch provider {
-	case "claude-code", "claude_code", "claude-agent-sdk", "claude_agent_sdk":
-		return true
-	default:
-		return false
-	}
+	return preset.ClassifyCredentialFamily(provider) == preset.CredentialFamilyClaudeCLI
 }
 
 func (m PresetLibraryModel) renderPreview(width, height int) string {
