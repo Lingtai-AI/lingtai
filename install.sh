@@ -191,11 +191,12 @@ Binaries install to --bin-dir/--prefix if given, otherwise a writable
 built from source but npm is missing. The Python runtime venv lives at
 ~/.lingtai-tui/runtime/venv.
 
-For an exact-artifact update, bounded repair, read-only verification, or an
-explicit editable development install of an existing installation, use the
-standalone maintenance entrypoints instead of this script: update.sh, fix.sh,
-verify.sh, dev.sh (each has its own --help). See ANATOMY.md for their exact
-preconditions, allowed writes, and postconditions.
+For an exact-artifact update, bounded repair, read-only verification, an
+explicit editable development install, or full removal of an existing
+installation, use the standalone maintenance entrypoints instead of this
+script: update.sh, fix.sh, verify.sh, dev.sh, remove.sh (each has its own
+--help). See ANATOMY.md for their exact preconditions, allowed writes, and
+postconditions.
 EOF
 }
 
