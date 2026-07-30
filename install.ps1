@@ -1212,7 +1212,7 @@ function Confirm-DevPrerequisites {
             $ErrorActionPreference = $savedErrorActionPreference
         }
         if ($wingetInvokeError) {
-            Fail "winget could not start prerequisite package $package: $wingetCommand. Check package policy, elevation, and App Installer, then re-run. Error: $wingetInvokeError"
+            Fail "winget could not start prerequisite package ${package}: $wingetCommand. Check package policy, elevation, and App Installer, then re-run. Error: $wingetInvokeError"
         }
         if ($null -eq $wingetExit) { $wingetExit = 1 }
         if ($wingetExit -ne 0) {
