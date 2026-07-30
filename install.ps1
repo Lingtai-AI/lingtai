@@ -144,6 +144,95 @@ function Write-Warn { param([string]$Message) Write-Host "warn: $Message" -Foreg
 function Write-Ok   { param([string]$Message) Write-Host "  ok: $Message" -ForegroundColor Green }
 function Write-Step { param([string]$Message) Write-Host "  -> $Message" -ForegroundColor DarkGray }
 
+# --- Progress reporting -------------------------------------------------------
+
+# Long phases (npm ci, two Go builds, a pip install) previously ran with their
+# output sent to Out-Null and no heading, so a -Latest install showed nothing at
+# all for minutes and looked hung. These helpers give every long phase a heading
+# printed BEFORE the work starts, plus an elapsed time when it finishes, so the
+# terminal always says what is currently running and how long it took.
+
+$script:InstallClock = [System.Diagnostics.Stopwatch]::StartNew()
+$script:PhaseNumber  = 0
+$script:PhaseTotal   = 0
+
+function Set-PhaseTotal {
+    param([int]$Total)
+    $script:PhaseTotal  = $Total
+    $script:PhaseNumber = 0
+}
+
+# Human-readable elapsed time: "48s" / "3m 07s". Seconds-resolution on purpose --
+# these phases run for minutes and millisecond noise would only add width.
+function Format-Duration {
+    param([TimeSpan]$Span)
+    if ($Span.TotalMinutes -ge 1) {
+        return ('{0}m {1:00}s' -f [int]$Span.TotalMinutes, $Span.Seconds)
+    }
+    return ('{0}s' -f [int][Math]::Max(1, [Math]::Round($Span.TotalSeconds)))
+}
+
+# Announce a phase BEFORE it runs (that ordering is the whole point) and return
+# the stopwatch the caller closes with Complete-Phase.
+function Start-Phase {
+    param([string]$Message)
+    $script:PhaseNumber++
+    $label = if ($script:PhaseTotal -gt 0) { "[$($script:PhaseNumber)/$($script:PhaseTotal)]" } else { '==>' }
+    Write-Host "$label $Message" -ForegroundColor Cyan
+    return [System.Diagnostics.Stopwatch]::StartNew()
+}
+
+function Complete-Phase {
+    param([System.Diagnostics.Stopwatch]$Clock, [string]$Message)
+    $Clock.Stop()
+    Write-Host ("  ok: {0} ({1})" -f $Message, (Format-Duration $Clock.Elapsed)) -ForegroundColor Green
+}
+
+# Write-Completion closes a successful install with what was installed, where it
+# went, and what to run next. The previous ending was a single green line naming
+# two 40-character SHAs, which said nothing about how to actually start LingTai
+# or where its state lives.
+function Write-Completion {
+    param(
+        [string]$BinDir,
+        [string]$GlobalDir,
+        [string]$Headline,
+        [System.Collections.Specialized.OrderedDictionary]$Facts
+    )
+    $rule = '-' * 60
+    Write-Host ''
+    Write-Host $rule -ForegroundColor Green
+    Write-Host "  LingTai: $Headline" -ForegroundColor Green
+    Write-Host $rule -ForegroundColor Green
+    Write-Host ''
+    # Each line is emitted as ONE Write-Host. A `-NoNewline` label followed by a
+    # second Write-Host renders correctly on a live console but splits across two
+    # lines as soon as the stream is redirected -- piping the install to a log, or
+    # a CI job capturing it, turned every label/value pair into two lines.
+    if ($Facts -and $Facts.Count -gt 0) {
+        $width = 0
+        foreach ($key in $Facts.Keys) { if ($key.Length -gt $width) { $width = $key.Length } }
+        foreach ($key in $Facts.Keys) {
+            Write-Host ("  {0}  {1}" -f $key.PadRight($width), $Facts[$key])
+        }
+        Write-Host ''
+    }
+    Write-Host '  Locations' -ForegroundColor Cyan
+    Write-Host "    binaries   $BinDir"
+    Write-Host "    state      $GlobalDir"
+    Write-Host "    runtime    $(Join-Path $GlobalDir 'runtime\venv')"
+    Write-Host ''
+    Write-Host '  Commands' -ForegroundColor Cyan
+    Write-Host '    lingtai-tui       start the terminal UI' -ForegroundColor Green
+    Write-Host '    lingtai-portal    start the web portal' -ForegroundColor Green
+    Write-Host ''
+    Write-Host ('  Total time: {0}' -f (Format-Duration $script:InstallClock.Elapsed)) -ForegroundColor DarkGray
+    if (-not $NoModifyPath) {
+        Write-Host '  Open a new terminal so the updated PATH is picked up everywhere.' -ForegroundColor Yellow
+    }
+    Write-Host ''
+}
+
 # Fail loud: print an actionable message to the ERROR stream and throw so the
 # outer catch turns it into a non-zero exit. Never swallow, never fake success.
 function Fail {
@@ -1111,6 +1200,69 @@ function Write-KernelProvenance {
     Write-Ok "Wrote kernel provenance -> $path"
 }
 
+# Copy-ManagedBinary installs one built/staged binary over its destination, even
+# when that destination is currently RUNNING.
+#
+# Windows refuses to overwrite or delete a mapped executable image, so a plain
+# `Copy-Item -Force` onto a running lingtai-tui.exe fails with "The process
+# cannot access the file ... because it is being used by another process."
+# Because the destination copy is the very last step, an ordinary `-Latest`
+# re-install with the TUI or portal open discarded a completed build -- several
+# minutes of checkout and compilation -- at the final instruction.
+#
+# Windows does, however, allow a running image to be RENAMED: the live process
+# keeps executing from the renamed file while the original name is freed
+# immediately. So park the old binary beside itself and retry the copy. The
+# running instance keeps the old code until it is restarted, which is inherent
+# to replacing a running program and is stated rather than papered over.
+#
+# This is the rename-then-replace half of what a from-scratch installer does
+# here; deliberately NOT the other half -- no process is killed. Terminating a
+# user's running agent supervisor to update a binary is a far worse outcome than
+# telling them to restart it.
+function Copy-ManagedBinary {
+    param([string]$Source, [string]$Destination)
+
+    try {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+        return
+    } catch {
+        if (-not (Test-Path -LiteralPath $Destination)) {
+            Fail "Could not install $(Split-Path -Leaf $Destination) into $(Split-Path -Parent $Destination) ($($_.Exception.Message))."
+        }
+    }
+
+    $parked = "$Destination.old-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    try {
+        Rename-Item -LiteralPath $Destination -NewName (Split-Path -Leaf $parked) -ErrorAction Stop
+    } catch {
+        Fail @"
+Could not replace $Destination because it is in use, and it could not be moved aside either ($($_.Exception.Message)).
+Close LingTai (lingtai-tui / lingtai-portal) and re-run; the completed build is kept and the next run reuses it.
+"@
+    }
+    Write-Warn "$(Split-Path -Leaf $Destination) was running; moved the old binary to $(Split-Path -Leaf $parked) and installed the new one. Restart it to pick up this build."
+    try {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    } catch {
+        # Put the original back so a failed replace never leaves BinDir without
+        # a working binary at the expected name.
+        try { Rename-Item -LiteralPath $parked -NewName (Split-Path -Leaf $Destination) -ErrorAction Stop } catch { }
+        Fail "Could not install $(Split-Path -Leaf $Destination) after moving the running binary aside ($($_.Exception.Message))."
+    }
+}
+
+# Remove-ParkedManagedBinaries deletes `*.old-<stamp>` binaries parked by an
+# earlier run whose process has since exited. Best-effort: one still held open
+# simply stays for the next install to collect.
+function Remove-ParkedManagedBinaries {
+    param([string]$BinDir)
+    if (-not (Test-Path -LiteralPath $BinDir)) { return }
+    foreach ($stale in @(Get-ChildItem -LiteralPath $BinDir -Filter 'lingtai-*.exe.old-*' -File -ErrorAction SilentlyContinue)) {
+        try { Remove-Item -LiteralPath $stale.FullName -Force -ErrorAction Stop } catch { }
+    }
+}
+
 # Remove-OrphanedKernelDistInfo deletes LingTai's OWN unusable .dist-info
 # directories from the installer-managed venv before an install writes a new
 # one.
@@ -1207,6 +1359,83 @@ function Install-Venv {
     }
 }
 
+# --- Mainland-China build mirrors --------------------------------------------
+
+# Initialize-BuildMirrors is the native-Windows counterpart to install.sh's
+# CN-restricted-network fallback, which install.ps1 previously had no equivalent
+# of at all -- so a mainland-China -Latest install fetched Go modules from
+# proxy.golang.org and npm packages from registry.npmjs.org and simply hung
+# until they timed out. The POSIX script has covered this since it gained
+# --latest; this closes the gap for the Windows path.
+#
+# Same policy as install.sh, deliberately, so the two installers behave alike:
+#
+#   * Probe once, bounded (LINGTAI_MIRROR_TIMEOUT, default 3s). Only if
+#     proxy.golang.org is unreachable do we switch anything.
+#   * FAIL OPEN. A probe that errors, times out, or is ambiguous means "not
+#     CN-restricted" -- never switch mirrors on a bad guess.
+#   * NEVER override an explicit pre-set value. A user (or CI) who exported
+#     GOPROXY/GOSUMDB/NPM_CONFIG_REGISTRY/LINGTAI_PYPI_INDEX_URL already stated
+#     their intent; install.sh keys that decision off GOPROXY and so does this.
+#   * LINGTAI_ASSUME_CN=1 forces the mirror set with no probe, for hosts with no
+#     outbound access to the probe URL at all.
+#
+# Returns the PyPI index URL the pip steps should use, or $null for pip's
+# default. This is the only mirror decision the caller has to thread through;
+# Go and npm read theirs from the process environment the builds inherit.
+function Initialize-BuildMirrors {
+    $explicitIndex = $env:LINGTAI_PYPI_INDEX_URL
+    if (-not [string]::IsNullOrWhiteSpace($explicitIndex)) {
+        Write-Step "Using LINGTAI_PYPI_INDEX_URL for Python dependencies: $explicitIndex"
+        return $explicitIndex
+    }
+
+    $timeout = 3
+    if ($env:LINGTAI_MIRROR_TIMEOUT -match '^\d+$') { $timeout = [int]$env:LINGTAI_MIRROR_TIMEOUT }
+
+    $assumeCn = ($env:LINGTAI_ASSUME_CN -eq '1')
+    $goproxyPreset = -not [string]::IsNullOrWhiteSpace($env:GOPROXY)
+
+    if (-not $assumeCn) {
+        if ($goproxyPreset) {
+            Write-Step "GOPROXY is already set; leaving build mirrors as configured."
+            return $null
+        }
+        $reachable = $false
+        try {
+            $probe = Invoke-WebRequest -Uri 'https://proxy.golang.org/github.com/golang/go/@latest' `
+                -UseBasicParsing -TimeoutSec $timeout -Method Head -ErrorAction Stop
+            $reachable = ($null -ne $probe)
+        } catch {
+            $reachable = $false
+        }
+        if ($reachable) { return $null }
+        Write-Info "proxy.golang.org unreachable within ${timeout}s; using China-friendly build mirrors."
+    } else {
+        Write-Info 'LINGTAI_ASSUME_CN=1; using China-friendly build mirrors without probing.'
+    }
+
+    if (-not $goproxyPreset) {
+        $env:GOPROXY = 'https://goproxy.cn,direct'
+        Write-Step "GOPROXY=$env:GOPROXY"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:GOSUMDB)) {
+        $env:GOSUMDB = 'sum.golang.google.cn'
+        Write-Step "GOSUMDB=$env:GOSUMDB"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:NPM_CONFIG_REGISTRY)) {
+        $env:NPM_CONFIG_REGISTRY = 'https://registry.npmmirror.com'
+        Write-Step "NPM_CONFIG_REGISTRY=$env:NPM_CONFIG_REGISTRY"
+    }
+    # Same mirror install.sh's PYPI_INDEX_URL_GITEE_DEFAULT uses, so a CN host
+    # resolves Python dependencies from a reachable index too. LingTai's own
+    # bytes are still never fetched from an index by name -- only the local
+    # wheel/checkout path is installed, and this affects its dependencies only.
+    $index = 'https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple'
+    Write-Step "Python dependency index: $index"
+    return $index
+}
+
 # --- Current-main development install ---------------------------------------
 
 function Resolve-MainSha {
@@ -1218,10 +1447,66 @@ function Resolve-MainSha {
     return $sha.ToLowerInvariant()
 }
 
+# Invoke-NativeBuild runs one build/checkout command, captures its combined
+# output to a log, and reports elapsed time.
+#
+# Previously this was `& $Tool @Arguments | Out-Null`, which had two costs. The
+# terminal went silent for minutes across `npm ci` and two Go builds with no
+# indication of what was running, and a failure surfaced ONLY as "(exit N)" --
+# the compiler/npm diagnostic that actually said why had been discarded, so the
+# error named the step but never the cause. Output now lands in $LogPath, the
+# tail is printed on failure, and the full log is kept for inspection.
+#
+# stderr is merged with `2>&1` so a failure's real diagnostic is captured, and
+# that REQUIRES relaxing $ErrorActionPreference around the call: on Windows
+# PowerShell 5.1 any text a native command writes to stderr becomes a
+# NativeCommandError under the script's fail-loud 'Stop' policy, which would
+# abort on npm/go progress chatter that is not an error at all. The real exit
+# code is captured immediately and remains the only success signal.
 function Invoke-NativeBuild {
-    param([string]$Tool, [string[]]$Arguments, [string]$Failure)
-    & $Tool @Arguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail "$Failure (exit $LASTEXITCODE)." }
+    param(
+        [string]$Tool,
+        [string[]]$Arguments,
+        [string]$Failure,
+        [string]$LogPath
+    )
+    $rendered = "$Tool $($Arguments -join ' ')"
+    Write-Step $rendered
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+
+    $saved = $ErrorActionPreference
+    $exitCode = 1
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& $Tool @Arguments 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ }
+        })
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+    $clock.Stop()
+
+    if ($LogPath) {
+        try {
+            $header = @("", "### $rendered (exit $exitCode, $(Format-Duration $clock.Elapsed))")
+            [System.IO.File]::AppendAllLines($LogPath, [string[]](@($header) + $lines))
+        } catch {
+            # A log-write failure must never mask the build result itself.
+            Write-Warn "Could not append to the build log $LogPath ($($_.Exception.Message))."
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        $tail = @($lines | Select-Object -Last 30)
+        if ($tail.Count -gt 0) {
+            Write-Host "  --- last $($tail.Count) line(s) of output ---" -ForegroundColor DarkGray
+            foreach ($line in $tail) { Write-Host "  | $line" -ForegroundColor DarkGray }
+        }
+        $where = if ($LogPath) { " Full output: $LogPath." } else { '' }
+        Fail "$Failure (exit $exitCode).$where"
+    }
+    Write-Host ("      done in {0}" -f (Format-Duration $clock.Elapsed)) -ForegroundColor DarkGray
 }
 
 function Confirm-DevPrerequisites {
@@ -1430,8 +1715,10 @@ function Confirm-DevPrerequisitesAfterBootstrap {
 # installer-owned staging directory until both binaries and their versions are
 # validated, so destination writes happen only after the complete pair exists.
 function Build-LatestMain {
+    $phase = Start-Phase 'Checking build prerequisites (git, Go, Node.js/npm, CPython 3.11-3.13) ...'
     $prerequisites = Confirm-DevPrerequisites
     if ($prerequisites.Deferred) { return @{ DryRun = $true; PrerequisitesDeferred = $true } }
+    Complete-Phase -Clock $phase -Message 'prerequisites satisfied'
     $tuiSha = Resolve-MainSha -RemoteUrl $RepoUrl -Label 'TUI'
     $kernelSha = Resolve-MainSha -RemoteUrl 'https://github.com/Lingtai-AI/lingtai-kernel.git' -Label 'kernel'
     Write-Info "Resolved TUI main commit: $tuiSha"
@@ -1444,32 +1731,51 @@ function Build-LatestMain {
     $stage = New-StagingDir
     $tuiSource = Join-Path $stage 'lingtai'
     $kernelSource = Join-Path $stage 'lingtai-kernel'
-    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main',$RepoUrl,$tuiSource) -Failure 'TUI main checkout failed'
-    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'fetch','--depth','1','origin',$tuiSha) -Failure 'TUI pinned commit fetch failed'
-    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'checkout','--detach',$tuiSha) -Failure 'TUI pinned checkout failed'
+    # One log for the whole build, beside the staging tree the installer already
+    # keeps for evidence, so a failure tail always has a full transcript behind it.
+    $buildLog = Join-Path $stage 'build.log'
+    Write-Step "Build log: $buildLog"
+
+    $phase = Start-Phase 'Checking out the pinned TUI commit ...'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main',$RepoUrl,$tuiSource) -Failure 'TUI main checkout failed' -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'fetch','--depth','1','origin',$tuiSha) -Failure 'TUI pinned commit fetch failed' -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$tuiSource,'checkout','--detach',$tuiSha) -Failure 'TUI pinned checkout failed' -LogPath $buildLog
     $actualTui = (& git -C $tuiSource rev-parse HEAD).Trim().ToLowerInvariant()
     if ($actualTui -ne $tuiSha) { Fail "TUI checkout mismatch: resolved $tuiSha but checked out $actualTui. Staging kept at $stage." }
+    Complete-Phase -Clock $phase -Message "TUI at $($tuiSha.Substring(0,12))"
 
-    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main','https://github.com/Lingtai-AI/lingtai-kernel.git',$kernelSource) -Failure 'kernel main checkout failed'
-    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'fetch','--depth','1','origin',$kernelSha) -Failure 'kernel pinned commit fetch failed'
-    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'checkout','--detach',$kernelSha) -Failure 'kernel pinned checkout failed'
+    $phase = Start-Phase 'Checking out the pinned kernel commit ...'
+    Invoke-NativeBuild -Tool 'git' -Arguments @('clone','--depth','1','--branch','main','https://github.com/Lingtai-AI/lingtai-kernel.git',$kernelSource) -Failure 'kernel main checkout failed' -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'fetch','--depth','1','origin',$kernelSha) -Failure 'kernel pinned commit fetch failed' -LogPath $buildLog
+    Invoke-NativeBuild -Tool 'git' -Arguments @('-C',$kernelSource,'checkout','--detach',$kernelSha) -Failure 'kernel pinned checkout failed' -LogPath $buildLog
     $actualKernel = (& git -C $kernelSource rev-parse HEAD).Trim().ToLowerInvariant()
     if ($actualKernel -ne $kernelSha) { Fail "kernel checkout mismatch: resolved $kernelSha but checked out $actualKernel. Staging kept at $stage." }
+    Complete-Phase -Clock $phase -Message "kernel at $($kernelSha.Substring(0,12))"
 
     $version = "main-$tuiSha"
     $tuiOut = Join-Path $stage 'lingtai-tui.exe'
     $portalOut = Join-Path $stage 'lingtai-portal.exe'
+
+    $phase = Start-Phase 'Building the portal web frontend (npm ci + npm run build; the longest step) ...'
     Push-Location (Join-Path $tuiSource 'portal/web')
     try {
-        Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed'
-        Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed'
+        Invoke-NativeBuild -Tool 'npm' -Arguments @('ci') -Failure 'portal frontend dependency install failed' -LogPath $buildLog
+        Invoke-NativeBuild -Tool 'npm' -Arguments @('run','build') -Failure 'portal frontend build failed' -LogPath $buildLog
     } finally { Pop-Location }
+    Complete-Phase -Clock $phase -Message 'portal web assets built'
+
+    $phase = Start-Phase 'Compiling lingtai-tui.exe ...'
     Push-Location (Join-Path $tuiSource 'tui')
-    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$tuiOut,'.') -Failure 'lingtai-tui.exe build failed' }
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$tuiOut,'.') -Failure 'lingtai-tui.exe build failed' -LogPath $buildLog }
     finally { Pop-Location }
+    Complete-Phase -Clock $phase -Message 'lingtai-tui.exe compiled'
+
+    $phase = Start-Phase 'Compiling lingtai-portal.exe ...'
     Push-Location (Join-Path $tuiSource 'portal')
-    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' }
+    try { Invoke-NativeBuild -Tool 'go' -Arguments @('build','-trimpath','-ldflags',"-X main.version=$version",'-o',$portalOut,'.') -Failure 'lingtai-portal.exe build failed' -LogPath $buildLog }
     finally { Pop-Location }
+    Complete-Phase -Clock $phase -Message 'lingtai-portal.exe compiled'
+
     Confirm-StagedVersion -StagedTui $tuiOut -Requested $version
     $portalProbe = & $portalOut 'version' 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0 -or $portalProbe.Trim() -ne "lingtai-portal $version") {
@@ -1479,14 +1785,18 @@ function Build-LatestMain {
 }
 
 function Install-MainVenv {
-    param([string]$KernelSource, [string]$KernelSha, [string]$GlobalDir)
+    param([string]$KernelSource, [string]$KernelSha, [string]$GlobalDir, [string]$PythonIndexUrl)
+    $phase = Start-Phase 'Provisioning the Python runtime venv and installing the pinned kernel ...'
     $bootstrap = Find-VenvPython
     $venvDir = Join-Path $GlobalDir 'runtime\venv'
     if (-not (Test-Path -LiteralPath $venvDir)) {
+        Write-Step "Creating the venv at $venvDir"
         New-Item -ItemType Directory -Force -Path (Split-Path $venvDir -Parent) | Out-Null
         $venvArgs = @($bootstrap.Args) + @('-m','venv',$venvDir)
         & $bootstrap.Launcher @venvArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "-Latest could not create the runtime venv at $venvDir." }
+    } else {
+        Write-Step "Reusing the existing venv at $venvDir"
     }
     $python = Join-Path $venvDir 'Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { Fail "-Latest runtime venv has no Scripts\python.exe at $venvDir." }
@@ -1494,17 +1804,28 @@ function Install-MainVenv {
     Remove-OrphanedKernelDistInfo -VenvDir $venvDir
     $head = (& git -C $KernelSource rev-parse HEAD).Trim().ToLowerInvariant()
     if ($head -ne $KernelSha) { Fail "Kernel source changed before install: expected $KernelSha, got $head." }
+    # Only third-party DEPENDENCY resolution goes through an index; LingTai's own
+    # bytes still come exclusively from the verified local checkout path below.
+    $indexArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($PythonIndexUrl)) {
+        $indexArgs = @('--index-url', $PythonIndexUrl)
+        Write-Step "Resolving dependencies from $PythonIndexUrl"
+    }
     Write-Info "Installing lingtai from the verified checked-out kernel source path (non-editable local build) ..."
-    & $python '-m' 'pip' 'install' $KernelSource | Out-Null
+    Write-Step 'pip install (this resolves the dependency tree and can take a few minutes)'
+    $pipArgs = @('-m','pip','install') + $indexArgs + @($KernelSource)
+    & $python @pipArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "-Latest kernel source install failed (exit $LASTEXITCODE)." }
     # A reused managed venv can already contain the same LingTai version with a
     # stale editable/local direct_url.json. The dependency-resolving install
     # above may then report the requirement satisfied without replacing that
     # root package. Reinstall only LingTai itself from this exact checked-out
     # source so provenance is deterministic while preserving resolved deps.
+    Write-Step 'pip install --force-reinstall --no-deps (pins provenance to this exact checkout)'
     & $python '-m' 'pip' 'install' '--force-reinstall' '--no-deps' $KernelSource | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "-Latest pinned kernel reinstall failed (exit $LASTEXITCODE)." }
     $version = Confirm-KernelImport -VenvPython $python -ExpectedVersion '' -VenvDir $venvDir -KernelSource $KernelSource
+    Complete-Phase -Clock $phase -Message "lingtai $version installed into the managed venv"
     return @{ KernelSource='main'; KernelVersion=$version; KernelProvider='github'; KernelCommit=$KernelSha }
 }
 
@@ -1512,8 +1833,9 @@ function Install-FromBuiltMain {
     param([hashtable]$Build, [string]$BinDir)
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'; $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
-    Copy-Item -LiteralPath $Build.Tui -Destination $tuiDest -Force
-    Copy-Item -LiteralPath $Build.Portal -Destination $portalDest -Force
+    Remove-ParkedManagedBinaries -BinDir $BinDir
+    Copy-ManagedBinary -Source $Build.Tui -Destination $tuiDest
+    Copy-ManagedBinary -Source $Build.Portal -Destination $portalDest
     Write-Ok "Installed pinned main binaries into $BinDir"
     return @($tuiDest,$portalDest)
 }
@@ -1583,14 +1905,15 @@ function Install-FromLocalArtifact {
     # 5. Install idempotently into BinDir (only reached once both binaries and
     # the staged TUI version have been validated).
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    Remove-ParkedManagedBinaries -BinDir $BinDir
     $tuiDest = Join-Path $BinDir 'lingtai-tui.exe'
-    Copy-Item -LiteralPath $tui.FullName -Destination $tuiDest -Force
+    Copy-ManagedBinary -Source $tui.FullName -Destination $tuiDest
     Write-Ok "Installed lingtai-tui.exe -> $BinDir"
 
     $managed = New-Object System.Collections.Generic.List[string]
     $managed.Add($tuiDest)
     $portalDest = Join-Path $BinDir 'lingtai-portal.exe'
-    Copy-Item -LiteralPath $portal.FullName -Destination $portalDest -Force
+    Copy-ManagedBinary -Source $portal.FullName -Destination $portalDest
     Write-Ok "Installed lingtai-portal.exe -> $BinDir"
     $managed.Add($portalDest)
 
@@ -1710,18 +2033,28 @@ function Invoke-Main {
             Fail "-Latest cannot be combined with $($conflicts -join ', '). Current-main mode always builds both binaries and provisions the checked-out kernel runtime."
         }
         Write-Info 'Mode: current main development install (-Latest)'
+        Write-Step "Binaries -> $BinDir"
+        Write-Step "State    -> $GlobalDir"
+        # 7 phases: prerequisites, 2 checkouts, portal web, 2 Go builds, runtime venv.
+        Set-PhaseTotal 7
+        $pythonIndexUrl = if ($DryRun) { $null } else { Initialize-BuildMirrors }
         $mainBuild = Build-LatestMain
         if ($DryRun) {
             Write-Step "[dry-run] would install the kernel checkout into $GlobalDir\runtime\venv"
             Write-Step "[dry-run] would copy both pinned binaries into $BinDir and write additive install.json main provenance"
             return
         }
-        $mainKernel = Install-MainVenv -KernelSource $mainBuild.KernelSource -KernelSha $mainBuild.KernelSha -GlobalDir $GlobalDir
+        $mainKernel = Install-MainVenv -KernelSource $mainBuild.KernelSource -KernelSha $mainBuild.KernelSha -GlobalDir $GlobalDir -PythonIndexUrl $pythonIndexUrl
         $mainManaged = Install-FromBuiltMain -Build $mainBuild -BinDir $BinDir
         Add-ToPath -Dir $BinDir
         Write-InstallMetadata -GlobalDir $GlobalDir -Prefix $prefix -BinDir $BinDir -RequestedRef 'main' -ResolvedRef 'main' -ResolvedCommit $mainBuild.TuiSha -InstallKind 'powershell-latest-main' -ManagedBinaries $mainManaged -KernelSource $mainKernel.KernelSource -KernelVersion $mainKernel.KernelVersion -KernelProvider $mainKernel.KernelProvider -SourceMode 'latest-main' -TuiCommit $mainBuild.TuiSha -KernelCommit $mainBuild.KernelSha
-        Write-Host ''
-        Write-Host "LingTai current-main development install complete (TUI $($mainBuild.TuiSha); kernel $($mainBuild.KernelSha))." -ForegroundColor Green
+        Write-Completion -BinDir $BinDir -GlobalDir $GlobalDir -Headline 'Current-main development install complete.' -Facts ([ordered]@{
+            'TUI commit'     = $mainBuild.TuiSha
+            'kernel commit'  = $mainBuild.KernelSha
+            'kernel version' = $mainKernel.KernelVersion
+            'stamped as'     = $mainBuild.Version
+            'build log'      = (Join-Path $mainBuild.Stage 'build.log')
+        })
         return
     }
 
