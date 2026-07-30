@@ -169,6 +169,30 @@ foreach ($name in $IsolatedVars) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
+# Restore-IsolatedEnv puts every isolated variable back to the value captured
+# above -- and, crucially, DELETES the ones that were never set on the host
+# instead of assigning $null to them.
+#
+# [Environment]::SetEnvironmentVariable($name, $null, 'Process') does not fully
+# remove the name from this process's native environment block; an empty entry
+# lingers, and every CHILD process inherits it. For PROCESSOR_ARCHITEW6432 --
+# which Set-DevBootstrapEnv sets and which is absent on a normal amd64 host --
+# that lingering empty entry makes Windows hand the child an EMPTY
+# PROCESSOR_ARCHITECTURE, so install.ps1's Get-Arch aborted every public-mode
+# contract with "Unsupported processor architecture ''" once CONTRACT 21 had
+# run, even though this process still reported AMD64 correctly. Remove-Item
+# Env:\ deletes the entry outright and children inherit the real host value.
+function Restore-IsolatedEnv {
+    foreach ($name in $IsolatedVars) {
+        $value = $SavedEnv[$name]
+        if ($null -eq $value) {
+            if (Test-Path -LiteralPath "Env:\$name") { Remove-Item -LiteralPath "Env:\$name" }
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+}
+
 # The test root deliberately contains a SPACE so that every child path derived
 # from it forces the installer invocation and Windows path handling through the
 # argument-quoting path (a common source of Windows installer bugs).
@@ -1158,9 +1182,7 @@ try {
 
     # CONTRACT 21 mutates only this test process's environment. Restore the
     # original host values before the legacy fixture/compiler contracts run.
-    foreach ($name in $IsolatedVars) {
-        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
-    }
+    Restore-IsolatedEnv
 
     # CONTRACT 20: current-main is an explicit, self-contained mode. Its
     # runtime and source pins are not optional, so release/local-artifact and
@@ -1997,9 +2019,7 @@ version = "0.18.0"
     # anything outside $TestRoot. The throwaway $TestRoot is intentionally left
     # on disk for post-mortem inspection by the CI job.
     # -----------------------------------------------------------------------
-    foreach ($name in $IsolatedVars) {
-        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
-    }
+    Restore-IsolatedEnv
     [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', $null, 'Process')
     [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', $null, 'Process')
     Stop-FakeGitHubApi
