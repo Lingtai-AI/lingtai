@@ -131,7 +131,7 @@ The TUI's filesystem window into an agent working directory (`<project>/.lingtai
 | `LocationStale(loc, maxAge)` | `tui/internal/fs/location.go:79-90` | true if `ResolvedAt` exceeds `maxAge` |
 | `UpdateHumanLocation` / `StoreResolvedHumanLocation` / `storeResolvedHumanLocationLocked` | `tui/internal/fs/location.go:92-145` | coalesces stale same-manifest lookups; the resolved-value entry point synchronously reuses an existing lookup through the identical transaction, latest-manifest reread, merge-only `location` commit, and shared unique-temp atomic replacement |
 | **network.go** | | |
-| `BuildNetwork(baseDir)` | `tui/internal/fs/network.go:8` | full topology: nodes, avatar edges, contact edges, mail edges, stats |
+| `NetworkOptions` / `BuildNetwork(baseDir)` / `BuildNetworkWithOptions` | `tui/internal/fs/network.go:8-79` | typed full topology by default; `SkipMailEdges` keeps nodes/avatar/contact/activity shape while omitting the historical mail scan and its total |
 | **activity.go** | | |
 | `ComputeNetworkActivity(baseDir)` | `tui/internal/fs/activity.go:42` | lightweight non-human project activity badge: folds agent state, heartbeat liveness, `.status.json` activity evidence, and running daemons into active, daemon-active, idle, asleep, suspend |
 | `hasStatusActivity(agentDir, now)` | `tui/internal/fs/activity.go:174` | treats heartbeat-live agents as active when status-snapshot evidence is fresh: `active_turn` via mtime/started_at/last_progress_at within 600s, or `last_progress_at` within 90s |

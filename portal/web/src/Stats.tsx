@@ -10,7 +10,7 @@ const items: { key: keyof Omit<NetworkStats, 'total_mails'>; stateKey: string }[
   { key: 'suspended', stateKey: 'SUSPENDED' },
 ];
 
-export function Stats({ stats, totalAgents, lang, theme }: { stats: NetworkStats; totalAgents: number; lang: string; theme: Theme }) {
+export function Stats({ stats, totalAgents, mailStatsAvailable, lang, theme }: { stats: NetworkStats; totalAgents: number; mailStatsAvailable: boolean; lang: string; theme: Theme }) {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
       <div style={{ textAlign: 'center' }}>
@@ -27,11 +27,15 @@ export function Stats({ stats, totalAgents, lang, theme }: { stats: NetworkStats
           </div>
         );
       })}
-      <div style={{ width: 1, height: 28, background: theme.divider, margin: '0 4px' }} />
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 18, fontWeight: 'bold', color: theme.edgeColors.mail }}>{stats.total_mails}</div>
-        <div style={{ fontSize: 9, color: theme.edgeColors.mail }}>{t(lang, 'mails')}</div>
-      </div>
+      {mailStatsAvailable && (
+        <>
+          <div style={{ width: 1, height: 28, background: theme.divider, margin: '0 4px' }} />
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 'bold', color: theme.edgeColors.mail }}>{stats.total_mails}</div>
+            <div style={{ fontSize: 9, color: theme.edgeColors.mail }}>{t(lang, 'mails')}</div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

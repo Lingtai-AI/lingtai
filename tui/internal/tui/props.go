@@ -35,9 +35,10 @@ type PropsModel struct {
 	agentNodes     []fs.AgentNode // discovered agents (for picker display)
 
 	// Right panel: dashboard snapshot
-	network    fs.Network
-	tokens     fs.TokenTotals
-	adminStart string // admin agent's started_at timestamp
+	network            fs.Network
+	mailStatsAvailable bool
+	tokens             fs.TokenTotals
+	adminStart         string // admin agent's started_at timestamp
 
 	// AutoRefresh reflects whether the app-level 1s auto-refresh is enabled.
 	// It only drives the footer hint (a "live" badge); the actual reloading is
@@ -92,17 +93,18 @@ func NewPropsModel(baseDir, orchDir, globalDir string) PropsModel {
 }
 
 type propsLoadMsg struct {
-	network        fs.Network
-	tokens         fs.TokenTotals
-	selectedTokens fs.TokenTotals
-	selectedStatus fs.AgentStatus
-	adminStart     string
-	agentDirs      []string
-	agentNodes     []fs.AgentNode
+	network            fs.Network
+	mailStatsAvailable bool
+	tokens             fs.TokenTotals
+	selectedTokens     fs.TokenTotals
+	selectedStatus     fs.AgentStatus
+	adminStart         string
+	agentDirs          []string
+	agentNodes         []fs.AgentNode
 }
 
 func (m PropsModel) loadData() tea.Msg {
-	net, _ := fs.BuildNetwork(m.baseDir)
+	net, _ := fs.BuildNetworkWithOptions(m.baseDir, fs.NetworkOptions{SkipMailEdges: true})
 
 	var dirs []string
 	for _, n := range net.Nodes {
@@ -129,13 +131,14 @@ func (m PropsModel) loadData() tea.Msg {
 	}
 
 	return propsLoadMsg{
-		network:        net,
-		tokens:         totals,
-		selectedTokens: selectedTokens,
-		selectedStatus: selectedStatus,
-		adminStart:     adminStart,
-		agentDirs:      allDirs,
-		agentNodes:     net.Nodes,
+		network:            net,
+		mailStatsAvailable: false,
+		tokens:             totals,
+		selectedTokens:     selectedTokens,
+		selectedStatus:     selectedStatus,
+		adminStart:         adminStart,
+		agentDirs:          allDirs,
+		agentNodes:         net.Nodes,
 	}
 }
 
@@ -187,6 +190,7 @@ func (m PropsModel) Update(msg tea.Msg) (PropsModel, tea.Cmd) {
 
 	case propsLoadMsg:
 		m.network = msg.network
+		m.mailStatsAvailable = msg.mailStatsAvailable
 		m.tokens = msg.tokens
 		m.selectedTokens = msg.selectedTokens
 		m.selectedStatus = msg.selectedStatus
@@ -828,11 +832,14 @@ func (m PropsModel) renderRight(maxW int) string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(formatComma(m.tokens.APICalls)))
 
-	// Mail
-	lines = append(lines, "")
-	lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_mails")))
-	lines = append(lines, "")
-	lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(fmt.Sprintf("%d", stats.TotalMails)))
+	// Mail history is intentionally omitted from the live kanban snapshot.
+	// Do not present the fast path's zero-value total as authoritative.
+	if m.mailStatsAvailable {
+		lines = append(lines, "")
+		lines = append(lines, "  "+sectionStyle.Render(i18n.T("props.total_mails")))
+		lines = append(lines, "")
+		lines = append(lines, "  "+labelStyle.Render("Total: ")+valueStyle.Render(fmt.Sprintf("%d", stats.TotalMails)))
+	}
 
 	// Avatar tree
 	lines = append(lines, "")
