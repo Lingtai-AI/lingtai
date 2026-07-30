@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -151,6 +152,139 @@ func TestLoadCodexPool_MalformedFileErrors(t *testing.T) {
 	}
 	if _, err := loadCodexPool(dir); err == nil {
 		t.Fatal("malformed pool file should return a parse error")
+	}
+}
+
+func TestCodexPoolAccountWeightDecoding_FlatAndClassified(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	type weightCase struct {
+		name    string
+		literal string
+		want    int64
+		valid   bool
+	}
+	cases := []weightCase{
+		{name: "missing", want: 1, valid: true},
+		{name: "plain-positive", literal: "3", want: 3, valid: true},
+		{name: "plain-zero", literal: "0", want: 0, valid: true},
+		{name: "plain-negative", literal: "-3", want: -3, valid: true},
+		{name: "decimal-positive", literal: "1.0", want: 1, valid: true},
+		{name: "decimal-trailing-zeros", literal: "1.000000000000000000000000", want: 1, valid: true},
+		{name: "exponent-positive", literal: "2e0", want: 2, valid: true},
+		{name: "scaled-decimal-exponent", literal: "2.50e1", want: 25, valid: true},
+		{name: "negative-exponent-still-integral", literal: "10e-1", want: 1, valid: true},
+		{name: "fraction", literal: "1.5"},
+		{name: "fractional-exponent", literal: "15e-1"},
+		{name: "decimal-zero", literal: "0.0"},
+		{name: "negative-decimal", literal: "-2.0"},
+		{name: "negative-exponent", literal: "-2e0"},
+		{name: "string", literal: `"2"`},
+		{name: "bool", literal: "true"},
+		{name: "null", literal: "null"},
+		{name: "malformed-object", literal: "{}"},
+		{name: "malformed-array", literal: "[2]"},
+		{name: "plain-overflow", literal: "9223372036854775808"},
+		{name: "exponent-overflow", literal: "1e100"},
+		{name: "huge-exponent-rejected-before-expansion", literal: "1e309"},
+	}
+	if strconv.IntSize == 64 {
+		cases = append(cases,
+			weightCase{name: "above-float64-integer-precision", literal: "9007199254740993.0", want: 9007199254740993, valid: true},
+			weightCase{name: "native-int-max-decimal", literal: "9223372036854775807.0", want: 9223372036854775807, valid: true},
+		)
+	}
+
+	entries := make([]string, 0, len(cases))
+	for _, tc := range cases {
+		weight := ""
+		if tc.literal != "" {
+			weight = `,"weight":` + tc.literal
+		}
+		entries = append(entries, `{"path":"codex-auth/`+tc.name+`.json"`+weight+`}`)
+	}
+	accounts := strings.Join(entries, ",")
+
+	for _, classified := range []bool{false, true} {
+		dir := t.TempDir()
+		var raw string
+		if classified {
+			raw = `{"version":2,"models":{"gpt-test":[` + accounts + `]}}`
+		} else {
+			raw = `{"version":1,"accounts":[` + accounts + `]}`
+		}
+		if err := os.WriteFile(codexPoolPath(dir), []byte(raw), 0o644); err != nil {
+			t.Fatalf("classified=%v seed pool: %v", classified, err)
+		}
+
+		pool, err := loadCodexPool(dir)
+		if err != nil {
+			t.Fatalf("classified=%v load pool: %v", classified, err)
+		}
+		var got []codexPoolAccount
+		if classified {
+			got = (*pool.Models)["gpt-test"]
+		} else {
+			got = pool.Accounts
+		}
+		wantDropped := 0
+		for _, tc := range cases {
+			if !tc.valid && tc.literal != "" {
+				wantDropped++
+			}
+		}
+		if pool.DroppedEntries != wantDropped {
+			t.Errorf("classified=%v dropped=%d, want %d (got=%#v)", classified, pool.DroppedEntries, wantDropped, got)
+		}
+		if len(got) != len(cases)-wantDropped {
+			t.Fatalf("classified=%v decoded accounts=%d, want %d (got=%#v)", classified, len(got), len(cases)-wantDropped, got)
+		}
+		for _, tc := range cases {
+			if !tc.valid {
+				continue
+			}
+			path := "codex-auth/" + tc.name + ".json"
+			var found *codexPoolAccount
+			for i := range got {
+				if got[i].Path == path {
+					found = &got[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Errorf("classified=%v valid account %q was dropped", classified, path)
+				continue
+			}
+			if int64(found.Weight) != tc.want {
+				t.Errorf("classified=%v %q weight=%d, want %d", classified, tc.literal, found.Weight, tc.want)
+			}
+		}
+	}
+}
+
+func TestCodexPoolAccountWeightWriterRoundTrip_PreservesZeroAndNegative(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := []byte(`{"version":1,"accounts":[{"path":"codex-auth/zero.json","weight":0},{"path":"codex-auth/negative.json","weight":-3}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatalf("seed pool: %v", err)
+	}
+	pool, err := loadCodexPool(dir)
+	if err != nil {
+		t.Fatalf("load pool: %v", err)
+	}
+	if err := saveCodexPool(dir, pool); err != nil {
+		t.Fatalf("save pool: %v", err)
+	}
+	written, err := os.ReadFile(codexPoolPath(dir))
+	if err != nil {
+		t.Fatalf("read saved pool: %v", err)
+	}
+	body := string(written)
+	if !strings.Contains(body, `"weight": 0`) || !strings.Contains(body, `"weight": -3`) {
+		t.Errorf("saved pool did not preserve canonical zero/negative integers: %s", body)
+	}
+	if len(pool.Accounts) != 2 || pool.Accounts[0].Weight != 0 || pool.Accounts[1].Weight != -3 {
+		t.Errorf("loaded weights = %#v, want 0 and -3", pool.Accounts)
 	}
 }
 

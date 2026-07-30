@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +82,75 @@ type codexPoolAccount struct {
 	Path    string `json:"path"`
 	Weight  int    `json:"weight"`
 	Enabled *bool  `json:"enabled,omitempty"`
+}
+
+var errCodexPoolInvalidWeight = errors.New("invalid codex pool account weight")
+
+// UnmarshalJSON preserves the pool's missing-weight default without routing
+// numeric acceptance through float64. Plain integer spellings retain their
+// exact native-int value (including 0/negative); decimal/exponent spellings are
+// accepted only when their exact value is a positive native int.
+func (a *codexPoolAccount) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Path    string          `json:"path"`
+		Weight  json.RawMessage `json:"weight"`
+		Enabled *bool           `json:"enabled,omitempty"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	weight, err := parseCodexPoolWeight(wire.Weight)
+	if err != nil {
+		return err
+	}
+	*a = codexPoolAccount{Path: wire.Path, Weight: weight, Enabled: wire.Enabled}
+	return nil
+}
+
+func parseCodexPoolWeight(raw json.RawMessage) (int, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return 1, nil
+	}
+	// Only a JSON number token may carry a weight. The enclosing account decode
+	// already guarantees that RawMessage contains one complete JSON value.
+	if c := trimmed[0]; c != '-' && (c < '0' || c > '9') {
+		return 0, errCodexPoolInvalidWeight
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	var num json.Number
+	if err := dec.Decode(&num); err != nil {
+		return 0, errCodexPoolInvalidWeight
+	}
+	s := num.String()
+	if !strings.ContainsAny(s, ".eE") {
+		value, err := strconv.ParseInt(s, 10, strconv.IntSize)
+		if err != nil {
+			return 0, errCodexPoolInvalidWeight
+		}
+		return int(value), nil
+	}
+
+	// ParseFloat is reject-only: it prevents unbounded exact expansion for huge
+	// exponents. Acceptance below is decided solely by big.Rat's exact value.
+	if f, err := strconv.ParseFloat(s, 64); err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
+		return 0, errCodexPoolInvalidWeight
+	}
+	exact, ok := new(big.Rat).SetString(s)
+	if !ok || !exact.IsInt() || exact.Sign() <= 0 {
+		return 0, errCodexPoolInvalidWeight
+	}
+	value := exact.Num()
+	if !value.IsInt64() {
+		return 0, errCodexPoolInvalidWeight
+	}
+	n := value.Int64()
+	if n > int64(^uint(0)>>1) {
+		return 0, errCodexPoolInvalidWeight
+	}
+	return int(n), nil
 }
 
 // codexPool is the on-disk pool file shape. Models (v2) classifies accounts by
