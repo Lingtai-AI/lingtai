@@ -271,8 +271,8 @@ type MailModel struct {
 	directUnreadSyncPending bool
 
 	// Home telemetry is resolved asynchronously off the render/input path (its
-	// I/O reaches sqlite + the token ledger + .status.json, which can stall on a
-	// locked/slow sidecar). View()/hasHomeTelemetry()/syncViewportHeight() read
+	// I/O reads one .status.json snapshot plus context-only fallbacks, which can
+	// stall on a slow volume). View()/hasHomeTelemetry()/syncViewportHeight() read
 	// this cached snapshot ONLY; the fetchHomeTelemetry background command
 	// refreshes it via homeTelemetryMsg. See home_telemetry.go's async note.
 	homeTelemetry          homeTelemetry // last-known snapshot; zero value renders no row

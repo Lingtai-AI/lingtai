@@ -12,16 +12,13 @@ import (
 )
 
 // moltSessionWindowQueryTimeout is a WORKER-LOCAL BACKSTOP that bounds how long
-// the molt-session-window sqlite3 subprocess may run before it is killed. It is
-// NOT the mechanism that protects the UI thread: home telemetry is gathered on a
-// background tea.Cmd (tui: fetchHomeTelemetry), never on the render (View) or
-// keypress (syncViewportHeight) path, so the UI never waits on this query. This
-// deadline exists only so a pathological sidecar — e.g. the kernel wedged holding
-// the write lock indefinitely — cannot pin a background worker forever; on expiry
+// the /kanban detail molt-session sqlite3 subprocess may run before it is killed.
+// Home reads the kernel-owned .status.json snapshot and never reaches SQLite.
+// This deadline exists only so a pathological sidecar - e.g. the kernel wedged
+// holding the write lock indefinitely - cannot pin a worker forever; on expiry
 // the query degrades to the last cached window (see moltWindowCache). It is
-// deliberately CONSERVATIVE (1s, far above a normal write's brief lock) precisely
-// because it no longer sits on a latency-sensitive path: a tight deadline here
-// would only cause spurious stale reads with no UI-responsiveness benefit.
+// deliberately CONSERVATIVE (1s, far above a normal write's brief lock) because
+// this path serves detail statistics rather than a latency-sensitive Home row.
 const moltSessionWindowQueryTimeout = 1 * time.Second
 
 // moltSessionWindowBusyTimeoutMS is the sqlite busy_timeout (milliseconds) applied
@@ -36,10 +33,9 @@ const moltSessionWindowBusyTimeoutMS = 150
 
 // moltSessionWindowCacheTTL is the minimum interval between two live sqlite
 // subprocess launches for the same agent's molt-session windows. It is a
-// secondary optimization: the TUI already debounces telemetry fetches at the
-// model level (tui: homeTelemetryTTL), so in practice this rarely fires, but it
-// keeps any other caller (and back-to-back background fetches) from relaunching
-// the subprocess needlessly. The molt window itself only moves when the kernel
+// secondary optimization: repeated /kanban detail reads may otherwise relaunch
+// the subprocess needlessly, so the cache keeps back-to-back detail fetches cheap.
+// The molt window itself only moves when the kernel
 // writes a new psyche_molt row (minutes apart at most), so a sub-second staleness
 // on the boundary is invisible to the token totals, which are separately re-summed
 // from the ledger by the caller.
@@ -59,13 +55,13 @@ type moltWindow struct {
 }
 
 // moltWindowCache holds the last successful molt-window query per agent. It is a
-// process-global cache shared across background telemetry fetches — the caller
-// (fs.SumMoltSessionTokenLedger, reached from the fetchHomeTelemetry tea.Cmd)
+// process-global cache shared across /kanban detail fetches — the caller
+// (fs.SumMoltSessionTokenLedger)
 // copies the model by value and so cannot hold the cache itself, exactly like
 // fs.moltSessionTokenLedgerCache. Its two jobs: (1) skip the subprocess entirely
 // within moltSessionWindowCacheTTL when the sidecar is unchanged, and (2) serve a
 // STALE window if a live query times out or errors, so a locked/slow database
-// degrades to stale-but-cheap telemetry instead of the expensive events.jsonl
+// degrades to stale-but-cheap detail statistics instead of the expensive events.jsonl
 // fallback path.
 var moltWindowCache = struct {
 	sync.Mutex
@@ -90,7 +86,7 @@ func moltWindowNow() time.Time {
 // the sqlite sidecar. It returns the current session lower bound, the previous
 // session lower bound, and the previous session upper bound.
 //
-// It is called from the background telemetry fetch (tui: fetchHomeTelemetry),
+// It is called by /kanban detail through fs.SumMoltSessionTokenLedger,
 // NOT from the render/keypress path, so it does not need to protect the UI
 // thread. It is nonetheless guarded so a single stuck sidecar cannot pin a
 // background worker: the sqlite3 subprocess runs under a conservative worker-local
