@@ -222,7 +222,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $directSourceProbe.Count -ne 1) { throw "invalid lingtai direct_url provenance: $($directSourceProbe -join '; ')" }
           $directSource = [IO.Path]::GetFullPath($directSourceProbe[0].Trim())
           $tempRoot = [IO.Path]::GetFullPath($env:TEMP)
-          if ((Split-Path -Leaf $directSource) -ne 'kernel-main' -or -not $directSource.StartsWith($tempRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "lingtai direct URL is not the staged kernel-main checkout: $directSource" }
+          if ((Split-Path -Leaf $directSource) -ne 'lingtai-kernel' -or -not $directSource.StartsWith($tempRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "lingtai direct URL is not the staged lingtai-kernel checkout: $directSource" }
           function Invoke-BoundedVersion([string]$Path, [string]$Expected) {
             $out = Join-Path $env:RUNNER_TEMP ((Split-Path $Path -Leaf) + '.probe.txt')
             $p = Start-Process -FilePath $Path -ArgumentList 'version' -RedirectStandardOutput $out -NoNewWindow -PassThru
