@@ -20,6 +20,84 @@ func assertNoCORS(t *testing.T, rr *httptest.ResponseRecorder) {
 	}
 }
 
+func setupNetworkHandlerMailFixture(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	for _, agent := range []struct {
+		name  string
+		admin interface{}
+	}{
+		{name: "alice", admin: map[string]bool{"karma": true}},
+		{name: "bob", admin: map[string]bool{"karma": false}},
+		{name: "human", admin: nil},
+	} {
+		dir := filepath.Join(base, agent.name)
+		if err := os.MkdirAll(filepath.Join(dir, "mailbox", "inbox"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := json.Marshal(map[string]interface{}{
+			"agent_name": agent.name,
+			"address":    agent.name,
+			"state":      "ACTIVE",
+			"admin":      agent.admin,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".agent.json"), manifest, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message, err := json.Marshal(fs.MailMessage{
+		ID:         "msg-1",
+		From:       "alice",
+		To:         "bob",
+		ReceivedAt: "2026-07-15T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageDir := filepath.Join(base, "alice", "mailbox", "inbox", "msg-1")
+	if err := os.MkdirAll(messageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(messageDir, "message.json"), message, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return base
+}
+
+func TestNetworkHandlerMailMode(t *testing.T) {
+	base := setupNetworkHandlerMailFixture(t)
+	for _, tc := range []struct {
+		name      string
+		path      string
+		wantMails int
+	}{
+		{name: "default remains full", path: "/api/network", wantMails: 1},
+		{name: "explicit fast opts out of mail", path: "/api/network?mail=0", wantMails: 0},
+		{name: "explicit full includes mail", path: "/api/network?mail=1", wantMails: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			NewNetworkHandler(base).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			var network fs.Network
+			if err := json.NewDecoder(rr.Body).Decode(&network); err != nil {
+				t.Fatalf("decode network: %v", err)
+			}
+			if got := network.Stats.TotalMails; got != tc.wantMails {
+				t.Fatalf("total_mails = %d, want %d", got, tc.wantMails)
+			}
+			if got := len(network.MailEdges); got != tc.wantMails {
+				t.Fatalf("mail_edges = %d, want %d", got, tc.wantMails)
+			}
+		})
+	}
+}
+
 func TestHandlersDoNotSetCORSHeaders(t *testing.T) {
 	t.Run("network success", func(t *testing.T) {
 		handler := NewNetworkHandler(t.TempDir())

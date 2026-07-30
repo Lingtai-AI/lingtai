@@ -93,6 +93,35 @@ func TestBuildNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildNetworkWithOptionsSkipsMailEdges(t *testing.T) {
+	base := setupTestNetwork(t)
+	writeJSON(t, filepath.Join(base, "bob", "mailbox", "inbox", "msg-1", "message.json"), MailMessage{
+		ID:         "msg-1",
+		From:       "alice",
+		To:         []interface{}{"bob"},
+		ReceivedAt: "2026-07-15T00:00:00Z",
+	})
+
+	full, err := BuildNetwork(base)
+	if err != nil {
+		t.Fatalf("build full network: %v", err)
+	}
+	fast, err := BuildNetworkWithOptions(base, NetworkOptions{SkipMailEdges: true})
+	if err != nil {
+		t.Fatalf("build fast network: %v", err)
+	}
+
+	if len(full.MailEdges) != 1 || full.Stats.TotalMails != 1 {
+		t.Fatalf("full network mail = (%d edges, %d total), want (1, 1)", len(full.MailEdges), full.Stats.TotalMails)
+	}
+	if len(fast.MailEdges) != 0 || fast.Stats.TotalMails != 0 {
+		t.Fatalf("fast network mail = (%d edges, %d total), want (0, 0)", len(fast.MailEdges), fast.Stats.TotalMails)
+	}
+	if len(fast.Nodes) != len(full.Nodes) || len(fast.AvatarEdges) != len(full.AvatarEdges) || len(fast.ContactEdges) != len(full.ContactEdges) {
+		t.Fatalf("fast network changed non-mail shape: full=(%d nodes, %d avatar, %d contact), fast=(%d nodes, %d avatar, %d contact)", len(full.Nodes), len(full.AvatarEdges), len(full.ContactEdges), len(fast.Nodes), len(fast.AvatarEdges), len(fast.ContactEdges))
+	}
+}
+
 func TestBuildNetworkCarriesManifestAgentIDs(t *testing.T) {
 	base := setupTestNetwork(t)
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,43 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/fs"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestPropsLoadDataSkipsMailEdges(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "alice")
+	messageDir := filepath.Join(agentDir, "mailbox", "inbox", "msg-1")
+	if err := os.MkdirAll(messageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"agent_id":"id-alice","agent_name":"alice","address":"alice","state":"IDLE","admin":{"karma":false}}`)
+	if err := os.WriteFile(filepath.Join(agentDir, ".agent.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	message, err := json.Marshal(fs.MailMessage{
+		ID:         "msg-1",
+		From:       "alice",
+		To:         "alice",
+		ReceivedAt: "2026-07-30T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(messageDir, "message.json"), message, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, ok := (PropsModel{baseDir: base, selectedDir: agentDir, orchDir: agentDir}).loadData().(propsLoadMsg)
+	if !ok {
+		t.Fatal("loadData returned unexpected message type")
+	}
+	if msg.mailStatsAvailable {
+		t.Fatal("Props fast snapshot must mark mail totals unavailable")
+	}
+	view := (PropsModel{network: msg.network}).renderRight(80)
+	if strings.Contains(view, "Total: 0") {
+		t.Fatalf("Props rendered omitted mail history as factual zero:\n%s", view)
+	}
+}
 
 func TestKanbanTimestampRendersLocalOffset(t *testing.T) {
 	origLocal := time.Local

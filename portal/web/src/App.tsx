@@ -7,6 +7,7 @@ import { BottomBar } from './BottomBar';
 import { getTheme, loadThemePreference, saveThemePreference } from './theme';
 import { FilterPanel, defaultFilter, type FilterState } from './FilterPanel';
 import { t } from './i18n';
+import { createLiveNetworkCoordinator } from './live-network.mjs';
 
 function mailKey(sender: string, recipient: string) {
   return `${sender}\0${recipient}`;
@@ -84,26 +85,41 @@ export default function App() {
   });
   const MAX_LOADED_CHUNKS = 3;
 
-  // Live mode: use a ref for prev network to avoid stale closures
-  const prevNetworkRef = useRef<Network | null>(null);
+  // Live mode: fast node/status polling plus explicitly complete email refresh.
+  const lastCompleteMailNetworkRef = useRef<Network | null>(null);
 
-  // ── Live mode ────────────────────────────────────────────────
+  // ── Live mode ─────────────────────────────────────────────────────────────
 
-  const onNetworkUpdate = useCallback((net: Network) => {
-    const prev = prevNetworkRef.current;
+  const [mailStatsAvailable, setMailStatsAvailable] = useState(false);
+
+  const onFastNetwork = useCallback((net: Network) => {
+    setNetwork(net);
+  }, []);
+
+  const onFullNetwork = useCallback((net: Network) => {
+    const prev = lastCompleteMailNetworkRef.current;
     const newBullets = diffMailBullets(prev, net, performance.now());
-    prevNetworkRef.current = net;
+    lastCompleteMailNetworkRef.current = net;
     setNetwork(net);
     if (newBullets.length > 0) setBullets(newBullets);
-  }, []); // no deps — uses ref, not state
+  }, []);
 
   useEffect(() => {
     if (vizMode !== 'live') return;
-    const poll = () => fetchNetwork().then(onNetworkUpdate).catch(console.error);
-    poll();
-    const id = setInterval(poll, 3000);
-    return () => clearInterval(id);
-  }, [onNetworkUpdate, vizMode]);
+    lastCompleteMailNetworkRef.current = null;
+    setMailStatsAvailable(false);
+    const coordinator = createLiveNetworkCoordinator({
+      fetchNetwork,
+      onFastNetwork,
+      onFullNetwork,
+      onMailAvailability: setMailStatsAvailable,
+    });
+    coordinator.start(edgeMode);
+    return () => {
+      coordinator.stop();
+      lastCompleteMailNetworkRef.current = null;
+    };
+  }, [edgeMode, onFastNetwork, onFullNetwork, vizMode]);
 
   // ── Replay rAF cleanup on unmount ────────────────────────────
 
@@ -213,6 +229,7 @@ export default function App() {
         newBullets = newBullets.concat(b);
         r.prevNet = frame.net;
         setNetwork(frame.net);
+        setMailStatsAvailable(true);
       }
 
       if (newBullets.length > 0) setBullets(newBullets);
@@ -278,6 +295,7 @@ export default function App() {
       setPlaying(true);
       setVizMode('replay');
       setNetwork(tape[0].net);
+      setMailStatsAvailable(true);
 
       const ref = replayRef.current;
       ref.virtualTime = playStart;
@@ -310,7 +328,7 @@ export default function App() {
     cm.loadedChunks.clear();
     cm.loadedOrder = [];
     cm.loading.clear();
-    prevNetworkRef.current = null;
+    lastCompleteMailNetworkRef.current = null;
   }, []);
 
   const togglePlaying = useCallback(() => {
@@ -358,6 +376,7 @@ export default function App() {
     setReplayTime(unixMs);
     if (r.tape[idx]) {
       setNetwork(r.tape[idx].net);
+      setMailStatsAvailable(true);
     }
   }, [findChunkForTime, loadAndMergeChunk]);
 
@@ -492,6 +511,7 @@ export default function App() {
       </div>
       <BottomBar
         network={network}
+        mailStatsAvailable={mailStatsAvailable}
         lang={lang}
         theme={theme}
         edgeMode={edgeMode}

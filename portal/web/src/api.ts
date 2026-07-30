@@ -1,7 +1,19 @@
 import type { Network, AgentNode, AvatarEdge, ContactEdge, MailEdge, NetworkStats } from './types';
 
-export async function fetchNetwork(): Promise<Network> {
-  const res = await fetch('/api/network');
+export interface FetchNetworkOptions {
+  signal?: AbortSignal;
+  /** Omit for the historical full network; false explicitly requests incomplete mail=0 data. Gate mail totals when false. */
+  includeMailEdges?: boolean;
+}
+
+export function networkEndpoint(includeMailEdges?: boolean): string {
+  if (includeMailEdges === false) return '/api/network?mail=0';
+  if (includeMailEdges === true) return '/api/network?mail=1';
+  return '/api/network';
+}
+
+export async function fetchNetwork(options: FetchNetworkOptions = {}): Promise<Network> {
+  const res = await fetch(networkEndpoint(options.includeMailEdges), { signal: options.signal });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

@@ -5,7 +5,16 @@ import (
 	"strings"
 )
 
+// NetworkOptions selects optional work while building a network snapshot.
+type NetworkOptions struct {
+	SkipMailEdges bool
+}
+
 func BuildNetwork(baseDir string) (Network, error) {
+	return BuildNetworkWithOptions(baseDir, NetworkOptions{})
+}
+
+func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, error) {
 	nodes, err := DiscoverAgents(baseDir)
 	if err != nil {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
@@ -45,8 +54,12 @@ func BuildNetwork(baseDir string) (Network, error) {
 		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
 	}
 
-	// Count from inbox + archive — messages exist in exactly one folder
-	mailEdges := buildMailEdges(nodes, baseDir)
+	// Count from inbox + archive — messages exist in exactly one folder.
+	// Live snapshots can skip this historical scan; BuildNetwork keeps the full default.
+	var mailEdges []MailEdge
+	if !opts.SkipMailEdges {
+		mailEdges = buildMailEdges(nodes, baseDir)
+	}
 	stats := computeStats(nodes, mailEdges)
 
 	// Relativize all edge addresses so they match AgentNode.Address format

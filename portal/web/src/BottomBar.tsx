@@ -45,8 +45,9 @@ function EdgeToggle({ edgeMode, lang, theme, onToggle }: {
   );
 }
 
-export function BottomBar({ network, lang, theme, edgeMode, onToggleEdgeMode }: {
+export function BottomBar({ network, mailStatsAvailable, lang, theme, edgeMode, onToggleEdgeMode }: {
   network: Network;
+  mailStatsAvailable: boolean;
   lang: string;
   theme: Theme;
   edgeMode: EdgeMode;
@@ -65,7 +66,7 @@ export function BottomBar({ network, lang, theme, edgeMode, onToggleEdgeMode }: 
     }}>
       <EdgeToggle edgeMode={edgeMode} lang={lang} theme={theme} onToggle={onToggleEdgeMode} />
       <div style={{ width: 1, height: 28, background: theme.border }} />
-      <Stats stats={network.stats} totalAgents={network.nodes.length} lang={lang} theme={theme} />
+      <Stats stats={network.stats} totalAgents={network.nodes.length} mailStatsAvailable={mailStatsAvailable} lang={lang} theme={theme} />
     </div>
   );
 }
