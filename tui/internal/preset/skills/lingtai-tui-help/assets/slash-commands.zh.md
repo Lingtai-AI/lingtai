@@ -44,6 +44,7 @@
 - `/system` — 浏览智能体的系统文件（system.md、covenant 等）。
 - `/daemons` — 检视各智能体的守护进程运行记录。
 - `/notification` — 查看当前 Agent 最近收到的通知块，并可左右切换。
+- `/taskcard` — 查看智能体当前活跃的声明式 Task Card（如有）。
 - `/presets` — 查看本智能体可用 `/refresh` 切换的预设。
 
 ### 网络与分享
@@ -182,6 +183,14 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 **用法：** `/notification`
 
 显示当前聚焦 Agent 最近收到的 agent-visible 通知块（从 `logs/log.sqlite` 重建）。当通知徽标看起来不对、Agent 说有通知，或你想检查最近实际注入给 Agent 的通知块时使用。左/右切换最近的通知块，`r` 重新加载，Esc/`q` 返回聊天；该视图只读，不会 dismiss 或修改通知。
+
+### `/taskcard` — 查看智能体的 Task Card
+**用法：** `/taskcard`
+
+显示当前智能体的声明式 Task Card——即其工作目录下的 `taskcard/taskcard.md`——前提是
+`taskcard/status` 精确读作 `active`。这与 Telegram 投射到常驻卡片上的是同一份
+agent-local 产物；TUI 只是把它显示出来，是某一时刻的快照，渲染在 markdown 查看器中。
+重新执行 `/taskcard` 即可刷新。若没有活跃的卡片，会显示一条简短的状态提示。
 
 ### `/presets` — 打开预设库
 **用法：** `/presets`

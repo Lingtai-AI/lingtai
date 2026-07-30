@@ -60,6 +60,7 @@ func DefaultCommands() []Command {
 		{Name: "kanban", Description: "palette.kanban", Detail: "cmd.kanban"},
 		{Name: "daemons", Description: "palette.daemons", Detail: "cmd.daemons"},
 		{Name: "notification", Description: "palette.notification", Detail: "cmd.notification"},
+		{Name: "taskcard", Description: "palette.taskcard", Detail: "cmd.taskcard"},
 		{Name: "goal", Description: "palette.goal", Detail: "cmd.goal"},
 		{Name: "projects", Description: "palette.projects", Detail: "cmd.projects"},
 		{Name: "agents", Description: "palette.agents", Detail: "cmd.agents"},
