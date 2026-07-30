@@ -169,6 +169,30 @@ foreach ($name in $IsolatedVars) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
+# Restore-IsolatedEnv puts every isolated variable back to the value captured
+# above -- and, crucially, DELETES the ones that were never set on the host
+# instead of assigning $null to them.
+#
+# [Environment]::SetEnvironmentVariable($name, $null, 'Process') does not fully
+# remove the name from this process's native environment block; an empty entry
+# lingers, and every CHILD process inherits it. For PROCESSOR_ARCHITEW6432 --
+# which Set-DevBootstrapEnv sets and which is absent on a normal amd64 host --
+# that lingering empty entry makes Windows hand the child an EMPTY
+# PROCESSOR_ARCHITECTURE, so install.ps1's Get-Arch aborted every public-mode
+# contract with "Unsupported processor architecture ''" once CONTRACT 21 had
+# run, even though this process still reported AMD64 correctly. Remove-Item
+# Env:\ deletes the entry outright and children inherit the real host value.
+function Restore-IsolatedEnv {
+    foreach ($name in $IsolatedVars) {
+        $value = $SavedEnv[$name]
+        if ($null -eq $value) {
+            if (Test-Path -LiteralPath "Env:\$name") { Remove-Item -LiteralPath "Env:\$name" }
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+}
+
 # The test root deliberately contains a SPACE so that every child path derived
 # from it forces the installer invocation and Windows path handling through the
 # argument-quoting path (a common source of Windows installer bugs).
@@ -1158,9 +1182,7 @@ try {
 
     # CONTRACT 21 mutates only this test process's environment. Restore the
     # original host values before the legacy fixture/compiler contracts run.
-    foreach ($name in $IsolatedVars) {
-        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
-    }
+    Restore-IsolatedEnv
 
     # CONTRACT 20: current-main is an explicit, self-contained mode. Its
     # runtime and source pins are not optional, so release/local-artifact and
@@ -1931,6 +1953,62 @@ version = "0.18.0"
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
             # Restore the good kernel manifest for any later reuse of this route.
             Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson -ContentType 'application/octet-stream'
+
+            # -------------------------------------------------------------------
+            # CONTRACT 22: a leftover, unusable lingtai-<version>.dist-info in the
+            # managed venv must not fail an otherwise-correct install.
+            #
+            # pip will not uninstall a .dist-info whose METADATA is missing or
+            # nameless -- it logs "Skipping <dir> due to invalid metadata entry
+            # 'name'" and leaves it -- while importlib.metadata's
+            # distribution('lingtai') lookup matches on the DIRECTORY NAME and
+            # returns the first filesystem hit. The orphan seeded here sorts ahead
+            # of the real distribution, so post-install verification used to read
+            # the orphan's stale version/direct_url and fail a correct install
+            # (observed live as DIRECT_URL_WRONG_SOURCE naming a path the
+            # installer never used; VERSION_MISMATCH in wheel mode). Verification
+            # now resolves the distribution that actually owns the imported
+            # module, and the installer removes metadata it can prove is unusable.
+            # -------------------------------------------------------------------
+            Write-Section 'contract: orphaned unusable lingtai dist-info does not fail a correct install'
+            $sitePackages22 = Join-Path $globalDir18 'runtime\venv\Lib\site-packages'
+            if (-not (Test-Path -LiteralPath $sitePackages22)) {
+                Assert-True $false "CONTRACT 22 requires the CONTRACT 18 venv at $sitePackages22"
+            } else {
+                # Only direct_url.json, exactly as the real leaked directory had:
+                # no METADATA, so pip cannot uninstall it and its version is None.
+                $orphanDir22 = Join-Path $sitePackages22 'lingtai-0.0.1.dist-info'
+                New-Item -ItemType Directory -Force -Path $orphanDir22 | Out-Null
+                Set-Content -LiteralPath (Join-Path $orphanDir22 'direct_url.json') `
+                    -Value '{"dir_info": {"editable": true}, "url": "file:///C:/nonexistent-stale-source"}' -Encoding ASCII
+                $realDistDir22 = Join-Path $sitePackages22 'lingtai-0.18.0.dist-info'
+                Assert-True (Test-Path -LiteralPath $realDistDir22) 'CONTRACT 22 baseline: the real lingtai dist-info is present'
+
+                $r22 = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir18
+                    GlobalDir    = $globalDir18
+                    NoModifyPath = $true
+                }
+                Assert-Equal 0 $r22.ExitCode "install over an orphaned lingtai dist-info exits 0 (stderr: $($r22.Stderr))"
+                if ($r22.ExitCode -ne 0) {
+                    Write-InstallerDiagnostics -Result $r22 -Context 'CONTRACT 22 (orphaned dist-info)'
+                }
+                Assert-True (-not (Test-Path -LiteralPath $orphanDir22)) 'install removed the unusable orphaned lingtai dist-info'
+                Assert-True (Test-Path -LiteralPath $realDistDir22) 'install left the real lingtai dist-info in place'
+                # The sibling distribution normalizes to lingtai_kernel-*, so the
+                # narrow lingtai-<version> sweep must never consider it.
+                $siblingDir22 = Join-Path $sitePackages22 'lingtai_kernel-9.9.9.dist-info'
+                New-Item -ItemType Directory -Force -Path $siblingDir22 | Out-Null
+                $r22b = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir18
+                    GlobalDir    = $globalDir18
+                    NoModifyPath = $true
+                }
+                Assert-Equal 0 $r22b.ExitCode "install with a metadata-less sibling distribution exits 0 (stderr: $($r22b.Stderr))"
+                Assert-True (Test-Path -LiteralPath $siblingDir22) 'the sweep does not touch a differently-named sibling distribution'
+            }
         }
     }
 
@@ -1941,9 +2019,7 @@ version = "0.18.0"
     # anything outside $TestRoot. The throwaway $TestRoot is intentionally left
     # on disk for post-mortem inspection by the CI job.
     # -----------------------------------------------------------------------
-    foreach ($name in $IsolatedVars) {
-        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
-    }
+    Restore-IsolatedEnv
     [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', $null, 'Process')
     [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', $null, 'Process')
     Stop-FakeGitHubApi

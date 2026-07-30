@@ -922,6 +922,71 @@ def fail(code, detail):
     print(code + ':' + detail)
     sys.exit(1)
 
+def normalize_dist_name(raw):
+    return (raw or '').strip().lower().replace('-', '_')
+
+# Does this distribution's own RECORD claim the file the interpreter actually
+# imported? Metadata alone is not enough: a .dist-info directory is just a
+# directory, so only its declared file list proves it describes THIS code.
+def dist_owns(candidate, target):
+    if target is None:
+        return False
+    try:
+        entries = candidate.files
+    except Exception:
+        return False
+    if not entries:
+        return False
+    for entry in entries:
+        try:
+            if Path(candidate.locate_file(entry)).resolve() == target:
+                return True
+        except Exception:
+            continue
+    return False
+
+# Resolve the distribution that PROVIDES the imported lingtai module, rather
+# than trusting importlib.metadata.distribution('lingtai').
+#
+# distribution()/from_name() matches on the .dist-info DIRECTORY NAME and
+# returns the first filesystem hit. A managed venv can accumulate a leftover
+# lingtai-<old>.dist-info that pip cannot remove -- pip skips a .dist-info
+# whose METADATA is missing or nameless (WARNING: ... due to invalid metadata
+# entry 'name') instead of uninstalling it -- and that orphan sorts ahead of
+# the real one. The probe then read the ORPHAN's stale direct_url.json and
+# reported DIRECT_URL_WRONG_SOURCE naming a path this installer never used,
+# failing a correct install with a misleading provenance error.
+#
+# Requiring BOTH a matching metadata Name and RECORD ownership of the imported
+# file is strictly stronger than the old name lookup: the verified provenance
+# now demonstrably belongs to the code that was imported. Genuine ambiguity
+# (two distributions claiming the same module) still fails loud.
+def resolve_lingtai_dist(target):
+    named = []
+    owners = []
+    for candidate in m.distributions():
+        try:
+            metadata = candidate.metadata
+            dist_name = normalize_dist_name(metadata['Name']) if metadata else ''
+        except Exception:
+            continue
+        if dist_name != 'lingtai':
+            continue
+        named.append(candidate)
+        if dist_owns(candidate, target):
+            owners.append(candidate)
+    if target is not None:
+        if len(owners) == 1:
+            return owners[0]
+        if len(owners) > 1:
+            fail('DIST_AMBIGUOUS', str(len(owners)) + ' installed distributions claim ' + str(target))
+        fail('DIST_NOT_FOUND_FOR_MODULE', str(target))
+    if len(named) == 1:
+        return named[0]
+    if len(named) > 1:
+        fail('DIST_AMBIGUOUS', str(len(named)) + ' lingtai distributions are installed')
+    fail('DIST_NOT_FOUND', 'no installed distribution provides lingtai')
+
 try:
     import lingtai
 except ImportError as exc:
@@ -931,13 +996,14 @@ mode = sys.argv[1]
 expected_version = '' if sys.argv[2] == '-' else sys.argv[2]
 if mode not in ('wheel', 'source'):
     fail('INVALID_VERIFICATION_MODE', mode)
-dist = m.distribution('lingtai')
+
+module_value = getattr(lingtai, '__file__', None)
+module_path = Path(module_value).resolve() if module_value else None
+dist = resolve_lingtai_dist(module_path)
 version = dist.version
 if expected_version and version != expected_version:
     fail('VERSION_MISMATCH', str(version))
 
-module_value = getattr(lingtai, '__file__', None)
-module_path = Path(module_value).resolve() if module_value else None
 direct_source = '<wheel>'
 if mode == 'source':
     venv_dir = Path(sys.argv[3]).resolve()
@@ -1045,6 +1111,46 @@ function Write-KernelProvenance {
     Write-Ok "Wrote kernel provenance -> $path"
 }
 
+# Remove-OrphanedKernelDistInfo deletes LingTai's OWN unusable .dist-info
+# directories from the installer-managed venv before an install writes a new
+# one.
+#
+# pip refuses to uninstall a .dist-info whose METADATA is absent or carries no
+# Name (it logs "Skipping <dir> due to invalid metadata entry 'name'" and moves
+# on), so such a directory survives every subsequent install. It still shadows
+# the real distribution for importlib.metadata's directory-name lookup, which
+# is how a stale provenance record broke otherwise-correct -Latest installs.
+# Confirm-KernelImport no longer trusts that lookup, but leaving the orphan in
+# place keeps re-emitting pip warnings and re-arms the same trap for any other
+# reader, so the installer removes what it can prove is unusable.
+#
+# Deliberately narrow -- NOT a venv rebuild. Only LingTai's own metadata
+# directory is touched: the sibling <name>-<version>.dist-info convention
+# normalizes the name part, so lingtai-kernel appears as lingtai_kernel-*
+# and never matches, and the venv's resolved dependency tree is preserved. A
+# directory with parseable METADATA is left alone even when stale, because pip
+# can and does replace that one itself.
+function Remove-OrphanedKernelDistInfo {
+    param([string]$VenvDir)
+    $sitePackages = Join-Path $VenvDir 'Lib\site-packages'
+    if (-not (Test-Path -LiteralPath $sitePackages)) { return }
+    $candidates = @(Get-ChildItem -LiteralPath $sitePackages -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^lingtai-[^-]+\.dist-info$' })
+    foreach ($candidate in $candidates) {
+        $metadataPath = Join-Path $candidate.FullName 'METADATA'
+        if (Test-Path -LiteralPath $metadataPath) {
+            $nameLine = @(Select-String -LiteralPath $metadataPath -Pattern '^Name:\s*\S' -ErrorAction SilentlyContinue)
+            if ($nameLine.Count -gt 0) { continue }
+        }
+        Write-Warn "Removing unusable LingTai metadata pip cannot uninstall: $($candidate.FullName)"
+        try {
+            Remove-Item -LiteralPath $candidate.FullName -Recurse -Force
+        } catch {
+            Fail "Could not remove the unusable metadata directory $($candidate.FullName) ($($_.Exception.Message)). Close anything using the runtime venv, delete that directory manually, then re-run."
+        }
+    }
+}
+
 # Install-Venv provisions %USERPROFILE%\.lingtai-tui\runtime\venv from the
 # bundle's pinned kernel release, exactly like install.sh's
 # ensure_runtime_venv/install_kernel_from_bundle: create the venv from an
@@ -1078,6 +1184,8 @@ function Install-Venv {
     if (-not (Test-Path -LiteralPath $venvPython)) {
         Fail "Venv created at $venvDir but Scripts\python.exe is missing."
     }
+
+    Remove-OrphanedKernelDistInfo -VenvDir $venvDir
 
     $wheelTag = Get-VenvWheelTag -VenvPython $venvPython
     $kernelManifest = Get-KernelManifest -KernelTag $Bundle.KernelTag -ManifestFilename $Bundle.KernelManifestFilename
@@ -1383,6 +1491,7 @@ function Install-MainVenv {
     $python = Join-Path $venvDir 'Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { Fail "-Latest runtime venv has no Scripts\python.exe at $venvDir." }
     Get-VenvWheelTag -VenvPython $python | Out-Null
+    Remove-OrphanedKernelDistInfo -VenvDir $venvDir
     $head = (& git -C $KernelSource rev-parse HEAD).Trim().ToLowerInvariant()
     if ($head -ne $KernelSha) { Fail "Kernel source changed before install: expected $KernelSha, got $head." }
     Write-Info "Installing lingtai from the verified checked-out kernel source path (non-editable local build) ..."
