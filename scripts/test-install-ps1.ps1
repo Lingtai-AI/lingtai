@@ -23,6 +23,7 @@
         -ArchivePath <path>      local fixture archive to install FROM
                                  (download/expand equivalent; no network)
         -ChecksumPath <path>     SHA-256 sidecar for -ArchivePath
+        -Latest                  explicit pinned current-main development install
         -SkipVenv                skip the Python runtime venv step
         -NoModifyPath            do not persist PATH changes
         -DryRun                  plan only; make no filesystem writes
@@ -738,6 +739,27 @@ try {
     # Report the host so the workflow logs prove PS 5.1 and PS 7 both parsed and
     # executed the identical file.
     Write-Host ("  host: {0} {1}" -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion)
+
+    # CONTRACT 20: current-main is an explicit, self-contained mode. Its
+    # runtime and source pins are not optional, so release/local-artifact and
+    # SkipVenv semantics must be rejected before prerequisite or destination
+    # work begins.
+    Write-Section 'contract: -Latest rejects release and SkipVenv conflicts'
+    $latestConflictHome = New-IsolatedHome
+    $latestConflictBin = Join-Path $latestConflictHome 'bin'
+    $latestConflictGlobal = Join-Path $latestConflictHome '.lingtai-tui'
+    $r20a = Invoke-Installer @{ Latest = $true; SkipVenv = $true; BinDir = $latestConflictBin; GlobalDir = $latestConflictGlobal; NoModifyPath = $true }
+    Assert-True ($r20a.ExitCode -ne 0) '-Latest + -SkipVenv exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath $latestConflictBin)) '-Latest + -SkipVenv creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $latestConflictGlobal)) '-Latest + -SkipVenv creates no GlobalDir'
+    $r20b = Invoke-Installer @{ Latest = $true; Version = 'v1.2.3'; BinDir = (Join-Path $latestConflictHome 'bin2'); GlobalDir = (Join-Path $latestConflictHome '.global2'); NoModifyPath = $true }
+    Assert-True ($r20b.ExitCode -ne 0) '-Latest + -Version exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome 'bin2'))) '-Latest + -Version creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome '.global2'))) '-Latest + -Version creates no GlobalDir'
+    $r20c = Invoke-Installer @{ Latest = $true; DryRun = $true; ArchivePath = (Join-Path $latestConflictHome 'missing.zip'); ChecksumPath = (Join-Path $latestConflictHome 'missing.zip.sha256'); BinDir = (Join-Path $latestConflictHome 'bin3'); GlobalDir = (Join-Path $latestConflictHome '.global3'); NoModifyPath = $true }
+    Assert-True ($r20c.ExitCode -ne 0) '-Latest + paired -ArchivePath/-ChecksumPath exits non-zero before artifact access'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome 'bin3'))) '-Latest + Archive/Checksum conflict creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome '.global3'))) '-Latest + Archive/Checksum conflict creates no GlobalDir'
 
     # -----------------------------------------------------------------------
     # Fixture self-check (does not need the installer): the fixture builder must

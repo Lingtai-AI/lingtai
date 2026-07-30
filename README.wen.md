@@ -100,6 +100,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 此令解析最新之发布标签，校 Windows 二进制包与所锁内核发布之验证码，遂装 `lingtai-tui`、`lingtai-portal` 及 Python 运行时之虚环境。加 `-SkipVenv` 则唯装 TUI/portal 二进制。其详见 [`RELEASING.md`](RELEASING.md)。
 
+欲于原生 Windows 调试今之主线，可行 `.\install.ps1 -Latest`。此唯支 amd64；ARM64 宜用 WSL2 与 `install.sh --latest`。此先钉住两仓 `main` 之完整 SHA，构建两二进制，并以非 editable 之本地构建将确切内核检出装入 `%USERPROFILE%\.lingtai-tui\runtime\venv`。须先备 Git、Go、Node.js/npm（Node 20.19+、22.12+，或更高主版本；Node 21 及 Node 22.<12 不支）与 64 位 CPython 3.11–3.13。`-Latest -DryRun` 只验此前置，不写目标目录、PATH 或配置；`-Latest` 不得与 `-Version`、`-ArchivePath` 或 `-SkipVenv` 同用。网站仓库仍须另补相应安装说明。
+
 > **初入灵台？** 循 [lingtai.ai 之教程](https://lingtai.ai/wen/tutorial/) 逐步而行——自安装、首务、外接诸渠、记忆与生死，首尾一贯。
 
 > Homebrew（`brew install lingtai-ai/lingtai/lingtai-tui`）于旧用者犹可用；然新装宜用一令之脚本。PyPI 之 `lingtai` 包者，乃 TUI 代管之 Python 运行时——唯开发或诊断内核时，方用 `pip`。

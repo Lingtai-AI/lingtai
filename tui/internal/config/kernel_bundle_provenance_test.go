@@ -74,6 +74,101 @@ func TestKernelBundleProvenanceBundleSourceReportsTrue(t *testing.T) {
 	}
 }
 
+func writeMainInstallJSON(t *testing.T, globalDir string) {
+	t.Helper()
+	body := `{
+  "schema":"lingtai.tui.install/v1", "schema_version":1,
+  "install_method":"powershell", "install_kind":"powershell-latest-main",
+  "prefix":"C:\\LingTai", "bin_dir":"C:\\LingTai\\bin",
+  "repo_url":"https://github.com/Lingtai-AI/lingtai",
+  "requested_ref":"main", "resolved_ref":"main",
+  "resolved_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "stamped_version":"main-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "managed_binaries":["C:\\LingTai\\bin\\lingtai-tui.exe"],
+  "source_mode":"latest-main", "tui_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "kernel_source":"main", "kernel_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "kernel_version":"0.0.0.dev0", "kernel_provider":"github"
+}`
+	if err := os.WriteFile(filepath.Join(globalDir, "install.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write main install.json: %v", err)
+	}
+}
+
+func TestKernelMainProvenanceRecognizesPinnedCommits(t *testing.T) {
+	globalDir := t.TempDir()
+	writeMainInstallJSON(t, globalDir)
+	isMain, meta := kernelMainProvenance(globalDir)
+	if !isMain || meta.TuiCommit == "" || meta.KernelCommit == "" {
+		t.Fatalf("expected current-main provenance, got isMain=%v meta=%+v", isMain, meta)
+	}
+}
+
+func TestKernelMainProvenanceRejectsMalformedCommitMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name, tui, kernel string
+	}{
+		{name: "empty", tui: "", kernel: ""},
+		{name: "tui-short", tui: strings.Repeat("a", 39), kernel: strings.Repeat("b", 40)},
+		{name: "tui-long", tui: strings.Repeat("a", 41), kernel: strings.Repeat("b", 40)},
+		{name: "tui-nonhex", tui: strings.Repeat("a", 39) + "g", kernel: strings.Repeat("b", 40)},
+		{name: "kernel-short", tui: strings.Repeat("a", 40), kernel: strings.Repeat("b", 39)},
+		{name: "kernel-long", tui: strings.Repeat("a", 40), kernel: strings.Repeat("b", 41)},
+		{name: "kernel-nonhex", tui: strings.Repeat("a", 40), kernel: strings.Repeat("b", 39) + "g"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			globalDir := t.TempDir()
+			writeMainInstallJSON(t, globalDir)
+			path := filepath.Join(globalDir, "install.json")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Replace(string(raw), `"tui_commit":"`+strings.Repeat("a", 40)+`"`, `"tui_commit":"`+tc.tui+`"`, 1)
+			text = strings.Replace(text, `"kernel_commit":"`+strings.Repeat("b", 40)+`"`, `"kernel_commit":"`+tc.kernel+`"`, 1)
+			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if isMain, _ := kernelMainProvenance(globalDir); isMain {
+				t.Fatalf("malformed commit metadata was accepted: tui=%q kernel=%q", tc.tui, tc.kernel)
+			}
+		})
+	}
+}
+
+func TestUpgradePythonRuntimeRoutineSkipsPyPIForMainProvenance(t *testing.T) {
+	globalDir := t.TempDir()
+	writeMainInstallJSON(t, globalDir)
+	venvPath := RuntimeVenvDir(globalDir)
+	mkdirTestVenv(t, venvPath)
+	runner := &fakeRunner{versions: []string{"0.0.0.dev0"}}
+	result := UpgradePythonRuntime(globalDir, false, &UpgradeRuntimeOptions{
+		HTTPClient: &http.Client{Transport: panicOnUseRoundTripper{t: t}},
+		Runner:     runner, LookPath: func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat: statAllExist, Home: t.TempDir(), LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if !result.Healthy || result.Updated {
+		t.Fatalf("main provenance must skip index/runtime mutation: healthy=%v updated=%v calls=%v lines=%+v", result.Healthy, result.Updated, runner.calls, result.Lines)
+	}
+	assertNoMutatingCalls(t, runner.calls)
+}
+
+func TestUpgradePythonRuntimeForcedSkipsPyPIForMainProvenance(t *testing.T) {
+	globalDir := t.TempDir()
+	writeMainInstallJSON(t, globalDir)
+	venvPath := RuntimeVenvDir(globalDir)
+	mkdirTestVenv(t, venvPath)
+	runner := &fakeRunner{versions: []string{"0.0.0.dev0"}}
+	result := UpgradePythonRuntime(globalDir, true, &UpgradeRuntimeOptions{
+		HTTPClient: &http.Client{Transport: panicOnUseRoundTripper{t: t}},
+		Runner:     runner, LookPath: func(string) (string, error) { return "/usr/bin/uv", nil },
+		Stat: statAllExist, Home: t.TempDir(), LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if !result.Healthy || result.Updated {
+		t.Fatalf("forced main provenance must skip index/runtime mutation: healthy=%v updated=%v calls=%v lines=%+v", result.Healthy, result.Updated, runner.calls, result.Lines)
+	}
+	assertNoMutatingCalls(t, runner.calls)
+}
+
 // --- UpgradePythonRuntime gate integration ---
 
 func TestUpgradePythonRuntimeSkipsPyPIForBundleProvenance(t *testing.T) {

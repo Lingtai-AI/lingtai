@@ -95,6 +95,8 @@ irm https://lingtai.ai/install.ps1 | iex
 
 它会解析最新的发布标签，校验 Windows 二进制压缩包与锁定的内核发布版本的校验和，并安装 `lingtai-tui`/`lingtai-portal` 及 Python 运行时虚拟环境。加上 `-SkipVenv` 可只安装 TUI/portal 二进制文件。详细契约见 [`RELEASING.md`](RELEASING.md)。
 
+若要在原生 Windows 上调试当前主线，请运行 `.\install.ps1 -Latest`。它仅支持 amd64；ARM64 请使用 WSL2 和 `install.sh --latest`。它会先固定两个仓库 `main` 的完整 SHA，构建两个二进制文件，并通过本地路径把准确的内核检出以非 editable 方式安装到 `%USERPROFILE%\.lingtai-tui\runtime\venv`。需要预先安装 Git、Go、Node.js/npm（Node 20.19+、22.12+ 或更高主版本；Node 21 及 Node 22.<12 不支持）和 64 位 CPython 3.11–3.13。`-Latest -DryRun` 只验证这些前置条件，不写入目标目录、PATH 或配置；`-Latest` 不能与 `-Version`、`-ArchivePath` 或 `-SkipVenv` 合用。网站仓库仍需另行补充对应安装说明。
+
 > **第一次用？** 跟着 [lingtai.ai 上的教程](https://lingtai.ai/zh/tutorial/) 一步步来——安装、第一个任务、外接渠道、记忆与生命周期，从头到尾走一遍。
 
 > Homebrew（`brew install lingtai-ai/lingtai/lingtai-tui`）对老用户依然可用，但新安装推荐用一行安装脚本。PyPI 上的 `lingtai` 包是 TUI 代你管理的 Python 运行时——只有在开发或诊断内核本身时才需要动 `pip`。

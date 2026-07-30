@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -615,16 +616,19 @@ type tuiInstallMetadata struct {
 	StampedVersion  string   `json:"stamped_version"`
 	ManagedBinaries []string `json:"managed_binaries"`
 
-	// Bundle provenance (additive; absent on install.json written before this
+	// Bundle/main provenance (additive; absent on install.json written before this
 	// field existed, which read.go treats identically to KernelSource=="pypi").
 	// Written by install.sh when it installs the Python `lingtai` runtime from
-	// a pinned release-bundle artifact by explicit local file path, rather
-	// than from PyPI. See kernelSourceFromMetadata / the provenance gate in
+	// a pinned release-bundle artifact or current-main checkout by explicit
+	// local path, rather than from PyPI. See the provenance gates in
 	// UpgradePythonRuntime below.
-	KernelSource   string `json:"kernel_source,omitempty"`    // "" | "pypi" | "bundle"
+	KernelSource   string `json:"kernel_source,omitempty"`    // "" | "pypi" | "bundle" | "main"
 	KernelBundleID string `json:"kernel_bundle_id,omitempty"` // e.g. "tui-v0.11.0" — the TUI bundle manifest's bundle_id
 	KernelVersion  string `json:"kernel_version,omitempty"`   // the pinned kernel version installed from the bundle
 	KernelProvider string `json:"kernel_provider,omitempty"`  // "github" | "gitee" — which provider served the bundle
+	SourceMode     string `json:"source_mode,omitempty"`      // e.g. "latest-main"
+	TuiCommit      string `json:"tui_commit,omitempty"`
+	KernelCommit   string `json:"kernel_commit,omitempty"`
 }
 
 type execCommandRunner struct{}
@@ -884,6 +888,20 @@ func kernelBundleProvenance(globalDir string) (isBundle bool, meta tuiInstallMet
 		return false, tuiInstallMetadata{}
 	}
 	return meta.KernelSource == "bundle", meta
+}
+
+// kernelMainProvenance recognizes the explicit current-main development mode.
+// It is intentionally separate from the release-bundle gate: a main checkout
+// must not be compared to or replaced by an index release during routine or
+// forced runtime checks.
+func kernelMainProvenance(globalDir string) (isMain bool, meta tuiInstallMetadata) {
+	metaPath := filepath.Join(globalDir, "install.json")
+	meta, err := readTUIInstallMetadata(metaPath)
+	if err != nil {
+		return false, tuiInstallMetadata{}
+	}
+	fullCommit := regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	return meta.SourceMode == "latest-main" && meta.KernelSource == "main" && fullCommit.MatchString(meta.TuiCommit) && fullCommit.MatchString(meta.KernelCommit), meta
 }
 
 func sourceMetadataMatchesExecutable(meta tuiInstallMetadata, exe string) bool {
@@ -1384,6 +1402,20 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 			result.add(DoctorOK,
 				"Python lingtai was installed from a pinned release bundle (%s, kernel %s via %s); skipping PyPI upgrade.",
 				valueOrUnknown(bundleMeta.KernelBundleID), valueOrUnknown(bundleMeta.KernelVersion), valueOrUnknown(bundleMeta.KernelProvider))
+		}
+		writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+		return result
+	}
+
+	if isMain, mainMeta := kernelMainProvenance(globalDir); isMain {
+		if force {
+			result.add(DoctorOK,
+				"Python lingtai is pinned to current main (TUI %s; kernel %s); a forced update does not override this checkout. Re-run install.ps1 -Latest to move it.",
+				valueOrUnknown(mainMeta.TuiCommit), valueOrUnknown(mainMeta.KernelCommit))
+		} else {
+			result.add(DoctorOK,
+				"Python lingtai was installed from the current-main checkout (TUI %s; kernel %s); skipping index upgrade.",
+				valueOrUnknown(mainMeta.TuiCommit), valueOrUnknown(mainMeta.KernelCommit))
 		}
 		writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
 		return result
