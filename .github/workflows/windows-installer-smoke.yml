@@ -17,7 +17,9 @@ on:
       - 'v*'
     paths:
       - 'install.ps1'
+      - 'remove.ps1'
       - 'scripts/test-install-ps1.ps1'
+      - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'
       - 'tui/internal/config/kernel_bundle_provenance_test.go'
       - 'tui/internal/config/venv.go'
@@ -25,7 +27,9 @@ on:
   pull_request:
     paths:
       - 'install.ps1'
+      - 'remove.ps1'
       - 'scripts/test-install-ps1.ps1'
+      - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'
       - 'tui/internal/config/kernel_bundle_provenance_test.go'
       - 'tui/internal/config/venv.go'
@@ -90,6 +94,11 @@ jobs:
         run: |
           .\scripts\test-install-ps1.ps1
 
+      - name: Run removal contract suite (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          .\scripts\test-remove-ps1.ps1
+
   powershell-7:
     name: PowerShell 7 (Core)
     runs-on: windows-latest
@@ -144,6 +153,11 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-install-ps1.ps1
+
+      - name: Run removal contract suite (PowerShell 7)
+        shell: pwsh
+        run: |
+          ./scripts/test-remove-ps1.ps1
 
   windows-current-main-smoke:
     name: Windows current-main install smoke (pwsh)

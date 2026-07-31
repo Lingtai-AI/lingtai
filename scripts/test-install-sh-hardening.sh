@@ -238,14 +238,23 @@ EOF
   assert_eq "v1.0.0" "$stamped" "the original receipt must survive an attempted second fresh write untouched"
   rm -f /tmp/write-metadata-stderr.$$
 
-  # --update legitimately re-publishes over its own existing receipt.
+  # --update legitimately re-publishes over its own existing receipt. Exercise
+  # this under a permissive umask (022) to catch the receipt mode regressing
+  # from 0600 to world-readable on republish (the republish branch used a
+  # bare shell-redirection temp file with no chmod, unlike the fresh-install
+  # branch's mktemp+chmod 600).
   UPDATE_MODE=1
+  old_umask="$(umask)"
+  umask 022
   write_install_metadata \
     "$global_dir" "$meta_home" "$bin_dir" "https://example.test/repo.git" \
     "v2.0.0" "v2.0.0" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "v2.0.0" \
     "$bin_dir/lingtai-tui" ""
+  umask "$old_umask"
   stamped2="$(python3 -c 'import json; print(json.load(open("'"$global_dir"'/install.json"))["stamped_version"])')"
   assert_eq "v2.0.0" "$stamped2" "UPDATE_MODE=1 legitimately republishes the receipt in place"
+  perm_update="$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$global_dir/install.json")"
+  assert_eq "0o600" "$perm_update" "UPDATE_MODE=1 republish under umask 022 must still leave install.json at mode 600"
   UPDATE_MODE=0
 
   # release-pin receipt shape, end to end.
@@ -334,14 +343,22 @@ PY
   # loop) must republish its own receipt in place with the NEW commit, not
   # refuse as though this were a fresh (non-update, non-latest) install —
   # Opus Blocker 2: the old code refused this exact call with "install
-  # receipt appeared before metadata creation".
+  # receipt appeared before metadata creation". Also exercised under a
+  # permissive umask (022) to catch the receipt mode regressing from 0600 to
+  # world-readable on republish/rerun, reproducing the macOS acceptance find.
+  old_umask="$(umask)"
+  umask 022
   write_install_metadata \
     "$global_dir" "$latest_meta_home" "$bin_dir" "https://example.test/repo.git" \
     "main" "main" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "dev" \
     "$bin_dir/lingtai-tui" ""
+  umask "$old_umask"
   second_commit="$(python3 -c 'import json; print(json.load(open("'"$global_dir"'/install.json"))["resolved_commit"])')"
   assert_eq "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$second_commit" \
     "a second --latest run must republish the receipt in place recording the new commit, not refuse (Opus Blocker 2)"
+  perm_latest="$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$global_dir/install.json")"
+  assert_eq "0o600" "$perm_latest" \
+    "a second --latest republish under umask 022 must still leave install.json at mode 600, not regress to 0644"
   LATEST_MAIN_MODE=0
   UPDATE_MODE=0
 )
