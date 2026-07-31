@@ -1026,6 +1026,8 @@ write_install_metadata() {
     chmod 600 "$tmp_path" || { rm -f "$tmp_path"; return 1; }
   else
     tmp_path="$metadata_path.tmp.$$"
+    : > "$tmp_path" || { echo "error: could not create receipt republish staging file: $tmp_path" >&2; return 1; }
+    chmod 600 "$tmp_path" || { rm -f "$tmp_path"; return 1; }
   fi
 
   cat > "$tmp_path" <<EOF
