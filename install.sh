@@ -120,6 +120,7 @@ BUNDLE_MANIFEST_KERNEL_TAG=""
 BUNDLE_MANIFEST_KERNEL_VERSION=""
 BUNDLE_MANIFEST_KERNEL_FILENAME=""
 BUNDLE_MANIFEST_BUNDLE_ID=""
+KERNEL_LATEST_TAG=""         # set by resolve_latest_kernel_release(); newest published kernel release
 
 usage() {
   cat <<'EOF'
@@ -946,16 +947,22 @@ ensure_runtime_venv() {
 
   if [[ -z "$BUNDLE_MANIFEST_JSON" ]]; then
     if [[ "$BUNDLE_REQUIRED" == "1" ]]; then
-      echo "error: no pinned kernel release bundle could be resolved for this install." >&2
-      echo "       Tried provider(s): $BUNDLE_PROVIDER (with same-tag fallback to the other provider)." >&2
-      echo "       LingTai's Python runtime is installed only from a verified pinned release" >&2
-      echo "       artifact, never from PyPI/an index by package name — so this is a hard stop," >&2
-      echo "       not a silent fallback." >&2
-      echo "       Options:" >&2
-      echo "         - Retry (the bundle manifest may not be published yet for this exact release)." >&2
-      echo "         - Pass --version <tag> for a release known to have a bundle manifest." >&2
-      echo "         - Pass --skip-python to install the TUI/portal binaries only, then set up the" >&2
-      echo "           Python runtime yourself (e.g. from an editable lingtai-kernel checkout)." >&2
+      # TUI/kernel decoupled: source-only TUI releases publish no bundle
+      # manifest. install_kernel_from_bundle resolves the LATEST kernel
+      # release directly; only fail here if even that is impossible.
+      if ! resolve_latest_kernel_release; then
+        echo "error: no kernel release could be resolved for this install." >&2
+        echo "       Tried the latest lingtai-kernel release on $BUNDLE_PROVIDER (with the other provider)." >&2
+        echo "       LingTai's Python runtime is installed only from a verified pinned release" >&2
+        echo "       artifact, never from PyPI/an index by package name - so this is a hard stop," >&2
+        echo "       not a silent fallback." >&2
+        echo "       Options:" >&2
+        echo "         - Retry (the latest kernel release may not be published yet)." >&2
+        echo "         - Pass --skip-python to install the TUI/portal binaries only, then set up the" >&2
+        echo "           Python runtime yourself (e.g. from an editable lingtai-kernel checkout)." >&2
+        return 1
+      fi
+
       return 1
     else
       echo "error: --ref/source-ref builds have no pinned kernel release bundle to install from." >&2
@@ -1314,6 +1321,32 @@ kernel_artifact_download_url() {
   esac
 }
 
+# resolve_latest_kernel_release queries the kernel provider(s) for the newest
+# published kernel release that carries a release manifest. Populates
+# KERNEL_LATEST_TAG; returns nonzero if unavailable on every provider.
+resolve_latest_kernel_release() {
+  local provider="${BUNDLE_PROVIDER:-github}" other body tag has_manifest candidate
+  KERNEL_LATEST_TAG=""
+  other="github"
+  [[ "$provider" == "github" ]] && other="gitee"
+  for candidate in "$provider" "$other"; do
+    if [[ "$candidate" == "github" ]]; then
+      body="$(curl -fsSL --max-time 15 "${KERNEL_GH_API_BASE}/releases/latest" 2>/dev/null || true)"
+    else
+      body="$(curl -fsSL --max-time 15 "${GITEE_KERNEL_API_BASE}/releases/latest" 2>/dev/null || true)"
+    fi
+    [[ -n "$body" ]] || continue
+    tag="$(printf '%s' "$body" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    has_manifest="$(printf '%s' "$body" | grep -c 'lingtai-kernel-release-manifest.json' || true)"
+    if [[ -n "$tag" && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$has_manifest" != "0" ]]; then
+      KERNEL_LATEST_TAG="$tag"
+      return 0
+    fi
+  done
+  return 1
+}
+
+
 # install_kernel_from_bundle installs the Python `lingtai` runtime from the
 # pinned bundle's kernel release, by explicit local file path — this is the
 # ONLY way this script installs LingTai; it is never requested from a
@@ -1326,31 +1359,31 @@ kernel_artifact_download_url() {
 # signal to try any other source.
 install_kernel_from_bundle() {
   local py="$1" uv="$2"
-  [[ -n "$BUNDLE_MANIFEST_JSON" ]] || return 1
 
   local kernel_tag kernel_manifest artifact_line fname sha download_url dest index_url
   kernel_tag="$(bundle_manifest_field kernel_tag)"
-  [[ -n "$kernel_tag" ]] || return 1
 
-  # TUI release and kernel runtime are decoupled on the default one-command
-  # path: resolve the LATEST kernel release instead of the bundle pin, so a
-  # TUI install never drags a stale kernel. --ref/source-ref builds skip this
-  # (BUNDLE_REQUIRED=0) and keep the bundle pin when a bundle is present.
+  # TUI release and kernel runtime are DECOUPLED on the default one-command
+  # path (BUNDLE_REQUIRED=1): the kernel ALWAYS comes from the latest
+  # lingtai-kernel release, independent of the TUI bundle. --ref/source-ref
+  # builds (BUNDLE_REQUIRED=0) keep the bundle pin when a bundle is present.
   if [[ "$BUNDLE_REQUIRED" == "1" ]]; then
-    local latest_kernel_json latest_kernel_tag has_manifest
-    latest_kernel_json="$(curl -fsSL --max-time 15 "${KERNEL_GH_API_BASE}/releases/latest" 2>/dev/null || true)"
-    latest_kernel_tag="$(printf '%s' "$latest_kernel_json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -1)"
-    has_manifest="$(printf '%s' "$latest_kernel_json" | grep -c 'lingtai-kernel-release-manifest.json' || true)"
-    if [[ -n "$latest_kernel_tag" && "$latest_kernel_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$has_manifest" != "0" ]]; then
-      if [[ "$latest_kernel_tag" != "$kernel_tag" ]]; then
-        say "Resolving latest kernel release: $latest_kernel_tag (TUI/kernel decoupled, bundle pinned $kernel_tag)"
-        kernel_tag="$latest_kernel_tag"
-        BUNDLE_MANIFEST_KERNEL_FILENAME="lingtai-kernel-release-manifest.json"
+    if resolve_latest_kernel_release; then
+      if [[ -n "$kernel_tag" && "$KERNEL_LATEST_TAG" != "$kernel_tag" ]]; then
+        say "Resolving latest kernel release: $KERNEL_LATEST_TAG (TUI/kernel decoupled, bundle pinned $kernel_tag)"
+      elif [[ -z "$kernel_tag" ]]; then
+        say "Resolving latest kernel release: $KERNEL_LATEST_TAG (no TUI bundle for this release)"
       fi
-    else
+      kernel_tag="$KERNEL_LATEST_TAG"
+      BUNDLE_MANIFEST_KERNEL_FILENAME="lingtai-kernel-release-manifest.json"
+    elif [[ -n "$kernel_tag" ]]; then
       warn "Could not resolve the latest kernel release; falling back to the bundle's pinned kernel $kernel_tag."
+    else
+      note "Could not resolve a kernel release (no bundle, no reachable latest kernel release)."
+      return 1
     fi
   fi
+  [[ -n "$kernel_tag" ]] || return 1
 
   if ! fetch_kernel_manifest "$kernel_tag"; then
     note "Could not fetch the pinned kernel release manifest ($kernel_tag) from GitHub or Gitee."
