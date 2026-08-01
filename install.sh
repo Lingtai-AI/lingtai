@@ -120,6 +120,7 @@ REF=""               # explicit source ref (branch/tag/commit) => forces source 
 VERSION=""           # explicit release tag to install (default: latest release)
 LATEST_MAIN_MODE=0   # --latest: explicit current-main TUI + kernel source install
 UPDATE_MODE=0        # --update: re-run for an existing source/user-local install
+REINSTALL_OK=0       # 1 when the default one-command path finds an existing receipt: reinstall in place (binaries + runtime refreshed; credentials/config untouched)
 INSTALL_PREFIX=""    # --prefix: install root (bin_dir = <prefix>/bin)
 BIN_DIR_OVERRIDE=""  # --bin-dir: explicit bin directory
 NON_INTERACTIVE=0    # --non-interactive: never prompt / never sudo-install packages
@@ -1023,7 +1024,7 @@ write_install_metadata() {
   # already-documented re-runnable current-main dev install, so a second run
   # must republish its own receipt in place exactly like --update, not refuse
   # to record newly-installed binaries/runtime it already mutated.
-  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" ]]; then
+  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" ]]; then
     if [[ -e "$metadata_path" || -L "$metadata_path" ]]; then
       echo "error: install receipt appeared before metadata creation; refusing to replace it: $metadata_path" >&2
       return 1
@@ -1059,7 +1060,7 @@ write_install_metadata() {
 }
 EOF
 
-  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" ]]; then
+  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" ]]; then
     if [[ -L "$global_dir" || -e "$metadata_path" || -L "$metadata_path" ]]; then
       rm -f "$tmp_path"
       echo "error: install receipt appeared during metadata creation; refusing to replace it: $metadata_path" >&2
@@ -1454,7 +1455,7 @@ ensure_runtime_venv() {
     fi
   fi
 
-  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" ]]; then
+  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" ]]; then
     local runtime_root="$HOME/.lingtai-tui/runtime" existing_state
     if ! canonical_runtime_venv "$venv_dir" "$runtime_root" >/dev/null; then
       echo "error: selected runtime venv is not a canonical child of the owned runtime root: $venv_dir" >&2
@@ -2720,7 +2721,20 @@ else
   # existing-runtime check and both write_install_metadata no-clobber sites.
   # --latest is a separate, already-documented re-runnable current-main dev
   # install with its own re-run semantics, identical in spirit to --update's.
-  if [[ "$UPDATE_MODE" != "1" ]]; then
+  #
+  # REINSTALL_OK is the plain re-run path Jason asked for: when the default
+  # one-command path (no --update/--ref/--latest) finds an existing receipt,
+  # re-running install.sh reinstalls in place — binaries and runtime are
+  # refreshed to the resolved release, the receipt is republished, and local
+  # credentials/config (under $HOME/.lingtai, .secrets, etc.) are never
+  # touched: the installer only ever manages BIN_DIR, the runtime venv, and
+  # install.json. If no receipt exists yet, REINSTALL_OK stays 0 and the
+  # first-install-only guards below behave exactly as before.
+  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && -z "$REF" && -e "$HOME/.lingtai-tui/install.json" ]]; then
+    REINSTALL_OK=1
+    say "Existing installation detected; reinstalling in place (binaries and runtime refreshed, credentials untouched)."
+  fi
+  if [[ "$UPDATE_MODE" != "1" && "$REINSTALL_OK" != "1" ]]; then
     validate_fresh_install_state || exit 1
     validate_install_target || exit 1
   fi
