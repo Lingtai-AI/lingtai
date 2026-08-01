@@ -962,8 +962,6 @@ ensure_runtime_venv() {
         echo "           Python runtime yourself (e.g. from an editable lingtai-kernel checkout)." >&2
         return 1
       fi
-
-      return 1
     else
       echo "error: --ref/source-ref builds have no pinned kernel release bundle to install from." >&2
       echo "       LingTai's Python runtime is installed only from a verified pinned release" >&2
