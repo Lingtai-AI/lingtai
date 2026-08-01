@@ -1332,6 +1332,26 @@ install_kernel_from_bundle() {
   kernel_tag="$(bundle_manifest_field kernel_tag)"
   [[ -n "$kernel_tag" ]] || return 1
 
+  # TUI release and kernel runtime are decoupled on the default one-command
+  # path: resolve the LATEST kernel release instead of the bundle pin, so a
+  # TUI install never drags a stale kernel. --ref/source-ref builds skip this
+  # (BUNDLE_REQUIRED=0) and keep the bundle pin when a bundle is present.
+  if [[ "$BUNDLE_REQUIRED" == "1" ]]; then
+    local latest_kernel_json latest_kernel_tag has_manifest
+    latest_kernel_json="$(curl -fsSL --max-time 15 "${KERNEL_GH_API_BASE}/releases/latest" 2>/dev/null || true)"
+    latest_kernel_tag="$(printf '%s' "$latest_kernel_json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -1)"
+    has_manifest="$(printf '%s' "$latest_kernel_json" | grep -c 'lingtai-kernel-release-manifest.json' || true)"
+    if [[ -n "$latest_kernel_tag" && "$latest_kernel_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$has_manifest" != "0" ]]; then
+      if [[ "$latest_kernel_tag" != "$kernel_tag" ]]; then
+        say "Resolving latest kernel release: $latest_kernel_tag (TUI/kernel decoupled, bundle pinned $kernel_tag)"
+        kernel_tag="$latest_kernel_tag"
+        BUNDLE_MANIFEST_KERNEL_FILENAME="lingtai-kernel-release-manifest.json"
+      fi
+    else
+      warn "Could not resolve the latest kernel release; falling back to the bundle's pinned kernel $kernel_tag."
+    fi
+  fi
+
   if ! fetch_kernel_manifest "$kernel_tag"; then
     note "Could not fetch the pinned kernel release manifest ($kernel_tag) from GitHub or Gitee."
     return 1
