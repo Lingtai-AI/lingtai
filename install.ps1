@@ -1458,8 +1458,22 @@ function Initialize-BuildMirrors {
 
 function Resolve-MainSha {
     param([string]$RemoteUrl, [string]$Label)
-    $lines = & git ls-remote $RemoteUrl 'refs/heads/main' 2>$null
-    if ($LASTEXITCODE -ne 0) { Fail "Could not resolve $Label refs/heads/main. Install Git and verify network access to $RemoteUrl." }
+    # PS 5.1 promotes native stderr to a terminating ErrorRecord under the
+    # script's global Stop policy, so a `git ls-remote` that writes to stderr
+    # (a controlled test shim, or git emitting a network diagnostic) would
+    # throw AT the native call and bypass the precise $LASTEXITCODE failure
+    # below. Relax to Continue around the call (same pattern as the winget
+    # bootstrap path) so stderr is discarded by 2>$null and the real exit
+    # code drives the message.
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = & git ls-remote $RemoteUrl 'refs/heads/main' 2>$null
+        $gitExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($gitExit -ne 0) { Fail "Could not resolve $Label refs/heads/main. Install Git and verify network access to $RemoteUrl." }
     $sha = ($lines | Select-Object -First 1) -split '\s+' | Select-Object -First 1
     if ($sha -notmatch '^[0-9a-fA-F]{40}$') { Fail "Could not resolve a full $Label main commit from $RemoteUrl." }
     return $sha.ToLowerInvariant()
