@@ -2207,6 +2207,18 @@ function Invoke-Main {
 
 try {
     Invoke-Main
+    # Same transient-console problem as the failure path: when launched by
+    # double-click / shortcut / Start-Process / `curl | iex`, `exit 0` closes the
+    # window the instant the install finishes. On a fast machine steps 3-7
+    # complete in under a second after the big download, so the window vanishing
+    # right after the download reads as a crash ("闪退") even though the
+    # install succeeded. Only pause for a real interactive console; piped/
+    # automated invocations stay non-blocking.
+    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+        Write-Host ""
+        Write-Host "Installation complete. Press Enter to close this window..." -ForegroundColor DarkGray
+        [void][Console]::ReadLine()
+    }
     exit 0
 } catch {
     # The specific fail-loud message was already emitted to the error stream by
