@@ -548,6 +548,7 @@
   "preset_editor.field_thinking": "Reasoning effort",
   "preset_editor.field_api_compat": "api_compat",
   "preset_editor.field_wire_api": "wire_api",
+  "preset_editor.field_responses_transport": "Transport",
   "preset_editor.field_base_url": "base_url",
   "preset_editor.field_api_key_env": "api_key_env",
   "preset_editor.field_api_key": "API key",
