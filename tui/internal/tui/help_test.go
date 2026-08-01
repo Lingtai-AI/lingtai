@@ -100,3 +100,92 @@ func TestNewHelpModelTitle(t *testing.T) {
 		t.Error("HelpModel inner viewer has empty title")
 	}
 }
+
+func TestAgentRailKeyboardCollapseHelpContract(t *testing.T) {
+	optionalF2ByLang := map[string]string{
+		"en":  "when the terminal sends F2",
+		"zh":  "终端实际发送 F2",
+		"wen": "终端实送 F2",
+	}
+	for _, c := range helpLangs {
+		content, err := preset.ReadBundledSkillFile(helpSkillName, c.asset)
+		if err != nil {
+			t.Fatalf("reading %s: %v", c.asset, err)
+		}
+
+		const heading = "### `/agents`"
+		start := strings.Index(content, heading)
+		if start < 0 {
+			t.Fatalf("%s has no %s section", c.asset, heading)
+		}
+		section := content[start:]
+		if next := strings.Index(section[len(heading):], "\n### "); next >= 0 {
+			section = section[:len(heading)+next]
+		}
+
+		paragraphs := strings.Split(strings.TrimSpace(section), "\n\n")
+		if len(paragraphs) < 3 {
+			t.Fatalf("%s /agents help has no keyboard-collapse paragraph", c.asset)
+		}
+		collapseParagraph := paragraphs[len(paragraphs)-1]
+		for _, required := range []string{"85", "84", "Ctrl+G", "fn/Globe+F2", "Tab", "/agents"} {
+			if !strings.Contains(collapseParagraph, required) {
+				t.Errorf("%s /agents keyboard-collapse paragraph does not mention %q", c.asset, required)
+			}
+		}
+		optionalF2, ok := optionalF2ByLang[c.lang]
+		if !ok {
+			t.Fatalf("%s has no terminal-dependent F2 help contract for language %q", c.asset, c.lang)
+		}
+		if !strings.Contains(collapseParagraph, optionalF2) {
+			t.Errorf("%s /agents keyboard-collapse paragraph does not qualify F2 as terminal-dependent with %q",
+				c.asset, optionalF2)
+		}
+		if primary, optional := strings.Index(collapseParagraph, "Ctrl+G"), strings.Index(collapseParagraph, "fn/Globe+F2"); primary < 0 || optional < 0 || primary > optional {
+			t.Errorf("%s /agents keyboard-collapse paragraph does not present Ctrl+G before optional fn/Globe+F2", c.asset)
+		}
+	}
+}
+
+func TestAgentRailVisibleControlsHelpContract(t *testing.T) {
+	leftClickByLang := map[string]string{
+		"en":  "left-click",
+		"zh":  "左键点击",
+		"wen": "鼠左击",
+	}
+	for _, c := range helpLangs {
+		content, err := preset.ReadBundledSkillFile(helpSkillName, c.asset)
+		if err != nil {
+			t.Fatalf("reading %s: %v", c.asset, err)
+		}
+
+		const heading = "### `/agents`"
+		start := strings.Index(content, heading)
+		if start < 0 {
+			t.Fatalf("%s has no %s section", c.asset, heading)
+		}
+		section := content[start:]
+		if next := strings.Index(section[len(heading):], "\n### "); next >= 0 {
+			section = section[:len(heading)+next]
+		}
+		paragraphs := strings.Split(strings.TrimSpace(section), "\n\n")
+		if len(paragraphs) < 3 {
+			t.Fatalf("%s /agents help has no visible-control paragraph", c.asset)
+		}
+		controlParagraph := paragraphs[len(paragraphs)-1]
+		for _, required := range []string{
+			"[<]",
+			"[>]",
+			leftClickByLang[c.lang],
+		} {
+			if !strings.Contains(controlParagraph, required) {
+				t.Errorf("%s /agents visible-control paragraph does not mention %q", c.asset, required)
+			}
+		}
+		for _, obsolete := range []string{"[F2<]", "[F2>]"} {
+			if strings.Contains(controlParagraph, obsolete) {
+				t.Errorf("%s /agents visible-control paragraph still advertises obsolete control %q", c.asset, obsolete)
+			}
+		}
+	}
+}

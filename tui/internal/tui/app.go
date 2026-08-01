@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/fs"
@@ -41,6 +42,7 @@ const (
 	appViewDaemons
 	appViewNotification
 	appViewHelp
+	appViewTaskCard
 )
 
 const doubleEscReturnWindow = 600 * time.Millisecond
@@ -62,6 +64,7 @@ type App struct {
 	notification  NotificationModel
 	presetLibrary PresetLibraryModel
 	help          HelpModel
+	taskcard      TaskCardModel
 	firstRun      FirstRunModel
 	addon         AddonModel
 	doctor        DoctorModel
@@ -98,6 +101,9 @@ type App struct {
 	mailGeneration       uint64
 	projectsActivationID uint64
 
+	nirvanaCleanupPending bool
+	nirvanaCleanupStarted bool
+
 	visiting                bool
 	visitOriginalProjectDir string
 	visitOriginalOrchDir    string
@@ -117,9 +123,61 @@ func humanAddr(projectDir string) string {
 }
 
 func (a *App) installMailModel(m MailModel) {
+	explicitlyCollapsed := a.mail.agentRail.explicitlyCollapsed
+	m.agentRail.explicitlyCollapsed = explicitlyCollapsed
+	m = m.blurAgentRail()
 	a.mailGeneration++
 	m.generation = a.mailGeneration
+	m.advancePollEpoch()
+	// Durable direct-unread operation results are activation-local. A preserved
+	// Mail model can return after prior lane results were routed through a
+	// visited context, so a new activation must not retain unfinishable
+	// in-flight/coalesced markers or accept a previous activation's operation.
+	m.directUnreadOpInFlight = false
+	m.directUnreadSyncPending = false
+	m.directUnreadOpSerial = nextAcceptedSnapshotSerial(m.directUnreadOpSerial)
 	a.mail = m
+}
+
+// beginNirvanaCleanup synchronously retires queued Mail work before any
+// destructive command can run. The one direct-unread durable operation already
+// in flight keeps its serial so its exact terminal result can clear the lane;
+// only its queued continuation is cancelled.
+func (a App) beginNirvanaCleanup() (App, tea.Cmd) {
+	if a.currentView != appViewNirvana || !a.nirvana.cleaning || a.nirvanaCleanupPending {
+		return a, nil
+	}
+
+	a.nirvanaCleanupPending = true
+	a.nirvanaCleanupStarted = false
+	a.mailGeneration++
+	a.mail.generation = a.mailGeneration
+	a.mail.directUnreadSyncPending = false
+	return a.maybeStartNirvanaCleanup()
+}
+
+func (a App) maybeStartNirvanaCleanup() (App, tea.Cmd) {
+	if !a.nirvanaCleanupPending || a.nirvanaCleanupStarted || a.mail.directUnreadOpInFlight {
+		return a, nil
+	}
+	a.nirvanaCleanupStarted = true
+	return a, a.nirvana.doClean()
+}
+
+// issueMailRefresh issues the one refresh request serial on the Update loop
+// for the installed Mail model, then detaches the real prepared-refresh command.
+func (a *App) issueMailRefresh() tea.Cmd {
+	var cmd tea.Cmd
+	a.mail, cmd = a.mail.issueRefreshRequest()
+	return cmd
+}
+
+// issueMailInitialRebuild re-dispatches the bounded initial rebuild under a
+// freshly issued request serial so its completion competes honestly with any
+// periodic refresh issued afterwards.
+func (a *App) issueMailInitialRebuild() tea.Cmd {
+	a.mail.refreshRequestSerial = nextAcceptedSnapshotSerial(a.mail.refreshRequestSerial)
+	return a.mail.initialRebuild
 }
 
 func (a *App) newMailForCurrentContext() MailModel {
@@ -290,16 +348,54 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// Reserve rows for root chrome first, then forward the *reduced*
-		// child window size — never the raw terminal height. See
+		// Derive both axes from the root layout budget, then forward the
+		// child content rectangle — never the raw terminal dimensions. See
 		// layout.go (LayoutBudget) for the contract.
-		return a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
+		budget := a.layoutBudget()
+		if a.currentView == appViewMail &&
+			!budget.RailVisible &&
+			a.mail.agentRail.focused {
+			a.mail = a.mail.blurAgentRail()
+		}
+		return a.updateChildWindowSize(budget.ChildWindowSize())
+
+	case tea.MouseClickMsg:
+		if a.currentView == appViewMail {
+			return a.updateMailMouseClick(msg)
+		}
+
+	case tea.MouseWheelMsg:
+		if a.currentView == appViewMail {
+			return a.updateMailMouseWheel(msg)
+		}
+
+	case tea.PasteMsg:
+		if a.currentView == appViewMail && a.layoutBudget().RailVisible && a.mail.agentRail.focused {
+			return a, nil
+		}
 
 	case tea.FocusMsg:
 		ApplyTerminalBG()
 		return a, nil
 
 	// === Cross-view messages ===
+
+	case nirvanaCleanStartMsg:
+		return a.beginNirvanaCleanup()
+
+	case directUnreadResultMsg:
+		// The exact terminal result must always pass through Mail so it can clear
+		// the durable lane. During Nirvana retirement, discard every follow-up
+		// command and start cleanup only after that lane is observably idle.
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.Update(msg)
+		if a.nirvanaCleanupPending {
+			if a.mail.directUnreadOpInFlight {
+				return a, nil
+			}
+			return a.maybeStartNirvanaCleanup()
+		}
+		return a, cmd
 
 	case mailRefreshMsg, mailPersistMsg, mailHistoryCountMsg, mailOlderPageMsg, homeTelemetryMsg:
 		// Mail content/count rebuilds, older pages, post-frame persistence, and
@@ -322,7 +418,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Likewise clear any global select mode left on by the view we came from
 		// (mail owns its own copyMode; the two must never both be active).
 		a.selectMode = false
-		return a, tea.Batch(a.mail.refreshMail, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize())
+		tickCmd, pulseCmd := a.mail.restartPollLoop()
+		return a, tea.Batch(a.issueMailRefresh(), tickCmd, pulseCmd, a.sendSize())
 
 	case doctorResultMsg:
 		if a.currentView == appViewDoctor {
@@ -391,7 +488,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.mail.AddSystemMessage(i18n.T("mail.refreshed"))
 		}
-		cmds := []tea.Cmd{a.mail.refreshMail}
+		cmds := []tea.Cmd{a.issueMailRefresh()}
 		if a.currentView == appViewKnowledge {
 			var kcmd tea.Cmd
 			a.knowledge, kcmd = a.knowledge.reloadVisible()
@@ -410,7 +507,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.mail.AddSystemMessage(i18n.T("mail.clear_requested"))
 		}
-		return a, a.mail.refreshMail
+		return a, a.issueMailRefresh()
 
 	case refreshAllDoneMsg:
 		if msg.generation != 0 && msg.generation != a.mail.generation {
@@ -421,7 +518,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.mail.AddSystemMessage(i18n.TF("mail.refresh_all", msg.count))
 		}
-		return a, a.mail.refreshMail
+		return a, a.issueMailRefresh()
 
 	case PaletteSelectMsg:
 		return a.handlePaletteCommand(msg.Command, msg.Args)
@@ -527,6 +624,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case RecipeFreshStartMsg:
 		a.pendingRecipe = msg.Recipe
 		a.pendingCustomDir = msg.CustomDir
+		a.nirvanaCleanupPending = false
+		a.nirvanaCleanupStarted = false
 		a.currentView = appViewNirvana
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
@@ -535,6 +634,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Nirvana complete: .lingtai/ wiped, go to first-run.
 		// Re-init project to recreate the human folder so agents can
 		// deliver mail once the new orchestrator starts.
+		a.nirvanaCleanupPending = false
+		a.nirvanaCleanupStarted = false
 		process.InitProject(a.projectDir)
 		a.orchDir = ""
 		a.orchName = ""
@@ -665,8 +766,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		case "q":
 			// Only quit if not in a text input context
-			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp {
+			if a.currentView != appViewFirstRun && a.currentView != appViewMail && a.currentView != appViewProps && a.currentView != appViewAddon && a.currentView != appViewNirvana && a.currentView != appViewLibrary && a.currentView != appViewProjects && a.currentView != appViewLogin && a.currentView != appViewKnowledge && a.currentView != appViewMailbox && a.currentView != appViewSystem && a.currentView != appViewPresets && a.currentView != appViewDaemons && a.currentView != appViewNotification && a.currentView != appViewHelp && a.currentView != appViewTaskCard {
 				return a, tea.Quit
+			}
+		}
+		if msg.Code == tea.KeyF2 || msg.Code == 'g' && msg.Mod == tea.ModCtrl {
+			if a.agentRailToggleEligible() {
+				return a.toggleAgentRail()
+			}
+			return a, nil
+		}
+		if a.currentView == appViewMail {
+			if updated, cmd, handled := a.updateAgentRailKey(msg); handled {
+				return updated, cmd
 			}
 		}
 	}
@@ -745,6 +857,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.notification.Update(msg)
 		a.notification = updated
 		return a, cmd
+	case appViewTaskCard:
+		updated, cmd := a.taskcard.Update(msg)
+		a.taskcard = updated
+		return a, cmd
 	case appViewHelp:
 		updated, cmd := a.help.Update(msg)
 		a.help = updated
@@ -761,11 +877,18 @@ func (a App) openSetupCredentials() (App, tea.Cmd) {
 }
 
 func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
+	if a.currentView == appViewMail && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
 	addMsg := func(text string) {
 		a.mail.AddSystemMessage(text)
 	}
 	targetDir := a.orchDir
 	targetName := a.orchName
+	if target, ok := a.mail.currentDirectTarget(); ok {
+		targetDir = target.Directory
+		targetName = target.Address
+	}
 	switch command {
 	case "sleep":
 		if args == "all" {
@@ -957,24 +1080,30 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 	case "settings":
 		a.currentView = appViewSettings
 		tuiCfg := config.LoadTUIConfig(a.globalDir)
-		a.settings = NewSettingsModel(a.globalDir, a.projectDir, a.orchDir, tuiCfg)
+		a.settings = NewSettingsModel(a.globalDir, a.projectDir, targetDir, tuiCfg)
 		return a, tea.Batch(a.settings.Init(), a.sendSize())
 	case "nirvana":
+		a.nirvanaCleanupPending = false
+		a.nirvanaCleanupStarted = false
 		a.currentView = appViewNirvana
 		a.nirvana = NewNirvanaModel(a.projectDir)
 		return a, tea.Batch(a.nirvana.Init(), a.sendSize())
 	case "kanban":
 		a.currentView = appViewProps
-		a.props = NewPropsModel(a.projectDir, a.orchDir, a.globalDir)
+		a.props = NewPropsModel(a.projectDir, targetDir, a.globalDir)
 		return a, tea.Batch(a.props.Init(), a.sendSize())
 	case "daemons":
 		a.currentView = appViewDaemons
-		a.daemons = NewDaemonsModel(a.projectDir, a.orchDir)
+		a.daemons = NewDaemonsModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.daemons.Init(), a.sendSize())
 	case "notification":
 		a.currentView = appViewNotification
-		a.notification = NewNotificationModel(a.orchDir)
+		a.notification = NewNotificationModel(targetDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "taskcard":
+		a.currentView = appViewTaskCard
+		a.taskcard = NewTaskCardModel(targetDir)
+		return a, tea.Batch(a.taskcard.Init(), a.sendSize())
 	case "goal":
 		if targetDir == "" {
 			addMsg(i18n.T("mail.goal_no_agent"))
@@ -996,17 +1125,26 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 		// Agent-scoped: mirror what the skills capability would inject for
 		// this agent. Scans <agent>/.library/ plus every Tier-1 path declared
 		// in init.json (manifest.capabilities.skills.paths).
-		a.library = NewLibraryModel(a.projectDir, a.orchDir, a.tuiConfig.Language)
+		a.library = NewLibraryModel(a.projectDir, targetDir, a.tuiConfig.Language)
 		return a, tea.Batch(a.library.Init(), a.sendSize())
+	case "agents":
+		// The /agents selector is a Mail-owned overlay over the canonical
+		// conversation rows; it works at every terminal width. A delayed
+		// palette result cannot displace an editor warning that already owns
+		// the Mail surface.
+		if a.currentView == appViewMail && !a.mail.showEditorWarn {
+			a.mail = a.mail.openAgentSelector()
+		}
+		return a, nil
 	case "projects":
 		return a.openProjectsView()
 	case "knowledge", "library", "codex":
 		a.currentView = appViewKnowledge
-		a.knowledge = NewKnowledgeModel(a.projectDir, a.orchDir)
+		a.knowledge = NewKnowledgeModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.knowledge.Init(), a.sendSize())
 	case "system":
 		a.currentView = appViewSystem
-		a.system = NewSystemModel(a.projectDir, a.orchDir)
+		a.system = NewSystemModel(a.projectDir, targetDir)
 		return a, tea.Batch(a.system.Init(), a.sendSize())
 	case "mailbox":
 		a.currentView = appViewMailbox
@@ -1036,15 +1174,15 @@ func (a App) handlePaletteCommand(command, args string) (tea.Model, tea.Cmd) {
 			addMsg(i18n.T("export.help"))
 			return a, nil
 		}
-		if a.orchDir == "" {
+		if targetDir == "" {
 			addMsg(i18n.T("export.no_agent"))
 			return a, nil
 		}
-		if !fs.IsAlive(a.orchDir, 3.0) {
+		if !fs.IsAlive(targetDir, 3.0) {
 			addMsg(i18n.T("mail.btw_suspended"))
 			return a, nil
 		}
-		fs.WritePrompt(a.orchDir, i18n.T("export.recipe_prompt"))
+		fs.WritePrompt(targetDir, i18n.T("export.recipe_prompt"))
 		addMsg(i18n.T("export.recipe_sent"))
 		return a, nil
 	case "molt":
@@ -1365,6 +1503,164 @@ type childWindowSizeMsg struct {
 	tea.WindowSizeMsg
 }
 
+func (a App) agentRailToggleEligible() bool {
+	return a.currentView == appViewMail &&
+		a.width >= agentRailMinTerminalWidth &&
+		!a.mail.copyMode &&
+		!a.mail.directVisibilityObscured()
+}
+
+func (a App) collapsedAgentRailControlVisible() bool {
+	return a.currentView == appViewMail &&
+		a.width >= agentRailMinTerminalWidth &&
+		a.mail.agentRail.explicitlyCollapsed &&
+		a.mail.ordinaryHeaderVisible()
+}
+
+func (a App) toggleAgentRail() (App, tea.Cmd) {
+	a.mail.agentRail.explicitlyCollapsed = !a.mail.agentRail.explicitlyCollapsed
+	if a.mail.agentRail.explicitlyCollapsed && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
+	a, cmd := a.updateChildWindowSize(a.layoutBudget().ChildWindowSize())
+	if a.mail.directChat.mainComposeStored {
+		a.mail.directChat.mainInput.SetWidth(a.mail.width)
+	}
+	return a, cmd
+}
+
+func (a App) updateAgentRailKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
+	if !a.layoutBudget().RailVisible {
+		return a, nil, false
+	}
+	if !a.mail.agentRail.focused {
+		if msg.Code != tea.KeyTab ||
+			!a.mail.input.Focused() ||
+			a.mail.showEditorWarn ||
+			a.mail.agentSelector.selectorOpen ||
+			a.mail.input.IsPaletteActive() {
+			return a, nil, false
+		}
+		a.mail = a.mail.focusAgentRail()
+		return a, nil, true
+	}
+
+	// Mail owns copy mode. Its toggle and first Esc keep their established
+	// precedence even while the rail has presentation focus.
+	if msg.String() == copyModeToggleKey || a.mail.copyMode && msg.String() == "esc" {
+		return a, nil, false
+	}
+	if msg.String() == "ctrl+r" {
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.Update(msg)
+		return a, cmd, true
+	}
+
+	switch msg.String() {
+	case "tab", "esc":
+		a.mail = a.mail.blurAgentRail()
+	case "up", "k":
+		a.mail = a.mail.moveSelectorCursor(-1).keepAgentRailCursorVisible()
+	case "down", "j":
+		a.mail = a.mail.moveSelectorCursor(1).keepAgentRailCursorVisible()
+	case "home":
+		a.mail = a.mail.setSelectorCursor(0).keepAgentRailCursorVisible()
+	case "end":
+		a.mail = a.mail.setSelectorCursor(len(a.mail.agentSelector.rows) - 1).keepAgentRailCursorVisible()
+	case "enter":
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.activateConversationRow(a.mail.agentSelector.cursor)
+		a.mail = a.mail.keepAgentRailCursorVisible()
+		return a, cmd, true
+	default:
+		if msg.Code == ' ' {
+			var cmd tea.Cmd
+			a.mail, cmd = a.mail.activateConversationRow(a.mail.agentSelector.cursor)
+			a.mail = a.mail.keepAgentRailCursorVisible()
+			return a, cmd, true
+		}
+	}
+	return a, nil, true
+}
+
+func (a App) mailMouseChildCoordinates(x, y int) (LayoutBudget, int, int, bool) {
+	budget := a.layoutBudget()
+	if x < 0 || x >= budget.TerminalWidth ||
+		y < budget.TopChromeRows ||
+		y >= budget.TopChromeRows+budget.ChildHeight {
+		return budget, 0, 0, false
+	}
+	return budget, x - budget.RailWidth, y - budget.TopChromeRows, true
+}
+
+func (a App) updateMailMouseClick(msg tea.MouseClickMsg) (App, tea.Cmd) {
+	budget, childX, childY, inside := a.mailMouseChildCoordinates(msg.X, msg.Y)
+	if !inside {
+		return a, nil
+	}
+	if budget.RailVisible && msg.X < budget.RailWidth {
+		if a.mail.copyMode || a.mail.directVisibilityObscured() || msg.Button != tea.MouseLeft {
+			return a, nil
+		}
+		if childY == 0 &&
+			msg.X >= agentRailCollapseControlStart &&
+			msg.X < agentRailCollapseControlStart+agentRailControlWidth {
+			return a.toggleAgentRail()
+		}
+		row := a.mail.agentRailRowAt(childY)
+		if row < 0 {
+			return a, nil
+		}
+		a.mail = a.mail.setSelectorCursor(row).keepAgentRailCursorVisible()
+		var cmd tea.Cmd
+		a.mail, cmd = a.mail.activateConversationRow(row)
+		return a, cmd
+	}
+
+	if a.collapsedAgentRailControlVisible() &&
+		childY == 0 &&
+		childX < agentRailControlWidth {
+		if msg.Button != tea.MouseLeft || !a.agentRailToggleEligible() {
+			return a, nil
+		}
+		return a.toggleAgentRail()
+	}
+
+	if msg.Button == tea.MouseLeft && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
+	msg.X = childX
+	msg.Y = childY
+	var cmd tea.Cmd
+	a.mail, cmd = a.mail.Update(msg)
+	return a, cmd
+}
+
+func (a App) updateMailMouseWheel(msg tea.MouseWheelMsg) (App, tea.Cmd) {
+	budget, childX, childY, inside := a.mailMouseChildCoordinates(msg.X, msg.Y)
+	if !inside {
+		return a, nil
+	}
+	if budget.RailVisible && msg.X < budget.RailWidth {
+		if a.mail.copyMode || a.mail.directVisibilityObscured() {
+			return a, nil
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			a.mail = a.mail.scrollAgentRail(-1)
+		case tea.MouseWheelDown:
+			a.mail = a.mail.scrollAgentRail(1)
+		}
+		return a, nil
+	}
+
+	msg.X = childX
+	msg.Y = childY
+	var cmd tea.Cmd
+	a.mail, cmd = a.mail.Update(msg)
+	return a, cmd
+}
+
 func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.currentView {
@@ -1406,6 +1702,8 @@ func (a App) updateChildWindowSize(msg tea.WindowSizeMsg) (App, tea.Cmd) {
 		a.notification, cmd = a.notification.Update(msg)
 	case appViewHelp:
 		a.help, cmd = a.help.Update(msg)
+	case appViewTaskCard:
+		a.taskcard, cmd = a.taskcard.Update(msg)
 	}
 	return a, cmd
 }
@@ -1498,9 +1796,9 @@ func firstLine(err error) string {
 
 // sendSize returns a tea.Cmd that sends the current *child* window size to a
 // newly created view so it doesn't render with zero width/height. The size is
-// the terminal dimensions reduced by any root chrome (see layout.go) — the same
-// budget the incoming-WindowSizeMsg handler forwards, so a freshly-routed view
-// and a resized view agree on their height.
+// the content rectangle produced by LayoutBudget (see layout.go) — the same
+// geometry the incoming-WindowSizeMsg handler forwards, so a freshly-routed
+// view and a resized view agree on viewport/composer/header/footer dimensions.
 func (a App) sendSize() tea.Cmd {
 	cs := a.layoutBudget().ChildWindowSize()
 	return func() tea.Msg { return childWindowSizeMsg{WindowSizeMsg: cs} }
@@ -1570,11 +1868,14 @@ func (a App) returnFromVisit() (App, tea.Cmd) {
 func (a *App) resumeMailModel(restored MailModel) tea.Cmd {
 	a.installMailModel(restored)
 	a.mail.homeTelemetryInFlight = false
-	refreshCmd := a.mail.refreshMail
+	var refreshCmd tea.Cmd
 	if a.mail.initialLoading {
-		refreshCmd = a.mail.initialRebuild
+		refreshCmd = a.issueMailInitialRebuild()
+	} else {
+		refreshCmd = a.issueMailRefresh()
 	}
-	return tea.Batch(refreshCmd, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize())
+	tickCmd, pulseCmd := a.mail.pollLoopCmds()
+	return tea.Batch(refreshCmd, tickCmd, pulseCmd, a.sendSize())
 }
 
 func (a App) maybeHandleVisitEsc(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
@@ -1600,7 +1901,10 @@ func (a App) visitEscEligible() bool {
 	if !a.visiting || a.selectMode || a.currentView != appViewMail {
 		return false
 	}
-	return !a.mail.copyMode && !a.mail.showEditorWarn && !a.mail.input.IsPaletteActive()
+	return !a.mail.copyMode &&
+		!a.mail.agentRail.focused &&
+		!a.mail.showEditorWarn &&
+		!a.mail.input.IsPaletteActive()
 }
 
 // RecipeFreshStartMsg is emitted from stepRecipeSwapConfirm when the user
@@ -1627,6 +1931,9 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 	// navigation so it never leaks into the destination (and so entering mail
 	// hands ctrl+y back to the mail model's own copyMode).
 	a.selectMode = false
+	if viewName != "mail" && a.mail.agentRail.focused {
+		a.mail = a.mail.blurAgentRail()
+	}
 	switch viewName {
 	case "mail":
 		a.currentView = appViewMail
@@ -1644,7 +1951,8 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.mail.toolCallTruncate = a.tuiConfig.ToolCallTruncate
 		// Re-apply theme to textarea (settings may have changed it)
 		a.mail.input.ApplyTheme()
-		mailCmd := a.mail.refreshMail
+		mailCmd := a.issueMailRefresh()
+		var tickCmd, pulseCmd tea.Cmd
 		if pageSizeChanged {
 			// The page size owns both visible batching and the bounded content
 			// snapshot. A preserved cache built with the previous setting cannot be
@@ -1653,13 +1961,17 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 			a.mail.initialLoading = true
 			a.installMailModel(a.mail)
 			mailCmd = a.mail.initialRebuild
+			tickCmd, pulseCmd = a.mail.pollLoopCmds()
+		} else {
+			tickCmd, pulseCmd = a.mail.restartPollLoop()
 		}
-		// Restart mail tick + refresh + pulse (ticks die when another view is active).
+		// Restart Mail refresh + tick/pulse. The new poll epoch invalidates any
+		// same-generation chain that was still pending outside Mail.
 		// Also (re)start the app-level auto-refresh ticker: this is the path
 		// taken when leaving /settings, where auto refresh may have just been
 		// toggled back on. startAutoRefresh is a no-op if it is already armed.
 		a, arCmd := a.startAutoRefresh()
-		return a, tea.Batch(mailCmd, tickEvery(a.mail.pollRate, a.mail.generation), pulseTick(a.mail.generation), a.sendSize(), arCmd)
+		return a, tea.Batch(mailCmd, tickCmd, pulseCmd, a.sendSize(), arCmd)
 	case "setup":
 		a.currentView = appViewFirstRun
 		a.firstRun = NewSetupModeModel(a.projectDir, a.globalDir, a.orchDir, a.orchName)
@@ -1688,6 +2000,10 @@ func (a App) switchToView(viewName string) (tea.Model, tea.Cmd) {
 		a.currentView = appViewNotification
 		a.notification = NewNotificationModel(a.orchDir)
 		return a, tea.Batch(a.notification.Init(), a.sendSize())
+	case "taskcard":
+		a.currentView = appViewTaskCard
+		a.taskcard = NewTaskCardModel(a.orchDir)
+		return a, tea.Batch(a.taskcard.Init(), a.sendSize())
 	case "skills":
 		a.currentView = appViewLibrary
 		// Agent-scoped: mirror what the skills capability would inject for
@@ -1747,7 +2063,15 @@ func (a App) View() tea.View {
 	case appViewFirstRun:
 		content = a.firstRun.View()
 	case appViewMail:
-		content = a.mail.View()
+		content = a.mail.view(a.collapsedAgentRailControlVisible())
+		budget := a.layoutBudget()
+		if budget.RailVisible {
+			content = lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				a.mail.renderAgentRail(budget.RailWidth, budget.ChildHeight),
+				content,
+			)
+		}
 	case appViewSettings:
 		content = a.settings.View()
 	case appViewProps:
@@ -1782,6 +2106,8 @@ func (a App) View() tea.View {
 		content = a.notification.View()
 	case appViewHelp:
 		content = a.help.View()
+	case appViewTaskCard:
+		content = a.taskcard.View()
 	}
 	// Compose root-owned chrome (top banner today) around the child content.
 	// The child was already sized to the reduced budget, so chrome occupies
@@ -1975,7 +2301,10 @@ func ValidateCodexAuthOnStartup(globalDir string) string {
 // validateOneCodexAuthFile refreshes a single Codex token file in place,
 // returning a banner string only on a malformed file or a server-side-revoked
 // grant. label identifies the account in the banner without leaking secrets.
-// Token material is written 0600 and never logged.
+// Token material is written 0600 and never logged. The actual expiry check,
+// refresh call, and atomic write-back live in ensureFreshCodexTokens
+// (oauth.go), shared with the save-time Codex eligibility probe
+// (codex_model_probe.go) so both agree on staleness/revocation handling.
 func validateOneCodexAuthFile(authPath, label string) string {
 	raw, err := os.ReadFile(authPath)
 	if err != nil {
@@ -1986,36 +2315,19 @@ func validateOneCodexAuthFile(authPath, label string) string {
 		return fmt.Sprintf("⚠ Codex OAuth (%s): credential malformed — re-login via /setup", label)
 	}
 
-	const refreshBufferSeconds = 300
-	if tokens.ExpiresAt > time.Now().Unix()+refreshBufferSeconds {
-		return ""
+	_, err = ensureFreshCodexTokens(authPath, tokens)
+	if err == ErrCodexAuthRevoked {
+		// Localized banner (#412). The %s slot is a navigation hint
+		// (/setup → <credentials section>), so it carries the section
+		// label, not the account. Per-account coverage (#415) is provided
+		// by validateCodexAuthOnStartup iterating every account file; the
+		// account itself is identified via the malformed banner below.
+		return i18n.TF("codex.oauth_expired_banner", i18n.T("preset.codex_credential_section"))
 	}
-
-	fresh, err := refreshCodexTokens(tokens.RefreshToken, tokens)
-	if err != nil {
-		if err == ErrCodexAuthRevoked {
-			// Localized banner (#412). The %s slot is a navigation hint
-			// (/setup → <credentials section>), so it carries the section
-			// label, not the account. Per-account coverage (#415) is provided
-			// by validateCodexAuthOnStartup iterating every account file; the
-			// account itself is identified via the malformed banner below.
-			return i18n.TF("codex.oauth_expired_banner", i18n.T("preset.codex_credential_section"))
-		}
-		return ""
-	}
-
-	out, err := json.MarshalIndent(fresh, "", "  ")
-	if err != nil {
-		return ""
-	}
-	tmpPath := authPath + ".tmp"
-	if err := os.WriteFile(tmpPath, out, 0o600); err != nil {
-		return ""
-	}
-	if err := os.Rename(tmpPath, authPath); err != nil {
-		os.Remove(tmpPath)
-		return ""
-	}
+	// Both nil (already fresh, or refreshed and persisted) and
+	// ErrCodexAuthTransient (network/5xx/timeout/write failure) are silent
+	// here, matching pre-extraction behavior: do not penalize the user for
+	// being offline, and do not surface anything when nothing is wrong.
 	return ""
 }
 
@@ -2029,15 +2341,23 @@ func codexOAuthConfigured(globalDir string) bool {
 	return codexAuthPathValid(legacyCodexAuthPath(globalDir))
 }
 
-// validateCodexAuthForAgents scans all agent directories under projectDir for
-// init.json files whose active/default preset is codex, and validates the
-// SPECIFIC Codex account each such preset binds to (manifest.llm.codex_auth_path,
-// falling back to the legacy file). If any agent's bound account is missing or
-// invalid, returns a warning naming that agent. A different, validly-bound
-// account never suppresses (or triggers) the warning. Returns "" when all
-// codex-using agents have a usable bound account.
+// validateCodexAuthForAgents scans active/default preset manifests for every
+// agent under projectDir. Single-account Codex presets validate their bound
+// account; Codex pool presets reuse the kernel-mirroring pool eligibility facts.
+// Provider ownership comes only from a successfully loaded manifest, never from
+// a preset filename or path, so malformed/unreadable refs are skipped. Returns a
+// warning naming the first Codex agent without usable credentials, or "" when
+// every discovered Codex agent is eligible.
 func validateCodexAuthForAgents(globalDir, projectDir string) string {
 	entries, _ := os.ReadDir(projectDir)
+	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(globalDir)
+	auth := preset.AuthState{
+		CodexOAuthConfigured:      codexOAuthConfigured(globalDir),
+		CodexAuthDir:              globalDir,
+		CodexPoolEligible:         poolEligible,
+		CodexPoolEligibleModels:   poolModels,
+		CodexPoolFallbackEligible: poolFallback,
+	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -2052,52 +2372,29 @@ func validateCodexAuthForAgents(globalDir, projectDir string) string {
 			continue
 		}
 		manifest, _ := init["manifest"].(map[string]interface{})
-		if manifest == nil {
-			continue
-		}
 		presetBlock, _ := manifest["preset"].(map[string]interface{})
 		if presetBlock == nil {
 			continue
 		}
+		seen := map[string]bool{}
 		for _, key := range []string{"default", "active"} {
 			presetRef, _ := presetBlock[key].(string)
-			if presetRef == "" || !strings.Contains(presetRef, "codex") {
+			if presetRef == "" || seen[presetRef] {
 				continue
 			}
-			// Resolve the preset's bound account (#415) and validate just that
-			// file; warn (localized, #412) naming the agent only when its own
-			// bound account is missing — a different account staying invalid
-			// no longer condemns this agent.
-			if !codexPresetRefAuthValid(globalDir, presetRef) {
+			seen[presetRef] = true
+			// The family and auth facts come exclusively from the loaded
+			// manifest. Unreadable/malformed refs have no family and are
+			// intentionally skipped; in particular they never fall back to
+			// a legacy Codex credential based on a filename or path.
+			rr := preset.ResolveRefsWithAuth([]string{presetRef}, nil, auth)
+			if len(rr) != 1 || !rr[0].ManifestValid {
+				continue
+			}
+			if (rr[0].Family == preset.CredentialFamilyCodexSingle || rr[0].Family == preset.CredentialFamilyCodexPool) && !rr[0].HasKey {
 				return i18n.TF("codex.oauth_unverified_agent", e.Name())
 			}
 		}
 	}
 	return ""
-}
-
-// codexPresetRefAuthValid loads the preset file at presetRef and validates the
-// Codex OAuth account it binds to (manifest.llm.codex_auth_path, empty →
-// legacy fallback). When the preset file can't be read (e.g. a transient path),
-// it falls back to validating the legacy account so a missing preset file
-// doesn't spuriously fail an agent that may still resolve at launch.
-func codexPresetRefAuthValid(globalDir, presetRef string) bool {
-	abs := presetRef
-	if strings.HasPrefix(abs, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			abs = filepath.Join(home, abs[2:])
-		}
-	}
-	ref := ""
-	if data, err := os.ReadFile(abs); err == nil {
-		var p map[string]interface{}
-		if json.Unmarshal(data, &p) == nil {
-			if manifest, ok := p["manifest"].(map[string]interface{}); ok {
-				if llm, ok := manifest["llm"].(map[string]interface{}); ok {
-					ref, _ = llm["codex_auth_path"].(string)
-				}
-			}
-		}
-	}
-	return codexAuthPathValid(resolveCodexAuthPath(globalDir, ref))
 }

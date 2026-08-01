@@ -44,11 +44,13 @@
 - `/system` — 浏览智能体的系统文件（system.md、covenant 等）。
 - `/daemons` — 检视各智能体的守护进程运行记录。
 - `/notification` — 查看当前 Agent 最近收到的通知块，并可左右切换。
+- `/taskcard` — 查看智能体当前活跃的声明式 Task Card（如有）。
 - `/presets` — 查看本智能体可用 `/refresh` 切换的预设。
 
 ### 网络与分享
 - `/mailbox` — 浏览全部邮箱消息与附件。
 - `/projects` — 切换到另一个运行中 admin 智能体的项目与邮件上下文。
+- `/agents` — 选择主会话或当前项目中的智能体进行直接邮件。
 - `/export` — 导出可复用的配方以便分享。
 - `/viz` — 在浏览器中打开网络可视化。
 
@@ -182,6 +184,14 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 
 显示当前聚焦 Agent 最近收到的 agent-visible 通知块（从 `logs/log.sqlite` 重建）。当通知徽标看起来不对、Agent 说有通知，或你想检查最近实际注入给 Agent 的通知块时使用。左/右切换最近的通知块，`r` 重新加载，Esc/`q` 返回聊天；该视图只读，不会 dismiss 或修改通知。
 
+### `/taskcard` — 查看智能体的 Task Card
+**用法：** `/taskcard`
+
+显示当前智能体的声明式 Task Card——即其工作目录下的 `taskcard/taskcard.md`——前提是
+`taskcard/status` 精确读作 `active`。这与 Telegram 投射到常驻卡片上的是同一份
+agent-local 产物；TUI 只是把它显示出来，是某一时刻的快照，渲染在 markdown 查看器中。
+重新执行 `/taskcard` 即可刷新。若没有活跃的卡片，会显示一条简短的状态提示。
+
 ### `/presets` — 打开预设库
 **用法：** `/presets`
 
@@ -195,6 +205,18 @@ goal 需要删除 `.notification/goal.json`，或把其中 status 标为 inactiv
 
 浏览每一条邮箱消息——收件、发件与 IMAP——包含完整正文和内联附件渲染。当你想要某智能体
 的完整邮件记录（含外部 IMAP 邮件与附件），而非实时对话流时使用。
+
+### `/agents` — 选择邮件会话
+**用法：** `/agents`
+
+选择主会话或当前项目中的智能体进行直接邮件。使用方向键（或 j/k）与
+Home/End 移动，Enter 或 Space 选择，Esc 取消且不改变当前会话。
+
+邮件视图宽度达到 85 列或更宽时，展开的 24 列宽会话侧栏显示 `[<]`，左键点击按钮可折叠；
+手动折叠后，普通邮件标题栏显示 `[>]`，左键点击按钮可展开。键盘可用 Ctrl+G 切换同一侧栏。
+Mac 上的 fn/Globe+F2 是可选加速键；仅当终端实际发送 F2 时，F2 才有效。仅当侧栏展开时，
+Tab 才能进入或离开侧栏。宽度为 84 列或更窄时，侧栏会自动隐藏。`/agents`
+始终是所有宽度下的规范后备入口，并从完全相同的会话条目中选择。
 
 ### `/projects` — 切换到运行中的 admin 智能体
 **用法：** `/projects`
@@ -250,7 +272,7 @@ Telegram、飞书、微信）将智能体连接到外部服务。它不负责设
 ### `/update-tui` — 更新 TUI 与 portal 二进制
 **用法：** `/update-tui`
 
-检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后升级 TUI 二进制，并可能同时刷新共装的 portal 二进制——不触碰 Python 内核。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
+检测 `lingtai-tui` 二进制的安装方式（Homebrew 或源码/用户本地），确认后升级 TUI 二进制，并可能同时刷新共装的 portal 二进制——不触碰 Python 内核。Homebrew 安装会迁移到原生安装器而不再执行 brew；`/update-tui` 本身不会移除旧的 Homebrew formula/keg——是否移除是另一个独立的问题，只有交互式**启动**流程在原生安装通过验证后才会以 `[y/N]` 提问，本命令不会。如果原生二进制在 PATH 中尚未排在 Homebrew 之前，`/update-tui` 会如实报告迁移已安装但尚未完成，而非宣称成功，并在 Homebrew 被移除或 PATH 被调整之前的每次运行中持续如实报告该状态。更新成功后显示重启提示，不会自动重启正在运行的 TUI。若安装方式不受支持（未知/其他），则仅作提示、不做改动。确认是强制的：`/update-tui` 绝不在单次按键时安装。关于安装方式检测、源码构建失败、Homebrew tap 和中国大陆网络连接，参见内置的 `lingtai-update` 技能。
 
 ### `/login` — 查看与管理凭证
 **用法：** `/login`

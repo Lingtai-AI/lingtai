@@ -2,9 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -54,33 +52,21 @@ const (
 	feWireAPI
 	feBaseURL
 	feAPIKey
-	feCapFile
-	feCapBash
-	feCapWebSearch
-	feCapAvatar
-	feCapDaemon
-	feCapVision
 	feStreaming
 	feKarma
 	feNirvana
 	feSave
 )
 
-// capFieldNames maps editable capability fields to their underlying capability
-// key. Kernel core capabilities are always included by the runtime floor and
-// are shown as informational rows, not as preset opt-in checkboxes.
-var capFieldNames = map[editorField]string{
-	feCapWebSearch: "web_search",
-	feCapVision:    "vision",
-}
-
 // editorFieldOrder is the rendering order of fields. The cursor walks
-// this slice; section headers render between transitions. Only truly
-// optional/provider-conditional capabilities appear as editable rows.
+// this slice; section headers render between transitions. Capabilities
+// are not cursor-navigable or editable fields — every capability the
+// kernel can grant an agent is always included, and the Capabilities
+// section renders as a fixed informational list below (see formRows'
+// capabilityRows), not as form rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
 	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feBaseURL, feAPIKey,
-	feCapWebSearch, feCapVision,
 	feSave,
 }
 
@@ -92,23 +78,12 @@ var saveFieldIndex = len(editorFieldOrder) - 1
 type editorMode int
 
 const (
-	emBrowse       editorMode = iota // navigating field list
-	emInline                         // textinput active for the focused field
-	emCapabilities                   // capability-edit modal
-	emCapInline                      // inline edit of a capability subfield (e.g. yolo, paths)
-	emClonePrompt                    // built-in: prompt for new name on semantic edit
-	emDirtyPrompt                    // legacy "discard? y/N" — kept for compat
-	emExitPrompt                     // three-way exit on Esc: save / discard / cancel
+	emBrowse      editorMode = iota // navigating field list
+	emInline                        // textinput active for the focused field
+	emClonePrompt                   // built-in: prompt for new name on semantic edit
+	emDirtyPrompt                   // legacy "discard? y/N" — kept for compat
+	emExitPrompt                    // three-way exit on Esc: save / discard / cancel
 )
-
-// capabilityProviderOptions enumerates the multi-provider capabilities
-// the editor knows about. Order matters — tab cycles through this list
-// in declaration order. "inherit" means "use the main LLM's provider"
-// via the kernel's expand_inherit logic.
-var capabilityProviderOptions = map[string][]string{
-	"web_search": {"duckduckgo", "minimax", "zhipu", "codex", "inherit"},
-	"vision":     {"inherit", "minimax", "mimo", "gemini", "codex", "codex-pool"},
-}
 
 // providerModels maps a provider name to the canonical model lineup the
 // editor cycles through with ←/→ on the model row. Providers absent from
@@ -156,11 +131,14 @@ var providerModels = map[string][]string{
 	// changes which token file each request routes through (the pool), not the
 	// model catalog. Keep the two lists identical.
 	"codex-pool": {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"},
-	// Claude Agent SDK uses Claude Code CLI aliases, not dated API IDs.
-	// Keep opus first to match Jason's requested Opus 4.8 default;
-	// sonnet/haiku remain selectable for cheaper or faster runs.
-	"claude-agent-sdk": {"opus", "sonnet", "haiku"},
-	"claude_agent_sdk": {"opus", "sonnet", "haiku"},
+	// Claude Code uses CLI aliases, not dated API IDs. Current Claude Code
+	// resolves fable to claude-fable-5. Keep the old provider spellings only
+	// so user-saved presets remain editable after the built-in moves to
+	// canonical provider "claude-code".
+	"claude-code":      {"opus", "fable", "sonnet", "haiku"},
+	"claude_code":      {"opus", "fable", "sonnet", "haiku"},
+	"claude-agent-sdk": {"opus", "fable", "sonnet", "haiku"},
+	"claude_agent_sdk": {"opus", "fable", "sonnet", "haiku"},
 }
 
 var codexServiceTierOptions = []string{"normal", "fast"}
@@ -171,14 +149,12 @@ var wireAPIOptions = []string{"auto", "chat_completions", "responses"}
 
 const presetEditorFieldLabelWidth = 18
 
-// modelHasVision reports whether a given model accepts image input.
-// Drives both the disabled-row rendering and the model-switch default
-// set: text-only models lose vision; vision-capable models gain it.
-//
-// Only includes models from providerModels above. Free-text providers
-// (openrouter/custom/codex/etc.) are assumed vision-capable here so
-// the user isn't blocked from enabling it on a model the editor
-// doesn't catalog.
+// modelHasVision documents which cataloged models actually accept image
+// input. The editor no longer uses this to gate or auto-toggle the vision
+// capability — vision is always included in the manifest like every other
+// capability — so this map is reference data for tests only, kept because
+// per-model vision support is still a real fact worth asserting against
+// regressions in providerModels/the model catalog above.
 var modelHasVision = map[string]bool{
 	// MiniMax: keyed to the official supported LLM model IDs. Only the known
 	// multimodal entries auto-enable vision — M3 (current flagship) and the
@@ -219,55 +195,6 @@ var modelHasVision = map[string]bool{
 	"gpt-5.2":       true,
 }
 
-// alwaysIncludedCapabilities are the kernel core floor. The runtime injects
-// these via CORE_DEFAULTS on boot/refresh unless the user opts out through the
-// explicit disable/null channel. The preset editor shows them for awareness but
-// does not serialize ordinary checkbox state for them.
-var alwaysIncludedCapabilities = []string{
-	"knowledge", "skills", "shell",
-	"avatar", "daemon", "mcp", "file",
-}
-
-// optionalCapabilities are provider/model-conditional. web_search picks
-// a search backend (duckduckgo / minimax / zhipu / mimo / codex /
-// inherit) via ←/→. vision is greyed out for text-only models.
-var optionalCapabilities = []string{
-	"web_search", "vision",
-}
-
-// editorCapabilities is the full ordered list of editable capabilities.
-var editorCapabilities = append([]string{}, optionalCapabilities...)
-
-// defaultCaps returns the canonical optional capability set the editor applies
-// when the user switches to this model. Kernel core capabilities are not listed
-// here because apply_core_defaults injects them at runtime; adding them to the
-// preset would make the UI imply they are ordinary opt-ins.
-func defaultCapsFor(modelID string) map[string]interface{} {
-	caps := map[string]interface{}{
-		"web_search": map[string]interface{}{"provider": "duckduckgo"},
-	}
-	if modelHasVision[modelID] {
-		caps["vision"] = map[string]interface{}{"provider": "inherit"}
-	}
-	return caps
-}
-
-// modelSupportsCap reports whether a given capability is allowed for
-// the current model. Today the only model-conditional cap is vision;
-// everything else is universally allowed. Returns true for unknown
-// models so we don't accidentally lock out a user-typed model id from
-// the free-text providers.
-func modelSupportsCap(modelID, cap string) bool {
-	if cap != "vision" {
-		return true
-	}
-	supports, known := modelHasVision[modelID]
-	if !known {
-		return true
-	}
-	return supports
-}
-
 // PresetEditorModel is a single-page preset editor. Hosted by the
 // firstrun/setup wizard and the library screen via embedding.
 type PresetEditorModel struct {
@@ -292,12 +219,6 @@ type PresetEditorModel struct {
 	// cloneNameInput captures the new preset name during the clone-first
 	// prompt overlay.
 	cloneNameInput textinput.Model
-
-	// Capability sub-modal state. capCursor is the row index in the
-	// capability list. capSubField is "yolo" or "paths" while inline-
-	// editing a capability's nested config; "" otherwise.
-	capCursor   int
-	capSubField string
 
 	// Display
 	width, height int
@@ -330,19 +251,6 @@ type PresetEditorModel struct {
 	existingKeys map[string]string
 	apiKey       string
 	apiKeySet    bool
-
-	// Model validity gate. Save (Ctrl+S / the Save button) must not
-	// commit until a real provider call against the EXACT current
-	// (provider, model, credential) tuple has succeeded — see commit()
-	// and checkModelValidityCmd. modelValidityGen increments on every
-	// check dispatched; modelValidityKey is a fingerprint of the tuple
-	// that produced modelValidityStatus, so a result for a since-changed
-	// tuple never counts as validating the current one. A late/stale
-	// modelValidityResultMsg (Generation mismatch) is dropped in Update.
-	modelValidity       modelValidityStatus
-	modelValidityDetail string
-	modelValidityGen    uint64
-	modelValidityKey    string
 
 	// Status
 	saveErr string
@@ -426,20 +334,6 @@ func (m PresetEditorModel) Init() tea.Cmd { return nil }
 
 func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case modelValidityResultMsg:
-		// Drop results from an abandoned check: either a newer check has
-		// since been dispatched (Generation mismatch) or the tuple it
-		// was checking is no longer the current one.
-		if msg.Generation != m.modelValidityGen || m.currentValidityKey() != m.modelValidityKey {
-			return m, nil
-		}
-		m.modelValidity = msg.Status
-		m.modelValidityDetail = msg.Detail
-		if msg.Status == validityValid || msg.Status == validityRetryable {
-			m.saveErr = ""
-		}
-		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -462,10 +356,6 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 		switch m.mode {
 		case emInline:
 			return m.updateInline(msg)
-		case emCapabilities:
-			return m.updateCapabilities(msg)
-		case emCapInline:
-			return m.updateCapInline(msg)
 		case emClonePrompt:
 			return m.updateClonePrompt(msg)
 		case emDirtyPrompt:
@@ -481,7 +371,7 @@ func (m PresetEditorModel) Update(msg tea.Msg) (PresetEditorModel, tea.Cmd) {
 	// inline editor or the clone-name overlay silently drops the blob —
 	// bubbletea v2 delivers paste as a separate msg type, not a KeyMsg.
 	switch m.mode {
-	case emInline, emCapInline:
+	case emInline:
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -552,9 +442,6 @@ func (m PresetEditorModel) updateBrowse(msg tea.KeyMsg) (PresetEditorModel, tea.
 			m.cursor = m.savedCursor
 			m.ensureFocusedVisible()
 		}
-		return m, nil
-	case " ":
-		m.toggleFocused()
 		return m, nil
 	case "enter":
 		return m.openInline()
@@ -647,10 +534,16 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feAPIKey:
-		// Codex preset — OAuth credential is managed on the preset picker
-		// page. API key field is read-only; no-op here.
-		if asString(m.llmMap()["provider"]) == "codex" && m.globalDir != "" {
+		// Non-Other credential families do not consume a typed API key at
+		// save time. Keep this row visibly read-only so it cannot suggest
+		// that typing here changes the bound OAuth/CLI credential.
+		family := preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"]))
+		switch family {
+		case preset.CredentialFamilyCodexSingle:
 			m.saveErr = i18n.T("preset_editor.api_key_codex_readonly")
+			return *m, nil
+		case preset.CredentialFamilyCodexPool, preset.CredentialFamilyClaudeCLI:
+			m.saveErr = i18n.T("preset_editor.api_key_managed_externally")
 			return *m, nil
 		}
 		// Edit the live key buffer, not the env-var-name. We start
@@ -686,10 +579,6 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feCapWebSearch, feCapVision:
-		// Capability rows: Enter toggles, same as Space. Disabled rows
-		// (e.g. vision on text-only models) are gated inside toggleFocused.
-		m.toggleFocused()
 	case feProvider, feAPICompat, feWireAPI:
 		// Enums — Enter cycles forward (same as Right). Lets the user
 		// stay on the keyboard's "advance" key.
@@ -699,187 +588,6 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		return updated, cmd
 	}
 	return *m, nil
-}
-
-func (m *PresetEditorModel) openCapabilities() {
-	m.capCursor = 0
-	m.capSubField = ""
-	m.mode = emCapabilities
-}
-
-// updateCapabilities handles the capability modal's main list.
-func (m PresetEditorModel) updateCapabilities(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = emBrowse
-		return m, nil
-	case "up", "k":
-		if m.capCursor > 0 {
-			m.capCursor--
-		}
-		return m, nil
-	case "down", "j":
-		if m.capCursor < len(editorCapabilities)-1 {
-			m.capCursor++
-		}
-		return m, nil
-	case " ", "space":
-		m.toggleCapability(editorCapabilities[m.capCursor])
-		return m, nil
-	case "tab", "right", "l":
-		m.cycleCapProvider(editorCapabilities[m.capCursor], +1)
-		return m, nil
-	case "shift+tab", "left", "h":
-		m.cycleCapProvider(editorCapabilities[m.capCursor], -1)
-		return m, nil
-	case "enter":
-		// On rows that have a nested config (shell.yolo, skills.paths),
-		// drop into a single-line inline edit. Other rows: enter is a
-		// no-op (use space to toggle, tab to cycle providers).
-		name := editorCapabilities[m.capCursor]
-		switch name {
-		case "shell":
-			// Toggle yolo via Enter as a one-keystroke shortcut.
-			caps := m.capsMap()
-			cfg := capCfgMap(caps, "shell")
-			cfg["yolo"] = !asBool(cfg["yolo"])
-			caps["shell"] = cfg
-		case "skills":
-			// Open inline editor with comma-joined paths.
-			caps := m.capsMap()
-			cfg := capCfgMap(caps, "skills")
-			paths := pathsFromConfig(cfg)
-			m.input.SetValue(strings.Join(paths, ","))
-			m.input.CursorEnd()
-			m.input.Focus()
-			m.capSubField = "paths"
-			m.mode = emCapInline
-		}
-		return m, nil
-	}
-	return m, nil
-}
-
-// updateCapInline handles the inline edit of a capability sub-field
-// (currently only skills.paths). Enter commits, esc abandons.
-func (m PresetEditorModel) updateCapInline(msg tea.KeyMsg) (PresetEditorModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = emCapabilities
-		m.capSubField = ""
-		m.input.Blur()
-		return m, nil
-	case "enter":
-		switch m.capSubField {
-		case "paths":
-			caps := m.capsMap()
-			cfg := capCfgMap(caps, "skills")
-			parts := strings.Split(m.input.Value(), ",")
-			cleaned := make([]interface{}, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					cleaned = append(cleaned, p)
-				}
-			}
-			cfg["paths"] = cleaned
-			caps["skills"] = cfg
-		}
-		m.mode = emCapabilities
-		m.capSubField = ""
-		m.input.Blur()
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
-}
-
-// toggleCapability flips a capability on/off in the working manifest.
-// Enabling synthesizes a sensible default config; disabling deletes the
-// entry. Provider preferences are preserved across off→on cycles via
-// the existing entry shape.
-func (m *PresetEditorModel) toggleCapability(name string) {
-	caps := m.capsMap()
-	if _, on := caps[name]; on {
-		delete(caps, name)
-		return
-	}
-	// Synthesize a reasonable default config.
-	cfg := map[string]interface{}{}
-	switch name {
-	case "shell":
-		cfg["yolo"] = false
-	case "skills":
-		cfg["paths"] = []interface{}{"../.library_shared", "~/.lingtai-tui/utilities"}
-	case "web_search":
-		cfg["provider"] = "duckduckgo"
-	case "vision":
-		cfg["provider"] = "inherit"
-	}
-	caps[name] = cfg
-}
-
-// cycleCapProvider rotates the provider field on a multi-provider capability.
-// No-op on caps that aren't enabled or don't have a provider list.
-func (m *PresetEditorModel) cycleCapProvider(name string, dir int) {
-	opts, ok := capabilityProviderOptions[name]
-	if !ok {
-		return
-	}
-	caps := m.capsMap()
-	cfg, on := caps[name].(map[string]interface{})
-	if !on {
-		return
-	}
-	cur, _ := cfg["provider"].(string)
-	next := cycleString(opts, cur, dir)
-	if next == cur {
-		return
-	}
-	// Provider-specific model, endpoint, credential, protocol, and header
-	// fields cannot be carried across a provider change. Keep only the
-	// explicit new provider so the runtime fails closed instead of pairing
-	// it with another provider's identity.
-	caps[name] = map[string]interface{}{"provider": next}
-}
-
-// capsMap returns manifest.capabilities, allocating it if missing.
-func (m *PresetEditorModel) capsMap() map[string]interface{} {
-	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
-	if caps == nil {
-		caps = map[string]interface{}{}
-		m.working.Manifest["capabilities"] = caps
-	}
-	return caps
-}
-
-// capCfgMap returns the config map for a single capability inside caps,
-// allocating it if the existing value is nil/missing/empty.
-func capCfgMap(caps map[string]interface{}, name string) map[string]interface{} {
-	cfg, _ := caps[name].(map[string]interface{})
-	if cfg == nil {
-		cfg = map[string]interface{}{}
-	}
-	return cfg
-}
-
-// pathsFromConfig coerces config["paths"] to []string, accepting both
-// []interface{} (post-JSON) and []string (post-Go-construction) shapes.
-func pathsFromConfig(cfg map[string]interface{}) []string {
-	switch v := cfg["paths"].(type) {
-	case []interface{}:
-		out := make([]string, 0, len(v))
-		for _, p := range v {
-			if s, ok := p.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []string:
-		return v
-	}
-	return nil
 }
 
 // applyInline writes the textinput's current value into the working
@@ -904,7 +612,6 @@ func (m *PresetEditorModel) applyInline(val string) {
 		m.setExtra("loses", val)
 	case feModel:
 		llm["model"] = val
-		m.syncCapsToModel(val)
 	case feBaseURL:
 		if val == "" {
 			llm["base_url"] = nil
@@ -926,11 +633,12 @@ func (m *PresetEditorModel) applyInline(val string) {
 }
 
 func (m PresetEditorModel) isCodexProvider() bool {
-	return asString(m.llmMap()["provider"]) == "codex"
+	return preset.ClassifyCredentialFamily(asString(m.llmMap()["provider"])) == preset.CredentialFamilyCodexSingle
 }
 
 func isCodexThinkingProvider(provider string) bool {
-	return provider == "codex" || provider == "codex-pool" || provider == "codex_pool"
+	family := preset.ClassifyCredentialFamily(provider)
+	return family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool
 }
 
 func (m PresetEditorModel) hasCodexThinking() bool {
@@ -976,7 +684,7 @@ func (m PresetEditorModel) codexAuthRef() string {
 // stray key in the JSON.
 func (m *PresetEditorModel) setCodexAuthRef(ref string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" || strings.TrimSpace(ref) == "" {
+	if preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle || strings.TrimSpace(ref) == "" {
 		delete(llm, "codex_auth_path")
 		return
 	}
@@ -1012,7 +720,7 @@ func (m PresetEditorModel) codexServiceTier() string {
 
 func (m *PresetEditorModel) setCodexServiceTier(tier string) {
 	llm := m.llmMap()
-	if asString(llm["provider"]) != "codex" || tier != "fast" {
+	if preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle || tier != "fast" {
 		delete(llm, "service_tier")
 		return
 	}
@@ -1052,7 +760,7 @@ func (m *PresetEditorModel) setCodexThinking(effort string) {
 
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
-	if llm == nil || asString(llm["provider"]) != "codex" {
+	if llm == nil || preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle {
 		return
 	}
 	if asString(llm["service_tier"]) == "fast" {
@@ -1121,28 +829,6 @@ func (m *PresetEditorModel) setExtra(key, val string) {
 	m.working.Description.Extra[key] = val
 }
 
-// syncCapsToModel resets the model-conditional optional capabilities
-// (web_search, vision) to the default set for the new model. All other
-// capability entries — skills.paths overrides, shell policy, anything
-// not in optionalCapabilities — are not model-dependent and survive the
-// switch untouched. For free-text models not in the providerModels
-// catalog, leave caps alone; we don't know what counts as "default"
-// for an arbitrary openrouter/custom model id.
-func (m *PresetEditorModel) syncCapsToModel(modelID string) {
-	if _, known := modelHasVision[modelID]; !known {
-		return
-	}
-	caps := m.capsMap()
-	defaults := defaultCapsFor(modelID)
-	for _, capName := range optionalCapabilities {
-		if def, ok := defaults[capName]; ok {
-			caps[capName] = def
-		} else {
-			delete(caps, capName)
-		}
-	}
-}
-
 // cycleFocused rotates enum fields by `dir` (+1 or -1).
 func (m *PresetEditorModel) cycleFocused(dir int) {
 	f := editorFieldOrder[m.cursor]
@@ -1172,7 +858,6 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			}
 			if !modelStillValid {
 				m.llmMap()["model"] = models[0]
-				m.syncCapsToModel(models[0])
 			}
 		}
 		// Reset base_url to the new provider's default region when
@@ -1188,7 +873,6 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		if models, ok := providerModels[provider]; ok && len(models) > 0 {
 			next := cycleString(models, m.fieldString(f), dir)
 			m.llmMap()["model"] = next
-			m.syncCapsToModel(next)
 		}
 	case feBaseURL:
 		provider := asString(m.llmMap()["provider"])
@@ -1235,29 +919,6 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"", "1", "2", "3", "4", "5"}
 		m.working.Description.Tier = cycleString(opts, m.working.Description.Tier, dir)
 	}
-	// Capability rows: ←/→ cycles the provider for caps that have one
-	// (web_search, vision). Disabled rows stay disabled.
-	if capName, ok := capFieldNames[f]; ok {
-		currentModel := asString(m.llmMap()["model"])
-		if !modelSupportsCap(currentModel, capName) {
-			return
-		}
-		m.cycleCapProvider(capName, dir)
-	}
-}
-
-// toggleFocused flips bool fields, and toggles capability rows.
-// Capability toggles are gated by modelSupportsCap so the user
-// cannot enable vision on a text-only model.
-func (m *PresetEditorModel) toggleFocused() {
-	f := editorFieldOrder[m.cursor]
-	if capName, ok := capFieldNames[f]; ok {
-		currentModel := asString(m.llmMap()["model"])
-		if !modelSupportsCap(currentModel, capName) {
-			return
-		}
-		m.toggleCapability(capName)
-	}
 }
 
 func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
@@ -1265,33 +926,7 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		m.saveErr = errs[0].Error()
 		return m, nil
 	}
-	// Real-availability gate: always run a live call for the exact current
-	// tuple. Deterministic configuration failures stay blocked. A provider
-	// that was reached but is temporarily rate-limited or overloaded may be
-	// saved with a factual warning; reset that result so a later Save re-probes
-	// instead of permanently caching the operational failure.
-	var commitWarning string
-	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity == validityUnknown {
-		m, cmd := m.startModelValidityCheck()
-		m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
-		return m, cmd
-	}
-	switch m.modelValidity {
-	case validityValid:
-		// Continue to commit.
-	case validityRetryable:
-		llm, _ := m.working.Manifest["llm"].(map[string]interface{})
-		commitWarning = i18n.TF("preset_editor.model_validity_retryable_saved_warning", asString(llm["provider"]), asString(llm["model"]), m.modelValidityDetail)
-		m.modelValidity = validityUnknown
-		m.modelValidityDetail = ""
-		m.saveErr = ""
-	case validityInvalid:
-		m.saveErr = i18n.T("preset_editor.model_validity_invalid_save")
-		return m, nil
-	default:
-		m.saveErr = i18n.T("preset_editor.model_validity_pending_save")
-		return m, nil
-	}
+	m.saveErr = ""
 	// Templates (built-ins) are starting points: the user picks one,
 	// edits it, and saves. The save always materializes a *new* file
 	// under an auto-generated name like `mimo-1` so the template stays
@@ -1328,45 +963,8 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 	}
 	normalizeLLMForCommit(committed.Manifest)
 	return m, func() tea.Msg {
-		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet, Warning: commitWarning}
+		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}
-}
-
-// currentValidityKey fingerprints the (provider, model, credential)
-// tuple that determines whether a validity check result still applies.
-// Any field that changes what a real provider call would hit — provider,
-// model, the live API key buffer, base_url, api_compat, or (for codex)
-// the bound account — must be part of this fingerprint, or an edit to
-// one of those fields could keep stale validity="valid" state around.
-func (m PresetEditorModel) currentValidityKey() string {
-	llm := m.llmMap()
-	return strings.Join([]string{
-		asString(llm["provider"]),
-		asString(llm["model"]),
-		m.apiKey,
-		asString(llm["base_url"]),
-		asString(llm["api_compat"]),
-		asString(llm["codex_auth_path"]),
-	}, "\x00")
-}
-
-// startModelValidityCheck dispatches a fresh async validity check for
-// the current tuple, marking it "checking" and bumping the generation
-// counter so any earlier in-flight check's result is recognized as
-// stale and dropped in Update.
-func (m PresetEditorModel) startModelValidityCheck() (PresetEditorModel, tea.Cmd) {
-	llm := m.llmMap()
-	m.modelValidityGen++
-	m.modelValidityKey = m.currentValidityKey()
-	m.modelValidity = validityChecking
-	m.modelValidityDetail = ""
-	gen := m.modelValidityGen
-	provider := asString(llm["provider"])
-	model := asString(llm["model"])
-	apiKey := m.apiKey
-	baseURL := asString(llm["base_url"])
-	apiCompat := asString(llm["api_compat"])
-	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
 }
 
 // hasSemanticEdits reports whether the user changed any field whose
@@ -1481,7 +1079,8 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 		// account (manifest.llm.codex_auth_path → resolved token file) and
 		// its validity. When more than one account exists, ←/→ cycles the
 		// binding (see isCyclable/cycleField). No secret is shown.
-		if asString(llm["provider"]) == "codex" {
+		family := preset.ClassifyCredentialFamily(asString(llm["provider"]))
+		if family == preset.CredentialFamilyCodexSingle {
 			if m.globalDir != "" {
 				label, valid := m.codexBoundAccountLabel()
 				if valid {
@@ -1491,8 +1090,12 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 			}
 			return i18n.T("codex.oauth_not_logged_in")
 		}
-		// Display the key (masked). The env-var name is an internal
-		// detail; the user only needs to see whether a key is set.
+		if family == preset.CredentialFamilyCodexPool || family == preset.CredentialFamilyClaudeCLI {
+			return i18n.T("preset_editor.api_key_managed_externally")
+		}
+		// Other providers display the existing key masked. The env-var name
+		// is an internal detail; the user only needs to see whether a key is
+		// set.
 		return maskAPIKey(m.apiKey)
 	}
 	return ""
@@ -1545,8 +1148,6 @@ func (m PresetEditorModel) View() string {
 	full := lipgloss.JoinVertical(lipgloss.Left, title, body, footer)
 
 	switch m.mode {
-	case emCapabilities, emCapInline:
-		full = m.renderCapOverlay(full)
 	case emClonePrompt:
 		full = m.renderCloneOverlay(full)
 	case emDirtyPrompt:
@@ -1646,25 +1247,25 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
-	// Always-included capabilities — kernel intrinsics plus the core
-	// floor injected by apply_core_defaults at runtime. The editor lists
-	// them for awareness; users cannot toggle them off via the preset
-	// manifest (the kernel's explicit-disable channel is the only way).
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_mandatory"))))
-	alwaysIncludedRows := []string{
+	// Capabilities — every tool/subsystem the runtime can grant an agent,
+	// including web_search and vision. All of them are always included:
+	// there is no separate editable-capability concept, no checkbox, and
+	// no provider control on this page that can remove or change one.
+	// Customizing what an agent can do is done outside the preset editor
+	// by asking the agent to explain init.json and hand-editing it there
+	// (capabilitiesGuidanceRow below).
+	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
+	capabilityRows := []string{
 		"email", "psyche", "soul", "system",
 		"knowledge", "skills", "shell",
 		"avatar", "daemon", "mcp", "file",
+		"web_search", "vision",
 	}
-	for _, capName := range alwaysIncludedRows {
+	for _, capName := range capabilityRows {
 		rows = append(rows, plain(m.mandatoryCapRow(capName, width-4)))
 	}
 	rows = append(rows, plain(""))
-	rows = append(rows, plain(m.sectionHeader(i18n.T("preset_editor.section_capabilities"))))
-	for _, capName := range optionalCapabilities {
-		f := capFieldFor(capName)
-		rows = append(rows, row(f, m.capRow(f, capName, width-4)))
-	}
+	rows = append(rows, plain(m.capabilitiesGuidanceRow(width-4)))
 	rows = append(rows, plain(""))
 	rows = append(rows, row(feSave, m.renderSaveButton()))
 	return rows
@@ -1719,33 +1320,11 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	return marker + keyStyle.Render(key) + valStyle.Render(value)
 }
 
-// capFieldFor returns the editorField id corresponding to a capability
-// name. Used by the form renderer to look up the cursor-target field
-// for a given capability slot.
-func capFieldFor(name string) editorField {
-	for f, n := range capFieldNames {
-		if n == name {
-			return f
-		}
-	}
-	return feSave // unreachable for caps in editorCapabilities
-}
-
-// capEnabled reports whether the given capability is currently
-// configured in the working manifest. An entry with an empty config
-// map still counts as enabled — the kernel reads existence, not
-// shape.
-func (m PresetEditorModel) capEnabled(name string) bool {
-	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
-	_, ok := caps[name]
-	return ok
-}
-
-// capRow renders one capability with checkbox + name + description.
-// Greys out and disables rows the current model doesn't support
-// (today: vision on text-only models). web_search additionally shows
-// an inline ● ○ provider strip on the same line.
-// mandatoryCapRow renders a non-toggleable capability row with [✓] always checked.
+// mandatoryCapRow renders one capability row in the Capabilities section:
+// a fixed, always-checked "[✓] name  description" line. Every capability
+// listed in formRows' capabilityRows renders this way — there is no
+// toggleable or provider-cyclable variant anymore; the row is purely
+// informational.
 func (m PresetEditorModel) mandatoryCapRow(name string, width int) string {
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	check := subtle.Render("[✓]")
@@ -1757,90 +1336,14 @@ func (m PresetEditorModel) mandatoryCapRow(name string, width int) string {
 	return "  " + check + " " + keyCol + val
 }
 
-func (m PresetEditorModel) capRow(f editorField, name string, width int) string {
-	focused := editorFieldOrder[m.cursor] == f
-	currentModel := asString(m.llmMap()["model"])
-	allowed := modelSupportsCap(currentModel, name)
-
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	disabled := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	nameStyle := lipgloss.NewStyle()
-	marker := "  "
-	if focused {
-		marker = "▸ "
-		if allowed {
-			nameStyle = nameStyle.Bold(true).Foreground(ColorAccent)
-		} else {
-			nameStyle = nameStyle.Bold(true).Foreground(lipgloss.Color("240"))
-		}
-	}
-
-	enabled := m.capEnabled(name)
-	check := "[ ]"
-	if enabled {
-		check = "[✓]"
-	}
-	if !allowed {
-		check = disabled.Render(check)
-	}
-
-	keyCol := lipgloss.NewStyle().Width(15).Render(name)
-	if !allowed {
-		keyCol = disabled.Render(lipgloss.NewStyle().Width(15).Render(name))
-	} else if focused {
-		keyCol = nameStyle.Width(15).Render(name)
-	} else {
-		keyCol = nameStyle.Width(15).Render(name)
-	}
-
-	// Inline provider strip for every multi-provider capability.
-	var detail string
-	_, hasProviderOptions := capabilityProviderOptions[name]
-	if hasProviderOptions && enabled && allowed {
-		detail = m.capProviderStrip(name, focused)
-	} else {
-		desc := i18n.T("firstrun.cap_desc." + name)
-		// Collapse the multiline description to a single line for the
-		// inline view; full text is still in i18n if we want a help
-		// overlay later.
-		desc = strings.ReplaceAll(desc, "\n", "  ")
-		if !allowed {
-			desc = i18n.T("preset_editor.cap_disabled_hint")
-			detail = disabled.Render(desc)
-		} else {
-			detail = subtle.Render(desc)
-		}
-	}
-
-	return marker + check + " " + keyCol + detail
-}
-
-// capProviderStrip renders the multi-provider radio strip for
-// capabilities that have a provider knob (web_search, vision).
-// Highlights the current provider in the focused row's accent color.
-func (m PresetEditorModel) capProviderStrip(capName string, focused bool) string {
-	opts, ok := capabilityProviderOptions[capName]
-	if !ok {
-		return ""
-	}
-	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
-	cfg, _ := caps[capName].(map[string]interface{})
-	current, _ := cfg["provider"].(string)
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	accent := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	parts := make([]string, 0, len(opts))
-	for _, p := range opts {
-		if p == current {
-			if focused {
-				parts = append(parts, accent.Render("● "+p))
-			} else {
-				parts = append(parts, "● "+p)
-			}
-		} else {
-			parts = append(parts, subtle.Render("○ "+p))
-		}
-	}
-	return strings.Join(parts, "  ")
+// capabilitiesGuidanceRow renders the one-line explanation of how to
+// customize an agent's capabilities now that this page offers no
+// checkbox or provider control that can remove or change one: ask the
+// agent to explain init.json, then hand-edit init.json directly.
+func (m PresetEditorModel) capabilitiesGuidanceRow(width int) string {
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
+	text := truncate(i18n.T("preset_editor.capabilities_guidance"), width)
+	return "  " + subtle.Render(text)
 }
 
 // modelRadioStrip renders the model field as a horizontal radio strip
@@ -1999,23 +1502,6 @@ func (m PresetEditorModel) tierDisplay() string {
 		return ""
 	}
 	return tierChipStyle(m.working.Description.Tier).Render(tierLabel(m.working.Description.Tier, m.lang))
-}
-
-// capabilitiesSummary renders the capability set as a count plus the
-// sorted name list. Press Enter on this row to open the capability
-// modal for full editing.
-func (m PresetEditorModel) capabilitiesSummary() string {
-	caps, _ := m.working.Manifest["capabilities"].(map[string]interface{})
-	if len(caps) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(i18n.T("preset_editor.caps_none"))
-	}
-	names := make([]string, 0, len(caps))
-	for k := range caps {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	return subtle.Render(fmt.Sprintf("(%d)  %s", len(caps), strings.Join(names, ", ")))
 }
 
 // renderPreview is the right-hand pane: live JSON + validation status.
@@ -2190,9 +1676,6 @@ func (m PresetEditorModel) renderFooter() string {
 	if m.saveErr != "" {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + m.saveErr)
 	}
-	if line := m.modelValidityLine(); line != "" {
-		return line
-	}
 	switch m.mode {
 	case emInline:
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_inline"))
@@ -2202,86 +1685,6 @@ func (m PresetEditorModel) renderFooter() string {
 		return hintStyle.Render("  " + i18n.T("preset_editor.hint_exit"))
 	}
 	return hintStyle.Render("  " + i18n.T("preset_editor.hint_browse"))
-}
-
-func (m PresetEditorModel) renderCapOverlay(_ string) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	cursorStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-
-	caps := m.capsMap()
-
-	var rows []string
-	rows = append(rows, titleStyle.Render(i18n.T("preset_editor.cap_picker_title")))
-	rows = append(rows, "")
-
-	for i, name := range editorCapabilities {
-		cfg, on := caps[name].(map[string]interface{})
-		marker := "  "
-		nameStyle := lipgloss.NewStyle()
-		if i == m.capCursor {
-			marker = "▸ "
-			nameStyle = cursorStyle
-		}
-		check := "[ ]"
-		if on {
-			check = "[✓]"
-		}
-
-		// Inline meta render (provider, yolo, paths preview).
-		var meta string
-		switch name {
-		case "shell":
-			if on {
-				if asBool(cfg["yolo"]) {
-					meta = "  yolo:on"
-				} else {
-					meta = "  yolo:off"
-				}
-			}
-		case "skills":
-			if on {
-				ps := pathsFromConfig(cfg)
-				if len(ps) == 0 {
-					meta = "  (no paths)"
-				} else {
-					meta = "  " + strings.Join(ps, ", ")
-				}
-			}
-		default:
-			if _, multi := capabilityProviderOptions[name]; multi && on {
-				prov, _ := cfg["provider"].(string)
-				if prov == "" {
-					prov = "inherit"
-				}
-				meta = "  prov:" + prov
-			}
-		}
-		row := marker + check + " " + nameStyle.Render(name) + subtle.Render(meta)
-		rows = append(rows, row)
-	}
-
-	// Inline edit field for skills.paths
-	if m.mode == emCapInline && m.capSubField == "paths" {
-		rows = append(rows, "")
-		rows = append(rows, subtle.Render("paths (comma-separated):"))
-		rows = append(rows, "  "+m.input.View())
-	}
-
-	rows = append(rows, "")
-	switch m.mode {
-	case emCapInline:
-		rows = append(rows, subtle.Render(i18n.T("preset_editor.cap_inline_hint")))
-	default:
-		rows = append(rows, subtle.Render(i18n.T("preset_editor.cap_hint")))
-	}
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(ColorAccent).
-		Padding(1, 2).
-		Render(strings.Join(rows, "\n"))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m PresetEditorModel) renderCloneOverlay(_ string) string {
@@ -2336,32 +1739,6 @@ func (m PresetEditorModel) renderSaveButton() string {
 			Render(label)
 	}
 	return "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(label)
-}
-
-// modelValidityLine renders the pending/valid/invalid status of the last
-// (or in-flight) real-availability check for the current (provider,
-// model, credential) tuple. Empty when no check has ever run for this
-// tuple, so a freshly opened editor doesn't show a stale state before
-// the user has attempted to save.
-func (m PresetEditorModel) modelValidityLine() string {
-	if m.currentValidityKey() != m.modelValidityKey || m.modelValidity == validityUnknown {
-		return ""
-	}
-	switch m.modelValidity {
-	case validityChecking:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  " + i18n.T("preset_editor.model_validity_checking"))
-	case validityValid:
-		return lipgloss.NewStyle().Foreground(ColorActive).Render("  " + i18n.T("preset_editor.model_validity_valid"))
-	case validityRetryable:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("  " + i18n.TF("preset_editor.model_validity_retryable_detail", m.modelValidityDetail))
-	case validityInvalid:
-		detail := m.modelValidityDetail
-		if detail == "" {
-			return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + i18n.T("preset_editor.model_validity_invalid"))
-		}
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + i18n.TF("preset_editor.model_validity_invalid_detail", detail))
-	}
-	return ""
 }
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -38,6 +39,10 @@ const bodhiLeaf = "" +
 // NirvanaDoneMsg is emitted after .lingtai/ has been wiped.
 // The app should transition to first-run.
 type NirvanaDoneMsg struct{}
+
+// nirvanaCleanStartMsg hands confirmation to the App root so it can retire and
+// drain every Mail writer before the destructive command starts.
+type nirvanaCleanStartMsg struct{}
 
 // nirvanaCleanDoneMsg is internal — signals that cleanup finished.
 type nirvanaCleanDoneMsg struct{}
@@ -103,7 +108,7 @@ func (m NirvanaModel) Update(msg tea.Msg) (NirvanaModel, tea.Cmd) {
 			switch m.cursor {
 			case 0: // Confirm
 				m.cleaning = true
-				return m, m.doClean()
+				return m, func() tea.Msg { return nirvanaCleanStartMsg{} }
 			case 1: // Cancel
 				return m, func() tea.Msg { return ViewChangeMsg{View: "mail"} }
 			}
@@ -129,7 +134,13 @@ func (m NirvanaModel) doClean() tea.Cmd {
 			}
 		}
 
-		// 2. Remove .lingtai/ entirely
+		// 2. Cross the location writer's exact manifest mutex immediately before
+		// removing the tree. Accepted Mail refreshes launch location updates in an
+		// untracked goroutine; this barrier proves any such writer is finished and
+		// removes its last commit target before recursive deletion.
+		_ = fs.RemoveHumanManifestForReset(filepath.Join(m.lingtaiDir, "human"))
+
+		// 3. Remove .lingtai/ entirely.
 		os.RemoveAll(m.lingtaiDir)
 
 		return nirvanaCleanDoneMsg{}

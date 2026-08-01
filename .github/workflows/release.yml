@@ -149,3 +149,161 @@ jobs:
           git add lingtai-tui.rb
           git diff --cached --quiet || git commit -m "Update lingtai-tui to ${{ github.ref_name }}"
           git push
+
+  windows-release:
+    needs: source-release
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+      KERNEL_REPO: Lingtai-AI/lingtai-kernel
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Fail closed unless the pinned kernel release is publishable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Tag must be an exact vX.Y.Z; the version stamped into the binaries
+          # and the Homebrew-style bare version must agree with it.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::TAG '$TAG' is not an exact vX.Y.Z release tag" >&2
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_ENV"
+
+          # kernel-release.json is the sole source of the paired kernel tag;
+          # this job never resolves "latest" kernel.
+          if [[ ! -f kernel-release.json ]]; then
+            echo "::error::kernel-release.json is missing; cannot bind a Windows bundle to a kernel release" >&2
+            exit 1
+          fi
+          schema="$(python3 -c 'import json,sys; print(json.load(open("kernel-release.json")).get("schema",""))')"
+          if [[ "$schema" != "lingtai.tui.kernel-pin/v1" ]]; then
+            echo "::error::kernel-release.json has unexpected schema '$schema'" >&2
+            exit 1
+          fi
+          kernel_tag="$(python3 -c 'import json; print(json.load(open("kernel-release.json"))["kernel_tag"])')"
+          if [[ ! "$kernel_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::kernel-release.json kernel_tag '$kernel_tag' is not an exact vX.Y.Z tag" >&2
+            exit 1
+          fi
+          echo "kernel_tag=$kernel_tag" >> "$GITHUB_ENV"
+          echo "kernel_version=${kernel_tag#v}" >> "$GITHUB_ENV"
+
+          # The pinned kernel release must exist and publish its strict release
+          # manifest plus at least one cp311/cp312/cp313 win_amd64 wheel with a
+          # digest, or this job fails closed before any build step runs.
+          if ! gh release view "$kernel_tag" --repo "$KERNEL_REPO" >/dev/null 2>&1; then
+            echo "::error::pinned kernel release $kernel_tag does not exist in $KERNEL_REPO" >&2
+            exit 1
+          fi
+          manifest_url="$(gh release view "$kernel_tag" --repo "$KERNEL_REPO" --json assets \
+            --jq '.assets[] | select(.name == "lingtai-kernel-release-manifest.json") | .url')"
+          if [[ -z "$manifest_url" ]]; then
+            echo "::error::pinned kernel release $kernel_tag has no lingtai-kernel-release-manifest.json asset" >&2
+            exit 1
+          fi
+          curl -fsSL "$manifest_url" -o /tmp/kernel-release-manifest.json
+          python3 - "$kernel_tag" "${TAG#v}" << 'PY'
+          import json, re, sys
+          kernel_tag, kernel_version_expected = sys.argv[1], sys.argv[1].lstrip("v")
+          data = json.load(open("/tmp/kernel-release-manifest.json"))
+          if data.get("schema") != "lingtai.kernel.release/v1":
+              sys.exit(f"kernel manifest has unexpected schema {data.get('schema')!r}")
+          if data.get("kernel_version") != kernel_version_expected:
+              sys.exit(f"kernel manifest kernel_version {data.get('kernel_version')!r} does not match pinned tag {kernel_tag}")
+          wheels = [
+              a for a in data.get("artifacts", [])
+              if a.get("kind") == "wheel"
+              and a.get("python_tag") in ("cp311", "cp312", "cp313")
+              and a.get("platform_tag") == "win_amd64"
+              and re.fullmatch(r"[0-9a-f]{64}", a.get("sha256", ""))
+          ]
+          if not wheels:
+              sys.exit(f"kernel release {kernel_tag} publishes no cp311/cp312/cp313 win_amd64 wheel with a sha256 digest")
+          print(f"OK: kernel release {kernel_tag} publishes {len(wheels)} compatible win_amd64 wheel(s)")
+          PY
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+
+      - name: Build lingtai-tui.exe (windows/amd64)
+        working-directory: tui
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+            -ldflags "-X main.version=$TAG" \
+            -o "$GITHUB_WORKSPACE/dist/lingtai-tui.exe" .
+
+      - name: Build lingtai-portal.exe (windows/amd64)
+        working-directory: portal
+        run: |
+          set -euo pipefail
+          npm --prefix web ci
+          npm --prefix web run build
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+            -ldflags "-X main.version=$TAG" \
+            -o "$GITHUB_WORKSPACE/dist/lingtai-portal.exe" .
+
+      - name: Package Windows archive
+        run: |
+          set -euo pipefail
+          test -f dist/lingtai-tui.exe
+          test -f dist/lingtai-portal.exe
+
+          zip_name="lingtai-${TAG}-windows-amd64.zip"
+          ( cd dist && zip -X "../$zip_name" lingtai-tui.exe lingtai-portal.exe )
+          sha256sum "$zip_name" > "$zip_name.sha256"
+          echo "zip_name=$zip_name" >> "$GITHUB_ENV"
+
+      - name: Generate bundle manifest
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          archive_sha="$(cut -d' ' -f1 "$zip_name.sha256")"
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 - "$TAG" "$commit" "$generated_at" "$kernel_tag" "$kernel_version" "$zip_name" "$archive_sha" << 'PY'
+          import json, sys
+          tag, commit, generated_at, kernel_tag, kernel_version, zip_name, archive_sha = sys.argv[1:]
+          manifest = {
+              "schema": "lingtai.tui.bundle/v1",
+              "bundle_id": tag,
+              "tui_tag": tag,
+              "tui_commit": commit,
+              "generated_at": generated_at,
+              "kernel_tag": kernel_tag,
+              "kernel_version": kernel_version,
+              "kernel_manifest_filename": "lingtai-kernel-release-manifest.json",
+              "archives": [
+                  {"filename": zip_name, "sha256": archive_sha},
+              ],
+              "providers": {
+                  "github": {"repo": "Lingtai-AI/lingtai"},
+                  "gitee": {"owner": "huangzesen1997", "repo": "lingtai"},
+              },
+          }
+          with open("lingtai-bundle-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2, sort_keys=False)
+              f.write("\n")
+          PY
+
+      - name: Upload Windows release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" --repo "$REPO" --clobber \
+            "$zip_name" "$zip_name.sha256" lingtai-bundle-manifest.json

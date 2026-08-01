@@ -82,6 +82,77 @@ assert_eq '\u0001' "$(json_escape $'\001')" "json generic control-byte escaping"
 assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix")" "bin dir from prefix"
 assert_eq "$tmp/prefix/bin" "$(bin_dir_for_prefix "$tmp/prefix/")" "bin dir from slash-suffixed prefix"
 
+# --- PATH guidance is shell-aware and does not mutate the host -----------------
+(
+  hint_home="$tmp/path-hint-zsh-home"
+  hint_bin="$tmp/path-hint-zsh-bin"
+  mkdir -p "$hint_home"
+  export HOME="$hint_home"
+  export SHELL="/bin/zsh"
+  export PATH="/usr/bin:/bin"
+
+  out="$(print_path_hint "$hint_bin")"
+  case "$out" in
+    *"Note: $hint_bin is not on your PATH."*) ;;
+    *) fail "zsh PATH hint should explain that the bin dir is absent: $out" ;;
+  esac
+  case "$out" in
+    *"$hint_home/.zshrc"*) ;;
+    *) fail "zsh PATH hint should target ~/.zshrc: $out" ;;
+  esac
+  [[ ! -e "$hint_home/.zshrc" ]] || fail "PATH hint must not write the zsh rc file"
+  assert_eq "/usr/bin:/bin" "$PATH" "zsh PATH hint leaves current PATH unchanged"
+)
+
+(
+  hint_home="$tmp/path-hint-bash-home"
+  hint_bin="$tmp/path-hint-bash-bin"
+  mkdir -p "$hint_home"
+  export HOME="$hint_home"
+  export SHELL="/bin/bash"
+  export PATH="/usr/bin:/bin"
+
+  out="$(print_path_hint "$hint_bin")"
+  case "$out" in
+    *"$hint_home/.bashrc"*) ;;
+    *) fail "bash PATH hint should target ~/.bashrc: $out" ;;
+  esac
+  [[ ! -e "$hint_home/.bashrc" ]] || fail "PATH hint must not write the bash rc file"
+)
+
+(
+  hint_home="$tmp/path-hint-present-home"
+  hint_bin="$tmp/path-hint-present-bin"
+  mkdir -p "$hint_home"
+  export HOME="$hint_home"
+  export SHELL="/bin/zsh"
+  export PATH="$hint_bin:/usr/bin:/bin"
+
+  out="$(print_path_hint "$hint_bin")"
+  assert_eq "" "$out" "PATH hint is silent when bin dir is already present"
+  [[ ! -e "$hint_home/.zshrc" ]] || fail "present PATH check must not write the zsh rc file"
+)
+
+(
+  hint_home="$tmp/path-hint-unknown-home"
+  hint_bin="$tmp/path-hint-unknown-bin"
+  mkdir -p "$hint_home"
+  export HOME="$hint_home"
+  export SHELL="/bin/fish"
+  export PATH="/usr/bin:/bin"
+
+  out="$(print_path_hint "$hint_bin")"
+  case "$out" in
+    *"shell startup file"*) ;;
+    *) fail "unknown shell PATH hint should name the shell startup file: $out" ;;
+  esac
+  case "$out" in
+    *"export PATH="*) ;;
+    *) fail "unknown shell PATH hint should provide a direct export: $out" ;;
+  esac
+  [[ ! -e "$hint_home/.profile" ]] || fail "unknown-shell PATH hint must not write .profile"
+)
+
 # --- uv bootstrap: no uv, system python3 too old (jammy scenario) -------------
 # Simulates Ubuntu jammy: python3 exists but reports 3.10 and there is no uv on
 # PATH. ensure_uv must download the official installer (via a fake curl) and run

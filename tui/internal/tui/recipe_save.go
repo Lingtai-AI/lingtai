@@ -198,9 +198,10 @@ func substituteGreetPlaceholders(template, humanAddr, humanDir, lang, soulDelay 
 			if len(parts) > 0 {
 				loc = strings.Join(parts, ", ")
 			}
-			// Also persist it to human's .agent.json so next time it's cached
+			// Persist the value already resolved for the placeholder through the
+			// same manifest transaction; do not start a second resolver/writer.
 			if humanDir != "" {
-				go fs.UpdateHumanLocation(humanDir)
+				fs.StoreResolvedHumanLocation(humanDir, resolved)
 			}
 		}
 	}

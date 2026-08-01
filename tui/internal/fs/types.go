@@ -13,6 +13,7 @@ type Location struct {
 
 // AgentNode represents a discovered agent in the network.
 type AgentNode struct {
+	AgentID      string    `json:"agent_id"`
 	Address      string    `json:"address"`
 	AgentName    string    `json:"agent_name"`
 	Nickname     string    `json:"nickname"`

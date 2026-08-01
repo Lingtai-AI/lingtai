@@ -73,9 +73,9 @@ The portal's read-focused window into a `.lingtai/` project directory. Same shap
 - `UpdateHumanLocation(humanDir)` (`portal/internal/fs/location.go:63-103`) — resolves location if stale (>1h), writes atomically via temp+rename.
 
 ### Network (`network.go`)
-- `BuildNetwork(baseDir)` (`portal/internal/fs/network.go:8-76`) — discovers agents, reads ledgers+contacts+mail, builds the full `Network` payload (nodes, all edge types, stats). Heartbeat overrides state to SUSPENDED when agent isn't alive.
-- `buildMailEdges(nodes, baseDir)` (`portal/internal/fs/network.go:78-133`) — aggregates inbox+archive into `MailEdge` counts (direct/cc/bcc).
-- `computeStats(nodes, mailEdges)` (`portal/internal/fs/network.go:151-171`) — counts agents by state; sums total mails.
+- `NetworkOptions` / `BuildNetwork(baseDir)` / `BuildNetworkWithOptions` (`portal/internal/fs/network.go:8-82`) — typed full topology by default; `SkipMailEdges` keeps nodes/avatar/contact shape while omitting the historical inbox/archive scan and its total. Heartbeat overrides state to SUSPENDED when an agent isn't alive.
+- `buildMailEdges(nodes, baseDir)` (`portal/internal/fs/network.go:84-140`) — aggregates inbox+archive into `MailEdge` counts (direct/cc/bcc) when the full shape is selected.
+- `computeStats(nodes, mailEdges)` (`portal/internal/fs/network.go:157-177`) — counts agents by state; sums total mails from the selected edge set.
 
 ### Contacts (`contacts.go`)
 - `ReadContacts(dir)` (`portal/internal/fs/contacts.go:15-35`) — reads `mailbox/contacts.json`, resolves target addresses to absolute paths.

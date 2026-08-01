@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,34 @@ type ipinfoResponse struct {
 	Country  string `json:"country"`
 	Timezone string `json:"timezone"`
 	Loc      string `json:"loc"`
+}
+
+var humanLocationManifestLocks sync.Map // canonical manifest path -> *sync.Mutex
+
+func humanLocationManifestMutex(path string) *sync.Mutex {
+	key, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		key = filepath.Clean(path)
+	}
+	lock, _ := humanLocationManifestLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+// RemoveHumanManifestForReset crosses the same canonical manifest mutex as
+// UpdateHumanLocation, then removes that writer's commit target. Call it at the
+// final reset boundary immediately before recursively deleting the project tree;
+// never hold this mutex across discovery, agent suspension, or RemoveAll.
+func RemoveHumanManifestForReset(humanDir string) error {
+	manifestPath := filepath.Join(humanDir, ".agent.json")
+	mutex := humanLocationManifestMutex(manifestPath)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	err := os.Remove(manifestPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // ResolveLocation queries ipinfo.io and returns a populated Location.
@@ -60,25 +89,22 @@ func LocationStale(loc Location, maxAge time.Duration) bool {
 	return time.Since(t) > maxAge
 }
 
-// UpdateHumanLocation reads the human's .agent.json, resolves location if stale
-// (older than 1 hour), and writes it back atomically. It is a no-op on any failure.
+// UpdateHumanLocation resolves and stores a stale human location. Same-manifest
+// callers serialize across the stale check, network request, and commit so a
+// waiter observes the first caller's fresh result instead of resolving again.
+// The commit rereads the latest valid manifest and changes only location.
+// The operation remains best-effort and is a no-op on any failure.
 func UpdateHumanLocation(humanDir string) {
+	manifestPath := filepath.Join(humanDir, ".agent.json")
+	mutex := humanLocationManifestMutex(manifestPath)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	raw, err := ReadAgentRaw(humanDir)
-	if err != nil {
+	if err != nil || raw == nil {
 		return
 	}
-
-	// Extract existing location, if any.
-	var current Location
-	if locRaw, ok := raw["location"]; ok {
-		// Re-encode and decode into Location struct for type safety.
-		b, err := json.Marshal(locRaw)
-		if err == nil {
-			_ = json.Unmarshal(b, &current)
-		}
-	}
-
-	if !LocationStale(current, time.Hour) {
+	if !LocationStale(locationFromManifest(raw), time.Hour) {
 		return
 	}
 
@@ -86,18 +112,44 @@ func UpdateHumanLocation(humanDir string) {
 	if err != nil {
 		return
 	}
+	storeResolvedHumanLocationLocked(humanDir, manifestPath, resolved)
+}
 
-	raw["location"] = resolved
+// StoreResolvedHumanLocation synchronously merges an already-resolved location
+// into the latest valid human manifest. It shares UpdateHumanLocation's
+// canonical-path mutex, allowing callers such as recipe rendering to reuse a
+// lookup without starting a second resolver or writer.
+func StoreResolvedHumanLocation(humanDir string, resolved Location) {
+	manifestPath := filepath.Join(humanDir, ".agent.json")
+	mutex := humanLocationManifestMutex(manifestPath)
+	mutex.Lock()
+	defer mutex.Unlock()
+	storeResolvedHumanLocationLocked(humanDir, manifestPath, resolved)
+}
 
-	data, err := json.MarshalIndent(raw, "", "  ")
+func storeResolvedHumanLocationLocked(humanDir, manifestPath string, resolved Location) {
+	latest, err := ReadAgentRaw(humanDir)
+	if err != nil || latest == nil {
+		return
+	}
+	if !LocationStale(locationFromManifest(latest), time.Hour) {
+		return
+	}
+
+	latest["location"] = resolved
+	data, err := json.MarshalIndent(latest, "", "  ")
 	if err != nil {
 		return
 	}
+	_ = writeAtomicBytes(manifestPath, data, 0o644)
+}
 
-	manifestPath := filepath.Join(humanDir, ".agent.json")
-	tmpPath := manifestPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return
+func locationFromManifest(raw map[string]interface{}) Location {
+	var location Location
+	encoded, err := json.Marshal(raw["location"])
+	if err != nil {
+		return location
 	}
-	_ = os.Rename(tmpPath, manifestPath)
+	_ = json.Unmarshal(encoded, &location)
+	return location
 }

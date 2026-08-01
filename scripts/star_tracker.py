@@ -101,7 +101,7 @@ def append_today(csv_path: Path, repo: str, count: int) -> tuple[str, bool]:
         action = "appended" if csv_path.exists() else "created"
     rows = [rows[0]] + body
     with csv_path.open("w", newline="") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerows(rows)
     return (action, True)
 
@@ -124,7 +124,7 @@ def write_backfill(csv_path: Path, repo: str, dates: list[dt.date]) -> int:
         counts_by_day[day] = cumulative
         day += dt.timedelta(days=1)
     with csv_path.open("w", newline="") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerow(["date", "stars", "repo"])
         for d in sorted(counts_by_day):
             writer.writerow([d.isoformat(), counts_by_day[d], repo])

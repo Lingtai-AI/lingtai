@@ -520,6 +520,32 @@ func TestSetCodexPoolWeight_RefusesModelClassifiedPool(t *testing.T) {
 	}
 }
 
+func TestSetCodexPoolWeight_RefusesPoolWithDroppedRawEntries(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	raw := []byte(`{"version":1,"accounts":[{"path":"codex-auth/typo.json","weight":"2"},{"path":"codex-auth/work.json","weight":1}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatalf("seed pool: %v", err)
+	}
+
+	work := filepath.Join(dir, codexAuthSubdir, "work.json")
+	err := setCodexPoolWeight(dir, work, 2)
+	if err == nil {
+		t.Fatal("weight edit on a pool with dropped entries must be refused")
+	}
+	if !errors.Is(err, errCodexPoolDroppedEntries) {
+		t.Errorf("refusal error = %v, want errCodexPoolDroppedEntries", err)
+	}
+
+	got, readErr := os.ReadFile(codexPoolPath(dir))
+	if readErr != nil {
+		t.Fatalf("read pool file back: %v", readErr)
+	}
+	if string(got) != string(raw) {
+		t.Errorf("refused edit must leave the pool file byte-identical;\n got: %s\nwant: %s", got, raw)
+	}
+}
+
 // TestCodexPoolModelInfo covers the UI's classification probe: missing, flat,
 // and malformed pools report unclassified; a v2 pool reports classified with
 // its category count.
@@ -610,5 +636,61 @@ func TestCodexPoolFileCorrupt(t *testing.T) {
 	}
 	if codexPoolFileCorrupt(good) {
 		t.Error("a valid pool file must not be reported corrupt")
+	}
+}
+
+func TestCodexPoolEligibilityFacts_FallbackAndFailClosed(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+
+	// No pool is an empty runtime snapshot and may use a valid legacy token.
+	empty := t.TempDir()
+	legacy := filepath.Join(empty, "codex-auth.json")
+	writeStubCodexToken(t, legacy, "legacy@example.com")
+	if !codexPoolEligible(empty, "gpt-5.6-sol") {
+		t.Fatal("missing pool with valid legacy token should be fallback-ready")
+	}
+	flat, classified, fallback := codexPoolEligibilityFacts(empty)
+	if !flat || classified != nil || !fallback {
+		t.Fatalf("missing pool facts = (%v, %v, %v), want true/nil/true", flat, classified, fallback)
+	}
+
+	// A nonempty pool whose only member is unusable must not silently route to
+	// the legacy account.
+	nonempty := t.TempDir()
+	writeStubCodexToken(t, filepath.Join(nonempty, "codex-auth.json"), "legacy@example.com")
+	raw := []byte(`{"version":1,"accounts":[{"path":"codex-auth/missing.json","weight":1}]}`)
+	if err := os.WriteFile(codexPoolPath(nonempty), raw, 0o644); err != nil {
+		t.Fatalf("write pool: %v", err)
+	}
+	if codexPoolEligible(nonempty, "gpt-5.6-sol") {
+		t.Fatal("nonempty unusable pool must remain ineligible")
+	}
+
+	// An empty classified category is fallback-ready, while a nonempty
+	// unusable category remains ineligible.
+	classifiedDir := t.TempDir()
+	writeStubCodexToken(t, filepath.Join(classifiedDir, "codex-auth.json"), "legacy@example.com")
+	classifiedRaw := []byte(`{"version":2,"models":{"gpt-5.6-sol":[],"gpt-5.5":[{"path":"codex-auth/missing.json","weight":1}]}}`)
+	if err := os.WriteFile(codexPoolPath(classifiedDir), classifiedRaw, 0o644); err != nil {
+		t.Fatalf("write classified pool: %v", err)
+	}
+	if !codexPoolEligible(classifiedDir, "gpt-5.6-sol") {
+		t.Fatal("empty classified category should be fallback-ready")
+	}
+	if codexPoolEligible(classifiedDir, "gpt-5.5") {
+		t.Fatal("nonempty unusable classified category must remain ineligible")
+	}
+}
+
+func TestCodexPoolEligibility_DroppedEntriesUseLegacyFallback(t *testing.T) {
+	t.Setenv("LINGTAI_TUI_DIR", "")
+	dir := t.TempDir()
+	writeStubCodexToken(t, legacyCodexAuthPath(dir), "legacy@example.com")
+	raw := []byte(`{"version":1,"accounts":[0,{"path":"","weight":1},{"path":"codex-auth/disabled.json","weight":1,"enabled":false},{"path":"codex-auth/zero.json","weight":0}]}`)
+	if err := os.WriteFile(codexPoolPath(dir), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !codexPoolEligible(dir, "gpt-test") {
+		t.Fatal("all dropped pool entries should be validated-empty and use legacy fallback")
 	}
 }

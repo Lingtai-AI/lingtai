@@ -31,15 +31,22 @@ type startupTUIUpgradeOptions struct {
 	Output    io.Writer
 	ErrOutput io.Writer
 
-	Runner config.CommandRunner
-	Stat   func(string) (os.FileInfo, error)
+	Runner   config.CommandRunner
+	Stat     func(string) (os.FileInfo, error)
+	LookPath func(string) (string, error)
+
+	// UninstallHomebrew overrides the injected Homebrew formula uninstall used
+	// when the human confirms the cleanup prompt below. Nil in production
+	// (config.homebrewTUIUpdater.Upgrade defaults to the real `brew uninstall`
+	// call); tests inject a fake so no real brew ever runs.
+	UninstallHomebrew func() error
 
 	GlobalDir           string
 	SourceInstallScript string
 
 	CheckTUIUpgrade                 func(string) string
 	FindOtherTUIProcesses           func() []runningTUIProcess
-	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) error
+	PrepareOtherTUIProcessesUpgrade func([]runningTUIProcess) (func() error, error)
 }
 
 func (o *startupTUIUpgradeOptions) setDefaults() {
@@ -80,8 +87,44 @@ func handleTUIUpgradeWithOptions(install config.TUIInstallInfo, version, latestV
 	}
 }
 
+// handleHomebrewTUIUpgrade migrates a Homebrew-managed install to LingTai's
+// native installer instead of running `brew upgrade`. The consent prompt is
+// explicit about the migration so a Homebrew user is never surprised by a
+// binary appearing at a new path. The migration step itself never touches the
+// Homebrew formula/keg. Once a native install is verified — either right
+// after this call's own migration, or immediately for a pre-existing
+// DuplicateNativeInstall — a second, separate consent question
+// (homebrewCleanupPrompt) decides whether to actually remove Homebrew; see
+// config.attemptHomebrewCleanup.
 func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
 	fmt.Fprintf(opts.Output, "lingtai-tui %s (latest: %s)\n", version, latestVersion)
+
+	// This function can ask up to two sequential questions in one flow (the
+	// migrate-or-others prompt below, then the cleanup prompt inside
+	// RunTUIUpdate). Both must read from the SAME *bufio.Reader: constructing
+	// a fresh bufio.Reader per prompt (as the old single-prompt readLineLower
+	// helper does) silently discards any input already buffered ahead past
+	// the first '\n', dropping the second answer even when both lines were
+	// present. See readLineLowerFromReader's doc comment.
+	stdin := bufio.NewReader(opts.Input)
+
+	if install.DuplicateNativeInstall {
+		fmt.Fprintln(opts.Output, "  Homebrew install detected, and a native lingtai-tui install already exists.")
+		fmt.Fprintf(opts.Output, "  %s\n", install.DuplicateNativeDetail)
+		fmt.Fprintln(opts.Output, "  The native install is ready and verified.")
+		update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
+			LatestVersion:          latestVersion,
+			GlobalDir:              opts.GlobalDir,
+			Runner:                 opts.Runner,
+			LookPath:               opts.LookPath,
+			ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
+			UninstallHomebrew:      opts.UninstallHomebrew,
+		})
+		printTUIUpdateLines(opts.Output, update.Lines)
+		return false
+	}
+
+	fmt.Fprintln(opts.Output, "  Homebrew install detected. LingTai now installs and updates itself with a native installer instead of Homebrew.")
 
 	others := opts.FindOtherTUIProcesses()
 	if len(others) > 0 {
@@ -93,53 +136,84 @@ func handleHomebrewTUIUpgrade(install config.TUIInstallInfo, version, latestVers
 				fmt.Fprintf(opts.Output, "    PID %d  %s\n", p.PID, p.Command)
 			}
 		}
-		fmt.Fprintln(opts.Output, "  Upgrading while they keep running can leave old/new Cellar binaries mixed.")
-		fmt.Fprint(opts.Output, "  Put agents in their projects to sleep, stop those TUI processes, and upgrade now? [y/N] ")
-		if !answerYes(readLineLower(opts.Input)) {
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Quit the other TUI windows first, then run:")
-			fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
+		fmt.Fprintln(opts.Output, "  Their TUI processes will remain running; only their agents are put to sleep while the managed runtime is updated.")
+		fmt.Fprint(opts.Output, "  Put those agents to sleep and migrate from Homebrew to the native installer now? [y/N] ")
+		if !answerYes(readLineLowerFromReader(stdin)) {
+			fmt.Fprintln(opts.Output, "  Migration skipped. Run manually later:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
-		if err := opts.PrepareOtherTUIProcessesUpgrade(others); err != nil {
-			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for upgrade: %v\n", err)
-			fmt.Fprintln(opts.Output, "  Upgrade skipped. Please close them manually and try again.")
+		rollback, err := opts.PrepareOtherTUIProcessesUpgrade(others)
+		if err != nil {
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					fmt.Fprintf(opts.ErrOutput, "  Could not restore partially prepared agents: %v\n", rollbackErr)
+				}
+			}
+			fmt.Fprintf(opts.ErrOutput, "  Could not prepare other TUI processes for migration: %v\n", err)
+			fmt.Fprintln(opts.Output, "  Migration skipped. The prepared agents were restored; try again later.")
 			return false
 		}
+		defer func() {
+			// The installer only needs the agents paused while it mutates the
+			// managed runtime. Always restore the exact pre-migration signal
+			// state, and surface a rollback error instead of hiding it.
+			if rollback != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					fmt.Fprintf(opts.ErrOutput, "  Could not restore prepared agents: %v\n", rollbackErr)
+				}
+			}
+		}()
 	} else {
-		fmt.Fprint(opts.Output, "  Upgrade now? [Y/n] ")
-		answer := readLineLower(opts.Input)
-		if answer == "n" || answer == "no" {
+		fmt.Fprint(opts.Output, "  Migrate from Homebrew to the native installer now? [y/N] ")
+		if !answerYes(readLineLowerFromReader(stdin)) {
+			fmt.Fprintln(opts.Output, "  Migration skipped. Run manually later:")
+			fmt.Fprintln(opts.Output, "    lingtai-tui self-update")
 			return false
 		}
 	}
 
-	fmt.Fprintln(opts.Output, "  Upgrading...")
+	fmt.Fprintln(opts.Output, "  Migrating from Homebrew to the native installer...")
 	update := config.RunTUIUpdate(install, config.TUIUpdateOptions{
-		LatestVersion: latestVersion,
-		Runner:        opts.Runner,
+		LatestVersion:          latestVersion,
+		GlobalDir:              opts.GlobalDir,
+		Runner:                 opts.Runner,
+		LookPath:               opts.LookPath,
+		ConfirmHomebrewCleanup: homebrewCleanupPrompt(opts, stdin),
+		UninstallHomebrew:      opts.UninstallHomebrew,
 	})
+	printTUIUpdateLines(opts.Output, update.Lines)
 	if !update.Healthy {
 		err := update.Err
 		if err == nil {
-			err = fmt.Errorf("homebrew upgrade failed")
+			err = fmt.Errorf("homebrew-to-native migration failed")
 		}
-		fmt.Fprintf(opts.ErrOutput, "  Upgrade failed: %v\n", err)
+		fmt.Fprintf(opts.ErrOutput, "  Migration failed: %v\n", err)
+		return false
+	}
+	if !update.Updated {
+		fmt.Fprintln(opts.Output, "  Native install ready, but the migration is not complete yet — see the manual-cleanup guidance above.")
 		return false
 	}
 
-	// Verify the upgrade actually changed the binary by re-checking the
-	// version. Brew returns exit 0 even for "already installed".
-	postUpgrade := opts.CheckTUIUpgrade(version)
-	if postUpgrade != "" {
-		// Still outdated — brew formula not updated yet, don't loop.
-		fmt.Fprintln(opts.Output, "  Brew formula not yet updated. Run manually later:")
-		fmt.Fprintln(opts.Output, "    brew update && brew upgrade lingtai-ai/lingtai/lingtai-tui")
-		return false
-	}
-
-	fmt.Fprintln(opts.Output, "  Upgraded! Please restart lingtai-tui to use the new version:")
+	fmt.Fprintln(opts.Output, "  Migrated! Please restart lingtai-tui to use the native binary:")
 	fmt.Fprintln(opts.Output, "    lingtai-tui")
 	return true
+}
+
+// homebrewCleanupPrompt returns the ConfirmHomebrewCleanup callback for the
+// interactive startup path: the exact, concrete removal question, asked only
+// once config.homebrewTUIUpdater.Upgrade has already verified a native
+// install exists (fresh migration or a pre-existing duplicate). Defaults to
+// No on anything but an explicit "y"/"yes" answer. Takes the same
+// *bufio.Reader the caller used for its own prompt(s) so a second sequential
+// question in one flow reads the next line instead of losing it to a
+// freshly-buffered reader.
+func homebrewCleanupPrompt(opts startupTUIUpgradeOptions, stdin *bufio.Reader) func() bool {
+	return func() bool {
+		fmt.Fprint(opts.Output, "  Remove the old Homebrew installation now? [y/N] ")
+		return answerYes(readLineLowerFromReader(stdin))
+	}
 }
 
 func handleSourceTUIUpgrade(install config.TUIInstallInfo, version, latestVersion string, opts startupTUIUpgradeOptions) bool {
@@ -183,7 +257,19 @@ func printTUIUpdateLines(w io.Writer, lines []config.DoctorLine) {
 }
 
 func readLineLower(input io.Reader) string {
-	reader := bufio.NewReader(input)
+	return readLineLowerFromReader(bufio.NewReader(input))
+}
+
+// readLineLowerFromReader reads one line from an existing *bufio.Reader
+// rather than wrapping the underlying io.Reader fresh each call. bufio.Reader
+// reads ahead into its own internal buffer, so constructing a new one per
+// prompt (as readLineLower above does) silently discards any input already
+// buffered past the first '\n' — invisible with a single prompt per call, but
+// it drops the answer to a SECOND sequential prompt (e.g. the Homebrew
+// cleanup question after the migration question) even though both lines were
+// present in the input. Callers that ask more than one question in a single
+// flow must share one *bufio.Reader across all of them.
+func readLineLowerFromReader(reader *bufio.Reader) string {
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(strings.ToLower(line))
 }
@@ -205,7 +291,12 @@ func (r streamingCommandRunner) Run(name string, args ...string) config.CommandR
 	return config.CommandResult{Err: err}
 }
 
-func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) error {
+type preparedAgentSleep struct {
+	sleepFile  string
+	wasPresent bool
+}
+
+func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) (func() error, error) {
 	projects := map[string]bool{}
 	for _, p := range procs {
 		if projectDir := findProjectDirFromCWD(p.CWD); projectDir != "" {
@@ -213,20 +304,35 @@ func prepareOtherTUIProcessesForUpgrade(procs []runningTUIProcess) error {
 		}
 	}
 
+	var prepared []preparedAgentSleep
 	for projectDir := range projects {
 		fmt.Printf("  Putting agents in %s to sleep...\n", projectDir)
-		if err := sleepAgentsInProject(projectDir); err != nil {
-			return err
+		states, err := sleepAgentsInProject(projectDir)
+		prepared = append(prepared, states...)
+		if err != nil {
+			return wakePreparedAgents(prepared), err
 		}
 	}
 
-	for _, p := range procs {
-		fmt.Printf("  Stopping lingtai-tui PID %d...\n", p.PID)
-		if err := stopTUIProcess(p.PID); err != nil {
-			return err
+	// Native migration installs beside Homebrew and does not overwrite the
+	// running Homebrew binary. Keep sibling TUI processes running; only the
+	// agents using the managed runtime are paused during the installer call.
+	return wakePreparedAgents(prepared), nil
+}
+
+func wakePreparedAgents(prepared []preparedAgentSleep) func() error {
+	return func() error {
+		var firstErr error
+		for _, state := range prepared {
+			if state.wasPresent {
+				continue
+			}
+			if err := os.Remove(state.sleepFile); err != nil && !os.IsNotExist(err) && firstErr == nil {
+				firstErr = err
+			}
 		}
+		return firstErr
 	}
-	return nil
 }
 
 func findProjectDirFromCWD(cwd string) string {
@@ -249,25 +355,34 @@ func findProjectDirFromCWD(cwd string) string {
 	}
 }
 
-func sleepAgentsInProject(projectDir string) error {
+func sleepAgentsInProject(projectDir string) ([]preparedAgentSleep, error) {
 	lingtaiDir := filepath.Join(projectDir, ".lingtai")
 	agents, err := fs.DiscoverAgents(lingtaiDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
+	var prepared []preparedAgentSleep
 	var alive []string
 	for _, agent := range agents {
 		if agent.IsHuman {
 			continue
 		}
 		sleepFile := filepath.Join(agent.WorkingDir, ".sleep")
-		if err := os.WriteFile(sleepFile, []byte(""), 0o644); err != nil {
-			return err
+		_, statErr := os.Stat(sleepFile)
+		wasPresent := statErr == nil
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return prepared, statErr
 		}
+		if !wasPresent {
+			if err := os.WriteFile(sleepFile, []byte(""), 0o644); err != nil {
+				return prepared, err
+			}
+		}
+		prepared = append(prepared, preparedAgentSleep{sleepFile: sleepFile, wasPresent: wasPresent})
 		if !agentIsAsleep(agent.WorkingDir) {
 			alive = append(alive, agent.WorkingDir)
 		}
@@ -289,7 +404,7 @@ func sleepAgentsInProject(projectDir string) error {
 	if len(alive) > 0 {
 		fmt.Printf("  Warning: %d agent(s) did not report asleep after .sleep signal.\n", len(alive))
 	}
-	return nil
+	return prepared, nil
 }
 
 func agentIsAsleep(agentDir string) bool {

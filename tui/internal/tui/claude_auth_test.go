@@ -75,3 +75,23 @@ func TestClaudeCodeAuthConfigured_MissingBinary(t *testing.T) {
 		t.Errorf("claudeCodeAuthConfigured() = true with no claude on PATH, want false")
 	}
 }
+
+func TestParseClaudeAuthInfoReturnsCurrentAccount(t *testing.T) {
+	info := parseClaudeAuthInfo([]byte(`{
+	  "loggedIn": true,
+	  "authMethod": "claude.ai",
+	  "email": "user@example.com",
+	  "subscriptionType": "max"
+	}`))
+	if !info.LoggedIn {
+		t.Fatal("LoggedIn = false, want true")
+	}
+	if info.Email != "user@example.com" {
+		t.Fatalf("Email = %q, want user@example.com", info.Email)
+	}
+
+	loggedOut := parseClaudeAuthInfo([]byte(`{"loggedIn":false,"email":"stale@example.com"}`))
+	if loggedOut.LoggedIn || loggedOut.Email != "" {
+		t.Fatalf("logged-out info = %#v, want no account", loggedOut)
+	}
+}

@@ -317,19 +317,6 @@ type FirstRunModel struct {
 	// ↑↓ moves between positions; the textarea is focused only at 0.
 	keyFieldIdx      int
 	selectedProvider string // provider of currently selected preset
-	// presetKeyValidity gates stepPresetKey's Next button. The preset's
-	// model was already checked against whatever key existed when
-	// stepEditPreset ran (see PresetEditorModel's own gate); but the
-	// human can then type/paste a DIFFERENT key on this step, which
-	// changes the (provider, model, credential) tuple and invalidates
-	// that earlier check. Next re-validates the exact tuple this step
-	// is about to commit before advancing. Mirrors PresetEditorModel's
-	// modelValidity/modelValidityGen/modelValidityKey trio — see
-	// model_validity.go.
-	presetKeyValidity       modelValidityStatus
-	presetKeyValidityDetail string
-	presetKeyValidityGen    uint64
-	presetKeyValidityKey    string
 	// presetEditor holds the dedicated preset-editor sub-model when the
 	// wizard is on stepEditPreset. The wizard delegates Update/View to
 	// this model and reacts to PresetEditorCommitMsg / CancelMsg.
@@ -640,7 +627,7 @@ func newFirstRunModelForPurpose(purpose firstRunPurpose, baseDir, globalDir stri
 	// Load OAuth / CLI auth status. Codex is local-file based (a read-only
 	// check of existing ~/.lingtai-tui/codex-auth*.json files — needed even
 	// in purposeDraft so the draft wizard's own Codex row reflects
-	// "already authed" state correctly). Claude Agent SDK auth uses a
+	// "already authed" state correctly). Claude Code auth uses a
 	// subprocess exec (`claude auth status --json`) to probe the existing
 	// Claude Code CLI login — that auth row is hidden in the UI already
 	// (unsupported for now), so purposeDraft skips this probe entirely as
@@ -1051,27 +1038,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		m.covenantInput.SetWidth(inputWidth)
 		m.soulFlowInput.SetWidth(inputWidth)
 		m.commentInput.SetWidth(inputWidth)
-		return m, nil
-
-	case modelValidityResultMsg:
-		// This message type is shared with the embedded PresetEditorModel
-		// (see model_validity.go). Route by step so each owner only sees
-		// results for checks it dispatched — stepEditPreset's checks
-		// belong to m.presetEditor; stepPresetKey's checks are handled
-		// here directly against presetKeyValidity*.
-		if m.step == stepEditPreset {
-			updated, cmd := m.presetEditor.Update(msg)
-			m.presetEditor = updated
-			return m, cmd
-		}
-		if msg.Generation != m.presetKeyValidityGen {
-			return m, nil
-		}
-		m.presetKeyValidity = msg.Status
-		m.presetKeyValidityDetail = msg.Detail
-		if msg.Status == validityValid {
-			m.message = ""
-		}
 		return m, nil
 
 	case PresetEditorCommitMsg:
@@ -1632,8 +1598,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				// Saved codex preset whose bound account isn't authed → require
 				// login first. Checks the preset's own codex_auth_path, so a
 				// different account being missing doesn't block this one.
-				if m.getPresetProvider(p) == "codex" && !m.codexPresetAuthValid(p) {
-					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
+				family, authValid := m.presetCredentialState(p)
+				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
+					m.message = i18n.T(m.presetCredentialHintKey(family))
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -1655,8 +1622,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 				if !ok {
 					return m, nil
 				}
-				if m.getPresetProvider(p) == "codex" && !m.codexPresetAuthValid(p) {
-					m.message = i18n.T("firstrun.preset_pick.codex_needs_oauth_hint")
+				family, authValid := m.presetCredentialState(p)
+				if (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid {
+					m.message = i18n.T(m.presetCredentialHintKey(family))
 					return m, nil
 				}
 				m.presetSaveWarning = ""
@@ -1991,31 +1959,6 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.message = i18n.T("firstrun.preset_pick.draft_key_override_cleared")
 				}
 				if key == "" && m.existingKeys[envName] == "" {
-					return m, nil
-				}
-				effectiveKey := key
-				if effectiveKey == "" {
-					effectiveKey = m.existingKeys[envName]
-				}
-				// Real-availability gate: the key just typed/pasted here
-				// changes the (provider, model, credential) tuple that
-				// stepEditPreset validated earlier (that check ran
-				// against whatever key existed at the time, which may
-				// differ from this one). Re-check the exact tuple this
-				// step is about to persist before advancing — Next must
-				// not succeed on a stale or unverified credential.
-				validityKey := m.presetKeyValidityKeyFor(effectiveKey)
-				if validityKey != m.presetKeyValidityKey || m.presetKeyValidity != validityValid {
-					if validityKey != m.presetKeyValidityKey {
-						m, cmd := m.startPresetKeyValidityCheck(effectiveKey)
-						m.message = i18n.T("preset_editor.model_validity_pending_save")
-						return m, cmd
-					}
-					if m.presetKeyValidity == validityInvalid {
-						m.message = i18n.T("preset_editor.model_validity_invalid_save")
-					} else {
-						m.message = i18n.T("preset_editor.model_validity_pending_save")
-					}
 					return m, nil
 				}
 				if key != "" {
@@ -2903,12 +2846,12 @@ func (m FirstRunModel) View() string {
 			if displayDesc == "preset.desc_"+p.Name {
 				displayDesc = p.Description.Summary
 			}
-			isCodex := m.getPresetProvider(p) == "codex"
-			needsOAuth := isCodex && !m.codexPresetAuthValid(p)
+			family, authValid := m.presetCredentialState(p)
+			needsCredential := (family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool) && !authValid
 			nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
 			name := nameStyle.Render(displayName)
-			if needsOAuth {
-				name += " " + StyleFaint.Render(i18n.T("firstrun.preset_pick.codex_needs_oauth_hint"))
+			if needsCredential {
+				name += " " + StyleFaint.Render(i18n.T(m.presetCredentialHintKey(family)))
 			}
 			// Tier + vision chips render between name and summary. Tier
 			// only when set; vision only for presets with the capability.
@@ -2992,7 +2935,7 @@ func (m FirstRunModel) View() string {
 			// Claude Code OAuth/auth row is hidden for now — that auth path
 			// is unsupported in the current build, so we don't surface a
 			// setup affordance for it. Detection (claudeCodeAuthValid /
-			// refreshClaudeCodeAuth) still runs and feeds the claude-agent-sdk
+			// refreshClaudeCodeAuth) still runs and feeds the claude-code
 			// credential guard; only the user-visible row is suppressed.
 
 		}
@@ -3129,9 +3072,6 @@ func (m FirstRunModel) View() string {
 		// Single textinput. The editor configured everything else.
 		b.WriteString("  " + i18n.T("setup.api_key_label") + " " + m.presetKeyInput.View() + "\n\n")
 
-		if line := m.presetKeyValidityLine(); line != "" {
-			b.WriteString("  " + line + "\n\n")
-		}
 		if m.message != "" {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(ColorSuspended).Render(m.message) + "\n\n")
 		}
@@ -3855,66 +3795,12 @@ func (m FirstRunModel) currentPresetKeyEnv() string {
 	if m.cursor < 0 || m.cursor >= len(m.presets) {
 		return ""
 	}
-	envName, _ := llmStringField(m.presets[m.cursor], "api_key_env")
-	return envName
-}
-
-// presetKeyValidityKeyFor fingerprints the (provider, model, credential)
-// tuple stepPresetKey is about to commit, so a fresh key typed here (or
-// a return to this step with a different current preset) is recognized
-// as invalidating any earlier check. Mirrors PresetEditorModel's
-// currentValidityKey — see model_validity.go.
-func (m FirstRunModel) presetKeyValidityKeyFor(apiKey string) string {
-	p := m.currentPreset()
-	provider, _ := llmStringField(p, "provider")
-	model, _ := llmStringField(p, "model")
-	baseURL, _ := llmStringField(p, "base_url")
-	apiCompat, _ := llmStringField(p, "api_compat")
-	return strings.Join([]string{provider, model, apiKey, baseURL, apiCompat}, "\x00")
-}
-
-// presetKeyValidityLine renders the pending/valid/invalid status of the
-// last (or in-flight) real-availability check for stepPresetKey's
-// current tuple. Empty when no check has run for the current textarea
-// contents, so the line doesn't show a stale state before Next is
-// pressed.
-func (m FirstRunModel) presetKeyValidityLine() string {
-	key := strings.TrimSpace(m.presetKeyInput.Value())
-	if key == "" {
-		key = m.existingKeys[m.currentPresetKeyEnv()]
-	}
-	if m.presetKeyValidityKeyFor(key) != m.presetKeyValidityKey || m.presetKeyValidity == validityUnknown {
+	p := m.presets[m.cursor]
+	if preset.ClassifyCredentialFamily(m.getPresetProvider(p)) != preset.CredentialFamilyOther {
 		return ""
 	}
-	switch m.presetKeyValidity {
-	case validityChecking:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(i18n.T("preset_editor.model_validity_checking"))
-	case validityValid:
-		return lipgloss.NewStyle().Foreground(ColorActive).Render(i18n.T("preset_editor.model_validity_valid"))
-	case validityInvalid:
-		if m.presetKeyValidityDetail == "" {
-			return lipgloss.NewStyle().Foreground(ColorSuspended).Render(i18n.T("preset_editor.model_validity_invalid"))
-		}
-		return lipgloss.NewStyle().Foreground(ColorSuspended).Render(i18n.TF("preset_editor.model_validity_invalid_detail", m.presetKeyValidityDetail))
-	}
-	return ""
-}
-
-// startPresetKeyValidityCheck dispatches a fresh async validity check
-// for the tuple stepPresetKey is about to commit, using the same
-// checkModelValidityCmd/probeLLM machinery as PresetEditorModel.
-func (m FirstRunModel) startPresetKeyValidityCheck(apiKey string) (FirstRunModel, tea.Cmd) {
-	p := m.currentPreset()
-	provider, _ := llmStringField(p, "provider")
-	model, _ := llmStringField(p, "model")
-	baseURL, _ := llmStringField(p, "base_url")
-	apiCompat, _ := llmStringField(p, "api_compat")
-	m.presetKeyValidityGen++
-	m.presetKeyValidityKey = m.presetKeyValidityKeyFor(apiKey)
-	m.presetKeyValidity = validityChecking
-	m.presetKeyValidityDetail = ""
-	gen := m.presetKeyValidityGen
-	return m, checkModelValidityCmd(gen, provider, model, apiKey, baseURL, apiCompat)
+	envName, _ := llmStringField(p, "api_key_env")
+	return envName
 }
 
 // llmStringField returns a string-typed field from a preset's
@@ -3942,7 +3828,8 @@ func llmStringField(p preset.Preset, key string) (string, bool) {
 // for codex; cleaner to leave api_key_env empty for the kernel's
 // _codex factory to ignore.
 func stampAutoEnvVar(p preset.Preset, existingKeys map[string]string) preset.Preset {
-	if provider, _ := llmStringField(p, "provider"); provider == "codex" {
+	provider, _ := llmStringField(p, "provider")
+	if preset.ClassifyCredentialFamily(provider) != preset.CredentialFamilyOther {
 		return p
 	}
 	if envName, _ := llmStringField(p, "api_key_env"); envName != "" {
@@ -4630,18 +4517,31 @@ func (m FirstRunModel) presetAtVisibleIdx(i int) (preset.Preset, bool) {
 	return m.presets[i], true
 }
 
-// codexPresetAuthValid reports whether the Codex OAuth credential bound to a
-// specific preset is usable. It resolves the preset's
-// manifest.llm.codex_auth_path against globalDir (empty → legacy single-
-// account file) and validates that token file. This is what gates editing /
-// selecting a particular codex preset, so one missing account never blocks a
-// different, validly-bound codex preset.
-func (m FirstRunModel) codexPresetAuthValid(p preset.Preset) bool {
-	ref := ""
-	if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-		ref, _ = llm["codex_auth_path"].(string)
+// presetAuthState gathers the loaded credential facts used by preset selection.
+// CodexSingle validates its bound token; CodexPool validates the applicable
+// model category; ClaudeCLI reports the external CLI session.
+func (m FirstRunModel) presetAuthState() preset.AuthState {
+	poolEligible, poolModels, poolFallback := codexPoolEligibilityFacts(m.globalDir)
+	return preset.AuthState{
+		CodexOAuthConfigured:      codexOAuthConfigured(m.globalDir),
+		CodexAuthDir:              m.globalDir,
+		CodexPoolEligible:         poolEligible,
+		CodexPoolEligibleModels:   poolModels,
+		CodexPoolFallbackEligible: poolFallback,
+		ClaudeCodeAuthConfigured:  m.claudeCodeAuthValid,
 	}
-	return codexAuthPathValid(resolveCodexAuthPath(m.globalDir, ref))
+}
+
+func (m FirstRunModel) presetCredentialState(p preset.Preset) (preset.CredentialFamily, bool) {
+	rr := preset.ResolvePresetWithAuth(p, m.existingKeys, m.presetAuthState())
+	return rr.Family, rr.ManifestValid && rr.HasKey
+}
+
+func (m FirstRunModel) presetCredentialHintKey(family preset.CredentialFamily) string {
+	if family == preset.CredentialFamilyCodexPool {
+		return "firstrun.preset_pick.codex_pool_unavailable_hint"
+	}
+	return "firstrun.preset_pick.codex_needs_oauth_hint"
 }
 
 func (m FirstRunModel) codexAuthDisplayLabel() string {
@@ -4655,7 +4555,7 @@ func (m FirstRunModel) codexAuthDisplayLabel() string {
 func (m *FirstRunModel) refreshCodexAuth() {
 	// codexAuth.valid reflects whether ANY Codex account is configured, so
 	// the inline credential row shows an authed state once the user has at
-	// least one account. Per-preset gating uses codexPresetAuthValid.
+	// least one account. Per-preset gating uses presetCredentialState.
 	tokens, ok := readCodexTokenFile(legacyCodexAuthPath(m.globalDir))
 	if !ok {
 		// No legacy account; fall back to any per-account file so the row
@@ -4699,7 +4599,8 @@ func (m *FirstRunModel) refreshClaudeCodeAuth() {
 // uses ChatGPT-OAuth, never paste-key, regardless of api_key_env
 // (a stale/auto-stamped value must not route the user to stepPresetKey).
 func (m FirstRunModel) presetNeedsKey(p preset.Preset) bool {
-	if m.getPresetProvider(p) == "codex" {
+	family := preset.ClassifyCredentialFamily(m.getPresetProvider(p))
+	if family != preset.CredentialFamilyOther {
 		return false
 	}
 	envName, ok := llmStringField(p, "api_key_env")
@@ -4866,7 +4767,7 @@ func (m FirstRunModel) viewRecipeSwapConfirm() string {
 // presetModelName reads the truthful manifest.llm.model value straight off
 // the preset that will actually be applied — the same field
 // Preset.Validate() requires to be non-empty and the same location every
-// other read site in this file (e.g. codexPresetAuthValid,
+// other read site in this file (e.g. presetCredentialState,
 // currentPresetKeyEnv) already reads llm from. Returns "" if somehow
 // missing rather than guessing or hardcoding a default; the caller's row()
 // helper renders "—" for an empty value rather than fabricating one.

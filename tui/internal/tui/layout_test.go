@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // budgetApp builds an App parked in the /help view with the given startup
@@ -198,5 +202,147 @@ func TestLayoutBudgetClampsSmallHeight(t *testing.T) {
 	}
 	if cs := b.ChildWindowSize(); cs.Height < 0 {
 		t.Fatalf("ChildWindowSize.Height = %d, want >= 0 (clamped)", cs.Height)
+	}
+}
+
+func TestLayoutBudgetOwnsHorizontalGeometryWithoutChangingCurrentWidth(t *testing.T) {
+	a := budgetApp(t, "")
+	a.width = 80
+	a.height = 24
+
+	b := a.layoutBudget()
+	if got := b.TerminalWidth; got != 80 {
+		t.Fatalf("TerminalWidth = %d, want 80", got)
+	}
+	if got := b.ContentWidth; got != 80 {
+		t.Fatalf("ContentWidth = %d, want unchanged current width 80", got)
+	}
+	if got := b.RailWidth; got != 0 {
+		t.Fatalf("RailWidth = %d, want 0 in the layout-foundation PR", got)
+	}
+	if got := b.MinChatWidth; got != minimumChatWidth {
+		t.Fatalf("MinChatWidth = %d, want contract value %d", got, minimumChatWidth)
+	}
+	if b.RailVisible {
+		t.Fatal("RailVisible = true, want false while RailWidth is zero")
+	}
+	if got := b.ChildWindowSize().Width; got != b.ContentWidth {
+		t.Fatalf("child width = %d, want ContentWidth", got)
+	}
+}
+
+func TestLayoutBudgetHorizontalTinyAndThresholdWidthsAreSafe(t *testing.T) {
+	const requestedRailWidth = 20
+	minimum := minimumChatWidth
+	threshold := minimum + requestedRailWidth
+
+	for _, width := range []int{-1, 0, 1, minimum - 1, minimum, threshold - 1, threshold, threshold + 1} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			terminal, content, rail, visible := resolveHorizontalLayout(
+				width,
+				requestedRailWidth,
+				minimum,
+				true,
+			)
+
+			if terminal < 0 || content < 0 || rail < 0 {
+				t.Fatalf("width=%d produced negative geometry: terminal=%d content=%d rail=%d", width, terminal, content, rail)
+			}
+			if content+rail != terminal {
+				t.Fatalf("width=%d geometry does not partition terminal: content(%d)+rail(%d) != terminal(%d)", width, content, rail, terminal)
+			}
+
+			wantVisible := width >= threshold
+			if visible != wantVisible {
+				t.Fatalf("width=%d RailVisible=%v, want %v at threshold %d", width, visible, wantVisible, threshold)
+			}
+			if visible {
+				if rail != requestedRailWidth || content < minimum {
+					t.Fatalf("width=%d visible geometry: content=%d rail=%d, want rail=%d and content >= %d", width, content, rail, requestedRailWidth, minimum)
+				}
+			} else if rail != 0 || content != terminal {
+				t.Fatalf("width=%d hidden rail changed content: content=%d rail=%d terminal=%d", width, content, rail, terminal)
+			}
+		})
+	}
+
+	terminal, content, rail, visible := resolveHorizontalLayout(threshold, requestedRailWidth, minimum, false)
+	if visible || rail != 0 || content != terminal {
+		t.Fatalf("non-mail geometry consumed rail: terminal=%d content=%d rail=%d visible=%v", terminal, content, rail, visible)
+	}
+}
+
+func mailLayoutApp(t *testing.T) App {
+	t.Helper()
+	dir := t.TempDir()
+	humanDir := filepath.Join(dir, "human")
+	orchDir := filepath.Join(dir, "main")
+	for _, path := range []string{humanDir, orchDir} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mail := NewMailModel(humanDir, "human@local", "~", orchDir, "main", 50, dir, "en", false, 0)
+	return App{currentView: appViewMail, mail: mail}
+}
+
+func assertMailHorizontalGeometry(t *testing.T, a App) {
+	t.Helper()
+	b := a.layoutBudget()
+	content := b.ContentWidth
+	if a.mail.width != content {
+		t.Fatalf("MailModel width = %d, want budget ContentWidth %d", a.mail.width, content)
+	}
+	if got := a.mail.viewport.Width(); got != content {
+		t.Fatalf("mail viewport width = %d, want budget ContentWidth %d", got, content)
+	}
+	if got := a.mail.input.width; got != content {
+		t.Fatalf("mail composer width = %d, want budget ContentWidth %d", got, content)
+	}
+
+	lines := strings.Split(a.mail.View(), "\n")
+	if len(lines) < 2 || lipgloss.Width(lines[1]) != content {
+		t.Fatalf("mail header width = %d, want budget ContentWidth %d", lipgloss.Width(lines[1]), content)
+	}
+	foundFooter := false
+	for _, line := range lines {
+		if strings.Contains(line, "Email To:") {
+			foundFooter = true
+			if got := lipgloss.Width(line); got != content {
+				t.Fatalf("mail footer width = %d, want budget ContentWidth %d", got, content)
+			}
+		}
+		if got := lipgloss.Width(line); got > content {
+			t.Fatalf("mail line overflows ContentWidth: got %d > %d: %q", got, content, line)
+		}
+	}
+	if !foundFooter {
+		t.Fatal("mail footer geometry assertion could not find Email To line")
+	}
+}
+
+func TestRawAndSyntheticResizeShareMailHorizontalGeometry(t *testing.T) {
+	a := mailLayoutApp(t)
+	model, _ := a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	a = model.(App)
+	assertMailHorizontalGeometry(t, a)
+
+	msg := runCmd(a.sendSize())
+	model, _ = a.Update(msg)
+	a = model.(App)
+	assertMailHorizontalGeometry(t, a)
+}
+
+func TestNonMailViewKeepsFullTerminalWidth(t *testing.T) {
+	a := budgetApp(t, "")
+	model, _ := a.Update(tea.WindowSizeMsg{Width: 73, Height: 24})
+	a = model.(App)
+
+	b := a.layoutBudget()
+	if got := b.ContentWidth; got != 73 {
+		t.Fatalf("non-mail ContentWidth = %d, want full terminal width 73", got)
+	}
+	if got := a.help.inner.width; got != 73 {
+		t.Fatalf("non-mail child width = %d, want full terminal width 73", got)
 	}
 }

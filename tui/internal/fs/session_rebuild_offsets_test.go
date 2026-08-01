@@ -13,7 +13,7 @@ func TestSessionCacheConstructionAndDetachedRebuildAreFilesystemPure(t *testing.
 	orchDir := filepath.Join(root, "orch")
 	writeSessionTestFile(t, filepath.Join(orchDir, "logs", "events.jsonl"), `{"ts":1781300001,"type":"text_output","text":"detached"}`+"\n")
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	if _, err := os.Stat(humanDir); !os.IsNotExist(err) {
 		t.Fatalf("constructor touched human directory: stat error = %v", err)
 	}
@@ -36,7 +36,7 @@ func TestRebuildPreservesTrailingPartialJSONLRecords(t *testing.T) {
 			`{"ts":1781300001,"type":"text_output","text":"first"}`+"\n"+
 				`{"ts":1781300002,"type":"text_output","text":"sec`)
 
-		sc := NewSessionCache(humanDir, root)
+		sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 		appendSessionTestFile(t, path, `ond"}`+"\n")
@@ -51,7 +51,7 @@ func TestRebuildPreservesTrailingPartialJSONLRecords(t *testing.T) {
 			`{"ts":"2026-06-12T21:33:21Z","source":"human","voice":"first"}`+"\n"+
 				`{"ts":"2026-06-12T21:33:22Z","source":"insight","voice":"sec`)
 
-		sc := NewSessionCache(humanDir, root)
+		sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 		appendSessionTestFile(t, path, `ond"}`+"\n")
@@ -66,7 +66,7 @@ func TestRebuildPreservesTrailingPartialJSONLRecords(t *testing.T) {
 		path := filepath.Join(orchDir, "logs", "soul_flow.jsonl")
 		writeSessionTestFile(t, path, `{"kind":"voice","fire_id":"fire-partial","source":"insights","voice":"partial`)
 
-		sc := NewSessionCache(humanDir, root)
+		sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 		appendSessionTestFile(t, path, ` voice"}`+"\n")
@@ -86,7 +86,7 @@ func TestRebuildPreservesAppendsThatLandAfterAuthoritativeReads(t *testing.T) {
 	writeSessionTestFile(t, inquiryPath, `{"ts":"2026-06-12T21:33:21Z","source":"human","voice":"before inquiry"}`+"\n")
 	writeSessionTestFile(t, soulPath, "")
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	sc.afterRebuildIngest = func() {
 		appendSessionTestFile(t, eventsPath, `{"ts":1781300003,"type":"text_output","text":"during event"}`+"\n")
 		appendSessionTestFile(t, inquiryPath, `{"ts":"2026-06-12T21:33:23Z","source":"insight","voice":"during inquiry"}`+"\n")

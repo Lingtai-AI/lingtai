@@ -111,6 +111,34 @@ func TestApplyActiveCodexAccount_RewritesOnlySavedCodexPresets(t *testing.T) {
 	}
 }
 
+func TestApplyActiveCodexAccount_RewritesCodexOAuthSavedPreset(t *testing.T) {
+	_, globalDir := withTempCodexHome(t)
+	p := preset.Preset{
+		Name:        "codex-oauth",
+		Description: preset.PresetDescription{Summary: "codex oauth test preset"},
+		Manifest: map[string]interface{}{"llm": map[string]interface{}{
+			"provider": "codex_oauth",
+			"model":    "gpt-5.6-sol",
+		}},
+	}
+	if err := preset.Save(p); err != nil {
+		t.Fatalf("save codex_oauth preset: %v", err)
+	}
+
+	target := filepath.Join(globalDir, codexAuthSubdir, "work.json")
+	wantRef := codexAuthRefForPath(globalDir, target)
+	updated, err := applyActiveCodexAccount(globalDir, target)
+	if err != nil {
+		t.Fatalf("applyActiveCodexAccount error: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("updated = %d, want 1 (one saved codex_oauth preset)", updated)
+	}
+	if ref, ok := reloadSavedRef(t, "codex-oauth"); !ok || ref != wantRef {
+		t.Fatalf("codex_oauth preset ref = %q (present=%v), want %q", ref, ok, wantRef)
+	}
+}
+
 // TestApplyActiveCodexAccount_LegacyClearsRef verifies selecting the legacy
 // account resets saved Codex presets to the implicit fallback by REMOVING the
 // codex_auth_path key (empty ref), not leaving an empty string behind.

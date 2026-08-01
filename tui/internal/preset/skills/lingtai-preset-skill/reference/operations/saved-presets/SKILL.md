@@ -89,7 +89,8 @@ writes.
 
 ## Operations
 
-For the preset editor's live-probe Save gate (distinct from structural
-`Validate()`), see `reference/operations/availability-save-gate/SKILL.md`.
+For why the preset editor's Save is structural-only and never makes a
+live provider/model call, see
+`reference/operations/availability-save-gate/SKILL.md`.
 For how a saved preset becomes the running default and what `/refresh`
 switches, see `reference/operations/activation-session-refresh/SKILL.md`.

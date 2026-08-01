@@ -23,6 +23,7 @@
         -ArchivePath <path>      local fixture archive to install FROM
                                  (download/expand equivalent; no network)
         -ChecksumPath <path>     SHA-256 sidecar for -ArchivePath
+        -Latest                  explicit pinned current-main development install
         -SkipVenv                skip the Python runtime venv step
         -NoModifyPath            do not persist PATH changes
         -DryRun                  plan only; make no filesystem writes
@@ -30,6 +31,14 @@
     Every run isolates HOME / USERPROFILE / LOCALAPPDATA / TEMP / TMP and all
     install outputs under a single throwaway test root, so a run can never touch
     the developer's real profile or PATH.
+
+    Public-mode (no -ArchivePath) contracts -- tag/latest resolution, bundle
+    manifest validation, Windows archive+sidecar download/verify, and the
+    pinned-kernel venv/wheel install -- are driven against a local
+    System.Net.HttpListener fake GitHub API (see "fake GitHub API server"
+    below), reached through install.ps1's LINGTAI_GITHUB_API_BASE /
+    LINGTAI_KERNEL_GITHUB_API_BASE override seam. No test in this suite depends
+    on a live GitHub release.
 
 .NOTES
     Exit code 0 => all contract tests passed (only possible once install.ps1
@@ -83,6 +92,16 @@ function Assert-Equal {
     }
 }
 
+function Assert-Contains {
+    param([string]$Haystack, [string]$Needle, [string]$Label)
+    Assert-True ($Haystack.Contains($Needle)) $Label
+}
+
+function Assert-NotContains {
+    param([string]$Haystack, [string]$Needle, [string]$Label)
+    Assert-True (-not $Haystack.Contains($Needle)) $Label
+}
+
 # A test whose behavior is deliberately deferred. It records the gap loudly and
 # honestly instead of pretending the contract point is covered.
 function Skip-NotYet {
@@ -91,15 +110,87 @@ function Skip-NotYet {
     Write-Host "  NOT-YET - $Label : $Reason"
 }
 
+# Prints a bounded tail of an Invoke-Installer result's captured stdout/stderr
+# so an unexpected-failure contract is decisive from a single CI log instead of
+# needing another opaque rerun. Call this ONLY after an assertion has already
+# failed -- it is a diagnostic aid, never a substitute for the assertion, and
+# it never changes pass/fail state.
+function Write-InstallerDiagnostics {
+    param([hashtable]$Result, [string]$Context, [int]$MaxLines = 40)
+    Write-Host "  ---- $Context : captured child process output (exit $($Result.ExitCode)) ----"
+    foreach ($streamName in @('Stdout', 'Stderr')) {
+        $text = $Result[$streamName]
+        Write-Host "  -- $streamName --"
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            Write-Host '  (empty)'
+            continue
+        }
+        $lines = $text -split "`r?`n"
+        $tail = $lines | Select-Object -Last $MaxLines
+        foreach ($line in $tail) { Write-Host "  | $line" }
+        if ($lines.Count -gt $MaxLines) {
+            Write-Host "  | ... ($($lines.Count - $MaxLines) earlier line(s) omitted)"
+        }
+    }
+    Write-Host "  ---- end $Context diagnostics ----"
+}
+
+# Prints a bounded tail of a log file (e.g. wheel-build.log) so a build-tool
+# failure is decisive from a single CI log instead of needing another opaque
+# rerun. Purely diagnostic -- never affects pass/fail/NOT-YET state.
+function Write-LogFileTail {
+    param([string]$Path, [string]$Context, [int]$MaxLines = 40)
+    Write-Host "  ---- $Context : tail of $Path ----"
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Host '  (file not found)'
+    } else {
+        $lines = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
+        if ($lines.Count -eq 0) {
+            Write-Host '  (empty)'
+        } else {
+            $tail = $lines | Select-Object -Last $MaxLines
+            foreach ($line in $tail) { Write-Host "  | $line" }
+            if ($lines.Count -gt $MaxLines) {
+                Write-Host "  | ... ($($lines.Count - $MaxLines) earlier line(s) omitted)"
+            }
+        }
+    }
+    Write-Host "  ---- end $Context diagnostics ----"
+}
+
 # ---------------------------------------------------------------------------
 # Environment isolation. Every install output, and every ambient location the
 # installer might read/write, is redirected under one test root. Original
 # values are captured and restored in the finally block.
 # ---------------------------------------------------------------------------
-$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP')
+$IsolatedVars = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'OS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'LINGTAI_TEST_WINGET_LOG', 'LINGTAI_TEST_WINGET_TOOL_DIR', 'LINGTAI_TEST_WINGET_EXIT', 'LINGTAI_TEST_MACHINE_PATH', 'LINGTAI_TEST_USER_PATH', 'LINGTAI_TEST_PATH_LOG')
 $SavedEnv = @{}
 foreach ($name in $IsolatedVars) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+
+# Restore-IsolatedEnv puts every isolated variable back to the value captured
+# above -- and, crucially, DELETES the ones that were never set on the host
+# instead of assigning $null to them.
+#
+# [Environment]::SetEnvironmentVariable($name, $null, 'Process') does not fully
+# remove the name from this process's native environment block; an empty entry
+# lingers, and every CHILD process inherits it. For PROCESSOR_ARCHITEW6432 --
+# which Set-DevBootstrapEnv sets and which is absent on a normal amd64 host --
+# that lingering empty entry makes Windows hand the child an EMPTY
+# PROCESSOR_ARCHITECTURE, so install.ps1's Get-Arch aborted every public-mode
+# contract with "Unsupported processor architecture ''" once CONTRACT 21 had
+# run, even though this process still reported AMD64 correctly. Remove-Item
+# Env:\ deletes the entry outright and children inherit the real host value.
+function Restore-IsolatedEnv {
+    foreach ($name in $IsolatedVars) {
+        $value = $SavedEnv[$name]
+        if ($null -eq $value) {
+            if (Test-Path -LiteralPath "Env:\$name") { Remove-Item -LiteralPath "Env:\$name" }
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
 }
 
 # The test root deliberately contains a SPACE so that every child path derived
@@ -317,6 +408,280 @@ function New-FixtureArchive {
 }
 
 # ---------------------------------------------------------------------------
+# Fake GitHub API + release-asset server (System.Net.HttpListener).
+#
+# install.ps1's public-mode resolution (Resolve-PublicTag, Get-ReleaseAssetUrl,
+# Get-BundleManifest, Get-KernelManifest, Install-KernelWheel) reads its base
+# URLs from $env:LINGTAI_GITHUB_API_BASE / $env:LINGTAI_KERNEL_GITHUB_API_BASE
+# -- the exact override seam install.ps1 exposes for this offline suite (mirrors
+# install.sh's LINGTAI_GITEE_OWNER/LINGTAI_GITEE_REPO pattern). Pointing those
+# at a local HttpListener lets every public-mode contract below run fully
+# offline and deterministically, with no dependency on a live GitHub release.
+#
+# Routes are registered as exact path -> {Status, Body} entries; a request for
+# an unregistered path returns 404, matching "no such asset" from the real API.
+#
+# NOTE ON RELEASE ASSET DOWNLOADS: the real GitHub API's release JSON embeds a
+# `browser_download_url` per asset, and install.ps1 downloads FROM that URL --
+# it never constructs a download URL itself. This fake server exploits that:
+# every asset's browser_download_url simply points back at this same listener
+# under /assets/<name>, so registering the bytes at that path is sufficient;
+# install.ps1 needs no additional knowledge of a separate download host.
+# ---------------------------------------------------------------------------
+$script:FakeApiListener = $null
+$script:FakeApiPrefix = $null
+$script:FakeApiRoutes = @{}
+$script:FakeApiJob = $null
+$script:FakeApiPs = $null
+
+function Start-FakeGitHubApi {
+    $port = Get-Random -Minimum 30000 -Maximum 40000
+    $prefix = "http://127.0.0.1:$port/"
+    $listener = New-Object System.Net.HttpListener
+    $listener.Prefixes.Add($prefix)
+    $listener.Start()
+    $script:FakeApiListener = $listener
+    $script:FakeApiPrefix = $prefix
+    $script:FakeApiRoutes = @{}
+
+    # A background runspace pumps requests so the main test thread is never
+    # blocked; each response is looked up by exact path in $script:FakeApiRoutes
+    # via a synchronized hashtable (thread-safe cross-runspace sharing).
+    $sync = [hashtable]::Synchronized($script:FakeApiRoutes)
+    $script:FakeApiRoutes = $sync
+
+    $ps = [powershell]::Create()
+    $ps.AddScript({
+        param($listener, $routes)
+        while ($listener.IsListening) {
+            try {
+                $context = $listener.GetContext()
+            } catch {
+                break
+            }
+            # A public-mode contract can make several SEQUENTIAL requests against
+            # this one listener (release-JSON lookup(s) + asset downloads). Any
+            # unhandled exception while building/writing ONE response would
+            # otherwise fall out of this while loop and silently kill the runspace
+            # -- nobody observes $ps.EndInvoke() -- leaving every LATER request in
+            # the same contract (or any later contract) to hit connection-refused
+            # instead of a clean HTTP response. Never let one request's failure
+            # take down the listener for the rest of the suite; always try to
+            # answer with SOMETHING (a 500 if we can't build the intended
+            # response) and keep looping.
+            try {
+                $path = $context.Request.Url.AbsolutePath
+                $route = $routes[$path]
+                if ($route) {
+                    $context.Response.StatusCode = $route.Status
+                    # The real GitHub API always answers with Content-Type:
+                    # application/json; install.ps1's Invoke-GitHubApi relies on
+                    # Invoke-RestMethod's Content-Type-driven auto-parsing to turn
+                    # the body into an object (HttpListener otherwise defaults to
+                    # text/html, which Invoke-RestMethod returns as an unparsed
+                    # string -- silently breaking every .tag_name/.assets access
+                    # downstream). Set it whenever the route declares one.
+                    if ($route.ContentType) { $context.Response.ContentType = $route.ContentType }
+                    # Routes always carry raw bytes (BodyBytes) so binary assets
+                    # (zips, wheels) round-trip exactly -- never re-encoded through
+                    # a string, which would corrupt non-ASCII byte values.
+                    $bytes = $route.BodyBytes
+                    $context.Response.ContentLength64 = $bytes.Length
+                    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+                } else {
+                    $context.Response.StatusCode = 404
+                    $bytes = [System.Text.Encoding]::UTF8.GetBytes('not found')
+                    $context.Response.ContentLength64 = $bytes.Length
+                    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+                }
+            } catch {
+                try {
+                    $context.Response.StatusCode = 500
+                    $errBytes = [System.Text.Encoding]::UTF8.GetBytes("fake API handler error: $($_.Exception.Message)")
+                    $context.Response.ContentLength64 = $errBytes.Length
+                    $context.Response.OutputStream.Write($errBytes, 0, $errBytes.Length)
+                } catch {
+                    # The response is unusable (e.g. client already disconnected).
+                    # Nothing more can be done for THIS request; fall through to
+                    # closing it and keep the listener loop alive for the next one.
+                }
+            } finally {
+                try { $context.Response.OutputStream.Close() } catch {}
+            }
+        }
+    }) | Out-Null
+    $ps.AddArgument($listener) | Out-Null
+    $ps.AddArgument($sync) | Out-Null
+    $script:FakeApiJob = $ps.BeginInvoke()
+    $script:FakeApiPs = $ps
+
+    return $prefix
+}
+
+function Stop-FakeGitHubApi {
+    if ($script:FakeApiListener) {
+        try { $script:FakeApiListener.Stop() } catch {}
+        try { $script:FakeApiListener.Close() } catch {}
+    }
+    if ($script:FakeApiPs) {
+        try { $script:FakeApiPs.Stop() } catch {}
+        try { $script:FakeApiPs.Dispose() } catch {}
+    }
+}
+
+# Diagnostic aid, never a pass/fail signal: reports whether the fake GitHub API's
+# background runspace is still alive and listening, and surfaces any error it
+# recorded. A public-mode contract makes several sequential requests against
+# this one listener; if the runspace's request-handling loop ever died silently
+# (see Start-FakeGitHubApi's per-request try/catch), every later request in the
+# SAME contract or a later one would hit connection-refused instead of a clean
+# HTTP response, which looks identical to "install.ps1 itself failed" from the
+# outside. Call this after any unexpected-failure public-mode contract so a
+# dead listener is decisive from a single CI log instead of another guess.
+function Write-FakeGitHubApiHealth {
+    param([string]$Context)
+    Write-Host "  ---- $Context : fake GitHub API health ----"
+    $listenerAlive = $false
+    try { $listenerAlive = [bool]($script:FakeApiListener -and $script:FakeApiListener.IsListening) } catch {}
+    Write-Host "  | listener.IsListening = $listenerAlive"
+    if ($script:FakeApiPs) {
+        Write-Host "  | runspace state = $($script:FakeApiPs.InvocationStateInfo.State)"
+        if ($script:FakeApiPs.HadErrors) {
+            Write-Host '  | runspace HadErrors = True; errors:'
+            foreach ($e in $script:FakeApiPs.Streams.Error) {
+                Write-Host "  | $e"
+            }
+        } else {
+            Write-Host '  | runspace HadErrors = False'
+        }
+    } else {
+        Write-Host '  | no runspace handle recorded'
+    }
+    Write-Host "  ---- end $Context fake GitHub API health ----"
+}
+
+function Register-FakeApiRoute {
+    <#
+      Registers a raw-bytes response. Prefer this (or the Text/Bytes wrappers
+      below) over hand-building the route hashtable so every path stores
+      BodyBytes, never a re-encoded string.
+    #>
+    param([string]$Path, [byte[]]$BodyBytes, [int]$Status = 200, [string]$ContentType = '')
+    $script:FakeApiRoutes[$Path] = @{ Status = $Status; BodyBytes = $BodyBytes; ContentType = $ContentType }
+}
+
+function Register-FakeApiRouteText {
+    param([string]$Path, [string]$Text, [int]$Status = 200, [string]$ContentType = '')
+    Register-FakeApiRoute -Path $Path -BodyBytes ([System.Text.Encoding]::UTF8.GetBytes($Text)) -Status $Status -ContentType $ContentType
+}
+
+function Register-FakeApiAsset {
+    <#
+      Registers a binary asset at /assets/<name> and returns the object shape
+      the GitHub release-assets API embeds ({name, browser_download_url}).
+    #>
+    param([string]$Name, [byte[]]$Bytes)
+    # Real GitHub release-asset downloads (browser_download_url, served from its
+    # CDN) always answer application/octet-stream regardless of file extension --
+    # never application/json even for a .json asset. Deliberately mirror that
+    # here (rather than leaving it to HttpListener's text/html default) so this
+    # fixture exercises install.ps1's Get-TextAssetContent through the SAME
+    # "Content-Type is not a recognized text type" condition production traffic
+    # actually presents, instead of accidentally dodging it.
+    Register-FakeApiRoute -Path "/assets/$Name" -BodyBytes $Bytes -ContentType 'application/octet-stream'
+    return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
+}
+
+function Register-FakeApiAssetText {
+    param([string]$Name, [string]$Text)
+    # See Register-FakeApiAsset: real GitHub serves release assets (including
+    # JSON manifest assets like lingtai-bundle-manifest.json) as
+    # application/octet-stream, never application/json. Setting that here
+    # deliberately, rather than relying on HttpListener's implicit text/html
+    # default, is what makes the CONTRACT 11/16/17/18 public-mode/full-runtime
+    # contracts actually exercise install.ps1's Get-TextAssetContent normalization
+    # (RawContentStream -> explicit UTF-8 decode -> BOM strip) instead of merely
+    # happening to work by accident of an unrelated default.
+    Register-FakeApiRouteText -Path "/assets/$Name" -Text $Text -ContentType 'application/octet-stream'
+    return @{ name = $Name; browser_download_url = "$($script:FakeApiPrefix)assets/$Name" }
+}
+
+function Register-FakeRelease {
+    <#
+      Registers GET /repos/<repo>/releases/tags/<tag> (and, if -Latest, also
+      .../releases/latest) with the given asset list, mirroring the real
+      GitHub release API's {tag_name, assets: [{name, browser_download_url}]}.
+    #>
+    param([string]$ApiPathPrefix, [string]$Tag, [array]$Assets, [switch]$Latest)
+    $body = @{ tag_name = $Tag; assets = $Assets } | ConvertTo-Json -Depth 6
+    # install.ps1's Invoke-GitHubApi reads this route through Invoke-RestMethod,
+    # which only auto-parses the body into an object when Content-Type says JSON
+    # (HttpListener's unset default is text/html); the real GitHub API always
+    # answers these endpoints with application/json, so mirror that here.
+    Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/tags/$Tag" -Text $body -ContentType 'application/json; charset=utf-8'
+    if ($Latest) {
+        Register-FakeApiRouteText -Path "$ApiPathPrefix/releases/latest" -Text $body -ContentType 'application/json; charset=utf-8'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Bundle / kernel manifest fixture builders (schema lingtai.tui.bundle/v1 and
+# lingtai.kernel.release/v1) -- same shapes install.sh's strict parser and
+# scripts/test-install-sh-gitee-bundle.sh's fixtures use.
+# ---------------------------------------------------------------------------
+function New-BundleManifestJson {
+    param(
+        [string]$Tag,
+        [string]$TuiCommit = ('a' * 40),
+        [string]$KernelTag = 'v0.18.0',
+        [string]$KernelVersion = '0.18.0',
+        [string]$ArchiveFilename,
+        [string]$ArchiveSha256
+    )
+    if (-not $ArchiveFilename) { $ArchiveFilename = "lingtai-$Tag-windows-amd64.zip" }
+    $manifest = [ordered]@{
+        schema                   = 'lingtai.tui.bundle/v1'
+        bundle_id                = $Tag
+        tui_tag                  = $Tag
+        tui_commit                = $TuiCommit
+        generated_at              = '2026-07-21T00:00:00Z'
+        kernel_tag                = $KernelTag
+        kernel_version             = $KernelVersion
+        kernel_manifest_filename   = 'lingtai-kernel-release-manifest.json'
+        archives                  = @(@{ filename = $ArchiveFilename; sha256 = $ArchiveSha256 })
+        providers                 = @{
+            github = @{ repo = 'Lingtai-AI/lingtai' }
+            gitee  = @{ owner = 'huangzesen1997'; repo = 'lingtai' }
+        }
+    }
+    return ($manifest | ConvertTo-Json -Depth 6)
+}
+
+function New-KernelManifestJson {
+    param(
+        [string]$KernelVersion = '0.18.0',
+        [array]$Wheels
+    )
+    $artifacts = @()
+    foreach ($w in $Wheels) {
+        $artifacts += @{
+            filename    = $w.filename
+            sha256      = $w.sha256
+            kind        = 'wheel'
+            python_tag  = $w.python_tag
+            abi_tag     = $w.abi_tag
+            platform_tag = $w.platform_tag
+        }
+    }
+    $manifest = [ordered]@{
+        schema         = 'lingtai.kernel.release/v1'
+        kernel_version = $KernelVersion
+        artifacts      = $artifacts
+    }
+    return ($manifest | ConvertTo-Json -Depth 6)
+}
+
+# ---------------------------------------------------------------------------
 # Installer invocation seam. Runs install.ps1 in a child PowerShell using the
 # SAME host executable that is running this suite, so PS 5.1 vs PS 7 coverage is
 # driven entirely by which host launches this file. Captures stdout, stderr, and
@@ -361,8 +726,17 @@ function Invoke-Installer {
     [string[]]$invokeArgs = $argList.ToArray()
     $outFile = Join-Path $TestRoot ("out-{0}.txt" -f ([Guid]::NewGuid().ToString('N')))
     $errFile = Join-Path $TestRoot ("err-{0}.txt" -f ([Guid]::NewGuid().ToString('N')))
-    & $psHost @invokeArgs 1> $outFile 2> $errFile
-    $exitCode = $LASTEXITCODE
+    # This seam deliberately captures child stderr and non-zero exits for contract
+    # assertions. PS 5.1 promotes any native stderr to NativeCommandError under
+    # the suite's global Stop policy, even with a separate redirect target.
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $psHost @invokeArgs 1> $outFile 2> $errFile
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     return @{
         ExitCode = $exitCode
         Stdout   = (Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)
@@ -391,6 +765,217 @@ function Get-TreeSnapshot {
         } | Sort-Object
 }
 
+function Join-Snapshot {
+    param([string[]]$Snapshot)
+    return (@($Snapshot) -join "`n")
+}
+
+function Get-InstallerOutput {
+    param([hashtable]$Result)
+    return "$($Result.Stdout)`n$($Result.Stderr)"
+}
+
+function Set-DevBootstrapEnv {
+    param([string[]]$PathEntries)
+    $clean = @($PathEntries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # PowerShell 7 launches .cmd application shims through cmd.exe; retain only
+    # System32 from the ambient host so the hermetic fake commands remain
+    # executable without exposing real Git/Go/Node/Python/winget installations.
+    $systemDirectory = [Environment]::SystemDirectory
+    if (-not [string]::IsNullOrWhiteSpace($systemDirectory) -and $clean -notcontains $systemDirectory) {
+        $clean += $systemDirectory
+    }
+    $env:PATH = ($clean -join ';')
+    if ([string]::IsNullOrWhiteSpace($env:PATHEXT)) {
+        $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
+    } elseif (($env:PATHEXT -split ';') -notcontains '.CMD') {
+        $env:PATHEXT = "$env:PATHEXT;.CMD"
+    }
+    $env:OS = 'Windows_NT'
+    $env:PROCESSOR_ARCHITECTURE = 'AMD64'
+    # Model an amd64 host explicitly in both native and WOW64 signals. Clearing
+    # ARCHITEW6432 through System.Environment can remain stale in the PS7 env
+    # provider inherited by the child, which makes the fixture look non-amd64.
+    $env:PROCESSOR_ARCHITEW6432 = 'AMD64'
+}
+
+function New-CmdShim {
+    param([string]$Dir, [string]$Name, [string[]]$Lines)
+    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+    $path = Join-Path $Dir "$Name.cmd"
+    Set-Content -LiteralPath $path -Value $Lines -Encoding ASCII
+    return $path
+}
+
+function New-ValidDevToolShims {
+    param([string]$Dir, [switch]$WithoutPython)
+    New-CmdShim -Dir $Dir -Name 'git' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+        'if "%1"=="ls-remote" (echo controlled fake main-ref failure 1>&2& exit /b 42)',
+        'echo fake git unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'go' -Lines @(
+        '@echo off',
+        'if "%1"=="version" (echo go version go1.26.0 windows/amd64& exit /b 0)',
+        'echo fake go unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'node' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo v22.13.0& exit /b 0)',
+        'echo fake node unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $Dir -Name 'npm' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo 10.9.0& exit /b 0)',
+        'echo fake npm unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    if (-not $WithoutPython) {
+        New-CmdShim -Dir $Dir -Name 'python' -Lines @(
+            '@echo off',
+            'if "%1"=="-c" (echo cpython:3.13:64& exit /b 0)',
+            'echo fake python unexpected args: %* 1>&2',
+            'exit /b 98'
+        ) | Out-Null
+    }
+}
+
+function New-FakeWingetShim {
+    param([string]$Dir)
+    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+    $impl = Join-Path $Dir 'winget-impl.ps1'
+    $implSource = @'
+$ErrorActionPreference = 'Stop'
+$log = $env:LINGTAI_TEST_WINGET_LOG
+if ($log) { Add-Content -LiteralPath $log -Value ($args -join ' ') -Encoding ASCII }
+$forcedExit = $env:LINGTAI_TEST_WINGET_EXIT
+if ($forcedExit) {
+    [Console]::Error.WriteLine("fake winget forced failure $forcedExit")
+    exit ([int]$forcedExit)
+}
+$idIndex = [Array]::IndexOf($args, '--id')
+if ($idIndex -lt 0 -or $idIndex + 1 -ge $args.Count) {
+    [Console]::Error.WriteLine('fake winget missing --id')
+    exit 64
+}
+$package = $args[$idIndex + 1]
+$toolDir = $env:LINGTAI_TEST_WINGET_TOOL_DIR
+if (-not $toolDir) {
+    [Console]::Error.WriteLine('fake winget missing LINGTAI_TEST_WINGET_TOOL_DIR')
+    exit 65
+}
+New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+function Write-Cmd($Name, [string[]]$Lines) {
+    Set-Content -LiteralPath (Join-Path $toolDir "$Name.cmd") -Value $Lines -Encoding ASCII
+}
+switch ($package) {
+    'Git.Git' {
+        Write-Cmd 'git' @(
+            '@echo off',
+            'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+            'if "%1"=="ls-remote" (echo controlled fake main-ref failure 1>&2& exit /b 42)',
+            'echo fake git unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'GoLang.Go' {
+        Write-Cmd 'go' @(
+            '@echo off',
+            'if "%1"=="version" (echo go version go1.26.0 windows/amd64& exit /b 0)',
+            'echo fake go unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'OpenJS.NodeJS.LTS' {
+        Write-Cmd 'node' @(
+            '@echo off',
+            'if "%1"=="--version" (echo v22.13.0& exit /b 0)',
+            'echo fake node unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+        Write-Cmd 'npm' @(
+            '@echo off',
+            'if "%1"=="--version" (echo 10.9.0& exit /b 0)',
+            'echo fake npm unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    'Python.Python.3.13' {
+        Write-Cmd 'python' @(
+            '@echo off',
+            'if "%1"=="-c" (echo cpython:3.13:64& exit /b 0)',
+            'echo fake python unexpected args: %* 1>&2',
+            'exit /b 98'
+        )
+    }
+    default {
+        [Console]::Error.WriteLine("fake winget unknown package $package")
+        exit 66
+    }
+}
+exit 0
+'@
+    Set-Content -LiteralPath $impl -Encoding ASCII -Value $implSource
+    New-CmdShim -Dir $Dir -Name 'winget' -Lines @(
+        '@echo off',
+        '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0winget-impl.ps1" %*',
+        'exit /b %ERRORLEVEL%'
+    ) | Out-Null
+}
+
+function New-DevBootstrapCase {
+    param([switch]$WithWinget, [switch]$WithValidTools)
+    $caseHome = New-IsolatedHome
+    $emptyPath = Join-Path $caseHome 'empty path'
+    $wingetDir = Join-Path $caseHome 'fake winget'
+    $toolDir = Join-Path $caseHome 'fake installed tools'
+    $processOnlyDir = Join-Path $caseHome 'process only path'
+    New-Item -ItemType Directory -Force -Path $emptyPath, $toolDir, $processOnlyDir | Out-Null
+    if ($WithWinget) { New-FakeWingetShim -Dir $wingetDir }
+    if ($WithValidTools) { New-ValidDevToolShims -Dir $toolDir }
+    $pathEntries = @()
+    if ($WithWinget) { $pathEntries += $wingetDir }
+    $pathEntries += @($toolDir, $processOnlyDir, $emptyPath)
+    Set-DevBootstrapEnv -PathEntries $pathEntries
+    $env:LINGTAI_TEST_WINGET_LOG = Join-Path $caseHome 'winget-argv.log'
+    $env:LINGTAI_TEST_WINGET_TOOL_DIR = $toolDir
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_WINGET_EXIT', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $null, 'Process')
+
+    # Both Windows PowerShell and pwsh lazily create per-profile startup-state
+    # files even under -NoProfile/-NonInteractive. Warm the exact child host now,
+    # before any DryRun tree snapshot, so the no-write assertion measures only
+    # installer effects rather than first-process runtime bookkeeping.
+    $psHost = (Get-Process -Id $PID).Path
+    $savedErrorActionPreference = $ErrorActionPreference
+    $warmExit = $null
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $psHost -NoProfile -NonInteractive -Command '$null' 1>$null 2>$null
+        $warmExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($warmExit -ne 0) { throw "Failed to warm child PowerShell host '$psHost' (exit $warmExit)." }
+
+    return @{
+        Home = $caseHome
+        BinDir = Join-Path $caseHome 'bin dest'
+        GlobalDir = Join-Path $caseHome '.lingtai-tui'
+        ToolDir = $toolDir
+        WingetDir = $wingetDir
+        EmptyPath = $emptyPath
+        WingetLog = $env:LINGTAI_TEST_WINGET_LOG
+        ProcessOnlyDir = $processOnlyDir
+    }
+}
+
 try {
     # -----------------------------------------------------------------------
     # PRECONDITION: installer script must exist. Until it does, this fails and
@@ -410,6 +995,216 @@ try {
     # executed the identical file.
     Write-Host ("  host: {0} {1}" -f $PSVersionTable.PSEdition, $PSVersionTable.PSVersion)
 
+    # CONTRACT 21: -Latest prerequisite bootstrap behavior. These tests execute
+    # install.ps1 in child PowerShell processes with isolated PATH entries and a
+    # fake winget/application set. They never invoke real winget and never write
+    # Machine/User PATH or runner-global locations.
+    Write-Section 'contract: -Latest prerequisite bootstrap behavior'
+    $exactGitCommand = 'winget install --id Git.Git --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactGoCommand = 'winget install --id GoLang.Go --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactNodeCommand = 'winget install --id OpenJS.NodeJS.LTS --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $exactPythonCommand = 'winget install --id Python.Python.3.13 --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent'
+    $expectedWingetArgv = @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand) |
+        ForEach-Object { $_.Substring('winget '.Length) }
+
+    $dryCase = New-DevBootstrapCase
+    $dryBefore = Join-Snapshot -Snapshot (Get-TreeSnapshot -Path $dryCase.Home)
+    $dryRun = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $dryCase.BinDir; GlobalDir = $dryCase.GlobalDir; NoModifyPath = $true }
+    $dryAfter = Join-Snapshot -Snapshot (Get-TreeSnapshot -Path $dryCase.Home)
+    $dryOut = Get-InstallerOutput -Result $dryRun
+    if ($dryRun.ExitCode -ne 0) {
+        Write-Host "  ---- all-missing DryRun child output (exit $($dryRun.ExitCode)) ----"
+        foreach ($line in @($dryOut -split "`r?`n")) { Write-Host "  | $line" }
+    }
+    Assert-Equal 0 $dryRun.ExitCode '-Latest -DryRun with all prerequisites missing exits zero'
+    Assert-Equal $dryBefore $dryAfter '-Latest -DryRun leaves the complete isolated tree unchanged'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.BinDir)) '-Latest -DryRun creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.GlobalDir)) '-Latest -DryRun creates no GlobalDir'
+    Assert-True (-not (Test-Path -LiteralPath $dryCase.WingetLog)) '-Latest -DryRun invokes no winget'
+    foreach ($name in @('git','go','node','npm','python')) {
+        Assert-Contains $dryOut $name "-Latest -DryRun reports unsatisfied $name"
+    }
+    foreach ($cmd in @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand)) {
+        Assert-Contains $dryOut $cmd "-Latest -DryRun reports exact command: $cmd"
+    }
+    Assert-NotContains $dryOut 'Resolved TUI main commit' '-Latest -DryRun with missing prerequisites stops before main ref resolution'
+
+    $unsupportedCase = New-DevBootstrapCase -WithValidTools
+    New-CmdShim -Dir $unsupportedCase.ToolDir -Name 'node' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo v21.7.3& exit /b 0)',
+        'echo fake node unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $unsupportedCase.ToolDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo cpython:3.13:32& exit /b 0)',
+        'echo fake python unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    $unsupported = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $unsupportedCase.BinDir; GlobalDir = $unsupportedCase.GlobalDir; NoModifyPath = $true }
+    $unsupportedOut = Get-InstallerOutput -Result $unsupported
+    Assert-Equal 0 $unsupported.ExitCode '-Latest -DryRun reports unsupported Node/Python without writing'
+    Assert-Contains $unsupportedOut 'unsupported version v21.7.3' '-Latest identifies unsupported Node policy'
+    Assert-Contains $unsupportedOut 'cpython:3.13:32' '-Latest reports the rejected non-64-bit CPython probe result'
+    Assert-Contains $unsupportedOut 'requires 64-bit CPython 3.11-3.13' '-Latest states the required Python architecture and implementation'
+    Assert-Contains $unsupportedOut $exactNodeCommand '-Latest plans Node LTS repair for unsupported Node'
+    Assert-Contains $unsupportedOut $exactPythonCommand '-Latest plans Python repair for non-64-bit Python'
+    Assert-NotContains $unsupportedOut $exactGitCommand '-Latest does not repair valid Git'
+    Assert-NotContains $unsupportedOut $exactGoCommand '-Latest does not repair valid Go'
+    Assert-True (-not (Test-Path -LiteralPath $unsupportedCase.WingetLog)) 'unsupported DryRun invokes no winget'
+
+    $nonCpythonCase = New-DevBootstrapCase -WithValidTools
+    New-CmdShim -Dir $nonCpythonCase.ToolDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo pypy:3.13:64& exit /b 0)',
+        'echo fake Python-compatible runtime unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    $nonCpython = Invoke-Installer @{ Latest = $true; DryRun = $true; BinDir = $nonCpythonCase.BinDir; GlobalDir = $nonCpythonCase.GlobalDir; NoModifyPath = $true }
+    $nonCpythonOut = Get-InstallerOutput -Result $nonCpython
+    Assert-Equal 0 $nonCpython.ExitCode '-Latest -DryRun rejects non-CPython without writing'
+    Assert-Contains $nonCpythonOut 'pypy:3.13:64' '-Latest reports the rejected non-CPython probe result'
+    Assert-Contains $nonCpythonOut 'requires 64-bit CPython 3.11-3.13' '-Latest states the exact CPython prerequisite contract'
+    Assert-Contains $nonCpythonOut $exactPythonCommand '-Latest plans CPython repair for a 64-bit non-CPython runtime'
+    Assert-NotContains $nonCpythonOut $exactGitCommand '-Latest does not repair valid Git in non-CPython case'
+    Assert-NotContains $nonCpythonOut $exactGoCommand '-Latest does not repair valid Go in non-CPython case'
+    Assert-NotContains $nonCpythonOut $exactNodeCommand '-Latest does not repair valid Node/npm in non-CPython case'
+    Assert-True (-not (Test-Path -LiteralPath $nonCpythonCase.WingetLog)) 'non-CPython DryRun invokes no winget'
+
+    $noWingetCase = New-DevBootstrapCase
+    $noWinget = Invoke-Installer @{ Latest = $true; BinDir = $noWingetCase.BinDir; GlobalDir = $noWingetCase.GlobalDir; NoModifyPath = $true }
+    $noWingetOut = Get-InstallerOutput -Result $noWinget
+    Assert-True ($noWinget.ExitCode -ne 0) '-Latest without winget exits non-zero'
+    Assert-Contains $noWingetOut 'winget was not found' '-Latest without winget explains App Installer/winget remediation'
+    foreach ($cmd in @($exactGitCommand, $exactGoCommand, $exactNodeCommand, $exactPythonCommand)) {
+        Assert-Contains $noWingetOut $cmd "-Latest without winget prints exact remediation command: $cmd"
+    }
+    Assert-NotContains $noWingetOut 'Resolved TUI main commit' '-Latest without winget fails before checkout'
+    Assert-True (-not (Test-Path -LiteralPath $noWingetCase.BinDir)) '-Latest without winget creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $noWingetCase.GlobalDir)) '-Latest without winget creates no GlobalDir'
+
+    $wingetFailCase = New-DevBootstrapCase -WithWinget
+    $env:LINGTAI_TEST_WINGET_EXIT = '73'
+    $wingetFail = Invoke-Installer @{ Latest = $true; BinDir = $wingetFailCase.BinDir; GlobalDir = $wingetFailCase.GlobalDir; NoModifyPath = $true }
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_WINGET_EXIT', $null, 'Process')
+    $wingetFailOut = Get-InstallerOutput -Result $wingetFail
+    Assert-True ($wingetFail.ExitCode -ne 0) 'fake winget nonzero exits non-zero'
+    Assert-Contains $wingetFailOut 'exit 73' 'fake winget nonzero preserves actual exit code under PS 5.1/7'
+    Assert-Contains $wingetFailOut 'Git.Git' 'fake winget nonzero names the failed package'
+    Assert-Contains $wingetFailOut $exactGitCommand 'fake winget nonzero prints the exact failed command'
+    Assert-NotContains $wingetFailOut 'NativeCommandError' 'fake winget stderr does not escape as a PS5.1 NativeCommandError'
+    Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.BinDir)) 'fake winget failure creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $wingetFailCase.GlobalDir)) 'fake winget failure creates no GlobalDir'
+    $wingetFailLog = @(if (Test-Path -LiteralPath $wingetFailCase.WingetLog) { Get-Content -LiteralPath $wingetFailCase.WingetLog })
+    Assert-Equal 1 $wingetFailLog.Count 'fake winget failure attempted exactly one package before failing'
+    if ($wingetFailLog.Count -eq 1) {
+        Assert-Equal $expectedWingetArgv[0] $wingetFailLog[0] 'fake winget failure receives the exact Git.Git argv'
+    }
+
+    $wingetOkCase = New-DevBootstrapCase -WithWinget
+    $wingetOk = Invoke-Installer @{ Latest = $true; BinDir = $wingetOkCase.BinDir; GlobalDir = $wingetOkCase.GlobalDir; NoModifyPath = $true }
+    $wingetOkOut = Get-InstallerOutput -Result $wingetOk
+    Assert-True ($wingetOk.ExitCode -ne 0) 'fake winget success reaches controlled main-ref failure'
+    Assert-Contains $wingetOkOut 'Using build prerequisites' 'fake winget success performs full post-bootstrap revalidation'
+    Assert-Contains $wingetOkOut 'Could not resolve TUI refs/heads/main' 'fake winget success reaches the controlled pre-checkout main-ref failure'
+    Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.BinDir)) 'fake winget success before checkout writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $wingetOkCase.GlobalDir)) 'fake winget success before checkout writes no GlobalDir'
+    $wingetOkLog = @(if (Test-Path -LiteralPath $wingetOkCase.WingetLog) { Get-Content -LiteralPath $wingetOkCase.WingetLog })
+    Assert-Equal 4 $wingetOkLog.Count 'fake winget success invokes exactly one command per unique package ID'
+    if ($wingetOkLog.Count -eq $expectedWingetArgv.Count) {
+        for ($i = 0; $i -lt $expectedWingetArgv.Count; $i++) {
+            Assert-Equal $expectedWingetArgv[$i] $wingetOkLog[$i] "fake winget success receives exact argv for package index $i"
+        }
+    }
+    foreach ($id in @('Git.Git','GoLang.Go','OpenJS.NodeJS.LTS','Python.Python.3.13')) {
+        $matches = @($wingetOkLog | Where-Object { $_ -like "*--id $id *" })
+        Assert-Equal 1 $matches.Count "fake winget success invokes $id exactly once"
+    }
+    $nodeMatches = @($wingetOkLog | Where-Object { $_ -like '*--id OpenJS.NodeJS.LTS *' })
+    Assert-Equal 1 $nodeMatches.Count 'Node/npm share one deduplicated OpenJS.NodeJS.LTS install'
+    Assert-True (Test-Path -LiteralPath $wingetOkCase.ProcessOnlyDir) 'process-only PATH directory still exists after refresh/revalidation'
+
+    # A process-only unsupported Python must not keep shadowing the CPython that
+    # fake winget exposes only through the refreshed Machine path.
+    $shadowCase = New-DevBootstrapCase -WithWinget
+    $shadowExistingDir = Join-Path $shadowCase.Home 'valid existing tools'
+    $shadowInvalidPythonDir = Join-Path $shadowCase.Home 'invalid process python'
+    New-ValidDevToolShims -Dir $shadowExistingDir -WithoutPython
+    New-CmdShim -Dir $shadowExistingDir -Name 'git' -Lines @(
+        '@echo off',
+        'if "%1"=="--version" (echo git version 2.45.0& exit /b 0)',
+        'if "%1"=="ls-remote" (echo %PATH%>"%LINGTAI_TEST_PATH_LOG%"& echo controlled fake main-ref failure 1>&2& exit /b 42)',
+        'echo fake git unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    New-CmdShim -Dir $shadowInvalidPythonDir -Name 'python' -Lines @(
+        '@echo off',
+        'if "%1"=="-c" (echo cpython:3.13:32& exit /b 0)',
+        'echo invalid fake python unexpected args: %* 1>&2',
+        'exit /b 98'
+    ) | Out-Null
+    Set-DevBootstrapEnv -PathEntries @($shadowCase.WingetDir, $shadowInvalidPythonDir, $shadowExistingDir, $shadowCase.ProcessOnlyDir, $shadowCase.EmptyPath)
+    $shadowPathLog = Join-Path $shadowCase.Home 'path-after-refresh.log'
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $shadowCase.ToolDir, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', ';', 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $shadowPathLog, 'Process')
+    $shadow = Invoke-Installer @{ Latest = $true; BinDir = $shadowCase.BinDir; GlobalDir = $shadowCase.GlobalDir; NoModifyPath = $true }
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_MACHINE_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_USER_PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_TEST_PATH_LOG', $null, 'Process')
+    $shadowOut = Get-InstallerOutput -Result $shadow
+    Assert-True ($shadow.ExitCode -ne 0) 'invalid process Python plus fake winget reaches controlled main-ref failure'
+    Assert-Contains $shadowOut 'Using build prerequisites' 'invalid process Python is replaced by refreshed fake CPython during revalidation'
+    Assert-Contains $shadowOut 'Could not resolve TUI refs/heads/main' 'shadowing repair reaches controlled pre-checkout main-ref failure'
+    $shadowWingetLog = @(if (Test-Path -LiteralPath $shadowCase.WingetLog) { Get-Content -LiteralPath $shadowCase.WingetLog })
+    Assert-Equal 1 $shadowWingetLog.Count 'shadowing repair invokes exactly one prerequisite package'
+    if ($shadowWingetLog.Count -eq 1) {
+        Assert-Equal $expectedWingetArgv[3] $shadowWingetLog[0] 'shadowing repair invokes exact Python.Python.3.13 argv'
+    }
+    Assert-True (Test-Path -LiteralPath $shadowPathLog) 'controlled git seam captured the post-refresh child PATH'
+    $shadowPath = if (Test-Path -LiteralPath $shadowPathLog) { (Get-Content -LiteralPath $shadowPathLog -Raw).Trim() } else { '' }
+    $installedPythonIndex = $shadowPath.IndexOf($shadowCase.ToolDir, [System.StringComparison]::OrdinalIgnoreCase)
+    $invalidPythonIndex = $shadowPath.IndexOf($shadowInvalidPythonDir, [System.StringComparison]::OrdinalIgnoreCase)
+    Assert-True ($installedPythonIndex -ge 0 -and $invalidPythonIndex -ge 0 -and $installedPythonIndex -lt $invalidPythonIndex) 'refreshed installed CPython directory precedes the invalid process-only Python directory'
+    Assert-True (-not (Test-Path -LiteralPath $shadowCase.BinDir)) 'shadowing repair controlled failure writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $shadowCase.GlobalDir)) 'shadowing repair controlled failure writes no GlobalDir'
+
+    $validCase = New-DevBootstrapCase -WithWinget -WithValidTools
+    $valid = Invoke-Installer @{ Latest = $true; BinDir = $validCase.BinDir; GlobalDir = $validCase.GlobalDir; NoModifyPath = $true }
+    $validOut = Get-InstallerOutput -Result $valid
+    Assert-True ($valid.ExitCode -ne 0) 'already-valid prerequisites reach controlled main-ref failure'
+    Assert-Contains $validOut 'Using build prerequisites' 'already-valid prerequisites are accepted without bootstrap'
+    Assert-Contains $validOut 'Could not resolve TUI refs/heads/main' 'already-valid prerequisites proceed to main-ref resolution'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.WingetLog)) 'already-valid prerequisites do not invoke winget'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.BinDir)) 'already-valid controlled failure writes no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $validCase.GlobalDir)) 'already-valid controlled failure writes no GlobalDir'
+
+    # CONTRACT 21 mutates only this test process's environment. Restore the
+    # original host values before the legacy fixture/compiler contracts run.
+    Restore-IsolatedEnv
+
+    # CONTRACT 20: current-main is an explicit, self-contained mode. Its
+    # runtime and source pins are not optional, so release/local-artifact and
+    # SkipVenv semantics must be rejected before prerequisite or destination
+    # work begins.
+    Write-Section 'contract: -Latest rejects release and SkipVenv conflicts'
+    $latestConflictHome = New-IsolatedHome
+    $latestConflictBin = Join-Path $latestConflictHome 'bin'
+    $latestConflictGlobal = Join-Path $latestConflictHome '.lingtai-tui'
+    $r20a = Invoke-Installer @{ Latest = $true; SkipVenv = $true; BinDir = $latestConflictBin; GlobalDir = $latestConflictGlobal; NoModifyPath = $true }
+    Assert-True ($r20a.ExitCode -ne 0) '-Latest + -SkipVenv exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath $latestConflictBin)) '-Latest + -SkipVenv creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath $latestConflictGlobal)) '-Latest + -SkipVenv creates no GlobalDir'
+    $r20b = Invoke-Installer @{ Latest = $true; Version = 'v1.2.3'; BinDir = (Join-Path $latestConflictHome 'bin2'); GlobalDir = (Join-Path $latestConflictHome '.global2'); NoModifyPath = $true }
+    Assert-True ($r20b.ExitCode -ne 0) '-Latest + -Version exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome 'bin2'))) '-Latest + -Version creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome '.global2'))) '-Latest + -Version creates no GlobalDir'
+    $r20c = Invoke-Installer @{ Latest = $true; DryRun = $true; ArchivePath = (Join-Path $latestConflictHome 'missing.zip'); ChecksumPath = (Join-Path $latestConflictHome 'missing.zip.sha256'); BinDir = (Join-Path $latestConflictHome 'bin3'); GlobalDir = (Join-Path $latestConflictHome '.global3'); NoModifyPath = $true }
+    Assert-True ($r20c.ExitCode -ne 0) '-Latest + paired -ArchivePath/-ChecksumPath exits non-zero before artifact access'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome 'bin3'))) '-Latest + Archive/Checksum conflict creates no BinDir'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $latestConflictHome '.global3'))) '-Latest + Archive/Checksum conflict creates no GlobalDir'
+
     # -----------------------------------------------------------------------
     # Fixture self-check (does not need the installer): the fixture builder must
     # produce an archive whose sidecar matches, proving the RED failures below
@@ -420,6 +1215,22 @@ try {
     Assert-True (Test-Path -LiteralPath $fx.ArchivePath) 'fixture archive was created'
     Assert-True (Test-Path -LiteralPath $fx.ChecksumPath) 'fixture checksum sidecar was created'
     Assert-Equal $fx.Sha256 (Get-Sha256Hex -Path $fx.ArchivePath) 'sidecar sha256 matches archive bytes'
+
+    # -----------------------------------------------------------------------
+    # Fake GitHub API + asset server. Every test in this suite -- including the
+    # pre-existing local-artifact contracts below, which now also resolve a
+    # bundle manifest for their default (non -SkipVenv) runtime step -- points
+    # install.ps1 at this listener via LINGTAI_GITHUB_API_BASE /
+    # LINGTAI_KERNEL_GITHUB_API_BASE so NOTHING in this suite depends on a live
+    # GitHub release. An unregistered path 404s exactly like a real missing
+    # release/asset, which is what gives CONTRACT 9b (below) its deterministic
+    # "no bundle available" failure without a live network dependency.
+    # -----------------------------------------------------------------------
+    Write-Section 'fixture: fake GitHub API server'
+    $apiPrefix = Start-FakeGitHubApi
+    Assert-True (-not [string]::IsNullOrWhiteSpace($apiPrefix)) 'fake GitHub API server started'
+    [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai", 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', "$($apiPrefix)repos/Lingtai-AI/lingtai-kernel", 'Process')
 
     # -----------------------------------------------------------------------
     # CONTRACT 1: local fixture install (download/expand equivalent).
@@ -643,10 +1454,12 @@ try {
     Assert-Equal 0 $r9.ExitCode 'SkipVenv install exits 0'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9 'runtime\venv'))) 'SkipVenv left no runtime venv'
 
-    # The default native runtime path is currently unsupported. Its known
-    # fail-loud gate must run before any binary or metadata write so a caller
-    # never gets a failed command that already changed BinDir.
-    Write-Section 'contract: unavailable default runtime fails before install writes'
+    # A default (non -SkipVenv) install for a tag with no resolvable bundle
+    # (v9.9.9 has no registered route on the fake API, so the bundle-manifest
+    # fetch 404s exactly like a real missing release) must fail loud BEFORE any
+    # binary or metadata write, so a caller never gets a failed command that
+    # already changed BinDir.
+    Write-Section 'contract: unresolvable runtime bundle fails before install writes'
     $home9b = New-IsolatedHome
     $binDir9b = Join-Path $home9b 'bin dir'
     $globalDir9b = Join-Path $home9b '.lingtai-tui'
@@ -658,7 +1471,7 @@ try {
         ChecksumPath = $fx.ChecksumPath
         NoModifyPath = $true
     }
-    Assert-True ($r9b.ExitCode -ne 0) 'unavailable default runtime exits non-zero'
+    Assert-True ($r9b.ExitCode -ne 0) 'unresolvable runtime bundle exits non-zero'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-tui.exe'))) 'runtime preflight failure installs no TUI binary'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir9b 'lingtai-portal.exe'))) 'runtime preflight failure installs no portal binary'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir9b 'install.json'))) 'runtime preflight failure writes no install metadata'
@@ -695,6 +1508,510 @@ try {
     Skip-NotYet 'PATH persistence (affirmative case)' `
         'Persisting PATH writes process-global HKCU\Environment state that cannot be isolated under the test root nor safely restored on a shared runner after an abrupt failure; implement with a safe save/restore harness before enabling.'
 
+    # =========================================================================
+    # PUBLIC MODE (no -ArchivePath): resolution, bundle-manifest validation, and
+    # the pinned-kernel runtime path, all served by the fake GitHub API above.
+    # =========================================================================
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 11: successful public-mode resolve + install with -SkipVenv.
+    # An explicit -Version resolves the bundle manifest, downloads the Windows
+    # archive + sidecar, verifies both against the manifest digest, confirms
+    # the staged version, and installs into BinDir -- no live GitHub release
+    # involved anywhere in this test.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode resolves tag, validates bundle, installs from release asset'
+    $pubTag = 'v11.0.0'
+    $pubFx = New-FixtureArchive -Version $pubTag
+    $pubZipBytes = [System.IO.File]::ReadAllBytes($pubFx.ArchivePath)
+    $pubZipAsset = Register-FakeApiAsset -Name "lingtai-$pubTag-windows-amd64.zip" -Bytes $pubZipBytes
+    $pubShaAsset = Register-FakeApiAssetText -Name "lingtai-$pubTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$pubTag-windows-amd64.zip" -f $pubFx.Sha256)
+    $pubBundleJson = New-BundleManifestJson -Tag $pubTag -ArchiveSha256 $pubFx.Sha256
+    $pubManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $pubBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $pubTag -Assets @($pubZipAsset, $pubShaAsset, $pubManifestAsset)
+
+    $home11 = New-IsolatedHome
+    $binDir11 = Join-Path $home11 'bin dir'
+    $globalDir11 = Join-Path $home11 '.lingtai-tui'
+    $r11 = Invoke-Installer @{
+        Version      = $pubTag
+        BinDir       = $binDir11
+        GlobalDir    = $globalDir11
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $r11.ExitCode 'public-mode install exits 0'
+    if ($r11.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r11 -Context 'CONTRACT 11 (public-mode install)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 11 (public-mode install)'
+    }
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir11 'lingtai-tui.exe')) 'public-mode install placed lingtai-tui.exe under BinDir'
+    $meta11 = $null
+    try { $meta11 = Get-Content -LiteralPath (Join-Path $globalDir11 'install.json') -Raw | ConvertFrom-Json } catch {}
+    Assert-True ($null -ne $meta11) 'public-mode install wrote a parseable install.json'
+    if ($null -ne $meta11) {
+        Assert-Equal 'powershell-release-asset' $meta11.install_kind 'public-mode install.json records install_kind powershell-release-asset'
+        Assert-Equal $pubTag $meta11.resolved_ref 'public-mode install.json records the resolved tag'
+    }
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 12: release checksum sidecar disagreeing with the bundle
+    # manifest digest is refused as mixed provenance -- installs nothing.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode refuses a sidecar that disagrees with the bundle manifest digest'
+    $mixTag = 'v11.0.1'
+    $mixFx = New-FixtureArchive -Version $mixTag
+    $mixZipAsset = Register-FakeApiAsset -Name "lingtai-$mixTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($mixFx.ArchivePath))
+    # Sidecar reports a DIFFERENT (well-formed but wrong) digest than the bundle manifest.
+    $wrongDigest = '0' * 64
+    $mixShaAsset = Register-FakeApiAssetText -Name "lingtai-$mixTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$mixTag-windows-amd64.zip" -f $wrongDigest)
+    $mixBundleJson = New-BundleManifestJson -Tag $mixTag -ArchiveSha256 $mixFx.Sha256
+    $mixManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $mixBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $mixTag -Assets @($mixZipAsset, $mixShaAsset, $mixManifestAsset)
+
+    $home12 = New-IsolatedHome
+    $binDir12 = Join-Path $home12 'bin dir'
+    $r12 = Invoke-Installer @{
+        Version      = $mixTag
+        BinDir       = $binDir12
+        GlobalDir    = (Join-Path $home12 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r12.ExitCode -ne 0) 'mixed-provenance sidecar/manifest digest exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir12 'lingtai-tui.exe'))) 'mixed-provenance digest installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 13: malformed bundle manifest (wrong schema) fails loud.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode rejects a malformed bundle manifest'
+    $badTag = 'v11.0.2'
+    $badManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text '{"schema":"unexpected/v1"}'
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $badTag -Assets @($badManifestAsset)
+
+    $home13 = New-IsolatedHome
+    $binDir13 = Join-Path $home13 'bin dir'
+    $r13 = Invoke-Installer @{
+        Version      = $badTag
+        BinDir       = $binDir13
+        GlobalDir    = (Join-Path $home13 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r13.ExitCode -ne 0) 'malformed bundle manifest schema exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir13 'lingtai-tui.exe'))) 'malformed bundle manifest installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 13b: a bundle manifest with a genuine duplicate key WITHIN the
+    # same JSON object fails loud. This is the regression case for a bug where
+    # duplicate-key detection was a flat scan over the whole document: the
+    # manifest schema legitimately has "repo" once under providers.github and
+    # once under providers.gitee (different objects, same leaf key name), which
+    # a flat scan would misreport as a duplicate and reject every valid
+    # manifest. The scoped (depth-tracked) check must accept that shape while
+    # still catching a REAL duplicate within one object.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode rejects a manifest with a same-object duplicate key'
+    $dupTag = 'v11.0.2b'
+    # Two "schema" keys inside the SAME top-level object -- a genuine violation.
+    $dupManifestText = '{"schema":"lingtai.tui.bundle/v1","schema":"lingtai.tui.bundle/v1","bundle_id":"' + $dupTag + '","tui_tag":"' + $dupTag + '","tui_commit":"' + ('a' * 40) + '","generated_at":"2026-07-21T00:00:00Z","kernel_tag":"v0.18.0","kernel_version":"0.18.0","kernel_manifest_filename":"lingtai-kernel-release-manifest.json","archives":[{"filename":"lingtai-' + $dupTag + '-windows-amd64.zip","sha256":"' + ('a' * 64) + '"}],"providers":{"github":{"repo":"Lingtai-AI/lingtai"},"gitee":{"owner":"huangzesen1997","repo":"lingtai"}}}'
+    $dupManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $dupManifestText
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $dupTag -Assets @($dupManifestAsset)
+
+    $home13b = New-IsolatedHome
+    $binDir13b = Join-Path $home13b 'bin dir'
+    $r13b = Invoke-Installer @{
+        Version      = $dupTag
+        BinDir       = $binDir13b
+        GlobalDir    = (Join-Path $home13b '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r13b.ExitCode -ne 0) 'same-object duplicate key exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir13b 'lingtai-tui.exe'))) 'same-object duplicate key installs nothing'
+    # Note: CONTRACT 11 (and every other public-mode contract in this suite)
+    # already proves the positive case -- a well-formed manifest with "repo"
+    # legitimately duplicated across providers.github/providers.gitee installs
+    # successfully -- so no separate positive assertion is needed here.
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 14: a release whose bundle manifest references a Windows archive
+    # that was never actually uploaded fails loud (asset listing has no such
+    # name) rather than attempting an unresolvable download.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode fails when the manifest-referenced archive asset is missing'
+    $missTag = 'v11.0.3'
+    $missBundleJson = New-BundleManifestJson -Tag $missTag -ArchiveSha256 ('a' * 64)
+    $missManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $missBundleJson
+    # Deliberately do NOT register the zip/sha256 assets for this tag.
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $missTag -Assets @($missManifestAsset)
+
+    $home14 = New-IsolatedHome
+    $binDir14 = Join-Path $home14 'bin dir'
+    $r14 = Invoke-Installer @{
+        Version      = $missTag
+        BinDir       = $binDir14
+        GlobalDir    = (Join-Path $home14 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r14.ExitCode -ne 0) 'missing manifest-referenced archive asset exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir14 'lingtai-tui.exe'))) 'missing archive asset installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 15: a correctly-checksummed archive whose staged lingtai-tui.exe
+    # reports the WRONG version still fails loud (the staged-version gate from
+    # local-artifact mode applies identically to public-mode downloads).
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode enforces staged version even with a valid checksum'
+    $wrongVerTag = 'v11.0.4'
+    $wrongVerFx = New-FixtureArchive -Version $wrongVerTag -TuiVersion 'v0.0.1'
+    $wvZipAsset = Register-FakeApiAsset -Name "lingtai-$wrongVerTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($wrongVerFx.ArchivePath))
+    $wvShaAsset = Register-FakeApiAssetText -Name "lingtai-$wrongVerTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$wrongVerTag-windows-amd64.zip" -f $wrongVerFx.Sha256)
+    $wvBundleJson = New-BundleManifestJson -Tag $wrongVerTag -ArchiveSha256 $wrongVerFx.Sha256
+    $wvManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $wvBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $wrongVerTag -Assets @($wvZipAsset, $wvShaAsset, $wvManifestAsset)
+
+    $home15 = New-IsolatedHome
+    $binDir15 = Join-Path $home15 'bin dir'
+    $r15 = Invoke-Installer @{
+        Version      = $wrongVerTag
+        BinDir       = $binDir15
+        GlobalDir    = (Join-Path $home15 '.lingtai-tui')
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-True ($r15.ExitCode -ne 0) 'staged version mismatch in public mode exits non-zero'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir15 'lingtai-tui.exe'))) 'staged version mismatch in public mode installs nothing'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 16: "latest" resolves through the release API exactly once. No
+    # -Version means GET .../releases/latest, and the resolved tag (not the
+    # literal string "latest") is what gets validated/installed/recorded.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode resolves latest through the release API once'
+    $latestTag = 'v11.1.0'
+    $latestFx = New-FixtureArchive -Version $latestTag
+    $latZipAsset = Register-FakeApiAsset -Name "lingtai-$latestTag-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($latestFx.ArchivePath))
+    $latShaAsset = Register-FakeApiAssetText -Name "lingtai-$latestTag-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$latestTag-windows-amd64.zip" -f $latestFx.Sha256)
+    $latBundleJson = New-BundleManifestJson -Tag $latestTag -ArchiveSha256 $latestFx.Sha256
+    $latManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $latBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $latestTag -Assets @($latZipAsset, $latShaAsset, $latManifestAsset) -Latest
+
+    $home16 = New-IsolatedHome
+    $binDir16 = Join-Path $home16 'bin dir'
+    $globalDir16 = Join-Path $home16 '.lingtai-tui'
+    $r16 = Invoke-Installer @{
+        BinDir       = $binDir16
+        GlobalDir    = $globalDir16
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    Assert-Equal 0 $r16.ExitCode 'no -Version (latest resolution) install exits 0'
+    if ($r16.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r16 -Context 'CONTRACT 16 (latest resolution)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 16 (latest resolution)'
+    }
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir16 'lingtai-tui.exe')) 'latest-resolved install placed lingtai-tui.exe under BinDir'
+    $meta16 = $null
+    try { $meta16 = Get-Content -LiteralPath (Join-Path $globalDir16 'install.json') -Raw | ConvertFrom-Json } catch {}
+    if ($null -ne $meta16) {
+        Assert-Equal $latestTag $meta16.resolved_ref 'latest resolution records the concrete resolved tag, not the literal "latest"'
+    } else {
+        Assert-True $false 'latest-resolved install wrote a parseable install.json'
+    }
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 17: public mode -DryRun performs no writes (resolution/validation
+    # reads are allowed; no staging/bin/global directories are created).
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: public mode DryRun performs no writes'
+    # CONTRACT 17 re-requests $pubTag (v11.0.0, registered back in CONTRACT 11),
+    # but the manifest asset lives at a SHARED, tag-independent path
+    # (/assets/lingtai-bundle-manifest.json) that CONTRACT 16 (immediately
+    # above) already overwrote with v11.1.0's manifest to exercise "latest"
+    # resolution. Re-register $pubTag's own manifest here before invoking the
+    # installer, or Get-BundleManifest fetches v11.1.0's content while
+    # Confirm-BundleManifest validates it against the resolved tag v11.0.0,
+    # failing "bundle_id/tui_tag does not equal resolved tag" -- a fixture
+    # sequencing bug, not an installer defect.
+    Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $pubBundleJson | Out-Null
+    $home17 = New-IsolatedHome
+    $binDir17 = Join-Path $home17 'bin dir'
+    $globalDir17 = Join-Path $home17 '.lingtai-tui'
+    New-Item -ItemType Directory -Force -Path $binDir17, $globalDir17 | Out-Null
+    $before17 = @(Get-TreeSnapshot $binDir17) + @(Get-TreeSnapshot $globalDir17)
+    $r17 = Invoke-Installer @{
+        Version      = $pubTag
+        BinDir       = $binDir17
+        GlobalDir    = $globalDir17
+        SkipVenv     = $true
+        NoModifyPath = $true
+        DryRun       = $true
+    }
+    $after17 = @(Get-TreeSnapshot $binDir17) + @(Get-TreeSnapshot $globalDir17)
+    Assert-Equal 0 $r17.ExitCode 'public-mode DryRun exits 0'
+    if ($r17.ExitCode -ne 0) {
+        Write-InstallerDiagnostics -Result $r17 -Context 'CONTRACT 17 (public-mode DryRun)'
+        Write-FakeGitHubApiHealth -Context 'CONTRACT 17 (public-mode DryRun)'
+    }
+    Assert-Equal ($before17 -join "`n") ($after17 -join "`n") 'public-mode DryRun left the complete tree unchanged'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 18: a cryptographically and manifest-consistent bundle that is
+    # missing the required portal must fail before any destination write. The
+    # archive SHA, sidecar, and bundle manifest all agree; only the portal is
+    # absent, so this proves the installer enforces the complete dual-binary
+    # contract rather than accepting a TUI-only archive.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: manifest-consistent bundle missing portal fails before destination writes'
+    $missingPortalTag = 'v11.0.5'
+    $missingPortalFx = New-FixtureArchive -Version $missingPortalTag -IncludePortal $false
+    $missingPortalZipName = "lingtai-$missingPortalTag-windows-amd64.zip"
+    $missingPortalZipAsset = Register-FakeApiAsset -Name $missingPortalZipName -Bytes ([System.IO.File]::ReadAllBytes($missingPortalFx.ArchivePath))
+    $missingPortalShaAsset = Register-FakeApiAssetText -Name "$missingPortalZipName.sha256" -Text ("{0}  $missingPortalZipName" -f $missingPortalFx.Sha256)
+    $missingPortalBundleJson = New-BundleManifestJson -Tag $missingPortalTag -ArchiveSha256 $missingPortalFx.Sha256
+    $missingPortalManifestAsset = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $missingPortalBundleJson
+    Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $missingPortalTag -Assets @($missingPortalZipAsset, $missingPortalShaAsset, $missingPortalManifestAsset)
+
+    $home18m = New-IsolatedHome
+    $binDir18m = Join-Path $home18m 'bin dir'
+    $globalDir18m = Join-Path $home18m '.lingtai-tui'
+    New-Item -ItemType Directory -Force -Path $binDir18m | Out-Null
+    $sentinel18m = Join-Path $binDir18m 'preexisting.txt'
+    Set-Content -LiteralPath $sentinel18m -Value 'must remain untouched' -Encoding ASCII
+    $before18m = @(Get-TreeSnapshot $binDir18m)
+    $r18m = Invoke-Installer @{
+        Version      = $missingPortalTag
+        BinDir       = $binDir18m
+        GlobalDir    = $globalDir18m
+        SkipVenv     = $true
+        NoModifyPath = $true
+    }
+    $after18m = @(Get-TreeSnapshot $binDir18m)
+    Assert-True ($r18m.ExitCode -ne 0) 'manifest-consistent archive without portal exits non-zero'
+    Assert-Equal ($before18m -join "`n") ($after18m -join "`n") 'missing-portal failure leaves destination tree unchanged'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir18m 'lingtai-tui.exe'))) 'missing-portal archive installs no TUI binary'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir18m 'lingtai-portal.exe'))) 'missing-portal archive installs no portal binary'
+
+    # -----------------------------------------------------------------------
+    # CONTRACT 19: pinned-kernel runtime install end to end, using the REAL
+    # Python already present on windows-latest plus a genuine (trivial,
+    # dependency-free) wheel built offline -- proves the full
+    # resolve -> bundle -> venv -> kernel-manifest -> wheel-select -> verify ->
+    # pip-install -> import/version/provenance chain, not just its gates.
+    # -----------------------------------------------------------------------
+    Write-Section 'contract: full runtime install from a real venv + genuine wheel'
+    # Discover a genuinely SUPPORTED interpreter (cp311/cp312/cp313) the same way
+    # install.ps1's own Find-VenvPython does: try the py launcher pinned to each
+    # exact supported minor in turn, then fall back to a bare python/python3 on
+    # PATH. Bare `py -3` (no minor) is deliberately NOT used here -- the launcher
+    # resolves that to the HIGHEST registered version, which can silently be a
+    # newer, unsupported CPython (e.g. cp314) even when a supported one is also
+    # installed/pinned in this job, permanently skipping this contract instead of
+    # exercising it.
+    $probeArgs = @('-c', 'import sys; print(''cp'' + str(sys.version_info.major) + str(sys.version_info.minor))')
+    $pyCmd = $null
+    $cpTag = $null
+    $py = Get-Command -Name 'py' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($py) {
+        foreach ($minor in @('3.13', '3.12', '3.11')) {
+            $probe = (& $py.Source "-$minor" @probeArgs) 2>$null
+            if ($LASTEXITCODE -eq 0 -and $probe -match '^cp3(11|12|13)$') {
+                $pyCmd = @{ Source = $py.Source; ExtraArgs = @("-$minor") }
+                $cpTag = $probe
+                break
+            }
+        }
+    }
+    if (-not $pyCmd) {
+        foreach ($name in @('python', 'python3')) {
+            $cmd = Get-Command -Name $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cmd) {
+                $probe = (& $cmd.Source @probeArgs) 2>$null
+                if ($LASTEXITCODE -eq 0 -and $probe -match '^cp3(11|12|13)$') {
+                    $pyCmd = @{ Source = $cmd.Source; ExtraArgs = @() }
+                    $cpTag = $probe
+                    break
+                }
+            }
+        }
+    }
+    if (-not $pyCmd) {
+        Skip-NotYet 'full runtime install (real Python + wheel)' 'no supported CPython 3.11/3.12/3.13 found via the py launcher or python/python3 on PATH'
+    } else {
+        $tag18 = 'v11.2.0'
+        $fx18 = New-FixtureArchive -Version $tag18
+        $zipAsset18 = Register-FakeApiAsset -Name "lingtai-$tag18-windows-amd64.zip" -Bytes ([System.IO.File]::ReadAllBytes($fx18.ArchivePath))
+        $shaAsset18 = Register-FakeApiAssetText -Name "lingtai-$tag18-windows-amd64.zip.sha256" -Text ("{0}  lingtai-$tag18-windows-amd64.zip" -f $fx18.Sha256)
+
+        # Build a minimal, dependency-free "lingtai" wheel offline via pip's
+        # own wheel machinery (no network: --no-build-isolation, no index).
+        $wheelSrc = Join-Path $TestRoot ("lingtai-wheel-src-{0}" -f ([Guid]::NewGuid().ToString('N')))
+        $pkgDir = Join-Path $wheelSrc 'lingtai'
+        New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $pkgDir '__init__.py') -Value '__version__ = "0.18.0"' -Encoding ASCII
+        $pyprojectToml = @'
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lingtai"
+version = "0.18.0"
+'@
+        Set-Content -LiteralPath (Join-Path $wheelSrc 'pyproject.toml') -Value $pyprojectToml -Encoding ASCII
+        $wheelOutDir = Join-Path $TestRoot ("lingtai-wheel-out-{0}" -f ([Guid]::NewGuid().ToString('N')))
+        New-Item -ItemType Directory -Force -Path $wheelOutDir | Out-Null
+        $wheelBuildArgs = @('-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation', '-w', $wheelOutDir, $wheelSrc)
+        $wheelBuildArgs = @($pyCmd.ExtraArgs) + $wheelBuildArgs
+        $wheelBuildLog = Join-Path $TestRoot 'wheel-build.log'
+        # `pip wheel` can legitimately fail here (missing/older setuptools, no
+        # network for a transitive build dependency, etc.) and this contract must
+        # treat that as NOT-YET, not abort the suite. On Windows PowerShell 5.1,
+        # ANY text a native command writes to stderr is wrapped as an ErrorRecord.
+        # Redirection still emits that record before the target consumes it, so
+        # the suite's global $ErrorActionPreference = 'Stop' would terminate even
+        # when pip succeeds. Downgrade only this native invocation to Continue,
+        # preserve both output streams for diagnostics, capture $LASTEXITCODE,
+        # and restore the fail-fast preference immediately afterward.
+        $savedErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $pyCmd.Source @wheelBuildArgs 1> $wheelBuildLog 2> "$wheelBuildLog.stderr"
+            $wheelBuildExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        Get-Content -LiteralPath "$wheelBuildLog.stderr" -ErrorAction SilentlyContinue | Add-Content -LiteralPath $wheelBuildLog
+        $builtWheel = Get-ChildItem -LiteralPath $wheelOutDir -Filter 'lingtai-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if (-not $builtWheel) {
+            Skip-NotYet 'full runtime install (real Python + wheel)' "could not build an offline test wheel (setuptools/pip wheel unavailable, pip exit $wheelBuildExit) -- see wheel-build.log"
+            Write-LogFileTail -Path $wheelBuildLog -Context 'CONTRACT 18 (wheel build)'
+        } else {
+            # Rename to the exact cpXY-cpXY-win_amd64 platform tag Select-KernelWheel expects.
+            $renamedWheel = Join-Path $wheelOutDir "lingtai-0.18.0-$cpTag-$cpTag-win_amd64.whl"
+            Move-Item -LiteralPath $builtWheel.FullName -Destination $renamedWheel -Force
+            $wheelSha = Get-Sha256Hex -Path $renamedWheel
+            $wheelBytes = [System.IO.File]::ReadAllBytes($renamedWheel)
+            $wheelAsset = Register-FakeApiAsset -Name (Split-Path -Leaf $renamedWheel) -Bytes $wheelBytes
+
+            $kernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = $wheelSha; python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+            )
+            $kernelManifestAsset = Register-FakeApiAssetText -Name 'lingtai-kernel-release-manifest.json' -Text $kernelManifestJson
+            Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai-kernel' -Tag 'v0.18.0' -Assets @($wheelAsset, $kernelManifestAsset)
+
+            $bundleJson18 = New-BundleManifestJson -Tag $tag18 -ArchiveSha256 $fx18.Sha256 -KernelTag 'v0.18.0' -KernelVersion '0.18.0'
+            $manifestAsset18 = Register-FakeApiAssetText -Name 'lingtai-bundle-manifest.json' -Text $bundleJson18
+            Register-FakeRelease -ApiPathPrefix '/repos/Lingtai-AI/lingtai' -Tag $tag18 -Assets @($zipAsset18, $shaAsset18, $manifestAsset18)
+
+            $home18 = New-IsolatedHome
+            $binDir18 = Join-Path $home18 'bin dir'
+            $globalDir18 = Join-Path $home18 '.lingtai-tui'
+            $r18 = Invoke-Installer @{
+                Version      = $tag18
+                BinDir       = $binDir18
+                GlobalDir    = $globalDir18
+                NoModifyPath = $true
+            }
+            Assert-Equal 0 $r18.ExitCode "full runtime install exits 0 (stderr: $($r18.Stderr))"
+            if ($r18.ExitCode -ne 0) {
+                Write-InstallerDiagnostics -Result $r18 -Context 'CONTRACT 18 (full runtime install)'
+                Write-FakeGitHubApiHealth -Context 'CONTRACT 18 (full runtime install)'
+            }
+            Assert-True (Test-Path -LiteralPath (Join-Path $binDir18 'lingtai-tui.exe')) 'full runtime install placed lingtai-tui.exe under BinDir'
+            Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\Scripts\python.exe')) 'full runtime install created the venv'
+            Assert-True (Test-Path -LiteralPath (Join-Path $globalDir18 'runtime\venv\kernel-provenance.json')) 'full runtime install wrote kernel provenance'
+            $meta18 = $null
+            try { $meta18 = Get-Content -LiteralPath (Join-Path $globalDir18 'install.json') -Raw | ConvertFrom-Json } catch {}
+            if ($null -ne $meta18) {
+                Assert-Equal 'bundle' $meta18.kernel_source 'full runtime install.json records kernel_source=bundle'
+                Assert-Equal '0.18.0' $meta18.kernel_version 'full runtime install.json records the installed kernel version'
+            } else {
+                Assert-True $false 'full runtime install wrote a parseable install.json'
+            }
+
+            # Wheel digest mismatch must fail loud and touch no BinDir/venv.
+            Write-Section 'contract: kernel wheel checksum mismatch fails loud, installs nothing'
+            $badKernelManifestJson = New-KernelManifestJson -KernelVersion '0.18.0' -Wheels @(
+                @{ filename = (Split-Path -Leaf $renamedWheel); sha256 = ('f' * 64); python_tag = $cpTag; abi_tag = $cpTag; platform_tag = 'win_amd64' }
+            )
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $badKernelManifestJson -ContentType 'application/octet-stream'
+            $home19 = New-IsolatedHome
+            $binDir19 = Join-Path $home19 'bin dir'
+            $globalDir19 = Join-Path $home19 '.lingtai-tui'
+            $r19 = Invoke-Installer @{
+                Version      = $tag18
+                BinDir       = $binDir19
+                GlobalDir    = $globalDir19
+                NoModifyPath = $true
+            }
+            Assert-True ($r19.ExitCode -ne 0) 'kernel wheel digest mismatch exits non-zero'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir19 'lingtai-tui.exe'))) 'kernel wheel digest mismatch installs no TUI binary'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $globalDir19 'install.json'))) 'kernel wheel digest mismatch writes no install metadata'
+            # Restore the good kernel manifest for any later reuse of this route.
+            Register-FakeApiRouteText -Path '/assets/lingtai-kernel-release-manifest.json' -Text $kernelManifestJson -ContentType 'application/octet-stream'
+
+            # -------------------------------------------------------------------
+            # CONTRACT 22: a leftover, unusable lingtai-<version>.dist-info in the
+            # managed venv must not fail an otherwise-correct install.
+            #
+            # pip will not uninstall a .dist-info whose METADATA is missing or
+            # nameless -- it logs "Skipping <dir> due to invalid metadata entry
+            # 'name'" and leaves it -- while importlib.metadata's
+            # distribution('lingtai') lookup matches on the DIRECTORY NAME and
+            # returns the first filesystem hit. The orphan seeded here sorts ahead
+            # of the real distribution, so post-install verification used to read
+            # the orphan's stale version/direct_url and fail a correct install
+            # (observed live as DIRECT_URL_WRONG_SOURCE naming a path the
+            # installer never used; VERSION_MISMATCH in wheel mode). Verification
+            # now resolves the distribution that actually owns the imported
+            # module, and the installer removes metadata it can prove is unusable.
+            # -------------------------------------------------------------------
+            Write-Section 'contract: orphaned unusable lingtai dist-info does not fail a correct install'
+            $sitePackages22 = Join-Path $globalDir18 'runtime\venv\Lib\site-packages'
+            if (-not (Test-Path -LiteralPath $sitePackages22)) {
+                Assert-True $false "CONTRACT 22 requires the CONTRACT 18 venv at $sitePackages22"
+            } else {
+                # Only direct_url.json, exactly as the real leaked directory had:
+                # no METADATA, so pip cannot uninstall it and its version is None.
+                $orphanDir22 = Join-Path $sitePackages22 'lingtai-0.0.1.dist-info'
+                New-Item -ItemType Directory -Force -Path $orphanDir22 | Out-Null
+                Set-Content -LiteralPath (Join-Path $orphanDir22 'direct_url.json') `
+                    -Value '{"dir_info": {"editable": true}, "url": "file:///C:/nonexistent-stale-source"}' -Encoding ASCII
+                $realDistDir22 = Join-Path $sitePackages22 'lingtai-0.18.0.dist-info'
+                Assert-True (Test-Path -LiteralPath $realDistDir22) 'CONTRACT 22 baseline: the real lingtai dist-info is present'
+
+                $r22 = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir18
+                    GlobalDir    = $globalDir18
+                    NoModifyPath = $true
+                }
+                Assert-Equal 0 $r22.ExitCode "install over an orphaned lingtai dist-info exits 0 (stderr: $($r22.Stderr))"
+                if ($r22.ExitCode -ne 0) {
+                    Write-InstallerDiagnostics -Result $r22 -Context 'CONTRACT 22 (orphaned dist-info)'
+                }
+                Assert-True (-not (Test-Path -LiteralPath $orphanDir22)) 'install removed the unusable orphaned lingtai dist-info'
+                Assert-True (Test-Path -LiteralPath $realDistDir22) 'install left the real lingtai dist-info in place'
+                # The sibling distribution normalizes to lingtai_kernel-*, so the
+                # narrow lingtai-<version> sweep must never consider it.
+                $siblingDir22 = Join-Path $sitePackages22 'lingtai_kernel-9.9.9.dist-info'
+                New-Item -ItemType Directory -Force -Path $siblingDir22 | Out-Null
+                $r22b = Invoke-Installer @{
+                    Version      = $tag18
+                    BinDir       = $binDir18
+                    GlobalDir    = $globalDir18
+                    NoModifyPath = $true
+                }
+                Assert-Equal 0 $r22b.ExitCode "install with a metadata-less sibling distribution exits 0 (stderr: $($r22b.Stderr))"
+                Assert-True (Test-Path -LiteralPath $siblingDir22) 'the sweep does not touch a differently-named sibling distribution'
+            }
+        }
+    }
+
 } finally {
     # -----------------------------------------------------------------------
     # Restore ambient environment. NOTE: this only restores the isolated env
@@ -702,9 +2019,10 @@ try {
     # anything outside $TestRoot. The throwaway $TestRoot is intentionally left
     # on disk for post-mortem inspection by the CI job.
     # -----------------------------------------------------------------------
-    foreach ($name in $IsolatedVars) {
-        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process')
-    }
+    Restore-IsolatedEnv
+    [Environment]::SetEnvironmentVariable('LINGTAI_GITHUB_API_BASE', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('LINGTAI_KERNEL_GITHUB_API_BASE', $null, 'Process')
+    Stop-FakeGitHubApi
 }
 
 # ---------------------------------------------------------------------------

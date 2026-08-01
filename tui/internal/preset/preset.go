@@ -230,7 +230,7 @@ func List() ([]Preset, error) {
 	templateOrder := map[string]int{
 		"minimax": 0, "zhipu": 1, "mimo": 2, "deepseek": 3,
 		"kimi": 4, "nvidia": 5, "openrouter": 6, "codex": 7,
-		"codex-pool": 8, "claude-agent-sdk": 9, "custom": 10,
+		"codex-pool": 8, "claude": 9, "custom": 10,
 	}
 	sort.Slice(templates, func(i, j int) bool {
 		return templateOrder[templates[i].Name] < templateOrder[templates[j].Name]
@@ -543,7 +543,7 @@ func BuiltinPresets() []Preset {
 		openrouterPreset(),
 		codexPreset(),
 		codexPoolPreset(),
-		claudeAgentSDKPreset(),
+		claudePreset(),
 		customPreset(),
 	}
 }
@@ -552,6 +552,7 @@ func BuiltinPresets() []Preset {
 // classify legacy files in presets/ during the directory split, and by
 // IsBuiltin (which exists for callers that only have a Name, not a
 // loaded Preset).
+// Legacy provider spellings remain recognized for flat-layout migration.
 var builtinNames = map[string]bool{
 	"minimax":          true,
 	"zhipu":            true,
@@ -565,6 +566,7 @@ var builtinNames = map[string]bool{
 	"codex_oauth":      true,
 	"codex-pool":       true,
 	"codex_pool":       true,
+	"claude":           true,
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
@@ -624,6 +626,35 @@ func isSyntheticPreset(p Preset) bool {
 // everything a UI surface (the kanban Presets section in particular)
 // needs to render an at-a-glance health check for a preset path
 // recorded in manifest.preset.{default,active,allowed}.
+// CredentialFamily is the narrow set of provider-owned authentication
+// families understood by the TUI. Keep this classifier here so every UI
+// surface consumes the manifest provider rather than reimplementing alias
+// lists or inferring auth from filenames.
+type CredentialFamily string
+
+const (
+	CredentialFamilyOther       CredentialFamily = "other"
+	CredentialFamilyCodexSingle CredentialFamily = "codex_single"
+	CredentialFamilyCodexPool   CredentialFamily = "codex_pool"
+	CredentialFamilyClaudeCLI   CredentialFamily = "claude_cli"
+)
+
+// ClassifyCredentialFamily classifies only exact manifest.llm.provider values.
+// Unknown values, including path/filename-like strings, remain Other.
+func ClassifyCredentialFamily(provider string) CredentialFamily {
+	switch provider {
+	case "codex", "codex_oauth":
+		return CredentialFamilyCodexSingle
+	case "codex-pool", "codex_pool":
+		return CredentialFamilyCodexPool
+	case "claude-code", "claude_code", "claude-agent-sdk", "claude_agent_sdk":
+		return CredentialFamilyClaudeCLI
+	default:
+		return CredentialFamilyOther
+	}
+}
+
+// ResolvedRef is a credential-aware view of one preset reference.
 type ResolvedRef struct {
 	// Ref is the original input string (e.g. "~/.lingtai-tui/presets/templates/mimo.json").
 	Ref string
@@ -634,16 +665,24 @@ type ResolvedRef struct {
 	// /templates/ segment, SourceSaved when it lives under /saved/,
 	// SourceUnknown otherwise (legacy flat layout, custom user path).
 	Source PresetSource
-	// Exists reports whether the file is readable on disk right now.
+	// Exists reports whether the path exists.
 	Exists bool
+	// ManifestValid reports that the existing path was successfully loaded.
+	// A false value is deliberately not interpreted as a legacy Codex preset.
+	ManifestValid bool
+	// Provider and Family come only from the loaded manifest provider.
+	Provider string
+	Family   CredentialFamily
 	// HasKey reports whether the preset's credential is actually
 	// configured. For a preset with a non-empty api_key_env, this is true
 	// only when that env var has a value in the passed existingKeys map.
 	// For a codex preset (provider "codex", which uses ChatGPT OAuth and
 	// declares no api_key_env), this is true only when OAuth is configured
-	// (see AuthState.CodexOAuthConfigured). For a claude-agent-sdk preset
-	// (provider "claude-agent-sdk"/"claude_agent_sdk", which authenticates
-	// through the local Claude Code CLI login and declares no api_key_env),
+	// (see AuthState.CodexOAuthConfigured). For a codex-pool preset, this is
+	// true only when the caller proves a usable member in the applicable pool
+	// category, or a validated empty pool can use the legacy fallback. For a Claude preset
+	// (provider "claude-code"/"claude_code", which authenticates through the
+	// local Claude Code CLI login and declares no api_key_env),
 	// this is true only when the CLI reports a logged-in session (see
 	// AuthState.ClaudeCodeAuthConfigured). A preset with an empty
 	// api_key_env that is not one of those OAuth/CLI providers has no
@@ -659,9 +698,8 @@ type ResolvedRef struct {
 }
 
 // AuthState carries machine-level credential facts the credential guard
-// cannot derive from a preset file alone. Today that is only Codex OAuth,
-// but the struct leaves room to add future OAuth providers without churning
-// the ResolveRefs signature again.
+// cannot derive from a preset file alone. Ordinary Codex OAuth, pool
+// membership, and fallback readiness remain separate facts.
 type AuthState struct {
 	// CodexOAuthConfigured is true when the legacy single-account token
 	// file ~/.lingtai-tui/codex-auth.json parses and carries a non-empty
@@ -679,11 +717,22 @@ type AuthState struct {
 	// are judged independently. Empty falls back to CodexOAuthConfigured.
 	CodexAuthDir string
 
+	// CodexPoolEligible says that a flat pool has a usable positively weighted
+	// member, or that the validated empty pool may use the legacy fallback.
+	CodexPoolEligible bool
+
+	// CodexPoolEligibleModels is non-nil for a model-classified pool. It is
+	// keyed by exact model; absent keys are false and do not fall back to the
+	// flat fact. CodexPoolFallbackEligible covers an absent/empty applicable
+	// category when the legacy token is valid.
+	CodexPoolEligibleModels   map[string]bool
+	CodexPoolFallbackEligible bool
+
 	// ClaudeCodeAuthConfigured is true when the local Claude Code CLI
 	// (`claude`) is installed and reports a logged-in session. The
-	// claude-agent-sdk provider authenticates through that existing CLI
-	// login (no per-request API key, no separate token stored by the TUI),
-	// so a claude-agent-sdk preset is credential-valid only when this is
+	// claude-code provider authenticates through that existing CLI login
+	// (no per-request API key, no separate token stored by the TUI), so a
+	// Claude preset is credential-valid only when this is
 	// true. Computed by the caller (see tui.claudeCodeAuthConfigured) and
 	// passed in to avoid the preset→tui import cycle.
 	ClaudeCodeAuthConfigured bool
@@ -757,8 +806,55 @@ func ResolveRefsWithAuth(refs []string, existingKeys map[string]string, auth Aut
 	return out
 }
 
+// ResolvePresetWithAuth applies the same credential-family rules as
+// ResolveRefsWithAuth to an already-loaded in-memory preset. UI flows that
+// already own a Preset should use this helper instead of duplicating provider
+// and credential checks.
+func ResolvePresetWithAuth(p Preset, existingKeys map[string]string, auth AuthState) ResolvedRef {
+	r := ResolvedRef{
+		Name:          p.Name,
+		Source:        p.Source,
+		Family:        CredentialFamilyOther,
+		Exists:        true,
+		ManifestValid: true,
+	}
+	llm, ok := p.Manifest["llm"].(map[string]interface{})
+	if !ok || llm == nil {
+		r.ManifestValid = false
+		return r
+	}
+	r.Provider, _ = llm["provider"].(string)
+	r.Family = ClassifyCredentialFamily(r.Provider)
+	model, _ := llm["model"].(string)
+	apiKeyEnv, _ := llm["api_key_env"].(string)
+	r.CodexAuthRef, _ = llm["codex_auth_path"].(string)
+	setAuth := func(ok bool) { r.HasKey = ok }
+	switch r.Family {
+	case CredentialFamilyCodexSingle:
+		if auth.CodexAuthDir != "" {
+			setAuth(codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, r.CodexAuthRef)))
+		} else {
+			setAuth(auth.CodexOAuthConfigured)
+		}
+	case CredentialFamilyCodexPool:
+		if auth.CodexPoolEligibleModels != nil {
+			eligible, present := auth.CodexPoolEligibleModels[model]
+			setAuth(eligible || (!present && auth.CodexPoolFallbackEligible))
+		} else {
+			setAuth(auth.CodexPoolEligible)
+		}
+	case CredentialFamilyClaudeCLI:
+		setAuth(auth.ClaudeCodeAuthConfigured)
+	default:
+		if apiKeyEnv != "" {
+			setAuth(existingKeys[apiKeyEnv] != "")
+		}
+	}
+	return r
+}
+
 func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) ResolvedRef {
-	r := ResolvedRef{Ref: ref}
+	r := ResolvedRef{Ref: ref, Family: CredentialFamilyOther}
 	if ref == "" {
 		return r
 	}
@@ -772,66 +868,30 @@ func resolveOneRef(ref string, existingKeys map[string]string, auth AuthState) R
 	default:
 		r.Source = SourceUnknown
 	}
-	if _, err := os.Stat(abs); err == nil {
-		r.Exists = true
-	}
-	if !r.Exists {
+	if _, err := os.Stat(abs); err != nil {
 		return r
 	}
-	if p, err := loadFromPath(abs); err == nil {
-		envName := ""
-		provider := ""
-		codexAuthPath := ""
-		if llm, ok := p.Manifest["llm"].(map[string]interface{}); ok {
-			envName, _ = llm["api_key_env"].(string)
-			provider, _ = llm["provider"].(string)
-			codexAuthPath, _ = llm["codex_auth_path"].(string)
-		}
-		switch {
-		case envName != "":
-			// Keyed provider: valid only when the env var has a value.
-			if v, ok := existingKeys[envName]; ok && v != "" {
-				r.HasKey = true
-			}
-		case provider == "codex":
-			// Codex declares no api_key_env by design — it uses ChatGPT
-			// OAuth token files. A preset may bind to a specific account via
-			// manifest.llm.codex_auth_path; absent that it falls back to the
-			// legacy single-account file. When auth.CodexAuthDir is set we
-			// validate the preset's OWN bound token file so multiple accounts
-			// are judged independently; otherwise we fall back to the global
-			// CodexOAuthConfigured signal (e.g. callers that only have the
-			// legacy bool).
-			r.CodexAuthRef = codexAuthPath
-			if auth.CodexAuthDir != "" {
-				r.HasKey = codexTokenFileValid(resolveCodexAuthRef(auth.CodexAuthDir, codexAuthPath))
-			} else {
-				r.HasKey = auth.CodexOAuthConfigured
-			}
-		case provider == "codex-pool" || provider == "codex_pool":
-			// The pool provider load-balances across the Codex accounts listed
-			// in ~/.lingtai-tui/codex-auth-pool.json (weights live there, not in
-			// the preset). It reuses the same ChatGPT-OAuth token files as the
-			// codex provider, so it is credential-valid whenever ANY Codex OAuth
-			// account is configured — the same signal the single-account codex
-			// preset uses for its legacy fallback. Judging the pool membership
-			// itself is the kernel's job at runtime; the credential guard only
-			// needs "is at least one Codex account logged in".
-			r.HasKey = auth.CodexOAuthConfigured
-		case provider == "claude-agent-sdk" || provider == "claude_agent_sdk":
-			// Claude Agent SDK declares no api_key_env by design — it
-			// authenticates through the local Claude Code CLI login. Valid
-			// only when that CLI reports a logged-in session.
-			r.HasKey = auth.ClaudeCodeAuthConfigured
-		default:
-			// No api_key_env and not codex: no configured credential and no
-			// OAuth, so the preset is not valid. (A preset that genuinely
-			// needs no credential must still be reached through a configured
-			// auth path; an empty api_key_env on a non-codex provider is
-			// treated as missing, not as "no key needed".)
-			r.HasKey = false
-		}
+	r.Exists = true
+	p, err := loadFromPath(abs)
+	if err != nil {
+		// Do not infer a provider from the basename/path. In particular, a
+		// malformed or unreadable `codex.json` is not allowed to fail open
+		// to the legacy Codex credential.
+		return r
 	}
+	r = ResolvePresetWithAuth(p, existingKeys, auth)
+	r.Ref = ref
+	r.Name = strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+	r.Source = func() PresetSource {
+		switch {
+		case strings.Contains(abs, string(filepath.Separator)+"templates"+string(filepath.Separator)):
+			return SourceTemplate
+		case strings.Contains(abs, string(filepath.Separator)+"saved"+string(filepath.Separator)):
+			return SourceSaved
+		default:
+			return SourceUnknown
+		}
+	}()
 	return r
 }
 
@@ -1207,28 +1267,27 @@ func codexPoolPreset() Preset {
 	}
 }
 
-func claudeAgentSDKPreset() Preset {
+func claudePreset() Preset {
 	return Preset{
-		Name:        "claude-agent-sdk",
+		Name:        "claude",
 		Description: PresetDescription{Summary: "Claude Code / Claude Max — uses your local Claude CLI login (no API key)"},
 		Manifest: map[string]interface{}{
 			"llm": map[string]interface{}{
-				// Clean-room completion provider backed by the Claude Agent
-				// SDK (kernel provider "claude-agent-sdk"). It authenticates
-				// through the local Claude Code CLI login — no per-request API
-				// key, and the TUI stores no Anthropic token of its own. So
+				// The kernel's canonical Claude Code provider invokes the local
+				// `claude` CLI, whose print-mode backend is shown as "claude-p"
+				// in the TUI. It reuses the CLI's OAuth login — no per-request
+				// API key, and the TUI stores no Anthropic token of its own. So
 				// api_key is nil and api_key_env is empty; credential validity
 				// is judged by detecting an existing `claude` CLI login (see
 				// AuthState.ClaudeCodeAuthConfigured). Default model is the CLI
-				// alias "opus" (Jason's requested Opus 4.8 default), never
-				// a dated API model id, so Claude Code maps it to the current
-				// its own endpoint.
-				"provider": "claude-agent-sdk", "model": "opus",
+				// alias "opus"; the editor also offers "fable", whose full ID
+				// is `claude-fable-5` in current Claude Code.
+				"provider": "claude-code", "model": "opus",
 				"api_key": nil, "api_key_env": "",
 			},
-			// Conservative capabilities: the Claude Agent SDK is wired here as
-			// a completion provider only. We do NOT route web_search or vision
-			// through it — the SDK's own native tool surface is out of scope,
+			// Conservative capabilities: Claude Code is wired here as a completion
+			// provider only. We do NOT route web_search or vision through it —
+			// the CLI's own native tool surface is out of scope,
 			// and there's no inherit path validated for this provider yet.
 			// Keep the standard LingTai skills default so agents behave like
 			// any other preset.

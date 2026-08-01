@@ -187,7 +187,7 @@ For base URL/API-compat/model/capability declaration shape versus
 credentials, and the full Codex OAuth quota-inspection routing (exact
 app-server sequence, secret-safe fields, official-vs-measured context
 window), see `reference/operations/endpoint-capabilities/SKILL.md`. For
-the availability/save gate a pool-bound preset still goes through, see
-`reference/operations/availability-save-gate/SKILL.md`. For what an explicit
+why saving a pool-bound preset no longer runs a live availability check,
+see `reference/operations/availability-save-gate/SKILL.md`. For what an explicit
 refresh actually does (and does not) reselect, see
 `reference/operations/activation-session-refresh/SKILL.md`.

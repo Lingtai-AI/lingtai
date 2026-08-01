@@ -38,12 +38,12 @@ import (
 // a long-lived agent) — so the number only grew and bore no relation to the
 // session in view. And <limit> was read from manifest["llm"]["context_limit"],
 // a key that does not exist (context_limit sits at the manifest TOP LEVEL), so
-// the "/ limit" half silently never rendered. This version reads current-session
-// stats from the same source the molt-session stats panel uses
-// (fs.SumMoltSessionTokenLedger().Current, props.go) and reads context usage +
-// window from the SAME live `.status.json` snapshot /kanban's context section
-// uses (fs.ReadStatus().Tokens.Context, props.go:518-535) so the two never
-// disagree. When no data is available the row is omitted entirely.
+// the "/ limit" half silently never rendered. This version reads the complete
+// current-session economy and context pair from one live `.status.json` snapshot
+// (fs.ReadStatus), the same snapshot /kanban's context section uses. The
+// ledger/SQLite path remains the detail path in props.go; Home does not
+// reconstruct its economy from history. When no data is available the row is
+// omitted entirely.
 
 // homeTelemetry holds the already-resolved scalars for the home row. Keeping the
 // data plain (no rendering) makes formatHomeTelemetry trivially testable.
@@ -59,31 +59,31 @@ type homeTelemetry struct {
 
 // --- Async scheduling ------------------------------------------------------
 //
-// gatherHomeTelemetry does real I/O: it reaches fs.SumMoltSessionTokenLedger
-// (sqlite sidecar via /usr/bin/sqlite3, plus a possible events.jsonl parse) and
-// fs.ReadStatus/ReadInitManifest. On a locked or slow-volume sidecar that work
-// can stall for seconds. It therefore MUST NOT run on the Bubble Tea render
-// (View) or input (Update/syncViewportHeight) paths — a stall there freezes the
+// gatherHomeTelemetry reads one `.status.json` snapshot and may read the manifest
+// or cached notification context for context-only fallbacks. It deliberately does
+// not invoke the ledger/SQLite/history path: Home must use the kernel-owned
+// current-session counters and leave `/kanban` detail as the ledger consumer.
+// It therefore still MUST NOT run on the Bubble Tea render (View) or input
+// (Update/syncViewportHeight) paths — even a small filesystem read can stall the
 // whole TUI.
 //
 // Instead the UI paths read a last-known snapshot cached on the model
 // (m.homeTelemetry), and the I/O runs in the background as a tea.Cmd
 // (fetchHomeTelemetry) that returns a homeTelemetryMsg to refresh the snapshot.
-// The snapshot only moves when the kernel writes new ledger/status data (seconds
-// to minutes apart), so a sub-second staleness on the boundary is invisible.
+// The snapshot only moves when the kernel rewrites `.status.json` (seconds to
+// minutes apart), so a sub-second staleness on the boundary is invisible.
 //
 // Fetches are debounced by two model flags checked in maybeScheduleHomeTelemetry:
 //   - homeTelemetryInFlight: at most one background fetch runs at a time, so a
-//     burst of keypresses/renders cannot spawn a pile of sqlite subprocesses.
+//     burst of keypresses/renders cannot pile up workers.
 //   - homeTelemetryLastFetch + homeTelemetryTTL: after a completed fetch we skip
-//     re-fetching until the TTL elapses, so the steady-state 1s poll doesn't
-//     hammer the sidecar and rapid typing costs nothing.
+//     re-reading until the TTL elapses, so the steady-state 1s poll costs little.
 
 // homeTelemetryTTL is the minimum wall-clock interval between two completed
 // background telemetry fetches. It is deliberately close to the mail poll cadence
-// (m.pollRate, ~1s): the underlying data (token ledger, .status.json) is rewritten
-// by the kernel on a similar cadence, so fetching faster only burns I/O without
-// showing newer numbers. Repeated render/keypress within the TTL reuses the cached
+// (m.pollRate, ~1s): the underlying .status.json snapshot or context-only
+// fallback is refreshed on a similar cadence, so fetching faster only burns I/O
+// without showing newer numbers. Repeated render/keypress within the TTL reuses the cached
 // snapshot with no I/O at all.
 const homeTelemetryTTL = 1 * time.Second
 
@@ -94,8 +94,8 @@ type homeTelemetryMsg struct {
 	t          homeTelemetry
 }
 
-// fetchHomeTelemetry is the background worker: it performs all telemetry I/O
-// (sqlite/ledger/status/manifest) off the UI thread and returns a homeTelemetryMsg.
+// fetchHomeTelemetry is the background worker: it performs status/context-fallback
+// I/O off the UI thread and returns a homeTelemetryMsg.
 // It is a value-receiver tea.Cmd, so it captures a snapshot of the model (orchestrator
 // path + session cache) exactly like refreshMail/initialRebuild — the running
 // command never touches live model state.
@@ -141,66 +141,48 @@ func (m *MailModel) applyHomeTelemetry(t homeTelemetry, now time.Time) (visibili
 	return m.hasHomeTelemetry() != was
 }
 
-// gatherHomeTelemetry resolves the telemetry scalars for the orchestrator agent
-// from data the TUI already reads elsewhere:
-//   - current-session token/cache/api stats from logs/token_ledger.jsonl bounded
-//     to the current molt window (fs.SumMoltSessionTokenLedger().Current) — the
-//     SAME source and scope as the molt-session stats panel in props.go
-//   - contextUsage + contextLimit from the live `.status.json` snapshot
-//     (fs.ReadStatus().Tokens.Context) — the SAME source, scope, and gate
-//     (WindowSize > 0) that /kanban's context section uses (props.go:518-535).
-//     This is the fix for Jason's "home ctx bar disagrees with /kanban" report:
-//     `.status.json` is rewritten by the kernel on a tight cadence and re-read
-//     here every 1s poll, whereas the notification Meta.Context.Usage below is
-//     only refreshed when a notification is injected (per molt round) and so can
-//     lag the live value by many minutes. Reading `.status.json` makes the home
-//     row show the exact same percentage and window /kanban does.
-//   - notification Meta.Context.Usage from the UNFILTERED session cache is kept
-//     ONLY as a fallback for agents with no live `.status.json` (stopped /
-//     never-booted — /kanban shows no context section for them either, but the
-//     home row degrades to the last notification value so the bar doesn't vanish
-//     mid-session). Reading the session cache — not the verbose-filtered
-//     m.messages — keeps that fallback independent of Ctrl+O/verbose state (the
-//     #442 regression: shouldShow() hides notifications below verboseThinking).
-//   - contextLimit also falls back to manifest TOP-LEVEL `context_limit`
-//     (fs.ReadInitManifest) when `.status.json` carries no WindowSize.
+// gatherHomeTelemetry resolves Home from one canonical `.status.json` read:
+//   - the five since-molt economy counters come from AgentStatus.Tokens;
+//   - context usage, used tokens, and window come from that same snapshot.
 //
-// Every source degrades to its "unknown" sentinel independently, so a missing
-// ledger / status / manifest / notification just drops that fragment rather than
-// the row.
+// The WindowSize > 0 gate matches /kanban's context section. Missing, legacy, or
+// malformed status leaves economy at zero and never falls back to ledger/history.
+// Context-only manifest and unfiltered notification fallbacks remain unchanged,
+// so stopped/legacy agents retain the existing context degradation behavior.
 func (m MailModel) gatherHomeTelemetry() homeTelemetry {
 	t := homeTelemetry{contextUsage: -1}
 	if m.orchestrator != "" {
-		cur := fs.SumMoltSessionTokenLedger(m.orchestrator).Current
-		t.apiCalls = cur.APICalls
-		t.sessionTokens = cur.Input + cur.Output + cur.Thinking
-		t.cached = cur.Cached
-		t.inputTokens = cur.Input
+		// One read supplies both halves of the row. The kernel publishes these
+		// counters atomically with Context and resets them at a successful molt.
+		status := fs.ReadStatus(m.orchestrator)
+		tok := status.Tokens
+		t.apiCalls = tok.APICalls
+		// Cached tokens are a subset of input and are reported separately.
+		t.sessionTokens = tok.InputTokens + tok.OutputTokens + tok.ThinkingTokens
+		t.cached = tok.CachedTokens
+		t.inputTokens = tok.InputTokens
 
-		// Primary, /kanban-identical source: the live `.status.json` context
-		// snapshot. Gate on WindowSize > 0 exactly as props.go does so the home
-		// row shows context whenever — and only when — /kanban would.
-		ctx := fs.ReadStatus(m.orchestrator).Tokens.Context
+		// Primary, /kanban-identical context source. Gate on WindowSize > 0
+		// exactly as props.go does so the home row shows context whenever — and
+		// only when — /kanban would.
+		ctx := tok.Context
 		if ctx.WindowSize > 0 {
 			t.contextUsage = ctx.UsagePct / 100
 			t.contextLimit = int64(ctx.WindowSize)
-			// Source the absolute "used" tokens straight from .status.json
-			// TotalTokens — the SAME field /kanban renders as the numerator
-			// (props.go:531) — so "used/limit" matches /kanban exactly rather
-			// than a usage×limit re-derivation that could round differently.
+			// TotalTokens is the same absolute numerator /kanban renders.
 			t.contextUsed = int64(ctx.TotalTokens)
 		}
 
-		// contextLimit fallback for agents with no live status snapshot.
+		// Context-only fallback for agents with no usable live status window.
+		// Economy intentionally has no ledger/history fallback.
 		if t.contextLimit == 0 {
 			if manifest, err := fs.ReadInitManifest(m.orchestrator); err == nil {
 				t.contextLimit = manifestContextLimit(manifest)
 			}
 		}
 	}
-	// contextUsage fallback: when `.status.json` had no usable WindowSize, fall
-	// back to the freshest notification Meta.Context.Usage in the UNFILTERED
-	// session cache (NOT verbose-filtered m.messages — see the #442 note above).
+	// Context usage fallback stays independent of economy: when status has no
+	// usable WindowSize, use the freshest unfiltered notification context.
 	if t.contextUsage < 0 && m.sessionCache != nil {
 		t.contextUsage = latestContextUsage(m.sessionCache.Entries())
 	}
@@ -261,7 +243,7 @@ func (t homeTelemetry) hasData() bool {
 //
 // It reads the last-known cached snapshot (m.homeTelemetry) ONLY — never
 // gatherHomeTelemetry — so it stays on the UI hot path without touching
-// sqlite/filesystem/JSONL. The snapshot is refreshed asynchronously by the
+// disk or history. The snapshot is refreshed asynchronously by the
 // fetchHomeTelemetry background command (see the Async scheduling note above).
 //
 // The homeTelemetryLoaded gate matters: a zero-value homeTelemetry has

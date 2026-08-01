@@ -5,12 +5,11 @@ import (
 	"time"
 )
 
-// The home telemetry row is resolved asynchronously: gathering it does sqlite +
-// token-ledger + .status.json I/O that must never run on the Bubble Tea render
-// (View) or input (syncViewportHeight) path. These tests pin the scheduling and
-// state machine that keeps that I/O off the UI thread — debounce (in-flight),
-// TTL, first-load, and the visibility-change gate that avoids layout thrash.
-
+// The home telemetry row is resolved asynchronously from the kernel-owned
+// .status.json snapshot. SQLite/token-ledger I/O remains /kanban detail-owned
+// and is not part of Home gathering. These tests pin the scheduling and state
+// machine that keeps status I/O off the UI thread - debounce (in-flight), TTL,
+// first-load, and the visibility-change gate that avoids layout thrash.
 // A freshly constructed model must render NO telemetry row: no fetch has landed,
 // so hasHomeTelemetry() is false regardless of the zero-value snapshot. This is
 // the guard against the contextUsage==0 sentinel trap: hasData() treats
@@ -44,7 +43,7 @@ func TestMaybeScheduleFirstFetch(t *testing.T) {
 }
 
 // While a fetch is in flight, no new fetch may be scheduled — a burst of
-// keypresses/renders must not spawn a pile of sqlite subprocesses.
+// keypresses/renders must not spawn a pile of telemetry workers.
 func TestMaybeScheduleDebouncesInFlight(t *testing.T) {
 	m := MailModel{homeTelemetryInFlight: true}
 	if cmd := m.maybeScheduleHomeTelemetry(time.Unix(1000, 0)); cmd != nil {

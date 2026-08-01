@@ -78,7 +78,25 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-The installer covers macOS, Linux, and WSL (native Windows/PowerShell is planned). It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+For the explicit development installer (current `main` of both the TUI and kernel), use:
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
+```
+
+It prints and records the exact full commit SHA for each repository. This mode is separate from the default stable installer and cannot be combined with `--version`, `--ref`, `--update`, `--source`, or `--skip-python`.
+
+The installer covers macOS, Linux, and WSL. It installs `lingtai-tui` and `lingtai-portal`. From there, **the TUI manages everything else** — on first run it creates `.lingtai/`, provisions its own Python runtime, walks you through model/preset setup, and starts one resident scientist for the project. To upgrade later, re-run the installer (or `lingtai-tui self-update`) and restart the TUI.
+
+Native Windows/PowerShell is also available:
+
+```powershell
+irm https://lingtai.ai/install.ps1 | iex
+```
+
+This resolves the latest tagged release, verifies the Windows binary archive and the pinned kernel release against their published checksums, and installs both `lingtai-tui`/`lingtai-portal` and the Python runtime venv. Pass `-SkipVenv` to install the TUI/portal binaries only. See [`RELEASING.md`](RELEASING.md) for the exact contract.
+
+For a native Windows current-main debugging install, use `.\install.ps1 -Latest`. It is amd64-only; on ARM64, use WSL2 with `install.sh --latest`. It checks Git, Go, Node.js/npm (Node 20.19+, 22.12+, or a newer major; Node 21 and Node 22.<12 are unsupported), and supported 64-bit CPython 3.11–3.13 in one pass, then uses `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent` for only the missing or unsupported prerequisite packages (`Git.Git`, `GoLang.Go`, `OpenJS.NodeJS.LTS`, and/or `Python.Python.3.13`). Successful prerequisite installs are external winget changes and are not rolled back if a later package or checkout fails; LingTai destination writes still wait until validation/build succeeds. The installer refreshes this process PATH and revalidates before pinning full `main` SHAs, building both binaries, and installing the checked-out kernel source as a non-editable local build into `%USERPROFILE%\.lingtai-tui\runtime\venv`. If winget or package policy/elevation blocks the repair, it fails with exact remediation commands. `-Latest -DryRun` reports the exact repair plan without invoking winget or writing destinations, PATH, or config. `-Latest` cannot be combined with `-Version`, `-ArchivePath`, or `-SkipVenv`. The separate website repository still needs a matching install-flow note.
 
 > **New here?** Follow the step-by-step [tutorial at lingtai.ai](https://lingtai.ai/en/tutorial/) — install, first task, channels, memory, and lifecycle, walked through end to end.
 

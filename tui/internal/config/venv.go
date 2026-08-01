@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -564,6 +565,25 @@ type TUIInstallInfo struct {
 	Detail       string
 	MetadataPath string
 	Diagnostics  []DoctorLine
+
+	// DuplicateNativeInstall is set when valid native (source-install-shaped)
+	// metadata exists at MetadataPath but does not match the currently
+	// resolved lingtai-tui executable, AND that executable still resolves to
+	// Homebrew. This is the post-migration state on a host where the native
+	// install landed in a bin dir that is not earlier on PATH than Homebrew's:
+	// a native binary was installed and verified, but the shell still runs
+	// the Homebrew one. Method stays TUIInstallMethodHomebrew (the resolved
+	// binary really is still Homebrew's) so routing/detail text is unchanged,
+	// but callers must check this field first and surface the manual-cleanup
+	// state instead of re-running the migration installer.
+	DuplicateNativeInstall bool
+	DuplicateNativeDetail  string
+	// DuplicateNativeTarget is the verified native lingtai-tui binary path
+	// (bin_dir/lingtai-tui) backing DuplicateNativeInstall/DuplicateNativeDetail
+	// above, kept as a structured path (not parsed out of the human-readable
+	// Detail string) so callers can re-resolve PATH and compare against it
+	// after a Homebrew cleanup.
+	DuplicateNativeTarget string
 }
 
 // Summary returns a human-readable label for the install method.
@@ -573,6 +593,9 @@ func (i TUIInstallInfo) Summary() string {
 		label = "source/user-local"
 	} else if i.Method == TUIInstallMethodUnknown {
 		label = "unknown/other"
+	}
+	if i.DuplicateNativeInstall {
+		label = "homebrew (duplicate native install pending manual cleanup)"
 	}
 	if i.Detail == "" {
 		return label
@@ -593,16 +616,19 @@ type tuiInstallMetadata struct {
 	StampedVersion  string   `json:"stamped_version"`
 	ManagedBinaries []string `json:"managed_binaries"`
 
-	// Bundle provenance (additive; absent on install.json written before this
+	// Bundle/main provenance (additive; absent on install.json written before this
 	// field existed, which read.go treats identically to KernelSource=="pypi").
 	// Written by install.sh when it installs the Python `lingtai` runtime from
-	// a pinned release-bundle artifact by explicit local file path, rather
-	// than from PyPI. See kernelSourceFromMetadata / the provenance gate in
+	// a pinned release-bundle artifact or current-main checkout by explicit
+	// local path, rather than from PyPI. See the provenance gates in
 	// UpgradePythonRuntime below.
-	KernelSource   string `json:"kernel_source,omitempty"`    // "" | "pypi" | "bundle"
+	KernelSource   string `json:"kernel_source,omitempty"`    // "" | "pypi" | "bundle" | "main"
 	KernelBundleID string `json:"kernel_bundle_id,omitempty"` // e.g. "tui-v0.11.0" — the TUI bundle manifest's bundle_id
 	KernelVersion  string `json:"kernel_version,omitempty"`   // the pinned kernel version installed from the bundle
 	KernelProvider string `json:"kernel_provider,omitempty"`  // "github" | "gitee" — which provider served the bundle
+	SourceMode     string `json:"source_mode,omitempty"`      // e.g. "latest-main"
+	TuiCommit      string `json:"tui_commit,omitempty"`
+	KernelCommit   string `json:"kernel_commit,omitempty"`
 }
 
 type execCommandRunner struct{}
@@ -710,6 +736,10 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		r.add(DoctorWarn, "TUI update available: %s → %s", current, release.TagName)
 	case ReleaseComparisonUpToDate:
 		r.add(DoctorOK, "TUI is up to date")
+		if install.DuplicateNativeInstall {
+			r.add(DoctorWarn, "%s", install.DuplicateNativeDetail)
+			r.add(DoctorInfo, "Remove the old Homebrew install yourself with `brew uninstall %s` (never done automatically) once you've confirmed the native install works.", homebrewTUIFormula)
+		}
 		return
 	case ReleaseComparisonCurrentNonSemver:
 		r.add(DoctorWarn, "Cannot compare TUI release versions: current version %q is not a strict vX.Y.Z release; latest is %q", current, release.TagName)
@@ -728,13 +758,11 @@ func (r *DoctorReport) checkTUI(globalDir string, opts DoctorOptions) {
 		return
 	}
 	update := RunTUIUpdate(install, TUIUpdateOptions{
-		LatestVersion:         release.TagName,
-		GlobalDir:             globalDir,
-		Runner:                opts.Runner,
-		LookPath:              opts.LookPath,
-		Stat:                  opts.Stat,
-		IncludeHomebrewUpdate: true,
-		ResolveHomebrewPath:   true,
+		LatestVersion: release.TagName,
+		GlobalDir:     globalDir,
+		Runner:        opts.Runner,
+		LookPath:      opts.LookPath,
+		Stat:          opts.Stat,
 	})
 	for _, line := range update.Lines {
 		r.add(line.Severity, "%s", line.Text)
@@ -754,6 +782,9 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 		opts.LookupEnv = os.LookupEnv
 	}
 
+	var staleNativeMeta tuiInstallMetadata
+	var staleNativeMetaValid bool
+
 	meta, err := readTUIInstallMetadata(info.MetadataPath)
 	if err == nil {
 		if isSourceInstallMetadata(meta) {
@@ -764,6 +795,15 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 				}
 				return TUIInstallInfo{Method: TUIInstallMethodSource, Detail: detail, MetadataPath: info.MetadataPath}
 			}
+			// Valid native metadata exists but the running exe doesn't match
+			// it — e.g. a prior Homebrew-to-native migration installed and
+			// verified a native binary, but Homebrew is still earlier on
+			// PATH so the shell keeps resolving the old binary. Remember
+			// this instead of only emitting a diagnostic: if the exe below
+			// also resolves as Homebrew, this becomes the duplicate-install
+			// state rather than a plain fresh Homebrew detection.
+			staleNativeMeta = meta
+			staleNativeMetaValid = true
 			info.Diagnostics = append(info.Diagnostics, DoctorLine{
 				Severity: DoctorWarn,
 				Text:     fmt.Sprintf("TUI install metadata at %s does not match executable %s; ignoring it", info.MetadataPath, exe),
@@ -792,6 +832,19 @@ func detectTUIInstallMethod(globalDir, exe string, opts DoctorOptions) TUIInstal
 	if ok, detail := detectHomebrewTUIInstall(homebrewExe, opts.LookupEnv); ok {
 		info.Method = TUIInstallMethodHomebrew
 		info.Detail = detail
+		if staleNativeMetaValid {
+			binDir := staleNativeMeta.BinDir
+			if binDir == "" {
+				binDir = filepath.Join(staleNativeMeta.Prefix, "bin")
+			}
+			target := filepath.Join(binDir, "lingtai-tui")
+			info.DuplicateNativeInstall = true
+			info.DuplicateNativeTarget = target
+			info.DuplicateNativeDetail = fmt.Sprintf(
+				"native install already verified at %s (version %s), but %s is still resolved first on PATH",
+				target, valueOrUnknown(staleNativeMeta.StampedVersion), detail,
+			)
+		}
 	}
 	return info
 }
@@ -835,6 +888,20 @@ func kernelBundleProvenance(globalDir string) (isBundle bool, meta tuiInstallMet
 		return false, tuiInstallMetadata{}
 	}
 	return meta.KernelSource == "bundle", meta
+}
+
+// kernelMainProvenance recognizes the explicit current-main development mode.
+// It is intentionally separate from the release-bundle gate: a main checkout
+// must not be compared to or replaced by an index release during routine or
+// forced runtime checks.
+func kernelMainProvenance(globalDir string) (isMain bool, meta tuiInstallMetadata) {
+	metaPath := filepath.Join(globalDir, "install.json")
+	meta, err := readTUIInstallMetadata(metaPath)
+	if err != nil {
+		return false, tuiInstallMetadata{}
+	}
+	fullCommit := regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	return meta.SourceMode == "latest-main" && meta.KernelSource == "main" && fullCommit.MatchString(meta.TuiCommit) && fullCommit.MatchString(meta.KernelCommit), meta
 }
 
 func sourceMetadataMatchesExecutable(meta tuiInstallMetadata, exe string) bool {
@@ -1335,6 +1402,20 @@ func UpgradePythonRuntime(globalDir string, force bool, opts *UpgradeRuntimeOpti
 			result.add(DoctorOK,
 				"Python lingtai was installed from a pinned release bundle (%s, kernel %s via %s); skipping PyPI upgrade.",
 				valueOrUnknown(bundleMeta.KernelBundleID), valueOrUnknown(bundleMeta.KernelVersion), valueOrUnknown(bundleMeta.KernelProvider))
+		}
+		writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
+		return result
+	}
+
+	if isMain, mainMeta := kernelMainProvenance(globalDir); isMain {
+		if force {
+			result.add(DoctorOK,
+				"Python lingtai is pinned to current main (TUI %s; kernel %s); a forced update does not override this checkout. Re-run install.ps1 -Latest to move it.",
+				valueOrUnknown(mainMeta.TuiCommit), valueOrUnknown(mainMeta.KernelCommit))
+		} else {
+			result.add(DoctorOK,
+				"Python lingtai was installed from the current-main checkout (TUI %s; kernel %s); skipping index upgrade.",
+				valueOrUnknown(mainMeta.TuiCommit), valueOrUnknown(mainMeta.KernelCommit))
 		}
 		writeRuntimeEnvMarkerIfVenvDirExists(venvPath, opts.Runner)
 		return result

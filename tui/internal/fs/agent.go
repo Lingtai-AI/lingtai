@@ -2,12 +2,15 @@
 package fs
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +20,7 @@ import (
 
 // agentManifest is the raw JSON shape of .agent.json.
 type agentManifest struct {
+	AgentID   string           `json:"agent_id"`
 	AgentName string           `json:"agent_name"`
 	Nickname  string           `json:"nickname"`
 	Address   string           `json:"address"`
@@ -47,6 +51,7 @@ func ReadAgent(dir string) (AgentNode, error) {
 	caps := ParseCapabilities(m.Capabilities)
 
 	return AgentNode{
+		AgentID:      m.AgentID,
 		Address:      m.Address,
 		AgentName:    m.AgentName,
 		Nickname:     m.Nickname,
@@ -285,10 +290,19 @@ func DiscoverAgents(baseDir string) ([]AgentNode, error) {
 }
 
 // AgentStatus holds live runtime status from .status.json (same as system("show")).
+// The five scalar token fields are the kernel-owned since-last-molt counters.
+// Older snapshots omit them and therefore decode to zero. total_tokens is not
+// mapped here: tokens.total_tokens is the component sum, while context.total_tokens
+// is the live context size used by the existing context display.
 type AgentStatus struct {
 	Tokens struct {
-		Estimated bool `json:"estimated"`
-		Context   struct {
+		InputTokens    int64 `json:"input_tokens"`
+		OutputTokens   int64 `json:"output_tokens"`
+		ThinkingTokens int64 `json:"thinking_tokens"`
+		CachedTokens   int64 `json:"cached_tokens"`
+		APICalls       int64 `json:"api_calls"`
+		Estimated      bool  `json:"estimated"`
+		Context        struct {
 			SystemTokens  int     `json:"system_tokens"`
 			ToolsTokens   int     `json:"tools_tokens"`
 			HistoryTokens int     `json:"history_tokens"`
@@ -326,15 +340,71 @@ type ContextStats struct {
 	ToolCounts        []ContextToolCount
 }
 
+var statusEconomyFields = [...]string{
+	"input_tokens",
+	"output_tokens",
+	"thinking_tokens",
+	"cached_tokens",
+	"api_calls",
+}
+
+// statusEconomyIsComplete validates the five kernel-published economy fields
+// independently of the compatibility struct decode. Home treats the tuple as
+// one unit: absent, fractional, negative, non-integral, out-of-range, or
+// wrongly-typed fields omit all five counters rather than presenting a partial
+// economy snapshot alongside valid context/runtime fields.
+func statusEconomyIsComplete(data []byte) bool {
+	var raw struct {
+		Tokens json.RawMessage `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	var tokens map[string]json.RawMessage
+	if err := json.Unmarshal(raw.Tokens, &tokens); err != nil {
+		return false
+	}
+	for _, field := range statusEconomyFields {
+		value, ok := tokens[field]
+		if !ok {
+			return false
+		}
+		value = bytes.TrimSpace(value)
+		parsed, err := strconv.ParseInt(string(value), 10, 64)
+		if err != nil || parsed < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func clearStatusEconomy(s *AgentStatus) {
+	s.Tokens.InputTokens = 0
+	s.Tokens.OutputTokens = 0
+	s.Tokens.ThinkingTokens = 0
+	s.Tokens.CachedTokens = 0
+	s.Tokens.APICalls = 0
+}
+
 // ReadStatus reads .status.json from an agent directory.
-// Returns zero struct if missing or unreadable.
+// Returns zero struct if missing or syntactically unreadable. A JSON type error
+// preserves the safely decoded fields, matching encoding/json's partial-struct
+// behavior, while the independent economy check keeps Home's tuple all-or-none.
 func ReadStatus(dir string) AgentStatus {
 	var s AgentStatus
 	data, err := os.ReadFile(filepath.Join(dir, ".status.json"))
 	if err != nil {
 		return s
 	}
-	json.Unmarshal(data, &s)
+	if err := json.Unmarshal(data, &s); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			return AgentStatus{}
+		}
+	}
+	if !statusEconomyIsComplete(data) {
+		clearStatusEconomy(&s)
+	}
 	return s
 }
 

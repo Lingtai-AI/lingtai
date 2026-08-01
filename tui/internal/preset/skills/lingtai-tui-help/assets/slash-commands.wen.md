@@ -44,11 +44,13 @@
 - `/system` — 阅器灵之系统诸文（system.md、covenant 等）。
 - `/daemons` — 察各器灵守护之运及其录。
 - `/notification` — 观当前 Agent 近日所受告块，并可以左右翻阅。
+- `/taskcard` — 观器灵今所活之 Task Card（如有）。
 - `/presets` — 览此器灵可以 `/refresh` 换之预设。
 
 ### 网络与分享
 - `/mailbox` — 阅邮箱诸讯与附件。
 - `/projects` — 入他运行之 admin 灵所在项目与邮境。
+- `/agents` — 择主会或本案灵使以通专函。
 - `/export` — 导可复用之方以分享。
 - `/viz` — 于浏览器启网络之图。
 
@@ -175,6 +177,14 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 
 显当前所聚 Agent 近日所受之 agent-visible 告块（自 `logs/log.sqlite` 重建）。凡徽标有疑、Agent 言有告，或欲验近来实际注入彼灵之告块，可用之。左/右翻阅近告，`r` 重载，Esc/`q` 返聊天；此视只读，不 dismiss，亦不改告。
 
+### `/taskcard` — 观器灵之 Task Card
+**用：** `/taskcard`
+
+显当下器灵之 Task Card——即其工作之境下 `taskcard/taskcard.md`——唯 `taskcard/status`
+恰读作 `active` 时乃显。此与 Telegram 所投于常驻卡者，同一 agent-local 之物也；TUI
+唯示之，一时之影，绘于 markdown 阅器中。欲新之，重行 `/taskcard` 即可。若无活卡，
+则示一简状之语。
+
 ### `/presets` — 启预设之库
 **用：** `/presets`
 
@@ -188,6 +198,17 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 
 阅每一邮箱之讯——收、发与 IMAP——含全文及内联附件之渲。凡欲得某器灵之全邮录（含外部 IMAP
 邮与附件），而非实时对话之流者用之。
+
+### `/agents` — 择邮会
+**用：** `/agents`
+
+择主会或本案灵使以通专函。以方向键（或 j/k）及 Home/End 移之，Enter 或
+Space 择之，Esc 罢而不易当前会。
+
+邮视广为 85 列以上，二十四列之会栏展则示 `[<]`，以鼠左击按钮可敛；手动敛栏后，
+常邮首示 `[>]`，以鼠左击按钮可展。键以 Ctrl+G 可展敛同栏。Mac 上之 fn/Globe+F2
+可为辅键；惟终端实送 F2 时，F2 方效。惟栏展时，Tab 方可入离。广为 84 列以下，栏自隐。
+`/agents` 乃诸宽恒备之正途，所择仍为同一会目。
 
 ### `/projects` — 入运行之 admin 灵
 **用：** `/projects`
@@ -241,7 +262,7 @@ LLM/能力预设——唯器灵确已宕时方用 `/cpr`。
 ### `/update-tui` — 更 TUI 与 portal 器
 **用：** `/update-tui`
 
-察 `lingtai-tui` 器之安法（brew 或源码/本地），允而后更其器，或并刷新共装之 portal 器——不触 Python 核。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
+察 `lingtai-tui` 器之安法（brew 或源），俟允而独升其器（不更核）。brew 装者，迁于原生安装器，不复行 brew；`/update-tui` 自身不去旧 formula/keg——去留另为一事，唯启动时交互之流程，于原生器验讫之后，方以 `[y/N]` 复问，此命令不问。若原生器未先 brew 而列于 PATH，则 `/update-tui` 如实告以迁已装而未竟，不诳言成，且每行必复告此状，至去旧 brew 装或调整 PATH 为止。功成则示重启之语，不自动重启方行之 TUI。若安法不可（未知/他属），则唯示其状、不为改动。允乃必行：`/update-tui` 断无一键即安之事。欲察安法、源码之败、Homebrew tap 及中原网络，读内置 `lingtai-update` 技能。
 
 ### `/login` — 察并理凭
 **用：** `/login`

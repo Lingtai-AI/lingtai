@@ -21,7 +21,28 @@ Nested `lingtai-update` reference. Detection is deliberately conservative.
    is available, and do not infer source ownership from a path alone when
    source metadata says otherwise.
 
-Symlinks matter: a manually linked or development binary may not be the Cellar
-copy Homebrew upgrades. Check `lingtai-tui doctor` output and the resolved
+Symlinks matter: a manually linked or development binary may not be the
+Homebrew Cellar copy. Check `lingtai-tui doctor` output and the resolved
 executable before choosing a manual command. This metadata is diagnostic and
 routing information, not a credential store.
+
+A Homebrew-detected install is not upgraded through brew: `/update-tui` and
+`lingtai-tui self-update` migrate it to the native installer instead (see
+`reference/update-tui/SKILL.md`). Migrating installs and verifies a native
+binary, but does not by itself guarantee the shell will run it: on a standard
+Apple-Silicon Homebrew host, `/opt/homebrew/bin` is earlier on PATH than
+install.sh's default native bin dir, so the resolved `lingtai-tui` can still
+be the old Homebrew one even after a "successful" install. Detection accounts
+for this directly — when valid native (`install.json`) metadata exists but
+does not match the currently resolved executable, and that executable still
+resolves as Homebrew, detection reports `DuplicateNativeInstall` instead of
+silently treating it as a plain fresh Homebrew install: the method stays
+Homebrew (the resolved binary really is still Homebrew's), and every update
+entry point surfaces "native installed, migration not complete, remove
+Homebrew yourself" instead of re-prompting or re-running the installer. Only
+once the resolved executable actually matches the native metadata does
+detection report the install as source/user-local from then on — until then,
+the Homebrew Cellar copy stays on disk. Removing it always requires a
+concrete interactive "y" to the "Remove the old Homebrew installation now?"
+prompt at startup (see `reference/update-tui/SKILL.md`); `self-update` and
+`doctor` never uninstall it themselves, only report the manual command.

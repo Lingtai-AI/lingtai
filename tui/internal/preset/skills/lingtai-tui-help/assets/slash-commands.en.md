@@ -50,11 +50,13 @@ Linux/Windows). Press `Ctrl+Y` again or `Esc` to exit.
 - `/system` — browse the agent's system files (system.md, covenant, …).
 - `/daemons` — inspect per-agent daemon runs and their records.
 - `/notification` — show the current agent's latest notification blocks with left/right navigation.
+- `/taskcard` — show the agent's active declarative Task Card, if any.
 - `/presets` — view the presets this agent can switch to with `/refresh`.
 
 ### Network & sharing
 - `/mailbox` — browse all mailbox messages and attachments.
 - `/projects` — switch into another running admin agent's project/mail context.
+- `/agents` — choose Main or a same-project agent for direct mail.
 - `/export` — export a reusable recipe for sharing.
 - `/viz` — open the network visualization in the browser.
 
@@ -214,6 +216,16 @@ trace exactly what a background daemon did.
 
 Shows the focused agent's latest agent-visible notification blocks reconstructed from `logs/log.sqlite`. Use this when notification badges look wrong, an agent says it has notifications, or you want to inspect the recent blocks actually injected into the agent. Left/right moves through the latest blocks, `r` reloads, and Esc/`q` returns to chat; the view is read-only and does not dismiss or mutate notifications.
 
+### `/taskcard` — show the agent's Task Card
+**Usage:** `/taskcard`
+
+Shows the current agent's declarative Task Card — `taskcard/taskcard.md` under
+its working directory — when `taskcard/status` reads exactly `active`. This is
+the same agent-local artifact Telegram projects onto its resident card; the TUI
+only displays it, point-in-time, in the markdown viewer. Re-run `/taskcard` to
+refresh. When no active card is available, it shows a short status message
+instead.
+
 ### `/presets` — open the preset library
 **Usage:** `/presets`
 
@@ -232,6 +244,22 @@ Browses every mailbox message — inbox, sent, and IMAP — with the full messag
 body and inline attachment rendering. Use it for the complete mail record for an
 agent, including external IMAP mail and attachments, rather than the live chat
 stream.
+
+### `/agents` — choose a mail conversation
+**Usage:** `/agents`
+
+Choose Main or a same-project agent for direct mail. Move with the arrow keys
+(or j/k) and Home/End, select with Enter or Space, and press Esc to cancel
+without changing the current conversation.
+
+On the Mail screen at 85 columns or wider, the expanded 24-column conversation
+rail shows `[<]`; left-click the button to collapse the rail. After an explicit
+collapse, the ordinary Mail header shows `[>]`; left-click the button to expand
+the rail. Ctrl+G toggles the same rail from the keyboard. On Macs,
+fn/Globe+F2 is optional. F2 works only when the terminal sends F2 to the app.
+Tab can enter or leave the rail only while it is expanded. At 84 columns or
+narrower, the rail is automatically hidden. `/agents` remains the canonical
+all-width fallback and selects from exactly the same rows.
 
 ### `/projects` — switch to a running admin agent
 **Usage:** `/projects`
@@ -307,11 +335,18 @@ single keystroke.
 
 Detects how the `lingtai-tui` binary was installed (Homebrew or source/user-local)
 and, after you confirm, upgrades the TUI binary and may refresh the co-installed
-portal binary — the Python kernel is untouched. After a successful update it
-shows a restart prompt; it never
-auto-restarts the running TUI. If the install method is unsupported (unknown/
-other), it reports that and makes no changes. The confirmation is mandatory:
-`/update-tui` never installs on a single keystroke.
+portal binary — the Python kernel is untouched. A Homebrew install migrates to
+the native installer instead of running brew; `/update-tui` itself never removes
+the old Homebrew formula/keg — that removal question is asked separately, only
+by the interactive **startup** `[y/N]` prompt (not this command), once a native
+install is verified. On a host where the native binary isn't yet resolved ahead
+of Homebrew on PATH, `/update-tui` reports that the migration is installed but
+not yet complete rather than claiming success, and repeats that report on every
+future run until Homebrew is removed or PATH is reordered. After a successful
+update it shows a restart prompt; it never auto-restarts the running TUI. If
+the install method is unsupported (unknown/other), it reports that and makes no
+changes. The confirmation is mandatory: `/update-tui` never installs on a
+single keystroke.
 
 For install-method detection, source-build failures, Homebrew tap details, or
 mainland-China connectivity, open the bundled `lingtai-update` skill.

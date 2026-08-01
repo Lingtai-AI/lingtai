@@ -242,7 +242,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude-agent-sdk", "custom"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -286,7 +286,7 @@ func writePresetFile(t *testing.T, dir, name, provider, apiKeyEnv string) string
 func TestResolveRefs_ValidityGuard(t *testing.T) {
 	dir := t.TempDir()
 	codexRef := writePresetFile(t, dir, "codex", "codex", "")
-	claudeRef := writePresetFile(t, dir, "claude-agent-sdk", "claude-agent-sdk", "")
+	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "")
 	claudeUnderscoreRef := writePresetFile(t, dir, "claude_agent_sdk", "claude_agent_sdk", "")
 	customRef := writePresetFile(t, dir, "custom", "custom", "")
 	keyedRef := writePresetFile(t, dir, "minimax", "minimax", "FOO_API_KEY")
@@ -305,10 +305,10 @@ func TestResolveRefs_ValidityGuard(t *testing.T) {
 	}{
 		{"codex no OAuth", codexRef, keysEmpty, AuthState{}, true, false},
 		{"codex with OAuth", codexRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, true},
-		{"claude-agent-sdk no CLI auth", claudeRef, keysEmpty, AuthState{}, true, false},
-		{"claude-agent-sdk with CLI auth", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
+		{"claude-code no CLI auth", claudeRef, keysEmpty, AuthState{}, true, false},
+		{"claude-code with CLI auth", claudeRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
 		{"claude_agent_sdk alias with CLI auth", claudeUnderscoreRef, keysEmpty, AuthState{ClaudeCodeAuthConfigured: true}, true, true},
-		{"claude-agent-sdk ignores codex OAuth", claudeRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, false},
+		{"claude-code ignores codex OAuth", claudeRef, keysEmpty, AuthState{CodexOAuthConfigured: true}, true, false},
 		{"keyless non-codex is invalid", customRef, keysEmpty, AuthState{}, true, false},
 		{"keyed with key present", keyedRef, keysWith, AuthState{}, true, true},
 		{"keyed with key absent", keyedRef, keysEmpty, AuthState{}, true, false},
@@ -344,13 +344,13 @@ func TestResolveRefs_ConservativeDefault(t *testing.T) {
 		t.Errorf("codex via ResolveRefs: HasKey = true, want false (conservative default)")
 	}
 
-	claudeRef := writePresetFile(t, dir, "claude-agent-sdk", "claude-agent-sdk", "")
+	claudeRef := writePresetFile(t, dir, "claude", "claude-code", "")
 	got = ResolveRefs([]string{claudeRef}, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 resolved ref, got %d", len(got))
 	}
 	if got[0].HasKey {
-		t.Errorf("claude-agent-sdk via ResolveRefs: HasKey = true, want false (conservative default)")
+		t.Errorf("claude-code via ResolveRefs: HasKey = true, want false (conservative default)")
 	}
 }
 
@@ -568,17 +568,17 @@ func TestCodexPresetDefaultOmitsServiceTierAndSetsThinking(t *testing.T) {
 	}
 }
 
-func TestClaudeAgentSDKPresetShape(t *testing.T) {
-	p := claudeAgentSDKPreset()
-	if p.Name != "claude-agent-sdk" {
-		t.Fatalf("name = %q, want claude-agent-sdk", p.Name)
+func TestClaudePresetShape(t *testing.T) {
+	p := claudePreset()
+	if p.Name != "claude" {
+		t.Fatalf("name = %q, want claude", p.Name)
 	}
 	llm, ok := p.Manifest["llm"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("manifest.llm missing or wrong type: %T", p.Manifest["llm"])
 	}
-	if got := llm["provider"]; got != "claude-agent-sdk" {
-		t.Errorf("llm.provider = %v, want claude-agent-sdk", got)
+	if got := llm["provider"]; got != "claude-code" {
+		t.Errorf("llm.provider = %v, want claude-code", got)
 	}
 	// Default to the CLI alias, never a dated API model id.
 	if got := llm["model"]; got != "opus" {
@@ -601,26 +601,26 @@ func TestClaudeAgentSDKPresetShape(t *testing.T) {
 		t.Errorf("capabilities.skills should be present (LingTai skills default)")
 	}
 	if _, ok := caps["web_search"]; ok {
-		t.Errorf("capabilities.web_search should be absent for claude-agent-sdk")
+		t.Errorf("capabilities.web_search should be absent for claude")
 	}
 	if _, ok := caps["vision"]; ok {
-		t.Errorf("capabilities.vision should be absent for claude-agent-sdk")
+		t.Errorf("capabilities.vision should be absent for claude")
 	}
 }
 
-func TestClaudeAgentSDKPresetIsBuiltin(t *testing.T) {
-	if !IsBuiltin("claude-agent-sdk") {
-		t.Errorf("IsBuiltin(claude-agent-sdk) = false, want true")
+func TestClaudePresetIsBuiltin(t *testing.T) {
+	if !IsBuiltin("claude") {
+		t.Errorf("IsBuiltin(claude) = false, want true")
 	}
 	found := false
 	for _, p := range BuiltinPresets() {
-		if p.Name == "claude-agent-sdk" {
+		if p.Name == "claude" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("claude-agent-sdk not present in BuiltinPresets()")
+		t.Errorf("claude not present in BuiltinPresets()")
 	}
 }
 
@@ -820,5 +820,71 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 	if _, ok := llm["wire_api"]; ok {
 		t.Fatalf("custom preset should omit wire_api so kernel/editor default to auto")
+	}
+}
+
+func TestCredentialFamilyAliases(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     CredentialFamily
+	}{
+		{"codex", CredentialFamilyCodexSingle},
+		{"codex_oauth", CredentialFamilyCodexSingle},
+		{"codex-pool", CredentialFamilyCodexPool},
+		{"codex_pool", CredentialFamilyCodexPool},
+		{"claude-code", CredentialFamilyClaudeCLI},
+		{"claude_code", CredentialFamilyClaudeCLI},
+		{"claude-agent-sdk", CredentialFamilyClaudeCLI},
+		{"claude_agent_sdk", CredentialFamilyClaudeCLI},
+		{"codex.json", CredentialFamilyOther},
+		{"custom", CredentialFamilyOther},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			if got := ClassifyCredentialFamily(tc.provider); got != tc.want {
+				t.Fatalf("ClassifyCredentialFamily(%q) = %q, want %q", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveRefs_ManifestFamilyDispatchAndFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	authDir := t.TempDir()
+	writeStubTokenFile(t, filepath.Join(authDir, "codex-auth.json"))
+
+	codexOAuthRef := writePresetFile(t, dir, "codex-oauth", "codex_oauth", "STALE_CODEX_KEY")
+	got := ResolveRefsWithAuth([]string{codexOAuthRef}, map[string]string{"STALE_CODEX_KEY": "must-not-be-used"}, AuthState{CodexAuthDir: authDir})
+	if len(got) != 1 || got[0].Family != CredentialFamilyCodexSingle || got[0].Provider != "codex_oauth" || !got[0].HasKey {
+		t.Fatalf("codex_oauth resolution = %#v, want manifest-owned CodexSingle auth", got)
+	}
+
+	malformed := filepath.Join(dir, "codex.json")
+	if err := os.WriteFile(malformed, []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = ResolveRefsWithAuth([]string{malformed}, nil, AuthState{CodexOAuthConfigured: true})
+	if len(got) != 1 {
+		t.Fatalf("malformed resolution length = %d, want 1", len(got))
+	}
+	if got[0].ManifestValid || got[0].Family != CredentialFamilyOther || got[0].HasKey {
+		t.Fatalf("malformed codex path failed open: %#v", got[0])
+	}
+}
+
+func TestResolvePresetWithAuthPreservesKeyedAndLocalBehavior(t *testing.T) {
+	keyed := Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{
+		"provider": "custom", "model": "local", "api_key_env": "CUSTOM_TEST_KEY",
+	}}}
+	got := ResolvePresetWithAuth(keyed, map[string]string{"CUSTOM_TEST_KEY": "present"}, AuthState{})
+	if got.Family != CredentialFamilyOther || !got.HasKey {
+		t.Fatalf("keyed custom resolution = %#v, want key-backed Other", got)
+	}
+	local := Preset{Manifest: map[string]interface{}{"llm": map[string]interface{}{
+		"provider": "custom", "model": "local",
+	}}}
+	got = ResolvePresetWithAuth(local, nil, AuthState{})
+	if got.Family != CredentialFamilyOther || got.HasKey {
+		t.Fatalf("keyless custom/local resolution = %#v, want unchanged no-key behavior", got)
 	}
 }

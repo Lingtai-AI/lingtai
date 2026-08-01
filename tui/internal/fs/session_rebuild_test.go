@@ -45,7 +45,7 @@ func TestRebuildDeduplicatesMailAcrossRestart(t *testing.T) {
 	}
 
 	// First rebuild (simulates fresh launch)
-	sc1 := NewSessionCache(humanDir, tmp)
+	sc1 := NewSessionCache(humanDir, tmp, MainAggregateWriter)
 	cache1 := NewMailCache(humanDir).Refresh()
 	sc1.RebuildFromSources(cache1, "human", orchDir, "xiake")
 	firstLen := sc1.Len()
@@ -54,7 +54,7 @@ func TestRebuildDeduplicatesMailAcrossRestart(t *testing.T) {
 	}
 
 	// Second rebuild (simulates relaunch — the bug scenario)
-	sc2 := NewSessionCache(humanDir, tmp)
+	sc2 := NewSessionCache(humanDir, tmp, MainAggregateWriter)
 	cache2 := NewMailCache(humanDir).Refresh()
 	sc2.RebuildFromSources(cache2, "human", orchDir, "xiake")
 	secondLen := sc2.Len()
@@ -88,7 +88,7 @@ func TestIngestMailWatermarkSkipsOldMail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sc := NewSessionCache(humanDir, tmp)
+	sc := NewSessionCache(humanDir, tmp, MainAggregateWriter)
 	sc.lastMailTs = "2026-04-10T00:00:00Z" // simulate post-rebuild watermark
 
 	cache := MailCache{
@@ -126,7 +126,7 @@ func TestRefreshDoesNotReingestSQLiteHistory(t *testing.T) {
 		sessionSQLiteInsert(1.0, "text_input", "hello from sqlite", rootSource, 0, "agent_events", "agent"),
 	)
 
-	sc := NewSessionCache(humanDir, tmp)
+	sc := NewSessionCache(humanDir, tmp, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.afterRebuildIngest = func() {
 		appendSessionTestFile(t, eventsPath,
@@ -157,7 +157,7 @@ func TestCanonicalJSONLRebuildIgnoresForeignSQLiteRows(t *testing.T) {
 				sessionSQLiteInsert(1.5, "text_output", "daemon leaked", daemonSource, int64(len(firstLine+tailLine)+100), "daemon_events", "daemon"),
 		)
 
-		sc := NewSessionCache(humanDir, root)
+		sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root tail")
@@ -180,7 +180,7 @@ func TestCanonicalJSONLRebuildIgnoresForeignSQLiteRows(t *testing.T) {
 				sessionSQLiteInsert(1.5, "text_output", "foreign leaked", foreignSource, foreignOffset, "agent_events", "agent"),
 		)
 
-		sc := NewSessionCache(humanDir, root)
+		sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 		cache := NewMailCache(humanDir).Refresh()
 		sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 		assertSessionBodiesExactly(t, sc.Entries(), "root indexed", "root must not be skipped")
@@ -202,7 +202,7 @@ func TestCanonicalJSONLRebuildIncludesRowsMissingFromSQLite(t *testing.T) {
 		sessionSQLiteInsert(1.0, "text_input", "covered before query", rootSource, 0, "agent_events", "agent"),
 	)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 	assertSessionBodiesExactly(t, sc.Entries(), "covered before query", "missing from sqlite")
@@ -223,7 +223,7 @@ func TestSQLiteReplayRejectsInvalidNoNewlineBoundary(t *testing.T) {
 		sessionSQLiteInsert(1.0, "text_input", "complete only after newline", rootSource, 0, "agent_events", "agent"),
 	)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 	assertSessionBodiesExactly(t, sc.Entries())
@@ -255,7 +255,7 @@ func TestSQLiteReplayFallsBackWhenRootIdentityCannotBeProven(t *testing.T) {
 	`
 	runSessionSQLiteSQL(t, sqliteBin, orchDir, oldSchema)
 
-	sc := NewSessionCache(humanDir, root)
+	sc := NewSessionCache(humanDir, root, MainAggregateWriter)
 	cache := NewMailCache(humanDir).Refresh()
 	sc.RebuildFromSourcesInMemory(cache, "human", orchDir, "orch")
 	sc.Refresh(cache, "human", orchDir, "orch")

@@ -17,7 +17,9 @@ var TopologyMu sync.Mutex
 
 func NewNetworkHandler(baseDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		network, err := fs.BuildNetwork(baseDir)
+		// Preserve the historical full network by default. Only the live fast lane opts into the explicitly incomplete ?mail=0 shape.
+		options := fs.NetworkOptions{SkipMailEdges: r.URL.Query().Get("mail") == "0"}
+		network, err := fs.BuildNetworkWithOptions(baseDir, options)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

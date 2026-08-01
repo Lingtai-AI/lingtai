@@ -77,7 +77,25 @@ mkdir my-project && cd my-project
 lingtai-tui
 ```
 
-安装脚本支持 macOS、Linux 和 WSL（原生 Windows/PowerShell 在计划中），会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+如需显式安装 TUI 与内核当前 `main` 的开发版本，请运行：
+
+```bash
+curl -fsSL https://lingtai.ai/install.sh | bash -s -- --latest
+```
+
+它会打印并记录两个仓库的完整提交 SHA。该模式独立于默认稳定版安装，不能与 `--version`、`--ref`、`--update`、`--source` 或 `--skip-python` 同时使用。
+
+安装脚本支持 macOS、Linux 和 WSL，会装好 `lingtai-tui` 和 `lingtai-portal`。之后**其余的事都交给 TUI**——首次启动时它会创建 `.lingtai/`，准备自己的 Python 运行时，引导你配置模型/配方，并为这个项目启动一个常驻的科学家。之后升级，重新跑一遍安装脚本（或 `lingtai-tui self-update`）再重启 TUI 即可。
+
+原生 Windows/PowerShell 现已支持：
+
+```powershell
+irm https://lingtai.ai/install.ps1 | iex
+```
+
+它会解析最新的发布标签，校验 Windows 二进制压缩包与锁定的内核发布版本的校验和，并安装 `lingtai-tui`/`lingtai-portal` 及 Python 运行时虚拟环境。加上 `-SkipVenv` 可只安装 TUI/portal 二进制文件。详细契约见 [`RELEASING.md`](RELEASING.md)。
+
+若要在原生 Windows 上调试当前主线，请运行 `.\install.ps1 -Latest`。它仅支持 amd64；ARM64 请使用 WSL2 和 `install.sh --latest`。它会一次检查 Git、Go、Node.js/npm（Node 20.19+、22.12+ 或更高主版本；Node 21 及 Node 22.<12 不支持）和 64 位 CPython 3.11–3.13，然后只为缺失或不受支持的前置条件运行 `winget install --id <ID> --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity --silent`（`Git.Git`、`GoLang.Go`、`OpenJS.NodeJS.LTS` 和/或 `Python.Python.3.13`）。成功安装的前置条件是外部 winget 变更；如果后续包、检出或构建失败，不会自动回滚，但 LingTai 目标目录写入仍会等到验证/构建成功之后。安装器会刷新当前进程 PATH 并重新验证，再固定两个仓库 `main` 的完整 SHA、构建两个二进制文件，并通过本地路径把准确的内核检出以非 editable 方式安装到 `%USERPROFILE%\.lingtai-tui\runtime\venv`。winget 或包策略/提权阻止修复时，会失败并给出精确补救命令。`-Latest -DryRun` 只报告精确修复计划，不调用 winget，也不写入目标目录、PATH 或配置；`-Latest` 不能与 `-Version`、`-ArchivePath` 或 `-SkipVenv` 合用。网站仓库仍需另行补充对应安装说明。
 
 > **第一次用？** 跟着 [lingtai.ai 上的教程](https://lingtai.ai/zh/tutorial/) 一步步来——安装、第一个任务、外接渠道、记忆与生命周期，从头到尾走一遍。
 

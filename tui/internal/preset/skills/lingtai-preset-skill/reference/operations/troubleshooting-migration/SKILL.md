@@ -31,10 +31,13 @@ migration internals it doesn't own.
   retired template) — see `reference/operations/saved-presets/SKILL.md`,
   Bootstrap section. A saved clone of a retired template is untouched and
   still loads.
-- **"Save is stuck / won't go through."** Check
-  `reference/operations/availability-save-gate/SKILL.md` first — pending,
-  hard-blocked, and retryable-warned are three different states with
-  different next actions.
+- **"Save is stuck / won't go through."** Save no longer runs a live
+  provider check, so there is no pending/blocked save state to diagnose
+  here — a save failure now means the structural `Validate()` rejected
+  the preset (see `reference/operations/saved-presets/SKILL.md`) or a
+  file-write error. If the user is instead asking whether the *provider*
+  actually works, that is a `/doctor` question, not a save-time one — see
+  `reference/operations/availability-save-gate/SKILL.md`.
 - **"I edited the preset/pool file but the running agent didn't change."**
   Expected — see `reference/operations/activation-session-refresh/SKILL.md`:
   saving alone never switches a running session; an explicit refresh,
@@ -56,9 +59,10 @@ migration internals it doesn't own.
   package's own ANATOMY.md and ownership, not this preset skill tree.
 - **A preset that looks structurally fine but the provider still rejects
   every request** is a live operational issue, not a documentation gap —
-  point at `reference/operations/availability-save-gate/SKILL.md` for how
-  to read the live probe's classification, but do not invent a root cause
-  this skill's evidence doesn't support.
+  point at `/doctor` (real availability diagnosis; see
+  `reference/operations/availability-save-gate/SKILL.md` for why Save
+  itself no longer probes), but do not invent a root cause this skill's
+  evidence doesn't support.
 
 When a question falls outside the "in scope" list above, say so explicitly
 and point at the narrower, correctly-owned skill or source location instead

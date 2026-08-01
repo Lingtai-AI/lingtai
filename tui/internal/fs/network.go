@@ -5,7 +5,16 @@ import (
 	"strings"
 )
 
+// NetworkOptions selects optional work while building a network snapshot.
+type NetworkOptions struct {
+	SkipMailEdges bool
+}
+
 func BuildNetwork(baseDir string) (Network, error) {
+	return BuildNetworkWithOptions(baseDir, NetworkOptions{})
+}
+
+func BuildNetworkWithOptions(baseDir string, opts NetworkOptions) (Network, error) {
 	nodes, err := DiscoverAgents(baseDir)
 	if err != nil {
 		return Network{}, fmt.Errorf("discover agents: %w", err)
@@ -40,8 +49,12 @@ func BuildNetwork(baseDir string) (Network, error) {
 		contactEdges = append(contactEdges, ReadContacts(n.WorkingDir)...)
 	}
 
-	// Count from inbox only — sent would double-count
-	mailEdges := buildMailEdges(nodes, baseDir)
+	// Count from inbox only — sent would double-count. Live snapshots can
+	// skip this historical scan; BuildNetwork keeps the full default.
+	var mailEdges []MailEdge
+	if !opts.SkipMailEdges {
+		mailEdges = buildMailEdges(nodes, baseDir)
+	}
 	stats := computeStats(nodes, mailEdges)
 	activity := computeNetworkActivity(nodes)
 
@@ -76,7 +89,7 @@ func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 		inbox, _ := ReadInbox(n.WorkingDir)
 		for _, msg := range inbox {
 			from := RelativizeAddress(ResolveAddress(msg.From, baseDir), baseDir)
-			recipients := resolveRecipients(msg.To)
+			recipients := NormalizeMailEndpoints(msg.To)
 			for _, r := range recipients {
 				counts[edgeKey{from, RelativizeAddress(ResolveAddress(r, baseDir), baseDir)}]++
 			}
@@ -92,22 +105,6 @@ func buildMailEdges(nodes []AgentNode, baseDir string) []MailEdge {
 		})
 	}
 	return edges
-}
-
-func resolveRecipients(to interface{}) []string {
-	switch v := to.(type) {
-	case string:
-		return []string{v}
-	case []interface{}:
-		var result []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result
-	}
-	return nil
 }
 
 func computeStats(nodes []AgentNode, mailEdges []MailEdge) NetworkStats {

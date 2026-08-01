@@ -82,9 +82,9 @@ After editing `providerModels["codex"]` / `modelHasVision`:
 
 ## Cross-references
 
-- `preset_editor.go:120` — `providerModels` map
-- `preset_editor.go:178` — `modelHasVision` map
-- `preset_editor.go:106` — `capabilityProviderOptions` (web_search, vision provider routing)
+- `preset_editor.go:97` — `providerModels` map
+- `preset_editor.go:158` — `modelHasVision` map
+- `preset_editor.go:1412` — `mandatoryCapRow` (fixed, informational capabilities rendering)
 - `internal/preset/preset.go:codexPreset()` — built-in template, sets default model
 - `firstrun.go` `startCodexLogin` — first-run Codex browser/device-code login launcher
 - `firstrun.go` / `login.go` `CodexOAuthDoneMsg` handlers — save tokens after matching-epoch browser/device-code completion

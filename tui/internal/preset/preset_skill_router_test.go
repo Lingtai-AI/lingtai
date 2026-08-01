@@ -321,18 +321,18 @@ func TestPresetSkillRouter_OperationBijection(t *testing.T) {
 // operation prose into the provider page itself.
 func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 	wantAnchor := map[string]string{
-		"minimax":          "tui/internal/preset/preset.go:979-1004",
-		"zhipu":            "tui/internal/preset/preset.go:1006-1023",
-		"mimo":             "tui/internal/preset/preset.go:1025-1050",
-		"deepseek":         "tui/internal/preset/preset.go:1052-1061",
-		"gemini":           "tui/internal/preset/preset.go:1063-1090",
-		"kimi":             "tui/internal/preset/preset.go:1092-1104",
-		"nvidia":           "tui/internal/preset/preset.go:1106-1125",
-		"openrouter":       "tui/internal/preset/preset.go:1127-1146",
-		"codex":            "tui/internal/preset/preset.go:1148-1176",
-		"codex-pool":       "tui/internal/preset/preset.go:1178-1208",
-		"claude-agent-sdk": "tui/internal/preset/preset.go:1210-1240",
-		"custom":           "tui/internal/preset/preset.go:1242-1264",
+		"minimax":    "tui/internal/preset/preset.go:979-1004",
+		"zhipu":      "tui/internal/preset/preset.go:1006-1023",
+		"mimo":       "tui/internal/preset/preset.go:1025-1050",
+		"deepseek":   "tui/internal/preset/preset.go:1052-1061",
+		"gemini":     "tui/internal/preset/preset.go:1063-1090",
+		"kimi":       "tui/internal/preset/preset.go:1092-1104",
+		"nvidia":     "tui/internal/preset/preset.go:1106-1125",
+		"openrouter": "tui/internal/preset/preset.go:1127-1146",
+		"codex":      "tui/internal/preset/preset.go:1148-1176",
+		"codex-pool": "tui/internal/preset/preset.go:1178-1208",
+		"claude":     "tui/internal/preset/preset.go:1212-1241",
+		"custom":     "tui/internal/preset/preset.go:1242-1264",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {
@@ -451,17 +451,23 @@ func TestPresetSkillRouter_SavedAndAvailabilitySourceContracts(t *testing.T) {
 
 	gate := readOperation("availability-save-gate")
 	for _, want := range []string{
-		"For non-OAuth providers",
-		"`codex` and the legacy\n  `codex_oauth` alias",
-		"Current-source gap",
-		"`codex-pool` provider string is not in",
-		"hard-block Save as `probeNoKey`",
-		"pressing Save again with the unchanged tuple does not",
-		"Transport timeouts remain in this category",
-		"Provider-reached rate limit / overload",
+		"Save is structural-only",
+		"never makes a live provider/model network call",
+		"Codex, Codex-pool, and API-key providers like",
+		"DeepSeek",
+		"not been replaced by another probe",
+		"`/doctor`",
 	} {
 		if !strings.Contains(gate, want) {
 			t.Errorf("availability-save-gate manual missing %q", want)
+		}
+	}
+	for _, mustNotContain := range []string{
+		"hard-block Save as `probeNoKey`",
+		"pressing Save again with the unchanged tuple does not",
+	} {
+		if strings.Contains(gate, mustNotContain) {
+			t.Errorf("availability-save-gate manual still describes the removed live-probe save gate: %q", mustNotContain)
 		}
 	}
 }

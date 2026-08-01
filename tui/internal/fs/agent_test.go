@@ -17,6 +17,7 @@ func TestReadAgent_ValidManifest(t *testing.T) {
 	os.MkdirAll(agentDir, 0o755)
 
 	manifest := map[string]interface{}{
+		"agent_id":     "id-alice",
 		"agent_name":   "alice",
 		"address":      "alice",
 		"state":        "ACTIVE",
@@ -32,6 +33,17 @@ func TestReadAgent_ValidManifest(t *testing.T) {
 	}
 	if node.AgentName != "alice" {
 		t.Errorf("agent_name = %q, want %q", node.AgentName, "alice")
+	}
+	exported, err := json.Marshal(node)
+	if err != nil {
+		t.Fatalf("marshal AgentNode: %v", err)
+	}
+	var exportedFields map[string]interface{}
+	if err := json.Unmarshal(exported, &exportedFields); err != nil {
+		t.Fatalf("unmarshal AgentNode JSON: %v", err)
+	}
+	if got := exportedFields["agent_id"]; got != "id-alice" {
+		t.Errorf("agent_id = %#v, want id-alice", got)
 	}
 	if node.State != "ACTIVE" {
 		t.Errorf("state = %q, want %q", node.State, "ACTIVE")
@@ -673,5 +685,136 @@ func TestSumMoltSessionTokenLedgerCacheInvalidatesOnLedgerChange(t *testing.T) {
 	stats = SumMoltSessionTokenLedger(agentDir)
 	if stats.Current.APICalls != 2 || stats.Current.Input != 3 {
 		t.Fatalf("after ledger append stats = %+v", stats.Current)
+	}
+}
+
+// TestReadStatusDecodesSinceMoltCounters pins the kernel-owned status contract
+// consumed by Home. The sibling tokens.total_tokens is intentionally not mapped:
+// it is distinct from context.total_tokens and the Home total is the sum of the
+// three component counters.
+func TestReadStatusDecodesSinceMoltCounters(t *testing.T) {
+	agentDir := t.TempDir()
+	status := `{
+  "runtime": {"pid": 99, "running": true, "uptime_seconds": 3.5},
+  "tokens": {
+    "input_tokens": 1781297,
+    "output_tokens": 13165,
+    "thinking_tokens": 5955,
+    "cached_tokens": 1547776,
+    "total_tokens": 999999,
+    "api_calls": 29,
+    "estimated": false,
+    "context": {"total_tokens": 48000, "window_size": 250000, "usage_pct": 19.2}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ReadStatus(agentDir).Tokens
+	if got.InputTokens != 1781297 || got.OutputTokens != 13165 ||
+		got.ThinkingTokens != 5955 || got.CachedTokens != 1547776 || got.APICalls != 29 {
+		t.Fatalf("since-molt counters = %+v, want published input/output/thinking/cached/api_calls", got)
+	}
+	if sum := got.InputTokens + got.OutputTokens + got.ThinkingTokens; sum != 1800417 {
+		t.Errorf("input+output+thinking = %d, want 1800417", sum)
+	}
+	if got.Context.TotalTokens != 48000 || got.Context.WindowSize != 250000 {
+		t.Errorf("context = %+v, want total 48000 / window 250000", got.Context)
+	}
+}
+
+func TestReadStatusLegacyAndMalformedStatusOmitSinceMoltCounters(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: ""},
+		{name: "legacy", body: `{"tokens":{"estimated":true,"context":{"window_size":200000,"usage_pct":12.5}}}`},
+		{name: "malformed", body: `{"tokens":{"input_tokens":"not-a-number","context":{"window_size":200000}}}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			agentDir := t.TempDir()
+			if tc.body != "" {
+				if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(tc.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := ReadStatus(agentDir).Tokens
+			if got.InputTokens != 0 || got.OutputTokens != 0 || got.ThinkingTokens != 0 ||
+				got.CachedTokens != 0 || got.APICalls != 0 {
+				t.Errorf("since-molt counters = %+v, want all zero for %s status", got, tc.name)
+			}
+			if tc.name == "legacy" && got.Context.WindowSize != 200000 {
+				t.Errorf("legacy context window = %d, want 200000", got.Context.WindowSize)
+			}
+		})
+	}
+}
+
+func TestReadStatusTypeErrorKeepsSafeFieldsAndOmitsEconomy(t *testing.T) {
+	agentDir := t.TempDir()
+	body := `{"runtime":{"pid":4242,"running":true,"uptime_seconds":3.5},"tokens":{"input_tokens":"bad","output_tokens":200,"thinking_tokens":50,"cached_tokens":100,"api_calls":4,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ReadStatus(agentDir)
+	if got.Runtime.PID != 4242 || !got.Runtime.Running || got.Runtime.UptimeSeconds != 3.5 {
+		t.Fatalf("runtime = %+v, want safely decoded runtime fields", got.Runtime)
+	}
+	if got.Tokens.Context.TotalTokens != 1234 || got.Tokens.Context.WindowSize != 8000 || got.Tokens.Context.UsagePct != 20 {
+		t.Fatalf("context = %+v, want safely decoded context fields", got.Tokens.Context)
+	}
+	if got.Tokens.InputTokens != 0 || got.Tokens.OutputTokens != 0 || got.Tokens.ThinkingTokens != 0 || got.Tokens.CachedTokens != 0 || got.Tokens.APICalls != 0 {
+		t.Fatalf("economy = %+v, want the whole tuple omitted after one invalid field", got.Tokens)
+	}
+}
+
+func TestReadStatusSyntaxErrorZerosWholeSnapshot(t *testing.T) {
+	agentDir := t.TempDir()
+	body := `{"runtime":{"pid":4242},"tokens":{"input_tokens":1,"context":{"total_tokens":1234,"window_size":8000}`
+	if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadStatus(agentDir); got != (AgentStatus{}) {
+		t.Fatalf("truncated status = %+v, want whole zero snapshot", got)
+	}
+}
+
+func TestReadStatusInvalidEconomyValuesOmitWholeTuple(t *testing.T) {
+	base := `{"runtime":{"pid":4242,"running":true},"tokens":{"input_tokens":11,"output_tokens":22,"thinking_tokens":33,"cached_tokens":44,"api_calls":55,"context":{"total_tokens":1234,"window_size":8000,"usage_pct":20}}}`
+	for _, tc := range []struct {
+		name  string
+		field string
+		valid int64
+		value string
+	}{
+		{name: "negative", field: "input_tokens", valid: 11, value: "-1"},
+		{name: "fractional", field: "output_tokens", valid: 22, value: "1.5"},
+		{name: "null", field: "thinking_tokens", valid: 33, value: "null"},
+		{name: "signed-int64 overflow", field: "cached_tokens", valid: 44, value: "9223372036854775808"},
+		{name: "quoted numeric string", field: "api_calls", valid: 55, value: `"55"`},
+		{name: "ordinary bad string", field: "input_tokens", valid: 11, value: `"not-a-number"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			needle := fmt.Sprintf(`"%s":%d`, tc.field, tc.valid)
+			body := strings.Replace(base, needle, fmt.Sprintf(`"%s":%s`, tc.field, tc.value), 1)
+			if body == base {
+				t.Fatalf("failed to replace valid %s counter", tc.field)
+			}
+			agentDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(agentDir, ".status.json"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := ReadStatus(agentDir)
+			if got.Tokens.InputTokens != 0 || got.Tokens.OutputTokens != 0 || got.Tokens.ThinkingTokens != 0 || got.Tokens.CachedTokens != 0 || got.Tokens.APICalls != 0 {
+				t.Fatalf("economy = %+v, want whole tuple omitted for %s", got.Tokens, tc.name)
+			}
+			if got.Tokens.Context.TotalTokens != 1234 || got.Runtime.PID != 4242 || !got.Runtime.Running {
+				t.Fatalf("safe fields = context=%+v runtime=%+v, want preserved", got.Tokens.Context, got.Runtime)
+			}
+		})
 	}
 }

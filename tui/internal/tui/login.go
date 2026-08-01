@@ -18,6 +18,7 @@ import (
 
 	"github.com/anthropics/lingtai-tui/i18n"
 	"github.com/anthropics/lingtai-tui/internal/config"
+	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
 // ---------------------------------------------------------------------------
@@ -502,6 +503,8 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 				CodexLegacy: isLegacy,
 			})
 		}
+		m.message = m.codexOAuthImpactMessage()
+		m.messageOK = true
 
 		// Re-run health check for the affected account.
 		for idx := range m.entries {
@@ -534,6 +537,44 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// codexOAuthImpactMessage explains the shared-credential scope after OAuth.
+// Saving OAuth never changes a preset or the active provider; the user must
+// explicitly create/activate a Codex preset and refresh the running agent.
+func (m LoginModel) codexOAuthImpactMessage() string {
+	all, _ := preset.List()
+	affected := 0
+	for _, p := range all {
+		if p.Source != preset.SourceSaved {
+			continue
+		}
+		llm, _ := p.Manifest["llm"].(map[string]interface{})
+		provider, _ := llm["provider"].(string)
+		if func() bool {
+			family := preset.ClassifyCredentialFamily(provider)
+			return family == preset.CredentialFamilyCodexSingle || family == preset.CredentialFamilyCodexPool
+		}() {
+			affected++
+		}
+	}
+	if affected == 0 {
+		return i18n.T("login.codex_oauth_saved_no_preset")
+	}
+	active := m.activePreset
+	if active == "" {
+		active = i18n.T("login.codex_oauth_no_active")
+	}
+	if m.activeModel != "" {
+		active += " (" + m.activeModel + ")"
+	}
+	if func() bool {
+		family := preset.ClassifyCredentialFamily(m.activePreset)
+		return family != preset.CredentialFamilyCodexSingle && family != preset.CredentialFamilyCodexPool
+	}() {
+		return i18n.TF("login.codex_oauth_saved_inactive", affected, active)
+	}
+	return i18n.TF("login.codex_oauth_saved_active", affected, active)
 }
 
 func (m LoginModel) startCodexLogin(deviceCode bool) (LoginModel, tea.Cmd) {

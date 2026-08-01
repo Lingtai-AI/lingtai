@@ -68,6 +68,20 @@ func buildAgentKnowledgeEntries(agentDir string) []MarkdownEntry {
 		path := filepath.Join(knowledgeDir, name, "KNOWLEDGE.md")
 		data, err := os.ReadFile(path)
 		if err != nil {
+			// No direct KNOWLEDGE.md — check for sub-entries to
+			// synthesise a routing-parent entry, so nested knowledge
+			// folders remain reachable from /knowledge.
+			subEntries := findKnowledgeSubEntries(filepath.Join(knowledgeDir, name))
+			if len(subEntries) == 0 {
+				continue
+			}
+			desc := fmt.Sprintf("%d sub-entries", len(subEntries))
+			entries = append(entries, knowledgeEntry{
+				Name:        name,
+				Description: desc,
+				Path:        filepath.Join(knowledgeDir, name),
+				RelDir:      name,
+			})
 			continue
 		}
 		fm := parseFrontmatter(string(data))
@@ -107,6 +121,28 @@ func buildAgentKnowledgeEntries(agentDir string) []MarkdownEntry {
 	return result
 }
 
+
+// findKnowledgeSubEntries returns the names of immediate subdirectories
+// under dir that contain a KNOWLEDGE.md file.  Used to detect whether a
+// parent directory without its own KNOWLEDGE.md still has navigable
+// children and should appear in the /knowledge catalog.
+func findKnowledgeSubEntries(dir string) []string {
+	dirents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var sub []string
+	for _, de := range dirents {
+		if !de.IsDir() || isHiddenEntry(de.Name()) {
+			continue
+		}
+		subPath := filepath.Join(dir, de.Name(), "KNOWLEDGE.md")
+		if _, err := os.Stat(subPath); err == nil {
+			sub = append(sub, de.Name())
+		}
+	}
+	return sub
+}
 func cleanFrontmatterScalar(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 {
