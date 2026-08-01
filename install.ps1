@@ -777,8 +777,13 @@ function Confirm-KernelManifest {
             # Validate the filename shape BEFORE it is ever used in a
             # download URL or Join-Path -- a malformed/adversarial filename
             # (path separators, traversal) is rejected here rather than
-            # relying on downstream code to handle it safely.
-            if ([string]::IsNullOrEmpty($art.filename) -or $art.filename -notmatch '^lingtai-[0-9A-Za-z_.+!-]+-(cp3(1[1-3]))-\1-win_amd64\.whl$') {
+            # relying on downstream code to handle it safely. This is a SAFETY
+            # check, not a platform gate: the kernel release manifest carries
+            # win_amd64, macosx_*, and manylinux_* wheels together, and every
+            # one must pass. Windows-only selection happens later in
+            # Select-KernelWheel, which matches the venv's exact
+            # cp311/312/313-win_amd64 tag.
+            if ([string]::IsNullOrEmpty($art.filename) -or $art.filename -notmatch '^lingtai-[0-9A-Za-z_.+!-]+-(cp3(1[1-3]))-\1-[0-9A-Za-z_.+-]+\.whl$') {
                 Fail "invalid kernel release manifest: wheel artifact has an invalid filename '$($art.filename)'"
             }
             if ($art.sha256 -notmatch '^[0-9a-f]{64}$') {
