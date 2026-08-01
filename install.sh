@@ -1060,7 +1060,7 @@ write_install_metadata() {
 }
 EOF
 
-  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" ]]; then
+  if [[ "$UPDATE_MODE" != "1" && "$LATEST_MAIN_MODE" != "1" && "$REINSTALL_OK" != "1" ]]; then
     if [[ -L "$global_dir" || -e "$metadata_path" || -L "$metadata_path" ]]; then
       rm -f "$tmp_path"
       echo "error: install receipt appeared during metadata creation; refusing to replace it: $metadata_path" >&2
