@@ -104,6 +104,14 @@ COUNTRY_DETECT_URL_1="${LINGTAI_COUNTRY_DETECT_URL_1:-https://ipapi.co/country/}
 COUNTRY_DETECT_URL_2="${LINGTAI_COUNTRY_DETECT_URL_2:-https://ifconfig.co/country-iso}"
 MIRROR_TIMEOUT="${LINGTAI_MIRROR_TIMEOUT:-3}"
 
+# Canonical URLs for the standalone maintenance scripts (update.sh/fix.sh/
+# verify.sh/dev.sh). The lingtai-web sync-installers workflow publishes those
+# under help/reference/installation/assets/ while install.sh/remove.sh stay at
+# the web root -- so a hint that only names the script would lead a user to
+# guess the root URL and hit a 404. Overridable for tests/offline use.
+LINGTAI_WEB_BASE="${LINGTAI_WEB_BASE:-https://lingtai.ai}"
+LINGTAI_SCRIPTS_ASSETS="$LINGTAI_WEB_BASE/help/reference/installation/assets"
+
 TMPDIR="${TMPDIR:-/tmp}"
 BUILD_DIR="$TMPDIR/lingtai-install-$$"
 
@@ -1460,7 +1468,7 @@ ensure_runtime_venv() {
     existing_state="$(runtime_venv_state "$venv_dir")"
     if [[ "$existing_state" != "missing" ]]; then
       echo "error: existing runtime at $venv_dir is $existing_state; ordinary install will not adopt or repair it." >&2
-      echo "       Use the standalone fix.sh to repair an existing installation, or update.sh to update one." >&2
+      echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh) to update one." >&2
       return 1
     fi
   fi
@@ -2160,7 +2168,7 @@ validate_install_target() {
   for managed in lingtai-tui lingtai-portal lingtai lingtai-agent; do
     if [[ -e "$BIN_DIR/$managed" || -L "$BIN_DIR/$managed" ]]; then
       echo "error: existing managed target $BIN_DIR/$managed was found; ordinary install will not adopt or overwrite it." >&2
-      echo "       Use the standalone fix.sh to repair an existing installation, or update.sh to update one." >&2
+      echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation, or update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh) to update one." >&2
       return 1
     fi
   done
@@ -2177,12 +2185,12 @@ validate_fresh_install_state() {
   local runtime_root="$state_root/runtime"
   if [[ -e "$metadata" || -L "$metadata" ]]; then
     echo "error: existing install receipt $metadata was found; ordinary install is first-install-only." >&2
-    echo "       Use the standalone update.sh, fix.sh, or verify.sh for an existing installation." >&2
+    echo "       Use the standalone update.sh ($LINGTAI_SCRIPTS_ASSETS/update.sh), fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh), or verify.sh ($LINGTAI_SCRIPTS_ASSETS/verify.sh) for an existing installation." >&2
     return 1
   fi
   if [[ -e "$runtime_root" || -L "$runtime_root" ]]; then
     echo "error: existing runtime state $runtime_root was found; ordinary install will not adopt or repair it." >&2
-    echo "       Use the standalone fix.sh to repair an existing installation." >&2
+    echo "       Use the standalone fix.sh ($LINGTAI_SCRIPTS_ASSETS/fix.sh) to repair an existing installation." >&2
     return 1
   fi
 }
