@@ -146,6 +146,8 @@ var codexServiceTierOptions = []string{"normal", "fast"}
 
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 
+var customResponsesThinkingOptions = []string{"default", "none", "minimal", "low", "medium", "high", "xhigh"}
+
 var wireAPIOptions = []string{"auto", "chat_completions", "responses"}
 
 var responsesTransportOptions = []string{"http", "websocket"}
@@ -576,7 +578,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 			m.cycleFocused(+1)
 		}
 	case feThinking:
-		if m.hasCodexThinking() {
+		if m.hasThinking() {
 			m.cycleFocused(+1)
 		}
 	case feTier:
@@ -648,6 +650,10 @@ func (m PresetEditorModel) hasCodexThinking() bool {
 	return isCodexThinkingProvider(asString(m.llmMap()["provider"]))
 }
 
+func (m PresetEditorModel) hasThinking() bool {
+	return m.hasCodexThinking() || m.isCustomOpenAIResponses()
+}
+
 // isCustomOpenAI reports whether the working preset is in the narrow scope
 // where the OpenAI wire-format selector (wire_api) applies: the custom
 // provider with api_compat=openai. Built-in OpenAI, Anthropic/Gemini custom
@@ -658,8 +664,10 @@ func (m PresetEditorModel) isCustomOpenAI() bool {
 		asString(llm["api_compat"]) == "openai"
 }
 
-// isCustomOpenAIResponses narrows transport selection to the only Kernel
-// path that supports it: custom + OpenAI compatibility + explicit Responses.
+// isCustomOpenAIResponses is the narrow custom-provider scope built on the
+// only Kernel path that supports the Responses adapter: custom + OpenAI
+// compatibility + explicit Responses. It gates both the transport selector
+// and the reasoning.effort selector.
 func (m PresetEditorModel) isCustomOpenAIResponses() bool {
 	return m.isCustomOpenAI() && m.fieldString(feWireAPI) == "responses"
 }
@@ -767,6 +775,49 @@ func (m *PresetEditorModel) setCodexThinking(effort string) {
 	}
 }
 
+func (m PresetEditorModel) thinkingValue() string {
+	if m.hasCodexThinking() {
+		return m.codexThinking()
+	}
+	if m.isCustomOpenAIResponses() {
+		switch asString(m.llmMap()["thinking"]) {
+		case "none", "minimal", "low", "medium", "high", "xhigh":
+			return asString(m.llmMap()["thinking"])
+		default:
+			return "default"
+		}
+	}
+	return ""
+}
+
+func (m PresetEditorModel) thinkingOptions() []string {
+	if m.hasCodexThinking() {
+		return codexThinkingOptions
+	}
+	if m.isCustomOpenAIResponses() {
+		return customResponsesThinkingOptions
+	}
+	return nil
+}
+
+func (m *PresetEditorModel) setThinking(effort string) {
+	if m.hasCodexThinking() {
+		m.setCodexThinking(effort)
+		return
+	}
+	llm := m.llmMap()
+	if !m.isCustomOpenAIResponses() || effort == "default" {
+		delete(llm, "thinking")
+		return
+	}
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		llm["thinking"] = effort
+	default:
+		delete(llm, "thinking")
+	}
+}
+
 func normalizeServiceTier(manifest map[string]interface{}) {
 	llm, _ := manifest["llm"].(map[string]interface{})
 	if llm == nil || preset.ClassifyCredentialFamily(asString(llm["provider"])) != preset.CredentialFamilyCodexSingle {
@@ -783,19 +834,32 @@ func normalizeThinking(manifest map[string]interface{}) {
 	if llm == nil {
 		return
 	}
-	if !isCodexThinkingProvider(asString(llm["provider"])) {
-		delete(llm, "thinking")
-		return
+	if isCodexThinkingProvider(asString(llm["provider"])) {
+		switch asString(llm["thinking"]) {
+		case "low", "medium", "high", "xhigh":
+			return
+		default:
+			// Codex with absent/invalid thinking is normalized to the default
+			// so committed/cloned/generated presets explicitly carry it and the
+			// running session receives xhigh rather than a UI-only fallback.
+			llm["thinking"] = codexDefaultThinking
+			return
+		}
 	}
-	switch asString(llm["thinking"]) {
-	case "low", "medium", "high", "xhigh":
-		return
-	default:
-		// Codex with absent/invalid thinking is normalized to the default
-		// so committed/cloned/generated presets explicitly carry it and the
-		// running session receives xhigh rather than a UI-only fallback.
-		llm["thinking"] = codexDefaultThinking
+	if asString(llm["provider"]) == "custom" &&
+		asString(llm["api_compat"]) == "openai" &&
+		asString(llm["wire_api"]) == "responses" {
+		switch asString(llm["thinking"]) {
+		case "none", "minimal", "low", "medium", "high", "xhigh":
+			return
+		default:
+			// Custom's "default" is represented by omission. The Kernel's
+			// existing main-session default then remains "high".
+			delete(llm, "thinking")
+			return
+		}
 	}
+	delete(llm, "thinking")
 }
 
 // normalizeWireAPI strips llm.wire_api whenever the preset leaves the narrow
@@ -865,13 +929,15 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		// Order matches the builtin presets (preset.go BuiltinPresets).
 		// Keep this in sync when adding a new provider/builtin.
 		opts := []string{"minimax", "zhipu", "mimo", "deepseek", "nvidia", "openrouter", "codex", "custom"}
-		newProvider := cycleString(opts, m.fieldString(f), dir)
+		oldProvider := m.fieldString(f)
+		newProvider := cycleString(opts, oldProvider, dir)
 		m.llmMap()["provider"] = newProvider
 		normalizeWireAPI(m.working.Manifest)
 		normalizeResponsesTransport(m.working.Manifest)
-		if newProvider != "codex" {
+		if newProvider != oldProvider {
 			delete(m.llmMap(), "thinking")
 		}
+		normalizeThinking(m.working.Manifest)
 		// Reset model to the new provider's first canonical entry when the
 		// current model isn't valid for the new provider. Without this, a
 		// minimax→zhipu switch leaves "MiniMax-M3" in model
@@ -917,6 +983,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
 		normalizeWireAPI(m.working.Manifest)
 		normalizeResponsesTransport(m.working.Manifest)
+		normalizeThinking(m.working.Manifest)
 	case feWireAPI:
 		next := cycleString(wireAPIOptions, m.fieldString(f), dir)
 		if next == "auto" {
@@ -925,6 +992,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			m.llmMap()["wire_api"] = next
 		}
 		normalizeResponsesTransport(m.working.Manifest)
+		normalizeThinking(m.working.Manifest)
 	case feResponsesTransport:
 		next := cycleString(responsesTransportOptions, m.fieldString(f), dir)
 		if next == "websocket" {
@@ -937,8 +1005,8 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			m.setCodexServiceTier(cycleString(codexServiceTierOptions, m.codexServiceTier(), dir))
 		}
 	case feThinking:
-		if m.hasCodexThinking() {
-			m.setCodexThinking(cycleString(codexThinkingOptions, m.codexThinking(), dir))
+		if m.hasThinking() {
+			m.setThinking(cycleString(m.thinkingOptions(), m.thinkingValue(), dir))
 		}
 	case feAPIKey:
 		// Codex account selector: bind the preset to the next/previous
@@ -1099,7 +1167,7 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 	case feServiceTier:
 		return m.codexServiceTier()
 	case feThinking:
-		return m.codexThinking()
+		return m.thinkingValue()
 	case feAPICompat:
 		s, _ := llm["api_compat"].(string)
 		return s
@@ -1281,7 +1349,7 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 		rows = append(rows, row(feServiceTier, m.row(feServiceTier, lbl("service_tier"), m.codexServiceTier(), width-4)))
 	}
 	if m.fieldVisible(feThinking) {
-		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.codexThinking(), width-4)))
+		rows = append(rows, row(feThinking, m.row(feThinking, lbl("thinking"), m.thinkingValue(), width-4)))
 	}
 	rows = append(rows, row(feAPICompat, m.row(feAPICompat, lbl("api_compat"), asString(llm["api_compat"]), width-4)))
 	if m.fieldVisible(feWireAPI) {
@@ -1444,13 +1512,14 @@ func (m PresetEditorModel) serviceTierRadioStrip(focused bool, valStyle lipgloss
 }
 
 func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.Style) string {
-	if !m.hasCodexThinking() {
+	if !m.hasThinking() {
 		return ""
 	}
-	current := m.codexThinking()
+	current := m.thinkingValue()
+	options := m.thinkingOptions()
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	parts := make([]string, 0, len(codexThinkingOptions))
-	for _, effort := range codexThinkingOptions {
+	parts := make([]string, 0, len(options))
+	for _, effort := range options {
 		if effort == current {
 			if focused {
 				parts = append(parts, valStyle.Render("● "+effort))
@@ -1461,7 +1530,12 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 			parts = append(parts, subtle.Render("○ "+effort))
 		}
 	}
-	return strings.Join(parts, "  ")
+	separator := "  "
+	if m.isCustomOpenAIResponses() {
+		// Seven custom choices still need to fit in the standard 80-column form.
+		separator = " "
+	}
+	return strings.Join(parts, separator)
 }
 
 // baseURLRadioStrip renders the base_url field as a horizontal radio
@@ -1543,7 +1617,7 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 	case feServiceTier:
 		return m.isCodexProvider()
 	case feThinking:
-		return m.hasCodexThinking()
+		return m.hasThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
 	case feResponsesTransport:
@@ -1673,7 +1747,7 @@ func (m PresetEditorModel) fieldVisible(f editorField) bool {
 	case feServiceTier:
 		return m.isCodexProvider()
 	case feThinking:
-		return m.hasCodexThinking()
+		return m.hasThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
 	case feResponsesTransport:

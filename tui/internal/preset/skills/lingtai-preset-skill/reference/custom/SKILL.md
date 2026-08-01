@@ -48,6 +48,21 @@ reports that the configured upstream does not support or rejected Responses
 WebSocket v2. It does not silently fall back to HTTP; choose `http` explicitly
 when the upstream lacks WebSocket support.
 
+## Responses reasoning effort
+
+For `provider: "custom"` with `api_compat: "openai"`, selecting the explicit
+`wire_api: "responses"` path reveals a reasoning-effort choice:
+
+- `default` removes `thinking` from the saved manifest and preserves the
+  Kernel's existing custom-provider default of `high`.
+- `none`, `minimal`, `low`, `medium`, `high`, and `xhigh` write the selected
+  value to `thinking`.
+
+The selector appears only in that exact scope. Changing provider,
+`api_compat`, or `wire_api` removes a stale custom Responses `thinking` value
+before save. The Codex provider keeps its existing effort choices and its
+existing `xhigh` default.
+
 ## Operations
 
 For base URL/API-compat/model/capability declaration shape versus
