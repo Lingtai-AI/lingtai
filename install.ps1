@@ -144,6 +144,19 @@ function Write-Warn { param([string]$Message) Write-Host "warn: $Message" -Foreg
 function Write-Ok   { param([string]$Message) Write-Host "  ok: $Message" -ForegroundColor Green }
 function Write-Step { param([string]$Message) Write-Host "  -> $Message" -ForegroundColor DarkGray }
 
+# Write-Phase prints a numbered progress banner ("[2/6] ...") so a user
+# watching a transient console always knows which stage the installer is in
+# and roughly how much remains -- installs that stall on a network step are
+# otherwise indistinguishable from a hung or crashed window.
+$script:PhaseCount = 0
+function Write-Phase {
+    param([string]$Name)
+    $script:PhaseCount++
+    Write-Host ""
+    Write-Host "[$($script:PhaseCount)/$TotalPhases] $Name" -ForegroundColor Cyan
+}
+$TotalPhases = 7
+
 # --- Progress reporting -------------------------------------------------------
 
 # Long phases (npm ci, two Go builds, a pip install) previously ran with their
@@ -2067,6 +2080,7 @@ function Invoke-Main {
     # no bundle shipped inside the archive, so it resolves the SAME bundle a
     # public install of -Version would (this is the only network use in that
     # mode, and only when the venv step is not skipped).
+    Write-Phase "Resolve release bundle"
     $bundle = $null
     $resolvedTag = $Version
     if (-not $SkipVenv) {
@@ -2083,6 +2097,7 @@ function Invoke-Main {
     # 2. Runtime capability gate. Provisioned BEFORE binaries/PATH/metadata can
     # change, so a runtime failure never leaves a half-installed TUI. -SkipVenv
     # is the explicit TUI-only opt-out; DryRun performs no writes at all.
+    Write-Phase "Runtime capability gate"
     $kernelMeta = $null
     if (-not $SkipVenv -and -not $DryRun) {
         $kernelMeta = Install-Venv -Bundle $bundle -TuiTag $resolvedTag -GlobalDir $GlobalDir
@@ -2117,6 +2132,7 @@ function Invoke-Main {
     # 3. Install binaries. When step 1 already resolved a tag/bundle (public
     # mode, venv not skipped), pass that SAME resolution through instead of
     # letting Install-FromPublicRelease re-resolve "latest" a second time.
+    Write-Phase "Install binaries"
     if ($haveArchive) {
         $managed = Install-FromLocalArtifact -Archive $ArchivePath -Sidecar $ChecksumPath -BinDir $BinDir -Requested $Version
     } elseif ($bundle) {
@@ -2130,6 +2146,7 @@ function Invoke-Main {
     }
 
     # 4. PATH. Skipped entirely in DryRun (no persistent writes).
+    Write-Phase "Update PATH"
     if ($DryRun) {
         Write-Step "[dry-run] would add '$BinDir' to the process and (unless -NoModifyPath) persistent user PATH"
     } else {
@@ -2137,11 +2154,13 @@ function Invoke-Main {
     }
 
     # 5. Runtime disposition.
+    Write-Phase "Runtime disposition"
     if ($SkipVenv) {
         Write-Warn "Skipping runtime venv (-SkipVenv). Provision the Python runtime yourself; the TUI/portal binaries are installed."
     }
 
     # 6. Metadata. Skipped in DryRun (no writes).
+    Write-Phase "Install metadata"
     if ($DryRun) {
         Write-Step "[dry-run] would write install metadata under $GlobalDir"
     } else {
@@ -2165,6 +2184,7 @@ function Invoke-Main {
     }
 
     # 7. Summary.
+    Write-Phase "Summary"
     Write-Host ""
     if ($DryRun) {
         Write-Host "Dry run complete. Nothing was installed." -ForegroundColor Green
@@ -2189,6 +2209,16 @@ try {
     # cleanup/removal -- staging is left on disk for evidence/recovery.
     if ($_.Exception -and $_.Exception.Message) {
         Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    # Interactive pause: when this script is launched from a transient console
+    # (double-click, shortcut, Start-Process, `curl | iex`), the window closes
+    # the instant `exit` runs -- the error above vanishes before it can be read
+    # and the install looks like a silent crash ("闪退"). Only pause for a real
+    # interactive console; piped/automated invocations stay non-blocking.
+    if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+        Write-Host ""
+        Write-Host "Installation failed. Press Enter to close this window..." -ForegroundColor DarkGray
+        [void][Console]::ReadLine()
     }
     exit 1
 }
