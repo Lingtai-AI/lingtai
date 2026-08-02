@@ -135,12 +135,9 @@ type capInfo struct {
 // — its callers pass hasPresets||draftMode so the picker honestly reads
 // "Step 1/4" even on a machine with no presets yet.
 func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, total int) {
-	if setupMode {
-		total = 4 // library → presets-config → details → recipe
-	} else if hasPresets {
-		total = 4 // library → presets-config → details → recipe
-	} else {
-		total = 5 // api key → library → presets-config → details → recipe
+	if setupMode {		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
+	} else if hasPresets {		total = 3 // library • presets-config • details (recipe picker removed: adaptive only)
+	} else {		total = 4 // api key • library • presets-config • details
 	}
 	switch {
 	case !hasPresets && step == stepAPIKey:
@@ -161,9 +158,9 @@ func stepProgress(step firstRunStep, hasPresets, setupMode bool) (current int, t
 		return 4, total
 	case step == stepRecipe || step == stepRecipeSwapConfirm:
 		if setupMode || hasPresets {
-			return 4, total
+			return 3, total
 		}
-		return 5, total
+		return 4, total
 	case step == stepLaunching:
 		return total, total
 	}
@@ -2409,14 +2406,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.pendingAgentOpts = opts
 					m.pendingDirName = filepath.Base(m.setupOrchDir)
 					m.agentName = m.nameInput.Value()
-					m.step = stepRecipe
 					m.message = ""
-					if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-						m.recipeCustomInput.Focus()
-					} else {
-						m.recipeCustomInput.Blur()
-					}
-					return m, nil
+					return m.applyDefaultRecipeAndAdvance()
 				}
 				name := m.nameInput.Value()
 				if name == "" {
@@ -2485,15 +2476,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 					m.pendingDirName = filepath.Base(m.setupOrchDir)
 				}
 
-				m.step = stepRecipe
 				m.message = ""
-				// Focus custom input if pre-selected to custom
-				if m.recipeIdxToName(m.recipeIdx) == preset.RecipeCustom {
-					m.recipeCustomInput.Focus()
-				} else {
-					m.recipeCustomInput.Blur()
-				}
-				return m, nil
+				return m.applyDefaultRecipeAndAdvance()
 			case "esc":
 				// stepCapabilities was removed from the flow — Esc from
 				// the agent-name page returns to the preset picker.
@@ -5103,6 +5087,28 @@ func (m FirstRunModel) performSetupSaveOnly() (FirstRunModel, tea.Cmd) {
 //     ~/.lingtai-tui/ or the user's download folder).
 //  4. Run preset.ApplyRecipe to write .prompt (skipped when greet
 //     absent), append skills paths, and snapshot the applied recipe.
+// applyDefaultRecipeAndAdvance is the stepAgentNameDir completion path for
+// the recipe phase: the recipe picker (stepRecipe) has been removed from the
+// setup/first-run flow and "adaptive" (preset.DefaultRecipe) is the only
+// recipe choice, so Enter on the details page commits adaptive directly
+// instead of opening the picker. The swap-confirm page is still honored in
+// setup mode when the running agent currently uses a different recipe.
+func (m FirstRunModel) applyDefaultRecipeAndAdvance() (FirstRunModel, tea.Cmd) {
+	recipeName := preset.DefaultRecipe
+	customDir := ""
+	if m.draftMode {
+		return m.enterReviewStep(recipeName, customDir)
+	}
+	if m.setupMode && recipeChanged(m.currentRecipe, m.currentCustomDir, recipeName, customDir) {
+		m.pendingRecipeName = recipeName
+		m.pendingCustomDir = customDir
+		m.step = stepRecipeSwapConfirm
+		m.swapConfirmIdx = 0
+		return m, nil
+	}
+	return m.performRecipeSave(recipeName, customDir)
+}
+
 func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
 	lang := m.pendingAgentOpts.Language
 	if lang == "" {
