@@ -1980,6 +1980,13 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 		args, _ := entry["tool_args"].(string)
 		if args == "" {
 			if argsMap, ok := entry["tool_args"].(map[string]interface{}); ok {
+				// LingTai tool protocol (LTP v2): args carry an explicit
+				// "action" field. Render the tool as tool.action_name instead
+				// of the full args JSON, and change nothing else about the
+				// tool_call display (timestamp, color, truncation, body layout).
+				if action, ok := argsMap["action"].(string); ok && action != "" {
+					return fmt.Sprintf("%s.%s", name, action)
+				}
 				data, _ := json.Marshal(argsMap)
 				args = string(data)
 			}

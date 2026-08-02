@@ -1,0 +1,77 @@
+package fs
+
+import (
+	"testing"
+)
+
+// TestExtractSessionEventTextToolCallLTP renders LingTai-protocol tool calls as
+// tool.action_name when the args carry an explicit action field, and leaves
+// every other tool_call shape untouched.
+func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]interface{}
+		want string
+	}{
+		{
+			name: "ltp-v2-args-with-action",
+			raw: map[string]interface{}{
+				"tool_name": "shell",
+				"tool_args": map[string]interface{}{
+					"action": "run",
+					"input":  map[string]interface{}{"command": "ls"},
+				},
+			},
+			want: "shell.run",
+		},
+		{
+			name: "ltp-v2-nested-args-with-action",
+			raw: map[string]interface{}{
+				"tool_name": "file",
+				"tool_args": map[string]interface{}{
+					"action": "read",
+					"input":  map[string]interface{}{"file_path": "/tmp/x"},
+				},
+			},
+			want: "file.read",
+		},
+		{
+			name: "non-ltp-map-args-without-action",
+			raw: map[string]interface{}{
+				"tool_name": "web",
+				"tool_args": map[string]interface{}{
+					"query": "hello",
+				},
+			},
+			want: `web({"query":"hello"})`,
+		},
+		{
+			name: "string-args-pass-through",
+			raw: map[string]interface{}{
+				"tool_name": "bash",
+				"tool_args": "echo hi",
+			},
+			want: "bash(echo hi)",
+		},
+		{
+			name: "empty-action-keeps-json",
+			raw: map[string]interface{}{
+				"tool_name": "shell",
+				"tool_args": map[string]interface{}{
+					"action": "",
+					"input":  map[string]interface{}{"command": "ls"},
+				},
+			},
+			want: `shell({"action":"","input":{"command":"ls"}})`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractSessionEventText(tt.raw, "tool_call")
+			if got != tt.want {
+				t.Errorf("extractSessionEventText(tool_call) = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
