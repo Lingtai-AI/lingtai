@@ -121,7 +121,7 @@ func TestProbeNoProjectPure_FailsClosedOnNonNotExistError(t *testing.T) {
 // never mkdirs ~/.lingtai-tui, in contrast to GlobalDir/EnsureGlobalDir.
 func TestGlobalDirPath_NeverCreatesDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	path, err := config.GlobalDirPath()
 	if err != nil {
@@ -223,7 +223,7 @@ func TestListRegisteredProjects_NeverPrunes(t *testing.T) {
 // test (and every earlier one) proves both.
 func TestLauncherRootModel_CreateEntryDoesNotTouchExistingConfigFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestLauncherRootModel_CreateEntryDoesNotTouchExistingConfigFile(t *testing.
 func buildDraftModel(t *testing.T) (FirstRunModel, string, string) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	draft := NewProjectDraft(projectRoot)
@@ -340,7 +340,7 @@ func TestLauncherPrelude_ThemeLanguageDoNotPersist(t *testing.T) {
 		_ = i18n.SetLang("en")
 	})
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 
@@ -444,7 +444,7 @@ func TestDraftFirstRun_PresetEditorCommitDoesNotPersist(t *testing.T) {
 // byte-for-byte while a localized "blocked" status is shown.
 func TestDraftFirstRun_DeleteKeyNeverDeletesSavedPreset(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	savedPreset := preset.Preset{
 		Name: "my-saved-preset",
@@ -675,7 +675,7 @@ func TestDraftFirstRun_EmptyPresetEditorKeyDoesNotDeleteSharedKey(t *testing.T) 
 // a synthetic direct field mutation).
 func TestDraftFirstRun_CodexDeleteBlockedForPreExistingAuth(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatalf("mkdir globalDir: %v", err)
@@ -1057,7 +1057,7 @@ func TestDraftFirstRun_BackButtonAtEntryStepEmitsCancelMsg(t *testing.T) {
 // to the decision page, and discard/reset the old draft."
 func TestLauncherRootModel_CancelReturnsToChooseAndDiscardsDraft(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 
@@ -1145,7 +1145,7 @@ func TestLauncherRootModel_AppliesPersistedThemeAndLanguageAndKeepsPreludeChoice
 	})
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
@@ -1619,7 +1619,7 @@ func TestLauncherWelcomeScreen_MatchesCanonicalFirstRunWelcome(t *testing.T) {
 		SetThemeByName(DefaultThemeName)
 		_ = i18n.SetLang("en")
 	})
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	projectRoot := filepath.Join(t.TempDir(), strings.Repeat("long-project-segment-", 8))
 	m := NewLauncherRootModel(projectRoot, filepath.Join(t.TempDir(), ".lingtai-tui"), "")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -1699,7 +1699,7 @@ func TestLauncherStagingRootViewReservesFooter(t *testing.T) {
 		SetThemeByName(DefaultThemeName)
 		_ = i18n.SetLang("en")
 	})
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	stagingRoot := t.TempDir()
 	longPath := filepath.Join(stagingRoot, strings.Repeat("路径-", 24)+"e\u0301-final")
 	longError := strings.Repeat("discard-error-", 24) + "权限 denied"
@@ -1751,7 +1751,7 @@ func assertLauncherScreenWidth(t *testing.T, content string, width int) {
 // root preserve the no-write guarantee while covering the real handoff.
 func TestLauncherRootModel_CreateReviewCtrlCRecordsCancel(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	projectRoot := t.TempDir()
 	globalDir := filepath.Join(home, ".lingtai-tui")
 
@@ -1789,7 +1789,7 @@ func TestLauncherRootModel_CreateReviewCtrlCRecordsCancel(t *testing.T) {
 // contract at the production dispatcher boundary: Esc backs one level,
 // while q and Ctrl+C cancel from every launcher-owned browsing screen.
 func TestLauncherKeyboardContract_ThroughRootUpdate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	newRoot := func() LauncherRootModel {
 		m := NewLauncherRootModel(t.TempDir(), filepath.Join(t.TempDir(), ".lingtai-tui"), "")
 		m.width, m.height = 80, 24

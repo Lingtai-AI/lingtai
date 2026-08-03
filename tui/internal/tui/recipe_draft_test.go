@@ -11,7 +11,7 @@ import (
 
 func TestNewDraftFirstRunModel_FreshHomeShowsEmbeddedRecipesWithoutWrites(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	baseDir := filepath.Join(t.TempDir(), ".lingtai")
 
@@ -138,6 +138,10 @@ func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutGlobalBootstrap(t *testing
 }
 
 func TestRecipePreviewDoesNotSubstituteEmbeddedForMissingDiskRecipe(t *testing.T) {
+	// preset.Bootstrap ignores globalDir when refreshing templates: it writes to
+	// os.UserHomeDir()/.lingtai-tui/presets/templates. Without this redirect the
+	// test drops 12 template files into the developer's real home on every run.
+	setTestHome(t, t.TempDir())
 	globalDir := filepath.Join(t.TempDir(), "global")
 	if err := preset.Bootstrap(globalDir); err != nil {
 		t.Fatalf("bootstrap disk recipes: %v", err)

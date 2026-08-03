@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -164,8 +165,18 @@ func TestSaveCodexCredentialLabelPreservesTokensAndClears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat token file: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("token file mode = %o, want 0600", info.Mode().Perm())
+	// The intent is "saveCodexCredentialLabel rewrites the file without widening
+	// its permissions". Windows has no POSIX permission bits: access is governed
+	// by ACLs, os.WriteFile's mode argument only decides read-only vs writable,
+	// and Go reports 0666 for any writable file. Assert the restrictive 0600 on
+	// the platforms that can actually enforce it, and the value Windows really
+	// produces there, so the check stays meaningful instead of always failing.
+	wantPerm := os.FileMode(0o600)
+	if runtime.GOOS == "windows" {
+		wantPerm = 0o666
+	}
+	if info.Mode().Perm() != wantPerm {
+		t.Fatalf("token file mode = %o, want %o", info.Mode().Perm(), wantPerm)
 	}
 
 	if _, err := saveCodexCredentialLabel(path, "   "); err != nil {

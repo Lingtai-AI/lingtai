@@ -71,7 +71,7 @@ func TestLoginModel_DelTwoPressDeletesCodex(t *testing.T) {
 
 func TestCodexOAuthImpactMessageCountsSavedPresetsOnly(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	savedDir := filepath.Join(preset.PresetsDir(), "saved")
 	templateDir := filepath.Join(preset.PresetsDir(), "templates")
 	if err := os.MkdirAll(savedDir, 0o755); err != nil {
