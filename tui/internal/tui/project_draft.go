@@ -6,13 +6,16 @@ import (
 )
 
 // ProjectDraft is the single in-memory holder for every choice made while
-// creating a NEW project through the no-project launcher. Before the atomic
-// rename, its project-local choices may be materialized only inside the owned
-// sibling staging directory; no final .lingtai path or global config, preset,
-// credential, or registry state is persisted. See Invariant 3/4 of the launcher
-// design (reports/design/lingtai-tui-no-project-launcher-2026-07-14). Until
-// confirmation, ProjectDraft is the only source of truth for theme/language,
-// credential material, preset edits, agent options, and recipe selection.
+// creating a NEW project through the no-project launcher. Until confirmation,
+// it is the only source of truth for theme/language, credential material,
+// preset edits, agent options, and recipe selection, and those choices cause no
+// writes. After confirmation, project-local state is built and validated only
+// in the owned sibling staging directory. RunProjectCreate then persists and
+// verifies the exact launch-critical preset/API-key/Codex dependencies before
+// the atomic rename; theme/language, registry, utility refresh, runtime checks,
+// and launch remain post-commit best effort. No final .lingtai path exists
+// before rename. See Invariant 3/4 of the launcher design
+// (reports/design/lingtai-tui-no-project-launcher-2026-07-14).
 //
 // Secret hygiene: DraftAPIKey and DraftCodexTokens hold credential material
 // that must never appear in a String()/Sprintf("%+v", ...)/error-wrapping
@@ -50,25 +53,21 @@ type ProjectDraft struct {
 	// different, unedited one before Review correctly drops the stale
 	// edit rather than silently finalizing it.
 	//
-	// DraftPresetDirty gates a REAL disk write, and that write happens
-	// strictly AFTER the atomic rename, not during staging: preset.Save
-	// only runs in the finalizer's post-commit phase (runPostCommit,
-	// PhasePostCommitConfig), once the project is already valid and
-	// published. This is deliberate — an earlier version called
-	// preset.Save during the pre-rename staging/build phase, which left an
-	// orphaned real global preset file behind if a LATER pre-rename phase
-	// then failed (the project was never created, but the preset file
-	// would have survived cleanup, since cleanup only ever removes the
-	// staging directory). The staged init.json can safely reference this
-	// preset's path before the file exists on disk — see RunProjectCreate's
-	// PhaseApplyPreset comment for why that's not a validity problem.
+	// DraftPresetDirty gates a REAL disk write in PhasePersistDependencies:
+	// only after the staged project passes all build/recipe/orchestrator
+	// validation, but before the atomic rename. The same normalized/stamped
+	// SourceSaved object generates init.json, is written by preset.Save, and
+	// has its exact RefFor verified. Failure leaves Committed=false and cleans
+	// staging. A later rename failure may leave that valid user-owned preset
+	// behind; it is intentionally not deleted or rolled back blindly.
 	DraftPreset      *preset.Preset
 	DraftPresetDirty bool // true once the user has actually edited/committed a preset in the wizard
 
-	// DraftCodexTokens holds a completed Codex OAuth token bundle held
-	// in memory instead of being written to codex-auth.json immediately.
-	// Marshaled JSON bytes, wrapped so the raw bearer/refresh tokens never
-	// print via %v/%s. Nil means "no Codex login performed in this draft".
+	// DraftCodexTokens holds a completed Codex OAuth token bundle in memory
+	// until PhasePersistDependencies writes and verifies codex-auth.json before
+	// project publication. Marshaled JSON bytes are wrapped so the raw
+	// bearer/refresh tokens never print via %v/%s. Nil means "no Codex login
+	// performed in this draft".
 	DraftCodexTokens secretBytes
 
 	// AgentName/AgentDirName are the chosen orchestrator identity.
@@ -166,7 +165,7 @@ func (kp keyPresence) keyNames() map[string]string {
 // secretString is a string wrapper that never reveals its value through
 // default formatting (%v, %s, %+v, %#v) or accidental logging. Call Reveal()
 // explicitly (and only at the point of use — e.g. writing the credential to
-// disk during the finalizer's build phase) to get the underlying value.
+// disk during the finalizer's dependency phase) to get the underlying value.
 //
 // Both String() and GoString() are required: Go's fmt package only invokes
 // the fmt.Stringer interface (String()) for %v/%s/%+v verbs — %#v instead

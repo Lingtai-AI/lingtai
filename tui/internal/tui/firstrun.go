@@ -181,7 +181,7 @@ type FirstRunModel struct {
 	// committed yet in this draft session. enterReviewStep always resolves
 	// DraftPreset afresh from the CURRENT cursor; it compares this index only
 	// to decide whether that selected preset is dirty and therefore needs the
-	// post-commit preset.Save. This separation prevents both stale-preset
+	// pre-publish dependency preset.Save. This separation prevents stale-preset
 	// carryover and stale Back/reselect state.
 	draftEditedPresetIdx int
 	// draftPendingAPIKeys keeps every in-memory key edit associated with its
@@ -1103,10 +1103,9 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		}
 		if m.draftMode {
 			// Draft only: hold the edited preset in memory. preset.Save
-			// (which writes presets/saved/<name>.json) runs strictly AFTER
-			// the atomic rename, in the finalizer's post-commit phase, not
-			// here and not during staging — see ProjectDraft.DraftPreset's
-			// doc comment for why the write is deferred that late. This
+			// (which writes presets/saved/<name>.json) runs in the finalizer's
+			// dependency phase after staged validation but before the atomic
+			// rename — see ProjectDraft.DraftPreset's doc comment. This
 			// captures the CURRENT cursor's edit; if the user later
 			// navigates away to a different, unedited preset before
 			// reaching Review, enterReviewStep re-resolves fresh from the
@@ -1249,8 +1248,8 @@ func (m FirstRunModel) Update(msg tea.Msg) (FirstRunModel, tea.Cmd) {
 		if m.draftMode {
 			// Draft only: hold the completed OAuth bundle in memory as
 			// secretBytes. The real codex-auth.json write happens during
-			// the finalizer's post-commit phase (project_create.go), never
-			// here. m.codexAuth is still updated in-memory (below, via
+			// the finalizer's pre-publish dependency phase (project_create.go),
+			// never here. m.codexAuth is still updated in-memory (below, via
 			// refreshCodexAuth) purely so the wizard's UI reflects "logged
 			// in" without touching disk.
 			if m.draft != nil {
@@ -5196,7 +5195,7 @@ func (m FirstRunModel) performRecipeSave(recipeName, customDir string) (FirstRun
 // stale prior Review value. The preset editor splices its committed copy into
 // m.presets, so this function can resolve fresh on every entry (including
 // Back/reselect navigation) and use draftEditedPresetIdx only to decide whether
-// the selected row is dirty enough to require preset.Save after commit.
+// the selected row is dirty enough to require preset.Save before publication.
 func (m FirstRunModel) enterReviewStep(recipeName, customDir string) (FirstRunModel, tea.Cmd) {
 	if m.draft != nil {
 		m.draft.RecipeName = recipeName
@@ -5207,10 +5206,10 @@ func (m FirstRunModel) enterReviewStep(recipeName, customDir string) (FirstRunMo
 		m.draft.AgentOpts = m.pendingAgentOpts
 		m.draft.ExistingKeys = redactedKeyPresence(m.existingKeys)
 		// Always resolve the preset fresh from the current cursor. Edited
-		// presets are already spliced into m.presets, so the index is needed
-		// only to decide whether preset.Save must run after commit. Keeping a
-		// previously resolved DraftPreset here breaks Back/reselect navigation
-		// and can silently finalize a different row.
+		// presets are already spliced into m.presets, so the index only decides
+		// whether preset.Save must run in the dependency phase. Retaining a
+		// previously resolved DraftPreset breaks Back/reselect navigation and can
+		// silently finalize a different row.
 		if p, ok := m.presetAtVisibleIdx(m.cursor); ok {
 			pCopy := p
 			m.draft.DraftPreset = &pCopy

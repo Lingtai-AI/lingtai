@@ -83,7 +83,7 @@ func TestBuildEmbeddedRecipeEntriesUsesContentWithoutDiskPath(t *testing.T) {
 	}
 }
 
-func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutGlobalBootstrap(t *testing.T) {
+func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutBroadGlobalBootstrap(t *testing.T) {
 	draft, root := newTestDraft(t)
 	opts := testCreateOptions(t, root)
 	draft.RecipeName = "adaptive"
@@ -95,8 +95,10 @@ func TestRunProjectCreate_AppliesEmbeddedRecipeWithoutGlobalBootstrap(t *testing
 			return nil
 		}
 		checkedBeforeRename = true
-		if _, err := os.Stat(opts.GlobalDir); !os.IsNotExist(err) {
-			t.Fatalf("global dir changed before rename: %v", err)
+		// Exact preset/credential dependencies may now exist before rename,
+		// but broad Bootstrap/utility refresh remains post-commit.
+		if _, err := os.Stat(filepath.Join(opts.GlobalDir, "utilities")); !os.IsNotExist(err) {
+			t.Fatalf("bundled utility library was populated before rename: %v", err)
 		}
 		entries, err := os.ReadDir(root)
 		if err != nil {

@@ -15,10 +15,13 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// PresetEditorCommitMsg fires when the editor's working copy passes
-// validation and the user pressed Ctrl+S. Hosts (firstrun, /setup,
-// library) decide what to do next — typically: persist via preset.Save,
-// then advance their own state. The editor itself does NOT save to disk.
+// PresetEditorCommitMsg fires when the editor's working copy passes validation
+// and the user completes a save action (normal save, clone-name Enter, or the
+// Ctrl+E expert overwrite). Hosts (firstrun, /setup, library) decide what to do
+// next — typically: persist via preset.Save, then advance their own state. The
+// editor itself does NOT save to disk.
+// Preset.Source is always SourceSaved so RefFor names the saved/ file those
+// hosts create, including an expert overwrite that keeps a built-in name.
 //
 // APIKey carries the new key value the user typed in the editor, when
 // they actually changed it. Empty means "unchanged — keep whatever's
@@ -1068,7 +1071,16 @@ func (m PresetEditorModel) commit() (PresetEditorModel, tea.Cmd) {
 		}
 	}
 	normalizeLLMForCommit(committed.Manifest)
-	return m, func() tea.Msg {
+	return m, m.commitCmd(committed)
+}
+
+// commitCmd is the single PresetEditorCommitMsg constructor. Every host writes
+// editor results through preset.Save, whose destination is presets/saved/, so
+// the runtime-only Source on the committed object must identify that exact
+// destination even when its name matches a built-in template.
+func (m PresetEditorModel) commitCmd(committed preset.Preset) tea.Cmd {
+	committed.Source = preset.SourceSaved
+	return func() tea.Msg {
 		return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
 	}
 }
@@ -1102,9 +1114,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
 		normalizeLLMForCommit(committed.Manifest)
-		return m, func() tea.Msg {
-			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
-		}
+		return m, m.commitCmd(committed)
 	case "enter":
 		newName := strings.TrimSpace(m.cloneNameInput.Value())
 		if newName == "" {
@@ -1120,9 +1130,7 @@ func (m PresetEditorModel) updateClonePrompt(msg tea.KeyMsg) (PresetEditorModel,
 		m.cloneNameInput.Blur()
 		committed := clonePresetForEditor(m.working)
 		normalizeLLMForCommit(committed.Manifest)
-		return m, func() tea.Msg {
-			return PresetEditorCommitMsg{Preset: committed, APIKey: m.apiKey, APIKeySet: m.apiKeySet}
-		}
+		return m, m.commitCmd(committed)
 	}
 	var cmd tea.Cmd
 	m.cloneNameInput, cmd = m.cloneNameInput.Update(msg)
@@ -1894,7 +1902,8 @@ func (m PresetEditorModel) renderSaveButton() string {
 
 // clonePresetForEditor deep-copies a Preset via JSON round-trip so the
 // editor's working copy doesn't share map references with the caller.
-// preset.Clone changes the Name; we want everything preserved.
+// preset.Clone changes the Name; we preserve every serialized field here.
+// Source is runtime-only and is deliberately re-established by commitCmd.
 func clonePresetForEditor(p preset.Preset) preset.Preset {
 	data, err := json.Marshal(p)
 	if err != nil {
