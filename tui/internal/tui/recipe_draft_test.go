@@ -11,7 +11,7 @@ import (
 
 func TestNewDraftFirstRunModel_FreshHomeShowsEmbeddedRecipesWithoutWrites(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	globalDir := filepath.Join(home, ".lingtai-tui")
 	baseDir := filepath.Join(t.TempDir(), ".lingtai")
 

@@ -8,15 +8,16 @@ import (
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
 
-// withTempCodexHome points $HOME at a fresh temp dir so preset.List/Save (which
-// resolve presets/saved under os.UserHomeDir) and codexAuthRefForPath (which
-// home-shortens absolute paths) operate against the temp tree, never the real
-// user's presets or credentials. Returns the temp home and the matching
-// globalDir (~/.lingtai-tui) the production code passes around.
+// withTempCodexHome points the user home at a fresh temp dir so preset.List/Save
+// (which resolve presets/saved under os.UserHomeDir) and codexAuthRefForPath
+// (which home-shortens absolute paths) operate against the temp tree, never the
+// real user's presets or credentials. The redirect goes through setTestHome so
+// it also covers Windows, where os.UserHomeDir reads USERPROFILE and ignores
+// HOME entirely. Returns the temp home and the matching globalDir
+// (~/.lingtai-tui) the production code passes around.
 func withTempCodexHome(t *testing.T) (home, globalDir string) {
 	t.Helper()
-	home = t.TempDir()
-	t.Setenv("HOME", home)
+	home = tempTestHome(t)
 	globalDir = filepath.Join(home, ".lingtai-tui")
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatalf("mkdir globalDir: %v", err)

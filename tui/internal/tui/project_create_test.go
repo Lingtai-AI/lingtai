@@ -46,7 +46,7 @@ func newTestDraft(t *testing.T) (*ProjectDraft, string) {
 func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	return CreateOptions{
 		GlobalDir:           filepath.Join(home, ".lingtai-tui"),
 		ExpectedProjectRoot: expectedProjectRoot,

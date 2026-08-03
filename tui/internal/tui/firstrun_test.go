@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/anthropics/lingtai-tui/i18n"
@@ -860,6 +861,13 @@ func TestPresetKeyNext_AdvancesWithoutLiveProbeForAPIKeyProvider(t *testing.T) {
 			},
 		},
 		presetKeyInput: keyInput,
+		// Pressing Next advances into enterCapabilities → enterAgentNameDir,
+		// which focuses nameInput and blurs dirInput. A zero-value
+		// textinput.Model has a nil cursor context, so Focus() panics; the
+		// production constructor builds both with textinput.New(). Mirror it
+		// here rather than leaving the literal half-initialized.
+		nameInput: textinput.New(),
+		dirInput:  textinput.New(),
 	}
 
 	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -897,6 +905,10 @@ func TestFirstRunAgentPresetsNext_AdvancesWithoutLiveCodexProbe(t *testing.T) {
 		presetDefaultIdx: 0,
 		presetCfgCursor:  2, // row 0, Back 1, Next 2
 		cursor:           0,
+		// Same reason as above: advancing runs enterAgentNameDir, which focuses
+		// nameInput — a zero-value textinput.Model would panic there.
+		nameInput: textinput.New(),
+		dirInput:  textinput.New(),
 	}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -961,7 +973,7 @@ func TestPresetEditorCommit_KeySaveErrorSurfacesAndDoesNotSavePreset(t *testing.
 	// to preset.Save, it would write under ~/.lingtai-tui/presets/saved.
 	// Point HOME at a temp dir so we can assert nothing was written there.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	m := FirstRunModel{
 		step:         stepPickPreset,
 		globalDir:    dir,
