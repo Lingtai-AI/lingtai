@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anthropics/lingtai-tui/internal/config"
 	"github.com/anthropics/lingtai-tui/internal/inventory"
 	"github.com/anthropics/lingtai-tui/internal/preset"
 )
@@ -47,6 +49,14 @@ func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 	t.Helper()
 	home := t.TempDir()
 	setTestHome(t, home)
+	// Non-dirty drafts must point at an exact backing preset. Seed the saved
+	// fixture after HOME is isolated so dependency verification can distinguish
+	// a real selection from the stale/missing-selection cases below.
+	seed := minimalDraftPreset()
+	seed.Source = preset.SourceSaved
+	if err := preset.Save(seed); err != nil {
+		t.Fatalf("seed saved preset dependency: %v", err)
+	}
 	return CreateOptions{
 		GlobalDir:           filepath.Join(home, ".lingtai-tui"),
 		ExpectedProjectRoot: expectedProjectRoot,
@@ -57,6 +67,28 @@ func testCreateOptions(t *testing.T, expectedProjectRoot string) CreateOptions {
 		RuntimeReady:      func(string) error { return nil },
 		ResolveLingtaiCmd: func(string) string { return "" },
 	}
+}
+
+func activePresetRefFromInit(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read init.json: %v", err)
+	}
+	var doc struct {
+		Manifest struct {
+			Preset struct {
+				Active string `json:"active"`
+			} `json:"preset"`
+		} `json:"manifest"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse init.json: %v", err)
+	}
+	if doc.Manifest.Preset.Active == "" {
+		t.Fatal("init.json manifest.preset.active is empty")
+	}
+	return doc.Manifest.Preset.Active
 }
 
 // TestRunProjectCreate_Success proves the happy path: staging disappears,
@@ -282,6 +314,7 @@ func TestRunProjectCreate_PreRenameFailureLeavesNoProject(t *testing.T) {
 		PhaseApplyPreset,
 		PhaseApplyRecipe,
 		PhaseValidate,
+		PhasePersistDependencies,
 	}
 	for _, phase := range phases {
 		phase := phase
@@ -386,7 +419,7 @@ func TestRunProjectCreate_PostRenameFailureLeavesValidRetryableProject(t *testin
 	}
 }
 
-// --- Invariant 4: dirty preset save is deferred to post-commit -------------
+// --- Invariant 4: launch dependencies precede publication ------------------
 
 // newTestDraftWithDirtyPreset is newTestDraft but with DraftPresetDirty=true
 // — the exact condition that triggers RunProjectCreate's preset.Save call.
@@ -408,26 +441,15 @@ func newTestDraftWithDirtyPreset(t *testing.T) (*ProjectDraft, string, string) {
 	return draft, root, p.Name
 }
 
-// TestRunProjectCreate_DirtyPresetPreRenameFailureLeavesNoGlobalTrace proves
-// the exact defect a parent review found: a dirty draft preset must NOT be
-// persisted to the real global ~/.lingtai-tui/presets/saved/ directory when
-// a LATER pre-rename phase fails. Before this fix, preset.Save ran inside
-// PhaseApplyPreset itself — before PhaseApplyRecipe/PhaseValidate/PhaseRename
-// had a chance to fail — so a failure in any of those later pre-rename
-// phases left a real global preset file on disk for a project that was
-// never actually created, and RunProjectCreate's own cleanup only ever
-// touched the STAGING directory, never that orphaned global file.
-//
-// This asserts BOTH ends of the "byte-identical/absent" requirement: the
-// final .lingtai/ must not exist (already covered by the pre-rename matrix
-// above), AND the entire global dir tree must be identical to a snapshot
-// taken before RunProjectCreate ran at all — proving no preset file (or
-// anything else) was left behind in ~/.lingtai-tui.
-func TestRunProjectCreate_DirtyPresetPreRenameFailureLeavesNoGlobalTrace(t *testing.T) {
+// TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset proves
+// the issue-scoped ordering boundary: a dirty preset is not persisted until
+// the staged project passes every build and orchestrator-validation phase.
+// Other pre-validation global writes (notably soul-flow configuration) are a
+// separate contract and deliberately not asserted here.
+func TestRunProjectCreate_DirtyPresetPreValidationFailureDoesNotSavePreset(t *testing.T) {
 	phases := []CreatePhase{
 		PhaseApplyRecipe, // the first phase strictly AFTER PhaseApplyPreset
 		PhaseValidate,
-		PhaseRename,
 	}
 	for _, phase := range phases {
 		phase := phase
@@ -435,8 +457,6 @@ func TestRunProjectCreate_DirtyPresetPreRenameFailureLeavesNoGlobalTrace(t *test
 			draft, root, presetName := newTestDraftWithDirtyPreset(t)
 			opts := testCreateOptions(t, root)
 			opts.InjectFailure = failPhaseInjector(phase)
-
-			globalBefore := dirSnapshot(t, opts.GlobalDir)
 
 			res := RunProjectCreate(draft, opts)
 
@@ -448,9 +468,6 @@ func TestRunProjectCreate_DirtyPresetPreRenameFailureLeavesNoGlobalTrace(t *test
 				t.Fatalf("phase %v: final .lingtai/ must not exist, stat err = %v", phase, err)
 			}
 
-			globalAfter := dirSnapshot(t, opts.GlobalDir)
-			assertSnapshotsEqual(t, "global dir after pre-rename failure at "+phase.String(), globalBefore, globalAfter)
-
 			presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
 			if _, err := os.Stat(presetPath); !os.IsNotExist(err) {
 				t.Fatalf("phase %v: dirty preset must NOT be saved to disk when a pre-rename phase fails, but found %s", phase, presetPath)
@@ -459,14 +476,10 @@ func TestRunProjectCreate_DirtyPresetPreRenameFailureLeavesNoGlobalTrace(t *test
 	}
 }
 
-// TestRunProjectCreate_DirtyPresetSavedOnlyAfterCommit proves the successful
-// path: the dirty preset is NOT on disk immediately after PhaseApplyPreset
-// (impossible to observe directly since RunProjectCreate is one synchronous
-// call, so this asserts the stronger, directly-testable claim: it IS on
-// disk after a full successful RunProjectCreate, confirming the deferred
-// save in runPostCommit actually ran) and that the final committed project's
-// staged init.json already references the correct preset path regardless.
-func TestRunProjectCreate_DirtyPresetSavedOnlyAfterCommit(t *testing.T) {
+// TestRunProjectCreate_DirtyPresetSavedAndReferencedOnSuccess proves the
+// successful final state. The separate rename-failure test below observes the
+// stronger ordering guarantee that this dependency exists before publication.
+func TestRunProjectCreate_DirtyPresetSavedAndReferencedOnSuccess(t *testing.T) {
 	draft, root, presetName := newTestDraftWithDirtyPreset(t)
 	opts := testCreateOptions(t, root)
 
@@ -487,14 +500,24 @@ func TestRunProjectCreate_DirtyPresetSavedOnlyAfterCommit(t *testing.T) {
 	}
 
 	presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
-	if _, err := os.Stat(presetPath); err != nil {
-		t.Fatalf("expected dirty preset saved to disk after successful commit: %v", err)
+	savedData, err := os.ReadFile(presetPath)
+	if err != nil {
+		t.Fatalf("read dirty preset saved on successful create: %v", err)
+	}
+	var saved preset.Preset
+	if err := json.Unmarshal(savedData, &saved); err != nil {
+		t.Fatalf("parse saved dirty preset: %v", err)
+	}
+	if saved.Name != presetName {
+		t.Fatalf("saved preset name = %q, want %q", saved.Name, presetName)
+	}
+	savedLLM, _ := saved.Manifest["llm"].(map[string]interface{})
+	if got, _ := savedLLM["api_key_env"].(string); got != "MINIMAX_INTL_1_API_KEY" {
+		t.Fatalf("saved preset api_key_env = %q, want normalized/stamped MINIMAX_INTL_1_API_KEY", got)
 	}
 
-	// The staged (now final) init.json must reference this preset's path —
-	// proving GenerateInitJSONWithOpts (pre-rename) correctly wrote the
-	// path-only reference without needing the file to exist yet at that
-	// point in the sequence.
+	// The staged (now final) init.json must reference the same preset path that
+	// dependency persistence verified before rename.
 	initPath := filepath.Join(root, ".lingtai", "orchestrator", "init.json")
 	data, err := os.ReadFile(initPath)
 	if err != nil {
@@ -505,43 +528,270 @@ func TestRunProjectCreate_DirtyPresetSavedOnlyAfterCommit(t *testing.T) {
 	}
 }
 
-// TestRunProjectCreate_DirtyPresetPostCommitFailureLeavesValidRetryableProject
-// proves a post-commit save failure (injected at PhasePostCommitConfig,
-// which is where the deferred preset.Save call now lives) behaves exactly
-// like every other post-commit failure: the project stays committed and
-// valid, never rolled back, surfaced only as a warning.
-func TestRunProjectCreate_DirtyPresetPostCommitFailureLeavesValidRetryableProject(t *testing.T) {
+// TestRunProjectCreate_DirtyPresetPersistenceFailureDoesNotPublishProject is
+// the primary issue-771 RED. A real saved-path collision makes preset.Save
+// fail deterministically; launch-critical dependency failure must happen
+// before rename, clean staging, and leave no final .lingtai/.
+func TestRunProjectCreate_DirtyPresetPersistenceFailureDoesNotPublishProject(t *testing.T) {
 	draft, root, presetName := newTestDraftWithDirtyPreset(t)
 	opts := testCreateOptions(t, root)
-	opts.InjectFailure = failPhaseInjector(PhasePostCommitConfig)
+	runtimeReadyCalled := false
+	opts.RuntimeReady = func(string) error {
+		runtimeReadyCalled = true
+		return nil
+	}
+	presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
+	if err := os.Mkdir(presetPath, 0o755); err != nil {
+		t.Fatalf("create deterministic preset save collision: %v", err)
+	}
 
 	res := RunProjectCreate(draft, opts)
 
-	if !res.Committed {
-		t.Fatal("expected Committed=true (post-commit failures never roll back)")
+	if res.Committed {
+		t.Fatal("expected Committed=false when dirty preset persistence fails")
 	}
-	if res.Err != nil {
-		t.Fatalf("post-commit failure must not set res.Err, got %v", res.Err)
+	if res.Err == nil {
+		t.Fatal("expected dirty preset persistence error")
 	}
-	if len(res.PostCommitWarnings) == 0 {
-		t.Fatal("expected a PostCommitWarning")
+	if got := res.FailedPhase.String(); got != "persist_dependencies" {
+		t.Fatalf("failed phase = %q, want persist_dependencies", got)
 	}
 	finalDir := filepath.Join(root, ".lingtai")
-	if _, err := os.Stat(finalDir); err != nil {
-		t.Fatalf("final .lingtai/ must still exist and be valid: %v", err)
+	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
+		t.Fatalf("final .lingtai/ must not exist after dependency failure, stat err = %v", err)
 	}
-	orchestrators := DetectOrchestrators(finalDir)
-	if len(orchestrators) != 1 {
-		t.Fatalf("expected exactly 1 orchestrator in the retained project, got %d", len(orchestrators))
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".lingtai.create-") {
+			t.Fatalf("leftover staging directory after dependency failure: %s", entry.Name())
+		}
+	}
+	if runtimeReadyCalled {
+		t.Fatal("runtime launch boundary ran after dependency persistence failed")
+	}
+}
+
+// Once the staged project is valid, its exact preset and newly staged
+// credentials are persisted before PhaseRename. A rename failure may leave
+// those valid user-owned dependencies behind, but must not publish a project.
+func TestRunProjectCreate_DependenciesPersistBeforeRenameFailure(t *testing.T) {
+	draft, root, presetName := newTestDraftWithDirtyPreset(t)
+	opts := testCreateOptions(t, root)
+	const keyEnv = "ISSUE_771_API_KEY"
+	llm := draft.DraftPreset.Manifest["llm"].(map[string]interface{})
+	llm["api_key_env"] = keyEnv
+	draft.DraftAPIKeyEnv = keyEnv
+	draft.DraftAPIKey = secretString("synthetic-api-key")
+	draft.DraftCodexTokens = secretBytes(`{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`)
+
+	var phases []string
+	opts.InjectFailure = func(phase CreatePhase) error {
+		phases = append(phases, phase.String())
+		if phase == PhaseRename {
+			return errors.New("injected rename failure")
+		}
+		return nil
 	}
 
-	// The whole PhasePostCommitConfig block short-circuits on injection
-	// (see runPostCommit's `if err := injected(...); err != nil { warn }
-	// else { ...preset.Save... }` shape), so the preset genuinely was never
-	// saved — the project is valid but "setup not finished", retryable.
-	presetPath := filepath.Join(opts.GlobalDir, "presets", "saved", presetName+".json")
-	if _, err := os.Stat(presetPath); !os.IsNotExist(err) {
-		t.Fatalf("expected preset NOT saved when PhasePostCommitConfig is injected to fail, but found %s", presetPath)
+	res := RunProjectCreate(draft, opts)
+	if res.Committed {
+		t.Fatal("rename failure must leave Committed=false")
+	}
+	if res.Err == nil || res.FailedPhase != PhaseRename {
+		t.Fatalf("result err=%v phase=%v, want rename failure", res.Err, res.FailedPhase)
+	}
+	persistIndex, renameIndex := -1, -1
+	for i, phase := range phases {
+		switch phase {
+		case "persist_dependencies":
+			persistIndex = i
+		case PhaseRename.String():
+			renameIndex = i
+		}
+	}
+	if persistIndex < 0 || renameIndex < 0 || persistIndex >= renameIndex {
+		t.Fatalf("phase order = %v, want persist_dependencies before rename", phases)
+	}
+
+	ref := preset.RefFor(preset.Preset{Name: presetName, Source: preset.SourceSaved})
+	resolved := preset.ResolveRefs([]string{ref}, map[string]string{keyEnv: "present"})
+	if len(resolved) != 1 || !resolved[0].Exists || !resolved[0].ManifestValid {
+		t.Fatalf("saved dependency %q did not resolve after rename failure: %+v", ref, resolved)
+	}
+	cfg, err := config.LoadConfigReadOnly(opts.GlobalDir)
+	if err != nil {
+		t.Fatalf("read persisted API-key config: %v", err)
+	}
+	if cfg.Keys[keyEnv] == "" {
+		t.Fatalf("pending API key %s was not persisted before rename", keyEnv)
+	}
+	if _, ok := readCodexTokenFile(legacyCodexAuthPath(opts.GlobalDir)); !ok {
+		t.Fatal("pending Codex token bundle was not available before rename")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("final .lingtai/ must not exist after rename failure, stat err = %v", err)
+	}
+}
+
+func TestRunProjectCreate_StaleSelectedPresetDoesNotPublishProject(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	missing := minimalDraftPreset()
+	missing.Name = "deleted-selection"
+	missing.Source = preset.SourceSaved
+	draft.DraftPreset = &missing
+
+	res := RunProjectCreate(draft, opts)
+	if res.Committed {
+		t.Fatal("stale selected preset must not publish a project")
+	}
+	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
+		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("final .lingtai/ must not exist for a stale selection, stat err = %v", err)
+	}
+}
+
+func TestRunProjectCreate_PendingAPIKeyPersistenceFailureDoesNotPublishProject(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftAPIKeyEnv = "ISSUE_771_API_KEY"
+	draft.DraftAPIKey = secretString("synthetic-api-key")
+	opts.InjectFailure = func(phase CreatePhase) error {
+		if phase.String() != "persist_dependencies" {
+			return nil
+		}
+		envPath := filepath.Join(opts.GlobalDir, ".env")
+		if err := os.Remove(envPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return os.Mkdir(envPath, 0o755)
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Committed {
+		t.Fatal("API-key persistence failure must not publish a project")
+	}
+	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
+		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("final .lingtai/ must not exist after API-key failure, stat err = %v", err)
+	}
+}
+
+// A fresh-home draft may select a compiled built-in before templates have
+// ever been materialized. The TUI-owned template dependency must exist and
+// resolve at its exact template ref before rename, without changing the ref to
+// saved/ or treating a missing user-owned saved selection the same way.
+func TestRunProjectCreate_ColdCompiledTemplateMaterializesExactRefBeforeRename(t *testing.T) {
+	draft, root := newTestDraft(t)
+	var selected preset.Preset
+	for _, candidate := range preset.BuiltinPresets() {
+		if candidate.Name == "minimax" {
+			selected = candidate
+			break
+		}
+	}
+	if selected.Name == "" {
+		t.Fatal("minimax built-in fixture missing")
+	}
+	selected.Source = preset.SourceTemplate
+	draft.DraftPreset = &selected
+	draft.DraftPresetDirty = false
+	opts := testCreateOptions(t, root)
+
+	var resolvedBeforeRename bool
+	opts.InjectFailure = func(phase CreatePhase) error {
+		if phase == PhaseRename {
+			resolved := preset.ResolveRefs([]string{preset.RefFor(selected)}, nil)
+			resolvedBeforeRename = len(resolved) == 1 && resolved[0].Exists && resolved[0].ManifestValid
+		}
+		return nil
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Err != nil || !res.Committed {
+		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
+	}
+	if !resolvedBeforeRename {
+		t.Fatal("compiled template dependency was not resolvable before rename")
+	}
+	wantRef := preset.RefFor(selected)
+	gotRef := activePresetRefFromInit(t, filepath.Join(root, ".lingtai", "orchestrator", "init.json"))
+	if gotRef != wantRef {
+		t.Fatalf("final init active preset ref = %q, want %q", gotRef, wantRef)
+	}
+}
+
+func TestRunProjectCreate_PendingCodexPersistenceFailureDoesNotPublishProject(t *testing.T) {
+	draft, root := newTestDraft(t)
+	opts := testCreateOptions(t, root)
+	draft.DraftCodexTokens = secretBytes(`{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`)
+	if err := os.Mkdir(legacyCodexAuthPath(opts.GlobalDir), 0o755); err != nil {
+		t.Fatalf("create deterministic Codex auth collision: %v", err)
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Committed {
+		t.Fatal("Codex token persistence failure must not publish a project")
+	}
+	if res.Err == nil || res.FailedPhase.String() != "persist_dependencies" {
+		t.Fatalf("result err=%v phase=%v, want persist_dependencies failure", res.Err, res.FailedPhase)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lingtai")); !os.IsNotExist(err) {
+		t.Fatalf("final .lingtai/ must not exist after Codex persistence failure, stat err = %v", err)
+	}
+}
+
+func TestRunProjectCreate_SuccessPublishesResolvableSavedRefAndCredentialsBeforeLaunch(t *testing.T) {
+	draft, root := newTestDraft(t)
+	p := minimalDraftPreset()
+	p.Name = "minimax"
+	p.Source = preset.SourceTemplate
+	const (
+		keyEnv         = "ISSUE_771_API_KEY"
+		expectedKey    = "synthetic-api-key"
+		expectedTokens = `{"refresh_token":"synthetic-refresh","access_token":"synthetic-access"}`
+	)
+	p.Manifest["llm"].(map[string]interface{})["api_key_env"] = keyEnv
+	draft.DraftPreset = &p
+	draft.DraftPresetDirty = true
+	draft.DraftAPIKeyEnv = keyEnv
+	draft.DraftAPIKey = secretString(expectedKey)
+	draft.DraftCodexTokens = secretBytes(expectedTokens)
+	opts := testCreateOptions(t, root)
+
+	var launchSawKey, launchSawTokens bool
+	opts.RuntimeReady = func(globalDir string) error {
+		cfg, err := config.LoadConfigReadOnly(globalDir)
+		launchSawKey = err == nil && cfg.Keys[keyEnv] == expectedKey
+		persistedTokens, readErr := os.ReadFile(legacyCodexAuthPath(globalDir))
+		launchSawTokens = readErr == nil && string(persistedTokens) == expectedTokens
+		return errors.New("test stops before process launch")
+	}
+
+	res := RunProjectCreate(draft, opts)
+	if res.Err != nil || !res.Committed {
+		t.Fatalf("create result = committed %v err %v (phase %v)", res.Committed, res.Err, res.FailedPhase)
+	}
+	if !launchSawKey || !launchSawTokens {
+		t.Fatalf("launch boundary saw key=%v tokens=%v, want both persisted", launchSawKey, launchSawTokens)
+	}
+
+	initPath := filepath.Join(root, ".lingtai", "orchestrator", "init.json")
+	ref := activePresetRefFromInit(t, initPath)
+	wantRef := "~/.lingtai-tui/presets/saved/minimax.json"
+	if ref != wantRef {
+		t.Fatalf("final init active preset ref = %q, want %q", ref, wantRef)
+	}
+	resolved := preset.ResolveRefs([]string{ref}, map[string]string{keyEnv: "present"})
+	if len(resolved) != 1 || !resolved[0].Exists || !resolved[0].ManifestValid || !resolved[0].HasKey {
+		t.Fatalf("final init preset ref did not resolve with its credential: %+v", resolved)
 	}
 }
 

@@ -368,6 +368,67 @@ func TestPresetEditorTemplateDoesNotInheritStoredProviderKey(t *testing.T) {
 	}
 }
 
+// Every editor result is destined for preset.Save, which always writes under
+// presets/saved/. The emitted runtime-only Source must therefore agree with
+// that host write even when the committed name matches a built-in template.
+func TestPresetEditorCommitPathsIdentifySavedSource(t *testing.T) {
+	template := builtinPresetForEditorTest(t, "minimax")
+	template.Source = preset.SourceTemplate
+
+	tests := []struct {
+		name string
+		cmd  func(t *testing.T) tea.Cmd
+	}{
+		{
+			name: "normal save",
+			cmd: func(t *testing.T) tea.Cmd {
+				m := NewPresetEditorModelWithBuiltinFlag(template, "en", nil, "", false)
+				_, cmd := m.commit()
+				return cmd
+			},
+		},
+		{
+			name: "clone prompt enter",
+			cmd: func(t *testing.T) tea.Cmd {
+				m := NewPresetEditorModel(template, "en", nil, "")
+				m.mode = emClonePrompt
+				m.cloneNameInput.SetValue("minimax-copy")
+				_, cmd := m.updateClonePrompt(tea.KeyPressMsg{Code: tea.KeyEnter})
+				return cmd
+			},
+		},
+		{
+			name: "expert built-in overwrite",
+			cmd: func(t *testing.T) tea.Cmd {
+				m := NewPresetEditorModel(template, "en", nil, "")
+				m.mode = emClonePrompt
+				_, cmd := m.updateClonePrompt(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+				return cmd
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := tt.cmd(t)
+			if cmd == nil {
+				t.Fatal("commit returned nil cmd")
+			}
+			commit, ok := cmd().(PresetEditorCommitMsg)
+			if !ok {
+				t.Fatalf("commit cmd returned a non-commit message")
+			}
+			if commit.Preset.Source != preset.SourceSaved {
+				t.Fatalf("commit source = %v, want SourceSaved", commit.Preset.Source)
+			}
+			wantRef := "~/.lingtai-tui/presets/saved/" + commit.Preset.Name + ".json"
+			if got := preset.RefFor(commit.Preset); got != wantRef {
+				t.Fatalf("commit ref = %q, want %q", got, wantRef)
+			}
+		})
+	}
+}
+
 // TestPresetEditorAPIKeyEditableWhenNoStoredKey verifies that a preset
 // with no stored key (typical for first-run flow on a fresh template)
 // allows inline edit so initial setup works.

@@ -34,6 +34,7 @@ const (
 	PhaseApplyPreset
 	PhaseApplyRecipe
 	PhaseValidate
+	PhasePersistDependencies
 	PhaseRename
 	PhasePostCommitConfig
 	PhasePostCommitRegister
@@ -54,6 +55,8 @@ func (p CreatePhase) String() string {
 		return "apply_recipe"
 	case PhaseValidate:
 		return "validate"
+	case PhasePersistDependencies:
+		return "persist_dependencies"
 	case PhaseRename:
 		return "rename"
 	case PhasePostCommitConfig:
@@ -306,20 +309,20 @@ func runPhantomRecheck(draft *ProjectDraft, opts CreateOptions) error {
 //     ownership before deleting.
 //  3. Build: process.InitProject on the staging dir (called as-is, not
 //     forked), then resolveDraftPreset + preset.GenerateInitJSONWithOpts +
-//     the recipe apply chain, all against the staging dir. The dirty draft
-//     preset is resolved and used HERE (in memory only) but NOT yet saved
-//     to disk — preset.Save is deferred to step 6, post-rename (see
-//     ProjectDraft.DraftPreset's doc comment and PhaseApplyPreset's own
-//     comment below for why).
+//     the recipe apply chain, all against the staging dir. A dirty draft is
+//     normalized/stamped once, forced to SourceSaved, and used in memory.
 //  4. Validate: exactly one orchestrator, using the same DetectOrchestrators/
 //     IsOrchestrator helpers main.go's own invariant checks use.
-//  5. Publish: os.Rename(staging, final). This is the ONLY line in this
+//  5. Persist dependencies: save a dirty preset (or materialize a cold
+//     TUI-owned template), verify the exact RefFor, and persist/verify any
+//     pending API key and Codex token bundle. Failure cleans staging and
+//     returns Committed=false. These valid global writes are not rolled back
+//     if a later dependency or rename step fails.
+//  6. Publish: os.Rename(staging, final). This is the ONLY line in this
 //     file that may cause draft.ProjectRoot/.lingtai to start existing.
-//  6. Post-commit (best-effort, never rolls back): save deferred
-//     config/credentials/preset (preset.Save runs for the FIRST time here,
-//     not in step 3), config.Register, PopulateBundledLibrary, attempt
-//     agent launch. Failures here are reported as warnings, not as
-//     CreateResult.Err — the project is already valid and retryable.
+//  7. Post-commit (best-effort, never rolls back): save theme/language,
+//     config.Register, PopulateBundledLibrary, and attempt agent launch.
+//     Failures here are warnings, not CreateResult.Err.
 func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 	result := CreateResult{}
 	if draft == nil {
@@ -376,7 +379,7 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 
 	// 2. Create staging as a sibling of the final dir (same filesystem —
 	// MkdirTemp with a dir argument guarantees this, which is what makes
-	// step 5's rename atomic).
+	// step 6's rename atomic).
 	stagingDir, err := os.MkdirTemp(root, ".lingtai.create-*")
 	if err != nil {
 		return fail(PhaseCreateStaging, fmt.Errorf("create staging dir: %w", err))
@@ -405,32 +408,10 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		return fail(PhaseInitProject, fmt.Errorf("init staging project: %w", err))
 	}
 
-	// 3b. Resolve the draft's preset choice — IN MEMORY ONLY. This phase
-	// used to also call preset.Save here, persisting a dirty draft preset
-	// to the REAL global ~/.lingtai-tui/presets/saved/ directory before
-	// validation/rename had even run. A parent review found that wrong:
-	// PhaseApplyPreset is pre-rename, so a later pre-rename phase failing
-	// (PhaseApplyRecipe, PhaseValidate, PhaseRename itself) would leave a
-	// real global preset file behind — global state mutated by an attempt
-	// that ultimately produced NO project — while this function's own
-	// cleanupStaging only ever removes the STAGING directory, never that
-	// global file. That is exactly the "global tree not byte-identical"
-	// defect a pre-rename-failure purity test now guards against.
-	//
-	// preset.Save is deferred to the post-commit phase (runPostCommit,
-	// PhasePostCommitConfig) below — the identical write, just moved to
-	// run only after the atomic rename has already succeeded. This is safe
-	// because GenerateInitJSONWithOpts (called further down, still
-	// pre-rename) only ever writes manifest.preset.{default,active,allowed}
-	// as PATH STRINGS derived from the preset's Name/Source via
-	// preset.RefFor — it performs no filesystem existence check on that
-	// path, so the staged init.json is fully well-formed whether or not
-	// the referenced saved/<name>.json file exists yet. If the post-commit
-	// save later fails, the project is still valid and rename'd (never
-	// rolled back, per this function's existing post-commit contract) —
-	// its init.json simply references a preset file that doesn't exist on
-	// disk yet, which is exactly the kind of "created; setup not finished,
-	// retryable" state runPostCommit's warnings already communicate.
+	// 3b. Resolve the draft's preset choice in memory. Dirty presets are
+	// normalized/stamped here so staged init.json and the later saved file use
+	// one object, but no preset dependency is persisted until AFTER every
+	// staged build/recipe/orchestrator validation succeeds.
 	if err := injected(PhaseApplyPreset); err != nil {
 		cleanupStaging()
 		return fail(PhaseApplyPreset, err)
@@ -443,6 +424,10 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 	if draft.DraftPresetDirty && draft.DraftPreset != nil {
 		toSave := stampAutoEnvVar(*draft.DraftPreset, draft.ExistingKeys.keyNames())
 		preset.SyncCapabilityAPIKeyEnv(toSave.Manifest)
+		// Every editor result is hosted by preset.Save in saved/. Stamp the
+		// same normalized object before init.json is generated so its RefFor
+		// names the exact file the dependency phase will persist.
+		toSave.Source = preset.SourceSaved
 		chosenPreset = toSave
 	}
 
@@ -527,7 +512,22 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 		return fail(PhaseValidate, fmt.Errorf("staged orchestrator missing init.json: %w", err))
 	}
 
-	// 5. Publish. This is the single product-visible commit point: the
+	// 5. Persist and verify every launch-critical dependency only after the
+	// staged project has passed validation, but before the project becomes
+	// visible at its final path. These writes are intentionally not rolled
+	// back if the later rename fails: they are valid user-owned preset or
+	// credential state, and deleting a pre-existing/replaced value would be
+	// unsafe. The project itself remains uncommitted until rename succeeds.
+	if err := injected(PhasePersistDependencies); err != nil {
+		cleanupStaging()
+		return fail(PhasePersistDependencies, err)
+	}
+	if err := persistCreateDependencies(draft, opts, chosenPreset); err != nil {
+		cleanupStaging()
+		return fail(PhasePersistDependencies, err)
+	}
+
+	// 6. Publish. This is the single product-visible commit point: the
 	// instant this os.Rename succeeds, the final .lingtai/ exists and
 	// nothing below this line may delete or roll it back.
 	if err := injected(PhaseRename); err != nil {
@@ -555,11 +555,122 @@ func RunProjectCreate(draft *ProjectDraft, opts CreateOptions) CreateResult {
 	// purpose; a failure here is cosmetic and does not affect validity.
 	_ = os.Remove(filepath.Join(finalDir, stagingMarkerName))
 
-	// 6. Post-commit: never rolls back. Every failure below is collected
+	// 7. Post-commit: never rolls back. Every failure below is collected
 	// as a warning; RunProjectCreate still returns Committed=true.
-	runPostCommit(draft, opts, finalDir, chosenPreset, &result)
+	runPostCommit(draft, opts, finalDir, &result)
 
 	return result
+}
+
+// persistCreateDependencies makes the selected preset reference and any
+// credential material collected during the draft available before project
+// publication. It runs only after the staged project validates. The writes are
+// deliberately not a cross-file transaction: a later dependency or rename
+// failure may leave valid user-owned global state, which is safer than either
+// deleting an older value or publishing a dangling project.
+func persistCreateDependencies(draft *ProjectDraft, opts CreateOptions, chosenPreset preset.Preset) error {
+	ref := preset.RefFor(chosenPreset)
+	if ref == "" {
+		return fmt.Errorf("selected preset dependency has no reference")
+	}
+
+	if draft.DraftPresetDirty {
+		// chosenPreset is the already normalized/stamped SourceSaved object
+		// used to generate staged init.json. Persist that exact value rather
+		// than reconstructing it from the original draft a second time.
+		if err := preset.Save(chosenPreset); err != nil {
+			return fmt.Errorf("save selected preset dependency %q: %w", ref, err)
+		}
+	}
+
+	if err := verifyPresetDependency(chosenPreset); err != nil {
+		// A fresh-home draft can select a compiled built-in before templates
+		// have ever been extracted. templates/ is TUI-owned, so materialize
+		// the canonical set narrowly and verify the SAME ref again. Missing
+		// saved/user-owned selections are never repaired or substituted.
+		if !draft.DraftPresetDirty && chosenPreset.Source == preset.SourceTemplate {
+			if refreshErr := preset.RefreshTemplates(); refreshErr != nil {
+				return fmt.Errorf("materialize template dependency %q: %w", ref, refreshErr)
+			}
+			if retryErr := verifyPresetDependency(chosenPreset); retryErr != nil {
+				return retryErr
+			}
+		} else {
+			return err
+		}
+	}
+
+	if !draft.DraftAPIKey.Empty() {
+		envName := strings.TrimSpace(draft.DraftAPIKeyEnv)
+		if envName == "" {
+			return fmt.Errorf("pending API key has no environment variable name")
+		}
+		cfg, err := config.LoadConfigReadOnly(opts.GlobalDir)
+		if err != nil {
+			return fmt.Errorf("load config for pending API key %s: %w", envName, err)
+		}
+		if cfg.Keys == nil {
+			cfg.Keys = map[string]string{}
+		}
+		cfg.Keys[envName] = draft.DraftAPIKey.Reveal()
+		if err := config.SaveConfig(opts.GlobalDir, cfg); err != nil {
+			return fmt.Errorf("persist pending API key %s: %w", envName, err)
+		}
+		persisted, err := config.LoadConfigReadOnly(opts.GlobalDir)
+		if err != nil {
+			return fmt.Errorf("verify pending API key %s: %w", envName, err)
+		}
+		if persisted.Keys[envName] != draft.DraftAPIKey.Reveal() {
+			return fmt.Errorf("verify pending API key %s: persisted value unavailable", envName)
+		}
+		if info, err := os.Stat(config.EnvFilePath(opts.GlobalDir)); err != nil || info.IsDir() {
+			if err != nil {
+				return fmt.Errorf("verify pending API key environment file: %w", err)
+			}
+			return fmt.Errorf("verify pending API key environment file: path is a directory")
+		}
+	}
+
+	if !draft.DraftCodexTokens.Empty() {
+		tokens := draft.DraftCodexTokens.Reveal()
+		if !json.Valid(tokens) {
+			return fmt.Errorf("pending Codex token bundle is not valid JSON")
+		}
+		if err := os.MkdirAll(opts.GlobalDir, 0o755); err != nil {
+			return fmt.Errorf("create Codex credential directory: %w", err)
+		}
+		authPath := legacyCodexAuthPath(opts.GlobalDir)
+		if err := os.WriteFile(authPath, tokens, 0o600); err != nil {
+			return fmt.Errorf("persist pending Codex token bundle: %w", err)
+		}
+		persisted, err := os.ReadFile(authPath)
+		if err != nil {
+			return fmt.Errorf("verify pending Codex token bundle: %w", err)
+		}
+		if string(persisted) != string(tokens) {
+			return fmt.Errorf("verify pending Codex token bundle: persisted bundle differs")
+		}
+		if _, ok := readCodexTokenFile(authPath); !ok {
+			return fmt.Errorf("verify pending Codex token bundle: credential unavailable")
+		}
+	}
+
+	return nil
+}
+
+func verifyPresetDependency(p preset.Preset) error {
+	ref := preset.RefFor(p)
+	resolved := preset.ResolveRefs([]string{ref}, nil)
+	if len(resolved) != 1 || resolved[0].Ref != ref {
+		return fmt.Errorf("resolve selected preset dependency %q: unexpected result", ref)
+	}
+	if !resolved[0].Exists {
+		return fmt.Errorf("selected preset dependency %q does not exist", ref)
+	}
+	if !resolved[0].ManifestValid {
+		return fmt.Errorf("selected preset dependency %q is invalid", ref)
+	}
+	return nil
 }
 
 // resolveDraftPreset returns the explicit preset captured in Review. The
@@ -573,13 +684,13 @@ func resolveDraftPreset(draft *ProjectDraft) (preset.Preset, error) {
 	return *draft.DraftPreset, nil
 }
 
-// runPostCommit performs the deferred, best-effort steps that in a normal
-// (non-launcher) startup already happen unconditionally: saving the API
-// key / theme / language / Codex tokens gathered in the draft, registering
-// the project, refreshing the bundled utility library, and attempting to
-// launch the agent. None of these may cause a rollback — the project is
-// already valid and retryable the moment this function is entered.
-func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, chosenPreset preset.Preset, result *CreateResult) {
+// runPostCommit performs the remaining best-effort steps that in a normal
+// (non-launcher) startup already happen unconditionally: saving theme/language,
+// registering the project, refreshing the bundled utility library, and
+// attempting to launch the agent. Preset and pending credential dependencies
+// are already durable and verified before this function is entered. None of
+// these remaining steps may cause a rollback.
+func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, result *CreateResult) {
 	warn := func(phase CreatePhase, format string, args ...interface{}) {
 		result.PostCommitWarnings = append(result.PostCommitWarnings, fmt.Sprintf("%s: "+format, append([]interface{}{phase.String()}, args...)...))
 	}
@@ -593,58 +704,18 @@ func runPostCommit(draft *ProjectDraft, opts CreateOptions, finalDir string, cho
 	if err := injected(PhasePostCommitConfig); err != nil {
 		warn(PhasePostCommitConfig, "%v", err)
 	} else {
-		// Global config directory now becomes an intentional side effect —
-		// this is post-commit, so EnsureGlobalDir (not the pure
-		// GlobalDirPath) is correct here.
+		// Ensure the global config directory for the remaining post-commit
+		// writes. The dependency phase may already have created it while
+		// persisting a preset or credential.
 		if _, err := config.EnsureGlobalDir(); err != nil {
 			warn(PhasePostCommitConfig, "ensure global dir: %v", err)
-		}
-		// Save a dirty draft preset now — deferred from the pre-rename
-		// staging phase (see RunProjectCreate's PhaseApplyPreset comment)
-		// so a pre-rename failure never leaves an orphaned global preset
-		// file behind for a project that was never actually created. A
-		// failure here is a warning, not a rollback trigger: the project
-		// is already valid and rename'd; its staged init.json already
-		// references this preset's path (via preset.RefFor, computed from
-		// Name/Source alone, no existence check) regardless of whether
-		// this save succeeds — so a failure here just means the referenced
-		// file doesn't exist yet, exactly the "created; setup not
-		// finished, retryable" state these warnings communicate.
-		if draft.DraftPresetDirty && draft.DraftPreset != nil {
-			toSave := stampAutoEnvVar(*draft.DraftPreset, draft.ExistingKeys.keyNames())
-			preset.SyncCapabilityAPIKeyEnv(toSave.Manifest)
-			if err := preset.Save(toSave); err != nil {
-				warn(PhasePostCommitConfig, "save draft preset: %v", err)
-			}
 		}
 		tuiCfg := config.LoadTUIConfig(opts.GlobalDir)
 		tuiCfg = draft.applyToConfig(tuiCfg)
 		if err := config.SaveTUIConfig(opts.GlobalDir, tuiCfg); err != nil {
 			warn(PhasePostCommitConfig, "save tui config: %v", err)
 		}
-		if !draft.DraftAPIKey.Empty() && draft.DraftAPIKeyEnv != "" {
-			cfg, err := config.LoadConfig(opts.GlobalDir)
-			if err != nil {
-				warn(PhasePostCommitConfig, "load config: %v", err)
-			} else {
-				if cfg.Keys == nil {
-					cfg.Keys = map[string]string{}
-				}
-				cfg.Keys[draft.DraftAPIKeyEnv] = draft.DraftAPIKey.Reveal()
-				if err := config.SaveConfig(opts.GlobalDir, cfg); err != nil {
-					warn(PhasePostCommitConfig, "save api key: %v", err)
-				}
-			}
-		} else {
-			config.EnsureConfigPersisted(opts.GlobalDir)
-		}
-		if !draft.DraftCodexTokens.Empty() {
-			authPath := legacyCodexAuthPath(opts.GlobalDir)
-			var tokens json.RawMessage = draft.DraftCodexTokens.Reveal()
-			if err := os.WriteFile(authPath, tokens, 0o600); err != nil {
-				warn(PhasePostCommitConfig, "save codex tokens: %v", err)
-			}
-		}
+		config.EnsureConfigPersisted(opts.GlobalDir)
 	}
 
 	if err := injected(PhasePostCommitRegister); err != nil {
