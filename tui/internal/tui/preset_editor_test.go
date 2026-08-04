@@ -419,7 +419,7 @@ func TestPresetEditorCanonicalizesLegacyShellForDisplay(t *testing.T) {
 func TestPresetEditorNoCapabilityFieldsInEditorFieldOrder(t *testing.T) {
 	wantOrder := []editorField{
 		feName, feSummary, feTier, feGains, feLoses,
-		feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feBaseURL, feAPIKey,
+		feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 		feSave,
 	}
 	if !reflect.DeepEqual(editorFieldOrder, wantOrder) {
@@ -1288,6 +1288,207 @@ func TestPresetEditorWireAPIEnterCyclesAndPreservesLegacyFlags(t *testing.T) {
 		if got := m.llmMap()[key]; got != true {
 			t.Fatalf("auto must keep legacy delegation flag %s=true, got %#v", key, got)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// responses_transport (HTTP default / WebSocket v2 opt-in)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestPresetEditorResponsesTransportVisibleOnlyForCustomResponses(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 80})
+
+	if !m.fieldVisible(feResponsesTransport) || !m.isCyclable(feResponsesTransport) {
+		t.Fatal("Responses transport should be visible and cyclable for custom OpenAI Responses")
+	}
+	if got := m.fieldString(feResponsesTransport); got != "http" {
+		t.Fatalf("absent responses_transport displays %q, want http", got)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Transport") || !strings.Contains(view, "websocket") {
+		t.Fatalf("custom Responses editor did not render the transport choices; view:\n%s", view)
+	}
+
+	delete(llm, "wire_api")
+	m = NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	if m.fieldVisible(feResponsesTransport) || m.isCyclable(feResponsesTransport) {
+		t.Fatal("Responses transport must be hidden when wire_api is not responses")
+	}
+}
+
+func TestPresetEditorResponsesTransportCyclesAndCommits(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feResponsesTransport)
+
+	// Enter uses the same enum path as Right: HTTP (omitted) -> WebSocket.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.fieldString(feResponsesTransport); got != "websocket" {
+		t.Fatalf("transport cycle = %q, want websocket", got)
+	}
+	if got := m.llmMap()["responses_transport"]; got != "websocket" {
+		t.Fatalf("responses_transport not persisted: %#v", got)
+	}
+
+	_, cmd := m.commit()
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if got := committed["responses_transport"]; got != "websocket" {
+		t.Fatalf("committed responses_transport = %#v, want websocket", got)
+	}
+
+	// WebSocket -> HTTP removes the key because HTTP is the default.
+	m.cycleFocused(+1)
+	if got := m.fieldString(feResponsesTransport); got != "http" {
+		t.Fatalf("transport cycle back = %q, want http", got)
+	}
+	if _, ok := m.llmMap()["responses_transport"]; ok {
+		t.Fatal("HTTP transport should be represented by an omitted manifest key")
+	}
+}
+
+func TestPresetEditorResponsesTransportCleansWhenScopeEnds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field editorField
+	}{
+		{name: "provider", field: feProvider},
+		{name: "api compat", field: feAPICompat},
+		{name: "wire api", field: feWireAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := testCustomOpenAIPresetEditorPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["wire_api"] = "responses"
+			llm["responses_transport"] = "websocket"
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+			m.cursor = editorFieldOrderIndex(t, tc.field)
+			m.cycleFocused(+1)
+			if _, ok := m.llmMap()["responses_transport"]; ok {
+				t.Fatal("leaving custom Responses scope must remove responses_transport")
+			}
+			if m.fieldVisible(feResponsesTransport) {
+				t.Fatal("transport must be hidden after leaving custom Responses scope")
+			}
+		})
+	}
+
+	// Commit is a second fail-closed boundary for stale or explicit HTTP values.
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	llm["responses_transport"] = "http"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	_, cmd := m.commit()
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committed["responses_transport"]; ok {
+		t.Fatal("commit must omit explicit HTTP responses_transport")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// custom OpenAI Responses reasoning effort
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestPresetEditorCustomResponsesThinkingShowsDefaultAndAllEfforts(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
+
+	if !m.fieldVisible(feThinking) || !m.isCyclable(feThinking) {
+		t.Fatal("thinking should be visible and cyclable for custom OpenAI Responses")
+	}
+	if got := m.fieldString(feThinking); got != "default" {
+		t.Fatalf("absent custom thinking displays %q, want default", got)
+	}
+	if got := m.thinkingOptions(); !reflect.DeepEqual(got, customResponsesThinkingOptions) {
+		t.Fatalf("custom thinking options = %#v, want %#v", got, customResponsesThinkingOptions)
+	}
+	view := m.View()
+	for _, effort := range customResponsesThinkingOptions {
+		if !strings.Contains(view, effort) {
+			t.Fatalf("custom thinking picker does not render %q; view:\n%s", effort, view)
+		}
+	}
+}
+
+func TestPresetEditorCustomResponsesThinkingCyclesAndOmitsDefault(t *testing.T) {
+	p := testCustomOpenAIPresetEditorPreset()
+	llm := p.Manifest["llm"].(map[string]interface{})
+	llm["wire_api"] = "responses"
+	m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+	m.cursor = editorFieldOrderIndex(t, feThinking)
+
+	for _, want := range customResponsesThinkingOptions[1:] {
+		m.cycleFocused(+1)
+		if got := m.fieldString(feThinking); got != want {
+			t.Fatalf("custom thinking cycle = %q, want %q", got, want)
+		}
+		if got := m.llmMap()["thinking"]; got != want {
+			t.Fatalf("manifest thinking = %#v, want %q", got, want)
+		}
+	}
+
+	// xhigh wraps to default, represented by an omitted field.
+	m.cycleFocused(+1)
+	if got := m.fieldString(feThinking); got != "default" {
+		t.Fatalf("custom thinking wrap = %q, want default", got)
+	}
+	if _, ok := m.llmMap()["thinking"]; ok {
+		t.Fatal("custom thinking default must omit the manifest field")
+	}
+
+	_, cmd := m.commit()
+	committed := cmd().(PresetEditorCommitMsg).Preset.Manifest["llm"].(map[string]interface{})
+	if _, ok := committed["thinking"]; ok {
+		t.Fatal("committed custom default must omit manifest.llm.thinking")
+	}
+}
+
+func TestPresetEditorCustomThinkingCleansWhenResponsesScopeEnds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field editorField
+	}{
+		{name: "provider", field: feProvider},
+		{name: "api compat", field: feAPICompat},
+		{name: "wire api", field: feWireAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := testCustomOpenAIPresetEditorPreset()
+			llm := p.Manifest["llm"].(map[string]interface{})
+			llm["wire_api"] = "responses"
+			llm["thinking"] = "xhigh"
+			m := NewPresetEditorModelWithBuiltinFlag(p, "en", nil, "", false)
+
+			m.cursor = editorFieldOrderIndex(t, tc.field)
+			m.cycleFocused(+1)
+			if _, ok := m.llmMap()["thinking"]; ok {
+				t.Fatal("leaving custom Responses scope must remove thinking")
+			}
+			if m.fieldVisible(feThinking) {
+				t.Fatal("thinking must be hidden after leaving custom Responses scope")
+			}
+		})
+	}
+}
+
+func TestPresetEditorCodexThinkingOptionsRemainUnchanged(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(testCodexPresetEditorPreset(nil), "en", nil, "", false)
+
+	if got := m.thinkingValue(); got != "xhigh" {
+		t.Fatalf("Codex default thinking = %q, want xhigh", got)
+	}
+	if got := m.thinkingOptions(); !reflect.DeepEqual(got, codexThinkingOptions) {
+		t.Fatalf("Codex thinking options = %#v, want %#v", got, codexThinkingOptions)
 	}
 }
 
