@@ -450,10 +450,6 @@ func (m *MailModel) syncViewportHeight() bool {
 	}
 	m.updateInputMaxHeight()
 	inputLines := m.input.LineCount()
-	paletteLines := 0
-	if m.input.IsPaletteActive() {
-		paletteLines = m.palette.LineCount()
-	}
 	// Direct View suppresses Main's history banners and home telemetry, so its
 	// viewport must reclaim exactly those rows while leaving Main state intact.
 	_, direct := m.currentDirectTarget()
@@ -462,6 +458,15 @@ func (m *MailModel) syncViewportHeight() bool {
 	if !direct {
 		bannerLines = m.bannerLineCount()
 		telemetryRow = m.hasHomeTelemetry()
+	}
+	// Size the palette before consuming LineCount. Mail owns the child rectangle
+	// and reserves its fixed chrome plus one mandatory transcript row; Palette
+	// owns which cursor-following command rows fit in the remaining allowance.
+	paletteMaxHeight := m.height - 2 - bannerLines - 1 - mailFooterHeight(0, inputLines, telemetryRow)
+	m.palette.SetSize(m.width, paletteMaxHeight)
+	paletteLines := 0
+	if m.input.IsPaletteActive() {
+		paletteLines = m.palette.LineCount()
 	}
 	if inputLines == m.lastInputLines && paletteLines == m.lastPaletteLines && bannerLines == m.lastBannerLines && telemetryRow == m.lastTelemetryRow {
 		return false
@@ -998,19 +1003,12 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		m.input.SetWidth(msg.Width)
 		m.updateInputMaxHeight()
 		if !m.ready {
-			inputLines := m.input.LineCount()
-			// sep(1) + input(N) + border(1) + status(1)
-			footerHeight := 1 + inputLines + 1 + 1
-			vpHeight := msg.Height - 2 - footerHeight
-			if vpHeight < 1 {
-				vpHeight = 1
-			}
 			m.viewport = viewport.New()
 			m.viewport.SetWidth(msg.Width)
-			m.viewport.SetHeight(vpHeight)
 			m.viewport.SetContent(m.renderMessages(m.visibleMessages()))
-			m.lastInputLines = inputLines
 			m.ready = true
+			m.lastInputLines = -1
+			m.syncViewportHeight()
 		} else if _, direct := m.currentDirectTarget(); direct {
 			if m.viewport.Width() != msg.Width {
 				m.directChat.mainViewportDirty = true
@@ -1567,7 +1565,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				// Forward typing to input, then update palette filter
 				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
-				m.syncViewportHeight()
 				m.maybeShowEditorHint()
 				// Extract filter from input (text after "/")
 				val := m.input.Value()
@@ -1576,6 +1573,7 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 				} else {
 					m.palette.SetFilter("")
 				}
+				m.syncViewportHeight()
 				return m, cmd
 			}
 		}
@@ -1708,9 +1706,6 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 		// If input is focused, forward keys to input
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		if m.syncViewportHeight() && m.viewport.AtBottom() {
-			m.viewport.GotoBottom()
-		}
 		m.maybeShowEditorHint()
 		// Check if slash was typed
 		if m.input.IsPaletteActive() {
@@ -1720,6 +1715,9 @@ func (m MailModel) Update(msg tea.Msg) (MailModel, tea.Cmd) {
 			} else {
 				m.palette.SetFilter("")
 			}
+		}
+		if m.syncViewportHeight() && m.viewport.AtBottom() {
+			m.viewport.GotoBottom()
 		}
 		return m, cmd
 	}
@@ -2427,11 +2425,11 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 		sepWidth = 0
 	}
 	sep := toLabel + strings.Repeat("\u2500", sepWidth)
-	var inputSection string
+	inputSection := m.input.View()
 	if m.input.IsPaletteActive() {
-		inputSection = m.palette.View() + "\n" + m.input.View()
-	} else {
-		inputSection = m.input.View()
+		if paletteView := m.palette.View(); paletteView != "" {
+			inputSection = paletteView + "\n" + inputSection
+		}
 	}
 
 	// Status bar: left = flash or dir path, right = hints

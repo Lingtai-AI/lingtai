@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/anthropics/lingtai-tui/i18n"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // PaletteSelectMsg is sent when the user selects a command from the palette.
@@ -26,19 +27,77 @@ type Command struct {
 
 // PaletteModel is the command palette overlay.
 type PaletteModel struct {
-	commands []Command
-	filtered []Command
-	cursor   int
-	filter   string
-	width    int
+	commands    []Command
+	filtered    []Command
+	cursor      int
+	filter      string
+	width       int
+	maxHeight   int
+	windowStart int
+	bounded     bool
 }
 
 func NewPaletteModel() PaletteModel {
 	cmds := DefaultCommands()
 	return PaletteModel{
-		commands: cmds,
-		filtered: cmds,
+		commands:  cmds,
+		filtered:  cmds,
+		maxHeight: len(cmds) + 2,
 	}
+}
+
+// SetSize bounds the palette to the already-budgeted Mail child width and the
+// maximum total palette height, including its two border rows.
+func (m *PaletteModel) SetSize(width, maxHeight int) {
+	m.width = max(0, width)
+	m.maxHeight = max(0, maxHeight)
+	m.bounded = true
+	m.clampWindow()
+}
+
+func (m PaletteModel) visibleCapacity() int {
+	capacity := m.maxHeight - 2
+	if capacity < 0 {
+		return 0
+	}
+	return min(capacity, len(m.filtered))
+}
+
+func (m *PaletteModel) clampWindow() {
+	if len(m.filtered) == 0 {
+		m.cursor = 0
+		m.windowStart = 0
+		return
+	}
+	m.cursor = min(max(m.cursor, 0), len(m.filtered)-1)
+	capacity := m.visibleCapacity()
+	if capacity == 0 {
+		m.windowStart = 0
+		return
+	}
+	maxStart := len(m.filtered) - capacity
+	m.windowStart = min(max(m.windowStart, 0), maxStart)
+	if m.cursor < m.windowStart {
+		m.windowStart = m.cursor
+	} else if m.cursor >= m.windowStart+capacity {
+		m.windowStart = m.cursor - capacity + 1
+	}
+}
+
+func (m PaletteModel) visibleWindow() (int, int) {
+	capacity := m.visibleCapacity()
+	if capacity == 0 {
+		return 0, 0
+	}
+	start := min(max(m.windowStart, 0), len(m.filtered)-capacity)
+	return start, start + capacity
+}
+
+func (m PaletteModel) canRender() bool {
+	if len(m.filtered) == 0 || m.visibleCapacity() == 0 {
+		return false
+	}
+	return !m.bounded || m.width >= 4
 }
 
 // DefaultCommands returns all slash commands.
@@ -124,6 +183,8 @@ func (m *PaletteModel) ExcludeCommands(names ...string) {
 	m.commands = filtered
 	m.filtered = filtered
 	m.cursor = 0
+	m.windowStart = 0
+	m.clampWindow()
 }
 
 func (m PaletteModel) Init() tea.Cmd { return nil }
@@ -136,11 +197,13 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			m.clampWindow()
 			return m, nil
 		case "down":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 			}
+			m.clampWindow()
 			return m, nil
 		case "enter":
 			if m.cursor < len(m.filtered) {
@@ -163,6 +226,8 @@ func (m *PaletteModel) SetFilter(filter string) {
 	if filter == "" {
 		m.filtered = m.commands
 		m.cursor = 0
+		m.windowStart = 0
+		m.clampWindow()
 		return
 	}
 
@@ -175,6 +240,8 @@ func (m *PaletteModel) SetFilter(filter string) {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+	m.windowStart = 0
+	m.clampWindow()
 }
 
 // fuzzyMatch checks for substring containment first, then character-sequence matching.
@@ -194,14 +261,15 @@ func fuzzyMatch(cmd, filter string) bool {
 
 // LineCount returns the terminal lines the palette occupies (0 if empty).
 func (m PaletteModel) LineCount() int {
-	if len(m.filtered) == 0 {
+	if !m.canRender() {
 		return 0
 	}
-	return len(m.filtered) + 2 // border top + commands + border bottom
+	start, end := m.visibleWindow()
+	return end - start + 2 // border top + visible commands + border bottom
 }
 
 func (m PaletteModel) View() string {
-	if len(m.filtered) == 0 {
+	if !m.canRender() {
 		return ""
 	}
 
@@ -211,16 +279,21 @@ func (m PaletteModel) View() string {
 		BorderForeground(ColorSubtle).
 		Padding(0, 1)
 
-	for idx, cmd := range m.filtered {
+	start, end := m.visibleWindow()
+	for idx := start; idx < end; idx++ {
+		cmd := m.filtered[idx]
 		cursor := "  "
 		if idx == m.cursor {
 			cursor = "> "
 		}
 		name := "/" + cmd.Name
 		desc := i18n.T(cmd.Description)
-		line := cursor + lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render(padRight(name, 12)) + StyleSubtle.Render(desc)
+		line := cursor + lipgloss.NewStyle().Bold(true).Foreground(ColorAccent).Render(padRightCells(name, 12)) + StyleSubtle.Render(desc)
+		if m.bounded {
+			line = fitPaletteLine(line, m.width-4)
+		}
 		b.WriteString(line)
-		if idx < len(m.filtered)-1 {
+		if idx < end-1 {
 			b.WriteString("\n")
 		}
 	}
@@ -228,9 +301,21 @@ func (m PaletteModel) View() string {
 	return border.Render(b.String())
 }
 
-func padRight(s string, width int) string {
-	if len(s) >= width {
+func padRightCells(s string, width int) string {
+	stringWidth := lipgloss.Width(s)
+	if stringWidth >= width {
 		return s + " "
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-stringWidth)
+}
+
+func fitPaletteLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	line = ansi.Truncate(line, width, "")
+	if padding := width - lipgloss.Width(line); padding > 0 {
+		line += strings.Repeat(" ", padding)
+	}
+	return line
 }

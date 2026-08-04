@@ -148,7 +148,7 @@ Screen routing is centralized in the `App` struct (`app.go`), which holds every 
 ### Non-screen shared types and helpers
 
 - **`tui/internal/tui/input.go:28-294`** — `InputModel`. Reusable compose widget with textarea, paste support, and multiline expand. Used by `MailModel`.
-- **`tui/internal/tui/palette.go:28-232`** — `PaletteModel`. Slash-command palette widget (type `/` to trigger, `/help` lists commands). Used by `MailModel` and `SettingsModel`; `DefaultCommands` includes `/notification` and `/goal` (`tui/internal/tui/palette.go:60-61`).
+- **`tui/internal/tui/palette.go:28-321`** — `PaletteModel`. Slash-command palette widget (type `/` to trigger, `/help` lists commands). Used by `MailModel`: Mail supplies child bounds; Palette owns the cursor-following visible window. `DefaultCommands` includes `/notification` and `/goal` (`tui/internal/tui/palette.go:121,123`).
 - **`tui/internal/tui/styles.go:1-471`** — Theme system: `Theme` type, `ActiveTheme()`, `SetThemeByName()`, `Color*` constants, `themedTextareaStyles()`, lipgloss rendering helpers.
 - **`tui/internal/tui/knowledge_entries.go:33-118`** — `buildAgentKnowledgeCatalogEntries`: scans `knowledge/<name>/KNOWLEDGE.md` folders (after a one-time migration of legacy `codex/codex.json` / `knowledge/knowledge.json` stores via `migrateLegacyJSONStores`), converts to `MarkdownEntry` slices for the `KnowledgeModel`.
 - **`tui/internal/tui/mailbox_entries.go:17-321`** — `buildMailboxEntries`: reads per-agent mailbox folders, converts to `MarkdownEntry` slices for the `MailboxModel`.
