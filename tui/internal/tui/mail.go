@@ -506,7 +506,7 @@ func (m *MailModel) inputRegionBounds() (start, end int) {
 	topBannerLines := 0
 	bottomBannerLines := 0
 	if _, direct := m.currentDirectTarget(); !direct {
-		if m.hasMoreOlder() {
+		if m.initialLoading || m.historyCountLoading || m.hasMoreOlder() {
 			topBannerLines = 1
 		}
 		if m.loadedExtra > 0 {
@@ -520,6 +520,22 @@ func (m *MailModel) inputRegionBounds() (start, end int) {
 	start = 2 + topBannerLines + viewportHeight + bottomBannerLines + 1 + paletteLines
 	end = start + m.input.LineCount() + 1 // input rows plus border line
 	return start, end
+}
+
+// Cursor returns the visible composer cursor in Mail child coordinates.
+func (m MailModel) Cursor() *tea.Cursor {
+	if !m.ready || m.showEditorWarn || m.agentSelector.selectorOpen ||
+		m.copyMode || m.agentRail.focused || !m.input.Focused() {
+		return nil
+	}
+	cursor := m.input.Cursor()
+	if cursor == nil {
+		return nil
+	}
+	projected := *cursor
+	start, _ := m.inputRegionBounds()
+	projected.Y += start
+	return &projected
 }
 
 func (m *MailModel) mouseInInputRegion(msg tea.MouseWheelMsg) bool {
@@ -2427,11 +2443,11 @@ func (m MailModel) view(showAgentRailExpandControl bool) string {
 		sepWidth = 0
 	}
 	sep := toLabel + strings.Repeat("\u2500", sepWidth)
-	var inputSection string
+	inputSection := m.input.View()
 	if m.input.IsPaletteActive() {
-		inputSection = m.palette.View() + "\n" + m.input.View()
-	} else {
-		inputSection = m.input.View()
+		if paletteView := m.palette.View(); paletteView != "" {
+			inputSection = paletteView + "\n" + inputSection
+		}
 	}
 
 	// Status bar: left = flash or dir path, right = hints

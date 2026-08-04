@@ -38,6 +38,7 @@ type InputModel struct {
 
 func NewInputModel(humanDir string) InputModel {
 	ti := textarea.New()
+	ti.SetVirtualCursor(false)
 	ti.Prompt = ""
 	ti.Placeholder = i18n.T("mail.placeholder")
 	ti.CharLimit = 5000
@@ -192,6 +193,17 @@ func (m InputModel) View() string {
 	// Bottom border — matches the top separator style in mail.go
 	border := strings.Repeat("\u2500", m.width)
 	return rendered + pad + hint + "\n" + border
+}
+
+// Cursor returns the textarea's real cursor in InputModel coordinates.
+func (m InputModel) Cursor() *tea.Cursor {
+	cursor := m.textarea.Cursor()
+	if cursor == nil {
+		return nil
+	}
+	projected := *cursor
+	projected.X += 4
+	return &projected
 }
 
 // LineCount returns the number of display lines in the input.
