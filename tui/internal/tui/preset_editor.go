@@ -50,6 +50,7 @@ const (
 	feThinking
 	feAPICompat
 	feWireAPI
+	feResponsesTransport
 	feBaseURL
 	feAPIKey
 	feStreaming
@@ -66,7 +67,7 @@ const (
 // capabilityRows), not as form rows.
 var editorFieldOrder = []editorField{
 	feName, feSummary, feTier, feGains, feLoses,
-	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feBaseURL, feAPIKey,
+	feProvider, feModel, feServiceTier, feThinking, feAPICompat, feWireAPI, feResponsesTransport, feBaseURL, feAPIKey,
 	feSave,
 }
 
@@ -146,6 +147,8 @@ var codexServiceTierOptions = []string{"normal", "fast"}
 var codexThinkingOptions = []string{"low", "medium", "high", "xhigh"}
 
 var wireAPIOptions = []string{"auto", "chat_completions", "responses"}
+
+var responsesTransportOptions = []string{"http", "websocket"}
 
 const presetEditorFieldLabelWidth = 18
 
@@ -579,7 +582,7 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 	case feTier:
 		// Tier is an enum — Enter cycles like ←/→. No picker overlay.
 		m.cycleFocused(+1)
-	case feProvider, feAPICompat, feWireAPI:
+	case feProvider, feAPICompat, feWireAPI, feResponsesTransport:
 		// Enums — Enter cycles forward (same as Right). Lets the user
 		// stay on the keyboard's "advance" key.
 		m.cycleFocused(+1)
@@ -653,6 +656,12 @@ func (m PresetEditorModel) isCustomOpenAI() bool {
 	llm, _ := m.working.Manifest["llm"].(map[string]interface{})
 	return asString(llm["provider"]) == "custom" &&
 		asString(llm["api_compat"]) == "openai"
+}
+
+// isCustomOpenAIResponses narrows transport selection to the only Kernel
+// path that supports it: custom + OpenAI compatibility + explicit Responses.
+func (m PresetEditorModel) isCustomOpenAIResponses() bool {
+	return m.isCustomOpenAI() && m.fieldString(feWireAPI) == "responses"
 }
 
 // codexAccountRefs returns the selectable codex_auth_path values for the
@@ -807,10 +816,29 @@ func normalizeWireAPI(manifest map[string]interface{}) {
 	delete(llm, "wire_api")
 }
 
+// normalizeResponsesTransport keeps HTTP as the omission/default and removes
+// stale transport values outside custom OpenAI-compatible Responses.
+func normalizeResponsesTransport(manifest map[string]interface{}) {
+	llm, _ := manifest["llm"].(map[string]interface{})
+	if llm == nil {
+		return
+	}
+	if asString(llm["provider"]) == "custom" &&
+		asString(llm["api_compat"]) == "openai" &&
+		asString(llm["wire_api"]) == "responses" {
+		if asString(llm["responses_transport"]) != "websocket" {
+			delete(llm, "responses_transport")
+		}
+		return
+	}
+	delete(llm, "responses_transport")
+}
+
 func normalizeLLMForCommit(manifest map[string]interface{}) {
 	normalizeServiceTier(manifest)
 	normalizeThinking(manifest)
 	normalizeWireAPI(manifest)
+	normalizeResponsesTransport(manifest)
 }
 
 // setExtra writes into Description.Extra, allocating the map on first
@@ -840,6 +868,7 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		newProvider := cycleString(opts, m.fieldString(f), dir)
 		m.llmMap()["provider"] = newProvider
 		normalizeWireAPI(m.working.Manifest)
+		normalizeResponsesTransport(m.working.Manifest)
 		if newProvider != "codex" {
 			delete(m.llmMap(), "thinking")
 		}
@@ -887,12 +916,21 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 		opts := []string{"", "openai", "anthropic"}
 		m.llmMap()["api_compat"] = cycleString(opts, m.fieldString(f), dir)
 		normalizeWireAPI(m.working.Manifest)
+		normalizeResponsesTransport(m.working.Manifest)
 	case feWireAPI:
 		next := cycleString(wireAPIOptions, m.fieldString(f), dir)
 		if next == "auto" {
 			delete(m.llmMap(), "wire_api")
 		} else {
 			m.llmMap()["wire_api"] = next
+		}
+		normalizeResponsesTransport(m.working.Manifest)
+	case feResponsesTransport:
+		next := cycleString(responsesTransportOptions, m.fieldString(f), dir)
+		if next == "websocket" {
+			m.llmMap()["responses_transport"] = next
+		} else {
+			delete(m.llmMap(), "responses_transport")
 		}
 	case feServiceTier:
 		if m.isCodexProvider() {
@@ -1071,6 +1109,11 @@ func (m PresetEditorModel) fieldString(f editorField) string {
 			return "auto"
 		}
 		return s
+	case feResponsesTransport:
+		if s, _ := llm["responses_transport"].(string); s == "websocket" {
+			return s
+		}
+		return "http"
 	case feBaseURL:
 		s, _ := llm["base_url"].(string)
 		return s
@@ -1244,6 +1287,9 @@ func (m PresetEditorModel) formRows(width int) []presetEditorRow {
 	if m.fieldVisible(feWireAPI) {
 		rows = append(rows, row(feWireAPI, m.row(feWireAPI, lbl("wire_api"), m.fieldString(feWireAPI), width-4)))
 	}
+	if m.fieldVisible(feResponsesTransport) {
+		rows = append(rows, row(feResponsesTransport, m.row(feResponsesTransport, lbl("responses_transport"), m.fieldString(feResponsesTransport), width-4)))
+	}
 	rows = append(rows, row(feBaseURL, m.row(feBaseURL, lbl("base_url"), asString(llm["base_url"]), width-4)))
 	rows = append(rows, row(feAPIKey, m.row(feAPIKey, lbl("api_key"), m.fieldString(feAPIKey), width-4)))
 	rows = append(rows, plain(""))
@@ -1305,6 +1351,9 @@ func (m PresetEditorModel) row(f editorField, key, value string, width int) stri
 	}
 	if f == feWireAPI {
 		return marker + keyStyle.Render(key) + m.wireAPIRadioStrip(focused, valStyle)
+	}
+	if f == feResponsesTransport {
+		return marker + keyStyle.Render(key) + m.responsesTransportRadioStrip(focused, valStyle)
 	}
 	if f == feBaseURL {
 		if strip := m.baseURLRadioStrip(focused, valStyle); strip != "" {
@@ -1463,6 +1512,26 @@ func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Sty
 	return strings.Join(parts, "  ")
 }
 
+// responsesTransportRadioStrip shows the default HTTP path and explicit
+// WebSocket v2 opt-in side by side.
+func (m PresetEditorModel) responsesTransportRadioStrip(focused bool, valStyle lipgloss.Style) string {
+	current := m.fieldString(feResponsesTransport)
+	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	parts := make([]string, 0, len(responsesTransportOptions))
+	for _, option := range responsesTransportOptions {
+		if option == current {
+			if focused {
+				parts = append(parts, valStyle.Render("● "+option))
+			} else {
+				parts = append(parts, "● "+option)
+			}
+		} else {
+			parts = append(parts, subtle.Render("○ "+option))
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
 // isCyclable reports whether a field accepts ←/→ to step through enum
 // values. The model row is conditional — only when the current provider
 // has a known model lineup. Free-text providers leave the model row as
@@ -1477,6 +1546,8 @@ func (m PresetEditorModel) isCyclable(f editorField) bool {
 		return m.hasCodexThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
+	case feResponsesTransport:
+		return m.isCustomOpenAIResponses()
 	case feAPIKey:
 		// For codex, the "API key" row is an account selector: ←/→ binds the
 		// preset to a different Codex OAuth account when more than one exists.
@@ -1605,6 +1676,8 @@ func (m PresetEditorModel) fieldVisible(f editorField) bool {
 		return m.hasCodexThinking()
 	case feWireAPI:
 		return m.isCustomOpenAI()
+	case feResponsesTransport:
+		return m.isCustomOpenAIResponses()
 	default:
 		return true
 	}
