@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/内核-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
-[![Discord](https://img.shields.io/badge/discord-加入-%235865F2?logo=discord&logoColor=white)](https://discord.gg/8KBGVYMS)
+[![Discord](https://img.shields.io/badge/discord-加入-%235865F2?logo=discord&logoColor=white)](https://discord.gg/pfc7z2TRq)
 
 </div>
 
@@ -166,7 +166,7 @@ git diff --check && git status --short
 
 - 官网、教程与发布日志：<https://lingtai.ai>
 - 主仓库：<https://github.com/Lingtai-AI/lingtai> · 内核：<https://github.com/Lingtai-AI/lingtai-kernel>
-- Discord：<https://discord.gg/8KBGVYMS>
+- Discord：<https://discord.gg/pfc7z2TRq>
 - Issues：<https://github.com/Lingtai-AI/lingtai/issues> · Discussions：<https://github.com/Lingtai-AI/lingtai/discussions>
 
 **微信交流群**：扫码加作者微信（备注 *lingtai*），拉入测试群。二维码会定期更新，若过期请提 issue。
