@@ -11,7 +11,7 @@ Digital Scientist · lifelong agent · self-growing memory · durable knowledge 
 [![License](https://img.shields.io/github/license/Lingtai-AI/lingtai?color=%237dab8f)](LICENSE)
 [![Kernel](https://img.shields.io/badge/kernel-lingtai--kernel-%237dab8f)](https://github.com/Lingtai-AI/lingtai-kernel)
 [![Site](https://img.shields.io/badge/site-lingtai.ai-%23d4a853)](https://lingtai.ai)
-[![Discord](https://img.shields.io/badge/discord-join-%235865F2?logo=discord&logoColor=white)](https://discord.gg/8KBGVYMS)
+[![Discord](https://img.shields.io/badge/discord-join-%235865F2?logo=discord&logoColor=white)](https://discord.gg/pfc7z2TRq)
 
 </div>
 
@@ -167,7 +167,7 @@ See [`RELEASING.md`](RELEASING.md) for the release process. Areas that often nee
 
 - Website, tutorial, and release notes: <https://lingtai.ai>
 - Main repo: <https://github.com/Lingtai-AI/lingtai> · Kernel: <https://github.com/Lingtai-AI/lingtai-kernel>
-- Discord: <https://discord.gg/8KBGVYMS>
+- Discord: <https://discord.gg/pfc7z2TRq>
 - Issues: <https://github.com/Lingtai-AI/lingtai/issues> · Discussions: <https://github.com/Lingtai-AI/lingtai/discussions>
 
 For Chinese-language discussion and early testing, scan the WeChat QR below. Add the author on WeChat with the note `lingtai`; if the QR has expired, open an issue and we will refresh it.
