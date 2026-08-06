@@ -2126,6 +2126,15 @@ func (a App) View() tea.View {
 	}
 	ApplyThemeToView(&v)
 	v.ReportFocus = true
+	if a.currentView == appViewMail {
+		if cursor := a.mail.Cursor(); cursor != nil {
+			projected := *cursor
+			budget := a.layoutBudget()
+			projected.X += budget.RailWidth
+			projected.Y += budget.TopChromeRows
+			v.Cursor = &projected
+		}
+	}
 	return v
 }
 
