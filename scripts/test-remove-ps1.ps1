@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $ScriptDir
-$RemoveScript = Join-Path $RepoRoot 'remove.ps1'
+$RemoveScript = Join-Path (Join-Path $RepoRoot 'scripts') 'remove.ps1'
 
 $script:Failures = 0
 $script:Passed   = 0
