@@ -14,6 +14,7 @@ related_files:
   - CLAUDE.md
   - .github/workflows/release.yml
   - .github/workflows/windows-installer-smoke.yml
+  - .github/workflows/delete-merged-branch.yml
   - install.sh
   - install.ps1
   - scripts/update.sh
@@ -158,6 +159,7 @@ The repo root holds two binary trees plus shared infrastructure. Each binary is 
 - **`RELEASING.md`** — Release process: tag, GitHub release, Windows asset/bundle publication, automated Homebrew tap update, manual tap fallback, and the PowerShell install path.
 - **`.github/workflows/release.yml`** — Tag-push workflow (`v*` push only), three jobs. `source-release` verifies the tag and creates the public GitHub Release without building or uploading binaries. `update-homebrew` computes the GitHub tag source-tarball checksum, rewrites `lingtai-tui.rb`, and pushes the source-build formula update to `Lingtai-AI/homebrew-lingtai`. `windows-release` (`needs: source-release`) fails closed unless `kernel-release.json`'s pinned kernel release exists and publishes a verified `win_amd64` wheel, then cross-compiles `lingtai-tui.exe`/`lingtai-portal.exe` for `windows/amd64`, packages `lingtai-<tag>-windows-amd64.zip`+`.sha256`, generates `lingtai-bundle-manifest.json`, and uploads all three via `gh release upload` — the only job in this workflow that uploads assets. See `RELEASING.md`.
 - **`.github/workflows/windows-installer-smoke.yml`** — Runs `scripts/test-install-ps1.ps1` and `scripts/test-remove-ps1.ps1` under both Windows PowerShell 5.1 and PowerShell 7 on `windows-latest` (PR/push, no live-release dependency), plus a `windows-release-asset-smoke` job gated to `push: tags: v*` that polls the just-published release for its Windows asset and runs a real `-SkipVenv` install against it.
+- **`.github/workflows/delete-merged-branch.yml`** — Deletes a pull request's head branch when that PR merges, so merged refs stop accumulating on `origin`. Runs on `pull_request_target: closed` (base-branch definition, writable token, no checkout and no PR-authored code) and acts only when the PR actually merged and its head lives in this repository — fork heads and closed-without-merge branches are left alone, as are the default/`develop`/`gh-pages`/`release/*` branches and any branch that is still the head of another open PR. An already-deleted ref is a success, not a failure, so it composes with the repository's own "automatically delete head branches" setting rather than fighting it.
 - **`CLAUDE.md`** — Repo-specific Claude Code instructions (build commands, gotchas, sibling repos).
 
 ### `tui/` packages
