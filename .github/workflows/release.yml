@@ -34,6 +34,11 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::TAG '$TAG' is not an exact vX.Y.Z release tag" >&2
+            exit 1
+          fi
           url="https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
           sha=$(curl -sL "$url" | shasum -a 256 | cut -d' ' -f1)
           echo "source=$sha" >> "$GITHUB_OUTPUT"
@@ -143,11 +148,13 @@ jobs:
 
       - name: Push formula update
         working-directory: homebrew-tap
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add lingtai-tui.rb
-          git diff --cached --quiet || git commit -m "Update lingtai-tui to ${{ github.ref_name }}"
+          git diff --cached --quiet || git commit -m "Update lingtai-tui to $TAG"
           git push
 
   windows-release:
