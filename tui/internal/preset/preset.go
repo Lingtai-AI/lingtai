@@ -570,6 +570,7 @@ func BuiltinPresets() []Preset {
 		codexPoolPreset(),
 		claudePreset(),
 		customPreset(),
+		opencodeGoPreset(),
 	}
 }
 
@@ -595,6 +596,8 @@ var builtinNames = map[string]bool{
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
+	"opencode-go":      true,
+	"opencode_go":      true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.
