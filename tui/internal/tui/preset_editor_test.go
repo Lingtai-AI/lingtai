@@ -1660,3 +1660,70 @@ func TestPresetEditorCredentialFamilyAPIKeyRowsAreReadOnly(t *testing.T) {
 		})
 	}
 }
+
+// TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel covers the
+// deepseek preset's three base_url options: cycling DeepSeek API → OpenCode
+// adopts the OpenCode credential env-var, cycling to Custom clears base_url
+// (the free-text sentinel), and Enter on Custom/unknown URLs opens inline
+// edit while Enter on a known region URL stays a no-op.
+func TestPresetEditorDeepseekBaseURLCyclingAndCustomSentinel(t *testing.T) {
+	m := NewPresetEditorModelWithBuiltinFlag(builtinPresetForEditorTest(t, "deepseek"), "en", nil, "", false)
+	llm := m.llmMap()
+	if got, _ := llm["provider"].(string); got != "deepseek" {
+		t.Fatalf("test preset provider = %q, want deepseek", got)
+	}
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+
+	// DeepSeek API -> OpenCode: base_url switches and api_key_env follows.
+	m.cycleFocused(+1)
+	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("after first cycle base_url = %q, want OpenCode endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after first cycle api_key_env = %q, want OPENCODE_GO_API_KEY", llm["api_key_env"])
+	}
+
+	// OpenCode -> Custom: base_url clears (free-text sentinel); api_key_env
+	// is left untouched (the Custom option declares no env).
+	m.cycleFocused(+1)
+	if got, _ := llm["base_url"].(string); got != "" {
+		t.Fatalf("after second cycle base_url = %q, want empty (Custom sentinel)", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("after second cycle api_key_env = %q, want untouched OPENCODE_GO_API_KEY", llm["api_key_env"])
+	}
+
+	// Cycling back to the first region restores DeepSeek API + its env.
+	m.cycleFocused(-1)
+	m.cycleFocused(-1)
+	if got, _ := llm["base_url"].(string); got != "https://api.deepseek.com" {
+		t.Fatalf("cycling back base_url = %q, want DeepSeek API endpoint", llm["base_url"])
+	}
+	if got, _ := llm["api_key_env"].(string); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("cycling back api_key_env = %q, want DEEPSEEK_API_KEY", llm["api_key_env"])
+	}
+
+	// Enter on a known region URL stays a no-op (←/→ cycle).
+	m2, _ := m.openInline()
+	if m2.mode == emInline {
+		t.Fatal("Enter on a known region URL must not open inline edit")
+	}
+
+	// Enter on the Custom (empty) URL opens free-text inline edit prefilled
+	// with the current value.
+	m.cursor = editorFieldOrderIndex(t, feBaseURL)
+	m.cycleFocused(+1) // DeepSeek API -> OpenCode
+	m.cycleFocused(+1) // OpenCode -> Custom (empty)
+	m3, _ := m.openInline()
+	if m3.mode != emInline {
+		t.Fatalf("Enter on Custom (empty base_url) mode = %v, want inline", m3.mode)
+	}
+
+	// Enter on an unknown (free-typed) URL also opens inline edit.
+	m4 := m
+	m4.llmMap()["base_url"] = "https://myhost.example/v1"
+	m5, _ := m4.openInline()
+	if m5.mode != emInline {
+		t.Fatalf("Enter on unknown base_url mode = %v, want inline", m5.mode)
+	}
+}

@@ -14,6 +14,15 @@ shared OpenAI-compatible text shape: provider `deepseek`, default model
 The shipped manifest has no `vision` capability, so this manual records no
 direct image route and no DeepSeek plan-level vision MCP.
 
+The deepseek preset's `base_url` offers three options in the TUI preset
+editor (`ProviderRegionURLs["deepseek"]`): **DeepSeek API**
+(`https://api.deepseek.com`, `DEEPSEEK_API_KEY`), **OpenCode**
+(`https://opencode.ai/zen/go/v1`, `OPENCODE_GO_API_KEY`), and **Custom**
+(free-typed endpoint). Selecting the DeepSeek API or OpenCode option also
+switches `api_key_env` to the matching slot. OpenCode Go is a
+DeepSeek-compatible cloud endpoint; China-hosted `deepseek-v4-flash` via
+OpenCode requires opting in at the OpenCode workspace page.
+
 ## Template-specific settings
 
 Read the official [DeepSeek API introduction](https://api-docs.deepseek.com/)

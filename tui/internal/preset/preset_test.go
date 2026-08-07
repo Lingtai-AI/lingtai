@@ -232,8 +232,8 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 			t.Fatalf("RefreshTemplates() error: %v", err)
 		}
 		presets, _ := List()
-		if len(presets) != 13 {
-			t.Fatalf("expected 13 presets, got %d", len(presets))
+		if len(presets) != 12 {
+			t.Fatalf("expected 12 presets, got %d", len(presets))
 		}
 		names := map[string]bool{}
 		for _, p := range presets {
@@ -242,7 +242,7 @@ func TestRefreshTemplates_CreatesAllTemplates(t *testing.T) {
 				t.Errorf("preset %q: Source = %v, want SourceTemplate", p.Name, p.Source)
 			}
 		}
-		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom", "opencode-go"} {
+		for _, want := range []string{"minimax", "zhipu", "mimo", "deepseek", "gemini", "kimi", "nvidia", "openrouter", "codex", "codex-pool", "claude", "custom"} {
 			if !names[want] {
 				t.Errorf("missing preset %q", want)
 			}
@@ -823,33 +823,33 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 }
 
-func TestOpenCodeGoPresetDeclaresCloudEndpoint(t *testing.T) {
-	p := opencodeGoPreset()
-	if p.Name != "opencode-go" {
-		t.Fatalf("preset name = %q, want opencode-go", p.Name)
+func TestDeepseekPresetDeclaresThreeBaseURLOptions(t *testing.T) {
+	// The deepseek preset must remain a builtin after the opencode-go preset
+	// was folded into it as an OpenCode base_url option.
+	found := false
+	for _, p := range BuiltinPresets() {
+		if p.Name == "deepseek" {
+			found = true
+			break
+		}
 	}
-	llm := p.Manifest["llm"].(map[string]interface{})
-	// Reuses the generic custom provider: no kernel registration needed.
-	if got, _ := llm["provider"].(string); got != "custom" {
-		t.Fatalf("provider = %q, want custom", got)
+	if !found {
+		t.Fatal("deepseek preset missing from BuiltinPresets")
 	}
-	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("base_url = %q, want https://opencode.ai/zen/go/v1", got)
+
+	regions, ok := ProviderRegionURLs["deepseek"]
+	if !ok || len(regions) != 3 {
+		t.Fatalf("ProviderRegionURLs[deepseek] = %#v, want 3 entries", regions)
 	}
-	if got, _ := llm["api_compat"].(string); got != "openai" {
-		t.Fatalf("api_compat = %q, want openai", got)
+	want := []RegionURL{
+		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
+		{Label: "OpenCode", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "Custom", URL: ""},
 	}
-	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
-		t.Fatalf("api_key_env = %q, want OPENCODE_GO_API_KEY", got)
-	}
-	// Model is left blank so the user fills in a Go model id themselves.
-	if got, _ := llm["model"].(string); got != "" {
-		t.Fatalf("model = %q, want blank (user fills it in)", got)
-	}
-	// Only the chat/completions wire is exposed — Responses is supported for
-	// some Go models but surfacing both wires would be confusing.
-	if got, _ := llm["wire_api"].(string); got != "chat_completions" {
-		t.Fatalf("wire_api = %q, want chat_completions", got)
+	for i, w := range want {
+		if regions[i] != w {
+			t.Errorf("ProviderRegionURLs[deepseek][%d] = %#v, want %#v", i, regions[i], w)
+		}
 	}
 }
 
