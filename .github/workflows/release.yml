@@ -34,6 +34,11 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::TAG '$TAG' is not an exact vX.Y.Z release tag" >&2
+            exit 1
+          fi
           url="https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
           sha=$(curl -sL "$url" | shasum -a 256 | cut -d' ' -f1)
           echo "source=$sha" >> "$GITHUB_OUTPUT"
@@ -51,8 +56,18 @@ jobs:
           TAG: ${{ github.ref_name }}
           SHA: ${{ steps.sha.outputs.source }}
         run: |
+          set -euo pipefail
           VERSION="${TAG#v}"
-          cat > homebrew-tap/lingtai-tui.rb << FORMULA
+
+          # The formula is written in two heredocs on purpose.
+          #
+          # This first one interpolates the three release values, so its
+          # delimiter has to stay unquoted. That is safe here and only here: the
+          # header carries no backtick and no $( ), and the shell never re-scans
+          # a parameter-expansion result, so neither the tag nor the checksum can
+          # turn into a command. The exact-tag gate in the first step of this job
+          # additionally keeps ${TAG} away from Ruby's #{} interpolation.
+          cat > homebrew-tap/lingtai-tui.rb << FORMULA_HEADER
           class LingtaiTui < Formula
             desc "Terminal UI for the Lingtai AI agent framework"
             homepage "https://github.com/Lingtai-AI/lingtai"
@@ -61,6 +76,15 @@ jobs:
 
             url "https://github.com/Lingtai-AI/lingtai/archive/refs/tags/${TAG}.tar.gz"
             sha256 "${SHA}"
+          FORMULA_HEADER
+
+          # The body needs no expansion and must not receive any. It is Ruby that
+          # only Homebrew may evaluate, and it contains a backtick pair (`npm ci`
+          # in the mirror-selection comment) plus #{version}. With an unquoted
+          # delimiter the runner executed that backtick pair itself and published
+          # its stdout into the tap. The quoted delimiter copies the body through
+          # byte for byte.
+          cat >> homebrew-tap/lingtai-tui.rb << 'FORMULA_BODY'
 
             depends_on "go" => :build
             depends_on "node" => :build
@@ -139,15 +163,17 @@ jobs:
               assert_match "lingtai-tui", shell_output("#{bin}/lingtai-tui version 2>&1", 0)
             end
           end
-          FORMULA
+          FORMULA_BODY
 
       - name: Push formula update
         working-directory: homebrew-tap
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add lingtai-tui.rb
-          git diff --cached --quiet || git commit -m "Update lingtai-tui to ${{ github.ref_name }}"
+          git diff --cached --quiet || git commit -m "Update lingtai-tui to $TAG"
           git push
 
   windows-release:
