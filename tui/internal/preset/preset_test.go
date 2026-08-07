@@ -823,6 +823,26 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGoPresetDeclaresCloudEndpoint(t *testing.T) {
+	p := opencodeGoPreset()
+	if p.Name != "opencode-go" {
+		t.Fatalf("preset name = %q, want opencode-go", p.Name)
+	}
+	llm := p.Manifest["llm"].(map[string]interface{})
+	if got, _ := llm["provider"].(string); got != "opencode-go" {
+		t.Fatalf("provider = %q, want opencode-go", got)
+	}
+	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("base_url = %q, want https://opencode.ai/zen/go/v1", got)
+	}
+	if got, _ := llm["api_compat"].(string); got != "openai" {
+		t.Fatalf("api_compat = %q, want openai", got)
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+}
+
 func TestCredentialFamilyAliases(t *testing.T) {
 	tests := []struct {
 		provider string

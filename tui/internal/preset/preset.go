@@ -531,6 +531,18 @@ var ProviderRegionURLs = map[string][]RegionURL{
 }
 
 // BuiltinPresets returns the built-in presets.
+func opencodeGoPreset() Preset {
+	// OpenCode Go subscription (https://opencode.ai/docs/go/) — curated open
+	// coding models served through the cloud Zen Go endpoint. OpenAI-compatible
+	// chat/completions wire; no local opencode serve process needed. The
+	// default model is GLM-5.2; change manifest.llm.model to any id from
+	// GET /zen/go/v1/models (e.g. kimi-k3, deepseek-v4-pro, minimax-m3).
+	return openAICompatNoVisionPreset(
+		"opencode-go",
+		"OpenCode Go — curated open coding models (GLM-5.2, Kimi K3, DeepSeek V4) via subscription",
+		"glm-5.2", "OPENCODE_GO_API_KEY", "https://opencode.ai/zen/go/v1", "3")
+}
+
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
