@@ -531,6 +531,34 @@ var ProviderRegionURLs = map[string][]RegionURL{
 }
 
 // BuiltinPresets returns the built-in presets.
+func opencodeGoPreset() Preset {
+	// OpenCode Go subscription (https://opencode.ai/docs/go/) — curated open
+	// coding models served through the cloud Zen Go endpoint. It is a plain
+	// OpenAI-compatible endpoint, so it reuses the generic `custom` provider
+	// with an explicit base_url — no kernel-side provider registration needed.
+	// Leave model blank on purpose: users fill in a Go model id themselves
+	// (see https://opencode.ai/docs/go/ for the current model list, or call
+	// GET https://opencode.ai/zen/go/v1/models with their API key).
+	return Preset{
+		Name:        "opencode-go",
+		Description: PresetDescription{Summary: "OpenCode Go subscription — curated open coding models; fill in a Go model id", Tier: "3"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "custom", "model": "",
+				"api_key": nil, "api_key_env": "OPENCODE_GO_API_KEY",
+				"base_url": "https://opencode.ai/zen/go/v1", "api_compat": "openai",
+				// Expose chat/completions only — the Responses API is supported for
+				// some Go models, but surfacing both wires would be confusing.
+				"wire_api": "chat_completions",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
+}
+
 func BuiltinPresets() []Preset {
 	return []Preset{
 		minimaxPreset(),
@@ -545,6 +573,7 @@ func BuiltinPresets() []Preset {
 		codexPoolPreset(),
 		claudePreset(),
 		customPreset(),
+		opencodeGoPreset(),
 	}
 }
 
@@ -570,6 +599,8 @@ var builtinNames = map[string]bool{
 	"claude-agent-sdk": true,
 	"claude_agent_sdk": true,
 	"custom":           true,
+	"opencode-go":      true,
+	"opencode_go":      true,
 }
 
 // IsBuiltin reports whether `name` matches a TUI-shipped template.

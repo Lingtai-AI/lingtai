@@ -823,6 +823,36 @@ func TestCustomPresetDeclaresOpenAICompatForWireSelector(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGoPresetDeclaresCloudEndpoint(t *testing.T) {
+	p := opencodeGoPreset()
+	if p.Name != "opencode-go" {
+		t.Fatalf("preset name = %q, want opencode-go", p.Name)
+	}
+	llm := p.Manifest["llm"].(map[string]interface{})
+	// Reuses the generic custom provider: no kernel registration needed.
+	if got, _ := llm["provider"].(string); got != "custom" {
+		t.Fatalf("provider = %q, want custom", got)
+	}
+	if got, _ := llm["base_url"].(string); got != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("base_url = %q, want https://opencode.ai/zen/go/v1", got)
+	}
+	if got, _ := llm["api_compat"].(string); got != "openai" {
+		t.Fatalf("api_compat = %q, want openai", got)
+	}
+	if got, _ := llm["api_key_env"].(string); got != "OPENCODE_GO_API_KEY" {
+		t.Fatalf("api_key_env = %q, want OPENCODE_GO_API_KEY", got)
+	}
+	// Model is left blank so the user fills in a Go model id themselves.
+	if got, _ := llm["model"].(string); got != "" {
+		t.Fatalf("model = %q, want blank (user fills it in)", got)
+	}
+	// Only the chat/completions wire is exposed — Responses is supported for
+	// some Go models but surfacing both wires would be confusing.
+	if got, _ := llm["wire_api"].(string); got != "chat_completions" {
+		t.Fatalf("wire_api = %q, want chat_completions", got)
+	}
+}
+
 func TestCredentialFamilyAliases(t *testing.T) {
 	tests := []struct {
 		provider string
