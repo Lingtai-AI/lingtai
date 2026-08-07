@@ -843,7 +843,7 @@ func TestDeepseekPresetDeclaresThreeBaseURLOptions(t *testing.T) {
 	}
 	want := []RegionURL{
 		{Label: "DeepSeek API", URL: "https://api.deepseek.com", Env: "DEEPSEEK_API_KEY"},
-		{Label: "OpenCode", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
+		{Label: "OpenCode Go", URL: "https://opencode.ai/zen/go/v1", Env: "OPENCODE_GO_API_KEY"},
 		{Label: "Custom", URL: ""},
 	}
 	for i, w := range want {

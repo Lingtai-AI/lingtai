@@ -534,16 +534,13 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op
 		// only while the current value is one of the known non-empty region
 		// URLs. The Custom option (empty-URL sentinel) and any free-typed URL
-		// open free-text inline edit instead.
+		// open free-text inline edit instead. The selection rule is shared with
+		// cycleFocused and baseURLRadioStrip via selectedRegionIndex.
 		provider := asString(m.llmMap()["provider"])
 		current := asString(m.llmMap()["base_url"])
 		regions, hasRegions := preset.ProviderRegionURLs[provider]
-		if hasRegions {
-			for _, r := range regions {
-				if r.URL != "" && r.URL == current {
-					return *m, nil
-				}
-			}
+		if hasRegions && len(regions) > 0 && regions[selectedRegionIndex(regions, current)].URL != "" {
+			return *m, nil
 		}
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
@@ -989,22 +986,27 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 	case feBaseURL:
 		provider := asString(m.llmMap()["provider"])
 		if regions, ok := preset.ProviderRegionURLs[provider]; ok && len(regions) > 0 {
-			urls := make([]string, len(regions))
-			for i, r := range regions {
-				urls[i] = r.URL
+			idx := selectedRegionIndex(regions, m.fieldString(f))
+			next := regions[(idx+dir+len(regions))%len(regions)]
+			if next.URL == "" {
+				// Moving onto the Custom free-text sentinel: clear the value
+				// so Enter opens a blank inline edit. This branch is only
+				// reachable from a known region option; an off-list typed URL
+				// resolves to the Custom row, so cycling away from it goes
+				// straight to a real region and never clears the typed value
+				// as a side effect.
+				m.llmMap()["base_url"] = ""
+				break
 			}
-			next := cycleString(urls, m.fieldString(f), dir)
-			m.llmMap()["base_url"] = next
+			m.llmMap()["base_url"] = next.URL
 			// Region options can carry an implied credential env-var (e.g.
-			// DeepSeek API -> DEEPSEEK_API_KEY, OpenCode -> OPENCODE_GO_API_KEY);
-			// adopt it when the selected option declares one. Cycling to the
-			// Custom option (empty URL) leaves api_key_env untouched so the
-			// user keeps whatever slot they already configured.
-			for _, r := range regions {
-				if r.URL == next && r.Env != "" {
-					m.llmMap()["api_key_env"] = r.Env
-					break
-				}
+			// DeepSeek API -> DEEPSEEK_API_KEY, OpenCode Go ->
+			// OPENCODE_GO_API_KEY); adopt it when the selected option declares
+			// one. The Custom option declares none, so landing on it leaves
+			// api_key_env untouched and the user keeps whatever credential
+			// slot their endpoint actually uses.
+			if next.Env != "" {
+				m.llmMap()["api_key_env"] = next.Env
 			}
 		}
 	case feAPICompat:
@@ -1588,22 +1590,10 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 	}
 	current := asString(m.llmMap()["base_url"])
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	hasCustom := false
-	matched := false
-	for _, r := range regions {
-		if r.URL == "" {
-			hasCustom = true
-		} else if r.URL == current {
-			matched = true
-		}
-	}
+	selected := selectedRegionIndex(regions, current)
 	parts := make([]string, 0, len(regions))
-	for _, r := range regions {
-		selected := r.URL == current
-		if r.URL == "" {
-			selected = hasCustom && !matched
-		}
-		if selected {
+	for i, r := range regions {
+		if i == selected {
 			if focused {
 				parts = append(parts, valStyle.Render("● "+r.Label))
 			} else {
@@ -1616,14 +1606,11 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 	strip := strings.Join(parts, "  ")
 	// Custom (or an unknown typed URL) shows the actual endpoint after the
 	// strip so the user always sees exactly what will be saved.
-	if hasCustom && !matched && current != "" {
+	if regions[selected].URL == "" && current != "" {
 		strip += "  " + subtle.Render(current)
 	}
 	return strip
 }
-
-// wireAPIRadioStrip renders all three wire choices so Custom OpenAI users
-// can see the selector rather than only the current raw manifest value.
 func (m PresetEditorModel) wireAPIRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	current := m.fieldString(feWireAPI)
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -1990,6 +1977,27 @@ func maskAPIKey(key string) string {
 		return strings.Repeat("•", len(key))
 	}
 	return "••••••••" + key[len(key)-4:]
+}
+
+// selectedRegionIndex resolves which ProviderRegionURLs option is selected
+// for the given current base_url. A value matching a known non-empty URL
+// selects that option; the empty-URL Custom sentinel and any free-typed
+// value select the Custom row, falling back to the first option when the
+// provider has no Custom row. All consumers (openInline, baseURLRadioStrip,
+// cycleFocused) share this rule so the strip's highlighted dot, the Enter
+// no-op, and the cycle always agree.
+func selectedRegionIndex(regions []preset.RegionURL, current string) int {
+	for i, r := range regions {
+		if r.URL != "" && r.URL == current {
+			return i
+		}
+	}
+	for i, r := range regions {
+		if r.URL == "" {
+			return i
+		}
+	}
+	return 0
 }
 
 // cycleString rotates `cur` through `opts` by `dir` steps. Unknown
