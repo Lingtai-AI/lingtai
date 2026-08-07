@@ -1,5 +1,7 @@
 # WeChat Addon (`lingtai.addons.wechat`) Design
 
+> **Superseded — historical record (as of 2026-08-07).** `src/lingtai/addons/` no longer exists; the WeChat integration now lives at `lingtai-kernel/src/lingtai/mcp_servers/wechat/login.py`. The activation contract is now an `init.json` `addons` list plus an `mcp.<name>` stdio entry and a `LINGTAI_WECHAT_CONFIG` env var, not the `.lingtai/.addons/wechat/config.json` path described here.
+
 ## Summary
 
 A LingTai addon that connects agents to WeChat via Tencent's official iLink Bot API — the same HTTP protocol used by `@tencent-weixin/openclaw-weixin`. Reimplements the 5 iLink endpoints directly in Python, with no OpenClaw or Node.js dependency.

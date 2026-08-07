@@ -1,5 +1,7 @@
 # Recipe Covenant Override + Dump Path Rename — Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** Neither `session_dump.go` nor `briefHistoryDir` exists — the hourly-dump feature this plan renames was never built. See `tui/internal/fs/registry.go`, which only writes `brief/projects/<hash>/meta.json`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Allow recipes to override the system-wide covenant, and fix the hourly dump path to use `brief/projects/<hash>/` instead of `brief/<hash>/`.

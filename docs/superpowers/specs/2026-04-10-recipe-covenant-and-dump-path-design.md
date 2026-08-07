@@ -1,5 +1,7 @@
 # Recipe Covenant Override + Dump Path Rename
 
+> **Superseded — historical record (as of 2026-08-07).** Neither `session_dump.go` nor `briefHistoryDir` exists — this design's dump-path rename was never implemented. `tui/internal/fs/registry.go` only writes `brief/projects/<hash>/meta.json`.
+
 **Date:** 2026-04-10
 **Status:** Draft
 

@@ -1,5 +1,7 @@
 # Email Scheduler Status — Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** The built-in email recurring-send scheduler this plan modifies was removed entirely, not reworked (see `test_email_schedule_removed_from_schema` in the kernel repo's test suite). `capabilities/` and the top-level `i18n/` directory are also gone; email now lives at `lingtai-kernel/src/lingtai/tools/email/`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the email scheduler's `.cancel` sentinel-file mechanism with an explicit `status` field on each schedule record, add a `reactivate` action, and force all in-flight schedules to pause on agent restart.

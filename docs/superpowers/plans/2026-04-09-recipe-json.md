@@ -1,5 +1,7 @@
 # recipe.json Manifest and Imported Recipe Picker Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** Bundled manifests live under `.recipe/` (`RecipeDotDir` in `tui/internal/preset/recipes.go`), not flat at the recipe root, and the `recipe.recommended`/`recipe.others` i18n keys this plan proposes were never added. See `tui/internal/preset/skills/lingtai-recipe/reference/recipe-format/SKILL.md` for the current format.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a mandatory `recipe.json` manifest to every recipe and surface auto-detected imported recipes as a first-class picker option above "Adaptive".

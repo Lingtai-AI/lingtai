@@ -10,6 +10,8 @@
 > creation via `system/lingtai.md` / psyche, not written into generated init.json.
 > The `_setup_from_init()` resolve loop and field list quoted here reflect the
 > 2026-03-29 schema, not current behavior. Read this for history, not as live guidance.
+>
+> **Additional drift (as of 2026-08-07):** `capabilities/` and `intrinsics/` directories are gone (avatar/soul now live under `src/lingtai/tools/`); the `soul`/`soul_file` init fields were retired in v0.7.6 (`init_schema.py`); the `soul.system_prompt` i18n key is absent; and `PrinciplePath` does not exist (only `CovenantPath`/`SoulFlowPath`).
 
 ## Problem
 

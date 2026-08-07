@@ -1,5 +1,7 @@
 # Covenant Distillation + Per-Agent `profile/` Layout
 
+> **Superseded — historical record (as of 2026-08-07).** The proposed `examples/profile/` directory was never built; kernel prompt templates now live under `lingtai-kernel/src/lingtai/prompts/`. Duplicate-process detection now goes through `match_agent_run()` in `lingtai-kernel/src/lingtai/kernel/process_match.py`, not the raw-substring check quoted here.
+
 **Date:** 2026-05-18
 **Repos touched:** `lingtai` (proposed defaults), per-agent `init.json` (immediate)
 **Pattern validated on:** `shouyi` (admin/karma orchestrator, zh language)

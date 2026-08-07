@@ -1,5 +1,7 @@
 # Session.jsonl Hourly Markdown Dump — Implementation Plan
 
+> **Superseded — historical record (as of 2026-08-07).** The hourly-markdown-dump-to-brief feature described here was never implemented (no `session_dump.go`, no dump hook in `session.go`'s `append()`). `NewSessionCache` is a 3-argument constructor (`humanDir, projectPath, persistenceRole`) in the current `tui/internal/fs/session.go`, not the 2-argument form this plan assumes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Produce hourly markdown transcripts of the TUI chat view at `~/.lingtai-tui/brief/<project-hash>/history/` for the future secretary agent.
