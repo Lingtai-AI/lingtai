@@ -22,7 +22,7 @@ func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
 					"input":  map[string]interface{}{"command": "ls"},
 				},
 			},
-			want: "shell.run",
+			want: `shell.run({"command":"ls"})`,
 		},
 		{
 			name: "ltp-v2-nested-args-with-action",
@@ -33,7 +33,7 @@ func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
 					"input":  map[string]interface{}{"file_path": "/tmp/x"},
 				},
 			},
-			want: "file.read",
+			want: `file.read({"file_path":"/tmp/x"})`,
 		},
 		{
 			name: "non-ltp-map-args-without-action",
@@ -63,6 +63,43 @@ func TestExtractSessionEventTextToolCallLTP(t *testing.T) {
 				},
 			},
 			want: `shell({"action":"","input":{"command":"ls"}})`,
+		},
+		{
+			name: "ltp-v2-reasoning-dropped",
+			raw: map[string]interface{}{
+				"tool_name": "file",
+				"tool_args": map[string]interface{}{
+					"action":     "read",
+					"file_path":  "/tmp/x",
+					"_reasoning": "private diary text",
+				},
+			},
+			want: `file.read({"file_path":"/tmp/x"})`,
+		},
+		{
+			name: "ltp-v2-action-only-no-params",
+			raw: map[string]interface{}{
+				"tool_name": "system",
+				"tool_args": map[string]interface{}{
+					"action": "presets",
+				},
+			},
+			want: "system.presets",
+		},
+		{
+			name: "ltp-v2-multi-input-keys",
+			raw: map[string]interface{}{
+				"tool_name": "file",
+				"tool_args": map[string]interface{}{
+					"action": "edit",
+					"input": map[string]interface{}{
+						"file_path":  "/tmp/a.txt",
+						"old_string": "x",
+						"new_string": "y",
+					},
+				},
+			},
+			want: `file.edit({"file_path":"/tmp/a.txt","new_string":"y","old_string":"x"})`,
 		},
 	}
 

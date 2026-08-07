@@ -1981,10 +1981,14 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 		if args == "" {
 			if argsMap, ok := entry["tool_args"].(map[string]interface{}); ok {
 				// LingTai tool protocol (LTP v2): args carry an explicit
-				// "action" field. Render the tool as tool.action_name instead
-				// of the full args JSON, and change nothing else about the
-				// tool_call display (timestamp, color, truncation, body layout).
+				// "action" field. Keep the readable tool.action_name prefix
+				// but DO NOT drop the parameters — the remaining args are
+				// appended so the call stays inspectable, e.g.
+				// file.read({"file_path":"/tmp/x"}) instead of file.read.
 				if action, ok := argsMap["action"].(string); ok && action != "" {
+					if params := renderLTPToolParams(argsMap); params != "" {
+						return fmt.Sprintf("%s.%s(%s)", name, action, params)
+					}
 					return fmt.Sprintf("%s.%s", name, action)
 				}
 				data, _ := json.Marshal(argsMap)
@@ -1999,6 +2003,39 @@ func extractSessionEventText(entry map[string]interface{}, eventType string) str
 		return formatToolResultEvent(entry)
 	}
 	return ""
+}
+
+// renderLTPToolParams renders the parameter portion of an LTP v2 tool_call
+// args map. It drops the "action" selector and the private "_reasoning" key,
+// unwraps the conventional "input" wrapper (which nests the real arguments),
+// and returns the remaining parameters as compact JSON. An empty result means
+// the call has no meaningful parameters beyond its action.
+func renderLTPToolParams(argsMap map[string]interface{}) string {
+	rest := make(map[string]interface{}, len(argsMap))
+	for k, v := range argsMap {
+		switch k {
+		case "action", "_reasoning":
+			continue
+		case "input":
+			if inner, ok := v.(map[string]interface{}); ok {
+				for ik, iv := range inner {
+					rest[ik] = iv
+				}
+				continue
+			}
+			rest[k] = v
+		default:
+			rest[k] = v
+		}
+	}
+	if len(rest) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(rest)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func formatToolResultEvent(entry map[string]interface{}) string {
