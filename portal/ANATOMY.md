@@ -23,6 +23,26 @@ related_files:
   - portal/web/src/live-network.d.mts
   - portal/web/src/live-network.test.mjs
   - portal/web/src/types.ts
+  - portal/.gitignore
+  - portal/go.sum
+  - portal/i18n/i18n_test.go
+  - portal/runtime_migrations_disabled_test.go
+  - portal/web/.gitignore
+  - portal/web/README.md
+  - portal/web/eslint.config.js
+  - portal/web/index.html
+  - portal/web/package-lock.json
+  - portal/web/public/favicon.svg
+  - portal/web/public/icons.svg
+  - portal/web/src/Stats.tsx
+  - portal/web/src/TopBar.tsx
+  - portal/web/src/i18n.ts
+  - portal/web/src/main.tsx
+  - portal/web/src/theme.ts
+  - portal/web/tsconfig.app.json
+  - portal/web/tsconfig.json
+  - portal/web/tsconfig.node.json
+  - portal/web/vite.config.ts
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -83,3 +103,4 @@ The `lingtai-portal` binary: a single Go binary that reads the same `.lingtai/` 
 - **Live recording begins at startup.** `StartRecording` (`portal/internal/api/server.go:70-114`) runs in a background goroutine. It preserves the existing startup reconstruction check/replay write, then records complete snapshots immediately and every 3 seconds; the live API's fast incomplete shape is separate.
 - **`needsReconstruction` detects format migration.** If `topology.jsonl` is missing, empty, or uses the pre-`direct/cc/bcc` format, the recorder triggers the existing full rebuild (`portal/internal/api/server.go:174-200`) before complete live recording.
 - **Runtime migration retirement.** Portal startup does not run the retained registry or reject projects based on its historical version. Rebuild both binaries after ordinary code changes as usual.
+- **`related_files` is this binary tree's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.

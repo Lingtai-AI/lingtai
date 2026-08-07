@@ -13,6 +13,7 @@ related_files:
   - tui/internal/process/check.go
   - tui/internal/process/check_test.go
   - tui/internal/migrate/m036_sqlite_log_backfill.go
+  - tui/internal/processscan/check_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;

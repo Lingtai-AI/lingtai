@@ -19,6 +19,52 @@ related_files:
   - tui/internal/migrate/m037_preset_skills_paths.go
   - tui/internal/migrate/m038_agent_init_skills_paths.go
   - tui/internal/migrate/m039_agent_init_context_preset_repair.go
+  - tui/internal/migrate/check_addon_comment.go
+  - tui/internal/migrate/check_addon_comment_test.go
+  - tui/internal/migrate/error_propagation_test.go
+  - tui/internal/migrate/m003_character_to_lingtai.go
+  - tui/internal/migrate/m004_soul_inquiry_source.go
+  - tui/internal/migrate/m005_relative_addressing.go
+  - tui/internal/migrate/m007_normalize_ledger.go
+  - tui/internal/migrate/m008_recipe_state.go
+  - tui/internal/migrate/m008_recipe_state_test.go
+  - tui/internal/migrate/m009_procedures.go
+  - tui/internal/migrate/m010_legacy_addons_warn.go
+  - tui/internal/migrate/m011_session_backfill.go
+  - tui/internal/migrate/m012_session_resort.go
+  - tui/internal/migrate/m013_agora_rename.go
+  - tui/internal/migrate/m014_skills_groups.go
+  - tui/internal/migrate/m016_rename_pad_codex_library.go
+  - tui/internal/migrate/m017_rename_preset_caps.go
+  - tui/internal/migrate/m017_rename_preset_caps_test.go
+  - tui/internal/migrate/m018_library_split.go
+  - tui/internal/migrate/m018_library_split_test.go
+  - tui/internal/migrate/m019_procedures_english_only.go
+  - tui/internal/migrate/m020_pseudo_agent_subscriptions.go
+  - tui/internal/migrate/m020_pseudo_agent_subscriptions_test.go
+  - tui/internal/migrate/m021_library_paths.go
+  - tui/internal/migrate/m021_library_paths_test.go
+  - tui/internal/migrate/m022_recipe_lang_suffix.go
+  - tui/internal/migrate/m022_recipe_lang_suffix_test.go
+  - tui/internal/migrate/m023_recipe_state_rename.go
+  - tui/internal/migrate/m023_recipe_state_rename_test.go
+  - tui/internal/migrate/m024_add_active_preset.go
+  - tui/internal/migrate/m024_add_active_preset_test.go
+  - tui/internal/migrate/m025_preset_description_object.go
+  - tui/internal/migrate/m025_preset_description_object_test.go
+  - tui/internal/migrate/m026_preset_path_form_test.go
+  - tui/internal/migrate/m027_strip_media_capabilities.go
+  - tui/internal/migrate/m028_addons_to_mcp.go
+  - tui/internal/migrate/m028_addons_to_mcp_test.go
+  - tui/internal/migrate/m028_e2e_test.go
+  - tui/internal/migrate/m029_preset_allowed_list_test.go
+  - tui/internal/migrate/m031_drop_legacy_intrinsic_capabilities.go
+  - tui/internal/migrate/m032_cleanup_codex_oauth.go
+  - tui/internal/migrate/m034_library_skills_caps_test.go
+  - tui/internal/migrate/m036_sqlite_log_backfill_test.go
+  - tui/internal/migrate/m037_preset_skills_paths_test.go
+  - tui/internal/migrate/m038_agent_init_skills_paths_test.go
+  - tui/internal/migrate/m039_agent_init_context_preset_repair_test.go
 maintenance: |
   Keep related_files as repo-relative paths to real files. Include neighboring
   ANATOMY.md files so the anatomy graph stays connected rather than isolated;
@@ -94,3 +140,4 @@ source, test, registry directory, or `migration/migration.md` was deleted.
 - The old append-only/collision rules explain Git history, not a new runtime
   contract. The six m040/preflight deletions are the complete authorized
   deletion set for this recut.
+- **`related_files` is this package's full inventory.** The repo-wide no-orphan rule (root `ANATOMY.md`, `## Anatomy convention`) requires every tracked file here to appear in the frontmatter above, and `TestArchitectureDocumentsCoverEveryTrackedFile` (`tui/architecture_documents_test.go`) fails when one is missing. The body stays the curated architectural map: adding a file does not oblige a new row above, but adding its `related_files` entry in the same commit is mandatory — and deleting a file means deleting its entry.
