@@ -533,14 +533,27 @@ var ProviderRegionURLs = map[string][]RegionURL{
 // BuiltinPresets returns the built-in presets.
 func opencodeGoPreset() Preset {
 	// OpenCode Go subscription (https://opencode.ai/docs/go/) — curated open
-	// coding models served through the cloud Zen Go endpoint. OpenAI-compatible
-	// chat/completions wire; no local opencode serve process needed. The
-	// default model is GLM-5.2; change manifest.llm.model to any id from
-	// GET /zen/go/v1/models (e.g. kimi-k3, deepseek-v4-pro, minimax-m3).
-	return openAICompatNoVisionPreset(
-		"opencode-go",
-		"OpenCode Go — curated open coding models (GLM-5.2, Kimi K3, DeepSeek V4) via subscription",
-		"glm-5.2", "OPENCODE_GO_API_KEY", "https://opencode.ai/zen/go/v1", "3")
+	// coding models served through the cloud Zen Go endpoint. It is a plain
+	// OpenAI-compatible endpoint, so it reuses the generic `custom` provider
+	// with an explicit base_url — no kernel-side provider registration needed.
+	// Leave model blank on purpose: users fill in a Go model id themselves
+	// (see https://opencode.ai/docs/go/ for the current model list, or call
+	// GET https://opencode.ai/zen/go/v1/models with their API key).
+	return Preset{
+		Name:        "opencode-go",
+		Description: PresetDescription{Summary: "OpenCode Go subscription — curated open coding models; fill in a Go model id", Tier: "3"},
+		Manifest: map[string]interface{}{
+			"llm": map[string]interface{}{
+				"provider": "custom", "model": "",
+				"api_key": nil, "api_key_env": "OPENCODE_GO_API_KEY",
+				"base_url": "https://opencode.ai/zen/go/v1", "api_compat": "openai",
+			},
+			"capabilities": map[string]interface{}{
+				"web_search": map[string]interface{}{"provider": "duckduckgo"},
+				"skills":     skillsDefault(),
+			},
+		},
+	}
 }
 
 func BuiltinPresets() []Preset {
