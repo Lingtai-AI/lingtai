@@ -547,6 +547,9 @@ func opencodeGoPreset() Preset {
 				"provider": "custom", "model": "",
 				"api_key": nil, "api_key_env": "OPENCODE_GO_API_KEY",
 				"base_url": "https://opencode.ai/zen/go/v1", "api_compat": "openai",
+				// Expose chat/completions only — the Responses API is supported for
+				// some Go models, but surfacing both wires would be confusing.
+				"wire_api": "chat_completions",
 			},
 			"capabilities": map[string]interface{}{
 				"web_search": map[string]interface{}{"provider": "duckduckgo"},

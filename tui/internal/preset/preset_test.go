@@ -846,6 +846,11 @@ func TestOpenCodeGoPresetDeclaresCloudEndpoint(t *testing.T) {
 	if got, _ := llm["model"].(string); got != "" {
 		t.Fatalf("model = %q, want blank (user fills it in)", got)
 	}
+	// Only the chat/completions wire is exposed — Responses is supported for
+	// some Go models but surfacing both wires would be confusing.
+	if got, _ := llm["wire_api"].(string); got != "chat_completions" {
+		t.Fatalf("wire_api = %q, want chat_completions", got)
+	}
 }
 
 func TestCredentialFamilyAliases(t *testing.T) {
