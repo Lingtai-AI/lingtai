@@ -17,7 +17,7 @@ on:
       - 'v*'
     paths:
       - 'install.ps1'
-      - 'remove.ps1'
+      - 'scripts/remove.ps1'
       - 'scripts/test-install-ps1.ps1'
       - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'
@@ -27,7 +27,7 @@ on:
   pull_request:
     paths:
       - 'install.ps1'
-      - 'remove.ps1'
+      - 'scripts/remove.ps1'
       - 'scripts/test-install-ps1.ps1'
       - 'scripts/test-remove-ps1.ps1'
       - 'tui/go.mod'

@@ -17,11 +17,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPDATE_SH="$ROOT_DIR/update.sh"
-FIX_SH="$ROOT_DIR/fix.sh"
-VERIFY_SH="$ROOT_DIR/verify.sh"
-DEV_SH="$ROOT_DIR/dev.sh"
-REMOVE_SH="$ROOT_DIR/remove.sh"
+UPDATE_SH="$ROOT_DIR/scripts/update.sh"
+FIX_SH="$ROOT_DIR/scripts/fix.sh"
+VERIFY_SH="$ROOT_DIR/scripts/verify.sh"
+DEV_SH="$ROOT_DIR/scripts/dev.sh"
+REMOVE_SH="$ROOT_DIR/scripts/remove.sh"
 
 command -v python3 >/dev/null || { echo "test-lifecycle-assets: python3 is required" >&2; exit 1; }
 command -v tar >/dev/null || { echo "test-lifecycle-assets: tar is required" >&2; exit 1; }
