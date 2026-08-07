@@ -22,7 +22,12 @@ Pushing a `v*` tag triggers the root GitHub Actions workflow at
   Release when it does not already exist. GitHub supplies the tag source archives;
   this job does not build or upload prebuilt binaries, checksums, or bundles.
 - **`update-homebrew`** — computes the GitHub source-tarball checksum and updates
-  the source-build formula in `Lingtai-AI/homebrew-lingtai`.
+  the source-build formula in `Lingtai-AI/homebrew-lingtai`. It **fails closed**
+  before the tap checkout unless the pushed tag is an exact `vX.Y.Z` — the same
+  shape `windows-release` already requires — so a tag name can never reach the
+  formula writer or the cross-repo tap token as unvalidated data. Prerelease and
+  other non-exact `v*` tags still create a GitHub source release, but are not
+  published to Homebrew.
 - **`windows-release`** (`needs: source-release`) — builds both
   `lingtai-tui.exe` and `lingtai-portal.exe` for `windows/amd64`; the portal web
   build is mandatory. It packages the dual-binary
