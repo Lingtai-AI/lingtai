@@ -333,6 +333,7 @@ func TestPresetSkillRouter_ProviderChildContracts(t *testing.T) {
 		"codex-pool": "tui/internal/preset/preset.go:1178-1208",
 		"claude":     "tui/internal/preset/preset.go:1212-1241",
 		"custom":     "tui/internal/preset/preset.go:1242-1264",
+		"opencode-go": "tui/internal/preset/preset.go:534-560",
 	}
 	want := map[string]bool{}
 	for _, p := range BuiltinPresets() {

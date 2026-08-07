@@ -74,6 +74,7 @@
   "firstrun.cap_desc.email": "灵台内邮 — 网内与人及同修遣、收、回、检、藏。\n外网真邮，须加 imap 外挂。",
   "firstrun.cap_desc.shell": "执行指令之器，设有关防。\n许器灵安装工具、运行script、察系统；凡涉毁伤之命，必先请命。",
   "firstrun.cap_desc.web_search": "游历之器 — 问道于网海。\n已与览卷统一为 web 之能，所凭后端随 provider 而异。",
+  "firstrun.cap_desc.web": "搜页与览卷合为一能。\n先索最新信息，复览所得之页。",
   "firstrun.cap_desc.psyche": "心印、简与上下文之管。\n器灵自修其心印，借凝蜕（molt）以去芜存菁。强烈荐之。",
   "firstrun.cap_desc.vision": "观象之器。\n器灵可阅截图、相片、图表、扫件。",
   "firstrun.cap_desc.talk": "宣言之器 — 化字为声。\n使器灵能以语音回复，须备 TTS 之 provider（详见右侧）。",

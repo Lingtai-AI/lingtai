@@ -74,6 +74,7 @@
   "firstrun.cap_desc.email": "灵台内部邮件 — 在网络内与人类/对等体之间发送、接收、回复、搜索、归档。\n真实互联网邮件需添加 imap 扩展。",
   "firstrun.cap_desc.shell": "执行 Shell 命令，带安全防护。\n允许 Agent 安装工具、运行脚本、探测系统；破坏性命令会要求确认。",
   "firstrun.cap_desc.web_search": "联网搜索最新信息。\n已与网页阅读统一为 web 能力 — 后端由所选 provider 决定（见右侧列表）。",
+  "firstrun.cap_desc.web": "搜索网页与阅读页面合为一个能力。\n先搜索最新信息，再浏览结果阅读其内容。",
   "firstrun.cap_desc.psyche": "身份、手记与上下文管理。\nAgent 自行更新人格、通过凝蜕（molt）压缩上下文。强烈建议开启。",
   "firstrun.cap_desc.vision": "识图能力。\nAgent 能读取截图、照片、图表与扫描件。",
   "firstrun.cap_desc.talk": "文字转语音。\n让 Agent 生成语音回复，需要支持 TTS 的 provider（见右侧列表）。",
