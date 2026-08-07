@@ -531,11 +531,19 @@ func (m *PresetEditorModel) openInline() (PresetEditorModel, tea.Cmd) {
 		m.input.Focus()
 		m.mode = emInline
 	case feBaseURL:
-		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op.
-		// Other providers get free-text inline edit.
+		// Providers with regional endpoints use ←/→ cycling; Enter is a no-op
+		// only while the current value is one of the known non-empty region
+		// URLs. The Custom option (empty-URL sentinel) and any free-typed URL
+		// open free-text inline edit instead.
 		provider := asString(m.llmMap()["provider"])
-		if _, hasRegions := preset.ProviderRegionURLs[provider]; hasRegions {
-			return *m, nil
+		current := asString(m.llmMap()["base_url"])
+		regions, hasRegions := preset.ProviderRegionURLs[provider]
+		if hasRegions {
+			for _, r := range regions {
+				if r.URL != "" && r.URL == current {
+					return *m, nil
+				}
+			}
 		}
 		m.input.SetValue(m.fieldString(f))
 		m.input.CursorEnd()
@@ -958,10 +966,16 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 				m.llmMap()["model"] = models[0]
 			}
 		}
-		// Reset base_url to the new provider's default region when
-		// switching to a provider with known regional endpoints.
+		// Reset base_url (and any region-declared credential env-var slot)
+		// to the new provider's default region when switching to a
+		// provider with known regional endpoints. DeepSeek's default
+		// DeepSeek API option declares DEEPSEEK_API_KEY, so a switch to
+		// deepseek lands on the right api_key_env.
 		if regions, ok := preset.ProviderRegionURLs[newProvider]; ok && len(regions) > 0 {
 			m.llmMap()["base_url"] = regions[0].URL
+			if regions[0].Env != "" {
+				m.llmMap()["api_key_env"] = regions[0].Env
+			}
 		}
 	case feModel:
 		// If the current provider has a known model lineup, cycle through
@@ -979,7 +993,19 @@ func (m *PresetEditorModel) cycleFocused(dir int) {
 			for i, r := range regions {
 				urls[i] = r.URL
 			}
-			m.llmMap()["base_url"] = cycleString(urls, m.fieldString(f), dir)
+			next := cycleString(urls, m.fieldString(f), dir)
+			m.llmMap()["base_url"] = next
+			// Region options can carry an implied credential env-var (e.g.
+			// DeepSeek API -> DEEPSEEK_API_KEY, OpenCode -> OPENCODE_GO_API_KEY);
+			// adopt it when the selected option declares one. Cycling to the
+			// Custom option (empty URL) leaves api_key_env untouched so the
+			// user keeps whatever slot they already configured.
+			for _, r := range regions {
+				if r.URL == next && r.Env != "" {
+					m.llmMap()["api_key_env"] = r.Env
+					break
+				}
+			}
 		}
 	case feAPICompat:
 		opts := []string{"", "openai", "anthropic"}
@@ -1550,6 +1576,10 @@ func (m PresetEditorModel) thinkingRadioStrip(focused bool, valStyle lipgloss.St
 // strip showing region labels (e.g. "● CN  ○ INTL") when the current
 // provider has regional endpoints. Returns "" when there's no region
 // list — caller falls back to the standard single-value render.
+// A region with an empty URL is the free-text "Custom" sentinel: it is
+// selected whenever the current base_url is empty or doesn't match any
+// known non-empty region URL, and the typed endpoint is appended after
+// the strip so it stays visible (the strip path hides the raw value).
 func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Style) string {
 	provider := asString(m.llmMap()["provider"])
 	regions, ok := preset.ProviderRegionURLs[provider]
@@ -1558,9 +1588,22 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 	}
 	current := asString(m.llmMap()["base_url"])
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	hasCustom := false
+	matched := false
+	for _, r := range regions {
+		if r.URL == "" {
+			hasCustom = true
+		} else if r.URL == current {
+			matched = true
+		}
+	}
 	parts := make([]string, 0, len(regions))
 	for _, r := range regions {
-		if r.URL == current {
+		selected := r.URL == current
+		if r.URL == "" {
+			selected = hasCustom && !matched
+		}
+		if selected {
 			if focused {
 				parts = append(parts, valStyle.Render("● "+r.Label))
 			} else {
@@ -1570,7 +1613,13 @@ func (m PresetEditorModel) baseURLRadioStrip(focused bool, valStyle lipgloss.Sty
 			parts = append(parts, subtle.Render("○ "+r.Label))
 		}
 	}
-	return strings.Join(parts, "  ")
+	strip := strings.Join(parts, "  ")
+	// Custom (or an unknown typed URL) shows the actual endpoint after the
+	// strip so the user always sees exactly what will be saved.
+	if hasCustom && !matched && current != "" {
+		strip += "  " + subtle.Render(current)
+	}
+	return strip
 }
 
 // wireAPIRadioStrip renders all three wire choices so Custom OpenAI users
