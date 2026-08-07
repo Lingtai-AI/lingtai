@@ -32,7 +32,7 @@ maintenance: |
 | `Migration` | `tui/internal/globalmigrate/globalmigrate.go:25` | one versioned step: `Version`, `Name`, and a `func(globalDir string) error` body |
 | `migrations` | `tui/internal/globalmigrate/globalmigrate.go:47-50` | the append-only ordered registry. v1 `tap-huangzesen-to-lingtai-ai`; v2 `split-presets-dir` is a **neutralized no-op tombstone** |
 | `Run` | `tui/internal/globalmigrate/globalmigrate.go:60` | reads the current version (absent ⇒ 0), runs pending steps in order, then atomically stamps the new version |
-| `migrateTapHuangzesenToLingtaiAI` | `tui/internal/globalmigrate/m001_tap_huangzesen_to_lingtai_ai.go:9-` | adds the canonical `lingtai-ai/lingtai` tap for users who installed from `huangzesen/lingtai`; deliberately does **not** untap the old one, because brew refuses to untap the source of an installed formula and doing so would mean reinstalling the running binary mid-startup |
+| `migrateTapHuangzesenToLingtaiAI` | `tui/internal/globalmigrate/m001_tap_huangzesen_to_lingtai_ai.go:33` | adds the canonical `lingtai-ai/lingtai` tap for users who installed from `huangzesen/lingtai`; deliberately does **not** untap the old one, because brew refuses to untap the source of an installed formula and doing so would mean reinstalling the running binary mid-startup |
 
 ## Connections
 

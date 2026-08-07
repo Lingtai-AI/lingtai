@@ -40,7 +40,7 @@ maintenance: |
 | `QueryErrorEvents` / `HasTUIClearCompletionEvent` | `tui/internal/sqlitelog/event.go:386,412` | diagnostic error listing and the `/clear` handshake completion probe |
 | `QueryMoltSessionWindows` | `tui/internal/sqlitelog/molt.go:99` | resolves current/previous `psyche_molt` boundaries — the time windows `/kanban` Ctrl+D session stats are summed over |
 | `QueryMoltSessionToolCallCounts` | `tui/internal/sqlitelog/molt.go:244` | counts lifecycle `tool_call` events inside those same windows |
-| `QueryRecentMoltTimes` / `QueryRecentRefreshCompleteTimes` | `tui/internal/sqlitelog/molt.go:334`, `tui/internal/sqlitelog/molt.go` | newest-first boundary timestamps rendered as ledger separators by `tui/internal/fs/rebuild_marker.go` |
+| `QueryRecentMoltTimes` / `QueryRecentRefreshCompleteTimes` | `tui/internal/sqlitelog/molt.go:334`, `tui/internal/sqlitelog/molt.go:343` | newest-first boundary timestamps rendered as ledger separators by `tui/internal/fs/rebuild_marker.go` |
 | notification readers | `tui/internal/sqlitelog/query.go:100,350,440,449,464,482` | `QueryNotificationBlocks`, `QueryNotificationBlockSnapshots`, `QueryNotifications`, and the by-id / before / after pivot queries backing `/notification` paging |
 | `PrettyFields` | `tui/internal/sqlitelog/query.go:499` | renders a notification event's JSON payload for the detail view |
 
